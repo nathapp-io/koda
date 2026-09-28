@@ -53,7 +53,6 @@ interface TransitionsServiceStub {
 }
 
 interface ProjectsServiceStub {
-  findAll: jest.Mock;
   findBySlug: jest.Mock;
   findProjectIdBySlug: jest.Mock;
   assertProjectMembership: jest.Mock;
@@ -134,7 +133,6 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
       reject: jest.fn(),
     };
     projectsService = {
-      findAll: jest.fn(),
       findBySlug: jest.fn(),
       findProjectIdBySlug: jest.fn(),
       assertProjectMembership: jest.fn(),

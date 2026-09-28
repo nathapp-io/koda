@@ -19,9 +19,8 @@ import { SearchKbDto } from './dto/search-kb.dto';
 import { ImportGraphifyDto } from './dto/import-graphify.dto';
 import { ListKbDocumentsQuery } from './dto/list-kb-documents.query';
 import { parseQuery } from '../common/dto/koda-page.query';
-import { Principal, RequiredPermission } from '@nathapp/nestjs-auth';
+import { RequiredPermission } from '@nathapp/nestjs-auth';
 import type { CaslPermissionAction } from '@nathapp/nestjs-auth';
-import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaAction } from '../auth/casl/koda-action.enum';
 import { PrismaRagRepository } from './prisma-rag.repository';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
@@ -53,7 +52,6 @@ export class RagController {
   async addDocument(
     @Param('slug') slug: string,
     @Body() dto: AddDocumentDto,
-    @Principal() _principal: KodaPrincipal,
   ) {
     const project = await this.resolveProject(slug);
     // H7: single write path. Previously this ran Promise.all over
@@ -81,7 +79,6 @@ export class RagController {
   @ApiResponse({ status: 404, description: 'Project not found' })
   async listDocuments(
     @Param('slug') slug: string,
-    @Principal() _principal: KodaPrincipal,
     @Query() rawQuery?: ListKbDocumentsQuery,
   ) {
     const project = await this.resolveProject(slug);
@@ -101,7 +98,6 @@ export class RagController {
   async deleteDocument(
     @Param('slug') slug: string,
     @Param('sourceId') sourceId: string,
-    @Principal() _principal: KodaPrincipal,
   ) {
     const project = await this.resolveProject(slug);
     await this.ragService.deleteBySource(project.id, sourceId);
@@ -117,7 +113,6 @@ export class RagController {
   async search(
     @Param('slug') slug: string,
     @Body() dto: SearchKbDto,
-    @Principal() _principal: KodaPrincipal,
   ) {
     const project = await this.resolveProject(slug);
 
@@ -154,7 +149,6 @@ export class RagController {
   async importGraphify(
     @Param('slug') slug: string,
     @Body() dto: ImportGraphifyDto,
-    @Principal() _principal: KodaPrincipal,
   ) {
     const project = await this.resolveProject(slug);
     if (!project.graphifyEnabled) throw new ValidationAppException({}, 'rag.graphifyDisabled');
@@ -173,10 +167,7 @@ export class RagController {
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Project not found' })
   @RequiredPermission('ADMIN')
-  async optimizeTable(
-    @Param('slug') slug: string,
-    @Principal() _principal: KodaPrincipal,
-  ) {
+  async optimizeTable(@Param('slug') slug: string) {
     const project = await this.resolveProject(slug);
     await this.ragService.optimizeTable(project.id);
     return JsonResponse.Ok({ optimized: true });

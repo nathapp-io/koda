@@ -1,10 +1,8 @@
 import { Controller, HttpCode, HttpStatus, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JsonResponse } from '@nathapp/nestjs-common';
-import { Principal } from '@nathapp/nestjs-auth';
 import { EvaluationService } from './evaluation.service';
 import { ProjectAccessService } from '../projects/project-access.service';
-import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 
 @ApiTags('knowledge-base')
@@ -30,10 +28,7 @@ export class RetrievalController {
   @ApiResponse({ status: 200, description: 'Evaluation results with precision@5 metrics' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - no project role' })
-  async evaluateRetrieval(
-    @Param('slug') slug: string,
-    @Principal() _principal: KodaPrincipal,
-  ) {
+  async evaluateRetrieval(@Param('slug') slug: string) {
     // Membership decision is made by ProjectMembershipGuard at class level.
     const project = await this.resolveProject(slug);
     const { loadEvalQueries } = await import('./load-queries');

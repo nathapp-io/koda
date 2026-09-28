@@ -4,30 +4,6 @@ import { EvaluationService } from './evaluation.service';
 import { ProjectAccessService } from '../projects/project-access.service';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 
-const mockAdminUser = {
-  actorType: 'user' as const,
-  id: 'user-admin',
-  name: 'admin@example.com',
-  email: 'admin@example.com',
-  role: 'ADMIN' as const,
-  blacklisted: false,
-  revoked: false,
-  authorities: ['ADMIN'],
-  extra: { sub: 'user-admin' },
-};
-
-const mockMemberUser = {
-  actorType: 'user' as const,
-  id: 'user-member',
-  name: 'member@example.com',
-  email: 'member@example.com',
-  role: 'MEMBER' as const,
-  blacklisted: false,
-  revoked: false,
-  authorities: ['MEMBER'],
-  extra: { sub: 'user-member' },
-};
-
 describe('RetrievalController', () => {
   let controller: RetrievalController;
   let evaluationService: jest.Mocked<EvaluationService>;
@@ -65,7 +41,7 @@ describe('RetrievalController', () => {
       mockFindProjectIdBySlug.mockResolvedValue('proj-1');
       mockAssertProjectMembership.mockResolvedValue(undefined);
 
-      const result = await controller.evaluateRetrieval('alpha', mockAdminUser);
+      const result = await controller.evaluateRetrieval('alpha');
 
       expect(evaluationService.runQueries).toHaveBeenCalled();
       expect((result as any).data).toEqual({ precisionAt5: 1 });
@@ -75,7 +51,7 @@ describe('RetrievalController', () => {
       mockFindProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
 
       await expect(
-        controller.evaluateRetrieval('missing', mockAdminUser),
+        controller.evaluateRetrieval('missing'),
       ).rejects.toThrow(NotFoundAppException);
     });
 
@@ -86,7 +62,7 @@ describe('RetrievalController', () => {
     it('US-005: leaves the membership decision to ProjectMembershipGuard instead of evaluating it in the handler', async () => {
       mockFindProjectIdBySlug.mockResolvedValue('proj-1');
 
-      await controller.evaluateRetrieval('alpha', mockMemberUser);
+      await controller.evaluateRetrieval('alpha');
 
       expect(mockAssertProjectMembership).not.toHaveBeenCalled();
       expect(evaluationService.runQueries).toHaveBeenCalled();

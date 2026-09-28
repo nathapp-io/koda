@@ -67,10 +67,6 @@ export class ProjectsService {
     );
   }
 
-  async findAll() {
-    return ProjectResponseDto.fromMany(await this.projectRepo.findAll());
-  }
-
   /**
    * US-002: list projects scoped to the calling principal.
    *  - User principals get only projects where they hold a `ProjectMember` row.

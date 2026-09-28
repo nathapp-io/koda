@@ -59,5 +59,10 @@ describe('CreateAgentDto slug validation (US-005)', () => {
         expect(properties).toContain('slug');
       }
     });
+
+    it('rejects a create without a slug, so the service never has to derive one (#145)', async () => {
+      expect(await errorProperties(CreateAgentDto, { name: 'No Slug Agent' })).toContain('slug');
+      expect(await errorProperties(CreateAgentDto, { name: 'Empty Slug Agent', slug: '' })).toContain('slug');
+    });
   });
 });

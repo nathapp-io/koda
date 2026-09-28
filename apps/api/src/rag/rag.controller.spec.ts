@@ -18,43 +18,6 @@ const mockProject = {
   updatedAt: new Date(),
 };
 
-const mockAdminUser = {
-  actorType: 'user' as const,
-  id: 'user-admin',
-  name: 'admin@example.com',
-  email: 'admin@example.com',
-  role: 'ADMIN' as const,
-  blacklisted: false,
-  revoked: false,
-  authorities: ['ADMIN'],
-  extra: { sub: 'user-admin' },
-};
-
-const mockMemberUser = {
-  actorType: 'user' as const,
-  id: 'user-member',
-  name: 'member@example.com',
-  email: 'member@example.com',
-  role: 'MEMBER' as const,
-  blacklisted: false,
-  revoked: false,
-  authorities: ['MEMBER'],
-  extra: { sub: 'user-member' },
-};
-
-const mockAgentPrincipal = {
-  actorType: 'agent' as const,
-  id: 'agent-1',
-  name: 'bot',
-  slug: 'bot',
-  status: 'ACTIVE' as const,
-  agentRoles: ['DEVELOPER'] as const,
-  capabilities: [],
-  blacklisted: false,
-  revoked: false,
-  authorities: ['WORKER'],
-};
-
 describe('RagController', () => {
   let controller: RagController;
   let ragService: jest.Mocked<RagService>;
@@ -118,7 +81,6 @@ describe('RagController', () => {
           content: 'hello world',
           metadata: {},
         },
-        mockAdminUser,
       );
 
       expect(ragService.indexDocument).toHaveBeenCalledTimes(1);
@@ -135,7 +97,6 @@ describe('RagController', () => {
         controller.addDocument(
           'missing',
           { source: 'doc', sourceId: 'x', content: 'y', metadata: {} },
-          mockAdminUser,
         ),
       ).rejects.toThrow(NotFoundAppException);
     });
@@ -147,7 +108,6 @@ describe('RagController', () => {
         controller.addDocument(
           'alpha',
           { source: 'doc', sourceId: 'x', content: 'y', metadata: {} },
-          mockAdminUser,
         ),
       ).rejects.toThrow(NotFoundAppException);
     });
@@ -159,7 +119,6 @@ describe('RagController', () => {
       const result = await controller.addDocument(
         'alpha',
         { source: 'doc', sourceId: 'doc-2', content: 'from agent', metadata: {} },
-        mockAgentPrincipal,
       );
 
       expect(ragService.indexDocument).toHaveBeenCalled();
@@ -178,7 +137,7 @@ describe('RagController', () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       ragService.listDocuments.mockResolvedValue([]);
 
-      await controller.listDocuments('alpha', mockAdminUser, {} as ListKbDocumentsQuery);
+      await controller.listDocuments('alpha', {} as ListKbDocumentsQuery);
 
       expect(ragService.listDocuments).toHaveBeenCalledWith('proj-1', 100);
     });
@@ -187,7 +146,7 @@ describe('RagController', () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       ragService.listDocuments.mockResolvedValue([]);
 
-      await controller.listDocuments('alpha', mockAdminUser, { limit: '25' } as unknown as ListKbDocumentsQuery);
+      await controller.listDocuments('alpha', { limit: '25' } as unknown as ListKbDocumentsQuery);
 
       expect(ragService.listDocuments).toHaveBeenCalledWith('proj-1', 25);
     });
@@ -196,7 +155,7 @@ describe('RagController', () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       ragService.listDocuments.mockResolvedValue([]);
 
-      await controller.listDocuments('alpha', mockAgentPrincipal);
+      await controller.listDocuments('alpha');
 
       expect(ragService.listDocuments).toHaveBeenCalled();
     });
@@ -210,7 +169,7 @@ describe('RagController', () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       ragService.deleteBySource.mockResolvedValue(undefined);
 
-      const result = await controller.deleteDocument('alpha', 'doc-1', mockAdminUser);
+      const result = await controller.deleteDocument('alpha', 'doc-1');
 
       expect(ragService.deleteBySource).toHaveBeenCalledWith('proj-1', 'doc-1');
       expect((result as any).data).toEqual({ deleted: true });
@@ -228,7 +187,7 @@ describe('RagController', () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       hybridRetrieverService.search.mockResolvedValue(mockSearchResult);
 
-      const result = await controller.search('alpha', { query: 'auth bug', limit: 10 }, mockAgentPrincipal);
+      const result = await controller.search('alpha', { query: 'auth bug', limit: 10 });
 
       expect(hybridRetrieverService.search).toHaveBeenCalled();
       expect((result as any).data).toBeDefined();
@@ -238,7 +197,7 @@ describe('RagController', () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       hybridRetrieverService.search.mockResolvedValue(mockSearchResult);
 
-      await controller.search('alpha', { query: 'test' }, mockAdminUser);
+      await controller.search('alpha', { query: 'test' });
 
       expect(hybridRetrieverService.search).toHaveBeenCalled();
     });
@@ -251,7 +210,7 @@ describe('RagController', () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       hybridRetrieverService.search.mockResolvedValue(mockSearchResult);
 
-      const result = await controller.search('alpha', { query: 'test' }, mockMemberUser);
+      const result = await controller.search('alpha', { query: 'test' });
 
       expect((result as any).data.results).toEqual([]);
     });
@@ -260,7 +219,7 @@ describe('RagController', () => {
       mockFindProjectBySlug.mockResolvedValue(null);
 
       await expect(
-        controller.search('missing', { query: 'test' }, mockAdminUser),
+        controller.search('missing', { query: 'test' }),
       ).rejects.toThrow(NotFoundAppException);
     });
 
@@ -285,7 +244,7 @@ describe('RagController', () => {
         retrievedAt: new Date().toISOString(),
       });
 
-      const result = await controller.search('alpha', { query: 'bug' }, mockAdminUser);
+      const result = await controller.search('alpha', { query: 'bug' });
 
       expect((result as any).data.provenance.sources).toHaveLength(1);
       expect((result as any).data.provenance.sources[0]).toEqual({ sourceType: 'ticket', sourceId: 'ticket-1' });
@@ -296,7 +255,7 @@ describe('RagController', () => {
     it('returns immediately when nodes array is empty', async () => {
       mockFindProjectBySlug.mockResolvedValue({ ...mockProject, graphifyEnabled: true });
 
-      const result = await controller.importGraphify('alpha', { nodes: [], links: [] }, mockAdminUser);
+      const result = await controller.importGraphify('alpha', { nodes: [], links: [] });
 
       expect(ragService.importGraphify).not.toHaveBeenCalled();
       expect((result as any).data).toEqual({ imported: 0, cleared: 0 });
@@ -309,7 +268,6 @@ describe('RagController', () => {
         controller.importGraphify(
           'alpha',
           { nodes: [{ id: 'n1', label: 'Foo' }], links: [] },
-          mockAdminUser,
         ),
       ).rejects.toThrow();
     });
@@ -321,7 +279,6 @@ describe('RagController', () => {
       const result = await controller.importGraphify(
         'alpha',
         { nodes: [{ id: 'n1', label: 'Foo' }], links: [] },
-        mockAdminUser,
       );
 
       expect(ragService.importGraphify).toHaveBeenCalledWith('proj-1', [{ id: 'n1', label: 'Foo' }], []);
@@ -337,7 +294,7 @@ describe('RagController', () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       ragService.optimizeTable.mockResolvedValue(undefined);
 
-      const result = await controller.optimizeTable('alpha', mockAdminUser);
+      const result = await controller.optimizeTable('alpha');
 
       expect(ragService.optimizeTable).toHaveBeenCalledWith('proj-1');
       expect((result as any).data).toEqual({ optimized: true });
