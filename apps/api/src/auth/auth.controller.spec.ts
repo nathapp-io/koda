@@ -283,13 +283,32 @@ const mockUser = {
       expect(Reflect.getMetadata(TTL_KEY, AuthController)).toBeUndefined();
     });
 
-    it('throttles login, register, and logout at 5/min each', () => {
+    it('throttles login, register, and logout at 5/min each (configurable via AUTH_LOGIN_THROTTLE_LIMIT)', () => {
       const proto = AuthController.prototype as unknown as Record<string, unknown>;
       for (const handler of ['login', 'register', 'logout']) {
         const handlerFn = proto[handler] as object;
+        // Default is 5/min in production; e2e raises this via env. The test
+        // runs in the unit context (no env override), so it sees 5.
         expect(Reflect.getMetadata(LIMIT_KEY, handlerFn)).toBe(5);
         expect(Reflect.getMetadata(TTL_KEY, handlerFn)).toBe(60000);
       }
+    });
+
+    it('honours AUTH_LOGIN_THROTTLE_LIMIT at class load time', () => {
+      const prev = process.env['AUTH_LOGIN_THROTTLE_LIMIT'];
+      process.env['AUTH_LOGIN_THROTTLE_LIMIT'] = '50';
+      // Use jest.isolateModules so the controller re-evaluates the env value
+      // at module load — the limit is captured into @Throttle metadata there.
+      let captured: number | undefined;
+      jest.isolateModules(() => {
+        const reloaded = require('./auth.controller').AuthController;
+        const proto = reloaded.prototype as unknown as Record<string, unknown>;
+        const handlerFn = proto['login'] as object;
+        captured = Reflect.getMetadata(LIMIT_KEY, handlerFn);
+      });
+      expect(captured).toBe(50);
+      if (prev === undefined) delete process.env['AUTH_LOGIN_THROTTLE_LIMIT'];
+      else process.env['AUTH_LOGIN_THROTTLE_LIMIT'] = prev;
     });
 
     it('does not throttle refresh beyond the global default', () => {

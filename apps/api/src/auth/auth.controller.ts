@@ -18,6 +18,19 @@ import type { IPrincipal } from './types';
 import { Throttle } from '@nathapp/nestjs-throttler';
 import { AuthException, JsonResponse } from '@nathapp/nestjs-common';
 
+/**
+ * Login/register/logout throttle limit. Defaults to 5/min in production —
+ * the spec calls this out as the brute-force defense on the auth surface.
+ * E2E tests raise this via `AUTH_LOGIN_THROTTLE_LIMIT` because every spec
+ * shares the same client IP, so even a small run trips 5/min once a
+ * worker restart (CI retry) clears the per-worker session cache.
+ *
+ * Resolved at class-load time: the value is captured into the @Throttle
+ * metadata below, so changing the env mid-process has no effect.
+ */
+const AUTH_LIMIT = Number.parseInt(process.env['AUTH_LOGIN_THROTTLE_LIMIT'] ?? '5', 10);
+const AUTH_LOGIN_LIMIT = Number.isFinite(AUTH_LIMIT) && AUTH_LIMIT > 0 ? AUTH_LIMIT : 5;
+
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
@@ -30,7 +43,7 @@ export class AuthController {
   @ApiResponse({ status: 400, description: 'Invalid input' })
   @ApiResponse({ status: 403, description: 'Registration is closed' })
   @Public()
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle({ default: { limit: AUTH_LOGIN_LIMIT, ttl: 60000 } })
   async register(@Body() registerDto: RegisterDto) {
     const data = await this.authService.register(registerDto);
     return JsonResponse.Ok(data);
@@ -53,7 +66,7 @@ export class AuthController {
   @ApiResponse({ status: 200, type: AuthResponseDto })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
   @Public()
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle({ default: { limit: AUTH_LOGIN_LIMIT, ttl: 60000 } })
   async login(@Body() loginDto: LoginDto) {
     const data = await this.authService.login(loginDto);
     return JsonResponse.Ok(data);
@@ -96,7 +109,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Revoke all outstanding access and refresh tokens for the current user' })
   @ApiResponse({ status: 200, description: 'Tokens revoked' })
   @ApiResponse({ status: 401, description: 'Missing or invalid token' })
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle({ default: { limit: AUTH_LOGIN_LIMIT, ttl: 60000 } })
   async logout(@Principal() user: IPrincipal) {
     await this.authService.logout(user.id);
     return JsonResponse.Ok({});

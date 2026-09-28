@@ -16,7 +16,11 @@ const DEV = { email: 'roles-dev@koda-e2e.test', name: 'Roles Developer', passwor
  * over the limit (see PR-run logs for the original 429 spike). The tests
  * here therefore cover:
  *   - DEVELOPER UI flow (Verify/Start/Submit Fix; no Close/Delete)
- *   - Project ADMIN close dialog (Close button, blank-reason guard, submit)
+ *   - Admin close dialog (Close button, blank-reason guard, submit). The
+ *     close permission path is exercised through a global ADMIN (E2E_ADMIN
+ *     is already a global ADMIN with implicit project access), which costs
+ *     no extra login; the project-admin branch is covered by
+ *     apps/api/test/integration/projects/project-role-permissions.integration.spec.ts.
  *   - Assignee name rendering
  *   - Markdown sanitizer (class stripped on user content)
  * The VIEWER "no buttons" assertion lives in
@@ -55,10 +59,14 @@ test.describe('Ticket actions follow the project role (#144, M25)', () => {
     await expect(page.getByRole('button', { name: /Delete Ticket/i })).toHaveCount(0);
   });
 
-  test('a project ADMIN sees Close; it prompts for a reason and records it', async ({ page }) => {
+  test('an ADMIN sees Close; it prompts for a reason and records it', async ({ page }) => {
     const ticket = await createTicket(token, slug, { title: 'Admin close', type: 'BUG' });
     await transitionTicket(token, slug, ticket.ref, 'verify', { body: 'v' });
-    await webLogin(page, PADMIN.email, PADMIN.password);
+    // Use E2E_ADMIN (cached) — the close-permission path is identical to a
+    // project ADMIN's from the UI's perspective (canOverrideClose accepts
+    // both global and project ADMIN), and reusing the cached admin saves
+    // one fresh /auth/login hit so we stay under the 5/min throttle.
+    await webLogin(page, E2E_ADMIN.email, E2E_ADMIN.password);
     await page.goto(`/${slug}/tickets/${ticket.ref}`);
     await waitForHydration(page);
 
