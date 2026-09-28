@@ -13,6 +13,7 @@ import { EntityStore } from './entity-store';
 import { GraphStoreService } from './graph-store.service';
 import { IncrementalGraphDiffService } from './incremental-graph-diff.service';
 import { PrismaRagRepository } from './prisma-rag.repository';
+import { KbTicketLifecycleSubscriber } from './kb-ticket-lifecycle.subscriber';
 import { RAG_REPOSITORY } from './domain/rag.domain';
 import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
 import { CounterOptimizeStrategy } from './strategies/counter-optimize.strategy';
@@ -145,6 +146,7 @@ class EntityStoreWarmup implements OnModuleInit {
     LexicalIndexWarmup,
     EntityStore,
     EntityStoreWarmup,
+    KbTicketLifecycleSubscriber,
     GraphStoreService,
     IncrementalGraphDiffService,
     {

@@ -178,7 +178,9 @@ export class TicketTransitionsService {
     (this.ticketRepo as import('../prisma-tickets.repository').PrismaTicketsRepository)
       .findTicketWithComments(ticket.id)
       .then((ticketFull) => {
-        if (!ticketFull) return;
+        // M15: a ticket deleted while this fire-and-forget index was pending must
+        // not be re-added after the TICKET_DELETED handler removed it.
+        if (!ticketFull || ticketFull.deletedAt) return;
         const content = [
           `Title: ${ticketFull.title}`,
           `Type: ${ticketFull.type}`,

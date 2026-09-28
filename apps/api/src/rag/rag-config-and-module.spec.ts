@@ -4,6 +4,7 @@ import { FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interfac
 import { CounterOptimizeStrategy } from './strategies/counter-optimize.strategy';
 import { CronOptimizeStrategy } from './strategies/cron-optimize.strategy';
 import { ManualOptimizeStrategy } from './strategies/manual-optimize.strategy';
+import { RagModule } from './rag.module';
 
 function mockRagConfig(overrides: Partial<IRagConfig> = {}): IRagConfig {
   return {
@@ -147,5 +148,10 @@ describe('RAG Config & Module Wiring (US-002)', () => {
       // Suppress unused variable warning — ragCfg is used in beforeEach to test default state
       void ragCfg;
     });
+  });
+
+  it('registers KbTicketLifecycleSubscriber as a RagModule provider (M15 wiring)', () => {
+    const providers = (Reflect.getMetadata('providers', RagModule) ?? []) as Array<{ name?: string; provide?: unknown }>;
+    expect(providers.map((p) => p.name ?? String(p.provide))).toContain('KbTicketLifecycleSubscriber');
   });
 });
