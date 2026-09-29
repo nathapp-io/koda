@@ -51,7 +51,13 @@ export class PlacementService {
     @Inject(VCS_CFG) private readonly vcsConfig: Pick<IVcsConfig, 'githubApiUrl' | 'gitlabApiUrl'>,
   ) {}
 
-  /** Dispatch-time check of a pin (spec §4): null = fits now, a reason = does not, 'not_found' = no such runner. */
+  /**
+   * Dispatch-time check of a pin (spec §4, plan D18): null = fits now, a reason = does not,
+   * 'not_found' = no such runner. `selectorLabels` are deliberately ignored for a pinned job —
+   * a pinned runner is named, so labels are not part of the match (see firstMisfit's
+   * `job.pinnedRunnerId === null` guard). Task 3 (BUG-3) re-runs this same check inside the
+   * placeJob tx so a runner-state change between verdict and lock surfaces the same verdict.
+   */
   async evaluatePinned(pinnedRunnerId: string, job: PlacementJob, now = new Date()): Promise<MisfitReason | null | 'not_found'> {
     const [runner] = await this.repo.findPlacementRunners([pinnedRunnerId]);
     if (!runner) return 'not_found';
