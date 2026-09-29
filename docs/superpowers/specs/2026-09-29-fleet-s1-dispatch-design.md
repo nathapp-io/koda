@@ -88,7 +88,8 @@ koda monorepo
 
 Boundaries:
 
-- The runner calls exactly three endpoints: enroll (once), sync, and bundle upload.
+- The runner calls exactly four endpoints: enroll (once), sync, bundle upload and `GET /fleet/runner/me`
+  (amended 2026-09-30, slice 3 design §1).
 - `packages/fleet-protocol` carries `FLEET_PROTOCOL_VERSION`. The server answers an unsupported version with
   426 and a body naming the supported range. The runner logs it and stops syncing (no retry storm).
 - Runner authentication reuses the agent API-key *hashing*: a random key, stored as an HMAC-SHA256 hash under
@@ -277,6 +278,10 @@ null after delete).
 
 ### 2.1 RunnerCapabilities (the §9.2 report)
 
+> **Amended 2026-09-30** by `2026-09-30-fleet-s1-slice-3-runner-design.md` §1.1: `credentials` mirrors
+> `nax auth list --json` and placement keys on `available`; `ProfileNeeds` is filled from `nax config --profile
+> <name> --json` (`protocol` = `requirements.transport`). The shape below is superseded for `credentials`.
+
 ```ts
 interface RunnerCapabilities {
   nax: { version: string; protocols: Array<'acp' | 'native'> };
@@ -412,6 +417,11 @@ dispatch with 422. A pinned job whose runner is merely offline queues.
 id), records activity, and runs placement.
 
 ### 5.2 Runner executor
+
+> **Amended 2026-09-30** by `2026-09-30-fleet-s1-slice-3-runner-design.md` §2: nax does not create a feature
+> branch, so RUN jobs check out `prd.branchName` (continued from origin when it exists) instead of a detached
+> HEAD; PLAN jobs commit and push `.nax/features/<feature>/`; the clean is `git clean -ffd` without `-x`; the
+> watcher does not tail `events.jsonl`. Steps 1, 2 and 5 below are superseded where they differ.
 
 For each `ASSIGN`:
 
@@ -580,6 +590,9 @@ machines at once.
 
 ### 7.2 Runner
 
+> **Amended 2026-09-30** by `2026-09-30-fleet-s1-slice-3-runner-design.md` §3.1: the helper is the runner binary
+> itself (`koda-runner git-cred <sock>`), and token refresh is requested within 240 s of expiry.
+
 - Per job, the daemon serves the current token on `<jobDir>/git-cred.sock` (mode 0600) and refreshes it through
   `tokenRequests` when it is within 10 minutes of expiry.
 - Per clone: `git config credential.helper "!<runner>/bin/koda-git-cred <sock>"`, returning
@@ -702,6 +715,9 @@ S1 (this spec) → S1b (C1, C4) → S1.5 (C8 + approvals relay) → S2a (logs) �
 (rules/context PRs, now on the S1 broker) → S5 (acpx brainstorming). C10, the container executor and the VM executor (§5.5) are unscheduled.
 
 ## 10. Spikes before the plan
+
+> **Resolved 2026-09-30:** SP-1 (works with caveats) and SP-4 (clean without `-x`) are recorded in
+> `2026-09-30-fleet-s1-slice-3-runner-design.md`, "Findings behind the rulings".
 
 Local and read-only; none is a billed nax run.
 
