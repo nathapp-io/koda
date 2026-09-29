@@ -88,7 +88,8 @@ koda monorepo
 
 Boundaries:
 
-- The runner calls exactly three endpoints: enroll (once), sync, and bundle upload.
+- The runner calls exactly four endpoints: enroll (once), sync, bundle upload and `GET /fleet/runner/me`
+  (amended 2026-09-30, slice 3 design §1).
 - `packages/fleet-protocol` carries `FLEET_PROTOCOL_VERSION`. The server answers an unsupported version with
   426 and a body naming the supported range. The runner logs it and stops syncing (no retry storm).
 - Runner authentication reuses the agent API-key *hashing*: a random key, stored as an HMAC-SHA256 hash under
@@ -588,6 +589,9 @@ machines at once.
   broker token: "Dispatched by <user> via koda job <id>". Failure to comment is logged, not fatal.
 
 ### 7.2 Runner
+
+> **Amended 2026-09-30** by `2026-09-30-fleet-s1-slice-3-runner-design.md` §3.1: the helper is the runner binary
+> itself (`koda-runner git-cred <sock>`), and token refresh is requested within 240 s of expiry.
 
 - Per job, the daemon serves the current token on `<jobDir>/git-cred.sock` (mode 0600) and refreshes it through
   `tokenRequests` when it is within 10 minutes of expiry.
