@@ -18,8 +18,11 @@ export function prNumberFor(repo: Pick<FleetRepoRef, 'provider' | 'owner' | 'nam
   }
   const match = (repo.provider === 'github' ? GITHUB_PR : GITLAB_MR).exec(path);
   if (!match) return null;
-  const same = (a: string, b: string) => decodeURIComponent(a).toLowerCase() === b.toLowerCase();
-  return same(match[1], repo.owner) && same(match[2], repo.name) ? Number(match[3]) : null;
+  const decode = (s: string): string | null => { try { return decodeURIComponent(s); } catch { return null; } };
+  const same = (a: string, b: string) => { const da = decode(a); return da !== null && da.toLowerCase() === b.toLowerCase(); };
+  const ownerMatch = same(match[1], repo.owner);
+  const nameMatch = same(match[2], repo.name);
+  return ownerMatch && nameMatch ? Number(match[3]) : null;
 }
 
 /** Spec §7.1: "Dispatched by <user> via koda job <id>", once per job; failures are logged, never thrown. */
