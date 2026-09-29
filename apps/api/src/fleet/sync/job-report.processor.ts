@@ -15,10 +15,9 @@ export interface ReportOutcome {
   ack: JobAck | null;
   unknown: boolean;
   live: LiveFleetJobEvent[];
-  terminalJobId: string | null;
 }
 
-const NONE: ReportOutcome = Object.freeze({ ack: null, unknown: false, live: [], terminalJobId: null });
+const NONE: ReportOutcome = Object.freeze({ ack: null, unknown: false, live: [] });
 
 /**
  * One job's events from one sync, in one transaction (spec §3.2, plan D2/D5/D6): fence,
@@ -67,7 +66,6 @@ export class JobReportProcessor {
     let current = job;
     let next = job.ackedRunnerSeq + 1;
     let mirrored = false;
-    let terminalJobId: string | null = null;
     const live: LiveFleetJobEvent[] = [];
     for (const event of await this.repo.findRunnerEventsAfter(job.id, job.leaseEpoch, job.ackedRunnerSeq)) {
       if (event.runnerSeq !== next) break;
@@ -75,25 +73,24 @@ export class JobReportProcessor {
       current = applied.job;
       if (applied.live) live.push(applied.live);
       mirrored = mirrored || applied.mirrored;
-      if (applied.terminal) terminalJobId = current.id;
       next += 1;
     }
     const ackedSeq = next - 1;
     if (ackedSeq !== job.ackedRunnerSeq) current = await this.repo.update(job.id, { ackedRunnerSeq: ackedSeq });
     if (mirrored && live.length === 0) live.push(this.live.event(current));
-    return { ack: { jobId: job.id, ackedSeq }, unknown: false, live, terminalJobId };
+    return { ack: { jobId: job.id, ackedSeq }, unknown: false, live };
   }
 
-  private async applyOne(job: FleetJobRecord, event: FleetJobEventRecord, runnerId: string, now: Date): Promise<{ job: FleetJobRecord; live?: LiveFleetJobEvent; mirrored: boolean; terminal: boolean }> {
+  private async applyOne(job: FleetJobRecord, event: FleetJobEventRecord, runnerId: string, now: Date): Promise<{ job: FleetJobRecord; live?: LiveFleetJobEvent; mirrored: boolean }> {
     const effect = interpretEvent(event.type, event.payload);
-    if (effect.kind === 'none') return { job, mirrored: false, terminal: false };
-    if (effect.kind === 'mirror') return { job: await this.repo.update(job.id, effect.patch), mirrored: true, terminal: false };
+    if (effect.kind === 'none') return { job, mirrored: false };
+    if (effect.kind === 'mirror') return { job: await this.repo.update(job.id, effect.patch), mirrored: true };
     if (effect.kind === 'transition' && canTransition(job.state, effect.to, 'runner')) {
       const r = await this.transitions.apply({
         job, to: effect.to, by: 'runner', now, actor: { type: 'RUNNER', id: runnerId }, reason: effect.reason,
         extra: effect.exitCode === null ? {} : { exitCode: effect.exitCode },
       });
-      return { job: r.job, live: r.live, mirrored: false, terminal: isTerminal(effect.to) };
+      return { job: r.job, live: r.live, mirrored: false };
     }
     const reason = effect.kind === 'invalid' ? effect.reason : `transition ${job.state} -> ${effect.to}`;
     this.logger.warn(`Rejected runner event on job ${job.id} (runnerSeq ${event.runnerSeq}): ${reason}`);
@@ -101,6 +98,6 @@ export class JobReportProcessor {
       actorType: 'RUNNER', actorId: runnerId, action: 'job.event_rejected', entityType: 'job', entityId: job.id, jobId: job.id,
       projectId: job.projectId, responsibleUserId: job.requestedById, payload: { runnerSeq: event.runnerSeq, type: event.type, reason },
     });
-    return { job, mirrored: false, terminal: false };
+    return { job, mirrored: false };
   }
 }
