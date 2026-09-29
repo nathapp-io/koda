@@ -35,6 +35,7 @@ import { EntityGraphModule } from './entity-graph/entity-graph.module';
 import { ContextModule } from './context/context.module';
 import { PolicyModule } from './policy/policy.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
+import { FleetModule } from './fleet/fleet.module';
 import { appConfig } from './config/app.config';
 import { authConfig } from './config/auth.config';
 import { databaseConfig } from './config/database.config';
@@ -109,6 +110,7 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
     ContextModule,
     PolicyModule,
     MonitoringModule,
+    FleetModule,
   ],
   providers: [
     // H2: register the throttler guard globally so @Throttle decorators are enforced.
