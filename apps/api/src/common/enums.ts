@@ -123,3 +123,22 @@ export const FleetActorType = {
   SYSTEM: 'SYSTEM',
 } as const;
 export type FleetActorType = (typeof FleetActorType)[keyof typeof FleetActorType];
+
+/** Fleet S1: FleetJob.state (spec §2, §5.4). */
+export const FleetJobState = {
+  QUEUED: 'QUEUED', ASSIGNED: 'ASSIGNED', RUNNING: 'RUNNING', UPLOADING: 'UPLOADING',
+  COMPLETED: 'COMPLETED', FAILED: 'FAILED', ESCALATED: 'ESCALATED', CRASHED: 'CRASHED', CANCELLED: 'CANCELLED',
+} as const;
+export type FleetJobState = (typeof FleetJobState)[keyof typeof FleetJobState];
+
+/** Fleet S1: FleetJob.command. */
+export const FleetJobKind = { RUN: 'RUN', PLAN: 'PLAN' } as const;
+export type FleetJobKind = (typeof FleetJobKind)[keyof typeof FleetJobKind];
+
+/** Fleet S1: FleetCommand.type. */
+export const FleetCommandType = { ASSIGN: 'ASSIGN', CANCEL: 'CANCEL', READOPT: 'READOPT', ABANDON: 'ABANDON' } as const;
+export type FleetCommandType = (typeof FleetCommandType)[keyof typeof FleetCommandType];
+
+/** Fleet S1: FleetCommand.ackResult. `withdrawn` and `stale` are server-set (plan D4, D8). */
+export const FleetCommandAckResult = { OK: 'ok', REJECTED: 'rejected', WITHDRAWN: 'withdrawn', STALE: 'stale' } as const;
+export type FleetCommandAckResult = (typeof FleetCommandAckResult)[keyof typeof FleetCommandAckResult];
