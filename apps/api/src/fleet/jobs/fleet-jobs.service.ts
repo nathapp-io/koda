@@ -103,9 +103,11 @@ export class FleetJobsService {
       }
       if (current.cancelRequestedAt) return { job: current, live: null, wake: null };
       // Reachable only in ASSIGNED (assign acked) / RUNNING / UPLOADING, all of which have a
-      // runner assigned by casAssign, so runnerId is non-null here.
+      // runner assigned by casAssign. Fail fast if a future state change breaks that
+      // invariant (DB FK on FleetCommand.runnerId would surface as a less obvious 500).
+      if (!current.runnerId) throw new Error(`cancel path reached without runnerId for job ${jobId} (state ${current.state})`);
       const updated = await this.repo.update(jobId, { cancelRequestedAt: now });
-      await this.repo.createCommand({ runnerId: current.runnerId as string, jobId, type: FleetCommandType.CANCEL, leaseEpoch: current.leaseEpoch, payload: {} });
+      await this.repo.createCommand({ runnerId: current.runnerId, jobId, type: FleetCommandType.CANCEL, leaseEpoch: current.leaseEpoch, payload: {} });
       await this.repo.appendEvent(jobId, { leaseEpoch: current.leaseEpoch, runnerSeq: null, type: 'lifecycle', payload: { level: 'info', message: 'cancel requested' } });
       await this.activity.record({
         actorType: 'USER', actorId, action: 'job.cancel_requested', entityType: 'job', entityId: jobId, jobId,
@@ -132,6 +134,11 @@ export class FleetJobsService {
         feature = current.feature;
         repoId = current.repoId;
         if (!canTransition(current.state, FleetJobState.QUEUED, 'server')) throw new ConflictAppException({ state: current.state }, 'fleet.jobState');
+        // Plan D4: a requeue is a fresh lease (the transition carries `bumpEpoch: true`).
+        // Withdraw pending non-ABANDON commands from the prior epoch so a late runner
+        // can no longer ack them, and so the next sync sees no orphan ASSIGN/CANCEL.
+        // ABANDON rows are deliberately preserved (they are server-issued).
+        await this.repo.withdrawPendingCommands(jobId, now);
         return this.transitions.apply({
           job: current, to: 'QUEUED', by: 'server', now, actor: { type: 'USER', id: actorId }, reason: 'requeued',
           extra: {
