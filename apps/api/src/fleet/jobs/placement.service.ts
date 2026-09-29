@@ -51,7 +51,13 @@ export class PlacementService {
     @Inject(VCS_CFG) private readonly vcsConfig: Pick<IVcsConfig, 'githubApiUrl' | 'gitlabApiUrl'>,
   ) {}
 
-  /** Dispatch-time check of a pin (spec §4): null = fits now, a reason = does not, 'not_found' = no such runner. */
+  /**
+   * Dispatch-time check of a pin (spec §4, plan D18): null = fits now, a reason = does not,
+   * 'not_found' = no such runner. `selectorLabels` are deliberately ignored for a pinned job —
+   * a pinned runner is named, so labels are not part of the match (see firstMisfit's
+   * `job.pinnedRunnerId === null` guard). Task 3 (BUG-3) re-runs this same check inside the
+   * placeJob tx so a runner-state change between verdict and lock surfaces the same verdict.
+   */
   async evaluatePinned(pinnedRunnerId: string, job: PlacementJob, now = new Date()): Promise<MisfitReason | null | 'not_found'> {
     const [runner] = await this.repo.findPlacementRunners([pinnedRunnerId]);
     if (!runner) return 'not_found';
@@ -68,6 +74,14 @@ export class PlacementService {
       const repo = await this.repo.findRepo(job.repoId);
       if (!repo) throw new Error(`fleet repo ${job.repoId} missing for job ${job.id}`);
       const ids = await this.repo.lockRunners(job.pinnedRunnerId ? [job.pinnedRunnerId] : undefined);
+      // Review 2a BUG-3: a pinned runner's state can change between FleetJobsService.dispatch's
+      // pre-tx evaluatePinned and the in-tx lock here. Re-evaluate; surface the same verdicts.
+      if (job.pinnedRunnerId && ids.length === 0) {
+        // The pinned runner was deleted between verdict and lock; the controller already
+        // turned that into 404 at dispatch time, but a requeue or fillRunner can reach here.
+        // Empty misfits is the documented accepted race for delete.
+        return { outcome: { assigned: false, runnerId: null, leaseEpoch: null, misfits: [] } as PlacementOutcome, live: [] };
+      }
       const runners = await this.repo.findPlacementRunners(ids);
       const loads = toLoads(await this.repo.findActiveLoads(ids));
       const placementJob = toPlacementJob(job, repo);

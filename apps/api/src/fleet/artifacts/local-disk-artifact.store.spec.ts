@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { mkdtempSync, readFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { Readable } from 'stream';
@@ -33,5 +33,19 @@ describe('LocalDiskArtifactStore', () => {
 
   it.each(['../escape', '/abs/key', 'jobs/../x', 'jobs//x', 'jobs/x y'])('refuses key %s', async (key) => {
     await expect(store.stat(key)).rejects.toThrow(/artifact key/);
+  });
+
+  it('removes the .tmp when rename fails', async () => {
+    const key = 'jobs/j1/rename-fail.tar.gz';
+    await store.put(key, Readable.from([good]), { maxBytes: 100, expectedSha256: sha(good) });
+    const target = join(root, key);
+    rmSync(target, { force: true });
+    mkdirSync(target); // makes the rename target a directory; rename onto it fails
+    try {
+      await expect(store.put(key, Readable.from([good]), { maxBytes: 100, expectedSha256: sha(good) })).rejects.toThrow();
+      expect(readdirSync(join(root, 'jobs', 'j1')).filter((n) => n.endsWith('.tmp'))).toEqual([]);
+    } finally {
+      rmSync(target, { recursive: true, force: true });
+    }
   });
 });

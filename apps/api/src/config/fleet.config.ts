@@ -26,6 +26,10 @@ export interface IFleetConfig {
   gitlabBotEmail: string;
   /** Days a consumed or expired enrollment row survives (#162); null disables the purge. */
   enrollmentRetentionDays: number | null;
+  /** Seconds before a cached GitHub App installation token's expiry that we still hand it out (review 2b DOC-5). */
+  gitTokenReuseMarginSec: number;
+  /** Seconds a freshly minted GitLab token is considered valid for; the broker never lets it outlive this. */
+  gitlabTokenTtlSec: number;
 }
 
 export class FleetConfigSchema {
@@ -43,6 +47,8 @@ export class FleetConfigSchema {
   @IsOptional() @IsString() FLEET_GITLAB_BOT_NAME: string;
   @IsOptional() @IsString() FLEET_GITLAB_BOT_EMAIL: string;
   @IsOptional() @IsString() FLEET_ENROLLMENT_RETENTION_DAYS: string;
+  @IsOptional() @IsString() FLEET_GIT_TOKEN_REUSE_MARGIN_SEC: string;
+  @IsOptional() @IsString() FLEET_GITLAB_TOKEN_TTL_SEC: string;
 }
 
 const int = (key: string, fallback: number): number => Number.parseInt(process.env[key] ?? String(fallback), 10);
@@ -74,6 +80,8 @@ export const fleetConfig = registerAs(FLEET_CFG, (): IFleetConfig => {
     gitlabBotName: process.env['FLEET_GITLAB_BOT_NAME'] || 'koda-fleet',
     gitlabBotEmail: process.env['FLEET_GITLAB_BOT_EMAIL'] || 'koda-fleet@users.noreply.invalid',
     enrollmentRetentionDays: retentionDays(),
+    gitTokenReuseMarginSec: int('FLEET_GIT_TOKEN_REUSE_MARGIN_SEC', 300),
+    gitlabTokenTtlSec: int('FLEET_GITLAB_TOKEN_TTL_SEC', 3_600),
   };
 });
 

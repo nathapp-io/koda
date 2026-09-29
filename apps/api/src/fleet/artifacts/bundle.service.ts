@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -27,6 +27,8 @@ export interface BundleUpload {
 
 @Injectable()
 export class BundleService {
+  private readonly logger = new Logger(BundleService.name);
+
   constructor(
     @Inject(FLEET_JOB_REPOSITORY) private readonly repo: IFleetJobRepository,
     @Inject(ARTIFACT_STORE) private readonly store: ArtifactStore,
@@ -72,7 +74,23 @@ export class BundleService {
       await this.store.delete(key); // only this attempt's file; the recorded bundle is untouched
       throw new FleetFenceException();
     }
-    if (recorded.replacedKey) await this.store.delete(recorded.replacedKey);
+    if (recorded.replacedKey) {
+      try {
+        await this.store.delete(recorded.replacedKey);
+      } catch (error) {
+        // Plan D3 / review 2b ENH-1: the DB row now points at the new file. If we can't
+        // delete the replaced file (fs error, EACCES, EBUSY), it has no DB pointer and
+        // accumulates on disk. Log an activity so an operator can intervene; the bundle
+        // upload itself still succeeded.
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`Failed to delete replaced bundle ${recorded.replacedKey}: ${message}`);
+        await this.activity.record({
+          actorType: 'SYSTEM', actorId: 'system', action: 'bundle.orphan_file', entityType: 'job', entityId: u.jobId, jobId: u.jobId,
+          projectId: (await this.repo.findById(u.jobId))?.projectId ?? null,
+          responsibleUserId: null, payload: { replacedPath: recorded.replacedKey, error: message },
+        });
+      }
+    }
     return { jobId: u.jobId, leaseEpoch, sizeBytes: String(stored.sizeBytes), sha256: stored.sha256 };
   }
 

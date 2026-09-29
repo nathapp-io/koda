@@ -1,10 +1,12 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import { createSign } from 'crypto';
 import { readFileSync } from 'fs';
 import { FLEET_CFG, IFleetConfig, isGitHubAppConfigured } from '../../config/fleet.config';
 import { IVcsConfig, VCS_CFG } from '../../config/vcs.config';
+import type { FleetRepoRef } from '../jobs/domain/fleet-job.domain';
 import { FleetHttpClient } from './fleet-http-client';
-import { RepoCheckException } from './repo-check.exception';
+import { GitTokenBroker } from './git-token.broker';
+import { RepoCheckException, RepoCheckReason } from './repo-check.exception';
 
 export interface CanonicalRepo {
   owner: string;
@@ -24,6 +26,7 @@ export class GitHubAppClient {
     @Inject(FLEET_CFG) private readonly fleetConfig: IFleetConfig,
     @Inject(VCS_CFG) private readonly vcsConfig: Pick<IVcsConfig, 'githubApiUrl'>,
     private readonly http: FleetHttpClient,
+    @Inject(forwardRef(() => GitTokenBroker)) private readonly broker: GitTokenBroker,
   ) {}
 
   private get api(): string {
@@ -66,9 +69,29 @@ export class GitHubAppClient {
     return { token, expiresAt: new Date(expiresAt) };
   }
 
-  /** Spec §7.1 attribution: one issue comment on the PR, with a fresh repo-scoped installation token. */
-  async commentOnPullRequest(installationId: bigint, owner: string, name: string, number: number, body: string): Promise<boolean> {
-    const { token } = await this.mintInstallationToken(installationId, name);
+  /**
+   * Spec §7.1 attribution: one issue comment on the PR. When `opts.jobId/leaseEpoch/repo`
+   * are all provided, prefer the in-memory `GitTokenBroker` cache (the same token the
+   * runner is using for the job); this saves one App mint per attributed job. The
+   * verification path calls without `opts` and gets a fresh mint.
+   */
+  async commentOnPullRequest(
+    installationId: bigint,
+    owner: string,
+    name: string,
+    number: number,
+    body: string,
+    opts?: { jobId?: string; leaseEpoch?: number; repo?: FleetRepoRef },
+  ): Promise<boolean> {
+    let token: string;
+    if (opts?.jobId && opts.leaseEpoch !== undefined && opts.repo) {
+      const result = await this.broker.mint({ jobId: opts.jobId, leaseEpoch: opts.leaseEpoch, repo: opts.repo }, new Date());
+      if (result.ok === false) throw new RepoCheckException(result.error.reason as RepoCheckReason);
+      token = result.token.token;
+    } else {
+      const minted = await this.mintInstallationToken(installationId, name);
+      token = minted.token;
+    }
     const path = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues/${number}/comments`;
     const res = await this.http.request('POST', `${this.api}${path}`, this.headers(token), { body });
     return res.status === 201;

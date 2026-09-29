@@ -99,4 +99,26 @@ describeIntegration('fleet job cancel and requeue (PG)', () => {
     expect(JSON.stringify(res.body)).toMatch(/active job/i);
     await post('viewer', (await insertJob('rq-viewer', { state: 'FAILED' })).id, 'requeue').expect(403);
   });
+
+  it('withdraws pending non-ABANDON commands from the prior epoch when a CRASHED job is requeued', async () => {
+    const runner = await insertRunner(prisma);
+    const job = await insertJob('rq-withdraw', {
+      state: 'CRASHED', runnerId: runner.id, leaseEpoch: 3, finishedAt: new Date(),
+    });
+    const cancel = await prisma.fleetCommand.create({
+      data: { runnerId: runner.id, jobId: job.id, type: 'CANCEL', leaseEpoch: 3, payload: {} },
+    });
+    await post('dev', job.id, 'requeue').expect(200);
+    expect(await prisma.fleetCommand.findUniqueOrThrow({ where: { id: cancel.id } })).toEqual(
+      expect.objectContaining({ ackResult: 'withdrawn' }),
+    );
+    // ABANDON rows from the prior epoch are deliberately not withdrawn (plan D4).
+    const abandon = await prisma.fleetCommand.create({
+      data: { runnerId: runner.id, jobId: job.id, type: 'ABANDON', leaseEpoch: 3, payload: {} },
+    });
+    await post('dev', job.id, 'requeue').expect(409); // job is ASSIGNED now; requeue is not in the table
+    expect(await prisma.fleetCommand.findUniqueOrThrow({ where: { id: abandon.id } })).toEqual(
+      expect.objectContaining({ ackResult: null, ackedAt: null }),
+    );
+  });
 });

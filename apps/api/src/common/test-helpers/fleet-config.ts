@@ -17,6 +17,8 @@ export function testFleetConfig(overrides: Partial<IFleetConfig> = {}): IFleetCo
     gitlabBotName: 'koda-fleet',
     gitlabBotEmail: 'koda-fleet@users.noreply.invalid',
     enrollmentRetentionDays: null,
+    gitTokenReuseMarginSec: 300,
+    gitlabTokenTtlSec: 3_600,
     ...overrides,
   };
 }

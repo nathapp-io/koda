@@ -91,4 +91,20 @@ describeIntegration('fleet bundles (PG)', () => {
     await upload(j.id, Buffer.from('x'), { epoch: 2, sha: 'nope' }).expect(400);
     await download(j.id, 'dev').expect(404);
   });
+
+  it('rejects a bundle whose lease was bumped between uploads (409, ABANDON, prior bundle still downloads)', async () => {
+    // Review 2b BUG-4 (test coverage gap): the lease-mismatch fence path is exercised here at
+    // the first `assertHolder` (bundle.service.ts:88-92). The second lock+re-check inside the
+    // recording transaction (bundle.service.ts:60-74) is exercised by the "fences: stale epoch
+    // 409 + ABANDON, ..." test below (line 85). The "true" mid-stream race — server bumps
+    // leaseEpoch while the body is streaming — is structurally hard to simulate without
+    // injecting into BundleService.
+    const j = await job('midstream', 'RUNNING', 2);
+    const good = Buffer.from('good-bundle');
+    await upload(j.id, good, { epoch: 2 }).expect(201);
+    await prisma.fleetJob.update({ where: { id: j.id }, data: { leaseEpoch: j.leaseEpoch + 1 } });
+    await upload(j.id, Buffer.from('late'), { epoch: 2 }).expect(409);
+    expect(await prisma.fleetCommand.count({ where: { jobId: j.id, type: 'ABANDON' } })).toBe(1);
+    expect((await download(j.id, 'dev').expect(200)).body).toEqual(good);
+  });
 });

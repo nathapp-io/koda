@@ -50,7 +50,15 @@ export class LocalDiskArtifactStore implements ArtifactStore {
       await rm(tmp, { force: true });
       throw new ArtifactHashMismatchError();
     }
-    await rename(tmp, target);
+    try {
+      await rename(tmp, target);
+    } catch (error) {
+      // Cross-device links, full disk, permission race, etc. The streaming body is gone;
+      // the partial hash has not been committed anywhere. Clean up the tmp and rethrow
+      // so BundleService.upload can surface the error and not record an artifact row.
+      await rm(tmp, { force: true });
+      throw error;
+    }
     return { sizeBytes: size, sha256 };
   }
 
