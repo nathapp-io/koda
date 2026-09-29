@@ -87,7 +87,7 @@ export class BundleService {
         await this.activity.record({
           actorType: 'SYSTEM', actorId: 'system', action: 'bundle.orphan_file', entityType: 'job', entityId: u.jobId, jobId: u.jobId,
           projectId: (await this.repo.findById(u.jobId))?.projectId ?? null,
-          responsibleUserId: null, payload: { replacedKey: recorded.replacedKey, error: message },
+          responsibleUserId: null, payload: { replacedPath: recorded.replacedKey, error: message },
         });
       }
     }
