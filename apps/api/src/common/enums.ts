@@ -108,3 +108,18 @@ export const EntityLinkRelation = {
   INCIDENT_TO_TICKET: 'incident_to_ticket',
 } as const;
 export type EntityLinkRelation = (typeof EntityLinkRelation)[keyof typeof EntityLinkRelation];
+
+/** Fleet S1: forge of a registered fleet repo (same spelling as VcsConnection.provider). */
+export const FleetProvider = {
+  GITHUB: 'github',
+  GITLAB: 'gitlab',
+} as const;
+export type FleetProvider = (typeof FleetProvider)[keyof typeof FleetProvider];
+
+/** Fleet S1: who performed a FleetActivity action. */
+export const FleetActorType = {
+  USER: 'USER',
+  RUNNER: 'RUNNER',
+  SYSTEM: 'SYSTEM',
+} as const;
+export type FleetActorType = (typeof FleetActorType)[keyof typeof FleetActorType];

@@ -112,6 +112,7 @@ model Project {
   entityLinks   EntityLink[]
   memoryQueryMetrics MemoryQueryMetric[]
   webhookDeliveries WebhookDelivery[]
+  fleetRepos        FleetRepo[]
 
   @@index([deletedAt])
 }
@@ -551,5 +552,74 @@ model MemoryQueryMetric {
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId, createdAt])
+  @@index([createdAt])
+}
+
+// Fleet S1 (docs/superpowers/specs/2026-09-29-fleet-s1-dispatch-design.md §2).
+// Slice 1 tables only; jobs, events, commands and artifacts arrive in slice 2.
+
+model Runner {
+  id              String   @id @default(cuid())
+  name            String   @unique
+  apiKeyHash      String   @unique // HMAC-SHA256 of the kr_ key under API_KEY_SECRET
+  os              String   // darwin | linux
+  arch            String   // arm64 | x64
+  labels          String[]
+  capacity        Int      @default(1)
+  capabilities    Json     // RunnerCapabilities (packages/fleet-protocol)
+  daemonVersion   String
+  protocolVersion Int
+  bootId          String
+  enabled         Boolean  @default(true)
+  lastSeenAt      DateTime
+  createdById     String   // User.id who issued the enrollment token
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model RunnerEnrollment {
+  id          String    @id @default(cuid())
+  tokenHash   String    @unique // HMAC-SHA256 of the ke_ token under API_KEY_SECRET
+  labels      String[]
+  expiresAt   DateTime
+  usedAt      DateTime?
+  runnerId    String?
+  createdById String
+  createdAt   DateTime  @default(now())
+
+  @@index([createdAt])
+}
+
+model FleetRepo {
+  id                   String   @id @default(cuid())
+  projectId            String
+  provider             String   // github | gitlab
+  owner                String   // canonical, as returned by the provider
+  name                 String   // canonical, as returned by the provider
+  defaultBranch        String
+  githubInstallationId BigInt?
+  createdById          String
+  createdAt            DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, owner, name])
+  @@index([projectId])
+}
+
+model FleetActivity {
+  id                String   @id @default(cuid())
+  actorType         String   // USER | RUNNER | SYSTEM
+  actorId           String
+  action            String
+  entityType        String   // runner | enrollment | repo (job from slice 2)
+  entityId          String
+  jobId             String?
+  responsibleUserId String?
+  payload           Json
+  createdAt         DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([jobId])
   @@index([createdAt])
 }

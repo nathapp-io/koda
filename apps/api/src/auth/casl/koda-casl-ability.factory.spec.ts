@@ -231,6 +231,13 @@ describe('KodaCaslAbilityFactory', () => {
     });
   });
 
+  describe('runner permissions (fleet)', () => {
+    it('grants a runner principal no permissions', async () => {
+      const runner = { actorType: 'runner', id: 'r1', name: 'r', runnerName: 'r', labels: [], enabled: true, blacklisted: false, revoked: false, authorities: [] };
+      await expect(factory.getPermissions(runner as never)).resolves.toEqual([]);
+    });
+  });
+
   describe('permission completeness', () => {
     it('MEMBER user has exactly 10 permission rules', async () => {
       const principal = makeUser({ role: 'MEMBER' });

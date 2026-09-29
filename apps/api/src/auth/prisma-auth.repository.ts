@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { AgentDomain, UserDomain } from './domain/auth.domain';
+import { AgentDomain, RunnerDomain, UserDomain } from './domain/auth.domain';
 import { GlobalLock, lockGlobal } from '../common/utils/advisory-lock';
 
 @Injectable()
@@ -94,6 +94,14 @@ export class PrismaAuthRepository {
     const m = await this.db.agent.findFirst({ where: { apiKeyHash: keyHash } });
     if (!m) return null;
     return { id: m.id, slug: m.slug, status: m.status, apiKeyHash: m.apiKeyHash };
+  }
+
+  async findRunnerByKeyHash(keyHash: string): Promise<RunnerDomain | null> {
+    const m = await this.db.runner.findUnique({
+      where: { apiKeyHash: keyHash },
+      select: { id: true, name: true, labels: true, enabled: true },
+    });
+    return m ?? null;
   }
 
   async findAgentRoles(agentId: string): Promise<string[]> {

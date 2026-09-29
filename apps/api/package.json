@@ -70,6 +70,7 @@
   "devDependencies": {
     "@golevelup/ts-jest": "^3.0.0",
     "@nathapp/eslint-config": "workspace:*",
+    "@nathapp/fleet-protocol": "workspace:*",
     "@nathapp/typescript-config": "workspace:*",
     "@nestjs/cli": "^11.0.24",
     "@nestjs/platform-express": "^11.1.28",

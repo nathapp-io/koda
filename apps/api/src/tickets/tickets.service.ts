@@ -11,7 +11,7 @@ import { remapPage } from '../common/dto/koda-page.query';
 import { TicketType, TicketStatus, Priority } from '../common/enums';
 import { buildGitUrl } from '../common/utils/git-url.util';
 import { actorForeignKeys } from '../auth/principal/actor-foreign-keys';
-import { isUserPrincipal, KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { actorKind, KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { runWithTicketNumberRetry } from '../common/utils/ticket-number-retry';
 import { TICKET_REPOSITORY, ITicketRepository, TicketDomain } from './domain/ticket.domain';
 import { TicketEventService } from '../events/ticket-event.service';
@@ -54,7 +54,7 @@ export class TicketsService {
     principal: KodaPrincipal,
     extra: Record<string, unknown> = {},
   ): Promise<void> {
-    const actorType = isUserPrincipal(principal) ? 'user' : 'agent';
+    const actorType = actorKind(principal);
     const event = await this.ticketEventService.create({
       ticketId,
       projectId,

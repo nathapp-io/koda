@@ -1,20 +1,23 @@
 import { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '@nathapp/nestjs-auth';
+import { AuthException } from '@nathapp/nestjs-common';
 import { AUTH_CFG, IAuthConfig } from '../../config/auth.config';
 import { CombinedAuthGuard } from './combined-auth.guard';
+import { RUNNER_ROUTE_KEY } from './runner-route.decorator';
 import type { PrismaAuthRepository } from '../prisma-auth.repository';
 import type { AgentAuthProvider } from '../agent-auth.provider';
 
-function makeReflector(isPublic = false): jest.Mocked<Reflector> {
+function makeReflector(isPublic = false, isRunnerRoute = false): jest.Mocked<Reflector> {
   return {
-    getAllAndOverride: jest.fn().mockReturnValue(isPublic),
+    getAllAndOverride: jest.fn((key: string) => (key === IS_PUBLIC_KEY ? isPublic : key === RUNNER_ROUTE_KEY ? isRunnerRoute : undefined)),
   } as unknown as jest.Mocked<Reflector>;
 }
 
-function makeAuthRepo(agent: unknown = null): jest.Mocked<PrismaAuthRepository> {
+function makeAuthRepo(agent: unknown = null, runner: unknown = null): jest.Mocked<PrismaAuthRepository> {
   return {
     findAgentByKeyHash: jest.fn().mockResolvedValue(agent),
+    findRunnerByKeyHash: jest.fn().mockResolvedValue(runner),
   } as unknown as jest.Mocked<PrismaAuthRepository>;
 }
 
@@ -57,6 +60,7 @@ function buildContext(request: Record<string, unknown>, isPublic = false): Execu
 describe('CombinedAuthGuard', () => {
   afterEach(() => {
     jest.clearAllMocks();
+    jest.restoreAllMocks();
   });
 
   describe('public routes', () => {
@@ -203,6 +207,69 @@ describe('CombinedAuthGuard', () => {
       const ctx = buildContext(buildRequest('Bearer not.a.jwt'));
 
       await expect(guard.canActivate(ctx)).rejects.toThrow('Unauthorized');
+    });
+  });
+
+  describe('runner keys (fleet)', () => {
+    const runnerRow = { id: 'run-1', name: 'mac-1', labels: ['darwin'], enabled: true };
+    const superSpy = (guard: CombinedAuthGuard) =>
+      jest.spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate').mockResolvedValue(true);
+
+    it('authenticates a kr_ key on a runner route and sets the runner principal', async () => {
+      const repo = makeAuthRepo(null, runnerRow);
+      const guard = new CombinedAuthGuard(makeReflector(false, true), repo, makeConfig(), makeAgentAuthProvider());
+      const jwt = superSpy(guard);
+      const request = buildRequest('Bearer kr_' + 'a'.repeat(64));
+
+      await expect(guard.canActivate(buildContext(request))).resolves.toBe(true);
+      expect(request['user']).toEqual(expect.objectContaining({ actorType: 'runner', id: 'run-1', runnerName: 'mac-1', enabled: true }));
+      expect(repo.findAgentByKeyHash).not.toHaveBeenCalled();
+      expect(jwt).not.toHaveBeenCalled();
+    });
+
+    it('keeps a disabled runner authenticated (drain) and marks it', async () => {
+      const guard = new CombinedAuthGuard(makeReflector(false, true), makeAuthRepo(null, { ...runnerRow, enabled: false }), makeConfig(), makeAgentAuthProvider());
+      const request = buildRequest('Bearer kr_' + 'b'.repeat(64));
+      await expect(guard.canActivate(buildContext(request))).resolves.toBe(true);
+      expect(request['user']).toEqual(expect.objectContaining({ enabled: false, blacklisted: false }));
+    });
+
+    it('rejects an unknown kr_ key on a runner route with 401', async () => {
+      const guard = new CombinedAuthGuard(makeReflector(false, true), makeAuthRepo(null, null), makeConfig(), makeAgentAuthProvider());
+      await expect(guard.canActivate(buildContext(buildRequest('Bearer kr_nope')))).rejects.toBeInstanceOf(AuthException);
+    });
+
+    it('rejects a kr_ key on a non-runner route without an agent lookup or JWT fallback', async () => {
+      const repo = makeAuthRepo({ id: 'agent-1', slug: 'bot', status: 'ACTIVE', apiKeyHash: 'x' }, runnerRow);
+      const guard = new CombinedAuthGuard(makeReflector(false, false), repo, makeConfig(), makeAgentAuthProvider());
+      const jwt = superSpy(guard);
+      await expect(guard.canActivate(buildContext(buildRequest('Bearer kr_' + 'c'.repeat(64))))).rejects.toBeInstanceOf(AuthException);
+      expect(repo.findAgentByKeyHash).not.toHaveBeenCalled();
+      expect(repo.findRunnerByKeyHash).not.toHaveBeenCalled();
+      expect(jwt).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['a JWT', 'Bearer aaa.bbb.ccc'],
+      ['an agent key', 'Bearer ' + 'd'.repeat(64)],
+      ['no credentials', ''],
+    ])('rejects %s on a runner route with 401', async (_label, header) => {
+      const repo = makeAuthRepo({ id: 'agent-1', slug: 'bot', status: 'ACTIVE', apiKeyHash: 'x' }, runnerRow);
+      const guard = new CombinedAuthGuard(makeReflector(false, true), repo, makeConfig(), makeAgentAuthProvider());
+      const jwt = superSpy(guard);
+      await expect(guard.canActivate(buildContext(buildRequest(header)))).rejects.toBeInstanceOf(AuthException);
+      expect(repo.findAgentByKeyHash).not.toHaveBeenCalled();
+      expect(jwt).not.toHaveBeenCalled();
+    });
+
+    it('fails closed on a kr_ key when API_KEY_SECRET is not configured', async () => {
+      const guard = new CombinedAuthGuard(makeReflector(false, true), makeAuthRepo(null, runnerRow), makeConfig(''), makeAgentAuthProvider());
+      await expect(guard.canActivate(buildContext(buildRequest('Bearer kr_' + 'e'.repeat(64))))).rejects.toBeInstanceOf(AuthException);
+    });
+
+    it('still allows public routes marked as runner routes (enroll)', async () => {
+      const guard = new CombinedAuthGuard(makeReflector(true, true), makeAuthRepo(), makeConfig(), makeAgentAuthProvider());
+      await expect(guard.canActivate(buildContext(buildRequest('')))).resolves.toBe(true);
     });
   });
 });

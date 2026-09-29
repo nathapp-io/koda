@@ -28,6 +28,6 @@ import { WebhookSecurityModule } from '../webhook-security/webhook-security.modu
     VcsPrSyncService,
     VcsLinkExtractorService,
   ],
-  exports: [VcsConnectionService, VcsSyncService, VcsWebhookService, VcsPollingService, VcsPrSyncService, VcsLinkExtractorService],
+  exports: [VCS_REPOSITORY, VcsConnectionService, VcsSyncService, VcsWebhookService, VcsPollingService, VcsPrSyncService, VcsLinkExtractorService],
 })
 export class VcsModule {}
