@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue'
+import { apiPath } from '~/lib/api-path'
 
 export interface TimelineEvent {
   id: string
@@ -57,7 +58,7 @@ export function useTimelineEvents(slug: string) {
         cursor: cursor.value,
       })
       const res = await $api.get<TimelineResponse>(
-        `/projects/${slug}/timeline`,
+        apiPath`/projects/${slug}/timeline`,
         { query },
       )
       if (requestId !== latestRequestId) return

@@ -17,19 +17,19 @@ function src(path: string): string {
 describe('Web OpenAPI gap operations are wired in source', () => {
   test('project settings uses GET/PATCH/DELETE /projects/:slug', () => {
     const source = src(settingsPath)
-    expect(source).toContain('$api.get(`/projects/${slug}`)')
-    expect(source).toContain('$api.patch(`/projects/${slug}`')
-    expect(source).toContain('$api.delete(`/projects/${slug}`)')
+    expect(source).toContain('$api.get(apiPath`/projects/${slug}`)')
+    expect(source).toContain('$api.patch(apiPath`/projects/${slug}`')
+    expect(source).toContain('$api.delete(apiPath`/projects/${slug}`)')
   })
 
   test('comment thread uses DELETE /comments/:id', () => {
     const source = src(commentThreadPath)
-    expect(source).toContain('$api.delete(`/comments/${comment.id}`)')
+    expect(source).toContain('$api.delete(apiPath`/comments/${comment.id}`)')
   })
 
   test('labels page uses PATCH /projects/:slug/labels/:id', () => {
     const source = src(labelsPath)
-    expect(source).toContain('$api.patch(`/projects/${slug}/labels/${label.id}`')
+    expect(source).toContain('$api.patch(apiPath`/projects/${slug}/labels/${label.id}`')
   })
 
   test('ticket detail uses delete/assign endpoints and action panel uses close endpoint', () => {

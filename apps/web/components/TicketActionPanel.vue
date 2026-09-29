@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { extractApiError } from '~/composables/useApi'
+import { apiPath } from '~/lib/api-path'
 
 type TicketAction = 'verify' | 'start' | 'fix' | 'verify-fix' | 'reject' | 'close'
 type DialogAction = 'verify' | 'fix' | 'reject' | 'close' | 'verify-fix-approve' | 'verify-fix-fail'
@@ -49,7 +50,7 @@ function closeDialog() {
   comment.value = ''
 }
 
-const baseUrl = computed(() => `/projects/${props.projectSlug}/tickets/${props.ticket.ref}`)
+const baseUrl = computed(() => apiPath`/projects/${props.projectSlug}/tickets/${props.ticket.ref}`)
 
 async function performAction(action: DialogAction | 'start', body: Record<string, unknown> = {}) {
   try {

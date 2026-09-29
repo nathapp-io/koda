@@ -44,7 +44,7 @@ export async function initCommand(options: InitOptions, deps: InitDeps = _initDe
   const { apiKey, apiUrl } = await deps.resolveAuth({ apiKey: options.apiKey, apiUrl: options.apiUrl });
 
   if (!apiKey) {
-    console.error('Not logged in. Run: koda login --api-key <key>');
+    console.error('Not logged in. Run: koda login --api-key -');
     return void process.exit(2);
   }
 

@@ -5,6 +5,7 @@ import { extractApiError } from '~/composables/useApi'
 import { createDebouncer } from '~/lib/debounce'
 import { renderMarkdownOrEscape } from '~/lib/markdown'
 import { safeHref } from '~/lib/safe-url'
+import { apiPath } from '~/lib/api-path'
 
 definePageMeta({ layout: 'default' })
 
@@ -59,12 +60,12 @@ const toast = useAppToast()
 
 const { data: ticketData, pending, error, refresh } = useAsyncData(
   `ticket-${slug}-${ref}`,
-  () => $api.get(`/projects/${slug}/tickets/${ref}`) as Promise<Ticket>,
+  () => $api.get(apiPath`/projects/${slug}/tickets/${ref}`) as Promise<Ticket>,
 )
 
 const { data: ticketLinksData, refresh: refreshTicketLinks } = useAsyncData(
   `ticket-links-${slug}-${ref}`,
-  () => $api.get(`/projects/${slug}/tickets/${ref}/links`) as Promise<TicketLink[]>,
+  () => $api.get(apiPath`/projects/${slug}/tickets/${ref}/links`) as Promise<TicketLink[]>,
 )
 
 interface Label {
@@ -75,7 +76,7 @@ interface Label {
 
 const { data: allLabelsData, refresh: refreshAllLabels } = useAsyncData(
   `labels-for-ticket-${slug}`,
-  () => $api.get(`/projects/${slug}/labels`) as Promise<Label[]>,
+  () => $api.get(apiPath`/projects/${slug}/labels`) as Promise<Label[]>,
 )
 
 const ticket = computed(() => ticketData.value ?? null)
@@ -88,7 +89,7 @@ const { data: liveComments } = useNuxtData(`comments-${slug}-${ref}`)
 
 async function reloadTicketSilently() {
   try {
-    ticketData.value = await ($api.get(`/projects/${slug}/tickets/${ref}`) as Promise<Ticket>)
+    ticketData.value = await ($api.get(apiPath`/projects/${slug}/tickets/${ref}`) as Promise<Ticket>)
   }
   catch {
     // The next live event or a resync retries.
@@ -97,7 +98,7 @@ async function reloadTicketSilently() {
 
 async function reloadCommentsSilently() {
   try {
-    liveComments.value = await $api.get(`/projects/${slug}/tickets/${ref}/comments`)
+    liveComments.value = await $api.get(apiPath`/projects/${slug}/tickets/${ref}/comments`)
   }
   catch {
     // The next live event or a resync retries.
@@ -151,7 +152,7 @@ function cancelEdit() {
 async function saveEdit() {
   if (!ticket.value) return
   try {
-    await $api.patch(`/projects/${slug}/tickets/${ref}`, {
+    await $api.patch(apiPath`/projects/${slug}/tickets/${ref}`, {
       title: editState.title,
       description: editState.description,
       priority: editState.priority,
@@ -210,10 +211,6 @@ function formatDate(dateStr: string) {
 async function onTransition() {
   toast.success(t('tickets.toast.updated'))
   await refresh()
-}
-
-function onCommentAdded() {
-  toast.success(t('comments.toast.added'))
 }
 
 function extractIssueNumber(url: string): string | null {
@@ -296,7 +293,7 @@ async function assignTicket() {
   if (!assigneeUserId.value.trim()) return
   assigning.value = true
   try {
-    await $api.post(`/projects/${slug}/tickets/${ref}/assign`, { userId: assigneeUserId.value.trim() })
+    await $api.post(apiPath`/projects/${slug}/tickets/${ref}/assign`, { userId: assigneeUserId.value.trim() })
     toast.success(t('tickets.toast.assigned'))
     await refresh()
   } catch (err: unknown) {
@@ -309,7 +306,7 @@ async function assignTicket() {
 async function unassignTicket() {
   assigning.value = true
   try {
-    await $api.post(`/projects/${slug}/tickets/${ref}/assign`, {})
+    await $api.post(apiPath`/projects/${slug}/tickets/${ref}/assign`, {})
     toast.success(t('tickets.toast.unassigned'))
     await refresh()
   } catch (err: unknown) {
@@ -324,7 +321,7 @@ async function deleteTicket() {
   if (!window.confirm(t('tickets.delete.confirm'))) return
   deletingTicket.value = true
   try {
-    await $api.delete(`/projects/${slug}/tickets/${ref}`)
+    await $api.delete(apiPath`/projects/${slug}/tickets/${ref}`)
     toast.success(t('tickets.delete.success'))
     await navigateTo(`/${slug}`)
   } catch (err: unknown) {
@@ -341,7 +338,7 @@ async function assignLabel() {
   if (!selectedLabelId.value) return
   assigningLabel.value = true
   try {
-    await $api.post(`/projects/${slug}/tickets/${ref}/labels`, { labelId: selectedLabelId.value })
+    await $api.post(apiPath`/projects/${slug}/tickets/${ref}/labels`, { labelId: selectedLabelId.value })
     selectedLabelId.value = ''
     toast.success(t('labels.toast.assigned'))
     await refresh()
@@ -355,7 +352,7 @@ async function assignLabel() {
 
 async function removeLabel(labelId: string) {
   try {
-    await $api.delete(`/projects/${slug}/tickets/${ref}/labels/${labelId}`)
+    await $api.delete(apiPath`/projects/${slug}/tickets/${ref}/labels/${labelId}`)
     toast.success(t('labels.toast.unassigned'))
     await refresh()
     await refreshAllLabels()
@@ -372,7 +369,7 @@ async function addLink() {
   if (!newLinkUrl.value.trim()) return
   addingLink.value = true
   try {
-    await $api.post(`/projects/${slug}/tickets/${ref}/links`, {
+    await $api.post(apiPath`/projects/${slug}/tickets/${ref}/links`, {
       url: newLinkUrl.value.trim(),
       linkType: newLinkType.value,
     })
@@ -388,7 +385,7 @@ async function addLink() {
 
 async function removeLink(linkId: string) {
   try {
-    await $api.delete(`/projects/${slug}/tickets/${ref}/links/${linkId}`)
+    await $api.delete(apiPath`/projects/${slug}/tickets/${ref}/links/${linkId}`)
     toast.success(t('tickets.links.toast.deleted'))
     await refreshTicketLinks()
   } catch (err: unknown) {
@@ -516,7 +513,6 @@ async function removeLink(linkId: string) {
         <CommentThread
           :project-slug="slug"
           :ticket-ref="ref"
-          @comment-added="onCommentAdded"
         />
 
         <!-- VCS Links Section grouped by linkType -->

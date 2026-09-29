@@ -24,6 +24,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { apiPath } from '~/lib/api-path'
 
 interface Agent {
   id: string
@@ -53,7 +54,7 @@ const isSubmitting = ref(false)
 async function handleDelete() {
   isSubmitting.value = true
   try {
-    await $api.delete('/agents/' + props.agent.slug)
+    await $api.delete(apiPath`/agents/${props.agent.slug}`)
     toast.success(t('agents.toast.deleted'))
     emit('deleted')
     emit('update:open', false)

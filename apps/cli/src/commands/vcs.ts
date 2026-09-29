@@ -10,6 +10,8 @@ import { table, error } from '../utils/output';
 import { handleApiError } from '../utils/error';
 import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
+import { parsePositiveInt } from '../utils/parse-positive-int';
+import { resolveSecret, VCS_TOKEN_SECRET, SecretInputError } from '../utils/secret-input';
 import { VCS_MESSAGES } from './vcs-messages';
 import {
   vcsControllerCreateConnection,
@@ -84,13 +86,14 @@ export function vcsCommand(program: Command): void {
     .option('--provider <provider>', 'VCS provider (github or gitlab)')
     .option('--owner <owner>', 'Repository owner')
     .option('--repo <repo>', 'Repository name')
-    .option('--token <token>', 'API token for provider')
+    .option('--token [token]', 'Provider API token (- reads stdin; omit the value to be prompted; or set KODA_VCS_TOKEN)')
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .option('--sync-mode <mode>', 'Sync mode (off, polling, webhook)')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        if (!options.provider || !options.owner || !options.repo || !options.token) {
+        const token = await resolveSecret(options.token, VCS_TOKEN_SECRET);
+        if (!options.provider || !options.owner || !options.repo || !token) {
           error(VCS_MESSAGES.MISSING_REQUIRED_OPTIONS);
           process.exit(3);
           return;
@@ -102,7 +105,7 @@ export function vcsCommand(program: Command): void {
           provider: options.provider,
           repoOwner: options.owner,
           repoName: options.repo,
-          token: options.token,
+          token,
           syncMode: options.syncMode || 'off',
         };
 
@@ -130,6 +133,11 @@ export function vcsCommand(program: Command): void {
 
         process.exit(0);
       } catch (err: unknown) {
+        if (err instanceof SecretInputError) {
+          error(err.message);
+          process.exit(3);
+          return;
+        }
         handleApiError(err);
       }
     });
@@ -189,7 +197,7 @@ export function vcsCommand(program: Command): void {
     .command('update')
     .option('--sync-mode <mode>', 'Sync mode (off, polling, webhook)')
     .option('--authors <authors>', 'Comma-separated list of allowed authors')
-    .option('--polling-interval-ms <ms>', 'Polling interval in milliseconds')
+    .option('--polling-interval-ms <ms>', 'Polling interval in milliseconds', parsePositiveInt)
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .action(async (options) => {
       try {
@@ -205,8 +213,8 @@ export function vcsCommand(program: Command): void {
             .map((author) => author.trim())
             .filter(Boolean);
         }
-        if (options.pollingIntervalMs) {
-          requestBody.pollingIntervalMs = Number(options.pollingIntervalMs);
+        if (options.pollingIntervalMs !== undefined) {
+          requestBody.pollingIntervalMs = options.pollingIntervalMs;
         }
 
         const response = await vcsControllerUpdateConnection({
@@ -305,17 +313,11 @@ export function vcsCommand(program: Command): void {
     });
 
   vcs
-    .command('import <issueNumber>')
+    .command('import')
+    .argument('<issueNumber>', 'Issue number to import', parsePositiveInt)
     .option('--project <slug>', 'Project slug (uses config if not provided)')
-    .action(async (issueNumberArg, options) => {
+    .action(async (issueNumber: number, options) => {
       try {
-        const issueNumber = parseInt(issueNumberArg, 10);
-        if (isNaN(issueNumber)) {
-          error(VCS_MESSAGES.INVALID_ISSUE_NUMBER);
-          process.exit(1);
-          return;
-        }
-
         const ctx = await withContext({ projectSlug: options.project });
 
         const response = await vcsControllerSyncIssue({

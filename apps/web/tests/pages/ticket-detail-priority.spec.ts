@@ -166,33 +166,14 @@ describe('US-005-4 AC4: ticket data refreshes after a transition', () => {
 // AC5 — Success toast appears after a comment is added
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('US-005-4 AC5: success toast appears after a comment is added', () => {
-  test('source has a comment-added event handler on CommentThread', () => {
-    const src = source()
-    const hasCommentAddedHandler =
-      src.includes('@comment-added') ||
-      src.includes('v-on:comment-added') ||
-      src.includes('@commentAdded') ||
-      src.includes('v-on:commentAdded') ||
-      src.includes('onCommentAdded')
-    expect(hasCommentAddedHandler).toBe(true)
+describe('US-005-4 AC5: one success toast after a comment is added', () => {
+  test('the page does not toast comments itself (CommentThread owns the toast)', () => {
+    expect(source()).not.toContain("comments.toast.added")
   })
 
-  test('source calls toast.success in the comment-added handler', () => {
-    const src = source()
-    // The page must have toast.success called (could be shared with transition toast)
-    const hasToastSuccess = src.includes('toast.success')
-    expect(hasToastSuccess).toBe(true)
-  })
-
-  test('source has a handler function for comment-added events', () => {
-    const src = source()
-    const hasHandler =
-      src.includes('onCommentAdded') ||
-      src.includes('handleCommentAdded') ||
-      src.includes('commentAdded') ||
-      src.includes('@comment-added=')
-    expect(hasHandler).toBe(true)
+  test('CommentThread toasts exactly once', () => {
+    const thread = readFileSync(join(__dirname, '../../components/CommentThread.vue'), 'utf-8')
+    expect(thread.match(/t\('comments\.toast\.added'\)/g)).toHaveLength(1)
   })
 })
 

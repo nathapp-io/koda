@@ -10,8 +10,8 @@ describe('useProjectEvents', () => {
     expect(source).toMatch(/onBeforeUnmount\(\(\) => \{[\s\S]*stream\?\.close\(\)/)
   })
 
-  test('targets the proxied events route with an encoded slug', () => {
-    expect(source).toContain('`/api/projects/${encodeURIComponent(slug)}/events`')
+  test('targets the proxied events route with the slug encoded by apiPath', () => {
+    expect(source).toContain('apiPath`/api/projects/${slug}/events`')
   })
 
   test('refreshes auth through useAuth, resolved during setup', () => {

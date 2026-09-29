@@ -355,6 +355,7 @@
   "agents": {
     "title": "代理",
     "createAgent": "创建代理",
+    "empty": "暂无代理。",
     "columns": {
       "name": "名称",
       "slug": "标识符",
@@ -369,6 +370,8 @@
       "OFFLINE": "OFFLINE"
     },
     "toast": {
+      "created": "代理创建成功",
+      "createFailed": "创建代理失败",
       "statusUpdated": "代理状态已更新为 {status}",
       "statusFailed": "更新代理状态失败",
       "rolesUpdated": "代理角色更新成功",

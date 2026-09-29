@@ -106,7 +106,8 @@ export class AgentsService {
       // schema default applies.
       const { roles, capabilities, ...scalarFields } = agentIdOrDto;
       const validatedRoles = AgentsService.validateAgentRoles(roles);
-      const slug = scalarFields.slug || scalarFields.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+      // CreateAgentDto requires a non-empty, pattern-checked slug (#145).
+      const { slug } = scalarFields;
       const createData = {
         name: scalarFields.name,
         slug,

@@ -4,6 +4,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { extractApiError } from '~/composables/useApi'
+import { apiPath } from '~/lib/api-path'
 
 interface Comment {
   id: string
@@ -26,7 +27,7 @@ const { $api } = useApi()
 const { t } = useI18n()
 const toast = useAppToast()
 
-const commentsEndpoint = `/projects/${props.projectSlug}/tickets/${props.ticketRef}/comments`
+const commentsEndpoint = apiPath`/projects/${props.projectSlug}/tickets/${props.ticketRef}/comments`
 
 const { data, pending, error, refresh: refreshComments } = useAsyncData<Comment[]>(
   `comments-${props.projectSlug}-${props.ticketRef}`,
@@ -89,7 +90,7 @@ async function saveEdit(comment: Comment) {
   if (!editDraft.value.trim()) return
 
   try {
-    await $api.patch(`/comments/${comment.id}`, {
+    await $api.patch(apiPath`/comments/${comment.id}`, {
       body: editDraft.value,
     })
     editingId.value = null
@@ -105,7 +106,7 @@ async function saveEdit(comment: Comment) {
 async function deleteComment(comment: Comment) {
   if (!window.confirm(t('comments.confirmDelete'))) return
   try {
-    await $api.delete(`/comments/${comment.id}`)
+    await $api.delete(apiPath`/comments/${comment.id}`)
     await refreshComments()
     toast.success(t('comments.toast.deleted'))
   } catch (err: unknown) {

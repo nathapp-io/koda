@@ -38,6 +38,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { extractApiError } from '~/composables/useApi'
+import { apiPath } from '~/lib/api-path'
 
 const props = defineProps<{
   open: boolean
@@ -73,7 +74,7 @@ const onSubmit = handleSubmit(async (formValues) => {
   try {
     const issueNumber = formValues.issueNumber as number
     const response = await $api.post<{ tickets: Array<{ ref: string }> }>(
-      `/projects/${props.projectSlug}/vcs/sync/${issueNumber}`
+      apiPath`/projects/${props.projectSlug}/vcs/sync/${issueNumber}`
     )
     toast.success(t('vcs.importIssue.success', { ref: response.tickets[0]?.ref || `${props.projectSlug}-${issueNumber}` }))
     emit('update:open', false)

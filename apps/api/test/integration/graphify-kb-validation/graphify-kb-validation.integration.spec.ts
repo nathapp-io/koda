@@ -502,18 +502,6 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
       { source: 'n1', target: 'n2', relation: 'depends_on' },
     ];
 
-    const adminUser: import('../../../src/auth/principal/koda-principal.types').UserPrincipal = {
-      actorType: 'user',
-      id: 'user-admin-001',
-      sub: 'user-admin-001',
-      role: 'ADMIN',
-      email: 'admin@test.com',
-      name: undefined,
-      blacklisted: false,
-      revoked: false,
-      authorities: [],
-    };
-
     beforeEach(async () => {
       mockTxClient = {
         project: {
@@ -569,7 +557,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
     it('AC8: calls ragService.importGraphify with project.id (not slug), dto.nodes, and dto.links', async () => {
       const dto: ImportGraphifyDto = { nodes: sampleNodes, links: sampleLinks };
 
-      await controller.importGraphify('test-project', dto, adminUser);
+      await controller.importGraphify('test-project', dto);
 
       expect(mockRagService.importGraphify).toHaveBeenCalledWith(
         mockProject.id,
@@ -581,7 +569,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
     it('AC8: calls ragService.importGraphify with empty array when dto.links is undefined (links ?? [])', async () => {
       const dto: ImportGraphifyDto = { nodes: sampleNodes };
 
-      await controller.importGraphify('test-project', dto, adminUser);
+      await controller.importGraphify('test-project', dto);
 
       expect(mockRagService.importGraphify).toHaveBeenCalledWith(
         mockProject.id,
@@ -594,7 +582,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
       mockRagService.importGraphify.mockResolvedValue({ imported: 3, cleared: 5 });
       const dto: ImportGraphifyDto = { nodes: sampleNodes };
 
-      const result = await controller.importGraphify('test-project', dto, adminUser);
+      const result = await controller.importGraphify('test-project', dto);
 
       expect(result).toMatchObject({ ret: 0, data: { imported: 3, cleared: 5 } });
     });
@@ -603,7 +591,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
     it('AC5: does NOT call ragService.importGraphify when nodes is empty', async () => {
       const dto: ImportGraphifyDto = { nodes: [] };
 
-      await controller.importGraphify('test-project', dto, adminUser);
+      await controller.importGraphify('test-project', dto);
 
       expect(mockRagService.importGraphify).not.toHaveBeenCalled();
     });
@@ -611,7 +599,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
     it('AC5: does NOT call ragService.indexDocument when nodes is empty', async () => {
       const dto: ImportGraphifyDto = { nodes: [] };
 
-      await controller.importGraphify('test-project', dto, adminUser);
+      await controller.importGraphify('test-project', dto);
 
       expect(mockRagService.indexDocument).not.toHaveBeenCalled();
     });
@@ -619,7 +607,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
     it('AC5: returns { imported: 0, cleared: 0 } when nodes is empty', async () => {
       const dto: ImportGraphifyDto = { nodes: [] };
 
-      const result = await controller.importGraphify('test-project', dto, adminUser);
+      const result = await controller.importGraphify('test-project', dto);
 
       expect(result).toMatchObject({ ret: 0, data: { imported: 0, cleared: 0 } });
     });
@@ -628,7 +616,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
     it('AC5: does NOT update graphifyLastImportedAt when nodes is empty', async () => {
       const dto: ImportGraphifyDto = { nodes: [] };
 
-      await controller.importGraphify('test-project', dto, adminUser);
+      await controller.importGraphify('test-project', dto);
 
       expect(mockPrismaClient.project.update).not.toHaveBeenCalled();
     });
@@ -642,7 +630,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
       const beforeTs = Date.now();
       const dto: ImportGraphifyDto = { nodes: sampleNodes, links: sampleLinks };
 
-      await controller.importGraphify('test-project', dto, adminUser);
+      await controller.importGraphify('test-project', dto);
 
       expect(mockPrismaClient.project.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -676,7 +664,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
       const dto: ImportGraphifyDto = { nodes: sampleNodes };
 
       await expect(
-        controller.importGraphify('test-project', dto, adminUser),
+        controller.importGraphify('test-project', dto),
       ).rejects.toThrow(ValidationAppException);
     });
 
@@ -686,7 +674,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
       const dto: ImportGraphifyDto = { nodes: sampleNodes };
 
       await expect(
-        controller.importGraphify('test-project', dto, adminUser),
+        controller.importGraphify('test-project', dto),
       ).rejects.toThrow();
     });
 
@@ -698,7 +686,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
       const dto: ImportGraphifyDto = { nodes: sampleNodes };
 
       await expect(
-        controller.importGraphify('test-project', dto, adminUser),
+        controller.importGraphify('test-project', dto),
       ).rejects.toThrow();
     });
   });

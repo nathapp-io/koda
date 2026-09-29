@@ -363,4 +363,11 @@ describe('ProjectsService', () => {
       });
     });
   });
+
+  describe('#145 dead code', () => {
+    it('has no unscoped findAll (findAllForPrincipal is the only list method)', () => {
+      expect('findAll' in ProjectsService.prototype).toBe(false);
+      expect(typeof ProjectsService.prototype.findAllForPrincipal).toBe('function');
+    });
+  });
 });

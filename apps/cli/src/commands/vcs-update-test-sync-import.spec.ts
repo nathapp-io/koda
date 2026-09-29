@@ -522,10 +522,10 @@ describe('vcsCommand - update, test, sync, import', () => {
       const vcsCmd = program.commands.find((cmd) => cmd.name() === 'vcs');
       const importCmd = vcsCmd?.commands.find((cmd) => cmd.name() === 'import');
 
-      await importCmd?.parseAsync(['node', 'test', 'not-a-number']);
-
-      expect(exitSpy).toHaveBeenCalledWith(1);
-      expect(errorSpy).toHaveBeenCalled();
+      await expect(
+        importCmd?.parseAsync(['node', 'test', 'not-a-number']),
+      ).rejects.toMatchObject({ code: 'commander.invalidArgument' });
+      expect(vcsControllerSyncIssue).not.toHaveBeenCalled();
     });
 
     it('resolves project slug from --project flag', async () => {

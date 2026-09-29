@@ -355,6 +355,7 @@
   "agents": {
     "title": "Agents",
     "createAgent": "Create Agent",
+    "empty": "No agents yet.",
     "columns": {
       "name": "Name",
       "slug": "Slug",
@@ -369,6 +370,8 @@
       "OFFLINE": "OFFLINE"
     },
     "toast": {
+      "created": "Agent created successfully",
+      "createFailed": "Failed to create agent",
       "statusUpdated": "Agent status updated to {status}",
       "statusFailed": "Failed to update agent status",
       "rolesUpdated": "Agent roles updated successfully",

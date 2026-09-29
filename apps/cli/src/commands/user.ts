@@ -4,6 +4,7 @@ import { table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
+import { parsePositiveInt } from '../utils/parse-positive-int';
 
 interface UserRow {
   id: string;
@@ -32,14 +33,14 @@ export function userCommand(program: Command): void {
     .command('list')
     .description('List users')
     .option('--email <text>', 'Filter by email substring (case-insensitive)')
-    .option('--page <n>', 'Page number', '1')
-    .option('--size <n>', 'Page size (1-100)', '20')
+    .option('--page <n>', 'Page number', parsePositiveInt, 1)
+    .option('--size <n>', 'Page size (1-100)', parsePositiveInt, 20)
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
         await withContext({}, { requireProject: false });
         const response = await adminUsersControllerList({
-          query: { email: options.email, current: parseInt(options.page, 10), size: parseInt(options.size, 10) },
+          query: { email: options.email, current: options.page, size: options.size },
         });
         const page = unwrap<UserPage>(response);
         if (options.json) {

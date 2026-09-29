@@ -90,19 +90,21 @@ export class PrismaCommentRepository extends AbstractPrismaRepository<CommentDom
   }
 
   /**
-   * US-002: resolve a comment to its owning ticket and project in a single
-   * query, so slug-less mutations can gate by project membership without
-   * exposing a route's `slug`. Returns null when the comment does not exist.
+   * US-002 / #145: the comment itself plus its owning ticket and project, in
+   * one query. Slug-less mutation paths gate by membership on the project and
+   * run the CASL check on the comment without a second fetch. Returns null
+   * when the comment does not exist.
    */
   async findOwningProjectAndTicket(
     commentId: string,
   ): Promise<{
+    comment: CommentDomain;
     project: { id: string; slug: string; key: string; deletedAt: Date | null };
     ticket: { id: string; deletedAt: Date | null };
   } | null> {
     const row = await this.prisma.client.comment.findUnique({
       where: { id: commentId },
-      select: {
+      include: {
         ticket: {
           select: {
             id: true,
@@ -115,14 +117,16 @@ export class PrismaCommentRepository extends AbstractPrismaRepository<CommentDom
       },
     });
     if (!row) return null;
+    const { ticket, ...comment } = row;
     return {
+      comment: this.toDomain(comment),
       project: {
-        id: row.ticket.project.id,
-        slug: row.ticket.project.slug,
-        key: row.ticket.project.key,
-        deletedAt: row.ticket.project.deletedAt,
+        id: ticket.project.id,
+        slug: ticket.project.slug,
+        key: ticket.project.key,
+        deletedAt: ticket.project.deletedAt,
       },
-      ticket: { id: row.ticket.id, deletedAt: row.ticket.deletedAt },
+      ticket: { id: ticket.id, deletedAt: ticket.deletedAt },
     };
   }
 }

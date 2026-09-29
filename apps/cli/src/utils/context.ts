@@ -42,8 +42,8 @@ export async function withContext(
   }
 
   if (!ctx.apiKey || !ctx.apiUrl) {
-    handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-    throw new Error('API key or URL not configured. Run: koda login --api-key <key>');
+    handleApiError(new Error('API key or URL not configured. Run: koda login --api-key -'), { configError: true });
+    throw new Error('API key or URL not configured. Run: koda login --api-key -');
   }
 
   configureApiClient(ctx.apiUrl.replace(/\/api\/?$/, ''), ctx.apiKey);

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { extractApiError } from '~/composables/useApi'
+import { apiPath } from '~/lib/api-path'
 import { useTicketBoardPages, type TicketPage } from '~/composables/useTicketBoardPages'
 import { createDebouncer } from '~/lib/debounce'
 
@@ -34,12 +35,12 @@ const BOARD_PAGE_SIZE = 100
 
 const { data: ticketsData, pending, error, refresh } = useAsyncData(
   `tickets-${slug}`,
-  () => $api.get<TicketPage<Ticket>>(`/projects/${slug}/tickets`, { query: { size: BOARD_PAGE_SIZE } }),
+  () => $api.get<TicketPage<Ticket>>(apiPath`/projects/${slug}/tickets`, { query: { size: BOARD_PAGE_SIZE } }),
 )
 
 const { tickets, hasNext, loadingMore, loadMoreTickets, reloadLoaded } = useTicketBoardPages(
   ticketsData,
-  current => $api.get<TicketPage<Ticket>>(`/projects/${slug}/tickets`, {
+  current => $api.get<TicketPage<Ticket>>(apiPath`/projects/${slug}/tickets`, {
     query: { current, size: BOARD_PAGE_SIZE },
   }),
   err => toast.error(extractApiError(err)),

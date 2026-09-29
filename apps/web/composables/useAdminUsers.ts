@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { apiPath } from '~/lib/api-path'
 
 export type GlobalRole = 'MEMBER' | 'ADMIN'
 
@@ -65,11 +66,11 @@ export function useAdminUsers() {
   }
 
   async function setDisabled(id: string, disabled: boolean): Promise<void> {
-    replace(await $api.patch<AdminUser>(`/admin/users/${encodeURIComponent(id)}`, { disabled }))
+    replace(await $api.patch<AdminUser>(apiPath`/admin/users/${id}`, { disabled }))
   }
 
   async function setRole(id: string, role: GlobalRole): Promise<void> {
-    replace(await $api.patch<AdminUser>(`/admin/users/${encodeURIComponent(id)}`, { role }))
+    replace(await $api.patch<AdminUser>(apiPath`/admin/users/${id}`, { role }))
   }
 
   return { users, total, page, hasNext, pending, load, createUser, setDisabled, setRole }

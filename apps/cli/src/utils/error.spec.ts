@@ -288,7 +288,7 @@ describe('error', () => {
       }
 
       const output = errorOutput.join('\n');
-      expect(output).toContain('koda config set apiKey');
+      expect(output).toContain('koda config set --api-key');
     });
 
     it('includes auth hint for 403 errors', () => {
@@ -307,7 +307,7 @@ describe('error', () => {
       }
 
       const output = errorOutput.join('\n');
-      expect(output).toContain('koda config set apiKey');
+      expect(output).toContain('koda config set --api-key');
     });
   });
 
@@ -350,7 +350,7 @@ describe('error', () => {
 
       expect(errorOutput).toHaveLength(1);
       const parsed = JSON.parse(errorOutput[0]);
-      expect(parsed.error.hint).toBe('Check your API key: koda config set apiKey <key>');
+      expect(parsed.error.hint).toBe('Check your API key: koda config set --api-key <key>');
       expect(exitCode).toBe(2);
     });
 

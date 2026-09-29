@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { apiPath } from '~/lib/api-path'
+
 definePageMeta({ layout: 'default' })
 
 interface Agent {
@@ -18,7 +20,7 @@ const toast = useAppToast()
 
 const { data: agentsData, pending, error, refresh } = useAsyncData(
   `agents-${slug}`,
-  () => $api.get(`/projects/${slug}/agents`) as Promise<Agent[]>,
+  () => $api.get(apiPath`/projects/${slug}/agents`) as Promise<Agent[]>,
 )
 
 const agents = computed(() => agentsData.value ?? [])
@@ -31,7 +33,7 @@ function statusClass(status: string) {
 
 async function changeStatus(agent: Agent, newStatus: 'ACTIVE' | 'PAUSED' | 'OFFLINE') {
   try {
-    await $api.patch(`/projects/${slug}/agents/${agent.slug}`, { status: newStatus })
+    await $api.patch(apiPath`/projects/${slug}/agents/${agent.slug}`, { status: newStatus })
     toast.success(t('agents.toast.statusUpdated', { status: newStatus }))
     refresh()
   } catch {

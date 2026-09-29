@@ -75,7 +75,6 @@ describe('ProjectsController', () => {
   beforeEach(async () => {
     projectsService = {
       create: jest.fn(),
-      findAll: jest.fn(),
       findAllForPrincipal: jest.fn(),
       findBySlug: jest.fn(),
       update: jest.fn(),
@@ -133,14 +132,6 @@ describe('ProjectsController', () => {
 
       expect(projectsService.findAllForPrincipal).toHaveBeenCalledWith(memberPrincipal);
       expect((result as any).data).toHaveLength(1);
-    });
-
-    it('does not use the unscoped list', async () => {
-      projectsService.findAllForPrincipal.mockResolvedValue([mockProject] as any);
-
-      await controller.findAll(memberPrincipal);
-
-      expect(projectsService.findAll).not.toHaveBeenCalled();
     });
   });
 

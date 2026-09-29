@@ -14,6 +14,8 @@ on:
       - "tsconfig*.json"
       - ".github/workflows/**"
       - "openapi.json"
+      - "turbo.json"
+      - ".nax/**"
   # No workflow-level path filter on PRs: every job is a required check on main,
   # and a PR whose workflow never ran could not be merged. The `changes` job
   # applies the same filter instead; the other jobs skip (= pass) without code changes.
@@ -49,7 +51,7 @@ jobs:
             echo "code=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          CODE_PATHS='^(apps/|packages/|prisma/|scripts/|\.github/workflows/)|^(bun\.lock|package\.json|openapi\.json)$|^tsconfig[^/]*\.json$'
+          CODE_PATHS='^(apps/|packages/|prisma/|scripts/|\.github/workflows/|\.nax/)|^(bun\.lock|package\.json|openapi\.json|turbo\.json)$|^tsconfig[^/]*\.json$'
           changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
           printf 'Changed files:\n%s\n' "$changed"
           if printf '%s\n' "$changed" | grep -qE "$CODE_PATHS"; then

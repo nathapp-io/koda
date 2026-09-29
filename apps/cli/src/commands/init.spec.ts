@@ -171,7 +171,7 @@ describe('initCommand', () => {
 
       expect(exitSpy).toHaveBeenCalledWith(2);
       const allOutput = errorSpy.mock.calls.flat().join('\n');
-      expect(allOutput).toContain('Not logged in. Run: koda login --api-key <key>');
+      expect(allOutput).toContain('Not logged in. Run: koda login --api-key -');
     });
 
     it('exits with code 2 when no project is provided and no auth', async () => {

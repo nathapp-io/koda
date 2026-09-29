@@ -51,6 +51,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { AGENT_ROLES } from '~/lib/agent-roles'
+import { apiPath } from '~/lib/api-path'
 
 const props = defineProps<{
   open: boolean
@@ -72,7 +73,7 @@ const availableRoles = AGENT_ROLES
 
 const formSchema = toTypedSchema(
   z.object({
-    roles: z.array(z.string()).min(1, t('agents.validation.rolesRequired')),
+    roles: z.array(z.string()).min(1, t('agents.form.validation.rolesRequired')),
   })
 )
 
@@ -90,7 +91,7 @@ const { $api } = useApi()
 
 const onSubmit = handleSubmit(async (formValues) => {
   try {
-    await $api.patch(`/agents/${props.agent.slug}/update-roles`, { roles: formValues.roles })
+    await $api.patch(apiPath`/agents/${props.agent.slug}/update-roles`, { roles: formValues.roles })
     toast.success(t('agents.toast.rolesUpdated'))
     emit('updated')
     emit('update:open', false)

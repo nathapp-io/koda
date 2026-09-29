@@ -7,7 +7,7 @@ import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { CommentResponseDto } from './dto/comment-response.dto';
 import { PrismaCommentRepository } from './prisma-comment.repository';
-import { COMMENT_REPOSITORY } from './domain/comment.domain';
+import { COMMENT_REPOSITORY, CommentDomain } from './domain/comment.domain';
 import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -56,7 +56,7 @@ export class CommentsService {
   private async assertCommentProjectMembership(
     commentId: string,
     principal: KodaPrincipal,
-  ): Promise<{ projectId: string; role: string | null }> {
+  ): Promise<{ projectId: string; role: string | null; comment: CommentDomain }> {
     const ownership = await this.commentRepo.findOwningProjectAndTicket(commentId);
 
     if (!ownership || ownership.ticket.deletedAt || ownership.project.deletedAt) {
@@ -67,7 +67,7 @@ export class CommentsService {
     // A non-member's 403 becomes 404 so the comment's existence stays hidden.
     try {
       const role = await this.access.resolveMembership(ownership.project.id, principal);
-      return { projectId: ownership.project.id, role };
+      return { projectId: ownership.project.id, role, comment: ownership.comment };
     } catch (err) {
       if (err instanceof ForbiddenAppException) throw new NotFoundAppException({}, 'comments');
       throw err;
@@ -161,14 +161,8 @@ export class CommentsService {
     // the CASL check. A non-member user gets 404 (their membership lookup is
     // translated from ForbiddenAppException); agents resolve to role null and
     // proceed to the CASL check unchanged.
-    const { role } = await this.assertCommentProjectMembership(commentId, principal);
-
-    // Find the comment via repository
-    const comment = await this.commentRepo.findById(commentId);
-
-    if (!comment) {
-      throw new NotFoundAppException({}, 'comments');
-    }
+    // #145: the membership gate's query already returned the comment.
+    const { role, comment } = await this.assertCommentProjectMembership(commentId, principal);
 
     // #144: the ability is built from the principal enriched with the project
     // role, so a project ADMIN gains unconditional DELETE and everyone else is
@@ -193,14 +187,8 @@ export class CommentsService {
     // US-002: same membership gate as `update`. Global ADMINs and agents
     // proceed; non-member users get 404 (not 403) so the comment's existence
     // stays hidden.
-    const { role } = await this.assertCommentProjectMembership(commentId, principal);
-
-    // Find the comment via repository
-    const comment = await this.commentRepo.findById(commentId);
-
-    if (!comment) {
-      throw new NotFoundAppException({}, 'comments');
-    }
+    // #145: the membership gate's query already returned the comment.
+    const { role, comment } = await this.assertCommentProjectMembership(commentId, principal);
 
     // #144: a project ADMIN may delete anyone's comment in the project; other
     // roles remain author-only.

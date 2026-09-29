@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ApiError, extractApiError } from '~/composables/useApi'
+import { apiPath } from '~/lib/api-path'
 
 definePageMeta({ layout: 'default' })
 
@@ -35,7 +36,7 @@ async function handleSearch() {
   searchResult.value = null
   try {
     searchResult.value = await $api.post<KbSearchResult>(
-      `/projects/${slug}/kb/search`,
+      apiPath`/projects/${slug}/kb/search`,
       { query: searchQuery.value },
     )
   }
@@ -59,7 +60,7 @@ interface KbDocument {
 
 const { data: docsData, pending, error, refresh } = useAsyncData(
   `kb-docs-${slug}`,
-  () => $api.get<{ items: KbDocument[] }>(`/projects/${slug}/kb/documents`),
+  () => $api.get<{ items: KbDocument[] }>(apiPath`/projects/${slug}/kb/documents`),
 )
 
 const docs = computed(() => docsData.value?.items ?? [])
@@ -82,7 +83,7 @@ const optimizing = ref(false)
 async function optimizeKb() {
   optimizing.value = true
   try {
-    await $api.post(`/projects/${slug}/kb/optimize`)
+    await $api.post(apiPath`/projects/${slug}/kb/optimize`)
     toast.success(t('kb.toast.optimizeSuccess'))
   } catch (err: unknown) {
     if (err instanceof ApiError && err.code === 403) {
@@ -98,7 +99,7 @@ async function optimizeKb() {
 async function deleteDocument(sourceId: string) {
   if (!window.confirm(t('kb.documents.deleteConfirm'))) return
   try {
-    await $api.delete(`/projects/${slug}/kb/documents/${sourceId}`)
+    await $api.delete(apiPath`/projects/${slug}/kb/documents/${sourceId}`)
     toast.success(t('kb.toast.deleted'))
     await refresh()
   } catch (err: unknown) {

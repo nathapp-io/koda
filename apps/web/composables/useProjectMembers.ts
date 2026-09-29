@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { apiPath } from '~/lib/api-path'
 
 export const ASSIGNABLE_MEMBER_ROLES = ['ADMIN', 'DEVELOPER', 'VIEWER'] as const
 export type AssignableMemberRole = (typeof ASSIGNABLE_MEMBER_ROLES)[number]
@@ -24,7 +25,7 @@ interface MemberPage {
 
 export function useProjectMembers(slug: string) {
   const { $api } = useApi()
-  const base = `/projects/${encodeURIComponent(slug)}/members`
+  const base = apiPath`/projects/${slug}/members`
   const members = ref<ProjectMember[]>([])
   const total = ref(0)
   const current = ref(1)
@@ -69,12 +70,12 @@ export function useProjectMembers(slug: string) {
   }
 
   async function changeRole(userId: string, role: AssignableMemberRole): Promise<void> {
-    const updated = await $api.patch<ProjectMember>(`${base}/${encodeURIComponent(userId)}`, { role })
+    const updated = await $api.patch<ProjectMember>(base + apiPath`/${userId}`, { role })
     members.value = members.value.map((m) => (m.userId === userId ? updated : m))
   }
 
   async function remove(userId: string): Promise<void> {
-    await $api.delete(`${base}/${encodeURIComponent(userId)}`)
+    await $api.delete(base + apiPath`/${userId}`)
     members.value = members.value.filter((m) => m.userId !== userId)
     total.value = Math.max(0, total.value - 1)
   }
