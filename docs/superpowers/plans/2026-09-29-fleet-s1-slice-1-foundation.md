@@ -39,7 +39,7 @@ Plan-level rules:
 | D1 | String columns + `common/enums.ts` constants instead of Prisma enums. | Repo rule; spec §2 drew Prisma enums. |
 | D2 | Slice 1 creates only `Runner`, `RunnerEnrollment`, `FleetRepo`, `FleetActivity`. `FleetJob`, `FleetJobEvent`, `FleetCommand`, `FleetJobArtifact` and the partial unique index come in slice 2. | YAGNI (spec R1: tables in the phase that uses them). Also: tests build the DB with `prisma db push` (`test/global-setup.ts:32`), so slice 2 must add the partial index to global setup as well; noted there. |
 | D3 | The API imports `@nathapp/fleet-protocol` with `import type` only, enforced by a source-guard spec. The supported protocol versions are an API-local constant pinned by a spec against the package constant. | The production image installs only the API's runtime deps and never copies `packages/` (`apps/api/Dockerfile` final stage), so a runtime import would break the image. Type imports are erased by `tsc`. |
-| D4 | Runner isolation lives in `CombinedAuthGuard`, driven by `@RunnerRoute()` metadata, and fails closed (throws, never falls back to agent/JWT). Defence in depth: the CASL factory grants a runner nothing, and `actorForeignKeys` throws for a runner. | About 20 call sites treat "not a user" as an agent (auth map, 09-30); a runner must never reach them. |
+| D4 | Runner isolation lives in `CombinedAuthGuard`, driven by `@RunnerRoute()` metadata, and fails closed (throws, never falls back to agent/JWT). Defence in depth: the CASL factory grants a runner nothing, and `actorForeignKeys` throws for a runner. | About 20 call sites treat "not a user" as an agent (auth map, 09-29); a runner must never reach them. |
 | D5 | A disabled runner still authenticates (drain: it can finish jobs and receive cancels in slice 2); placement ignores it. Deleting a runner revokes its key. | Mirrors PAUSED agents. Delete is the kill switch. |
 | D6 | Add `GET /fleet/runner/me` (runner identity). | Gives the daemon an auth check and lets slice 1 test the runner principal end to end before sync exists. |
 | D7 | Enroll body also carries `bootId` and `labels`; stored labels = union of the enrollment preset and the runner's labels. | Spec §2 `Runner.bootId` is required; spec §11 puts labels in the runner config. |
@@ -65,7 +65,7 @@ Plan-level rules:
 | `apps/api/src/fleet/common/protocol.ts` (new) | API-local supported versions + type re-exports | 1 |
 | `apps/api/src/fleet/common/protocol.spec.ts` (new) | Pins the local versions to the package; source guard for type-only imports | 1 |
 | `apps/api/src/common/enums.ts` | `FleetProvider`, `FleetActorType` | 2 |
-| `apps/api/prisma/schema.prisma`, `apps/api/prisma/migrations/20260930090000_fleet_foundation/migration.sql` (new) | Four fleet tables | 2 |
+| `apps/api/prisma/schema.prisma`, `apps/api/prisma/migrations/20260929120000_fleet_foundation/migration.sql` (new) | Four fleet tables | 2 |
 | `apps/api/src/config/fleet.config.ts` (new), `env.validation.ts`, `config-bridge.module.ts`, `app.module.ts` | Fleet config | 3 |
 | `apps/api/src/auth/principal/koda-principal.types.ts`, `actor-foreign-keys.ts` | `RunnerPrincipal` arm | 4 |
 | `apps/api/src/auth/guards/runner-route.decorator.ts` (new) | `@RunnerRoute()` metadata | 4 |
@@ -302,7 +302,7 @@ git commit -m "feat(fleet): fleet-protocol package, type-only in the API"
 **Files:**
 - Modify: `apps/api/src/common/enums.ts`
 - Modify: `apps/api/prisma/schema.prisma` (new models after `MemoryQueryMetric`; `fleetRepos` on `Project`)
-- Create: `apps/api/prisma/migrations/20260930090000_fleet_foundation/migration.sql` (generated)
+- Create: `apps/api/prisma/migrations/20260929120000_fleet_foundation/migration.sql` (generated)
 - Test: `apps/api/test/integration/fleet/fleet-schema.integration.spec.ts`
 
 **Interfaces:**
@@ -407,9 +407,9 @@ model FleetActivity {
 ```bash
 cd apps/api
 OLD_SCHEMA="$(mktemp)"; git show a36adcc6:apps/api/prisma/schema.prisma > "$OLD_SCHEMA"
-mkdir -p prisma/migrations/20260930090000_fleet_foundation
+mkdir -p prisma/migrations/20260929120000_fleet_foundation
 bunx prisma migrate diff --from-schema-datamodel "$OLD_SCHEMA" --to-schema-datamodel prisma/schema.prisma --script \
-  > prisma/migrations/20260930090000_fleet_foundation/migration.sql
+  > prisma/migrations/20260929120000_fleet_foundation/migration.sql
 bunx prisma validate && bunx prisma generate
 ```
 Open the SQL and check it contains exactly: `CREATE TABLE "Runner"`, `"RunnerEnrollment"`, `"FleetRepo"`, `"FleetActivity"`; `"labels" TEXT[]`; `"capabilities" JSONB NOT NULL`; `"githubInstallationId" BIGINT`; unique indexes `Runner_name_key`, `Runner_apiKeyHash_key`, `RunnerEnrollment_tokenHash_key`, `FleetRepo_provider_owner_name_key`; the `FleetRepo_projectId_fkey` foreign key with `ON DELETE CASCADE`; nothing touching existing tables. Prepend one comment line: `-- Fleet S1 slice 1: runner, enrollment, fleet repo and activity tables.`
@@ -492,7 +492,7 @@ Expected: 3 passed (global setup pushes the new schema). If it fails with "table
 - [ ] **Step 6: Commit**
 
 ```bash
-git add apps/api/src/common/enums.ts apps/api/prisma/schema.prisma apps/api/prisma/migrations/20260930090000_fleet_foundation apps/api/test/integration/fleet/fleet-schema.integration.spec.ts
+git add apps/api/src/common/enums.ts apps/api/prisma/schema.prisma apps/api/prisma/migrations/20260929120000_fleet_foundation apps/api/test/integration/fleet/fleet-schema.integration.spec.ts
 git commit -m "feat(fleet): runner, enrollment, fleet repo and activity tables"
 ```
 
@@ -3574,7 +3574,7 @@ git commit -m "docs(fleet): api context for fleet runner isolation and protocol 
 git push -u origin feat/fleet-s1-slice1-foundation
 gh pr create --base main --title "feat(fleet): S1 slice 1 — protocol, runner identity, repo registry" --body-file <(cat <<'EOF'
 ## Summary
-Fleet S1 slice 1 (spec `docs/superpowers/specs/2026-09-29-fleet-s1-dispatch-design.md`, plan `docs/superpowers/plans/2026-09-30-fleet-s1-slice-1-foundation.md`).
+Fleet S1 slice 1 (spec `docs/superpowers/specs/2026-09-29-fleet-s1-dispatch-design.md`, plan `docs/superpowers/plans/2026-09-29-fleet-s1-slice-1-foundation.md`).
 
 - `packages/fleet-protocol`: protocol version + wire types; the API uses it type-only.
 - Tables: Runner, RunnerEnrollment, FleetRepo, FleetActivity.
