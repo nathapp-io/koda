@@ -33,6 +33,16 @@ describe('FleetHttpClient', () => {
     expect(Date.now() - started).toBeLessThan(2500);
   });
 
+  it('maps a 200 whose body is not JSON to provider_error, not provider_unreachable (#160)', async () => {
+    forge.routes.set('GET /html', () => ({ status: 200, rawBody: '<html>proxy error</html>', headers: { 'content-type': 'text/html' } }));
+    await expect(client.request('GET', `${forge.url}/html`, {})).rejects.toMatchObject({ reason: 'provider_error' });
+  });
+
+  it('returns an undefined body for an empty 204', async () => {
+    forge.routes.set('GET /empty', () => ({ status: 204 }));
+    await expect(client.request('GET', `${forge.url}/empty`, {})).resolves.toEqual({ status: 204, body: undefined });
+  });
+
   it('maps a mid-body stall to provider_unreachable (the timeout also bounds the body read)', async () => {
     forge.routes.set('GET /stall-body', () => ({ status: 200, body: { a: 1 }, stallBodyMs: 3000 }));
     const started = Date.now();
