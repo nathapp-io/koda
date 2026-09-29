@@ -1,12 +1,13 @@
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { encryptToken } from '../../common/utils/encryption.util';
+import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FleetReposService } from './fleet-repos.service';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 
 const KEY = 'a'.repeat(64);
 
 describe('FleetReposService', () => {
-  const repo = { findProject: jest.fn(), create: jest.fn(), findById: jest.fn(), findPage: jest.fn(), delete: jest.fn() };
+  const repo = { findProject: jest.fn(), create: jest.fn(), findById: jest.fn(), findPage: jest.fn(), delete: jest.fn(), lockForDelete: jest.fn(), countUnfinishedJobs: jest.fn() };
   const vcsRepo = { findVcsConnectionByProjectId: jest.fn() };
   const github = { verifyRepo: jest.fn() };
   const gitlab = { verifyRepo: jest.fn() };
@@ -71,5 +72,21 @@ describe('FleetReposService', () => {
     vcsRepo.findVcsConnectionByProjectId.mockResolvedValue({ provider: 'gitlab', repoOwner: 'group', repoName: 'app', encryptedToken: 'not-a-valid-ciphertext' });
     await expect(make().create('u1', { projectSlug: 'p', provider: 'gitlab', owner: 'group', name: 'app' })).rejects.toMatchObject({ reason: 'gitlab_token_invalid' });
     expect(gitlab.verifyRepo).not.toHaveBeenCalled();
+  });
+
+  it('deletes and records', async () => {
+    repo.findById.mockResolvedValue(created());
+    repo.countUnfinishedJobs.mockResolvedValue(0);
+    await make().remove('u9', 'fr1');
+    expect(repo.lockForDelete).toHaveBeenCalledWith('fr1');
+    expect(repo.delete).toHaveBeenCalledWith('fr1');
+    expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'repo.deleted', entityId: 'fr1' }));
+  });
+
+  it('409s a repo with unfinished jobs', async () => {
+    repo.findById.mockResolvedValue(created());
+    repo.countUnfinishedJobs.mockResolvedValue(1);
+    await expect(make().remove('u9', 'fr1')).rejects.toBeInstanceOf(ConflictAppException);
+    expect(repo.delete).not.toHaveBeenCalled();
   });
 });

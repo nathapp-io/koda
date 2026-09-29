@@ -22,4 +22,8 @@ export interface IFleetRepoRepository {
   findById(id: string): Promise<FleetRepoRecord | null>;
   findPage(filters: { projectId?: string }, page: IPageOption): Promise<IPageResult<FleetRepoRecord>>;
   delete(id: string): Promise<void>;
+  /** Number of the repo's jobs in an active state (plan D15). */
+  countUnfinishedJobs(repoId: string): Promise<number>;
+  /** SELECT ... FOR UPDATE on the repo row, so the delete decision sees a stable row (review m6). */
+  lockForDelete(id: string): Promise<void>;
 }

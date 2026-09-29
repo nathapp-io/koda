@@ -22,4 +22,5 @@ export type KodaSubject =
   | 'CodeIntel'
   | 'AstIndex'
   | 'ProjectContext'
+  | 'FleetJob'
   | 'all';

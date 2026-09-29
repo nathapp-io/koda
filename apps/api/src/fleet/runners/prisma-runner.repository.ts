@@ -4,6 +4,7 @@ import { Paginate, PrismaService } from '@nathapp/nestjs-prisma';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
+import { ACTIVE_STATES } from '../jobs/job-state';
 import type { EnrollmentRecord, IRunnerRepository, NewRunner, RunnerPatch, RunnerRecord } from './domain/runner.domain';
 
 const RUNNER_SELECT = {
@@ -44,6 +45,13 @@ export class PrismaRunnerRepository implements IRunnerRepository {
     return this.db.runnerEnrollment.findUnique({ where: { tokenHash }, select: { id: true, labels: true, createdById: true } });
   }
 
+  async deleteSpentEnrollmentsBefore(before: Date): Promise<number> {
+    const { count } = await this.db.runnerEnrollment.deleteMany({
+      where: { OR: [{ usedAt: { lt: before } }, { usedAt: null, expiresAt: { lt: before } }] },
+    });
+    return count;
+  }
+
   async linkEnrollment(enrollmentId: string, runnerId: string): Promise<void> {
     await this.db.runnerEnrollment.update({ where: { id: enrollmentId }, data: { runnerId } });
   }
@@ -77,5 +85,13 @@ export class PrismaRunnerRepository implements IRunnerRepository {
 
   async deleteRunner(id: string): Promise<void> {
     await this.db.runner.delete({ where: { id } });
+  }
+
+  countUnfinishedJobs(runnerId: string): Promise<number> {
+    return this.db.fleetJob.count({ where: { OR: [{ runnerId }, { pinnedRunnerId: runnerId }], state: { in: [...ACTIVE_STATES] } } });
+  }
+
+  async lockForDelete(id: string): Promise<void> {
+    await this.db.$queryRaw`SELECT "id" FROM "Runner" WHERE "id" = ${id} FOR UPDATE`;
   }
 }

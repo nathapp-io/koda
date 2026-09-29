@@ -219,3 +219,8 @@ Rules:
 - Runner capabilities are untrusted input: always pass them through `parseCapabilities`.
 - Forge HTTP goes through `FleetHttpClient` (timeout, no redirects). Minted git tokens are never stored or logged.
 - `FleetActivityService.record` runs inside the mutating `txManager.run`; payloads must not carry secrets.
+- Jobs (`src/fleet/jobs/`): every state change goes through `JobTransitionsService` (table in `job-state.ts`, spec §5.4). Never write `FleetJob.state` directly.
+- Assignment is `casAssign` only (spec §6.1); placement locks runner rows in id order and takes job rows with SKIP LOCKED during a fill.
+- Server-owned terminal transitions of a held job bump `leaseEpoch` and withdraw pending commands (plan D4). Requeue bumps it too.
+- Publish `fleet_job` live events and wake runners only after the transaction commits.
+- Tests build the schema with `prisma db push`; partial unique indexes live in `test/helpers/partial-indexes.ts` and must also be shipped verbatim by a migration.

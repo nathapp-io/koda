@@ -1,0 +1,102 @@
+/**
+ * Fleet S1 slice 2a — cancel and requeue over HTTP (PG).
+ * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-job-cancel-requeue.integration.spec.ts
+ */
+import request from 'supertest';
+import { NathApplication } from '@nathapp/nestjs-app';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { Prisma, PrismaClient } from '@prisma/client';
+import { resetDb } from '../../helpers/reset-db';
+import { bootHttpApp, data } from '../../helpers/http-app';
+import { FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+
+const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+
+describeIntegration('fleet job cancel and requeue (PG)', () => {
+  let app: NathApplication;
+  let server: ReturnType<NathApplication['getHttpServer']>;
+  let prisma: PrismaClient;
+  let world: FleetHttpWorld;
+  let projectId: string;
+  let repoId: string;
+  let ids: FleetHttpWorld['ids'];
+  const auth = (who: keyof FleetHttpWorld['tokens']) => ({ Authorization: `Bearer ${world.tokens[who]}` });
+
+  beforeAll(async () => {
+    await resetDb();
+    app = await bootHttpApp({ registrationEnabled: false });
+    server = app.getHttpServer();
+    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    world = await seedFleetHttpWorld(server, prisma);
+    ({ projectId, repoId, ids } = world);
+  });
+  afterAll(async () => {
+    await app.close();
+  });
+
+  const insertJob = async (feature: string, over: Partial<Prisma.FleetJobUncheckedCreateInput> = {}) =>
+    prisma.fleetJob.create({
+      data: {
+        projectId, repoId, ref: 'main', command: 'RUN', feature, profiles: [], maxCostUsd: 5, selectorLabels: [],
+        requestedById: ids.dev, ...over,
+      },
+    });
+  const reload = (id: string) => prisma.fleetJob.findUniqueOrThrow({ where: { id } });
+  const post = (who: keyof FleetHttpWorld['tokens'], id: string, action: 'cancel' | 'requeue') =>
+    request(server).post(`/api/projects/web/fleet/jobs/${id}/${action}`).set(auth(who));
+
+  it('cancels a QUEUED job on the server', async () => {
+    const job = await insertJob('c-queued');
+    await post('dev', job.id, 'cancel').expect(200);
+    expect(await reload(job.id)).toEqual(expect.objectContaining({ state: 'CANCELLED', leaseEpoch: 0 }));
+  });
+
+  it('cancels an ASSIGNED job whose assign was never acked: withdraws the ASSIGN and bumps the epoch', async () => {
+    const runner = await insertRunner(prisma);
+    const job = await insertJob('c-unacked', { state: 'ASSIGNED', runnerId: runner.id, leaseEpoch: 1 });
+    const assign = await prisma.fleetCommand.create({ data: { runnerId: runner.id, jobId: job.id, type: 'ASSIGN', leaseEpoch: 1, payload: {} } });
+    await post('dev', job.id, 'cancel').expect(200);
+    expect(await reload(job.id)).toEqual(expect.objectContaining({ state: 'CANCELLED', leaseEpoch: 2 }));
+    expect(await prisma.fleetCommand.findUniqueOrThrow({ where: { id: assign.id } })).toEqual(expect.objectContaining({ ackResult: 'withdrawn' }));
+  });
+
+  it('asks the runner to cancel a RUNNING job exactly once', async () => {
+    const runner = await insertRunner(prisma);
+    const job = await insertJob('c-running', { state: 'RUNNING', runnerId: runner.id, leaseEpoch: 1 });
+    await post('dev', job.id, 'cancel').expect(200);
+    await post('dev', job.id, 'cancel').expect(200);
+    expect((await reload(job.id)).cancelRequestedAt).not.toBeNull();
+    expect(await prisma.fleetCommand.count({ where: { jobId: job.id, type: 'CANCEL', ackedAt: null } })).toBe(1);
+  });
+
+  it('refuses to cancel a finished job with 409, lets a requester cancel, and forbids other viewers', async () => {
+    const done = await insertJob('c-done', { state: 'COMPLETED' });
+    await post('dev', done.id, 'cancel').expect(409);
+    const mine = await insertJob('c-mine', { requestedById: ids.viewer });
+    await post('viewer', mine.id, 'cancel').expect(200);
+    const theirs = await insertJob('c-theirs');
+    await post('viewer', theirs.id, 'cancel').expect(403);
+  });
+
+  it('requeues a CRASHED job: clears the run, bumps the epoch and places it again', async () => {
+    const runner = await insertRunner(prisma);
+    const job = await insertJob('rq', {
+      state: 'CRASHED', runnerId: runner.id, leaseEpoch: 3, naxRunId: 'run-1', costSpentUsd: 1.5, stateReason: 'runner silent', finishedAt: new Date(),
+    });
+    const res = data<{ job: { state: string; leaseEpoch: number } }>(await post('dev', job.id, 'requeue').expect(200));
+    // 3 -> 4 on requeue, 4 -> 5 on the compare-and-set assignment.
+    expect(res.job).toEqual(expect.objectContaining({ state: 'ASSIGNED', leaseEpoch: 5 }));
+    const after = await reload(job.id);
+    expect(after).toEqual(expect.objectContaining({ naxRunId: null, finishedAt: null, ackedRunnerSeq: 0 }));
+    expect(after.costSpentUsd.toString()).toBe('0');
+  });
+
+  it('refuses requeue of a COMPLETED job, of an active duplicate, and by a viewer', async () => {
+    await post('dev', (await insertJob('rq-done', { state: 'COMPLETED' })).id, 'requeue').expect(409);
+    const failed = await insertJob('rq-dup', { state: 'FAILED' });
+    await insertJob('rq-dup'); // QUEUED duplicate
+    const res = await post('dev', failed.id, 'requeue').expect(409);
+    expect(JSON.stringify(res.body)).toMatch(/active job/i);
+    await post('viewer', (await insertJob('rq-viewer', { state: 'FAILED' })).id, 'requeue').expect(403);
+  });
+});

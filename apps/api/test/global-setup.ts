@@ -14,7 +14,9 @@
 import { config } from 'dotenv';
 import { resolve } from 'path';
 import { execSync } from 'child_process';
+import { PrismaClient } from '@prisma/client';
 import { assertSafeTestDatabaseUrl } from './helpers/test-database-url';
+import { PARTIAL_UNIQUE_INDEXES } from './helpers/partial-indexes';
 
 export default async function globalSetup(): Promise<void> {
   // Only `bun run test:integration` (and nax's test:scoped / acceptance) set
@@ -33,4 +35,12 @@ export default async function globalSetup(): Promise<void> {
     stdio: 'inherit',
     env: { ...process.env, DATABASE_URL: databaseUrl },
   });
+
+  // `db push` cannot express partial indexes; replay the ones migrations ship (plan D2 of slice 1).
+  const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+  try {
+    for (const statement of PARTIAL_UNIQUE_INDEXES) await prisma.$executeRawUnsafe(statement);
+  } finally {
+    await prisma.$disconnect();
+  }
 }

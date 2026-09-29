@@ -9,6 +9,7 @@ export class FleetActivityDto {
   @ApiProperty() declare entityType: string;
   @ApiProperty() declare entityId: string;
   @ApiPropertyOptional({ nullable: true, type: String }) declare jobId: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true }) declare projectId: string | null;
   @ApiPropertyOptional({ nullable: true, type: String }) declare responsibleUserId: string | null;
   @ApiProperty({ type: Object }) declare payload: Record<string, unknown>;
   @ApiProperty() declare createdAt: string;
@@ -22,6 +23,7 @@ export class FleetActivityDto {
       entityType: r.entityType,
       entityId: r.entityId,
       jobId: r.jobId,
+      projectId: r.projectId,
       responsibleUserId: r.responsibleUserId,
       payload: (r.payload ?? {}) as Record<string, unknown>,
       createdAt: r.createdAt.toISOString(),

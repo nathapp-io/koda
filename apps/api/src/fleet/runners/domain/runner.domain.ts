@@ -58,10 +58,16 @@ export interface IRunnerRepository {
   /** Atomically marks an unused, unexpired token used; null when none matched. */
   consumeEnrollment(tokenHash: string, now: Date): Promise<Pick<EnrollmentRecord, 'id' | 'labels' | 'createdById'> | null>;
   linkEnrollment(enrollmentId: string, runnerId: string): Promise<void>;
+  /** #162: deletes consumed rows used before `before` and never-used rows that expired before it. */
+  deleteSpentEnrollmentsBefore(before: Date): Promise<number>;
   /** Throws ConflictAppException(fleet.runners) on a duplicate name. */
   createRunner(data: NewRunner): Promise<RunnerRecord>;
   findRunnerById(id: string): Promise<RunnerRecord | null>;
   findRunnerPage(page: IPageOption): Promise<IPageResult<RunnerRecord>>;
   updateRunner(id: string, patch: RunnerPatch): Promise<RunnerRecord>;
   deleteRunner(id: string): Promise<void>;
+  /** Number of the runner's jobs in an active state, as runner or as pin (plan D15). */
+  countUnfinishedJobs(runnerId: string): Promise<number>;
+  /** SELECT ... FOR UPDATE on the runner row, so the delete decision sees a stable row (review m6). */
+  lockForDelete(id: string): Promise<void>;
 }

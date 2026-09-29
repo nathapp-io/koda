@@ -1,6 +1,7 @@
 import { AuthException } from '@nathapp/nestjs-common';
 import { EnrollmentService } from './enrollment.service';
 import { ProtocolVersionException } from './protocol-version.exception';
+import { testFleetConfig } from '../../common/test-helpers/fleet-config';
 
 const caps = {
   nax: { version: '0.83.0', protocols: ['native'] },
@@ -21,7 +22,7 @@ describe('EnrollmentService', () => {
   const tx = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
   const service = new EnrollmentService(
     repo as never, activity as never, tx as never,
-    { apiKeySecret: 's3cret' } as never, { enrollmentTtlSec: 3600 } as never,
+    { apiKeySecret: 's3cret' } as never, testFleetConfig({ enrollmentTtlSec: 3600 }),
   );
 
   beforeEach(() => jest.clearAllMocks());

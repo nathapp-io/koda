@@ -4554,7 +4554,8 @@
               "enum": [
                 "runner",
                 "enrollment",
-                "repo"
+                "repo",
+                "job"
               ]
             }
           },
@@ -4573,14 +4574,22 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "jobId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "Page of FleetActivityDto: { total, current, size, hasNext, hasPrev, records }"
+            "description": "Page of FleetActivityDto"
           },
           "403": {
-            "description": "Global admin role required"
+            "description": "Not a user"
           }
         },
         "security": [
@@ -4588,7 +4597,7 @@
             "bearer": []
           }
         ],
-        "summary": "List fleet activity (global admin)",
+        "summary": "List fleet activity: global admin sees all, members see their projects' job rows",
         "tags": [
           "fleet"
         ]
@@ -4747,6 +4756,312 @@
           }
         ],
         "summary": "The project's fleet repos (project member)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/jobs": {
+      "post": {
+        "operationId": "FleetJobsController_dispatch",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DispatchFleetJobDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchResultDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Repo not in this project, or pinned runner unknown"
+          },
+          "409": {
+            "description": "An active job already runs this (repo, feature); message names it"
+          },
+          "422": {
+            "description": "Pinned runner can never run this job"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Dispatch a nax run or plan to a fleet runner (project DEVELOPER+)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "get": {
+        "operationId": "FleetJobsController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "state",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "QUEUED",
+                "ASSIGNED",
+                "RUNNING",
+                "UPLOADING",
+                "COMPLETED",
+                "FAILED",
+                "ESCALATED",
+                "CRASHED",
+                "CANCELLED"
+              ]
+            }
+          },
+          {
+            "name": "repoId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "runnerId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "requestedById",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "feature",
+            "required": false,
+            "in": "query",
+            "description": "nax feature name (plan D10)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of FleetJobDto"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List fleet jobs (project member)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/jobs/{id}/cancel": {
+      "post": {
+        "operationId": "FleetJobsController_cancel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetJobDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Job already finished"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Cancel a job (project DEVELOPER+, or the requester)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/jobs/{id}/requeue": {
+      "post": {
+        "operationId": "FleetJobsController_requeue",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchResultDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Job not requeueable, or an active duplicate exists"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Requeue a CRASHED, FAILED or CANCELLED job (project DEVELOPER+)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/jobs/{id}": {
+      "get": {
+        "operationId": "FleetJobsController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetJobDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a fleet job (project member)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/jobs/{id}/events": {
+      "get": {
+        "operationId": "FleetJobsController_events",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of FleetJobEventDto"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Job timeline, ordered by seq (project member)",
         "tags": [
           "fleet"
         ]
@@ -7166,6 +7481,321 @@
           "name",
           "defaultBranch",
           "createdAt"
+        ]
+      },
+      "DispatchFleetJobDto": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "ref": {
+            "type": "string",
+            "maxLength": 255,
+            "description": "Git ref to check out detached; defaults to the repo default branch"
+          },
+          "command": {
+            "enum": [
+              "RUN",
+              "PLAN"
+            ],
+            "type": "string"
+          },
+          "feature": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "nax feature name"
+          },
+          "planFrom": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "Repo-relative spec path, PLAN only"
+          },
+          "profiles": {
+            "maxItems": 8,
+            "description": "nax profile chain, later wins",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "maxCostUsd": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 10000,
+            "description": "USD, > 0, at most 4 decimals"
+          },
+          "bashMode": {
+            "type": "string",
+            "enum": [
+              "raw"
+            ],
+            "description": "Only raw until S1.5"
+          },
+          "selectorLabels": {
+            "maxItems": 16,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pinnedRunnerId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "repoId",
+          "command",
+          "feature",
+          "maxCostUsd"
+        ]
+      },
+      "FleetJobDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "repoId": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "command": {
+            "enum": [
+              "RUN",
+              "PLAN"
+            ],
+            "type": "string"
+          },
+          "feature": {
+            "type": "string"
+          },
+          "planFrom": {
+            "type": "string",
+            "nullable": true
+          },
+          "profiles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "maxCostUsd": {
+            "type": "string",
+            "description": "Decimal as string"
+          },
+          "bashMode": {
+            "type": "string"
+          },
+          "selectorLabels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pinnedRunnerId": {
+            "type": "string",
+            "nullable": true
+          },
+          "runnerId": {
+            "type": "string",
+            "nullable": true
+          },
+          "leaseEpoch": {
+            "type": "number"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "ASSIGNED",
+              "RUNNING",
+              "UPLOADING",
+              "COMPLETED",
+              "FAILED",
+              "ESCALATED",
+              "CRASHED",
+              "CANCELLED"
+            ]
+          },
+          "stateReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "requestedById": {
+            "type": "string"
+          },
+          "queuedAt": {
+            "type": "string"
+          },
+          "assignedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "startedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "finishedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "cancelRequestedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "naxRunId": {
+            "type": "string",
+            "nullable": true
+          },
+          "naxLogRunId": {
+            "type": "string",
+            "nullable": true
+          },
+          "naxCostRunId": {
+            "type": "string",
+            "nullable": true
+          },
+          "progress": {
+            "type": "object",
+            "nullable": true
+          },
+          "currentStoryId": {
+            "type": "string",
+            "nullable": true
+          },
+          "currentPhase": {
+            "type": "string",
+            "nullable": true
+          },
+          "costSpentUsd": {
+            "type": "string",
+            "description": "Decimal as string"
+          },
+          "lastHeartbeatAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "finishResult": {
+            "type": "string",
+            "nullable": true
+          },
+          "escalationReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "exitCode": {
+            "type": "number",
+            "nullable": true
+          },
+          "resultBranch": {
+            "type": "string",
+            "nullable": true
+          },
+          "resultSha": {
+            "type": "string",
+            "nullable": true
+          },
+          "resultPrUrl": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "repoId",
+          "ref",
+          "command",
+          "feature",
+          "profiles",
+          "maxCostUsd",
+          "bashMode",
+          "selectorLabels",
+          "leaseEpoch",
+          "state",
+          "requestedById",
+          "queuedAt",
+          "costSpentUsd"
+        ]
+      },
+      "PlacementMisfitDto": {
+        "type": "object",
+        "properties": {
+          "runnerId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "disabled",
+              "offline",
+              "labels",
+              "executor",
+              "protocol",
+              "provider_missing",
+              "provider_expired",
+              "sandbox",
+              "tools",
+              "busy_repo",
+              "capacity"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "runnerId",
+          "name",
+          "reason"
+        ]
+      },
+      "PlacementSummaryDto": {
+        "type": "object",
+        "properties": {
+          "assigned": {
+            "type": "boolean"
+          },
+          "runnerId": {
+            "type": "string",
+            "nullable": true
+          },
+          "misfits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlacementMisfitDto"
+            }
+          }
+        },
+        "required": [
+          "assigned",
+          "misfits"
+        ]
+      },
+      "DispatchResultDto": {
+        "type": "object",
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/FleetJobDto"
+          },
+          "placement": {
+            "$ref": "#/components/schemas/PlacementSummaryDto"
+          }
+        },
+        "required": [
+          "job",
+          "placement"
         ]
       },
       "CreateEnrollmentDto": {

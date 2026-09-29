@@ -29,6 +29,7 @@ export class FleetActivityService {
       entityType: entry.entityType,
       entityId: entry.entityId,
       jobId: entry.jobId ?? null,
+      projectId: entry.projectId ?? null,
       responsibleUserId: entry.responsibleUserId ?? null,
       payload,
     });
@@ -36,5 +37,10 @@ export class FleetActivityService {
 
   async list(filters: FleetActivityFilters, page: IPageOption): Promise<IPageResult<FleetActivityDto>> {
     return remapPage(await this.repo.findPage(filters, page), FleetActivityDto.from);
+  }
+
+  /** Project ids the user is a member of, for activity scoping (plan D14). */
+  memberProjectIds(userId: string): Promise<string[]> {
+    return this.repo.findMemberProjectIds(userId);
   }
 }

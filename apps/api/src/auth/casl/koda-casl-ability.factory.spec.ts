@@ -65,11 +65,11 @@ describe('KodaCaslAbilityFactory', () => {
       expect(permissionSet(perms)).not.toContain('manage:AgentScope');
     });
 
-    it('should have exactly 7 permission rules', async () => {
+    it('should have exactly 10 permission rules', async () => {
       const principal = makeUser({ role: 'ADMIN' });
       const perms = await factory.getPermissions(principal);
 
-      expect(perms).toHaveLength(9);
+      expect(perms).toHaveLength(10);
     });
   });
 
@@ -334,5 +334,26 @@ describe('project-role permissions (#144)', () => {
     const ability = await factory.createForUser(agent);
     expect(ability.can(T, 'Ticket')).toBe(true);
     expect(ability.can(U, 'Ticket')).toBe(false);
+  });
+});
+
+describe('FleetJob (fleet S1, plan D9)', () => {
+  const factory = new KodaCaslAbilityFactory();
+
+  it.each([
+    ['ADMIN', true, true],
+    ['DEVELOPER', true, true],
+    ['VIEWER', false, false],
+  ])('project %s: create=%s update=%s', async (projectRole, create, update) => {
+    const ability = await factory.createForUser(makeUser({ projectRole }));
+    expect(ability.can(CaslPermissionAction.CREATE, 'FleetJob')).toBe(create);
+    expect(ability.can(CaslPermissionAction.UPDATE, 'FleetJob')).toBe(update);
+  });
+
+  it('lets a global admin manage fleet jobs and never an agent', async () => {
+    expect((await factory.createForUser(makeUser({ role: 'ADMIN' }))).can(CaslPermissionAction.CREATE, 'FleetJob')).toBe(true);
+    const agent = await factory.createForUser(makeAgent({ agentRoles: ['DEVELOPER'] }));
+    expect(agent.can(CaslPermissionAction.CREATE, 'FleetJob')).toBe(false);
+    expect(agent.can(CaslPermissionAction.UPDATE, 'FleetJob')).toBe(false);
   });
 });

@@ -1,7 +1,9 @@
 import { readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
 import { FLEET_PROTOCOL_VERSION } from '@nathapp/fleet-protocol';
+import type { FleetCommandTypeName, FleetJobKindName, FleetJobStateName } from '@nathapp/fleet-protocol';
 import { SUPPORTED_FLEET_PROTOCOL_VERSIONS, isSupportedProtocolVersion } from './protocol';
+import { FleetCommandType, FleetJobKind, FleetJobState } from '../../common/enums';
 
 const SRC = join(__dirname, '..', '..');
 
@@ -36,5 +38,23 @@ describe('fleet protocol', () => {
       /^\s*(import|export)\s+(?!type\b)[^;]*from\s+['"]@nathapp\/fleet-protocol['"]/m.test(readFileSync(file, 'utf8')),
     );
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('API enums match the protocol unions', () => {
+  // Record<Union, true> fails to compile if a union member is missing or extra.
+  const states: Record<FleetJobStateName, true> = {
+    QUEUED: true, ASSIGNED: true, RUNNING: true, UPLOADING: true, COMPLETED: true,
+    FAILED: true, ESCALATED: true, CRASHED: true, CANCELLED: true,
+  };
+  const kinds: Record<FleetJobKindName, true> = { RUN: true, PLAN: true };
+  const commands: Record<FleetCommandTypeName, true> = { ASSIGN: true, CANCEL: true, READOPT: true, ABANDON: true };
+
+  it.each([
+    ['FleetJobState', FleetJobState, states],
+    ['FleetJobKind', FleetJobKind, kinds],
+    ['FleetCommandType', FleetCommandType, commands],
+  ])('%s', (_name, apiConst, union) => {
+    expect(Object.values(apiConst).sort()).toEqual(Object.keys(union).sort());
   });
 });

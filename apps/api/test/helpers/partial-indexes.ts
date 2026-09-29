@@ -1,0 +1,8 @@
+/**
+ * Partial unique indexes that `prisma db push` cannot create. Each statement is shipped
+ * verbatim by a migration (pinned by test/unit/fleet/partial-indexes.spec.ts) and replayed
+ * by test/global-setup.ts after the push.
+ */
+export const PARTIAL_UNIQUE_INDEXES: readonly string[] = [
+  `CREATE UNIQUE INDEX IF NOT EXISTS "FleetJob_active_repo_feature_key" ON "FleetJob" ("repoId", "feature") WHERE "state" IN ('QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING')`,
+];

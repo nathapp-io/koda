@@ -7,7 +7,7 @@ export interface FakeRequest {
   headers: IncomingMessage['headers'];
   body: unknown;
 }
-export type FakeReply = { status: number; body?: unknown; headers?: Record<string, string>; delayMs?: number; stallBodyMs?: number };
+export type FakeReply = { status: number; body?: unknown; rawBody?: string; headers?: Record<string, string>; delayMs?: number; stallBodyMs?: number };
 export interface FakeForge {
   url: string;
   routes: Map<string, (req: FakeRequest) => FakeReply>;
@@ -34,17 +34,17 @@ export async function startFakeForge(): Promise<FakeForge> {
         // stallBodyMs: flush the head plus a partial body chunk immediately, then hold the
         // remainder open — a provider that starts answering and stalls mid-body (so the
         // client's fetch resolves and the abort fires during the body read).
+        const payload = reply.rawBody ?? (reply.body === undefined ? '' : JSON.stringify(reply.body));
         if (reply.stallBodyMs) {
-          const raw = reply.body === undefined ? '' : JSON.stringify(reply.body);
-          if (raw) {
-            const cut = Math.max(1, Math.floor(raw.length / 2));
-            res.write(raw.slice(0, cut));
-            setTimeout(() => res.end(raw.slice(cut)), reply.stallBodyMs);
+          if (payload) {
+            const cut = Math.max(1, Math.floor(payload.length / 2));
+            res.write(payload.slice(0, cut));
+            setTimeout(() => res.end(payload.slice(cut)), reply.stallBodyMs);
           } else {
             setTimeout(() => res.end(), reply.stallBodyMs);
           }
         } else {
-          res.end(reply.body === undefined ? '' : JSON.stringify(reply.body));
+          res.end(payload);
         }
       }, reply.delayMs ?? 0);
     });

@@ -46,6 +46,7 @@ Plan-level rules:
 | D8 | Repo-check failures are `422` with a fixed `reason` code; the GitHub App JWT is signed with `node:crypto` (no new dependency); a dedicated `FleetHttpClient` (fetch, `redirect: 'error'`, timeout) is used instead of the VCS `HttpClient` (no timeout, follows redirects) or `OutboundHttpClient` (POST-only, no body). | A token must never follow a redirect; a hung provider must not hang the request. |
 | D9 | `GET /fleet/activity` is global-ADMIN only in slice 1. The project-member view (rows for their projects' jobs) arrives with jobs in slice 2. | No job rows exist yet. |
 | D10 | Runner and repo delete have no active-job check in slice 1 (no jobs). Slice 2 adds the 409. | Same. |
+| D11 (shipped) | A 13th repo-check reason `github_app_key_unreadable` (commit 55b8258b): a set-but-unreadable `GITHUB_APP_PRIVATE_KEY_FILE` or bad PEM is a 422, not a 500. Recorded after merge (#159). |
 
 ## Review Focus
 
