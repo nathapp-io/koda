@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import type { GitToken, GitTokenError } from '../common/protocol';
 import type { FleetRepoRef } from '../jobs/domain/fleet-job.domain';
 import { GitHubAppClient } from './github-app-client';
@@ -20,7 +20,7 @@ export class GitTokenBroker {
   private readonly logger = new Logger(GitTokenBroker.name);
   private cache: ReadonlyMap<string, GitToken> = new Map();
 
-  constructor(private readonly github: GitHubAppClient, private readonly gitlab: GitLabTokenSource) {}
+  constructor(@Inject(forwardRef(() => GitHubAppClient)) private readonly github: GitHubAppClient, private readonly gitlab: GitLabTokenSource) {}
 
   async mint(req: { jobId: string; leaseEpoch: number; repo: FleetRepoRef }, now = new Date()): Promise<MintResult> {
     const key = `${req.jobId}:${req.leaseEpoch}`;
