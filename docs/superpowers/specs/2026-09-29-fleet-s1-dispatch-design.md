@@ -36,7 +36,7 @@ story progress and live cost, keep the run's artifact bundle, and never let two 
 | R3 | C7 git identity: **GitHub App**. |
 | R4 | Protocol **A**: one long-polled `POST /fleet/runner/sync` plus a separate bundle upload. |
 | R5 | **All** runner git traffic is brokered by koda: GitHub via per-job App installation tokens, GitLab via the project's stored `VcsConnection` token. Clone, fetch, nax finish push and `gh`/`glab` PR creation all use it. Machines hold no git credentials. This amends the 2026-09-13 ruling (§6 Q5, "git credentials stay machine-local"). Provider (LLM) credentials still stay on the machine; koda never stores them. |
-| R6 | Cross-machine duplicate work is prevented by compare-and-set assignment, a lease epoch fence (also enforced by the git broker), and a partial unique index on active `(repoId, feature)` (§6.4). |
+| R6 | Cross-machine duplicate work is prevented by compare-and-set assignment, a lease epoch fence (also enforced by the git broker), and a partial unique index on active `(repoId, feature)` (§6). |
 | R7 | Isolation: S1 runs jobs on the host through a `JobExecutor` seam (`HostExecutor`), under a dedicated OS user. A VM executor is a later phase; VMs are not required in S1 (§5.5). |
 
 Earlier rulings that still hold (design doc §6): fleet = mixed macOS + Linux; runners auto-clone from a
