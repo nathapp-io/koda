@@ -5191,7 +5191,7 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "{ id, name, labels, enabled }"
+            "description": "{ id, name, labels, capacity, enabled }"
           }
         },
         "security": [
