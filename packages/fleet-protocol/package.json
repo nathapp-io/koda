@@ -1,0 +1,15 @@
+{
+  "name": "@nathapp/fleet-protocol",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Koda fleet runner <-> server protocol: version constant and wire types",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "type-check": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@nathapp/typescript-config": "workspace:*",
+    "typescript": "5.8.3"
+  }
+}

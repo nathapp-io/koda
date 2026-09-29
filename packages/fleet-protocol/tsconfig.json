@@ -1,0 +1,5 @@
+{
+  "extends": "@nathapp/typescript-config/base.json",
+  "compilerOptions": { "noEmit": true },
+  "include": ["src/**/*"]
+}

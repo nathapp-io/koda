@@ -62,6 +62,7 @@
       "devDependencies": {
         "@golevelup/ts-jest": "^3.0.0",
         "@nathapp/eslint-config": "workspace:*",
+        "@nathapp/fleet-protocol": "workspace:*",
         "@nathapp/typescript-config": "workspace:*",
         "@nestjs/cli": "^11.0.24",
         "@nestjs/platform-express": "^11.1.28",
@@ -145,6 +146,14 @@
         "eslint-config-turbo": "^2.11.4",
         "eslint-plugin-only-warn": "^1.1.0",
         "eslint-plugin-prettier": "^4.0.0",
+        "typescript": "5.8.3",
+      },
+    },
+    "packages/fleet-protocol": {
+      "name": "@nathapp/fleet-protocol",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@nathapp/typescript-config": "workspace:*",
         "typescript": "5.8.3",
       },
     },
@@ -625,6 +634,8 @@
     "@nathapp/common": ["@nathapp/common@0.1.15", "https://npm.nathapp.io/@nathapp/common/-/common-0.1.15.tgz", { "peerDependencies": { "bcrypt": ">=5.1.0" } }, "sha512-qbaS4H3paDmcR4kt0annv+gU0jQynOhNq9B1xiTEvcz0FkuHnzux4RIDvbRsQ0FS4g7hR26Clx2leC7SRAm1Tw=="],
 
     "@nathapp/eslint-config": ["@nathapp/eslint-config@workspace:packages/eslint-config"],
+
+    "@nathapp/fleet-protocol": ["@nathapp/fleet-protocol@workspace:packages/fleet-protocol"],
 
     "@nathapp/koda-api": ["@nathapp/koda-api@workspace:apps/api"],
 
@@ -3301,6 +3312,8 @@
     "@napi-rs/wasm-runtime/@emnapi/runtime": ["@emnapi/runtime@1.9.0", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-QN75eB0IH2ywSpRpNddCRfQIhmJYBCJ1x5Lb3IscKAL8bMnVAKnRg8dCoXbHzVLLH7P38N2Z3mtulB7W0J0FKw=="],
 
     "@nathapp/eslint-config/typescript": ["typescript@5.8.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ=="],
+
+    "@nathapp/fleet-protocol/typescript": ["typescript@5.8.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ=="],
 
     "@nathapp/nestjs-common/joi": ["joi@17.13.3", "", { "dependencies": { "@hapi/hoek": "^9.3.0", "@hapi/topo": "^5.1.0", "@sideway/address": "^4.1.5", "@sideway/formula": "^3.0.1", "@sideway/pinpoint": "^2.0.0" } }, "sha512-otDA4ldcIx+ZXsKHWmp0YizCweVRZG96J10b0FevjfuncLO1oX59THoAmHkNubYJ+9gWsYsp5k8v4ib6oDv1fA=="],
 
