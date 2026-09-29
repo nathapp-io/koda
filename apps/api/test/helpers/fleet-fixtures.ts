@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import request from 'supertest';
-import type { RunnerCapabilities } from '../../src/fleet/common/protocol';
+import type { RunnerCapabilities, SyncRequest } from '../../src/fleet/common/protocol';
 import { data, loginToken, TEST_PASSWORD } from './http-app';
 
 export const FLEET_CAPS: RunnerCapabilities = {
@@ -85,3 +85,25 @@ export async function seedFleetHttpWorld(server: Parameters<typeof request>[0], 
     foreignRepoId: (await repo(ops.id, 'ops', 'main')).id,
   };
 }
+
+/** Issues an enrollment token as admin and enrolls a runner over HTTP (enroll is throttled 10/min). */
+export async function enrollRunner(
+  server: Parameters<typeof request>[0],
+  adminToken: string,
+  name: string,
+  over: { labels?: string[]; capabilities?: RunnerCapabilities; bootId?: string } = {},
+): Promise<{ runnerId: string; apiKey: string }> {
+  const { token } = data<{ token: string }>(
+    await request(server).post('/api/fleet/enrollments').set({ Authorization: `Bearer ${adminToken}` }).send({ labels: over.labels ?? ['linux'] }).expect(201),
+  );
+  return data(
+    await request(server).post('/api/fleet/runner/enroll').send({
+      enrollmentToken: token, name, os: 'linux', arch: 'x64', daemonVersion: '0.1.0', protocolVersion: 1,
+      bootId: over.bootId ?? 'boot-1', labels: [], capabilities: over.capabilities ?? FLEET_CAPS,
+    }).expect(201),
+  );
+}
+
+export const syncBody = (over: Partial<SyncRequest> = {}): SyncRequest => ({
+  protocolVersion: 1, bootId: 'boot-1', daemonVersion: '0.1.0', freeSlots: 0, jobs: [], commandAcks: [], tokenRequests: [], ...over,
+});

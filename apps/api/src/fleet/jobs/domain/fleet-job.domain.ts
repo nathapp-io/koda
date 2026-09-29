@@ -1,6 +1,7 @@
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import type { FleetCommandType, FleetJobKind, FleetJobState } from '../../../common/enums';
+import type { RunnerCapabilities } from '../../common/protocol';
 import type { PlacementRunner } from '../placement-rules';
 
 export const FLEET_JOB_REPOSITORY = Symbol('FLEET_JOB_REPOSITORY');
@@ -160,6 +161,8 @@ export interface IFleetJobRepository {
   findRunnerHeld(runnerId: string): Promise<FleetJobRecord[]>;
   /** Jobs held by a runner whose lastSeenAt is before the cutoff. */
   findSilentHeldIds(runnerSeenBefore: Date): Promise<string[]>;
+  /** Updates lastSeenAt and the reported fields; returns the boot id stored before this sync, or null if the runner is gone. */
+  recordRunnerSync(runnerId: string, s: { now: Date; bootId: string; daemonVersion: string; protocolVersion: number; capabilities?: RunnerCapabilities }): Promise<{ previousBootId: string } | null>;
 
   findPlacementRunners(ids?: readonly string[]): Promise<PlacementRunnerRow[]>;
   /** Locks runner rows in id order (all when ids is undefined); returns the locked ids. */

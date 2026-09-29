@@ -134,6 +134,19 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     return rows.map((r) => r.id);
   }
 
+  async recordRunnerSync(runnerId: string, s: { now: Date; bootId: string; daemonVersion: string; protocolVersion: number; capabilities?: RunnerCapabilities }) {
+    const before = await this.db.runner.findUnique({ where: { id: runnerId }, select: { bootId: true } });
+    if (!before) return null;
+    await this.db.runner.update({
+      where: { id: runnerId },
+      data: {
+        lastSeenAt: s.now, bootId: s.bootId, daemonVersion: s.daemonVersion, protocolVersion: s.protocolVersion,
+        ...(s.capabilities ? { capabilities: s.capabilities as unknown as Prisma.InputJsonValue } : {}),
+      },
+    });
+    return { previousBootId: before.bootId };
+  }
+
   async findPlacementRunners(ids?: readonly string[]): Promise<PlacementRunnerRow[]> {
     const rows = await this.db.runner.findMany({
       where: ids ? { id: { in: [...ids] } } : {},
