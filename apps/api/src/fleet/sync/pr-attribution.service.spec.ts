@@ -26,7 +26,7 @@ describe('prNumberFor (plan D19)', () => {
 
 describe('prNumberFor hostile input', () => {
   it('returns null when a URL path segment is undecodable (%E0%A4%A) instead of throwing', () => {
-    expect(prNumberFor({ provider: 'github', owner: 'acme', name: 'app' }, 'https://github.com/%E0%A4%A/pull/12')).toBeNull();
+    expect(prNumberFor({ provider: 'github', owner: 'acme', name: 'app' }, 'https://github.com/%E0%A4%A/app/pull/12')).toBeNull();
   });
   it('returns null for a GitLab MR with an undecodable path segment', () => {
     expect(prNumberFor({ provider: 'gitlab', owner: 'acme', name: 'app' }, 'https://gitlab.example.com/%E0%A4%A/app/-/merge_requests/12')).toBeNull();
