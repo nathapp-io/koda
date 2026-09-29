@@ -39,6 +39,7 @@ story progress and live cost, keep the run's artifact bundle, and never let two 
 | R6 | Cross-machine duplicate work is prevented by compare-and-set assignment, a lease epoch fence (also enforced by the git broker), and a partial unique index on active `(repoId, feature)` (§6). |
 | R7 | Isolation: S1 runs jobs on the host through a `JobExecutor` seam (`HostExecutor`), under a dedicated OS user. A VM executor is a later phase; VMs are not required in S1 (§5.5). |
 | R8 | A central provider-credential vault (C10, §9.6) is **designed, not scheduled**. S1 keeps provider credentials machine-local. When and how it is built is decided when the need arises; the open questions are in §9.6. |
+| R9 | Docker is designed, not scheduled (§5.5): a per-job `ContainerExecutor` is the next executor before a VM, and running the daemon in a container is an optional Linux packaging with no sandboxed jobs unless unconfined. S1 stays host-only. |
 
 Earlier rulings that still hold (design doc §6): fleet = mixed macOS + Linux; runners auto-clone from a
 platform repo registry; labels + auto-pick with a pin override; 1 job per runner by default; home server + VPN
@@ -57,7 +58,8 @@ broker is in S1 and not S3.
 - Automatic requeue of crashed jobs.
 - A multi-instance API. The API stays single-instance (in-process long-poll notifier, in-process sweeps).
 - Object storage for artifacts (local disk behind an interface).
-- Runners inside Docker. Linux runners install on the host because bubblewrap fails in stock Docker (§9.2).
+- Docker: packaging the daemon in a container and a per-job container executor. Both are designed in §5.5 and
+  unscheduled. S1 runners install on the host.
 - Revoking or rotating a GitLab token automatically. The stored token lives as long as the user made it.
 - Editing machine-local `~/.nax` profiles or credentials from koda.
 
@@ -282,7 +284,7 @@ interface RunnerCapabilities {
   profiles: Record<string, ProfileNeeds>;                           // resolved locally by the runner
   credentials: Array<{ providerId: string; kind: string; expires?: string }>; // secret-free
   tools: { git: boolean; gh: boolean; glab: boolean };
-  executors: Array<'host'>;                                          // §5.5; 'vm' later
+  executors: Array<'host'>;                                          // §5.5; 'container', 'vm' later
 }
 interface ProfileNeeds { protocol: 'acp' | 'native'; providers: string[]; sandbox: boolean }
 ```
@@ -490,12 +492,33 @@ and logged. Every transition writes a `state` event and `FleetActivity`.
 
 - **`JobExecutor` seam** in the runner: `prepare(job)`, `spawn()`, `watch()`, `kill(signal)`,
   `collectBundle()`, `cleanup()`. S1 ships `HostExecutor` only. The runner reports `executors: ['host']` in
-  `RunnerCapabilities`; a later job field can require `vm` without protocol or server changes.
+  `RunnerCapabilities`; a later job field can require `container` or `vm` without protocol or server changes.
 - **Dedicated OS user.** The daemon runs as a `koda-runner` user (installed by `koda-runner install-service`)
   with its own home and `~/.nax` (provider credentials provisioned there by a human, as today), no personal SSH
   keys, and access only to its workspace root. The P4 Bash sandbox still wraps agent Bash calls inside that.
 - **Not covered:** the coding agent can still read the runner user's `~/.nax/credentials` (nax needs them) and
   the job's git-cred socket; a VM does not change the first point either.
+- **Linux host sandbox requirement (S1).** Ubuntu 24.04+ restricts unprivileged user namespaces through
+  AppArmor, which makes bubblewrap fail every command on the host, not only in containers. nax CI lifts it with
+  `sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` on a throwaway VM (nax `.github/workflows/ci.yml:57-66`,
+  job `runs-on: ubuntu-latest`, no container). `koda-runner install-service` detects the restriction and offers a
+  targeted AppArmor profile for `bwrap` (exact profile to be verified on a real 24.04 host in slice 3) instead of
+  the machine-wide sysctl; until fixed, the capability probe reports `sandbox.available: false` and placement
+  keeps sandbox-requiring jobs away.
+- **`ContainerExecutor` (designed, unscheduled; next executor before VM).** The host daemon starts one container
+  per job from an image per toolchain, mounts the job's workspace and git-cred socket, labels it
+  `koda.jobId=<id>`, kills with `docker kill`, cleans up with `docker rm` (no `git clean` risk). Readopt after a
+  daemon restart finds the running container by label. Test services (for example Postgres) run as per-job
+  sidecar containers on a per-job network; the host Docker socket is never mounted (root-equivalent). Inside the
+  container, Docker's default seccomp and AppArmor profiles block bubblewrap's namespace calls, so either the
+  container is the boundary and the job's profile runs with the nax sandbox off, or the container runs with
+  `seccomp=unconfined`/`apparmor=unconfined` (weaker container, P4 sandbox kept). Which one is decided when it is
+  built. Shares the kernel, so isolation is weaker than a VM, at a fraction of the cost.
+- **Daemon in Docker (designed, unscheduled; Linux packaging only).** The daemon runs in a long-lived container
+  with the workspace on a volume. The live probe reports `sandbox.available: false` in a stock container, so
+  only jobs whose profile does not need the sandbox are placed there. Restarting the container kills running
+  jobs, so readopt only covers a daemon crash inside a running container (tini as PID 1). On macOS, Docker
+  Desktop is a Linux VM, so this is a Linux runner.
 - **VM executor (later phase, after S1b):** Lima or Tart on macOS (Linux guests; Apple allows two macOS guests
   per host), Firecracker or libvirt on Linux, warm images and a dependency cache, git-cred socket forwarded into
   the guest.
@@ -676,7 +699,7 @@ Open questions, decided when development starts:
 ### 9.7 Phase order
 
 S1 (this spec) → S1b (C1, C4) → S1.5 (C8 + approvals relay) → S2a (logs) → S2b (C9, dashboard, analytics) → S3
-(rules/context PRs, now on the S1 broker) → S5 (acpx brainstorming). C10 and the VM executor (§5.5) are unscheduled.
+(rules/context PRs, now on the S1 broker) → S5 (acpx brainstorming). C10, the container executor and the VM executor (§5.5) are unscheduled.
 
 ## 10. Spikes before the plan
 
