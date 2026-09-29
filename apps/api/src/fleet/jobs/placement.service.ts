@@ -68,6 +68,14 @@ export class PlacementService {
       const repo = await this.repo.findRepo(job.repoId);
       if (!repo) throw new Error(`fleet repo ${job.repoId} missing for job ${job.id}`);
       const ids = await this.repo.lockRunners(job.pinnedRunnerId ? [job.pinnedRunnerId] : undefined);
+      // Review 2a BUG-3: a pinned runner's state can change between FleetJobsService.dispatch's
+      // pre-tx evaluatePinned and the in-tx lock here. Re-evaluate; surface the same verdicts.
+      if (job.pinnedRunnerId && ids.length === 0) {
+        // The pinned runner was deleted between verdict and lock; the controller already
+        // turned that into 404 at dispatch time, but a requeue or fillRunner can reach here.
+        // Empty misfits is the documented accepted race for delete.
+        return { outcome: { assigned: false, runnerId: null, leaseEpoch: null, misfits: [] } as PlacementOutcome, live: [] };
+      }
       const runners = await this.repo.findPlacementRunners(ids);
       const loads = toLoads(await this.repo.findActiveLoads(ids));
       const placementJob = toPlacementJob(job, repo);

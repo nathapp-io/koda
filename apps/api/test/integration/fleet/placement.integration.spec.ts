@@ -7,7 +7,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
-import { insertRunner, seedFleetBase } from '../../helpers/fleet-fixtures';
+import { insertRunner, seedFleetBase, FLEET_CAPS } from '../../helpers/fleet-fixtures';
 import { PlacementService } from '../../../src/fleet/jobs/placement.service';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -100,5 +100,43 @@ describeIntegration('fleet placement (PG)', () => {
     expect(await placement.fillRunner(disabled.id, 1)).toBe(0);
     expect(await placement.fillRunner(other.id, 1)).toBe(0);
     expect(await placement.fillRunner(pinnedTo.id, 1)).toBe(1);
+  });
+
+  it('re-evaluates a pinned runner that was disabled between verdict and placeJob (422)', async () => {
+    // Review 2a BUG-3: pre-tx verdict runs outside any tx; placeJob then re-locks the
+    // runner. A flip to enabled=false between verdict and lock must surface the same
+    // 'disabled' verdict that evaluatePinned would have surfaced.
+    const pinned = await prisma.runner.create({
+      data: {
+        name: 'pin-runner', apiKeyHash: 'h', os: 'linux', arch: 'x64', labels: ['linux'], capacity: 1,
+        capabilities: FLEET_CAPS as object, daemonVersion: '0.1.0', protocolVersion: 1, bootId: 'b', enabled: true,
+        lastSeenAt: new Date(), createdById: 'seed',
+      },
+      select: { id: true, name: true },
+    });
+    const job = await prisma.fleetJob.create({
+      data: {
+        projectId: base.projectId, repoId: base.repoId, ref: 'main', command: 'RUN', feature: 'pin-disabled', profiles: [],
+        selectorLabels: [], maxCostUsd: new Prisma.Decimal(1), requestedById: base.adminId, state: 'QUEUED', pinnedRunnerId: pinned.id,
+      },
+    });
+    await prisma.runner.update({ where: { id: pinned.id }, data: { enabled: false } });
+    const outcome = await placement.placeJob(job.id);
+    expect(outcome.assigned).toBe(false);
+    expect(outcome.misfits).toEqual([{ runnerId: pinned.id, name: pinned.name, reason: 'disabled' }]);
+  });
+
+  it('returns not_found when the pinned runner was deleted before placeJob re-evaluated', async () => {
+    // The runner-delete cascades pinnedRunnerId to null, so by the time placeJob re-locks
+    // the row is gone; the documented accepted race returns empty misfits.
+    const pinned = await insertRunner(prisma, { labels: ['linux'] });
+    const job = await prisma.fleetJob.create({
+      data: {
+        projectId: base.projectId, repoId: base.repoId, ref: 'main', command: 'RUN', feature: 'pin-deleted', profiles: [],
+        selectorLabels: [], maxCostUsd: new Prisma.Decimal(1), requestedById: base.adminId, state: 'QUEUED', pinnedRunnerId: pinned.id,
+      },
+    });
+    await prisma.runner.delete({ where: { id: pinned.id } });
+    await expect(placement.placeJob(job.id)).resolves.toEqual(expect.objectContaining({ assigned: false, misfits: [] }));
   });
 });
