@@ -4517,6 +4517,529 @@
           "admin"
         ]
       }
+    },
+    "/api/fleet/activity": {
+      "get": {
+        "operationId": "FleetActivityController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "entityType",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "runner",
+                "enrollment",
+                "repo"
+              ]
+            }
+          },
+          {
+            "name": "entityId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actorId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of FleetActivityDto: { total, current, size, hasNext, hasPrev, records }"
+          },
+          "403": {
+            "description": "Global admin role required"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List fleet activity (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/repos": {
+      "get": {
+        "operationId": "FleetReposController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of FleetRepoDto"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List fleet repos (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "post": {
+        "operationId": "FleetReposController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateFleetRepoDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRepoDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already registered"
+          },
+          "422": {
+            "description": "Forge check failed: { reason }"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Register a repo for fleet dispatch after proving koda can broker git access (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/repos/{id}": {
+      "delete": {
+        "operationId": "FleetReposController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Unregister a fleet repo (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/repos": {
+      "get": {
+        "operationId": "ProjectFleetReposController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of FleetRepoDto"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The project's fleet repos (project member)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/enrollments": {
+      "post": {
+        "operationId": "EnrollmentsController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEnrollmentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentCreatedDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Issue a single-use runner enrollment token (global admin); the token is shown once",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "get": {
+        "operationId": "EnrollmentsController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of EnrollmentDto"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List enrollment tokens (global admin); tokens are never returned",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/runner/enroll": {
+      "post": {
+        "operationId": "RunnerApiController_enroll",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnrollDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "{ runnerId, apiKey }"
+          },
+          "401": {
+            "description": "Token invalid, used or expired"
+          },
+          "409": {
+            "description": "Runner name taken; the token stays usable"
+          },
+          "426": {
+            "description": "Unsupported protocol version"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Enroll a runner with a single-use token; returns its API key once",
+        "tags": [
+          "fleet-runner"
+        ]
+      }
+    },
+    "/api/fleet/runner/me": {
+      "get": {
+        "operationId": "RunnerApiController_me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "{ id, name, labels, enabled }"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The calling runner's identity",
+        "tags": [
+          "fleet-runner"
+        ]
+      }
+    },
+    "/api/fleet/runners": {
+      "get": {
+        "operationId": "RunnersController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of RunnerDto"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List runners (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/runners/{id}": {
+      "get": {
+        "operationId": "RunnersController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunnerDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a runner (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "patch": {
+        "operationId": "RunnersController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRunnerDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunnerDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Enable/disable a runner or change its labels or capacity (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "delete": {
+        "operationId": "RunnersController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a runner; revokes its key (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      }
     }
   },
   "info": {
@@ -6569,6 +7092,286 @@
           "success",
           "message"
         ]
+      },
+      "CreateFleetRepoDto": {
+        "type": "object",
+        "properties": {
+          "projectSlug": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "provider": {
+            "enum": [
+              "github",
+              "gitlab"
+            ],
+            "type": "string"
+          },
+          "owner": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+            "description": "Owner or namespace (GitLab: group/subgroup)"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,100}$"
+          }
+        },
+        "required": [
+          "projectSlug",
+          "provider",
+          "owner",
+          "name"
+        ]
+      },
+      "FleetRepoDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "github",
+              "gitlab"
+            ],
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "defaultBranch": {
+            "type": "string"
+          },
+          "githubInstallationId": {
+            "type": "string",
+            "nullable": true,
+            "description": "GitHub App installation id (BigInt as string)"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "provider",
+          "owner",
+          "name",
+          "defaultBranch",
+          "createdAt"
+        ]
+      },
+      "CreateEnrollmentDto": {
+        "type": "object",
+        "properties": {
+          "labels": {
+            "maxItems": 20,
+            "description": "Labels preset on the runner that enrolls with this token",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "EnrollmentCreatedDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "usedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "runnerId": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdById": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string",
+            "description": "Shown once; koda stores only its hash"
+          }
+        },
+        "required": [
+          "id",
+          "labels",
+          "expiresAt",
+          "createdById",
+          "createdAt",
+          "token"
+        ]
+      },
+      "EnrollDto": {
+        "type": "object",
+        "properties": {
+          "enrollmentToken": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+            "description": "Unique runner name"
+          },
+          "os": {
+            "enum": [
+              "darwin",
+              "linux"
+            ],
+            "type": "string"
+          },
+          "arch": {
+            "enum": [
+              "arm64",
+              "x64"
+            ],
+            "type": "string"
+          },
+          "daemonVersion": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "protocolVersion": {
+            "type": "number"
+          },
+          "bootId": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "labels": {
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "capabilities": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "RunnerCapabilities (spec §2.1), validated by parseCapabilities"
+          }
+        },
+        "required": [
+          "enrollmentToken",
+          "name",
+          "os",
+          "arch",
+          "daemonVersion",
+          "protocolVersion",
+          "bootId",
+          "labels",
+          "capabilities"
+        ]
+      },
+      "RunnerDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "os": {
+            "type": "string",
+            "enum": [
+              "darwin",
+              "linux"
+            ]
+          },
+          "arch": {
+            "type": "string",
+            "enum": [
+              "arm64",
+              "x64"
+            ]
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "capacity": {
+            "type": "number"
+          },
+          "capabilities": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "daemonVersion": {
+            "type": "string"
+          },
+          "protocolVersion": {
+            "type": "number"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "lastSeenAt": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "os",
+          "arch",
+          "labels",
+          "capacity",
+          "capabilities",
+          "daemonVersion",
+          "protocolVersion",
+          "enabled",
+          "lastSeenAt",
+          "createdAt"
+        ]
+      },
+      "UpdateRunnerDto": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "labels": {
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "capacity": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 16
+          }
+        }
       }
     }
   }
