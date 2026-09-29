@@ -10,6 +10,7 @@ import { VCS_CFG, IVcsConfig, vcsConfig } from '../../config/vcs.config';
 import { outboxConfig } from '../../config/outbox.config';
 import { LIVE_CFG, ILiveConfig } from '../../config/live.config';
 import { WEBHOOK_CFG, IWebhookConfig } from '../../config/webhook.config';
+import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 
 export const mockPrismaService = {
   client: {
@@ -80,6 +81,14 @@ export const mockWebhookConfig: IWebhookConfig = {
   deliveryTimeoutMs: 5000,
 };
 
+export const mockFleetConfig: IFleetConfig = {
+  githubAppId: undefined,
+  githubAppPrivateKeyFile: undefined,
+  githubAppSlug: undefined,
+  enrollmentTtlSec: 86400,
+  httpTimeoutMs: 10000,
+};
+
 @Global()
 @Module({
   imports: [
@@ -102,7 +111,8 @@ export const mockWebhookConfig: IWebhookConfig = {
     { provide: VCS_CFG, useValue: mockVcsConfig },
     { provide: LIVE_CFG, useValue: mockLiveConfig },
     { provide: WEBHOOK_CFG, useValue: mockWebhookConfig },
+    { provide: FLEET_CFG, useValue: mockFleetConfig },
   ],
-  exports: [PrismaService, TRANSACTION_MANAGER, ConfigModule, AgentsService, CacheManager, AUTH_CFG, RAG_CFG, VCS_CFG, LIVE_CFG, WEBHOOK_CFG],
+  exports: [PrismaService, TRANSACTION_MANAGER, ConfigModule, AgentsService, CacheManager, AUTH_CFG, RAG_CFG, VCS_CFG, LIVE_CFG, WEBHOOK_CFG, FLEET_CFG],
 })
 export class GlobalStubsModule {}

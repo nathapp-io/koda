@@ -43,6 +43,7 @@ import { vcsConfig } from './config/vcs.config';
 import { outboxConfig } from './config/outbox.config';
 import { liveConfig } from './config/live.config';
 import { webhookConfig } from './config/webhook.config';
+import { fleetConfig } from './config/fleet.config';
 import { validate } from './config/env.validation';
 import { ConfigBridgeModule } from './config/config-bridge.module';
 
@@ -51,7 +52,7 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
-      load: [appConfig, authConfig, databaseConfig, ragConfig, vcsConfig, outboxConfig, liveConfig, webhookConfig, ServerSecurityConfig],
+      load: [appConfig, authConfig, databaseConfig, ragConfig, vcsConfig, outboxConfig, liveConfig, webhookConfig, fleetConfig, ServerSecurityConfig],
       validate: validate,
     }),
     ConfigBridgeModule,

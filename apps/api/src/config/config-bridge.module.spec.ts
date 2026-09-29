@@ -21,6 +21,7 @@ import { ragConfig } from './rag.config';
 import { vcsConfig } from './vcs.config';
 import { liveConfig } from './live.config';
 import { IWebhookConfig, WEBHOOK_CFG, webhookConfig } from './webhook.config';
+import { fleetConfig } from './fleet.config';
 
 /**
  * The resolved config, or the error that stopped the module from coming up / the token
@@ -53,7 +54,7 @@ describe('US-001 AC11: ConfigBridgeModule WEBHOOK_CFG', () => {
           await ConfigModule.forRoot({
             isGlobal: true,
             ignoreEnvFile: true,
-            load: [appConfig, authConfig, ragConfig, vcsConfig, liveConfig, webhookConfig],
+            load: [appConfig, authConfig, ragConfig, vcsConfig, liveConfig, webhookConfig, fleetConfig],
           }),
           ConfigBridgeModule,
         ],

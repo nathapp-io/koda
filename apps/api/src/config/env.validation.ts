@@ -51,6 +51,12 @@ const envSchema = Joi.object({
     })
     .messages({ 'any.invalid': '{{#message}}' })
     .optional(),
+  // Fleet S1: GitHub App used to broker runner git access (spec §7.1).
+  GITHUB_APP_ID: Joi.string().pattern(/^\d+$/).optional(),
+  GITHUB_APP_PRIVATE_KEY_FILE: Joi.string().optional(),
+  GITHUB_APP_SLUG: Joi.string().pattern(/^[a-z0-9-]+$/).optional(),
+  FLEET_ENROLLMENT_TTL_SEC: Joi.number().integer().min(60).max(604_800).optional(),
+  FLEET_HTTP_TIMEOUT_MS: Joi.number().integer().min(1000).max(60_000).optional(),
 }).unknown(true);
 
 export function validate(config: Record<string, unknown>): Record<string, unknown> {
