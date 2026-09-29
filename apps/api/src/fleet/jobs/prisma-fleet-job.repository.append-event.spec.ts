@@ -13,6 +13,10 @@ describe('PrismaFleetJobRepository.appendEvent P2002 no-op', () => {
   const prisma = { client: { fleetJob: { update }, fleetJobEvent: { create, findUnique } } };
   const repo = new PrismaFleetJobRepository(prisma as never);
 
+  beforeEach(() => {
+    findUnique.mockResolvedValue(existing);
+  });
+
   it('returns the existing row when the unique (jobId, leaseEpoch, runnerSeq) collides', async () => {
     const r = await repo.appendEvent('j1', { leaseEpoch: 2, runnerSeq: 3, type: 'log', payload: { text: 'again' } });
     expect(r).toBe(existing);
