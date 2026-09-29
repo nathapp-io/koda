@@ -5,5 +5,9 @@
   "capabilities": { "-2": "Invalid runner capabilities: {reason}" },
   "runners": { "404": "Runner not found", "409": "A runner with this name already exists" },
   "repos": { "404": "Fleet repository not found", "409": "This repository is already registered" },
-  "repoCheck": { "422": "Repository check failed: {reason}" }
+  "repoCheck": { "422": "Repository check failed: {reason}" },
+  "jobs": { "404": "Fleet job not found", "409": "An active job already runs this feature: {activeJobId}" },
+  "jobState": { "409": "The job is {state}; this action is not allowed" },
+  "dispatch": { "422": "The pinned runner can never run this job: {reason}" },
+  "dispatchInput": { "-2": "Invalid dispatch: {reason}" }
 }

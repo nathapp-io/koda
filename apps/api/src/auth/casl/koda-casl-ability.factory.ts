@@ -29,7 +29,7 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
    * (AgentScope, AdminScope) so that agent-only routes stay gated.
    */
   private static readonly ADMIN_MANAGEABLE_RESOURCES = [
-    'Comment', 'Label', 'Ticket', 'Project', 'Agent', 'ProjectContext',
+    'Comment', 'Label', 'Ticket', 'Project', 'Agent', 'ProjectContext', 'FleetJob',
   ] as const;
 
   async getPermissions(principal: KodaPrincipal): Promise<CaslPermission[]> {
@@ -77,6 +77,7 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
           // Delete any comment in the project; editing stays author-only.
           { action: CaslPermissionAction.DELETE, subject: 'Comment' },
           { action: CaslPermissionAction.READ, subject: 'CodeIntel' },
+          { action: CaslPermissionAction.MANAGE, subject: 'FleetJob' },
         ];
       case 'DEVELOPER':
         return [
@@ -86,6 +87,8 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
           { action: KodaAction.TRANSITION as CaslPermissionAction, subject: 'Ticket' },
           { action: CaslPermissionAction.CREATE, subject: 'Label' },
           { action: CaslPermissionAction.READ, subject: 'CodeIntel' },
+          { action: CaslPermissionAction.CREATE, subject: 'FleetJob' },
+          { action: CaslPermissionAction.UPDATE, subject: 'FleetJob' },
         ];
       default:
         return base;

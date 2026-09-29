@@ -1,5 +1,7 @@
 import { PrismaClient } from '@prisma/client';
+import request from 'supertest';
 import type { RunnerCapabilities } from '../../src/fleet/common/protocol';
+import { data, loginToken, TEST_PASSWORD } from './http-app';
 
 export const FLEET_CAPS: RunnerCapabilities = {
   nax: { version: '0.83.0', protocols: ['native'] },
@@ -35,4 +37,51 @@ export async function insertRunner(prisma: PrismaClient, over: Partial<{ name: s
     },
     select: { id: true },
   });
+}
+
+type Who = 'root' | 'dev' | 'viewer' | 'outsider';
+
+export interface FleetHttpWorld {
+  tokens: Record<Who, string>;
+  ids: Record<Who, string>;
+  projectId: string;
+  opsProjectId: string;
+  repoId: string;
+  foreignRepoId: string;
+}
+
+/**
+ * Root admin (registered), projects `web` and `ops`, users dev (DEVELOPER on web), viewer
+ * (VIEWER on web) and outsider (no membership), GitHub fleet repos acme/app on web (default
+ * branch `trunk`) and acme/ops on ops, inserted directly (registration is covered by slice 1).
+ * Logs in four times: within the 5/min login throttle.
+ */
+export async function seedFleetHttpWorld(server: Parameters<typeof request>[0], prisma: PrismaClient): Promise<FleetHttpWorld> {
+  const tokens = {} as Record<Who, string>;
+  const ids = {} as Record<Who, string>;
+  tokens.root = data<{ accessToken: string }>(
+    await request(server).post('/api/auth/register').send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD }).expect(201),
+  ).accessToken;
+  const asRoot = { Authorization: `Bearer ${tokens.root}` };
+  for (const slug of ['web', 'ops']) {
+    await request(server).post('/api/projects').set(asRoot).send({ name: slug, slug, key: slug.toUpperCase() }).expect(201);
+  }
+  for (const [who, role] of [['dev', 'DEVELOPER'], ['viewer', 'VIEWER'], ['outsider', null]] as const) {
+    await request(server).post('/api/admin/users').set(asRoot).send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
+    tokens[who] = await loginToken(server, `${who}@koda.test`);
+    if (role) await request(server).post('/api/projects/web/members').set(asRoot).send({ email: `${who}@koda.test`, role }).expect(201);
+  }
+  for (const who of ['root', 'dev', 'viewer', 'outsider'] as const) {
+    ids[who] = (await prisma.user.findUniqueOrThrow({ where: { email: `${who}@koda.test` } })).id;
+  }
+  const web = await prisma.project.findUniqueOrThrow({ where: { slug: 'web' } });
+  const ops = await prisma.project.findUniqueOrThrow({ where: { slug: 'ops' } });
+  const repo = (projectId: string, name: string, defaultBranch: string) => prisma.fleetRepo.create({
+    data: { projectId, provider: 'github', owner: 'acme', name, defaultBranch, githubInstallationId: BigInt(77), createdById: ids.root },
+  });
+  return {
+    tokens, ids, projectId: web.id, opsProjectId: ops.id,
+    repoId: (await repo(web.id, 'app', 'trunk')).id,
+    foreignRepoId: (await repo(ops.id, 'ops', 'main')).id,
+  };
 }
