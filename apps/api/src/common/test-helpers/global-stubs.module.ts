@@ -11,6 +11,7 @@ import { outboxConfig } from '../../config/outbox.config';
 import { LIVE_CFG, ILiveConfig } from '../../config/live.config';
 import { WEBHOOK_CFG, IWebhookConfig } from '../../config/webhook.config';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
+import { testFleetConfig } from './fleet-config';
 
 export const mockPrismaService = {
   client: {
@@ -81,13 +82,7 @@ export const mockWebhookConfig: IWebhookConfig = {
   deliveryTimeoutMs: 5000,
 };
 
-export const mockFleetConfig: IFleetConfig = {
-  githubAppId: undefined,
-  githubAppPrivateKeyFile: undefined,
-  githubAppSlug: undefined,
-  enrollmentTtlSec: 86400,
-  httpTimeoutMs: 10000,
-};
+export const mockFleetConfig: IFleetConfig = testFleetConfig();
 
 @Global()
 @Module({

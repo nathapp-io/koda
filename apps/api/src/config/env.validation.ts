@@ -57,6 +57,15 @@ const envSchema = Joi.object({
   GITHUB_APP_SLUG: Joi.string().pattern(/^[a-z0-9-]+$/).optional(),
   FLEET_ENROLLMENT_TTL_SEC: Joi.number().integer().min(60).max(604_800).optional(),
   FLEET_HTTP_TIMEOUT_MS: Joi.number().integer().min(1000).max(60_000).optional(),
+  FLEET_RUNNER_OFFLINE_SEC: Joi.number().integer().min(10).max(3_600).optional(),
+  FLEET_JOB_CRASH_SEC: Joi.number().integer().min(30).max(86_400).optional(),
+  FLEET_SYNC_WAIT_MS: Joi.number().integer().min(0).max(60_000).optional(),
+  FLEET_SWEEP_ENABLED: Joi.string().pattern(/^(true|false)$/i).optional(),
+  FLEET_BUNDLE_MAX_BYTES: Joi.number().integer().min(1_024).max(2_147_483_647).optional(),
+  FLEET_ARTIFACT_DIR: Joi.string().optional(),
+  FLEET_GITLAB_BOT_NAME: Joi.string().max(100).optional(),
+  FLEET_GITLAB_BOT_EMAIL: Joi.string().email({ tlds: false }).optional(),
+  FLEET_ENROLLMENT_RETENTION_DAYS: Joi.number().integer().min(0).max(3_650).optional(),
 }).unknown(true);
 
 export function validate(config: Record<string, unknown>): Record<string, unknown> {
