@@ -52,6 +52,28 @@ export class GitHubAppClient {
     }
   }
 
+  /** Repo-scoped installation token (spec §7.1): contents + pull_requests write, metadata read. */
+  async mintInstallationToken(installationId: bigint, repoName: string): Promise<{ token: string; expiresAt: Date }> {
+    const minted = await this.http.request('POST', `${this.api}/app/installations/${installationId.toString()}/access_tokens`, this.headers(this.createAppJwt()), {
+      repositories: [repoName],
+      permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' },
+    });
+    if (minted.status === 404) throw new RepoCheckException('app_not_installed');
+    if (minted.status === 422 || minted.status === 403) throw new RepoCheckException('app_permissions_insufficient');
+    if (minted.status !== 201) throw new RepoCheckException('provider_error');
+    const { token, expires_at: expiresAt } = obj(minted.body);
+    if (typeof token !== 'string' || typeof expiresAt !== 'string' || Number.isNaN(Date.parse(expiresAt))) throw new RepoCheckException('provider_error');
+    return { token, expiresAt: new Date(expiresAt) };
+  }
+
+  /** Spec §7.1 attribution: one issue comment on the PR, with a fresh repo-scoped installation token. */
+  async commentOnPullRequest(installationId: bigint, owner: string, name: string, number: number, body: string): Promise<boolean> {
+    const { token } = await this.mintInstallationToken(installationId, name);
+    const path = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues/${number}/comments`;
+    const res = await this.http.request('POST', `${this.api}${path}`, this.headers(token), { body });
+    return res.status === 201;
+  }
+
   async verifyRepo(owner: string, name: string): Promise<CanonicalRepo & { installationId: bigint }> {
     const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
     const appJwt = this.createAppJwt();
@@ -62,14 +84,7 @@ export class GitHubAppClient {
     const installationId = obj(installation.body).id;
     if (typeof installationId !== 'number') throw new RepoCheckException('provider_error');
 
-    const minted = await this.http.request('POST', `${this.api}/app/installations/${installationId}/access_tokens`, this.headers(appJwt), {
-      repositories: [name],
-      permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' },
-    });
-    if (minted.status === 422 || minted.status === 403) throw new RepoCheckException('app_permissions_insufficient');
-    if (minted.status !== 201) throw new RepoCheckException('provider_error');
-    const token = obj(minted.body).token;
-    if (typeof token !== 'string') throw new RepoCheckException('provider_error');
+    const { token } = await this.mintInstallationToken(BigInt(installationId), name);
 
     const repo = await this.http.request('GET', `${this.api}${repoPath}`, this.headers(token));
     if (repo.status === 404) throw new RepoCheckException('repo_not_found');

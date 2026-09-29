@@ -156,3 +156,16 @@ export interface SyncResponse {
   unknownJobIds: string[];
   nextPollAfterMs?: number;
 }
+
+// ---- Slice 2b: bundle upload (spec §3.3) ----
+
+/**
+ * `PUT /fleet/runner/jobs/:jobId/bundle?leaseEpoch=<epoch>` with header
+ * `X-Content-SHA256` (lowercase hex of the body) and content-type `application/gzip`.
+ * Fenced: the runner must hold the job's (runnerId, leaseEpoch); a stale epoch answers
+ * 409 and queues an ABANDON command. Known limit (S1, documented, not fixed): a body
+ * sent without `Content-Length` that crosses `FLEET_BUNDLE_MAX_BYTES` mid-stream is
+ * destroyed by the server's streaming pipeline, so the client sees a connection reset
+ * instead of 413. The slice 3 runner always sends `Content-Length` (it uploads a
+ * finished file), so the server answers 413 before reading the body.
+ */

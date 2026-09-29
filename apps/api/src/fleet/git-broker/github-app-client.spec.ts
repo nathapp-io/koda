@@ -63,6 +63,16 @@ describe('GitHubAppClient', () => {
     await expect(client.verifyRepo('o', 'r')).rejects.toMatchObject({ reason: 'app_permissions_insufficient' });
   });
 
+  it('mints a repo-scoped installation token with its expiry', async () => {
+    forge.routes.set('POST /app/installations/77/access_tokens', (req) => {
+      expect(req.body).toEqual({ repositories: ['app'], permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' } });
+      return { status: 201, body: { token: 'ghs_x', expires_at: '2026-10-01T01:00:00Z' } };
+    });
+    await expect(client.mintInstallationToken(BigInt(77), 'app')).resolves.toEqual({ token: 'ghs_x', expiresAt: new Date('2026-10-01T01:00:00Z') });
+    forge.routes.set('POST /app/installations/78/access_tokens', () => ({ status: 404, body: {} }));
+    await expect(client.mintInstallationToken(BigInt(78), 'app')).rejects.toMatchObject({ reason: 'app_not_installed' });
+  });
+
   it('reports github_app_not_configured when the key file is unset', async () => {
     const bare = new GitHubAppClient({ ...fleetCfg, githubAppPrivateKeyFile: undefined } as never, { githubApiUrl: forge.url } as never, new FleetHttpClient(fleetCfg as never));
     await expect(bare.verifyRepo('o', 'r')).rejects.toMatchObject({ reason: 'github_app_not_configured' });

@@ -11,5 +11,9 @@
   "jobs": { "404": "未找到任务", "409": "该功能已有进行中的任务：{activeJobId}" },
   "jobState": { "409": "任务状态为 {state}，不允许此操作" },
   "dispatch": { "422": "指定的执行器无法运行此任务：{reason}" },
-  "dispatchInput": { "-2": "无效的派发请求：{reason}" }
+  "dispatchInput": { "-2": "无效的派发请求：{reason}" },
+  "sync": { "-2": "无效的同步请求：{reason}" },
+  "bundle": { "404": "此任务尚未上传产物包", "413": "产物包超过 {maxBytes} 字节", "415": "产物包必须是 application/gzip", "422": "产物包被拒绝：{reason}" },
+  "bundleInput": { "-2": "无效的产物包上传：{reason}" },
+  "fence": { "409": "此执行器不持有该任务的当前租约" }
 }
