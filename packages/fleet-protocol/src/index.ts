@@ -16,16 +16,29 @@ export interface ProfileNeeds {
   sandbox: boolean;
 }
 
+/** nax's verdict on one provider, mirroring `nax auth list --json` without account labels (slice 3 design §1.1). */
+export type RunnerCredentialExec = 'served' | 'declined' | 'error';
+export interface RunnerCredentialStored { kind: 'api-key' | 'oauth'; expires?: string; expired: boolean }
+export interface RunnerCredential {
+  providerId: string;
+  /** nax's verdict: stored, exec-served or ambient. Placement follows it (it ignores access-token expiry on purpose). */
+  available: boolean;
+  stored: RunnerCredentialStored | null;
+  /** Present when nax `auth.source` is exec. */
+  exec?: RunnerCredentialExec;
+  ambient: boolean;
+}
+
 /**
  * Validated by the server (#161): `nax.protocols` non-empty and unique; at most 64 profiles
  * named /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, each with at most 16 providers; at most 64
- * credentials; `expires` must parse as a date. Whole report at most 64 KiB.
+ * credentials; `stored.expires`, when present, must parse as a date. Whole report at most 64 KiB.
  */
 export interface RunnerCapabilities {
   nax: { version: string; protocols: NaxProtocol[] };
   sandbox: { available: boolean; probedAt: string; error?: string };
   profiles: Record<string, ProfileNeeds>;
-  credentials: Array<{ providerId: string; kind: string; expires?: string }>;
+  credentials: RunnerCredential[];
   tools: { git: boolean; gh: boolean; glab: boolean };
   executors: RunnerExecutor[];
 }

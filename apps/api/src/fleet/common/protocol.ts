@@ -21,6 +21,7 @@ export type {
   ReadoptPayload,
   RunnerArch,
   RunnerCapabilities,
+  RunnerCredential,
   RunnerEvent,
   RunnerEventType,
   RunnerExecutor,

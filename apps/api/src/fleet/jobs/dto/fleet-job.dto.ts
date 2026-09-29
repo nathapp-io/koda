@@ -63,7 +63,7 @@ export class FleetJobDto {
 export class PlacementMisfitDto {
   @ApiProperty() declare runnerId: string;
   @ApiProperty() declare name: string;
-  @ApiProperty({ enum: ['disabled', 'offline', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_expired', 'sandbox', 'tools', 'busy_repo', 'capacity'] })
+  @ApiProperty({ enum: ['disabled', 'offline', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox', 'tools', 'busy_repo', 'capacity'] })
   declare reason: MisfitReason;
 }
 
