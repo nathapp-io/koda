@@ -108,21 +108,55 @@ function parseCredentials(value: unknown): RunnerCredential[] {
   return value.map(parseCredential);
 }
 
+/** Same bounded-name and bounded-collection rules as the server validator (apps/api/src/fleet/common/capabilities.ts). */
+const PROFILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const MAX_PROFILES = 64;
+const MAX_PROVIDERS_PER_PROFILE = 16;
+const MAX_PROVIDER_ID_LENGTH = 200;
+
+/**
+ * Local shape check of one `capabilities.profiles` entry against the server validator
+ * (apps/api/src/fleet/common/capabilities.ts `parseProfile`); a bad profile would otherwise pass
+ * local load and only surface as a 400 on the first sync, which silently disables placement.
+ */
+function parseProfile(name: string, value: unknown): ProfileNeeds {
+  const where = `capabilities.profiles.${name}`;
+  if (!PROFILE_NAME.test(name)) throw new ConfigError(`${where} is not a valid profile name (must match ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$)`);
+  if (!isObj(value)) throw new ConfigError(`${where} must be an object`);
+  const { protocol, providers, sandbox } = value;
+  if (protocol !== 'native' && protocol !== 'acp') throw new ConfigError(`${where}.protocol must be native or acp`);
+  if (!Array.isArray(providers) || !providers.every((p) => typeof p === 'string' && p.length > 0 && p.length <= MAX_PROVIDER_ID_LENGTH)) {
+    throw new ConfigError(`${where}.providers must be an array of non-empty provider ids`);
+  }
+  if (providers.length > MAX_PROVIDERS_PER_PROFILE) throw new ConfigError(`${where}.providers has at most 16 entries`);
+  if (typeof sandbox !== 'boolean') throw new ConfigError(`${where}.sandbox must be a boolean`);
+  return { protocol, providers: [...(providers as string[])], sandbox };
+}
+
+function parseProfiles(profiles: unknown): Record<string, ProfileNeeds> {
+  if (profiles === undefined) return {};
+  if (!isObj(profiles)) throw new ConfigError('capabilities.profiles must be an object');
+  const entries = Object.entries(profiles);
+  if (entries.length > MAX_PROFILES) throw new ConfigError('capabilities.profiles has at most 64 profiles');
+  return Object.fromEntries(entries.map(([name, v]) => [name, parseProfile(name, v)]));
+}
+
 function parseCapabilities(value: unknown): StaticCapabilities {
   if (!isObj(value)) throw new ConfigError('capabilities is required');
   const { nax, sandbox, profiles, credentials, tools, executors } = value;
   if (!isObj(nax) || typeof nax.version !== 'string' || nax.version === '' || !Array.isArray(nax.protocols) || nax.protocols.length === 0 ||
-    !nax.protocols.every((p) => p === 'native' || p === 'acp')) throw new ConfigError('capabilities.nax needs a version and at least one protocol');
+    !nax.protocols.every((p) => p === 'native' || p === 'acp') || new Set(nax.protocols).size !== nax.protocols.length) {
+    throw new ConfigError('capabilities.nax needs a version and unique protocols from native and acp');
+  }
   if (!isObj(sandbox) || typeof sandbox.available !== 'boolean') throw new ConfigError('capabilities.sandbox.available must be a boolean');
   if (!isObj(tools) || typeof tools.git !== 'boolean' || typeof tools.gh !== 'boolean' || typeof tools.glab !== 'boolean') {
     throw new ConfigError('capabilities.tools needs git, gh and glab booleans');
   }
   if (!Array.isArray(executors) || executors.length === 0 || !executors.every((e) => e === 'host')) throw new ConfigError('capabilities.executors must be ["host"]');
-  if (profiles !== undefined && !isObj(profiles)) throw new ConfigError('capabilities.profiles must be an object');
   return {
     nax: { version: nax.version, protocols: [...(nax.protocols as NaxProtocol[])] },
     sandbox: { available: sandbox.available, ...(typeof sandbox.error === 'string' ? { error: sandbox.error } : {}) },
-    profiles: { ...((profiles as Record<string, ProfileNeeds> | undefined) ?? {}) },
+    profiles: parseProfiles(profiles),
     credentials: parseCredentials(credentials),
     tools: { git: tools.git, gh: tools.gh, glab: tools.glab },
     executors: ['host'],

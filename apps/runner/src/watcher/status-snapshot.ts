@@ -16,7 +16,7 @@ export function formatCost(spent: unknown): string | undefined {
   return spent.toFixed(4);
 }
 
-/** The server's `escalationReason` limit (`event-payloads.ts`: `str(p.escalationReason, 2_000)`); a longer one would 400 the whole event. */
+/** The server's `escalationReason` limit (`event-payloads.ts`: `str(p.escalationReason, 2_000)`); an over-limit reason is dropped whole, so clipping here preserves the first 2,000 characters. */
 const ESCALATION_REASON_MAX = 2_000;
 
 function clip(text: string | undefined, max: number): string | undefined {
