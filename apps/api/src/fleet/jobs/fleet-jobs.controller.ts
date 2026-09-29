@@ -63,7 +63,8 @@ export class FleetJobsController {
   @Get()
   @ApiOperation({ summary: 'List fleet jobs (project member)' })
   @ApiResponse({ status: 200, description: 'Page of FleetJobDto' })
-  async list(@Query() rawQuery: ListFleetJobsQuery, @CurrentProject() ctx: ProjectContext) {
+  async list(@Query() rawQuery: ListFleetJobsQuery, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    if (!isUserPrincipal(principal)) throw new ForbiddenAppException({}, 'projects');
     const { current, size, state, repoId, runnerId, requestedById, feature } = parseQuery(ListFleetJobsQuery, rawQuery);
     return JsonResponse.Ok(toPageResult(await this.jobs.list({ projectId: ctx.project.id, state, repoId, runnerId, requestedById, feature }, { current, size })));
   }
@@ -71,14 +72,16 @@ export class FleetJobsController {
   @Get(':id')
   @ApiOperation({ summary: 'Get a fleet job (project member)' })
   @ApiResponse({ status: 200, type: FleetJobDto })
-  async get(@Param('id') id: string, @CurrentProject() ctx: ProjectContext) {
+  async get(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    if (!isUserPrincipal(principal)) throw new ForbiddenAppException({}, 'projects');
     return JsonResponse.Ok(await this.jobs.get(ctx.project.id, id));
   }
 
   @Get(':id/events')
   @ApiOperation({ summary: 'Job timeline, ordered by seq (project member)' })
   @ApiResponse({ status: 200, description: 'Page of FleetJobEventDto' })
-  async events(@Param('id') id: string, @Query() rawQuery: KodaPageQuery, @CurrentProject() ctx: ProjectContext) {
+  async events(@Param('id') id: string, @Query() rawQuery: KodaPageQuery, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    if (!isUserPrincipal(principal)) throw new ForbiddenAppException({}, 'projects');
     const { current, size } = parseQuery(KodaPageQuery, rawQuery);
     return JsonResponse.Ok(toPageResult(await this.jobs.events(ctx.project.id, id, { current, size })));
   }

@@ -6,7 +6,7 @@ import type { DispatchFleetJobDto } from './dto/dispatch-fleet-job.dto';
 /** nax validateFeatureName (src/utils/feature-name.ts): a single path segment. */
 export const FEATURE_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 /** A conservative subset of git check-ref-format. */
-export const GIT_REF_RE = /^(?![-/])(?!.*\.\.)(?!.*\/\/)(?!.*\.lock$)(?!.*\/$)[A-Za-z0-9._/@+-]{1,255}$/;
+export const GIT_REF_RE = /^(?![-.\/])(?!.*\.\.)(?!.*\/\/)(?!.*\.lock$)(?!.*\/$)[A-Za-z0-9._/@+-]{1,255}$/;
 /** Reserved for the runner's per-job profile (spec §5.2 step 3). */
 export const RESERVED_PROFILE_PREFIX = 'koda-job-';
 

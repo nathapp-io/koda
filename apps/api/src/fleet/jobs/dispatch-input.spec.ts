@@ -33,7 +33,7 @@ describe('normalizeDispatch (spec §5.1)', () => {
     expect(() => normalizeDispatch(input, 'main')).toThrow(ValidationAppException);
   });
 
-  it.each([['main', true], ['feature/x', true], ['v1.2.3', true], ['-x', false], ['a..b', false], ['a//b', false], ['x.lock', false], ['x/', false], ['a b', false]])(
+  it.each([['main', true], ['feature/x', true], ['v1.2.3', true], ['-x', false], ['.foo', false], ['.hidden/x', false], ['a..b', false], ['a//b', false], ['x.lock', false], ['x/', false], ['a b', false]])(
     'ref %s valid=%s', (ref, ok) => {
       expect(GIT_REF_RE.test(ref)).toBe(ok);
     },

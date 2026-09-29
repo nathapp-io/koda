@@ -10,6 +10,7 @@ import { FleetActivityService } from '../activity/fleet-activity.service';
 import { normalizeDispatch } from './dispatch-input';
 import { FleetDispatchException } from './fleet-dispatch.exception';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
+import type { LiveFleetJobEvent } from '../../live/live-event';
 import { canTransition, isTerminal } from './job-state';
 import { JobTransitionsService } from './job-transitions.service';
 import { RunnerNotifier } from './runner-notifier';
@@ -101,6 +102,8 @@ export class FleetJobsService {
         }
       }
       if (current.cancelRequestedAt) return { job: current, live: null, wake: null };
+      // Reachable only in ASSIGNED (assign acked) / RUNNING / UPLOADING, all of which have a
+      // runner assigned by casAssign, so runnerId is non-null here.
       const updated = await this.repo.update(jobId, { cancelRequestedAt: now });
       await this.repo.createCommand({ runnerId: current.runnerId as string, jobId, type: FleetCommandType.CANCEL, leaseEpoch: current.leaseEpoch, payload: {} });
       await this.repo.appendEvent(jobId, { leaseEpoch: current.leaseEpoch, runnerSeq: null, type: 'lifecycle', payload: { level: 'info', message: 'cancel requested' } });
@@ -121,6 +124,7 @@ export class FleetJobsService {
     let queued: FleetJobRecord;
     let feature = '';
     let repoId = '';
+    let liveEvent: LiveFleetJobEvent;
     try {
       const r = await this.txManager.run(async () => {
         const current = await this.repo.lockById(jobId);
@@ -139,12 +143,13 @@ export class FleetJobsService {
         });
       });
       queued = r.job;
-      this.live.publish([r.live]);
+      liveEvent = r.live;
     } catch (error) {
       if (!(error instanceof DuplicateActiveJobError)) throw error;
       const activeJobId = await this.repo.findActiveJobId(repoId, feature);
       throw new ConflictAppException({ activeJobId: activeJobId ?? 'unknown' }, 'fleet.jobs');
     }
+    this.live.publish([liveEvent]);
     const outcome = await this.placement.placeJob(queued.id);
     const fresh = (await this.repo.findById(queued.id)) ?? queued;
     return Object.assign(new DispatchResultDto(), {
