@@ -4,6 +4,8 @@
 
 > **Numbering.** This is plan 3a-1, the first half of slice 3a. Task numbers are the combined slice-3a numbering: this plan holds Tasks 0-11 (plus 11b, repo wiring and PR text); Tasks 12-28 (git, executor, watcher, bundle, supervisor, daemon, CLI, integration harness and scenarios) are plan **3a-2**, a separate PR on its own branch cut after 3a-1 merges, and cite this plan's decision register. Decision numbers continue the fleet S1 register: D1-D20 live in the 2a and 2b plans and still govern the server; this plan adds **D21-D59** (3a-2 uses D60 and up). "3b" (git-cred socket, credential helper, shims, `NaxCapabilityProbe`, `install-service`, live check) is a separate plan and is out of scope here except for the seams named in the Self-review.
 
+> **Rides along, do not execute here.** This branch also carries `docs/superpowers/plans/2026-09-30-fleet-s1-slice-3a-2-runner-execution.md` (Tasks 0b, 12-28) as a document only. Implement only Tasks 0-11 and 11b in this PR; plan 3a-2 is executed in its own PR on `feat/fleet-s1-slice3a-2-runner-execution`, cut from `main` after this PR merges.
+
 **Prerequisite:** slices 1, 2a and 2b are merged (`main` at `32b543d0`, the #166 squash of the slice 3 design, on top of `fa721a30`). This plan builds on branch `feat/fleet-s1-slice3a-1-runner-foundations`; the plan file is the only commit on top of `main`. The slice 3 design and the S1 spec pointer amendments (S1 spec §2.1, §5.2, §7.2, §10) are already on `main`; Task 0 verifies them. Server code is unchanged between `fa721a30` and `32b543d0` (only two spec documents differ), so every server line citation below was checked at `32b543d0`. Nothing else is in development in parallel.
 
 **Goal:** Ship the protocol and runner foundations as one PR: the protocol v1 `credentials` edit with its server validator and placement `provider_unavailable`, #157 (runner capacity on `/fleet/runner/me`, `ke_` prefix on enroll), the regenerated contract, and a new `apps/runner` package (`@nathapp/koda-runner`) with its scaffold, foundations (logger, time, safe segments, test helpers), config and identity, the bun:sqlite journal, the server client with batching and backoff, the sync loop, and the pure verdict and snapshot mapping. Everything is unit-tested and database-free except Task 3 **[DB]**. Tasks 12-28 (git, executor, watcher, bundle, supervisor, daemon, CLI, integration against the real API) are plan 3a-2.
@@ -4003,7 +4005,7 @@ Title: `feat(fleet): S1 slice 3a-1 — protocol v1 credentials, #157, runner fou
 
 ```markdown
 ## Summary
-Fleet S1 slice 3a-1 — protocol and runner foundations (design `docs/superpowers/specs/2026-09-30-fleet-s1-slice-3-runner-design.md`, plan `docs/superpowers/plans/2026-09-30-fleet-s1-slice-3a-1-runner-foundations.md`). Slice 3a-2 (git, executor, watcher, bundle, supervisor, daemon, CLI, integration) follows on its own branch.
+Fleet S1 slice 3a-1 — protocol and runner foundations (design `docs/superpowers/specs/2026-09-30-fleet-s1-slice-3-runner-design.md`, plan `docs/superpowers/plans/2026-09-30-fleet-s1-slice-3a-1-runner-foundations.md`). Slice 3a-2 (git, executor, watcher, bundle, supervisor, daemon, CLI, integration) follows on its own branch; its plan, `docs/superpowers/plans/2026-09-30-fleet-s1-slice-3a-2-runner-execution.md`, is included in this PR as a document only.
 
 - Protocol v1: `RunnerCapabilities.credentials` mirrors `nax auth list --json` (R-3.2); `stored` is required (object or null); validator, placement (`provider_unavailable`, `provider_expired` removed), DTO enum, openapi.
 - #157: runner capacity on `/fleet/runner/me`; `ke_` prefix check on enroll.
@@ -4016,6 +4018,8 @@ Closes #157.
 D21-D59 in the plan (the decision register; 3a-2 continues at D60).
 
 ## Out of scope
+
+- Executing plan 3a-2 (`docs/superpowers/plans/2026-09-30-fleet-s1-slice-3a-2-runner-execution.md`): it is committed on this branch as a document for the next PR, not implemented here.
 3a-2 (git workspace, executor, watcher, bundle, supervisor, daemon, CLI, integration harness and scenarios, compile script, CI runner-integration step) and 3b (git-cred socket, credential helper, gh/glab shims, `NaxCapabilityProbe`, `install-service`, live check).
 ```
 
