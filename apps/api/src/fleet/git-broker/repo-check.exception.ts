@@ -2,6 +2,7 @@ import { AppException } from '@nathapp/nestjs-common';
 
 export type RepoCheckReason =
   | 'github_app_not_configured'
+  | 'github_app_key_unreadable'
   | 'app_not_installed'
   | 'app_permissions_insufficient'
   | 'repo_not_found'

@@ -37,12 +37,19 @@ export class GitHubAppClient {
   /** RS256 App JWT: iat 60s in the past for clock skew, 9 min lifetime (GitHub max is 10). */
   createAppJwt(now: Date = new Date()): string {
     if (!isGitHubAppConfigured(this.fleetConfig)) throw new RepoCheckException('github_app_not_configured');
-    this.privateKey ??= readFileSync(this.fleetConfig.githubAppPrivateKeyFile as string, 'utf8');
-    const iat = Math.floor(now.getTime() / 1000) - 60;
-    const header = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
-    const payload = b64url(JSON.stringify({ iat, exp: iat + 600, iss: this.fleetConfig.githubAppId }));
-    const signature = createSign('RSA-SHA256').update(`${header}.${payload}`).sign(this.privateKey);
-    return `${header}.${payload}.${b64url(signature)}`;
+    try {
+      this.privateKey ??= readFileSync(this.fleetConfig.githubAppPrivateKeyFile as string, 'utf8');
+      const iat = Math.floor(now.getTime() / 1000) - 60;
+      const header = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
+      const payload = b64url(JSON.stringify({ iat, exp: iat + 600, iss: this.fleetConfig.githubAppId }));
+      const signature = createSign('RSA-SHA256').update(`${header}.${payload}`).sign(this.privateKey);
+      return `${header}.${payload}.${b64url(signature)}`;
+    } catch (error) {
+      if (error instanceof RepoCheckException) throw error;
+      // A set-but-broken key path (ENOENT/EACCES) or unparseable PEM is a setup fault the
+      // operator must see as a 422 with a fixed reason, not a raw 500 (spec §7.1).
+      throw new RepoCheckException('github_app_key_unreadable');
+    }
   }
 
   async verifyRepo(owner: string, name: string): Promise<CanonicalRepo & { installationId: bigint }> {
