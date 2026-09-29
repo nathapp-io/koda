@@ -224,3 +224,7 @@ Rules:
 - Server-owned terminal transitions of a held job bump `leaseEpoch` and withdraw pending commands (plan D4). Requeue bumps it too.
 - Publish `fleet_job` live events and wake runners only after the transaction commits.
 - Tests build the schema with `prisma db push`; partial unique indexes live in `test/helpers/partial-indexes.ts` and must also be shipped verbatim by a migration.
+- Every runner write (events, acks, token requests, bundles) is fenced by `(runnerId, leaseEpoch)` through `FenceService`; a mismatch queues one `ABANDON` and stores nothing.
+- Never hold a transaction across the sync long-poll or forge HTTP. One failing job or ack in a sync is logged and skipped, never allowed to fail the whole request.
+- Runner strings are untrusted: parse through `parseSyncRequest` (NUL replaced) and `interpretEvent` (bounded fields dropped, never fatal).
+- Git tokens exist only in `GitTokenBroker`'s memory cache and the sync response: never logged, stored, or put in a command or activity payload.

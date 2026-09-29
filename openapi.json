@@ -5355,6 +5355,148 @@
           "fleet"
         ]
       }
+    },
+    "/api/fleet/runner/sync": {
+      "post": {
+        "operationId": "RunnerSyncController_sync",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "SyncRequest (packages/fleet-protocol)"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "SyncResponse (packages/fleet-protocol)"
+          },
+          "400": {
+            "description": "Malformed sync request or capabilities"
+          },
+          "426": {
+            "description": "Unsupported protocol version"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Runner sync: events, command acks, token requests; long-polls when idle",
+        "tags": [
+          "fleet-runner"
+        ]
+      }
+    },
+    "/api/fleet/runner/jobs/{jobId}/bundle": {
+      "put": {
+        "operationId": "BundleUploadController_upload",
+        "parameters": [
+          {
+            "name": "jobId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "leaseEpoch",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-content-sha256",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "content-type",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "content-length",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "{ jobId, leaseEpoch, sizeBytes, sha256 }"
+          },
+          "409": {
+            "description": "Stale lease, or job not RUNNING/UPLOADING"
+          },
+          "413": {
+            "description": "Larger than FLEET_BUNDLE_MAX_BYTES"
+          },
+          "415": {
+            "description": "Not application/gzip"
+          },
+          "422": {
+            "description": "X-Content-SHA256 mismatch"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Upload the run bundle (tar.gz) for the held lease; replaces this epoch's previous bundle",
+        "tags": [
+          "fleet-runner"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/jobs/{id}/bundle": {
+      "get": {
+        "operationId": "JobBundleController_download",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "tar.gz stream"
+          },
+          "404": {
+            "description": "No such job or no bundle yet"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Download the latest run bundle (project member)",
+        "tags": [
+          "fleet"
+        ]
+      }
     }
   },
   "info": {
