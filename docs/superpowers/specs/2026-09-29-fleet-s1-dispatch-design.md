@@ -4,7 +4,7 @@
 **Base:** `main` @ `5ef74662` (Track 1 and Track 3 complete, PRs #133-#154)
 **nax reference:** main `1c7aa52ee` (v0.83.0-canary.2)
 **Source:** fleet platform design doc (`projects/koda/koda-fleet-platform-design-2026-09-13.md`, workspace repo) §3, §6, §7, the §9.2 native-agent amendments and the §9.12 Paperclip copy list C1-C9. This spec supersedes §7.
-**Status:** Sectioned design approved in chat 2026-09-29 (seven sections). Spec review 2026-09-29 (two Sonnet reviewers, koda side and nax side): READY AFTER FIXES, all applied; isolation ruling R7 added. Awaiting user review.
+**Status:** Sectioned design approved in chat 2026-09-29 (seven sections). Spec review 2026-09-29 (two Sonnet reviewers, koda side and nax side): READY AFTER FIXES, all applied; rulings R7-R9 added. **Approved by the user 2026-09-29.**
 
 ## Goal
 
