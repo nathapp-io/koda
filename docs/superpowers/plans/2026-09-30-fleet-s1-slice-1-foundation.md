@@ -649,7 +649,9 @@ git commit -m "feat(fleet): fleet config (GitHub App, enrollment TTL, HTTP timeo
 - Create: `apps/api/src/i18n/en/fleet.json`, `apps/api/src/i18n/zh/fleet.json`
 
 **Interfaces:**
-- Produces: `RunnerPrincipal { actorType: 'runner'; id; name; runnerName; labels: readonly string[]; enabled: boolean; blacklisted; revoked; authorities: [] }`; `KodaPrincipal = UserPrincipal | AgentPrincipal | RunnerPrincipal`; `isRunnerPrincipal()`; `RUNNER_KEY_PREFIX = 'kr_'`; `RUNNER_ROUTE_KEY`; `RunnerRoute()`; `RunnerDomain { id; name; labels: string[]; enabled: boolean }`; `PrismaAuthRepository.findRunnerByKeyHash(hash): Promise<RunnerDomain | null>`; `toRunnerPrincipal(r: RunnerDomain): RunnerPrincipal`.
+- Produces: `RunnerPrincipal { actorType: 'runner'; id; name; runnerName; labels: readonly string[]; enabled: boolean; blacklisted; revoked; authorities: [] }`; `KodaPrincipal = UserPrincipal | AgentPrincipal | RunnerPrincipal`; `isRunnerPrincipal()`; `RUNNER_KEY_PREFIX = 'kr_'`; `RUNNER_ROUTE_KEY`; `RunnerRoute()`; `RunnerDomain { id; name; labels: string[]; enabled: boolean }`; `PrismaAuthRepository.findRunnerByKeyHash(hash): Promise<RunnerDomain | null>`; `toRunnerPrincipal(r: RunnerDomain): RunnerPrincipal`; `actorKind(principal: KodaPrincipal): 'user' | 'agent'` (throws for a runner).
+
+Also modify (runner audit, spec §1 "audit every exhaustive match"): `apps/api/src/comments/comments.service.ts:88,131-132`, `apps/api/src/tickets/tickets.service.ts:57`, `apps/api/src/tickets/state-machine/ticket-transitions.service.ts:98,124`. These use plain `isUserPrincipal(p) ? 'user' : 'agent'` ternaries, which `tsc` cannot flag, so a runner would silently be recorded as an agent. `memory.controller.ts:35` already rejects anything that is neither user nor agent, and `memory.controller.ts:18` returns `null` for it; both stay as they are.
 
 Rules this task enforces (spec §1, plan D4, D5):
 
@@ -753,11 +755,19 @@ describe('runner keys (fleet)', () => {
 `actor-foreign-keys.spec.ts` (add, or create with these imports):
 ```ts
 import { actorForeignKeys } from './actor-foreign-keys';
+import { actorKind } from './koda-principal.types';
 import type { RunnerPrincipal } from './koda-principal.types';
 
 it('refuses to derive ticket/comment actor columns for a runner', () => {
   const runner = { actorType: 'runner', id: 'r1', name: 'r', runnerName: 'r', labels: [], enabled: true, blacklisted: false, revoked: false, authorities: [] } as RunnerPrincipal;
   expect(() => actorForeignKeys(runner, 'createdBy')).toThrow('runner principals cannot author domain records');
+});
+
+it('actorKind maps users and agents and refuses runners', () => {
+  const runner = { actorType: 'runner', id: 'r1', name: 'r', runnerName: 'r', labels: [], enabled: true, blacklisted: false, revoked: false, authorities: [] } as RunnerPrincipal;
+  expect(actorKind({ actorType: 'user' } as never)).toBe('user');
+  expect(actorKind({ actorType: 'agent' } as never)).toBe('agent');
+  expect(() => actorKind(runner)).toThrow('runner principals cannot author domain records');
 });
 ```
 
@@ -796,6 +806,19 @@ export type KodaPrincipal = UserPrincipal | AgentPrincipal | RunnerPrincipal;
 export const isRunnerPrincipal = (principal: KodaPrincipal): principal is RunnerPrincipal =>
   principal.actorType === 'runner';
 ```
+
+Also add to `koda-principal.types.ts`:
+```ts
+/** Binary actor kind for ticket/comment events. Runners never author domain records. */
+export function actorKind(principal: KodaPrincipal): 'user' | 'agent' {
+  if (principal.actorType === 'runner') throw new Error('runner principals cannot author domain records');
+  return principal.actorType;
+}
+```
+and replace the ternaries at the audit sites:
+- `comments.service.ts:88`, `tickets.service.ts:57`, `ticket-transitions.service.ts:98` and `:124`: `const actorType = isUserPrincipal(principal) ? 'user' : 'agent';` becomes `const actorType = actorKind(principal);`
+- `comments.service.ts:131-132`: replace the two `authorUserId` / `authorAgentId` lines with `...actorForeignKeys(principal, 'authoredBy'),` (same values; it already imports nothing for this, so add `import { actorForeignKeys } from '../auth/principal/actor-foreign-keys';`).
+Remove any `isUserPrincipal` import that becomes unused.
 
 `actor-foreign-keys.ts`, first lines of the implementation signature body:
 ```ts
@@ -871,7 +894,13 @@ Replace `canActivate` lines 22-31 (up to the API-key `try`) so the runner branch
     }
     if (isRunnerRoute) throw new AuthException({}, 'fleet.runnerAuth');
 ```
-(the rest of `canActivate`, from `// Try API Key first`, is unchanged). Add the helpers and reuse `bearerToken` inside `tryApiKey` (replace its lines 62-70 with `const rawKey = this.bearerToken(request); if (!rawKey) return false;`):
+(the rest of `canActivate`, from `// Try API Key first`, is unchanged). Add the helpers and reuse `bearerToken` inside `tryApiKey`: replace its lines 62-70 (the request declaration plus the header parsing) with the three lines below. Keep the `request` declaration: line 90 (`request['user'] = …`) still uses it.
+```ts
+    const request = context.switchToHttp().getRequest<Record<string, unknown>>();
+    const rawKey = this.bearerToken(request);
+    if (!rawKey) return false;
+```
+Helpers:
 ```ts
   private bearerToken(request: Record<string, unknown>): string {
     const headers = request['headers'] as Record<string, string | string[]> | undefined;
@@ -951,13 +980,13 @@ export function toRunnerPrincipal(runner: RunnerDomain): RunnerPrincipal {
 
 - [ ] **Step 7: Run the specs and the type check**
 
-Run: `cd apps/api && bun run test:scoped src/auth && bunx tsc --noEmit -p tsconfig.json`
-Expected: all pass. If the type check flags an exhaustive `switch` on `actorType`, add a `case 'runner':` that throws `ForbiddenAppException` (the auth map found none, but ts is the authority).
+Run: `cd apps/api && bun run test:scoped src/auth src/comments src/tickets && bunx tsc --noEmit -p tsconfig.json`
+Expected: all pass (the comment and ticket specs prove the audit edits kept behaviour). If the type check flags an exhaustive `switch` on `actorType`, add a `case 'runner':` that throws `ForbiddenAppException` (the auth map found none, but ts is the authority).
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add apps/api/src/auth apps/api/src/i18n/en/fleet.json apps/api/src/i18n/zh/fleet.json
+git add apps/api/src/auth apps/api/src/comments apps/api/src/tickets apps/api/src/i18n/en/fleet.json apps/api/src/i18n/zh/fleet.json
 git commit -m "feat(fleet): runner principal with fail-closed runner route isolation"
 ```
 
@@ -3318,7 +3347,7 @@ import { FLEET_REPO_REPOSITORY } from './domain/fleet-repo.domain';
 })
 export class FleetReposModule {}
 ```
-If `VcsModule` does not export `VCS_REPOSITORY`, add it to `VcsModule.exports` (one-line change in `apps/api/src/vcs/vcs.module.ts`) rather than re-providing the Prisma VCS repository here. Add `FleetReposModule` to `FleetModule.imports` and `expect(module.get(FleetReposService)).toBeDefined();` to `fleet.module.spec.ts` (stub `VCS_CFG` in its `FakeGlobalsModule` if needed).
+`VcsModule` does not export `VCS_REPOSITORY` today (its `exports` list only services): add `VCS_REPOSITORY` to `VcsModule.exports` in `apps/api/src/vcs/vcs.module.ts` rather than re-providing the Prisma VCS repository here. Add `FleetReposModule` to `FleetModule.imports` and `expect(module.get(FleetReposService)).toBeDefined();` to `fleet.module.spec.ts` (stub `VCS_CFG` in its `FakeGlobalsModule` if needed).
 
 - [ ] **Step 6: Run the unit specs**
 
@@ -3529,7 +3558,7 @@ Expected: all green; `openapi.json` unchanged by the second generate. Record api
 - [ ] **Step 3: Security self-check**
 
 ```bash
-git diff a36adcc6 -- apps/api/src | grep -nE "console\.log|apiKeyHash|tokenHash" | grep -v "spec.ts"
+git diff --name-only a36adcc6 -- apps/api/src | grep -v '\.spec\.ts$' | xargs grep -nE "console\.log|apiKeyHash|tokenHash"
 ```
 Expected: `apiKeyHash`/`tokenHash` appear only in the schema-facing repository code and key generation, never in a DTO, log call or activity payload. No `console.log`.
 
