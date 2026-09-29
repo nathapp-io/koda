@@ -69,6 +69,24 @@ describeIntegration('runner sync lifecycle (PG)', () => {
     expect(await job(j.id)).toEqual(expect.objectContaining({ state: 'FAILED', stateReason: 'assign rejected: workspace root full' }));
   });
 
+  it('acks an ASSIGN whose lease was requeued elsewhere as stale and queues one ABANDON without a job transition (review focus 1)', async () => {
+    const j = await dispatch('stale-ack');
+    const assign = (await sync()).commands.find((c) => c.jobId === j.id && c.type === 'ASSIGN')!;
+    // Simulate a server-side requeue: bump the lease epoch directly, bypassing transitions.
+    await prisma.fleetJob.update({ where: { id: j.id }, data: { leaseEpoch: j.leaseEpoch + 1 } });
+    await sync({ commandAcks: [{ commandId: assign.commandId, leaseEpoch: j.leaseEpoch, result: 'ok' }] });
+    expect((await prisma.fleetCommand.findUniqueOrThrow({ where: { id: assign.commandId } })).ackResult).toBe('stale');
+    expect(await prisma.fleetCommand.count({ where: { jobId: j.id, type: 'ABANDON' } })).toBe(1);
+    expect(await job(j.id)).toEqual(expect.objectContaining({ state: 'ASSIGNED', leaseEpoch: j.leaseEpoch + 1 }));
+    await sync({});
+    expect(await prisma.fleetCommand.count({ where: { jobId: j.id, type: 'ABANDON' } })).toBe(1);
+    // Drain leftover pending commands (the ABANDON plus the boot reconcile's READOPT) so the
+    // next test's idle sync actually idles.
+    for (let pending = (await sync({})).commands; pending.length > 0; pending = (await sync({})).commands) {
+      await sync({ commandAcks: pending.map((c) => ({ commandId: c.commandId, leaseEpoch: c.leaseEpoch, result: 'ok' })) });
+    }
+  });
+
   it('delivers CANCEL for a running job and ends CANCELLED when the runner reports it', async () => {
     const j = await startRunning('cancel');
     await request(server).post(`/api/projects/web/fleet/jobs/${j.id}/cancel`).set(asDev()).expect(200);
