@@ -188,3 +188,12 @@ Rules:
 - when controller/DTO contract changes are made, regenerate the spec from the monorepo root
 - downstream CLI client generation depends on this spec
 - do not edit generated downstream clients manually to compensate for stale API contracts
+
+## Fleet (S1)
+
+- Spec: `docs/superpowers/specs/2026-09-29-fleet-s1-dispatch-design.md`. Code under `src/fleet/`.
+- Runner keys start with `kr_` and work only on `@RunnerRoute()` routes; `CombinedAuthGuard` fails closed in both directions. Never add a runner route without `@RunnerRoute()`, and never let a runner principal reach a ticket, comment or project route.
+- `apps/api` may import `@nathapp/fleet-protocol` with `import type` only (the production image does not ship workspace packages); `src/fleet/common/protocol.spec.ts` enforces it.
+- Runner capabilities are untrusted input: always pass them through `parseCapabilities`.
+- Forge HTTP goes through `FleetHttpClient` (timeout, no redirects). Minted git tokens are never stored or logged.
+- `FleetActivityService.record` runs inside the mutating `txManager.run`; payloads must not carry secrets.
