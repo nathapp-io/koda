@@ -44,6 +44,13 @@ export class PrismaRunnerRepository implements IRunnerRepository {
     return this.db.runnerEnrollment.findUnique({ where: { tokenHash }, select: { id: true, labels: true, createdById: true } });
   }
 
+  async deleteSpentEnrollmentsBefore(before: Date): Promise<number> {
+    const { count } = await this.db.runnerEnrollment.deleteMany({
+      where: { OR: [{ usedAt: { lt: before } }, { usedAt: null, expiresAt: { lt: before } }] },
+    });
+    return count;
+  }
+
   async linkEnrollment(enrollmentId: string, runnerId: string): Promise<void> {
     await this.db.runnerEnrollment.update({ where: { id: enrollmentId }, data: { runnerId } });
   }

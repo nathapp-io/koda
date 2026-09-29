@@ -58,6 +58,8 @@ export interface IRunnerRepository {
   /** Atomically marks an unused, unexpired token used; null when none matched. */
   consumeEnrollment(tokenHash: string, now: Date): Promise<Pick<EnrollmentRecord, 'id' | 'labels' | 'createdById'> | null>;
   linkEnrollment(enrollmentId: string, runnerId: string): Promise<void>;
+  /** #162: deletes consumed rows used before `before` and never-used rows that expired before it. */
+  deleteSpentEnrollmentsBefore(before: Date): Promise<number>;
   /** Throws ConflictAppException(fleet.runners) on a duplicate name. */
   createRunner(data: NewRunner): Promise<RunnerRecord>;
   findRunnerById(id: string): Promise<RunnerRecord | null>;
