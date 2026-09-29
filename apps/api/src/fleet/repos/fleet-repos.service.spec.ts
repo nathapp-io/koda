@@ -63,4 +63,13 @@ describe('FleetReposService', () => {
     // an empty key is falsy and exercises the vcs_encryption_key_missing branch.
     await expect(make('').create('u1', { projectSlug: 'p', provider: 'gitlab', owner: 'group', name: 'app' })).rejects.toMatchObject({ reason: 'vcs_encryption_key_missing' });
   });
+
+  it('rejects GitLab registration with undecryptable token ciphertext as gitlab_token_invalid', async () => {
+    // Matching connection, key present, but the ciphertext is garbage (e.g. key
+    // rotation without re-encryption): the crypto error must surface as the fixed
+    // 422 reason, never as a 500 echoing library detail, and the forge is not called.
+    vcsRepo.findVcsConnectionByProjectId.mockResolvedValue({ provider: 'gitlab', repoOwner: 'group', repoName: 'app', encryptedToken: 'not-a-valid-ciphertext' });
+    await expect(make().create('u1', { projectSlug: 'p', provider: 'gitlab', owner: 'group', name: 'app' })).rejects.toMatchObject({ reason: 'gitlab_token_invalid' });
+    expect(gitlab.verifyRepo).not.toHaveBeenCalled();
+  });
 });
