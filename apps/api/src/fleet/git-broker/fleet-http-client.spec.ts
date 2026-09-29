@@ -32,4 +32,11 @@ describe('FleetHttpClient', () => {
     await expect(client.request('GET', `${forge.url}/slow`, {})).rejects.toBeInstanceOf(RepoCheckException);
     expect(Date.now() - started).toBeLessThan(2500);
   });
+
+  it('maps a mid-body stall to provider_unreachable (the timeout also bounds the body read)', async () => {
+    forge.routes.set('GET /stall-body', () => ({ status: 200, body: { a: 1 }, stallBodyMs: 3000 }));
+    const started = Date.now();
+    await expect(client.request('GET', `${forge.url}/stall-body`, {})).rejects.toMatchObject({ reason: 'provider_unreachable' });
+    expect(Date.now() - started).toBeLessThan(2500);
+  });
 });

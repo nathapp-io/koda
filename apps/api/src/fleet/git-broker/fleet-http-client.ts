@@ -24,12 +24,15 @@ export class FleetHttpClient {
       throw new RepoCheckException('provider_unreachable');
     }
     if (response.status >= 300 && response.status < 400) throw new RepoCheckException('provider_unreachable');
-    const text = await response.text();
     let parsed: unknown = undefined;
     try {
+      const text = await response.text();
       parsed = text ? JSON.parse(text) : undefined;
     } catch {
-      parsed = undefined;
+      // The timeout signal bounds the whole exchange, not just the fetch: a provider that
+      // stalls or resets mid-body (or answers unparseably) must map to provider_unreachable
+      // instead of leaking a raw abort error (plan D8, spec §7.1 Review Focus 4).
+      throw new RepoCheckException('provider_unreachable');
     }
     return { status: response.status, body: parsed };
   }
