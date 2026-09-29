@@ -5,6 +5,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FleetModule } from './fleet.module';
 import { EnrollmentService } from './runners/enrollment.service';
+import { RunnersService } from './runners/runners.service';
 import { FleetActivityService } from './activity/fleet-activity.service';
 import { mockAuthConfig, mockFleetConfig } from '../common/test-helpers/global-stubs.module';
 import { AUTH_CFG } from '../config/auth.config';
@@ -44,5 +45,6 @@ describe('FleetModule', () => {
   it('compiles with its providers resolvable', async () => {
     expect(module.get(FleetActivityService)).toBeDefined();
     expect(module.get(EnrollmentService)).toBeDefined();
+    expect(module.get(RunnersService)).toBeDefined();
   });
 });

@@ -70,8 +70,9 @@ describeIntegration('fleet enrollment (PG)', () => {
     expect(me).toEqual({ id: enrolled.runnerId, name: 'box-1', labels: ['gpu', 'linux'], enabled: true });
 
     await request(server).get('/api/projects').set(auth(enrolled.apiKey)).expect(401);
-    // /api/fleet/activity stands in for /api/fleet/runners here: that admin route only
-    // exists once Task 8 adds runners.controller.ts, which will assert it directly.
+    // Task 8 added runners.controller.ts, so /api/fleet/runners now exists and a runner
+    // key is asserted against it directly (deeper coverage in runner-admin.integration.spec.ts).
+    await request(server).get('/api/fleet/runners').set(auth(enrolled.apiKey)).expect(401);
     await request(server).get('/api/fleet/activity').set(auth(enrolled.apiKey)).expect(401);
     await request(server).post('/api/fleet/runner/enroll').send(enrollBody(token, 'box-2')).expect(401);
   });
