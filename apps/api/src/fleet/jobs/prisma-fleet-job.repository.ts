@@ -173,6 +173,14 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     return rows.map((r) => ({ runnerId: r.runnerId as string, repoId: r.repoId }));
   }
 
+  /**
+   * Append a server or runner event. **Must be called inside `txManager.run` while the
+   * caller holds the job's row lock** (`lockById` with `FOR UPDATE`). The increment of
+   * `eventSeq` is two queries and is serialised by that lock; outside the lock the
+   * @@unique([jobId, seq]) index would surface duplicate seq values as P2002.
+   * Task 13 of this plan (TYPE-2) maps the runnerSeq-side P2002 to a no-op so the caller
+   * still makes progress on a same-`(jobId, leaseEpoch, runnerSeq)` insert.
+   */
   async appendEvent(jobId: string, e: { leaseEpoch: number; runnerSeq: number | null; type: string; payload: unknown }): Promise<FleetJobEventRecord> {
     const { eventSeq } = await this.db.fleetJob.update({ where: { id: jobId }, data: { eventSeq: { increment: 1 } }, select: { eventSeq: true } });
     return this.db.fleetJobEvent.create({
