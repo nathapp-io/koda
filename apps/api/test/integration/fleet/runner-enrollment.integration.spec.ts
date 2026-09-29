@@ -66,8 +66,8 @@ describeIntegration('fleet enrollment (PG)', () => {
     );
     expect(enrolled.apiKey).toMatch(/^kr_/);
 
-    const me = data<{ id: string; labels: string[] }>(await request(server).get('/api/fleet/runner/me').set(auth(enrolled.apiKey)).expect(200));
-    expect(me).toEqual({ id: enrolled.runnerId, name: 'box-1', labels: ['gpu', 'linux'], enabled: true });
+    const me = data<Record<string, unknown>>(await request(server).get('/api/fleet/runner/me').set(auth(enrolled.apiKey)).expect(200));
+    expect(me).toEqual({ id: enrolled.runnerId, name: 'box-1', labels: ['gpu', 'linux'], capacity: 1, enabled: true });
 
     await request(server).get('/api/projects').set(auth(enrolled.apiKey)).expect(401);
     // Task 8 added runners.controller.ts, so /api/fleet/runners now exists and a runner
@@ -75,6 +75,12 @@ describeIntegration('fleet enrollment (PG)', () => {
     await request(server).get('/api/fleet/runners').set(auth(enrolled.apiKey)).expect(401);
     await request(server).get('/api/fleet/activity').set(auth(enrolled.apiKey)).expect(401);
     await request(server).post('/api/fleet/runner/enroll').send(enrollBody(token, 'box-2')).expect(401);
+  });
+
+  it('answers the bad-token 401 for a non-ke_ token without consuming anything (#157)', async () => {
+    const { token } = await newToken();
+    await request(server).post('/api/fleet/runner/enroll').send(enrollBody(`x${token}`, 'box-bad')).expect(401);
+    await request(server).post('/api/fleet/runner/enroll').send(enrollBody(token, 'box-good')).expect(201);
   });
 
   it('refuses user JWTs and missing credentials on runner routes', async () => {

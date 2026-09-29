@@ -32,6 +32,8 @@ export interface RunnerPrincipal extends IPrincipal {
   labels: readonly string[];
   /** Disabled runners still authenticate so they can drain; placement ignores them. */
   enabled: boolean;
+  /** Slots the operator granted this runner (PATCH /fleet/runners/:id); the runner reads it from /fleet/runner/me. */
+  capacity: number;
 }
 
 export type KodaPrincipal = UserPrincipal | AgentPrincipal | RunnerPrincipal;

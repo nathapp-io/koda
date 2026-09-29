@@ -24,4 +24,5 @@ export interface RunnerDomain {
   name: string;
   labels: string[];
   enabled: boolean;
+  capacity: number;
 }

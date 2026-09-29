@@ -8,7 +8,7 @@ import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { remapPage } from '../../common/dto/koda-page.query';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { parseCapabilities } from '../common/capabilities';
-import { generateEnrollmentToken, generateRunnerKey, hashSecret } from '../common/fleet-keys';
+import { ENROLLMENT_TOKEN_PREFIX, generateEnrollmentToken, generateRunnerKey, hashSecret } from '../common/fleet-keys';
 import { isSupportedProtocolVersion } from '../common/protocol';
 import { IRunnerRepository, RUNNER_REPOSITORY } from './domain/runner.domain';
 import { EnrollDto } from './dto/enroll.dto';
@@ -45,6 +45,8 @@ export class EnrollmentService {
 
   async enroll(body: EnrollDto): Promise<{ runnerId: string; apiKey: string }> {
     if (!isSupportedProtocolVersion(body.protocolVersion)) throw new ProtocolVersionException(body.protocolVersion);
+    // #157: only ke_ tokens are enrollment tokens; anything else is the same bad-token 401, before the hash lookup.
+    if (!body.enrollmentToken.startsWith(ENROLLMENT_TOKEN_PREFIX)) throw new AuthException({}, 'fleet.enroll');
     const capabilities = parseCapabilities(body.capabilities);
     const secret = this.authConfig.apiKeySecret ?? '';
     const tokenHash = hashSecret(secret, body.enrollmentToken);

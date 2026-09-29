@@ -211,7 +211,7 @@ describe('CombinedAuthGuard', () => {
   });
 
   describe('runner keys (fleet)', () => {
-    const runnerRow = { id: 'run-1', name: 'mac-1', labels: ['darwin'], enabled: true };
+    const runnerRow = { id: 'run-1', name: 'mac-1', labels: ['darwin'], enabled: true, capacity: 3 };
     const superSpy = (guard: CombinedAuthGuard) =>
       jest.spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate').mockResolvedValue(true);
 
@@ -222,7 +222,7 @@ describe('CombinedAuthGuard', () => {
       const request = buildRequest('Bearer kr_' + 'a'.repeat(64));
 
       await expect(guard.canActivate(buildContext(request))).resolves.toBe(true);
-      expect(request['user']).toEqual(expect.objectContaining({ actorType: 'runner', id: 'run-1', runnerName: 'mac-1', enabled: true }));
+      expect(request['user']).toEqual(expect.objectContaining({ actorType: 'runner', id: 'run-1', runnerName: 'mac-1', enabled: true, capacity: 3 }));
       expect(repo.findAgentByKeyHash).not.toHaveBeenCalled();
       expect(jwt).not.toHaveBeenCalled();
     });
