@@ -33,6 +33,9 @@ export function actorForeignKeys(
   principal: KodaPrincipal,
   prefix: 'createdBy' | 'authoredBy' | 'assignedTo' | 'actor',
 ): Record<string, string | null> {
+  if (principal.actorType === 'runner') {
+    throw new Error('runner principals cannot author domain records');
+  }
   const { userField, agentField } = getFieldNames(prefix);
   const isUser = isUserPrincipal(principal);
   return {

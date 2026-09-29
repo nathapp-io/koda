@@ -16,7 +16,7 @@ import { VCS_CFG, IVcsConfig } from '../../config/vcs.config';
 import { decryptToken } from '../../common/utils/encryption.util';
 import { TicketLinksService } from '../../ticket-links/ticket-links.service';
 import { actorForeignKeys } from '../../auth/principal/actor-foreign-keys';
-import { isUserPrincipal, KodaPrincipal } from '../../auth/principal/koda-principal.types';
+import { actorKind, KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { TICKET_REPOSITORY, ITicketRepository } from '../domain/ticket.domain';
 import type { TicketDomain } from '../domain/ticket.domain';
 import { TicketEventService } from '../../events/ticket-event.service';
@@ -95,7 +95,7 @@ export class TicketTransitionsService {
     principal: KodaPrincipal,
   ): Promise<void> {
     if (!this.ticketEventService || !this.outboxService) return;
-    const actorType = isUserPrincipal(principal) ? 'user' : 'agent';
+    const actorType = actorKind(principal);
     const data = { fromStatus, newStatus: toStatus };
     const event = await this.ticketEventService.create({
       ticketId,
@@ -121,7 +121,7 @@ export class TicketTransitionsService {
     principal: KodaPrincipal,
   ): Promise<void> {
     if (!this.ticketEventService || !this.outboxService) return;
-    const actorType = isUserPrincipal(principal) ? 'user' : 'agent';
+    const actorType = actorKind(principal);
     const data = { commentId };
     const event = await this.ticketEventService.create({
       ticketId,

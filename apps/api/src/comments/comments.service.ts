@@ -8,7 +8,8 @@ import { UpdateCommentDto } from './dto/update-comment.dto';
 import { CommentResponseDto } from './dto/comment-response.dto';
 import { PrismaCommentRepository } from './prisma-comment.repository';
 import { COMMENT_REPOSITORY, CommentDomain } from './domain/comment.domain';
-import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
+import { KodaPrincipal, actorKind } from '../auth/principal/koda-principal.types';
+import { actorForeignKeys } from '../auth/principal/actor-foreign-keys';
 import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
@@ -85,7 +86,7 @@ export class CommentsService {
     commentId: string,
     principal: KodaPrincipal,
   ): Promise<void> {
-    const actorType = isUserPrincipal(principal) ? 'user' : 'agent';
+    const actorType = actorKind(principal);
     const data = { commentId };
     const event = await this.ticketEventService.create({
       ticketId,
@@ -128,8 +129,7 @@ export class CommentsService {
         ticketId: ticket.id,
         body: createCommentDto.body,
         type: createCommentDto.type as CommentType,
-        authorUserId: isUserPrincipal(principal) ? principal.id : null,
-        authorAgentId: isUserPrincipal(principal) ? null : principal.id,
+        ...actorForeignKeys(principal, 'authoredBy'),
         createdAt: new Date(),
         updatedAt: new Date(),
       });

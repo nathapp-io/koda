@@ -7,6 +7,7 @@ import {
 import {
   KodaPrincipal,
   isUserPrincipal,
+  isRunnerPrincipal,
   type UserPrincipal,
   type AgentPrincipal,
 } from '../principal/koda-principal.types';
@@ -32,6 +33,7 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
   ] as const;
 
   async getPermissions(principal: KodaPrincipal): Promise<CaslPermission[]> {
+    if (isRunnerPrincipal(principal)) return [];
     if (isUserPrincipal(principal)) {
       return this.userPermissions(principal);
     }

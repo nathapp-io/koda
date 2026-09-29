@@ -1,10 +1,14 @@
 import { ExecutionContext, Inject, Injectable, Logger } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY, JwtAuthGuard } from '@nathapp/nestjs-auth';
+import { AuthException } from '@nathapp/nestjs-common';
 import { createHmac } from 'crypto';
 import { AgentAuthProvider } from '../agent-auth.provider';
 import { PrismaAuthRepository } from '../prisma-auth.repository';
 import { AUTH_CFG, IAuthConfig } from '../../config/auth.config';
+import { RUNNER_KEY_PREFIX, RUNNER_ROUTE_KEY } from './runner-route.decorator';
+import type { RunnerDomain } from '../domain/auth.domain';
+import type { RunnerPrincipal } from '../principal/koda-principal.types';
 
 @Injectable()
 export class CombinedAuthGuard extends JwtAuthGuard {
@@ -28,6 +32,16 @@ export class CombinedAuthGuard extends JwtAuthGuard {
 
     const request = context.switchToHttp().getRequest<Record<string, unknown>>();
     this.combinedLogger.debug(`canActivate: handler=${handler.name}, class=${clazz.name}`);
+
+    // Fleet runner isolation (spec §1): fail closed in both directions, never fall back.
+    const isRunnerRoute = this.myReflector.getAllAndOverride<boolean>(RUNNER_ROUTE_KEY, [handler, clazz]) === true;
+    const bearer = this.bearerToken(request);
+    if (bearer.startsWith(RUNNER_KEY_PREFIX)) {
+      if (!isRunnerRoute) throw new AuthException({}, 'fleet.runnerAuth');
+      request['user'] = await this.authenticateRunner(bearer);
+      return true;
+    }
+    if (isRunnerRoute) throw new AuthException({}, 'fleet.runnerAuth');
 
     // Try API Key first (deterministic: no JWT structure = potential API key)
     try {
@@ -60,13 +74,7 @@ export class CombinedAuthGuard extends JwtAuthGuard {
 
   private async tryApiKey(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Record<string, unknown>>();
-    const headers = request['headers'] as Record<string, string | string[]>;
-    const authHeaderValue = headers?.['authorization'];
-    const authHeader = Array.isArray(authHeaderValue) ? authHeaderValue[0] : (authHeaderValue ?? '');
-
-    if (!authHeader.startsWith('Bearer ')) return false;
-
-    const rawKey = authHeader.slice('Bearer '.length).trim();
+    const rawKey = this.bearerToken(request);
     if (!rawKey) return false;
 
     // JWTs always have exactly 3 dot-separated parts; skip them
@@ -91,4 +99,37 @@ export class CombinedAuthGuard extends JwtAuthGuard {
 
     return true;
   }
+
+  private bearerToken(request: Record<string, unknown>): string {
+    const headers = request['headers'] as Record<string, string | string[]> | undefined;
+    const value = headers?.['authorization'];
+    const header = Array.isArray(value) ? value[0] : (value ?? '');
+    return header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
+  }
+
+  private async authenticateRunner(rawKey: string): Promise<RunnerPrincipal> {
+    const secret = this.authConfig.apiKeySecret;
+    if (!secret) {
+      this.combinedLogger.error('auth.apiKeySecret not configured');
+      throw new AuthException({}, 'fleet.runnerAuth');
+    }
+    const keyHash = createHmac('sha256', secret).update(rawKey).digest('hex');
+    const runner = await this.authRepo.findRunnerByKeyHash(keyHash);
+    if (!runner) throw new AuthException({}, 'fleet.runnerAuth');
+    return toRunnerPrincipal(runner);
+  }
+}
+
+export function toRunnerPrincipal(runner: RunnerDomain): RunnerPrincipal {
+  return {
+    actorType: 'runner',
+    id: runner.id,
+    name: runner.name,
+    runnerName: runner.name,
+    labels: runner.labels,
+    enabled: runner.enabled,
+    blacklisted: false,
+    revoked: false,
+    authorities: [],
+  };
 }

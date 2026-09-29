@@ -18,3 +18,10 @@ export interface AgentDomain {
   status: string;
   apiKeyHash: string;
 }
+
+export interface RunnerDomain {
+  id: string;
+  name: string;
+  labels: string[];
+  enabled: boolean;
+}
