@@ -459,6 +459,15 @@ describe('agentCommand', () => {
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
+    it('describes --slug as required by the API, not as defaulted from the name', () => {
+      const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
+      const createCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'create');
+      const slugOption = createCmd?.options.find((opt) => opt.long === '--slug');
+
+      expect(slugOption?.description).not.toContain('defaults to a slugified name');
+      expect(slugOption?.description).toContain('required');
+    });
+
     it('defaults roles to an empty array when --roles is omitted', async () => {
       (agentsControllerGenerateApiKey as jest.Mock).mockResolvedValue({
         ret: 0,

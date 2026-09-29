@@ -123,7 +123,7 @@ const response = await agentsControllerFindAll();
     .command('create')
     .description('Create an agent and generate its API key (admin only)')
     .requiredOption('--name <name>', 'Agent name')
-    .option('--slug <slug>', 'Agent slug (defaults to a slugified name)')
+    .option('--slug <slug>', 'Agent slug (required by the API)')
     .option('--roles <roles>', 'Comma-separated list of roles (e.g. DEVELOPER,AGENT)')
     .option('--max-concurrent-tickets <n>', 'Max concurrent tickets this agent can handle', parsePositiveInt)
     .option('--json', 'Output as JSON')
