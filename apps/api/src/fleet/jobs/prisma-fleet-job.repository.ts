@@ -178,14 +178,25 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
    * caller holds the job's row lock** (`lockById` with `FOR UPDATE`). The increment of
    * `eventSeq` is two queries and is serialised by that lock; outside the lock the
    * @@unique([jobId, seq]) index would surface duplicate seq values as P2002.
-   * Task 13 of this plan (TYPE-2) maps the runnerSeq-side P2002 to a no-op so the caller
-   * still makes progress on a same-`(jobId, leaseEpoch, runnerSeq)` insert.
+   * Plan D2 / review 2b TYPE-2 maps the runnerSeq-side P2002 to a no-op so the caller
+   * still makes progress on a same-`(jobId, leaseEpoch, runnerSeq)` insert (a retry
+   * whose prior sync was interrupted between the server-side read and write).
    */
   async appendEvent(jobId: string, e: { leaseEpoch: number; runnerSeq: number | null; type: string; payload: unknown }): Promise<FleetJobEventRecord> {
     const { eventSeq } = await this.db.fleetJob.update({ where: { id: jobId }, data: { eventSeq: { increment: 1 } }, select: { eventSeq: true } });
-    return this.db.fleetJobEvent.create({
-      data: { jobId, seq: eventSeq, leaseEpoch: e.leaseEpoch, runnerSeq: e.runnerSeq, type: e.type, payload: e.payload as Prisma.InputJsonValue },
-    });
+    try {
+      return await this.db.fleetJobEvent.create({
+        data: { jobId, seq: eventSeq, leaseEpoch: e.leaseEpoch, runnerSeq: e.runnerSeq, type: e.type, payload: e.payload as Prisma.InputJsonValue },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002' && e.runnerSeq !== null) {
+        const existing = await this.db.fleetJobEvent.findUnique({
+          where: { jobId_leaseEpoch_runnerSeq: { jobId, leaseEpoch: e.leaseEpoch, runnerSeq: e.runnerSeq } },
+        });
+        if (existing) return existing;
+      }
+      throw error;
+    }
   }
 
   findRunnerEvents(jobId: string, leaseEpoch: number, runnerSeqs: readonly number[]): Promise<FleetJobEventRecord[]> {
