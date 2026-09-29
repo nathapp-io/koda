@@ -1,13 +1,16 @@
 import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { CaslPermissionAction, Principal } from '@nathapp/nestjs-auth';
-import { JsonResponse } from '@nathapp/nestjs-common';
+import { JsonResponse, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { KodaPageQuery, parseQuery, toPageResult } from '../../common/dto/koda-page.query';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
+import { isUserPrincipal } from '../../auth/principal/koda-principal.types';
+import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
 import { ProjectMembershipGuard } from '../../projects/project-membership.guard';
 import { ProjectPermission } from '../../projects/project-permission.decorator';
 import { CurrentProject } from '../../projects/current-project.decorator';
 import type { ProjectContext } from '../../projects/project-context';
+import { withProjectRole } from '../../projects/project-context';
 import { FleetJobsService } from './fleet-jobs.service';
 import { DispatchFleetJobDto } from './dto/dispatch-fleet-job.dto';
 import { DispatchResultDto, FleetJobDto } from './dto/fleet-job.dto';
@@ -18,7 +21,10 @@ import { ListFleetJobsQuery } from './dto/list-fleet-jobs.query';
 @Controller('projects/:slug/fleet/jobs')
 @UseGuards(ProjectMembershipGuard)
 export class FleetJobsController {
-  constructor(private readonly jobs: FleetJobsService) {}
+  constructor(
+    private readonly jobs: FleetJobsService,
+    private readonly casl: KodaCaslAbilityFactory,
+  ) {}
 
   @Post()
   @HttpCode(201)
@@ -30,6 +36,28 @@ export class FleetJobsController {
   @ApiResponse({ status: 422, description: 'Pinned runner can never run this job' })
   async dispatch(@Body() dto: DispatchFleetJobDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
     return JsonResponse.Ok(await this.jobs.dispatch(principal.id, ctx.project.id, dto));
+  }
+
+  @Post(':id/cancel')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Cancel a job (project DEVELOPER+, or the requester)' })
+  @ApiResponse({ status: 200, type: FleetJobDto })
+  @ApiResponse({ status: 409, description: 'Job already finished' })
+  async cancel(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    if (!isUserPrincipal(principal)) throw new ForbiddenAppException({}, 'projects');
+    const ability = await this.casl.createForUser(withProjectRole(principal, ctx.role));
+    const canOperate = ability.can(CaslPermissionAction.UPDATE, 'FleetJob');
+    return JsonResponse.Ok(await this.jobs.cancel(principal.id, ctx.project.id, id, canOperate));
+  }
+
+  @Post(':id/requeue')
+  @HttpCode(200)
+  @ProjectPermission([CaslPermissionAction.UPDATE, 'FleetJob'])
+  @ApiOperation({ summary: 'Requeue a CRASHED, FAILED or CANCELLED job (project DEVELOPER+)' })
+  @ApiResponse({ status: 200, type: DispatchResultDto })
+  @ApiResponse({ status: 409, description: 'Job not requeueable, or an active duplicate exists' })
+  async requeue(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    return JsonResponse.Ok(await this.jobs.requeue(principal.id, ctx.project.id, id));
   }
 
   @Get()

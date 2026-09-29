@@ -102,7 +102,13 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
       ...(progress !== undefined ? { progress: progress === null ? Prisma.DbNull : (progress as Prisma.InputJsonValue) } : {}),
       ...(bumpEpoch ? { leaseEpoch: { increment: 1 } } : {}),
     };
-    return toJob(await this.db.fleetJob.update({ where: { id }, data }));
+    try {
+      return toJob(await this.db.fleetJob.update({ where: { id }, data }));
+    } catch (error) {
+      // Requeue into a (repoId, feature) that has an active job (spec §5.3: "the partial index still applies").
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new DuplicateActiveJobError();
+      throw error;
+    }
   }
 
   async findQueuedIds(limit: number): Promise<string[]> {
