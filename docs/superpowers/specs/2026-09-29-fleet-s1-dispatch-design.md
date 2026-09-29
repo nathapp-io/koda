@@ -38,6 +38,7 @@ story progress and live cost, keep the run's artifact bundle, and never let two 
 | R5 | **All** runner git traffic is brokered by koda: GitHub via per-job App installation tokens, GitLab via the project's stored `VcsConnection` token. Clone, fetch, nax finish push and `gh`/`glab` PR creation all use it. Machines hold no git credentials. This amends the 2026-09-13 ruling (§6 Q5, "git credentials stay machine-local"). Provider (LLM) credentials still stay on the machine; koda never stores them. |
 | R6 | Cross-machine duplicate work is prevented by compare-and-set assignment, a lease epoch fence (also enforced by the git broker), and a partial unique index on active `(repoId, feature)` (§6). |
 | R7 | Isolation: S1 runs jobs on the host through a `JobExecutor` seam (`HostExecutor`), under a dedicated OS user. A VM executor is a later phase; VMs are not required in S1 (§5.5). |
+| R8 | A central provider-credential vault (C10, §9.6) is **designed, not scheduled**. S1 keeps provider credentials machine-local. When and how it is built is decided when the need arises; the open questions are in §9.6. |
 
 Earlier rulings that still hold (design doc §6): fleet = mixed macOS + Linux; runners auto-clone from a
 platform repo registry; labels + auto-pick with a pin override; 1 job per runner by default; home server + VPN
@@ -634,10 +635,48 @@ adds a ticket comment with the reason.
 `ArtifactStore.putLogChunk(jobId, seqRange, stream)` for full JSONL streaming; `FleetJobEvent` stays the small
 indexed timeline.
 
-### 9.6 Phase order
+### 9.6 C10 Central provider-credential vault (designed, not scheduled)
+
+Proposed 2026-09-29. Would reverse the design doc §3 (k) rule "koda never stores provider credentials", so it
+is a deliberate later decision, not part of S1. Also the route to closing nax#2256 (nax re-reads
+`~/.nax/credentials` on every request, so a mid-run change silently switches accounts; a plain snapshot breaks
+OAuth refresh-token rotation).
+
+Three layers, no vendor lock-in:
+
+1. **nax: pluggable credential source** (a nax spec, fixes #2256). `credentials.source: file | exec`. `exec`
+   runs a helper command (like git's credential helper or AWS `credential_process`) that returns
+   `{kind, secret, expiresAt}`; nax caches the credential for the lease, records a fingerprint (provider, kind,
+   short non-reversible hash) on `run.start` and on every lease renewal, and leaves refresh to the source.
+   `file` stays the default with its #2256 behaviour decided explicitly. Plugs in at nax-ai's existing
+   credential-store seam (`createFileCredentialStore` / `createMemoryCredentialStore`).
+2. **koda runner: per-job broker.** The per-job socket from §7.2 also serves provider credentials; the nax
+   `exec` helper reads from it. Fenced by `(runnerId, leaseEpoch)` like git tokens (§6.3). The runner advertises
+   `credentialBroker: true`; a job may require it.
+3. **koda server: `SecretStore` interface.** Backends: local encrypted (master key from env, as
+   `common/utils/encryption.util` does for VCS tokens) for the home setup; HashiCorp Vault / OpenBao (KV v2,
+   AppRole or Kubernetes auth) for enterprise use; cloud KMS later. koda fronts a vault rather than being one.
+   Secrets are scoped (global, project, repo) and every issue is written to `FleetActivity`.
+
+Limits: an LLM API key cannot be scoped like a GitHub App token and the nax process must hold it, so the gain is
+central provisioning, rotation, attribution and audit, not secrecy from the agent. Keeping the socket out of
+the agent's sandboxed Bash is a goal to verify against the P4 sandbox rules. koda (or its Vault) becomes a
+high-value target.
+
+Open questions, decided when development starts:
+
+- Backend choice and what "enterprise grade" must mean (audit, policies, dynamic secrets, HA).
+- OAuth subscription logins (Claude, ChatGPT): whether provider terms allow sharing across a fleet; if so, koda
+  as the single refresher. Starting point: API keys only, OAuth stays machine-local.
+- Threat model for the home setup versus enterprise.
+- The #2256 decision for the `file` source (options A-D in the issue) alongside the `exec` lease model.
+- Multi-team ownership: per-project keys and billing, who may use which key, tie-in with C1 budgets.
+- Phase: after S1 (as "S1c") or later.
+
+### 9.7 Phase order
 
 S1 (this spec) → S1b (C1, C4) → S1.5 (C8 + approvals relay) → S2a (logs) → S2b (C9, dashboard, analytics) → S3
-(rules/context PRs, now on the S1 broker) → S5 (acpx brainstorming).
+(rules/context PRs, now on the S1 broker) → S5 (acpx brainstorming). C10 and the VM executor (§5.5) are unscheduled.
 
 ## 10. Spikes before the plan
 
