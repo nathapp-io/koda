@@ -12,5 +12,8 @@
   "jobState": { "409": "The job is {state}; this action is not allowed" },
   "dispatch": { "422": "The pinned runner can never run this job: {reason}" },
   "dispatchInput": { "-2": "Invalid dispatch: {reason}" },
-  "sync": { "-2": "Invalid sync request: {reason}" }
+  "sync": { "-2": "Invalid sync request: {reason}" },
+  "bundle": { "404": "No bundle has been uploaded for this job", "413": "Bundle larger than {maxBytes} bytes", "415": "Bundles must be application/gzip", "422": "Bundle rejected: {reason}" },
+  "bundleInput": { "-2": "Invalid bundle upload: {reason}" },
+  "fence": { "409": "This runner does not hold the job's current lease" }
 }

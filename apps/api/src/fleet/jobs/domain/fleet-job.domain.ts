@@ -187,6 +187,7 @@ export interface IFleetJobRepository {
   withdrawPendingCommands(jobId: string, now: Date): Promise<number>;
 
   upsertArtifact(artifact: Omit<FleetArtifactRecord, 'id' | 'createdAt'>): Promise<FleetArtifactRecord>;
+  findArtifact(jobId: string, kind: string, leaseEpoch: number): Promise<FleetArtifactRecord | null>;
   findLatestArtifact(jobId: string, kind: string): Promise<FleetArtifactRecord | null>;
 
   /** Plan D19: sets attributedAt when still null; true when this call claimed it. */

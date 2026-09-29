@@ -5,6 +5,7 @@ import { AppModule } from './app.module';
 import { CombinedAuthGuard } from './auth/guards/combined-auth.guard';
 import { APP_CFG, IAppConfig } from './config/app.config';
 import { registerRawBodyHook } from './common/hooks/raw-body.hook';
+import { registerBundleContentParser } from './common/hooks/bundle-content-parser';
 
 async function bootstrap() {
   const app = await AppFactory.createFastifyApp(AppModule, {
@@ -16,6 +17,7 @@ async function bootstrap() {
   const { httpAdapter } = app.get(HttpAdapterHost);
   const fastify = httpAdapter.getInstance();
   registerRawBodyHook(fastify);
+  registerBundleContentParser(fastify);
 
   // H2: the throttler guard's IP tracker (getClientIp) only honours forwarded
   // headers when trust proxy is configured via configureTrustProxy(). Trust the

@@ -243,6 +243,10 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     });
   }
 
+  findArtifact(jobId: string, kind: string, leaseEpoch: number): Promise<FleetArtifactRecord | null> {
+    return this.db.fleetJobArtifact.findUnique({ where: { jobId_kind_leaseEpoch: { jobId, kind, leaseEpoch } } });
+  }
+
   findLatestArtifact(jobId: string, kind: string): Promise<FleetArtifactRecord | null> {
     return this.db.fleetJobArtifact.findFirst({ where: { jobId, kind }, orderBy: { leaseEpoch: 'desc' } });
   }
