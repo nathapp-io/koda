@@ -19,6 +19,12 @@ export class GitLabAccessChecker {
     private readonly http: FleetHttpClient,
   ) {}
 
+  async commentOnMergeRequest(owner: string, name: string, iid: number, body: string, token: string): Promise<boolean> {
+    const api = this.vcsConfig.gitlabApiUrl.replace(/\/+$/, '');
+    const res = await this.http.request('POST', `${api}/projects/${encodeURIComponent(`${owner}/${name}`)}/merge_requests/${iid}/notes`, { 'private-token': token }, { body });
+    return res.status === 201;
+  }
+
   async verifyRepo(owner: string, name: string, token: string): Promise<CanonicalRepo> {
     const api = this.vcsConfig.gitlabApiUrl.replace(/\/+$/, '');
     const headers = { 'private-token': token };

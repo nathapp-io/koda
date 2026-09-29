@@ -6,10 +6,10 @@ describe('FleetSweeper scheduling', () => {
 
   it('starts a 30s interval only when enabled, and stops it on shutdown', () => {
     jest.useFakeTimers();
-    const off = new FleetSweeper({} as never, {} as never, {} as never, {} as never, testFleetConfig({ sweepEnabled: false }));
+    const off = new FleetSweeper({} as never, {} as never, {} as never, {} as never, testFleetConfig({ sweepEnabled: false }), {} as never);
     off.onModuleInit();
     expect(jest.getTimerCount()).toBe(0);
-    const on = new FleetSweeper({} as never, {} as never, {} as never, {} as never, testFleetConfig({ sweepEnabled: true }));
+    const on = new FleetSweeper({} as never, {} as never, {} as never, {} as never, testFleetConfig({ sweepEnabled: true }), {} as never);
     on.onModuleInit();
     expect(jest.getTimerCount()).toBe(1);
     on.onModuleDestroy();

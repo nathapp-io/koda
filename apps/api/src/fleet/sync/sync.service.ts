@@ -12,11 +12,12 @@ import { PlacementService } from '../jobs/placement.service';
 import { RunnerNotifier } from '../jobs/runner-notifier';
 import type { FleetRepoRef } from '../jobs/domain/fleet-job.domain';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
-import { RUNNER_HELD_STATES } from '../jobs/job-state';
+import { RUNNER_HELD_STATES, isTerminal } from '../jobs/job-state';
 import { ProtocolVersionException } from '../runners/protocol-version.exception';
 import { FenceService } from './fence.service';
 import { CommandAckProcessor } from './command-ack.processor';
 import { JobReportProcessor } from './job-report.processor';
+import { PrAttributionService } from './pr-attribution.service';
 import { parseSyncRequest } from './sync-request.parser';
 
 /**
@@ -38,6 +39,7 @@ export class SyncService {
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'syncWaitMs'>,
     private readonly broker: GitTokenBroker,
     private readonly fence: FenceService,
+    private readonly attribution: PrAttributionService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
 
@@ -55,14 +57,12 @@ export class SyncService {
     const live: LiveFleetJobEvent[] = [...(await this.acks.process(runnerId, req.bootId, req.commandAcks, now))];
     const jobAcks: JobAck[] = [];
     const unknownJobIds: string[] = [];
-    const terminalJobIds: string[] = [];
     for (const report of req.jobs) {
       // One failing job must not block the rest of the sync (review M2): no ack for it, the runner resends it.
       try {
         const outcome = await this.reports.process(runnerId, report, now);
         if (outcome.ack) jobAcks.push(outcome.ack);
         if (outcome.unknown) unknownJobIds.push(report.jobId);
-        if (outcome.terminalJobId) terminalJobIds.push(outcome.terminalJobId);
         live.push(...outcome.live);
       } catch (error) {
         this.logger.error(`Sync: job ${report.jobId} from runner ${runnerId} failed: ${error instanceof Error ? error.name : 'unknown'}`);
@@ -78,7 +78,7 @@ export class SyncService {
     }
     this.live.publish(live);
     if (req.freeSlots > 0) await this.placement.fillRunner(runnerId, req.freeSlots, now);
-    await this.afterTerminal(terminalJobIds);
+    await this.afterTerminal(live.filter((e) => isTerminal(e.state)).map((e) => e.jobId));
 
     const tokens = await this.grantTokens(runnerId, req.tokenRequests, now);
     let commands = await this.deliver(runnerId, now);
@@ -126,9 +126,12 @@ export class SyncService {
     return { gitTokens, gitTokenErrors, unknownJobIds };
   }
 
-  /** Evicts cached tokens; Task 19 posts the attribution comment. */
+  /** Evicts cached tokens; posts the attribution comment (spec §7.1). */
   protected async afterTerminal(jobIds: readonly string[]): Promise<void> {
-    for (const id of jobIds) this.broker.evict(id);
+    for (const id of new Set(jobIds)) {
+      this.broker.evict(id);
+      void this.attribution.attribute(id); // fire-and-forget; never throws
+    }
   }
 
   private async deliver(runnerId: string, now: Date): Promise<FleetCommandOut[]> {

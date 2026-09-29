@@ -66,6 +66,14 @@ export class GitHubAppClient {
     return { token, expiresAt: new Date(expiresAt) };
   }
 
+  /** Spec §7.1 attribution: one issue comment on the PR, with a fresh repo-scoped installation token. */
+  async commentOnPullRequest(installationId: bigint, owner: string, name: string, number: number, body: string): Promise<boolean> {
+    const { token } = await this.mintInstallationToken(installationId, name);
+    const path = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues/${number}/comments`;
+    const res = await this.http.request('POST', `${this.api}${path}`, this.headers(token), { body });
+    return res.status === 201;
+  }
+
   async verifyRepo(owner: string, name: string): Promise<CanonicalRepo & { installationId: bigint }> {
     const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
     const appJwt = this.createAppJwt();

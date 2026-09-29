@@ -6,6 +6,7 @@ import { FleetJobLivePublisher } from '../jobs/fleet-job-live.publisher';
 import { RUNNER_HELD_STATES } from '../jobs/job-state';
 import { JobTransitionsService, SYSTEM_ACTOR } from '../jobs/job-transitions.service';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
+import { PrAttributionService } from './pr-attribution.service';
 
 const SWEEP_INTERVAL_MS = 30_000;
 
@@ -24,6 +25,7 @@ export class FleetSweeper implements OnModuleInit, OnModuleDestroy {
     private readonly live: FleetJobLivePublisher,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'sweepEnabled' | 'jobCrashSec'>,
+    private readonly attribution: PrAttributionService,
   ) {}
 
   onModuleInit(): void {
@@ -52,6 +54,7 @@ export class FleetSweeper implements OnModuleInit, OnModuleDestroy {
       });
       if (event) {
         this.live.publish([event]);
+        void this.attribution.attribute(id); // fire-and-forget; never throws
         crashed += 1;
       }
     }
