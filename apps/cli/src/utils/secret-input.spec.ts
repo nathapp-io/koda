@@ -57,6 +57,14 @@ describe('resolveSecret', () => {
     expect(exit).toHaveBeenCalledWith(130);
   });
 
+  it('restores the terminal and rejects when stdin errors during the prompt', async () => {
+    const { io, stdin } = makeIo({ tty: true });
+    const pending = resolveSecret(true, SPEC, io);
+    stdin.emit('error', new Error('I/O error'));
+    await expect(pending).rejects.toThrow(SecretInputError);
+    expect(stdin.setRawMode).toHaveBeenLastCalledWith(false);
+  });
+
   it('refuses a bare flag when stdin is not a terminal', async () => {
     const { io } = makeIo();
     await expect(resolveSecret(true, SPEC, io)).rejects.toThrow("--token - or set KODA_VCS_TOKEN");

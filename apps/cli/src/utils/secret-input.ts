@@ -85,10 +85,14 @@ function promptHidden(prompt: string, io: SecretIo): Promise<string> {
   stdin.setEncoding('utf8');
   stdin.resume();
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let value = '';
+    let done = false;
     const finish = () => {
+      if (done) return;
+      done = true;
       stdin.removeListener('data', onData);
+      stdin.removeListener('error', onError);
       stdin.setRawMode?.(false);
       stdin.pause();
       io.stderr.write('\n');
@@ -112,6 +116,12 @@ function promptHidden(prompt: string, io: SecretIo): Promise<string> {
         }
       }
     };
+    const onError = (err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      finish();
+      reject(new SecretInputError(`could not read the hidden prompt: ${message}`));
+    };
     stdin.on('data', onData);
+    stdin.on('error', onError);
   });
 }
