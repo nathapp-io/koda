@@ -5,14 +5,10 @@ import type { IPageOption } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { remapPage } from '../../common/dto/koda-page.query';
-import { decryptToken } from '../../common/utils/encryption.util';
-import { IVcsConfig, VCS_CFG } from '../../config/vcs.config';
-import { VCS_REPOSITORY } from '../../vcs/domain/vcs.repository';
-import type { IVcsRepository } from '../../vcs/domain/vcs.repository';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { GitHubAppClient } from '../git-broker/github-app-client';
 import { GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
-import { RepoCheckException } from '../git-broker/repo-check.exception';
+import { GitLabTokenSource } from '../git-broker/gitlab-token.source';
 import { FLEET_REPO_REPOSITORY, IFleetRepoRepository } from './domain/fleet-repo.domain';
 import { CreateFleetRepoDto } from './dto/create-fleet-repo.dto';
 import { FleetRepoDto } from './dto/fleet-repo.dto';
@@ -21,12 +17,11 @@ import { FleetRepoDto } from './dto/fleet-repo.dto';
 export class FleetReposService {
   constructor(
     @Inject(FLEET_REPO_REPOSITORY) private readonly repo: IFleetRepoRepository,
-    @Inject(VCS_REPOSITORY) private readonly vcsRepo: Pick<IVcsRepository, 'findVcsConnectionByProjectId'>,
     private readonly github: GitHubAppClient,
     private readonly gitlab: GitLabAccessChecker,
+    private readonly gitlabTokens: GitLabTokenSource,
     private readonly activity: FleetActivityService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
-    @Inject(VCS_CFG) private readonly vcsConfig: Pick<IVcsConfig, 'encryptionKey'>,
   ) {}
 
   async create(actorId: string, dto: CreateFleetRepoDto): Promise<FleetRepoDto> {
@@ -57,20 +52,7 @@ export class FleetReposService {
   }
 
   private async verifyGitLab(projectId: string, owner: string, name: string) {
-    const connection = await this.vcsRepo.findVcsConnectionByProjectId(projectId);
-    if (!connection) throw new RepoCheckException('vcs_connection_missing');
-    const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
-    if (connection.provider !== 'gitlab' || !same(connection.repoOwner, owner) || !same(connection.repoName, name)) {
-      throw new RepoCheckException('vcs_connection_mismatch');
-    }
-    if (!this.vcsConfig.encryptionKey) throw new RepoCheckException('vcs_encryption_key_missing');
-    let token: string;
-    try {
-      token = decryptToken(connection.encryptedToken, this.vcsConfig.encryptionKey);
-    } catch {
-      throw new RepoCheckException('gitlab_token_invalid');
-    }
-    return this.gitlab.verifyRepo(owner, name, token);
+    return this.gitlab.verifyRepo(owner, name, await this.gitlabTokens.resolve(projectId, owner, name));
   }
 
   async list(filters: { projectId?: string }, page: IPageOption): Promise<IPageResult<FleetRepoDto>> {

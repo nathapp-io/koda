@@ -1,15 +1,20 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AuthException } from '@nathapp/nestjs-common';
+import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import type { LiveFleetJobEvent } from '../../live/live-event';
 import { parseCapabilities } from '../common/capabilities';
 import { isSupportedProtocolVersion } from '../common/protocol';
-import type { FleetCommandOut, JobAck, SyncResponse } from '../common/protocol';
+import type { FleetCommandOut, GitToken, GitTokenError, JobAck, SyncResponse } from '../common/protocol';
+import { GitTokenBroker } from '../git-broker/git-token.broker';
 import { FleetJobLivePublisher } from '../jobs/fleet-job-live.publisher';
 import { PlacementService } from '../jobs/placement.service';
 import { RunnerNotifier } from '../jobs/runner-notifier';
+import type { FleetRepoRef } from '../jobs/domain/fleet-job.domain';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
+import { RUNNER_HELD_STATES } from '../jobs/job-state';
 import { ProtocolVersionException } from '../runners/protocol-version.exception';
+import { FenceService } from './fence.service';
 import { CommandAckProcessor } from './command-ack.processor';
 import { JobReportProcessor } from './job-report.processor';
 import { parseSyncRequest } from './sync-request.parser';
@@ -31,6 +36,9 @@ export class SyncService {
     private readonly live: FleetJobLivePublisher,
     private readonly notifier: RunnerNotifier,
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'syncWaitMs'>,
+    private readonly broker: GitTokenBroker,
+    private readonly fence: FenceService,
+    @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
 
   async sync(runnerId: string, raw: unknown): Promise<SyncResponse> {
@@ -86,14 +94,41 @@ export class SyncService {
     };
   }
 
-  /** Task 15 mints tokens here. */
-  protected async grantTokens(_runnerId: string, _requests: ReadonlyArray<{ jobId: string; leaseEpoch: number }>, _now: Date) {
-    return { gitTokens: [], gitTokenErrors: [], unknownJobIds: [] as string[] };
+  /** Spec §6.3: fence each request (ABANDON on a stale epoch), then mint outside any transaction. */
+  protected async grantTokens(runnerId: string, requests: ReadonlyArray<{ jobId: string; leaseEpoch: number }>, now: Date) {
+    const gitTokens: GitToken[] = [];
+    const gitTokenErrors: GitTokenError[] = [];
+    const unknownJobIds: string[] = [];
+    const toMint = await this.txManager.run(async () => {
+      const granted: Array<{ jobId: string; leaseEpoch: number; repo: FleetRepoRef }> = [];
+      for (const req of requests) {
+        // Row lock: two overlapping syncs from one runner must not both queue an ABANDON.
+        const job = await this.repo.lockById(req.jobId);
+        if (!job) {
+          unknownJobIds.push(req.jobId);
+        } else if (!this.fence.holds(job, runnerId, req.leaseEpoch)) {
+          await this.fence.abandon(runnerId, job, req.leaseEpoch);
+        } else if (!(RUNNER_HELD_STATES as readonly string[]).includes(job.state)) {
+          gitTokenErrors.push({ jobId: job.id, reason: 'job_not_active' });
+        } else {
+          const repo = await this.repo.findRepo(job.repoId);
+          if (repo) granted.push({ jobId: job.id, leaseEpoch: job.leaseEpoch, repo });
+        }
+      }
+      return granted;
+    });
+    for (const req of toMint) {
+      const result = await this.broker.mint(req, now);
+      // strictNullChecks is off repo-wide, so `result.ok` does not narrow the MintResult union; `in` does.
+      if ('error' in result) gitTokenErrors.push(result.error);
+      else gitTokens.push(result.token);
+    }
+    return { gitTokens, gitTokenErrors, unknownJobIds };
   }
 
-  /** Task 15 evicts cached tokens, Task 19 posts the attribution comment. */
-  protected async afterTerminal(_jobIds: readonly string[]): Promise<void> {
-    return undefined;
+  /** Evicts cached tokens; Task 19 posts the attribution comment. */
+  protected async afterTerminal(jobIds: readonly string[]): Promise<void> {
+    for (const id of jobIds) this.broker.evict(id);
   }
 
   private async deliver(runnerId: string, now: Date): Promise<FleetCommandOut[]> {
