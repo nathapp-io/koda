@@ -11,5 +11,6 @@
   "jobs": { "404": "Fleet job not found", "409": "An active job already runs this feature: {activeJobId}" },
   "jobState": { "409": "The job is {state}; this action is not allowed" },
   "dispatch": { "422": "The pinned runner can never run this job: {reason}" },
-  "dispatchInput": { "-2": "Invalid dispatch: {reason}" }
+  "dispatchInput": { "-2": "Invalid dispatch: {reason}" },
+  "sync": { "-2": "Invalid sync request: {reason}" }
 }
