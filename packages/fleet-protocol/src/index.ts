@@ -16,6 +16,11 @@ export interface ProfileNeeds {
   sandbox: boolean;
 }
 
+/**
+ * Validated by the server (#161): `nax.protocols` non-empty and unique; at most 64 profiles
+ * named /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, each with at most 16 providers; at most 64
+ * credentials; `expires` must parse as a date. Whole report at most 64 KiB.
+ */
 export interface RunnerCapabilities {
   nax: { version: string; protocols: NaxProtocol[] };
   sandbox: { available: boolean; probedAt: string; error?: string };
