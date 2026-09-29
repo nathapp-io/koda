@@ -22,20 +22,21 @@ datasource db {
 // ---------------------------------------------------------------------------
 
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
+  id           String   @id @default(cuid())
+  email        String   @unique
   name         String?
   passwordHash String
-  role         String    @default("MEMBER") // MEMBER | ADMIN
-  tokenVersion Int       @default(0)
-  disabled     Boolean   @default(false)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  role         String   @default("MEMBER") // MEMBER | ADMIN
+  tokenVersion Int      @default(0)
+  disabled     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  createdTickets  Ticket[]  @relation("TicketCreatedByUser")
-  assignedTickets Ticket[]  @relation("TicketAssignedToUser")
-  comments        Comment[] @relation("CommentByUser")
+  createdTickets     Ticket[]        @relation("TicketCreatedByUser")
+  assignedTickets    Ticket[]        @relation("TicketAssignedToUser")
+  comments           Comment[]       @relation("CommentByUser")
   projectMemberships ProjectMember[]
+  fleetJobs          FleetJob[]      @relation("FleetJobRequestedBy")
 }
 
 model Agent {
@@ -48,11 +49,11 @@ model Agent {
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
-  roles         AgentRoleEntry[]
-  capabilities  AgentCapabilityEntry[]
-  createdTickets  Ticket[]  @relation("TicketCreatedByAgent")
-  assignedTickets Ticket[]  @relation("TicketAssignedToAgent")
-  comments        Comment[] @relation("CommentByAgent")
+  roles           AgentRoleEntry[]
+  capabilities    AgentCapabilityEntry[]
+  createdTickets  Ticket[]               @relation("TicketCreatedByAgent")
+  assignedTickets Ticket[]               @relation("TicketAssignedToAgent")
+  comments        Comment[]              @relation("CommentByAgent")
 }
 
 model AgentRoleEntry {
@@ -80,39 +81,40 @@ model AgentCapabilityEntry {
 // ---------------------------------------------------------------------------
 
 model Project {
-  id               String    @id @default(cuid())
-  name             String
-  slug             String    @unique
-  key              String    @unique // e.g. KODA — used in ticket refs
-  description      String?
-  gitRemoteUrl     String?
-  autoIndexOnClose Boolean   @default(true)
-  autoAssign       String    @default("OFF")
-  graphifyEnabled  Boolean   @default(false)
+  id                     String    @id @default(cuid())
+  name                   String
+  slug                   String    @unique
+  key                    String    @unique // e.g. KODA — used in ticket refs
+  description            String?
+  gitRemoteUrl           String?
+  autoIndexOnClose       Boolean   @default(true)
+  autoAssign             String    @default("OFF")
+  graphifyEnabled        Boolean   @default(false)
   graphifyLastImportedAt DateTime?
-  deletedAt        DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  deletedAt              DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
-  tickets Ticket[]
-  labels  Label[]
-  webhooks Webhook[]
-  ciWebhookToken String?
-  vcsConnection VcsConnection?
-  outboxEvents OutboxEvent[]
-  ticketEvents TicketEvent[]
-  agentEvents AgentEvent[]
-  decisionEvents DecisionEvent[]
-  members       ProjectMember[]
-  graphNodes    GraphNode[]
-  graphLinks    GraphLink[]
-  memoryItems   MemoryItem[]
-  symbols       Symbol[]
-  entityNodes   EntityNode[]
-  entityLinks   EntityLink[]
+  tickets            Ticket[]
+  labels             Label[]
+  webhooks           Webhook[]
+  ciWebhookToken     String?
+  vcsConnection      VcsConnection?
+  outboxEvents       OutboxEvent[]
+  ticketEvents       TicketEvent[]
+  agentEvents        AgentEvent[]
+  decisionEvents     DecisionEvent[]
+  members            ProjectMember[]
+  graphNodes         GraphNode[]
+  graphLinks         GraphLink[]
+  memoryItems        MemoryItem[]
+  symbols            Symbol[]
+  entityNodes        EntityNode[]
+  entityLinks        EntityLink[]
   memoryQueryMetrics MemoryQueryMetric[]
-  webhookDeliveries WebhookDelivery[]
-  fleetRepos        FleetRepo[]
+  webhookDeliveries  WebhookDelivery[]
+  fleetRepos         FleetRepo[]
+  fleetJobs          FleetJob[]
 
   @@index([deletedAt])
 }
@@ -121,7 +123,7 @@ model ProjectMember {
   id        String   @id @default(cuid())
   projectId String
   userId    String
-  role      String   // ADMIN | DEVELOPER | AGENT | VIEWER
+  role      String // ADMIN | DEVELOPER | AGENT | VIEWER
   joinedAt  DateTime @default(now())
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -133,31 +135,31 @@ model ProjectMember {
 model Ticket {
   id                String    @id @default(cuid())
   projectId         String
-  number            Int       // auto-incremented per project
-  type              String    // BUG | ENHANCEMENT | TASK | QUESTION
+  number            Int // auto-incremented per project
+  type              String // BUG | ENHANCEMENT | TASK | QUESTION
   title             String
   description       String?
   status            String    @default("CREATED") // CREATED | VERIFIED | IN_PROGRESS | VERIFY_FIX | CLOSED | REJECTED
-  priority          String    @default("MEDIUM")  // LOW | MEDIUM | HIGH | CRITICAL
+  priority          String    @default("MEDIUM") // LOW | MEDIUM | HIGH | CRITICAL
   assignedToUserId  String?
   assignedToAgentId String?
   createdByUserId   String?
   createdByAgentId  String?
-  gitRefVersion     String?   // e.g. 'v1.0', 'main'
-  gitRefFile        String?   // e.g. 'apps/api/src/auth.ts'
-  gitRefLine        Int?      // e.g. 42
-  externalVcsId     String?   // e.g. 'owner/repo#123' for GitHub issues
-  externalVcsUrl    String?   // full URL to external VCS issue
+  gitRefVersion     String? // e.g. 'v1.0', 'main'
+  gitRefFile        String? // e.g. 'apps/api/src/auth.ts'
+  gitRefLine        Int? // e.g. 42
+  externalVcsId     String? // e.g. 'owner/repo#123' for GitHub issues
+  externalVcsUrl    String? // full URL to external VCS issue
   vcsSyncedAt       DateTime?
   deletedAt         DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
-  project         Project           @relation(fields: [projectId], references: [id])
-  assignedToUser  User?             @relation("TicketAssignedToUser", fields: [assignedToUserId], references: [id])
-  assignedToAgent Agent?            @relation("TicketAssignedToAgent", fields: [assignedToAgentId], references: [id])
-  createdByUser   User?             @relation("TicketCreatedByUser", fields: [createdByUserId], references: [id])
-  createdByAgent  Agent?            @relation("TicketCreatedByAgent", fields: [createdByAgentId], references: [id])
+  project         Project          @relation(fields: [projectId], references: [id])
+  assignedToUser  User?            @relation("TicketAssignedToUser", fields: [assignedToUserId], references: [id])
+  assignedToAgent Agent?           @relation("TicketAssignedToAgent", fields: [assignedToAgentId], references: [id])
+  createdByUser   User?            @relation("TicketCreatedByUser", fields: [createdByUserId], references: [id])
+  createdByAgent  Agent?           @relation("TicketCreatedByAgent", fields: [createdByAgentId], references: [id])
   comments        Comment[]
   labels          TicketLabel[]
   activities      TicketActivity[]
@@ -190,7 +192,7 @@ model Comment {
 }
 
 model Label {
-  id        String @id @default(cuid())
+  id        String  @id @default(cuid())
   projectId String
   name      String
   color     String?
@@ -214,7 +216,7 @@ model TicketLabel {
 model TicketActivity {
   id           String   @id @default(cuid())
   ticketId     String
-  action       String   // STATUS_CHANGE | ASSIGNMENT | COMMENT | LABEL_CHANGE
+  action       String // STATUS_CHANGE | ASSIGNMENT | COMMENT | LABEL_CHANGE
   fromStatus   String?
   toStatus     String?
   actorUserId  String?
@@ -235,7 +237,7 @@ model Webhook {
   projectId String
   url       String
   secret    String
-  events    String   // JSON array stored as string e.g. '["STATUS_CHANGE"]'
+  events    String // JSON array stored as string e.g. '["STATUS_CHANGE"]'
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
 
@@ -246,10 +248,10 @@ model TicketLink {
   id          String    @id @default(cuid())
   ticketId    String
   url         String
-  provider    String    // github | gitlab | bitbucket | other
-  externalRef String?   // provider-specific reference e.g. 'owner/repo#42'
-  prState     String?   // draft | open | merged | closed
-  prNumber    Int?      // direct PR lookup
+  provider    String // github | gitlab | bitbucket | other
+  externalRef String? // provider-specific reference e.g. 'owner/repo#42'
+  prState     String? // draft | open | merged | closed
+  prNumber    Int? // direct PR lookup
   prUpdatedAt DateTime? // tracking last sync time
   linkType    String    @default("url") // url | pr | commit | branch
   createdAt   DateTime  @default(now())
@@ -265,36 +267,36 @@ model TicketLink {
 // ---------------------------------------------------------------------------
 
 model VcsConnection {
-  id                   String    @id @default(cuid())
-  projectId            String    @unique
-  provider             String    // github | gitlab | bitbucket | etc
-  repoOwner            String
-  repoName             String
-  encryptedToken       String    // encrypted access token
-  syncMode             String    @default("off") // off | webhook | polling
-  allowedAuthors       String    @default("[]") // JSON string of allowed authors
-  pollingIntervalMs    Int       @default(600000) // polling interval in milliseconds
-  webhookSecret        String?   // secret for validating webhook payloads
-  lastSyncedAt         DateTime?
-  isActive             Boolean   @default(true)
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  id                String    @id @default(cuid())
+  projectId         String    @unique
+  provider          String // github | gitlab | bitbucket | etc
+  repoOwner         String
+  repoName          String
+  encryptedToken    String // encrypted access token
+  syncMode          String    @default("off") // off | webhook | polling
+  allowedAuthors    String    @default("[]") // JSON string of allowed authors
+  pollingIntervalMs Int       @default(600000) // polling interval in milliseconds
+  webhookSecret     String? // secret for validating webhook payloads
+  lastSyncedAt      DateTime?
+  isActive          Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  project              Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  syncLogs             VcsSyncLog[]
+  project  Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  syncLogs VcsSyncLog[]
 }
 
 model VcsSyncLog {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   vcsConnectionId String
-  syncType        String   // polling | webhook | manual
-  issuesSynced    Int      @default(0)
-  issuesSkipped   Int      @default(0)
+  syncType        String // polling | webhook | manual
+  issuesSynced    Int       @default(0)
+  issuesSkipped   Int       @default(0)
   errorMessage    String?
-  startedAt       DateTime @default(now())
+  startedAt       DateTime  @default(now())
   completedAt     DateTime?
 
-  vcsConnection   VcsConnection @relation(fields: [vcsConnectionId], references: [id], onDelete: Cascade)
+  vcsConnection VcsConnection @relation(fields: [vcsConnectionId], references: [id], onDelete: Cascade)
 
   @@index([vcsConnectionId, startedAt])
 }
@@ -309,8 +311,8 @@ model TicketEvent {
   projectId String
   action    String
   actorId   String
-  actorType String   // user | agent
-  source    String   // api | internal | webhook
+  actorType String // user | agent
+  source    String // api | internal | webhook
   data      String   @default("{}") // JSON stored as string
   timestamp DateTime @default(now())
   createdAt DateTime @default(now())
@@ -327,7 +329,7 @@ model AgentEvent {
   projectId String
   action    String
   actorId   String
-  source    String   // api | internal | webhook
+  source    String // api | internal | webhook
   data      String   @default("{}") // JSON stored as string
   timestamp DateTime @default(now())
   createdAt DateTime @default(now())
@@ -343,9 +345,9 @@ model DecisionEvent {
   projectId String
   agentId   String
   action    String
-  decision  String   // decided | rejected | escalated
+  decision  String // decided | rejected | escalated
   rationale String?
-  source    String   // api | internal | webhook
+  source    String // api | internal | webhook
   data      String   @default("{}") // JSON stored as string
   timestamp DateTime @default(now())
   createdAt DateTime @default(now())
@@ -362,10 +364,10 @@ model DecisionEvent {
 model OutboxEvent {
   id            String    @id @default(cuid())
   projectId     String
-  type          String    // ticket_event | agent_event | decision_event | document_indexed | graphify_import | code_commit | webhook_delivery
-  eventId       String    // canonical record ID this outbox event originated from
+  type          String // ticket_event | agent_event | decision_event | document_indexed | graphify_import | code_commit | webhook_delivery
+  eventId       String // canonical record ID this outbox event originated from
   payload       String    @default("{}") // JSON stored as string
-  headers       String?   // JSON stored as string
+  headers       String? // JSON stored as string
   status        String    @default("pending") // pending | processing | published | dead (@nathapp/nestjs-outbox OutboxStatus)
   attempts      Int       @default(0)
   nextAttemptAt DateTime  @default(now())
@@ -376,7 +378,7 @@ model OutboxEvent {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([status, createdAt])
   @@index([projectId, createdAt])
@@ -390,35 +392,35 @@ model OutboxEvent {
 // ---------------------------------------------------------------------------
 
 model EntityNode {
-  id          String   @id @default(cuid())
-  projectId   String
-  entityId    String
-  entityType  String   // ticket | service | owner | incident | code_module
-  label       String
-  metadata    String   @default("{}") // JSON stored as string - tags, source refs, etc.
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(cuid())
+  projectId  String
+  entityId   String
+  entityType String // ticket | service | owner | incident | code_module
+  label      String
+  metadata   String   @default("{}") // JSON stored as string - tags, source refs, etc.
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@unique([projectId, entityId])
   @@index([projectId, entityType])
 }
 
 model EntityLink {
-  id          String   @id @default(cuid())
-  projectId   String
-  sourceId    String   // entityId of source node
-  targetId    String   // entityId of target node
-  relation    String   // ticket_to_service | ticket_to_owner | service_to_service | incident_to_ticket
-  metadata    String   @default("{}") // JSON stored as string
-  createdAt   DateTime @default(now())
+  id        String   @id @default(cuid())
+  projectId String
+  sourceId  String // entityId of source node
+  targetId  String // entityId of target node
+  relation  String // ticket_to_service | ticket_to_owner | service_to_service | incident_to_ticket
+  metadata  String   @default("{}") // JSON stored as string
+  createdAt DateTime @default(now())
 
-  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
+  @@unique([projectId, sourceId, targetId, relation])
   @@index([projectId, sourceId])
   @@index([projectId, targetId])
-  @@unique([projectId, sourceId, targetId, relation])
 }
 
 // ---------------------------------------------------------------------------
@@ -437,35 +439,35 @@ model GraphNode {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@unique([projectId, nodeId])
   @@index([projectId, vectorStale])
 }
 
 model GraphLink {
-  id          String   @id @default(cuid())
-  projectId   String
-  sourceId    String
-  targetId    String
-  relation    String?
-  createdAt   DateTime @default(now())
+  id        String   @id @default(cuid())
+  projectId String
+  sourceId  String
+  targetId  String
+  relation  String?
+  createdAt DateTime @default(now())
 
-  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
+  @@unique([projectId, sourceId, targetId, relation])
   @@index([projectId, sourceId])
   @@index([projectId, sourceId, targetId])
-  @@unique([projectId, sourceId, targetId, relation])
 }
 
 model Symbol {
-  id         String   @id  // {projectId}:{repoId}:{filePath}::{SymbolName}
+  id         String   @id // {projectId}:{repoId}:{filePath}::{SymbolName}
   symbolId   String
   projectId  String
   repoId     String
   commitHash String
   name       String
-  kind       String   // class | method | function | interface | enum
+  kind       String // class | method | function | interface | enum
   file       String
   startLine  Int
   endLine    Int
@@ -487,25 +489,25 @@ model Symbol {
 model MemoryItem {
   id           String    @id @default(cuid())
   projectId    String
-  kind         String    // FACT | DECISION | PREFERENCE | CONSTRAINT | INCIDENT_PATTERN
-  subject      String    // e.g. 'ticket:123'
-  predicate    String    // e.g. 'status', 'assigned_to'
-  object       String?   // e.g. 'IN_PROGRESS', 'user:456'
+  kind         String // FACT | DECISION | PREFERENCE | CONSTRAINT | INCIDENT_PATTERN
+  subject      String // e.g. 'ticket:123'
+  predicate    String // e.g. 'status', 'assigned_to'
+  object       String? // e.g. 'IN_PROGRESS', 'user:456'
   confidence   Float     @default(0.8) // 0.0 - 1.0
   ttlAt        DateTime? // null = never expires
-  ownerId      String?   // agent or user who created it
-  sourceType   String?   // ticket_event | agent_event | decision_event | manual
-  sourceId     String?   // ID of canonical record/source
+  ownerId      String? // agent or user who created it
+  sourceType   String? // ticket_event | agent_event | decision_event | manual
+  sourceId     String? // ID of canonical record/source
   status       String    @default("active") // active | superseded | rejected
-  supersededBy String?   // ID of the MemoryItem that superseded this one
-  activeKey    String?   // set only for active rows; null for superseded/rejected
+  supersededBy String? // ID of the MemoryItem that superseded this one
+  activeKey    String? // set only for active rows; null for superseded/rejected
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   deletedAt    DateTime? // soft delete
 
-  project      Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project            Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   supersededByMemory MemoryItem?  @relation("MemorySupersession", fields: [supersededBy], references: [id])
-  supersedes          MemoryItem[] @relation("MemorySupersession")
+  supersedes         MemoryItem[] @relation("MemorySupersession")
 
   @@unique([projectId, activeKey])
   @@index([projectId, kind])
@@ -522,8 +524,8 @@ model MemoryItem {
 model WebhookDelivery {
   id         String   @id @default(cuid())
   projectId  String
-  source     String   // github | ci
-  deliveryId String   // sender-provided delivery id (X-GitHub-Delivery / X-CI-Delivery)
+  source     String // github | ci
+  deliveryId String // sender-provided delivery id (X-GitHub-Delivery / X-CI-Delivery)
   receivedAt DateTime @default(now())
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -537,17 +539,17 @@ model WebhookDelivery {
 // ---------------------------------------------------------------------------
 
 model MemoryQueryMetric {
-  id                    String   @id @default(cuid())
-  projectId             String
-  intent                String
-  latencyMs             Int
-  tokensUsed            Int?
-  hadProvenance         Boolean
-  staleHitCount         Int      @default(0)
-  resultCount           Int      @default(0)
-  docId                 String?
-  leakageIncidentCount  Int      @default(0)
-  createdAt             DateTime @default(now())
+  id                   String   @id @default(cuid())
+  projectId            String
+  intent               String
+  latencyMs            Int
+  tokensUsed           Int?
+  hadProvenance        Boolean
+  staleHitCount        Int      @default(0)
+  resultCount          Int      @default(0)
+  docId                String?
+  leakageIncidentCount Int      @default(0)
+  createdAt            DateTime @default(now())
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
@@ -556,25 +558,28 @@ model MemoryQueryMetric {
 }
 
 // Fleet S1 (docs/superpowers/specs/2026-09-29-fleet-s1-dispatch-design.md §2).
-// Slice 1 tables only; jobs, events, commands and artifacts arrive in slice 2.
 
 model Runner {
   id              String   @id @default(cuid())
   name            String   @unique
   apiKeyHash      String   @unique // HMAC-SHA256 of the kr_ key under API_KEY_SECRET
-  os              String   // darwin | linux
-  arch            String   // arm64 | x64
+  os              String // darwin | linux
+  arch            String // arm64 | x64
   labels          String[]
   capacity        Int      @default(1)
-  capabilities    Json     // RunnerCapabilities (packages/fleet-protocol)
+  capabilities    Json // RunnerCapabilities (packages/fleet-protocol)
   daemonVersion   String
   protocolVersion Int
   bootId          String
   enabled         Boolean  @default(true)
   lastSeenAt      DateTime
-  createdById     String   // User.id who issued the enrollment token
+  createdById     String // User.id who issued the enrollment token
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  jobs       FleetJob[]     @relation("FleetJobRunner")
+  pinnedJobs FleetJob[]     @relation("FleetJobPinnedRunner")
+  commands   FleetCommand[]
 }
 
 model RunnerEnrollment {
@@ -593,9 +598,9 @@ model RunnerEnrollment {
 model FleetRepo {
   id                   String   @id @default(cuid())
   projectId            String
-  provider             String   // github | gitlab
-  owner                String   // canonical, as returned by the provider
-  name                 String   // canonical, as returned by the provider
+  provider             String // github | gitlab
+  owner                String // canonical, as returned by the provider
+  name                 String // canonical, as returned by the provider
   defaultBranch        String
   githubInstallationId BigInt?
   createdById          String
@@ -603,23 +608,138 @@ model FleetRepo {
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
+  jobs FleetJob[]
+
   @@unique([provider, owner, name])
   @@index([projectId])
 }
 
 model FleetActivity {
   id                String   @id @default(cuid())
-  actorType         String   // USER | RUNNER | SYSTEM
+  actorType         String // USER | RUNNER | SYSTEM
   actorId           String
   action            String
-  entityType        String   // runner | enrollment | repo (job from slice 2)
+  entityType        String // runner | enrollment | repo | job
   entityId          String
   jobId             String?
+  projectId         String? // set on job rows
   responsibleUserId String?
   payload           Json
   createdAt         DateTime @default(now())
 
   @@index([entityType, entityId])
   @@index([jobId])
+  @@index([projectId])
   @@index([createdAt])
+}
+
+/// Fleet S1 slice 2 (spec §2). One dispatched nax run or plan.
+model FleetJob {
+  id                String    @id @default(cuid())
+  projectId         String
+  repoId            String
+  ref               String
+  command           String // RUN | PLAN
+  feature           String
+  planFrom          String? // repo-relative spec path, PLAN only
+  profiles          String[]
+  maxCostUsd        Decimal   @db.Decimal(12, 4)
+  bashMode          String    @default("raw") // S1 accepts raw only
+  selectorLabels    String[]
+  pinnedRunnerId    String?
+  runnerId          String?
+  runnerBootId      String?
+  leaseEpoch        Int       @default(0)
+  state             String    @default("QUEUED") // QUEUED | ASSIGNED | RUNNING | UPLOADING | COMPLETED | FAILED | ESCALATED | CRASHED | CANCELLED
+  stateReason       String?
+  requestedById     String
+  queuedAt          DateTime  @default(now())
+  assignedAt        DateTime?
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  cancelRequestedAt DateTime?
+  naxRunId          String?
+  naxLogRunId       String?
+  naxCostRunId      String?
+  progress          Json?
+  currentStoryId    String?
+  currentPhase      String?
+  costSpentUsd      Decimal   @default(0) @db.Decimal(12, 4)
+  lastHeartbeatAt   DateTime?
+  finishResult      String?
+  escalationReason  String?
+  exitCode          Int?
+  resultBranch      String?
+  resultSha         String?
+  resultPrUrl       String?
+  eventSeq          Int       @default(0) // server timeline counter (plan D2)
+  ackedRunnerSeq    Int       @default(0) // cumulative runner ack for leaseEpoch (plan D2)
+  attributedAt      DateTime? // PR/MR attribution comment posted (plan D19)
+  updatedAt         DateTime  @updatedAt
+
+  project      Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repo         FleetRepo          @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  runner       Runner?            @relation("FleetJobRunner", fields: [runnerId], references: [id], onDelete: SetNull)
+  pinnedRunner Runner?            @relation("FleetJobPinnedRunner", fields: [pinnedRunnerId], references: [id], onDelete: SetNull)
+  requestedBy  User               @relation("FleetJobRequestedBy", fields: [requestedById], references: [id])
+  events       FleetJobEvent[]
+  commands     FleetCommand[]
+  artifacts    FleetJobArtifact[]
+
+  @@index([state])
+  @@index([runnerId, state])
+  @@index([projectId, queuedAt])
+}
+
+/// Job timeline. Runner events dedup on (jobId, leaseEpoch, runnerSeq); server events have runnerSeq null (plan D2).
+model FleetJobEvent {
+  id         String   @id @default(cuid())
+  jobId      String
+  seq        Int // server timeline order
+  leaseEpoch Int
+  runnerSeq  Int?
+  type       String // state | snapshot | lifecycle | log
+  payload    Json
+  createdAt  DateTime @default(now())
+
+  job FleetJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, seq])
+  @@unique([jobId, leaseEpoch, runnerSeq])
+}
+
+/// Server -> runner command, re-sent until acked (spec §3.2). id is the idempotency key.
+model FleetCommand {
+  id          String    @id @default(cuid())
+  runnerId    String
+  jobId       String
+  type        String // ASSIGN | CANCEL | READOPT | ABANDON
+  leaseEpoch  Int
+  payload     Json // never a secret
+  createdAt   DateTime  @default(now())
+  deliveredAt DateTime?
+  ackedAt     DateTime?
+  ackResult   String? // ok | rejected | withdrawn | stale
+
+  runner Runner   @relation(fields: [runnerId], references: [id], onDelete: Cascade)
+  job    FleetJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([runnerId, ackedAt])
+  @@index([jobId])
+}
+
+/// Uploaded run bundle, one per job and lease epoch (plan D3).
+model FleetJobArtifact {
+  id         String   @id @default(cuid())
+  jobId      String
+  leaseEpoch Int
+  kind       String // bundle
+  storageKey String
+  sizeBytes  BigInt
+  sha256     String
+  createdAt  DateTime @default(now())
+
+  job FleetJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, kind, leaseEpoch])
 }
