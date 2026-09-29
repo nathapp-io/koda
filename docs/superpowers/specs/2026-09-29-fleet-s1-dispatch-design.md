@@ -4,7 +4,7 @@
 **Base:** `main` @ `5ef74662` (Track 1 and Track 3 complete, PRs #133-#154)
 **nax reference:** main `1c7aa52ee` (v0.83.0-canary.2)
 **Source:** fleet platform design doc (`projects/koda/koda-fleet-platform-design-2026-09-13.md`, workspace repo) §3, §6, §7, the §9.2 native-agent amendments and the §9.12 Paperclip copy list C1-C9. This spec supersedes §7.
-**Status:** Sectioned design approved in chat 2026-09-29 (seven sections). Awaiting written-spec review.
+**Status:** Sectioned design approved in chat 2026-09-29 (seven sections). Spec review 2026-09-29 (two Sonnet reviewers, koda side and nax side): READY AFTER FIXES, all applied; isolation ruling R7 added. Awaiting user review.
 
 ## Goal
 
@@ -37,6 +37,7 @@ story progress and live cost, keep the run's artifact bundle, and never let two 
 | R4 | Protocol **A**: one long-polled `POST /fleet/runner/sync` plus a separate bundle upload. |
 | R5 | **All** runner git traffic is brokered by koda: GitHub via per-job App installation tokens, GitLab via the project's stored `VcsConnection` token. Clone, fetch, nax finish push and `gh`/`glab` PR creation all use it. Machines hold no git credentials. This amends the 2026-09-13 ruling (§6 Q5, "git credentials stay machine-local"). Provider (LLM) credentials still stay on the machine; koda never stores them. |
 | R6 | Cross-machine duplicate work is prevented by compare-and-set assignment, a lease epoch fence (also enforced by the git broker), and a partial unique index on active `(repoId, feature)` (§6.4). |
+| R7 | Isolation: S1 runs jobs on the host through a `JobExecutor` seam (`HostExecutor`), under a dedicated OS user. A VM executor is a later phase; VMs are not required in S1 (§5.5). |
 
 Earlier rulings that still hold (design doc §6): fleet = mixed macOS + Linux; runners auto-clone from a
 platform repo registry; labels + auto-pick with a pin override; 1 job per runner by default; home server + VPN
@@ -87,23 +88,33 @@ Boundaries:
 - The runner calls exactly three endpoints: enroll (once), sync, and bundle upload.
 - `packages/fleet-protocol` carries `FLEET_PROTOCOL_VERSION`. The server answers an unsupported version with
   426 and a body naming the supported range. The runner logs it and stops syncing (no retry storm).
-- Runner authentication reuses the agent API-key machinery: a random key, stored as an HMAC-SHA256 hash under
-  `auth.apiKeySecret` (see `AgentsService.generateApiKey`, `apps/api/src/agents/agents.service.ts:79-87`),
-  resolved in `CombinedAuthGuard`. A new `RUNNER` principal type is accepted only on `/fleet/runner/*`, and
-  JWT and agent principals are refused there. Runner keys are never accepted anywhere else.
+- Runner authentication reuses the agent API-key *hashing*: a random key, stored as an HMAC-SHA256 hash under
+  `auth.apiKeySecret` (see `AgentsService.generateApiKey`, `apps/api/src/agents/agents.service.ts:79-91`).
+  The guard does not generalise today: `CombinedAuthGuard.tryApiKey` looks up agents only
+  (`combined-auth.guard.ts:83`, `findAgentByKeyHash`) and `KodaPrincipal = UserPrincipal | AgentPrincipal` is a
+  closed union (`auth/principal/koda-principal.types.ts:27`). S1 therefore: gives runner keys a distinct prefix
+  (`kr_`), routes prefixed keys to a `findRunnerByKeyHash` lookup, adds a third arm `RunnerPrincipal`
+  (`actorType: 'runner'`) with `isRunnerPrincipal`, and audits every exhaustive match on `KodaPrincipal`. A
+  `RunnerOnlyGuard` on `/fleet/runner/*` refuses user and agent principals, and every other route refuses runner
+  principals (a global check in the guard, not per controller). The global `PermissionAuthGuard` allows routes
+  without `@RequiredPermission`, so runner routes are not blocked by CASL.
 - Job updates reach browsers through the existing `ProjectEventBus` (`apps/api/src/live/project-event-bus.ts`)
-  and SSE stream. `LiveEvent` gains a `fleet_job` member (content-free: `jobId`, `state`, `at`); the page
-  refetches the job. The Runners page is not project-scoped and polls every 15s.
+  and SSE stream. `LiveEvent` (`apps/api/src/live/live-event.ts:10-17`, today a one-member union) becomes a
+  discriminated union with a `fleet_job` member carrying `id`, `projectId` (required: `ProjectEventBus.publish`
+  routes on it, `project-event-bus.ts:26-33`), `jobId`, `state`, `at`; content-free, the page refetches the job.
+  Every consumer that switches on `type` gets the new arm. The Runners page is not project-scoped and polls every 15s.
 - Fleet adds no distributed machinery. The long-poll notifier and the silence sweep run in process.
 
 ## 2. Data model
 
 New tables use native Postgres `Json`, `String[]` and Prisma enums (the String-JSON convention on older
-tables is existing debt and not extended).
+tables is existing debt and not extended). `BigInt` and `Decimal` are new to the schema (no existing table uses
+them) and do not survive `JSON.stringify`, so every response DTO maps them to `string` and the OpenAPI schema
+declares them as `string`; a unit test serialises each fleet DTO.
 
 ```prisma
 enum FleetJobState { QUEUED ASSIGNED RUNNING UPLOADING COMPLETED FAILED ESCALATED CRASHED CANCELLED }
-enum FleetJobCommand { RUN PLAN }
+enum FleetJobKind { RUN PLAN }
 enum FleetCommandType { ASSIGN CANCEL READOPT ABANDON }
 enum FleetProvider { GITHUB GITLAB }
 enum FleetActorType { USER RUNNER SYSTEM }
@@ -156,7 +167,7 @@ model FleetJob {
   projectId        String
   repoId           String
   ref              String
-  command          FleetJobCommand
+  command          FleetJobKind
   feature          String
   planFrom         String?         // repo-relative spec path, required for PLAN
   profiles         String[]
@@ -205,7 +216,7 @@ model FleetJobEvent {
   @@unique([jobId, seq])
 }
 
-model FleetJobCommand {
+model FleetCommand {
   id          String           @id @default(cuid())   // idempotency key
   runnerId    String
   jobId       String
@@ -270,12 +281,24 @@ interface RunnerCapabilities {
   profiles: Record<string, ProfileNeeds>;                           // resolved locally by the runner
   credentials: Array<{ providerId: string; kind: string; expires?: string }>; // secret-free
   tools: { git: boolean; gh: boolean; glab: boolean };
+  executors: Array<'host'>;                                          // §5.5; 'vm' later
 }
 interface ProfileNeeds { protocol: 'acp' | 'native'; providers: string[]; sandbox: boolean }
 ```
 
-`ProfileNeeds` and `credentials` come from spikes SP-2 and SP-3 (§10). The server matches names and flags only;
-it never parses nax config.
+The server matches names and flags only; it never parses nax config.
+
+- `profiles` covers **machine** profiles (the runner user's `~/.nax/profiles/`). Repo profiles
+  (`<repo>/.nax/profiles/`) are unknowable before clone, so placement treats a profile name absent from
+  `capabilities.profiles` as repo-provided and skips its needs check. After checkout the runner resolves the
+  full chain; if a need is unmet it reports ASSIGNED→FAILED with `stateReason = 'capability mismatch: …'` (no
+  automatic re-placement in S1).
+- Resolving a chain's needs requires a small nax PR, because `nax config` has no `--profile` option and
+  `nax config profile show <name>` shows one unmerged profile (nax `src/cli/config-profile.ts:116-130`). The PR
+  adds `nax config --profile <chain> --json` (resolved `agent.protocol`, providers, sandbox) and
+  `nax auth list --json`. Until it ships, `credentials` is read directly from the runner user's
+  `~/.nax/credentials` (`{credentials: {<providerId>: {kind, expires}}}`, the file `readStoredEntries` reads,
+  `src/agents/native/credentials.ts:57-90`; key material is never parsed).
 
 ### 2.2 Permissions
 
@@ -319,8 +342,10 @@ response { jobAcks: [{ jobId, ackedSeq }],
   rows at or below it and, after a reconnect, resends everything above it.
 - **Idempotent commands.** Every command has a unique id and is re-sent until acked. The runner records the
   ids it has applied per job, so a repeated command is acked again without being re-applied.
-- **Long-poll.** When there is nothing to return, the server holds the request up to 25s and wakes early when a
-  command is queued for that runner (in-process notifier keyed by `runnerId`).
+- **Long-poll.** The request is processed in two steps: (1) one short transaction stores events, applies acks
+  and snapshot mirrors, runs placement when `freeSlots > 0`, and collects pending commands; (2) only if there is
+  nothing to return, the handler waits up to 25s **holding no transaction or connection**, woken by an in-process
+  notifier keyed by `runnerId`, then re-reads pending commands.
 - **Mirror.** Snapshot events update the `FleetJob` mirror columns in the same transaction as the insert and
   publish a `fleet_job` live event after commit.
 - **Log events** are excerpts: at most 8 KiB each and 60 per job per minute; excess is dropped by the runner
@@ -335,6 +360,24 @@ bundle on cancel) or UPLOADING. The server streams to the `ArtifactStore`, stops
 at `FLEET_BUNDLE_MAX_BYTES` (default 200 MiB) with 413, verifies the hash, and creates `FleetJobArtifact`.
 A re-upload for the same job and epoch replaces the previous bundle.
 
+### 3.4 User-facing endpoints
+
+| Route | Permission |
+|:--|:--|
+| `GET /fleet/runners`, `GET /fleet/runners/:id` | global ADMIN |
+| `PATCH /fleet/runners/:id` (`enabled`, `labels`, `capacity`), `DELETE /fleet/runners/:id` | global ADMIN |
+| `POST /fleet/enrollments` (returns the token once), `GET /fleet/enrollments` | global ADMIN |
+| `GET /fleet/repos`, `POST /fleet/repos`, `DELETE /fleet/repos/:id` | global ADMIN |
+| `GET /projects/:slug/fleet/repos` (repos usable for dispatch) | project member |
+| `POST /projects/:slug/fleet/jobs` (dispatch) | project DEVELOPER+ |
+| `GET /projects/:slug/fleet/jobs` (paged, filters: state, repo, runner, requester), `GET /projects/:slug/fleet/jobs/:id`, `GET …/:id/events` (paged by seq) | project member |
+| `POST /projects/:slug/fleet/jobs/:id/cancel` | project DEVELOPER+ or requester |
+| `POST /projects/:slug/fleet/jobs/:id/requeue` | project DEVELOPER+ |
+| `GET /projects/:slug/fleet/jobs/:id/bundle` | project member |
+| `GET /fleet/activity` | §8 |
+
+Lists use the `@nathapp` `Page` pagination like the rest of the API. Responses use `JsonResponse.Ok`.
+
 ## 4. Placement
 
 Runs on dispatch and whenever a runner syncs with `freeSlots > 0`.
@@ -345,8 +388,10 @@ Runs on dispatch and whenever a runner syncs with `freeSlots > 0`.
 2. Capability fit: every name in `profiles` exists in `capabilities.profiles`; the union of their `ProfileNeeds`
    is satisfied (protocol in `nax.protocols`, each provider present in `credentials` and not expired, and
    `sandbox.available` when needed); `tools.git` plus `tools.gh` (GitHub) or `tools.glab` (GitLab).
-3. Load: no active job on the same repo on that runner (nax.lock allows one run per repo per machine), and
-   active jobs below `capacity`.
+3. Load: no active job on the same repo on that runner, and active jobs below `capacity`. (nax keeps two
+   locks: the checkout lock `<workdir>/nax.lock`, `src/execution/lock.ts:222`, which the shared clone still
+   enforces, and a feature lock under `<outputDir>/features/<feature>/nax.lock`, `feature-lock.ts:107`, which is
+   inert across jobs once `outputDir` is per job. This placement rule is the real guard; neither lock is relied on.)
 4. Order: fewest active jobs, then oldest `lastSeenAt`.
 5. Assign with the compare-and-set in §6.4, then queue an `ASSIGN` command.
 
@@ -371,9 +416,13 @@ For each `ASSIGN`:
    installed (§7.2). Before checkout: `git fetch`, then clean the working tree. The exact clean scope, and
    what nax state under `.nax/` must survive between runs, is pinned by spike SP-4.
 2. **Checkout** `ref` as a detached HEAD. nax creates its own feature branch.
-3. **Per-job output.** `<workspaceRoot>/.jobs/<jobId>/` holds the nax output dir, the git-cred socket and shim
-   `bin/`. The isolating mechanism (`NAX_GLOBAL_CONFIG_DIR`, `config.outputDir` or `config.name`) is pinned
-   by spike SP-1, with the constraint that machine profiles and credentials under `~/.nax` still resolve.
+3. **Per-job output.** `<workspaceRoot>/.jobs/<jobId>/` holds the nax output dir (`nax-out/`), the git-cred
+   socket and shim `bin/`. Isolation uses `config.outputDir`, which moves only the run output tree
+   (`projectOutputDir`, nax `src/runtime/paths.ts:19-32`; absolute paths accepted). `NAX_GLOBAL_CONFIG_DIR` is
+   ruled out: it also relocates profiles and the credential store (`src/agents/native/credentials.ts:26`). nax
+   has no CLI flag for `outputDir`, so the runner writes a per-job profile `koda-job-<jobId>.json` =
+   `{"outputDir": "<abs>"}` into the runner user's `~/.nax/profiles/`, appends it last to the chain (profiles are
+   raw overlays, later wins), and deletes it at the end. SP-1 verifies this end to end.
 4. **Spawn.** `nax run --headless --json -f <feature> --profile <chain> --max-cost <n>` or `nax plan --from
    <planFrom> -f <feature> --profile <chain>`, in its own process group, started detached so it survives a daemon
    restart. PID and process group go to the journal. The job becomes RUNNING.
@@ -386,7 +435,7 @@ For each `ASSIGN`:
 
    | Condition | State |
    |:--|:--|
-   | `cancelRequestedAt` set and the process ended | CANCELLED |
+   | `cancelRequestedAt` set and the process ended | CANCELLED (must stay first: SIGTERM makes nax write `run.status = crashed`, `src/execution/crash-writer.ts:105`) |
    | `postRun.finish.result` = `escalated` | ESCALATED (`escalationReason` from `postRun.finish.escalationReason`) |
    | `run.status` = `completed` and `postRun.finish` absent, skipped, or `result` in `opened`, `promoted`, `already-ready`, `nothing-to-finish` | COMPLETED |
    | anything else (`failed`, `stalled`, `crashed`, `precheck-failed`, `cost-limit`, `aborted`, no `status.json`) | FAILED (`stateReason` = run status or the missing file) |
@@ -395,8 +444,11 @@ For each `ASSIGN`:
    JSON with a non-empty `userStories` array; otherwise FAILED. nax can exit 0 after writing an invalid PRD, so
    the file is checked, not the exit code.
 
-   `resultPrUrl` comes from `postRun.finish.url`; `resultBranch` and `resultSha` from
-   `finish-audit/<feature>/last.json` when present (exact fields pinned in slice 3).
+   `resultPrUrl` comes from `postRun.finish.url`; `resultBranch` and `resultSha` from the `branch` and `headSha`
+   fields of `finish-audit/<feature>/last.json` (nax `src/finish/audit.ts:51-52`) when present.
+
+   `status.json` is written atomically (tmp + rename); a parse failure is treated as "no new snapshot" and
+   retried on the next 2s tick. Five consecutive failures are logged as a watcher error in a `lifecycle` event.
 7. **Upload.** UPLOADING, then a tar.gz of the run JSONL, cost ledger, review-audit, finish-audit,
    `metrics.json` and `status.json` (prompt-audit excluded), then the upload. Three failed attempts with
    backoff end the job in its verdict state with `stateReason='bundle upload failed'`; the bundle stays on disk.
@@ -417,6 +469,13 @@ For each `ASSIGN`:
 - **Requeue.** CRASHED, FAILED or CANCELLED only, manual only. It moves the job back to QUEUED, clears the
   runner fields and increments `leaseEpoch`. The partial index still applies.
 
+### 5.4a Service units
+
+The nax child must survive a daemon restart (§5.3 readopt). The runner spawns nax with `setsid` (own session and
+process group). The generated systemd unit sets `KillMode=process` (the default `control-group` would kill the
+detached child on `systemctl restart`); the launchd plist sets `AbandonProcessGroup` to `true`. Both units run as
+the dedicated runner user (§5.5). The runner test suite includes a restart test per platform.
+
 ### 5.4 State transitions
 
 Server-owned: QUEUED→ASSIGNED (placement), QUEUED→CANCELLED, ASSIGNED→CANCELLED (unacked assign),
@@ -425,6 +484,20 @@ Runner-reported: ASSIGNED→RUNNING, ASSIGNED→FAILED (workspace or checkout fa
 ASSIGNED→CANCELLED (cancel before spawn), RUNNING→UPLOADING, UPLOADING→COMPLETED|FAILED|ESCALATED|CANCELLED,
 RUNNING→CANCELLED. Any other transition is rejected
 and logged. Every transition writes a `state` event and `FleetActivity`.
+
+### 5.5 Isolation (R7)
+
+- **`JobExecutor` seam** in the runner: `prepare(job)`, `spawn()`, `watch()`, `kill(signal)`,
+  `collectBundle()`, `cleanup()`. S1 ships `HostExecutor` only. The runner reports `executors: ['host']` in
+  `RunnerCapabilities`; a later job field can require `vm` without protocol or server changes.
+- **Dedicated OS user.** The daemon runs as a `koda-runner` user (installed by `koda-runner install-service`)
+  with its own home and `~/.nax` (provider credentials provisioned there by a human, as today), no personal SSH
+  keys, and access only to its workspace root. The P4 Bash sandbox still wraps agent Bash calls inside that.
+- **Not covered:** the coding agent can still read the runner user's `~/.nax/credentials` (nax needs them) and
+  the job's git-cred socket; a VM does not change the first point either.
+- **VM executor (later phase, after S1b):** Lima or Tart on macOS (Linux guests; Apple allows two macOS guests
+  per host), Firecracker or libvirt on Linux, warm images and a dependency cache, git-cred socket forwarded into
+  the guest.
 
 ## 6. Exclusive execution (R6)
 
@@ -470,9 +543,11 @@ machines at once.
   `repositories: [name]` and `permissions: {contents: write, pull_requests: write, metadata: read}`. Cached in
   memory per `(jobId, leaseEpoch)` until 5 minutes before expiry.
 - **GitLab:** decrypt the project's `VcsConnection.encryptedToken` (`common/utils/encryption.util`). The
-  FleetRepo must equal that connection's `repoOwner`/`repoName`.
+  FleetRepo must equal that connection's `repoOwner`/`repoName`. `VcsConnection.projectId` is unique, so S1
+  supports **one GitLab fleet repo per project** (the connected one); GitHub has no such limit. A per-repo GitLab
+  token is a later extension if needed.
 - Tokens are returned only in the sync response `gitTokens`, computed per request, never written to the
-  database (including `FleetJobCommand`), never logged, and redacted from error bodies.
+  database (including `FleetCommand`), never logged, and redacted from error bodies.
 - **Registration checks.** GitHub: the installation exists and lists the repo; `githubInstallationId` is stored.
   GitLab: the token's access level on the project is Developer or higher and it has `write_repository` scope.
   A failing check is 422 with the reason.
@@ -488,6 +563,13 @@ machines at once.
   set to the App bot (`<slug>[bot]`, GitHub noreply) or the GitLab bot identity.
 - `gh`/`glab` shims first on the job's `PATH` (`<jobDir>/bin`) fetch the token and `exec` the real binary with
   `GH_TOKEN` / `GITLAB_TOKEN` set for that process only. No token is placed in the nax process environment.
+
+Verified at nax `1c7aa52ee`: the finish phase's `git push` and `gh`/`glab` calls run through `Bun.spawn`
+with `process.env` passed through (`src/forge/deps.ts:39-56`, `src/utils/git-env.ts:66-72`), **outside** the P4
+Bash sandbox, which wraps only agent Bash tool calls (`src/agents/coding-tool-sandbox.ts`). So the socket and
+shims are not blocked by srt/bubblewrap for the finish push. nax detects the forge from the `origin` hostname
+first and probes `gh`/`glab` only for ambiguous hosts (`src/forge/detect.ts:54-58`); shim tests cover the
+action calls (`pr create`, `pr view`, `pr ready`, `pr edit`) as well as the probe.
 
 ### 7.3 Known limits
 
@@ -563,9 +645,9 @@ Local and read-only; none is a billed nax run.
 
 | # | Question | Decides |
 |:--|:--|:--|
-| SP-1 | Which of `NAX_GLOBAL_CONFIG_DIR`, `config.outputDir`, `config.name` isolates `status.json` and the output dir per job while `~/.nax` profiles and credentials still resolve? | §5.2 step 3 |
-| SP-2 | Can the runner get a profile chain's resolved `agent.protocol`, providers and sandbox need from a nax CLI call (`nax config --profile X` with JSON output), or is a small nax PR needed? | `ProfileNeeds` |
-| SP-3 | Credential inventory: replicate the read behind `readStoredEntries`, or add `nax auth list --json` in a small nax PR (preferred: avoids depending on the credentials file format)? | `capabilities.credentials` |
+| SP-1 | Answered by review (`config.outputDir`). Verify end to end that a per-job profile appended last to the chain moves `status.json`, run logs, finish-audit and the cost ledger under `<jobDir>/nax-out` while profiles and credentials still resolve from the runner user's `~/.nax`. | §5.2 step 3 |
+| SP-2 | Answered by review: no nax command resolves a chain today. Replaced by a nax PR (`nax config --profile <chain> --json`, `nax auth list --json`), landed before slice 3. | §2.1 |
+| SP-3 | Answered by review: the credentials file shape is `{credentials: {<providerId>: {kind, expires}}}`; read directly until the nax PR ships. | §2.1 |
 | SP-4 | Which nax state under `.nax/` must survive between runs of the same repo on one machine, so the pre-checkout clean does not delete it? | §5.2 step 1 |
 
 ## 11. Web and CLI
@@ -624,5 +706,4 @@ One plan per slice, each a PR, in order:
    every app has its own context file.
 4. Web pages and CLI.
 
-The spikes in §10 run before the slice 1 plan; SP-1, SP-3 and SP-4 only change slice 3, SP-2 changes the
-capability shape in slice 1.
+SP-1 and SP-4 run before the slice 3 plan; they do not change slices 1-2. The nax PR (§2.1) lands before slice 3.
