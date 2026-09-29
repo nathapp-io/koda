@@ -4,7 +4,7 @@ import type { LiveFleetJobEvent } from '../../live/live-event';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import type { JobAck, JobReport } from '../common/protocol';
 import { FleetJobLivePublisher } from '../jobs/fleet-job-live.publisher';
-import { canTransition, isTerminal } from '../jobs/job-state';
+import { canTransition } from '../jobs/job-state';
 import { JobTransitionsService } from '../jobs/job-transitions.service';
 import { FLEET_JOB_REPOSITORY, FleetJobEventRecord, FleetJobRecord, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { interpretEvent } from './event-payloads';
