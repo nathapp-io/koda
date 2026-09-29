@@ -581,6 +581,9 @@ Web, under `/fleet`:
   current story and phase, live cost, finish result and escalation reason, branch/PR link, bundle download,
   cancel and requeue.
 
+User-facing strings follow the repo's split i18n: API messages in `apps/api/src/i18n/{en,zh}`, web strings in
+`apps/web/i18n/locales/{en,zh}.json`.
+
 CLI: `koda fleet runner list|enable|disable|enroll-token`, `koda fleet repo add|list|rm`,
 `koda fleet dispatch …`, `koda fleet job list|show|cancel|requeue|bundle`.
 
@@ -616,7 +619,9 @@ One plan per slice, each a PR, in order:
    broker registration checks, `FleetActivity`.
 2. Jobs: dispatch, placement, fencing, sync endpoint, commands, cancel, requeue, silence sweep, boot-id
    reconcile, bundle upload, token minting, `fleet_job` live events.
-3. `apps/runner`: journal, sync loop, executor, watcher, git-cred, capability probe, service units.
+3. `apps/runner`: journal, sync loop, executor, watcher, git-cred, capability probe, service units. Adds
+   `.nax/mono/apps/runner/context.md` (and regenerates agent files with `nax generate`), per the repo rule that
+   every app has its own context file.
 4. Web pages and CLI.
 
 The spikes in §10 run before the slice 1 plan; SP-1, SP-3 and SP-4 only change slice 3, SP-2 changes the
