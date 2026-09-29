@@ -12,4 +12,7 @@ export class ListFleetActivityQuery extends KodaPageQuery {
 
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(64)
   actorId?: string;
+
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(64)
+  jobId?: string;
 }

@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
+import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { IPageResult } from '@nathapp/nestjs-data';
@@ -76,11 +77,16 @@ export class FleetReposService {
     return remapPage(await this.repo.findPage(filters, page), FleetRepoDto.from);
   }
 
-  /** Slice 2 adds the active-job 409 (plan D10). */
+  /**
+   * Deletion is refused while any job on the repo is unfinished (plan D15). The row
+   * is locked FOR UPDATE first so the count sees a stable row (review m6).
+   */
   async remove(actorId: string, id: string): Promise<void> {
     await this.txManager.run(async () => {
+      await this.repo.lockForDelete(id);
       const row = await this.repo.findById(id);
       if (!row) throw new NotFoundAppException({}, 'fleet.repos');
+      if ((await this.repo.countUnfinishedJobs(id)) > 0) throw new ConflictAppException({}, 'fleet.repoBusy');
       await this.repo.delete(id);
       await this.activity.record({
         actorType: 'USER', actorId, action: 'repo.deleted', entityType: 'repo', entityId: id,

@@ -4,6 +4,7 @@ import { Paginate, PrismaService } from '@nathapp/nestjs-prisma';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
+import { ACTIVE_STATES } from '../jobs/job-state';
 import type { FleetRepoRecord, IFleetRepoRepository } from './domain/fleet-repo.domain';
 
 @Injectable()
@@ -41,5 +42,13 @@ export class PrismaFleetRepoRepository implements IFleetRepoRepository {
 
   async delete(id: string): Promise<void> {
     await this.db.fleetRepo.delete({ where: { id } });
+  }
+
+  countUnfinishedJobs(repoId: string): Promise<number> {
+    return this.db.fleetJob.count({ where: { repoId, state: { in: [...ACTIVE_STATES] } } });
+  }
+
+  async lockForDelete(id: string): Promise<void> {
+    await this.db.$queryRaw`SELECT "id" FROM "FleetRepo" WHERE "id" = ${id} FOR UPDATE`;
   }
 }

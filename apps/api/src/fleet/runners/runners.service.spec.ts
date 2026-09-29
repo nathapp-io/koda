@@ -1,4 +1,5 @@
 import { NotFoundAppException } from '@nathapp/nestjs-common';
+import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { RunnersService } from './runners.service';
 
 const row = (over = {}) => ({
@@ -8,7 +9,7 @@ const row = (over = {}) => ({
 });
 
 describe('RunnersService', () => {
-  const repo = { findRunnerById: jest.fn(), findRunnerPage: jest.fn(), updateRunner: jest.fn(), deleteRunner: jest.fn() };
+  const repo = { findRunnerById: jest.fn(), findRunnerPage: jest.fn(), updateRunner: jest.fn(), deleteRunner: jest.fn(), lockForDelete: jest.fn(), countUnfinishedJobs: jest.fn() };
   const activity = { record: jest.fn() };
   const tx = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
   const service = new RunnersService(repo as never, activity as never, tx as never);
@@ -31,8 +32,17 @@ describe('RunnersService', () => {
 
   it('deletes and records', async () => {
     repo.findRunnerById.mockResolvedValue(row());
+    repo.countUnfinishedJobs.mockResolvedValue(0);
     await service.remove('u9', 'r1');
+    expect(repo.lockForDelete).toHaveBeenCalledWith('r1');
     expect(repo.deleteRunner).toHaveBeenCalledWith('r1');
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'runner.deleted', entityId: 'r1', payload: { name: 'box' } }));
+  });
+
+  it('409s a runner with unfinished or pinned jobs', async () => {
+    repo.findRunnerById.mockResolvedValue(row());
+    repo.countUnfinishedJobs.mockResolvedValue(2);
+    await expect(service.remove('u9', 'r1')).rejects.toBeInstanceOf(ConflictAppException);
+    expect(repo.deleteRunner).not.toHaveBeenCalled();
   });
 });

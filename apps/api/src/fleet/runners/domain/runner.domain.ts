@@ -66,4 +66,8 @@ export interface IRunnerRepository {
   findRunnerPage(page: IPageOption): Promise<IPageResult<RunnerRecord>>;
   updateRunner(id: string, patch: RunnerPatch): Promise<RunnerRecord>;
   deleteRunner(id: string): Promise<void>;
+  /** Number of the runner's jobs in an active state, as runner or as pin (plan D15). */
+  countUnfinishedJobs(runnerId: string): Promise<number>;
+  /** SELECT ... FOR UPDATE on the runner row, so the delete decision sees a stable row (review m6). */
+  lockForDelete(id: string): Promise<void>;
 }

@@ -5,6 +5,8 @@
   "capabilities": { "-2": "Invalid runner capabilities: {reason}" },
   "runners": { "404": "Runner not found", "409": "A runner with this name already exists" },
   "repos": { "404": "Fleet repository not found", "409": "This repository is already registered" },
+  "runnerBusy": { "409": "The runner has unfinished or pinned jobs; disable it instead" },
+  "repoBusy": { "409": "The repository has unfinished jobs" },
   "repoCheck": { "422": "Repository check failed: {reason}" },
   "jobs": { "404": "Fleet job not found", "409": "An active job already runs this feature: {activeJobId}" },
   "jobState": { "409": "The job is {state}; this action is not allowed" },

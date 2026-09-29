@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { FleetCommand as FleetCommandRow, FleetJob as JobRow, Prisma, PrismaClient } from '@prisma/client';
 import { Paginate, PrismaService } from '@nathapp/nestjs-prisma';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { FleetCommandAckResult, FleetCommandType, FleetJobState, FleetJobKind } from '../../common/enums';
@@ -44,6 +45,8 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     } catch (error) {
       // The only unique constraint a new row can hit is the active (repoId, feature) index.
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new DuplicateActiveJobError();
+      // A dispatch that waited on the repo's lockForDelete then raced the delete: FK on FleetRepo fails.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') throw new NotFoundAppException({}, 'fleet.repos');
       throw error;
     }
   }

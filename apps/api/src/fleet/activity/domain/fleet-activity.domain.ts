@@ -36,9 +36,14 @@ export interface FleetActivityFilters {
   entityType?: string;
   entityId?: string;
   actorId?: string;
+  jobId?: string;
+  /** undefined = no scope (global ADMIN); otherwise only rows in these projects. */
+  projectIds?: readonly string[];
 }
 
 export interface IFleetActivityRepository {
   create(row: Required<Omit<FleetActivityEntry, 'payload'>> & { payload: Record<string, unknown> }): Promise<void>;
   findPage(filters: FleetActivityFilters, page: IPageOption): Promise<IPageResult<FleetActivityRecord>>;
+  /** Ids of the user's non-deleted project memberships (activity scoping, plan D14). */
+  findMemberProjectIds(userId: string): Promise<string[]>;
 }
