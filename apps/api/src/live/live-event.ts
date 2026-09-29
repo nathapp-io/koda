@@ -1,12 +1,12 @@
 /**
  * Track 1 Slice 5: the content-free live event pushed to browsers over SSE.
- * `type` is a union with one member today; fleet S2 adds members.
+ * `type` is a union: `ticket` since Track 1 Slice 5, `fleet_job` since fleet S1.
  * `id` is the ticket_event envelope id (the TicketEvent row id), stable
  * across outbox retries, so clients can drop duplicate deliveries.
  */
 export type LiveTicketAction = 'created' | 'updated' | 'transitioned' | 'assigned' | 'commented' | 'deleted';
 
-export interface LiveEvent {
+export interface LiveTicketEvent {
   id: string;
   type: 'ticket';
   action: LiveTicketAction;
@@ -25,10 +25,25 @@ export const TICKET_ACTION_TO_LIVE: Readonly<Record<string, LiveTicketAction>> =
   TICKET_DELETED: 'deleted',
 });
 
+/**
+ * Fleet S1 (spec §1): content-free job change; the page refetches the job.
+ * `projectId` is required: ProjectEventBus routes on it.
+ */
+export interface LiveFleetJobEvent {
+  id: string;
+  type: 'fleet_job';
+  projectId: string;
+  jobId: string;
+  state: string;
+  at: string;
+}
+
+export type LiveEvent = LiveTicketEvent | LiveFleetJobEvent;
+
 const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 
-/** Maps a ticket_event outbox envelope to a LiveEvent; null when it cannot or should not be sent. */
-export function toLiveEvent(payload: unknown): LiveEvent | null {
+/** Maps a ticket_event outbox envelope to a LiveTicketEvent; null when it cannot or should not be sent. */
+export function toLiveEvent(payload: unknown): LiveTicketEvent | null {
   if (typeof payload !== 'object' || payload === null) return null;
   const p = payload as Record<string, unknown>;
   // Own-property check: a plain-object lookup would otherwise resolve inherited

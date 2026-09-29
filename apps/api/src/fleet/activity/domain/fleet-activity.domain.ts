@@ -4,7 +4,7 @@ import type { FleetActorType } from '../../../common/enums';
 
 export const FLEET_ACTIVITY_REPOSITORY = Symbol('FLEET_ACTIVITY_REPOSITORY');
 
-export type FleetEntityType = 'runner' | 'enrollment' | 'repo';
+export type FleetEntityType = 'runner' | 'enrollment' | 'repo' | 'job';
 
 export interface FleetActivityEntry {
   actorType: FleetActorType;
@@ -13,6 +13,7 @@ export interface FleetActivityEntry {
   entityType: FleetEntityType;
   entityId: string;
   jobId?: string | null;
+  projectId?: string | null;
   responsibleUserId?: string | null;
   payload?: Record<string, unknown>;
 }
@@ -25,6 +26,7 @@ export interface FleetActivityRecord {
   entityType: string;
   entityId: string;
   jobId: string | null;
+  projectId: string | null;
   responsibleUserId: string | null;
   payload: unknown;
   createdAt: Date;

@@ -10,7 +10,7 @@ describe('FleetActivityService', () => {
     await service.record({ actorType: 'USER', actorId: 'u1', action: 'runner.deleted', entityType: 'runner', entityId: 'r1' });
     expect(repo.create).toHaveBeenCalledWith({
       actorType: 'USER', actorId: 'u1', action: 'runner.deleted', entityType: 'runner', entityId: 'r1',
-      jobId: null, responsibleUserId: null, payload: {},
+      jobId: null, projectId: null, responsibleUserId: null, payload: {},
     });
   });
 
@@ -24,7 +24,7 @@ describe('FleetActivityService', () => {
     const createdAt = new Date('2026-09-30T00:00:00.000Z');
     repo.findPage.mockResolvedValue({
       total: 1, current: 1, size: 20, hasNext: false, hasPrev: false,
-      records: [{ id: 'a1', actorType: 'USER', actorId: 'u1', action: 'repo.created', entityType: 'repo', entityId: 'fr1', jobId: null, responsibleUserId: null, payload: {}, createdAt }],
+      records: [{ id: 'a1', actorType: 'USER', actorId: 'u1', action: 'repo.created', entityType: 'repo', entityId: 'fr1', jobId: null, projectId: null, responsibleUserId: null, payload: {}, createdAt }],
     });
     const page = await service.list({}, { current: 1, size: 20 });
     expect(page.records[0]).toEqual(expect.objectContaining({ id: 'a1', createdAt: '2026-09-30T00:00:00.000Z' }));

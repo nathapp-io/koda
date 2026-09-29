@@ -29,6 +29,7 @@ export class FleetActivityService {
       entityType: entry.entityType,
       entityId: entry.entityId,
       jobId: entry.jobId ?? null,
+      projectId: entry.projectId ?? null,
       responsibleUserId: entry.responsibleUserId ?? null,
       payload,
     });
