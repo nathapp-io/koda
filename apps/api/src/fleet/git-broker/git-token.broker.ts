@@ -1,31 +1,37 @@
 import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import type { GitToken, GitTokenError } from '../common/protocol';
 import type { FleetRepoRef } from '../jobs/domain/fleet-job.domain';
+import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { GitHubAppClient } from './github-app-client';
 import { GitLabTokenSource } from './gitlab-token.source';
 import { RepoCheckException } from './repo-check.exception';
 
 export type MintResult = { ok: true; token: GitToken } | { ok: false; error: GitTokenError };
 
-const REUSE_MARGIN_MS = 5 * 60_000;
-const GITLAB_NOMINAL_TTL_MS = 60 * 60_000;
-
 /**
  * Per-job git credentials (spec §7.1, §6.3). Callers fence first: only the job's current
  * (runnerId, leaseEpoch) in ASSIGNED | RUNNING | UPLOADING reaches mint(). Tokens live only
  * in this in-memory cache and the sync response; never logged, never stored.
+ *
+ * Tunables live on IFleetConfig: `gitTokenReuseMarginSec` (cached GitHub App token reuse
+ * window), `gitlabTokenTtlSec` (defensive TTL on the GitLab stored token).
  */
 @Injectable()
 export class GitTokenBroker {
   private readonly logger = new Logger(GitTokenBroker.name);
   private cache: ReadonlyMap<string, GitToken> = new Map();
 
-  constructor(@Inject(forwardRef(() => GitHubAppClient)) private readonly github: GitHubAppClient, private readonly gitlab: GitLabTokenSource) {}
+  constructor(
+    @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'gitTokenReuseMarginSec' | 'gitlabTokenTtlSec'>,
+    @Inject(forwardRef(() => GitHubAppClient)) private readonly github: GitHubAppClient,
+    private readonly gitlab: GitLabTokenSource,
+  ) {}
 
   async mint(req: { jobId: string; leaseEpoch: number; repo: FleetRepoRef }, now = new Date()): Promise<MintResult> {
     const key = `${req.jobId}:${req.leaseEpoch}`;
     const cached = this.cache.get(key);
-    if (cached && Date.parse(cached.expiresAt) - now.getTime() > REUSE_MARGIN_MS) return { ok: true, token: cached };
+    const reuseMarginMs = this.fleetConfig.gitTokenReuseMarginSec * 1000;
+    if (cached && Date.parse(cached.expiresAt) - now.getTime() > reuseMarginMs) return { ok: true, token: cached };
     try {
       const token = await this.fresh(req, now);
       this.cache = new Map([...[...this.cache].filter(([, t]) => Date.parse(t.expiresAt) > now.getTime()), [key, token]]);
@@ -50,6 +56,6 @@ export class GitTokenBroker {
       return { jobId: req.jobId, token, username: 'x-access-token', expiresAt: expiresAt.toISOString() };
     }
     const token = await this.gitlab.resolve(repo.projectId, repo.owner, repo.name);
-    return { jobId: req.jobId, token, username: 'oauth2', expiresAt: new Date(now.getTime() + GITLAB_NOMINAL_TTL_MS).toISOString() };
+    return { jobId: req.jobId, token, username: 'oauth2', expiresAt: new Date(now.getTime() + this.fleetConfig.gitlabTokenTtlSec * 1000).toISOString() };
   }
 }

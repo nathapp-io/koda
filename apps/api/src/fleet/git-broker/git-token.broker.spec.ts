@@ -12,7 +12,11 @@ describe('GitTokenBroker', () => {
   let broker: GitTokenBroker;
   beforeEach(() => {
     jest.resetAllMocks();
-    broker = new GitTokenBroker(app as never, lab as never);
+    broker = new GitTokenBroker(
+      { gitTokenReuseMarginSec: 300, gitlabTokenTtlSec: 3_600 },
+      app as never,
+      lab as never,
+    );
   });
 
   it('mints a GitHub installation token and reuses it until 5 minutes before expiry', async () => {
