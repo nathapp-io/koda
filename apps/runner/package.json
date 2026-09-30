@@ -10,6 +10,7 @@
     "build:all": "bun scripts/build-binary.ts all",
     "test": "bun test src test/unit",
     "test:integration": "bun test test/integration",
+    "test:live": "bun test test/live",
     "type-check": "tsc --noEmit",
     "lint": "eslint \"{src,test}/**/*.ts\" --max-warnings=0",
     "lint:json-error": "eslint -f json \"{src,test}/**/*.ts\" --max-warnings=0 --quiet",

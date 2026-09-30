@@ -287,6 +287,13 @@ Control paths:
 
 ### 3.2 Capability probe (`NaxCapabilityProbe`)
 
+> **Amended by plan 3b-2 (D95-D104):** runner.json `capabilities` stays as an optional override. Machine profiles
+> are the first 64 by name; a profile that fails to resolve is skipped with a warning rather than rejecting the
+> report; a failed `auth list` reports the needed providers unavailable. nax 0.83.1 or newer is required and the
+> daemon refuses to start without it. nax's trust gate (#2293) adds a start check on `workspaceRoot` and a per-job
+> `project untrusted` check before the capability check. `nax sandbox probe --json` exists (nax 0.83.0), so the
+> "until that command exists" fallback is gone.
+
 Runs at boot, every 10 minutes and on SIGHUP; the report is sent in `sync` only when its hash (excluding
 `sandbox.probedAt`) changes.
 
@@ -305,6 +312,10 @@ Runs at boot, every 10 minutes and on SIGHUP; the report is sent in `sync` only 
   'capability mismatch: <detail>'`.
 
 ### 3.3 Service units
+
+> **Amended by plan 3b-2 (D103, D105, D106):** `install-service` needs `--home` and `--user`, refuses paths it would
+> have to quote, checks nax trust of the workspace as the service user (`--trust-workspace` adds it), and the units add
+> `ExecReload` (SIGHUP re-probe) and `RestartPreventExitStatus=2`. Operator guide: `docs/deployment/runner.md`.
 
 - `koda-runner install-service` writes a systemd unit (`User=koda-runner`, `KillMode=process`, `Restart=always`)
   or a launchd plist (`UserName`, `AbandonProcessGroup=true`, `KeepAlive`). It requires the OS user to exist;
