@@ -91,11 +91,19 @@ export class ServerClient {
     return this.post('/fleet/runner/sync', request, true, this.options.syncTimeoutMs ?? 35_000, signal);
   }
 
-  async uploadBundle(args: { jobId: string; leaseEpoch: number; filePath: string; sha256: string; signal?: AbortSignal }): Promise<{ status: number }> {
+  async uploadBundle(args: { jobId: string; leaseEpoch: number; filePath: string; sha256: string; signal?: AbortSignal }): Promise<{ status: number; message?: string }> {
     const url = `${this.url(`/fleet/runner/jobs/${encodeURIComponent(args.jobId)}/bundle`)}?leaseEpoch=${args.leaseEpoch}`;
-    const headers = { ...this.bearer(), 'content-type': 'application/gzip', 'x-content-sha256': args.sha256 };
+    const headers = { ...this.bearer(), 'content-type': 'application/gzip', 'x-content-sha256': args.sha256, 'accept-language': 'en' };
     const response = await this.send(url, { method: 'PUT', headers, body: Bun.file(args.filePath) }, UPLOAD_TIMEOUT_MS, args.signal);
-    await response.arrayBuffer().catch(() => undefined);
-    return { status: response.status };
+    const text = await response.text().catch(() => '');
+    if (response.ok) return { status: response.status };
+    let body: unknown = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      body = null;
+    }
+    const message = messageOf(body);
+    return message === null ? { status: response.status } : { status: response.status, message };
   }
 }
