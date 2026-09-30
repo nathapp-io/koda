@@ -4,6 +4,7 @@ import { uploadWithRetry } from '../bundle/upload-bundle';
 import { CapabilityReporter, StaticCapabilityProbe } from '../capabilities/capability-probe';
 import type { RunnerConfig, RunnerHome } from '../config/runner-config';
 import { errorMessage } from '../errors';
+import { TokenCache } from '../credentials/token-cache';
 import { HostExecutor } from '../executor/host-executor';
 import { assertMinGitVersion, createGit, type Git } from '../executor/git';
 import type { JobExecutor } from '../executor/job-executor';
@@ -92,6 +93,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   await capacity.refresh();
   const reporter = new CapabilityReporter(new StaticCapabilityProbe(config.capabilities, now), journal);
   await reporter.refresh();
+  const tokens = new TokenCache({ refreshMarginMs: tuning.tokenRefreshMarginMs, cooldownMs: tuning.tokenCooldownMs });
 
   const executor = options.executorFactory?.() ?? new HostExecutor({ config, git, log, nowMs: () => now().getTime(), sleep });
   const uploader: BundleUploader = {
@@ -115,12 +117,18 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     onCapabilitiesSent: (hash) => reporter.markSent(hash),
     handleCommands: (commands) => handler.handle(commands),
     abandonUnknown: async (jobIds) => { for (const id of jobIds) await supervisor.abandonAll(id); },
+    tokenRequests: () => tokens.requests(Date.now()),
+    onTokens: (requested, granted, errors) => {
+      tokens.apply(requested, granted, errors, Date.now());
+      for (const error of errors) log.warn('git token refused', { jobId: error.jobId, reason: error.reason });
+    },
     onStop: (reason) => {
       stopReason = reason;
       log.error(reason.kind === 'protocol' ? 'server does not support this runner protocol; stopped' : 'server rejected the runner key; stopped', { message: reason.message });
     },
     log, sleep, random: Math.random, nowMs: () => performance.now(), minGapMs: tuning.syncMinGapMs,
   });
+  const stopNeedListener = tokens.onNeed(() => loop.wake());
   const running = loop.run().then((): StopReason | 'stopped' => stopReason ?? 'stopped');
 
   const timers = [
@@ -136,6 +144,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     stopping ??= (async () => {
       for (const timer of timers) clearInterval(timer);
       loop.stop();
+      stopNeedListener();
       await running;
       supervisor.shutdown();
       // D67: a halted run ends at its next check, or when its current executor call returns. The journal must outlive it.
@@ -155,6 +164,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     crashed = true;
     for (const timer of timers) clearInterval(timer);
     loop.stop();
+    stopNeedListener();
     supervisor.shutdown();   // a real kill ends every run; in one process they must at least stop emitting
     journal.close();
   };

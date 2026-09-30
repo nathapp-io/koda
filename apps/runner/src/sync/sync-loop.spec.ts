@@ -27,6 +27,8 @@ let handled: FleetCommandOut[][];
 let commandAcks: CommandAck[];
 let abandoned: string[][];
 let now: number;
+let tokenAsks: Array<{ jobId: string; leaseEpoch: number }>;
+let delivered: Array<{ requested: unknown; tokens: unknown; errors: unknown }>;
 
 function makeLoop(over: Partial<SyncLoopDeps> = {}): SyncLoop {
   return new SyncLoop({
@@ -41,7 +43,10 @@ function makeLoop(over: Partial<SyncLoopDeps> = {}): SyncLoop {
     handleCommands: async (cmds) => { handled.push([...cmds]); return commandAcks; },
     abandonUnknown: async (ids) => { abandoned.push([...ids]); },
     onStop: (r) => { stops.push(r); }, log: createMemoryLogger(),
-    sleep: async (ms) => { sleeps.push(ms); }, random: () => 0.5, nowMs: () => now, minGapMs: 250, ...over,
+    sleep: async (ms) => { sleeps.push(ms); }, random: () => 0.5, nowMs: () => now, minGapMs: 250,
+    tokenRequests: () => tokenAsks,
+    onTokens: (requested, tokens, errors) => { delivered.push({ requested: [...requested], tokens: [...tokens], errors: [...errors] }); },
+    ...over,
   });
 }
 const add = (jobId: string, epoch = 1) => journal.insertJob({ assign: assign(jobId), leaseEpoch: epoch, repoKey: 'a/b', jobDir: `/w/${jobId}` });
@@ -52,6 +57,7 @@ const assignCmd: FleetCommandOut = { commandId: 'c1', type: 'ASSIGN', jobId: 'j1
 beforeEach(() => {
   journal = Journal.open(':memory:');
   calls = []; script = []; sleeps = []; stops = []; capsNow = null; sentHashes = []; handled = []; commandAcks = []; abandoned = []; now = 0;
+  tokenAsks = []; delivered = [];
 });
 
 describe('acks and the cursor', () => {
@@ -360,5 +366,38 @@ describe('commands', () => {
     loop.wake();                                 // loop is not inflight, prune runs anyway
     await loop.syncOnce();
     expect(calls[1].commandAcks).toEqual([]);
+  });
+});
+
+describe('git tokens (design §3.1, D81)', () => {
+  test('the request carries the cache\'s token requests and the answer goes back with them', async () => {
+    tokenAsks = [{ jobId: 'j1', leaseEpoch: 2 }];
+    const token = { jobId: 'j1', token: 'ghs_x', expiresAt: '2026-10-01T01:00:00.000Z', username: 'x-access-token' as const };
+    script.push(ok({ gitTokens: [token], gitTokenErrors: [{ jobId: 'j9', reason: 'job_not_active' }] }));
+    await makeLoop().syncOnce();
+    expect(calls[0].tokenRequests).toEqual([{ jobId: 'j1', leaseEpoch: 2 }]);
+    expect(delivered).toEqual([{ requested: [{ jobId: 'j1', leaseEpoch: 2 }], tokens: [token], errors: [{ jobId: 'j9', reason: 'job_not_active' }] }]);
+  });
+  test('a failed sync delivers nothing, so the next one asks again', async () => {
+    tokenAsks = [{ jobId: 'j1', leaseEpoch: 1 }];
+    script.push(async () => { throw new NetworkError('down'); });
+    await makeLoop().syncOnce();
+    expect(delivered).toEqual([]);
+  });
+  test('a request that asks for tokens is not an idle poll: wake() does not abort it', async () => {
+    tokenAsks = [{ jobId: 'j1', leaseEpoch: 1 }];
+    let aborted = false;
+    let release: () => void = () => undefined;
+    script.push((_req, signal) => new Promise((resolve) => {
+      signal?.addEventListener('abort', () => { aborted = true; });
+      release = () => resolve(empty);
+    }));
+    const loop = makeLoop();
+    const pending = loop.syncOnce();
+    await Promise.resolve();
+    loop.wake();
+    release();
+    await pending;
+    expect(aborted).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import type { CommandAck, FleetCommandOut, RunnerCapabilities, SyncRequest, SyncResponse } from '@nathapp/fleet-protocol';
+import type { CommandAck, FleetCommandOut, GitToken, GitTokenError, RunnerCapabilities, SyncRequest, SyncResponse, TokenRequest } from '@nathapp/fleet-protocol';
 import { errorMessage } from '../errors';
 import type { Journal } from '../journal/journal';
 import type { Logger } from '../logger';
@@ -37,6 +37,10 @@ export interface SyncLoopDeps {
   readonly onCapabilitiesSent: (hash: string) => void;
   readonly handleCommands: (commands: readonly FleetCommandOut[]) => Promise<CommandAck[]>;
   readonly abandonUnknown: (jobIds: readonly string[]) => Promise<void>;
+  /** Design §3.1: which jobs need a git token now (TokenCache.requests). */
+  readonly tokenRequests: () => readonly TokenRequest[];
+  /** The server's answer to this request's token requests (TokenCache.apply). */
+  readonly onTokens: (requested: readonly TokenRequest[], tokens: readonly GitToken[], errors: readonly GitTokenError[]) => void;
   readonly onStop: (reason: StopReason) => void;
   readonly log: Logger;
   readonly sleep: Sleep;
@@ -118,6 +122,7 @@ export class SyncLoop {
     const request = buildSyncRequest({
       journal: this.deps.journal, bootId: this.deps.bootId, daemonVersion: this.deps.daemonVersion, freeSlots: this.deps.freeSlots(),
       acks: this.acksExcluded ? [] : [...this.pendingAcks.values()], capabilities: report?.capabilities, scale: this.scale,
+      tokenRequests: this.deps.tokenRequests(),
     });
     const controller = new AbortController();
     this.inflightIdle = request.jobs.length === 0 && request.commandAcks.length === 0 && request.tokenRequests.length === 0;
@@ -146,6 +151,7 @@ export class SyncLoop {
     if (report && request.capabilities) this.deps.onCapabilitiesSent(report.hash);
     this.failures = 0;
     this.scale = doubleScale(this.scale);
+    this.deps.onTokens(request.tokenRequests, response.gitTokens ?? [], response.gitTokenErrors ?? []);
     const unknown = response.unknownJobIds ?? [];
     if (unknown.length > 0) await this.deps.abandonUnknown(unknown);
     const commands = response.commands ?? [];
