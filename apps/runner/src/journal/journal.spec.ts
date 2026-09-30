@@ -1,8 +1,11 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
+import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AssignPayload } from '@nathapp/fleet-protocol';
 import { makeTempDirs } from '../../test/helpers/tmp';
 import { Journal } from './journal';
+
+const SKIP_FILEMODE = process.platform === 'win32' || (typeof process.getuid === 'function' && process.getuid() === 0);
 
 const assign = (jobId = 'j1'): AssignPayload => ({
   jobId, command: 'RUN', repo: { provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', cloneUrl: 'https://github.com/acme/app.git' },
@@ -187,5 +190,18 @@ describe('openReadOnly (D72)', () => {
     writer.insertJob(job('j3'));                                          // the writer is unaffected
     writer.close();
     expect(() => Journal.openReadOnly(join(path, '..', 'missing.db'), now)).toThrow();
+  });
+});
+
+describe('file permissions (SEC-1)', () => {
+  test('the journal file and its WAL siblings are created 0o600, not the process umask', async () => {
+    if (SKIP_FILEMODE) return;
+    const path = join(await tmp.make('mode'), 'journal.db');
+    const j = Journal.open(path, now);
+    j.insertJob(job());
+    j.close();
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    expect((await stat(`${path}-wal`)).mode & 0o777).toBe(0o600);
+    expect((await stat(`${path}-shm`)).mode & 0o777).toBe(0o600);
   });
 });

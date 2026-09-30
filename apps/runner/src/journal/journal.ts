@@ -1,14 +1,17 @@
 import { Database } from 'bun:sqlite';
+import { chmodSync } from 'node:fs';
 import type { RunnerEvent, RunnerEventType } from '@nathapp/fleet-protocol';
 import { systemNow, type Now } from '../time';
 import { SCHEMA_SQL } from './schema';
 import type { CommandRecord, EventRow, JobPatch, JobRow, NewJob } from './types';
 
 type Row = Record<string, unknown>;
+const SKIP_FILEMODE = process.platform === 'win32' || (typeof process.getuid === 'function' && process.getuid() === 0);
 
 const PATCH_COLUMNS: Readonly<Record<keyof JobPatch, string>> = {
   state: 'state', branch: 'branch', pid: 'pid', pgid: 'pgid', naxRunId: 'nax_run_id', logPath: 'log_path',
   cancelRequestedAt: 'cancel_requested_at', resultBranch: 'result_branch', resultSha: 'result_sha',
+  lastPushAttemptAt: 'last_push_attempt_at',
 };
 
 const toJob = (r: Row): JobRow => ({
@@ -17,6 +20,7 @@ const toJob = (r: Row): JobRow => ({
   naxRunId: r['nax_run_id'] as string | null, logPath: r['log_path'] as string | null, jobDir: r['job_dir'] as string,
   assign: JSON.parse(r['assign_json'] as string), cancelRequestedAt: r['cancel_requested_at'] as string | null,
   resultBranch: r['result_branch'] as string | null, resultSha: r['result_sha'] as string | null,
+  lastPushAttemptAt: r['last_push_attempt_at'] as string | null,
   createdAt: r['created_at'] as string, updatedAt: r['updated_at'] as string, doneAt: r['done_at'] as string | null,
 });
 
@@ -45,6 +49,14 @@ export class Journal {
     // would keep the first one (its ack is the highest contiguous stored seq).
     db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;');
     db.exec(SCHEMA_SQL);
+    // SEC-1: the journal carries ASSIGN payloads (clone URLs, identity), event sequences and runner metadata;
+    // match identity.json's 0o600 so a local user on a multi-tenant host cannot read it. bun:sqlite creates the
+    // file using the process umask, and the WAL/SHM siblings are created lazily — best-effort, no throw on EACCES.
+    if (!SKIP_FILEMODE) {
+      for (const p of [path, `${path}-wal`, `${path}-shm`]) {
+        try { chmodSync(p, 0o600); } catch { /* the file may not exist yet; the next open will try again */ }
+      }
+    }
     return new Journal(db, now);
   }
 
@@ -208,6 +220,8 @@ export class Journal {
     });
   }
 
+  /** @design stats() is a cold path (D48): `koda-runner status` is the only caller. The full COUNT(*) stays as-is;
+   *  if a hot caller ever appears, switch to the indexed `MAX(seq)-applied < ?` per-job window or `EXISTS`-style check. */
   stats(): { activeJobs: number; pendingEvents: number } {
     return {
       activeJobs: this.activeCount(),
