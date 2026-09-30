@@ -44,8 +44,8 @@ New rows D78-D94, each needed by a task below.
 |:--|:--|:--|
 | D78 | The socket is `<socketDir>/<key>.sock`, not `<jobDir>/git-cred.sock`. `key` = the first 16 hex characters of SHA-256(`<runnerId>:<jobId>:<leaseEpoch>`). `socketDir` defaults to `/tmp/koda-runner-<uid>`, and runner.json `socketDir` (absolute) overrides it. The daemon creates it with mode 0700, or refuses to start when it is not a real directory, is owned by another uid, or has any group or other permission bit. It also refuses when a socket path would exceed 100 bytes. | A unix socket path is limited to 104 bytes on macOS (108 on Linux). `<workspaceRoot>/.jobs/<25-char id>/git-cred.sock` already exceeds that for ordinary workspace roots and for every macOS temp dir. The runner id in the key keeps two daemons on one machine, and the in-process test runners, apart. |
 | D79 | Wire protocol: the client writes the one line `get\n`. The server answers one JSON line and closes: `{ ok: true, username, token, expiresAt, protocol, host }` or `{ ok: false, reason }`. `protocol` (without the colon) and `host` (with the port) come from the job's `cloneUrl`. Before a token exists the server waits up to `tokenServeWaitMs` (30 s), then answers `no token`. It answers `job ended` once the job no longer wants a token, and `bad request` to any other line or to more than 64 bytes without a newline. | The design fixes "one line in, one JSON object out" but not the words. The wait lets a readopted nax's push succeed while the first token after a restart is still on its way. |
-| D80 | The helper answers only `get`, and only when git's `protocol` and `host` equal the reply's. It then writes `username=...\npassword=...\n`. For `store`, `erase`, any mismatch, an unreachable socket, a `{ ok: false }` reply, or a token or username containing a newline or NUL, it prints nothing and exits 0. It always reads stdin to the end first. | A token must never leave for another host, such as a submodule, a redirect or an LFS server. git treats silence as "no credential" and, with prompts disabled, fails with its own authentication error. Reading stdin first avoids a SIGPIPE in git. |
-| D81 | `TokenCache.requests(now)` lists every wanted `(jobId, epoch)` that has no token, or whose token expires within `tokenRefreshMarginMs` (240 s), and that is not cooling down. It sends one entry per job id, the highest wanted epoch, and at most 64. A `GitToken` carries no epoch, so it is matched to the epoch its job id had in the request that asked for it. A delivered token whose `expiresAt` did not change, or that is already inside the margin, and any `gitTokenErrors` entry, start a `tokenCooldownMs` (30 s) cool-down for that key. | Without a cool-down, a server that keeps returning the same token (clock skew) or an error would make every sync non-idle and turn the long poll into a 250 ms loop. |
+| D80 | The helper answers only `get`, and only when git's `protocol` and `host` equal the reply's. It then writes `username=...\npassword=...\n`. For `store`, `erase`, any mismatch, an unreachable socket, a `{ ok: false }` reply, or a token or username containing a newline or NUL, it prints nothing and exits 0. It always reads stdin to the end first. | A token must never leave for another host, such as a submodule, a redirect or an LFS server. git treats silence as "no credential"; with prompts disabled (D69) it authenticates with nothing and the server's refusal fails the command. Reading stdin first avoids a SIGPIPE in git. |
+| D81 | `TokenCache.requests(now)` lists every wanted `(jobId, epoch)` that has no token, or whose token expires within `tokenRefreshMarginMs` (240 s), and that is not cooling down. It sends one entry per job id, the highest wanted epoch, and at most 64. A `GitToken` carries no epoch, so it is matched to the epoch its job id had in the request that asked for it. A delivered token that is already inside the margin (which covers a refresh returning the same token), and any `gitTokenErrors` entry, start a `tokenCooldownMs` (30 s) cool-down for that key. | Without a cool-down, a server that keeps returning the same token (clock skew) or an error would make every sync non-idle and turn the long poll into a 250 ms loop. |
 | D82 | Token errors: while prepare waits for its first token, an error fails the job with `stateReason = 'git token: <reason>'` (the server's fixed reason code). Waiting ends after `tokenWaitMs` (120 s) with `git token: timeout`. Once a job has a token, a later error only shows in the socket reply after that token expires. The current token keeps serving until then, and nax's push then fails and nax escalates (S1 spec §7.3). | Design §3.1 fails "a job that has no usable token". Killing a running nax over a refresh error would lose work that a later refresh can still save. |
 | D83 | Only `http:` and `https:` clone URLs use credentials. A `file:` clone URL (unit tests, local mirrors) gets no token request, no socket, no shims and no helper. | The server only ever sends https URLs; the 3a unit tests run against `file://` origins and stay as they are. |
 | D84 | The helper and the shims run the runner itself. `selfCommand()` is `[process.execPath]` when compiled (`Bun.main` starts with `/$bunfs/`) and `[process.execPath, Bun.main]` otherwise (spiked 2026-09-30). `startDaemon` takes `selfCommand` as an option; tests pass `['bun', <apps/runner/src/main.ts>]`, because under `bun test` `Bun.main` is the test file. `main.ts` dispatches `git-cred` and `shim` before commander parses. | The design names the binary as the helper (`koda-runner git-cred <sock>`). A shim's arguments belong to `gh` (`--title`, `-R`) and must never be parsed as runner options. |
@@ -213,14 +213,16 @@ describe('TokenCache apply (D81, D82)', () => {
     expect(cache.wanted('j1', 1)).toBe(false);
     expect(cache.state('j1', 1, T0)).toEqual({ kind: 'pending' });
   });
-  test('an unchanged expiresAt after a refresh cools the job down for 30 s', () => {
+  test('a refresh that returns the same token (still inside the margin) cools the job down for 30 s', () => {
     const cache = new TokenCache(timing);
     cache.want('j1', 1);
-    const exp = iso(T0 + 200_000);   // already inside the margin
+    const exp = iso(T0 + 600_000);   // fresh when it first arrives: no cool-down
     cache.apply([{ jobId: 'j1', leaseEpoch: 1 }], [tok('j1', exp)], [], T0);
-    cache.apply([{ jobId: 'j1', leaseEpoch: 1 }], [tok('j1', exp)], [], T0 + 30_000);
-    expect(cache.requests(T0 + 30_000 + 29_999)).toEqual([]);
-    expect(cache.requests(T0 + 60_000)).toEqual([{ jobId: 'j1', leaseEpoch: 1 }]);
+    const refresh = T0 + 400_000;    // now inside the margin, so the job asks again ...
+    expect(cache.requests(refresh)).toEqual([{ jobId: 'j1', leaseEpoch: 1 }]);
+    cache.apply([{ jobId: 'j1', leaseEpoch: 1 }], [tok('j1', exp)], [], refresh);   // ... and gets the same token back
+    expect(cache.requests(refresh + 29_999)).toEqual([]);
+    expect(cache.requests(refresh + 30_000)).toEqual([{ jobId: 'j1', leaseEpoch: 1 }]);
   });
   test('Review focus 1: a token that arrives already inside the margin is served but not asked for again at once', () => {
     const cache = new TokenCache(timing);
@@ -307,7 +309,7 @@ export type TokenState =
 export interface TokenCacheTiming {
   /** Design §3.1: ask again this long before `expiresAt` (the server reuses its token until 300 s before it). */
   readonly refreshMarginMs: number;
-  /** D81: after an unchanged or short-lived token, or an error, wait this long before asking for that job again. */
+  /** D81: after a token that is already inside the margin, or an error, wait this long before asking for that job again. */
   readonly cooldownMs: number;
 }
 
@@ -386,11 +388,10 @@ export class TokenCache {
       const epoch = epochOf.get(token.jobId);
       const entry = epoch === undefined ? undefined : next.get(keyOf(token.jobId, epoch));
       if (!entry) continue;
-      const unchanged = entry.token?.expiresAt === token.expiresAt;
       const cached: CachedToken = { token: token.token, username: token.username, expiresAt: token.expiresAt };
-      next.set(keyOf(entry.jobId, entry.leaseEpoch), {
-        ...entry, token: cached, error: null, coolUntilMs: unchanged || !this.fresh(token.expiresAt, nowMs) ? cool : 0,
-      });
+      // A token already inside the margin (a refresh that returned the same token, or clock skew) would be asked for
+      // again at once: cool down instead (D81).
+      next.set(keyOf(entry.jobId, entry.leaseEpoch), { ...entry, token: cached, error: null, coolUntilMs: this.fresh(token.expiresAt, nowMs) ? 0 : cool });
     }
     for (const error of errors) {
       const epoch = epochOf.get(error.jobId);
@@ -569,7 +570,7 @@ export interface Tuning {
   // ...existing fields...
   /** D92, design §3.1: ask for a new git token this long before the current one expires. */
   readonly tokenRefreshMarginMs: number;
-  /** D81: pause after an unchanged token or a token error. */
+  /** D81: pause after a token already inside the refresh margin, or a token error. */
   readonly tokenCooldownMs: number;
   /** D82: how long prepare waits for a job's first token. */
   readonly tokenWaitMs: number;
@@ -836,8 +837,10 @@ export async function ensureSocketDir(dir: string, uid: number): Promise<void> {
 
 ```ts
 // apps/runner/src/credentials/cred-server.ts
-import { chmod, lstat, rm } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { chmod, lstat, rename, rm } from 'node:fs/promises';
 import { createServer, type Server, type Socket } from 'node:net';
+import { dirname, join } from 'node:path';
 
 export type CredentialReply =
   | { ok: true; username: string; token: string; expiresAt: string; protocol: string; host: string }
@@ -882,30 +885,41 @@ export class CredentialServer {
     private readonly inode: number,
   ) {}
 
-  /** A stale file at `path` (a daemon that died without cleaning up) is removed first; the socket is made 0600. */
+  /**
+   * Listens on a private staging name in the same directory, makes it 0600, then renames it onto `path`. Closing a
+   * node:net unix server unlinks the name it was bound to, so a server bound to `path` itself would delete a newer
+   * server's socket when it closes late (a crashed daemon's servers close while the restarted one listens, D90).
+   * The rename also replaces a stale file a dead daemon left at `path`.
+   */
   static async listen(path: string, reply: () => Promise<CredentialReply>): Promise<CredentialServer> {
-    await rm(path, { force: true });
     const open = new Set<Socket>();
     const server = createServer((socket) => {
       open.add(socket);
       socket.on('close', () => open.delete(socket));
       serve(socket, reply);
     });
+    const staging = join(dirname(path), `.${randomBytes(3).toString('hex')}`);
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
-      server.listen(path, () => {
+      server.listen(staging, () => {
         server.off('error', reject);
         resolve();
       });
     });
-    await chmod(path, 0o600);
+    try {
+      await chmod(staging, 0o600);
+      await rename(staging, path);
+    } catch (error) {
+      server.close();
+      throw error;
+    }
     return new CredentialServer(server, open, path, (await lstat(path)).ino);
   }
 
   /**
-   * Ends every open connection (a reply still waiting for a token is dropped), stops listening, and removes the socket
-   * file only while it is still this server's: a crashed daemon's sockets close in the background while the restarted
-   * daemon already listens on the same path (D90).
+   * Ends every open connection (a reply still waiting for a token is dropped) and stops listening (which unlinks only
+   * the staging name, long renamed away). The public file is removed only while its inode is still this server's, so a
+   * newer server on the same path keeps its socket (D90).
    */
   async close(): Promise<void> {
     for (const socket of this.open) socket.destroy();
@@ -986,6 +1000,7 @@ describe('runGitCred (D80)', () => {
     const x = io(input({ protocol: 'https', host: 'gitlab.com' }), REPLY);
     expect(await runGitCred(['/s.sock', 'get'], x)).toBe(0);
     expect(x.out).toEqual([]);
+    expect(x.asked).toEqual(['/s.sock']);   // the host is only known from the reply
   });
   test('the same host over another protocol gets nothing', async () => {
     const x = io(input({ protocol: 'http', host: 'github.com' }), REPLY);
@@ -1099,6 +1114,7 @@ export function requestCredential(path: string, timeoutMs: number = CLIENT_TIMEO
       if (out.length > MAX_REPLY_BYTES) finish({ ok: false, reason: 'reply too large' });
     });
     socket.on('end', () => finish(parseReply(out)));
+    socket.on('close', () => finish(parseReply(out)));   // a close without FIN must not wait for the timeout
     socket.on('error', () => finish({ ok: false, reason: 'unavailable' }));
   });
 }
@@ -1124,7 +1140,7 @@ const SAFE = /^[^\n\r\0]+$/;
 
 /**
  * `koda-runner git-cred <sock> <action>` (design §3.1, D80). git appends the action. Always exits 0: printing nothing
- * means "no credential", and git then fails with its own error (prompts are disabled).
+ * means "no credential"; git then authenticates with nothing and fails with its own authentication error.
  */
 export async function runGitCred(args: readonly string[], io: GitCredIo): Promise<number> {
   const [sock, action] = args;
@@ -1492,7 +1508,7 @@ describe('koda-runner git-cred through real git (design §3.1, D80, D84)', () =>
     const sock = join(await tmp.make('cli'), 'c.sock');
     const server = await CredentialServer.listen(sock, async () => REPLY);
     try {
-      const out = await run(['git', '-c', 'credential.helper=', '-c', `credential.helper=${helperValue(SELF, sock)}`, 'credential', 'fill'], { stdin: 'protocol=https\nhost=evil.example\n\n' });
+      const out = await run(['git', '-c', 'credential.helper=', '-c', `credential.helper=${helperValue(SELF, sock)}`, 'credential', 'fill'], { stdin: 'protocol=https\nhost=evil.example\n\n', env: { GIT_ASKPASS: 'false' } });   // no askpass fallback from the shell
       expect(out.code).not.toBe(0);
       expect(out.stdout).not.toContain('ghs_cli');
     } finally {
@@ -1742,6 +1758,12 @@ describe('CredentialBroker (design §3.1, D78-D83, D90)', () => {
     expect(await w.broker.acquire(w.job(), { wait: true, isCancelled: () => true })).toEqual({ ok: false, reason: 'cancelled', cancelled: true });
     await w.broker.closeAll();
   });
+  test('closeAll ends a prepare that is still waiting for its first token (daemon stop)', async () => {
+    const w = await world({ ...FAST, waitMs: 60_000 });
+    const waiting = w.broker.acquire(w.job(), { wait: true });
+    setTimeout(() => { void w.broker.closeAll(); }, 30);
+    expect(await waiting).toEqual({ ok: false, reason: 'cancelled', cancelled: true });
+  });
   test('D79: without waiting, a socket request made before the token exists is answered once it arrives', async () => {
     const w = await world();
     const row = w.job('http://127.0.0.1:8080/acme/app.git');
@@ -1789,7 +1811,7 @@ describe('CredentialBroker (design §3.1, D78-D83, D90)', () => {
     expect(await requestCredential(w.sock(row))).toMatchObject({ ok: true });
     await w.broker.closeAll();
   });
-  test('D90: two epochs have two sockets; releasing the older leaves the newer serving', async () => {
+  test('D90: two epochs have two sockets; releasing the older leaves the newer serving, shims included', async () => {
     const w = await world();
     const one = w.job(undefined, 1);
     const two = w.job(undefined, 2);
@@ -1802,6 +1824,7 @@ describe('CredentialBroker (design §3.1, D78-D83, D90)', () => {
     await w.broker.release(one);
     expect(await requestCredential(w.sock(one))).toEqual({ ok: false, reason: 'unavailable' });
     expect(await requestCredential(w.sock(two))).toMatchObject({ ok: true });
+    await expect(stat(join(two.jobDir, 'bin', 'gh'))).resolves.toBeDefined();   // the shared shims stay for epoch 2
     await w.broker.closeAll();
   });
   test('D90: closeAll closes every socket but keeps the tokens wanted (a restarted daemon readopts)', async () => {
@@ -1894,6 +1917,7 @@ async function closeQuietly(pending: Promise<CredentialServer>): Promise<void> {
 /** Design §3.1: one socket per (job, epoch), answered from the TokenCache, and the job's shims. */
 export class CredentialBroker implements CredentialProvider {
   private servers: ReadonlyMap<string, Promise<CredentialServer>> = new Map();
+  private closing = false;
 
   constructor(private readonly deps: BrokerDeps) {}
 
@@ -1919,11 +1943,14 @@ export class CredentialBroker implements CredentialProvider {
     const pending = this.servers.get(key);
     this.servers = new Map([...this.servers].filter(([other]) => other !== key));
     if (pending) await closeQuietly(pending);
-    await rm(join(job.jobDir, 'bin'), { recursive: true, force: true });
+    // `<jobDir>/bin` is shared by every epoch of the job (one job dir): keep it while another epoch is served.
+    const sibling = [...this.servers.keys()].some((other) => other.startsWith(`${job.jobId}:`));
+    if (!sibling) await rm(join(job.jobDir, 'bin'), { recursive: true, force: true });
   }
 
   /** D90: daemon stop or crash. The sockets go; the tokens stay wanted and the shims stay, for a readopt. */
   async closeAll(): Promise<void> {
+    this.closing = true;   // a prepare still waiting for its first token stops at once (daemon stop must not wait 120 s)
     const pending = [...this.servers.values()];
     this.servers = new Map();
     await Promise.all(pending.map(closeQuietly));
@@ -1971,7 +1998,7 @@ export class CredentialBroker implements CredentialProvider {
       const state = tokens.state(job.jobId, job.leaseEpoch, nowMs());
       if (state.kind === 'token') return null;
       if (state.kind === 'error') return { ok: false, reason: `git token: ${state.reason}` };
-      if (isCancelled?.()) return { ok: false, reason: 'cancelled', cancelled: true };
+      if (this.closing || isCancelled?.()) return { ok: false, reason: 'cancelled', cancelled: true };
       if (nowMs() >= deadline) return { ok: false, reason: 'git token: timeout' };
       await sleep(timing.pollMs);
     }
@@ -1982,7 +2009,7 @@ export class CredentialBroker implements CredentialProvider {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cd apps/runner && bun test test/unit/broker.spec.ts`
-Expected: PASS, 12 tests.
+Expected: PASS, 13 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -2113,6 +2140,9 @@ afterAll(() => tmp.cleanup());
 const g = createGit();
 const identity = { name: 'koda-fleet[bot]', email: 'bot@koda.test' };
 const MAIN = join(import.meta.dir, '..', '..', 'src', 'main.ts');
+/** Not `sh()`: it trims, which would drop the leading empty entry. */
+const helperList = async (repoDir: string): Promise<string[]> =>
+  (await g.ok(['config', '--local', '--get-all', 'credential.helper'], { cwd: repoDir })).split('\n').slice(0, -1);
 
 async function world() {
   const root = await tmp.make('auth');
@@ -2136,7 +2166,7 @@ describe('network git through the job helper (D85, D86, D89)', () => {
     const w = await world();
     try {
       await ensureClone(g, { repoDir: w.repoDir, cloneUrl: w.cloneUrl, identity, credentialHelper: w.helper });
-      expect((await sh(w.repoDir, 'config', '--local', '--get-all', 'credential.helper')).split('\n')).toEqual(['', w.helper]);
+      expect(await helperList(w.repoDir)).toEqual(['', w.helper]);
       expect(w.http.requests.some((r) => r.authorized && r.path.includes('git-upload-pack'))).toBe(true);
     } finally {
       await w.close();
@@ -2185,7 +2215,7 @@ describe('network git through the job helper (D85, D86, D89)', () => {
       await ensureClone(g, { repoDir: w.repoDir, cloneUrl: w.cloneUrl, identity, credentialHelper: w.helper });
       await sh(w.repoDir, 'config', '--local', '--add', 'credential.helper', '!echo stale');
       await configureRepoHelper(g, w.repoDir, w.helper);
-      expect((await sh(w.repoDir, 'config', '--local', '--get-all', 'credential.helper')).split('\n')).toEqual(['', w.helper]);
+      expect(await helperList(w.repoDir)).toEqual(['', w.helper]);
     } finally {
       await w.close();
     }
@@ -2727,7 +2757,7 @@ Expected: PASS; type-check and lint clean.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/runner/src/executor apps/runner/src/supervisor apps/runner/test/helpers apps/runner/test/fixtures/fake-nax.ts apps/runner/test/unit/host-executor.spec.ts apps/runner/test/unit/host-executor-auth.spec.ts
+git add apps/runner/src/executor apps/runner/src/supervisor apps/runner/src/daemon/daemon.ts apps/runner/test/helpers apps/runner/test/fixtures/fake-nax.ts apps/runner/test/unit/host-executor.spec.ts apps/runner/test/unit/host-executor-auth.spec.ts
 git commit -m "feat(fleet): runner jobs acquire, resume and release git credentials (3b-1, D88, D90, D93, D94)"
 ```
 
@@ -2738,6 +2768,7 @@ git commit -m "feat(fleet): runner jobs acquire, resume and release git credenti
 **Files:**
 - Modify: `apps/runner/src/config/runner-config.ts` (`RunnerConfig.socketDir`, `parseRunnerConfig`)
 - Modify: `apps/runner/src/daemon/daemon.ts` (`DaemonOptions.selfCommand`, the checked socket dir, `closeAll`)
+- Modify: `apps/runner/test/unit/daemon.spec.ts` (its `setup` config gets a private `socketDir`)
 - Test: `apps/runner/src/config/runner-config.spec.ts`, `apps/runner/test/unit/daemon-socket-dir.spec.ts`
 
 **Interfaces:**
@@ -2801,6 +2832,8 @@ describe('the daemon refuses an unsafe socket directory (D78)', () => {
 });
 ```
 
+In `apps/runner/test/unit/daemon.spec.ts` `setup()`, add `socketDir: join(base, 's'),` to the `parseRunnerConfig({...})` object, so the daemon specs never touch the shared `/tmp/koda-runner-<uid>`. Keep the name short (D78: the socket path must stay under 100 bytes inside a macOS temp dir).
+
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `cd apps/runner && bun test src/config/runner-config.spec.ts test/unit/daemon-socket-dir.spec.ts`
@@ -2822,7 +2855,7 @@ In `parseRunnerConfig`, before the `return`:
   if (socketDir !== null && (typeof socketDir !== 'string' || !isAbsolute(socketDir))) throw new ConfigError('socketDir must be an absolute path');
 ```
 
-and add `socketDir: socketDir as string | null,` to the returned object. Any test that builds a full `RunnerConfig` literal gets `socketDir: null` (the type-check names them).
+and add `socketDir: socketDir as string | null,` to the returned object.
 
 `apps/runner/src/daemon/daemon.ts`:
 
@@ -2843,11 +2876,13 @@ In `startDaemon`, directly after the `chmod(home.dir, 0o700)` line (before `Jour
 
 In the `new CredentialBroker({...})` from Task 9, change `socketDir: defaultSocketDir(process.getuid?.() ?? 0)` to `socketDir` and `selfCommand: selfCommand()` to `selfCommand: options.selfCommand ?? selfCommand()`.
 
-In `stop()`, after the `try { await supervisor.idle(); } finally {...}` block and before `journal.close()`:
+In `stop()`, directly after `supervisor.shutdown();` (before the wait for `supervisor.idle()`):
 
 ```ts
-      await broker.closeAll();   // D90
+      await broker.closeAll();   // D90: sockets close; a prepare waiting for its first token ends now instead of in 120 s
 ```
+
+A run halted during prepare then returns without a transition (`prepareAndSpawn` checks `halted` right after `prepare`).
 
 In `crash()`, after `supervisor.shutdown();`:
 
@@ -2863,7 +2898,7 @@ Expected: type-check and lint clean; every unit spec passes (662 at the base plu
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/runner/src/config apps/runner/src/daemon apps/runner/test/unit/daemon-socket-dir.spec.ts
+git add apps/runner/src/config apps/runner/src/daemon apps/runner/test/unit/daemon-socket-dir.spec.ts apps/runner/test/unit/daemon.spec.ts
 git commit -m "feat(fleet): runner daemon serves git credentials from a checked socket dir (3b-1, D78, D84, D90)"
 ```
 
@@ -2888,8 +2923,10 @@ git commit -m "feat(fleet): runner daemon serves git credentials from a checked 
 ```ts
 // apps/runner/test/integration/credentials.integration.spec.ts
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from 'bun:test';
+import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
+import { defaultSocketDir, socketPathFor } from '../../src/credentials/socket-dir';
 import { git as sh } from '../helpers/git-fixture';
 import { waitFor } from '../helpers/wait';
 import { createWorld, type TestRunner, type World } from './harness';
@@ -2919,7 +2956,7 @@ describe.skipIf(!enabled)('runner 3b-1 against the real API: git credentials', (
     });
     const job = await world.job(id);
     expect(job).toMatchObject({ resultPrUrl: 'https://example.test/koda/pull/7', resultBranch: 'feat/fa', finishResult: 'opened' });
-    expect(await sh(world.origin.dir, 'rev-parse', 'feat/fa')).toBe(job.resultSha);
+    expect(job.resultSha).toBe(await sh(world.origin.dir, 'rev-parse', 'feat/fa'));
     expect(world.gitRequests.some((r) => r.authorized && r.path.includes('git-upload-pack'))).toBe(true);
     expect(receivePacks()).toBeGreaterThan(0);
 
@@ -2963,9 +3000,13 @@ describe.skipIf(!enabled)('runner 3b-1 against the real API: git credentials', (
     runner.crash();
     await runner.start();
     await waitFor(async () => (await world.prisma.fleetCommand.findMany({ where: { jobId: id, type: 'READOPT' } })).some((c) => c.ackResult === 'ok'), { timeoutMs: 30_000, message: 'READOPT was not acked ok' });
+    const { runnerId } = await runner.identity();
+    const sock = socketPathFor(defaultSocketDir(process.getuid?.() ?? 0), runnerId, id, 1);
+    await waitFor(() => existsSync(sock), { timeoutMs: 30_000, message: 'the restarted daemon did not re-open the job socket' });
     const before = receivePacks();
     await writeFile(gate, '');
-    const job = await world.waitForJob(id, (j) => j.state === 'COMPLETED', 60_000);
+    const job = await world.waitForJob(id, (j) => j.state === 'COMPLETED' || j.state === 'ESCALATED', 60_000);
+    expect(job.state).toBe('COMPLETED');                                   // ESCALATED here means the push had no credentials
     expect(job.resultBranch).toBe('feat/fd');
     expect(receivePacks()).toBeGreaterThan(before);
   });
@@ -3108,15 +3149,29 @@ In `.nax/mono/apps/runner/context.md`:
 - Testing, add:
   `- Authenticated git in specs uses `test/helpers/git-http.ts` (`git http-backend` behind Basic auth); `file://` origins never call a credential helper. `startDaemon` in tests needs `selfCommand: [process.execPath, <src/main.ts>]`.`
 
-- [ ] **Step 2: Point the design at D78**
+- [ ] **Step 2: Bring the design up to date (D78, D89, D91)**
 
-Under the `### 3.1 Git credential broker` heading of `docs/superpowers/specs/2026-09-30-fleet-s1-slice-3-runner-design.md`, add:
+In `docs/superpowers/specs/2026-09-30-fleet-s1-slice-3-runner-design.md`:
+
+1. Under the `### 3.1 Git credential broker` heading, add:
 
 ```markdown
 > **Amended by plan 3b-1 (D78, D79, D82):** the socket is `<socketDir>/<16 hex>.sock` (default
 > `/tmp/koda-runner-<uid>`, mode 0700, checked at start), not `<jobDir>/git-cred.sock`, because a unix socket path
 > is limited to 104 bytes on macOS. The wire words and the token-error rule are in the plan's decision register.
 ```
+
+2. In the §1 `config/` block (the `runner.json:` key list), after `jobRetentionDays (default 7),` insert `socketDir (default /tmp/koda-runner-<uid>, 3b),`.
+
+3. After the paragraph that begins `**3a depends on nothing from 3b, and says so where it matters:**` (it ends with the `GIT_CONFIG_VALUE_n` mapping), add:
+
+```markdown
+> **Superseded in 3b-1 (D89, D91):** an authentication failure is now `git auth failed`, and the integration
+> harness no longer maps clone URLs to `file://`: an authenticated git-HTTP front (`git http-backend`) serves the
+> repositories, so every scenario authenticates through the credential helper.
+```
+
+4. In §4, the integration bullet that says the harness "runs the daemon in process with `insteadOf` mapping to `file://` bare remotes": replace that phrase with `runs the daemon in process against an authenticated git-HTTP front of the bare remotes (3b-1 D91; 3a used an insteadOf mapping to file://)`.
 
 - [ ] **Step 3: Regenerate the agent files**
 
@@ -3132,7 +3187,7 @@ Expected: all clean and passing.
 
 ```bash
 git add .nax/mono/apps/runner/context.md docs/superpowers/specs/2026-09-30-fleet-s1-slice-3-runner-design.md apps/runner/AGENTS.md apps/runner/CLAUDE.md apps/runner/GEMINI.md apps/runner/codex.md
-git commit -m "docs(fleet): runner context and design pointer for the git broker (3b-1)"
+git commit -m "docs(fleet): runner context and design updates for the git broker (3b-1)"
 ```
 
 - [ ] **Step 6: PR text (a human opens the PR)**
