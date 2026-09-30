@@ -1,9 +1,10 @@
 /**
- * A stand-in for `nax run` / `nax plan` (slice 3 design §4). Behaviour is chosen by env, see the plan, Task 13.
+ * A stand-in for `nax run` / `nax plan` (slice 3 design §4), and the read-only probe commands of D108 (`fake-nax-probe.ts`). Behaviour is chosen by env, see the plan, Task 13.
  * It deliberately mimics the facts the runner depends on: the exit code is not the verdict (a failed run exits 1, a fatal config error exits 0), latest.jsonl appears only at exit,
  * a job profile supplies outputDir, SIGTERM makes nax write run.status = crashed, and `plan` leaves untracked files.
  */
 import { execFileSync } from 'node:child_process';
+import { answerProbe } from './fake-nax-probe';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
@@ -26,8 +27,13 @@ const writeAtomic = (path: string, text: string): void => {
 };
 
 if (args[0] === '--version') {
-  console.log('0.0.0-fake');
+  console.log(process.env['FAKE_NAX_VERSION'] ?? '0.83.1-fake');
   process.exit(0);
+}
+const probed = answerProbe(args, process.env, process.cwd());   // D108: config, auth list, sandbox probe, trust check
+if (probed) {
+  process.stdout.write(`${probed.stdout}\n`);
+  process.exit(probed.code);
 }
 
 const command = args[0];
