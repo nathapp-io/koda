@@ -10,6 +10,8 @@ export interface GitOptions {
   readonly cwd: string;
   readonly timeoutMs?: number;
   readonly env?: Readonly<Record<string, string>>;
+  /** D86: this call may authenticate, through the job's helper; every other call keeps an empty helper list. */
+  readonly credentialHelper?: string | null;
 }
 
 export class GitError extends Error {
@@ -25,7 +27,7 @@ export interface Git {
 }
 
 const DEFAULT_TIMEOUT_MS = 10 * 60_000;
-export const NO_CREDENTIALS_REASON = 'no git credentials (runner 3b)';
+export const NO_CREDENTIALS_REASON = 'git auth failed';
 const AUTH_PATTERNS: readonly RegExp[] = [
   /authentication failed/i,
   /could not read (username|password)/i,
@@ -47,8 +49,10 @@ export function reasonFromError(error: unknown): string {
 
 /** D69: git must never wait for a person. These win over the caller's and the daemon's environment. */
 const NO_PROMPT_ENV = { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: 'true', LC_ALL: 'C' } as const;
-/** 3a has no git credentials: an empty helper stops a host credential manager from answering (3b replaces this). */
+/** D86: an empty helper clears system, global and repo helpers, so a host credential manager never answers for a job. */
 const NO_HELPER_ARGS = ['-c', 'credential.helper='] as const;
+const helperArgs = (helper: string | null | undefined): readonly string[] =>
+  helper ? ['-c', 'credential.helper=', '-c', `credential.helper=${helper}`] : NO_HELPER_ARGS;
 
 export const MIN_GIT_VERSION: readonly [number, number] = [2, 30];
 
@@ -68,7 +72,7 @@ export async function assertMinGitVersion(git: Git): Promise<void> {
 
 export function createGit(): Git {
   const run: Git['run'] = async (args, options) => {
-    const proc = Bun.spawn(['git', ...NO_HELPER_ARGS, ...args], {
+    const proc = Bun.spawn(['git', ...helperArgs(options.credentialHelper), ...args], {
       cwd: options.cwd, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
       timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS, killSignal: 'SIGKILL',
       env: { ...process.env, ...options.env, ...NO_PROMPT_ENV },

@@ -62,6 +62,7 @@ export interface PlanPushInput {
   readonly refSha: string;
   readonly defaultBranch: string;
   readonly identity: GitIdentity;
+  readonly credentialHelper?: string | null;
   readonly sleep?: (ms: number) => Promise<void>;
 }
 
@@ -91,7 +92,7 @@ async function commitStep(input: PlanPushInput, files: readonly string[]): Promi
 async function pushWithRetry(input: PlanPushInput): Promise<string | null> {
   const sleep = input.sleep ?? systemSleep;
   for (let attempt = 0; ; attempt += 1) {
-    const push = await input.git.run(['push', '--set-upstream', 'origin', input.branchName], { cwd: input.repoDir });
+    const push = await input.git.run(['push', '--set-upstream', 'origin', input.branchName], { cwd: input.repoDir, credentialHelper: input.credentialHelper ?? null });
     if (push.code === 0) return null;
     if (isAuthFailure(push.stderr)) return NO_CREDENTIALS_REASON;
     const backoff = PLAN_PUSH_BACKOFF_MS[attempt];
