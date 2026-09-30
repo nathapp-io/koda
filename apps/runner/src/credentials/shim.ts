@@ -1,4 +1,5 @@
 // apps/runner/src/credentials/shim.ts
+import { realpathSync } from 'node:fs';
 import { delimiter, resolve } from 'node:path';
 import type { CredentialReply } from './cred-server';
 
@@ -18,10 +19,22 @@ export function tokenEnv(tool: ShimTool, reply: Granted): Readonly<Record<string
   return reply.host === 'gitlab.com' ? { GITLAB_TOKEN: reply.token } : { GITLAB_TOKEN: reply.token, GITLAB_HOST: reply.host };
 }
 
-/** `PATH` without the shim directory (compared after `resolve`, so `bin/` and `./bin` match) and without empty entries. */
+/** The entry's real path, or its resolved spelling when it does not exist (a missing entry can hide nothing). */
+const real = (entry: string): string => {
+  try {
+    return realpathSync(entry);
+  } catch {
+    return resolve(entry);
+  }
+};
+
+/**
+ * `PATH` without the shim directory and without empty entries. Compared after `resolve` (so `bin/` and `./bin` match)
+ * and after `realpath`, so a symlink alias of the shim dir cannot put the shim back on the child's search path.
+ */
 export function pathWithout(pathValue: string, dir: string): string {
-  const target = resolve(dir);
-  return pathValue.split(delimiter).filter((entry) => entry !== '' && resolve(entry) !== target).join(delimiter);
+  const target = real(dir);
+  return pathValue.split(delimiter).filter((entry) => entry !== '' && real(entry) !== target).join(delimiter);
 }
 
 export interface ShimChild {

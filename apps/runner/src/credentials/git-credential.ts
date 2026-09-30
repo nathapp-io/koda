@@ -39,7 +39,7 @@ export function requestCredential(path: string, timeoutMs: number = CLIENT_TIMEO
     socket.on('connect', () => socket.write('get\n'));
     socket.on('data', (chunk: string) => {
       out += chunk;
-      if (out.length > MAX_REPLY_BYTES) finish({ ok: false, reason: 'reply too large' });
+      if (Buffer.byteLength(out, 'utf8') > MAX_REPLY_BYTES) finish({ ok: false, reason: 'reply too large' });
     });
     socket.on('end', () => finish(parseReply(out)));
     socket.on('close', () => finish(parseReply(out)));   // a close without FIN must not wait for the timeout
@@ -71,13 +71,17 @@ const SAFE = /^[^\n\r\0]+$/;
  * means "no credential"; git then authenticates with nothing and fails with its own authentication error.
  */
 export async function runGitCred(args: readonly string[], io: GitCredIo): Promise<number> {
-  const [sock, action] = args;
-  const fields = parseCredentialInput(await io.readStdin());   // read first: git writes before it reads (no SIGPIPE)
-  if (action !== 'get' || !sock) return 0;
-  const reply = await io.request(sock);
-  if (!reply.ok) return 0;
-  if (fields['protocol'] !== reply.protocol || fields['host'] !== reply.host) return 0;
-  if (!SAFE.test(reply.username) || !SAFE.test(reply.token)) return 0;
-  io.write(`username=${reply.username}\npassword=${reply.token}\n`);
+  try {
+    const [sock, action] = args;
+    const fields = parseCredentialInput(await io.readStdin());   // read first: git writes before it reads (no SIGPIPE)
+    if (action !== 'get' || !sock) return 0;
+    const reply = await io.request(sock);
+    if (!reply.ok) return 0;
+    if (fields['protocol'] !== reply.protocol || fields['host'] !== reply.host) return 0;
+    if (!SAFE.test(reply.username) || !SAFE.test(reply.token)) return 0;
+    io.write(`username=${reply.username}\npassword=${reply.token}\n`);
+  } catch {
+    // D80: the helper always exits 0; silence is "no credential", a throw would fail git's whole helper chain.
+  }
   return 0;
 }

@@ -35,7 +35,10 @@ export async function ensureSocketDir(dir: string, uid: number): Promise<void> {
   await mkdir(dir, { recursive: true, mode: 0o700 }).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== 'EEXIST' && error.code !== 'ENOTDIR') throw error;
   });
-  const info = await lstat(dir);
+  // A parent component that is a plain file reaches here as a raw ENOTDIR; name it for the operator either way.
+  const info = await lstat(dir).catch((error: NodeJS.ErrnoException) => {
+    throw new SocketDirError(`socketDir ${dir} is not a directory (${error.code ?? 'unknown error'})`);
+  });
   if (info.isSymbolicLink()) throw new SocketDirError(`socketDir ${dir} must be a directory, not a link`);
   if (!info.isDirectory()) throw new SocketDirError(`socketDir ${dir} is not a directory`);
   if (info.uid !== uid) throw new SocketDirError(`socketDir ${dir} is owned by uid ${info.uid}, not ${uid}`);

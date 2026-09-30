@@ -1,7 +1,13 @@
 // apps/runner/src/credentials/shim.spec.ts
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { mkdir, symlink } from 'node:fs/promises';
+import { delimiter, join } from 'node:path';
+import { makeTempDirs } from '../../test/helpers/tmp';
 import type { CredentialReply } from './cred-server';
 import { pathWithout, runShim, tokenEnv, type ShimDeps } from './shim';
+
+const tmp = makeTempDirs();
+afterAll(() => tmp.cleanup());
 
 const granted = (host: string): Extract<CredentialReply, { ok: true }> => ({ ok: true, username: 'x-access-token', token: 'ghs_s', expiresAt: '2099-01-01T00:00:00Z', protocol: 'https', host });
 
@@ -37,6 +43,14 @@ describe('tokenEnv (D87)', () => {
 describe('pathWithout', () => {
   test('drops the shim dir however it is spelled, and empty entries', () => {
     expect(pathWithout('/job/bin::/usr/bin:/job/bin/:/job/./bin', '/job/bin')).toBe('/usr/bin');
+  });
+  test('drops a symlink alias of the shim dir too, so the shim cannot re-exec itself', async () => {
+    const base = await tmp.make('pw');
+    const bin = join(base, 'bin');
+    await mkdir(bin, { recursive: true });
+    await symlink(bin, join(base, 'alias'));
+    const path = [bin, join(base, 'alias'), base, '/usr/bin'].join(delimiter);
+    expect(pathWithout(path, bin)).toBe([base, '/usr/bin'].join(delimiter));
   });
 });
 

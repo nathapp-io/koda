@@ -69,6 +69,12 @@ describe('socket directory (D78)', () => {
     await writeFile(file, '');
     await expect(ensureSocketDir(file, uid)).rejects.toThrow(SocketDirError);
   });
+  test('a plain file as a parent component is refused as a SocketDirError, not a raw ENOTDIR', async () => {
+    const base = await tmp.make('sd');
+    const file = join(base, 'file');
+    await writeFile(file, '');
+    await expect(ensureSocketDir(join(file, 'socks'), uid)).rejects.toThrow(SocketDirError);
+  });
 });
 
 describe('CredentialServer (D79)', () => {
@@ -90,6 +96,7 @@ describe('CredentialServer (D79)', () => {
     try {
       expect(JSON.parse(await ask(path, 'store\n'))).toEqual({ ok: false, reason: 'bad request' });
       expect(JSON.parse(await ask(path, 'g'.repeat(65)))).toEqual({ ok: false, reason: 'bad request' });
+      expect(JSON.parse(await ask(path, 'ß'.repeat(33)))).toEqual({ ok: false, reason: 'bad request' });   // 66 bytes, 33 chars
     } finally {
       await server.close();
     }

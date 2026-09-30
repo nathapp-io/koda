@@ -26,7 +26,7 @@ function serve(socket: Socket, reply: () => Promise<CredentialReply>): void {
     buffered += chunk;
     const newline = buffered.indexOf('\n');
     if (newline < 0) {
-      if (buffered.length > MAX_REQUEST_BYTES) answer({ ok: false, reason: 'bad request' });
+      if (Buffer.byteLength(buffered, 'utf8') > MAX_REQUEST_BYTES) answer({ ok: false, reason: 'bad request' });
       return;
     }
     if (buffered.slice(0, newline).trim() !== 'get') {

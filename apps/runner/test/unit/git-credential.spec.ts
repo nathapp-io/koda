@@ -63,6 +63,19 @@ describe('runGitCred (D80)', () => {
     expect(await runGitCred([], x)).toBe(0);
     expect(x.out).toEqual([]);
   });
+  test('a stdin read failure still exits 0 with nothing and never asks the socket (D80: always exit 0)', async () => {
+    const out: string[] = [];
+    const asked: string[] = [];
+    const x: GitCredIo & { out: string[]; asked: string[] } = {
+      out, asked,
+      readStdin: async () => { throw new Error('stdin gone'); },
+      write: (text) => { out.push(text); },
+      request: async (path) => { asked.push(path); return REPLY; },
+    };
+    expect(await runGitCred(['/s.sock', 'get'], x)).toBe(0);
+    expect(x.out).toEqual([]);
+    expect(x.asked).toEqual([]);
+  });
 });
 
 describe('requestCredential', () => {
@@ -83,6 +96,15 @@ describe('requestCredential', () => {
     const server = await CredentialServer.listen(path, () => new Promise<CredentialReply>(() => undefined));
     try {
       expect(await requestCredential(path, 50)).toEqual({ ok: false, reason: 'timeout' });
+    } finally {
+      await server.close();
+    }
+  });
+  test('a reply over 16 KiB is `reply too large`', async () => {
+    const path = join(await tmp.make('gc'), 'c.sock');
+    const server = await CredentialServer.listen(path, async () => ({ ...REPLY, token: 'x'.repeat(20_000) }));
+    try {
+      expect(await requestCredential(path)).toEqual({ ok: false, reason: 'reply too large' });
     } finally {
       await server.close();
     }

@@ -102,6 +102,16 @@ describe('CredentialBroker (design §3.1, D78-D83, D90)', () => {
     expect(w.tokens.wanted('j1', 1)).toBe(false);
     await expect(stat(join(row.jobDir, 'bin'))).rejects.toThrow();
   });
+  test('D79: a job that no longer wants a token is answered `job ended` while its socket still lives', async () => {
+    const w = await world();
+    const row = w.job();
+    w.tokens.want('j1', 1);
+    w.grant(row);
+    await w.broker.acquire(row, { wait: true });
+    w.tokens.drop('j1', 1);   // what release() does before it closes the socket; an in-flight reply sees this
+    expect(await requestCredential(w.sock(row))).toEqual({ ok: false, reason: 'job ended' });
+    await w.broker.closeAll();
+  });
   test('Review focus 3: a stale socket file left by a dead daemon is replaced', async () => {
     const w = await world();
     const row = w.job();
