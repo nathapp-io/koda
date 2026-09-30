@@ -1,5 +1,5 @@
 import { ValidationAppException } from '@nathapp/nestjs-common';
-import type { NaxProtocol, ProfileNeeds, RunnerCapabilities } from './protocol';
+import type { NaxProtocol, ProfileNeeds, RunnerCapabilities, RunnerCredential } from './protocol';
 
 export const MAX_CAPABILITIES_BYTES = 65_536;
 /** #161: bounded names (same rule as dispatch profiles, Task 11) and bounded collections. */
@@ -29,6 +29,41 @@ function parseProfile(name: string, v: unknown): ProfileNeeds {
   return { protocol: v.protocol as NaxProtocol, providers: [...(v.providers as string[])], sandbox: v.sandbox as boolean };
 }
 
+const CREDENTIAL_KEYS = new Set(['providerId', 'available', 'stored', 'exec', 'ambient']);
+const STORED_KEYS = new Set(['kind', 'expires', 'expired']);
+const STORED_KINDS: readonly string[] = ['api-key', 'oauth'];
+const EXEC_STATUSES: readonly string[] = ['served', 'declined', 'error'];
+
+function parseStored(v: unknown, i: number): RunnerCredential['stored'] {
+  if (v === null) return null;
+  // `stored` is required on the wire: an object or an explicit null. undefined (absent) is rejected.
+  if (
+    v === undefined || !isObj(v) || !STORED_KINDS.includes(v.kind as string) || !isBool(v.expired) ||
+    (v.expires !== undefined && (!isStr(v.expires) || Number.isNaN(Date.parse(v.expires))))
+  ) fail(`credential ${i} stored`);
+  const stored = v as Obj;
+  if (Object.keys(stored).some((k) => !STORED_KEYS.has(k))) fail(`credential ${i} stored has unexpected fields`);
+  return {
+    kind: stored.kind as 'api-key' | 'oauth',
+    ...(stored.expires !== undefined ? { expires: stored.expires as string } : {}),
+    expired: stored.expired as boolean,
+  };
+}
+
+function parseCredential(c: unknown, i: number): RunnerCredential {
+  if (!isObj(c) || !isStr(c.providerId) || !isBool(c.available) || !isBool(c.ambient)) fail(`credential ${i}`);
+  const cred = c as Obj;
+  if (Object.keys(cred).some((k) => !CREDENTIAL_KEYS.has(k))) fail(`credential ${i} has unexpected fields`);
+  if (cred.exec !== undefined && !EXEC_STATUSES.includes(cred.exec as string)) fail(`credential ${i} exec`);
+  return {
+    providerId: cred.providerId as string,
+    available: cred.available as boolean,
+    stored: parseStored(cred.stored, i),
+    ...(cred.exec !== undefined ? { exec: cred.exec as RunnerCredential['exec'] } : {}),
+    ambient: cred.ambient as boolean,
+  };
+}
+
 /** Validates a runner's self-reported capabilities (untrusted input, spec §2.1) and returns a clean copy. */
 export function parseCapabilities(raw: unknown): RunnerCapabilities {
   if (!isObj(raw)) fail('not an object');
@@ -47,12 +82,7 @@ export function parseCapabilities(raw: unknown): RunnerCapabilities {
   if (!isObj(tools) || !isBool(tools.git) || !isBool(tools.gh) || !isBool(tools.glab)) fail('tools');
   if (!Array.isArray(executors) || !executors.every((e) => (EXECUTORS as readonly unknown[]).includes(e))) fail('executors');
 
-  const parsedCredentials = credentials.map((c, i) => {
-    if (!isObj(c) || !isStr(c.providerId) || !isStr(c.kind) || (c.expires !== undefined && (!isStr(c.expires) || Number.isNaN(Date.parse(c.expires))))) fail(`credential ${i}`);
-    const allowed = new Set(['providerId', 'kind', 'expires']);
-    if (Object.keys(c).some((k) => !allowed.has(k))) fail(`credential ${i} has unexpected fields`);
-    return { providerId: c.providerId as string, kind: c.kind as string, ...(c.expires ? { expires: c.expires as string } : {}) };
-  });
+  const parsedCredentials = credentials.map(parseCredential);
 
   return {
     nax: { version: nax.version as string, protocols: [...(nax.protocols as NaxProtocol[])] },

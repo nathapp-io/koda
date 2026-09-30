@@ -31,8 +31,8 @@ export class RunnerApiController {
 
   @Get('me')
   @ApiOperation({ summary: "The calling runner's identity" })
-  @ApiResponse({ status: 200, description: '{ id, name, labels, enabled }' })
+  @ApiResponse({ status: 200, description: '{ id, name, labels, capacity, enabled }' })
   async me(@Principal() runner: RunnerPrincipal) {
-    return JsonResponse.Ok({ id: runner.id, name: runner.runnerName, labels: runner.labels, enabled: runner.enabled });
+    return JsonResponse.Ok({ id: runner.id, name: runner.runnerName, labels: runner.labels, capacity: runner.capacity, enabled: runner.enabled });
   }
 }

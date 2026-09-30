@@ -72,6 +72,16 @@ describeIntegration('fleet placement (PG)', () => {
     expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: job.id } })).state).toBe('QUEUED');
   });
 
+  it('queues, rather than rejects, a job whose runner has the provider but nax cannot authenticate it', async () => {
+    const unavailable = { ...FLEET_CAPS, credentials: [{ providerId: 'deepseek', available: false, stored: null, ambient: false }] };
+    const r = await insertRunner(prisma, { capabilities: unavailable });
+    const job = await queue('unavail', { pinnedRunnerId: r.id });
+    const outcome = await placement.placeJob(job.id);
+    expect(outcome.assigned).toBe(false);
+    expect(outcome.misfits).toEqual([expect.objectContaining({ runnerId: r.id, reason: 'provider_unavailable' })]);
+    expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: job.id } })).state).toBe('QUEUED');
+  });
+
   it('never assigns one job twice when dispatch placement and a sync fill race', async () => {
     const r = await insertRunner(prisma, { capacity: 3 });
     for (let i = 0; i < 5; i += 1) {

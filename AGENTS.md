@@ -41,6 +41,7 @@ koda/
 ├── apps/
 │   ├── api/     # NestJS API, system of record
 │   ├── cli/     # Commander.js API client for agents/terminals
+│   ├── runner/  # Bun fleet runner daemon (executes nax jobs)
 │   └── web/     # Nuxt SSR app for humans
 ├── packages/
 │   ├── eslint-config/
@@ -48,7 +49,7 @@ koda/
 ├── docs/
 ├── .nax/
 │   ├── context.md
-│   └── mono/apps/{api,cli,web}/context.md
+│   └── mono/apps/{api,cli,runner,web}/context.md
 ├── openapi.json
 ├── package.json
 ├── turbo.json
@@ -92,6 +93,11 @@ The detailed architecture reference lives in `docs/architecture.md`.
 - should use generated client code in `apps/cli/src/generated/`
 - should not reimplement API business rules locally
 - resolves auth and project context from flags, env, user config, and local project config
+
+### `apps/runner`
+- fleet runner daemon: runs nax jobs dispatched by the API on a host checkout
+- talks only to `/fleet/runner/*` and the bundle upload; never embeds business rules
+- Bun-only; see `.nax/mono/apps/runner/context.md`
 
 ### `apps/web`
 - remains a UI client over the API
@@ -174,6 +180,7 @@ Rules:
 Read the matching app context before making app-local changes:
 - `.nax/mono/apps/api/context.md`
 - `.nax/mono/apps/cli/context.md`
+- `.nax/mono/apps/runner/context.md`
 - `.nax/mono/apps/web/context.md`
 
 If a new app is added to this monorepo, create its context file under `.nax/mono/apps/<new-app>/context.md`.

@@ -90,6 +90,13 @@ describeIntegration('fleet runner admin (PG)', () => {
     await request(server).patch(`/api/fleet/runners/${runner.runnerId}`).set(auth(admin)).send({ labels: ['Bad Label'] }).expect(400);
   });
 
+  it('reports the operator-set capacity on /me (#157)', async () => {
+    const read = async () => data<{ capacity: number }>(await request(server).get('/api/fleet/runner/me').set(auth(runner.apiKey)).expect(200)).capacity;
+    expect(await read()).toBe(1);
+    await request(server).patch(`/api/fleet/runners/${runner.runnerId}`).set(auth(admin)).send({ capacity: 3 }).expect(200);
+    expect(await read()).toBe(3);
+  });
+
   it('revokes the key on delete', async () => {
     await request(server).delete(`/api/fleet/runners/${runner.runnerId}`).set(auth(admin)).expect(204);
     await request(server).get('/api/fleet/runner/me').set(auth(runner.apiKey)).expect(401);

@@ -98,6 +98,20 @@
         "typescript": "^5.4.0",
       },
     },
+    "apps/runner": {
+      "name": "@nathapp/koda-runner",
+      "version": "0.1.0",
+      "dependencies": {
+        "@nathapp/fleet-protocol": "workspace:*",
+        "commander": "^12.0.0",
+      },
+      "devDependencies": {
+        "@nathapp/typescript-config": "workspace:*",
+        "@types/bun": "^1.4.2",
+        "@types/node": "^22.0.0",
+        "typescript": "^5.4.0",
+      },
+    },
     "apps/web": {
       "name": "@nathapp/koda-web",
       "version": "0.4.2",
@@ -641,6 +655,8 @@
 
     "@nathapp/koda-cli": ["@nathapp/koda-cli@workspace:apps/cli"],
 
+    "@nathapp/koda-runner": ["@nathapp/koda-runner@workspace:apps/runner"],
+
     "@nathapp/koda-web": ["@nathapp/koda-web@workspace:apps/web"],
 
     "@nathapp/nestjs-app": ["@nathapp/nestjs-app@3.3.0", "", { "dependencies": { "@nathapp/nestjs-auth": "^3.3.0", "@nathapp/nestjs-common": "^3.3.0" }, "peerDependencies": { "@nathapp/auth": "^1.0.2", "@nathapp/nestjs-cache": "^3.0.0", "@nathapp/nestjs-microservices": "^3.0.0", "@nestjs/common": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/config": "^1.0.0 || ^2.0.0 || ^3.0.0 || ^4.0.0", "@nestjs/core": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/passport": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/swagger": "^7.1.1 || ^8.0.0 || ^11.0.0", "cache-manager": ">=6", "class-transformer": "*", "class-validator": "*", "rxjs": "*" }, "optionalPeers": ["@nathapp/nestjs-cache", "@nathapp/nestjs-microservices", "cache-manager"] }, "sha512-XCy4h2RkbEhWtiq75UYVeQ7mawOapbsmxXSmox14OEVVSNt0CCMrmYYF0Su5mXo6BwzguW8NGcpMFUZvbDEoYw=="],
@@ -1067,6 +1083,8 @@
 
     "@types/bcrypt": ["@types/bcrypt@5.0.2", "", { "dependencies": { "@types/node": "*" } }, "sha512-6atioO8Y75fNcbmj0G7UjI9lXN2pQ/IGJ2FWT4a/btd0Lk9lQalHLKhkgKVZ3r+spnmWUKfbMi1GEe9wyHQfNQ=="],
 
+    "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
+
     "@types/command-line-args": ["@types/command-line-args@5.2.3", "", {}, "sha512-uv0aG6R0Y8WHZLTamZwtfsDLVRnOa+n+n5rEvFWL5Na5gZ8V2Teab/duDPFzIIIhs9qizDpcavCusCLJZu62Kw=="],
 
     "@types/command-line-usage": ["@types/command-line-usage@5.0.4", "", {}, "sha512-BwR5KP3Es/CSht0xqBcUXS3qCAUVXwpRKsV2+arxeb65atasuXG9LykC9Ab10Cw3s2raH92ZqOeILaQbsB2ACg=="],
@@ -1438,6 +1456,8 @@
     "buffer-from": ["buffer-from@1.1.2", "", {}, "sha512-E+XQCRwSbaaiChtv6k6Dwgc+bx+Bs6vuKJHHl5kox/BaKbhiXzqQOwK4cO22yElGp2OCmjwVhT3HmxgyPGnJfQ=="],
 
     "builtin-modules": ["builtin-modules@3.3.0", "", {}, "sha512-zhaCDicdLuWN5UbN5IMnFqNMhNfo919sH85y2/ea+5Yg9TsTkeZxpL+JLbp6cgYFS4sRLp3YV4S6yDuqVWHYOw=="],
+
+    "bun-types": ["bun-types@1.4.2", "", { "dependencies": { "@types/node": "*" } }, "sha512-bxV1FgK7yBIzjRe5zBozIM4Bem11ZJcCXSrjWRG3YWLt8yFDePu4cLjpebO8OvPeIE9trbyPF4fuj3Cia4Fj3w=="],
 
     "bundle-name": ["bundle-name@4.1.0", "", { "dependencies": { "run-applescript": "^7.0.0" } }, "sha512-tjwM5exMg6BGRI+kNmTntNsvdZS1X8BFYS6tnJ2hdH0kVxM6/eVZ2xy+FqStSWvYmtfFMDLIxurorHwDKfDz5Q=="],
 

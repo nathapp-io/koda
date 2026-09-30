@@ -1,0 +1,22 @@
+{
+  "quality": {
+    "commands": {
+      "build": "bun run type-check",
+      "test": "bun run test",
+      "testScoped": "bun test {{files}}",
+      "typecheck": "bun run type-check",
+      "lint": "bun run lint:json-error",
+      "lintFix": "bun run lint:fix",
+      "formatFix": "bun run lint:fix"
+    }
+  },
+  "execution": {
+    "smartTestRunner": {
+      "testFilePatterns": [
+        "**/*.spec.ts",
+        "**/*.integration.spec.ts",
+        "**/*.test.ts"
+      ]
+    }
+  }
+}

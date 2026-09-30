@@ -128,6 +128,7 @@ export function toRunnerPrincipal(runner: RunnerDomain): RunnerPrincipal {
     runnerName: runner.name,
     labels: runner.labels,
     enabled: runner.enabled,
+    capacity: runner.capacity,
     blacklisted: false,
     revoked: false,
     authorities: [],

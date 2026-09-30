@@ -42,6 +42,13 @@ describe('EnrollmentService', () => {
     expect(repo.consumeEnrollment).not.toHaveBeenCalled();
   });
 
+  it('rejects a token without the ke_ prefix with the bad-token 401 before any lookup (#157)', async () => {
+    for (const enrollmentToken of ['abc', 'kr_' + 'a'.repeat(64), 'KE_abc', '']) {
+      await expect(service.enroll({ ...body, enrollmentToken } as never)).rejects.toBeInstanceOf(AuthException);
+    }
+    expect(repo.consumeEnrollment).not.toHaveBeenCalled();
+  });
+
   it('rejects a used, expired or unknown token with 401', async () => {
     repo.consumeEnrollment.mockResolvedValue(null);
     await expect(service.enroll(body as never)).rejects.toBeInstanceOf(AuthException);

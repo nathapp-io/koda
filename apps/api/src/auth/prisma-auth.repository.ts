@@ -99,7 +99,7 @@ export class PrismaAuthRepository {
   async findRunnerByKeyHash(keyHash: string): Promise<RunnerDomain | null> {
     const m = await this.db.runner.findUnique({
       where: { apiKeyHash: keyHash },
-      select: { id: true, name: true, labels: true, enabled: true },
+      select: { id: true, name: true, labels: true, enabled: true, capacity: true },
     });
     return m ?? null;
   }

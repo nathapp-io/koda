@@ -7,7 +7,7 @@ export const FLEET_CAPS: RunnerCapabilities = {
   nax: { version: '0.83.0', protocols: ['native'] },
   sandbox: { available: true, probedAt: '2026-10-01T00:00:00.000Z' },
   profiles: { fast: { protocol: 'native', providers: ['deepseek'], sandbox: false } },
-  credentials: [{ providerId: 'deepseek', kind: 'api-key' }],
+  credentials: [{ providerId: 'deepseek', available: true, stored: { kind: 'api-key', expired: false }, ambient: false }],
   tools: { git: true, gh: true, glab: true },
   executors: ['host'],
 };
