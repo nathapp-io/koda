@@ -1,8 +1,9 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import type { SyncRequest } from '@nathapp/fleet-protocol';
+import type { FakeForge } from '../../../../api/test/helpers/fake-forge';
 import { enrollRunner } from '../../../src/commands/enroll';
 import { loadRunnerConfig, resolveHome, type RunnerHome } from '../../../src/config/runner-config';
 import { startDaemon, type DaemonHandle } from '../../../src/daemon/daemon';
@@ -11,13 +12,17 @@ import { createMemoryLogger, type MemoryLogger } from '../../../src/logger';
 import { jobDirFor } from '../../../src/paths/safe-segment';
 import { ServerClient } from '../../../src/sync/http';
 import { systemNow } from '../../../src/time';
+import { installFakeGh } from '../../helpers/fake-gh';
+import type { GitHttpRequest } from '../../helpers/git-http';
 import { isolateGit, makeOrigin, type Origin } from '../../helpers/git-fixture';
 import { startApi, type RunningApi } from './api-process';
 import { assertPartialIndex, prepareDatabase, runnerTestDatabaseUrl } from './database';
-import { startForge, type Forge } from './forge';
+import { startGitFront } from './git-front';
+import { HARNESS_TOKEN, startForge, type Forge } from './forge';
 
 const PASSWORD = 'Admin1234!Aa';
 const FAKE_NAX = join(import.meta.dir, '..', '..', 'fixtures', 'fake-nax.ts');
+const SELF = [process.execPath, join(import.meta.dir, '..', '..', '..', 'src', 'main.ts')];
 export const FEATURES: readonly string[] = ['fa', 'fb', 'fc', 'fd', 'fe', 'ff', 'fg'];
 
 export interface JobView {
@@ -60,6 +65,9 @@ export interface World {
   readonly api: RunningApi;
   readonly prisma: PrismaClient;
   readonly origin: Origin;
+  readonly forge: FakeForge;
+  readonly gitRequests: readonly GitHttpRequest[];
+  readonly fakeGh: { binDir: string; logPath: string };
   readonly forgeCloneUrl: string;
   dispatch(input: { feature: string; command?: 'RUN' | 'PLAN'; ref?: string; planFrom?: string }): Promise<string>;
   job(id: string): Promise<JobView>;
@@ -98,12 +106,15 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
   await prepareDatabase(databaseUrl);
   const { forge, keyFile }: Forge = await startForge(join(base, 'forge'));
   cleanups.push(() => forge.close());
+  const remotes = join(base, 'remotes');
+  const front = startGitFront(forge.url, remotes, () => HARNESS_TOKEN);
+  cleanups.push(async () => front.stop());
   const api = await startApi({
     DATABASE_URL: databaseUrl, JWT_SECRET: 'it-jwt-secret', JWT_REFRESH_SECRET: 'it-jwt-refresh-secret', API_KEY_SECRET: 'it-api-key-secret',
     RAG_IN_MEMORY_ONLY: 'true', EMBEDDING_PROVIDER: 'fake', REGISTRATION_ENABLED: 'true', AUTH_LOGIN_THROTTLE_LIMIT: '1000',
     FLEET_SYNC_WAIT_MS: '1500', FLEET_SWEEP_ENABLED: 'false', FLEET_ARTIFACT_DIR: join(base, 'artifacts'),
     VCS_ENCRYPTION_KEY: 'b'.repeat(64), GITHUB_APP_ID: '4242', GITHUB_APP_PRIVATE_KEY_FILE: keyFile, GITHUB_APP_SLUG: 'koda-fleet',
-    GITHUB_API_URL: forge.url, VCS_GITLAB_API_URL: `${forge.url}/api/v4`,
+    GITHUB_API_URL: front.url, VCS_GITLAB_API_URL: `${front.url}/api/v4`,
   }, base);
   cleanups.push(() => api.stop());
   const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
@@ -129,15 +140,16 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
 
   const files: Record<string, string> = { 'README.md': '# app\n', 'docs/spec.md': '# spec\n', '.nax/config.json': '{}\n' };
   for (const f of FEATURES) files[`.nax/features/${f}/prd.json`] = prd(f, f === 'fb' ? 'OLD-1' : 'US-001');
-  const remotes = join(base, 'remotes');
   const origin = await makeOrigin(join(remotes, 'acme'), 'app', { files });
-  const forgeCloneUrl = `${forge.url}/acme/app.git`;
-  // D39: the server's clone URL is the fake forge's; git rewrites it to the bare repository.
-  process.env['GIT_CONFIG_COUNT'] = '1';
-  process.env['GIT_CONFIG_KEY_0'] = `url.file://${remotes}/.insteadOf`;
-  process.env['GIT_CONFIG_VALUE_0'] = `${forge.url}/`;
+  const forgeCloneUrl = `${front.url}/acme/app.git`;
   process.env['FAKE_NAX_STEP_MS'] = '40';
-  cleanups.push(async () => { for (const k of ['GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0', 'FAKE_NAX_STEP_MS']) delete process.env[k]; });
+  cleanups.push(async () => { for (const k of ['FAKE_NAX_STEP_MS']) delete process.env[k]; });
+
+  const fakeGh = await installFakeGh(join(base, 'gh'));
+  const savedPath = process.env['PATH'];
+  process.env['PATH'] = `${fakeGh.binDir}${delimiter}${savedPath ?? ''}`;   // behind each job's shims (D88)
+  process.env['FAKE_GH_LOG'] = fakeGh.logPath;
+  cleanups.push(async () => { process.env['PATH'] = savedPath; delete process.env['FAKE_GH_LOG']; });
 
   const runners: TestRunner[] = [];
   const savedFake: Record<string, string | undefined> = {};
@@ -154,7 +166,7 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
   };
 
   const world: World = {
-    base, api, prisma, origin, forgeCloneUrl,
+    base, api, prisma, origin, forge, gitRequests: front.requests, fakeGh, forgeCloneUrl,
     async dispatch(input) {
       const res = await http('POST', '/projects/web/fleet/jobs', {
         token: admin,
@@ -223,7 +235,7 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
             return response;
           };
           await prisma.runner.update({ where: { name }, data: { enabled: true } });
-          runner.daemon = await startDaemon({ home, config, identity, log, fetchFn, tuning: { statusPollMs: 50, syncMinGapMs: 20, ackPollMs: 25 } });
+          runner.daemon = await startDaemon({ home, config, identity, log, fetchFn, selfCommand: SELF, tuning: { statusPollMs: 50, syncMinGapMs: 20, ackPollMs: 25 } });
           return runner.daemon;
         },
         async stop() {
