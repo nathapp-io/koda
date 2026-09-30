@@ -91,9 +91,21 @@ export class JobRun {
 
   private async lifecycle(from: RunStart): Promise<void> {
     if ((from === 'prepare' || from === 'reprepare') && !(await this.prepareAndSpawn(from === 'reprepare'))) return;
+    if (from === 'watch') await this.resumeCredentials();
     if (from !== 'finish') await this.watchUntilExit(from === 'watch');
     if (this.halted) return;
     await this.finish();
+  }
+
+  /** D90: a readopted nax may still push; its socket died with the previous daemon. A failure is reported, not fatal. */
+  private async resumeCredentials(): Promise<void> {
+    const row = this.row();
+    if (!row) return;
+    try {
+      await this.deps.executor.resumeCredentials(row);
+    } catch (error) {
+      this.events.lifecycle('warn', `git credentials could not be restored: ${errorMessage(error)}`);
+    }
   }
 
   requestCancel(): boolean {
@@ -157,6 +169,10 @@ export class JobRun {
   private async abandonCleanup(row: JobRow): Promise<void> {
     try {
       await killIfOurs(this.deps.executor, row, this.deps.log);   // SEC-2: returns void; the matchesProcess=false branch is intentionally silent (D65)
+      // D90: the socket is per epoch, so it closes even when a live higher epoch keeps the reap and the profile.
+      await this.deps.executor.releaseCredentials(row).catch((error: unknown) => {
+        this.deps.log.warn('credential release failed', { jobId: this.jobId, error: errorMessage(error) });
+      });
       if (this.higherEpochLive()) {
         this.deps.log.info('abandon leaves reap and cleanup to the live higher epoch', { jobId: this.jobId, leaseEpoch: this.leaseEpoch });
         return;

@@ -463,7 +463,7 @@ describe('abandon and halt', () => {
     await b.run.abandon();
     await running;
     expect(b.ex.killed).toEqual([{ pgid: 4242, signal: 'SIGKILL' }]);       // that pid is epoch 1's
-    expect(b.ex.calls.slice(callsBefore)).toEqual([]);                        // no reap, no cleanup: they would hit epoch 2's files
+    expect(b.ex.calls.slice(callsBefore)).toEqual(['releaseCredentials:j1']);   // D90: epoch 1's socket closes; no reap, no cleanup
     expect(b.journal.getJob('j1', 1)).toBeNull();
     expect(b.journal.getJob('j1', 2)).not.toBeNull();
   });
@@ -503,6 +503,46 @@ describe('abandon and halt', () => {
     expect(b.ex.killed).toEqual([]);
     expect(stateNames(b)).toEqual(['RUNNING']);
     expect(b.journal.getJob('j1', 1)?.doneAt).toBeNull();
+  });
+});
+
+describe('git credentials across a restart (D90)', () => {
+  test('a watch start restores the job\'s credentials before the first watcher tick', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    b.ex.alive = true;
+    let restoredFirst = false;
+    b.ex.onTick = (n) => {
+      if (n === 1) restoredFirst = b.ex.calls.includes('resumeCredentials:j1');
+      if (n >= 1) b.ex.alive = false;
+    };
+    await b.run.start('watch');
+    expect(restoredFirst).toBe(true);
+  });
+  test('a prepare start does not resume (prepare acquires them itself)', async () => {
+    const b = build();
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    expect(b.ex.calls).not.toContain('resumeCredentials:j1');
+  });
+  test('a failing resume is a warning and the run is still watched to its end', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    b.ex.alive = true;
+    b.ex.resumeError = new Error('socket dir gone');
+    b.ex.dieAfterTicks(1);
+    await b.run.start('watch');
+    expect(events(b).some((e) => e.type === 'lifecycle' && JSON.stringify(e.payload).includes('git credentials could not be restored'))).toBe(true);
+    expect(stateNames(b)).toEqual(['UPLOADING', 'COMPLETED']);
+  });
+  test('abandon releases this epoch\'s credentials', async () => {
+    const b = build();
+    b.ex.onTick = () => undefined;
+    const running = b.run.start('prepare');
+    await waitFor(() => b.ex.calls.includes('spawn:j1') && b.ex.ticks >= 1);
+    await b.run.abandon();
+    await running;
+    expect(b.ex.calls).toContain('releaseCredentials:j1');
   });
 });
 

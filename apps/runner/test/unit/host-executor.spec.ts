@@ -12,6 +12,7 @@ import { createMemoryLogger } from '../../src/logger';
 import { jobDirFor } from '../../src/paths/safe-segment';
 import { runVerdict } from '../../src/verdict/run-verdict';
 import { git as sh, isolateGit, makeOrigin } from '../helpers/git-fixture';
+import { NO_CREDENTIALS } from '../helpers/no-credentials';
 import { makeTempDirs } from '../helpers/tmp';
 import { waitFor } from '../helpers/wait';
 
@@ -33,7 +34,7 @@ async function world(command: 'RUN' | 'PLAN' = 'RUN', over: Partial<AssignPayloa
   };
   const journal = Journal.open(':memory:');
   const row: JobRow = journal.insertJob({ assign, leaseEpoch: 1, repoKey: 'acme/app', jobDir: jobDirFor(workspaceRoot, assign.jobId) }).row;
-  const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now(), sleep: async () => undefined });
+  const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now(), sleep: async () => undefined, credentials: NO_CREDENTIALS });
   return { base, origin, workspaceRoot, naxHome, assign, row, ex, journal };
 }
 
@@ -217,7 +218,7 @@ describe('HostExecutor PLAN', () => {
     };
     const journal = Journal.open(':memory:');
     const row = journal.insertJob({ assign, leaseEpoch: 1, repoKey: 'acme/bare', jobDir: jobDirFor(workspaceRoot, 'cjob2') }).row;
-    const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome: join(base, 'nh') }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now() });
+    const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome: join(base, 'nh') }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now(), credentials: NO_CREDENTIALS });
     expect(await ex.prepare(row)).toEqual({ ok: false, reason: 'no .nax dir' });
   });
 });

@@ -46,4 +46,8 @@ export interface JobExecutor {
   readFinishLedger(job: JobRow): Promise<{ branch: string; headSha: string } | null>;
   collectBundle(job: JobRow): Promise<BundleFile>;
   cleanup(job: JobRow): Promise<void>;
+  /** D90: after a daemon restart, re-open this job's credential socket (a readopted nax may still push). */
+  resumeCredentials(job: JobRow): Promise<void>;
+  /** D90: close this epoch's credential socket and forget its token; other epochs of the job are untouched. */
+  releaseCredentials(job: JobRow): Promise<void>;
 }

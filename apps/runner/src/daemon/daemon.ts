@@ -4,7 +4,9 @@ import { uploadWithRetry } from '../bundle/upload-bundle';
 import { CapabilityReporter, StaticCapabilityProbe } from '../capabilities/capability-probe';
 import type { RunnerConfig, RunnerHome } from '../config/runner-config';
 import { errorMessage } from '../errors';
+import { CredentialBroker } from '../credentials/broker';
 import { TokenCache } from '../credentials/token-cache';
+import { defaultSocketDir } from '../credentials/socket-dir';
 import { HostExecutor } from '../executor/host-executor';
 import { assertMinGitVersion, createGit, type Git } from '../executor/git';
 import type { JobExecutor } from '../executor/job-executor';
@@ -13,6 +15,7 @@ import { newBootId, type RunnerIdentityFile } from '../identity/identity-store';
 import { Journal } from '../journal/journal';
 import { createConsoleLogger, type Logger } from '../logger';
 import { assertInside } from '../paths/safe-segment';
+import { selfCommand } from '../self-command';
 import { CommandHandler } from '../supervisor/command-handler';
 import { RepoMutex } from '../supervisor/repo-mutex';
 import { Supervisor } from '../supervisor/supervisor';
@@ -94,8 +97,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const reporter = new CapabilityReporter(new StaticCapabilityProbe(config.capabilities, now), journal);
   await reporter.refresh();
   const tokens = new TokenCache({ refreshMarginMs: tuning.tokenRefreshMarginMs, cooldownMs: tuning.tokenCooldownMs });
+  const broker = new CredentialBroker({
+    tokens, socketDir: defaultSocketDir(process.getuid?.() ?? 0), runnerId: identity.runnerId, selfCommand: selfCommand(),
+    nowMs: () => Date.now(), sleep,
+    timing: { waitMs: tuning.tokenWaitMs, serveWaitMs: tuning.tokenServeWaitMs, pollMs: tuning.tokenPollMs },
+  });
 
-  const executor = options.executorFactory?.() ?? new HostExecutor({ config, git, log, nowMs: () => now().getTime(), sleep });
+  const executor = options.executorFactory?.() ?? new HostExecutor({ config, git, log, nowMs: () => now().getTime(), sleep, credentials: broker });
   const uploader: BundleUploader = {
     upload: (job, file, rebuild) => uploadWithRetry({
       upload: ({ jobId, leaseEpoch, file: f }) => client.uploadBundle({ jobId, leaseEpoch, filePath: f.path, sha256: f.sha256 }),
