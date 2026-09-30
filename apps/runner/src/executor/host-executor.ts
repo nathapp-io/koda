@@ -25,7 +25,13 @@ export interface HostExecutorDeps {
   readonly nowMs: () => number;
 }
 
-const ATTEMPT_FILES = ['nax-out', 'nax.stdout', 'nax.stderr', 'pre-plan', 'plan-out', 'plan-out.tmp', 'plan-logs', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json'];
+// D76: split ATTEMPT_FILES into two sets so a transient PLAN push failure can be resumed. The mutable per-attempt
+// set is wiped on every prepare (nax-out, bundles, tmp plan staging). The persistent set is kept across attempts
+// on a `plan push failed` row — `prd.json` is the source of truth that the next prepare reads to push the kept
+// commit instead of re-stashing from scratch.
+const MUTABLE_ATTEMPT_FILES = ['nax-out', 'nax.stdout', 'nax.stderr', 'pre-plan', 'plan-out.tmp', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json'];
+const PERSISTENT_ATTEMPT_FILES = ['plan-out', 'plan-logs'];
+const ATTEMPT_FILES = [...MUTABLE_ATTEMPT_FILES, ...PERSISTENT_ATTEMPT_FILES];
 const CANCELLED: PrepareOutcome = { ok: false, reason: 'cancelled', cancelled: true };
 const exists = (path: string): Promise<boolean> => stat(path).then(() => true, () => false);
 
@@ -57,7 +63,11 @@ export class HostExecutor implements JobExecutor {
       const { repoDir, jobDir, outDir } = this.dirs(job);
       const { assign } = job;
       if (cancelled()) return CANCELLED;
-      await Promise.all(ATTEMPT_FILES.map((name) => rm(join(jobDir, name), { recursive: true, force: true })));
+      // D76: a row whose last attempt failed at PLAN push keeps the kept-commit artefacts (`plan-out`, `plan-logs`)
+      // so the next prepare can resume by re-pushing the local commit instead of re-stashing from scratch.
+      const keepPersistent = assign.command === 'PLAN' && job.resultBranch !== null && job.resultSha !== null;
+      const toWipe = keepPersistent ? MUTABLE_ATTEMPT_FILES : ATTEMPT_FILES;
+      await Promise.all(toWipe.map((name) => rm(join(jobDir, name), { recursive: true, force: true })));
       await mkdir(jobDir, { recursive: true });
       await ensureClone(this.deps.git, { repoDir, cloneUrl: assign.repo.cloneUrl, identity: assign.gitIdentity });
       if (cancelled()) return CANCELLED;
@@ -65,7 +75,7 @@ export class HostExecutor implements JobExecutor {
       if (cancelled()) return CANCELLED;
       const checkout = await prepareCheckout({ git: this.deps.git, repoDir, assign });
       if (!checkout.ok) return { ok: false, reason: checkout.reason };
-      if (assign.command === 'PLAN') await this.moveStalePlanFiles(repoDir, jobDir, assign.feature);
+      if (assign.command === 'PLAN' && !keepPersistent) await this.moveStalePlanFiles(repoDir, jobDir, assign.feature);
       if (cancelled()) return CANCELLED;
       await mkdir(outDir, { recursive: true });
       await writeJobProfile(this.deps.config.naxHome, job.jobId, outDir, projectNameFor(assign.repo.owner, assign.repo.name));
@@ -106,8 +116,8 @@ export class HostExecutor implements JobExecutor {
     return command !== null && command.includes(jobProfileName(job.jobId));
   }
 
-  kill(pgid: number, signal: 'SIGTERM' | 'SIGKILL'): void {
-    signalGroup(pgid, signal);
+  kill(pgid: number, signal: 'SIGTERM' | 'SIGKILL'): boolean {
+    return signalGroup(pgid, signal);
   }
 
   async reap(job: JobRow, since: Date): Promise<void> {
@@ -144,7 +154,8 @@ export class HostExecutor implements JobExecutor {
       git: this.deps.git, repoDir, jobDir, feature: job.assign.feature, jobId: job.jobId,
       branchName: check.branchName, refSha, defaultBranch: job.assign.repo.defaultBranch, identity: job.assign.gitIdentity,
     });
-    return result.ok ? { ok: true, branch: result.branch, sha: result.sha } : { ok: false, reason: result.reason };
+    if (result.ok) return { ok: true, branch: result.branch, sha: result.sha };
+    return result.resume ? { ok: false, reason: result.reason, resume: result.resume } : { ok: false, reason: result.reason };
   }
 
   async readFinishLedger(job: JobRow): Promise<{ branch: string; headSha: string } | null> {

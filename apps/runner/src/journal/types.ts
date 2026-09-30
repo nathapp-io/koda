@@ -16,6 +16,7 @@ export interface JobRow {
   readonly cancelRequestedAt: string | null;
   readonly resultBranch: string | null;
   readonly resultSha: string | null;
+  readonly lastPushAttemptAt: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly doneAt: string | null;
@@ -28,7 +29,7 @@ export interface NewJob {
   readonly jobDir: string;
 }
 
-export type JobPatch = Partial<Pick<JobRow, 'state' | 'branch' | 'pid' | 'pgid' | 'naxRunId' | 'logPath' | 'cancelRequestedAt' | 'resultBranch' | 'resultSha'>>;
+export type JobPatch = Partial<Pick<JobRow, 'state' | 'branch' | 'pid' | 'pgid' | 'naxRunId' | 'logPath' | 'cancelRequestedAt' | 'resultBranch' | 'resultSha' | 'lastPushAttemptAt'>>;
 
 export interface EventRow {
   readonly jobId: string;
