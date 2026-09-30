@@ -216,27 +216,6 @@ describe('PLAN', () => {
     expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'plan push failed' });
     expect(b.uploads).toHaveLength(1);
   });
-  test('D76: a transient push failure records the kept commit on the row', async () => {
-    const b = build('PLAN');
-    b.ex.planPush = { ok: false, reason: 'plan push failed', resume: { branch: 'feat/x', sha: 'd'.repeat(40) } };
-    b.ex.dieAfterTicks(1);
-    await b.run.start('prepare');
-    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'plan push failed' });
-    const row = b.journal.getJob('j1', 1);
-    expect(row).toMatchObject({ resultBranch: 'feat/x', resultSha: 'd'.repeat(40) });
-    expect(row?.lastPushAttemptAt).not.toBeNull();
-  });
-  test('D76: a resumed prepare keeps the kept-commit artefacts (plan-out, plan-logs) for the next push', async () => {
-    const b = build('PLAN');
-    b.journal.updateJob('j1', 1, { resultBranch: 'feat/x', resultSha: 'd'.repeat(40), lastPushAttemptAt: '2026-10-01T00:00:00.000Z' });
-    b.ex.dieAfterTicks(1);
-    await b.run.start('prepare');
-    expect(stateNames(b)).toEqual(['RUNNING', 'UPLOADING', 'COMPLETED']);
-    expect(b.ex.calls).toContain('prepare:j1');
-    expect(b.ex.calls).toContain('finishPlan:j1');   // D76: push is retried, no second commit
-    expect(b.ex.calls.filter((c) => c === 'prepare:j1')).toHaveLength(1);
-    expect(b.journal.getJob('j1', 1)).toMatchObject({ resultBranch: 'feat/x', lastPushAttemptAt: null });
-  });
   test('an invalid plan is FAILED and nothing is pushed', async () => {
     const b = build('PLAN');
     b.ex.plan = { ok: false, reason: 'prd.json has no userStories', branchName: null };

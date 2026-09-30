@@ -93,7 +93,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const reporter = new CapabilityReporter(new StaticCapabilityProbe(config.capabilities, now), journal);
   await reporter.refresh();
 
-  const executor = options.executorFactory?.() ?? new HostExecutor({ config, git, log, nowMs: () => now().getTime() });
+  const executor = options.executorFactory?.() ?? new HostExecutor({ config, git, log, nowMs: () => now().getTime(), sleep });
   const uploader: BundleUploader = {
     upload: (job, file, rebuild) => uploadWithRetry({
       upload: ({ jobId, leaseEpoch, file: f }) => client.uploadBundle({ jobId, leaseEpoch, filePath: f.path, sha256: f.sha256 }),

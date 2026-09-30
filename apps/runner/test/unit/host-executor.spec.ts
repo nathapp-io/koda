@@ -33,7 +33,7 @@ async function world(command: 'RUN' | 'PLAN' = 'RUN', over: Partial<AssignPayloa
   };
   const journal = Journal.open(':memory:');
   const row: JobRow = journal.insertJob({ assign, leaseEpoch: 1, repoKey: 'acme/app', jobDir: jobDirFor(workspaceRoot, assign.jobId) }).row;
-  const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now() });
+  const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now(), sleep: async () => undefined });
   return { base, origin, workspaceRoot, naxHome, assign, row, ex, journal };
 }
 
@@ -175,6 +175,28 @@ describe('HostExecutor PLAN', () => {
     const pushed = await w.ex.finishPlan(w.row);
     expect(pushed).toMatchObject({ ok: true, branch: 'feat/feat' });
     expect(JSON.parse(await sh(w.origin.dir, 'show', 'feat/feat:.nax/features/feat/prd.json')).userStories[0].id).toBe('US-001');
+  });
+  test('D77: a requeue after a failed push re-plans from a wiped job dir and the kept commit still reaches origin', async () => {
+    const w = await world('PLAN');
+    const repoDir = join(w.workspaceRoot, 'acme', 'app');
+    expect((await w.ex.prepare(w.row)).ok).toBe(true);
+    const first = await w.ex.spawn(w.row);
+    await waitFor(() => !w.ex.isAlive(first.pid));
+    await sh(repoDir, 'remote', 'set-url', 'origin', `file://${join(w.base, 'nowhere.git')}`);
+    expect(await w.ex.finishPlan(w.row)).toEqual({ ok: false, reason: 'plan push failed' });
+    const kept = await sh(repoDir, 'rev-parse', 'feat/feat');
+    await expect(stat(join(w.row.jobDir, 'plan-out', 'prd.json'))).resolves.toBeDefined();
+
+    // The server's requeue is a new lease epoch: a new journal row over the same job directory.
+    await sh(repoDir, 'remote', 'set-url', 'origin', w.origin.url);
+    const requeued = w.journal.insertJob({ assign: w.assign, leaseEpoch: 2, repoKey: 'acme/app', jobDir: w.row.jobDir }).row;
+    expect((await w.ex.prepare(requeued)).ok).toBe(true);
+    await expect(stat(join(w.row.jobDir, 'plan-out'))).rejects.toThrow();   // the previous stash is gone: this attempt re-plans
+    const second = await w.ex.spawn(requeued);
+    await waitFor(() => !w.ex.isAlive(second.pid));
+    const pushed = await w.ex.finishPlan(requeued);
+    expect(pushed).toMatchObject({ ok: true, branch: 'feat/feat' });
+    await sh(w.origin.dir, 'merge-base', '--is-ancestor', kept, 'feat/feat');   // throws if the kept commit was lost
   });
   test('an invalid plan is not rescued by the stale PRD that was moved aside', async () => {
     const w = await world('PLAN');
