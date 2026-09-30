@@ -1,7 +1,7 @@
 import { chmod, mkdir, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { uploadWithRetry } from '../bundle/upload-bundle';
-import { CapabilityReporter } from '../capabilities/capability-probe';
+import { CapabilityReporter, type CapabilityProbe } from '../capabilities/capability-probe';
 import { createCapabilityProbe } from '../capabilities/create-probe';
 import type { RunnerConfig, RunnerHome } from '../config/runner-config';
 import { errorMessage } from '../errors';
@@ -15,6 +15,8 @@ import { sweepOrphanProfiles } from '../executor/job-profile';
 import { newBootId, type RunnerIdentityFile } from '../identity/identity-store';
 import { Journal } from '../journal/journal';
 import { createConsoleLogger, type Logger } from '../logger';
+import { createNaxCli, type NaxCli } from '../nax/nax-cli';
+import { assertWorkspaceTrusted } from '../nax/trust';
 import { assertInside } from '../paths/safe-segment';
 import { selfCommand } from '../self-command';
 import { CommandHandler } from '../supervisor/command-handler';
@@ -42,6 +44,10 @@ export interface DaemonOptions {
   readonly git?: Git;
   /** D84: how git and the shims run this runner; tests pass ['bun', <src/main.ts>]. */
   readonly selfCommand?: readonly string[];
+  /** D96: tests inject a scripted nax; otherwise `createNaxCli(config.naxCommand, config.naxHome)`. */
+  readonly nax?: NaxCli;
+  /** D95: tests inject a probe; otherwise `createCapabilityProbe(config)`. */
+  readonly capabilityProbe?: CapabilityProbe;
 }
 
 export interface DaemonHandle {
@@ -51,6 +57,8 @@ export interface DaemonHandle {
   readonly stopped: Promise<StopReason | 'stopped'>;
   stop(): Promise<void>;
   crash(): void;
+  /** D102: probe again now (SIGHUP); a changed report is sent on the next sync. Never rejects. */
+  reprobe(): Promise<void>;
 }
 
 async function pruneJobs(journal: Journal, config: RunnerConfig, log: Logger): Promise<void> {
@@ -94,14 +102,23 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const bootId = options.bootId ?? newBootId();
   journal.setMeta('boot_id', bootId);
   journal.setMeta('runner_id', identity.runnerId);
+  const nax = options.nax ?? createNaxCli(config.naxCommand, config.naxHome, tuning.naxCallTimeoutMs);
+  const probed = config.capabilities === null;   // D95
+  const reporter = new CapabilityReporter(options.capabilityProbe ?? createCapabilityProbe(config, now, nax), journal, log);
+  try {
+    await reporter.refresh();   // D97, D102: nax missing or older than 0.83.1 stops the start
+    if (probed) await assertWorkspaceTrusted(nax, config);   // D103
+  } catch (error) {
+    journal.close();
+    throw error;
+  }
+  if (!probed) log.warn('capabilities come from runner.json; nax is not probed (remove the block to probe nax)');
   await sweepOrphanProfiles(config.naxHome, new Set(journal.activeJobs().map((job) => job.jobId)));
   await pruneJobs(journal, config, log);
 
   const client = new ServerClient({ serverUrl: config.serverUrl, apiKey: identity.apiKey, fetchFn: options.fetchFn, syncTimeoutMs: tuning.syncTimeoutMs });
   const capacity = new CapacityTracker(client, log);
   await capacity.refresh();
-  const reporter = new CapabilityReporter(createCapabilityProbe(config, now), journal);
-  await reporter.refresh();
   const tokens = new TokenCache({ refreshMarginMs: tuning.tokenRefreshMarginMs, cooldownMs: tuning.tokenCooldownMs });
   const broker = new CredentialBroker({
     tokens, socketDir, runnerId: identity.runnerId, selfCommand: options.selfCommand ?? selfCommand(),
@@ -145,9 +162,19 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const stopNeedListener = tokens.onNeed(() => loop.wake());
   const running = loop.run().then((): StopReason | 'stopped' => stopReason ?? 'stopped');
 
+  const reprobe = async (): Promise<void> => {
+    try {
+      if (await reporter.refresh()) loop.wake();
+    } catch (error) {
+      // D102, Review focus 3: nax upgraded or removed under a running daemon; the last report stays.
+      log.warn('capability probe failed; keeping the last report', { error: errorMessage(error) });
+    }
+  };
+
   const timers = [
     setInterval(() => { void capacity.refresh(); }, tuning.capacityRefreshMs),
     setInterval(() => { void pruneJobs(journal, config, log); }, tuning.pruneIntervalMs),
+    setInterval(() => { void reprobe(); }, tuning.capabilityProbeMs),
   ];
   for (const timer of timers) timer.unref();
 
@@ -184,5 +211,5 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     void broker.closeAll();   // D90: a killed daemon's listeners die with it; the files stay (the next daemon replaces them)
     journal.close();
   };
-  return { bootId, journal, supervisor, stopped: running, stop, crash };
+  return { bootId, journal, supervisor, stopped: running, stop, crash, reprobe };
 }

@@ -11,6 +11,9 @@ import { assignFor } from '../helpers/assign';
 import { FakeExecutor } from '../helpers/fake-executor';
 import { makeTempDirs } from '../helpers/tmp';
 import { waitFor } from '../helpers/wait';
+import { NaxUnavailableError, type NaxResult } from '../../src/nax/nax-cli';
+import { WorkspaceUntrustedError } from '../../src/nax/trust';
+import { FakeNaxCli } from '../helpers/fake-nax-cli';
 
 const tmp = makeTempDirs();
 afterAll(() => tmp.cleanup());
@@ -307,5 +310,106 @@ describe('startDaemon', () => {
     await expect(stat(s.home.journalPath)).rejects.toThrow();
     await expect(stat(join(s.config.workspaceRoot, '.jobs'))).rejects.toThrow();
     server.stop();
+  });
+});
+
+describe('startDaemon, capabilities from nax (D95, D97, D102, D103)', () => {
+  async function probed(server: FakeServer, nax: FakeNaxCli) {
+    const s = await setup(server);
+    const config = parseRunnerConfig({
+      serverUrl: server.url, workspaceRoot: join(s.base, 'ws'), naxHome: join(s.base, 'naxhome'), jobRetentionDays: 1, socketDir: join(s.base, 's'),
+    }, {});
+    const start = (over: Partial<Parameters<typeof startDaemon>[0]> = {}) =>
+      startDaemon({ home: s.home, config, identity: s.identity, tuning, nax, executorFactory: () => s.ex, ...over });
+    return { ...s, config, start };
+  }
+  const withCapabilities = (server: FakeServer) => server.syncs.filter((sync) => sync.capabilities !== undefined);
+
+  test('without a capabilities block the first sync carries what nax reported; the workspace root was checked for trust', async () => {
+    const server = fakeServer();
+    const nax = new FakeNaxCli({ version: '0.83.1' });
+    const p = await probed(server, nax);
+    const log = createMemoryLogger();
+    const daemon = await p.start({ log });
+    try {
+      await waitFor(() => server.syncs.length >= 1);
+      expect(server.syncs[0].capabilities).toMatchObject({ nax: { version: '0.83.1' }, profiles: {}, sandbox: { available: true }, executors: ['host'] });
+      expect(nax.calls.some((c) => c.args[0] === 'trust' && c.args[c.args.length - 1] === p.config.workspaceRoot)).toBe(true);
+      expect(log.lines.some((l) => l.message.includes('nax is not probed'))).toBe(false);
+    } finally {
+      await daemon.stop();
+      server.stop();
+    }
+  });
+
+  test('D97: nax older than 0.83.1 stops the start with NaxUnavailableError; nothing is sent', async () => {
+    const server = fakeServer();
+    const p = await probed(server, new FakeNaxCli({ version: '0.83.0' }));
+    await expect(p.start()).rejects.toBeInstanceOf(NaxUnavailableError);
+    expect(server.syncs).toEqual([]);
+    server.stop();
+  });
+
+  test('Review focus 4, D103: an untrusted workspace root stops the start and names the nax trust add command', async () => {
+    const server = fakeServer();
+    const p = await probed(server, new FakeNaxCli({ trusted: false }));
+    const failure = p.start();
+    await expect(failure).rejects.toBeInstanceOf(WorkspaceUntrustedError);
+    await expect(failure).rejects.toThrow(`nax trust add ${p.config.workspaceRoot} --yes`);
+    expect(server.syncs).toEqual([]);
+    server.stop();
+  });
+
+  test('D102: reprobe sends a changed report once; an unchanged one is not resent', async () => {
+    const server = fakeServer();
+    const nax = new FakeNaxCli({ version: '0.83.1' });
+    const p = await probed(server, nax);
+    const daemon = await p.start();
+    try {
+      await waitFor(() => withCapabilities(server).length === 1 && server.syncs.length >= 2);
+      await daemon.reprobe();
+      await Bun.sleep(50);
+      expect(withCapabilities(server)).toHaveLength(1);
+      nax.answers = { ...nax.answers, version: '0.84.0' };
+      await daemon.reprobe();
+      await waitFor(() => withCapabilities(server).length === 2);
+      expect(withCapabilities(server)[1].capabilities?.nax.version).toBe('0.84.0');
+    } finally {
+      await daemon.stop();
+      server.stop();
+    }
+  });
+
+  test('Review focus 3: a probe that fails after start keeps the last report, warns, and the daemon keeps syncing', async () => {
+    const server = fakeServer();
+    const nax = new FakeNaxCli({ version: '0.83.1' });
+    const p = await probed(server, nax);
+    const log = createMemoryLogger();
+    const daemon = await p.start({ log });
+    try {
+      await waitFor(() => server.syncs.length >= 2);
+      const gone: NaxResult = { code: 127, stdout: '', stderr: 'nax: not found', timedOut: false };
+      nax.answers = { ...nax.answers, version: gone };
+      await daemon.reprobe();
+      expect(log.lines.some((l) => l.level === 'warn' && l.message.includes('capability probe failed'))).toBe(true);
+      const before = server.syncs.length;
+      await waitFor(() => server.syncs.length > before);
+    } finally {
+      await daemon.stop();
+      server.stop();
+    }
+  });
+
+  test('D102: the periodic probe runs every capabilityProbeMs', async () => {
+    const server = fakeServer();
+    const nax = new FakeNaxCli();
+    const p = await probed(server, nax);
+    const daemon = await p.start({ tuning: { ...tuning, capabilityProbeMs: 30 } });
+    try {
+      await waitFor(() => nax.calls.filter((c) => c.args[0] === '--version').length >= 3);
+    } finally {
+      await daemon.stop();
+      server.stop();
+    }
   });
 });
