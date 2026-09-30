@@ -1,12 +1,20 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { FLEET_PROTOCOL_VERSION, type EnrollRequest } from '@nathapp/fleet-protocol';
-import { loadRunnerConfig, resolveHome } from '../config/runner-config';
+import { FLEET_PROTOCOL_VERSION, type EnrollRequest, type RunnerCapabilities } from '@nathapp/fleet-protocol';
+import { loadRunnerConfig, resolveHome, type RunnerConfig } from '../config/runner-config';
 import { readIdentity } from '../identity/identity-store';
+import { NaxUnavailableError } from '../nax/nax-cli';
 import { NetworkError, ServerError } from '../sync/http';
 import { makeTempDirs } from '../../test/helpers/tmp';
-import { EnrollError, defaultCapabilities, defaultRunnerName, enrollRunner, type EnrollDeps } from './enroll';
+import { EnrollError, defaultRunnerName, enrollRunner, type EnrollDeps } from './enroll';
+
+const PROBED: RunnerCapabilities = {
+  nax: { version: '0.83.1', protocols: ['native'] }, sandbox: { available: true, probedAt: '2026-10-01T00:00:00.000Z' },
+  profiles: { fast: { protocol: 'native', providers: ['deepseek'], sandbox: false } },
+  credentials: [{ providerId: 'deepseek', available: true, stored: { kind: 'api-key', expired: false }, ambient: false }],
+  tools: { git: true, gh: true, glab: false }, executors: ['host'],
+};
 
 const tmp = makeTempDirs();
 afterAll(() => tmp.cleanup());
@@ -15,7 +23,7 @@ function deps(over: Partial<EnrollDeps> & { enroll?: (body: EnrollRequest) => Pr
   const sent: EnrollRequest[] = [];
   const lines: string[] = [];
   const d: EnrollDeps = {
-    env: {}, hostname: () => 'Mac-Mini.local', platform: 'darwin', arch: 'arm64', which: (c) => (c === 'gh' ? null : `/usr/bin/${c}`),
+    env: {}, hostname: () => 'Mac-Mini.local', platform: 'darwin', arch: 'arm64', probe: () => ({ probe: async () => ({ capabilities: PROBED, warnings: [] }) }),
     now: () => new Date('2026-10-01T00:00:00.000Z'), log: (l) => { lines.push(l); },
     makeClient: () => ({ enroll: async (body) => { sent.push(body); return (over.enroll ?? (async () => ({ runnerId: 'r1', apiKey: 'kr_secret' })))(body); } }),
     ...over,
@@ -32,24 +40,17 @@ describe('helpers', () => {
     expect(defaultRunnerName(h)).toBe(n);
     expect(n).toMatch(/^[a-z0-9][a-z0-9-]{0,62}$/);
   });
-  test('defaultCapabilities detects tools and declares the honest minimum (D50)', () => {
-    const caps = defaultCapabilities((c) => (c === 'gh' ? null : `/bin/${c}`));
-    expect(caps).toEqual({
-      nax: { version: 'unknown', protocols: ['native'] }, sandbox: { available: false }, profiles: {}, credentials: [],
-      tools: { git: true, gh: false, glab: true }, executors: ['host'],
-    });
-  });
 });
 
 describe('enrollRunner', () => {
-  test('writes runner.json and identity.json (0600), sends the static capabilities and protocol version, and never stores the token', async () => {
+  test('writes runner.json (without a capabilities block) and identity.json (0600), sends the probed capabilities and protocol version, and never stores the token', async () => {
     const o = await opts();
     const { d, sent } = deps();
     expect(await enrollRunner(o, d)).toEqual({ runnerId: 'r1', name: 'mac-mini-local' });
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({
       enrollmentToken: 'ke_token', name: 'mac-mini-local', os: 'darwin', arch: 'arm64', protocolVersion: FLEET_PROTOCOL_VERSION, labels: ['gpu'],
-      capabilities: { nax: { version: 'unknown' }, sandbox: { available: false, probedAt: '2026-10-01T00:00:00.000Z' }, executors: ['host'] },
+      capabilities: PROBED,
     });
     expect(sent[0].bootId).toMatch(/^[0-9a-f-]{36}$/);
     const identity = await readIdentity(o.home.identityPath);
@@ -57,6 +58,7 @@ describe('enrollRunner', () => {
     expect((await stat(o.home.identityPath)).mode & 0o777).toBe(0o600);
     const config = await loadRunnerConfig(o.home.configPath, {});
     expect(config).toMatchObject({ serverUrl: 'https://koda.example.com', labels: ['gpu'], workspaceRoot: join(o.home.dir, 'workspace') });
+    expect(JSON.parse(await readFile(o.home.configPath, 'utf8')).capabilities).toBeUndefined();
     expect(await readFile(o.home.configPath, 'utf8')).not.toContain('ke_token');
     expect(await readFile(o.home.identityPath, 'utf8')).not.toContain('ke_token');
   });
@@ -133,5 +135,26 @@ describe('enrollRunner', () => {
   test('an unsupported platform or architecture is refused', async () => {
     await expect(enrollRunner(await opts(), deps({ platform: 'win32' }).d)).rejects.toThrow(/unsupported platform/);
     await expect(enrollRunner(await opts(), deps({ arch: 'ia32' }).d)).rejects.toThrow(/unsupported platform/);
+  });
+  test('D97: a probe that fails (nax missing or older than 0.83.1) is an EnrollError; nothing is sent and no identity is written', async () => {
+    const o = await opts();
+    const { d, sent } = deps({ probe: () => ({ probe: async () => { throw new NaxUnavailableError('koda-runner needs nax 0.83.1 or newer (found 0.80.0)'); } }) });
+    await expect(enrollRunner(o, d)).rejects.toThrow(/needs nax 0\.83\.1 or newer/);
+    await expect(enrollRunner(o, d)).rejects.toBeInstanceOf(EnrollError);
+    expect(sent).toEqual([]);
+    expect(await readIdentity(o.home.identityPath)).toBeNull();
+  });
+  test('probe warnings are printed, and the probe gets the config just written (no capabilities block: nax mode)', async () => {
+    const o = await opts();
+    const seen: RunnerConfig[] = [];
+    const { d, lines } = deps({
+      probe: (config) => {
+        seen.push(config);
+        return { probe: async () => ({ capabilities: PROBED, warnings: ['profile otel skipped: PROFILE_ENV_VAR_UNRESOLVED'] }) };
+      },
+    });
+    await enrollRunner(o, d);
+    expect(lines).toContain('warning: profile otel skipped: PROFILE_ENV_VAR_UNRESOLVED');
+    expect(seen[0]?.capabilities).toBeNull();
   });
 });

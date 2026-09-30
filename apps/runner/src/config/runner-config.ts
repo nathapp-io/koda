@@ -29,7 +29,8 @@ export interface RunnerConfig {
   readonly jobRetentionDays: number;
   /** D78: where the per-job credential sockets live; null means `/tmp/koda-runner-<uid>`. */
   readonly socketDir: string | null;
-  readonly capabilities: StaticCapabilities;
+  /** D95: the operator's override; null (the default) means the daemon asks nax (`NaxCapabilityProbe`). */
+  readonly capabilities: StaticCapabilities | null;
 }
 
 export interface RunnerHome {
@@ -192,7 +193,7 @@ export function parseRunnerConfig(raw: unknown, env: NodeJS.ProcessEnv): RunnerC
     naxHome,
     jobRetentionDays: retention as number,
     socketDir: socketDir as string | null,
-    capabilities: parseCapabilities(raw.capabilities),
+    capabilities: raw.capabilities === undefined || raw.capabilities === null ? null : parseCapabilities(raw.capabilities),
   };
 }
 

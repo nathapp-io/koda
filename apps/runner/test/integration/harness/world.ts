@@ -4,6 +4,7 @@ import { delimiter, join } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import type { SyncRequest } from '@nathapp/fleet-protocol';
 import type { FakeForge } from '../../../../api/test/helpers/fake-forge';
+import { createCapabilityProbe } from '../../../src/capabilities/create-probe';
 import { enrollRunner } from '../../../src/commands/enroll';
 import { loadRunnerConfig, resolveHome, type RunnerHome } from '../../../src/config/runner-config';
 import { startDaemon, type DaemonHandle } from '../../../src/daemon/daemon';
@@ -210,7 +211,7 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
       const token: string = (await http('POST', '/fleet/enrollments', { token: admin, body: { labels: [] } })).body.data.token;
       await enrollRunner(
         { home, token, name, labels: [], insecureHttp: false },
-        { env: {}, hostname: () => name, platform: process.platform, arch: process.arch, which: (c) => Bun.which(c), now: systemNow, makeClient: (serverUrl) => new ServerClient({ serverUrl }), log: () => undefined },
+        { env: {}, hostname: () => name, platform: process.platform, arch: process.arch, probe: (config) => createCapabilityProbe(config, systemNow), now: systemNow, makeClient: (serverUrl) => new ServerClient({ serverUrl }), log: () => undefined },
       );
       const net: NetControl = { down: false, dropResponse: false, syncs: [] };
       const log = createMemoryLogger();

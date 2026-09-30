@@ -1,7 +1,8 @@
 import { chmod, mkdir, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { uploadWithRetry } from '../bundle/upload-bundle';
-import { CapabilityReporter, StaticCapabilityProbe } from '../capabilities/capability-probe';
+import { CapabilityReporter } from '../capabilities/capability-probe';
+import { createCapabilityProbe } from '../capabilities/create-probe';
 import type { RunnerConfig, RunnerHome } from '../config/runner-config';
 import { errorMessage } from '../errors';
 import { CredentialBroker } from '../credentials/broker';
@@ -99,7 +100,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const client = new ServerClient({ serverUrl: config.serverUrl, apiKey: identity.apiKey, fetchFn: options.fetchFn, syncTimeoutMs: tuning.syncTimeoutMs });
   const capacity = new CapacityTracker(client, log);
   await capacity.refresh();
-  const reporter = new CapabilityReporter(new StaticCapabilityProbe(config.capabilities, now), journal);
+  const reporter = new CapabilityReporter(createCapabilityProbe(config, now), journal);
   await reporter.refresh();
   const tokens = new TokenCache({ refreshMarginMs: tuning.tokenRefreshMarginMs, cooldownMs: tuning.tokenCooldownMs });
   const broker = new CredentialBroker({

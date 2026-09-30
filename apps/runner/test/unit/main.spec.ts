@@ -1,10 +1,12 @@
 import { afterAll, describe, expect, test } from 'bun:test';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { makeTempDirs } from '../helpers/tmp';
 
 const tmp = makeTempDirs();
 afterAll(() => tmp.cleanup());
 const MAIN = join(import.meta.dir, '..', '..', 'src', 'main.ts');
+const FAKE_NAX = join(import.meta.dir, '..', 'fixtures', 'fake-nax.ts');
 
 async function cli(args: string[], env: Record<string, string> = {}) {
   const proc = Bun.spawn(['bun', MAIN, ...args], { stdout: 'pipe', stderr: 'pipe', env: { ...process.env, ...env } });
@@ -43,7 +45,13 @@ describe('koda-runner CLI', () => {
     expect(stderr).toMatch(/--token|KODA_RUNNER_ENROLL_TOKEN/);
   });
   test('an unreachable server on enroll is a readable error, not a stack trace', async () => {
-    const home = join(await tmp.make('cli'), 'home');
+    const dir = await tmp.make('cli');
+    const home = join(dir, 'home');
+    await mkdir(home, { recursive: true });
+    // D95: enroll probes nax first; the fake nax stands in for it (CI machines have none).
+    await writeFile(join(home, 'runner.json'), JSON.stringify({
+      serverUrl: 'http://127.0.0.1:9', workspaceRoot: join(dir, 'ws'), naxHome: join(dir, 'naxhome'), naxCommand: ['bun', FAKE_NAX],
+    }));
     const { stderr, code } = await cli(['--home', home, 'enroll', '--server', 'http://127.0.0.1:9', '--token', 'ke_x']);
     expect(code).toBe(1);
     expect(stderr).toMatch(/cannot reach the server/);

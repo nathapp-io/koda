@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { hostname } from 'node:os';
+import { createCapabilityProbe } from './capabilities/create-probe';
 import { startDaemon } from './daemon/daemon';
 import { EnrollError, enrollRunner } from './commands/enroll';
 import { runCommand } from './commands/run';
@@ -44,7 +45,7 @@ program
       await enrollRunner(
         { home: resolveHome(process.env, home()), server: opts.server, token, name: opts.name, labels: opts.labels, workspace: opts.workspace, insecureHttp: opts.insecureHttp },
         {
-          env: process.env, hostname, platform: process.platform, arch: process.arch, which: (c) => Bun.which(c), now: systemNow,
+          env: process.env, hostname, platform: process.platform, arch: process.arch, probe: (config) => createCapabilityProbe(config, systemNow), now: systemNow,
           makeClient: (serverUrl) => new ServerClient({ serverUrl }), log: say,
         },
       );
