@@ -112,7 +112,7 @@ export async function enrollRunner(options: EnrollOptions, deps: EnrollDeps): Pr
     throw error;
   }
   const name = options.name ?? defaultRunnerName(deps.hostname());
-  const capabilities = await new StaticCapabilityProbe(config.capabilities, deps.now).probe();
+  const { capabilities } = await new StaticCapabilityProbe(config.capabilities, deps.now).probe();
   let enrolled: { runnerId: string; apiKey: string };
   try {
     enrolled = await deps.makeClient(config.serverUrl).enroll({
