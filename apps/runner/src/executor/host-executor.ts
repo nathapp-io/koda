@@ -1,5 +1,6 @@
 import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
+import { NO_JOB_CHECK, type JobCheck } from '../capabilities/job-check';
 import { buildBundle, type BundleFile } from '../bundle/build-bundle';
 import type { RunnerConfig } from '../config/runner-config';
 import type { CredentialProvider } from '../credentials/broker';
@@ -31,6 +32,8 @@ export interface HostExecutorDeps {
   readonly sleep?: (ms: number) => Promise<void>;
   /** Design §3.1: per-job git credentials (the broker; a stub in `file://` specs). */
   readonly credentials: CredentialProvider;
+  /** D104: nax mode only. Absent: no post-checkout check (static capabilities, unit specs). */
+  readonly jobCheck?: JobCheck;
 }
 
 // D53: a new attempt (including a requeue, which is a new lease epoch over the same job dir, D77) starts from none of these.
@@ -78,6 +81,8 @@ export class HostExecutor implements JobExecutor {
       if (cancelled()) return CANCELLED;
       const checkout = await prepareCheckout({ git: this.deps.git, repoDir, assign });
       if (!checkout.ok) return { ok: false, reason: checkout.reason };
+      const mismatch = await (this.deps.jobCheck ?? NO_JOB_CHECK).check(assign, repoDir);   // D104
+      if (mismatch !== null) return { ok: false, reason: mismatch };
       if (assign.command === 'PLAN') await this.moveStalePlanFiles(repoDir, jobDir, assign.feature);
       if (cancelled()) return CANCELLED;
       await mkdir(outDir, { recursive: true });

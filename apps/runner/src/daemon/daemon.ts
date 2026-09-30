@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { uploadWithRetry } from '../bundle/upload-bundle';
 import { CapabilityReporter, type CapabilityProbe } from '../capabilities/capability-probe';
 import { createCapabilityProbe } from '../capabilities/create-probe';
+import { NaxJobCheck } from '../capabilities/job-check';
 import type { RunnerConfig, RunnerHome } from '../config/runner-config';
 import { errorMessage } from '../errors';
 import { CredentialBroker } from '../credentials/broker';
@@ -126,7 +127,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     timing: { waitMs: tuning.tokenWaitMs, serveWaitMs: tuning.tokenServeWaitMs, pollMs: tuning.tokenPollMs },
   });
 
-  const executor = options.executorFactory?.() ?? new HostExecutor({ config, git, log, nowMs: () => now().getTime(), sleep, credentials: broker });
+  const jobCheck = probed ? new NaxJobCheck({ nax, capabilities: () => reporter.latest() }) : undefined;   // D104
+  const executor = options.executorFactory?.() ?? new HostExecutor({
+    config, git, log, nowMs: () => now().getTime(), sleep, credentials: broker, ...(jobCheck ? { jobCheck } : {}),
+  });
   const uploader: BundleUploader = {
     upload: (job, file, rebuild) => uploadWithRetry({
       upload: ({ jobId, leaseEpoch, file: f }) => client.uploadBundle({ jobId, leaseEpoch, filePath: f.path, sha256: f.sha256 }),
