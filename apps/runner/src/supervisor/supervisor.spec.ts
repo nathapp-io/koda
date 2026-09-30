@@ -167,7 +167,7 @@ describe('readopt (design §2 control paths, D33, D54)', () => {
     expect(b.ex.calls.indexOf('reap:j1')).toBeLessThan(b.ex.calls.indexOf('cleanup:j1'));
     expect(b.journal.getJob('j1', 1)?.doneAt).not.toBeNull();
   });
-  test('D75: missing status.lastHeartbeat is rejected even when row.updatedAt is fresh (the silent fallback)', async () => {
+  test('D75: neither child-side stamp present is rejected even when row.updatedAt is fresh (the silent fallback)', async () => {
     const b = build();
     const row = running(b);
     if (!row) throw new Error('expected a journal row');
@@ -176,6 +176,42 @@ describe('readopt (design §2 control paths, D33, D54)', () => {
     b.ex.status = { run: { id: 'run-1', status: 'running' } } as never;   // no lastHeartbeat, no updatedAt
     expect(await b.supervisor.readopt('j1', 1)).toEqual({ result: 'rejected', detail: 'stale heartbeat' });
     expect(b.journal.getJob('j1', 1)?.doneAt).not.toBeNull();
+  });
+  test('D77: a status.json from a non-heartbeat nax write (no lastHeartbeat, fresh updatedAt) is re-attached', async () => {
+    const b = build();
+    running(b);
+    b.ex.alive = true;
+    b.ex.status = { run: { id: 'run-1', status: 'running' }, updatedAt: b.time.now().toISOString() } as never;
+    b.ex.dieAfterTicks(1);
+    expect(await b.supervisor.readopt('j1', 1)).toEqual({ result: 'ok' });
+    await b.supervisor.idle();
+    expect(b.ex.watchOptions[0].startAtEnd).toBe(true);
+  });
+  test('D77: the newer of lastHeartbeat and updatedAt decides freshness', async () => {
+    const b = build();
+    running(b);
+    b.ex.alive = true;
+    const old = new Date(b.time.nowMs() - 300_000).toISOString();
+    b.ex.status = { run: { id: 'run-1', status: 'running' }, lastHeartbeat: old, updatedAt: b.time.now().toISOString() } as never;
+    b.ex.dieAfterTicks(1);
+    expect(await b.supervisor.readopt('j1', 1)).toEqual({ result: 'ok' });
+    await b.supervisor.idle();
+  });
+  test('D77: a fresh lastHeartbeat wins over a stale updatedAt', async () => {
+    const b = build();
+    running(b);
+    b.ex.alive = true;
+    b.ex.status = freshStatus(b, { updatedAt: new Date(b.time.nowMs() - 300_000).toISOString() }) as never;
+    b.ex.dieAfterTicks(1);
+    expect(await b.supervisor.readopt('j1', 1)).toEqual({ result: 'ok' });
+    await b.supervisor.idle();
+  });
+  test('D77: both child-side stamps stale (or unparseable) is rejected', async () => {
+    const b = build();
+    running(b);
+    b.ex.alive = true;
+    b.ex.status = { run: { id: 'run-1', status: 'running' }, lastHeartbeat: 'garbage', updatedAt: new Date(b.time.nowMs() - 121_000).toISOString() } as never;
+    expect(await b.supervisor.readopt('j1', 1)).toEqual({ result: 'rejected', detail: 'stale heartbeat' });
   });
   test('pid alive, it is this job\'s nax, but its run id is not the journaled one: rejected and killed', async () => {
     const b = build();

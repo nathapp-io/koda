@@ -67,12 +67,12 @@ export class Supervisor {
   }
 
   private fresh(status: StatusView): boolean {
-    // D75: the 2-minute freshness window is a child-side heartbeat contract; the runner's own `updatedAt`
-    // is a write timestamp (cancel-requested patches, event-append patches), not a heartbeat, so falling back to
-    // it silently accepted a wedged nax after any unrelated runner-side write.
-    if (!status.lastHeartbeat) return false;
-    const stamp = Date.parse(status.lastHeartbeat);
-    return !Number.isNaN(stamp) && this.deps.now().getTime() - stamp < this.deps.readoptHeartbeatMs;
+    // D75: the 2-minute freshness window is a child-side contract; the journal row's `updatedAt` is a runner-side
+    // write timestamp, so it never counts. D77: both status.json stamps are nax-written. nax sets `lastHeartbeat`
+    // only on its 60s heartbeat write and drops it on every other status write, which still bumps `updatedAt`.
+    const stamps = [status.lastHeartbeat, status.updatedAt].map((value) => (value ? Date.parse(value) : Number.NaN)).filter((ms) => !Number.isNaN(ms));
+    if (stamps.length === 0) return false;
+    return this.deps.now().getTime() - Math.max(...stamps) < this.deps.readoptHeartbeatMs;
   }
 
   private async reject(row: JobRow, detail: string): Promise<ReadoptResult> {

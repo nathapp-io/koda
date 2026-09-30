@@ -255,27 +255,13 @@ export class JobRun {
     const judged = await this.judge(row);
     let verdict = judged.verdict;
     let result = { branch: row.resultBranch, sha: row.resultSha };
-    if (row.command === 'PLAN' && verdict.state === 'COMPLETED') {
-      // D76: a kept-commit row (`resultBranch`/`resultSha` set, `lastPushAttemptAt` set from a prior failed push)
-      // needs to retry the push without a second commit; otherwise the first-time path commits and pushes.
-      const needRetryPush = row.resultSha !== null && row.lastPushAttemptAt !== null;
-      const needFirstPush = row.resultSha === null;
-      if (needFirstPush || needRetryPush) {
-        const pushed = await this.deps.executor.finishPlan(row);
-        if (pushed.ok) {
-          result = { branch: pushed.branch, sha: pushed.sha };
-          this.deps.journal.updateJob(this.jobId, this.leaseEpoch, {
-            resultBranch: pushed.branch, resultSha: pushed.sha, lastPushAttemptAt: null,
-          });
-        } else {
-          if (pushed.resume) {
-            this.deps.journal.updateJob(this.jobId, this.leaseEpoch, {
-              resultBranch: pushed.resume.branch, resultSha: pushed.resume.sha, lastPushAttemptAt: this.deps.now().toISOString(),
-            });
-            result = { branch: pushed.resume.branch, sha: pushed.resume.sha };
-          }
-          verdict = { state: 'FAILED', reason: pushed.reason };
-        }
+    if (row.command === 'PLAN' && verdict.state === 'COMPLETED' && row.resultSha === null) {
+      const pushed = await this.deps.executor.finishPlan(row);
+      if (pushed.ok) {
+        result = { branch: pushed.branch, sha: pushed.sha };
+        this.deps.journal.updateJob(this.jobId, this.leaseEpoch, { resultBranch: pushed.branch, resultSha: pushed.sha });
+      } else {
+        verdict = { state: 'FAILED', reason: pushed.reason };
       }
     } else if (row.command === 'RUN') {
       const ledger = await this.deps.executor.readFinishLedger(row);

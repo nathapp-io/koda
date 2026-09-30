@@ -1,6 +1,6 @@
 # Fleet S1 Slice 3a — Deviations and Plan Amendments
 
-> **Status:** Draft (awaiting implementation).
+> **Status:** D75 and D76 implemented in #170; both amended by **D77** (below, #171/#172).
 > **Origin:** `docs/20260930-review-fleet-s1-slice-3a.md` (Deep Code Review, 2026-09-30).
 > **Scope:** Two `@plan-challenge` findings raised against slice 3a-1 and 3a-2 plans. Both are deviations where the code follows the plan but the plan itself has a contradiction or an implicit silent fallback that the reviewer believes weakens the contract.
 
@@ -8,7 +8,7 @@ This document records the deviations as **new decision numbers D75 and D76** and
 
 ---
 
-## D75 — READOPT requires `status.lastHeartbeat`; no fallback to `updatedAt`
+## D75 — READOPT requires `status.lastHeartbeat`; no fallback to `updatedAt` (source rule amended by D77)
 
 **Conflict:** the slice 3 design §1.3 says "READOPT re-attaches only when the pid is alive, `status.json` `run.id` equals the journaled `naxRunId` and the heartbeat is under 2 minutes old". The 3a-2 code at `apps/runner/src/supervisor/supervisor.ts:69-72` (`Supervisor.fresh`) implements the freshness test as:
 
@@ -38,7 +38,7 @@ private fresh(status: StatusView): boolean {
 
 ---
 
-## D76 — Resolving the D52/D53 contradiction on PLAN push failure
+## D76 — Resolving the D52/D53 contradiction on PLAN push failure (superseded by D77)
 
 **Conflict:** the 3a-1 register's **D52** says "the PLAN commit is `chore(plan): <feature> PRD via koda job <jobId>`, idempotent … push failure: FAILED, `stateReason = 'plan push failed'`, **commit kept locally**". The same register's **D53** says "prepare first deletes the previous attempt's files under a reused `<jobDir>` (`nax-out`, `nax.stdout`, `nax.stderr`, `pre-plan`, `plan-out`, `plan-logs`, `bundle.tar.gz`, `bundle.list`, `bundle-manifest.json`)".
 
@@ -77,12 +77,33 @@ Concretely:
 
 ---
 
-## Decision addendum (D75–D76)
+## D77 — Heartbeat source and PLAN push recovery, corrected (#172, #171)
+
+**D75 correction (#172).** D75 was right to exclude the journal row's `updatedAt` (a runner-side write stamp) and wrong to exclude `status.updatedAt`. Both `status.json` stamps are written by nax. nax sets `lastHeartbeat` only on its 60s heartbeat write (`src/execution/crash-heartbeat.ts`); `StatusWriter.getSnapshot` does not carry it, so every other status write (story transitions, iterations) drops it, and it is absent for the first 60s of a run. Requiring it made READOPT reject, kill and re-run a healthy RUN job after most daemon restarts. Every nax status write, heartbeat included, stamps `updatedAt`, so it is at least as fresh a child-side liveness signal.
+
+**Resolution:** `Supervisor.fresh` takes the newer of the parseable `status.lastHeartbeat` and `status.updatedAt`; neither present or parseable is stale. `row.updatedAt` never counts. PLAN readopt does not call `fresh()` and is unaffected.
+
+**D76 correction (#171).** D76 keyed recovery on the current journal row. A server requeue bumps the lease epoch (plan D4), so the runner inserts a new row with `result_branch`/`result_sha` NULL; the recovery path could not run. Carrying the kept commit across epochs only works when placement returns the job to the same runner, and needs a prepare-to-finish path that skips `nax plan`.
+
+**Resolution:**
+
+1. A transient push failure is recovered inside the attempt: `commitAndPushPlan` retries only the `git push`, after back-offs of 2 s and 8 s (`PLAN_PUSH_BACKOFF_MS`, 3 pushes in all). An authentication failure is not retried (`no git credentials (runner 3b)`).
+2. A requeue is a fresh attempt and re-plans. D53 is restored whole: `prepare` wipes `plan-out`/`plan-logs` with the other attempt files. On the same runner the unpushed commit survives on its local branch (D51 `keep-local`), so the new attempt's commit lands on top of it (or pushes it unchanged when the PRD is identical) and nothing is lost.
+3. Removed: the persistent-files split in `prepare`, `PlanPushResume`/`resume`, the `needRetryPush` path in `JobRun.finish`, and the `last_push_attempt_at` column with its migration. No runner was deployed with it, and an existing journal keeps the unused nullable column harmlessly.
+
+**Accepted cost:** a requeue after three failed pushes spends one more billed `nax plan`.
+
+**Tests:** `supervisor.spec.ts` (non-heartbeat status write re-attached; newer stamp wins; both stale rejected); `plan-commit.spec.ts` (transient failure retried to one commit; persistent failure tried 3 times with the back-offs; auth failure not retried); `host-executor.spec.ts` (a requeue on a new epoch wipes the stash, re-plans, and the kept commit reaches origin).
+
+---
+
+## Decision addendum (D75–D77)
 
 | # | Decision | Why |
 |:--|:--|:--|
-| D75 | `Supervisor.fresh` requires `status.lastHeartbeat`; no fallback to `status.updatedAt` or `row.updatedAt`. | The 2-minute freshness window is a *child-side* heartbeat contract; the runner's own `updatedAt` is a write timestamp, not a heartbeat. The silent fallback made a stuck nax appear fresh after any unrelated runner-side write. |
-| D76 | `prepare` no longer wipes `plan-out/` on a row whose last attempt failed at PLAN push. The next attempt pushes the kept local commit (idempotent `git push`); on success the row transitions `FAILED -> RUNNING -> UPLOADING -> COMPLETED`. The journal records `result_branch` / `result_sha` from `markDone`; a `last_push_attempt_at` column bounds the retry budget. | D52 ("commit kept locally") and D53 ("wipe previous attempt's files") overlapped on `plan-out/`. The contradiction made a transient push failure a permanent failure with no operator-visible recovery. D76 narrows D53 to mutable per-attempt outputs and turns D52 into a real recovery path. |
+| D75 | `Supervisor.fresh` requires `status.lastHeartbeat`; no fallback to `status.updatedAt` or `row.updatedAt`. **Source rule amended by D77.** | The 2-minute freshness window is a *child-side* heartbeat contract; the runner's own `updatedAt` is a write timestamp, not a heartbeat. The silent fallback made a stuck nax appear fresh after any unrelated runner-side write. |
+| D76 | `prepare` no longer wipes `plan-out/` on a row whose last attempt failed at PLAN push. The next attempt pushes the kept local commit (idempotent `git push`); on success the row transitions `FAILED -> RUNNING -> UPLOADING -> COMPLETED`. The journal records `result_branch` / `result_sha` from `markDone`; a `last_push_attempt_at` column bounds the retry budget. **Superseded by D77.** | D52 ("commit kept locally") and D53 ("wipe previous attempt's files") overlapped on `plan-out/`. The contradiction made a transient push failure a permanent failure with no operator-visible recovery. D76 narrows D53 to mutable per-attempt outputs and turns D52 into a real recovery path. |
+| D77 | `fresh()` uses the newer of `status.lastHeartbeat` and `status.updatedAt` (both nax-written). A PLAN push is retried inside the attempt (2 s, 8 s back-off; an auth failure is not retried); a requeue re-plans from a wiped job dir. D76's resume machinery is removed. | nax drops `lastHeartbeat` on every non-heartbeat status write, so D75 rejected healthy runs. D76's resume could not run across a requeue's new epoch, and never can on another runner. |
 
 ---
 

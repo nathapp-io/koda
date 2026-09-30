@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { createGit } from '../../src/executor/git';
-import { commitAndPushPlan, stashPlanOutputs } from '../../src/executor/plan-commit';
+import { createGit, NO_CREDENTIALS_REASON, type Git, type GitResult } from '../../src/executor/git';
+import { commitAndPushPlan, PLAN_PUSH_BACKOFF_MS, stashPlanOutputs } from '../../src/executor/plan-commit';
 import { cleanWorkspace, ensureClone } from '../../src/executor/workspace';
 import { git as sh, isolateGit, makeOrigin, pushCommit } from '../helpers/git-fixture';
 import { makeTempDirs } from '../helpers/tmp';
@@ -36,6 +36,17 @@ async function planOutputs(repoDir: string, prd = NEW_PRD): Promise<void> {
   await writeFile(join(dir, 'prd.rejected.json'), '{"old":true}');
   await writeFile(join(dir, 'plan', 'plan-1.jsonl'), '{"m":1}\n');
   await writeFile(join(dir, 'sessions', 's1.json'), '{}');
+}
+const noSleep = async (): Promise<void> => undefined;
+/** Real git, except that `push` is counted and, when `pushResult` is given, answered without running. */
+function countingGit(pushResult?: GitResult): { git: Git; pushes: () => number } {
+  let count = 0;
+  const run: Git['run'] = async (args, options) => {
+    if (args[0] !== 'push') return g.run(args, options);
+    count += 1;
+    return pushResult ?? g.run(args, options);
+  };
+  return { git: { run, ok: g.ok }, pushes: () => count };
 }
 const input = (s: Awaited<ReturnType<typeof setup>>, over: Record<string, unknown> = {}) => ({
   git: g, repoDir: s.repoDir, jobDir: s.jobDir, feature: 'f', jobId: 'j1', branchName: 'feat/f', refSha: s.refSha, defaultBranch: 'main', identity, ...over,
@@ -123,16 +134,13 @@ describe('commitAndPushPlan', () => {
     expect(pushed.branchName).toBe('feat/f');
     expect(pushed.userStories[0].id).toBe('US-001');
   });
-  test('is idempotent, and a crash between commit and push resumes without a second commit (D76)', async () => {
+  test('is idempotent: after the push retries run out, a later call pushes the kept commit without a second one', async () => {
     const s = await setup();
     await planOutputs(s.repoDir);
     await sh(s.repoDir, 'remote', 'set-url', 'origin', `file://${join(s.base, 'nowhere.git')}`);
-    const failed = await commitAndPushPlan(input(s));
-    expect(failed.ok).toBe(false);
-    if (failed.ok) throw new Error('expected a push failure');
-    expect(failed.reason).toBe('plan push failed');
-    expect(failed.resume?.branch).toBe('feat/f');            // D76: the kept commit is recorded
-    const local = failed.resume?.sha ?? await sh(s.repoDir, 'rev-parse', 'feat/f');
+    const failed = await commitAndPushPlan(input(s, { sleep: noSleep }));
+    expect(failed).toEqual({ ok: false, reason: 'plan push failed' });
+    const local = await sh(s.repoDir, 'rev-parse', 'feat/f');
     expect(local).not.toBe(s.refSha);                        // the commit is kept locally
     await sh(s.repoDir, 'remote', 'set-url', 'origin', s.origin.url);
     await cleanWorkspace(g, s.repoDir);
@@ -140,6 +148,41 @@ describe('commitAndPushPlan', () => {
     expect(again).toMatchObject({ ok: true, committed: false, sha: local });
     expect(await sh(s.origin.dir, 'rev-parse', 'feat/f')).toBe(local);
     expect(await commitAndPushPlan(input(s))).toMatchObject({ ok: true, committed: false, sha: local });
+  });
+  test('D77: a transient push failure is retried after a back-off and succeeds with one commit', async () => {
+    const s = await setup();
+    await planOutputs(s.repoDir);
+    await sh(s.repoDir, 'remote', 'set-url', 'origin', `file://${join(s.base, 'nowhere.git')}`);
+    const waits: number[] = [];
+    const sleep = async (ms: number): Promise<void> => {
+      waits.push(ms);
+      await sh(s.repoDir, 'remote', 'set-url', 'origin', s.origin.url);   // the network comes back during the back-off
+    };
+    const result = await commitAndPushPlan(input(s, { sleep }));
+    expect(result).toMatchObject({ ok: true, committed: true });
+    expect(waits).toEqual([PLAN_PUSH_BACKOFF_MS[0]]);
+    expect(await sh(s.origin.dir, 'rev-parse', 'feat/f~1')).toBe(s.refSha);   // exactly one plan commit on the ref
+  });
+  test('D77: a push that keeps failing is tried once per back-off step plus once, then fails', async () => {
+    const s = await setup();
+    await planOutputs(s.repoDir);
+    await sh(s.repoDir, 'remote', 'set-url', 'origin', `file://${join(s.base, 'nowhere.git')}`);
+    const { git, pushes } = countingGit();
+    const waits: number[] = [];
+    const result = await commitAndPushPlan(input(s, { git, sleep: async (ms: number) => { waits.push(ms); } }));
+    expect(result).toEqual({ ok: false, reason: 'plan push failed' });
+    expect(pushes()).toBe(PLAN_PUSH_BACKOFF_MS.length + 1);
+    expect(waits).toEqual([...PLAN_PUSH_BACKOFF_MS]);
+  });
+  test('D77: an auth failure is not retried', async () => {
+    const s = await setup();
+    await planOutputs(s.repoDir);
+    const { git, pushes } = countingGit({ code: 128, stdout: '', stderr: 'fatal: Authentication failed for https://x' });
+    const waits: number[] = [];
+    const result = await commitAndPushPlan(input(s, { git, sleep: async (ms: number) => { waits.push(ms); } }));
+    expect(result).toEqual({ ok: false, reason: NO_CREDENTIALS_REASON });
+    expect(pushes()).toBe(1);
+    expect(waits).toEqual([]);
   });
   test('continues an existing origin branch on top of its tip (fast-forward push)', async () => {
     const s = await setup({ 'README.md': 'x' }, [{ name: 'feat/f', files: { 'older.txt': '1' } }]);

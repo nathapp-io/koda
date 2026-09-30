@@ -2,14 +2,15 @@ import { copyFile, mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { GitIdentity } from '@nathapp/fleet-protocol';
 import { featureDirFor } from '../paths/safe-segment';
+import { systemSleep } from '../time';
 import { checkoutArgs, planBranch, validateBranchName } from './branch';
 import { NO_CREDENTIALS_REASON, isAuthFailure, type Git, GitError } from './git';
 
-/** D76: shape of a transient PLAN push failure recorded on the row so the next prepare can resume the push. */
-export interface PlanPushResume {
-  readonly branch: string;
-  readonly sha: string;
-}
+/**
+ * D77: back-off before each retry of a failed PLAN push (so 3 pushes in all). A transient failure is recovered inside
+ * the attempt; a requeue is a fresh lease that may land on another runner, so it re-plans rather than resuming.
+ */
+export const PLAN_PUSH_BACKOFF_MS: readonly number[] = [2_000, 8_000];
 
 /** Design §2 step 8: never `plan/`, `sessions/` or `prd.rejected.json`. */
 export const PLAN_ALLOWLIST = ['prd.json', 'spec.md', 'prd-fidelity-report.md', 'acceptance-meta.json'] as const;
@@ -61,11 +62,10 @@ export interface PlanPushInput {
   readonly refSha: string;
   readonly defaultBranch: string;
   readonly identity: GitIdentity;
+  readonly sleep?: (ms: number) => Promise<void>;
 }
 
-export type PlanPushResult =
-  | { ok: true; branch: string; sha: string; committed: boolean }
-  | { ok: false; reason: string; resume?: PlanPushResume };   // D76: on a push failure the local commit is recorded for a resume
+export type PlanPushResult = { ok: true; branch: string; sha: string; committed: boolean } | { ok: false; reason: string };
 
 async function commitStep(input: PlanPushInput, files: readonly string[]): Promise<{ failure: string } | { committed: boolean }> {
   const { git, repoDir, feature, branchName, refSha } = input;
@@ -87,6 +87,19 @@ async function commitStep(input: PlanPushInput, files: readonly string[]): Promi
   return { committed: true };
 }
 
+/** D77: `null` once the branch reached origin, else the failure reason. An auth failure is not retried. */
+async function pushWithRetry(input: PlanPushInput): Promise<string | null> {
+  const sleep = input.sleep ?? systemSleep;
+  for (let attempt = 0; ; attempt += 1) {
+    const push = await input.git.run(['push', '--set-upstream', 'origin', input.branchName], { cwd: input.repoDir });
+    if (push.code === 0) return null;
+    if (isAuthFailure(push.stderr)) return NO_CREDENTIALS_REASON;
+    const backoff = PLAN_PUSH_BACKOFF_MS[attempt];
+    if (backoff === undefined) return 'plan push failed';
+    await sleep(backoff);
+  }
+}
+
 /**
  * Design §2 step 8 (R-3.4): the plan outputs go onto the PRD's `branchName` (checked out by the step 4 rules with
  * `checkout -f`), are committed as the assigned identity and pushed. Safe to run again after a crash (D52).
@@ -104,13 +117,8 @@ export async function commitAndPushPlan(input: PlanPushInput): Promise<PlanPushR
   } catch {
     return { ok: false, reason: 'plan commit failed' };
   }
-  const push = await git.run(['push', '--set-upstream', 'origin', branchName], { cwd: repoDir });
-  if (push.code !== 0) {
-    // D76: keep the local commit reachable — the next prepare pushes it (idempotent) instead of re-stashing.
-    const localSha = (await git.ok(['rev-parse', 'HEAD'], { cwd: repoDir }).catch(() => '')).trim();
-    const resume: PlanPushResume | undefined = localSha ? { branch: branchName, sha: localSha } : undefined;
-    return { ok: false, reason: isAuthFailure(push.stderr) ? NO_CREDENTIALS_REASON : 'plan push failed', ...(resume ? { resume } : {}) };
-  }
+  const failure = await pushWithRetry(input);
+  if (failure) return { ok: false, reason: failure };   // the commit stays on the local branch (D51 keep-local)
   const sha = (await git.ok(['rev-parse', 'HEAD'], { cwd: repoDir })).trim();
   return { ok: true, branch: branchName, sha, committed };
 }
