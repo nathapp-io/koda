@@ -36,6 +36,20 @@ describe('selectReapable (D37: pids recycle)', () => {
     });
     expect(await selectReapable(entries, { repoDir: '/repo', since: T0, startedAt, selfPid: 999 })).toEqual([21]);
   });
+  test('BUG-5: a real nax registered within 5s of its start is picked (lstart slack covers normal races)', async () => {
+    const entries = parsePidEntries([
+      entry(31, { spawnedAt: '2026-10-01T00:00:05.000Z' }),   // registered at 5s
+    ].join('\n'));
+    const startedAt = started({ 31: new Date('2026-10-01T00:00:07.100Z') });   // process started 2.1s AFTER registration
+    expect(await selectReapable(entries, { repoDir: '/repo', since: T0, startedAt })).toEqual([31]);
+  });
+  test('a recycled pid whose process started far after registration (well past the slack) is still skipped', async () => {
+    const entries = parsePidEntries([
+      entry(32, { spawnedAt: '2026-10-01T00:00:05.000Z' }),
+    ].join('\n'));
+    const startedAt = started({ 32: new Date('2026-10-01T00:00:30.000Z') });   // 25s after registration
+    expect(await selectReapable(entries, { repoDir: '/repo', since: T0, startedAt })).toEqual([]);
+  });
 });
 
 describe('parseEtime', () => {

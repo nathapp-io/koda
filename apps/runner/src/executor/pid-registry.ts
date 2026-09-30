@@ -24,7 +24,13 @@ export function parsePidEntries(text: string): PidEntry[] {
   return entries;
 }
 
-const REGISTRATION_SLACK_MS = 2_000;
+/**
+ * BUG-5: lstart reports the start time to the second; with the etime rounding the comparison was firing on an
+ * approximate, then-derived start, and a 1s rounding in either direction could push a real nax outside the slack.
+ * The slack is now 5s because lstart has 1s precision while the entry's `spawnedAt` is millisecond-accurate, and a
+ * slow `Date.now()` NTP step between spawn and reap is no longer the dominant source of error.
+ */
+const REGISTRATION_SLACK_MS = 5_000;
 
 /** D37: nax itself refuses to signal stale entries because pids recycle; so does the runner. */
 export async function selectReapable(
@@ -43,7 +49,8 @@ export async function selectReapable(
   return picked;
 }
 
-/** `ps -o etime=` is `[[dd-]hh:]mm:ss` on macOS and Linux; `lstart` would depend on the time zone (bun test forces UTC). */
+/** `ps -o etime=` is `[[dd-]hh:]mm:ss` on macOS and Linux; kept for the test surface and for callers that still
+ * want elapsed time directly (BUN_TEST_TZ=UTC keeps these deterministic). */
 export function parseEtime(text: string): number | null {
   const m = /^(?:(?:(\d+)-)?(\d+):)?(\d+):(\d+)$/.exec(text.trim());
   if (!m) return null;
@@ -51,13 +58,20 @@ export function parseEtime(text: string): number | null {
   return ((days * 24 + hours) * 60 + minutes) * 60 + seconds;
 }
 
+/** BUG-5: `ps -o lstart=` returns the actual start timestamp (locale-formatted), immune to `Date.now()` clock drift
+ * between registration and reap. The output is parsed by `Date`, which treats it as local time in the runner's TZ. */
 export async function readProcessStart(pid: number): Promise<Date | null> {
   if (!Number.isInteger(pid) || pid <= 0) return null;
-  const proc = Bun.spawn(['ps', '-o', 'etime=', '-p', String(pid)], { stdout: 'pipe', stderr: 'ignore', stdin: 'ignore', env: { ...process.env, LC_ALL: 'C' } });
-  const text = await new Response(proc.stdout).text();
+  // Force TZ=UTC for `ps` so its locale-formatted output is in the same frame `Date.parse` uses: tests under
+  // `bun test` already run with TZ=UTC and `process.env.TZ` may be unset in production, but the daemon's wall
+  // clock is the same in either frame. Without the explicit override, `ps` would emit host-local time and the
+  // parser would shift it by the host TZ, corrupting the slack check by hours on non-UTC hosts.
+  const proc = Bun.spawn(['ps', '-o', 'lstart=', '-p', String(pid)], { stdout: 'pipe', stderr: 'ignore', stdin: 'ignore', env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } });
+  const text = (await new Response(proc.stdout).text()).trim();
   await proc.exited;
-  const elapsed = parseEtime(text);
-  return elapsed === null ? null : new Date(Date.now() - elapsed * 1000);
+  if (text === '') return null;
+  const stamp = Date.parse(text);
+  return Number.isNaN(stamp) ? null : new Date(stamp);
 }
 
 /** The identity check for a process that is not our child: a job's argv carries `koda-job-<jobId>` (S1 spec §5.2 step 4). */
