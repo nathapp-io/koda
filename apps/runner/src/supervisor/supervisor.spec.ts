@@ -167,6 +167,16 @@ describe('readopt (design §2 control paths, D33, D54)', () => {
     expect(b.ex.calls.indexOf('reap:j1')).toBeLessThan(b.ex.calls.indexOf('cleanup:j1'));
     expect(b.journal.getJob('j1', 1)?.doneAt).not.toBeNull();
   });
+  test('D75: missing status.lastHeartbeat is rejected even when row.updatedAt is fresh (the silent fallback)', async () => {
+    const b = build();
+    const row = running(b);
+    if (!row) throw new Error('expected a journal row');
+    b.ex.alive = true;
+    b.journal.updateJob(row.jobId, row.leaseEpoch, { cancelRequestedAt: b.time.now().toISOString() });   // bumps updatedAt
+    b.ex.status = { run: { id: 'run-1', status: 'running' } } as never;   // no lastHeartbeat, no updatedAt
+    expect(await b.supervisor.readopt('j1', 1)).toEqual({ result: 'rejected', detail: 'stale heartbeat' });
+    expect(b.journal.getJob('j1', 1)?.doneAt).not.toBeNull();
+  });
   test('pid alive, it is this job\'s nax, but its run id is not the journaled one: rejected and killed', async () => {
     const b = build();
     running(b);

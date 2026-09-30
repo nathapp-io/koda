@@ -66,14 +66,18 @@ export class Supervisor {
     for (const row of this.deps.journal.jobsById(jobId)) await this.abandon(jobId, row.leaseEpoch);
   }
 
-  private fresh(status: StatusView, row: JobRow): boolean {
-    const stamp = Date.parse(status.lastHeartbeat ?? status.updatedAt ?? row.updatedAt);
+  private fresh(status: StatusView): boolean {
+    // D75: the 2-minute freshness window is a child-side heartbeat contract; the runner's own `updatedAt`
+    // is a write timestamp (cancel-requested patches, event-append patches), not a heartbeat, so falling back to
+    // it silently accepted a wedged nax after any unrelated runner-side write.
+    if (!status.lastHeartbeat) return false;
+    const stamp = Date.parse(status.lastHeartbeat);
     return !Number.isNaN(stamp) && this.deps.now().getTime() - stamp < this.deps.readoptHeartbeatMs;
   }
 
   private async reject(row: JobRow, detail: string): Promise<ReadoptResult> {
     try {
-      await killIfOurs(this.deps.executor, row, this.deps.log);   // D65: a live but stale nax must not keep writing into the workspace
+      await killIfOurs(this.deps.executor, row, this.deps.log);   // SEC-2: void return (D65)
       await this.deps.executor.reap(row, new Date(row.createdAt));
       await this.deps.executor.cleanup(row);
     } catch (error) {
@@ -106,7 +110,7 @@ export class Supervisor {
     }
     const status = await this.deps.executor.readStatus(row);
     const matches = status !== null && row.naxRunId !== null && status.run.id === row.naxRunId;
-    if (status && matches && alive && this.fresh(status, row)) {
+    if (status && matches && alive && this.fresh(status)) {
       this.begin(row, 'watch');
       return OK;
     }

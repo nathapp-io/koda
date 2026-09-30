@@ -216,6 +216,27 @@ describe('PLAN', () => {
     expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'plan push failed' });
     expect(b.uploads).toHaveLength(1);
   });
+  test('D76: a transient push failure records the kept commit on the row', async () => {
+    const b = build('PLAN');
+    b.ex.planPush = { ok: false, reason: 'plan push failed', resume: { branch: 'feat/x', sha: 'd'.repeat(40) } };
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'plan push failed' });
+    const row = b.journal.getJob('j1', 1);
+    expect(row).toMatchObject({ resultBranch: 'feat/x', resultSha: 'd'.repeat(40) });
+    expect(row?.lastPushAttemptAt).not.toBeNull();
+  });
+  test('D76: a resumed prepare keeps the kept-commit artefacts (plan-out, plan-logs) for the next push', async () => {
+    const b = build('PLAN');
+    b.journal.updateJob('j1', 1, { resultBranch: 'feat/x', resultSha: 'd'.repeat(40), lastPushAttemptAt: '2026-10-01T00:00:00.000Z' });
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    expect(stateNames(b)).toEqual(['RUNNING', 'UPLOADING', 'COMPLETED']);
+    expect(b.ex.calls).toContain('prepare:j1');
+    expect(b.ex.calls).toContain('finishPlan:j1');   // D76: push is retried, no second commit
+    expect(b.ex.calls.filter((c) => c === 'prepare:j1')).toHaveLength(1);
+    expect(b.journal.getJob('j1', 1)).toMatchObject({ resultBranch: 'feat/x', lastPushAttemptAt: null });
+  });
   test('an invalid plan is FAILED and nothing is pushed', async () => {
     const b = build('PLAN');
     b.ex.plan = { ok: false, reason: 'prd.json has no userStories', branchName: null };
@@ -278,6 +299,17 @@ describe('bundle outcomes (D36, D49)', () => {
     await b.run.start('prepare');
     expect(events(b).some((e) => e.type === 'lifecycle' && JSON.stringify(e.payload).includes('left out 1 file'))).toBe(true);
     expect(states(b).at(-1)?.to).toBe('COMPLETED');
+  });
+  test('STYLE-3: the lifecycle warning for skipped bundle files carries the names as a structured `details` array, not a JSON-encoded string', async () => {
+    const b = build();
+    b.ex.bundle = { ...b.ex.bundle, skipped: ['a\nb', 'c\\d'] };
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    const warn = events(b).find((e) => e.type === 'lifecycle' && (e.payload as { message: string }).message.includes('left out'));
+    expect(warn).toBeDefined();
+    const payload = warn?.payload as { message: string; details?: unknown[] };
+    expect(payload.details).toEqual(['a\nb', 'c\\d']);
+    expect(payload.message).not.toContain('["a\\nb"');
   });
 });
 
@@ -391,6 +423,24 @@ describe('resume (readopt)', () => {
     expect(b.ex.calls).not.toContain('spawn:j1');
     expect(b.ex.killed[0]).toEqual({ pgid: 4242, signal: 'SIGTERM' });
     expect(stateNames(b)).toEqual(['UPLOADING', 'CANCELLED']);
+  });
+  test('BUG-2: a RUNNING row with pid=null fails safely instead of uploading a partial bundle', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'RUNNING' });   // pid stays null: journal corruption / missed patch
+    await b.run.start('watch');
+    expect(stateNames(b)).toEqual(['UPLOADING', 'FAILED']);
+    expect(states(b).at(-1)?.reason).toBe('runner error: pid missing on RUNNING row');
+    expect(b.uploads).toEqual([]);
+    expect(b.ex.calls).toContain('cleanup:j1');
+    expect(b.journal.getJob('j1', 1)?.doneAt).not.toBeNull();
+  });
+  test('BUG-4: failSafe with pid=null skips reap (no stale .nax-pids SIGKILL)', async () => {
+    const b = build();
+    // trigger failSafe via the same RUNNING-no-pid path; b.ex.calls records reap vs cleanup
+    b.journal.updateJob('j1', 1, { state: 'RUNNING' });
+    await b.run.start('watch');
+    expect(b.ex.calls).not.toContain('reap:j1');
+    expect(b.ex.calls).toContain('cleanup:j1');
   });
   test('finish from UPLOADING does not emit UPLOADING again', async () => {
     const b = build();
