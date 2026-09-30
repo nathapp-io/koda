@@ -485,6 +485,32 @@ describe('abandon and halt', () => {
     expect(abandoned).toBe(true);
     expect(b.ex.calls).toContain('cleanup:j1');
   });
+  test('an abandon during a prepare that is waiting for its first token ends the wait at once (the halt isCancelled fires), with no transition', async () => {
+    const b = build();
+    const waitStartMs = b.time.nowMs();
+    const deadline = waitStartMs + 120_000;                        // the real tokenWaitMs: the fenced server never mints
+    let polls = 0;
+    const originalPrepare = b.ex.prepare.bind(b.ex);
+    b.ex.prepare = async (job, options) => {                       // mimics the broker's firstToken poll loop
+      await originalPrepare(job, options);
+      for (;;) {
+        if (options?.isCancelled?.()) return { ok: false, reason: 'cancelled', cancelled: true };
+        if (b.time.nowMs() >= deadline) return { ok: false, reason: 'git token: timeout' };
+        polls += 1;
+        await b.time.sleep(250);
+      }
+    };
+    const started = b.run.start('prepare');
+    await waitFor(() => polls >= 1);                               // the prepare is inside its token wait, holding the repo mutex
+    await b.run.abandon();                                         // sets halted, then waits on the mutex the prepare holds
+    await started;
+    expect(b.time.nowMs()).toBeLessThan(deadline);                 // the wait ended at the next poll, not at tokenWaitMs
+    expect(states(b)).toEqual([]);                                 // a halted prepare's outcome is discarded without a transition
+    expect(b.ex.calls).toContain('prepare:j1');
+    expect(b.ex.calls).not.toContain('spawn:j1');
+    expect(b.journal.getJob('j1', 1)).toBeNull();                  // the abandon still completed its cleanup
+    expect(b.mutex.isLocked('acme/app')).toBe(false);
+  });
   test('a recycled pid (not this job) is not signalled on abandon', async () => {
     const b = build();
     const running = b.run.start('prepare');

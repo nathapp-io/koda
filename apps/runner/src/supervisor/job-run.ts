@@ -188,7 +188,9 @@ export class JobRun {
     const row = this.mustRow();
     if (this.cancelRequested()) return this.endBeforeSpawn('CANCELLED', 'cancelled before start');
     if (reprepare) await this.reapQuietly(row);   // D65: a nax spawned just before the crash may have registered pids
-    const prepared = await this.deps.executor.prepare(row, { isCancelled: () => this.cancelRequested() });
+    // A halt (abandon, daemon stop) must end a prepare that is still waiting for its first token at once: the broker's
+    // wait polls this probe, and `prepareAndSpawn` discards a halted prepare's outcome below without a transition.
+    const prepared = await this.deps.executor.prepare(row, { isCancelled: () => this.cancelRequested() || this.halted });
     if (this.halted) return false;
     if (!prepared.ok) return prepared.cancelled ? this.endBeforeSpawn('CANCELLED', 'cancelled before start') : this.endBeforeSpawn('FAILED', prepared.reason);
     if (this.cancelRequested()) return this.endBeforeSpawn('CANCELLED', 'cancelled before start');
