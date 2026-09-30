@@ -125,6 +125,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     tokens, socketDir, runnerId: identity.runnerId, selfCommand: options.selfCommand ?? selfCommand(),
     nowMs: () => Date.now(), sleep,
     timing: { waitMs: tuning.tokenWaitMs, serveWaitMs: tuning.tokenServeWaitMs, pollMs: tuning.tokenPollMs },
+    uid,
   });
 
   const jobCheck = probed ? new NaxJobCheck({ nax, capabilities: () => reporter.latest() }) : undefined;   // D104

@@ -5,7 +5,7 @@ import type { JobRow } from '../journal/types';
 import type { Sleep } from '../time';
 import { CredentialServer, type CredentialReply } from './cred-server';
 import { helperValue, writeShims } from './job-files';
-import { socketPathFor } from './socket-dir';
+import { SocketDirError, ensureSocketDir, socketPathFor } from './socket-dir';
 import type { TokenCache } from './token-cache';
 
 export interface JobCredentials {
@@ -44,6 +44,8 @@ export interface BrokerDeps {
   readonly nowMs: () => number;
   readonly sleep: Sleep;
   readonly timing: BrokerTiming;
+  /** D109: the owner the socket directory must have; defaults to this process's uid. */
+  readonly uid?: number;
 }
 
 const NONE: JobCredentials = { helper: null, binDir: null };
@@ -75,7 +77,12 @@ export class CredentialBroker implements CredentialProvider {
     const { tokens, socketDir, runnerId, selfCommand } = this.deps;
     tokens.want(job.jobId, job.leaseEpoch);
     const sock = socketPathFor(socketDir, runnerId, job.jobId, job.leaseEpoch);
-    await this.serve(job, sock, target);
+    try {
+      await this.serve(job, sock, target);
+    } catch (error) {
+      if (error instanceof SocketDirError) return { ok: false, reason: 'git credentials: socket dir unsafe' };   // D109
+      throw error;
+    }
     const binDir = join(job.jobDir, 'bin');
     await writeShims(binDir, selfCommand, sock);
     const credentials: JobCredentials = { helper: helperValue(selfCommand, sock), binDir };
@@ -111,6 +118,7 @@ export class CredentialBroker implements CredentialProvider {
       await existing;
       return;
     }
+    await ensureSocketDir(this.deps.socketDir, this.deps.uid ?? process.getuid?.() ?? 0);   // D109: not only at daemon start
     const pending = CredentialServer.listen(sock, () => this.reply(job, target));
     this.servers = new Map([...this.servers, [key, pending]]);
     try {
