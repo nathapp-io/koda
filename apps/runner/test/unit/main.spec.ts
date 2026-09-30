@@ -22,7 +22,7 @@ describe('koda-runner CLI', () => {
   });
   test('--help lists enroll, run and status', async () => {
     const { stdout } = await cli(['--help']);
-    for (const word of ['enroll', 'run', 'status', '--home']) expect(stdout).toContain(word);
+    for (const word of ['enroll', 'run', 'status', 'install-service', 'uninstall-service', '--home']) expect(stdout).toContain(word);
   });
   test('status on an empty home says not enrolled and exits 0; --json is machine readable', async () => {
     const home = join(await tmp.make('cli'), 'home');
@@ -43,6 +43,13 @@ describe('koda-runner CLI', () => {
     const { stderr, code } = await cli(['--home', home, 'enroll', '--server', 'https://koda.example.com'], { KODA_RUNNER_ENROLL_TOKEN: '' });
     expect(code).toBe(1);
     expect(stderr).toMatch(/--token|KODA_RUNNER_ENROLL_TOKEN/);
+  });
+  test('install-service --print shows the unit for this platform and changes nothing', async () => {
+    const user = process.env['USER'] ?? '';
+    if (!/^[a-z_][a-z0-9_-]{0,31}$/.test(user)) return;   // the CI user name is always valid; a local one may not be
+    const { stdout, code } = await cli(['--home', '/srv/koda-runner', 'install-service', '--user', user, '--print', '--path', '/usr/bin:/bin']);
+    expect(code).toBe(0);
+    expect(stdout).toContain(process.platform === 'darwin' ? '<key>AbandonProcessGroup</key>' : 'KillMode=process');
   });
   test('an unreachable server on enroll is a readable error, not a stack trace', async () => {
     const dir = await tmp.make('cli');
