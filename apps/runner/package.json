@@ -6,6 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "bun src/main.ts",
+    "build:binary": "bun scripts/build-binary.ts",
+    "build:all": "bun scripts/build-binary.ts all",
     "test": "bun test src test/unit",
     "test:integration": "bun test test/integration",
     "type-check": "tsc --noEmit",
@@ -18,6 +20,7 @@
     "commander": "^12.0.0"
   },
   "devDependencies": {
+    "@prisma/client": "^6.0.0",
     "@nathapp/typescript-config": "workspace:*",
     "@types/bun": "^1.4.2",
     "@types/node": "^22.0.0",

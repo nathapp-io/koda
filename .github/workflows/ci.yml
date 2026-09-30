@@ -240,7 +240,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16
@@ -292,6 +292,11 @@ jobs:
         run: cd apps/api && bun run test:integration
         env:
           DATABASE_URL: postgresql://koda:koda@localhost:5433/koda_test
+
+      - name: Runner integration (Postgres, built API)
+        run: cd apps/runner && bun run test:integration
+        env:
+          KODA_DB_TESTS: "1"
 
   # ─── Web e2e (Playwright, Postgres, built web) ─────────────────────────────
   e2e:

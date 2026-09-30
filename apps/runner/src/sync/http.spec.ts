@@ -111,4 +111,16 @@ describe('uploadBundle', () => {
     expect(await c.uploadBundle({ jobId: 'j', leaseEpoch: 1, filePath: file, sha256: 'b'.repeat(64) })).toEqual({ status: 413 });
     await expect(client(async () => { throw new TypeError('down'); }).uploadBundle({ jobId: 'j', leaseEpoch: 1, filePath: file, sha256: 'b'.repeat(64) })).rejects.toBeInstanceOf(NetworkError);
   });
+  test('returns the error message of a non-2xx JSON body, and asks for English (D60)', async () => {
+    const file = join(await tmp.make('up'), 'b.tgz');
+    await writeFile(file, 'x');
+    let language = null as string | null;
+    const c = client(async (_url, init) => {
+      language = new Headers(init?.headers).get('accept-language');
+      return new Response(JSON.stringify({ ret: 409, message: 'The job is ASSIGNED; this action is not allowed' }), { status: 409 });
+    });
+    expect(await c.uploadBundle({ jobId: 'j', leaseEpoch: 1, filePath: file, sha256: 'b'.repeat(64) })).toEqual({ status: 409, message: 'The job is ASSIGNED; this action is not allowed' });
+    expect(language).toBe('en');
+    expect(await client(async () => new Response('not json', { status: 502 })).uploadBundle({ jobId: 'j', leaseEpoch: 1, filePath: file, sha256: 'b'.repeat(64) })).toEqual({ status: 502 });
+  });
 });

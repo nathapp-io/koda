@@ -172,3 +172,20 @@ describe('persistence and retention', () => {
     expect(j.getJob('running', 1)).not.toBeNull();
   });
 });
+
+describe('openReadOnly (D72)', () => {
+  test('reads what a writer committed, refuses every write, and creates nothing', async () => {
+    const path = join(await tmp.make('ro'), 'journal.db');
+    const writer = Journal.open(path, now);
+    writer.insertJob(job());
+    const reader = Journal.openReadOnly(path, now);
+    expect(reader.getJob('j1', 1)?.state).toBe('ASSIGNED');
+    expect(reader.stats().activeJobs).toBe(1);
+    expect(() => reader.insertJob(job('j2'))).toThrow();
+    expect(() => reader.setMeta('k', 'v')).toThrow();
+    reader.close();
+    writer.insertJob(job('j3'));                                          // the writer is unaffected
+    writer.close();
+    expect(() => Journal.openReadOnly(join(path, '..', 'missing.db'), now)).toThrow();
+  });
+});
