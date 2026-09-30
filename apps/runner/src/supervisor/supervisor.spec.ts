@@ -197,6 +197,15 @@ describe('readopt (design §2 control paths, D33, D54)', () => {
     expect(await b.supervisor.readopt('j1', 1)).toEqual({ result: 'ok' });
     await b.supervisor.idle();
   });
+  test('D77: a fresh lastHeartbeat wins over a stale updatedAt', async () => {
+    const b = build();
+    running(b);
+    b.ex.alive = true;
+    b.ex.status = freshStatus(b, { updatedAt: new Date(b.time.nowMs() - 300_000).toISOString() }) as never;
+    b.ex.dieAfterTicks(1);
+    expect(await b.supervisor.readopt('j1', 1)).toEqual({ result: 'ok' });
+    await b.supervisor.idle();
+  });
   test('D77: both child-side stamps stale (or unparseable) is rejected', async () => {
     const b = build();
     running(b);

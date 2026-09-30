@@ -2,6 +2,7 @@ import { copyFile, mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { GitIdentity } from '@nathapp/fleet-protocol';
 import { featureDirFor } from '../paths/safe-segment';
+import { systemSleep } from '../time';
 import { checkoutArgs, planBranch, validateBranchName } from './branch';
 import { NO_CREDENTIALS_REASON, isAuthFailure, type Git, GitError } from './git';
 
@@ -10,7 +11,6 @@ import { NO_CREDENTIALS_REASON, isAuthFailure, type Git, GitError } from './git'
  * the attempt; a requeue is a fresh lease that may land on another runner, so it re-plans rather than resuming.
  */
 export const PLAN_PUSH_BACKOFF_MS: readonly number[] = [2_000, 8_000];
-const realSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Design §2 step 8: never `plan/`, `sessions/` or `prd.rejected.json`. */
 export const PLAN_ALLOWLIST = ['prd.json', 'spec.md', 'prd-fidelity-report.md', 'acceptance-meta.json'] as const;
@@ -89,7 +89,7 @@ async function commitStep(input: PlanPushInput, files: readonly string[]): Promi
 
 /** D77: `null` once the branch reached origin, else the failure reason. An auth failure is not retried. */
 async function pushWithRetry(input: PlanPushInput): Promise<string | null> {
-  const sleep = input.sleep ?? realSleep;
+  const sleep = input.sleep ?? systemSleep;
   for (let attempt = 0; ; attempt += 1) {
     const push = await input.git.run(['push', '--set-upstream', 'origin', input.branchName], { cwd: input.repoDir });
     if (push.code === 0) return null;

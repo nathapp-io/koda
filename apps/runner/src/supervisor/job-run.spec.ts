@@ -215,6 +215,7 @@ describe('PLAN', () => {
     await b.run.start('prepare');
     expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'plan push failed' });
     expect(b.uploads).toHaveLength(1);
+    expect(b.journal.getJob('j1', 1)).toMatchObject({ resultBranch: null, resultSha: null });   // D77: nothing kept for a resume; a requeue re-plans
   });
   test('an invalid plan is FAILED and nothing is pushed', async () => {
     const b = build('PLAN');
