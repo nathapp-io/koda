@@ -58,9 +58,10 @@ export class FakeExecutor implements JobExecutor {
     return this.alive && this.procMatches;
   }
 
-  kill(pgid: number, signal: 'SIGTERM' | 'SIGKILL'): void {
+  kill(pgid: number, signal: 'SIGTERM' | 'SIGKILL'): boolean {
     this.killed.push({ pgid, signal });
     this.onKill(signal);
+    return true;
   }
 
   async reap(job: JobRow): Promise<void> {

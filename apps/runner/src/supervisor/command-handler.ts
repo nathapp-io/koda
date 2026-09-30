@@ -17,6 +17,9 @@ export interface CommandHandlerDeps {
 
 type Outcome = { result: 'ok' | 'rejected'; detail?: string };
 
+/** TYPE-2: a fixed literal for any command type we did not recognise, so the journal never stores String(number). */
+const UNKNOWN_COMMAND_TYPE = 'unknown';
+
 /** Turns server commands into acks (design §1.3). Every applied command is recorded so a re-sent one is acked, not re-run. */
 export class CommandHandler {
   constructor(private readonly deps: CommandHandlerDeps) {}
@@ -75,7 +78,7 @@ export class CommandHandler {
       }
       default: {
         const outcome: Outcome = { result: 'rejected', detail: 'unknown command type' };
-        journal.recordCommand({ commandId: command.commandId, jobId: command.jobId, leaseEpoch: command.leaseEpoch, type: String(command.type), result: 'rejected', detail: outcome.detail ?? null, appliedAt: this.deps.now().toISOString() });
+        journal.recordCommand({ commandId: command.commandId, jobId: command.jobId, leaseEpoch: command.leaseEpoch, type: UNKNOWN_COMMAND_TYPE, result: 'rejected', detail: outcome.detail ?? null, appliedAt: this.deps.now().toISOString() });
         return outcome;
       }
     }

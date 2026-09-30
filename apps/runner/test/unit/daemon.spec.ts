@@ -187,6 +187,45 @@ describe('startDaemon', () => {
     }
   });
 
+  test('ENH-3: a pruned job whose nax-out still has files is logged before removal, and the dir is still removed', async () => {
+    const server = fakeServer();
+    const s = await setup(server);
+    await mkdir(s.home.dir, { recursive: true });
+    const old = Journal.open(s.home.journalPath, () => new Date('2026-01-01T00:00:00.000Z'));
+    const oldDir = join(s.config.workspaceRoot, '.jobs', 'jorphan');
+    await mkdir(join(oldDir, 'nax-out'), { recursive: true });
+    for (const name of ['run-1.log', 'checkpoint.jsonl']) await writeFile(join(oldDir, 'nax-out', name), 'kept');
+    old.insertJob({ assign: assignFor('RUN', { jobId: 'jorphan' }) as AssignPayload, leaseEpoch: 1, repoKey: 'acme/app', jobDir: oldDir });
+    old.markDone('jorphan', 1);
+    old.close();
+    const log = createMemoryLogger();
+    const daemon = await startDaemon({ home: s.home, config: s.config, identity: s.identity, tuning, log, executorFactory: () => s.ex });
+    try {
+      expect(daemon.journal.getJob('jorphan', 1)).toBeNull();
+      await expect(stat(oldDir)).rejects.toThrow();
+      const warn = log.lines.find((l) => l.message.includes('nax-out still has files'));
+      expect(warn).toBeDefined();
+      expect((warn?.fields as { count?: number }).count).toBe(2);
+    } finally {
+      await daemon.stop();
+      server.stop();
+    }
+  });
+
+  test('SEC-1: home dir is created 0o700 and the journal 0o600', async () => {
+    if (process.platform === 'win32' || (typeof process.getuid === 'function' && process.getuid() === 0)) return;
+    const server = fakeServer();
+    const s = await setup(server);
+    const daemon = await startDaemon({ home: s.home, config: s.config, identity: s.identity, tuning, executorFactory: () => s.ex });
+    try {
+      expect((await stat(s.home.dir)).mode & 0o777).toBe(0o700);
+      expect((await stat(s.home.journalPath)).mode & 0o777).toBe(0o600);
+    } finally {
+      await daemon.stop();
+      server.stop();
+    }
+  });
+
   test('stop never kills a running job; a second daemon on the same home has a new boot id and finds the journal', async () => {
     const server = fakeServer();
     const s = await setup(server);

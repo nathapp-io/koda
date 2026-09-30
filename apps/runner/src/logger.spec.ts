@@ -7,6 +7,12 @@ describe('redact', () => {
       apiKey: '[redacted]', nested: { Authorization: '[redacted]', ok: 1 }, list: [{ token: '[redacted]' }], name: 'n',
     });
   });
+  test('STYLE-1: a camelCase lower→upper case change is a boundary too, so apiKey stays redacted while monkey/monkeyCount do not', () => {
+    expect(redact({ monkeyCount: 5, monkey: 1, tokenize: true, xKeyx: 'k' })).toEqual({ monkeyCount: 5, monkey: 1, tokenize: true, xKeyx: 'k' });
+    const api = redact({ apiKey: 'sk-1', accessToken: 't' }) as Record<string, unknown>;
+    expect(api['apiKey']).toBe('[redacted]');
+    expect(api['accessToken']).toBe('[redacted]');
+  });
   test('bounds recursion instead of overflowing on a cycle', () => {
     const a: Record<string, unknown> = {};
     a['self'] = a;

@@ -3,7 +3,7 @@ import type { AssignPayload, CommandAck, FleetCommandOut, SyncRequest, SyncRespo
 import { Journal } from '../journal/journal';
 import { createMemoryLogger } from '../logger';
 import { ServerError, NetworkError } from './http';
-import { SyncLoop, type CapabilityReport, type StopReason, type SyncLoopDeps } from './sync-loop';
+import { SyncLoop, PENDING_ACK_TTL_MS, type CapabilityReport, type StopReason, type SyncLoopDeps } from './sync-loop';
 
 const empty: SyncResponse = { jobAcks: [], commands: [], gitTokens: [], gitTokenErrors: [], unknownJobIds: [] };
 const assign = (jobId: string): AssignPayload => ({
@@ -319,5 +319,36 @@ describe('commands', () => {
     script.push(ok({ unknownJobIds: ['ghost'] }));
     await makeLoop().syncOnce();
     expect(abandoned).toEqual([['ghost']]);
+  });
+  test('pending acks older than 1h are pruned (MEM-1)', async () => {
+    commandAcks = [{ commandId: 'c1', leaseEpoch: 1, result: 'ok' }];
+    script.push(ok({ commands: [assignCmd] }), ok(), ok());
+    const loop = makeLoop();
+    await loop.syncOnce();                       // queues c1 at nowMs=0
+    commandAcks = [];
+    now = PENDING_ACK_TTL_MS + 1;
+    expect(loop.pruneStalePendingAcks(now)).toBe(1);
+    await loop.syncOnce();                       // carries nothing
+    expect(calls[1].commandAcks).toEqual([]);
+  });
+  test('pruneStalePendingAcks is a no-op when no ack is stale', async () => {
+    commandAcks = [{ commandId: 'c1', leaseEpoch: 1, result: 'ok' }];
+    script.push(ok({ commands: [assignCmd] }), ok());
+    const loop = makeLoop();
+    await loop.syncOnce();
+    commandAcks = [];
+    now = PENDING_ACK_TTL_MS - 1;
+    expect(loop.pruneStalePendingAcks(now)).toBe(0);
+  });
+  test('wake triggers the prune before deciding to abort', async () => {
+    commandAcks = [{ commandId: 'c1', leaseEpoch: 1, result: 'ok' }];
+    script.push(ok({ commands: [assignCmd] }), ok());
+    const loop = makeLoop();
+    await loop.syncOnce();
+    commandAcks = [];
+    now = PENDING_ACK_TTL_MS + 1;
+    loop.wake();                                 // loop is not inflight, prune runs anyway
+    await loop.syncOnce();
+    expect(calls[1].commandAcks).toEqual([]);
   });
 });

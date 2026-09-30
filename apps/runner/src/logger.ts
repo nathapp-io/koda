@@ -6,7 +6,10 @@ export interface Logger {
   error(message: string, fields?: LogFields): void;
 }
 
-const SECRET_KEY = /key|token|secret|password|authorization/i;
+// STYLE-1: anchored to a word boundary OR a camelCase lower→upper case change. Without the case-change branch the
+// redaction could not distinguish `apiKey` (a secret field) from `monkey` (an innocent word that contains "key").
+// Each option is cased explicitly — the `i` flag would make `[A-Z]` also match lowercase, defeating the boundary.
+const SECRET_KEY = /(?:^|(?<=[a-z])(?=[A-Z]))(?:[Kk]ey|[Tt]oken|[Ss]ecret|[Pp]assword|[Aa]uthorization)\b/;
 const MAX_DEPTH = 5;
 
 export function redact(value: unknown, depth = 0): unknown {

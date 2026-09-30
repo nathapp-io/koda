@@ -7,6 +7,9 @@ import { backoffDelay } from './backoff';
 import { FULL_SCALE, buildSyncRequest, clampAck, doubleScale, halveScale, type BatchScale } from './batch';
 import { ServerError } from './http';
 
+/** MEM-1: a server-side filter or a stale identity can hold an ack forever; the map never grows without bound. */
+export const PENDING_ACK_TTL_MS = 60 * 60 * 1000;
+
 export interface StopReason {
   readonly kind: 'protocol' | 'auth';
   readonly message: string;
@@ -52,6 +55,7 @@ export class SyncLoop {
   private dirty = false;
   private acksExcluded = false;
   private readonly pendingAcks = new Map<string, CommandAck>();
+  private readonly pendingAcksAt = new Map<string, number>();
   private readonly unsubscribe: () => void;
 
   constructor(private readonly deps: SyncLoopDeps) {
@@ -63,9 +67,23 @@ export class SyncLoop {
    * by the server, and dropping its response would re-deliver commands. Otherwise the next sync just starts at once.
    */
   wake(): void {
+    this.pruneStalePendingAcks(this.deps.nowMs());
     if (!this.inflight) return;
     if (this.inflightIdle) this.inflight.abort('wake');
     else this.dirty = true;
+  }
+
+  /** MEM-1: drop pending acks that have been queued longer than `maxAgeMs` (default `PENDING_ACK_TTL_MS`). */
+  pruneStalePendingAcks(nowMs: number, maxAgeMs: number = PENDING_ACK_TTL_MS): number {
+    let pruned = 0;
+    for (const [id, appliedAt] of [...this.pendingAcksAt]) {
+      if (nowMs - appliedAt >= maxAgeMs) {
+        this.pendingAcks.delete(id);
+        this.pendingAcksAt.delete(id);
+        pruned += 1;
+      }
+    }
+    return pruned;
   }
 
   stop(): void {
@@ -129,7 +147,11 @@ export class SyncLoop {
     if (unknown.length > 0) await this.deps.abandonUnknown(unknown);
     const commands = response.commands ?? [];
     if (commands.length > 0) {
-      for (const ack of await this.deps.handleCommands(commands)) this.pendingAcks.set(ack.commandId, clampAck(ack));
+      const stamp = this.deps.nowMs();
+      for (const ack of await this.deps.handleCommands(commands)) {
+        this.pendingAcks.set(ack.commandId, clampAck(ack));
+        this.pendingAcksAt.set(ack.commandId, stamp);
+      }
     }
     return { kind: 'ok' };
   }

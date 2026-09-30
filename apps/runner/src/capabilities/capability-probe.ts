@@ -29,6 +29,9 @@ export function stableStringify(value: unknown): string {
   return JSON.stringify(value) ?? 'null';
 }
 
+/** @design ENH-5: `sandbox.error` is currently folded into the hash. A transient error would flap the hash and
+ *  cause the runner to keep resending its capabilities report. The 3b seam `NaxCapabilityProbe` should decide
+ *  whether to strip `error` (recommended: keep it stable, retry transient ones internally). */
 export function hashCapabilities(caps: RunnerCapabilities): string {
   const { probedAt: _probedAt, ...sandbox } = caps.sandbox;
   return createHash('sha256').update(stableStringify({ ...caps, sandbox })).digest('hex');
