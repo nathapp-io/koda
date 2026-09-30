@@ -92,6 +92,18 @@ describe('isLoopbackHost', () => {
   test.each(['example.com', '10.0.0.1', '0.0.0.0', 'localhost.evil.com'])('%s is not', (h) => expect(isLoopbackHost(h)).toBe(false));
 });
 
+describe('socketDir (D78)', () => {
+  test('absent is null (the daemon uses /tmp/koda-runner-<uid>)', () => {
+    expect(parse().socketDir).toBeNull();
+  });
+  test('an absolute path is kept', () => {
+    expect(parse({ socketDir: '/run/koda' }).socketDir).toBe('/run/koda');
+  });
+  test.each(['run/koda', 42, ''])('%p is refused', (socketDir) => {
+    expect(() => parse({ socketDir })).toThrow('socketDir must be an absolute path');
+  });
+});
+
 describe('resolveHome', () => {
   test('override beats env beats the default', () => {
     expect(resolveHome({ KODA_RUNNER_HOME: '/a' }, '/b').dir).toBe('/b');

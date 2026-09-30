@@ -6,7 +6,7 @@ import type { RunnerConfig, RunnerHome } from '../config/runner-config';
 import { errorMessage } from '../errors';
 import { CredentialBroker } from '../credentials/broker';
 import { TokenCache } from '../credentials/token-cache';
-import { defaultSocketDir } from '../credentials/socket-dir';
+import { defaultSocketDir, ensureSocketDir } from '../credentials/socket-dir';
 import { HostExecutor } from '../executor/host-executor';
 import { assertMinGitVersion, createGit, type Git } from '../executor/git';
 import type { JobExecutor } from '../executor/job-executor';
@@ -39,6 +39,8 @@ export interface DaemonOptions {
   readonly bootId?: string;
   readonly executorFactory?: () => JobExecutor;
   readonly git?: Git;
+  /** D84: how git and the shims run this runner; tests pass ['bun', <src/main.ts>]. */
+  readonly selfCommand?: readonly string[];
 }
 
 export interface DaemonHandle {
@@ -83,6 +85,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   // 0o700 so a local user on a multi-tenant host cannot list the directory.
   await mkdir(home.dir, { recursive: true, mode: 0o700 });
   await chmod(home.dir, 0o700).catch(() => undefined);
+  const uid = process.getuid?.() ?? 0;
+  const socketDir = config.socketDir ?? defaultSocketDir(uid);
+  await ensureSocketDir(socketDir, uid);   // D78: refuse to start before anything could listen in an unsafe place
 
   const journal = Journal.open(home.journalPath, now);
   const bootId = options.bootId ?? newBootId();
@@ -98,7 +103,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   await reporter.refresh();
   const tokens = new TokenCache({ refreshMarginMs: tuning.tokenRefreshMarginMs, cooldownMs: tuning.tokenCooldownMs });
   const broker = new CredentialBroker({
-    tokens, socketDir: defaultSocketDir(process.getuid?.() ?? 0), runnerId: identity.runnerId, selfCommand: selfCommand(),
+    tokens, socketDir, runnerId: identity.runnerId, selfCommand: options.selfCommand ?? selfCommand(),
     nowMs: () => Date.now(), sleep,
     timing: { waitMs: tuning.tokenWaitMs, serveWaitMs: tuning.tokenServeWaitMs, pollMs: tuning.tokenPollMs },
   });
@@ -155,6 +160,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       stopNeedListener();
       await running;
       supervisor.shutdown();
+      await broker.closeAll();   // D90: sockets close; a prepare waiting for its first token ends now instead of in 120 s
       // D67: a halted run ends at its next check, or when its current executor call returns. The journal must outlive it.
       const notice = setTimeout(() => log.warn('waiting for halted job runs to end before closing the journal'), SHUTDOWN_NOTICE_MS);
       try {
@@ -174,6 +180,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     loop.stop();
     stopNeedListener();
     supervisor.shutdown();   // a real kill ends every run; in one process they must at least stop emitting
+    void broker.closeAll();   // D90: a killed daemon's listeners die with it; the files stay (the next daemon replaces them)
     journal.close();
   };
   return { bootId, journal, supervisor, stopped: running, stop, crash };
