@@ -1,4 +1,4 @@
-/** Slice 3 design §1.4 plus D23 (cancel_requested_at, result_branch, result_sha, applied_commands.detail). */
+/** Slice 3 design §1.4 plus D23 (cancel_requested_at, result_branch, result_sha, applied_commands.detail) and D76 (last_push_attempt_at). */
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS jobs (
   job_id TEXT NOT NULL,
@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   cancel_requested_at TEXT,
   result_branch TEXT,
   result_sha TEXT,
+  last_push_attempt_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   done_at TEXT,

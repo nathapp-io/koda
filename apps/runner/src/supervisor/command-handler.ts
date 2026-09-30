@@ -17,6 +17,9 @@ export interface CommandHandlerDeps {
 
 type Outcome = { result: 'ok' | 'rejected'; detail?: string };
 
+/** TYPE-2: a fixed literal for any command type we did not recognise, so the journal never stores String(number). */
+const UNKNOWN_COMMAND_TYPE = 'unknown';
+
 /** Turns server commands into acks (design §1.3). Every applied command is recorded so a re-sent one is acked, not re-run. */
 export class CommandHandler {
   constructor(private readonly deps: CommandHandlerDeps) {}
@@ -32,8 +35,12 @@ export class CommandHandler {
   }
 
   private record(command: FleetCommandOut, outcome: Outcome): void {
+    this.recordAs(command, String(command.type), outcome);
+  }
+
+  private recordAs(command: FleetCommandOut, type: string, outcome: Outcome): void {
     this.deps.journal.recordCommand({
-      commandId: command.commandId, jobId: command.jobId, leaseEpoch: command.leaseEpoch, type: String(command.type),
+      commandId: command.commandId, jobId: command.jobId, leaseEpoch: command.leaseEpoch, type,
       result: outcome.result, detail: outcome.detail ?? null, appliedAt: this.deps.now().toISOString(),
     });
   }
@@ -55,7 +62,7 @@ export class CommandHandler {
   }
 
   private async apply(command: FleetCommandOut): Promise<Outcome> {
-    const { journal, supervisor } = this.deps;
+    const { supervisor } = this.deps;
     switch (command.type) {
       case 'ASSIGN': return this.assign(command);
       case 'CANCEL': {
@@ -75,7 +82,7 @@ export class CommandHandler {
       }
       default: {
         const outcome: Outcome = { result: 'rejected', detail: 'unknown command type' };
-        journal.recordCommand({ commandId: command.commandId, jobId: command.jobId, leaseEpoch: command.leaseEpoch, type: String(command.type), result: 'rejected', detail: outcome.detail ?? null, appliedAt: this.deps.now().toISOString() });
+        this.recordAs(command, UNKNOWN_COMMAND_TYPE, outcome);
         return outcome;
       }
     }

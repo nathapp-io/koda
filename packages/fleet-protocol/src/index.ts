@@ -100,7 +100,9 @@ export interface SnapshotEventPayload {
   droppedLogs?: number;
 }
 
-export interface LifecycleEventPayload { level: 'info' | 'warn' | 'error'; message: string }
+/** STYLE-3: `details` is a free-form array of structured items the runner wants attached to a lifecycle event
+ *  (e.g. the unsafe names left out of a bundle). The server ignores it; it is opaque telemetry. */
+export interface LifecycleEventPayload { level: 'info' | 'warn' | 'error'; message: string; details?: readonly unknown[] }
 /** At most 8 KiB of text (§3.2). */
 export interface LogEventPayload { stream: 'stdout' | 'stderr' | 'run'; text: string }
 

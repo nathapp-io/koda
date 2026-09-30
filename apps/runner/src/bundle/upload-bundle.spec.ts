@@ -73,6 +73,14 @@ describe('uploadWithRetry (design §2 step 9)', () => {
     script.push(new NetworkError('reset'), 503, new NetworkError('reset'));
     expect((await uploadWithRetry(deps(), 'j', 3, { ...file('big'), size: BIG })).kind).toBe('failed');
   });
+  test('BUG-6: NetworkError and 5xx are counted separately; only NetworkError exhaustion on a large bundle becomes too-large', async () => {
+    script.push(new NetworkError('reset'), new NetworkError('reset'), new NetworkError('reset'));
+    expect(await uploadWithRetry(deps(), 'j', 3, { ...file('big'), size: BIG })).toEqual({ kind: 'too-large' });
+    script.push(new NetworkError('reset'), new NetworkError('reset'), new NetworkError('reset'));
+    expect((await uploadWithRetry(deps(), 'j', 3, file('small'))).kind).toBe('failed');
+    script.push(500, 500, 500);
+    expect((await uploadWithRetry(deps(), 'j', 3, { ...file('big'), size: BIG })).kind).toBe('failed');
+  });
   test('422 rebuilds the archive once and retries it without spending an attempt; a second 422 fails', async () => {
     script.push(422, 500, 201);
     expect(await uploadWithRetry(deps(), 'j', 3, file('a'))).toEqual({ kind: 'ok' });

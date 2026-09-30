@@ -123,14 +123,17 @@ describe('commitAndPushPlan', () => {
     expect(pushed.branchName).toBe('feat/f');
     expect(pushed.userStories[0].id).toBe('US-001');
   });
-  test('is idempotent, and a crash between commit and push resumes without a second commit', async () => {
+  test('is idempotent, and a crash between commit and push resumes without a second commit (D76)', async () => {
     const s = await setup();
     await planOutputs(s.repoDir);
     await sh(s.repoDir, 'remote', 'set-url', 'origin', `file://${join(s.base, 'nowhere.git')}`);
     const failed = await commitAndPushPlan(input(s));
-    expect(failed).toEqual({ ok: false, reason: 'plan push failed' });
-    const local = await sh(s.repoDir, 'rev-parse', 'feat/f');
-    expect(local).not.toBe(s.refSha);                      // the commit is kept locally
+    expect(failed.ok).toBe(false);
+    if (failed.ok) throw new Error('expected a push failure');
+    expect(failed.reason).toBe('plan push failed');
+    expect(failed.resume?.branch).toBe('feat/f');            // D76: the kept commit is recorded
+    const local = failed.resume?.sha ?? await sh(s.repoDir, 'rev-parse', 'feat/f');
+    expect(local).not.toBe(s.refSha);                        // the commit is kept locally
     await sh(s.repoDir, 'remote', 'set-url', 'origin', s.origin.url);
     await cleanWorkspace(g, s.repoDir);
     const again = await commitAndPushPlan(input(s));

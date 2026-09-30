@@ -101,6 +101,17 @@ describe('buildBundle', () => {
     expect(manifest).toMatchObject({ version: 1, command: 'PLAN' });
     expect(manifest.entries).toContain('nax.stdout');
   });
+  test('ENH-1: a symlink to a directory is stored as a link, not followed (D27)', async () => {
+    const jobDir = await jobDirWith();
+    const outside = await tmp.make('outside');
+    await writeFile(join(outside, 'secret.txt'), 'TOP-SECRET');
+    await symlink(outside, join(jobDir, 'nax-out', 'link'));
+    const file = await buildBundle({ jobDir, command: 'RUN' });
+    const names = await tarList(file.path);
+    expect(names).toContain('nax-out/link');
+    expect(names).not.toContain('nax-out/link/secret.txt');
+    expect(names.some((n) => n.includes('TOP-SECRET'))).toBe(false);
+  });
   test('an otherwise empty job dir still produces a valid archive (the manifest)', async () => {
     const file = await buildBundle({ jobDir: await tmp.make('empty'), command: 'RUN' });
     expect(await tarList(file.path)).toEqual(['bundle-manifest.json']);

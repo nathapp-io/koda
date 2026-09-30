@@ -17,10 +17,14 @@ function checked(fn: () => void): boolean {
     fn();
     return true;
   } catch (error) {
-    if (error instanceof PathError || error instanceof Error) return false;
+    if (error instanceof PathError) return false;
     throw error;
   }
 }
+
+/** @design API-1: `checked`'s re-throw policy cannot be reached through `parseAssign` (all validators throw `PathError`),
+ *  so it is exported under a test-only name rather than widened into the public parse surface. */
+export const __checked = checked;
 
 /**
  * D30: the server is trusted to deliver, not to be well formed. Every field that reaches a path, an argv or git config

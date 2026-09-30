@@ -7,6 +7,19 @@ describe('redact', () => {
       apiKey: '[redacted]', nested: { Authorization: '[redacted]', ok: 1 }, list: [{ token: '[redacted]' }], name: 'n',
     });
   });
+  test('STYLE-1: a camelCase lower→upper case change is a boundary too, so apiKey stays redacted while monkey/monkeyCount do not', () => {
+    expect(redact({ monkeyCount: 5, monkey: 1, tokenize: true, xKeyx: 'k' })).toEqual({ monkeyCount: 5, monkey: 1, tokenize: true, xKeyx: 'k' });
+    const api = redact({ apiKey: 'sk-1', accessToken: 't' }) as Record<string, unknown>;
+    expect(api['apiKey']).toBe('[redacted]');
+    expect(api['accessToken']).toBe('[redacted]');
+  });
+  test('SEC-3: snake/kebab/plural/SCREAMING secret keys are redacted; benign substrings are not', () => {
+    const leaked = ['api_key', 'x-api-key', 'apiKeys', 'keys', 'tokens', 'secrets', 'secret_key', 'refresh_token', 'accessTokenHash', 'API_KEY'];
+    const benign = ['monkey', 'monkeyCount', 'tokenize', 'xKeyx', 'keyboard'];
+    const out = redact(Object.fromEntries([...leaked, ...benign].map((k) => [k, 'keep']))) as Record<string, string>;
+    for (const k of leaked) expect(out[k]).toBe('[redacted]');
+    for (const k of benign) expect(out[k]).toBe('keep');
+  });
   test('bounds recursion instead of overflowing on a cycle', () => {
     const a: Record<string, unknown> = {};
     a['self'] = a;

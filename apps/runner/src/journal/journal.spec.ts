@@ -1,8 +1,12 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
+import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { Database } from 'bun:sqlite';
 import type { AssignPayload } from '@nathapp/fleet-protocol';
 import { makeTempDirs } from '../../test/helpers/tmp';
 import { Journal } from './journal';
+
+const SKIP_FILEMODE = process.platform === 'win32' || (typeof process.getuid === 'function' && process.getuid() === 0);
 
 const assign = (jobId = 'j1'): AssignPayload => ({
   jobId, command: 'RUN', repo: { provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', cloneUrl: 'https://github.com/acme/app.git' },
@@ -187,5 +191,42 @@ describe('openReadOnly (D72)', () => {
     writer.insertJob(job('j3'));                                          // the writer is unaffected
     writer.close();
     expect(() => Journal.openReadOnly(join(path, '..', 'missing.db'), now)).toThrow();
+  });
+});
+
+describe('file permissions (SEC-1)', () => {
+  test('the journal file and its WAL siblings are created 0o600, not the process umask', async () => {
+    if (SKIP_FILEMODE) return;
+    const path = join(await tmp.make('mode'), 'journal.db');
+    const j = Journal.open(path, now);
+    j.insertJob(job());
+    // The -wal/-shm siblings exist only while a connection holds the WAL open; SQLite removes them on
+    // the last clean close (Linux) but leaves them (macOS), so assert the mode while still open.
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    expect((await stat(`${path}-wal`)).mode & 0o777).toBe(0o600);
+    expect((await stat(`${path}-shm`)).mode & 0o777).toBe(0o600);
+    j.close();
+  });
+});
+
+describe('schema migration (MIG-1)', () => {
+  test('an old journal without last_push_attempt_at is upgraded in place', async () => {
+    const path = join(await tmp.make('migrate'), 'journal.db');
+    const old = new Database(path, { create: true });
+    old.exec(`CREATE TABLE jobs (
+      job_id TEXT NOT NULL, lease_epoch INTEGER NOT NULL, command TEXT NOT NULL, state TEXT NOT NULL,
+      repo_key TEXT NOT NULL, branch TEXT, pid INTEGER, pgid INTEGER, nax_run_id TEXT, log_path TEXT,
+      job_dir TEXT NOT NULL, assign_json TEXT NOT NULL, cancel_requested_at TEXT, result_branch TEXT,
+      result_sha TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, done_at TEXT,
+      PRIMARY KEY (job_id, lease_epoch));`);
+    old.query('INSERT INTO jobs (job_id, lease_epoch, command, state, repo_key, job_dir, assign_json, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run('j1', 1, 'PLAN', 'FAILED', 'acme/app', '/w/.jobs/j1', JSON.stringify(assign()), 't', 't');
+    old.close();
+
+    const upgraded = Journal.open(path, now);
+    expect(upgraded.getJob('j1', 1)?.lastPushAttemptAt).toBeNull();
+    const patched = upgraded.updateJob('j1', 1, { lastPushAttemptAt: '2026-10-01T00:00:01.000Z' });
+    expect(patched?.lastPushAttemptAt).toBe('2026-10-01T00:00:01.000Z');
+    upgraded.close();
   });
 });

@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { FleetCommandOut } from '@nathapp/fleet-protocol';
 import { assignFor } from '../../test/helpers/assign';
-import { parseAssign } from './assign-parser';
+import { parseAssign, __checked } from './assign-parser';
+import { assertOwner, PathError } from '../paths/safe-segment';
 
 const cmd = (payload: unknown, over: Partial<FleetCommandOut> = {}): FleetCommandOut => ({ commandId: 'c1', type: 'ASSIGN', jobId: 'j1', leaseEpoch: 1, payload: payload as never, ...over });
 
@@ -48,5 +49,12 @@ describe('parseAssign (D30)', () => {
   });
   test('an odd but syntactically plain ref is not rejected here; prepare turns it into a fixed reason', () => {
     expect(parseAssign(cmd({ ...assignFor(), ref: '--upload-pack=x' })).ok).toBe(true);
+  });
+  test('STYLE-5: a non-PathError thrown from a validator is re-thrown, not silently swallowed', () => {
+    expect(__checked(() => assertOwner('a/b'))).toBe(true);
+    expect(() => __checked(() => { throw new TypeError('boom'); })).toThrow(TypeError);
+  });
+  test('STYLE-5: a PathError thrown from a validator returns false (the parse-time rejection path)', () => {
+    expect(__checked(() => { throw new PathError('invalid owner'); })).toBe(false);
   });
 });

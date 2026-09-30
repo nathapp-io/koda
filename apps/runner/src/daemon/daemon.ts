@@ -1,4 +1,4 @@
-import { mkdir, rm } from 'node:fs/promises';
+import { chmod, mkdir, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { uploadWithRetry } from '../bundle/upload-bundle';
 import { CapabilityReporter, StaticCapabilityProbe } from '../capabilities/capability-probe';
@@ -49,8 +49,15 @@ export interface DaemonHandle {
 async function pruneJobs(journal: Journal, config: RunnerConfig, log: Logger): Promise<void> {
   const jobsRoot = join(config.workspaceRoot, '.jobs');
   for (const pruned of journal.prune(config.jobRetentionDays)) {
+    const jobDir = assertInside(jobsRoot, pruned.jobDir);
     try {
-      await rm(assertInside(jobsRoot, pruned.jobDir), { recursive: true, force: true });
+      const entries = await readdir(join(jobDir, 'nax-out'));
+      if (entries.length > 0) log.warn('pruning a job directory whose nax-out still has files (cancel-during-upload?)', { jobId: pruned.jobId, count: entries.length });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') log.warn('could not list nax-out before pruning', { jobId: pruned.jobId, error: errorMessage(error) });
+    }
+    try {
+      await rm(jobDir, { recursive: true, force: true });
     } catch (error) {
       log.warn('could not remove a pruned job directory', { jobId: pruned.jobId, error: errorMessage(error) });
     }
@@ -68,7 +75,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const git = options.git ?? createGit();
   await assertMinGitVersion(git);   // D69: refuse to start before anything is created
   await mkdir(join(config.workspaceRoot, '.jobs'), { recursive: true });
-  await mkdir(home.dir, { recursive: true });
+  // SEC-1: the home dir holds the journal (which carries clone URLs and runner metadata) — match identity.json's
+  // 0o700 so a local user on a multi-tenant host cannot list the directory.
+  await mkdir(home.dir, { recursive: true, mode: 0o700 });
+  await chmod(home.dir, 0o700).catch(() => undefined);
 
   const journal = Journal.open(home.journalPath, now);
   const bootId = options.bootId ?? newBootId();

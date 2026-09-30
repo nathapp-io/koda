@@ -37,6 +37,11 @@ export async function uploadWithRetry(deps: UploadDeps, jobId: string, leaseEpoc
   let file = first;
   let rebuilt = false;
   let attempt = 1;
+  // BUG-6: the old code conflated `NetworkError` (timeout / DNS) and 5xx under one counter, and the
+  // `too-large` branch was unreachable because `status === 0` never reached it (a non-OK response always
+  // surfaces as a `ServerError` from the client). Now `NetworkError` is counted separately so the
+  // proxy-silently-drops-large-bundle intent (D68) is enforced only on `NetworkError` exhaustion;
+  // 5xx always stays `failed`.
   let networkFailures = 0;
   for (;;) {
     let status = 0;

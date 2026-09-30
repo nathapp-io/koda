@@ -6,7 +6,13 @@ export interface Logger {
   error(message: string, fields?: LogFields): void;
 }
 
-const SECRET_KEY = /key|token|secret|password|authorization/i;
+// STYLE-1/SEC-3: a secret word must sit on a segment boundary — start/end, a non-letter (`_`, `-`, space) or a
+// camelCase lower→upper case change (splitCamel). The word may be plural. This keeps `monkey`/`monkeyCount`/
+// `tokenize`/`xKeyx`/`keyboard` unredacted while `apiKey`, `api_key`, `x-api-key`, `apiKeys`, `keys`, `tokens`,
+// `secrets`, `secret_key`, `refresh_token`, `accessTokenHash` and SCREAMING_SNAKE (`API_KEY`) stay redacted.
+const SECRET_KEY = /(?:^|[^A-Za-z])(?:key|token|secret|password|authorization)s?(?:$|[^A-Za-z])/i;
+const splitCamel = (key: string): string => key.replace(/([a-z0-9])([A-Z])/g, '$1_$2');
+const isSecretKey = (key: string): boolean => SECRET_KEY.test(splitCamel(key));
 const MAX_DEPTH = 5;
 
 export function redact(value: unknown, depth = 0): unknown {
@@ -14,7 +20,7 @@ export function redact(value: unknown, depth = 0): unknown {
   if (Array.isArray(value)) return value.map((item) => redact(item, depth + 1));
   if (value !== null && typeof value === 'object') {
     return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, SECRET_KEY.test(key) ? '[redacted]' : redact(item, depth + 1)]),
+      Object.entries(value).map(([key, item]) => [key, isSecretKey(key) ? '[redacted]' : redact(item, depth + 1)]),
     );
   }
   return value;

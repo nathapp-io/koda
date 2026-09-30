@@ -156,7 +156,7 @@ export class JobRun {
 
   private async abandonCleanup(row: JobRow): Promise<void> {
     try {
-      await killIfOurs(this.deps.executor, row, this.deps.log);   // safe for a lower epoch too: that pid is this epoch's own
+      await killIfOurs(this.deps.executor, row, this.deps.log);   // SEC-2: returns void; the matchesProcess=false branch is intentionally silent (D65)
       if (this.higherEpochLive()) {
         this.deps.log.info('abandon leaves reap and cleanup to the live higher epoch', { jobId: this.jobId, leaseEpoch: this.leaseEpoch });
         return;
@@ -211,6 +211,13 @@ export class JobRun {
 
   private async watchUntilExit(resumed: boolean): Promise<void> {
     const start = this.mustRow();
+    // BUG-2: a RUNNING row with pid === null is corrupt (journal patch missing or DB race); fall through to
+    // finish() would upload a partial bundle and call it FAILED with 'no status.json' — honest, but reachable on
+    // a tampered journal. failSafe records a 'runner error: pid missing on RUNNING row' and ends locally.
+    if (start.state === 'RUNNING' && start.pid === null) {
+      await this.failSafe(new Error('pid missing on RUNNING row'));
+      return;
+    }
     const watcher = this.deps.executor.createWatcher(start, this.events, {
       startAtEnd: resumed,
       onRunIds: (ids) => { this.deps.journal.updateJob(this.jobId, this.leaseEpoch, { naxRunId: ids.naxRunId, logPath: ids.logPath }); },
@@ -248,13 +255,27 @@ export class JobRun {
     const judged = await this.judge(row);
     let verdict = judged.verdict;
     let result = { branch: row.resultBranch, sha: row.resultSha };
-    if (row.command === 'PLAN' && verdict.state === 'COMPLETED' && row.resultSha === null) {
-      const pushed = await this.deps.executor.finishPlan(row);
-      if (pushed.ok) {
-        result = { branch: pushed.branch, sha: pushed.sha };
-        this.deps.journal.updateJob(this.jobId, this.leaseEpoch, { resultBranch: pushed.branch, resultSha: pushed.sha });
-      } else {
-        verdict = { state: 'FAILED', reason: pushed.reason };
+    if (row.command === 'PLAN' && verdict.state === 'COMPLETED') {
+      // D76: a kept-commit row (`resultBranch`/`resultSha` set, `lastPushAttemptAt` set from a prior failed push)
+      // needs to retry the push without a second commit; otherwise the first-time path commits and pushes.
+      const needRetryPush = row.resultSha !== null && row.lastPushAttemptAt !== null;
+      const needFirstPush = row.resultSha === null;
+      if (needFirstPush || needRetryPush) {
+        const pushed = await this.deps.executor.finishPlan(row);
+        if (pushed.ok) {
+          result = { branch: pushed.branch, sha: pushed.sha };
+          this.deps.journal.updateJob(this.jobId, this.leaseEpoch, {
+            resultBranch: pushed.branch, resultSha: pushed.sha, lastPushAttemptAt: null,
+          });
+        } else {
+          if (pushed.resume) {
+            this.deps.journal.updateJob(this.jobId, this.leaseEpoch, {
+              resultBranch: pushed.resume.branch, resultSha: pushed.resume.sha, lastPushAttemptAt: this.deps.now().toISOString(),
+            });
+            result = { branch: pushed.resume.branch, sha: pushed.resume.sha };
+          }
+          verdict = { state: 'FAILED', reason: pushed.reason };
+        }
       }
     } else if (row.command === 'RUN') {
       const ledger = await this.deps.executor.readFinishLedger(row);
@@ -326,7 +347,7 @@ export class JobRun {
       return { kind: 'failed', detail: `bundle build failed: ${errorMessage(error)}` };
     }
     if (file.skipped && file.skipped.length > 0) {
-      this.events.lifecycle('warn', `bundle left out ${file.skipped.length} file(s) whose names have a newline or backslash: ${JSON.stringify(file.skipped.slice(0, 3))}`);
+      this.events.lifecycle('warn', `bundle left out ${file.skipped.length} file(s) whose names have a newline or backslash`, file.skipped.slice(0, 3));
     }
     return this.deps.uploader.upload(row, file, () => this.deps.executor.collectBundle(row));
   }
@@ -351,7 +372,9 @@ export class JobRun {
       const row = this.row();
       if (row) {
         await killIfOurs(this.deps.executor, row, this.deps.log);
-        await this.reapQuietly(row);
+        // BUG-4: when the run never spawned (pid is null), a stale `.nax-pids` from a previous attempt at this
+        // jobDir would still be inside `since = createdAt`, so reap could SIGKILL someone else's pid. Skip it.
+        if (row.pid !== null) await this.reapQuietly(row);
       }
       if (this.events.currentState() === 'RUNNING') this.events.transition('UPLOADING');
       this.events.transition('FAILED', `runner error: ${errorMessage(error)}`);

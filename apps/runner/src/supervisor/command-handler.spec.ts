@@ -145,4 +145,10 @@ describe('CANCEL, ABANDON, READOPT and unknown types', () => {
     const [ack] = await b.handler.handle([other('CANCEL', 'x2')]);
     expect(ack).toMatchObject({ commandId: 'x2', result: 'rejected', detail: 'runner error' });
   });
+  test('a non-string command type is journaled as the literal "unknown" (TYPE-2)', async () => {
+    const b = build();
+    const acks = await b.handler.handle([{ ...other('CANCEL', 'u1'), type: 1 as never }]);
+    expect(acks[0]).toMatchObject({ result: 'rejected', detail: 'unknown command type' });
+    expect(b.journal.getCommand('u1')).toMatchObject({ type: 'unknown', result: 'rejected', detail: 'unknown command type' });
+  });
 });

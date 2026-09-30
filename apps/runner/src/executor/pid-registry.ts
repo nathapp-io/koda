@@ -24,7 +24,13 @@ export function parsePidEntries(text: string): PidEntry[] {
   return entries;
 }
 
-const REGISTRATION_SLACK_MS = 2_000;
+/**
+ * BUG-5: lstart reports the start time to the second; with the etime rounding the comparison was firing on an
+ * approximate, then-derived start, and a 1s rounding in either direction could push a real nax outside the slack.
+ * The slack is now 5s because lstart has 1s precision while the entry's `spawnedAt` is millisecond-accurate, and a
+ * slow `Date.now()` NTP step between spawn and reap is no longer the dominant source of error.
+ */
+const REGISTRATION_SLACK_MS = 5_000;
 
 /** D37: nax itself refuses to signal stale entries because pids recycle; so does the runner. */
 export async function selectReapable(
@@ -43,21 +49,18 @@ export async function selectReapable(
   return picked;
 }
 
-/** `ps -o etime=` is `[[dd-]hh:]mm:ss` on macOS and Linux; `lstart` would depend on the time zone (bun test forces UTC). */
-export function parseEtime(text: string): number | null {
-  const m = /^(?:(?:(\d+)-)?(\d+):)?(\d+):(\d+)$/.exec(text.trim());
-  if (!m) return null;
-  const [days, hours, minutes, seconds] = [Number(m[1] ?? 0), Number(m[2] ?? 0), Number(m[3]), Number(m[4])];
-  return ((days * 24 + hours) * 60 + minutes) * 60 + seconds;
-}
-
+/** BUG-5: `ps -o lstart=` returns the actual start timestamp (locale-formatted), immune to `Date.now()` clock drift
+ * between registration and reap. BUG-5a: the child `ps` is forced to `TZ=UTC`, so its output must be parsed as UTC
+ * too — `Date.parse` without a zone would read the string in the runner's host TZ, shifting the instant by the UTC
+ * offset and making the slack check reject a live nax on any non-UTC host. */
 export async function readProcessStart(pid: number): Promise<Date | null> {
   if (!Number.isInteger(pid) || pid <= 0) return null;
-  const proc = Bun.spawn(['ps', '-o', 'etime=', '-p', String(pid)], { stdout: 'pipe', stderr: 'ignore', stdin: 'ignore', env: { ...process.env, LC_ALL: 'C' } });
-  const text = await new Response(proc.stdout).text();
+  const proc = Bun.spawn(['ps', '-o', 'lstart=', '-p', String(pid)], { stdout: 'pipe', stderr: 'ignore', stdin: 'ignore', env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } });
+  const text = (await new Response(proc.stdout).text()).trim();
   await proc.exited;
-  const elapsed = parseEtime(text);
-  return elapsed === null ? null : new Date(Date.now() - elapsed * 1000);
+  if (text === '') return null;
+  const stamp = Date.parse(`${text} UTC`);
+  return Number.isNaN(stamp) ? null : new Date(stamp);
 }
 
 /** The identity check for a process that is not our child: a job's argv carries `koda-job-<jobId>` (S1 spec §5.2 step 4). */

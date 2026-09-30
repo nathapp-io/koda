@@ -88,7 +88,7 @@ async function ensureConfig(options: EnrollOptions, deps: EnrollDeps) {
 function explain(error: unknown, name: string): EnrollError {
   if (error instanceof ServerError) {
     if (error.status === 401) return new EnrollError('the enrollment token is invalid, used or expired');
-    if (error.status === 409) return new EnrollError(`a runner named "${name}" already exists; pass --name to choose another`);
+    if (error.status === 409) return new EnrollError(`a runner named "${name}" already exists; pass --name to choose another, or remove the existing runner row on the server`);
     if (error.status === 426) return new EnrollError(`the server does not support this runner: ${error.message}`);
     if (error.status === 400) return new EnrollError(`the server rejected the request: ${error.message}`);
     return new EnrollError(`the server answered ${error.status}: ${error.message}`);

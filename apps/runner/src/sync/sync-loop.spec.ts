@@ -3,7 +3,7 @@ import type { AssignPayload, CommandAck, FleetCommandOut, SyncRequest, SyncRespo
 import { Journal } from '../journal/journal';
 import { createMemoryLogger } from '../logger';
 import { ServerError, NetworkError } from './http';
-import { SyncLoop, type CapabilityReport, type StopReason, type SyncLoopDeps } from './sync-loop';
+import { SyncLoop, PENDING_ACK_TTL_MS, type CapabilityReport, type StopReason, type SyncLoopDeps } from './sync-loop';
 
 const empty: SyncResponse = { jobAcks: [], commands: [], gitTokens: [], gitTokenErrors: [], unknownJobIds: [] };
 const assign = (jobId: string): AssignPayload => ({
@@ -319,5 +319,46 @@ describe('commands', () => {
     script.push(ok({ unknownJobIds: ['ghost'] }));
     await makeLoop().syncOnce();
     expect(abandoned).toEqual([['ghost']]);
+  });
+  test('pending acks older than 1h are pruned (MEM-1)', async () => {
+    commandAcks = [{ commandId: 'c1', leaseEpoch: 1, result: 'ok' }];
+    script.push(ok({ commands: [assignCmd] }), ok(), ok());
+    const loop = makeLoop();
+    await loop.syncOnce();                       // queues c1 at nowMs=0
+    commandAcks = [];
+    now = PENDING_ACK_TTL_MS + 1;
+    expect(loop.pruneStalePendingAcks(now)).toBe(1);
+    await loop.syncOnce();                       // carries nothing
+    expect(calls[1].commandAcks).toEqual([]);
+  });
+  test('MEM-1: a confirmed ack clears its timestamp, so prune never sees a ghost', async () => {
+    commandAcks = [{ commandId: 'c1', leaseEpoch: 1, result: 'ok' }];
+    script.push(ok({ commands: [assignCmd] }), ok());   // second sync carries c1 and the server confirms it
+    const loop = makeLoop();
+    await loop.syncOnce();                       // queues c1 at nowMs=0
+    await loop.syncOnce();                       // sends c1; apply() drops both the ack and its timestamp
+    commandAcks = [];
+    now = PENDING_ACK_TTL_MS + 1;
+    expect(loop.pruneStalePendingAcks(now)).toBe(0);
+  });
+  test('pruneStalePendingAcks is a no-op when no ack is stale', async () => {
+    commandAcks = [{ commandId: 'c1', leaseEpoch: 1, result: 'ok' }];
+    script.push(ok({ commands: [assignCmd] }), ok());
+    const loop = makeLoop();
+    await loop.syncOnce();
+    commandAcks = [];
+    now = PENDING_ACK_TTL_MS - 1;
+    expect(loop.pruneStalePendingAcks(now)).toBe(0);
+  });
+  test('wake triggers the prune before deciding to abort', async () => {
+    commandAcks = [{ commandId: 'c1', leaseEpoch: 1, result: 'ok' }];
+    script.push(ok({ commands: [assignCmd] }), ok());
+    const loop = makeLoop();
+    await loop.syncOnce();
+    commandAcks = [];
+    now = PENDING_ACK_TTL_MS + 1;
+    loop.wake();                                 // loop is not inflight, prune runs anyway
+    await loop.syncOnce();
+    expect(calls[1].commandAcks).toEqual([]);
   });
 });

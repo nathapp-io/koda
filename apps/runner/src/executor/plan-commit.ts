@@ -5,6 +5,12 @@ import { featureDirFor } from '../paths/safe-segment';
 import { checkoutArgs, planBranch, validateBranchName } from './branch';
 import { NO_CREDENTIALS_REASON, isAuthFailure, type Git, GitError } from './git';
 
+/** D76: shape of a transient PLAN push failure recorded on the row so the next prepare can resume the push. */
+export interface PlanPushResume {
+  readonly branch: string;
+  readonly sha: string;
+}
+
 /** Design §2 step 8: never `plan/`, `sessions/` or `prd.rejected.json`. */
 export const PLAN_ALLOWLIST = ['prd.json', 'spec.md', 'prd-fidelity-report.md', 'acceptance-meta.json'] as const;
 
@@ -57,7 +63,9 @@ export interface PlanPushInput {
   readonly identity: GitIdentity;
 }
 
-export type PlanPushResult = { ok: true; branch: string; sha: string; committed: boolean } | { ok: false; reason: string };
+export type PlanPushResult =
+  | { ok: true; branch: string; sha: string; committed: boolean }
+  | { ok: false; reason: string; resume?: PlanPushResume };   // D76: on a push failure the local commit is recorded for a resume
 
 async function commitStep(input: PlanPushInput, files: readonly string[]): Promise<{ failure: string } | { committed: boolean }> {
   const { git, repoDir, feature, branchName, refSha } = input;
@@ -97,7 +105,12 @@ export async function commitAndPushPlan(input: PlanPushInput): Promise<PlanPushR
     return { ok: false, reason: 'plan commit failed' };
   }
   const push = await git.run(['push', '--set-upstream', 'origin', branchName], { cwd: repoDir });
-  if (push.code !== 0) return { ok: false, reason: isAuthFailure(push.stderr) ? NO_CREDENTIALS_REASON : 'plan push failed' };
+  if (push.code !== 0) {
+    // D76: keep the local commit reachable — the next prepare pushes it (idempotent) instead of re-stashing.
+    const localSha = (await git.ok(['rev-parse', 'HEAD'], { cwd: repoDir }).catch(() => '')).trim();
+    const resume: PlanPushResume | undefined = localSha ? { branch: branchName, sha: localSha } : undefined;
+    return { ok: false, reason: isAuthFailure(push.stderr) ? NO_CREDENTIALS_REASON : 'plan push failed', ...(resume ? { resume } : {}) };
+  }
   const sha = (await git.ok(['rev-parse', 'HEAD'], { cwd: repoDir })).trim();
   return { ok: true, branch: branchName, sha, committed };
 }

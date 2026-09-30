@@ -1,6 +1,7 @@
 import { mkdir, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { GitIdentity } from '@nathapp/fleet-protocol';
+import { PathError } from '../paths/safe-segment';
 import type { Git } from './git';
 
 const CLONE_SCHEMES = new Set(['https:', 'http:', 'file:']);
@@ -11,9 +12,9 @@ export function assertCloneUrl(url: string): void {
   try {
     parsed = new URL(url);
   } catch {
-    throw new Error('invalid cloneUrl');
+    throw new PathError('invalid cloneUrl');
   }
-  if (!CLONE_SCHEMES.has(parsed.protocol) || /\s/.test(url) || url.startsWith('-')) throw new Error('invalid cloneUrl');
+  if (!CLONE_SCHEMES.has(parsed.protocol) || /\s/.test(url) || url.startsWith('-')) throw new PathError('invalid cloneUrl');
 }
 
 async function exists(path: string): Promise<boolean> {

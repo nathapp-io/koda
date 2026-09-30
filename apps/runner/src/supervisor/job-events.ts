@@ -37,8 +37,11 @@ export class JobEvents implements WatcherSink {
     this.journal.appendEvent(this.jobId, this.leaseEpoch, 'snapshot', fits ? payload : rest);
   }
 
-  lifecycle(level: 'info' | 'warn' | 'error', message: string): void {
-    this.journal.appendEvent(this.jobId, this.leaseEpoch, 'lifecycle', { level, message: message.slice(0, MAX_MESSAGE) });
+  lifecycle(level: 'info' | 'warn' | 'error', message: string, details?: readonly unknown[]): void {
+    this.journal.appendEvent(
+      this.jobId, this.leaseEpoch, 'lifecycle',
+      { level, message: message.slice(0, MAX_MESSAGE), ...(details ? { details: [...details] } : {}) },
+    );
   }
 
   logLine(payload: LogEventPayload): void {
