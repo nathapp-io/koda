@@ -3,6 +3,7 @@ import { delimiter, join } from 'node:path';
 import { buildBundle, type BundleFile } from '../bundle/build-bundle';
 import type { RunnerConfig } from '../config/runner-config';
 import type { CredentialProvider } from '../credentials/broker';
+import { withoutCredentialVars } from '../credentials/credential-env';
 import type { JobRow } from '../journal/types';
 import type { Logger } from '../logger';
 import { assertInside, featureDirFor, repoDirFor } from '../paths/safe-segment';
@@ -19,6 +20,8 @@ import { readProcessCommand, reapNaxPids } from './pid-registry';
 import { commitAndPushPlan, stashPlanOutputs } from './plan-commit';
 import { cleanWorkspace, ensureClone } from './workspace';
 
+export { withoutCredentialVars } from '../credentials/credential-env';
+
 export interface HostExecutorDeps {
   readonly config: Pick<RunnerConfig, 'workspaceRoot' | 'naxCommand' | 'naxHome'>;
   readonly git: Git;
@@ -34,16 +37,6 @@ export interface HostExecutorDeps {
 const ATTEMPT_FILES = ['nax-out', 'nax.stdout', 'nax.stderr', 'pre-plan', 'plan-out', 'plan-out.tmp', 'plan-logs', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json'];
 const CANCELLED: PrepareOutcome = { ok: false, reason: 'cancelled', cancelled: true };
 const exists = (path: string): Promise<boolean> => stat(path).then(() => true, () => false);
-
-/**
- * D88: the forge-token variables the daemon may have inherited from its operator never reach nax's environment — the
- * job's shims are the only thing that puts a token into a gh/glab child, from the socket.
- */
-const CREDENTIAL_ENV_VARS: readonly string[] = ['GH_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_TOKEN', 'GITLAB_TOKEN', 'GL_TOKEN'];
-
-export function withoutCredentialVars(env: Readonly<Record<string, string | undefined>>): Readonly<Record<string, string | undefined>> {
-  return Object.fromEntries(Object.entries(env).filter(([name]) => !CREDENTIAL_ENV_VARS.includes(name)));
-}
 
 async function moveAside(from: string, to: string): Promise<void> {
   try {
