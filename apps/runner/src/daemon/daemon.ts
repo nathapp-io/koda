@@ -4,6 +4,9 @@ import { uploadWithRetry } from '../bundle/upload-bundle';
 import { CapabilityReporter, StaticCapabilityProbe } from '../capabilities/capability-probe';
 import type { RunnerConfig, RunnerHome } from '../config/runner-config';
 import { errorMessage } from '../errors';
+import { CredentialBroker } from '../credentials/broker';
+import { TokenCache } from '../credentials/token-cache';
+import { defaultSocketDir, ensureSocketDir } from '../credentials/socket-dir';
 import { HostExecutor } from '../executor/host-executor';
 import { assertMinGitVersion, createGit, type Git } from '../executor/git';
 import type { JobExecutor } from '../executor/job-executor';
@@ -12,6 +15,7 @@ import { newBootId, type RunnerIdentityFile } from '../identity/identity-store';
 import { Journal } from '../journal/journal';
 import { createConsoleLogger, type Logger } from '../logger';
 import { assertInside } from '../paths/safe-segment';
+import { selfCommand } from '../self-command';
 import { CommandHandler } from '../supervisor/command-handler';
 import { RepoMutex } from '../supervisor/repo-mutex';
 import { Supervisor } from '../supervisor/supervisor';
@@ -35,6 +39,8 @@ export interface DaemonOptions {
   readonly bootId?: string;
   readonly executorFactory?: () => JobExecutor;
   readonly git?: Git;
+  /** D84: how git and the shims run this runner; tests pass ['bun', <src/main.ts>]. */
+  readonly selfCommand?: readonly string[];
 }
 
 export interface DaemonHandle {
@@ -79,6 +85,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   // 0o700 so a local user on a multi-tenant host cannot list the directory.
   await mkdir(home.dir, { recursive: true, mode: 0o700 });
   await chmod(home.dir, 0o700).catch(() => undefined);
+  const uid = process.getuid?.() ?? 0;
+  const socketDir = config.socketDir ?? defaultSocketDir(uid);
+  await ensureSocketDir(socketDir, uid);   // D78: refuse to start before anything could listen in an unsafe place
 
   const journal = Journal.open(home.journalPath, now);
   const bootId = options.bootId ?? newBootId();
@@ -92,8 +101,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   await capacity.refresh();
   const reporter = new CapabilityReporter(new StaticCapabilityProbe(config.capabilities, now), journal);
   await reporter.refresh();
+  const tokens = new TokenCache({ refreshMarginMs: tuning.tokenRefreshMarginMs, cooldownMs: tuning.tokenCooldownMs });
+  const broker = new CredentialBroker({
+    tokens, socketDir, runnerId: identity.runnerId, selfCommand: options.selfCommand ?? selfCommand(),
+    nowMs: () => Date.now(), sleep,
+    timing: { waitMs: tuning.tokenWaitMs, serveWaitMs: tuning.tokenServeWaitMs, pollMs: tuning.tokenPollMs },
+  });
 
-  const executor = options.executorFactory?.() ?? new HostExecutor({ config, git, log, nowMs: () => now().getTime(), sleep });
+  const executor = options.executorFactory?.() ?? new HostExecutor({ config, git, log, nowMs: () => now().getTime(), sleep, credentials: broker });
   const uploader: BundleUploader = {
     upload: (job, file, rebuild) => uploadWithRetry({
       upload: ({ jobId, leaseEpoch, file: f }) => client.uploadBundle({ jobId, leaseEpoch, filePath: f.path, sha256: f.sha256 }),
@@ -115,12 +130,18 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     onCapabilitiesSent: (hash) => reporter.markSent(hash),
     handleCommands: (commands) => handler.handle(commands),
     abandonUnknown: async (jobIds) => { for (const id of jobIds) await supervisor.abandonAll(id); },
+    tokenRequests: () => tokens.requests(Date.now()),
+    onTokens: (requested, granted, errors) => {
+      tokens.apply(requested, granted, errors, Date.now());
+      for (const error of errors) log.warn('git token refused', { jobId: error.jobId, reason: error.reason });
+    },
     onStop: (reason) => {
       stopReason = reason;
       log.error(reason.kind === 'protocol' ? 'server does not support this runner protocol; stopped' : 'server rejected the runner key; stopped', { message: reason.message });
     },
     log, sleep, random: Math.random, nowMs: () => performance.now(), minGapMs: tuning.syncMinGapMs,
   });
+  const stopNeedListener = tokens.onNeed(() => loop.wake());
   const running = loop.run().then((): StopReason | 'stopped' => stopReason ?? 'stopped');
 
   const timers = [
@@ -136,8 +157,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     stopping ??= (async () => {
       for (const timer of timers) clearInterval(timer);
       loop.stop();
+      stopNeedListener();
       await running;
       supervisor.shutdown();
+      await broker.closeAll();   // D90: sockets close; a prepare waiting for its first token ends now instead of in 120 s
       // D67: a halted run ends at its next check, or when its current executor call returns. The journal must outlive it.
       const notice = setTimeout(() => log.warn('waiting for halted job runs to end before closing the journal'), SHUTDOWN_NOTICE_MS);
       try {
@@ -155,7 +178,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     crashed = true;
     for (const timer of timers) clearInterval(timer);
     loop.stop();
+    stopNeedListener();
     supervisor.shutdown();   // a real kill ends every run; in one process they must at least stop emitting
+    void broker.closeAll();   // D90: a killed daemon's listeners die with it; the files stay (the next daemon replaces them)
     journal.close();
   };
   return { bootId, journal, supervisor, stopped: running, stop, crash };

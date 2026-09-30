@@ -64,7 +64,7 @@ async function setup(server: FakeServer) {
   const base = await tmp.make('daemon');
   const home = resolveHome({}, join(base, 'home'));
   const config = parseRunnerConfig({
-    serverUrl: server.url, workspaceRoot: join(base, 'ws'), naxHome: join(base, 'naxhome'), jobRetentionDays: 1,
+    serverUrl: server.url, workspaceRoot: join(base, 'ws'), naxHome: join(base, 'naxhome'), jobRetentionDays: 1, socketDir: join(base, 's'),
     capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, sandbox: { available: true }, tools: { git: true, gh: true, glab: false }, executors: ['host'] },
   }, {});
   const identity = { runnerId: 'r1', apiKey: 'kr_test', serverUrl: server.url, name: 'box', enrolledAt: '2026-10-01T00:00:00.000Z' };

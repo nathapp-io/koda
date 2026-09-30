@@ -60,4 +60,7 @@ describe('isAuthFailure and reasonFromError (D32)', () => {
     expect(reasonFromError(other)).toBe('workspace: fatal: repository not found');
     expect(reasonFromError(new Error('disk full'))).toBe('workspace: disk full');
   });
+  test('D89: an authentication failure is `git auth failed`', () => {
+    expect(NO_CREDENTIALS_REASON).toBe('git auth failed');
+  });
 });

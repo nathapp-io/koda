@@ -66,10 +66,15 @@ describe.skipIf(!enabled)('integration harness', () => {
     expect(await worlds()).toBe(before);                               // the temp directory was removed
   });
 
-  test('the fake forge origin serves the seeded repository through the insteadOf mapping', async () => {
-    const proc = Bun.spawn(['git', 'ls-remote', world.forgeCloneUrl], { stdout: 'pipe', stderr: 'pipe', env: { ...process.env } });
-    expect(await new Response(proc.stdout).text()).toContain('refs/heads/main');
-    expect(await proc.exited).toBe(0);
+  test('D91: the git front serves the seeded repository only with the minted token', async () => {
+    const ls = async (helper: string) => {
+      const proc = Bun.spawn(['git', '-c', 'credential.helper=', ...(helper ? ['-c', `credential.helper=${helper}`] : []), 'ls-remote', world.forgeCloneUrl], { stdout: 'pipe', stderr: 'pipe', env: { ...process.env } });
+      return { out: await new Response(proc.stdout).text(), code: await proc.exited };
+    };
+    expect((await ls('')).code).not.toBe(0);
+    const good = await ls('!f() { echo username=x-access-token; echo password=ghs_harness; }; f');
+    expect(good.code).toBe(0);
+    expect(good.out).toContain('refs/heads/main');
   });
 
   test('dispatch reaches a runner, the fake nax runs, and the job completes (a smoke test of every seam)', async () => {

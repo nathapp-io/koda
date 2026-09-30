@@ -1,4 +1,4 @@
-import { FLEET_PROTOCOL_VERSION, type CommandAck, type JobReport, type RunnerCapabilities, type SyncRequest } from '@nathapp/fleet-protocol';
+import { FLEET_PROTOCOL_VERSION, type CommandAck, type JobReport, type RunnerCapabilities, type SyncRequest, type TokenRequest } from '@nathapp/fleet-protocol';
 import type { Journal } from '../journal/journal';
 
 export const SYNC_LIMITS = Object.freeze({ jobs: 64, eventsPerJob: 500, acks: 256, tokenRequests: 64, payloadBytes: 16_384 } as const);
@@ -36,6 +36,8 @@ export interface BuildInput {
   readonly acks: readonly CommandAck[];
   readonly capabilities?: RunnerCapabilities;
   readonly scale: BatchScale;
+  /** Design §3.1: from the TokenCache; the server allows 64. */
+  readonly tokenRequests?: readonly TokenRequest[];
 }
 
 /** The server allows 500 characters and no NUL; a runner-built detail is shorter and never poisons a request (D59). */
@@ -69,7 +71,7 @@ export function buildSyncRequest(input: BuildInput): SyncRequest {
     ...(input.capabilities ? { capabilities: input.capabilities } : {}),
     freeSlots,
     commandAcks,
-    tokenRequests: [] as SyncRequest['tokenRequests'],
+    tokenRequests: (input.tokenRequests ?? []).slice(0, SYNC_LIMITS.tokenRequests).map((r) => ({ jobId: r.jobId, leaseEpoch: r.leaseEpoch })),
   };
   let budget = MAX_BODY_BYTES - byteLength({ ...head, jobs: [] });
   const jobs: JobReport[] = [];

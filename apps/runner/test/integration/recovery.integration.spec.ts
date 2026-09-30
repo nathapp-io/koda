@@ -46,7 +46,7 @@ describe.skipIf(!enabled)('runner 3a against the real API: recovery', () => {
     await runner.stop();
   });
 
-  test('a run that finishes while the daemon is down is verdicted, bundled and reported after READOPT, not lost', async () => {
+  test('a run that finishes while the daemon is down is verdicted, bundled and reported after READOPT; its push had no credentials, so it escalates (D94, S1 spec §7.3)', async () => {
     const runner = await world.addRunner('recover-2');
     await runner.start();
     const gate = join(world.base, 'gate-fe');
@@ -58,8 +58,8 @@ describe.skipIf(!enabled)('runner 3a against the real API: recovery', () => {
     expect(status.run.status).toBe('completed');
     expect((await world.job(id)).state).toBe('RUNNING');          // the server has heard nothing since the daemon went down
     await runner.start();
-    const job = await world.waitForJob(id, (j) => j.state === 'COMPLETED', 60_000);
-    expect(job).toMatchObject({ resultBranch: 'feat/fe', resultPrUrl: 'https://example.test/koda/pull/1' });
+    const job = await world.waitForJob(id, (j) => j.state === 'ESCALATED', 60_000);
+    expect(job).toMatchObject({ resultBranch: 'feat/fe', finishResult: 'escalated', resultPrUrl: null });
     expect((await readopts(id)).some((c) => c.ackResult === 'ok')).toBe(true);
     expect((await world.downloadBundle(id)).status).toBe(200);
     await runner.stop();

@@ -27,6 +27,8 @@ export interface RunnerConfig {
   readonly naxCommand: readonly string[];
   readonly naxHome: string;
   readonly jobRetentionDays: number;
+  /** D78: where the per-job credential sockets live; null means `/tmp/koda-runner-<uid>`. */
+  readonly socketDir: string | null;
   readonly capabilities: StaticCapabilities;
 }
 
@@ -179,6 +181,8 @@ export function parseRunnerConfig(raw: unknown, env: NodeJS.ProcessEnv): RunnerC
   if (typeof naxHome !== 'string' || !isAbsolute(naxHome)) throw new ConfigError('naxHome must be an absolute path');
   const retention = raw.jobRetentionDays ?? 7;
   if (!Number.isInteger(retention) || (retention as number) < 1 || (retention as number) > 365) throw new ConfigError('jobRetentionDays must be 1-365');
+  const socketDir = raw.socketDir ?? null;
+  if (socketDir !== null && (typeof socketDir !== 'string' || !isAbsolute(socketDir))) throw new ConfigError('socketDir must be an absolute path');
   return {
     serverUrl: parseServerUrl(raw.serverUrl, allowInsecureHttp),
     allowInsecureHttp,
@@ -187,6 +191,7 @@ export function parseRunnerConfig(raw: unknown, env: NodeJS.ProcessEnv): RunnerC
     naxCommand: [...(naxCommand as string[])],
     naxHome,
     jobRetentionDays: retention as number,
+    socketDir: socketDir as string | null,
     capabilities: parseCapabilities(raw.capabilities),
   };
 }

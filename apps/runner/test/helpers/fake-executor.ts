@@ -1,5 +1,5 @@
 import type { BundleFile } from '../../src/bundle/build-bundle';
-import type { JobExecutor, JobWatcher, PlanPushOutcome, PrepareOptions, PrepareOutcome, SpawnHandle, WatchOptions } from '../../src/executor/job-executor';
+import type { JobExecutor, JobWatcher, FinishPlanOptions, PlanPushOutcome, PrepareOptions, PrepareOutcome, SpawnHandle, WatchOptions } from '../../src/executor/job-executor';
 import type { JobRow } from '../../src/journal/types';
 import type { PlanCheck } from '../../src/verdict/plan-verdict';
 import type { StatusView } from '../../src/verdict/status-view';
@@ -11,6 +11,7 @@ export class FakeExecutor implements JobExecutor {
   readonly killed: Array<{ pgid: number; signal: string }> = [];
   readonly watchOptions: WatchOptions[] = [];
   readonly prepareOptions: PrepareOptions[] = [];
+  readonly finishPlanOptions: FinishPlanOptions[] = [];
   prepareResult: PrepareOutcome = { ok: true, branch: 'feat/x' };
   spawnError: Error | null = null;
   handle: SpawnHandle = { pid: 4242, pgid: 4242 };
@@ -24,6 +25,7 @@ export class FakeExecutor implements JobExecutor {
   ledger: { branch: string; headSha: string } | null = { branch: 'feat/x', headSha: 'b'.repeat(40) };
   bundle: BundleFile = { path: '/b.tgz', size: 1, sha256: 'c'.repeat(64) };
   bundleError: Error | null = null;
+  resumeError: Error | null = null;
   ticks = 0;
   onTick: (n: number, final: boolean, sink: WatcherSink) => void = () => undefined;
   onKill: (signal: 'SIGTERM' | 'SIGKILL') => void = () => { this.alive = false; };
@@ -84,8 +86,9 @@ export class FakeExecutor implements JobExecutor {
     return this.plan;
   }
 
-  async finishPlan(job: JobRow): Promise<PlanPushOutcome> {
+  async finishPlan(job: JobRow, options: FinishPlanOptions = {}): Promise<PlanPushOutcome> {
     this.note('finishPlan', job);
+    this.finishPlanOptions.push(options);
     return this.planPush;
   }
 
@@ -101,5 +104,14 @@ export class FakeExecutor implements JobExecutor {
 
   async cleanup(job: JobRow): Promise<void> {
     this.note('cleanup', job);
+  }
+
+  async resumeCredentials(job: JobRow): Promise<void> {
+    this.note('resumeCredentials', job);
+    if (this.resumeError) throw this.resumeError;
+  }
+
+  async releaseCredentials(job: JobRow): Promise<void> {
+    this.note('releaseCredentials', job);
   }
 }

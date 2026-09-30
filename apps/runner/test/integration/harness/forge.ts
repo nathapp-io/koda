@@ -8,6 +8,8 @@ export interface Forge {
   readonly keyFile: string;
 }
 
+export const HARNESS_TOKEN = 'ghs_harness';
+
 /** A local GitHub: the App installation, the repo and the token route the API's registration check calls (fleet-repos.integration.spec.ts). */
 export async function startForge(dir: string): Promise<Forge> {
   const forge = await startFakeForge();
@@ -17,6 +19,6 @@ export async function startForge(dir: string): Promise<Forge> {
   await writeFile(keyFile, privateKey.export({ type: 'pkcs1', format: 'pem' }));
   forge.routes.set('GET /repos/acme/app/installation', () => ({ status: 200, body: { id: 77 } }));
   forge.routes.set('GET /repos/acme/app', () => ({ status: 200, body: { name: 'app', owner: { login: 'acme' }, default_branch: 'main' } }));
-  forge.routes.set('POST /app/installations/77/access_tokens', () => ({ status: 201, body: { token: 'ghs_harness', expires_at: '2099-01-01T00:00:00Z' } }));
+  forge.routes.set('POST /app/installations/77/access_tokens', () => ({ status: 201, body: { token: HARNESS_TOKEN, expires_at: '2099-01-01T00:00:00Z' } }));
   return { forge, keyFile };
 }

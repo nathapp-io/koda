@@ -9,6 +9,15 @@ export interface Tuning {
   /** D60: how often and for how long a job waits for the server to ack its UPLOADING event before it uploads the bundle. */
   readonly ackPollMs: number;
   readonly uploadAckWaitMs: number;
+  /** D92, design §3.1: ask for a new git token this long before the current one expires. */
+  readonly tokenRefreshMarginMs: number;
+  /** D81: pause after a token already inside the refresh margin, or a token error. */
+  readonly tokenCooldownMs: number;
+  /** D82: how long prepare waits for a job's first token. */
+  readonly tokenWaitMs: number;
+  /** D79: how long the socket holds a request open for a token that has not arrived. */
+  readonly tokenServeWaitMs: number;
+  readonly tokenPollMs: number;
 }
 
 /** D42: the design's constants in one place; only `startDaemon` options (tests) override them, runner.json cannot. */
@@ -22,4 +31,9 @@ export const TUNING: Tuning = Object.freeze({
   readoptHeartbeatMs: 120_000,
   ackPollMs: 250,
   uploadAckWaitMs: 60_000,
+  tokenRefreshMarginMs: 240_000,
+  tokenCooldownMs: 30_000,
+  tokenWaitMs: 120_000,
+  tokenServeWaitMs: 30_000,
+  tokenPollMs: 250,
 });

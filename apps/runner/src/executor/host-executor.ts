@@ -1,7 +1,8 @@
-import { copyFile, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
+import { delimiter, join } from 'node:path';
 import { buildBundle, type BundleFile } from '../bundle/build-bundle';
 import type { RunnerConfig } from '../config/runner-config';
+import type { CredentialProvider } from '../credentials/broker';
 import type { JobRow } from '../journal/types';
 import type { Logger } from '../logger';
 import { assertInside, featureDirFor, repoDirFor } from '../paths/safe-segment';
@@ -11,7 +12,7 @@ import { Watcher, type WatcherSink } from '../watcher/watcher';
 import { readStatusFile } from '../watcher/status-snapshot';
 import { prepareCheckout } from './checkout';
 import { reasonFromError, type Git } from './git';
-import type { JobExecutor, JobWatcher, PlanPushOutcome, PrepareOptions, PrepareOutcome, SpawnHandle, WatchOptions } from './job-executor';
+import type { JobExecutor, JobWatcher, FinishPlanOptions, PlanPushOutcome, PrepareOptions, PrepareOutcome, SpawnHandle, WatchOptions } from './job-executor';
 import { deleteJobProfile, jobProfileName, projectNameFor, writeJobProfile } from './job-profile';
 import { buildNaxArgv, isProcessAlive, signalGroup, spawnNax } from './nax-process';
 import { readProcessCommand, reapNaxPids } from './pid-registry';
@@ -25,12 +26,24 @@ export interface HostExecutorDeps {
   readonly nowMs: () => number;
   /** D77: the PLAN push back-off; tests inject a no-op. */
   readonly sleep?: (ms: number) => Promise<void>;
+  /** Design §3.1: per-job git credentials (the broker; a stub in `file://` specs). */
+  readonly credentials: CredentialProvider;
 }
 
 // D53: a new attempt (including a requeue, which is a new lease epoch over the same job dir, D77) starts from none of these.
 const ATTEMPT_FILES = ['nax-out', 'nax.stdout', 'nax.stderr', 'pre-plan', 'plan-out', 'plan-out.tmp', 'plan-logs', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json'];
 const CANCELLED: PrepareOutcome = { ok: false, reason: 'cancelled', cancelled: true };
 const exists = (path: string): Promise<boolean> => stat(path).then(() => true, () => false);
+
+/**
+ * D88: the forge-token variables the daemon may have inherited from its operator never reach nax's environment — the
+ * job's shims are the only thing that puts a token into a gh/glab child, from the socket.
+ */
+const CREDENTIAL_ENV_VARS: readonly string[] = ['GH_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_TOKEN', 'GITLAB_TOKEN', 'GL_TOKEN'];
+
+export function withoutCredentialVars(env: Readonly<Record<string, string | undefined>>): Readonly<Record<string, string | undefined>> {
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !CREDENTIAL_ENV_VARS.includes(name)));
+}
 
 async function moveAside(from: string, to: string): Promise<void> {
   try {
@@ -61,10 +74,14 @@ export class HostExecutor implements JobExecutor {
       const { assign } = job;
       if (cancelled()) return CANCELLED;
       await Promise.all(ATTEMPT_FILES.map((name) => rm(join(jobDir, name), { recursive: true, force: true })));
-      await mkdir(jobDir, { recursive: true });
-      await ensureClone(this.deps.git, { repoDir, cloneUrl: assign.repo.cloneUrl, identity: assign.gitIdentity });
+      await mkdir(jobDir, { recursive: true, mode: 0o700 });
+      await chmod(jobDir, 0o700);   // D93: it holds the shims
+      const acquired = await this.deps.credentials.acquire(job, { wait: true, isCancelled: cancelled });
+      if (!acquired.ok) return acquired.cancelled ? CANCELLED : { ok: false, reason: acquired.reason };
+      const { helper } = acquired.credentials;
+      await ensureClone(this.deps.git, { repoDir, cloneUrl: assign.repo.cloneUrl, identity: assign.gitIdentity, credentialHelper: helper });
       if (cancelled()) return CANCELLED;
-      await cleanWorkspace(this.deps.git, repoDir);
+      await cleanWorkspace(this.deps.git, repoDir, helper);
       if (cancelled()) return CANCELLED;
       const checkout = await prepareCheckout({ git: this.deps.git, repoDir, assign });
       if (!checkout.ok) return { ok: false, reason: checkout.reason };
@@ -93,9 +110,14 @@ export class HostExecutor implements JobExecutor {
   async spawn(job: JobRow): Promise<SpawnHandle> {
     const { repoDir, jobDir } = this.dirs(job);
     const argv = buildNaxArgv(this.deps.config.naxCommand, job.assign);
+    const acquired = await this.deps.credentials.acquire(job, { wait: false });
+    const binDir = acquired.ok ? acquired.credentials.binDir : null;
+    const inherited = process.env['PATH'] ?? '';
+    // D88: the shims come first on nax's PATH; no token variable is ever set here.
+    const path = binDir ? `${binDir}${delimiter}${inherited}` : inherited;
     return spawnNax(argv, {
       cwd: repoDir, stdoutPath: join(jobDir, 'nax.stdout'), stderrPath: join(jobDir, 'nax.stderr'),
-      env: { ...process.env, NAX_GLOBAL_CONFIG_DIR: this.deps.config.naxHome },
+      env: { ...withoutCredentialVars(process.env), NAX_GLOBAL_CONFIG_DIR: this.deps.config.naxHome, PATH: path },
     });
   }
 
@@ -138,14 +160,17 @@ export class HostExecutor implements JobExecutor {
     return checkPlanPrd(await readFile(path, 'utf8').catch(() => null));
   }
 
-  async finishPlan(job: JobRow): Promise<PlanPushOutcome> {
+  async finishPlan(job: JobRow, options: FinishPlanOptions = {}): Promise<PlanPushOutcome> {
     const { repoDir, jobDir } = this.dirs(job);
     const check = await this.readPlan(job);
     if (!check.ok || check.branchName === null) return { ok: false, reason: check.branchName === null && check.ok ? 'checkout: invalid branchName' : 'plan output missing' };
+    const acquired = await this.deps.credentials.acquire(job, { wait: true, isCancelled: () => options.isCancelled?.() === true });
+    if (!acquired.ok) return acquired.cancelled ? { ok: false, reason: 'cancelled', cancelled: true } : { ok: false, reason: acquired.reason };
     const refSha = (await this.deps.git.ok(['rev-parse', 'HEAD'], { cwd: repoDir })).trim();
     const result = await commitAndPushPlan({
       git: this.deps.git, repoDir, jobDir, feature: job.assign.feature, jobId: job.jobId,
       branchName: check.branchName, refSha, defaultBranch: job.assign.repo.defaultBranch, identity: job.assign.gitIdentity,
+      credentialHelper: acquired.credentials.helper,
       ...(this.deps.sleep ? { sleep: this.deps.sleep } : {}),
     });
     return result.ok ? { ok: true, branch: result.branch, sha: result.sha } : { ok: false, reason: result.reason };
@@ -168,6 +193,18 @@ export class HostExecutor implements JobExecutor {
   }
 
   async cleanup(job: JobRow): Promise<void> {
-    await deleteJobProfile(this.deps.config.naxHome, job.jobId);
+    try {
+      await deleteJobProfile(this.deps.config.naxHome, job.jobId);
+    } finally {
+      await this.deps.credentials.release(job);
+    }
+  }
+
+  async resumeCredentials(job: JobRow): Promise<void> {
+    await this.deps.credentials.acquire(job, { wait: false });
+  }
+
+  async releaseCredentials(job: JobRow): Promise<void> {
+    await this.deps.credentials.release(job);
   }
 }

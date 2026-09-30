@@ -74,6 +74,7 @@ apps/runner/src/
   config/            runner.json: serverUrl (https unless loopback or --insecure-http), workspaceRoot,
                      labels (sent at enroll only), naxCommand (default ["nax"]), naxHome (default: nax's
                      globalConfigDir, NAX_GLOBAL_CONFIG_DIR else ~/.nax), jobRetentionDays (default 7),
+                     socketDir (default /tmp/koda-runner-<uid>, 3b),
                      capabilities (3a only). No capacity: the server owns it (GET /fleet/runner/me, #157).
   identity/          runnerId + apiKey file (mode 0600); bootId, new per daemon start
   journal/           bun:sqlite, see §1.4
@@ -98,6 +99,10 @@ helper, so it never sends `tokenRequests` and ignores `gitTokens`; a clone, fetc
 authentication error fails the job with `stateReason = 'no git credentials (runner 3b)'`. 3a is exercised end
 to end only against `file://` remotes (tests map the server's `https://<host>/<owner>/<repo>.git` clone URL with
 `url.<file-url>.insteadOf` through `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`).
+
+> **Superseded in 3b-1 (D89, D91):** an authentication failure is now `git auth failed`, and the integration
+> harness no longer maps clone URLs to `file://`: an authenticated git-HTTP front (`git http-backend`) serves the
+> repositories, so every scenario authenticates through the credential helper.
 
 ### 1.1 Protocol v1 edit (R-3.2)
 
@@ -261,6 +266,10 @@ Control paths:
 
 ### 3.1 Git credential broker
 
+> **Amended by plan 3b-1 (D78, D79, D82):** the socket is `<socketDir>/<16 hex>.sock` (default
+> `/tmp/koda-runner-<uid>`, mode 0700, checked at start), not `<jobDir>/git-cred.sock`, because a unix socket path
+> is limited to 104 bytes on macOS. The wire words and the token-error rule are in the plan's decision register.
+
 - **Tokens:** a `tokenRequest` is sent on ASSIGN, and again when the cached token is within 240 s of
   `expiresAt` (the server reuses a cached token until 300 s before expiry, `git-token.broker.ts:34`, so an earlier
   request returns the same token), repeating until `expiresAt` changes. `gitTokenErrors` fail a job that has no
@@ -331,8 +340,8 @@ TDD throughout, `bun test` in `apps/runner`.
     `RAG_IN_MEMORY_ONLY=true`, `EMBEDDING_PROVIDER=fake`, `REGISTRATION_ENABLED=true`, a high
     `AUTH_LOGIN_THROTTLE_LIMIT`, a short `FLEET_SYNC_WAIT_MS`, a temp `FLEET_ARTIFACT_DIR`, `VCS_ENCRYPTION_KEY`
     and `GITHUB_APP_*` pointing at an in-test fake forge (the API's `test/helpers/fake-forge.ts` pattern);
-  - seeds admin, project, repo and enrollment token over HTTP, and runs the daemon in process with
-    `insteadOf` mapping to `file://` bare remotes.
+  - seeds admin, project, repo and enrollment token over HTTP, and runs the daemon in process against an
+    authenticated git-HTTP front of the bare remotes (3b-1 D91; 3a used an insteadOf mapping to file://).
   - 3a scenarios: RUN happy path, PLAN commit and push, cancel, daemon kill then READOPT (both the running and
     the finished-while-down case), network cut then resend from the ack cursor, stale epoch then `ABANDON`.
     3b: clone, push and `gh pr create` through helper and shims with a fake `gh`; no token in nax's environment,

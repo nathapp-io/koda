@@ -7,6 +7,7 @@ describe('TUNING (D42, slice 3 design)', () => {
       statusPollMs: 2_000, killGraceMs: 30_000, syncMinGapMs: 250, syncTimeoutMs: 35_000,
       capacityRefreshMs: 300_000, pruneIntervalMs: 86_400_000, readoptHeartbeatMs: 120_000,
       ackPollMs: 250, uploadAckWaitMs: 60_000,
+      tokenRefreshMarginMs: 240_000, tokenCooldownMs: 30_000, tokenWaitMs: 120_000, tokenServeWaitMs: 30_000, tokenPollMs: 250,
     });
     expect(Object.isFrozen(TUNING)).toBe(true);
   });

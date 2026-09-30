@@ -105,3 +105,17 @@ describe('buildSyncRequest', () => {
     expect(build().jobs[0].events).toHaveLength(1);
   });
 });
+
+describe('token requests (design §3.1)', () => {
+  test('are carried as given, capped at the sync limit of 64', () => {
+    const journal = Journal.open(':memory:');
+    const tokenRequests = Array.from({ length: 70 }, (_, i) => ({ jobId: `j${i}`, leaseEpoch: 1 }));
+    const request = buildSyncRequest({ journal, bootId: 'b', daemonVersion: 'v', freeSlots: 1, acks: [], scale: FULL_SCALE, tokenRequests });
+    expect(request.tokenRequests).toHaveLength(SYNC_LIMITS.tokenRequests);
+    expect(request.tokenRequests[0]).toEqual({ jobId: 'j0', leaseEpoch: 1 });
+  });
+  test('are empty when none are given', () => {
+    const request = buildSyncRequest({ journal: Journal.open(':memory:'), bootId: 'b', daemonVersion: 'v', freeSlots: 1, acks: [], scale: FULL_SCALE });
+    expect(request.tokenRequests).toEqual([]);
+  });
+});

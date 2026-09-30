@@ -15,6 +15,11 @@ const flag = (...names: string[]): string | undefined => {
 };
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const git = (...a: string[]): string => execFileSync('git', a, { cwd: process.cwd(), encoding: 'utf8' }).trim();
+/** D94: `FAKE_NAX_GH=1` opens the PR through `gh` on PATH (the job's shim), as nax's finish phase does. */
+const openPr = (branch: string): string => {
+  if (process.env['FAKE_NAX_GH'] !== '1') return 'https://example.test/koda/pull/1';
+  return execFileSync('gh', ['pr', 'create', '--head', branch, '--title', `${feature}: fake`, '--body', 'fake'], { cwd: process.cwd(), encoding: 'utf8' }).trim();
+};
 const writeAtomic = (path: string, text: string): void => {
   writeFileSync(`${path}.tmp`, text);
   renameSync(`${path}.tmp`, path);
@@ -39,6 +44,8 @@ if (!profile.outputDir || !isAbsolute(profile.outputDir)) {
   process.exit(2);
 }
 const outDir = profile.outputDir;
+const envDump = process.env['FAKE_NAX_ENV_DUMP'];
+if (envDump) writeFileSync(envDump, JSON.stringify(process.env));
 const scenario = process.env['FAKE_NAX_SCENARIO'] ?? (command === 'plan' ? 'plan-valid' : 'completed');
 const stepMs = Number(process.env['FAKE_NAX_STEP_MS'] ?? 30);
 const steps = Number(process.env['FAKE_NAX_STEPS'] ?? 3);
@@ -131,18 +138,27 @@ async function run(): Promise<void> {
     } catch {
       branch = '';
     }
-    const opened = scenario === 'completed';
-    if (branch && opened) git('push', '-q', '--set-upstream', 'origin', branch);
+    let pushed = false;
+    if (branch && scenario === 'completed') {
+      try {
+        git('push', '-q', '--set-upstream', 'origin', branch);
+        pushed = true;
+      } catch {
+        pushed = false;   // D94: nax escalates a finish push that fails (no credentials, network)
+      }
+    }
+    const opened = scenario === 'completed' && pushed;
+    const escalationReason = scenario === 'completed' ? 'push failed' : 'fake escalation';
     if (branch) {
       const ledgerDir = join(outDir, 'finish-audit', feature);
       mkdirSync(ledgerDir, { recursive: true });
-      const prUrl = 'https://example.test/koda/pull/1';
+      const prUrl = opened ? openPr(branch) : undefined;
       writeFileSync(join(ledgerDir, 'last.json'), JSON.stringify({
-        branch, headSha: git('rev-parse', 'HEAD'), status: opened ? 'opened' : 'escalated', ...(opened ? { prUrl } : {}), runId, finishedAt: new Date().toISOString(),
+        branch, headSha: git('rev-parse', 'HEAD'), status: opened ? 'opened' : 'escalated', ...(prUrl ? { prUrl } : {}), runId, finishedAt: new Date().toISOString(),
       }));
-      finish = opened ? { status: 'passed', result: 'opened', url: prUrl } : { status: 'passed', result: 'escalated', escalationReason: 'fake escalation' };
+      finish = opened ? { status: 'passed', result: 'opened', url: prUrl } : { status: 'passed', result: 'escalated', escalationReason };
     } else {
-      finish = opened ? { status: 'skipped', reason: 'branch' } : { status: 'passed', result: 'escalated', escalationReason: 'fake escalation' };
+      finish = scenario === 'completed' ? { status: 'skipped', reason: 'branch' } : { status: 'passed', result: 'escalated', escalationReason: 'fake escalation' };
     }
   }
   flush();

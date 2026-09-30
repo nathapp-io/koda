@@ -11,6 +11,11 @@ export interface PrepareOptions {
   readonly isCancelled?: () => boolean;
 }
 
+/** Polled while the PLAN push waits for its first token; true ends the wait at once (the run feeds cancel and halt). */
+export interface FinishPlanOptions {
+  readonly isCancelled?: () => boolean;
+}
+
 export interface SpawnHandle {
   readonly pid: number;
   readonly pgid: number;
@@ -25,7 +30,7 @@ export interface JobWatcher {
   tick(final?: boolean): Promise<void>;
 }
 
-export type PlanPushOutcome = { ok: true; branch: string; sha: string } | { ok: false; reason: string };
+export type PlanPushOutcome = { ok: true; branch: string; sha: string } | { ok: false; reason: string; cancelled?: true };
 
 /**
  * Slice 3 design §1 `executor/`. 3a ships HostExecutor only; a container or VM executor implements the same seam
@@ -42,8 +47,12 @@ export interface JobExecutor {
   createWatcher(job: JobRow, sink: WatcherSink, options: WatchOptions): JobWatcher;
   readStatus(job: JobRow): Promise<StatusView | null>;
   readPlan(job: JobRow): Promise<PlanCheck>;
-  finishPlan(job: JobRow): Promise<PlanPushOutcome>;
+  finishPlan(job: JobRow, options?: FinishPlanOptions): Promise<PlanPushOutcome>;
   readFinishLedger(job: JobRow): Promise<{ branch: string; headSha: string } | null>;
   collectBundle(job: JobRow): Promise<BundleFile>;
   cleanup(job: JobRow): Promise<void>;
+  /** D90: after a daemon restart, re-open this job's credential socket (a readopted nax may still push). */
+  resumeCredentials(job: JobRow): Promise<void>;
+  /** D90: close this epoch's credential socket and forget its token; other epochs of the job are untouched. */
+  releaseCredentials(job: JobRow): Promise<void>;
 }

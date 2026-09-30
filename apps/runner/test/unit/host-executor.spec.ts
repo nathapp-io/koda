@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AssignPayload } from '@nathapp/fleet-protocol';
+import type { CredentialProvider } from '../../src/credentials/broker';
 import { HostExecutor } from '../../src/executor/host-executor';
 import { createGit } from '../../src/executor/git';
 import { jobProfilePath } from '../../src/executor/job-profile';
@@ -12,6 +13,7 @@ import { createMemoryLogger } from '../../src/logger';
 import { jobDirFor } from '../../src/paths/safe-segment';
 import { runVerdict } from '../../src/verdict/run-verdict';
 import { git as sh, isolateGit, makeOrigin } from '../helpers/git-fixture';
+import { NO_CREDENTIALS } from '../helpers/no-credentials';
 import { makeTempDirs } from '../helpers/tmp';
 import { waitFor } from '../helpers/wait';
 
@@ -33,7 +35,7 @@ async function world(command: 'RUN' | 'PLAN' = 'RUN', over: Partial<AssignPayloa
   };
   const journal = Journal.open(':memory:');
   const row: JobRow = journal.insertJob({ assign, leaseEpoch: 1, repoKey: 'acme/app', jobDir: jobDirFor(workspaceRoot, assign.jobId) }).row;
-  const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now(), sleep: async () => undefined });
+  const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now(), sleep: async () => undefined, credentials: NO_CREDENTIALS });
   return { base, origin, workspaceRoot, naxHome, assign, row, ex, journal };
 }
 
@@ -217,7 +219,46 @@ describe('HostExecutor PLAN', () => {
     };
     const journal = Journal.open(':memory:');
     const row = journal.insertJob({ assign, leaseEpoch: 1, repoKey: 'acme/bare', jobDir: jobDirFor(workspaceRoot, 'cjob2') }).row;
-    const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome: join(base, 'nh') }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now() });
+    const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome: join(base, 'nh') }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now(), credentials: NO_CREDENTIALS });
     expect(await ex.prepare(row)).toEqual({ ok: false, reason: 'no .nax dir' });
+  });
+});
+
+describe('HostExecutor credentials wiring (review minors 2, 7)', () => {
+  test('D88: forge-token variables from the daemon environment never reach nax', async () => {
+    const w = await world();
+    await w.ex.prepare(w.row);
+    const dump = join(w.base, 'nax-env.json');
+    process.env['GH_TOKEN'] = 'operator-ghs';
+    process.env['GITLAB_TOKEN'] = 'operator-gls';
+    process.env['FAKE_NAX_ENV_DUMP'] = dump;
+    try {
+      const handle = await w.ex.spawn(w.row);
+      await waitFor(() => !w.ex.isAlive(handle.pid));
+    } finally {
+      for (const key of ['GH_TOKEN', 'GITLAB_TOKEN', 'FAKE_NAX_ENV_DUMP']) delete process.env[key];
+    }
+    const env = JSON.parse(await readFile(dump, 'utf8')) as Record<string, string>;
+    expect(env['GH_TOKEN']).toBeUndefined();
+    expect(env['GITLAB_TOKEN']).toBeUndefined();
+    expect(env['NAX_GLOBAL_CONFIG_DIR']).toBe(w.naxHome);   // the rest of the environment is intact
+  });
+  test('finishPlan hands its cancel probe to the credential acquire and reports the cancelled wait', async () => {
+    const w = await world('PLAN');
+    await w.ex.prepare(w.row);
+    const stash = join(w.row.jobDir, 'plan-out', 'prd.json');   // D61: the write-once stash is what readPlan trusts
+    await mkdir(join(w.row.jobDir, 'plan-out'), { recursive: true });
+    await writeFile(stash, JSON.stringify({ branchName: 'feat/feat', userStories: [{ id: 'US-1' }] }));
+    const seen: { cancelled: boolean | null } = { cancelled: null };
+    const credentials: CredentialProvider = {
+      acquire: async (_job, options) => {
+        seen.cancelled = options.isCancelled?.() === true;
+        return seen.cancelled ? { ok: false, reason: 'cancelled', cancelled: true } : { ok: true, credentials: { helper: null, binDir: null } };
+      },
+      release: async () => undefined,
+    };
+    const ex = new HostExecutor({ config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now(), sleep: async () => undefined, credentials });
+    expect(await ex.finishPlan(w.row, { isCancelled: () => true })).toEqual({ ok: false, reason: 'cancelled', cancelled: true });
+    expect(seen.cancelled).toBe(true);
   });
 });

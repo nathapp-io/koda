@@ -91,9 +91,21 @@ export class JobRun {
 
   private async lifecycle(from: RunStart): Promise<void> {
     if ((from === 'prepare' || from === 'reprepare') && !(await this.prepareAndSpawn(from === 'reprepare'))) return;
+    if (from === 'watch') await this.resumeCredentials();
     if (from !== 'finish') await this.watchUntilExit(from === 'watch');
     if (this.halted) return;
     await this.finish();
+  }
+
+  /** D90: a readopted nax may still push; its socket died with the previous daemon. A failure is reported, not fatal. */
+  private async resumeCredentials(): Promise<void> {
+    const row = this.row();
+    if (!row) return;
+    try {
+      await this.deps.executor.resumeCredentials(row);
+    } catch (error) {
+      this.events.lifecycle('warn', `git credentials could not be restored: ${errorMessage(error)}`);
+    }
   }
 
   requestCancel(): boolean {
@@ -157,6 +169,10 @@ export class JobRun {
   private async abandonCleanup(row: JobRow): Promise<void> {
     try {
       await killIfOurs(this.deps.executor, row, this.deps.log);   // SEC-2: returns void; the matchesProcess=false branch is intentionally silent (D65)
+      // D90: the socket is per epoch, so it closes even when a live higher epoch keeps the reap and the profile.
+      await this.deps.executor.releaseCredentials(row).catch((error: unknown) => {
+        this.deps.log.warn('credential release failed', { jobId: this.jobId, error: errorMessage(error) });
+      });
       if (this.higherEpochLive()) {
         this.deps.log.info('abandon leaves reap and cleanup to the live higher epoch', { jobId: this.jobId, leaseEpoch: this.leaseEpoch });
         return;
@@ -172,7 +188,9 @@ export class JobRun {
     const row = this.mustRow();
     if (this.cancelRequested()) return this.endBeforeSpawn('CANCELLED', 'cancelled before start');
     if (reprepare) await this.reapQuietly(row);   // D65: a nax spawned just before the crash may have registered pids
-    const prepared = await this.deps.executor.prepare(row, { isCancelled: () => this.cancelRequested() });
+    // A halt (abandon, daemon stop) must end a prepare that is still waiting for its first token at once: the broker's
+    // wait polls this probe, and `prepareAndSpawn` discards a halted prepare's outcome below without a transition.
+    const prepared = await this.deps.executor.prepare(row, { isCancelled: () => this.cancelRequested() || this.halted });
     if (this.halted) return false;
     if (!prepared.ok) return prepared.cancelled ? this.endBeforeSpawn('CANCELLED', 'cancelled before start') : this.endBeforeSpawn('FAILED', prepared.reason);
     if (this.cancelRequested()) return this.endBeforeSpawn('CANCELLED', 'cancelled before start');
@@ -256,11 +274,15 @@ export class JobRun {
     let verdict = judged.verdict;
     let result = { branch: row.resultBranch, sha: row.resultSha };
     if (row.command === 'PLAN' && verdict.state === 'COMPLETED' && row.resultSha === null) {
-      const pushed = await this.deps.executor.finishPlan(row);
+      // The same probe prepare got: a cancel or halt during the push's first-token wait must not hold the repo mutex
+      // for tokenWaitMs. A cancelled push is CANCELLED (the verdict planVerdict itself gives), not FAILED.
+      const pushed = await this.deps.executor.finishPlan(row, { isCancelled: () => this.cancelRequested() || this.halted });
       if (pushed.ok) {
         result = { branch: pushed.branch, sha: pushed.sha };
         this.deps.journal.updateJob(this.jobId, this.leaseEpoch, { resultBranch: pushed.branch, resultSha: pushed.sha });
-      } else {
+      } else if (pushed.cancelled && this.cancelRequested()) {
+        verdict = { state: 'CANCELLED', reason: null };
+      } else if (!pushed.cancelled) {
         verdict = { state: 'FAILED', reason: pushed.reason };
       }
     } else if (row.command === 'RUN') {

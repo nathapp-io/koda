@@ -233,6 +233,34 @@ describe('PLAN', () => {
     expect(stateNames(b)).toEqual(['COMPLETED']);
     expect(lastSnapshot(b)).toMatchObject({ resultSha: 'd'.repeat(40) });
   });
+  test('a cancel that lands during the PLAN push ends CANCELLED, not FAILED (review minor 2)', async () => {
+    const b = build('PLAN');
+    b.ex.dieAfterTicks(1);
+    let sawOptions: readonly unknown[] = [];
+    b.ex.finishPlan = async (job, options) => {
+      sawOptions = [...b.ex.finishPlanOptions, options];
+      b.run.requestCancel();
+      return options?.isCancelled?.() === true ? { ok: false, reason: 'cancelled', cancelled: true } : b.ex.planPush;
+    };
+    await b.run.start('prepare');
+    expect(sawOptions).toHaveLength(1);
+    expect(states(b).at(-1)).toEqual({ to: 'CANCELLED' });   // reason null, as planVerdict words a cancel
+    expect(stateNames(b)).toEqual(['RUNNING', 'UPLOADING', 'CANCELLED']);
+  });
+  test('a halt during the PLAN push records nothing: the probe reflects halt and the run lets go (review minor 2)', async () => {
+    const b = build('PLAN');
+    b.ex.dieAfterTicks(1);
+    const seen: { probe: (() => boolean) | null } = { probe: null };
+    b.ex.finishPlan = async (_job, options) => {
+      seen.probe = options?.isCancelled ?? null;
+      b.run.halt();
+      return { ok: false, reason: 'cancelled', cancelled: true };
+    };
+    await b.run.start('prepare');
+    expect(seen.probe?.()).toBe(true);
+    expect(everyStateName(b)).toEqual(['RUNNING']);   // no UPLOADING, no verdict: abandon owns the job now
+    expect(b.uploads).toEqual([]);
+  });
 });
 
 describe('bundle outcomes (D36, D49)', () => {
@@ -463,7 +491,7 @@ describe('abandon and halt', () => {
     await b.run.abandon();
     await running;
     expect(b.ex.killed).toEqual([{ pgid: 4242, signal: 'SIGKILL' }]);       // that pid is epoch 1's
-    expect(b.ex.calls.slice(callsBefore)).toEqual([]);                        // no reap, no cleanup: they would hit epoch 2's files
+    expect(b.ex.calls.slice(callsBefore)).toEqual(['releaseCredentials:j1']);   // D90: epoch 1's socket closes; no reap, no cleanup
     expect(b.journal.getJob('j1', 1)).toBeNull();
     expect(b.journal.getJob('j1', 2)).not.toBeNull();
   });
@@ -485,6 +513,32 @@ describe('abandon and halt', () => {
     expect(abandoned).toBe(true);
     expect(b.ex.calls).toContain('cleanup:j1');
   });
+  test('an abandon during a prepare that is waiting for its first token ends the wait at once (the halt isCancelled fires), with no transition', async () => {
+    const b = build();
+    const waitStartMs = b.time.nowMs();
+    const deadline = waitStartMs + 120_000;                        // the real tokenWaitMs: the fenced server never mints
+    let polls = 0;
+    const originalPrepare = b.ex.prepare.bind(b.ex);
+    b.ex.prepare = async (job, options) => {                       // mimics the broker's firstToken poll loop
+      await originalPrepare(job, options);
+      for (;;) {
+        if (options?.isCancelled?.()) return { ok: false, reason: 'cancelled', cancelled: true };
+        if (b.time.nowMs() >= deadline) return { ok: false, reason: 'git token: timeout' };
+        polls += 1;
+        await b.time.sleep(250);
+      }
+    };
+    const started = b.run.start('prepare');
+    await waitFor(() => polls >= 1);                               // the prepare is inside its token wait, holding the repo mutex
+    await b.run.abandon();                                         // sets halted, then waits on the mutex the prepare holds
+    await started;
+    expect(b.time.nowMs()).toBeLessThan(deadline);                 // the wait ended at the next poll, not at tokenWaitMs
+    expect(states(b)).toEqual([]);                                 // a halted prepare's outcome is discarded without a transition
+    expect(b.ex.calls).toContain('prepare:j1');
+    expect(b.ex.calls).not.toContain('spawn:j1');
+    expect(b.journal.getJob('j1', 1)).toBeNull();                  // the abandon still completed its cleanup
+    expect(b.mutex.isLocked('acme/app')).toBe(false);
+  });
   test('a recycled pid (not this job) is not signalled on abandon', async () => {
     const b = build();
     const running = b.run.start('prepare');
@@ -503,6 +557,46 @@ describe('abandon and halt', () => {
     expect(b.ex.killed).toEqual([]);
     expect(stateNames(b)).toEqual(['RUNNING']);
     expect(b.journal.getJob('j1', 1)?.doneAt).toBeNull();
+  });
+});
+
+describe('git credentials across a restart (D90)', () => {
+  test('a watch start restores the job\'s credentials before the first watcher tick', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    b.ex.alive = true;
+    let restoredFirst = false;
+    b.ex.onTick = (n) => {
+      if (n === 1) restoredFirst = b.ex.calls.includes('resumeCredentials:j1');
+      if (n >= 1) b.ex.alive = false;
+    };
+    await b.run.start('watch');
+    expect(restoredFirst).toBe(true);
+  });
+  test('a prepare start does not resume (prepare acquires them itself)', async () => {
+    const b = build();
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    expect(b.ex.calls).not.toContain('resumeCredentials:j1');
+  });
+  test('a failing resume is a warning and the run is still watched to its end', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    b.ex.alive = true;
+    b.ex.resumeError = new Error('socket dir gone');
+    b.ex.dieAfterTicks(1);
+    await b.run.start('watch');
+    expect(events(b).some((e) => e.type === 'lifecycle' && JSON.stringify(e.payload).includes('git credentials could not be restored'))).toBe(true);
+    expect(stateNames(b)).toEqual(['UPLOADING', 'COMPLETED']);
+  });
+  test('abandon releases this epoch\'s credentials', async () => {
+    const b = build();
+    b.ex.onTick = () => undefined;
+    const running = b.run.start('prepare');
+    await waitFor(() => b.ex.calls.includes('spawn:j1') && b.ex.ticks >= 1);
+    await b.run.abandon();
+    await running;
+    expect(b.ex.calls).toContain('releaseCredentials:j1');
   });
 });
 

@@ -31,7 +31,7 @@ This is the app-specific source-of-truth context for `apps/runner` (`@nathapp/ko
 It should not:
 - talk to the server from anywhere but `src/sync/` (other modules write journal events; the sync loop ships them)
 - decide a job's outcome from an exit code (nax exits 0 on failure; verdicts come from `status.json` and files)
-- hold git or provider credentials in 3a (3b adds the git-cred broker; a clone or push authentication failure fails the job with `no git credentials (runner 3b)`, and git never prompts)
+- hold git credentials of its own: a per-job token comes over sync, lives only in daemon memory, and reaches git and gh/glab through the job's socket (3b-1); an authentication failure fails the job with `git auth failed`, and git never prompts
 
 ## Stack
 
@@ -42,7 +42,7 @@ It should not:
 ## Architecture
 
 ```text
-src/main.ts          koda-runner run | enroll | status
+src/main.ts          koda-runner run | enroll | status (git-cred and shim are internal: git and the job shims call them)
 src/commands/        enroll, run, status over injected dependencies
 src/config/          runner.json (https unless loopback or allowInsecureHttp)
 src/identity/        identity.json (0600) and the per-start boot id
@@ -50,6 +50,7 @@ src/journal/         bun:sqlite, WAL, synchronous FULL; every row is written BEF
 src/sync/            ServerClient, batching (one entry per jobId, 1 MiB budget), SyncLoop (abort only an idle poll, backoff, 426/401 stop)
 src/supervisor/      RepoMutex, JobEvents (legal transitions only), JobRun (one job), Supervisor, CommandHandler
 src/executor/        JobExecutor seam + HostExecutor (git workspace, branch rules, detached nax, PLAN commit)
+src/credentials/     TokenCache, CredentialBroker (one unix socket per job epoch in socketDir), git-cred helper, gh/glab shim
 src/watcher/         status.json poll, run-log and stdout/stderr tails, rate cap
 src/verdict/         pure verdict functions (S1 spec 5.2 step 6)
 src/bundle/          tar.gz from a file list, upload retry rules (409 is stale or state-conflict)
@@ -68,7 +69,8 @@ src/paths/           safe path segments
 - Emit only the S1 spec 5.4 runner transitions (`JobEvents.transition` refuses the rest). A spawned job always goes RUNNING -> UPLOADING -> terminal; a job that never spawned goes ASSIGNED -> FAILED or CANCELLED.
 - The nax child is detached (own process group) and its output goes to files, so it survives a daemon restart. `stop()` never signals a child. Signal only `-pgid`, and only after `matchesProcess` confirms the pid is still this job (argv carries `koda-job-<jobId>`).
 - `git clean` has no `-x`: ignored nax files (`checkpoint.jsonl`) must survive between runs; `plan/` is ignored too, so prepare deletes stale `plan/*.jsonl` itself.
-- git runs with `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`, `GIT_ASKPASS=true` and an empty credential helper; the daemon refuses git older than 2.30.
+- git runs with `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`, `GIT_ASKPASS=true`; a call that may authenticate passes the job helper (`credentialHelper`), every other call keeps an empty helper list; the clone's own helper list is `''` then the job helper. The daemon refuses git older than 2.30.
+- A git token never goes to a logger, the journal, a file, a bundle or nax's environment; only the shim puts it into its one gh/glab child. The socket directory (default `/tmp/koda-runner-<uid>`) must be ours and mode 0700, or the daemon does not start.
 - `plan-out/` (the PLAN stash) is write-once: a retry never re-reads the checkout that `checkout -f -B` may have reverted.
 - Two epochs of one job id can coexist on a runner: abandoning the lower one never reaps or cleans while a live higher epoch exists.
 - Timing constants live in `src/daemon/tuning.ts`; only tests override them. In tests an `expect` inside a callback that a `try/catch` swallows proves nothing.
@@ -79,6 +81,7 @@ src/paths/           safe path segments
 - Integration specs (`test/integration/*.integration.spec.ts`, 3a-2) need `KODA_DB_TESTS=1`, the test Postgres and a built API.
 - Prefer real files and real SQLite (`:memory:` or a temp file) over mocks; the sync loop takes an injected client.
 - Specs that need real git and the fake nax are `test/unit/*.spec.ts`; `test/fixtures/fake-nax.ts` is the fake nax (scenarios via `FAKE_NAX_*` env; a failed run exits 1 like the real one, and the verdict never reads the exit code). Real git runs in tests, isolated by `isolateGit()`.
+- Authenticated git in specs uses `test/helpers/git-http.ts` (`git http-backend` behind Basic auth); `file://` origins never call a credential helper. `startDaemon` in tests needs `selfCommand: [process.execPath, <src/main.ts>]`.
 - Integration specs run the built API against their own database `koda_runner_test`: `cd apps/runner && KODA_DB_TESTS=1 bun run test:integration`. `daemon.crash()` is the in-process kill; `TestRunner.net` cuts the network (`down`, or `dropResponse` to lose only the answers).
 - Use `FakeExecutor` only for `JobRun` and `Supervisor` state-machine tests.
 

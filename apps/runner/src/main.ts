@@ -5,10 +5,14 @@ import { EnrollError, enrollRunner } from './commands/enroll';
 import { runCommand } from './commands/run';
 import { collectStatus, formatStatus } from './commands/status';
 import { resolveHome } from './config/runner-config';
+import { dispatchInternal } from './internal-commands';
 import { createConsoleLogger } from './logger';
 import { ServerClient } from './sync/http';
 import { systemNow } from './time';
 import { DAEMON_VERSION } from './version';
+
+const internal = await dispatchInternal(process.argv.slice(2));
+if (internal !== null) process.exit(internal);
 
 const say = (line: string): void => { process.stdout.write(`${line}\n`); };
 const fail = (message: string): number => { process.stderr.write(`koda-runner: ${message}\n`); return 1; };
