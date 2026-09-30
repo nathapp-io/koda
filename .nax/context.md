@@ -54,6 +54,7 @@ The detailed architecture reference lives in `docs/architecture.md`.
 | API | NestJS 11 + Fastify + Prisma |
 | Web | Nuxt 3 + Shadcn-nuxt + Tailwind CSS |
 | CLI | Commander.js 12 |
+| Runner | Bun-only ESM (`bun:sqlite`, `bun build --compile`), Commander.js 12 |
 | Database | Prisma on PostgreSQL 16 |
 | Test | Jest; Playwright in web |
 | i18n | API and web maintain separate translation systems |
