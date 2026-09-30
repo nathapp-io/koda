@@ -48,6 +48,11 @@ export class Journal {
     return new Journal(db, now);
   }
 
+  /** D72: for `koda-runner status`. No schema statements, no `create`: a missing or foreign file throws. */
+  static openReadOnly(path: string, now: Now = systemNow): Journal {
+    return new Journal(new Database(path, { readonly: true }), now);
+  }
+
   close(): void {
     this.db.close();
   }
