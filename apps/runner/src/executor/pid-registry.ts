@@ -49,28 +49,17 @@ export async function selectReapable(
   return picked;
 }
 
-/** `ps -o etime=` is `[[dd-]hh:]mm:ss` on macOS and Linux; kept for the test surface and for callers that still
- * want elapsed time directly (BUN_TEST_TZ=UTC keeps these deterministic). */
-export function parseEtime(text: string): number | null {
-  const m = /^(?:(?:(\d+)-)?(\d+):)?(\d+):(\d+)$/.exec(text.trim());
-  if (!m) return null;
-  const [days, hours, minutes, seconds] = [Number(m[1] ?? 0), Number(m[2] ?? 0), Number(m[3]), Number(m[4])];
-  return ((days * 24 + hours) * 60 + minutes) * 60 + seconds;
-}
-
 /** BUG-5: `ps -o lstart=` returns the actual start timestamp (locale-formatted), immune to `Date.now()` clock drift
- * between registration and reap. The output is parsed by `Date`, which treats it as local time in the runner's TZ. */
+ * between registration and reap. BUG-5a: the child `ps` is forced to `TZ=UTC`, so its output must be parsed as UTC
+ * too — `Date.parse` without a zone would read the string in the runner's host TZ, shifting the instant by the UTC
+ * offset and making the slack check reject a live nax on any non-UTC host. */
 export async function readProcessStart(pid: number): Promise<Date | null> {
   if (!Number.isInteger(pid) || pid <= 0) return null;
-  // Force TZ=UTC for `ps` so its locale-formatted output is in the same frame `Date.parse` uses: tests under
-  // `bun test` already run with TZ=UTC and `process.env.TZ` may be unset in production, but the daemon's wall
-  // clock is the same in either frame. Without the explicit override, `ps` would emit host-local time and the
-  // parser would shift it by the host TZ, corrupting the slack check by hours on non-UTC hosts.
   const proc = Bun.spawn(['ps', '-o', 'lstart=', '-p', String(pid)], { stdout: 'pipe', stderr: 'ignore', stdin: 'ignore', env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } });
   const text = (await new Response(proc.stdout).text()).trim();
   await proc.exited;
   if (text === '') return null;
-  const stamp = Date.parse(text);
+  const stamp = Date.parse(`${text} UTC`);
   return Number.isNaN(stamp) ? null : new Date(stamp);
 }
 

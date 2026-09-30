@@ -22,7 +22,8 @@ function checked(fn: () => void): boolean {
   }
 }
 
-/** Test seam: exercise `checked`'s re-throw policy directly. */
+/** @design API-1: `checked`'s re-throw policy cannot be reached through `parseAssign` (all validators throw `PathError`),
+ *  so it is exported under a test-only name rather than widened into the public parse surface. */
 export const __checked = checked;
 
 /**

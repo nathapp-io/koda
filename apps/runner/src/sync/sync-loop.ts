@@ -138,7 +138,10 @@ export class SyncLoop {
       const reported = request.jobs.find((job) => job.jobId === ack.jobId);
       if (reported) this.deps.journal.ackThrough(ack.jobId, reported.leaseEpoch, ack.ackedSeq);
     }
-    for (const ack of request.commandAcks) this.pendingAcks.delete(ack.commandId);
+    for (const ack of request.commandAcks) {
+      this.pendingAcks.delete(ack.commandId);
+      this.pendingAcksAt.delete(ack.commandId);   // MEM-1: don't leave a timestamp for a confirmed ack
+    }
     if (this.acksExcluded) this.stripPendingAckDetails();
     if (report && request.capabilities) this.deps.onCapabilitiesSent(report.hash);
     this.failures = 0;

@@ -20,9 +20,14 @@ const toJob = (r: Row): JobRow => ({
   naxRunId: r['nax_run_id'] as string | null, logPath: r['log_path'] as string | null, jobDir: r['job_dir'] as string,
   assign: JSON.parse(r['assign_json'] as string), cancelRequestedAt: r['cancel_requested_at'] as string | null,
   resultBranch: r['result_branch'] as string | null, resultSha: r['result_sha'] as string | null,
-  lastPushAttemptAt: r['last_push_attempt_at'] as string | null,
+  lastPushAttemptAt: (r['last_push_attempt_at'] as string | null) ?? null,
   createdAt: r['created_at'] as string, updatedAt: r['updated_at'] as string, doneAt: r['done_at'] as string | null,
 });
+
+/** MIG-1: `CREATE TABLE IF NOT EXISTS` never adds a column to an existing table; additive columns need an ALTER. */
+function hasColumn(db: Database, table: string, column: string): boolean {
+  return (db.query(`PRAGMA table_info(${table})`).all() as Row[]).some((r) => r['name'] === column);
+}
 
 const toEvent = (r: Row): EventRow => ({
   jobId: r['job_id'] as string, leaseEpoch: r['lease_epoch'] as number, seq: r['seq'] as number, type: r['type'] as RunnerEventType,
@@ -49,6 +54,9 @@ export class Journal {
     // would keep the first one (its ack is the highest contiguous stored seq).
     db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;');
     db.exec(SCHEMA_SQL);
+    // MIG-1: a journal created before D76 lacks the column; add it in place so an UPDATE that sets
+    // last_push_attempt_at (every PLAN push) does not fail with "no such column" after an upgrade.
+    if (!hasColumn(db, 'jobs', 'last_push_attempt_at')) db.exec('ALTER TABLE jobs ADD COLUMN last_push_attempt_at TEXT');
     // SEC-1: the journal carries ASSIGN payloads (clone URLs, identity), event sequences and runner metadata;
     // match identity.json's 0o600 so a local user on a multi-tenant host cannot read it. bun:sqlite creates the
     // file using the process umask, and the WAL/SHM siblings are created lazily — best-effort, no throw on EACCES.

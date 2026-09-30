@@ -331,6 +331,16 @@ describe('commands', () => {
     await loop.syncOnce();                       // carries nothing
     expect(calls[1].commandAcks).toEqual([]);
   });
+  test('MEM-1: a confirmed ack clears its timestamp, so prune never sees a ghost', async () => {
+    commandAcks = [{ commandId: 'c1', leaseEpoch: 1, result: 'ok' }];
+    script.push(ok({ commands: [assignCmd] }), ok());   // second sync carries c1 and the server confirms it
+    const loop = makeLoop();
+    await loop.syncOnce();                       // queues c1 at nowMs=0
+    await loop.syncOnce();                       // sends c1; apply() drops both the ack and its timestamp
+    commandAcks = [];
+    now = PENDING_ACK_TTL_MS + 1;
+    expect(loop.pruneStalePendingAcks(now)).toBe(0);
+  });
   test('pruneStalePendingAcks is a no-op when no ack is stale', async () => {
     commandAcks = [{ commandId: 'c1', leaseEpoch: 1, result: 'ok' }];
     script.push(ok({ commands: [assignCmd] }), ok());

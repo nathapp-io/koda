@@ -50,8 +50,8 @@ The recovery story in D52 ("commit kept locally") is therefore broken: the opera
 
 | Set | Wiped on every prepare | Examples |
 |:--|:--|:--|
-| **Mutable per-attempt** | yes | `nax-out/`, `nax.stdout`, `nax.stderr`, `pre-plan/`, `plan-out/`, `plan-logs/`, `bundle.tar.gz`, `bundle.list`, `bundle-manifest.json` |
-| **Persistent across attempts on push failure** | no | `.nax/features/<f>/prd.json`, `.nax/features/<f>/prd.rejected.json`, the journal `result_branch`/`result_sha` from `markDone` |
+| **Mutable per-attempt** | yes | `nax-out/`, `nax.stdout`, `nax.stderr`, `pre-plan/`, `plan-out.tmp/`, `plan-logs.tmp/`, `bundle.tar.gz`, `bundle.list`, `bundle-manifest.json` |
+| **Persistent across attempts on push failure** | no | `plan-out/`, `plan-logs/` (the write-once stash), plus the journal `result_branch`/`result_sha`/`last_push_attempt_at` |
 
 Concretely:
 

@@ -35,8 +35,12 @@ export class CommandHandler {
   }
 
   private record(command: FleetCommandOut, outcome: Outcome): void {
+    this.recordAs(command, String(command.type), outcome);
+  }
+
+  private recordAs(command: FleetCommandOut, type: string, outcome: Outcome): void {
     this.deps.journal.recordCommand({
-      commandId: command.commandId, jobId: command.jobId, leaseEpoch: command.leaseEpoch, type: String(command.type),
+      commandId: command.commandId, jobId: command.jobId, leaseEpoch: command.leaseEpoch, type,
       result: outcome.result, detail: outcome.detail ?? null, appliedAt: this.deps.now().toISOString(),
     });
   }
@@ -58,7 +62,7 @@ export class CommandHandler {
   }
 
   private async apply(command: FleetCommandOut): Promise<Outcome> {
-    const { journal, supervisor } = this.deps;
+    const { supervisor } = this.deps;
     switch (command.type) {
       case 'ASSIGN': return this.assign(command);
       case 'CANCEL': {
@@ -78,7 +82,7 @@ export class CommandHandler {
       }
       default: {
         const outcome: Outcome = { result: 'rejected', detail: 'unknown command type' };
-        journal.recordCommand({ commandId: command.commandId, jobId: command.jobId, leaseEpoch: command.leaseEpoch, type: UNKNOWN_COMMAND_TYPE, result: 'rejected', detail: outcome.detail ?? null, appliedAt: this.deps.now().toISOString() });
+        this.recordAs(command, UNKNOWN_COMMAND_TYPE, outcome);
         return outcome;
       }
     }

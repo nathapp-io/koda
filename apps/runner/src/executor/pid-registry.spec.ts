@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { makeTempDirs } from '../../test/helpers/tmp';
 import { waitFor } from '../../test/helpers/wait';
 import { isProcessAlive } from './nax-process';
-import { parseEtime, parsePidEntries, readProcessCommand, readProcessStart, reapNaxPids, selectReapable } from './pid-registry';
+import { parsePidEntries, readProcessCommand, readProcessStart, reapNaxPids, selectReapable } from './pid-registry';
 
 const tmp = makeTempDirs();
 afterAll(() => tmp.cleanup());
@@ -52,15 +52,6 @@ describe('selectReapable (D37: pids recycle)', () => {
   });
 });
 
-describe('parseEtime', () => {
-  test.each([['05:32', 332], ['01:02:03', 3723], ['1-02:03:04', 93_784], ['  00:07 ', 7], ['12-00:00:01', 1_036_801]])('%j is %d seconds', (text, seconds) => {
-    expect(parseEtime(text)).toBe(seconds);
-  });
-  test.each(['', 'garbage', '5', '1:2:3:4', '-1:00'])('%j is not an elapsed time', (text) => {
-    expect(parseEtime(text)).toBeNull();
-  });
-});
-
 describe('readProcessCommand', () => {
   test('returns the full command line of a live process and null for none', async () => {
     const proc = Bun.spawn(['sh', '-c', 'sleep 30; true', 'koda-job-abc123'], { stdout: 'ignore', stderr: 'ignore' });
@@ -71,6 +62,25 @@ describe('readProcessCommand', () => {
     } finally {
       proc.kill();
     }
+  });
+});
+
+describe('readProcessStart (BUG-5a: TZ-independent)', () => {
+  test('a live process start is parsed in UTC, not the runner host TZ', async () => {
+    const prev = process.env.TZ;
+    process.env.TZ = 'America/New_York';                 // a UTC-4/5 host would shift an unzoned parse by hours
+    const proc = Bun.spawn(['sleep', '30'], { stdout: 'ignore', stderr: 'ignore' });
+    try {
+      const started = await readProcessStart(proc.pid);
+      expect(started).not.toBeNull();
+      expect(Math.abs(Date.now() - (started as Date).getTime())).toBeLessThan(60_000);
+    } finally {
+      proc.kill();
+      if (prev === undefined) delete process.env.TZ; else process.env.TZ = prev;
+    }
+  });
+  test('an absent pid has no start time', async () => {
+    expect(await readProcessStart(2 ** 22 + 12345)).toBeNull();
   });
 });
 

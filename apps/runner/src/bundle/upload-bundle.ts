@@ -51,7 +51,6 @@ export async function uploadWithRetry(deps: UploadDeps, jobId: string, leaseEpoc
     } catch (error) {
       if (!(error instanceof NetworkError)) return { kind: 'failed', detail: errorMessage(error) };
       networkFailures += 1;
-      status = 0;
     }
     if (status >= 200 && status < 300) return { kind: 'ok' };
     if (status === 413) return { kind: 'too-large' };
