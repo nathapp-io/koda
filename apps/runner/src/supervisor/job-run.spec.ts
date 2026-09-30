@@ -233,6 +233,34 @@ describe('PLAN', () => {
     expect(stateNames(b)).toEqual(['COMPLETED']);
     expect(lastSnapshot(b)).toMatchObject({ resultSha: 'd'.repeat(40) });
   });
+  test('a cancel that lands during the PLAN push ends CANCELLED, not FAILED (review minor 2)', async () => {
+    const b = build('PLAN');
+    b.ex.dieAfterTicks(1);
+    let sawOptions: readonly unknown[] = [];
+    b.ex.finishPlan = async (job, options) => {
+      sawOptions = [...b.ex.finishPlanOptions, options];
+      b.run.requestCancel();
+      return options?.isCancelled?.() === true ? { ok: false, reason: 'cancelled', cancelled: true } : b.ex.planPush;
+    };
+    await b.run.start('prepare');
+    expect(sawOptions).toHaveLength(1);
+    expect(states(b).at(-1)).toEqual({ to: 'CANCELLED' });   // reason null, as planVerdict words a cancel
+    expect(stateNames(b)).toEqual(['RUNNING', 'UPLOADING', 'CANCELLED']);
+  });
+  test('a halt during the PLAN push records nothing: the probe reflects halt and the run lets go (review minor 2)', async () => {
+    const b = build('PLAN');
+    b.ex.dieAfterTicks(1);
+    const seen: { probe: (() => boolean) | null } = { probe: null };
+    b.ex.finishPlan = async (_job, options) => {
+      seen.probe = options?.isCancelled ?? null;
+      b.run.halt();
+      return { ok: false, reason: 'cancelled', cancelled: true };
+    };
+    await b.run.start('prepare');
+    expect(seen.probe?.()).toBe(true);
+    expect(everyStateName(b)).toEqual(['RUNNING']);   // no UPLOADING, no verdict: abandon owns the job now
+    expect(b.uploads).toEqual([]);
+  });
 });
 
 describe('bundle outcomes (D36, D49)', () => {

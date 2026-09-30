@@ -12,7 +12,7 @@ import { Watcher, type WatcherSink } from '../watcher/watcher';
 import { readStatusFile } from '../watcher/status-snapshot';
 import { prepareCheckout } from './checkout';
 import { reasonFromError, type Git } from './git';
-import type { JobExecutor, JobWatcher, PlanPushOutcome, PrepareOptions, PrepareOutcome, SpawnHandle, WatchOptions } from './job-executor';
+import type { JobExecutor, JobWatcher, FinishPlanOptions, PlanPushOutcome, PrepareOptions, PrepareOutcome, SpawnHandle, WatchOptions } from './job-executor';
 import { deleteJobProfile, jobProfileName, projectNameFor, writeJobProfile } from './job-profile';
 import { buildNaxArgv, isProcessAlive, signalGroup, spawnNax } from './nax-process';
 import { readProcessCommand, reapNaxPids } from './pid-registry';
@@ -34,6 +34,16 @@ export interface HostExecutorDeps {
 const ATTEMPT_FILES = ['nax-out', 'nax.stdout', 'nax.stderr', 'pre-plan', 'plan-out', 'plan-out.tmp', 'plan-logs', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json'];
 const CANCELLED: PrepareOutcome = { ok: false, reason: 'cancelled', cancelled: true };
 const exists = (path: string): Promise<boolean> => stat(path).then(() => true, () => false);
+
+/**
+ * D88: the forge-token variables the daemon may have inherited from its operator never reach nax's environment — the
+ * job's shims are the only thing that puts a token into a gh/glab child, from the socket.
+ */
+const CREDENTIAL_ENV_VARS: readonly string[] = ['GH_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_TOKEN', 'GITLAB_TOKEN', 'GL_TOKEN'];
+
+export function withoutCredentialVars(env: Readonly<Record<string, string | undefined>>): Readonly<Record<string, string | undefined>> {
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !CREDENTIAL_ENV_VARS.includes(name)));
+}
 
 async function moveAside(from: string, to: string): Promise<void> {
   try {
@@ -107,7 +117,7 @@ export class HostExecutor implements JobExecutor {
     const path = binDir ? `${binDir}${delimiter}${inherited}` : inherited;
     return spawnNax(argv, {
       cwd: repoDir, stdoutPath: join(jobDir, 'nax.stdout'), stderrPath: join(jobDir, 'nax.stderr'),
-      env: { ...process.env, NAX_GLOBAL_CONFIG_DIR: this.deps.config.naxHome, PATH: path },
+      env: { ...withoutCredentialVars(process.env), NAX_GLOBAL_CONFIG_DIR: this.deps.config.naxHome, PATH: path },
     });
   }
 
@@ -150,12 +160,12 @@ export class HostExecutor implements JobExecutor {
     return checkPlanPrd(await readFile(path, 'utf8').catch(() => null));
   }
 
-  async finishPlan(job: JobRow): Promise<PlanPushOutcome> {
+  async finishPlan(job: JobRow, options: FinishPlanOptions = {}): Promise<PlanPushOutcome> {
     const { repoDir, jobDir } = this.dirs(job);
     const check = await this.readPlan(job);
     if (!check.ok || check.branchName === null) return { ok: false, reason: check.branchName === null && check.ok ? 'checkout: invalid branchName' : 'plan output missing' };
-    const acquired = await this.deps.credentials.acquire(job, { wait: true });
-    if (!acquired.ok) return { ok: false, reason: acquired.reason };
+    const acquired = await this.deps.credentials.acquire(job, { wait: true, isCancelled: () => options.isCancelled?.() === true });
+    if (!acquired.ok) return acquired.cancelled ? { ok: false, reason: 'cancelled', cancelled: true } : { ok: false, reason: acquired.reason };
     const refSha = (await this.deps.git.ok(['rev-parse', 'HEAD'], { cwd: repoDir })).trim();
     const result = await commitAndPushPlan({
       git: this.deps.git, repoDir, jobDir, feature: job.assign.feature, jobId: job.jobId,

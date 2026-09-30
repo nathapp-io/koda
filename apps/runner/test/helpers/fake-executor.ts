@@ -1,5 +1,5 @@
 import type { BundleFile } from '../../src/bundle/build-bundle';
-import type { JobExecutor, JobWatcher, PlanPushOutcome, PrepareOptions, PrepareOutcome, SpawnHandle, WatchOptions } from '../../src/executor/job-executor';
+import type { JobExecutor, JobWatcher, FinishPlanOptions, PlanPushOutcome, PrepareOptions, PrepareOutcome, SpawnHandle, WatchOptions } from '../../src/executor/job-executor';
 import type { JobRow } from '../../src/journal/types';
 import type { PlanCheck } from '../../src/verdict/plan-verdict';
 import type { StatusView } from '../../src/verdict/status-view';
@@ -11,6 +11,7 @@ export class FakeExecutor implements JobExecutor {
   readonly killed: Array<{ pgid: number; signal: string }> = [];
   readonly watchOptions: WatchOptions[] = [];
   readonly prepareOptions: PrepareOptions[] = [];
+  readonly finishPlanOptions: FinishPlanOptions[] = [];
   prepareResult: PrepareOutcome = { ok: true, branch: 'feat/x' };
   spawnError: Error | null = null;
   handle: SpawnHandle = { pid: 4242, pgid: 4242 };
@@ -85,8 +86,9 @@ export class FakeExecutor implements JobExecutor {
     return this.plan;
   }
 
-  async finishPlan(job: JobRow): Promise<PlanPushOutcome> {
+  async finishPlan(job: JobRow, options: FinishPlanOptions = {}): Promise<PlanPushOutcome> {
     this.note('finishPlan', job);
+    this.finishPlanOptions.push(options);
     return this.planPush;
   }
 

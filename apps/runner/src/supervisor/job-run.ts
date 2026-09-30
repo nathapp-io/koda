@@ -274,11 +274,15 @@ export class JobRun {
     let verdict = judged.verdict;
     let result = { branch: row.resultBranch, sha: row.resultSha };
     if (row.command === 'PLAN' && verdict.state === 'COMPLETED' && row.resultSha === null) {
-      const pushed = await this.deps.executor.finishPlan(row);
+      // The same probe prepare got: a cancel or halt during the push's first-token wait must not hold the repo mutex
+      // for tokenWaitMs. A cancelled push is CANCELLED (the verdict planVerdict itself gives), not FAILED.
+      const pushed = await this.deps.executor.finishPlan(row, { isCancelled: () => this.cancelRequested() || this.halted });
       if (pushed.ok) {
         result = { branch: pushed.branch, sha: pushed.sha };
         this.deps.journal.updateJob(this.jobId, this.leaseEpoch, { resultBranch: pushed.branch, resultSha: pushed.sha });
-      } else {
+      } else if (pushed.cancelled && this.cancelRequested()) {
+        verdict = { state: 'CANCELLED', reason: null };
+      } else if (!pushed.cancelled) {
         verdict = { state: 'FAILED', reason: pushed.reason };
       }
     } else if (row.command === 'RUN') {
