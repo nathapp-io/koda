@@ -1335,6 +1335,7 @@ export async function runnerNames(slug: string): Promise<ReadonlyMap<string, str
 }
 
 // The API's error envelope carries an AppException code, not the HTTP status (Global Constraints).
+// Repo-wide fix tracked in #176; fold this back into handleApiError when it lands.
 const RET_STATUS: ReadonlyMap<number, number> = new Map([[40000, 401], [40003, 403], [404, 404], [-2, 400]]);
 
 /**
