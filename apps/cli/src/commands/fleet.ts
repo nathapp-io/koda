@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { registerFleetDispatch } from './fleet-dispatch';
 import { registerFleetRepo } from './fleet-repo';
 import { registerFleetRunner } from './fleet-runner';
 
@@ -8,5 +9,6 @@ export function fleetCommand(program: Command): Command {
   fleet.description('Dispatch nax runs to fleet runners and follow the jobs');
   registerFleetRunner(fleet);
   registerFleetRepo(fleet);
+  registerFleetDispatch(fleet);
   return fleet;
 }
