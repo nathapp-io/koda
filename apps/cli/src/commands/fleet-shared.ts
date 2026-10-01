@@ -6,7 +6,6 @@ import {
   type RunnerSummaryDto,
 } from '../generated';
 import { unwrap } from '../utils/api';
-import { apiErrorCode } from '../utils/api-error-code';
 import { handleApiError } from '../utils/error';
 import { table } from '../utils/output';
 
@@ -90,24 +89,6 @@ export async function runnerNamesOrEmpty(slug: string): Promise<ReadonlyMap<stri
   } catch {
     return new Map();
   }
-}
-
-// The API's error envelope carries an AppException code, not the HTTP status (Global Constraints).
-// Repo-wide fix tracked in #176; fold this back into handleApiError when it lands.
-const RET_STATUS: ReadonlyMap<number, number> = new Map([[40000, 401], [40003, 403], [404, 404], [-2, 400]]);
-
-/**
- * handleApiError for fleet commands: maps the envelope code to the status handleApiError reads, so 401/403
- * exit 2, 404 exits 4 (with `notFoundMessage`) and validation exits 3. `adminHint` adds the admin-token hint to a 403.
- */
-export function handleFleetError(err: unknown, opts: { notFoundMessage?: string; adminHint?: boolean } = {}): never {
-  const code = apiErrorCode(err);
-  const status = code === undefined ? undefined : RET_STATUS.get(code);
-  const mapped = status === undefined ? err : { ...(err as Record<string, unknown>), status };
-  return handleApiError(mapped, {
-    ...(opts.notFoundMessage ? { notFoundMessage: opts.notFoundMessage } : {}),
-    ...(status === 403 && opts.adminHint ? { hint: ADMIN_TOKEN_HINT } : {}),
-  });
 }
 
 export function handleFleetValidation(message: string): never {

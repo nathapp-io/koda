@@ -7,8 +7,7 @@ jest.mock('../generated', () => ({
 }));
 
 import { projectFleetReposControllerList, projectFleetRunnersControllerList } from '../generated';
-import { setJsonMode } from '../utils/json-mode';
-import { ago, handleFleetError, pageHint, printPlacement, resolveRepo, resolveRunner, runnerNames, splitRepoPath } from './fleet-shared';
+import { ago, pageHint, printPlacement, resolveRepo, resolveRunner, runnerNames, splitRepoPath } from './fleet-shared';
 
 const ok = <T>(data: T) => ({ ret: 0, data });
 const page = <T>(records: T[], current = 1, hasNext = false) => ok({ total: records.length, current, size: 100, hasNext, hasPrev: current > 1, records });
@@ -18,7 +17,6 @@ const box = { id: 'r1', name: 'box-1', os: 'linux', arch: 'x64', labels: [], ena
 
 describe('fleet-shared', () => {
   afterEach(() => {
-    setJsonMode(false);
     jest.clearAllMocks();
   });
 
@@ -81,52 +79,6 @@ describe('fleet-shared', () => {
     expect(await resolveRunner('web', 'box-2')).toEqual({ ...box, id: 'r2', name: 'box-2' });
     expect(await resolveRunner('web', 'r2')).toEqual({ ...box, id: 'r2', name: 'box-2' });
     expect((await runnerNames('web')).get('r2')).toBe('box-2');
-  });
-
-  describe('handleFleetError', () => {
-    let exit: jest.SpyInstance;
-    let err: jest.SpyInstance;
-    beforeEach(() => {
-      exit = jest.spyOn(process, 'exit').mockImplementation((() => {}) as never);
-      err = jest.spyOn(console, 'error').mockImplementation(() => {});
-    });
-    afterEach(() => { exit.mockRestore(); err.mockRestore(); });
-    const stderr = () => err.mock.calls.flat().join('\n');
-
-    it.each([
-      [{ ret: 40000, message: 'Unauthorized' }, 2],
-      [{ ret: 40003, message: 'Forbidden' }, 2],
-      [{ ret: -2, message: 'size must not be greater than 100' }, 3],
-      [{ ret: 409, message: 'An active job already runs this feature: j1' }, 1],
-      [{ ret: 422, message: 'The pinned runner can never run this job: tools' }, 1],
-      [new Error('socket hang up'), 1],
-    ])('maps %j to exit %i', (body, code) => {
-      handleFleetError(body);
-      expect(exit).toHaveBeenCalledWith(code);
-    });
-
-    it('maps 404 to exit 4 with the not-found message', () => {
-      handleFleetError({ ret: 404, message: 'Runner not found' }, { notFoundMessage: 'Runner not found: r9' });
-      expect(exit).toHaveBeenCalledWith(4);
-      expect(stderr()).toContain('Runner not found: r9');
-    });
-
-    it('adds the admin-token hint to a 403 only when asked', () => {
-      handleFleetError({ ret: 40003, message: 'Forbidden' }, { adminHint: true });
-      expect(stderr()).toContain('global-admin user access token');
-      err.mockClear();
-      handleFleetError({ ret: 40003, message: 'Forbidden' });
-      expect(stderr()).not.toContain('global-admin user access token');
-    });
-
-    it('keeps the admin hint inside the structured JSON error', () => {
-      setJsonMode(true);
-      err.mockClear();
-      handleFleetError({ ret: 40003, message: 'Forbidden' }, { adminHint: true });
-      const output = stderr();
-      expect(JSON.parse(output)).toEqual({ error: { code: 'UNAUTHORIZED', message: 'Forbidden', status: 403, hint: 'Requires a global-admin user access token: KODA_API_KEY=<token> koda fleet …' } });
-      expect(err).toHaveBeenCalledTimes(1);
-    });
   });
 
   it('printPlacement shows the assigned runner by name, or each misfit', () => {

@@ -8,9 +8,10 @@ import {
 } from '../generated';
 import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
+import { handleApiError } from '../utils/error';
 import { table } from '../utils/output';
 import { parsePositiveInt } from '../utils/parse-positive-int';
-import { ADMIN_TOKEN_HINT, ago, type FleetPage, handleFleetError, handleFleetValidation, pageHint } from './fleet-shared';
+import { ADMIN_TOKEN_HINT, ago, type FleetPage, handleFleetValidation, pageHint } from './fleet-shared';
 
 const LABEL = /^[a-z0-9][a-z0-9._-]{0,31}$/; // UpdateRunnerDto / CreateEnrollmentDto LABEL_PATTERN
 
@@ -48,7 +49,7 @@ function registerList(runner: Command): void {
         }
         process.exit(0);
       } catch (err: unknown) {
-        handleFleetError(err, { adminHint: true });
+        handleApiError(err, { forbiddenHint: ADMIN_TOKEN_HINT });
       }
     });
 }
@@ -67,7 +68,7 @@ function registerToggle(runner: Command, name: 'enable' | 'disable'): void {
         else console.log(`Runner ${updated.name} ${enabled ? 'enabled' : 'disabled'}`);
         process.exit(0);
       } catch (err: unknown) {
-        handleFleetError(err, { adminHint: true, notFoundMessage: `Runner not found: ${runnerId}` });
+        handleApiError(err, { forbiddenHint: ADMIN_TOKEN_HINT, notFoundMessage: `Runner not found: ${runnerId}` });
       }
     });
 }
@@ -96,7 +97,7 @@ function registerEnrollToken(runner: Command): void {
         }
         process.exit(0);
       } catch (err: unknown) {
-        handleFleetError(err, { adminHint: true });
+        handleApiError(err, { forbiddenHint: ADMIN_TOKEN_HINT });
       }
     });
 }

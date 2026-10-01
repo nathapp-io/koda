@@ -9,8 +9,9 @@ import {
 import { unwrap } from '../utils/api';
 import { apiErrorCode } from '../utils/api-error-code';
 import { withContext } from '../utils/context';
+import { handleApiError } from '../utils/error';
 import { parseUsd } from '../utils/parse-usd';
-import { type FleetPage, handleFleetConflict, handleFleetError, handleFleetValidation, printPlacement, resolveRepo, resolveRunner, runnerNamesOrEmpty } from './fleet-shared';
+import { type FleetPage, handleFleetConflict, handleFleetValidation, printPlacement, resolveRepo, resolveRunner, runnerNamesOrEmpty } from './fleet-shared';
 
 const ACTIVE = new Set(['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING']);
 const collect = (value: string, previous: string[]): string[] => [...previous, value];
@@ -52,14 +53,14 @@ async function buildBody(slug: string, o: DispatchOptions): Promise<DispatchFlee
 
 /** A 409 on dispatch names the active job (D133, overview D121); any other error, or a failed lookup, reports as-is. */
 async function explainConflict(err: unknown, slug: string, body: DispatchFleetJobDto): Promise<void> {
-  if (apiErrorCode(err) !== 409) return handleFleetError(err);
+  if (apiErrorCode(err) !== 409) return handleApiError(err);
   let active: FleetJobDto | null = null;
   try {
     active = await findActiveJob(slug, body.repoId, body.feature);
   } catch {
     // The lookup is a courtesy; the original 409 is the answer.
   }
-  if (!active) return handleFleetError(err);
+  if (!active) return handleApiError(err);
   handleFleetConflict(`An active job already runs ${body.feature} on this repo: ${active.id} (${active.state}). koda fleet job show ${active.id}`);
 }
 
@@ -91,7 +92,7 @@ export function registerFleetDispatch(fleet: Command): void {
         process.exit(0);
       } catch (err: unknown) {
         if (body) await explainConflict(err, slug, body);
-        else handleFleetError(err);
+        else handleApiError(err);
       }
     });
 }
