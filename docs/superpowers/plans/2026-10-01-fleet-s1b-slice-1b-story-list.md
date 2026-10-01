@@ -35,8 +35,9 @@ to prove a halted job pushes nothing.
 - `requeue` clears `stories` and `storiesTruncated` with the other live fields.
 - The `fleet_job` live event is unchanged; the job page already refetches on it.
 - Runner tests: `cd apps/runner && bun run test` (unit), `KODA_DB_TESTS=1 bun run test:integration` (needs
-  `cd apps/api && bun run test:db:up`). API: `cd apps/api && bun run test:unit -- <path>`, and
-  `bun run test:scoped <paths>` for integration. Web: `cd apps/web && bun run test -- <path>`. Never run bare
+  `cd apps/api && bun run test:db:up`). API: `cd apps/api && bun run test:scoped <paths>` for one unit or integration spec (paths relative to
+  `apps/api`; unit specs need no DB). Never `bun run test:unit -- <path>`: the script's
+  `--testPathIgnorePatterns` swallows the path and runs the whole suite green. Web: `cd apps/web && bun run test -- <path>`. Never run bare
   `bun test` at the repo root.
 - No emojis in source; no `console.log` in source.
 
@@ -49,7 +50,7 @@ to prove a halted job pushes nothing.
 | D148 | The change gate compares the serialized list string, not a hash, and the watcher's snapshot dedup key includes it, so a PRD-only change still emits a snapshot. An unreadable PRD keeps the previous key. | The list is at most 8 KiB, so the string is as cheap as a hash and cannot collide. Keeping the key on a failed read avoids two redundant snapshots each time nax is caught mid-write. |
 | D149 | `GET /fleet/jobs` (the list) returns `stories: null`, `storiesTruncated: false` via `FleetJobDto.summary`; only single-job responses carry the list. | A 100-row page would carry up to 800 KiB of stories no list view renders. The spec says "exposed in `FleetJobDto`"; the PR notes this narrowing. |
 | D150 | The server mirrors `storiesTruncated` only together with an accepted `stories` list, as `p.storiesTruncated === true`. | The two are one fact; a flag without its list would describe a list the server does not have. |
-| D151 | The runner's oversize-snapshot fallback (`JobEvents.snapshot`) tries the full payload, then without `progress` (as today), then without the story list, then without both. | Stories plus a 2,000-character escalation reason plus 4 KiB progress can pass 16 KiB; the event must never be refused by the sync parser. |
+| D151 | The runner's oversize-snapshot fallback (`JobEvents.snapshot`) tries the full payload, then without `progress` (as today), then without the story list, then without both. A dropped list is resent only on the next PRD change (the watcher already recorded it as sent). | Stories plus a 2,000-character escalation reason plus 4 KiB progress can pass 16 KiB; the event must never be refused by the sync parser. Reaching the second fallback needs about 8 KiB of other fields, so the stale-list case is practically unreachable. |
 | D152 | The web highlights the current story only while the job is active (`QUEUED` to `UPLOADING`). | A finished job's `currentStoryId` is history, not "now". |
 | D153 | D144 gets an integration test: the harness git front holds the progress push's first request; the test writes the `CRASHED` + epoch bump and the `ABANDON` row itself (what `FenceService.abandon` writes), waits for `deliveredAt`, then fails the held request. The push's 2 s retry back-off is where the halt is seen. | The fence only fires when a sync mentions the job, which an exited nax no longer guarantees. `abandon()` waits on the repo mutex the push holds, so the test cannot wait for the ack before releasing. |
 
@@ -569,6 +570,9 @@ Expected: PASS, including the existing progress test.
 
 - [ ] **Step 9: Runner checks**
 
+The runner's `tsc` also checks `test/integration`, which needs the generated Prisma client: run
+`cd apps/api && bun run db:generate` once first if it has not been run in this checkout.
+
 Run: `cd apps/runner && bun run type-check && bun run lint && bun run test`
 Expected: all pass.
 
@@ -644,7 +648,7 @@ Append inside `describe('interpretEvent', ...)` in `apps/api/src/fleet/sync/even
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `cd apps/api && bun run test:unit -- src/fleet/sync/event-payloads.spec.ts`
+Run: `cd apps/api && bun run test:scoped src/fleet/sync/event-payloads.spec.ts`
 Expected: FAIL. Valid lists produce no `stories` in the patch.
 
 - [ ] **Step 3: Column, migration, domain**
@@ -762,7 +766,7 @@ after the `wipPush` entry:
     ['storiesTruncated', stories === undefined ? undefined : p.storiesTruncated === true],   // D150
 ```
 
-Run: `cd apps/api && bun run test:unit -- src/fleet/sync/event-payloads.spec.ts`
+Run: `cd apps/api && bun run test:scoped src/fleet/sync/event-payloads.spec.ts`
 Expected: PASS.
 
 - [ ] **Step 6: Write the failing DTO test**
@@ -801,8 +805,8 @@ and in the first test add after the `wipPush` expectation:
     expect(json).toEqual(expect.objectContaining({ stories: [{ id: 'US-001', title: 't', status: 'passed', attempts: 1, dependsOn: [] }], storiesTruncated: true }));
 ```
 
-Run: `cd apps/api && bun run test:unit -- src/fleet/jobs/dto/fleet-job.dto.spec.ts`
-Expected: FAIL (`stories` missing; `FleetJobDto.summary` is not a function).
+Run: `cd apps/api && bun run test:scoped src/fleet/jobs/dto/fleet-job.dto.spec.ts`
+Expected: FAIL. The suite does not compile (TS2339: `summary` does not exist on `typeof FleetJobDto`).
 
 - [ ] **Step 7: Expose the list in the DTO**
 
@@ -825,10 +829,11 @@ after the `wipPush` property:
   @ApiProperty({ description: 'True when the runner cut the story list to fit (S1b §1.2)' }) declare storiesTruncated: boolean;
 ```
 
-in `from()` change the last line of the object to:
+in `from()`, directly after the existing line
+`resultBranch: r.resultBranch, resultSha: r.resultSha, resultPrUrl: r.resultPrUrl, wipPush: r.wipPush,` add this
+new line (do not retype the existing one):
 
 ```ts
-      resultBranch: r.resultBranch, resultSha: r.resultSha, resultPrUrl: r.resultPrUrl, wipPush: r.wipPush,
       stories: r.stories, storiesTruncated: r.storiesTruncated,
 ```
 
@@ -843,7 +848,7 @@ and add after `from()`:
 
 `apps/api/src/fleet/jobs/fleet-jobs.service.ts`, `list()`: change `FleetJobDto.from` to `FleetJobDto.summary`.
 
-Run: `cd apps/api && bun run test:unit -- src/fleet/jobs/dto/fleet-job.dto.spec.ts`
+Run: `cd apps/api && bun run test:scoped src/fleet/jobs/dto/fleet-job.dto.spec.ts`
 Expected: PASS.
 
 - [ ] **Step 8: Write the failing integration assertions (requeue + #185)**
@@ -897,13 +902,24 @@ Expected: PASS.
 
 - [ ] **Step 10: Contract and API checks**
 
-From the repo root: `bun run generate`
+From the repo root: `bun run generate` (needs `apps/api/.env`; in a fresh worktree copy it from the main checkout,
+or `api:export-spec` exits 1 with no message).
 Then: `cd apps/api && bun run type-check && bun run lint && bun run test:unit`
 Expected: all pass; `git diff --stat openapi.json` shows `FleetJobStoryDto`, `stories`, `storiesTruncated`.
 Also run the fleet integration specs that read jobs:
 `cd apps/api && bun run test:scoped test/integration/fleet/runner-sync.integration.spec.ts test/integration/fleet/fleet-jobs.integration.spec.ts test/integration/fleet/fleet-jobs-schema.integration.spec.ts`
-Expected: PASS. If `fleet-jobs-schema` compares the migrated schema with `schema.prisma`, a mismatch there means the
-migration SQL and the Prisma model disagree; fix the one that is wrong.
+Expected: PASS.
+
+The integration suites build their schema with `prisma db push`, so no test checks `migration.sql`. Verify it
+against `schema.prisma` in a scratch database (a new name, so concurrent test runs are not disturbed):
+
+```bash
+docker exec koda-postgres-test-1 psql -U koda -d postgres -c 'CREATE DATABASE koda_shadow'
+cd apps/api && bunx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url postgresql://koda:koda@localhost:5433/koda_shadow --exit-code
+docker exec koda-postgres-test-1 psql -U koda -d postgres -c 'DROP DATABASE koda_shadow'
+```
+
+Expected: `No difference detected.`
 
 - [ ] **Step 11: Commit**
 
@@ -922,7 +938,7 @@ git commit -m "feat(fleet): stories snapshot fields, FleetJob columns and job DT
 - Create: `apps/web/components/fleet/FleetJobStories.vue`
 - Modify: `apps/web/pages/[project]/fleet/jobs/[id].vue`
 - Modify: `apps/web/i18n/locales/en.json`, `apps/web/i18n/locales/zh.json`
-- Test: `apps/web/tests/lib/fleet-jobs.spec.ts`, create `apps/web/tests/components/fleet-job-stories.spec.ts`
+- Test: `apps/web/tests/lib/fleet-jobs.spec.ts`, create `apps/web/tests/components/fleet-job-stories.spec.ts`, `apps/web/tests/pages/fleet-job-detail.spec.ts`
 
 **Interfaces:**
 - Consumes: `FleetJobDto.stories`, `.storiesTruncated` from the API (Task 3).
@@ -954,7 +970,7 @@ In `apps/web/tests/lib/fleet-jobs.spec.ts`, the `job()` literal: change `resultP
 `resultPrUrl: null, wipPush: null, stories: null, storiesTruncated: false,`.
 
 Run: `cd apps/web && bun run type-check`
-Expected: PASS. If it flags another full `FleetJobDto` literal, add the same two fields there.
+Expected: PASS. (`nuxt typecheck` does not cover `tests/`, so the fixture edit is kept by hand, not enforced.)
 
 - [ ] **Step 2: Write the failing `storyRows` tests**
 
@@ -1045,9 +1061,8 @@ export function storyRows(job: Pick<FleetJobDto, 'stories' | 'state' | 'currentS
 }
 ```
 
-`text` and `count` are the module's existing helpers (`count` ~line 52, `text` ~line 95); keep `storyRows` below
-both so neither is used before its declaration. If `text` is declared after `wipPushStatus`, place `storyRows`
-after `text`.
+`text` and `count` are the module's existing helpers (`count` ~line 52, `text` ~line 95). Placing `storyRows`
+right after `wipPushStatus` (before `text`) is fine: it only calls `text` at run time, and lint accepts it.
 
 Run: `cd apps/web && bun run test -- tests/lib/fleet-jobs.spec.ts`
 Expected: PASS.
@@ -1149,7 +1164,8 @@ and inside `"fleet"`, as a sibling directly after the `"state": {...}` object (t
       "blocked": "Blocked",
       "paused": "Paused",
       "regression-failed": "Regression failed",
-      "decomposed": "Decomposed"
+      "decomposed": "Decomposed",
+      "unknown": "Unknown"
     },
 ```
 
@@ -1174,7 +1190,8 @@ and inside `"fleet"`, as a sibling directly after the `"state": {...}` object (t
       "blocked": "已阻塞",
       "paused": "已暂停",
       "regression-failed": "回归失败",
-      "decomposed": "已拆分"
+      "decomposed": "已拆分",
+      "unknown": "未知"
     },
 ```
 
@@ -1208,6 +1225,7 @@ const statusLabel = (status: string): string => codeLabel(t, te, 'fleet.storySta
         data-testid="fleet-job-story"
         :data-story="row.id"
         :data-current="row.current ? 'true' : 'false'"
+        :aria-current="row.current ? 'step' : undefined"
       >
         <span class="font-mono text-xs">{{ row.id }}</span>
         <span class="min-w-0 flex-1 break-words">{{ row.title }}</span>
@@ -1237,6 +1255,17 @@ In `apps/web/pages/[project]/fleet/jobs/[id].vue`: after
       <FleetJobStories :job="job" />
 ```
 
+Pin the wiring: in `apps/web/tests/pages/fleet-job-detail.spec.ts`, inside `describe('job detail', ...)`, add
+
+```ts
+  test('renders the story checklist under the progress block', () => {
+    expect(detail).toMatch(/<FleetJobProgress :job="job" \/>\s*<FleetJobStories :job="job" \/>/)
+  })
+```
+
+Run: `cd apps/web && bun run test -- tests/pages/fleet-job-detail.spec.ts`
+Expected: PASS (FAIL if the page line is missing).
+
 - [ ] **Step 8: Web checks**
 
 Run: `cd apps/web && bun run type-check && bun run lint && bun run test`
@@ -1245,7 +1274,7 @@ Expected: all pass (an en/zh key-parity test, if present, passes because both lo
 - [ ] **Step 9: Commit**
 
 ```bash
-git add apps/web/lib apps/web/components/fleet/FleetJobStories.vue 'apps/web/pages/[project]/fleet/jobs/[id].vue' apps/web/i18n/locales apps/web/tests/lib/fleet-jobs.spec.ts apps/web/tests/components/fleet-job-stories.spec.ts
+git add apps/web/lib apps/web/components/fleet/FleetJobStories.vue 'apps/web/pages/[project]/fleet/jobs/[id].vue' apps/web/i18n/locales apps/web/tests/lib/fleet-jobs.spec.ts apps/web/tests/components/fleet-job-stories.spec.ts apps/web/tests/pages/fleet-job-detail.spec.ts
 git commit -m "feat(web): story checklist on the fleet job page"
 ```
 
@@ -1403,7 +1432,7 @@ Add to the imports: `import { waitFor } from '../helpers/wait';`. Add a third te
       // mentions the job, which an exited nax no longer guarantees (D153).
       await world.prisma.$transaction([
         world.prisma.fleetJob.update({ where: { id }, data: { state: 'CRASHED', leaseEpoch: { increment: 1 } } }),
-        world.prisma.fleetCommand.create({ data: { runnerId: aId, jobId: id, type: 'ABANDON', leaseEpoch: held.leaseEpoch, payload: { reason: 'test fence' } } }),
+        world.prisma.fleetCommand.create({ data: { runnerId: aId, jobId: id, type: 'ABANDON', leaseEpoch: held.leaseEpoch, payload: { reason: 'stale_lease' } } }),
       ]);
       await waitFor(
         async () => (await world.prisma.fleetCommand.count({ where: { jobId: id, type: 'ABANDON', deliveredAt: { not: null } } })) > 0,
@@ -1427,7 +1456,10 @@ Add to the imports: `import { waitFor } from '../helpers/wait';`. Add a third te
 
 - [ ] **Step 5: Run the runner integration suite**
 
-Run: `cd apps/api && bun run test:db:up && cd ../runner && KODA_DB_TESTS=1 bun run test:integration`
+Run: `cd apps/api && bun run test:db:up && cd ../.. && bunx turbo run build --filter=@nathapp/koda-api && cd apps/runner && KODA_DB_TESTS=1 bun run test:integration`
+
+The harness runs the API's built `dist/main.js` (`harness/api-process.ts`): rebuild the API after any change under
+`apps/api`, or the harness runs stale code and the new `stories` assertions fail.
 Expected: PASS, all specs (23 before this slice, plus the new D144 test). If the D144 test times out at
 "ABANDON was not delivered", check that the runner's sync loop is not blocked behind the push: the ABANDON is
 delivered by a sync, and only its handling waits on the mutex.
@@ -1451,6 +1483,7 @@ git commit -m "test(runner): story list end to end; a halted job's progress push
 **Files:**
 - Modify: `docs/superpowers/specs/2026-10-01-fleet-s1b-budgets-schedules-design.md` (§1.3 D149 note; §1.5
   halted-push note)
+- Modify: `.nax/mono/apps/runner/context.md` (watcher line), then regenerate agent files
 
 - [ ] **Step 1: Spec notes**
 
@@ -1468,6 +1501,13 @@ add:
   The halted case is covered by the 1b plan's D153 test (the harness holds the push).
 ```
 
+Runner agent guidance: in `.nax/mono/apps/runner/context.md`, change the architecture line
+`src/watcher/         status.json poll, run-log and stdout/stderr tails, rate cap` to
+`src/watcher/         status.json poll, run-log and stdout/stderr tails, rate cap; RUN only: prd.json story list (S1b 1b), capped 100 stories / 8 KiB`.
+Then regenerate the agent files from the repo root: `nax generate && nax generate --all-packages` (local, not a
+billed run), and include every regenerated file in the commit below. Never edit the generated `AGENTS.md` /
+`CLAUDE.md` files by hand.
+
 - [ ] **Step 2: Repo-wide checks**
 
 From the repo root:
@@ -1480,14 +1520,16 @@ Expected: no changes (Task 3 committed the regenerated contract).
 
 Run the integration suites touched by this slice:
 `cd apps/api && bun run test:scoped test/integration/fleet/fleet-job-cancel-requeue.integration.spec.ts test/integration/fleet/runner-sync.integration.spec.ts`
-and `cd apps/runner && KODA_DB_TESTS=1 bun run test:integration`
+and, after `bunx turbo run build --filter=@nathapp/koda-api` from the repo root,
+`cd apps/runner && KODA_DB_TESTS=1 bun run test:integration`
 Expected: PASS.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add docs/superpowers/specs/2026-10-01-fleet-s1b-budgets-schedules-design.md
-git commit -m "docs(fleet): S1b spec notes for the story list slice"
+git add docs/superpowers/specs/2026-10-01-fleet-s1b-budgets-schedules-design.md .nax/mono/apps/runner/context.md
+git add -u   # the agent files nax generate rewrote
+git commit -m "docs(fleet): S1b spec and runner context notes for the story list slice"
 ```
 
 - [ ] **Step 4: PR notes to carry**
