@@ -42,7 +42,7 @@ It should not:
 ## Architecture
 
 ```text
-src/main.ts          koda-runner run | enroll | status (git-cred and shim are internal: git and the job shims call them)
+src/main.ts          koda-runner run | enroll | status | install-service | uninstall-service (git-cred and shim are internal: git and the job shims call them)
 src/commands/        enroll, run, status over injected dependencies
 src/config/          runner.json (https unless loopback or allowInsecureHttp)
 src/identity/        identity.json (0600) and the per-start boot id
@@ -54,7 +54,9 @@ src/credentials/     TokenCache, CredentialBroker (one unix socket per job epoch
 src/watcher/         status.json poll, run-log and stdout/stderr tails, rate cap
 src/verdict/         pure verdict functions (S1 spec 5.2 step 6)
 src/bundle/          tar.gz from a file list, upload retry rules (409 is stale or state-conflict)
-src/capabilities/    CapabilityProbe seam; StaticCapabilityProbe in 3a
+src/capabilities/    CapabilityProbe seam: NaxCapabilityProbe (nax JSON) or StaticCapabilityProbe (runner.json override); JobCheck after checkout
+src/nax/            NaxCli (read-only JSON commands, 30 s timeout), the 0.83.1 floor, trust check
+src/service/        systemd unit, launchd plist, AppArmor profile for bwrap (install-service)
 src/daemon/          startDaemon (stop drains, crash does not), tuning constants, capacity
 src/paths/           safe path segments
 ```
@@ -73,6 +75,10 @@ src/paths/           safe path segments
 - A git token never goes to a logger, the journal, a file, a bundle or nax's environment; only the shim puts it into its one gh/glab child. The socket directory (default `/tmp/koda-runner-<uid>`) must be ours and mode 0700, or the daemon does not start.
 - `plan-out/` (the PLAN stash) is write-once: a retry never re-reads the checkout that `checkout -f -B` may have reverted.
 - Two epochs of one job id can coexist on a runner: abandoning the lower one never reaps or cleans while a live higher epoch exists.
+- Capabilities come from nax (`config --profile --json`, `auth list --json`, `sandbox probe --json`); the runner maps nax's documents and never re-derives nax's rules. A report must pass the server validator whole (64 profiles, 16 providers each, 64 credentials, 64 KiB in total), so the probe drops what does not fit and warns instead.
+- Unreadable is not the same as absent: a profiles directory, `/etc/apparmor.d` or a profile in it that cannot be read is a warning or a refusal, never "none found". An nax call that fails to spawn is `NAX_SPAWN_FAILED`, not a missing nax.
+- nax 0.83.1 or newer. The daemon refuses to start without it, or while nax does not trust `workspaceRoot`; the runner never trusts a folder itself. After checkout, a job whose needs the machine does not meet fails with `project untrusted` or `capability mismatch: ...` before nax spawns.
+- `install-service` and `uninstall-service` do every effect through `ServiceDeps`; tests never write /etc or /Library and never run systemctl, launchctl, sudo or apparmor_parser.
 - Timing constants live in `src/daemon/tuning.ts`; only tests override them. In tests an `expect` inside a callback that a `try/catch` swallows proves nothing.
 
 ## Testing
@@ -84,6 +90,7 @@ src/paths/           safe path segments
 - Authenticated git in specs uses `test/helpers/git-http.ts` (`git http-backend` behind Basic auth); `file://` origins never call a credential helper. `startDaemon` in tests needs `selfCommand: [process.execPath, <src/main.ts>]`.
 - Integration specs run the built API against their own database `koda_runner_test`: `cd apps/runner && KODA_DB_TESTS=1 bun run test:integration`. `daemon.crash()` is the in-process kill; `TestRunner.net` cuts the network (`down`, or `dropResponse` to lose only the answers).
 - Use `FakeExecutor` only for `JobRun` and `Supervisor` state-machine tests.
+- Unit tests inject nax (`FakeNaxCli`, `test/helpers/fake-nax-cli.ts`) and `toolWorks`; they never depend on what the machine has installed. The fake nax process answers the probe commands from files in its nax home (`test/fixtures/fake-nax-probe.ts`). `test/live/` (`KODA_NAX_LIVE=1 bun run test:live`) is the merge gate against the installed nax, never in CI.
 
 ## Generated Files
 

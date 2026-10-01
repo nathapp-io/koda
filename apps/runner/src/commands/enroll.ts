@@ -1,8 +1,8 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { FLEET_PROTOCOL_VERSION } from '@nathapp/fleet-protocol';
-import { StaticCapabilityProbe } from '../capabilities/capability-probe';
-import { ConfigError, loadRunnerConfig, parseRunnerConfig, type RunnerHome, type StaticCapabilities } from '../config/runner-config';
+import { FLEET_PROTOCOL_VERSION, type RunnerCapabilities } from '@nathapp/fleet-protocol';
+import type { CapabilityProbe } from '../capabilities/capability-probe';
+import { ConfigError, loadRunnerConfig, parseRunnerConfig, type RunnerConfig, type RunnerHome } from '../config/runner-config';
 import { errorMessage } from '../errors';
 import { newBootId, readIdentity, writeIdentity } from '../identity/identity-store';
 import { NetworkError, ServerError, type ServerClient } from '../sync/http';
@@ -31,7 +31,8 @@ export interface EnrollDeps {
   readonly hostname: () => string;
   readonly platform: string;
   readonly arch: string;
-  readonly which: (cmd: string) => string | null;
+  /** D95: `createCapabilityProbe` in production; the probe decides between runner.json and nax. */
+  readonly probe: (config: RunnerConfig) => CapabilityProbe;
   readonly now: Now;
   readonly makeClient: (serverUrl: string) => Pick<ServerClient, 'enroll'>;
   readonly log: (line: string) => void;
@@ -40,14 +41,6 @@ export interface EnrollDeps {
 export function defaultRunnerName(hostname: string): string {
   const name = hostname.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+/, '').slice(0, 63);
   return name === '' ? 'runner' : name;
-}
-
-/** D50: what a machine can honestly claim without asking nax; the operator edits runner.json for the rest. */
-export function defaultCapabilities(which: (cmd: string) => string | null): StaticCapabilities {
-  return {
-    nax: { version: 'unknown', protocols: ['native'] }, sandbox: { available: false }, profiles: {}, credentials: [],
-    tools: { git: which('git') !== null, gh: which('gh') !== null, glab: which('glab') !== null }, executors: ['host'],
-  };
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -76,12 +69,11 @@ async function ensureConfig(options: EnrollOptions, deps: EnrollDeps) {
     workspaceRoot: options.workspace ?? join(home.dir, 'workspace'),
     labels: [...options.labels],
     naxCommand: ['nax'],
-    capabilities: defaultCapabilities(deps.which),
   };
   const config = parseRunnerConfig(raw, deps.env);
   await mkdir(home.dir, { recursive: true, mode: 0o700 });
   await writeFile(home.configPath, `${JSON.stringify(raw, null, 2)}\n`);
-  deps.log(`wrote ${home.configPath}; edit its "capabilities" block to declare nax version, profiles and credentials`);
+  deps.log(`wrote ${home.configPath}`);
   return config;
 }
 
@@ -95,6 +87,17 @@ function explain(error: unknown, name: string): EnrollError {
   }
   if (error instanceof NetworkError) return new EnrollError(`cannot reach the server: ${error.message}`);
   return new EnrollError(errorMessage(error));
+}
+
+/** D97: a machine whose nax is missing or older than 0.83.1 cannot run jobs, so it does not enroll. */
+async function probeCapabilities(config: RunnerConfig, deps: EnrollDeps): Promise<RunnerCapabilities> {
+  try {
+    const { capabilities, warnings } = await deps.probe(config).probe();
+    for (const warning of warnings) deps.log(`warning: ${warning}`);
+    return capabilities;
+  } catch (error) {
+    throw new EnrollError(errorMessage(error));
+  }
 }
 
 export async function enrollRunner(options: EnrollOptions, deps: EnrollDeps): Promise<{ runnerId: string; name: string }> {
@@ -112,7 +115,7 @@ export async function enrollRunner(options: EnrollOptions, deps: EnrollDeps): Pr
     throw error;
   }
   const name = options.name ?? defaultRunnerName(deps.hostname());
-  const capabilities = await new StaticCapabilityProbe(config.capabilities, deps.now).probe();
+  const capabilities = await probeCapabilities(config, deps);
   let enrolled: { runnerId: string; apiKey: string };
   try {
     enrolled = await deps.makeClient(config.serverUrl).enroll({

@@ -1,8 +1,10 @@
 import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
+import { NO_JOB_CHECK, type JobCheck } from '../capabilities/job-check';
 import { buildBundle, type BundleFile } from '../bundle/build-bundle';
 import type { RunnerConfig } from '../config/runner-config';
 import type { CredentialProvider } from '../credentials/broker';
+import { withoutCredentialVars } from '../credentials/credential-env';
 import type { JobRow } from '../journal/types';
 import type { Logger } from '../logger';
 import { assertInside, featureDirFor, repoDirFor } from '../paths/safe-segment';
@@ -28,22 +30,14 @@ export interface HostExecutorDeps {
   readonly sleep?: (ms: number) => Promise<void>;
   /** Design §3.1: per-job git credentials (the broker; a stub in `file://` specs). */
   readonly credentials: CredentialProvider;
+  /** D104: nax mode only. Absent: no post-checkout check (static capabilities, unit specs). */
+  readonly jobCheck?: JobCheck;
 }
 
 // D53: a new attempt (including a requeue, which is a new lease epoch over the same job dir, D77) starts from none of these.
 const ATTEMPT_FILES = ['nax-out', 'nax.stdout', 'nax.stderr', 'pre-plan', 'plan-out', 'plan-out.tmp', 'plan-logs', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json'];
 const CANCELLED: PrepareOutcome = { ok: false, reason: 'cancelled', cancelled: true };
 const exists = (path: string): Promise<boolean> => stat(path).then(() => true, () => false);
-
-/**
- * D88: the forge-token variables the daemon may have inherited from its operator never reach nax's environment — the
- * job's shims are the only thing that puts a token into a gh/glab child, from the socket.
- */
-const CREDENTIAL_ENV_VARS: readonly string[] = ['GH_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_TOKEN', 'GITLAB_TOKEN', 'GL_TOKEN'];
-
-export function withoutCredentialVars(env: Readonly<Record<string, string | undefined>>): Readonly<Record<string, string | undefined>> {
-  return Object.fromEntries(Object.entries(env).filter(([name]) => !CREDENTIAL_ENV_VARS.includes(name)));
-}
 
 async function moveAside(from: string, to: string): Promise<void> {
   try {
@@ -85,6 +79,8 @@ export class HostExecutor implements JobExecutor {
       if (cancelled()) return CANCELLED;
       const checkout = await prepareCheckout({ git: this.deps.git, repoDir, assign });
       if (!checkout.ok) return { ok: false, reason: checkout.reason };
+      const mismatch = await (this.deps.jobCheck ?? NO_JOB_CHECK).check(assign, repoDir);   // D104
+      if (mismatch !== null) return { ok: false, reason: mismatch };
       if (assign.command === 'PLAN') await this.moveStalePlanFiles(repoDir, jobDir, assign.feature);
       if (cancelled()) return CANCELLED;
       await mkdir(outDir, { recursive: true });

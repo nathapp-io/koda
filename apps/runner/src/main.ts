@@ -1,12 +1,16 @@
 import { Command } from 'commander';
 import { hostname } from 'node:os';
+import { createCapabilityProbe } from './capabilities/create-probe';
 import { startDaemon } from './daemon/daemon';
 import { EnrollError, enrollRunner } from './commands/enroll';
 import { runCommand } from './commands/run';
+import { installService, uninstallService } from './commands/service';
 import { collectStatus, formatStatus } from './commands/status';
 import { resolveHome } from './config/runner-config';
 import { dispatchInternal } from './internal-commands';
 import { createConsoleLogger } from './logger';
+import { ServiceError } from './service/units';
+import { systemServiceDeps } from './service/system-deps';
 import { ServerClient } from './sync/http';
 import { systemNow } from './time';
 import { DAEMON_VERSION } from './version';
@@ -44,7 +48,7 @@ program
       await enrollRunner(
         { home: resolveHome(process.env, home()), server: opts.server, token, name: opts.name, labels: opts.labels, workspace: opts.workspace, insecureHttp: opts.insecureHttp },
         {
-          env: process.env, hostname, platform: process.platform, arch: process.arch, which: (c) => Bun.which(c), now: systemNow,
+          env: process.env, hostname, platform: process.platform, arch: process.arch, probe: (config) => createCapabilityProbe(config, systemNow), now: systemNow,
           makeClient: (serverUrl) => new ServerClient({ serverUrl }), log: say,
         },
       );
@@ -71,5 +75,31 @@ program
     const report = await collectStatus(home(), { env: process.env, makeClient: (serverUrl, apiKey) => new ServerClient({ serverUrl, apiKey }) });
     process.stdout.write(opts.json ? `${JSON.stringify(report)}\n` : formatStatus(report));
   });
+
+const serviceAction = async (work: () => Promise<void>): Promise<void> => {
+  try {
+    await work();
+  } catch (error) {
+    if (!(error instanceof ServiceError)) throw error;
+    process.exitCode = fail(error.message);
+  }
+};
+
+program
+  .command('install-service')
+  .description('Install the daemon as a system service (systemd on Linux, launchd on macOS); run with sudo and --home')
+  .requiredOption('--user <name>', 'the existing OS user the daemon runs as')
+  .option('--binary <path>', 'the koda-runner binary the service runs (default: this one)')
+  .option('--path <PATH>', 'PATH for the service; nax, git and gh must be on it (default: this PATH)')
+  .option('--trust-workspace', 'when nax does not trust the workspace root yet, trust it (nax trust add, as --user)', false)
+  .option('--apply-apparmor', 'Linux 24.04+: write and load a targeted AppArmor profile so bwrap may create user namespaces', false)
+  .option('--print', 'print the unit and the commands; change nothing', false)
+  .action((opts: { user: string; binary?: string; path?: string; trustWorkspace: boolean; applyApparmor: boolean; print: boolean }) =>
+    serviceAction(() => installService({ ...opts, home: home() }, systemServiceDeps(say))));
+
+program
+  .command('uninstall-service')
+  .description('Stop and remove the service install-service wrote; run with sudo')
+  .action(() => serviceAction(() => uninstallService(systemServiceDeps(say))));
 
 await program.parseAsync(process.argv);

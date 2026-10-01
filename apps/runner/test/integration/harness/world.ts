@@ -4,6 +4,7 @@ import { delimiter, join } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import type { SyncRequest } from '@nathapp/fleet-protocol';
 import type { FakeForge } from '../../../../api/test/helpers/fake-forge';
+import { createCapabilityProbe } from '../../../src/capabilities/create-probe';
 import { enrollRunner } from '../../../src/commands/enroll';
 import { loadRunnerConfig, resolveHome, type RunnerHome } from '../../../src/config/runner-config';
 import { startDaemon, type DaemonHandle } from '../../../src/daemon/daemon';
@@ -69,7 +70,7 @@ export interface World {
   readonly gitRequests: readonly GitHttpRequest[];
   readonly fakeGh: { binDir: string; logPath: string };
   readonly forgeCloneUrl: string;
-  dispatch(input: { feature: string; command?: 'RUN' | 'PLAN'; ref?: string; planFrom?: string }): Promise<string>;
+  dispatch(input: { feature: string; command?: 'RUN' | 'PLAN'; ref?: string; planFrom?: string; profiles?: string[] }): Promise<string>;
   job(id: string): Promise<JobView>;
   events(id: string): Promise<EventView[]>;
   waitForJob(id: string, predicate: (job: JobView) => boolean, timeoutMs?: number): Promise<JobView>;
@@ -140,6 +141,8 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
 
   const files: Record<string, string> = { 'README.md': '# app\n', 'docs/spec.md': '# spec\n', '.nax/config.json': '{}\n' };
   for (const f of FEATURES) files[`.nax/features/${f}/prd.json`] = prd(f, f === 'fb' ? 'OLD-1' : 'US-001');
+  // D104: a profile the repo provides (the fake nax reads <clone>/.nax/fake-profiles); the runners have no zai credential.
+  files['.nax/fake-profiles/needs-zai.json'] = JSON.stringify({ fakeRequirements: { transport: 'native', providers: ['zai'], sandbox: false } });
   const origin = await makeOrigin(join(remotes, 'acme'), 'app', { files });
   const forgeCloneUrl = `${front.url}/acme/app.git`;
   process.env['FAKE_NAX_STEP_MS'] = '40';
@@ -170,7 +173,7 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
     async dispatch(input) {
       const res = await http('POST', '/projects/web/fleet/jobs', {
         token: admin,
-        body: { repoId, command: input.command ?? 'RUN', feature: input.feature, ...(input.ref ? { ref: input.ref } : {}), ...(input.planFrom ? { planFrom: input.planFrom } : {}), maxCostUsd: 5 },
+        body: { repoId, command: input.command ?? 'RUN', feature: input.feature, ...(input.ref ? { ref: input.ref } : {}), ...(input.planFrom ? { planFrom: input.planFrom } : {}), ...(input.profiles ? { profiles: input.profiles } : {}), maxCostUsd: 5 },
       });
       if (res.status !== 201) throw new Error(`dispatch failed: ${JSON.stringify(res.body)}`);
       return res.body.data.job.id as string;
@@ -203,14 +206,16 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
       const home = resolveHome({}, join(dir, 'home'));
       const workspaceRoot = join(dir, 'ws');
       await mkdir(home.dir, { recursive: true });
-      await writeFile(home.configPath, JSON.stringify({
-        serverUrl: api.url, workspaceRoot, naxHome: join(dir, 'naxhome'), naxCommand: ['bun', FAKE_NAX], labels: ['harness'],
-        capabilities: { nax: { version: '0.0.0-fake', protocols: ['native'] }, sandbox: { available: true }, profiles: {}, credentials: [], tools: { git: true, gh: true, glab: false }, executors: ['host'] },
-      }));
+      const naxHome = join(dir, 'naxhome');
+      await mkdir(join(naxHome, 'profiles'), { recursive: true });
+      // D95, D108: no capabilities block, so the runner probes nax; the fake nax answers from these files.
+      await writeFile(join(naxHome, 'profiles', 'fast.json'), JSON.stringify({ fakeRequirements: { transport: 'native', providers: ['deepseek'], sandbox: false } }));
+      await writeFile(join(naxHome, 'fake-auth.json'), JSON.stringify({ providers: [{ providerId: 'deepseek', stored: { kind: 'api-key', expired: false }, ambient: false, available: true }] }));
+      await writeFile(home.configPath, JSON.stringify({ serverUrl: api.url, workspaceRoot, naxHome, naxCommand: ['bun', FAKE_NAX], labels: ['harness'] }));
       const token: string = (await http('POST', '/fleet/enrollments', { token: admin, body: { labels: [] } })).body.data.token;
       await enrollRunner(
         { home, token, name, labels: [], insecureHttp: false },
-        { env: {}, hostname: () => name, platform: process.platform, arch: process.arch, which: (c) => Bun.which(c), now: systemNow, makeClient: (serverUrl) => new ServerClient({ serverUrl }), log: () => undefined },
+        { env: {}, hostname: () => name, platform: process.platform, arch: process.arch, probe: (config) => createCapabilityProbe(config, systemNow), now: systemNow, makeClient: (serverUrl) => new ServerClient({ serverUrl }), log: () => undefined },
       );
       const net: NetControl = { down: false, dropResponse: false, syncs: [] };
       const log = createMemoryLogger();

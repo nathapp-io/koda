@@ -70,6 +70,12 @@ describe('runShim (D87)', () => {
     expect(f.spawned[0].env['GITLAB_TOKEN']).toBeUndefined();
     expect(f.warnings).toEqual(['koda-runner: no git token for this job (no token); running glab without one']);
   });
+  test('D109: a `job ended` reply still runs the real binary, without a token, and says why', async () => {
+    const f = fake({ ok: false, reason: 'job ended' });
+    expect(await runShim(['gh', '/s.sock', '/job/bin', '--', 'pr', 'view'], f.deps)).toBe(3);
+    expect(f.spawned[0].env['GH_TOKEN']).toBeUndefined();
+    expect(f.warnings).toEqual(['koda-runner: no git token for this job (job ended); running gh without one']);
+  });
   test('no real binary on PATH exits 127 and never asks the socket', async () => {
     const f = fake(granted('github.com'), { which: () => null });
     expect(await runShim(['gh', '/s.sock', '/job/bin', '--', 'pr', 'view'], f.deps)).toBe(127);

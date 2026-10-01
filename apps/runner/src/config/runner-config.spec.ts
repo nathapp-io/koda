@@ -23,7 +23,11 @@ describe('parseRunnerConfig', () => {
       serverUrl: 'https://koda.example.com', allowInsecureHttp: false, workspaceRoot: '/srv/koda-runner/work', labels: [],
       naxCommand: ['nax'], naxHome: join(homedir(), '.nax'), jobRetentionDays: 7,
     });
-    expect(c.capabilities.tools.gh).toBe(true);
+    expect(c.capabilities?.tools.gh).toBe(true);
+  });
+  test('D95: capabilities may be omitted or null; the runner then probes nax', () => {
+    expect(parse({ capabilities: undefined }).capabilities).toBeNull();
+    expect(parse({ capabilities: null }).capabilities).toBeNull();
   });
   test('naxHome follows NAX_GLOBAL_CONFIG_DIR, and an explicit value wins', () => {
     expect(parse({}, { NAX_GLOBAL_CONFIG_DIR: '/opt/nax' }).naxHome).toBe('/opt/nax');
@@ -51,7 +55,6 @@ describe('parseRunnerConfig', () => {
     ['retention 0', { jobRetentionDays: 0 }],
     ['retention 400', { jobRetentionDays: 400 }],
     ['a relative naxHome', { naxHome: 'nax' }],
-    ['missing capabilities', { capabilities: undefined }],
     ['capabilities without protocols', { capabilities: { ...capabilities, nax: { version: '1', protocols: [] } } }],
     ['an unknown executor', { capabilities: { ...capabilities, executors: ['vm'] } }],
     ['tools not booleans', { capabilities: { ...capabilities, tools: { git: 'yes', gh: true, glab: false } } }],
@@ -77,7 +80,7 @@ describe('parseRunnerConfig', () => {
       { providerId: 'claude', available: true, stored: { kind: 'oauth', expires: '2026-10-01T00:00:00.000Z', expired: false }, exec: 'declined', ambient: true },
       { providerId: 'env-only', available: true, stored: null, ambient: true },
     ];
-    expect(parse({ capabilities: { ...capabilities, credentials } }).capabilities.credentials).toEqual(credentials);
+    expect(parse({ capabilities: { ...capabilities, credentials } }).capabilities?.credentials).toEqual(credentials);
   });
   test('names the bad credential in the error, so the operator can find it in runner.json', () => {
     expect(() => parse({ capabilities: { ...capabilities, credentials: [credential, { providerId: 'x' }] } })).toThrow(/credentials\[1\]/);

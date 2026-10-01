@@ -6,6 +6,7 @@ import { writeIdentity } from '../identity/identity-store';
 import { createMemoryLogger } from '../logger';
 import { makeTempDirs } from '../../test/helpers/tmp';
 import { runCommand, type RunDeps } from './run';
+import { NaxUnavailableError } from '../nax/nax-cli';
 import type { DaemonHandle } from '../daemon/daemon';
 
 const tmp = makeTempDirs();
@@ -24,7 +25,9 @@ async function enrolledHome(serverUrl = 'https://koda.example.com') {
 }
 function harness(stopper: (resolve: (v: 'stopped' | { kind: 'protocol' | 'auth'; message: string }) => void) => void) {
   const handlers: Array<() => void> = [];
+  const signals = new Map<string, () => void>();
   let stopped = 0;
+  let reprobes = 0;
   let stoppedOnce = false;
   const log = createMemoryLogger();
   const deps: RunDeps = {
@@ -33,11 +36,16 @@ function harness(stopper: (resolve: (v: 'stopped' | { kind: 'protocol' | 'auth';
       let resolveStopped: (v: 'stopped' | { kind: 'protocol' | 'auth'; message: string }) => void = () => undefined;
       const stoppedPromise = new Promise<'stopped' | { kind: 'protocol' | 'auth'; message: string }>((r) => { resolveStopped = r; });
       stopper(resolveStopped);
-      return { bootId: 'b', journal: null as never, supervisor: null as never, stopped: stoppedPromise as never, stop: async () => { if (!stoppedOnce) { stoppedOnce = true; stopped += 1; } resolveStopped('stopped'); }, crash: () => undefined } satisfies DaemonHandle;
+      return {
+        bootId: 'b', journal: null as never, supervisor: null as never, stopped: stoppedPromise as never,
+        stop: async () => { if (!stoppedOnce) { stoppedOnce = true; stopped += 1; } resolveStopped('stopped'); },
+        crash: () => undefined,
+        reprobe: async () => { reprobes += 1; },
+      } satisfies DaemonHandle;
     },
-    onSignal: (_signal, handler) => { handlers.push(handler); },
+    onSignal: (signal, handler) => { handlers.push(handler); signals.set(signal, handler); },
   };
-  return { deps, handlers, log, get stopped() { return stopped; } };
+  return { deps, handlers, signals, log, get stopped() { return stopped; }, get reprobes() { return reprobes; } };
 }
 
 describe('runCommand', () => {
@@ -57,7 +65,7 @@ describe('runCommand', () => {
     const h = harness(() => undefined);
     const finished = runCommand(home.dir, h.deps);
     await Bun.sleep(20);
-    expect(h.handlers).toHaveLength(2);
+    expect(h.handlers).toHaveLength(3);
     h.handlers[0]();
     expect(await finished).toBe(0);
     expect(h.stopped).toBe(1);
@@ -67,5 +75,24 @@ describe('runCommand', () => {
     const h = harness((resolve) => resolve({ kind: 'auth', message: 'runner key rejected' }));
     expect(await runCommand(home.dir, h.deps)).toBe(2);
     expect(h.log.lines.some((l) => l.level === 'error')).toBe(true);
+  });
+  test('D102: SIGHUP asks the daemon to probe again and does not stop it', async () => {
+    const home = await enrolledHome();
+    const h = harness(() => undefined);
+    const finished = runCommand(home.dir, h.deps);
+    await Bun.sleep(20);
+    h.signals.get('SIGHUP')?.();
+    await Bun.sleep(5);
+    expect(h.reprobes).toBe(1);
+    expect(h.stopped).toBe(0);
+    h.signals.get('SIGTERM')?.();
+    expect(await finished).toBe(0);
+  });
+  test('D97, D103: a StartupError (nax too old, workspace untrusted) is exit 1 with its message logged as is', async () => {
+    const home = await enrolledHome();
+    const h = harness(() => undefined);
+    const deps: RunDeps = { ...h.deps, start: async () => { throw new NaxUnavailableError('koda-runner needs nax 0.83.1 or newer (found 0.80.0)'); } };
+    expect(await runCommand(home.dir, deps)).toBe(1);
+    expect(h.log.lines.some((l) => l.level === 'error' && l.message === 'koda-runner needs nax 0.83.1 or newer (found 0.80.0)')).toBe(true);
   });
 });

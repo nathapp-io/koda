@@ -1,6 +1,6 @@
 import { ConfigError, loadRunnerConfig, resolveHome } from '../config/runner-config';
 import type { DaemonHandle, DaemonOptions } from '../daemon/daemon';
-import { errorMessage } from '../errors';
+import { errorMessage, StartupError } from '../errors';
 import { IdentityError, readIdentity } from '../identity/identity-store';
 import type { Logger } from '../logger';
 
@@ -8,10 +8,10 @@ export interface RunDeps {
   readonly env: NodeJS.ProcessEnv;
   readonly log: Logger;
   readonly start: (options: DaemonOptions) => Promise<DaemonHandle>;
-  readonly onSignal: (signal: 'SIGINT' | 'SIGTERM', handler: () => void) => void;
+  readonly onSignal: (signal: 'SIGINT' | 'SIGTERM' | 'SIGHUP', handler: () => void) => void;
 }
 
-/** Exit codes: 0 clean stop, 1 not enrolled or bad config, 2 stopped by the server (426 or 401). */
+/** Exit codes: 0 clean stop, 1 not enrolled, bad config, nax missing or too old, or workspace untrusted, 2 stopped by the server (426 or 401). */
 export async function runCommand(homeOverride: string | undefined, deps: RunDeps): Promise<number> {
   const home = resolveHome(deps.env, homeOverride);
   let daemon: DaemonHandle;
@@ -24,7 +24,7 @@ export async function runCommand(homeOverride: string | undefined, deps: RunDeps
     }
     daemon = await deps.start({ home, config, identity, log: deps.log });
   } catch (error) {
-    if (error instanceof ConfigError || error instanceof IdentityError) {
+    if (error instanceof ConfigError || error instanceof IdentityError || error instanceof StartupError) {
       deps.log.error(error.message);
       return 1;
     }
@@ -34,6 +34,7 @@ export async function runCommand(homeOverride: string | undefined, deps: RunDeps
   const stopOnSignal = (): void => { void daemon.stop(); };
   deps.onSignal('SIGTERM', stopOnSignal);
   deps.onSignal('SIGINT', stopOnSignal);
+  deps.onSignal('SIGHUP', () => { void daemon.reprobe(); });   // D102: systemctl reload, launchctl kill HUP
   const reason = await daemon.stopped;
   await daemon.stop();
   if (reason === 'stopped') return 0;

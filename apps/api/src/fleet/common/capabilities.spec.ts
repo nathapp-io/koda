@@ -1,4 +1,5 @@
 import { ValidationAppException } from '@nathapp/nestjs-common';
+import { CapabilityValidationError, parseCapabilitiesCore } from './capabilities-core';
 import { parseCapabilities } from './capabilities';
 
 const cred = (over: Record<string, unknown> = {}) => ({ providerId: 'deepseek', available: true, stored: { kind: 'api-key', expired: false }, ambient: false, ...over });
@@ -65,5 +66,22 @@ describe('parseCapabilities', () => {
     const profiles: Record<string, unknown> = {};
     for (let i = 0; i < 2000; i += 1) profiles[`p${i}`] = { protocol: 'native', providers: ['x'.repeat(30)], sandbox: true };
     expect(() => parseCapabilities({ ...valid, profiles })).toThrow(ValidationAppException);
+  });
+});
+
+/**
+ * The validator itself carries no NestJS: the runner's merge gate imports this module so that proving a real report
+ * passes does not depend on this app's dependency graph (apps/runner/test/live/nax-probe.live.spec.ts).
+ */
+describe('parseCapabilitiesCore', () => {
+  it('returns the same clean copy as the NestJS wrapper', () => {
+    expect(parseCapabilitiesCore({ ...valid, extra: 'dropped' })).toEqual(valid);
+  });
+
+  it('throws a plain Error carrying the reason, for every rejection the wrapper rejects', () => {
+    expect(() => parseCapabilitiesCore({ ...valid, tools: undefined })).toThrow(CapabilityValidationError);
+    expect(() => parseCapabilitiesCore({ ...valid, tools: undefined })).toThrow(/tools/);
+    expect(() => parseCapabilitiesCore({ ...valid, executors: ['vm'] })).toThrow(/executors/);
+    expect(() => parseCapabilitiesCore('x')).toThrow(CapabilityValidationError);
   });
 });

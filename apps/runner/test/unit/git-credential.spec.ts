@@ -51,6 +51,11 @@ describe('runGitCred (D80)', () => {
     await runGitCred(['/s.sock', 'get'], x);
     expect(x.out).toEqual([]);
   });
+  test('D109: a `reply too large` answer prints nothing and exits 0', async () => {
+    const x = io(input({ protocol: 'https', host: 'github.com' }), { ok: false, reason: 'reply too large' });
+    expect(await runGitCred(['/s.sock', 'get'], x)).toBe(0);
+    expect(x.out).toEqual([]);
+  });
   test('a token or username with a newline or NUL is never printed (it would inject credential lines)', async () => {
     for (const bad of [{ ...REPLY, token: 'a\nusername=evil' }, { ...REPLY, username: 'x\u0000' }]) {
       const x = io(input({ protocol: 'https', host: 'github.com' }), bad);

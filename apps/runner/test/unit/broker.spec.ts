@@ -1,6 +1,6 @@
 // apps/runner/test/unit/broker.spec.ts
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { CredentialBroker, type BrokerTiming } from '../../src/credentials/broker';
 import { requestCredential } from '../../src/credentials/git-credential';
@@ -146,6 +146,15 @@ describe('CredentialBroker (design §3.1, D78-D83, D90)', () => {
     expect(await requestCredential(w.sock(one))).toEqual({ ok: false, reason: 'unavailable' });
     expect(await requestCredential(w.sock(two))).toMatchObject({ ok: true });
     await expect(stat(join(two.jobDir, 'bin', 'gh'))).resolves.toBeDefined();   // the shared shims stay for epoch 2
+    await w.broker.closeAll();
+  });
+  test('D109: the socket directory is checked again before every listen; opened up after start, it fails the job', async () => {
+    const w = await world();
+    await chmod(w.socketDir, 0o755);
+    const row = w.job();
+    expect(await w.broker.acquire(row, { wait: false })).toEqual({ ok: false, reason: 'git credentials: socket dir unsafe' });
+    await chmod(w.socketDir, 0o700);
+    expect((await w.broker.acquire(row, { wait: false })).ok).toBe(true);
     await w.broker.closeAll();
   });
   test('D90: closeAll closes every socket but keeps the tokens wanted (a restarted daemon readopts)', async () => {
