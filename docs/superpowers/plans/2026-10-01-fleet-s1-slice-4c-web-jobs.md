@@ -4,13 +4,16 @@
 
 > **Numbering.** This is plan 4c, the third of the three slice 4 plans (`2026-10-01-fleet-s1-slice-4-overview.md`, D114). Read the overview first: it fixes the API contract (D116-D121) and the shared decisions D114-D129 this plan relies on. This plan adds **D138-D140** only.
 
-**Prerequisite:** 4a and 4b are merged. Cut branch `feat/fleet-s1-slice4c-web-jobs` from that `main`. From 4a this plan uses `GET /api/projects/:slug/fleet/runners` (`RunnerSummaryDto`, D118) and nothing else new. From 4b it assumes:
-- `apps/web/lib/fleet-types.ts` exports `Page<T>` (`{ records, total, current, size, hasNext, hasPrev }`), `FleetRepoDto` and `RunnerSummaryDto` (fields as in the overview);
-- the i18n root `fleet` exists in both locales with `fleet.state.<STATE>`, `fleet.misfit.<reason>`, `fleet.repoReason.<reason>` and `fleet.common.*`;
-- `fleet` is in the `API_ROOT` alternation of `apps/web/tests/lib/api-path-guard.spec.ts`;
-- the admin nav links (Runners, Repos) are in `layouts/default.vue`.
+**Prerequisite:** 4a and 4b are merged. Cut branch `feat/fleet-s1-slice4c-web-jobs` from that `main`. From 4a this plan uses `GET /api/projects/:slug/fleet/runners` (`RunnerSummaryDto`, D118) and nothing else new. From 4b (`2026-10-01-fleet-s1-slice-4b-web-admin.md`) it uses, by these exact names:
+- `apps/web/lib/fleet-types.ts` exports `FleetPage<T>` (`{ records, total, current, size, hasNext, hasPrev }`), `FleetRepo`, `FleetRunnerSummary` and `FLEET_LIST_SIZE` (100, overview D125);
+- `apps/web/lib/fleet-validation.ts` exports `LABEL_PATTERN` (the API's label rule);
+- `apps/web/components/fleet/NativeSelect.vue`, auto-imported as `<FleetNativeSelect v-bind="componentField" :options="[{ value, label }]" :placeholder? :testid? />` (4b D137: fleet forms use native selects; the `testid` lands on the `<select>` itself);
+- the i18n root `fleet` in both locales with `fleet.state.<STATE>`, `fleet.misfit.<reason>`, `fleet.repoReason.<reason>` and `fleet.common.*`, and `nav.fleetRunners`, `nav.fleetRepos` right after `nav.users`;
+- `apps/web/tests/i18n/fleet-locale-parity.spec.ts`, which already checks en/zh parity, non-empty values and the `|`/`@` ban for the whole `fleet` and `nav` subtrees (this plan extends it, it does not add another parity spec);
+- `fleet` in the `API_ROOT` alternation of `apps/web/tests/lib/api-path-guard.spec.ts`;
+- the lucide import of `layouts/default.vue` ending `..., Users, Server, FolderGit2 } from 'lucide-vue-next'` and the admin Runners/Repos links.
 
-Check before Task 1 (`grep -n "export interface Page\|RunnerSummaryDto\|FleetRepoDto" apps/web/lib/fleet-types.ts`, `grep -c '"misfit"' apps/web/i18n/locales/en.json`). If 4b named something differently (for example `FleetPage<T>`, or already ships a code-to-label helper like `codeLabel`), use 4b's name everywhere below and drop the duplicate this plan would add; do not rename 4b's exports.
+Check before Task 1: `grep -n "FleetPage\|FleetRunnerSummary\|FleetRepo\b\|FLEET_LIST_SIZE" apps/web/lib/fleet-types.ts`, `grep -n "LABEL_PATTERN" apps/web/lib/fleet-validation.ts`, `ls apps/web/components/fleet/NativeSelect.vue apps/web/tests/i18n/fleet-locale-parity.spec.ts`. Each must match; if 4b changed a name in review, use 4b's name everywhere below and do not rename 4b's exports.
 
 **Goal:** A project member follows fleet jobs in the web app: a filterable jobs list, a dispatch form that explains placement, and a job page that updates live (state, story, phase, cost, timeline) and offers cancel, requeue and the bundle download; proven end to end by a Playwright run against a scripted runner.
 
@@ -25,10 +28,10 @@ Check before Task 1 (`grep -n "export interface Page\|RunnerSummaryDto\|FleetRep
 From the spec, the overview and the repo rules (`.nax/rules/web.md`, `common.md`); every task includes them.
 
 - **Routes (D115):** jobs list `/:project/fleet`, dispatch `/:project/fleet/dispatch`, job `/:project/fleet/jobs/:id`.
-- **Permissions (S1 spec §2.2):** dispatch and requeue: project ADMIN or DEVELOPER (`canWork = canManage || viewerRole === 'DEVELOPER'`); cancel: `canWork` or the requester; read: any member. The server enforces all of them; the web only hides controls.
+- **Permissions (S1 spec §2.2):** dispatch and requeue: project ADMIN or DEVELOPER (`canWorkOnFleet(viewer)` = `canManage || viewerRole === 'DEVELOPER'`, one helper for all three pages); cancel: `canWork` or the requester; read: any member. The server enforces all of them; the web only hides controls.
 - **API access:** only through `useApi()` inside composables; every interpolated API path through `apiPath` (the guard spec fails otherwise). No raw `$fetch`/`useFetch` in pages or components.
 - **i18n:** no hardcoded UI strings; every key in `en.json` and `zh.json`; server codes (state, misfit reason) through key maps with a raw-code fallback (D126). vue-i18n treats `|` and `@` in messages as syntax: never use them in a message.
-- **Forms:** vee-validate + zod, validation messages are i18n keys.
+- **Forms:** vee-validate + zod, validation messages are i18n keys; form selects are `<FleetNativeSelect v-bind="componentField">` (4b D137, issue #58: Radix `Select` options live in a portal that Playwright drives unreliably, `tests/e2e/vcs-integration-settings.e2e.spec.ts:207`). Filter selects that no E2E drives (the jobs list) may stay shadcn `Select`.
 - **Errors:** `toast.error(extractApiError(err))`; a status is told apart by `ApiError.code` (the envelope `ret`: 409 for the duplicate dispatch, 422 for a pinned misfit), never by message text.
 - **Links:** a PR URL is rendered as a link only when it is `https:` (the API also accepts `http:`), with `rel="noopener noreferrer"`.
 - **Code style:** no emojis, immutable updates (new arrays and objects, never `push` into reactive state), files under 400 lines, functions under 50 lines, no `eslint-disable`, no non-null assertions.
@@ -50,8 +53,8 @@ Inputs the spec implies that a user will meet and that no page-level test would 
 | # | Decision | Why |
 |:--|:--|:--|
 | D138 | The E2E fixture is seeded by `apps/api/prisma/seed-e2e.ts`: project `fleet-e2e` (key `FLTE`, the seeded admin is its project ADMIN) and GitHub repo `acme/e2e-app` (installation id 1), with the fleet tables wiped first. The runner enrolls over HTTP from the test. | Registering a repo runs a live forge check (GitHub App or GitLab token) that e2e cannot pass; `apps/web` has no Prisma client, and spawning one per test is slower and couples the test to the API's toolchain. The seed already runs once per e2e database reset, before the API starts. |
-| D139 | Live updates: `ProjectEventHandlers.onEvent` becomes optional and `onFleetJob` is added; the `fleet_job` listener is registered only when `onFleetJob` is given, so ticket pages do not change. The jobs list reloads the visible page on any fleet notice (300 ms debounce); the job page reloads only for its own `jobId`, refetching the job and the events from the last loaded page (events only append, ordered by `seq`). Live reloads never touch `pending`. | Same pattern as the ticket board and detail (Track 1 Slice 5): content-free events, refetch, debounce, and no LoadingState flash. |
-| D140 | The web mirrors a few server rules with a source pointer instead of importing them: `FEATURE_RE`, `PROFILE_NAME_RE`, `LABEL_RE`, the `koda-job-` prefix, max-cost bounds (`lib/fleet-dispatch.ts`), the state groups and the requeue/cancel rules (`lib/fleet-jobs.ts`). The server stays the authority: its 400/409/422 message is shown as-is. The bundle downloads as `koda-job-<id>.tar.gz`. | `apps/web` cannot import `apps/api` source and there is no shared package for these rules; catching mistakes before the request is a usability gain only. The blob download cannot read `Content-Disposition`, so the file name is built from the job id. |
+| D139 | Live updates: `ProjectEventHandlers.onEvent` becomes optional and `onFleetJob` is added; the `fleet_job` listener is registered only when `onFleetJob` is given, so ticket pages do not change. The jobs list reloads the visible page on any fleet notice (300 ms debounce); the job page reloads only for its own `jobId`, refetching the job and the events from the last loaded page, then following `hasNext` for at most 10 more pages (events only append, ordered by `seq`; a busy job's runner logs can push new rows past the loaded page). Live reloads never touch `pending`. A live notice carries any non-empty `state` string, not only today's nine, so a state added later still triggers the refetch. | Same pattern as the ticket board and detail (Track 1 Slice 5): content-free events, refetch, debounce, and no LoadingState flash. |
+| D140 | The web mirrors a few server rules with a source pointer instead of importing them: `FEATURE_RE`, `PROFILE_NAME_RE`, the `koda-job-` prefix, max-cost bounds (`lib/fleet-dispatch.ts`; labels reuse 4b's `LABEL_PATTERN`), the state groups and the requeue/cancel rules (`lib/fleet-jobs.ts`). The server stays the authority: its 400/409/422 message is shown as-is. The bundle downloads as `koda-job-<id>.tar.gz`. | `apps/web` cannot import `apps/api` source and there is no shared package for these rules; catching mistakes before the request is a usability gain only. The blob download cannot read `Content-Disposition`, so the file name is built from the job id. |
 
 ## File structure
 
@@ -60,7 +63,8 @@ Inputs the spec implies that a user will meet and that no page-level test would 
 | `apps/web/lib/project-event-stream.ts` (modify) | `LiveFleetJobEvent`, `parseFleetJobEvent`, optional `onFleetJob` |
 | `apps/web/composables/useApi.ts` (modify) | `blobErrorToApiError`, `$api.download()` |
 | `apps/web/lib/fleet-types.ts` (modify, from 4b) | job, event, placement and dispatch-body types |
-| `apps/web/lib/fleet-jobs.ts` | state groups, permissions, cost/progress formatting, timeline summaries, `mergeEvents`, `pickActiveJob` |
+| `apps/web/lib/fleet-jobs.ts` | state groups, permissions (`canWorkOnFleet`, cancel, requeue), cost/progress formatting, timeline summaries and filter, `mergeEvents`, `pickActiveJob` |
+| `apps/web/lib/save-blob.ts` | hands a Blob to the browser as a file, revoking the object URL after a delay |
 | `apps/web/lib/fleet-i18n.ts` | `codeLabel` (D126) |
 | `apps/web/lib/fleet-dispatch.ts` | dispatch zod schema, defaults, `toDispatchBody`, token-list helpers |
 | `apps/web/composables/useFleetJobs.ts` | list/get/events/dispatch/cancel/requeue/findActiveJob/downloadBundle |
@@ -70,9 +74,10 @@ Inputs the spec implies that a user will meet and that no page-level test would 
 | `apps/web/pages/[project]/fleet/index.vue`, `dispatch.vue`, `jobs/[id].vue` | the three pages |
 | `apps/web/layouts/default.vue` (modify) | project nav link + breadcrumbs |
 | `apps/web/i18n/locales/{en,zh}.json` (modify) | `fleet.jobs.*`, `fleet.dispatch.*`, `nav.fleetJobs` |
+| `apps/web/tests/i18n/fleet-locale-parity.spec.ts` (modify, from 4b) | `nav.fleetJobs` assertion |
 | `apps/api/prisma/seed-e2e.ts` (modify), `apps/web/playwright.config.ts` (modify), `apps/web/tests/e2e/fixtures/scripted-runner.ts`, `apps/web/tests/e2e/fleet-dispatch.e2e.spec.ts` | E2E |
 
-All code in this plan was applied to a scratch worktree of `main` with a stand-in for 4b's `lib/fleet-types.ts` and checked there: the full web jest suite (129 suites, 2176 tests), `eslint --max-warnings=0` on every new and changed file, and `nuxt typecheck` all passed; `seed-e2e.ts` compiles. The Playwright spec was not run (it needs 4a's runner summaries route).
+Verified after the review fixes: 4b's web code, then every code block of this plan, applied in order to a scratch worktree of `main` `0ba9ba94` (no stand-ins: 4b's real `fleet-types.ts`, `fleet-validation.ts`, `NativeSelect.vue`, parity spec and layout). The full web jest suite passed (142 suites, 2260 tests: 13 suites and 108 tests over 4b's 129/2152), `bun run lint` exited 0, and `bun run type-check` exited 0; Nuxt's type-check covers `tests/e2e` (its tsconfig includes `../**/*`), so the scripted runner and the E2E spec type-check too. The Playwright spec was not run (it needs 4a's runner summaries route); the review ran its sync sequence against a booted API and it reached COMPLETED.
 
 ---
 
@@ -86,7 +91,7 @@ All code in this plan was applied to a scratch worktree of `main` with a stand-i
 
 **Interfaces:**
 - Consumes: the API's named SSE event `fleet_job` with data `{ id, type: 'fleet_job', projectId, jobId, state, at }` (overview, "Unchanged and relied on").
-- Produces: `FLEET_JOB_STATES` (the nine states, `as const`), `type FleetJobState`, `interface LiveFleetJobEvent { id: string; type: 'fleet_job'; projectId: string; jobId: string; state: FleetJobState; at: string }`, `parseFleetJobEvent(raw: string): LiveFleetJobEvent | null`, and `ProjectEventHandlers { onEvent?: (e: LiveTicketEvent) => void; onFleetJob?: (e: LiveFleetJobEvent) => void; onResync: () => void }`. Tasks 3, 7 and 9 use `FleetJobState`, `FLEET_JOB_STATES` and `onFleetJob`.
+- Produces: `FLEET_JOB_STATES` (the nine states, `as const`), `type FleetJobState`, `interface LiveFleetJobEvent { id: string; type: 'fleet_job'; projectId: string; jobId: string; state: string; at: string }` (`state` is any non-empty string: the notice only triggers a refetch, so a state added to the API later must not silence live updates, D139), `parseFleetJobEvent(raw: string): LiveFleetJobEvent | null`, and `ProjectEventHandlers { onEvent?: (e: LiveTicketEvent) => void; onFleetJob?: (e: LiveFleetJobEvent) => void; onResync: () => void }`. Tasks 3, 7 and 9 use `FleetJobState`, `FLEET_JOB_STATES` and `onFleetJob`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -153,7 +158,8 @@ describe('parseFleetJobEvent', () => {
     ['a ticket event', { id: 'e1', type: 'ticket', jobId: 'j1', state: 'RUNNING' }],
     ['no jobId', { id: 'e1', type: 'fleet_job', state: 'RUNNING' }],
     ['no id', { type: 'fleet_job', jobId: 'j1', state: 'RUNNING' }],
-    ['an unknown state', { id: 'e1', type: 'fleet_job', jobId: 'j1', state: 'EXPLODED' }],
+    ['a non-string state', { id: 'e1', type: 'fleet_job', jobId: 'j1', state: 42 }],
+    ['an empty state', { id: 'e1', type: 'fleet_job', jobId: 'j1', state: '' }],
     ['a non-object', 'nope'],
     ['null', null],
   ])('rejects %s', (_name, value) => {
@@ -162,6 +168,10 @@ describe('parseFleetJobEvent', () => {
 
   test('rejects text that is not JSON', () => {
     expect(parseFleetJobEvent('{oops')).toBeNull()
+  })
+
+  test('accepts a state this web build does not know yet (it only triggers a refetch)', () => {
+    expect(parseFleetJobEvent(JSON.stringify(fleetEvent('e1', { state: 'PAUSED' })))?.state).toBe('PAUSED')
   })
 })
 
@@ -186,7 +196,7 @@ describe('createProjectEventStream with onFleetJob', () => {
   test('ignores malformed fleet_job payloads', () => {
     const onFleetJob = jest.fn()
     const es = open({ onFleetJob, onResync: jest.fn() })
-    es.emit('fleet_job', { id: 'e1', type: 'fleet_job', jobId: 'j1', state: 'nope' })
+    es.emit('fleet_job', { id: 'e1', type: 'fleet_job', jobId: 'j1', state: 42 })
     expect(onFleetJob).not.toHaveBeenCalled()
   })
 
@@ -234,7 +244,8 @@ export interface LiveFleetJobEvent {
   type: 'fleet_job'
   projectId: string
   jobId: string
-  state: FleetJobState
+  /** Any non-empty string: the notice only triggers a refetch, so a new API state must not be dropped (D139). */
+  state: string
   at: string
 }
 
@@ -254,7 +265,7 @@ export function parseFleetJobEvent(raw: string): LiveFleetJobEvent | null {
     const value = JSON.parse(raw) as Partial<LiveFleetJobEvent> | null
     if (!value || typeof value !== 'object') return null
     if (value.type !== 'fleet_job' || typeof value.id !== 'string' || typeof value.jobId !== 'string') return null
-    if (!FLEET_JOB_STATES.includes(value.state as FleetJobState)) return null
+    if (typeof value.state !== 'string' || value.state.length === 0) return null
     return value as LiveFleetJobEvent
   }
   catch {
@@ -487,9 +498,9 @@ git commit -m "feat(web): add useApi download() returning a Blob with API errors
 
 **Interfaces:**
 - Consumes: `FleetJobState` (Task 1).
-- Produces (used by Tasks 5, 7, 8, 9): types `MisfitReason`, `FleetJobDto`, `FleetJobEventDto`, `PlacementMisfit`, `DispatchResultDto`, `DispatchBody`; from `lib/fleet-jobs.ts`: `ACTIVE_JOB_STATES`, `TERMINAL_JOB_STATES`, `REQUEUEABLE_JOB_STATES`, `isActiveJobState(s)`, `isTerminalJobState(s)`, `mayHaveBundle(s)`, `interface JobViewer { userId: string | null; canWork: boolean }`, `canCancelJob(job, viewer)`, `canRequeueJob(job, viewer)`, `formatUsd(decimal)`, `interface JobProgress`, `extractProgress(unknown)`, `safePrUrl(url)`, `type TimelineEntry`, `summarizeEvent(event)`, `pickActiveJob(records)`, `bundleFileName(id)`, `mergeEvents(existing, incoming)`; from `lib/fleet-i18n.ts`: `codeLabel(t, te, prefix, code)`.
+- Produces (used by Tasks 5, 7, 8, 9): types `MisfitReason`, `FleetJobDto`, `FleetJobEventDto`, `PlacementMisfit`, `DispatchResultDto`, `DispatchBody`; from `lib/fleet-jobs.ts`: `ACTIVE_JOB_STATES`, `TERMINAL_JOB_STATES`, `REQUEUEABLE_JOB_STATES`, `isActiveJobState(s)`, `isTerminalJobState(s)`, `mayHaveBundle(s)`, `canWorkOnFleet(role: { canManage: boolean; viewerRole: string | null }): boolean`, `interface JobViewer { userId: string | null; canWork: boolean }`, `canCancelJob(job, viewer)`, `canRequeueJob(job, viewer)`, `formatUsd(decimal)`, `interface JobProgress`, `extractProgress(unknown)`, `safePrUrl(url)`, `type TimelineEntry`, `summarizeEvent(event)`, `visibleTimelineEvents(events)`, `pickActiveJob(records)`, `bundleFileName(id)`, `mergeEvents(existing, incoming)`; from `lib/fleet-i18n.ts`: `codeLabel(t, te, prefix, code)`.
 
-`FleetJobDto` mirrors `apps/api/src/fleet/jobs/dto/fleet-job.dto.ts` field for field. `progress` is nax's `status.json` counters `{ total, passed, failed, paused, blocked, pending }` (runner `src/verdict/status-view.ts`), but it is untrusted JSON, so it stays `unknown` and only `extractProgress` reads it. Server-written `state` events carry `{ from, to, by, reason }` with `runnerSeq: null`; runner-written ones carry `{ to, reason?, exitCode? }` (`apps/api/src/fleet/jobs/job-transitions.service.ts:62`, `sync/event-payloads.ts`).
+`FleetJobDto` mirrors `apps/api/src/fleet/jobs/dto/fleet-job.dto.ts` field for field. `progress` is nax's `status.json` counters `{ total, passed, failed, paused, blocked, pending }` (runner `src/verdict/status-view.ts`), but it is untrusted JSON, so it stays `unknown` and only `extractProgress` reads it. Server-written `state` events carry `{ from, to, by, reason }` with `runnerSeq: null` (the first one, at dispatch, is `{ from: null, to: 'QUEUED', by: 'server' }`); runner-written ones carry `{ to, reason?, exitCode? }` and are stored too, next to the server's own row for the transition they caused (`apps/api/src/fleet/jobs/job-transitions.service.ts:62`, `sync/event-payloads.ts`; observed against the real API in review: seq 3 and 5, 6 and 7, 9 and 10). The timeline therefore shows only the server's `state` rows (`visibleTimelineEvents`), so every transition appears once.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -501,6 +512,7 @@ import {
   bundleFileName,
   canCancelJob,
   canRequeueJob,
+  canWorkOnFleet,
   extractProgress,
   formatUsd,
   isActiveJobState,
@@ -510,6 +522,7 @@ import {
   pickActiveJob,
   safePrUrl,
   summarizeEvent,
+  visibleTimelineEvents,
 } from '~/lib/fleet-jobs'
 import type { FleetJobDto, FleetJobEventDto } from '~/lib/fleet-types'
 
@@ -536,6 +549,13 @@ describe('state groups', () => {
 })
 
 describe('permissions', () => {
+  test('canWorkOnFleet: project ADMIN (canManage) or DEVELOPER', () => {
+    expect(canWorkOnFleet({ canManage: true, viewerRole: 'ADMIN' })).toBe(true)
+    expect(canWorkOnFleet({ canManage: false, viewerRole: 'DEVELOPER' })).toBe(true)
+    expect(canWorkOnFleet({ canManage: false, viewerRole: 'VIEWER' })).toBe(false)
+    expect(canWorkOnFleet({ canManage: false, viewerRole: null })).toBe(false)
+  })
+
   const dev = { userId: 'u2', canWork: true }
   const viewer = { userId: 'u3', canWork: false }
   const requester = { userId: 'u1', canWork: false }
@@ -604,6 +624,11 @@ describe('summarizeEvent', () => {
       .toEqual({ kind: 'transition', from: 'QUEUED', to: 'ASSIGNED', reason: null, source: 'server' })
   })
 
+  test('the server row written at dispatch has no from', () => {
+    expect(summarizeEvent({ type: 'state', runnerSeq: null, payload: { from: null, to: 'QUEUED', by: 'server', reason: null } }))
+      .toEqual({ kind: 'transition', from: null, to: 'QUEUED', reason: null, source: 'server' })
+  })
+
   test('runner-reported state has no from', () => {
     expect(summarizeEvent({ type: 'state', runnerSeq: 3, payload: { to: 'FAILED', reason: 'capability mismatch: sandbox' } }))
       .toEqual({ kind: 'transition', from: null, to: 'FAILED', reason: 'capability mismatch: sandbox', source: 'runner' })
@@ -634,6 +659,17 @@ describe('summarizeEvent', () => {
   test('a non-object payload never throws', () => {
     expect(summarizeEvent({ type: 'lifecycle', runnerSeq: 1, payload: null })).toEqual({ kind: 'lifecycle', level: 'info', message: '' })
     expect(summarizeEvent({ type: 'bogus' as 'log', runnerSeq: 1, payload: 'x' })).toEqual({ kind: 'unknown', type: 'bogus' })
+  })
+})
+
+describe('visibleTimelineEvents', () => {
+  const ev = (id: string, type: FleetJobEventDto['type'], runnerSeq: number | null): FleetJobEventDto =>
+    ({ id, seq: 0, leaseEpoch: 1, runnerSeq, type, payload: {}, createdAt: '2026-10-01T00:00:00.000Z' })
+
+  test("drops the runner's own state rows (the server writes the applied transition too) and keeps everything else", () => {
+    const events = [ev('q', 'state', null), ev('r', 'state', 3), ev('s', 'state', null), ev('n', 'snapshot', 4), ev('l', 'log', 5)]
+    expect(visibleTimelineEvents(events).map(e => e.id)).toEqual(['q', 's', 'n', 'l'])
+    expect(events).toHaveLength(5)
   })
 })
 
@@ -797,9 +833,14 @@ export const isTerminalJobState = (state: string): boolean => (TERMINAL_JOB_STAT
 /** A bundle can exist once the runner may upload (RUNNING partial on cancel, UPLOADING) or the job ended. */
 export const mayHaveBundle = (state: string): boolean => state === 'UPLOADING' || isTerminalJobState(state)
 
+/** Dispatch and requeue: project ADMIN (`canManage`) or DEVELOPER (S1 spec §2.2); one rule for every fleet page. */
+export function canWorkOnFleet(role: { canManage: boolean; viewerRole: string | null }): boolean {
+  return role.canManage || role.viewerRole === 'DEVELOPER'
+}
+
 export interface JobViewer {
   userId: string | null
-  /** Project ADMIN or DEVELOPER (S1 spec §2.2). */
+  /** Project ADMIN or DEVELOPER (S1 spec §2.2), from canWorkOnFleet. */
   canWork: boolean
 }
 
@@ -894,6 +935,14 @@ export function summarizeEvent(event: Pick<FleetJobEventDto, 'type' | 'payload' 
   }
 }
 
+/**
+ * Timeline rows: the runner's own `state` events (runnerSeq set) are dropped because the server writes
+ * the transition it applied as well (runnerSeq null), with `from`; everything else is kept.
+ */
+export function visibleTimelineEvents(events: readonly FleetJobEventDto[]): FleetJobEventDto[] {
+  return events.filter(event => !(event.type === 'state' && event.runnerSeq !== null))
+}
+
 /** The active job behind a dispatch 409 (D121): newest first, at most one is active. */
 export function pickActiveJob(records: readonly FleetJobDto[]): FleetJobDto | null {
   return records.find(job => isActiveJobState(job.state)) ?? null
@@ -925,7 +974,7 @@ export function codeLabel(t: Translate, te: HasKey, prefix: string, code: string
 - [ ] **Step 4: Run them to verify they pass**
 
 Run: `cd apps/web && npx jest tests/lib/fleet-jobs.spec.ts tests/lib/fleet-i18n.spec.ts`
-Expected: PASS (33 tests).
+Expected: PASS (36 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -941,10 +990,10 @@ git commit -m "feat(web): fleet job types and pure helpers for states, permissio
 - Test: `apps/web/tests/lib/fleet-dispatch.spec.ts`
 
 **Interfaces:**
-- Consumes: `DispatchBody` (Task 3).
-- Produces (Task 8): `buildDispatchSchema(t: (key: string) => string)` (a zod object), `type DispatchFormValues`, `DISPATCH_DEFAULTS` (`maxCostUsd: 5`, `command: 'RUN'`, everything else empty), `toDispatchBody(values): DispatchBody`, `addToken(list, token): string[]`, `removeToken(list, token): string[]`, and the constants `FEATURE_RE`, `PROFILE_NAME_RE`, `LABEL_RE`, `RESERVED_PROFILE_PREFIX`, `MAX_PROFILES` (8), `MAX_LABELS` (16), `MAX_COST_USD` (10000).
+- Consumes: `DispatchBody` (Task 3); `LABEL_PATTERN` from 4b's `lib/fleet-validation.ts`.
+- Produces (Task 8): `buildDispatchSchema(t: (key: string) => string)` (a zod object), `type DispatchFormValues`, `DISPATCH_DEFAULTS` (`maxCostUsd: 5`, `command: 'RUN'`, everything else empty), `toDispatchBody(values): DispatchBody`, `addToken(list, token): string[]`, `removeToken(list, token): string[]`, and the constants `FEATURE_RE`, `PROFILE_NAME_RE`, `RESERVED_PROFILE_PREFIX`, `MAX_PROFILES` (8), `MAX_SELECTOR_LABELS` (16; not 4b's `MAX_LABELS`, which is the runner's 20), `MAX_COST_USD` (10000).
 
-Mirrors (D140): `apps/api/src/fleet/jobs/dispatch-input.ts` (`FEATURE_RE`, `..` ban, PLAN needs `planFrom`, RUN must not send it, reserved `koda-job-` profiles, no duplicate profiles), `dto/dispatch-fleet-job.dto.ts` (profiles max 8, labels max 16, `maxCostUsd` 0.0001..10000 with at most 4 decimals), `common/capabilities.ts` (`PROFILE_NAME_RE`), `runners/dto/create-enrollment.dto.ts` (`LABEL_PATTERN`). `bashMode` is never sent (the server defaults to `raw`). A pin wins over labels in the body; the schema also rejects both together, so the form shows the conflict instead of silently dropping labels.
+Mirrors (D140): `apps/api/src/fleet/jobs/dispatch-input.ts` (`FEATURE_RE`, `..` ban, PLAN needs `planFrom`, RUN must not send it, reserved `koda-job-` profiles, no duplicate profiles), `dto/dispatch-fleet-job.dto.ts` (profiles max 8, labels max 16, `maxCostUsd` 0.0001..10000 with at most 4 decimals), `common/capabilities.ts` (`PROFILE_NAME_RE`); selector labels use the label rule 4b already mirrors (`LABEL_PATTERN`, `runners/dto/create-enrollment.dto.ts`). `bashMode` is never sent (the server defaults to `raw`). A pin wins over labels in the body; the schema also rejects both together, so the form shows the conflict instead of silently dropping labels.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1058,16 +1107,16 @@ Create `apps/web/lib/fleet-dispatch.ts`:
 ```ts
 import * as z from 'zod'
 import type { DispatchBody } from '~/lib/fleet-types'
+import { LABEL_PATTERN } from '~/lib/fleet-validation'
 
 /** apps/api/src/fleet/jobs/dispatch-input.ts FEATURE_RE (nax validateFeatureName). */
 export const FEATURE_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/
 /** apps/api/src/fleet/common/capabilities.ts PROFILE_NAME_RE. */
 export const PROFILE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
-/** apps/api/src/fleet/runners/dto/create-enrollment.dto.ts LABEL_PATTERN. */
-export const LABEL_RE = /^[a-z0-9][a-z0-9._-]{0,31}$/
 export const RESERVED_PROFILE_PREFIX = 'koda-job-'
 export const MAX_PROFILES = 8
-export const MAX_LABELS = 16
+/** DispatchFleetJobDto selectorLabels max (a runner's own labels allow 20: 4b's MAX_LABELS). */
+export const MAX_SELECTOR_LABELS = 16
 export const MAX_COST_USD = 10_000
 
 type Translate = (key: string) => string
@@ -1092,8 +1141,8 @@ export function buildDispatchSchema(t: Translate) {
       .gt(0, t('fleet.dispatch.validation.maxCost'))
       .max(MAX_COST_USD, t('fleet.dispatch.validation.maxCost'))
       .refine(n => Math.abs(n * 10_000 - Math.round(n * 10_000)) < 1e-6, t('fleet.dispatch.validation.maxCost')), // at most 4 decimals
-    selectorLabels: z.array(z.string()).max(MAX_LABELS, t('fleet.dispatch.validation.labelsMax'))
-      .refine(list => list.every(l => LABEL_RE.test(l)), t('fleet.dispatch.validation.label')),
+    selectorLabels: z.array(z.string()).max(MAX_SELECTOR_LABELS, t('fleet.dispatch.validation.labelsMax'))
+      .refine(list => list.every(l => LABEL_PATTERN.test(l)), t('fleet.dispatch.validation.label')),
     pinnedRunnerId: z.string().optional(),
   }).superRefine((v, ctx) => {
     if (v.command === 'PLAN' && !(v.planFrom ?? '').trim()) {
@@ -1161,16 +1210,17 @@ git commit -m "feat(web): fleet dispatch form schema and request body"
 ### Task 5: Fleet job composables
 
 **Files:**
-- Create: `apps/web/composables/useFleetJobs.ts`, `apps/web/composables/useFleetDispatchOptions.ts`, `apps/web/composables/useProjectMemberNames.ts`
-- Test: `apps/web/tests/composables/useFleetJobs.spec.ts`, `apps/web/tests/composables/useFleetDispatchOptions.spec.ts`, `apps/web/tests/composables/useProjectMemberNames.spec.ts`
+- Create: `apps/web/lib/save-blob.ts`, `apps/web/composables/useFleetJobs.ts`, `apps/web/composables/useFleetDispatchOptions.ts`, `apps/web/composables/useProjectMemberNames.ts`
+- Test: `apps/web/tests/lib/save-blob.spec.ts`, `apps/web/tests/composables/useFleetJobs.spec.ts`, `apps/web/tests/composables/useFleetDispatchOptions.spec.ts`, `apps/web/tests/composables/useProjectMemberNames.spec.ts`
 
 **Interfaces:**
-- Consumes: `$api.get/post/download` (Task 2), `apiPath`, types and helpers from Task 3, `Page<T>`, `FleetRepoDto`, `RunnerSummaryDto` (4b), `ProjectMember` (exported by `composables/useProjectMembers.ts`).
+- Consumes: `$api.get/post/download` (Task 2), `apiPath`, types and helpers from Task 3, `FleetPage<T>`, `FleetRepo`, `FleetRunnerSummary`, `FLEET_LIST_SIZE` (4b), `ProjectMember` (exported by `composables/useProjectMembers.ts`).
 - Produces (Tasks 7-9):
   - `FLEET_JOB_PAGE_SIZE` (20), `FLEET_EVENT_PAGE_SIZE` (50), `interface FleetJobFilters { state?; repoId?; runnerId?; requestedById?; page? }`, `buildJobQuery(filters): Record<string, string>`;
-  - `useFleetJobs(slug)` returns `{ jobs, total, page, hasNext, load(filters), get(id), events(id, current), dispatch(body), cancel(id), requeue(id), findActiveJob(repoId, feature), downloadBundle(id) }` (refs are `Ref`s; `get` returns `FleetJobDto`, `events` a `Page<FleetJobEventDto>`, `dispatch` and `requeue` a `DispatchResultDto`, `cancel` a `FleetJobDto`);
-  - `FLEET_OPTIONS_PAGE_SIZE` (100), `useFleetDispatchOptions(slug)` returns `{ repos, runners, moreRepos, moreRunners, load(), profileOptions, labelOptions, repoName(id), runnerName(id | null) }`;
-  - `useProjectMemberNames(slug)` returns `{ members, load(), nameOf(userId) }`.
+  - `REVOKE_DELAY_MS` (1000) and `saveBlob(blob: Blob, fileName: string): void` (`lib/save-blob.ts`);
+  - `useFleetJobs(slug)` returns `{ jobs, total, page, hasNext, load(filters), get(id), events(id, current), dispatch(body), cancel(id), requeue(id), findActiveJob(repoId, feature), downloadBundle(id) }` (refs are `Ref`s; `get` returns `FleetJobDto`, `events` a `FleetPage<FleetJobEventDto>`, `dispatch` and `requeue` a `DispatchResultDto`, `cancel` a `FleetJobDto`);
+  - `useFleetDispatchOptions(slug)` returns `{ repos, runners, moreRepos, moreRunners, load(), profileOptions, labelOptions, repoName(id), runnerName(id | null) }` (one page of 4b's `FLEET_LIST_SIZE`);
+  - `useProjectMemberNames(slug)` returns `{ members, load(), nameOf(userId): string | null }` (null for a user who is not in the loaded members: a former member, or beyond the first 100; pages show `fleet.jobs.unknownMember`).
 
 Routes: `GET|POST /projects/:slug/fleet/jobs`, `GET .../jobs/:id`, `GET .../jobs/:id/events?current&size`, `POST .../jobs/:id/cancel`, `POST .../jobs/:id/requeue`, `GET .../jobs/:id/bundle`, `GET /projects/:slug/fleet/repos?size=100`, `GET /projects/:slug/fleet/runners?size=100` (4a, D118), `GET /projects/:slug/members?size=100`. `findActiveJob` implements D121. Runner names come from the summaries, which any member can read; the admin runner list is not used here.
 
@@ -1254,7 +1304,7 @@ describe('useFleetJobs', () => {
     expect(await useFleetJobs('web').findActiveJob('r1', 'f')).toBeNull()
   })
 
-  test('downloadBundle saves the blob under koda-job-<id>.tar.gz and revokes the URL', async () => {
+  test('downloadBundle saves the blob under koda-job-<id>.tar.gz', async () => {
     const blob = new Blob(['gz'])
     const download = jest.fn(async () => blob)
     withApi({ download })
@@ -1262,6 +1312,7 @@ describe('useFleetJobs', () => {
     g.document = { createElement: jest.fn(() => link), body: { appendChild: jest.fn() } }
     const createObjectURL = jest.spyOn(URL, 'createObjectURL').mockReturnValue('blob:x')
     const revokeObjectURL = jest.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    jest.useFakeTimers()
     try {
       const { useFleetJobs } = await import(composablePath)
       await useFleetJobs('web').downloadBundle('j1')
@@ -1270,9 +1321,10 @@ describe('useFleetJobs', () => {
       expect(createObjectURL).toHaveBeenCalledWith(blob)
       expect(link.download).toBe('koda-job-j1.tar.gz')
       expect(link.click).toHaveBeenCalled()
-      expect(revokeObjectURL).toHaveBeenCalledWith('blob:x')
     }
     finally {
+      jest.runOnlyPendingTimers()
+      jest.useRealTimers()
       delete g.document
       createObjectURL.mockRestore()
       revokeObjectURL.mockRestore()
@@ -1291,6 +1343,60 @@ describe('useFleetJobs', () => {
       delete g.document
     }
     expect(createElement).not.toHaveBeenCalled()
+  })
+})
+```
+
+Create `apps/web/tests/lib/save-blob.spec.ts`:
+
+```ts
+import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals'
+import { REVOKE_DELAY_MS, saveBlob } from '~/lib/save-blob'
+
+const g = globalThis as Record<string, unknown>
+
+describe('saveBlob', () => {
+  let link: { href: string; download: string; click: jest.Mock; remove: jest.Mock }
+  let createObjectURL: jest.SpiedFunction<typeof URL.createObjectURL>
+  let revokeObjectURL: jest.SpiedFunction<typeof URL.revokeObjectURL>
+
+  beforeEach(() => {
+    link = { href: '', download: '', click: jest.fn(), remove: jest.fn() }
+    g.document = { createElement: jest.fn(() => link), body: { appendChild: jest.fn() } }
+    createObjectURL = jest.spyOn(URL, 'createObjectURL').mockReturnValue('blob:x')
+    revokeObjectURL = jest.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    jest.useFakeTimers()
+  })
+
+  afterEach(() => {
+    jest.useRealTimers()
+    delete g.document
+    createObjectURL.mockRestore()
+    revokeObjectURL.mockRestore()
+  })
+
+  test('clicks a link to the object URL with the file name, then removes the link', () => {
+    const blob = new Blob(['gz'])
+    saveBlob(blob, 'koda-job-j1.tar.gz')
+    expect(createObjectURL).toHaveBeenCalledWith(blob)
+    expect(link).toMatchObject({ href: 'blob:x', download: 'koda-job-j1.tar.gz' })
+    expect(link.click).toHaveBeenCalledTimes(1)
+    expect(link.remove).toHaveBeenCalledTimes(1)
+  })
+
+  test('revokes the object URL only after the delay (Firefox and Safari drop a download revoked in the click tick)', () => {
+    saveBlob(new Blob(['gz']), 'f.tar.gz')
+    expect(revokeObjectURL).not.toHaveBeenCalled()
+    jest.advanceTimersByTime(REVOKE_DELAY_MS)
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:x')
+  })
+
+  test('still removes the link and revokes when the click throws', () => {
+    link.click.mockImplementation(() => { throw new Error('blocked') })
+    expect(() => saveBlob(new Blob(['gz']), 'f.tar.gz')).toThrow('blocked')
+    expect(link.remove).toHaveBeenCalledTimes(1)
+    jest.advanceTimersByTime(REVOKE_DELAY_MS)
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:x')
   })
 })
 ```
@@ -1347,7 +1453,7 @@ const g = globalThis as Record<string, unknown>
 describe('useProjectMemberNames', () => {
   beforeEach(() => { g.useApi = undefined })
 
-  test('loads 100 members and resolves names, falling back to email then id', async () => {
+  test('loads 100 members and resolves names, falling back to email, null for an unknown id', async () => {
     const get = jest.fn(async () => ({
       records: [
         { userId: 'u1', email: 'ann@k.t', name: 'Ann', role: 'ADMIN', joinedAt: 'x' },
@@ -1363,17 +1469,42 @@ describe('useProjectMemberNames', () => {
     expect(get).toHaveBeenCalledWith('/projects/web/members', { query: { size: '100' } })
     expect(people.nameOf('u1')).toBe('Ann')
     expect(people.nameOf('u2')).toBe('bob@k.t')
-    expect(people.nameOf('gone')).toBe('gone')
+    expect(people.nameOf('gone')).toBeNull()
   })
 })
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `cd apps/web && npx jest tests/composables/useFleet tests/composables/useProjectMemberNames.spec.ts`
-Expected: FAIL: `Cannot find module '.../composables/useFleetJobs.ts'` (and the other two).
+Run: `cd apps/web && npx jest tests/lib/save-blob.spec.ts tests/composables/useFleet tests/composables/useProjectMemberNames.spec.ts`
+Expected: FAIL: `Cannot find module '~/lib/save-blob'` and `Cannot find module '.../composables/useFleetJobs.ts'` (and the other two).
 
 - [ ] **Step 3: Implement**
+
+Create `apps/web/lib/save-blob.ts`:
+
+```ts
+/**
+ * Hands a Blob to the browser as a file download (D127). The object URL is revoked after a delay:
+ * Firefox and Safari can drop a download whose URL is revoked in the same tick as the click.
+ */
+export const REVOKE_DELAY_MS = 1000
+
+export function saveBlob(blob: Blob, fileName: string): void {
+  const link = document.createElement('a')
+  const url = URL.createObjectURL(blob)
+  try {
+    link.href = url
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+  }
+  finally {
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS)
+  }
+}
+```
 
 Create `apps/web/composables/useFleetJobs.ts`:
 
@@ -1381,7 +1512,8 @@ Create `apps/web/composables/useFleetJobs.ts`:
 import { ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
 import { bundleFileName, pickActiveJob } from '~/lib/fleet-jobs'
-import type { DispatchBody, DispatchResultDto, FleetJobDto, FleetJobEventDto, Page } from '~/lib/fleet-types'
+import type { DispatchBody, DispatchResultDto, FleetJobDto, FleetJobEventDto, FleetPage } from '~/lib/fleet-types'
+import { saveBlob } from '~/lib/save-blob'
 
 export const FLEET_JOB_PAGE_SIZE = 20
 export const FLEET_EVENT_PAGE_SIZE = 50
@@ -1422,7 +1554,7 @@ export function useFleetJobs(slug: string) {
   const hasNext = ref(false)
 
   async function load(filters: FleetJobFilters = {}): Promise<void> {
-    const res = await $api.get<Page<FleetJobDto>>(base, { query: buildJobQuery(filters) })
+    const res = await $api.get<FleetPage<FleetJobDto>>(base, { query: buildJobQuery(filters) })
     jobs.value = res.records ?? []
     total.value = res.total ?? 0
     page.value = res.current ?? 1
@@ -1431,8 +1563,8 @@ export function useFleetJobs(slug: string) {
 
   const get = (id: string): Promise<FleetJobDto> => $api.get<FleetJobDto>(jobPath(id))
 
-  const events = (id: string, current: number): Promise<Page<FleetJobEventDto>> =>
-    $api.get<Page<FleetJobEventDto>>(apiPath`/projects/${slug}/fleet/jobs/${id}/events`, {
+  const events = (id: string, current: number): Promise<FleetPage<FleetJobEventDto>> =>
+    $api.get<FleetPage<FleetJobEventDto>>(apiPath`/projects/${slug}/fleet/jobs/${id}/events`, {
       query: { current: String(current), size: String(FLEET_EVENT_PAGE_SIZE) },
     })
 
@@ -1446,25 +1578,13 @@ export function useFleetJobs(slug: string) {
 
   /** D121: the job behind a dispatch 409 (at most one active job per repo and feature). */
   async function findActiveJob(repoId: string, feature: string): Promise<FleetJobDto | null> {
-    const res = await $api.get<Page<FleetJobDto>>(base, { query: { repoId, feature, size: '20' } })
+    const res = await $api.get<FleetPage<FleetJobDto>>(base, { query: { repoId, feature, size: '20' } })
     return pickActiveJob(res.records ?? [])
   }
 
-  /** D127: fetch the bundle as a Blob and hand it to the browser as a file. */
+  /** D127: fetch the bundle as a Blob (an API error propagates, no file is made), then save it. */
   async function downloadBundle(id: string): Promise<void> {
-    const blob = await $api.download(apiPath`/projects/${slug}/fleet/jobs/${id}/bundle`)
-    const url = URL.createObjectURL(blob)
-    try {
-      const link = document.createElement('a')
-      link.href = url
-      link.download = bundleFileName(id)
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-    }
-    finally {
-      URL.revokeObjectURL(url)
-    }
+    saveBlob(await $api.download(apiPath`/projects/${slug}/fleet/jobs/${id}/bundle`), bundleFileName(id))
   }
 
   return { jobs, total, page, hasNext, load, get, events, dispatch, cancel, requeue, findActiveJob, downloadBundle }
@@ -1476,10 +1596,7 @@ Create `apps/web/composables/useFleetDispatchOptions.ts`:
 ```ts
 import { computed, ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
-import type { FleetRepoDto, Page, RunnerSummaryDto } from '~/lib/fleet-types'
-
-/** D125: fleets are small; one page of 100, with a hint when there is more. */
-export const FLEET_OPTIONS_PAGE_SIZE = 100
+import { FLEET_LIST_SIZE, type FleetPage, type FleetRepo, type FleetRunnerSummary } from '~/lib/fleet-types'
 
 const sortedUnion = (lists: ReadonlyArray<readonly string[]>): string[] =>
   [...new Set(lists.flat())].sort((a, b) => a.localeCompare(b))
@@ -1487,16 +1604,17 @@ const sortedUnion = (lists: ReadonlyArray<readonly string[]>): string[] =>
 /** Repos and runner summaries a project member may dispatch to (D118), and the pickers derived from them. */
 export function useFleetDispatchOptions(slug: string) {
   const { $api } = useApi()
-  const repos = ref<FleetRepoDto[]>([])
-  const runners = ref<RunnerSummaryDto[]>([])
+  const repos = ref<FleetRepo[]>([])
+  const runners = ref<FleetRunnerSummary[]>([])
   const moreRepos = ref(false)
   const moreRunners = ref(false)
 
   async function load(): Promise<void> {
-    const query = { size: String(FLEET_OPTIONS_PAGE_SIZE) }
+    // D125: fleets are small; one page of FLEET_LIST_SIZE, with a hint when there is more.
+    const query = { size: String(FLEET_LIST_SIZE) }
     const [repoPage, runnerPage] = await Promise.all([
-      $api.get<Page<FleetRepoDto>>(apiPath`/projects/${slug}/fleet/repos`, { query }),
-      $api.get<Page<RunnerSummaryDto>>(apiPath`/projects/${slug}/fleet/runners`, { query }),
+      $api.get<FleetPage<FleetRepo>>(apiPath`/projects/${slug}/fleet/repos`, { query }),
+      $api.get<FleetPage<FleetRunnerSummary>>(apiPath`/projects/${slug}/fleet/runners`, { query }),
     ])
     repos.value = repoPage.records ?? []
     runners.value = runnerPage.records ?? []
@@ -1536,10 +1654,10 @@ export function useProjectMemberNames(slug: string) {
     members.value = res.records ?? []
   }
 
-  /** The member's name, else email, else the raw id (a former member). */
-  const nameOf = (userId: string): string => {
+  /** The member's name, else email; null when the id is not among the loaded members (a former member). */
+  const nameOf = (userId: string): string | null => {
     const member = members.value.find(m => m.userId === userId)
-    return member ? (member.name || member.email) : userId
+    return member ? (member.name || member.email) : null
   }
 
   return { members, load, nameOf }
@@ -1548,13 +1666,13 @@ export function useProjectMemberNames(slug: string) {
 
 - [ ] **Step 4: Run them and the apiPath guard**
 
-Run: `cd apps/web && npx jest tests/composables/useFleet tests/composables/useProjectMemberNames.spec.ts tests/lib/api-path-guard.spec.ts`
-Expected: PASS (9 composable tests; the guard finds no raw `/projects/${...}` template).
+Run: `cd apps/web && npx jest tests/lib/save-blob.spec.ts tests/composables/useFleet tests/composables/useProjectMemberNames.spec.ts tests/lib/api-path-guard.spec.ts`
+Expected: PASS (3 save-blob and 9 composable tests; the guard finds no raw `/projects/${...}` template).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/web/composables/useFleetJobs.ts apps/web/composables/useFleetDispatchOptions.ts apps/web/composables/useProjectMemberNames.ts apps/web/tests/composables/useFleetJobs.spec.ts apps/web/tests/composables/useFleetDispatchOptions.spec.ts apps/web/tests/composables/useProjectMemberNames.spec.ts
+git add apps/web/lib/save-blob.ts apps/web/tests/lib/save-blob.spec.ts apps/web/composables/useFleetJobs.ts apps/web/composables/useFleetDispatchOptions.ts apps/web/composables/useProjectMemberNames.ts apps/web/tests/composables/useFleetJobs.spec.ts apps/web/tests/composables/useFleetDispatchOptions.spec.ts apps/web/tests/composables/useProjectMemberNames.spec.ts
 git commit -m "feat(web): fleet job, dispatch-option and member-name composables"
 ```
 
@@ -1563,59 +1681,27 @@ git commit -m "feat(web): fleet job, dispatch-option and member-name composables
 **Files:**
 - Modify: `apps/web/i18n/locales/en.json`, `apps/web/i18n/locales/zh.json`
 - Modify: `apps/web/layouts/default.vue` (icon import, breadcrumbs, project link)
-- Test: `apps/web/tests/i18n/fleet-jobs-locale-parity.spec.ts`, `apps/web/tests/layouts/fleet-jobs-nav.spec.ts`
+- Modify: `apps/web/tests/i18n/fleet-locale-parity.spec.ts` (4b's spec: one more test)
+- Test: `apps/web/tests/layouts/fleet-jobs-nav.spec.ts`
 
 **Interfaces:**
-- Consumes: 4b's `fleet` locale object.
+- Consumes: 4b's `fleet` locale object and its parity spec, which already checks the whole `fleet` and `nav` subtrees (en/zh key parity, non-empty zh values, no `|` or `@` in en messages), so the new `fleet.jobs`/`fleet.dispatch` keys are covered without a second parity spec.
 - Produces: `nav.fleetJobs`, `fleet.jobs.*`, `fleet.dispatch.*` (every literal key the Task 7-9 pages and components use; `tests/i18n/used-keys-exist.spec.ts` enforces it); the sidebar link `/${projectSlug}/fleet` for every project member; breadcrumbs for `/:project/fleet`, `/:project/fleet/dispatch` and `/:project/fleet/jobs/:id`.
 
 All keys land in this task so each page task stays green under `used-keys-exist.spec.ts`.
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `apps/web/tests/i18n/fleet-jobs-locale-parity.spec.ts`:
+In 4b's `apps/web/tests/i18n/fleet-locale-parity.spec.ts`, directly below the test `'nav has the two admin fleet links'`, add:
 
 ```ts
-import { describe, expect, test } from '@jest/globals'
-
-type Tree = { [key: string]: string | Tree }
-const en = require('../../i18n/locales/en.json') as { nav: Record<string, string>; fleet: Tree }
-const zh = require('../../i18n/locales/zh.json') as { nav: Record<string, string>; fleet: Tree }
-
-/** Every leaf key under a subtree, dotted. */
-function leaves(tree: Tree | string | undefined, prefix = ''): string[] {
-  if (tree === undefined) return []
-  if (typeof tree === 'string') return [prefix]
-  return Object.entries(tree).flatMap(([key, value]) => leaves(value, prefix ? `${prefix}.${key}` : key))
-}
-
-function leafValues(tree: Tree | string | undefined): string[] {
-  if (tree === undefined) return []
-  if (typeof tree === 'string') return [tree]
-  return Object.values(tree).flatMap(leafValues)
-}
-
-describe('Fleet slice 4c locale parity', () => {
-  test.each(['jobs', 'dispatch'])('fleet.%s: en and zh define the same non-empty keys', (section) => {
-    const enTree = en.fleet[section] as Tree
-    const zhTree = zh.fleet[section] as Tree
-    expect(leaves(enTree).length).toBeGreaterThan(0)
-    expect(leaves(zhTree).sort()).toEqual(leaves(enTree).sort())
-    for (const value of leafValues(zhTree)) expect(value.trim()).not.toBe('')
+  test('nav has the project fleet jobs link (slice 4c)', () => {
+    expect(at(en, 'nav.fleetJobs')).toBe('Fleet jobs')
+    expect(at(zh, 'nav.fleetJobs')).toBeTruthy()
   })
-
-  test('vue-i18n special characters never appear in fleet job messages', () => {
-    for (const value of [...leafValues(en.fleet.jobs as Tree), ...leafValues(en.fleet.dispatch as Tree)]) {
-      expect(value).not.toMatch(/[|@]/)
-    }
-  })
-
-  test('nav.fleetJobs exists in both locales', () => {
-    expect(en.nav.fleetJobs).toBeTruthy()
-    expect(zh.nav.fleetJobs).toBeTruthy()
-  })
-})
 ```
+
+(4c adds no new code-to-label map, so `ENUMS` stays as 4b left it.)
 
 Create `apps/web/tests/layouts/fleet-jobs-nav.spec.ts`:
 
@@ -1646,12 +1732,12 @@ describe('fleet jobs navigation', () => {
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `cd apps/web && npx jest tests/i18n/fleet-jobs-locale-parity.spec.ts tests/layouts/fleet-jobs-nav.spec.ts`
-Expected: FAIL: `expect(received).toBeGreaterThan(expected)` (no `fleet.jobs` keys), `nav.fleetJobs` undefined, and the layout has no `/fleet` link.
+Run: `cd apps/web && npx jest tests/i18n/fleet-locale-parity.spec.ts tests/layouts/fleet-jobs-nav.spec.ts`
+Expected: FAIL: `nav.fleetJobs` is undefined, and the layout has no `/fleet` link (4b's other parity tests still pass).
 
 - [ ] **Step 3: Add the locale keys**
 
-Edit by hand (keep the files' existing compact formatting; do not reformat them with a JSON tool). In `en.json`, add `"fleetJobs": "Fleet jobs"` to `nav` after `"users"`, and add these two members inside 4b's `"fleet"` object:
+Edit by hand (keep the files' existing compact formatting; do not reformat them with a JSON tool). In `en.json`, in `nav`, replace 4b's `    "fleetRepos": "Repos"` with `    "fleetRepos": "Repos",` followed by `    "fleetJobs": "Fleet jobs"`, and add these two members inside 4b's `"fleet"` object:
 
 ```json
 {
@@ -1661,6 +1747,7 @@ Edit by hand (keep the files' existing compact formatting; do not reformat them 
     "dispatch": "Dispatch",
     "empty": "No fleet jobs yet",
     "total": "{total} jobs",
+    "unknownMember": "Unknown member",
     "previous": "Previous",
     "next": "Next",
     "filters": {
@@ -1719,12 +1806,13 @@ Edit by hand (keep the files' existing compact formatting; do not reformat them 
       "cancelRequested": "Cancel requested",
       "requeued": "Job requeued"
     },
+    "requeuePlacement": "Requeue placement",
     "timeline": {
       "title": "Timeline",
       "empty": "No events yet",
       "loadMore": "Load more",
       "transition": "{from} to {to}",
-      "reported": "Runner reported {to}",
+      "queued": "Queued",
       "snapshot": "Status: {detail}",
       "snapshotEmpty": "Status update",
       "lifecycle": "Runner {level}: {message}",
@@ -1791,33 +1879,34 @@ Edit by hand (keep the files' existing compact formatting; do not reformat them 
 }
 ```
 
-In `zh.json`, add `"fleetJobs": "Fleet 任务"` to `nav` after `"users"`, and inside `"fleet"`:
+In `zh.json`, in `nav`, replace 4b's `    "fleetRepos": "仓库"` with `    "fleetRepos": "仓库",` followed by `    "fleetJobs": "Fleet 任务"`, and inside `"fleet"`:
 
 ```json
 {
   "jobs": {
     "title": "Fleet 任务",
-    "subtitle": "派发到 fleet 运行机的 nax run 与 nax plan",
+    "subtitle": "派发到 fleet 执行机的 nax run 与 nax plan",
     "dispatch": "派发",
     "empty": "还没有 fleet 任务",
     "total": "共 {total} 个任务",
+    "unknownMember": "未知成员",
     "previous": "上一页",
     "next": "下一页",
     "filters": {
       "state": "状态",
       "repo": "仓库",
-      "runner": "运行机",
+      "runner": "执行机",
       "requester": "发起人",
       "allStates": "全部状态",
       "allRepos": "全部仓库",
-      "allRunners": "全部运行机",
+      "allRunners": "全部执行机",
       "allRequesters": "所有人"
     },
     "table": {
       "feature": "功能",
       "command": "命令",
       "repo": "仓库",
-      "runner": "运行机",
+      "runner": "执行机",
       "state": "状态",
       "cost": "费用",
       "requester": "发起人",
@@ -1831,7 +1920,7 @@ In `zh.json`, add `"fleetJobs": "Fleet 任务"` to `nav` after `"users"`, and in
       "phase": "阶段",
       "cost": "费用",
       "costOf": "{spent} / {max}",
-      "runner": "运行机",
+      "runner": "执行机",
       "unassigned": "未分配",
       "requester": "发起人",
       "profiles": "配置链",
@@ -1853,28 +1942,29 @@ In `zh.json`, add `"fleetJobs": "Fleet 任务"` to `nav` after `"users"`, and in
     },
     "confirmCancel": {
       "title": "取消这个任务？",
-      "body": "运行机会停止 nax，任务以已取消结束。已推送的提交仍保留在分支上。"
+      "body": "执行机会停止 nax，任务以已取消结束。已推送的提交仍保留在分支上。"
     },
     "toast": {
       "cancelRequested": "已请求取消",
       "requeued": "任务已重新排队"
     },
+    "requeuePlacement": "重新排队的调度结果",
     "timeline": {
       "title": "时间线",
       "empty": "还没有事件",
       "loadMore": "加载更多",
       "transition": "{from} 变为 {to}",
-      "reported": "运行机报告 {to}",
+      "queued": "已排队",
       "snapshot": "状态：{detail}",
       "snapshotEmpty": "状态更新",
-      "lifecycle": "运行机 {level}：{message}",
+      "lifecycle": "执行机 {level}：{message}",
       "log": "日志：{text}",
       "unknown": "未知事件 {type}"
     }
   },
   "dispatch": {
     "title": "派发任务",
-    "subtitle": "在一台 fleet 运行机上运行 nax",
+    "subtitle": "在一台 fleet 执行机上运行 nax",
     "noPermission": "只有项目开发者和管理员可以派发任务。",
     "noRepos": "这个项目还没有登记仓库。全局管理员在 Fleet 仓库页面登记。",
     "repo": "仓库",
@@ -1895,22 +1985,22 @@ In `zh.json`, add `"fleetJobs": "Fleet 任务"` to `nav` after `"users"`, and in
     "remove": "移除 {item}",
     "maxCost": "费用上限（美元）",
     "placement": "调度",
-    "placementAuto": "任意合适的运行机",
-    "placementLabels": "带这些标签的运行机",
-    "placementPin": "指定一台运行机",
+    "placementAuto": "任意合适的执行机",
+    "placementLabels": "带这些标签的执行机",
+    "placementPin": "指定一台执行机",
     "labelPlaceholder": "标签",
-    "pinPlaceholder": "选择运行机",
+    "pinPlaceholder": "选择执行机",
     "runnerOffline": "离线",
     "runnerDisabled": "已停用",
-    "moreRunners": "只列出前 100 台运行机。",
+    "moreRunners": "只列出前 100 台执行机。",
     "submit": "派发",
     "submitting": "派发中...",
     "conflict": "这个仓库上已有一个进行中的任务在处理这个功能。",
     "conflictLink": "打开进行中的任务",
     "result": {
       "assigned": "已分配给 {runner}",
-      "queued": "已排队：目前没有合适的运行机，有合适的运行机时开始。",
-      "misfitsTitle": "各运行机不合适的原因",
+      "queued": "已排队：目前没有合适的执行机，有合适的执行机时开始。",
+      "misfitsTitle": "各执行机不合适的原因",
       "openJob": "打开任务"
     },
     "validation": {
@@ -1925,7 +2015,7 @@ In `zh.json`, add `"fleetJobs": "Fleet 任务"` to `nav` after `"users"`, and in
       "maxCost": "请输入大于 0、不超过 10000 且最多 4 位小数的金额",
       "labelsMax": "最多 16 个标签",
       "label": "标签只能使用小写字母、数字、点、短横线或下划线",
-      "labelsOrPin": "请选择标签或运行机，不能同时选择"
+      "labelsOrPin": "请选择标签或执行机，不能同时选择"
     }
   }
 }
@@ -1937,13 +2027,11 @@ Check the result parses: `node -e "require('./i18n/locales/en.json'); require('.
 
 In `apps/web/layouts/default.vue`:
 
-1. Add `Rocket` to the lucide import:
+1. Replace the lucide import (4b's line, which ends `Users, Server, FolderGit2`) with:
 
 ```ts
-import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users, Rocket } from 'lucide-vue-next'
+import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users, Server, FolderGit2, Rocket } from 'lucide-vue-next'
 ```
-
-(If 4b added icons to this import, keep them and add `Rocket`.)
 
 2. In `breadcrumbItems`, directly above `const ticketRef = (route.params.ref as string | undefined)`, add:
 
@@ -1978,7 +2066,7 @@ Expected: PASS (all i18n and layout specs, including `used-keys-exist` and the e
 - [ ] **Step 6: Commit**
 
 ```bash
-git add apps/web/i18n/locales/en.json apps/web/i18n/locales/zh.json apps/web/layouts/default.vue apps/web/tests/i18n/fleet-jobs-locale-parity.spec.ts apps/web/tests/layouts/fleet-jobs-nav.spec.ts
+git add apps/web/i18n/locales/en.json apps/web/i18n/locales/zh.json apps/web/layouts/default.vue apps/web/tests/i18n/fleet-locale-parity.spec.ts apps/web/tests/layouts/fleet-jobs-nav.spec.ts
 git commit -m "feat(web): fleet jobs locale keys, project nav link and breadcrumbs"
 ```
 
@@ -1989,7 +2077,7 @@ git commit -m "feat(web): fleet jobs locale keys, project nav link and breadcrum
 - Test: `apps/web/tests/pages/fleet-jobs-list.spec.ts`
 
 **Interfaces:**
-- Consumes: `useFleetJobs`, `useFleetDispatchOptions`, `useProjectMemberNames` (Task 5), `useProjectViewerRole`, `useProjectEvents` with `onFleetJob` (Task 1), `createDebouncer`, `codeLabel`, `formatUsd`, `FLEET_JOB_STATES`.
+- Consumes: `useFleetJobs`, `useFleetDispatchOptions`, `useProjectMemberNames` (Task 5), `useProjectViewerRole`, `useProjectEvents` with `onFleetJob` (Task 1), `createDebouncer`, `codeLabel`, `canWorkOnFleet`, `formatUsd`, `FLEET_JOB_STATES`.
 - Produces: `FleetJobStateBadge` (prop `state: string`; renders `data-testid="fleet-job-state"` and `data-state="<STATE>"`, used by Tasks 9 and 10); test ids `fleet-dispatch-button`, `fleet-jobs-table`, `fleet-job-row-<id>`, `fleet-filter-{state,repo,runner,requester}`.
 
 Pages in this repo are tested by source wiring (no component mounting; see `tests/pages/live-wiring.spec.ts`); the behaviour lives in the helpers and composables tested in Tasks 3-5, and Task 10 exercises the page in a browser. Data loads on mount (client), like the live parts of the board. Radix `SelectItem` cannot take an empty value, so "no filter" is the sentinel `__all__`. Names (repo, runner, requester) are cosmetic: a failed lookup leaves ids on screen.
@@ -2028,9 +2116,14 @@ describe('fleet jobs list', () => {
     expect(list).toMatch(/onBeforeUnmount\(\(\) => liveReload\.cancel\(\)\)/)
   })
 
-  test('the dispatch button is shown to project ADMIN and DEVELOPER only', () => {
-    expect(list).toContain("viewer.value.canManage || viewer.value.viewerRole === 'DEVELOPER'")
+  test('the dispatch button is shown to project ADMIN and DEVELOPER only, through the shared rule', () => {
+    expect(list).toContain('const canWork = computed(() => canWorkOnFleet(viewer.value))')
     expect(list).toMatch(/<Button v-if="canWork"[^>]*data-testid="fleet-dispatch-button"/)
+  })
+
+  test('the table scrolls sideways on narrow screens and names a requester who left', () => {
+    expect(list).toMatch(/<div class="overflow-x-auto">\s*<Table data-testid="fleet-jobs-table">/)
+    expect(list).toContain("people.nameOf(job.requestedById) ?? t('fleet.jobs.unknownMember')")
   })
 })
 ```
@@ -2078,7 +2171,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 import { createDebouncer } from '~/lib/debounce'
 import { codeLabel } from '~/lib/fleet-i18n'
-import { formatUsd } from '~/lib/fleet-jobs'
+import { canWorkOnFleet, formatUsd } from '~/lib/fleet-jobs'
 import { FLEET_JOB_STATES } from '~/lib/project-event-stream'
 import FleetJobStateBadge from '~/components/fleet/FleetJobStateBadge.vue'
 
@@ -2092,7 +2185,7 @@ const jobsApi = useFleetJobs(slug)
 const options = useFleetDispatchOptions(slug)
 const people = useProjectMemberNames(slug)
 const { data: viewer } = useProjectViewerRole(slug)
-const canWork = computed(() => viewer.value.canManage || viewer.value.viewerRole === 'DEVELOPER')
+const canWork = computed(() => canWorkOnFleet(viewer.value))
 
 /** Radix Select items cannot have an empty value, so "no filter" is a sentinel. */
 const ALL = '__all__'
@@ -2196,34 +2289,36 @@ const stateLabel = (state: string): string => codeLabel(t, te, 'fleet.state', st
     <ErrorState v-else-if="loadFailed" @retry="reload()" />
     <EmptyState v-else-if="jobsApi.jobs.value.length === 0" :message="t('fleet.jobs.empty')" />
     <template v-else>
-      <Table data-testid="fleet-jobs-table">
-        <TableHeader>
-          <TableRow>
-            <TableHead>{{ t('fleet.jobs.table.feature') }}</TableHead>
-            <TableHead>{{ t('fleet.jobs.table.command') }}</TableHead>
-            <TableHead>{{ t('fleet.jobs.table.repo') }}</TableHead>
-            <TableHead>{{ t('fleet.jobs.table.runner') }}</TableHead>
-            <TableHead>{{ t('fleet.jobs.table.state') }}</TableHead>
-            <TableHead>{{ t('fleet.jobs.table.cost') }}</TableHead>
-            <TableHead>{{ t('fleet.jobs.table.requester') }}</TableHead>
-            <TableHead>{{ t('fleet.jobs.table.queued') }}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          <TableRow v-for="job in jobsApi.jobs.value" :key="job.id" :data-testid="`fleet-job-row-${job.id}`">
-            <TableCell>
-              <NuxtLink :to="`/${slug}/fleet/jobs/${job.id}`" class="font-medium text-primary underline-offset-4 hover:underline">{{ job.feature }}</NuxtLink>
-            </TableCell>
-            <TableCell>{{ job.command }}</TableCell>
-            <TableCell>{{ options.repoName(job.repoId) }}</TableCell>
-            <TableCell>{{ options.runnerName(job.runnerId) ?? '-' }}</TableCell>
-            <TableCell><FleetJobStateBadge :state="job.state" /></TableCell>
-            <TableCell>{{ formatUsd(job.costSpentUsd) }}</TableCell>
-            <TableCell>{{ people.nameOf(job.requestedById) }}</TableCell>
-            <TableCell>{{ new Date(job.queuedAt).toLocaleString() }}</TableCell>
-          </TableRow>
-        </TableBody>
-      </Table>
+      <div class="overflow-x-auto">
+        <Table data-testid="fleet-jobs-table">
+          <TableHeader>
+            <TableRow>
+              <TableHead>{{ t('fleet.jobs.table.feature') }}</TableHead>
+              <TableHead>{{ t('fleet.jobs.table.command') }}</TableHead>
+              <TableHead>{{ t('fleet.jobs.table.repo') }}</TableHead>
+              <TableHead>{{ t('fleet.jobs.table.runner') }}</TableHead>
+              <TableHead>{{ t('fleet.jobs.table.state') }}</TableHead>
+              <TableHead>{{ t('fleet.jobs.table.cost') }}</TableHead>
+              <TableHead>{{ t('fleet.jobs.table.requester') }}</TableHead>
+              <TableHead>{{ t('fleet.jobs.table.queued') }}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow v-for="job in jobsApi.jobs.value" :key="job.id" :data-testid="`fleet-job-row-${job.id}`">
+              <TableCell>
+                <NuxtLink :to="`/${slug}/fleet/jobs/${job.id}`" class="font-medium text-primary underline-offset-4 hover:underline">{{ job.feature }}</NuxtLink>
+              </TableCell>
+              <TableCell>{{ job.command }}</TableCell>
+              <TableCell>{{ options.repoName(job.repoId) }}</TableCell>
+              <TableCell>{{ options.runnerName(job.runnerId) ?? '-' }}</TableCell>
+              <TableCell><FleetJobStateBadge :state="job.state" /></TableCell>
+              <TableCell>{{ formatUsd(job.costSpentUsd) }}</TableCell>
+              <TableCell>{{ people.nameOf(job.requestedById) ?? t('fleet.jobs.unknownMember') }}</TableCell>
+              <TableCell>{{ new Date(job.queuedAt).toLocaleString() }}</TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </div>
       <div class="flex items-center justify-between text-sm text-muted-foreground">
         <span>{{ t('fleet.jobs.total', { total: jobsApi.total.value }) }}</span>
         <div class="flex gap-2">
@@ -2255,10 +2350,10 @@ git commit -m "feat(web): fleet jobs list page with filters and live refresh"
 - Test: `apps/web/tests/pages/fleet-dispatch-page.spec.ts`
 
 **Interfaces:**
-- Consumes: `buildDispatchSchema`, `DISPATCH_DEFAULTS`, `toDispatchBody`, `addToken`, `removeToken` (Task 4), `useFleetJobs().dispatch/findActiveJob`, `useFleetDispatchOptions` (Task 5), `ApiError`, `extractApiError`, `codeLabel`.
-- Produces: test ids used by Task 10: `dispatch-repo`, `dispatch-command`, `dispatch-ref`, `dispatch-feature`, `dispatch-plan-from`, `dispatch-profiles-{input,add,item,suggestion}`, `dispatch-max-cost`, `placement-{auto,labels,pin}`, `dispatch-labels-*`, `dispatch-pin`, `dispatch-submit`, `placement-result`, `placement-assigned`, `placement-queued`, `placement-misfit`, `placement-open-job`, `dispatch-conflict`, `dispatch-conflict-link`, `dispatch-no-permission`, `dispatch-no-repos`.
+- Consumes: `buildDispatchSchema`, `DISPATCH_DEFAULTS`, `toDispatchBody`, `addToken`, `removeToken` (Task 4), `useFleetJobs().dispatch/findActiveJob`, `useFleetDispatchOptions` (Task 5), `canWorkOnFleet` (Task 3), `<FleetNativeSelect>` (4b D137), `ApiError`, `extractApiError`, `codeLabel`.
+- Produces: `<FleetPlacementResult :slug :result :runner-name :hide-open-link? />` (Task 9 reuses it after a requeue); test ids used by Task 10 (`dispatch-repo`, `dispatch-command` and `dispatch-pin` are native `<select>`s, driven with Playwright's `selectOption`): `dispatch-repo`, `dispatch-command`, `dispatch-ref`, `dispatch-feature`, `dispatch-plan-from`, `dispatch-profiles-{input,add,item,suggestion}`, `dispatch-max-cost`, `placement-{auto,labels,pin}`, `dispatch-labels-*`, `dispatch-pin`, `dispatch-submit`, `placement-result`, `placement-assigned`, `placement-queued`, `placement-misfit`, `placement-open-job`, `dispatch-conflict`, `dispatch-conflict-link`, `dispatch-no-permission`, `dispatch-no-repos`.
 
-Behaviour (S1 spec §11 "Dispatch"): repo, ref (placeholder = the selected repo's default branch; empty sends no `ref`), command, feature, spec path (PLAN only), profile chain (ordered; machine profiles from the runner summaries offered as suggestions, any repo-provided name typed in, S1 spec §2.1), max cost, and placement as one of: any runner, labels, or a pinned runner. Switching the placement mode clears the other mode's field. After submit the page shows the placement: the assigned runner, or "queued" plus each runner's misfit reason (translated, D126), with a link to the job. A 409 (`ApiError.code === 409`) looks up the active job (D121) and links it; a pinned misfit (422) and validation errors (400) show the API's message. The token list and labels fields are driven with `values`/`setFieldValue` rather than `FormField` slot props: shadcn's `FormField` types its slot as `{ componentField }` only (Nuxt typecheck rejects `value`/`handleChange`).
+Behaviour (S1 spec §11 "Dispatch"): repo, ref (placeholder = the selected repo's default branch; empty sends no `ref`), command, feature, spec path (PLAN only), profile chain (ordered; machine profiles from the runner summaries offered as suggestions, any repo-provided name typed in, S1 spec §2.1), max cost, and placement as one of: any runner, labels, or a pinned runner. Switching the placement mode clears the other mode's field. After submit the page shows the placement: the assigned runner, or "queued" plus each runner's misfit reason (translated, D126), with a link to the job. A 409 (`ApiError.code === 409`) looks up the active job (D121) and links it; a pinned misfit (422) and validation errors (400) show the API's message. The token list and labels fields are driven with `values`/`setFieldValue` rather than `FormField` slot props: shadcn's `FormField` types its slot as `{ componentField }` only (Nuxt typecheck rejects `value`/`handleChange`). Repo, command and pin are `<FleetNativeSelect v-bind="componentField">` (4b D137, issue #58): the E2E drives this form, and Radix `Select` options sit in a portal Playwright reaches unreliably (`tests/e2e/vcs-integration-settings.e2e.spec.ts:207`).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2294,6 +2389,18 @@ describe('dispatch page', () => {
   test('PLAN shows the spec path; the placement result is rendered after submit', () => {
     expect(dispatch).toContain('v-if="values.command === \'PLAN\'"')
     expect(dispatch).toContain('<FleetPlacementResult v-if="result"')
+  })
+
+  test('repo, command and pin are native selects bound through FleetNativeSelect (4b D137)', () => {
+    for (const testid of ['dispatch-repo', 'dispatch-command', 'dispatch-pin']) {
+      expect(dispatch).toMatch(new RegExp(`<FleetNativeSelect v-bind="componentField"[^>]*testid="${testid}"`))
+    }
+    expect(dispatch).not.toContain('<SelectContent')
+    expect(dispatch).not.toMatch(/<select[^>]*v-bind="componentField"/)
+  })
+
+  test('only project ADMIN and DEVELOPER get the form, through the shared rule', () => {
+    expect(dispatch).toContain('const canWork = computed(() => canWorkOnFleet(viewer.value))')
   })
 })
 ```
@@ -2371,6 +2478,8 @@ defineProps<{
   slug: string
   result: DispatchResultDto
   runnerName: (id: string | null) => string | null
+  /** The job page shows a requeue's placement; it does not link to itself. */
+  hideOpenLink?: boolean
 }>()
 const { t, te } = useI18n()
 </script>
@@ -2390,6 +2499,7 @@ const { t, te } = useI18n()
       </ul>
     </div>
     <NuxtLink
+      v-if="!hideOpenLink"
       :to="`/${slug}/fleet/jobs/${result.job.id}`"
       class="inline-block text-sm font-medium text-primary underline-offset-4 hover:underline"
       data-testid="placement-open-job"
@@ -2409,7 +2519,8 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { ApiError, extractApiError } from '~/composables/useApi'
 import { buildDispatchSchema, DISPATCH_DEFAULTS, toDispatchBody } from '~/lib/fleet-dispatch'
-import type { DispatchResultDto, FleetJobDto } from '~/lib/fleet-types'
+import { canWorkOnFleet } from '~/lib/fleet-jobs'
+import type { DispatchResultDto, FleetJobDto, FleetRunnerSummary } from '~/lib/fleet-types'
 import FleetPlacementResult from '~/components/fleet/FleetPlacementResult.vue'
 import FleetTokenListInput from '~/components/fleet/FleetTokenListInput.vue'
 
@@ -2422,7 +2533,7 @@ const toast = useAppToast()
 const jobsApi = useFleetJobs(slug)
 const options = useFleetDispatchOptions(slug)
 const { data: viewer } = useProjectViewerRole(slug)
-const canWork = computed(() => viewer.value.canManage || viewer.value.viewerRole === 'DEVELOPER')
+const canWork = computed(() => canWorkOnFleet(viewer.value))
 
 const loadFailed = ref(false)
 onMounted(async () => {
@@ -2450,6 +2561,18 @@ function setPlacementMode(mode: string): void {
 }
 
 const selectedRepo = computed(() => options.repos.value.find(r => r.id === values.repoId) ?? null)
+
+// Native select options (4b D137).
+const repoOptions = computed(() => options.repos.value.map(r => ({ value: r.id, label: `${r.owner}/${r.name}` })))
+const commandOptions = computed(() => [
+  { value: 'RUN', label: t('fleet.dispatch.commandRun') },
+  { value: 'PLAN', label: t('fleet.dispatch.commandPlan') },
+])
+function runnerOptionLabel(runner: FleetRunnerSummary): string {
+  if (!runner.enabled) return `${runner.name} (${t('fleet.dispatch.runnerDisabled')})`
+  return runner.online ? runner.name : `${runner.name} (${t('fleet.dispatch.runnerOffline')})`
+}
+const pinOptions = computed(() => options.runners.value.map(r => ({ value: r.id, label: runnerOptionLabel(r) })))
 const result = ref<DispatchResultDto | null>(null)
 const activeJob = ref<FleetJobDto | null>(null)
 
@@ -2481,14 +2604,9 @@ const onSubmit = handleSubmit(async (formValues) => {
       <FormField v-slot="{ componentField }" name="repoId">
         <FormItem>
           <FormLabel>{{ t('fleet.dispatch.repo') }}</FormLabel>
-          <Select v-bind="componentField">
-            <FormControl>
-              <SelectTrigger data-testid="dispatch-repo"><SelectValue :placeholder="t('fleet.dispatch.repoPlaceholder')" /></SelectTrigger>
-            </FormControl>
-            <SelectContent>
-              <SelectItem v-for="repo in options.repos.value" :key="repo.id" :value="repo.id">{{ repo.owner }}/{{ repo.name }}</SelectItem>
-            </SelectContent>
-          </Select>
+          <FormControl>
+            <FleetNativeSelect v-bind="componentField" :options="repoOptions" :placeholder="t('fleet.dispatch.repoPlaceholder')" testid="dispatch-repo" />
+          </FormControl>
           <p v-if="options.moreRepos.value" class="text-xs text-muted-foreground">{{ t('fleet.dispatch.moreRepos') }}</p>
           <FormMessage />
         </FormItem>
@@ -2498,15 +2616,9 @@ const onSubmit = handleSubmit(async (formValues) => {
         <FormField v-slot="{ componentField }" name="command">
           <FormItem>
             <FormLabel>{{ t('fleet.dispatch.command') }}</FormLabel>
-            <Select v-bind="componentField">
-              <FormControl>
-                <SelectTrigger data-testid="dispatch-command"><SelectValue /></SelectTrigger>
-              </FormControl>
-              <SelectContent>
-                <SelectItem value="RUN">{{ t('fleet.dispatch.commandRun') }}</SelectItem>
-                <SelectItem value="PLAN">{{ t('fleet.dispatch.commandPlan') }}</SelectItem>
-              </SelectContent>
-            </Select>
+            <FormControl>
+              <FleetNativeSelect v-bind="componentField" :options="commandOptions" testid="dispatch-command" />
+            </FormControl>
             <FormMessage />
           </FormItem>
         </FormField>
@@ -2591,18 +2703,9 @@ const onSubmit = handleSubmit(async (formValues) => {
 
         <FormField v-if="placementMode === 'pin'" v-slot="{ componentField }" name="pinnedRunnerId">
           <FormItem>
-            <Select v-bind="componentField">
-              <FormControl>
-                <SelectTrigger data-testid="dispatch-pin"><SelectValue :placeholder="t('fleet.dispatch.pinPlaceholder')" /></SelectTrigger>
-              </FormControl>
-              <SelectContent>
-                <SelectItem v-for="runner in options.runners.value" :key="runner.id" :value="runner.id">
-                  {{ runner.name }}
-                  <template v-if="!runner.enabled"> ({{ t('fleet.dispatch.runnerDisabled') }})</template>
-                  <template v-else-if="!runner.online"> ({{ t('fleet.dispatch.runnerOffline') }})</template>
-                </SelectItem>
-              </SelectContent>
-            </Select>
+            <FormControl>
+              <FleetNativeSelect v-bind="componentField" :options="pinOptions" :placeholder="t('fleet.dispatch.pinPlaceholder')" testid="dispatch-pin" />
+            </FormControl>
             <p v-if="options.moreRunners.value" class="text-xs text-muted-foreground">{{ t('fleet.dispatch.moreRunners') }}</p>
             <FormMessage />
           </FormItem>
@@ -2645,10 +2748,10 @@ git commit -m "feat(web): fleet dispatch page with placement result and duplicat
 - Test: `apps/web/tests/pages/fleet-job-detail.spec.ts`
 
 **Interfaces:**
-- Consumes: `useFleetJobs().get/events/cancel/requeue/downloadBundle`, `useFleetDispatchOptions().repoName/runnerName`, `useProjectMemberNames().nameOf` (Task 5), `canCancelJob`, `canRequeueJob`, `isTerminalJobState`, `mayHaveBundle`, `mergeEvents`, `safePrUrl`, `summarizeEvent`, `extractProgress`, `formatUsd` (Task 3), `FleetJobStateBadge` (Task 7), `useAuth().user.value?.id`.
-- Produces: test ids used by Task 10: `fleet-job-state` (badge), `fleet-job-state-reason`, `fleet-job-cancel-pending`, `fleet-job-progress`, `fleet-job-story`, `fleet-job-phase`, `fleet-job-cost`, `fleet-job-runner`, `fleet-job-finish`, `fleet-job-pr`, `fleet-job-escalation`, `fleet-job-timeline`, `fleet-job-event`, `fleet-job-events-more`, `fleet-job-bundle`, `fleet-job-requeue`, `fleet-job-cancel`, `fleet-job-cancel-confirm`.
+- Consumes: `useFleetJobs().get/events/cancel/requeue/downloadBundle`, `useFleetDispatchOptions().repoName/runnerName`, `useProjectMemberNames().nameOf` (Task 5), `canWorkOnFleet`, `canCancelJob`, `canRequeueJob`, `isTerminalJobState`, `mayHaveBundle`, `mergeEvents`, `safePrUrl`, `summarizeEvent`, `visibleTimelineEvents`, `extractProgress`, `formatUsd` (Task 3), `FleetJobStateBadge` (Task 7), `FleetPlacementResult` (Task 8), `useAuth().user.value?.id`.
+- Produces: test ids used by Task 10 (plus `fleet-job-requeue-result`): `fleet-job-state` (badge), `fleet-job-state-reason`, `fleet-job-cancel-pending`, `fleet-job-progress`, `fleet-job-story`, `fleet-job-phase`, `fleet-job-cost`, `fleet-job-runner`, `fleet-job-finish`, `fleet-job-pr`, `fleet-job-escalation`, `fleet-job-timeline`, `fleet-job-event`, `fleet-job-events-more`, `fleet-job-bundle`, `fleet-job-requeue`, `fleet-job-cancel`, `fleet-job-cancel-confirm`.
 
-Behaviour (S1 spec §11 "Jobs" detail): state with reason, a pending-cancel note, progress (stories passed of total), current story and phase, live cost against the cap, runner, requester, profile chain, times, finish result, branch and short sha, the PR link (https only), the escalation reason, and the event timeline paged by `seq` (50 a page, load more). Live (D139): only this job's notices reload it. Cancel asks for confirmation; requeue and cancel replace the job from the response; the bundle button appears from UPLOADING on and on terminal states, and a missing bundle shows the API's message.
+Behaviour (S1 spec §11 "Jobs" detail): state with reason, a pending-cancel note, progress (stories passed of total), current story and phase, live cost against the cap, runner, requester, profile chain, times, finish result, branch and short sha, the PR link (https only), the escalation reason, and the event timeline paged by `seq` (50 a page, load more). Live (D139): only this job's notices reload it, and the reload follows `hasNext` for at most 10 more event pages so a busy job's new rows are not stuck past the loaded page. The timeline shows each transition once (the server's row; `visibleTimelineEvents`), the dispatch row as "Queued". Cancel asks for confirmation; requeue and cancel replace the job from the response, and a requeue also shows its placement (`FleetPlacementResult` without the open-job link). The bundle button appears from UPLOADING on and on terminal states, and a missing bundle shows the API's message. A failed first timeline load is a toast, not an empty "No events yet".
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2662,6 +2765,7 @@ import path from 'node:path'
 const webDir = path.join(__dirname, '../..')
 const read = (...parts: string[]): string => readFileSync(path.join(webDir, ...parts), 'utf-8')
 const detail = read('pages', '[project]', 'fleet', 'jobs', '[id].vue')
+const timeline = read('components', 'fleet', 'FleetJobTimeline.vue')
 
 /** The body of the object literal passed to useProjectEvents(...). */
 const liveHandlers = (source: string): string => {
@@ -2679,14 +2783,32 @@ describe('job detail', () => {
   })
 
   test('actions are gated by the pure permission helpers', () => {
+    expect(detail).toContain('canWork: canWorkOnFleet(viewerRole.value)')
     expect(detail).toContain('canCancelJob(job.value, viewer.value)')
     expect(detail).toContain('canRequeueJob(job.value, viewer.value)')
     expect(detail).toContain('mayHaveBundle(job.value.state)')
   })
 
+  test('a live reload catches up a bounded number of event pages; a failed first load is reported', () => {
+    expect(detail).toContain('const LIVE_CATCH_UP_PAGES = 10')
+    expect(detail).toMatch(/for \(let i = 0; i < LIVE_CATCH_UP_PAGES && moreEvents\.value; i \+= 1\)/)
+    expect(detail).toContain('void loadEventsFrom(1).catch((err: unknown) => toast.error(extractApiError(err)))')
+  })
+
+  test('a requeue shows its placement without a link to this same job', () => {
+    expect(detail).toContain('<FleetPlacementResult v-if="requeueResult"')
+    expect(detail).toContain('hide-open-link')
+  })
+
   test('cancel asks for confirmation first', () => {
     expect(detail).toContain('@click="confirmCancel = true"')
     expect(detail).toContain('data-testid="fleet-job-cancel-confirm"')
+  })
+
+  test('the timeline lists each transition once (server rows only) and names the dispatch row Queued', () => {
+    expect(timeline).toContain('visibleTimelineEvents(props.events)')
+    expect(timeline).toContain("t('fleet.jobs.timeline.queued')")
+    expect(timeline).not.toContain('timeline.reported')
   })
 
   test('the PR link is rendered only through safePrUrl, opened without opener', () => {
@@ -2754,7 +2876,7 @@ Create `apps/web/components/fleet/FleetJobTimeline.vue`:
 <script setup lang="ts">
 import { computed } from 'vue'
 import { codeLabel } from '~/lib/fleet-i18n'
-import { summarizeEvent, type TimelineEntry } from '~/lib/fleet-jobs'
+import { summarizeEvent, visibleTimelineEvents, type TimelineEntry } from '~/lib/fleet-jobs'
 import type { FleetJobEventDto } from '~/lib/fleet-types'
 
 const props = defineProps<{ events: FleetJobEventDto[]; hasMore: boolean; loading: boolean }>()
@@ -2766,9 +2888,10 @@ const stateLabel = (code: string): string => codeLabel(t, te, 'fleet.state', cod
 function describe(entry: TimelineEntry): string {
   switch (entry.kind) {
     case 'transition':
+      // Only server rows reach here (visibleTimelineEvents); the one without `from` is the dispatch.
       return entry.from
         ? t('fleet.jobs.timeline.transition', { from: stateLabel(entry.from), to: stateLabel(entry.to) })
-        : t('fleet.jobs.timeline.reported', { to: stateLabel(entry.to) })
+        : t('fleet.jobs.timeline.queued')
     case 'snapshot':
       return entry.parts.length > 0
         ? t('fleet.jobs.timeline.snapshot', { detail: entry.parts.join(' | ') })
@@ -2782,7 +2905,7 @@ function describe(entry: TimelineEntry): string {
   }
 }
 
-const rows = computed(() => props.events.map((event) => {
+const rows = computed(() => visibleTimelineEvents(props.events).map((event) => {
   const entry = summarizeEvent(event)
   return {
     id: event.id,
@@ -2822,11 +2945,12 @@ Create `apps/web/pages/[project]/fleet/jobs/[id].vue`:
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 import { createDebouncer } from '~/lib/debounce'
-import { canCancelJob, canRequeueJob, isTerminalJobState, mayHaveBundle, mergeEvents, safePrUrl } from '~/lib/fleet-jobs'
-import type { FleetJobDto, FleetJobEventDto } from '~/lib/fleet-types'
+import { canCancelJob, canRequeueJob, canWorkOnFleet, isTerminalJobState, mayHaveBundle, mergeEvents, safePrUrl } from '~/lib/fleet-jobs'
+import type { DispatchResultDto, FleetJobDto, FleetJobEventDto } from '~/lib/fleet-types'
 import FleetJobProgress from '~/components/fleet/FleetJobProgress.vue'
 import FleetJobStateBadge from '~/components/fleet/FleetJobStateBadge.vue'
 import FleetJobTimeline from '~/components/fleet/FleetJobTimeline.vue'
+import FleetPlacementResult from '~/components/fleet/FleetPlacementResult.vue'
 
 definePageMeta({ layout: 'default' })
 
@@ -2846,6 +2970,7 @@ const pending = ref(true)
 const loadFailed = ref(false)
 const busy = ref(false)
 const confirmCancel = ref(false)
+const requeueResult = ref<DispatchResultDto | null>(null)
 
 const events = ref<FleetJobEventDto[]>([])
 const eventPage = ref(0)
@@ -2854,7 +2979,7 @@ const loadingEvents = ref(false)
 
 const viewer = computed(() => ({
   userId: auth.user.value?.id ?? null,
-  canWork: viewerRole.value.canManage || viewerRole.value.viewerRole === 'DEVELOPER',
+  canWork: canWorkOnFleet(viewerRole.value),
 }))
 const canCancel = computed(() => job.value !== null && canCancelJob(job.value, viewer.value))
 const canRequeue = computed(() => job.value !== null && canRequeueJob(job.value, viewer.value))
@@ -2893,16 +3018,27 @@ async function loadJob(): Promise<void> {
 onMounted(async () => {
   await loadJob()
   if (!job.value) return
-  void loadEventsFrom(1).catch(() => undefined)
+  // An empty timeline must not read as "No events yet" when the load failed.
+  void loadEventsFrom(1).catch((err: unknown) => toast.error(extractApiError(err)))
+  // Names are cosmetic: a failure leaves ids (or "Unknown member") on screen.
   void options.load().catch(() => undefined)
   void people.load().catch(() => undefined)
 })
+
+/** A busy job's runner logs can push new rows past the loaded page: follow hasNext, bounded (D139). */
+const LIVE_CATCH_UP_PAGES = 10
+async function catchUpEvents(): Promise<void> {
+  await loadEventsFrom(Math.max(eventPage.value, 1))
+  for (let i = 0; i < LIVE_CATCH_UP_PAGES && moreEvents.value; i += 1) {
+    await loadEventsFrom(eventPage.value + 1)
+  }
+}
 
 /** Live: never flip `pending` (it would swap the page for LoadingState); a failure waits for the next event. */
 async function reloadSilently(): Promise<void> {
   try {
     job.value = await jobsApi.get(jobId)
-    await loadEventsFrom(Math.max(eventPage.value, 1))
+    await catchUpEvents()
   }
   catch {
     // The next live event or a resync retries.
@@ -2938,9 +3074,11 @@ const cancelJob = (): Promise<void> => act(async () => {
 })
 
 const requeueJob = (): Promise<void> => act(async () => {
-  job.value = (await jobsApi.requeue(jobId)).job
+  const result = await jobsApi.requeue(jobId)
+  job.value = result.job
+  requeueResult.value = result
   toast.success(t('fleet.jobs.toast.requeued'))
-  await loadEventsFrom(Math.max(eventPage.value, 1))
+  await catchUpEvents()
 })
 
 const downloadBundle = (): Promise<void> => act(() => jobsApi.downloadBundle(jobId))
@@ -2975,11 +3113,16 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
         </span>
       </div>
 
+      <section v-if="requeueResult" class="space-y-2" data-testid="fleet-job-requeue-result">
+        <h2 class="text-sm font-medium">{{ t('fleet.jobs.requeuePlacement') }}</h2>
+        <FleetPlacementResult v-if="requeueResult" :slug="slug" :result="requeueResult" :runner-name="options.runnerName" hide-open-link />
+      </section>
+
       <FleetJobProgress :job="job" />
 
       <dl class="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.runner') }}</dt><dd data-testid="fleet-job-runner">{{ options.runnerName(job.runnerId) ?? t('fleet.jobs.detail.unassigned') }}</dd></div>
-        <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.requester') }}</dt><dd>{{ people.nameOf(job.requestedById) }}</dd></div>
+        <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.requester') }}</dt><dd>{{ people.nameOf(job.requestedById) ?? t('fleet.jobs.unknownMember') }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.profiles') }}</dt><dd>{{ job.profiles.length > 0 ? job.profiles.join(' > ') : '-' }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.queuedAt') }}</dt><dd>{{ formatTime(job.queuedAt) }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.startedAt') }}</dt><dd>{{ formatTime(job.startedAt) }}</dd></div>
@@ -3043,14 +3186,14 @@ git commit -m "feat(web): fleet job detail page with live progress, timeline, ca
 
 **Interfaces:**
 - Consumes: the API's runner routes (`POST /api/fleet/enrollments` as admin, `POST /api/fleet/runner/enroll`, `POST /api/fleet/runner/sync`, `PUT /api/fleet/runner/jobs/:jobId/bundle?leaseEpoch=` with `Content-Type: application/gzip` and `X-Content-SHA256`, all with `Authorization: Bearer <kr_ key>`), the test ids of Tasks 7-9, `login`/`E2E_ADMIN` (`fixtures/api-client.ts`), `webLogin`/`waitForHydration` (`fixtures/page-helpers.ts`).
-- Produces: `ScriptedRunner.enroll(adminToken, name)`, `runner.acceptAssign(jobId): Promise<Lease>`, `runner.report(lease, events)`, `runner.uploadBundle(lease, content)`, `E2E_RUNNER_CAPABILITIES`, `interface Lease { jobId; leaseEpoch }`.
+- Produces: `ScriptedRunner.enroll(adminToken, name)`, `runner.heartbeat()`, `runner.acceptAssign(jobId): Promise<Lease>`, `runner.report(lease, events)`, `runner.uploadBundle(lease, content)`, `E2E_RUNNER_CAPABILITIES`, `interface Lease { jobId; leaseEpoch }`.
 
 Protocol facts the script relies on (read in `apps/api/src/fleet/sync/`):
 - `parseSyncRequest` needs `protocolVersion`, `bootId`, `daemonVersion`, `freeSlots` (0..64) and arrays `jobs`, `commandAcks`, `tokenRequests`; events are `{ seq >= 1, type: state|snapshot|lifecycle|log, payload: object }`.
 - Runner transitions allowed: ASSIGNED to RUNNING, RUNNING to UPLOADING, UPLOADING to COMPLETED (`jobs/job-state.ts`); COMPLETED needs no bundle, but the bundle is accepted only while RUNNING or UPLOADING, so it is uploaded in UPLOADING.
 - Snapshot fields are mirrored when they pass their bound (`event-payloads.ts`): `costSpentUsd` matches `^\d{1,8}(\.\d{1,4})?$`, `resultPrUrl` http(s), `progress` an object under 4 KiB.
 - An idle sync long-polls `FLEET_SYNC_WAIT_MS` (default 25 s); e2e sets 1 s so `acceptAssign` polls quickly. Bundles go to `FLEET_ARTIFACT_DIR`, set to a temp dir so e2e never writes into `apps/api/data`.
-- Placement for a GitHub repo needs `tools.git` and `tools.gh`; a pinned, online, fitting runner is assigned during the dispatch request, so the dispatch page shows "Assigned to <runner>".
+- Placement for a GitHub repo needs `tools.git` and `tools.gh`; a pinned, online, fitting runner is assigned during the dispatch request, so the dispatch page shows "Assigned to <runner>". "Online" means a sync within `FLEET_RUNNER_OFFLINE_SEC` (90 s); login and a cold `nuxt dev` compile can take longer than that after `beforeAll` enrolled the runner, and an offline pin is not a permanent misfit, so the job would just queue. The test therefore syncs once (`heartbeat()`) right before it submits.
 - On COMPLETED the API's PR attribution runs fire-and-forget; with no GitHub App configured in e2e it does nothing and never throws (`sync/pr-attribution.service.ts`).
 
 - [ ] **Step 1: Write the spec and the scripted runner**
@@ -3139,6 +3282,11 @@ export class ScriptedRunner {
     return new ScriptedRunner(runnerId, name, apiKey);
   }
 
+  /** One idle sync: refreshes lastSeenAt so placement sees the runner online (FLEET_RUNNER_OFFLINE_SEC). */
+  async heartbeat(): Promise<void> {
+    await this.sync({});
+  }
+
   private sync(over: Record<string, unknown>): Promise<SyncReply> {
     return call<SyncReply>('/fleet/runner/sync', {
       method: 'POST',
@@ -3219,17 +3367,20 @@ test.describe('Fleet dispatch (scripted runner)', () => {
   });
 
   test('dispatch, live progress to COMPLETED, bundle download', async ({ page }) => {
+    // About 15 sequential steps against `nuxt dev`, each waiting on a sync or a live update.
+    test.setTimeout(90_000);
     await webLogin(page);
     await page.goto(`/${SLUG}/fleet/dispatch`);
     await waitForHydration(page);
 
-    await page.getByTestId('dispatch-repo').click();
-    await page.getByRole('option', { name: 'acme/e2e-app' }).click();
+    // Native selects (4b D137): selectOption, never a portal click.
+    await page.getByTestId('dispatch-repo').selectOption({ label: 'acme/e2e-app' });
     await page.getByTestId('dispatch-feature').fill(feature);
     await page.getByTestId('dispatch-max-cost').fill('3');
     await page.getByTestId('placement-pin').click();
-    await page.getByTestId('dispatch-pin').click();
-    await page.getByRole('option', { name: runner.name }).click();
+    // By value: the label gains an "(offline)" suffix if the runner has gone quiet.
+    await page.getByTestId('dispatch-pin').selectOption(runner.id);
+    await runner.heartbeat();
     await page.getByTestId('dispatch-submit').click();
 
     await expect(page.getByTestId('placement-assigned')).toContainText(runner.name);
@@ -3296,7 +3447,7 @@ test.describe('Fleet dispatch (scripted runner)', () => {
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `cd apps/api && bun run test:db:up && cd ../web && bunx playwright test tests/e2e/fleet-dispatch.e2e.spec.ts`
-Expected: FAIL: the locator `getByTestId('dispatch-repo')` times out. Project `fleet-e2e` is not seeded yet, so the page shows the no-permission or no-repos notice instead of the form.
+Expected: FAIL: `selectOption` on `getByTestId('dispatch-repo')` times out. Project `fleet-e2e` is not seeded yet, so the page shows the no-permission or no-repos notice instead of the form.
 
 - [ ] **Step 3: Seed the fixture and set the e2e API env**
 
