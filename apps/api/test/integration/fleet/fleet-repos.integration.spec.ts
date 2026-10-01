@@ -108,17 +108,40 @@ describeIntegration('fleet repos (PG)', () => {
 
   it('re-checks a registered repo on demand and reports a forge refusal as data (D119)', async () => {
     const all = data<{ records: Array<{ id: string; name: string }> }>(await request(server).get('/api/fleet/repos').set(auth(admin)).expect(200));
-    const app1 = all.records.find((r) => r.name === 'app');
-    const ok = data<{ repoId: string; reachable: boolean; reason: string | null }>(
-      await request(server).post(`/api/fleet/repos/${app1?.id}/check`).set(auth(admin)).expect(200),
+    const registered = all.records.find((r) => r.name === 'app') ?? data<{ id: string; name: string }>(
+      await request(server).post('/api/fleet/repos').set(auth(admin)).send({ projectSlug: 'web', provider: 'github', owner: 'Acme', name: 'App' }).expect(201),
     );
-    expect(ok).toEqual(expect.objectContaining({ repoId: app1?.id, reachable: true, reason: null }));
+    const ok = data<{ repoId: string; reachable: boolean; reason: string | null }>(
+      await request(server).post(`/api/fleet/repos/${registered.id}/check`).set(auth(admin)).expect(200),
+    );
+    expect(ok).toEqual(expect.objectContaining({ repoId: registered.id, reachable: true, reason: null }));
 
-    forge.routes.set('GET /repos/acme/app/installation', () => ({ status: 404, body: { message: 'provider-internal-detail' } }));
-    const res = await request(server).post(`/api/fleet/repos/${app1?.id}/check`).set(auth(admin)).expect(200);
-    expect(data<{ reachable: boolean; reason: string }>(res)).toEqual(expect.objectContaining({ reachable: false, reason: 'app_not_installed' }));
-    expect(JSON.stringify(res.body)).not.toContain('provider-internal-detail');
-    forge.routes.set('GET /repos/acme/app/installation', () => ({ status: 200, body: { id: 77 } }));
+    const discoveryRoute = 'GET /repos/acme/app/installation';
+    const persistedMintRoute = 'POST /app/installations/77/access_tokens';
+    const previousDiscovery = forge.routes.get(discoveryRoute);
+    const previousMint = forge.routes.get(persistedMintRoute);
+    const requestStart = forge.requests.length;
+    try {
+      // A newly discovered ID must not replace the installation ID saved at registration.
+      forge.routes.set(discoveryRoute, () => ({ status: 200, body: { id: 99 } }));
+      forge.routes.set(persistedMintRoute, () => ({ status: 404, body: { message: 'provider-internal-detail' } }));
+      const res = await request(server).post(`/api/fleet/repos/${registered.id}/check`).set(auth(admin)).expect(200);
+      expect(data<{ reachable: boolean; reason: string }>(res)).toEqual(expect.objectContaining({ reachable: false, reason: 'app_not_installed' }));
+      expect(JSON.stringify(res.body)).not.toContain('provider-internal-detail');
+      const checkRequests = forge.requests.slice(requestStart);
+      expect(checkRequests.some((r) => r.path === '/app/installations/77/access_tokens')).toBe(true);
+      expect(checkRequests.some((r) => r.path === '/app/installations/99/access_tokens')).toBe(false);
+      expect(checkRequests.some((r) => r.path === '/repos/acme/app/installation')).toBe(false);
+
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+      const afterCheck = await prisma.fleetRepo.findUniqueOrThrow({ where: { id: registered.id } });
+      expect(afterCheck.githubInstallationId).toBe(BigInt(77));
+    } finally {
+      if (previousDiscovery) forge.routes.set(discoveryRoute, previousDiscovery);
+      else forge.routes.delete(discoveryRoute);
+      if (previousMint) forge.routes.set(persistedMintRoute, previousMint);
+      else forge.routes.delete(persistedMintRoute);
+    }
   });
 
   it('keeps the repo check to admins and 404s an unknown repo', async () => {
