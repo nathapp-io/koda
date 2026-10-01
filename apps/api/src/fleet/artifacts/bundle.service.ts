@@ -61,7 +61,14 @@ export class BundleService {
     // The lease may have moved while the body streamed: re-check before recording.
     const recorded = await this.txManager.run(async () => {
       const job = await this.repo.lockById(u.jobId);
-      if (!job || !this.fence.holds(job, u.runnerId, leaseEpoch) || !UPLOAD_STATES.includes(job.state)) return { ok: false as const };
+      if (!job) return { ok: false as const, error: new NotFoundAppException({}, 'fleet.jobs') };
+      if (!this.fence.holds(job, u.runnerId, leaseEpoch)) {
+        await this.fence.abandon(u.runnerId, job, leaseEpoch);
+        return { ok: false as const, error: new FleetFenceException() };
+      }
+      if (!UPLOAD_STATES.includes(job.state)) {
+        return { ok: false as const, error: new ConflictAppException({ state: job.state }, 'fleet.jobState') };
+      }
       const previous = await this.repo.findArtifact(job.id, 'bundle', leaseEpoch);
       await this.repo.upsertArtifact({ jobId: job.id, leaseEpoch, kind: 'bundle', storageKey: key, sizeBytes: BigInt(stored.sizeBytes), sha256: stored.sha256 });
       await this.activity.record({
@@ -72,7 +79,8 @@ export class BundleService {
     });
     if (!recorded.ok) {
       await this.store.delete(key); // only this attempt's file; the recorded bundle is untouched
-      throw new FleetFenceException();
+      // Throw after commit so the stale lease's ABANDON is not rolled back.
+      throw recorded.error;
     }
     if (recorded.replacedKey) {
       try {
