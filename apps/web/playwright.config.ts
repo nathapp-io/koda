@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import os from 'os';
 import path from 'path';
 
 const API_PORT = process.env['E2E_API_PORT'] ?? '3102';
@@ -59,6 +60,10 @@ export default defineConfig({
         // a single client IP) stay under the limit even with CI retries that
         // restart workers and clear the per-worker session cache.
         AUTH_LOGIN_THROTTLE_LIMIT: process.env['AUTH_LOGIN_THROTTLE_LIMIT'] ?? '50',
+        // Fleet slice 4c: the scripted runner's idle sync returns within 1 s instead of
+        // long-polling 25 s, and job bundles land outside the repo.
+        FLEET_SYNC_WAIT_MS: '1000',
+        FLEET_ARTIFACT_DIR: path.join(os.tmpdir(), `koda-e2e-fleet-artifacts-${API_PORT}`),
       },
     },
     {
