@@ -12,6 +12,7 @@ import {
   mergeEvents,
   pickActiveJob,
   safePrUrl,
+  storyRows,
   summarizeEvent,
   visibleTimelineEvents,
   wipPushStatus,
@@ -24,7 +25,7 @@ const job = (over: Partial<FleetJobDto> = {}): FleetJobDto => ({
   state: 'QUEUED', stateReason: null, requestedById: 'u1', queuedAt: '2026-10-01T00:00:00.000Z', assignedAt: null,
   startedAt: null, finishedAt: null, cancelRequestedAt: null, naxRunId: null, naxLogRunId: null, naxCostRunId: null,
   progress: null, currentStoryId: null, currentPhase: null, costSpentUsd: '0', lastHeartbeatAt: null,
-  finishResult: null, escalationReason: null, exitCode: null, resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null,
+  finishResult: null, escalationReason: null, exitCode: null, resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null, stories: null, storiesTruncated: false,
   ...over,
 })
 
@@ -118,6 +119,38 @@ describe('wipPushStatus', () => {
     expect(wipPushStatus(null)).toBeNull()
     expect(wipPushStatus(undefined)).toBeNull()
     expect(wipPushStatus('weird')).toBeNull()
+  })
+})
+
+describe('storyRows', () => {
+  const stories = [
+    { id: 'US-001', title: 'Login', status: 'passed', attempts: 1, dependsOn: [] },
+    { id: 'US-002', title: 'Logout', status: 'in-progress', attempts: 2, dependsOn: ['US-001'] },
+    { id: 'US-003', title: 'Audit', status: 'regression-failed', attempts: 3, dependsOn: [] },
+    { id: 'US-004', title: 'Docs', status: 'decomposed', attempts: 0, dependsOn: [] },
+  ]
+
+  test('one row per story; status picks the badge variant; the active job highlights its current story', () => {
+    const rows = storyRows(job({ state: 'RUNNING', stories, currentStoryId: 'US-002', currentPhase: 'implement' }))
+    expect(rows.map(r => [r.id, r.variant, r.current, r.phase])).toEqual([
+      ['US-001', 'default', false, null],
+      ['US-002', 'secondary', true, 'implement'],
+      ['US-003', 'destructive', false, null],
+      ['US-004', 'outline', false, null],
+    ])
+    expect(rows[1]).toEqual(expect.objectContaining({ title: 'Logout', status: 'in-progress', attempts: 2 }))
+  })
+
+  test('a finished job highlights nothing (D152)', () => {
+    expect(storyRows(job({ state: 'FAILED', stories, currentStoryId: 'US-002', currentPhase: 'implement' })).some(r => r.current)).toBe(false)
+  })
+
+  test('no list, or junk entries, give no rows', () => {
+    expect(storyRows(job({ stories: null }))).toEqual([])
+    const junk = [null, 'x', { title: 'no id' }, { id: '' }, { id: 'US-9', attempts: 'many' }] as unknown as FleetJobDto['stories']
+    expect(storyRows(job({ stories: junk }))).toEqual([
+      { id: 'US-9', title: '', status: 'pending', attempts: 0, current: false, phase: null, variant: 'outline' },
+    ])
   })
 })
 

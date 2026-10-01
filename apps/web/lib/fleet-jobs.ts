@@ -84,6 +84,47 @@ export function wipPushStatus(value: string | null | undefined): WipPushStatus |
   return null
 }
 
+export interface StoryRow {
+  id: string
+  title: string
+  status: string
+  attempts: number
+  /** D152: only while the job is active. */
+  current: boolean
+  phase: string | null
+  variant: 'default' | 'secondary' | 'destructive' | 'outline'
+}
+
+const STORY_VARIANTS: Readonly<Record<string, StoryRow['variant']>> = {
+  'passed': 'default',
+  'in-progress': 'secondary',
+  'failed': 'destructive',
+  'regression-failed': 'destructive',
+}
+
+/** S1b §1.4: the job page's story checklist. The server validated the list; each row is still checked. */
+export function storyRows(job: Pick<FleetJobDto, 'stories' | 'state' | 'currentStoryId' | 'currentPhase'>): StoryRow[] {
+  if (!Array.isArray(job.stories)) return []
+  const active = isActiveJobState(job.state)
+  return job.stories.flatMap((entry: unknown): StoryRow[] => {
+    if (typeof entry !== 'object' || entry === null) return []
+    const s = entry as Record<string, unknown>
+    const id = text(s.id)
+    if (id === null) return []
+    const status = text(s.status) ?? 'pending'
+    const current = active && id === job.currentStoryId
+    return [{
+      id,
+      title: text(s.title) ?? '',
+      status,
+      attempts: count(s.attempts) ?? 0,
+      current,
+      phase: current ? job.currentPhase : null,
+      variant: STORY_VARIANTS[status] ?? 'outline',
+    }]
+  })
+}
+
 export type TimelineEntry =
   | { kind: 'transition'; from: string | null; to: string; reason: string | null; source: 'server' | 'runner' }
   | { kind: 'snapshot'; parts: string[] }

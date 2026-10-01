@@ -75,4 +75,8 @@ describe('job detail', () => {
     expect(detail).toContain('safePrUrl(job.value?.resultPrUrl)')
     expect(detail).toMatch(/<a v-if="prUrl" :href="prUrl" target="_blank" rel="noopener noreferrer"/)
   })
+
+  test('renders the story checklist under the progress block', () => {
+    expect(detail).toMatch(/<FleetJobProgress :job="job" \/>\s*<FleetJobStories :job="job" \/>/)
+  })
 })

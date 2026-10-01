@@ -6,6 +6,7 @@ import { loadFleetJobDetail } from '~/lib/fleet-job-detail'
 import { canCancelJob, canRequeueJob, canWorkOnFleet, isTerminalJobState, mayHaveBundle, mergeEvents, safePrUrl, wipPushStatus } from '~/lib/fleet-jobs'
 import type { DispatchResultDto, FleetJobDto, FleetJobEventDto } from '~/lib/fleet-types'
 import FleetJobProgress from '~/components/fleet/FleetJobProgress.vue'
+import FleetJobStories from '~/components/fleet/FleetJobStories.vue'
 import FleetJobStateBadge from '~/components/fleet/FleetJobStateBadge.vue'
 import FleetJobTimeline from '~/components/fleet/FleetJobTimeline.vue'
 import FleetPlacementResult from '~/components/fleet/FleetPlacementResult.vue'
@@ -184,6 +185,7 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
       </section>
 
       <FleetJobProgress :job="job" />
+      <FleetJobStories :job="job" />
 
       <dl class="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.runner') }}</dt><dd data-testid="fleet-job-runner">{{ options.runnerName(job.runnerId) ?? t('fleet.jobs.detail.unassigned') }}</dd></div>
