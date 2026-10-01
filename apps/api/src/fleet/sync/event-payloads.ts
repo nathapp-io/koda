@@ -13,6 +13,8 @@ const MAX_PROGRESS_BYTES = 4_096;
 const MAX_LOG_BYTES = 8_192;
 const COST_RE = /^\d{1,8}(\.\d{1,4})?$/;
 const SHA_RE = /^[0-9a-f]{7,64}$/;
+/** S1b §1.1: `pushed`, `none` or `failed:` plus 1-200 printable ASCII characters. */
+const WIP_PUSH_RE = /^(pushed|none|failed:[\x20-\x7e]{1,200})$/;
 
 const str = (v: unknown, max: number): string | undefined => (typeof v === 'string' && v.length > 0 && v.length <= max ? v : undefined);
 const strOrNull = (v: unknown, max: number): string | null | undefined => (v === null ? null : str(v, max));
@@ -47,6 +49,7 @@ function mirror(p: Obj): FleetJobPatch {
     ['resultBranch', str(p.resultBranch, 255)],
     ['resultSha', typeof p.resultSha === 'string' && SHA_RE.test(p.resultSha) ? p.resultSha : undefined],
     ['resultPrUrl', httpUrl(p.resultPrUrl)],
+    ['wipPush', typeof p.wipPush === 'string' && WIP_PUSH_RE.test(p.wipPush) ? p.wipPush : undefined],
   ];
   return Object.fromEntries(entries.filter(([, v]) => v !== undefined)) as FleetJobPatch;
 }

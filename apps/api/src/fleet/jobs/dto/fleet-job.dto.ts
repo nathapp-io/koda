@@ -42,6 +42,7 @@ export class FleetJobDto {
   @ApiPropertyOptional({ type: String, nullable: true }) declare resultBranch: string | null;
   @ApiPropertyOptional({ type: String, nullable: true }) declare resultSha: string | null;
   @ApiPropertyOptional({ type: String, nullable: true }) declare resultPrUrl: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true, description: 'pushed | none | failed:<reason> (S1b §1.1)' }) declare wipPush: string | null;
 
   /** Internal columns (runnerBootId, eventSeq, ackedRunnerSeq, attributedAt) stay server-side. */
   static from(r: FleetJobRecord): FleetJobDto {
@@ -55,7 +56,7 @@ export class FleetJobDto {
       naxCostRunId: r.naxCostRunId, progress: r.progress ?? null, currentStoryId: r.currentStoryId,
       currentPhase: r.currentPhase, costSpentUsd: r.costSpentUsd, lastHeartbeatAt: iso(r.lastHeartbeatAt),
       finishResult: r.finishResult, escalationReason: r.escalationReason, exitCode: r.exitCode,
-      resultBranch: r.resultBranch, resultSha: r.resultSha, resultPrUrl: r.resultPrUrl,
+      resultBranch: r.resultBranch, resultSha: r.resultSha, resultPrUrl: r.resultPrUrl, wipPush: r.wipPush,
     });
   }
 }

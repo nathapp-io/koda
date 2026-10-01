@@ -614,3 +614,92 @@ describe('two jobs on one repo', () => {
     expect(order).toEqual(['prepare:j1', 'cleanup:j1', 'prepare:j2', 'cleanup:j2']);
   });
 });
+
+describe('RUN progress push (S1b 1a)', () => {
+  const failedStatus = { run: { id: 'r', status: 'failed' } };
+  test('a FAILED run pushes before UPLOADING; the pushed branch and sha override the ledger', async () => {
+    const b = build();
+    b.ex.status = failedStatus;
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    expect(b.ex.calls.indexOf('pushProgress:j1')).toBeGreaterThan(-1);
+    expect(b.ex.calls.indexOf('pushProgress:j1')).toBeLessThan(b.ex.calls.indexOf('collectBundle:j1'));
+    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'run status: failed' });
+    expect(lastSnapshot(b)).toMatchObject({ wipPush: 'pushed', resultBranch: 'feat/x', resultSha: 'e'.repeat(40) });
+    expect(b.journal.getJob('j1', 1)).toMatchObject({ resultBranch: 'feat/x', resultSha: 'e'.repeat(40) });
+  });
+  test('a COMPLETED run does not push and reports no wipPush', async () => {
+    const b = build();
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    expect(b.ex.calls).not.toContain('pushProgress:j1');
+    expect(lastSnapshot(b)?.wipPush).toBeUndefined();
+  });
+  test('ESCALATED with nothing new reports none and keeps the ledger result (D145)', async () => {
+    const b = build();
+    b.ex.status = { run: { id: 'r', status: 'completed' }, postRun: { finish: { result: 'escalated', escalationReason: 'review' } } };
+    b.ex.progressPush = { kind: 'none' };
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    expect(lastSnapshot(b)).toMatchObject({ wipPush: 'none', resultBranch: 'feat/x', resultSha: 'b'.repeat(40) });
+    expect(states(b).at(-1)).toEqual({ to: 'ESCALATED', reason: 'review' });
+  });
+  test('a failed push keeps the nax verdict and reason', async () => {
+    const b = build();
+    b.ex.status = failedStatus;
+    b.ex.progressPush = { kind: 'failed', reason: 'diverged' };
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'run status: failed' });
+    expect(lastSnapshot(b)).toMatchObject({ wipPush: 'failed:diverged', resultSha: 'b'.repeat(40) });
+  });
+  test('a CANCELLED run still pushes, and the probe is halt-only', async () => {
+    const b = build();
+    b.ex.status = { run: { id: 'r', status: 'crashed' } };
+    b.ex.onTick = (n) => { if (n === 2) b.run.requestCancel(); };
+    await b.run.start('prepare');
+    expect(stateNames(b)).toEqual(['RUNNING', 'UPLOADING', 'CANCELLED']);
+    expect(b.ex.calls).toContain('pushProgress:j1');
+    expect(b.ex.pushProgressOptions[0].isHalted?.()).toBe(false);
+    expect(lastSnapshot(b)).toMatchObject({ wipPush: 'pushed' });
+  });
+  test('a halt during the push records nothing (D144)', async () => {
+    const b = build();
+    b.ex.status = failedStatus;
+    b.ex.dieAfterTicks(1);
+    const seen: { probe: (() => boolean) | null } = { probe: null };
+    b.ex.pushProgress = async (_job, options) => {
+      seen.probe = options?.isHalted ?? null;
+      b.run.halt();
+      return { kind: 'halted' };
+    };
+    await b.run.start('prepare');
+    expect(seen.probe?.()).toBe(true);
+    expect(everyStateName(b)).toEqual(['RUNNING']);
+    expect(b.uploads).toEqual([]);
+  });
+  test('resume after the push was recorded does not push again and reports pushed (D141)', async () => {
+    const b = build();
+    b.ex.status = failedStatus;
+    b.journal.updateJob('j1', 1, { state: 'UPLOADING', branch: 'feat/x', resultBranch: 'feat/x', resultSha: 'd'.repeat(40), pid: 1, pgid: 1 });
+    await b.run.start('finish');
+    expect(b.ex.calls).not.toContain('pushProgress:j1');
+    expect(stateNames(b)).toEqual(['FAILED']);
+    expect(lastSnapshot(b)).toMatchObject({ wipPush: 'pushed', resultSha: 'd'.repeat(40) });
+  });
+  test('a push that throws keeps the nax verdict and reports failed:push error', async () => {
+    const b = build();
+    b.ex.status = failedStatus;
+    b.ex.pushProgress = async () => { throw new Error('boom'); };
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'run status: failed' });
+    expect(lastSnapshot(b)).toMatchObject({ wipPush: 'failed:push error', resultSha: 'b'.repeat(40) });
+  });
+  test('PLAN never calls pushProgress', async () => {
+    const b = build('PLAN');
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    expect(b.ex.calls).not.toContain('pushProgress:j1');
+  });
+});

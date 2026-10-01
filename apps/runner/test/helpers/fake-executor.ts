@@ -1,5 +1,6 @@
 import type { BundleFile } from '../../src/bundle/build-bundle';
-import type { JobExecutor, JobWatcher, FinishPlanOptions, PlanPushOutcome, PrepareOptions, PrepareOutcome, SpawnHandle, WatchOptions } from '../../src/executor/job-executor';
+import type { JobExecutor, JobWatcher, FinishPlanOptions, PlanPushOutcome, PrepareOptions, PrepareOutcome, PushProgressOptions, SpawnHandle, WatchOptions } from '../../src/executor/job-executor';
+import type { ProgressPushOutcome } from '../../src/executor/progress-push';
 import type { JobRow } from '../../src/journal/types';
 import type { PlanCheck } from '../../src/verdict/plan-verdict';
 import type { StatusView } from '../../src/verdict/status-view';
@@ -12,6 +13,8 @@ export class FakeExecutor implements JobExecutor {
   readonly watchOptions: WatchOptions[] = [];
   readonly prepareOptions: PrepareOptions[] = [];
   readonly finishPlanOptions: FinishPlanOptions[] = [];
+  readonly pushProgressOptions: PushProgressOptions[] = [];
+  progressPush: ProgressPushOutcome = { kind: 'pushed', branch: 'feat/x', sha: 'e'.repeat(40) };
   prepareResult: PrepareOutcome = { ok: true, branch: 'feat/x' };
   spawnError: Error | null = null;
   handle: SpawnHandle = { pid: 4242, pgid: 4242 };
@@ -90,6 +93,12 @@ export class FakeExecutor implements JobExecutor {
     this.note('finishPlan', job);
     this.finishPlanOptions.push(options);
     return this.planPush;
+  }
+
+  async pushProgress(job: JobRow, options: PushProgressOptions = {}): Promise<ProgressPushOutcome> {
+    this.note('pushProgress', job);
+    this.pushProgressOptions.push(options);
+    return this.progressPush;
   }
 
   async readFinishLedger(): Promise<{ branch: string; headSha: string } | null> {

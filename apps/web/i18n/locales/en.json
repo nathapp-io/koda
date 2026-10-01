@@ -870,6 +870,11 @@
         "pr": "Pull request",
         "planFrom": "Spec path",
         "escalation": "Escalation reason",
+        "wipPush": {
+          "pushed": "Progress pushed to the branch",
+          "none": "No new progress to push",
+          "failed": "Progress push failed: {reason}"
+        },
         "cancelRequested": "Cancel requested at {at}"
       },
       "actions": {

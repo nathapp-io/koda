@@ -3,6 +3,7 @@ import type { JobRow } from '../journal/types';
 import type { PlanCheck } from '../verdict/plan-verdict';
 import type { StatusView } from '../verdict/status-view';
 import type { WatcherSink } from '../watcher/watcher';
+import type { ProgressPushOutcome } from './progress-push';
 
 export type PrepareOutcome = { ok: true; branch: string | null } | { ok: false; reason: string; cancelled?: true };
 
@@ -14,6 +15,11 @@ export interface PrepareOptions {
 /** Polled while the PLAN push waits for its first token; true ends the wait at once (the run feeds cancel and halt). */
 export interface FinishPlanOptions {
   readonly isCancelled?: () => boolean;
+}
+
+/** S1b §1.1: polled while the progress push waits for a token or a retry; true (an ABANDON) stops it. Never a cancel. */
+export interface PushProgressOptions {
+  readonly isHalted?: () => boolean;
 }
 
 export interface SpawnHandle {
@@ -48,6 +54,8 @@ export interface JobExecutor {
   readStatus(job: JobRow): Promise<StatusView | null>;
   readPlan(job: JobRow): Promise<PlanCheck>;
   finishPlan(job: JobRow, options?: FinishPlanOptions): Promise<PlanPushOutcome>;
+  /** S1b §1.1 (B5): after an unfinished RUN, commit the PRD and fast-forward the feature branch on origin. */
+  pushProgress(job: JobRow, options?: PushProgressOptions): Promise<ProgressPushOutcome>;
   readFinishLedger(job: JobRow): Promise<{ branch: string; headSha: string } | null>;
   collectBundle(job: JobRow): Promise<BundleFile>;
   cleanup(job: JobRow): Promise<void>;

@@ -145,7 +145,7 @@ export class FleetJobsService {
             runnerId: null, runnerBootId: null, assignedAt: null, startedAt: null, finishedAt: null, cancelRequestedAt: null,
             naxRunId: null, naxLogRunId: null, naxCostRunId: null, progress: null, currentStoryId: null, currentPhase: null,
             costSpentUsd: '0', lastHeartbeatAt: null, finishResult: null, escalationReason: null, exitCode: null,
-            resultBranch: null, resultSha: null, resultPrUrl: null, ackedRunnerSeq: 0, bumpEpoch: true,
+            resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null, ackedRunnerSeq: 0, bumpEpoch: true,
           },
         });
       });
