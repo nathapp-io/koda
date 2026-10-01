@@ -31,6 +31,16 @@ onMounted(async () => {
   }
 })
 
+async function retry(): Promise<void> {
+  try {
+    await options.load()
+    loadFailed.value = false
+  }
+  catch (err: unknown) {
+    toast.error(extractApiError(err))
+  }
+}
+
 const { handleSubmit, isSubmitting, values, setFieldValue } = useForm({
   validationSchema: toTypedSchema(buildDispatchSchema(t)),
   initialValues: { ...DISPATCH_DEFAULTS },
@@ -82,7 +92,7 @@ const onSubmit = handleSubmit(async (formValues) => {
     <PageHeader :title="t('fleet.dispatch.title')" :subtitle="t('fleet.dispatch.subtitle')" />
 
     <p v-if="!canWork" class="text-sm text-muted-foreground" data-testid="dispatch-no-permission">{{ t('fleet.dispatch.noPermission') }}</p>
-    <ErrorState v-else-if="loadFailed" @retry="options.load()" />
+    <ErrorState v-else-if="loadFailed" @retry="retry()" />
     <p v-else-if="options.repos.value.length === 0" class="text-sm text-muted-foreground" data-testid="dispatch-no-repos">{{ t('fleet.dispatch.noRepos') }}</p>
 
     <form v-else class="space-y-5" data-testid="dispatch-form" @submit="onSubmit">
