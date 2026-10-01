@@ -21,8 +21,26 @@ export interface LiveTicketEvent {
   at: string
 }
 
+/** Fleet S1 slice 4c: content-free job notice; the page refetches the job (S1 spec §1). */
+export const FLEET_JOB_STATES = [
+  'QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING', 'COMPLETED', 'FAILED', 'ESCALATED', 'CRASHED', 'CANCELLED',
+] as const
+export type FleetJobState = typeof FLEET_JOB_STATES[number]
+
+export interface LiveFleetJobEvent {
+  id: string
+  type: 'fleet_job'
+  projectId: string
+  jobId: string
+  /** Any non-empty string: the notice only triggers a refetch, so a new API state must not be dropped (D139). */
+  state: string
+  at: string
+}
+
+/** Both event handlers are optional; a page subscribes to what it shows. */
 export interface ProjectEventHandlers {
-  onEvent: (event: LiveTicketEvent) => void
+  onEvent?: (event: LiveTicketEvent) => void
+  onFleetJob?: (event: LiveFleetJobEvent) => void
   onResync: () => void
 }
 
@@ -57,6 +75,19 @@ export function parseLiveEvent(raw: string): LiveTicketEvent | null {
     if (value.type !== 'ticket' || typeof value.id !== 'string' || typeof value.ticketId !== 'string') return null
     if (!LIVE_ACTIONS.includes(value.action as LiveAction)) return null
     return value as LiveTicketEvent
+  }
+  catch {
+    return null
+  }
+}
+
+export function parseFleetJobEvent(raw: string): LiveFleetJobEvent | null {
+  try {
+    const value = JSON.parse(raw) as Partial<LiveFleetJobEvent> | null
+    if (!value || typeof value !== 'object') return null
+    if (value.type !== 'fleet_job' || typeof value.id !== 'string' || typeof value.jobId !== 'string') return null
+    if (typeof value.state !== 'string' || value.state.length === 0) return null
+    return value as LiveFleetJobEvent
   }
   catch {
     return null
@@ -115,8 +146,15 @@ export function createProjectEventStream(
     }
     es.addEventListener('ticket', (ev) => {
       const event = parseLiveEvent(ev.data)
-      if (event && isNew(event.id)) handlers.onEvent(event)
+      if (event && isNew(event.id)) handlers.onEvent?.(event)
     })
+    const onFleetJob = handlers.onFleetJob
+    if (onFleetJob) {
+      es.addEventListener('fleet_job', (ev) => {
+        const event = parseFleetJobEvent(ev.data)
+        if (event && isNew(event.id)) onFleetJob(event)
+      })
+    }
     es.onerror = () => {
       hadError = true
       if (stopped || es.readyState !== EVENT_SOURCE_CLOSED) return
