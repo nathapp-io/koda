@@ -18,19 +18,20 @@ import type { GitHttpRequest } from '../../helpers/git-http';
 import { isolateGit, makeOrigin, type Origin } from '../../helpers/git-fixture';
 import { startApi, type RunningApi } from './api-process';
 import { assertPartialIndex, prepareDatabase, runnerTestDatabaseUrl } from './database';
-import { startGitFront } from './git-front';
+import { startGitFront, type PushHold } from './git-front';
 import { HARNESS_TOKEN, startForge, type Forge } from './forge';
 
 const PASSWORD = 'Admin1234!Aa';
 const FAKE_NAX = join(import.meta.dir, '..', '..', 'fixtures', 'fake-nax.ts');
 const SELF = [process.execPath, join(import.meta.dir, '..', '..', '..', 'src', 'main.ts')];
-export const FEATURES: readonly string[] = ['fa', 'fb', 'fc', 'fd', 'fe', 'ff', 'fg'];
+export const FEATURES: readonly string[] = ['fa', 'fb', 'fc', 'fd', 'fe', 'ff', 'fg', 'fh'];
 
 export interface JobView {
   id: string; state: string; stateReason: string | null; leaseEpoch: number; runnerId: string | null;
   resultBranch: string | null; resultSha: string | null; resultPrUrl: string | null; finishResult: string | null;
   naxRunId: string | null; naxLogRunId: string | null; naxCostRunId: string | null; costSpentUsd: string;
   cancelRequestedAt: string | null; currentStoryId: string | null; wipPush: string | null;
+  stories: unknown; storiesTruncated: boolean;
 }
 export interface EventView { seq: number; leaseEpoch: number; runnerSeq: number | null; type: string; payload: Record<string, unknown> }
 
@@ -78,6 +79,7 @@ export interface World {
   downloadBundle(id: string): Promise<{ status: number; bytes: Uint8Array }>;
   addRunner(name: string): Promise<TestRunner>;
   withFake<T>(env: Record<string, string>, fn: () => Promise<T>): Promise<T>;
+  holdPushes(): PushHold;
   close(): Promise<void>;
 }
 
@@ -164,12 +166,12 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
       id: r.id, state: r.state, stateReason: r.stateReason, leaseEpoch: r.leaseEpoch, runnerId: r.runnerId, resultBranch: r.resultBranch,
       resultSha: r.resultSha, resultPrUrl: r.resultPrUrl, finishResult: r.finishResult, naxRunId: r.naxRunId, naxLogRunId: r.naxLogRunId,
       naxCostRunId: r.naxCostRunId, costSpentUsd: r.costSpentUsd.toString(), cancelRequestedAt: r.cancelRequestedAt?.toISOString() ?? null,
-      currentStoryId: r.currentStoryId, wipPush: r.wipPush,
+      currentStoryId: r.currentStoryId, wipPush: r.wipPush, stories: r.stories, storiesTruncated: r.storiesTruncated,
     };
   };
 
   const world: World = {
-    base, api, prisma, origin, forge, gitRequests: front.requests, fakeGh, forgeCloneUrl,
+    base, api, prisma, origin, forge, gitRequests: front.requests, holdPushes: () => front.holdPushes(), fakeGh, forgeCloneUrl,
     async dispatch(input) {
       const res = await http('POST', '/projects/web/fleet/jobs', {
         token: admin,

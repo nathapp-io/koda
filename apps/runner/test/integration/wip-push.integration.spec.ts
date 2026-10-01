@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { git as sh } from '../helpers/git-fixture';
+import { waitFor } from '../helpers/wait';
 import { createWorld, type TestRunner, type World } from './harness';
 
 setDefaultTimeout(120_000);
@@ -28,6 +29,9 @@ describe.skipIf(!enabled)('S1b 1a: an unfinished RUN pushes its progress and ano
       return world.waitForJob(id, (j) => j.state === 'FAILED');
     });
     expect(first).toMatchObject({ stateReason: 'run status: failed', wipPush: 'pushed', resultBranch: 'feat/fd' });
+    // S1b 1b: the final watcher tick read the PRD nax left behind (FAKE_NAX_DIRTY_PRD marks US-001 passed).
+    expect(first.stories).toEqual([{ id: 'US-001', title: 'story', status: 'passed', attempts: 1, dependsOn: [] }]);
+    expect(first.storiesTruncated).toBe(false);
     const tip = await sh(world.origin.dir, 'rev-parse', 'feat/fd');
     expect(first.resultSha).toBe(tip);
     expect(await sh(world.origin.dir, 'log', '-1', '--format=%s|%an|%ae', 'feat/fd')).toBe(`chore(nax): progress of fd via koda job ${first.id}|koda-fleet[bot]|koda-fleet[bot]@users.noreply.github.com`);
@@ -50,6 +54,42 @@ describe.skipIf(!enabled)('S1b 1a: an unfinished RUN pushes its progress and ano
       return world.waitForJob(id, (j) => j.state === 'FAILED');
     });
     expect(job).toMatchObject({ stateReason: 'run status: cost-limit', wipPush: 'pushed', resultBranch: 'feat/fe' });
+    expect(job.stories).toEqual([{ id: 'US-001', title: 'story', status: 'pending', attempts: 0, dependsOn: [] }]);
     expect(job.resultSha).toBe(await sh(world.origin.dir, 'rev-parse', 'feat/fe'));
+  });
+
+  test('a halt between nax exit and the progress push pushes nothing (D144, D153)', async () => {
+    const hold = world.holdPushes();
+    try {
+      const id = await world.withFake({ FAKE_NAX_SCENARIO: 'failed' }, async () => {
+        const jobId = await world.dispatch({ feature: 'fh', pinnedRunnerId: aId });
+        await hold.reached;   // nax has exited and the progress push is on the wire
+        return jobId;
+      });
+      const held = await world.job(id);
+      expect(held.state).toBe('RUNNING');
+      // What the silence sweep and FenceService.abandon write. The runner's own fence would need a sync that
+      // mentions the job, which an exited nax no longer guarantees (D153).
+      await world.prisma.$transaction([
+        world.prisma.fleetJob.update({ where: { id }, data: { state: 'CRASHED', leaseEpoch: { increment: 1 } } }),
+        world.prisma.fleetCommand.create({ data: { runnerId: aId, jobId: id, type: 'ABANDON', leaseEpoch: held.leaseEpoch, payload: { reason: 'stale_lease' } } }),
+      ]);
+      await waitFor(
+        async () => (await world.prisma.fleetCommand.count({ where: { jobId: id, type: 'ABANDON', deliveredAt: { not: null } } })) > 0,
+        { timeoutMs: 15_000, message: 'ABANDON was not delivered' },
+      );
+      // abandon() waits for the repo mutex the push holds, so the ack comes only after the push gives up. The failed
+      // attempt's 2 s back-off is where the push sees the halt.
+      hold.fail();
+      await waitFor(
+        async () => (await world.prisma.fleetCommand.count({ where: { jobId: id, type: 'ABANDON', ackResult: 'ok' } })) > 0,
+        { timeoutMs: 30_000, message: 'ABANDON was not acked ok' },
+      );
+      expect(hold.attempts()).toBe(1);   // halted at the back-off, not three attempts exhausted
+      expect(await sh(world.origin.dir, 'branch', '--list', 'feat/fh')).toBe('');
+      expect(await world.job(id)).toMatchObject({ state: 'CRASHED', wipPush: null });
+    } finally {
+      hold.clear();
+    }
   });
 });
