@@ -52,6 +52,11 @@ describe('Fleet locale parity (en and zh)', () => {
     expect(String(at(zh, key) ?? '').trim()).not.toBe('')
   })
 
+  test('nav has the project fleet jobs link (slice 4c)', () => {
+    expect(at(en, 'nav.fleetJobs')).toBe('Fleet jobs')
+    expect(at(zh, 'nav.fleetJobs')).toBeTruthy()
+  })
+
   test('no fleet message uses the vue-i18n plural or linked-message syntax by accident', () => {
     for (const leaf of leafPaths(at(en, 'fleet'))) {
       const value = String(at(en, `fleet.${leaf}`))

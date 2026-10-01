@@ -72,7 +72,8 @@
     "slos": "SLO 指标",
     "users": "用户",
     "fleetRunners": "执行机",
-    "fleetRepos": "仓库"
+    "fleetRepos": "仓库",
+    "fleetJobs": "Fleet 任务"
   },
   "admin": {
     "users": {
@@ -817,6 +818,141 @@
         "name": "仓库名称",
         "submit": "添加仓库",
         "submitting": "正在检查访问权限…"
+      }
+    },
+    "jobs": {
+      "title": "Fleet 任务",
+      "subtitle": "派发到 fleet 执行机的 nax run 与 nax plan",
+      "dispatch": "派发",
+      "empty": "还没有 fleet 任务",
+      "total": "共 {total} 个任务",
+      "unknownMember": "未知成员",
+      "previous": "上一页",
+      "next": "下一页",
+      "filters": {
+        "state": "状态",
+        "repo": "仓库",
+        "runner": "执行机",
+        "requester": "发起人",
+        "allStates": "全部状态",
+        "allRepos": "全部仓库",
+        "allRunners": "全部执行机",
+        "allRequesters": "所有人"
+      },
+      "table": {
+        "feature": "功能",
+        "command": "命令",
+        "repo": "仓库",
+        "runner": "执行机",
+        "state": "状态",
+        "cost": "费用",
+        "requester": "发起人",
+        "queued": "排队时间"
+      },
+      "detail": {
+        "title": "任务",
+        "progress": "进度",
+        "progressValue": "{total} 个故事中 {passed} 个通过，{failed} 个失败",
+        "story": "当前故事",
+        "phase": "阶段",
+        "cost": "费用",
+        "costOf": "{spent} / {max}",
+        "runner": "执行机",
+        "unassigned": "未分配",
+        "requester": "发起人",
+        "profiles": "配置链",
+        "queuedAt": "排队时间",
+        "startedAt": "开始时间",
+        "finishedAt": "结束时间",
+        "heartbeat": "最近心跳",
+        "finishResult": "收尾结果",
+        "branch": "分支",
+        "pr": "拉取请求",
+        "planFrom": "规格路径",
+        "escalation": "升级原因",
+        "cancelRequested": "已于 {at} 请求取消"
+      },
+      "actions": {
+        "cancel": "取消任务",
+        "requeue": "重新排队",
+        "bundle": "下载产物包"
+      },
+      "confirmCancel": {
+        "title": "取消这个任务？",
+        "body": "执行机会停止 nax，任务以已取消结束。已推送的提交仍保留在分支上。"
+      },
+      "toast": {
+        "cancelRequested": "已请求取消",
+        "requeued": "任务已重新排队"
+      },
+      "requeuePlacement": "重新排队的调度结果",
+      "timeline": {
+        "title": "时间线",
+        "empty": "还没有事件",
+        "loadMore": "加载更多",
+        "transition": "{from} 变为 {to}",
+        "queued": "已排队",
+        "snapshot": "状态：{detail}",
+        "snapshotEmpty": "状态更新",
+        "lifecycle": "执行机 {level}：{message}",
+        "log": "日志：{text}",
+        "unknown": "未知事件 {type}"
+      }
+    },
+    "dispatch": {
+      "title": "派发任务",
+      "subtitle": "在一台 fleet 执行机上运行 nax",
+      "noPermission": "只有项目开发者和管理员可以派发任务。",
+      "noRepos": "这个项目还没有登记仓库。全局管理员在 Fleet 仓库页面登记。",
+      "repo": "仓库",
+      "repoPlaceholder": "选择仓库",
+      "moreRepos": "只列出前 100 个仓库。",
+      "command": "命令",
+      "commandRun": "nax run",
+      "commandPlan": "nax plan",
+      "ref": "Git 引用",
+      "refHint": "留空则使用仓库默认分支。",
+      "feature": "功能",
+      "planFrom": "规格路径",
+      "planFromHint": "nax plan 读取的规格文件，相对仓库根目录。",
+      "profiles": "配置链",
+      "profilesHint": "后面的配置覆盖前面的。可选择机器上的配置，或输入仓库内配置的名称。",
+      "profilePlaceholder": "配置名称",
+      "add": "添加",
+      "remove": "移除 {item}",
+      "maxCost": "费用上限（美元）",
+      "placement": "调度",
+      "placementAuto": "任意合适的执行机",
+      "placementLabels": "带这些标签的执行机",
+      "placementPin": "指定一台执行机",
+      "labelPlaceholder": "标签",
+      "pinPlaceholder": "选择执行机",
+      "runnerOffline": "离线",
+      "runnerDisabled": "已停用",
+      "moreRunners": "只列出前 100 台执行机。",
+      "submit": "派发",
+      "submitting": "派发中...",
+      "conflict": "这个仓库上已有一个进行中的任务在处理这个功能。",
+      "conflictLink": "打开进行中的任务",
+      "result": {
+        "assigned": "已分配给 {runner}",
+        "queued": "已排队：目前没有合适的执行机，有合适的执行机时开始。",
+        "misfitsTitle": "各执行机不合适的原因",
+        "openJob": "打开任务"
+      },
+      "validation": {
+        "repoRequired": "请选择仓库",
+        "ref": "Git 引用最多 255 个字符",
+        "feature": "只能使用字母、数字、点、短横线或下划线，以字母或数字开头，最多 128 个字符",
+        "planFrom": "规格路径最多 512 个字符",
+        "planFromRequired": "nax plan 需要规格路径",
+        "profilesMax": "最多 8 个配置",
+        "profileName": "配置名称只能使用字母、数字、点、短横线或下划线，且不能以 koda-job- 开头",
+        "profileDuplicate": "每个配置只能出现一次",
+        "maxCost": "请输入大于 0、不超过 10000 且最多 4 位小数的金额",
+        "labelsMax": "最多 16 个标签",
+        "label": "标签只能使用小写字母、数字、点、短横线或下划线",
+        "labelsOrPin": "请选择标签或执行机，不能同时选择"
       }
     }
   }

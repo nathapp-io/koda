@@ -72,7 +72,8 @@
     "slos": "SLOs",
     "users": "Users",
     "fleetRunners": "Runners",
-    "fleetRepos": "Repos"
+    "fleetRepos": "Repos",
+    "fleetJobs": "Fleet jobs"
   },
   "admin": {
     "users": {
@@ -817,6 +818,141 @@
         "name": "Repository name",
         "submit": "Add repo",
         "submitting": "Checking access…"
+      }
+    },
+    "jobs": {
+      "title": "Fleet jobs",
+      "subtitle": "nax runs and plans dispatched to fleet runners",
+      "dispatch": "Dispatch",
+      "empty": "No fleet jobs yet",
+      "total": "{total} jobs",
+      "unknownMember": "Unknown member",
+      "previous": "Previous",
+      "next": "Next",
+      "filters": {
+        "state": "State",
+        "repo": "Repo",
+        "runner": "Runner",
+        "requester": "Requested by",
+        "allStates": "All states",
+        "allRepos": "All repos",
+        "allRunners": "All runners",
+        "allRequesters": "Everyone"
+      },
+      "table": {
+        "feature": "Feature",
+        "command": "Command",
+        "repo": "Repo",
+        "runner": "Runner",
+        "state": "State",
+        "cost": "Cost",
+        "requester": "Requested by",
+        "queued": "Queued"
+      },
+      "detail": {
+        "title": "Job",
+        "progress": "Progress",
+        "progressValue": "{passed} of {total} stories passed, {failed} failed",
+        "story": "Current story",
+        "phase": "Phase",
+        "cost": "Cost",
+        "costOf": "{spent} of {max}",
+        "runner": "Runner",
+        "unassigned": "Not assigned",
+        "requester": "Requested by",
+        "profiles": "Profile chain",
+        "queuedAt": "Queued",
+        "startedAt": "Started",
+        "finishedAt": "Finished",
+        "heartbeat": "Last heartbeat",
+        "finishResult": "Finish result",
+        "branch": "Branch",
+        "pr": "Pull request",
+        "planFrom": "Spec path",
+        "escalation": "Escalation reason",
+        "cancelRequested": "Cancel requested at {at}"
+      },
+      "actions": {
+        "cancel": "Cancel job",
+        "requeue": "Requeue",
+        "bundle": "Download bundle"
+      },
+      "confirmCancel": {
+        "title": "Cancel this job?",
+        "body": "The runner stops nax and the job ends as cancelled. Work already pushed stays on its branch."
+      },
+      "toast": {
+        "cancelRequested": "Cancel requested",
+        "requeued": "Job requeued"
+      },
+      "requeuePlacement": "Requeue placement",
+      "timeline": {
+        "title": "Timeline",
+        "empty": "No events yet",
+        "loadMore": "Load more",
+        "transition": "{from} to {to}",
+        "queued": "Queued",
+        "snapshot": "Status: {detail}",
+        "snapshotEmpty": "Status update",
+        "lifecycle": "Runner {level}: {message}",
+        "log": "Log: {text}",
+        "unknown": "Unknown event {type}"
+      }
+    },
+    "dispatch": {
+      "title": "Dispatch a job",
+      "subtitle": "Run nax on one of the fleet runners",
+      "noPermission": "Only project developers and admins can dispatch jobs.",
+      "noRepos": "No repos are registered for this project yet. A global admin registers them on the Fleet repos page.",
+      "repo": "Repo",
+      "repoPlaceholder": "Select a repo",
+      "moreRepos": "Only the first 100 repos are listed.",
+      "command": "Command",
+      "commandRun": "nax run",
+      "commandPlan": "nax plan",
+      "ref": "Git ref",
+      "refHint": "Leave empty for the repo's default branch.",
+      "feature": "Feature",
+      "planFrom": "Spec path",
+      "planFromHint": "Repo-relative path of the spec nax plan reads.",
+      "profiles": "Profile chain",
+      "profilesHint": "Later profiles override earlier ones. Pick a machine profile or type the name of a profile in the repo.",
+      "profilePlaceholder": "Profile name",
+      "add": "Add",
+      "remove": "Remove {item}",
+      "maxCost": "Max cost (USD)",
+      "placement": "Placement",
+      "placementAuto": "Any runner that fits",
+      "placementLabels": "Runners with these labels",
+      "placementPin": "One specific runner",
+      "labelPlaceholder": "Label",
+      "pinPlaceholder": "Select a runner",
+      "runnerOffline": "offline",
+      "runnerDisabled": "disabled",
+      "moreRunners": "Only the first 100 runners are listed.",
+      "submit": "Dispatch",
+      "submitting": "Dispatching...",
+      "conflict": "An active job already runs this feature on this repo.",
+      "conflictLink": "Open the active job",
+      "result": {
+        "assigned": "Assigned to {runner}",
+        "queued": "Queued: no runner fits right now. It starts when one does.",
+        "misfitsTitle": "Why each runner does not fit",
+        "openJob": "Open job"
+      },
+      "validation": {
+        "repoRequired": "Select a repo",
+        "ref": "The git ref is at most 255 characters",
+        "feature": "Use letters, digits, dot, dash or underscore; start with a letter or digit; at most 128 characters",
+        "planFrom": "The spec path is at most 512 characters",
+        "planFromRequired": "nax plan needs a spec path",
+        "profilesMax": "At most 8 profiles",
+        "profileName": "Profile names use letters, digits, dot, dash or underscore, and cannot start with koda-job-",
+        "profileDuplicate": "Each profile can appear once",
+        "maxCost": "Enter an amount above 0 and at most 10000, with at most 4 decimals",
+        "labelsMax": "At most 16 labels",
+        "label": "Labels use lowercase letters, digits, dot, dash or underscore",
+        "labelsOrPin": "Choose labels or a runner, not both"
       }
     }
   }

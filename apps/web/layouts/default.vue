@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users, Server, FolderGit2 } from 'lucide-vue-next'
+import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users, Server, FolderGit2, Rocket } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const auth = useAuth()
@@ -34,6 +34,14 @@ const breadcrumbItems = computed(() => {
   }
   if (path === `/${project}/kb`) {
     return [{ label: 'Koda', to: '/' }, projectBase, { label: t('nav.kb') }]
+  }
+
+  if (path === `/${project}/fleet`) {
+    return [{ label: 'Koda', to: '/' }, projectBase, { label: t('nav.fleetJobs') }]
+  }
+  if (path.startsWith(`/${project}/fleet/`)) {
+    const leaf = path === `/${project}/fleet/dispatch` ? t('fleet.jobs.dispatch') : t('fleet.jobs.detail.title')
+    return [{ label: 'Koda', to: '/' }, projectBase, { label: t('nav.fleetJobs'), to: `/${project}/fleet` }, { label: leaf }]
   }
 
   const ticketRef = (route.params.ref as string | undefined)
@@ -142,6 +150,14 @@ const backTo = computed(() => {
           >
             <Code2 class="h-4 w-4 shrink-0" />
             {{ t('nav.codeIntel') }}
+          </NuxtLink>
+          <NuxtLink
+            :to="`/${projectSlug}/fleet`"
+            :class="navLinkClass"
+            :active-class="activeClass"
+          >
+            <Rocket class="h-4 w-4 shrink-0" />
+            {{ t('nav.fleetJobs') }}
           </NuxtLink>
           <NuxtLink
             :to="`/${projectSlug}/settings`"
