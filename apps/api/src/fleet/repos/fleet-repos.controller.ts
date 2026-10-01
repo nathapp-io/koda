@@ -8,6 +8,7 @@ import { FleetReposService } from './fleet-repos.service';
 import { CreateFleetRepoDto } from './dto/create-fleet-repo.dto';
 import { FleetRepoDto } from './dto/fleet-repo.dto';
 import { ListFleetReposQuery } from './dto/list-fleet-repos.query';
+import { RepoCheckResultDto } from './dto/repo-check-result.dto';
 
 @ApiTags('fleet')
 @ApiBearerAuth()
@@ -33,6 +34,16 @@ export class FleetReposController {
   @ApiResponse({ status: 422, description: 'Forge check failed: { reason }' })
   async create(@Body() dto: CreateFleetRepoDto, @Principal() principal: KodaPrincipal) {
     return JsonResponse.Ok(await this.repos.create(principal.id, dto));
+  }
+
+  @Post(':id/check')
+  @HttpCode(200)
+  @RequiredPermission('ADMIN')
+  @ApiOperation({ summary: 'Re-run the forge check for a registered repo (global admin)' })
+  @ApiResponse({ status: 200, type: RepoCheckResultDto })
+  @ApiResponse({ status: 404, description: 'No such repo' })
+  async check(@Param('id') id: string) {
+    return JsonResponse.Ok(await this.repos.check(id));
   }
 
   @Delete(':id')

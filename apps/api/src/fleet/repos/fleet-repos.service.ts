@@ -9,9 +9,11 @@ import { FleetActivityService } from '../activity/fleet-activity.service';
 import { GitHubAppClient } from '../git-broker/github-app-client';
 import { GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
 import { GitLabTokenSource } from '../git-broker/gitlab-token.source';
+import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { FLEET_REPO_REPOSITORY, IFleetRepoRepository } from './domain/fleet-repo.domain';
 import { CreateFleetRepoDto } from './dto/create-fleet-repo.dto';
 import { FleetRepoDto } from './dto/fleet-repo.dto';
+import { RepoCheckResultDto } from './dto/repo-check-result.dto';
 
 @Injectable()
 export class FleetReposService {
@@ -75,5 +77,24 @@ export class FleetReposService {
         payload: { provider: row.provider, owner: row.owner, name: row.name },
       });
     });
+  }
+
+  /**
+   * Re-runs the registration forge check (overview D119): can koda still broker git for this repo?
+   * A forge verdict is returned as data; anything else is a real error and propagates.
+   */
+  async check(id: string, now = new Date()): Promise<RepoCheckResultDto> {
+    const row = await this.repo.findById(id);
+    if (!row) throw new NotFoundAppException({}, 'fleet.repos');
+    const result = (reachable: boolean, reason: RepoCheckResultDto['reason']) =>
+      Object.assign(new RepoCheckResultDto(), { repoId: id, reachable, reason, checkedAt: now.toISOString() });
+    try {
+      if (row.provider === 'github') await this.github.verifyRepo(row.owner, row.name);
+      else await this.verifyGitLab(row.projectId, row.owner, row.name);
+      return result(true, null);
+    } catch (error) {
+      if (error instanceof RepoCheckException) return result(false, error.reason);
+      throw error;
+    }
   }
 }

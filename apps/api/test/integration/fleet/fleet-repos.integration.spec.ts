@@ -106,6 +106,26 @@ describeIntegration('fleet repos (PG)', () => {
     await request(server).post('/api/fleet/repos').set(auth(member)).send({ projectSlug: 'web', provider: 'github', owner: 'acme', name: 'app' }).expect(403);
   });
 
+  it('re-checks a registered repo on demand and reports a forge refusal as data (D119)', async () => {
+    const all = data<{ records: Array<{ id: string; name: string }> }>(await request(server).get('/api/fleet/repos').set(auth(admin)).expect(200));
+    const app1 = all.records.find((r) => r.name === 'app');
+    const ok = data<{ repoId: string; reachable: boolean; reason: string | null }>(
+      await request(server).post(`/api/fleet/repos/${app1?.id}/check`).set(auth(admin)).expect(200),
+    );
+    expect(ok).toEqual(expect.objectContaining({ repoId: app1?.id, reachable: true, reason: null }));
+
+    forge.routes.set('GET /repos/acme/app/installation', () => ({ status: 404, body: { message: 'provider-internal-detail' } }));
+    const res = await request(server).post(`/api/fleet/repos/${app1?.id}/check`).set(auth(admin)).expect(200);
+    expect(data<{ reachable: boolean; reason: string }>(res)).toEqual(expect.objectContaining({ reachable: false, reason: 'app_not_installed' }));
+    expect(JSON.stringify(res.body)).not.toContain('provider-internal-detail');
+    forge.routes.set('GET /repos/acme/app/installation', () => ({ status: 200, body: { id: 77 } }));
+  });
+
+  it('keeps the repo check to admins and 404s an unknown repo', async () => {
+    await request(server).post('/api/fleet/repos/nope/check').set(auth(admin)).expect(404);
+    await request(server).post('/api/fleet/repos/nope/check').set(auth(member)).expect(403);
+  });
+
   it('deletes a repo and records the activity', async () => {
     const all = data<{ records: Array<{ id: string; name: string }> }>(await request(server).get('/api/fleet/repos').set(auth(admin)).expect(200));
     const target = all.records.find((r) => r.name === 'app');
