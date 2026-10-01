@@ -69,6 +69,16 @@ describe('koda fleet dispatch', () => {
     expect(logSpy.mock.calls.flat().join('\n')).toContain('offline');
   });
 
+  it('still prints the job and exits 0 when the runner-name lookup fails after dispatch', async () => {
+    (fleetJobsControllerDispatch as jest.Mock).mockResolvedValue({ ret: 0, data: { job: job(), placement: { assigned: true, runnerId: 'r1', misfits: [] } } });
+    (projectFleetRunnersControllerList as jest.Mock).mockRejectedValue(new Error('network down'));
+    await run('--repo', 'acme/app', '--feature', 'login', '--max-cost', '5');
+    const out = logSpy.mock.calls.flat().join('\n');
+    expect(out).toContain('Job j1 ASSIGNED');
+    expect(out).toContain('Assigned to r1');
+    expect(exitSpy).toHaveBeenLastCalledWith(0);
+  });
+
   it('refuses --label with --pin, an unknown repo and an unknown runner before dispatching (exit 3)', async () => {
     await run('--repo', 'acme/app', '--feature', 'f', '--max-cost', '1', '--label', 'gpu', '--pin', 'box-1');
     expect(exitSpy).toHaveBeenLastCalledWith(3);

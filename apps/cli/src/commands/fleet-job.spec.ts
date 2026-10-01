@@ -103,6 +103,16 @@ describe('koda fleet job', () => {
     expect(logSpy.mock.calls.flat().join('\n')).toContain('Queued: no runner fits now');
   });
 
+  it('requeue still prints the job and exits 0 when the runner-name lookup fails', async () => {
+    (fleetJobsControllerRequeue as jest.Mock).mockResolvedValue({ ret: 0, data: { job: job({ state: 'QUEUED' }), placement: { assigned: true, runnerId: 'r1', misfits: [] } } });
+    (projectFleetRunnersControllerList as jest.Mock).mockRejectedValue(new Error('network down'));
+    await run('requeue', 'j1');
+    const out = logSpy.mock.calls.flat().join('\n');
+    expect(out).toContain('Job j1 QUEUED');
+    expect(out).toContain('Assigned to r1');
+    expect(exitSpy).toHaveBeenLastCalledWith(0);
+  });
+
   it('bundle writes the bytes to koda-job-<id>.tar.gz without overwriting', async () => {
     const bytes = new Uint8Array([0x1f, 0x8b, 0x08, 0x00]).buffer;
     (jobBundleControllerDownload as jest.Mock).mockResolvedValue(bytes);

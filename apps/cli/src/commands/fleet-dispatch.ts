@@ -11,7 +11,7 @@ import { apiErrorCode } from '../utils/api-error-code';
 import { withContext } from '../utils/context';
 import { error } from '../utils/output';
 import { parseUsd } from '../utils/parse-usd';
-import { type FleetPage, handleFleetError, printPlacement, resolveRepo, resolveRunner, runnerNames } from './fleet-shared';
+import { type FleetPage, handleFleetError, printPlacement, resolveRepo, resolveRunner, runnerNamesOrEmpty } from './fleet-shared';
 
 const ACTIVE = new Set(['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING']);
 const collect = (value: string, previous: string[]): string[] => [...previous, value];
@@ -91,7 +91,7 @@ export function registerFleetDispatch(fleet: Command): void {
         if (!body) return;
         const result = unwrap<DispatchResultDto>(await fleetJobsControllerDispatch({ path: { slug }, body }));
         if (options.json) console.log(JSON.stringify(result, null, 2));
-        else printPlacement(result, result.placement.assigned ? await runnerNames(slug) : new Map());
+        else printPlacement(result, result.placement.assigned ? await runnerNamesOrEmpty(slug) : new Map());
         process.exit(0);
       } catch (err: unknown) {
         if (body) await explainConflict(err, slug, body);
