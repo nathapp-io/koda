@@ -9,13 +9,13 @@
         <FormField v-slot="{ componentField }" name="labels">
           <FormItem>
             <FormLabel>{{ t('fleet.runners.enrollment.labels') }}</FormLabel>
-            <FormControl><Input v-bind="componentField" placeholder="linux, gpu" /></FormControl>
+            <FormControl><Input v-bind="componentField" :placeholder="t('fleet.runners.enrollment.labelsPlaceholder')" /></FormControl>
             <p class="text-xs text-muted-foreground">{{ t('fleet.runners.enrollment.labelsHint') }}</p>
             <FormMessage />
           </FormItem>
         </FormField>
         <div class="flex justify-end gap-2">
-          <Button type="button" variant="outline" @click="onOpenChange(false)">{{ t('common.cancel') }}</Button>
+          <Button type="button" variant="outline" :disabled="isSubmitting" @click="onOpenChange(false)">{{ t('common.cancel') }}</Button>
           <Button type="submit" :disabled="isSubmitting">
             {{ isSubmitting ? t('fleet.runners.enrollment.submitting') : t('fleet.runners.enrollment.submit') }}
           </Button>
@@ -94,7 +94,12 @@ const onSubmit = handleSubmit(async (values) => {
   const started = generation
   try {
     const result = await createEnrollment(parsed.labels)
-    if (started !== generation) return
+    // Unreachable while closing is blocked during the request (see guardClose), but a token that
+    // arrives late must never be dropped silently: the server has already minted it, shown once.
+    if (started !== generation) {
+      toast.error(t('fleet.runners.enrollment.tokenLost'))
+      return
+    }
     created.value = result
   } catch (err: unknown) {
     toast.error(extractApiError(err))
@@ -115,9 +120,12 @@ function selectAll(event: FocusEvent): void {
   (event.target as HTMLInputElement | null)?.select()
 }
 
-/** While a token is showing, only Done closes the dialog: Esc or an outside click would lose it. */
+/**
+ * Only Done closes the dialog in two states, because both would lose a token the API already minted
+ * and shows once: while one is showing, and while the create request is in flight.
+ */
 function guardClose(event: Event): void {
-  if (created.value) event.preventDefault()
+  if (created.value || isSubmitting.value) event.preventDefault()
 }
 
 /** Closing forgets the token: it is shown once (S1 spec §11). */

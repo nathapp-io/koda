@@ -62,6 +62,7 @@ export function useFleetRepos() {
     }
   }
 
+  /** Checks every loaded repo; only the admin's explicit "Check all" spends that many forge calls. */
   async function checkAll(): Promise<void> {
     await mapLimit(repos.value.map((r) => r.id), CHECK_CONCURRENCY, check)
   }

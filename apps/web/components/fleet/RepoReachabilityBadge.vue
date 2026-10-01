@@ -1,5 +1,7 @@
 <template>
-  <Badge v-if="!state || state.status === 'checking'" variant="outline">{{ t('fleet.repos.reach.checking') }}</Badge>
+  <Badge v-if="state?.status === 'checking'" variant="outline">{{ t('fleet.repos.reach.checking') }}</Badge>
+  <!-- Unchecked is not checking: a forge check only runs when the admin asks for one. -->
+  <Badge v-else-if="!state" variant="outline">{{ t('fleet.repos.reach.unchecked') }}</Badge>
   <Badge v-else-if="state.status === 'error'" variant="outline" :title="state.message">{{ t('fleet.repos.reach.error') }}</Badge>
   <Badge v-else-if="state.result.reachable" variant="secondary">{{ t('fleet.repos.reach.ok') }}</Badge>
   <Badge v-else variant="destructive" :title="reasonText(state.result.reason)">

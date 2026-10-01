@@ -55,7 +55,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
@@ -91,6 +91,12 @@ const formSchema = toTypedSchema(z.object({
 const { handleSubmit, isSubmitting, resetForm } = useForm({
   validationSchema: formSchema,
   initialValues: { projectSlug: '', provider: 'github' as const, owner: '', name: '' },
+})
+
+// Closing discards the draft, like EnrollmentTokenDialog: an admin who cancels must not find their
+// half-typed owner and the project they picked still filled in next time.
+watch(() => props.open, (open) => {
+  if (!open) resetForm()
 })
 
 // The API runs the forge check before saving. A 409 (already registered) or a 422 arrives as the

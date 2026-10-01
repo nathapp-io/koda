@@ -763,10 +763,12 @@
       "enrollment": {
         "title": "新建注册令牌",
         "labels": "新执行机的标签",
+        "labelsPlaceholder": "linux, gpu",
         "labelsHint": "可选。用逗号或空格分隔。",
         "submit": "创建令牌",
         "submitting": "创建中…",
         "tokenOnce": "请立即复制令牌。它只显示一次，将于 {expiresAt} 过期。",
+        "tokenLost": "令牌已创建但无法显示。请重新创建一个并使用它；此注册已无法完成。",
         "token": "令牌",
         "command": "注册命令",
         "commandHint": "请以执行机的服务用户身份运行。如果执行机通过其他地址访问 koda，请替换服务器 URL。除非服务器是本机回环地址或添加 --insecure-http，执行机要求使用 https。"
@@ -786,11 +788,13 @@
       },
       "reach": {
         "checking": "检查中…",
+        "unchecked": "未检查",
         "ok": "可达",
         "failed": "不可达",
         "error": "检查失败"
       },
       "actions": {
+        "checkAll": "检查全部",
         "add": "添加仓库",
         "recheck": "重新检查",
         "delete": "删除"

@@ -36,11 +36,29 @@ async function loadRows(): Promise<boolean> {
   }
 }
 
+/**
+ * A reachability check is a live call to the forge, so mounting this page must not fan out one
+ * request per row: with 100 rows that spends the installation's whole hourly App budget, and again
+ * on every visit. Rows therefore start unchecked and the admin asks for checks explicitly.
+ */
+const checkingAll = ref(false)
+
+async function onCheckAll(): Promise<void> {
+  checkingAll.value = true
+  try {
+    await checkAll()
+  } finally {
+    checkingAll.value = false
+  }
+}
+
+/**
+ * The rows and the project labels only. `checkAll` is deliberately not called here; see onCheckAll.
+ */
 async function reload(): Promise<void> {
   if (!(await loadRows())) return
   // The project list only labels rows; a failure there leaves the ids showing.
   await loadProjects().catch((err: unknown) => toast.error(extractApiError(err)))
-  await checkAll()
 }
 
 /** A new repo: reload the rows (the dialog has its own composable instance) and check only the new one. */
@@ -65,6 +83,9 @@ onMounted(() => reload())
   <div class="space-y-6">
     <PageHeader :title="t('fleet.repos.title')" :subtitle="t('fleet.repos.subtitle')">
       <template #actions>
+        <Button variant="outline" :disabled="adminOnly || checkingAll" @click="onCheckAll">
+          {{ checkingAll ? t('fleet.repos.reach.checking') : t('fleet.repos.actions.checkAll') }}
+        </Button>
         <Button :disabled="adminOnly" @click="addOpen = true">
           <Plus class="mr-2 h-4 w-4" />{{ t('fleet.repos.actions.add') }}
         </Button>

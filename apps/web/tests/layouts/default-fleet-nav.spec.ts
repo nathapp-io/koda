@@ -19,11 +19,25 @@ function extractTemplate(sfcSource: string): string {
 const icon = { render() { return VueFull.h('span', { class: 'icon' }) } }
 const stub = (tag: string) => ({ name: `Stub${tag}`, render(this: { $slots: { default?: () => unknown } }) { return VueFull.h('div', {}, this.$slots.default?.()) } })
 
+/**
+ * Every icon the layout imports from lucide-vue-next, taken from the layout source itself.
+ *
+ * Hardcoding the list meant a new nav entry could ship without its icon and this spec would still
+ * pass (Vue renders an unresolved component), which is how the first copy of this harness drifted.
+ */
+function layoutIconNames(source: string): string[] {
+  const m = source.match(/import\s*\{([^}]*)\}\s*from\s*'lucide-vue-next'/)
+  if (!m) throw new Error('no lucide-vue-next import in the layout')
+  return (m[1] ?? '').split(',').map((name) => name.trim()).filter((name) => name !== '')
+}
+
 describe('Fleet admin nav links', () => {
+  let layoutSource: string
   let layoutTemplate: string
 
   beforeAll(() => {
-    layoutTemplate = extractTemplate(readFileSync(layoutPath, 'utf-8'))
+    layoutSource = readFileSync(layoutPath, 'utf-8')
+    layoutTemplate = extractTemplate(layoutSource)
   })
 
   function render(isGlobalAdmin: boolean): Promise<string> {
@@ -51,8 +65,7 @@ describe('Fleet admin nav links', () => {
         },
         Button: stub('Button'), BackButton: stub('BackButton'), AppBreadcrumb: stub('AppBreadcrumb'),
         LanguageSwitcher: stub('LanguageSwitcher'), ThemeSwitcher: stub('ThemeSwitcher'),
-        LayoutDashboard: icon, Kanban: icon, Bot: icon, Tag: icon, BookOpen: icon, Clock: icon, Brain: icon,
-        Code2: icon, Activity: icon, Users: icon, Server: icon, FolderGit2: icon,
+        ...Object.fromEntries(layoutIconNames(layoutSource).map((name) => [name, icon])),
       },
       directives: { show: {} },
     })
@@ -68,5 +81,11 @@ describe('Fleet admin nav links', () => {
   test('a non-admin does not see them', async () => {
     const html = await render(false)
     expect(html).not.toContain('/admin/fleet/')
+  })
+
+  // Guards the drift that caused the harness duplication: an unresolved component renders as a bare
+  // tag and this spec would still pass, so the fleet links' icons must actually resolve.
+  test('every icon the layout renders is registered, including the two fleet ones', async () => {
+    expect(layoutIconNames(layoutSource)).toEqual(expect.arrayContaining(['Server', 'FolderGit2']))
   })
 })

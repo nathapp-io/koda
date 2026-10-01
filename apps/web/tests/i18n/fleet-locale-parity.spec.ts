@@ -46,9 +46,10 @@ describe('Fleet locale parity (en and zh)', () => {
     expect(Object.keys(at(en, path) as Tree).sort()).toEqual([...values].sort())
   })
 
-  test('nav has the two admin fleet links', () => {
-    expect(at(en, 'nav.fleetRunners')).toBe('Runners')
-    expect(at(en, 'nav.fleetRepos')).toBe('Repos')
+  // Parity, not copy: rewording an English label must not fail a green test.
+  test.each(['nav.fleetRunners', 'nav.fleetRepos'])('%s is translated in both locales', (key) => {
+    expect(String(at(en, key) ?? '').trim()).not.toBe('')
+    expect(String(at(zh, key) ?? '').trim()).not.toBe('')
   })
 
   test('no fleet message uses the vue-i18n plural or linked-message syntax by accident', () => {

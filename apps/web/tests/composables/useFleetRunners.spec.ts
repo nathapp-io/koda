@@ -76,6 +76,30 @@ describe('useFleetRunners', () => {
     expect(fleet.pending.value).toBe(false)
   })
 
+  // The epoch is module-scoped, so a mutation issued from a DIFFERENT instance (the edit dialog's
+  // own useFleetRunners()) must still invalidate this instance's in-flight poll.
+  test('a mutation from another instance drops a load that started before it', async () => {
+    let release: (value: unknown) => void = () => undefined
+    const get = jest.fn()
+      .mockImplementationOnce(async () => pageOf([r('a')]))
+      .mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
+    const patch = jest.fn(async () => r('a', { enabled: false }))
+    withApi({ get, patch })
+    const { useFleetRunners } = await import(composablePath)
+    const page = useFleetRunners()
+    const dialog = useFleetRunners()
+    await page.load()
+
+    const poll = page.load()
+    await dialog.update('a', { enabled: false })
+    // The in-flight poll carries pre-mutation rows; if the shared epoch did not change, this would
+    // overwrite the page's list with them.
+    release(pageOf([r('a', { capacity: 99 })]))
+    await poll
+
+    expect(page.runners.value[0].capacity).toBe(1)
+  })
+
   test('update encodes the id as one path segment', async () => {
     const patch = jest.fn(async () => r('a/b'))
     withApi({ get: jest.fn(), patch })

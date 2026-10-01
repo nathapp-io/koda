@@ -763,10 +763,12 @@
       "enrollment": {
         "title": "New enrollment token",
         "labels": "Labels for the new runner",
+        "labelsPlaceholder": "linux, gpu",
         "labelsHint": "Optional. Comma or space separated.",
         "submit": "Create token",
         "submitting": "Creating…",
         "tokenOnce": "Copy the token now. It is shown once and expires {expiresAt}.",
+        "tokenLost": "The token was created but could not be shown. Create another one and use it; this enrollment can no longer be completed.",
         "token": "Token",
         "command": "Enroll command",
         "commandHint": "Run it as the runner's service user. Replace the server URL if the runner reaches koda at another address. The runner requires https unless the server is loopback or you add --insecure-http."
@@ -786,11 +788,13 @@
       },
       "reach": {
         "checking": "Checking…",
+        "unchecked": "Not checked",
         "ok": "Reachable",
         "failed": "Unreachable",
         "error": "Check failed"
       },
       "actions": {
+        "checkAll": "Check all",
         "add": "Add repo",
         "recheck": "Check again",
         "delete": "Delete"
