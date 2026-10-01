@@ -136,7 +136,15 @@ async function run(): Promise<void> {
   writeFileSync(join(process.cwd(), `koda-fake-${feature}.txt`), `${runId}\n`);
   git('add', '-A');
   git('commit', '-q', '-m', `feat(${feature}): fake story work`);
-  runStatus = scenario === 'failed' ? 'failed' : 'completed';
+  runStatus = scenario === 'failed' ? 'failed' : scenario === 'cost-limit' ? 'cost-limit' : 'completed';
+  // S1b 1a: what nax leaves after an unfinished run: an updated PRD and story code it never committed.
+  if (process.env['FAKE_NAX_DIRTY_PRD'] === '1') {
+    const prdPath = join(process.cwd(), '.nax', 'features', feature, 'prd.json');
+    const current = JSON.parse(readFileSync(prdPath, 'utf8')) as { userStories?: Array<Record<string, unknown>> };
+    const stories = (current.userStories ?? []).map((s) => ({ ...s, status: 'passed', attempts: 1 }));
+    writeFileSync(prdPath, `${JSON.stringify({ ...current, userStories: stories }, null, 2)}\n`);
+    writeFileSync(join(process.cwd(), 'koda-fake-uncommitted.txt'), 'half-done\n');
+  }
   if (scenario === 'escalated' || scenario === 'completed') {
     let branch = '';
     try {

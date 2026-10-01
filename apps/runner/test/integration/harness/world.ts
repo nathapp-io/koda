@@ -30,7 +30,7 @@ export interface JobView {
   id: string; state: string; stateReason: string | null; leaseEpoch: number; runnerId: string | null;
   resultBranch: string | null; resultSha: string | null; resultPrUrl: string | null; finishResult: string | null;
   naxRunId: string | null; naxLogRunId: string | null; naxCostRunId: string | null; costSpentUsd: string;
-  cancelRequestedAt: string | null; currentStoryId: string | null;
+  cancelRequestedAt: string | null; currentStoryId: string | null; wipPush: string | null;
 }
 export interface EventView { seq: number; leaseEpoch: number; runnerSeq: number | null; type: string; payload: Record<string, unknown> }
 
@@ -70,7 +70,7 @@ export interface World {
   readonly gitRequests: readonly GitHttpRequest[];
   readonly fakeGh: { binDir: string; logPath: string };
   readonly forgeCloneUrl: string;
-  dispatch(input: { feature: string; command?: 'RUN' | 'PLAN'; ref?: string; planFrom?: string; profiles?: string[] }): Promise<string>;
+  dispatch(input: { feature: string; command?: 'RUN' | 'PLAN'; ref?: string; planFrom?: string; profiles?: string[]; pinnedRunnerId?: string }): Promise<string>;
   job(id: string): Promise<JobView>;
   events(id: string): Promise<EventView[]>;
   waitForJob(id: string, predicate: (job: JobView) => boolean, timeoutMs?: number): Promise<JobView>;
@@ -164,7 +164,7 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
       id: r.id, state: r.state, stateReason: r.stateReason, leaseEpoch: r.leaseEpoch, runnerId: r.runnerId, resultBranch: r.resultBranch,
       resultSha: r.resultSha, resultPrUrl: r.resultPrUrl, finishResult: r.finishResult, naxRunId: r.naxRunId, naxLogRunId: r.naxLogRunId,
       naxCostRunId: r.naxCostRunId, costSpentUsd: r.costSpentUsd.toString(), cancelRequestedAt: r.cancelRequestedAt?.toISOString() ?? null,
-      currentStoryId: r.currentStoryId,
+      currentStoryId: r.currentStoryId, wipPush: r.wipPush,
     };
   };
 
@@ -173,7 +173,7 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
     async dispatch(input) {
       const res = await http('POST', '/projects/web/fleet/jobs', {
         token: admin,
-        body: { repoId, command: input.command ?? 'RUN', feature: input.feature, ...(input.ref ? { ref: input.ref } : {}), ...(input.planFrom ? { planFrom: input.planFrom } : {}), ...(input.profiles ? { profiles: input.profiles } : {}), maxCostUsd: 5 },
+        body: { repoId, command: input.command ?? 'RUN', feature: input.feature, ...(input.ref ? { ref: input.ref } : {}), ...(input.planFrom ? { planFrom: input.planFrom } : {}), ...(input.profiles ? { profiles: input.profiles } : {}), ...(input.pinnedRunnerId ? { pinnedRunnerId: input.pinnedRunnerId } : {}), maxCostUsd: 5 },
       });
       if (res.status !== 201) throw new Error(`dispatch failed: ${JSON.stringify(res.body)}`);
       return res.body.data.job.id as string;
