@@ -1,6 +1,7 @@
 import { describe, expect, test } from '@jest/globals'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
+import { loadFleetJobDetail } from '~/lib/fleet-job-detail'
 
 const webDir = path.join(__dirname, '../..')
 const read = (...parts: string[]): string => readFileSync(path.join(webDir, ...parts), 'utf-8')
@@ -15,6 +16,25 @@ const liveHandlers = (source: string): string => {
 }
 
 describe('job detail', () => {
+  test('a successful retry initializes events and display names after the first job request failed', async () => {
+    let jobAvailable = false
+    const initializeRelatedData = jest.fn()
+    const loadJob = jest.fn(async () => jobAvailable)
+
+    await loadFleetJobDetail(loadJob, initializeRelatedData)
+    expect(initializeRelatedData).not.toHaveBeenCalled()
+
+    jobAvailable = true
+    await loadFleetJobDetail(loadJob, initializeRelatedData)
+
+    expect(loadJob).toHaveBeenCalledTimes(2)
+    expect(initializeRelatedData).toHaveBeenCalledTimes(1)
+    expect(detail).toContain('onMounted(loadJobDetail)')
+    expect(detail).toContain('@retry="loadJobDetail()"')
+    expect(detail).toMatch(/function initializeRelatedData\(\): void[\s\S]*?loadEventsFrom\(1\)[\s\S]*?options\.load\(\)[\s\S]*?people\.load\(\)/)
+    expect(detail).toContain('await loadFleetJobDetail(loadJob, initializeRelatedData)')
+  })
+
   test('reacts only to events for this job and never flips pending from live handlers', () => {
     const handlers = liveHandlers(detail)
     expect(handlers).toContain('if (event.jobId === jobId) liveReload.trigger()')

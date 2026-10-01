@@ -10,6 +10,13 @@ function withApi(api: Record<string, jest.Mock>) {
   g.useApi = () => ({ $api: api })
 }
 
+function deferred<T>() {
+  let resolve = (_value: T): void => undefined
+  let reject = (_reason?: unknown): void => undefined
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
+}
+
 describe('buildJobQuery', () => {
   test('sends only set filters, a page size, and current past page 1', async () => {
     const { buildJobQuery } = await import(composablePath)
@@ -34,6 +41,69 @@ describe('useFleetJobs', () => {
     expect(jobs.jobs.value).toHaveLength(1)
     expect(jobs.total.value).toBe(21)
     expect(jobs.hasNext.value).toBe(true)
+  })
+
+  test('keeps the newest page and its metadata when requests resolve out of order', async () => {
+    const older = deferred<ReturnType<typeof page>>()
+    const newer = deferred<ReturnType<typeof page>>()
+    const get = jest.fn()
+      .mockReturnValueOnce(older.promise)
+      .mockReturnValueOnce(newer.promise)
+    withApi({ get })
+    const { useFleetJobs } = await import(composablePath)
+    const jobs = useFleetJobs('web')
+
+    const olderLoad = jobs.load({ state: 'RUNNING', page: 1 })
+    const newerLoad = jobs.load({ state: 'FAILED', page: 2 })
+    newer.resolve(page([job('new', 'FAILED')], { total: 42, current: 2, hasNext: true }))
+    await expect(newerLoad).resolves.toBe(true)
+    older.resolve(page([job('old', 'RUNNING')], { total: 1, current: 1, hasNext: false }))
+    await expect(olderLoad).resolves.toBe(false)
+
+    expect(jobs.jobs.value.map(({ id }) => id)).toEqual(['new'])
+    expect(jobs.total.value).toBe(42)
+    expect(jobs.page.value).toBe(2)
+    expect(jobs.hasNext.value).toBe(true)
+  })
+
+  test('does not propagate an obsolete request error after a newer request starts', async () => {
+    const older = deferred<ReturnType<typeof page>>()
+    const newer = deferred<ReturnType<typeof page>>()
+    const get = jest.fn()
+      .mockReturnValueOnce(older.promise)
+      .mockReturnValueOnce(newer.promise)
+    withApi({ get })
+    const { useFleetJobs } = await import(composablePath)
+    const jobs = useFleetJobs('web')
+
+    const olderLoad = jobs.load({ state: 'RUNNING' })
+    const newerLoad = jobs.load({ state: 'COMPLETED' })
+    newer.resolve(page([job('new', 'COMPLETED')], { total: 3, current: 1, hasNext: false }))
+    await expect(newerLoad).resolves.toBe(true)
+    older.reject(new Error('stale request failed'))
+
+    await expect(olderLoad).resolves.toBe(false)
+    expect(jobs.jobs.value.map(({ id }) => id)).toEqual(['new'])
+    expect(jobs.total.value).toBe(3)
+  })
+
+  test('a failed newest load stays authoritative when an older load succeeds afterward', async () => {
+    const older = deferred<ReturnType<typeof page>>()
+    const newer = deferred<ReturnType<typeof page>>()
+    const get = jest.fn()
+      .mockReturnValueOnce(older.promise)
+      .mockReturnValueOnce(newer.promise)
+    withApi({ get })
+    const { useFleetJobs } = await import(composablePath)
+    const jobs = useFleetJobs('web')
+
+    const olderLoad = jobs.load({ state: 'RUNNING' })
+    const newerLoad = jobs.load({ state: 'FAILED' })
+    newer.reject(new Error('newest request failed'))
+    await expect(newerLoad).rejects.toThrow('newest request failed')
+    older.resolve(page([job('old', 'RUNNING')]))
+
+    await expect(olderLoad).resolves.toBe(false)
   })
 
   test('get, events, cancel, requeue and dispatch hit their routes', async () => {

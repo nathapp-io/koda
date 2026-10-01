@@ -41,13 +41,23 @@ export function useFleetJobs(slug: string) {
   const total = ref(0)
   const page = ref(1)
   const hasNext = ref(false)
+  let latestLoadId = 0
 
-  async function load(filters: FleetJobFilters = {}): Promise<void> {
-    const res = await $api.get<FleetPage<FleetJobDto>>(base, { query: buildJobQuery(filters) })
-    jobs.value = res.records ?? []
-    total.value = res.total ?? 0
-    page.value = res.current ?? 1
-    hasNext.value = res.hasNext === true
+  async function load(filters: FleetJobFilters = {}): Promise<boolean> {
+    const loadId = ++latestLoadId
+    try {
+      const res = await $api.get<FleetPage<FleetJobDto>>(base, { query: buildJobQuery(filters) })
+      if (loadId !== latestLoadId) return false
+      jobs.value = res.records ?? []
+      total.value = res.total ?? 0
+      page.value = res.current ?? 1
+      hasNext.value = res.hasNext === true
+      return true
+    }
+    catch (error) {
+      if (loadId === latestLoadId) throw error
+      return false
+    }
   }
 
   const get = (id: string): Promise<FleetJobDto> => $api.get<FleetJobDto>(jobPath(id))

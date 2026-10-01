@@ -20,6 +20,13 @@ describe('fleet jobs list', () => {
     expect(list).toContain("const ALL = '__all__'")
   })
 
+  test('a stale successful reload cannot clear the newest reload error or pending state', () => {
+    expect(list).toContain('const reloadId = ++latestReloadId')
+    expect(list).toMatch(/const accepted = await jobsApi\.load\([\s\S]*?if \(!accepted \|\| reloadId !== latestReloadId\) return/)
+    expect(list).toMatch(/catch \(err: unknown\) \{[\s\S]*?if \(reloadId !== latestReloadId\) return/)
+    expect(list).toMatch(/finally \{\s*if \(reloadId === latestReloadId\) pending\.value = false/)
+  })
+
   test('refreshes on any fleet_job event, debounced, and cancels on unmount', () => {
     const handlers = liveHandlers(list)
     expect(handlers).toContain('onFleetJob: () => liveReload.trigger()')

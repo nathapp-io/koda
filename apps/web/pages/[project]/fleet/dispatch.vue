@@ -44,6 +44,7 @@ async function retry(): Promise<void> {
 const { handleSubmit, isSubmitting, values, setFieldValue } = useForm({
   validationSchema: toTypedSchema(buildDispatchSchema(t)),
   initialValues: { ...DISPATCH_DEFAULTS },
+  keepValuesOnUnmount: true,
 })
 
 /** Placement is one of: any fitting runner, runners with all of some labels, or one pinned runner (S1 spec §4). */

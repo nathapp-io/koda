@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 import { createDebouncer } from '~/lib/debounce'
+import { loadFleetJobDetail } from '~/lib/fleet-job-detail'
 import { canCancelJob, canRequeueJob, canWorkOnFleet, isTerminalJobState, mayHaveBundle, mergeEvents, safePrUrl } from '~/lib/fleet-jobs'
 import type { DispatchResultDto, FleetJobDto, FleetJobEventDto } from '~/lib/fleet-types'
 import FleetJobProgress from '~/components/fleet/FleetJobProgress.vue'
@@ -58,29 +59,35 @@ async function loadEventsFrom(pageNo: number): Promise<void> {
   }
 }
 
-async function loadJob(): Promise<void> {
+async function loadJob(): Promise<boolean> {
   try {
     job.value = await jobsApi.get(jobId)
     loadFailed.value = false
+    return true
   }
   catch (err: unknown) {
     loadFailed.value = true
     toast.error(extractApiError(err))
+    return false
   }
   finally {
     pending.value = false
   }
 }
 
-onMounted(async () => {
-  await loadJob()
-  if (!job.value) return
+function initializeRelatedData(): void {
   // An empty timeline must not read as "No events yet" when the load failed.
   void loadEventsFrom(1).catch((err: unknown) => toast.error(extractApiError(err)))
   // Names are cosmetic: a failure leaves ids (or "Unknown member") on screen.
   void options.load().catch(() => undefined)
   void people.load().catch(() => undefined)
-})
+}
+
+async function loadJobDetail(): Promise<void> {
+  await loadFleetJobDetail(loadJob, initializeRelatedData)
+}
+
+onMounted(loadJobDetail)
 
 /** A busy job's runner logs can push new rows past the loaded page: follow hasNext, bounded (D139). */
 const LIVE_CATCH_UP_PAGES = 10
@@ -146,7 +153,7 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
 <template>
   <div class="space-y-6">
     <LoadingState v-if="pending" />
-    <ErrorState v-else-if="loadFailed || !job" @retry="loadJob()" />
+    <ErrorState v-else-if="loadFailed || !job" @retry="loadJobDetail()" />
     <template v-else>
       <PageHeader :title="job.feature" :subtitle="`${job.command} | ${options.repoName(job.repoId)} @ ${job.ref}`">
         <template #actions>

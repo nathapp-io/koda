@@ -25,26 +25,30 @@ const filters = reactive({ state: ALL, repoId: ALL, runnerId: ALL, requestedById
 const page = ref(1)
 const pending = ref(true)
 const loadFailed = ref(false)
+let latestReloadId = 0
 
 const pick = (value: string): string | undefined => (value === ALL ? undefined : value)
 
 async function reload(): Promise<void> {
+  const reloadId = ++latestReloadId
   try {
-    await jobsApi.load({
+    const accepted = await jobsApi.load({
       state: pick(filters.state),
       repoId: pick(filters.repoId),
       runnerId: pick(filters.runnerId),
       requestedById: pick(filters.requestedById),
       page: page.value,
     })
+    if (!accepted || reloadId !== latestReloadId) return
     loadFailed.value = false
   }
   catch (err: unknown) {
+    if (reloadId !== latestReloadId) return
     loadFailed.value = jobsApi.jobs.value.length === 0
     toast.error(extractApiError(err))
   }
   finally {
-    pending.value = false
+    if (reloadId === latestReloadId) pending.value = false
   }
 }
 
