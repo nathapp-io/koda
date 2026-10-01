@@ -23,8 +23,8 @@ From the specs, the overview and the repo rules (`.nax/rules/web.md`, `.nax/rule
 - **Contract (overview):** `RunnerDto` = `id, name, os, arch, labels, capacity, capabilities, daemonVersion, protocolVersion, enabled, lastSeenAt, createdAt, bootId, bootedAt (string | null), online`; `FleetRepoDto` = `id, projectId, provider ('github' | 'gitlab'), owner, name, defaultBranch, githubInstallationId (string | null), createdAt`; `POST /api/fleet/repos/:id/check` answers 200 `{ repoId, reachable, reason | null, checkedAt }`; enrollment create answers `EnrollmentDto & { token }`. Pages are `{ records, total, current, size, hasNext, hasPrev }`.
 - **Lists:** one page of `size=100` and a "more" note when `hasNext` (D125).
 - **Input rules copied from the API DTOs:** labels `^[a-z0-9][a-z0-9._-]{0,31}$`, at most 20; capacity integer 1..16; repo owner `^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$`; repo name `^[A-Za-z0-9._-]{1,100}$`.
-- **Runners page polls every 15 s** (S1 spec §1), skips a hidden tab, clears its timer on unmount.
-- **Enrollment tokens are shown once** (S1 spec §11): the dialog forgets the token when it closes.
+- **Runners page polls every 15 s** (S1 spec §1): never two polls at once, skips a hidden tab, refreshes as soon as the tab is visible again, clears its timer and listener on unmount, and a poll that started before a mutation never overwrites it.
+- **Enrollment tokens are shown once** (S1 spec §11): the dialog forgets the token when it closes, and while a token is showing only its Done button closes it (Esc and outside clicks do not). Copy falls back to manual selection where the Clipboard API is missing (plain http, the VPN phase).
 - **Codes are translated from fixed key maps; an unknown code shows raw** (D126).
 - **Web rules:** API calls only through `useApi()` inside composables; every path with an interpolation through the `apiPath` tag; no hardcoded UI strings, en and zh both updated; vee-validate + zod forms with i18n messages; semantic Tailwind tokens (`text-muted-foreground`, `border-border`, `bg-muted`); errors shown with `toast.error(extractApiError(err))`.
 - **Repo conventions:** conventional commits, no attribution trailer, never push, no emojis, no `console.log`, no `any`, no `eslint-disable` in new source (the existing layout-spec pattern's `no-var-requires` disables are copied as-is in test files only), immutable updates (`map`/`filter`/spread, never mutate a ref's array or object in place), files under 400 lines, functions under 50 lines.
@@ -41,7 +41,7 @@ Plan-level rules:
 |:--|:--|:--|
 | D135 | Fleet wire types are hand-written in `apps/web/lib/fleet-types.ts`, and the runner `capabilities` object is read defensively in `lib/fleet-capabilities.ts` (every field checked; a malformed part yields no chip). The web does not depend on `@nathapp/fleet-protocol`. | `.nax/mono/apps/web/context.md`: the web uses hand-written composables and types by design, no generated or shared client. On the wire `capabilities` is `Record<string, unknown>`, and a runner on an older daemon may send an older shape; the Runners page must never crash on it. 4c adds job types to the same file. |
 | D136 | The enrollment dialog shows the token and the full command `koda-runner enroll --server <origin> --token <token>`, where `<origin>` is the page's own `window.location.origin`, with a hint to replace it if runners reach koda at another address. | `docs/deployment/runner.md` documents `--server https://koda.example.com`, the same origin that serves the web and proxies `/api`. The web has no other knowledge of the public API URL (`runtimeConfig.public.apiBaseUrl` is the relative `/api`). A copy-ready line removes the most common enrollment mistake; the hint covers split deployments. |
-| D137 | Fleet forms use native `<select>` elements styled like `components/CreateUserDialog.vue`, not the shadcn `Select`. | Issue #58: shadcn `Select` renders its options in a portal that Playwright and snapshot automation cannot reach reliably, and 4c's E2E drives fleet forms. Track 1 slice 4 already chose native selects for the admin users page and dialog. This overrides `.nax/rules/web.md`'s "prefer Shadcn primitives" for selects only, on that precedent. |
+| D137 | Fleet forms use a native `<select>` through the new `components/fleet/NativeSelect.vue` (`<FleetNativeSelect>`), not the shadcn `Select`. It takes `modelValue` and emits `update:modelValue` from the native `change` event (and `blur`), so vee-validate's `componentField` binds to it; 4c reuses it. | Issue #58: shadcn `Select` renders its options in a portal that Playwright and snapshot automation cannot reach reliably, and 4c's E2E drives fleet forms. Track 1 slice 4 already chose native selects for the admin users page. A bare `<select v-bind="componentField">` does not work: `componentField` is `{ modelValue, 'onUpdate:modelValue', onBlur }`, component props and events that a native element renders as a `modelvalue` attribute and never fires, so the form value never changes (reproduced in review, Vue 3.5). `components/CreateUserDialog.vue` binds its role select that way and has the same latent defect: out of scope here, to be filed separately. This overrides `.nax/rules/web.md`'s "prefer Shadcn primitives" for selects only. |
 
 Smaller choices (no decision number): deletes confirm with `window.confirm`, as in `pages/[project]/settings.vue`, `kb.vue` and `CommentThread.vue`; dialogs call their own composable instance and the page reloads on their event, as `CreateUserDialog` does; Nuxt prefixes components by folder, so `components/fleet/Age.vue` is used as `<FleetAge>`.
 
@@ -50,7 +50,7 @@ Smaller choices (no decision number): deletes confirm with `window.confirm`, as 
 The five inputs or conditions most likely to bite an admin that no spec line names, each pinned by a test in the owning task:
 
 1. **A malformed or older capability report** (missing `sandbox`, non-array `credentials`, a credential without `providerId`): the Runners page must render the row with fewer chips, never throw. Pinned in Task 2 (`capabilityChips` "never throws on a malformed report").
-2. **The API restarts or the network drops while the Runners page is open**: polling must keep the last rows, show the stale note, not toast every 15 s, and recover on the next good poll; a 403 must stop polling. Pinned in Task 6 (wiring spec on `refresh`, `stopPolling`).
+2. **The API restarts or the network drops while the Runners page is open, or the tab sits hidden**: polling must keep the last rows, show the stale note, not toast every 15 s, never stack two polls, recover on the next good poll, refresh as soon as the tab is visible again, and stop on a 403; a poll that started before an enable/disable must not overwrite it. Pinned in Task 6 (`useVisiblePolling` fake-timer spec) and Task 3 (`useFleetRunners` drops a load that raced a mutation).
 3. **Label input as people type it** (`Linux, gpu,,gpu`): upper case is reported (not silently folded), duplicates and blanks collapse, more than 20 is refused, all before the PATCH. Pinned in Task 2 (`parseLabels`).
 4. **Many repos on the Repos page**: checks run with at most 4 requests in flight, and one failing check marks only its own row. Pinned in Task 3 (`checkAll` peak concurrency, `check` error state) and Task 2 (`mapLimit` keeps going after a rejection).
 5. **Browser and API clocks disagree**: a `lastSeenAt` slightly in the future must read "0s ago", not a negative or NaN age; a null `bootedAt` (runner not rebooted since the 4a migration) reads as a dash. Pinned in Task 2 (`ageParts`).
@@ -88,7 +88,7 @@ Expected: each count is at least 1. If any is 0, 4a is not merged (or its contra
 cd apps/web && bun run test 2>&1 | tail -4
 ```
 
-Expected: all suites pass. Record the suite and test counts for Task 7.
+Expected: all suites pass. Record the suite and test counts for Task 8.
 
 ---
 
@@ -100,7 +100,7 @@ Expected: all suites pass. Record the suite and test counts for Task 7.
 - Test: `apps/web/tests/i18n/fleet-locale-parity.spec.ts` (create)
 
 **Interfaces:**
-- Produces: `nav.fleetRunners`, `nav.fleetRepos`, and the `fleet` tree. Shared with 4c: `fleet.common.*` (`online`, `offline`, `enabled`, `disabled`, `adminOnly`, `more`, `stale`, `copy`, `copied`, `unknown`, `ago.{s,m,h,d}`, `duration.{s,m,h,d}`), `fleet.validation.*`, `fleet.state.<STATE>` (9 states), `fleet.misfit.<reason>` (11), `fleet.repoReason.<reason>` (13). 4b-only: `fleet.runners.*`, `fleet.repos.*`. 4c adds `fleet.jobs.*` and `fleet.dispatch.*` and extends this spec's `ENUMS` if it adds maps.
+- Produces: `nav.fleetRunners`, `nav.fleetRepos`, and the `fleet` tree. Shared with 4c: `fleet.common.*` (`online`, `offline`, `enabled`, `disabled`, `adminOnly`, `more`, `stale`, `copy`, `copied`, `copyFailed`, `unknown`, `ago.{s,m,h,d}`, `duration.{s,m,h,d}`), `fleet.validation.*`, `fleet.state.<STATE>` (9 states), `fleet.misfit.<reason>` (11), `fleet.repoReason.<reason>` (13). 4b-only: `fleet.runners.*`, `fleet.repos.*`. 4c adds `fleet.jobs.*` and `fleet.dispatch.*` and extends this spec's `ENUMS` if it adds maps.
 
 - [ ] **Step 1: Write the failing parity spec**
 
@@ -136,6 +136,7 @@ const ENUMS: Record<string, string[]> = {
   'fleet.common.ago': ['s', 'm', 'h', 'd'],
   'fleet.common.duration': ['s', 'm', 'h', 'd'],
   'fleet.repos.provider': ['github', 'gitlab'],
+  'fleet.runners.chip.kind': ['api-key', 'oauth', 'exec', 'ambient', 'none'],
 }
 
 describe('Fleet locale parity (en and zh)', () => {
@@ -207,6 +208,7 @@ Make `fleet` the last top-level key: put a comma after the closing `}` of the cu
     "stale": "Could not refresh. Showing the last data.",
     "copy": "Copy",
     "copied": "Copied",
+    "copyFailed": "Could not copy. Select the text and copy it manually.",
     "unknown": "Unknown",
     "ago": {
       "s": "{n}s ago",
@@ -272,7 +274,7 @@ Make `fleet` the last top-level key: put a comma after the closing `}` of the cu
     "title": "Runners",
     "subtitle": "Machines that run nax jobs for koda.",
     "empty": "No runners yet. Create an enrollment token and run koda-runner enroll on a machine.",
-    "deleteConfirm": "Delete runner {name}? Its key is revoked. A runner with unfinished jobs cannot be deleted.",
+    "deleteConfirm": "Delete runner {name}? Its key is revoked. A runner with unfinished or pinned jobs cannot be deleted.",
     "table": {
       "name": "Name",
       "status": "Status",
@@ -295,7 +297,15 @@ Make `fleet` the last top-level key: put a comma after the closing `}` of the cu
       "sandboxOff": "no sandbox",
       "protocol": "{name}",
       "credential": "{provider}: {kind}",
-      "credentialExpires": "{provider}: {kind} until {expires}"
+      "credentialExpires": "{provider}: {kind} until {expires}",
+      "credentialExpired": "{provider}: {kind}, expired {expires}",
+      "kind": {
+        "api-key": "API key",
+        "oauth": "OAuth",
+        "exec": "exec helper",
+        "ambient": "ambient",
+        "none": "no credential"
+      }
     },
     "toast": {
       "enabled": "Runner enabled",
@@ -320,7 +330,7 @@ Make `fleet` the last top-level key: put a comma after the closing `}` of the cu
       "tokenOnce": "Copy the token now. It is shown once and expires {expiresAt}.",
       "token": "Token",
       "command": "Enroll command",
-      "commandHint": "Run it as the runner's service user. Replace the server URL if the runner reaches koda at another address."
+      "commandHint": "Run it as the runner's service user. Replace the server URL if the runner reaches koda at another address. The runner requires https unless the server is loopback or you add --insecure-http."
     }
   },
   "repos": {
@@ -385,6 +395,7 @@ Same place, same shape:
     "stale": "刷新失败，显示的是上一次的数据。",
     "copy": "复制",
     "copied": "已复制",
+    "copyFailed": "无法复制，请手动选择文本复制。",
     "unknown": "未知",
     "ago": {
       "s": "{n} 秒前",
@@ -450,7 +461,7 @@ Same place, same shape:
     "title": "执行机",
     "subtitle": "为 koda 运行 nax 任务的机器。",
     "empty": "还没有执行机。请创建注册令牌，并在机器上运行 koda-runner enroll。",
-    "deleteConfirm": "删除执行机 {name}？其密钥将被吊销。有未完成任务的执行机无法删除。",
+    "deleteConfirm": "删除执行机 {name}？其密钥将被吊销。有未完成任务或被固定任务的执行机无法删除。",
     "table": {
       "name": "名称",
       "status": "状态",
@@ -473,7 +484,15 @@ Same place, same shape:
       "sandboxOff": "无沙箱",
       "protocol": "{name}",
       "credential": "{provider}：{kind}",
-      "credentialExpires": "{provider}：{kind}，有效期至 {expires}"
+      "credentialExpires": "{provider}：{kind}，有效期至 {expires}",
+      "credentialExpired": "{provider}：{kind}，已于 {expires} 过期",
+      "kind": {
+        "api-key": "API 密钥",
+        "oauth": "OAuth",
+        "exec": "外部命令",
+        "ambient": "环境凭据",
+        "none": "无凭据"
+      }
     },
     "toast": {
       "enabled": "执行机已启用",
@@ -498,7 +517,7 @@ Same place, same shape:
       "tokenOnce": "请立即复制令牌。它只显示一次，将于 {expiresAt} 过期。",
       "token": "令牌",
       "command": "注册命令",
-      "commandHint": "请以执行机的服务用户身份运行。如果执行机通过其他地址访问 koda，请替换服务器 URL。"
+      "commandHint": "请以执行机的服务用户身份运行。如果执行机通过其他地址访问 koda，请替换服务器 URL。除非服务器是本机回环地址或添加 --insecure-http，执行机要求使用 https。"
     }
   },
   "repos": {
@@ -575,7 +594,7 @@ git commit -m "feat(web): fleet i18n section and admin nav keys"
   - `fleet-types.ts`: `FleetPage<T>`, `FLEET_LIST_SIZE = 100`, `FleetProtocol`, `FleetProfileNeeds`, `FleetCredentialStored`, `FleetCredential`, `FleetCapabilities`, `FleetRunner`, `FleetRunnerPatch`, `FleetEnrollment`, `FleetEnrollmentCreated`, `FleetRunnerSummary`, `FleetProvider`, `FleetRepo`, `NewFleetRepo`, `FleetRepoCheck`.
   - `fleet-validation.ts`: `LABEL_PATTERN`, `MAX_LABELS`, `CAPACITY_MIN`, `CAPACITY_MAX`, `REPO_OWNER_PATTERN`, `REPO_NAME_PATTERN`, `type LabelParse`, `parseLabels(input: string): LabelParse`.
   - `fleet-age.ts`: `type AgeUnit`, `interface AgeParts { n; unit }`, `ageParts(fromIso: string | null | undefined, now: Date): AgeParts | null`.
-  - `fleet-capabilities.ts`: `type ChipTone = 'ok' | 'warn' | 'bad'`, `interface CapabilityChip { id; key; params; tone }`, `capabilityChips(capabilities: unknown): CapabilityChip[]`, `naxVersion(capabilities: unknown): string | null`.
+  - `fleet-capabilities.ts`: `type ChipTone = 'ok' | 'warn' | 'bad'`, `interface CapabilityChip { id; key; params; tone }` (a credential chip's `params.kind` is a `CredentialKind` code, translated by the chips component), `CREDENTIAL_KINDS`, `type CredentialKind`, `capabilityChips(capabilities: unknown): CapabilityChip[]`, `naxVersion(capabilities: unknown): string | null`.
   - `fleet-enroll.ts`: `enrollCommand(server: string, token: string): string`.
   - `map-limit.ts`: `mapLimit<T>(items: readonly T[], limit: number, fn: (item: T) => Promise<void>): Promise<void>`.
 
@@ -665,7 +684,7 @@ Create `apps/web/tests/lib/fleet-capabilities.spec.ts`:
 
 ```ts
 import { describe, expect, it } from '@jest/globals'
-import { capabilityChips, naxVersion } from '~/lib/fleet-capabilities'
+import { CREDENTIAL_KINDS, capabilityChips, naxVersion } from '~/lib/fleet-capabilities'
 
 const caps = {
   nax: { version: '0.83.1', protocols: ['native', 'acp'] },
@@ -691,7 +710,7 @@ describe('capabilityChips', () => {
       { id: 'protocol:acp', key: 'fleet.runners.chip.protocol', params: { name: 'acp' }, tone: 'ok' },
       { id: 'credential:anthropic', key: 'fleet.runners.chip.credentialExpires', params: { provider: 'anthropic', kind: 'oauth', expires: '2026-11-02' }, tone: 'ok' },
       { id: 'credential:openai', key: 'fleet.runners.chip.credential', params: { provider: 'openai', kind: 'api-key' }, tone: 'ok' },
-      { id: 'credential:zai', key: 'fleet.runners.chip.credentialExpires', params: { provider: 'zai', kind: 'oauth', expires: '2026-09-30' }, tone: 'warn' },
+      { id: 'credential:zai', key: 'fleet.runners.chip.credentialExpired', params: { provider: 'zai', kind: 'oauth', expires: '2026-09-30' }, tone: 'warn' },
       { id: 'credential:minimax', key: 'fleet.runners.chip.credential', params: { provider: 'minimax', kind: 'exec' }, tone: 'bad' },
       { id: 'credential:bedrock', key: 'fleet.runners.chip.credential', params: { provider: 'bedrock', kind: 'ambient' }, tone: 'ok' },
       { id: 'credential:none', key: 'fleet.runners.chip.credential', params: { provider: 'none', kind: 'none' }, tone: 'bad' },
@@ -729,8 +748,15 @@ describe('every chip key exists in both locales', () => {
     const keys = new Set([
       ...capabilityChips(caps).map((chip) => chip.key),
       ...capabilityChips({ sandbox: { available: false } }).map((chip) => chip.key),
+      // The chips component translates params.kind through fleet.runners.chip.kind.<code>.
+      ...CREDENTIAL_KINDS.map((kind) => `fleet.runners.chip.kind.${kind}`),
     ])
     expect([...keys].filter((key) => !has(tree as Record<string, unknown>, key))).toEqual([])
+  })
+
+  it('every kind a chip can carry is in CREDENTIAL_KINDS', () => {
+    const kinds = capabilityChips(caps).flatMap((chip) => (chip.params.kind ? [chip.params.kind] : []))
+    expect(kinds.filter((kind) => !(CREDENTIAL_KINDS as readonly string[]).includes(kind))).toEqual([])
   })
 })
 ```
@@ -999,6 +1025,10 @@ import type { FleetCredential } from '~/lib/fleet-types'
 
 export type ChipTone = 'ok' | 'warn' | 'bad'
 
+/** How nax serves a provider; each code has a label under fleet.runners.chip.kind. */
+export const CREDENTIAL_KINDS = ['api-key', 'oauth', 'exec', 'ambient', 'none'] as const
+export type CredentialKind = (typeof CREDENTIAL_KINDS)[number]
+
 /** One capability chip: an i18n key under fleet.runners.chip, its params, and a tone. */
 export interface CapabilityChip {
   id: string
@@ -1027,7 +1057,7 @@ function protocolChips(raw: unknown): CapabilityChip[] {
 }
 
 /** How nax serves the provider: the stored kind, else exec, else ambient, else none. */
-function credentialKind(c: Pick<FleetCredential, 'stored' | 'exec' | 'ambient'>): string {
+function credentialKind(c: Pick<FleetCredential, 'stored' | 'exec' | 'ambient'>): CredentialKind {
   if (c.stored) return c.stored.kind
   if (c.exec) return 'exec'
   return c.ambient ? 'ambient' : 'none'
@@ -1044,10 +1074,12 @@ function credentialChip(raw: unknown): CapabilityChip[] {
     ambient: raw.ambient === true,
   })
   const expires = stored ? str(stored.expires) : undefined
-  const tone: ChipTone = !raw.available ? 'bad' : stored?.expired === true ? 'warn' : 'ok'
-  return expires
-    ? [{ id: `credential:${provider}`, key: 'fleet.runners.chip.credentialExpires', params: { provider, kind, expires: expires.slice(0, 10) }, tone }]
-    : [{ id: `credential:${provider}`, key: 'fleet.runners.chip.credential', params: { provider, kind }, tone }]
+  const expired = stored?.expired === true
+  const tone: ChipTone = !raw.available ? 'bad' : expired ? 'warn' : 'ok'
+  if (!expires) return [{ id: `credential:${provider}`, key: 'fleet.runners.chip.credential', params: { provider, kind }, tone }]
+  // An expired credential says so in words, not only by the chip's tone (review 4b).
+  const key = expired ? 'fleet.runners.chip.credentialExpired' : 'fleet.runners.chip.credentialExpires'
+  return [{ id: `credential:${provider}`, key, params: { provider, kind, expires: expires.slice(0, 10) }, tone }]
 }
 
 /**
@@ -1106,7 +1138,7 @@ export async function mapLimit<T>(items: readonly T[], limit: number, fn: (item:
 - [ ] **Step 8: Run the specs**
 
 Run: `cd apps/web && npx jest tests/lib/fleet-validation.spec.ts tests/lib/fleet-age.spec.ts tests/lib/fleet-capabilities.spec.ts tests/lib/fleet-enroll.spec.ts tests/lib/map-limit.spec.ts`
-Expected: PASS, 5 suites, 21 tests.
+Expected: PASS, 5 suites, 22 tests.
 
 - [ ] **Step 9: Commit**
 
@@ -1127,7 +1159,7 @@ git commit -m "feat(web): fleet wire types and pure helpers"
 **Interfaces:**
 - Consumes: Task 2 types, `FLEET_LIST_SIZE`, `mapLimit`; `useApi()` (`$api.get/post/patch/delete`), `extractApiError` from `~/composables/useApi`, `apiPath` from `~/lib/api-path`.
 - Produces:
-  - `useFleetRunners()` → `{ runners: Ref<FleetRunner[]>, hasMore: Ref<boolean>, pending: Ref<boolean>, load(): Promise<void>, update(id, patch: FleetRunnerPatch): Promise<FleetRunner>, remove(id): Promise<void>, createEnrollment(labels: readonly string[]): Promise<FleetEnrollmentCreated> }`.
+  - `useFleetRunners()` → `{ runners: Ref<FleetRunner[]>, hasMore: Ref<boolean>, pending: Ref<boolean>, load(): Promise<void>, apply(updated: FleetRunner): void, update(id, patch: FleetRunnerPatch): Promise<FleetRunner>, remove(id): Promise<void>, createEnrollment(labels: readonly string[]): Promise<FleetEnrollmentCreated> }`. `apply` puts a row saved elsewhere (the edit dialog's own instance) into this list and counts as a mutation, so an in-flight poll cannot overwrite it.
   - `useFleetRepos()` → `{ repos, hasMore, pending, checks: Ref<Record<string, RepoCheckState>>, projects: Ref<ProjectOption[]>, load(), loadProjects(), check(id): Promise<void> (never throws), checkAll(), create(input: NewFleetRepo): Promise<FleetRepo>, remove(id) }`; exported `type RepoCheckState`, `interface ProjectOption { id; slug; name }`, `CHECK_CONCURRENCY = 4`.
 
 - [ ] **Step 1: Extend the apiPath guard first**
@@ -1212,6 +1244,26 @@ describe('useFleetRunners', () => {
     expect(patch).toHaveBeenCalledWith('/fleet/runners/b', { enabled: false })
     expect(fleet.runners.value[1].enabled).toBe(false)
     expect(before[1].enabled).toBe(true)
+  })
+
+  test('a load that started before a mutation does not overwrite it', async () => {
+    let release: (value: unknown) => void = () => undefined
+    const get = jest.fn()
+      .mockImplementationOnce(async () => pageOf([r('a')]))
+      .mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
+    const patch = jest.fn(async () => r('a', { enabled: false }))
+    withApi({ get, patch })
+    const { useFleetRunners } = await import(composablePath)
+    const fleet = useFleetRunners()
+    await fleet.load()
+
+    const poll = fleet.load()
+    await fleet.update('a', { enabled: false })
+    release(pageOf([r('a', { enabled: true })]))
+    await poll
+
+    expect(fleet.runners.value[0].enabled).toBe(false)
+    expect(fleet.pending.value).toBe(false)
   })
 
   test('update encodes the id as one path segment', async () => {
@@ -1335,6 +1387,22 @@ describe('useFleetRepos', () => {
     expect(Object.keys(fleet.checks.value).sort()).toEqual(ids)
   })
 
+  test('a check still in flight when its repo is removed does not bring its state back', async () => {
+    let release: (value: unknown) => void = () => undefined
+    const post = jest.fn(() => new Promise((resolve) => { release = resolve }))
+    withApi({ get: jest.fn(async () => pageOf([repo('a')])), post, delete: jest.fn(async () => ({})) })
+    const { useFleetRepos } = await import(composablePath)
+    const fleet = useFleetRepos()
+    await fleet.load()
+
+    const checking = fleet.check('a')
+    await fleet.remove('a')
+    release(ok('a'))
+    await checking
+
+    expect(fleet.checks.value).toEqual({})
+  })
+
   test('create posts the body and appends; remove deletes, drops the row and its check', async () => {
     const post = jest.fn()
       .mockImplementationOnce(async () => repo('b'))
@@ -1376,11 +1444,16 @@ export function useFleetRunners() {
   const runners = ref<FleetRunner[]>([])
   const hasMore = ref(false)
   const pending = ref(false)
+  // Bumped by every successful mutation. A load (a poll) that started before one would carry
+  // older rows, so it drops its result; the next poll brings fresh ones.
+  let mutations = 0
 
   async function load(): Promise<void> {
+    const started = mutations
     pending.value = true
     try {
       const res = await $api.get<FleetPage<FleetRunner>>('/fleet/runners', { query: { size: String(FLEET_LIST_SIZE) } })
+      if (started !== mutations) return
       runners.value = res.records ?? []
       hasMore.value = res.hasNext === true
     } finally {
@@ -1388,18 +1461,21 @@ export function useFleetRunners() {
     }
   }
 
-  function replace(updated: FleetRunner): void {
+  /** A row saved here or elsewhere (the edit dialog's own instance) replaces the listed one. */
+  function apply(updated: FleetRunner): void {
+    mutations += 1
     runners.value = runners.value.map((r) => (r.id === updated.id ? updated : r))
   }
 
   async function update(id: string, patch: FleetRunnerPatch): Promise<FleetRunner> {
     const updated = await $api.patch<FleetRunner>(apiPath`/fleet/runners/${id}`, { ...patch })
-    replace(updated)
+    apply(updated)
     return updated
   }
 
   async function remove(id: string): Promise<void> {
     await $api.delete(apiPath`/fleet/runners/${id}`)
+    mutations += 1
     runners.value = runners.value.filter((r) => r.id !== id)
   }
 
@@ -1407,7 +1483,7 @@ export function useFleetRunners() {
     return $api.post<FleetEnrollmentCreated>('/fleet/enrollments', { labels: [...labels] })
   }
 
-  return { runners, hasMore, pending, load, update, remove, createEnrollment }
+  return { runners, hasMore, pending, load, apply, update, remove, createEnrollment }
 }
 ```
 
@@ -1460,7 +1536,11 @@ export function useFleetRepos() {
     projects.value = (rows ?? []).map(({ id, slug, name }) => ({ id, slug, name }))
   }
 
+  // Repos removed while their check was in flight: a late result must not bring the row's state back.
+  let removed: ReadonlySet<string> = new Set()
+
   function setCheck(id: string, state: RepoCheckState): void {
+    if (removed.has(id)) return
     checks.value = { ...checks.value, [id]: state }
   }
 
@@ -1486,6 +1566,7 @@ export function useFleetRepos() {
 
   async function remove(id: string): Promise<void> {
     await $api.delete(apiPath`/fleet/repos/${id}`)
+    removed = new Set([...removed, id])
     repos.value = repos.value.filter((r) => r.id !== id)
     checks.value = Object.fromEntries(Object.entries(checks.value).filter(([key]) => key !== id))
   }
@@ -1499,7 +1580,7 @@ export function useFleetRepos() {
 - [ ] **Step 6: Run the specs and the guard**
 
 Run: `cd apps/web && npx jest tests/composables/useFleetRunners.spec.ts tests/composables/useFleetRepos.spec.ts tests/lib/api-path-guard.spec.ts`
-Expected: PASS, 3 suites (6 + 5 composable tests, 2 guard tests).
+Expected: PASS, 3 suites (7 + 6 composable tests, 2 guard tests).
 
 - [ ] **Step 7: Commit**
 
@@ -1670,12 +1751,13 @@ describe('Fleet admin Runners page wiring', () => {
     expect(page).toContain("t('fleet.common.adminOnly')")
   })
 
-  test('polls every 15 s, skips hidden tabs, and clears the timer on unmount and on 403', () => {
+  // The timing itself (interval, hidden tab, no overlap, visibility refresh) is pinned by
+  // tests/composables/useVisiblePolling.spec.ts; this only checks the page uses it.
+  test('polls every 15 s through useVisiblePolling, and stops on unmount and on 403', () => {
     expect(page).toContain('const POLL_MS = 15_000')
-    expect(page).toContain('setInterval(tick, POLL_MS)')
-    expect(page).toContain("document.visibilityState === 'hidden'")
-    expect(page).toContain('onBeforeUnmount(stopPolling)')
-    expect(page).toMatch(/adminOnly\.value = true\s+stopPolling\(\)/)
+    expect(page).toContain('useVisiblePolling(refresh, POLL_MS)')
+    expect(page).toContain('onBeforeUnmount(polling.stop)')
+    expect(page).toMatch(/adminOnly\.value = true\s+polling\.stop\(\)/)
   })
 
   test('a failed poll keeps the rows and shows the stale note; only the first load toasts', () => {
@@ -1689,7 +1771,8 @@ describe('Fleet admin Runners page wiring', () => {
     expect(page).toContain('v-if="!runner.enabled"')
     expect(page).toContain('<FleetRunnerCapabilityChips :capabilities="runner.capabilities" />')
     expect(page).toContain('<FleetAge :iso="runner.lastSeenAt" :now="now" mode="ago" />')
-    expect(page).toContain('<FleetAge :iso="runner.bootedAt" :now="now" mode="duration" />')
+    // Uptime only means something while the runner is online (review 4b).
+    expect(page).toContain('<FleetAge v-if="runner.online" :iso="runner.bootedAt" :now="now" mode="duration" />')
   })
 
   test('enable/disable patches, edit opens the dialog, delete asks first', () => {
@@ -1697,6 +1780,8 @@ describe('Fleet admin Runners page wiring', () => {
     expect(page).toContain('<FleetRunnerEditDialog')
     expect(page).toContain("window.confirm(t('fleet.runners.deleteConfirm', { name: runner.name }))")
     expect(page).toContain('<FleetEnrollmentTokenDialog v-model:open="enrollOpen" />')
+    // The edit dialog has its own composable instance: the page applies the saved row through its own.
+    expect(page).toContain('@saved="apply"')
   })
 
   test('tells the admin when the list was capped', () => {
@@ -1711,8 +1796,23 @@ describe('Fleet runner dialogs wiring', () => {
     expect(dialog).toContain('createEnrollment(parsed.labels)')
     expect(dialog).toContain('enrollCommand(window.location.origin, created.value.token)')
     expect(dialog).toContain('navigator.clipboard.writeText(text)')
-    expect(dialog).toMatch(/if \(!value\) \{\s+created\.value = null/)
+    expect(dialog).toMatch(/if \(!value\) \{\s+generation \+= 1\s+created\.value = null/)
     expect(dialog).toContain('parseLabels(value)')
+  })
+
+  test('enrollment dialog keeps a showing token safe: no silent copy failure, no accidental close, no stale reply', () => {
+    const dialog = read('components', 'fleet', 'EnrollmentTokenDialog.vue')
+    expect(dialog).toContain("toast.error(t('fleet.common.copyFailed'))")
+    expect(dialog).toContain('@interact-outside="guardClose"')
+    expect(dialog).toContain('@escape-key-down="guardClose"')
+    expect(dialog).toContain('if (created.value) event.preventDefault()')
+    expect(dialog).toContain('if (started !== generation) return')
+    expect(dialog).toContain('@focus="selectAll"')
+  })
+
+  test('capability chips translate the credential kind code, raw when unknown', () => {
+    const chips = read('components', 'fleet', 'RunnerCapabilityChips.vue')
+    expect(chips).toContain('te(key) ? t(key) : kind')
   })
 
   test('edit dialog validates labels and capacity, patches both, and reloads its values per runner', () => {
@@ -1760,7 +1860,7 @@ const text = computed(() => {
 <template>
   <div class="flex flex-wrap gap-1">
     <Badge v-for="chip in chips" :key="chip.id" :variant="variantOf(chip.tone)">
-      {{ t(chip.key, chip.params) }}
+      {{ t(chip.key, paramsOf(chip)) }}
     </Badge>
     <span v-if="version" class="text-xs text-muted-foreground">nax {{ version }}</span>
   </div>
@@ -1769,11 +1869,11 @@ const text = computed(() => {
 <script setup lang="ts">
 import { computed } from 'vue'
 import { capabilityChips, naxVersion } from '~/lib/fleet-capabilities'
-import type { ChipTone } from '~/lib/fleet-capabilities'
+import type { CapabilityChip, ChipTone } from '~/lib/fleet-capabilities'
 
 const props = defineProps<{ capabilities: Record<string, unknown> }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 
 const chips = computed(() => capabilityChips(props.capabilities))
 const version = computed(() => naxVersion(props.capabilities))
@@ -1781,6 +1881,14 @@ const version = computed(() => naxVersion(props.capabilities))
 function variantOf(tone: ChipTone): 'secondary' | 'outline' | 'destructive' {
   if (tone === 'bad') return 'destructive'
   return tone === 'warn' ? 'outline' : 'secondary'
+}
+
+/** A credential chip carries its kind as a code: show its label (an unknown code shows raw, plan D126). */
+function paramsOf(chip: CapabilityChip): Record<string, string> {
+  const kind = chip.params.kind
+  if (!kind) return chip.params
+  const key = `fleet.runners.chip.kind.${kind}`
+  return { ...chip.params, kind: te(key) ? t(key) : kind }
 }
 </script>
 ```
@@ -1790,7 +1898,7 @@ function variantOf(tone: ChipTone): 'secondary' | 'outline' | 'destructive' {
 ```vue
 <template>
   <Dialog :open="open" @update:open="onOpenChange">
-    <DialogContent class="sm:max-w-[600px]">
+    <DialogContent class="sm:max-w-[600px]" @interact-outside="guardClose" @escape-key-down="guardClose">
       <DialogHeader>
         <DialogTitle>{{ t('fleet.runners.enrollment.title') }}</DialogTitle>
       </DialogHeader>
@@ -1819,14 +1927,14 @@ function variantOf(tone: ChipTone): 'secondary' | 'outline' | 'destructive' {
         <div class="space-y-1">
           <Label>{{ t('fleet.runners.enrollment.token') }}</Label>
           <div class="flex gap-2">
-            <Input :value="created.token" readonly class="flex-1 font-mono text-sm" data-testid="enrollment-token" />
+            <Input :value="created.token" readonly class="flex-1 font-mono text-sm" data-testid="enrollment-token" @focus="selectAll" />
             <Button type="button" variant="outline" @click="copy(created.token, 'token')">{{ copied === 'token' ? t('fleet.common.copied') : t('fleet.common.copy') }}</Button>
           </div>
         </div>
         <div class="space-y-1">
           <Label>{{ t('fleet.runners.enrollment.command') }}</Label>
           <div class="flex gap-2">
-            <pre class="flex-1 overflow-x-auto rounded-md border border-border bg-muted p-2 font-mono text-xs">{{ command }}</pre>
+            <pre class="flex-1 select-all overflow-x-auto rounded-md border border-border bg-muted p-2 font-mono text-xs">{{ command }}</pre>
             <Button type="button" variant="outline" @click="copy(command, 'command')">{{ copied === 'command' ? t('fleet.common.copied') : t('fleet.common.copy') }}</Button>
           </div>
           <p class="text-xs text-muted-foreground">{{ t('fleet.runners.enrollment.commandHint') }}</p>
@@ -1859,6 +1967,9 @@ const { createEnrollment } = useFleetRunners()
 
 const created = ref<FleetEnrollmentCreated | null>(null)
 const copied = ref<'token' | 'command' | null>(null)
+// Bumped on every close: a token request that answers after the dialog closed must not
+// reappear when it is opened again.
+let generation = 0
 
 const formSchema = toTypedSchema(z.object({
   labels: z.string().superRefine((value, ctx) => {
@@ -1878,21 +1989,39 @@ const command = computed(() => (created.value ? enrollCommand(window.location.or
 const onSubmit = handleSubmit(async (values) => {
   const parsed = parseLabels(values.labels)
   if (!parsed.ok) return
+  const started = generation
   try {
-    created.value = await createEnrollment(parsed.labels)
+    const result = await createEnrollment(parsed.labels)
+    if (started !== generation) return
+    created.value = result
   } catch (err: unknown) {
     toast.error(extractApiError(err))
   }
 })
 
+/** navigator.clipboard is undefined on a plain-http origin (the VPN phase): say so, the text stays selectable. */
 async function copy(text: string, which: 'token' | 'command'): Promise<void> {
-  await navigator.clipboard.writeText(text)
-  copied.value = which
+  try {
+    await navigator.clipboard.writeText(text)
+    copied.value = which
+  } catch {
+    toast.error(t('fleet.common.copyFailed'))
+  }
+}
+
+function selectAll(event: FocusEvent): void {
+  (event.target as HTMLInputElement | null)?.select()
+}
+
+/** While a token is showing, only Done closes the dialog: Esc or an outside click would lose it. */
+function guardClose(event: Event): void {
+  if (created.value) event.preventDefault()
 }
 
 /** Closing forgets the token: it is shown once (S1 spec §11). */
 function onOpenChange(value: boolean): void {
   if (!value) {
+    generation += 1
     created.value = null
     copied.value = null
     resetForm()
@@ -2003,7 +2132,7 @@ const onSubmit = handleSubmit(async (values) => {
 - [ ] **Step 7: Run the dialog block**
 
 Run: `cd apps/web && npx jest tests/pages/admin-fleet-runners.spec.ts -t "dialogs"`
-Expected: PASS, 2 tests (the page block is skipped by `-t`; it fails until Task 6).
+Expected: PASS, 4 tests (the page block is skipped by `-t`; it fails until Task 6).
 
 - [ ] **Step 8: Commit**
 
@@ -2017,19 +2146,198 @@ git commit -m "feat(web): fleet runner components (age, capability chips, enroll
 ## Task 6: Runners page
 
 **Files:**
-- Create: `apps/web/pages/admin/fleet/runners.vue`
-- Test: `apps/web/tests/pages/admin-fleet-runners.spec.ts` (page block, written in Task 5)
+- Create: `apps/web/composables/useVisiblePolling.ts`, `apps/web/pages/admin/fleet/runners.vue`
+- Test: `apps/web/tests/composables/useVisiblePolling.spec.ts` (create); `apps/web/tests/pages/admin-fleet-runners.spec.ts` (page block, written in Task 5)
 
 **Interfaces:**
-- Consumes: `useFleetRunners()` (Task 3), the Task 5 components, `FLEET_LIST_SIZE`, `ApiError`, `extractApiError`.
-- Produces: route `/admin/fleet/runners`.
+- Consumes: `useFleetRunners()` (Task 3, including `apply`), the Task 5 components, `FLEET_LIST_SIZE`, `ApiError`, `extractApiError`.
+- Produces: route `/admin/fleet/runners`; `useVisiblePolling(task: () => Promise<void>, ms: number, deps?: PollingDeps) → { start(), stop(), runNow(): Promise<void>, isActive(): boolean }`, `interface PollingDeps { isHidden; setInterval; clearInterval; onVisible }`, `browserPollingDeps(): PollingDeps` (4c may reuse it).
 
-- [ ] **Step 1: Run the page block to see it fail**
+- [ ] **Step 1: Write the failing polling spec**
+
+The polling rules are behaviour, so they get a real test with fake timers and injected browser hooks, not source strings. Create `apps/web/tests/composables/useVisiblePolling.spec.ts`:
+
+```ts
+import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals'
+import { useVisiblePolling } from '~/composables/useVisiblePolling'
+import type { PollingDeps } from '~/composables/useVisiblePolling'
+
+function fakeBrowser(hidden: boolean) {
+  const state = { hidden, onVisible: null as (() => void) | null }
+  const deps: PollingDeps = {
+    isHidden: () => state.hidden,
+    setInterval: (fn, ms) => setInterval(fn, ms),
+    clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
+    onVisible: (fn) => {
+      state.onVisible = fn
+      return () => { state.onVisible = null }
+    },
+  }
+  return { state, deps }
+}
+
+describe('useVisiblePolling', () => {
+  beforeEach(() => { jest.useFakeTimers() })
+  afterEach(() => { jest.useRealTimers() })
+
+  test('runs the task once per interval while the tab is visible', async () => {
+    const task = jest.fn(async () => undefined)
+    const polling = useVisiblePolling(task, 15_000, fakeBrowser(false).deps)
+
+    polling.start()
+    await jest.advanceTimersByTimeAsync(45_000)
+
+    expect(task).toHaveBeenCalledTimes(3)
+  })
+
+  test('skips ticks while hidden and runs at once when the tab becomes visible', async () => {
+    const task = jest.fn(async () => undefined)
+    const browser = fakeBrowser(true)
+    const polling = useVisiblePolling(task, 15_000, browser.deps)
+
+    polling.start()
+    await jest.advanceTimersByTimeAsync(45_000)
+    expect(task).not.toHaveBeenCalled()
+
+    browser.state.hidden = false
+    browser.state.onVisible?.()
+    await jest.advanceTimersByTimeAsync(0)
+    expect(task).toHaveBeenCalledTimes(1)
+  })
+
+  test('stop halts the timer and drops the visibility listener', async () => {
+    const task = jest.fn(async () => undefined)
+    const browser = fakeBrowser(false)
+    const polling = useVisiblePolling(task, 15_000, browser.deps)
+
+    polling.start()
+    await jest.advanceTimersByTimeAsync(15_000)
+    polling.stop()
+    await jest.advanceTimersByTimeAsync(45_000)
+
+    expect(task).toHaveBeenCalledTimes(1)
+    expect(browser.state.onVisible).toBeNull()
+    expect(polling.isActive()).toBe(false)
+  })
+
+  test('a rejected run does not stop the polling', async () => {
+    const task = jest.fn(async () => { throw new Error('API down') })
+    const polling = useVisiblePolling(task, 15_000, fakeBrowser(false).deps)
+
+    polling.start()
+    await jest.advanceTimersByTimeAsync(30_000)
+
+    expect(task).toHaveBeenCalledTimes(2)
+  })
+
+  test('never overlaps: ticks and runNow during a slow run are skipped', async () => {
+    let release: () => void = () => undefined
+    const task = jest.fn(() => new Promise<void>((resolve) => { release = resolve }))
+    const polling = useVisiblePolling(task, 15_000, fakeBrowser(false).deps)
+
+    polling.start()
+    polling.start() // idempotent: still one timer
+    await jest.advanceTimersByTimeAsync(15_000)
+    await polling.runNow()
+    await jest.advanceTimersByTimeAsync(30_000)
+    expect(task).toHaveBeenCalledTimes(1)
+
+    release()
+    await jest.advanceTimersByTimeAsync(15_000)
+    expect(task).toHaveBeenCalledTimes(2)
+  })
+})
+```
+
+`await polling.runNow()` resolves at once here because a run is in flight (it returns without waiting).
+
+- [ ] **Step 2: Run it to see it fail**
+
+Run: `cd apps/web && npx jest tests/composables/useVisiblePolling.spec.ts`
+Expected: FAIL, "Cannot find module '~/composables/useVisiblePolling'".
+
+- [ ] **Step 3: Write `apps/web/composables/useVisiblePolling.ts`**
+
+```ts
+/** What the poller needs from the browser; injected so the timing is testable with fake timers. */
+export interface PollingDeps {
+  isHidden: () => boolean
+  setInterval: (fn: () => void, ms: number) => unknown
+  clearInterval: (handle: unknown) => void
+  /** Calls `fn` whenever the tab becomes visible; returns the unsubscribe. */
+  onVisible: (fn: () => void) => () => void
+}
+
+/** The real browser hooks. Only touched on the client (start runs in onMounted). */
+export function browserPollingDeps(): PollingDeps {
+  return {
+    isHidden: () => document.visibilityState === 'hidden',
+    setInterval: (fn, ms) => window.setInterval(fn, ms),
+    clearInterval: (handle) => window.clearInterval(handle as number),
+    onVisible: (fn) => {
+      const listener = (): void => {
+        if (document.visibilityState === 'visible') fn()
+      }
+      document.addEventListener('visibilitychange', listener)
+      return () => document.removeEventListener('visibilitychange', listener)
+    },
+  }
+}
+
+/**
+ * Runs `task` every `ms` while the tab is visible (S1 spec §1: the Runners page polls every 15 s).
+ * At most one run at a time: a tick or runNow during a run is skipped. A rejected run never stops
+ * the polling (the task reports its own errors). The tab becoming visible again runs it at once.
+ */
+export function useVisiblePolling(task: () => Promise<void>, ms: number, deps: PollingDeps = browserPollingDeps()) {
+  let handle: unknown = null
+  let unsubscribe: (() => void) | null = null
+  let running = false
+
+  async function runNow(): Promise<void> {
+    if (running) return
+    running = true
+    try {
+      await task()
+    } catch {
+      // The task owns its error reporting (toast, stale note); polling carries on.
+    } finally {
+      running = false
+    }
+  }
+
+  function tick(): void {
+    if (!deps.isHidden()) void runNow()
+  }
+
+  function start(): void {
+    if (handle !== null) return
+    handle = deps.setInterval(tick, ms)
+    unsubscribe = deps.onVisible(tick)
+  }
+
+  function stop(): void {
+    if (handle !== null) deps.clearInterval(handle)
+    handle = null
+    unsubscribe?.()
+    unsubscribe = null
+  }
+
+  return { start, stop, runNow, isActive: () => handle !== null }
+}
+```
+
+- [ ] **Step 4: Run it to see it pass**
+
+Run: `cd apps/web && npx jest tests/composables/useVisiblePolling.spec.ts`
+Expected: PASS, 5 tests.
+
+- [ ] **Step 5: Run the page block to see it fail**
 
 Run: `cd apps/web && npx jest tests/pages/admin-fleet-runners.spec.ts -t "Runners page"`
 Expected: FAIL, ENOENT for `pages/admin/fleet/runners.vue`.
 
-- [ ] **Step 2: Write `apps/web/pages/admin/fleet/runners.vue`**
+- [ ] **Step 6: Write `apps/web/pages/admin/fleet/runners.vue`**
 
 ```vue
 <script setup lang="ts">
@@ -2045,7 +2353,7 @@ const POLL_MS = 15_000
 
 const { t } = useI18n()
 const toast = useAppToast()
-const { runners, hasMore, pending, load, update, remove } = useFleetRunners()
+const { runners, hasMore, pending, load, apply, update, remove } = useFleetRunners()
 
 const adminOnly = ref(false)
 const stale = ref(false)
@@ -2053,16 +2361,10 @@ const now = ref(new Date())
 const enrollOpen = ref(false)
 const editOpen = ref(false)
 const editing = ref<FleetRunner | null>(null)
-let timer: ReturnType<typeof setInterval> | null = null
 
 // ApiError.code is the envelope `ret`: a 403 arrives as ret 40003 (see pages/admin/users.vue).
 function isForbidden(err: unknown): boolean {
   return err instanceof ApiError && (err.code === 40003 || err.code === 403)
-}
-
-function stopPolling(): void {
-  if (timer !== null) clearInterval(timer)
-  timer = null
 }
 
 async function refresh(): Promise<void> {
@@ -2072,7 +2374,7 @@ async function refresh(): Promise<void> {
   } catch (err: unknown) {
     if (isForbidden(err)) {
       adminOnly.value = true
-      stopPolling()
+      polling.stop()
       return
     }
     // The first load reports; a failed poll keeps the last rows and marks them stale.
@@ -2083,10 +2385,8 @@ async function refresh(): Promise<void> {
   }
 }
 
-function tick(): void {
-  if (document.visibilityState === 'hidden') return
-  void refresh()
-}
+// Declared after refresh, which it runs; refresh only reaches `polling` when it is called.
+const polling = useVisiblePolling(refresh, POLL_MS)
 
 async function setEnabled(runner: FleetRunner, enabled: boolean): Promise<void> {
   try {
@@ -2113,10 +2413,10 @@ async function confirmDelete(runner: FleetRunner): Promise<void> {
 }
 
 onMounted(() => {
-  void refresh()
-  timer = setInterval(tick, POLL_MS)
+  void polling.runNow()
+  polling.start()
 })
-onBeforeUnmount(stopPolling)
+onBeforeUnmount(polling.stop)
 </script>
 
 <template>
@@ -2166,7 +2466,10 @@ onBeforeUnmount(stopPolling)
             <TableCell>{{ runner.capacity }}</TableCell>
             <TableCell><FleetRunnerCapabilityChips :capabilities="runner.capabilities" /></TableCell>
             <TableCell><FleetAge :iso="runner.lastSeenAt" :now="now" mode="ago" /></TableCell>
-            <TableCell><FleetAge :iso="runner.bootedAt" :now="now" mode="duration" /></TableCell>
+            <TableCell>
+              <FleetAge v-if="runner.online" :iso="runner.bootedAt" :now="now" mode="duration" />
+              <span v-else class="text-muted-foreground">—</span>
+            </TableCell>
             <TableCell class="space-x-1 whitespace-nowrap text-right">
               <Button size="sm" variant="outline" @click="setEnabled(runner, !runner.enabled)">
                 {{ runner.enabled ? t('fleet.runners.actions.disable') : t('fleet.runners.actions.enable') }}
@@ -2181,28 +2484,28 @@ onBeforeUnmount(stopPolling)
     </template>
 
     <FleetEnrollmentTokenDialog v-model:open="enrollOpen" />
-    <FleetRunnerEditDialog v-if="editing" v-model:open="editOpen" :runner="editing" @saved="refresh()" />
+    <FleetRunnerEditDialog v-if="editing" v-model:open="editOpen" :runner="editing" @saved="apply" />
   </div>
 </template>
 ```
 
-Notes for the implementer: the timer is a plain `let`, not a ref (nothing renders it); `refresh()` swallows its own errors so the interval callback never produces an unhandled rejection; `now` is bumped after every poll so the ages in the table move with the data.
+Notes for the implementer: `refresh()` reports its own errors (toast on the first load, stale note on a poll, admin-only on a 403), and `useVisiblePolling` keeps polling after a rejected run anyway; `now` is bumped after every poll so the ages in the table move with the data; an offline runner shows a dash for uptime (its daemon may be long gone); `@saved="apply"` puts the edit dialog's saved row into this page's list as a mutation, so a poll already in flight cannot overwrite it.
 
-- [ ] **Step 3: Run the whole spec**
+- [ ] **Step 7: Run the whole spec**
 
-Run: `cd apps/web && npx jest tests/pages/admin-fleet-runners.spec.ts`
-Expected: PASS, 8 tests.
+Run: `cd apps/web && npx jest tests/pages/admin-fleet-runners.spec.ts tests/composables/useVisiblePolling.spec.ts`
+Expected: PASS, 15 tests (10 wiring, 5 polling).
 
-- [ ] **Step 4: Type-check**
+- [ ] **Step 8: Type-check**
 
 Run: `cd apps/web && bun run type-check`
 Expected: exit 0, no `error TS` lines. (Verified while writing this plan: a deliberate `{ enabled: 3 }` in this page fails type-check with TS2322, so the check does cover these files.)
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add apps/web/pages/admin/fleet/runners.vue
-git commit -m "feat(web): admin fleet Runners page with 15 s polling"
+git add apps/web/composables/useVisiblePolling.ts apps/web/tests/composables/useVisiblePolling.spec.ts apps/web/pages/admin/fleet/runners.vue
+git commit -m "feat(web): admin fleet Runners page with 15 s visible-tab polling"
 ```
 
 ---
@@ -2210,12 +2513,12 @@ git commit -m "feat(web): admin fleet Runners page with 15 s polling"
 ## Task 7: Repos page
 
 **Files:**
-- Create: `apps/web/components/fleet/RepoReachabilityBadge.vue`, `apps/web/components/fleet/AddRepoDialog.vue`, `apps/web/pages/admin/fleet/repos.vue`
-- Test: `apps/web/tests/pages/admin-fleet-repos.spec.ts` (create)
+- Create: `apps/web/components/fleet/NativeSelect.vue`, `apps/web/components/fleet/RepoReachabilityBadge.vue`, `apps/web/components/fleet/AddRepoDialog.vue`, `apps/web/pages/admin/fleet/repos.vue`
+- Test: `apps/web/tests/pages/admin-fleet-repos.spec.ts`, `apps/web/tests/components/fleet-native-select.spec.ts`, `apps/web/tests/helpers/mount-sfc.ts` (create)
 
 **Interfaces:**
 - Consumes: `useFleetRepos()`, `RepoCheckState`, `ProjectOption` (Task 3); `REPO_OWNER_PATTERN`, `REPO_NAME_PATTERN`, `FleetRepo`, `FLEET_LIST_SIZE` (Task 2); `fleet.repoReason.*` (Task 1).
-- Produces: route `/admin/fleet/repos`; `<FleetRepoReachabilityBadge :state />`, `<FleetAddRepoDialog v-model:open :projects @created />`.
+- Produces: route `/admin/fleet/repos`; `<FleetRepoReachabilityBadge :state />`, `<FleetAddRepoDialog v-model:open :projects @created="(repo: FleetRepo) => void" />`; `<FleetNativeSelect v-bind="componentField" :options="Array<{ value: string; label: string }>" placeholder? testid? />` (D137; 4c reuses it); test helper `mountSfc(file, props) → { root, find(tag) }` in `tests/helpers/mount-sfc.ts` (mounts a real `.vue` file that imports only `vue`, through a recording custom renderer, so a test can fire a native event and see what the component emits).
 
 - [ ] **Step 1: Write the failing wiring spec**
 
@@ -2235,7 +2538,7 @@ describe('Fleet admin Repos page wiring', () => {
   test('loads through useFleetRepos, handles the admin-only 403, then labels projects and checks every row', () => {
     expect(page).toContain('useFleetRepos()')
     expect(page).toContain('err.code === 40003')
-    expect(page).toMatch(/await load\(\)[\s\S]*await loadProjects\(\)[\s\S]*await checkAll\(\)/)
+    expect(page).toMatch(/await loadRows\(\)[\s\S]*await loadProjects\(\)[\s\S]*await checkAll\(\)/)
   })
 
   test('each row has a reachability badge and a recheck button that is disabled while checking', () => {
@@ -2244,9 +2547,11 @@ describe('Fleet admin Repos page wiring', () => {
     expect(page).toContain('@click="check(repo.id)"')
   })
 
-  test('delete asks first; add opens the dialog and reloads on created', () => {
+  test('delete asks first; a new repo reloads the rows and checks only itself', () => {
     expect(page).toContain("window.confirm(t('fleet.repos.deleteConfirm', { repo: repoName(repo) }))")
-    expect(page).toContain('<FleetAddRepoDialog v-model:open="addOpen" :projects="projects" @created="reload()" />')
+    expect(page).toContain('<FleetAddRepoDialog v-model:open="addOpen" :projects="projects" @created="onCreated" />')
+    expect(page).toMatch(/async function onCreated\(repo: FleetRepo\)[\s\S]*?await check\(repo\.id\)/)
+    expect(page.match(/async function onCreated[\s\S]*?\n\}/)?.[0]).not.toContain('checkAll')
   })
 })
 
@@ -2257,8 +2562,12 @@ describe('Fleet repo components wiring', () => {
     expect(dialog).toContain('toast.error(extractApiError(err))')
     expect(dialog).toContain('REPO_OWNER_PATTERN')
     expect(dialog).toContain('REPO_NAME_PATTERN')
-    // Native selects (plan D137, issue #58).
-    expect(dialog).toContain('data-testid="fleet-repo-project"')
+    // Native selects through FleetNativeSelect (plan D137, issue #58): a bare <select> cannot bind
+    // componentField, so the form value would never change (FleetNativeSelect's own spec proves it binds).
+    expect(dialog).toContain('<FleetNativeSelect v-bind="componentField"')
+    expect(dialog).not.toMatch(/<select[^>]*v-bind="componentField"/)
+    expect(dialog).toContain('testid="fleet-repo-project"')
+    expect(dialog).toContain('testid="fleet-repo-provider"')
     expect(dialog).not.toContain('<SelectContent')
   })
 
@@ -2274,7 +2583,189 @@ describe('Fleet repo components wiring', () => {
 Run: `cd apps/web && npx jest tests/pages/admin-fleet-repos.spec.ts`
 Expected: FAIL, ENOENT for `pages/admin/fleet/repos.vue` and the two components.
 
-- [ ] **Step 3: Write `apps/web/components/fleet/RepoReachabilityBadge.vue`**
+- [ ] **Step 3: Write the mount helper and the failing `FleetNativeSelect` spec**
+
+The web has no `@vue/test-utils` or jsdom, and a source-string check cannot prove a select binds a form (the review found the wiring specs pass with a broken binding). This helper mounts the real SFC in node. Create `apps/web/tests/helpers/mount-sfc.ts`:
+
+```ts
+/**
+ * Mounts a real .vue file in node without a DOM: compiles the SFC with vue/compiler-sfc, transpiles
+ * its TypeScript, and renders it through a minimal custom renderer that records element props and
+ * event handlers. Enough to fire a native event at an element and observe what the component emits.
+ * Only `vue` can be imported by the SFC under test.
+ */
+import { readFileSync } from 'fs'
+import * as ts from 'typescript'
+import * as Vue from 'vue'
+import type { Component } from 'vue'
+import { compileScript, parse } from 'vue/compiler-sfc'
+
+export interface FakeNode {
+  tag: string
+  props: Record<string, unknown>
+  children: FakeNode[]
+  text: string
+  parent: FakeNode | null
+}
+
+const node = (tag: string, text = ''): FakeNode => ({ tag, props: {}, children: [], text, parent: null })
+
+const renderer = Vue.createRenderer({
+  createElement: (tag: string) => node(tag),
+  createText: (text: string) => node('#text', text),
+  createComment: (text: string) => node('#comment', text),
+  setText: (n: FakeNode, text: string) => { n.text = text },
+  setElementText: (n: FakeNode, text: string) => { n.children = [node('#text', text)] },
+  insert: (child: FakeNode, parent: FakeNode, anchor: FakeNode | null) => {
+    child.parent = parent
+    const at = anchor ? parent.children.indexOf(anchor) : -1
+    parent.children = at < 0 ? [...parent.children, child] : [...parent.children.slice(0, at), child, ...parent.children.slice(at)]
+  },
+  remove: (child: FakeNode) => {
+    if (child.parent) child.parent.children = child.parent.children.filter((c) => c !== child)
+  },
+  patchProp: (el: FakeNode, key: string, _prev: unknown, next: unknown) => { el.props = { ...el.props, [key]: next } },
+  parentNode: (n: FakeNode) => n.parent,
+  nextSibling: (n: FakeNode) => {
+    if (!n.parent) return null
+    return n.parent.children[n.parent.children.indexOf(n) + 1] ?? null
+  },
+})
+
+function loadComponent(file: string): Component {
+  const { descriptor } = parse(readFileSync(file, 'utf-8'), { filename: file })
+  const script = compileScript(descriptor, { id: 'test', inlineTemplate: true })
+  const js = ts.transpileModule(script.content, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
+  }).outputText
+  const mod: { exports: Record<string, unknown> } = { exports: {} }
+  const requireVue = (id: string): unknown => {
+    if (id === 'vue') return Vue
+    throw new Error(`mount-sfc: ${file} imports ${id}; only 'vue' is supported`)
+  }
+  new Function('require', 'module', 'exports', js)(requireVue, mod, mod.exports)
+  return mod.exports.default as Component
+}
+
+export function mountSfc(file: string, props: Record<string, unknown>): { root: FakeNode; find: (tag: string) => FakeNode[] } {
+  const root = node('#root')
+  renderer.createApp(loadComponent(file), props).mount(root)
+  const find = (tag: string, from: FakeNode = root): FakeNode[] =>
+    from.children.flatMap((c) => [...(c.tag === tag ? [c] : []), ...find(tag, c)])
+  return { root, find: (tag: string) => find(tag) }
+}
+```
+
+Create `apps/web/tests/components/fleet-native-select.spec.ts`:
+
+```ts
+import { describe, test, expect, jest } from '@jest/globals'
+import { readFileSync } from 'fs'
+import { join } from 'path'
+import { mountSfc } from '../helpers/mount-sfc'
+
+const file = join(__dirname, '../..', 'components', 'fleet', 'NativeSelect.vue')
+const options = [{ value: 'github', label: 'GitHub' }, { value: 'gitlab', label: 'GitLab' }]
+
+// vee-validate's FormField hands this exact shape to its slot as `componentField`.
+function componentField(value: string) {
+  return { modelValue: value, 'onUpdate:modelValue': jest.fn(), onBlur: jest.fn() }
+}
+
+describe('FleetNativeSelect binds vee-validate componentField', () => {
+  test('a native change reaches onUpdate:modelValue with the chosen value', () => {
+    const field = componentField('github')
+    const { find } = mountSfc(file, { ...field, options, testid: 'fleet-repo-provider' })
+    const [select] = find('select')
+
+    ;(select.props.onChange as (e: unknown) => void)({ target: { value: 'gitlab' } })
+
+    expect(field['onUpdate:modelValue']).toHaveBeenCalledWith('gitlab')
+  })
+
+  test('blur reaches onBlur', () => {
+    const field = componentField('github')
+    const { find } = mountSfc(file, { ...field, options })
+    const event = { type: 'blur' }
+
+    ;(find('select')[0].props.onBlur as (e: unknown) => void)(event)
+
+    expect(field.onBlur).toHaveBeenCalledWith(event)
+  })
+
+  test('the select shows modelValue and never leaks modelValue as an attribute', () => {
+    const { find } = mountSfc(file, { ...componentField('gitlab'), options, testid: 'fleet-repo-provider' })
+    const [select] = find('select')
+
+    expect(select.props.value).toBe('gitlab')
+    expect(select.props['data-testid']).toBe('fleet-repo-provider')
+    expect(Object.keys(select.props)).not.toContain('modelValue')
+    expect(find('option').map((o) => o.props.value)).toEqual(['github', 'gitlab'])
+  })
+
+  test('a placeholder renders a disabled empty first option', () => {
+    const { find } = mountSfc(file, { ...componentField(''), options, placeholder: 'Choose' })
+    const [first] = find('option')
+
+    expect(first.props.value).toBe('')
+    expect(first.props.disabled).toBe('')
+  })
+
+  test('the SFC imports nothing but vue (the mount helper only provides vue)', () => {
+    const source = readFileSync(file, 'utf-8')
+    expect(source).not.toMatch(/from '(?!vue')/)
+  })
+})
+```
+
+Run: `cd apps/web && npx jest tests/components/fleet-native-select.spec.ts`
+Expected: FAIL, ENOENT for `components/fleet/NativeSelect.vue`.
+
+- [ ] **Step 4: Write `apps/web/components/fleet/NativeSelect.vue`**
+
+```vue
+<template>
+  <select
+    :value="modelValue"
+    :data-testid="testid"
+    class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+    @change="onChange"
+    @blur="emit('blur', $event)"
+  >
+    <option v-if="placeholder" value="" disabled>{{ placeholder }}</option>
+    <option v-for="option in options" :key="option.value" :value="option.value">{{ option.label }}</option>
+  </select>
+</template>
+
+<script setup lang="ts">
+/**
+ * A native <select> that speaks the v-model protocol, so vee-validate's `componentField`
+ * (modelValue + onUpdate:modelValue + onBlur) binds to it. Binding componentField straight onto a
+ * bare <select> renders `modelvalue` as an attribute and never updates the form (plan D137).
+ */
+interface NativeSelectOption {
+  value: string
+  label: string
+}
+
+defineProps<{ modelValue?: string; options: readonly NativeSelectOption[]; testid?: string; placeholder?: string }>()
+
+const emit = defineEmits<{
+  (e: 'update:modelValue', value: string): void
+  (e: 'blur', event: FocusEvent): void
+}>()
+
+function onChange(event: Event): void {
+  const target = event.target as HTMLSelectElement | null
+  emit('update:modelValue', target?.value ?? '')
+}
+</script>
+```
+
+Run: `cd apps/web && npx jest tests/components/fleet-native-select.spec.ts`
+Expected: PASS, 5 tests. (Verified while fixing the plan: swapping the component body for a bare `<select v-bind="$attrs">` fails the change, modelValue and placeholder tests: there is no `onChange` handler, and `modelValue` lands on the element as an attribute.)
+
+- [ ] **Step 5: Write `apps/web/components/fleet/RepoReachabilityBadge.vue`**
 
 ```vue
 <template>
@@ -2302,7 +2793,7 @@ function reasonText(reason: string | null): string {
 </script>
 ```
 
-- [ ] **Step 4: Write `apps/web/components/fleet/AddRepoDialog.vue`**
+- [ ] **Step 6: Write `apps/web/components/fleet/AddRepoDialog.vue`**
 
 ```vue
 <template>
@@ -2318,10 +2809,7 @@ function reasonText(reason: string | null): string {
           <FormItem>
             <FormLabel>{{ t('fleet.repos.form.project') }}</FormLabel>
             <FormControl>
-              <select v-bind="componentField" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="fleet-repo-project">
-                <option value="" disabled>{{ t('fleet.repos.form.projectPlaceholder') }}</option>
-                <option v-for="project in projects" :key="project.id" :value="project.slug">{{ project.name }} ({{ project.slug }})</option>
-              </select>
+              <FleetNativeSelect v-bind="componentField" :options="projectOptions" :placeholder="t('fleet.repos.form.projectPlaceholder')" testid="fleet-repo-project" />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -2331,10 +2819,7 @@ function reasonText(reason: string | null): string {
           <FormItem>
             <FormLabel>{{ t('fleet.repos.form.provider') }}</FormLabel>
             <FormControl>
-              <select v-bind="componentField" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="fleet-repo-provider">
-                <option value="github">{{ t('fleet.repos.provider.github') }}</option>
-                <option value="gitlab">{{ t('fleet.repos.provider.gitlab') }}</option>
-              </select>
+              <FleetNativeSelect v-bind="componentField" :options="providerOptions" testid="fleet-repo-provider" />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -2368,6 +2853,7 @@ function reasonText(reason: string | null): string {
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
@@ -2376,7 +2862,7 @@ import { REPO_NAME_PATTERN, REPO_OWNER_PATTERN } from '~/lib/fleet-validation'
 import type { ProjectOption } from '~/composables/useFleetRepos'
 import type { FleetRepo } from '~/lib/fleet-types'
 
-defineProps<{ open: boolean; projects: ProjectOption[] }>()
+const props = defineProps<{ open: boolean; projects: ProjectOption[] }>()
 
 const emit = defineEmits<{
   (e: 'update:open', value: boolean): void
@@ -2386,6 +2872,12 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const toast = useAppToast()
 const { create } = useFleetRepos()
+
+const projectOptions = computed(() => props.projects.map((p) => ({ value: p.slug, label: `${p.name} (${p.slug})` })))
+const providerOptions = computed(() => [
+  { value: 'github', label: t('fleet.repos.provider.github') },
+  { value: 'gitlab', label: t('fleet.repos.provider.gitlab') },
+])
 
 const formSchema = toTypedSchema(z.object({
   projectSlug: z.string().min(1, t('fleet.validation.required')),
@@ -2399,8 +2891,9 @@ const { handleSubmit, isSubmitting, resetForm } = useForm({
   initialValues: { projectSlug: '', provider: 'github' as const, owner: '', name: '' },
 })
 
-// The API runs the forge check before saving, so a 409 (already registered) or a 422
-// with a check reason arrives here as a translated API message.
+// The API runs the forge check before saving. A 409 (already registered) or a 422 arrives as the
+// API's translated message; a 422's message embeds the check reason as its raw code, which stays
+// raw here: parsing it out of the message is banned (.nax/rules/common.md, structured codes only).
 const onSubmit = handleSubmit(async (values) => {
   try {
     const repo = await create(values)
@@ -2415,7 +2908,7 @@ const onSubmit = handleSubmit(async (values) => {
 </script>
 ```
 
-- [ ] **Step 5: Write `apps/web/pages/admin/fleet/repos.vue`**
+- [ ] **Step 7: Write `apps/web/pages/admin/fleet/repos.vue`**
 
 ```vue
 <script setup lang="ts">
@@ -2444,22 +2937,29 @@ function repoName(repo: FleetRepo): string {
   return `${repo.owner}/${repo.name}`
 }
 
-async function reload(): Promise<void> {
+/** Loads the rows; false (after a toast or the admin-only note) when that failed. */
+async function loadRows(): Promise<boolean> {
   try {
     await load()
+    return true
   } catch (err: unknown) {
-    if (isForbidden(err)) {
-      adminOnly.value = true
-      return
-    }
-    toast.error(extractApiError(err))
-    return
+    if (isForbidden(err)) adminOnly.value = true
+    else toast.error(extractApiError(err))
+    return false
   }
+}
+
+async function reload(): Promise<void> {
+  if (!(await loadRows())) return
   // The project list only labels rows; a failure there leaves the ids showing.
   await loadProjects().catch((err: unknown) => toast.error(extractApiError(err)))
   await checkAll()
 }
 
+/** A new repo: reload the rows (the dialog has its own composable instance) and check only the new one. */
+async function onCreated(repo: FleetRepo): Promise<void> {
+  if (await loadRows()) await check(repo.id)
+}
 
 async function confirmDelete(repo: FleetRepo): Promise<void> {
   if (!window.confirm(t('fleet.repos.deleteConfirm', { repo: repoName(repo) }))) return
@@ -2519,22 +3019,22 @@ onMounted(() => reload())
       <p v-if="hasMore" class="text-sm text-muted-foreground">{{ t('fleet.common.more', { n: FLEET_LIST_SIZE }) }}</p>
     </template>
 
-    <FleetAddRepoDialog v-model:open="addOpen" :projects="projects" @created="reload()" />
+    <FleetAddRepoDialog v-model:open="addOpen" :projects="projects" @created="onCreated" />
   </div>
 </template>
 ```
 
-`reload()` never throws (it toasts or sets `adminOnly`), so `@created="reload()"` and `onMounted` need no catch; it re-checks every row, including the one just added.
+`reload()` and `onCreated()` never throw (they toast or set `adminOnly`; `check` records its own errors), so `onMounted` and `@created` need no catch. Only mount checks every row: adding one repo checks only that repo, so a large registry does not re-run every forge check on each add.
 
-- [ ] **Step 6: Run the spec and the guard**
+- [ ] **Step 8: Run the specs and the guard**
 
-Run: `cd apps/web && npx jest tests/pages/admin-fleet-repos.spec.ts tests/lib/api-path-guard.spec.ts tests/i18n/used-keys-exist.spec.ts`
-Expected: PASS, 3 suites.
+Run: `cd apps/web && npx jest tests/pages/admin-fleet-repos.spec.ts tests/components/fleet-native-select.spec.ts tests/lib/api-path-guard.spec.ts tests/i18n/used-keys-exist.spec.ts`
+Expected: PASS, 4 suites.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add apps/web/components/fleet/RepoReachabilityBadge.vue apps/web/components/fleet/AddRepoDialog.vue apps/web/pages/admin/fleet/repos.vue apps/web/tests/pages/admin-fleet-repos.spec.ts
+git add apps/web/components/fleet/NativeSelect.vue apps/web/components/fleet/RepoReachabilityBadge.vue apps/web/components/fleet/AddRepoDialog.vue apps/web/pages/admin/fleet/repos.vue apps/web/tests/pages/admin-fleet-repos.spec.ts apps/web/tests/components/fleet-native-select.spec.ts apps/web/tests/helpers/mount-sfc.ts
 git commit -m "feat(web): admin fleet Repos page with reachability checks"
 ```
 
@@ -2557,17 +3057,17 @@ Expected: exit 0.
 - [ ] **Step 3: All web unit tests**
 
 Run: `cd apps/web && bun run test 2>&1 | tail -5`
-Expected: every suite passes; 11 suites and 57 tests more than the Task 0 baseline (verified while writing, on `main` at `0ba9ba94` plus this plan: 116 suites / 2079 tests before, 127 / 2136 after).
+Expected: every suite passes; 13 suites and 73 tests more than the Task 0 baseline (verified after the review fixes, on `main` at `0ba9ba94` plus this plan: 116 suites / 2079 tests before, 129 / 2152 after; `bun run lint` and `bun run type-check` exit 0, and type-check covers the new SFCs and `tests/helpers/mount-sfc.ts`).
 
 - [ ] **Step 4: Manual smoke (human, optional, local only)**
 
 With the API on :3100 (`cd apps/api && bun run start:dev`, test Postgres up) and the web on :3101 (`cd apps/web && bun run dev`), log in as a global admin and check:
 
 1. The sidebar shows Runners and Repos; a MEMBER user does not see them, and opening `/admin/fleet/runners` as that user shows the admin-only note.
-2. Runners: "Enrollment token" with labels `linux, gpu` shows a `ke_` token and the enroll command with `http://localhost:3101`; closing and reopening shows the form again. Uppercase `GPU` is refused with the translated message.
-3. With a runner enrolled (or a row inserted by the 4a integration fixtures), the row shows Online, chips, "Ns ago"; stop the API for 20 s: the stale note appears without toasts, and clears after the API is back.
+2. Runners: "Enrollment token" with labels `linux, gpu` shows a `ke_` token and the enroll command with `http://localhost:3101`; Copy works on localhost; Esc and a click outside do not close the dialog while the token shows; Done closes it, and reopening shows the form again. Uppercase `GPU` is refused with the translated message. Opened from another machine over plain http (no Clipboard API), Copy shows the "could not copy" toast and the token is still selectable.
+3. With a runner enrolled (or a row inserted by the 4a integration fixtures), the row shows Online, chips with translated credential kinds, "Ns ago"; stop the API for 20 s: the stale note appears without toasts, and clears after the API is back. Switch to another tab for 30 s and back: the table refreshes at once (network tab shows one `GET /api/fleet/runners` on return, none while hidden).
 4. Edit labels and capacity, disable, enable, delete (confirm dialog).
-5. Repos: Add repo with a project and a repo koda cannot reach shows the API's translated 422 message; an existing row shows Reachable or Unreachable with a reason; "Check again" shows Checking first.
+5. Repos: in Add repo, choose a project other than the first and provider GitLab, then submit: the network tab's `POST /api/fleet/repos` body carries that `projectSlug` and `"provider":"gitlab"` (the D137 binding; the review found a bare select would send `github` and an empty project). A repo koda cannot reach shows the API's 422 message (its reason code stays raw there); an existing row shows Reachable or Unreachable with a translated reason; "Check again" shows Checking first; adding a repo checks only the new row.
 6. Switch the language to zh: every fleet string changes.
 
 - [ ] **Step 5: Hand-off**
