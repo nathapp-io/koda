@@ -96,6 +96,9 @@ export interface SnapshotEventPayload {
   resultBranch?: string;
   resultSha?: string;
   resultPrUrl?: string;
+  /** S1b §1.1: outcome of the runner's work-in-progress push after an unfinished RUN.
+   *  `pushed` | `none` | `failed:<reason>` (printable ASCII, at most 200 chars of reason). */
+  wipPush?: string;
   /** Log events dropped by the runner's rate limit since the last snapshot (§3.2). */
   droppedLogs?: number;
 }

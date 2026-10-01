@@ -30,6 +30,15 @@ describe('interpretEvent', () => {
     expect(hostile).toEqual({ kind: 'mirror', patch: {} });
   });
 
+  it('mirrors a valid wipPush and drops an invalid one without rejecting the snapshot', () => {
+    for (const value of ['pushed', 'none', 'failed:diverged', 'failed:git auth failed']) {
+      expect(interpretEvent('snapshot', { wipPush: value })).toEqual({ kind: 'mirror', patch: { wipPush: value } });
+    }
+    for (const value of ['', 'yes', 'failed:', `failed:${'x'.repeat(201)}`, 'failed:line\nbreak', 42]) {
+      expect(interpretEvent('snapshot', { wipPush: value, currentPhase: 'review' })).toEqual({ kind: 'mirror', patch: { currentPhase: 'review' } });
+    }
+  });
+
   it('stores lifecycle and log events without effect, and flags an oversized log', () => {
     expect(interpretEvent('lifecycle', { level: 'warn', message: 'watcher error' })).toEqual({ kind: 'none' });
     expect(interpretEvent('log', { stream: 'run', text: 'ok' })).toEqual({ kind: 'none' });

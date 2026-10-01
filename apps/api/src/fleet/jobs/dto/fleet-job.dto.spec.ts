@@ -11,10 +11,12 @@ describe('fleet job DTOs', () => {
       startedAt: null, finishedAt: null, cancelRequestedAt: null, naxRunId: null, naxLogRunId: null, naxCostRunId: null,
       progress: null, currentStoryId: null, currentPhase: null, costSpentUsd: '0.1234', lastHeartbeatAt: null,
       finishResult: null, escalationReason: null, exitCode: null, resultBranch: null, resultSha: null, resultPrUrl: null,
+      wipPush: 'failed:diverged',
       eventSeq: 3, ackedRunnerSeq: 2, attributedAt: null, updatedAt: now,
     });
     const json = JSON.parse(JSON.stringify(dto));
     expect(json).toEqual(expect.objectContaining({ maxCostUsd: '5.5', costSpentUsd: '0.1234', queuedAt: now.toISOString() }));
+    expect(json).toEqual(expect.objectContaining({ wipPush: 'failed:diverged' }));
     for (const hidden of ['runnerBootId', 'eventSeq', 'ackedRunnerSeq', 'attributedAt']) expect(json).not.toHaveProperty(hidden);
     expect(JSON.stringify(FleetJobEventDto.from({ id: 'e', jobId: 'j', seq: 1, leaseEpoch: 0, runnerSeq: null, type: 'state', payload: {}, createdAt: now }))).toContain('"seq":1');
   });

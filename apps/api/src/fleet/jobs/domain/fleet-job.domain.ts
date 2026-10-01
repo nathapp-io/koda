@@ -53,6 +53,7 @@ export interface FleetJobRecord {
   resultBranch: string | null;
   resultSha: string | null;
   resultPrUrl: string | null;
+  wipPush: string | null;
   eventSeq: number;
   ackedRunnerSeq: number;
   attributedAt: Date | null;
@@ -78,7 +79,7 @@ type Mutable =
   | 'state' | 'stateReason' | 'runnerId' | 'runnerBootId' | 'assignedAt' | 'startedAt' | 'finishedAt'
   | 'cancelRequestedAt' | 'naxRunId' | 'naxLogRunId' | 'naxCostRunId' | 'progress' | 'currentStoryId'
   | 'currentPhase' | 'costSpentUsd' | 'lastHeartbeatAt' | 'finishResult' | 'escalationReason' | 'exitCode'
-  | 'resultBranch' | 'resultSha' | 'resultPrUrl' | 'ackedRunnerSeq';
+  | 'resultBranch' | 'resultSha' | 'resultPrUrl' | 'wipPush' | 'ackedRunnerSeq';
 
 /** Columns a transition, snapshot or requeue may change. `bumpEpoch` adds one to leaseEpoch (plan D4). */
 export type FleetJobPatch = Partial<Pick<FleetJobRecord, Mutable>> & { bumpEpoch?: boolean };

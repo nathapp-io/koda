@@ -673,6 +673,7 @@ model FleetJob {
   resultBranch      String?
   resultSha         String?
   resultPrUrl       String?
+  wipPush           String? // S1b §1.1: pushed | none | failed:<reason>
   eventSeq          Int       @default(0) // server timeline counter (plan D2)
   ackedRunnerSeq    Int       @default(0) // cumulative runner ack for leaseEpoch (plan D2)
   attributedAt      DateTime? // PR/MR attribution comment posted (plan D19)

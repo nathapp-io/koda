@@ -8046,6 +8046,11 @@
           "resultPrUrl": {
             "type": "string",
             "nullable": true
+          },
+          "wipPush": {
+            "type": "string",
+            "nullable": true,
+            "description": "pushed | none | failed:<reason> (S1b §1.1)"
           }
         },
         "required": [
