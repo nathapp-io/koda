@@ -41,9 +41,14 @@ From the S1 spec, the overview and the repo rules (`.nax/context.md`, `.nax/rule
 - **Wire shapes:** every JSON route returns `JsonResponse.Ok(...)`; lists use `parseQuery` + `toPageResult`
   (`{ total, current, size, hasNext, hasPrev, records }`, `size` 1..100); dates are ISO strings; BigInt/Decimal are
   strings.
-- **Errors on the wire are `{ ret, message }`** (nathapp `GlobalExceptionsFilter`); the generated CLI client throws
-  that parsed body. `ret` is the AppException code (409 for `ConflictAppException`, 422 for the fleet 422s). Never
-  match on message text (`.nax/rules/common.md`).
+- **Errors on the wire are `{ ret, message }`** (nathapp `GlobalExceptionsFilter`), with no HTTP status; the
+  generated CLI client throws that parsed body. Observed `ret` values (2026-10-01, real API): 401 → `40000`, 403 →
+  `40003`, 404 → `404`, 400 validation → `-2`, `ConflictAppException` → `409`, fleet 422s → `422`. The shared
+  `handleApiError` reads only `status`, so on its own every API error exits 1; fleet commands go through
+  `handleFleetError` (Task 5), which maps those codes to the statuses `handleApiError` understands. Never match on
+  message text (`.nax/rules/common.md`).
+- **Exit codes:** commander option-parse failures (`parsePositiveInt`, `parseUsd`) exit 1 (commander's own
+  behaviour, as for every existing command); validation the command does itself exits 3; 401/403 exit 2; 404 exits 4.
 - **OpenAPI:** `openapi.json` at the repo root is committed and must match the API; `apps/cli/src/generated/` is
   gitignored and regenerated with `bun run generate:cli`; never hand-edit generated files.
 - **CLI rules (`.nax/rules/cli.md`):** generated SDK only (no hand-written HTTP); every data command supports
@@ -66,6 +71,8 @@ Plan-level rules:
   lint `bun run lint`.
 - CLI: `cd apps/cli && npx jest <path>`, `bun run test`, `bun run type-check`, `bun run lint`.
 - After a Prisma schema change run `bun run db:generate` from the repo root.
+- `bun run api:export-spec` boots the app and exits 1 with no output when `apps/api/.env` is missing (a fresh
+  worktree): `cp apps/api/.env.example apps/api/.env` first. `bun scripts/export-spec.cjs` in `apps/api` shows the error.
 
 ## Review Focus
 
@@ -81,7 +88,7 @@ The five uncovered inputs most likely to bite a user, each pinned by a test in t
 4. **`--max-cost` input:** `5`, `0.0001` accepted; `0`, `-1`, `1e3`, `0.00001`, `10000.01`, `abc`, `` rejected
    before any request. Task 7.
 5. **`koda fleet job bundle` when the output file exists, or when no bundle exists yet.** Existing file: refused
-   without `--force`, never truncated; no bundle: exit 1 with the API message, no file left behind. Task 8.
+   without `--force`, never truncated; no bundle: exit 4, no file left behind. Task 8.
 
 ## Plan decisions beyond the spec and overview
 
@@ -350,7 +357,7 @@ const RUNNER_SELECT = {
 `apps/api/src/fleet/runners/dto/runner.dto.ts`:
 
 ```ts
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 import { isRunnerOnline } from '../../common/runner-online';
 import type { RunnerRecord } from '../domain/runner.domain';
 
@@ -371,7 +378,7 @@ export class RunnerDto {
   @ApiProperty() declare daemonVersion: string;
   @ApiProperty() declare protocolVersion: number;
   @ApiProperty({ description: 'Id of the daemon boot the runner last reported (#158)' }) declare bootId: string;
-  @ApiPropertyOptional({ type: String, nullable: true, description: 'Start of the current daemon boot; null until the first boot after 2026-10-01' })
+  @ApiProperty({ type: String, nullable: true, description: 'Start of the current daemon boot; null until the first boot after 2026-10-01' })
   declare bootedAt: string | null;
   @ApiProperty({ description: 'Synced within FLEET_RUNNER_OFFLINE_SEC (the placement rule)' }) declare online: boolean;
   @ApiProperty() declare enabled: boolean;
@@ -660,13 +667,17 @@ In `runners.service.ts` import `RunnerSummaryDto` and add:
 
 ```ts
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiExtraModels, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { parseQuery, toPageResult } from '../../common/dto/koda-page.query';
 import { ProjectMembershipGuard } from '../../projects/project-membership.guard';
 import { RunnersService } from './runners.service';
 import { ListRunnersQuery } from './dto/list-runners.query';
+import { RunnerSummaryDto } from './dto/runner-summary.dto';
 
+// Nothing else references RunnerSummaryDto (the page response has only a description), so without
+// ApiExtraModels it is missing from openapi.json and the CLI has no type for it (verified 2026-10-01).
+@ApiExtraModels(RunnerSummaryDto)
 @ApiTags('fleet')
 @ApiBearerAuth()
 @ApiParam({ name: 'slug', required: true, schema: { type: 'string' } })
@@ -684,10 +695,6 @@ export class ProjectFleetRunnersController {
   }
 }
 ```
-
-`RunnerSummaryDto` must appear in `openapi.json` components (the CLI types the page records with it). If the
-Task 4 export shows no `RunnerSummaryDto` schema because nothing references it, add
-`@ApiExtraModels(RunnerSummaryDto)` to this controller (import from `@nestjs/swagger`) and re-export.
 
 `apps/api/src/fleet/runners/runners.module.ts`:
 
@@ -839,7 +846,7 @@ Expected: FAIL: `make(...).check is not a function`.
 `apps/api/src/fleet/repos/dto/repo-check-result.dto.ts`:
 
 ```ts
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 import type { RepoCheckReason } from '../../git-broker/repo-check.exception';
 
 const REASONS: RepoCheckReason[] = [
@@ -852,7 +859,7 @@ const REASONS: RepoCheckReason[] = [
 export class RepoCheckResultDto {
   @ApiProperty() declare repoId: string;
   @ApiProperty() declare reachable: boolean;
-  @ApiPropertyOptional({ enum: REASONS, nullable: true }) declare reason: RepoCheckReason | null;
+  @ApiProperty({ enum: REASONS, nullable: true }) declare reason: RepoCheckReason | null;
   @ApiProperty() declare checkedAt: string;
 }
 ```
@@ -1036,13 +1043,12 @@ Run (repo root): `bun run api:export-spec`
 Expected: `OpenAPI spec exported to .../openapi.json`.
 
 Run: `cd apps/api && npx jest src/fleet/fleet-openapi.contract.spec.ts`
-Expected: PASS. If only `RunnerSummaryDto` is missing, apply the `@ApiExtraModels` note from Task 2 Step 3 and
-re-export.
+Expected: PASS.
 
 Run (repo root): `bun run generate:cli && grep -c "projectFleetRunnersControllerList\|fleetReposControllerCheck" apps/cli/src/generated/sdk.gen.ts`
 Expected: a count of at least 2. Then
-`grep -n "export type FleetJobsControllerCancelData" -A6 apps/cli/src/generated/types.gen.ts` shows
-`path: { slug: string; id: string; }`.
+`grep -n "export type FleetJobsControllerCancelData" -A6 apps/cli/src/generated/types.gen.ts` shows a `path`
+object containing `slug: string` (next to `id: string`; order does not matter).
 
 - [ ] **Step 5: Check the whole API and CLI still build against the new contract**
 
@@ -1085,7 +1091,8 @@ git commit -m "feat(fleet): typed slug params and openapi export for slice 4"
     `resolveRepo(slug: string, ref: string): Promise<FleetRepoDto | null>`;
     `resolveRunner(slug: string, ref: string): Promise<RunnerSummaryDto | null>`;
     `runnerNames(slug: string): Promise<ReadonlyMap<string, string>>`;
-    `printPlacement(result: DispatchResultDto, names: ReadonlyMap<string, string>): void`
+    `printPlacement(result: DispatchResultDto, names: ReadonlyMap<string, string>): void`;
+    `handleFleetError(err: unknown, opts?: { notFoundMessage?: string; adminHint?: boolean }): never`
   - `registerFleetRunner(fleet: Command): void` (`commands/fleet-runner.ts`)
   - `fleetCommand(program: Command): Command` (`commands/fleet.ts`) returns the `fleet` group; Tasks 6-8 add one
     `registerFleetX(fleet)` line each.
@@ -1173,6 +1180,43 @@ describe('fleet-shared', () => {
     expect((await runnerNames('web')).get('r1')).toBe('box-1');
   });
 
+  describe('handleFleetError', () => {
+    let exit: jest.SpyInstance;
+    let err: jest.SpyInstance;
+    beforeEach(() => {
+      exit = jest.spyOn(process, 'exit').mockImplementation((() => {}) as never);
+      err = jest.spyOn(console, 'error').mockImplementation(() => {});
+    });
+    afterEach(() => { exit.mockRestore(); err.mockRestore(); });
+    const stderr = () => err.mock.calls.flat().join('\n');
+
+    it.each([
+      [{ ret: 40000, message: 'Unauthorized' }, 2],
+      [{ ret: 40003, message: 'Forbidden' }, 2],
+      [{ ret: -2, message: 'size must not be greater than 100' }, 3],
+      [{ ret: 409, message: 'An active job already runs this feature: j1' }, 1],
+      [{ ret: 422, message: 'The pinned runner can never run this job: tools' }, 1],
+      [new Error('socket hang up'), 1],
+    ])('maps %j to exit %i', (body, code) => {
+      handleFleetError(body);
+      expect(exit).toHaveBeenCalledWith(code);
+    });
+
+    it('maps 404 to exit 4 with the not-found message', () => {
+      handleFleetError({ ret: 404, message: 'Runner not found' }, { notFoundMessage: 'Runner not found: r9' });
+      expect(exit).toHaveBeenCalledWith(4);
+      expect(stderr()).toContain('Runner not found: r9');
+    });
+
+    it('adds the admin-token hint to a 403 only when asked', () => {
+      handleFleetError({ ret: 40003, message: 'Forbidden' }, { adminHint: true });
+      expect(stderr()).toContain('global-admin user access token');
+      err.mockClear();
+      handleFleetError({ ret: 40003, message: 'Forbidden' });
+      expect(stderr()).not.toContain('global-admin user access token');
+    });
+  });
+
   it('printPlacement shows the assigned runner by name, or each misfit', () => {
     const log = jest.spyOn(console, 'log').mockImplementation(() => {});
     const job = { id: 'j1', state: 'ASSIGNED' };
@@ -1225,7 +1269,9 @@ import {
   type RunnerSummaryDto,
 } from '../generated';
 import { unwrap } from '../utils/api';
-import { table } from '../utils/output';
+import { apiErrorCode } from '../utils/api-error-code';
+import { handleApiError } from '../utils/error';
+import { error, table } from '../utils/output';
 
 export interface FleetPage<T> {
   total: number;
@@ -1288,6 +1334,21 @@ export async function runnerNames(slug: string): Promise<ReadonlyMap<string, str
   return new Map((await projectRunners(slug)).map((r) => [r.id, r.name]));
 }
 
+// The API's error envelope carries an AppException code, not the HTTP status (Global Constraints).
+const RET_STATUS: ReadonlyMap<number, number> = new Map([[40000, 401], [40003, 403], [404, 404], [-2, 400]]);
+
+/**
+ * handleApiError for fleet commands: maps the envelope code to the status handleApiError reads, so 401/403
+ * exit 2, 404 exits 4 (with `notFoundMessage`) and validation exits 3. `adminHint` adds the admin-token hint to a 403.
+ */
+export function handleFleetError(err: unknown, opts: { notFoundMessage?: string; adminHint?: boolean } = {}): never {
+  const code = apiErrorCode(err);
+  const status = code === undefined ? undefined : RET_STATUS.get(code);
+  if (status === 403 && opts.adminHint) error(ADMIN_TOKEN_HINT);
+  const mapped = status === undefined ? err : { ...(err as Record<string, unknown>), status };
+  return handleApiError(mapped, opts.notFoundMessage ? { notFoundMessage: opts.notFoundMessage } : undefined);
+}
+
 /** Dispatch and requeue answer: the job, and either its runner or why no runner fits now. */
 export function printPlacement(result: DispatchResultDto, names: ReadonlyMap<string, string>): void {
   console.log(`Job ${result.job.id} ${result.job.state}`);
@@ -1335,7 +1396,7 @@ import { fleetCommand } from './fleet';
 import { enrollmentsControllerCreate, runnersControllerList, runnersControllerUpdate } from '../generated';
 import { resolveContext } from '../config';
 
-const CTX = { apiKey: 'jwt', apiUrl: 'https://koda.example.com/api', projectSlug: 'web' };
+const CTX = { apiKey: 'jwt', apiUrl: 'https://koda.example.com', projectSlug: 'web' };
 const runner = {
   id: 'r1', name: 'box-1', os: 'linux', arch: 'x64', labels: ['linux', 'gpu'], capacity: 2,
   capabilities: { nax: { version: '0.83.1' } }, daemonVersion: '0.1.0', protocolVersion: 1, bootId: 'b1',
@@ -1360,7 +1421,7 @@ describe('koda fleet runner', () => {
     jest.spyOn(console, 'error').mockImplementation(() => {});
   });
 
-  afterEach(() => jest.restoreAllMocks());
+  afterEach(() => jest.clearAllMocks());
 
   it('list prints name, online, enabled, labels, capacity, nax version and boot age', async () => {
     (runnersControllerList as jest.Mock).mockResolvedValue({ ret: 0, data: page });
@@ -1383,6 +1444,13 @@ describe('koda fleet runner', () => {
     (runnersControllerList as jest.Mock).mockResolvedValue({ ret: 0, data: page });
     await run('list', '--json');
     expect(logSpy).toHaveBeenCalledWith(JSON.stringify(page, null, 2));
+  });
+
+  it('a non-admin gets exit 2 and the admin-token hint', async () => {
+    (runnersControllerList as jest.Mock).mockRejectedValue({ ret: 40003, message: 'Forbidden' });
+    await run('list');
+    expect(exitSpy).toHaveBeenCalledWith(2);
+    expect((console.error as jest.Mock).mock.calls.flat().join('\n')).toContain('global-admin user access token');
   });
 
   it('enable and disable patch only enabled', async () => {
@@ -1472,10 +1540,9 @@ import {
 } from '../generated';
 import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
-import { handleApiError } from '../utils/error';
 import { error, table } from '../utils/output';
 import { parsePositiveInt } from '../utils/parse-positive-int';
-import { ADMIN_TOKEN_HINT, ago, type FleetPage, pageHint } from './fleet-shared';
+import { ADMIN_TOKEN_HINT, ago, type FleetPage, handleFleetError, pageHint } from './fleet-shared';
 
 const LABEL = /^[a-z0-9][a-z0-9._-]{0,31}$/; // UpdateRunnerDto / CreateEnrollmentDto LABEL_PATTERN
 
@@ -1513,7 +1580,7 @@ function registerList(runner: Command): void {
         }
         process.exit(0);
       } catch (err: unknown) {
-        handleApiError(err);
+        handleFleetError(err, { adminHint: true });
       }
     });
 }
@@ -1532,7 +1599,7 @@ function registerToggle(runner: Command, name: 'enable' | 'disable'): void {
         else console.log(`Runner ${updated.name} ${enabled ? 'enabled' : 'disabled'}`);
         process.exit(0);
       } catch (err: unknown) {
-        handleApiError(err, { notFoundMessage: `Runner not found: ${runnerId}` });
+        handleFleetError(err, { adminHint: true, notFoundMessage: `Runner not found: ${runnerId}` });
       }
     });
 }
@@ -1563,7 +1630,7 @@ function registerEnrollToken(runner: Command): void {
         }
         process.exit(0);
       } catch (err: unknown) {
-        handleApiError(err);
+        handleFleetError(err, { adminHint: true });
       }
     });
 }
@@ -1633,7 +1700,10 @@ jest.mock('../generated', () => ({
 }));
 ```
 
-and these tests (program built with `fleetCommand(program)`, `run = (...a) => program.parseAsync(['node','koda','fleet','repo',...a])`):
+and these tests. The Task 6-8 specs reuse the Task 5 runner spec's `describe`/`beforeEach`/`afterEach` shell
+verbatim (program built with `fleetCommand(program)`, `afterEach(() => jest.clearAllMocks())`); fixtures go at
+module level, while `run` and any spy go inside the `describe` (they close over `program`). Here
+`const run = (...a: string[]) => program.parseAsync(['node', 'koda', 'fleet', 'repo', ...a]);`:
 
 ```ts
 const repo = { id: 'fr1', projectId: 'p', provider: 'gitlab', owner: 'group/sub', name: 'svc', defaultBranch: 'main', githubInstallationId: null, createdAt: '' };
@@ -1716,11 +1786,10 @@ import {
 } from '../generated';
 import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
-import { handleApiError } from '../utils/error';
 import { requireForce } from '../utils/force';
 import { error, table } from '../utils/output';
 import { parsePositiveInt } from '../utils/parse-positive-int';
-import { ADMIN_TOKEN_HINT, type FleetPage, pageHint, splitRepoPath } from './fleet-shared';
+import { ADMIN_TOKEN_HINT, type FleetPage, handleFleetError, pageHint, splitRepoPath } from './fleet-shared';
 
 const PROVIDERS = ['github', 'gitlab'] as const;
 type Provider = (typeof PROVIDERS)[number];
@@ -1748,7 +1817,7 @@ function registerAdd(repo: Command): void {
         else console.log(`Registered ${created.owner}/${created.name} (${created.id}), default branch ${created.defaultBranch}`);
         process.exit(0);
       } catch (err: unknown) {
-        handleApiError(err);
+        handleFleetError(err, { adminHint: true });
       }
     });
 }
@@ -1783,7 +1852,7 @@ function registerList(repo: Command): void {
         }
         process.exit(0);
       } catch (err: unknown) {
-        handleApiError(err);
+        handleFleetError(err, { adminHint: Boolean(options.all) });
       }
     });
 }
@@ -1801,7 +1870,7 @@ function registerRemove(repo: Command): void {
         console.log(`Removed repo ${repoId}`);
         process.exit(0);
       } catch (err: unknown) {
-        handleApiError(err, { notFoundMessage: `Repo not found: ${repoId}` });
+        handleFleetError(err, { adminHint: true, notFoundMessage: `Repo not found: ${repoId}` });
       }
     });
 }
@@ -1819,7 +1888,7 @@ function registerCheck(repo: Command): void {
         else console.log(result.reachable ? `Reachable (${result.checkedAt})` : `Unreachable: ${result.reason ?? 'unknown'} (${result.checkedAt})`);
         process.exit(result.reachable ? 0 : 1);
       } catch (err: unknown) {
-        handleApiError(err, { notFoundMessage: `Repo not found: ${repoId}` });
+        handleFleetError(err, { adminHint: true, notFoundMessage: `Repo not found: ${repoId}` });
       }
     });
 }
@@ -1864,7 +1933,7 @@ git commit -m "feat(cli): koda fleet repo add, list, rm, check"
 - Consumes: `resolveRepo`, `resolveRunner`, `runnerNames`, `printPlacement` (Task 5); `apiErrorCode` (Task 5);
   generated `fleetJobsControllerDispatch`, `fleetJobsControllerList`.
 - Produces: `parseUsd(value: string): number`; `findActiveJob(slug: string, repoId: string, feature: string): Promise<FleetJobDto | null>`
-  (exported from `fleet-dispatch.ts`, Task 8's `requeue` uses it); `registerFleetDispatch(fleet: Command): void`.
+  (exported from `fleet-dispatch.ts`); `registerFleetDispatch(fleet: Command): void`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1887,7 +1956,8 @@ describe('parseUsd', () => {
 
 `apps/cli/src/commands/fleet-dispatch.spec.ts` (same boilerplate as `fleet-runner.spec.ts`; `../generated` mock with
 `fleetJobsControllerDispatch`, `fleetJobsControllerList`, `projectFleetReposControllerList`,
-`projectFleetRunnersControllerList`):
+`projectFleetRunnersControllerList`). Reuse the Task 5 shell as described in Task 6; the `run` and `beforeEach`
+lines below go inside the `describe`:
 
 ```ts
 const repo = { id: 'fr1', projectId: 'p', provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', createdAt: '' };
@@ -2002,10 +2072,9 @@ import {
 import { unwrap } from '../utils/api';
 import { apiErrorCode } from '../utils/api-error-code';
 import { withContext } from '../utils/context';
-import { handleApiError } from '../utils/error';
 import { error } from '../utils/output';
 import { parseUsd } from '../utils/parse-usd';
-import { type FleetPage, printPlacement, resolveRepo, resolveRunner, runnerNames } from './fleet-shared';
+import { type FleetPage, handleFleetError, printPlacement, resolveRepo, resolveRunner, runnerNames } from './fleet-shared';
 
 const ACTIVE = new Set(['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING']);
 const collect = (value: string, previous: string[]): string[] => [...previous, value];
@@ -2049,14 +2118,14 @@ async function buildBody(slug: string, o: DispatchOptions): Promise<DispatchFlee
 
 /** A 409 on dispatch names the active job (D133, overview D121); any other error, or a failed lookup, reports as-is. */
 async function explainConflict(err: unknown, slug: string, body: DispatchFleetJobDto): Promise<void> {
-  if (apiErrorCode(err) !== 409) return handleApiError(err);
+  if (apiErrorCode(err) !== 409) return handleFleetError(err);
   let active: FleetJobDto | null = null;
   try {
     active = await findActiveJob(slug, body.repoId, body.feature);
   } catch {
     // The lookup is a courtesy; the original 409 is the answer.
   }
-  if (!active) return handleApiError(err);
+  if (!active) return handleFleetError(err);
   error(`An active job already runs ${body.feature} on this repo: ${active.id} (${active.state}). koda fleet job show ${active.id}`);
   process.exit(1);
 }
@@ -2089,7 +2158,7 @@ export function registerFleetDispatch(fleet: Command): void {
         process.exit(0);
       } catch (err: unknown) {
         if (body) await explainConflict(err, slug, body);
-        else handleApiError(err);
+        else handleFleetError(err);
       }
     });
 }
@@ -2136,7 +2205,7 @@ git commit -m "feat(cli): koda fleet dispatch"
 
 **Interfaces:**
 - Consumes: `resolveRepo`, `resolveRunner`, `runnerNames`, `printPlacement`, `pageHint`, `ago`, `FleetPage`
-  (Task 5); `apiErrorCode` (Task 5); `findActiveJob` (Task 7); generated `fleetJobsControllerList`,
+  (Task 5); generated `fleetJobsControllerList`,
   `fleetJobsControllerGet`, `fleetJobsControllerCancel`, `fleetJobsControllerRequeue`, `jobBundleControllerDownload`.
 - Produces: `registerFleetJob(fleet: Command): void`.
 
@@ -2144,7 +2213,8 @@ git commit -m "feat(cli): koda fleet dispatch"
 
 `apps/cli/src/commands/fleet-job.spec.ts` (same boilerplate as `fleet-runner.spec.ts`, plus the `errorSpy` of
 Task 7; `../generated` mock with the five job functions plus `projectFleetReposControllerList` and
-`projectFleetRunnersControllerList`; also mock `fs/promises`):
+`projectFleetRunnersControllerList`; also mock `fs/promises`). The `run`, `beforeEach` and `it` blocks go inside
+the `describe`:
 
 ```ts
 const mockWriteFile = jest.fn();
@@ -2237,11 +2307,11 @@ const run = (...a: string[]) => program.parseAsync(['node', 'koda', 'fleet', 'jo
     expect(exitSpy).toHaveBeenLastCalledWith(1);
   });
 
-  it('bundle with no bundle yet writes nothing', async () => {
+  it('bundle with no bundle yet writes nothing and exits 4', async () => {
     (jobBundleControllerDownload as jest.Mock).mockRejectedValue({ ret: 404, message: 'No bundle for this job' });
     await run('bundle', 'j1');
     expect(mockWriteFile).not.toHaveBeenCalled();
-    expect(exitSpy).toHaveBeenLastCalledWith(1);
+    expect(exitSpy).toHaveBeenLastCalledWith(4);
   });
 ```
 
@@ -2270,10 +2340,9 @@ import {
 } from '../generated';
 import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
-import { handleApiError } from '../utils/error';
 import { error, table } from '../utils/output';
 import { parsePositiveInt } from '../utils/parse-positive-int';
-import { ago, type FleetPage, pageHint, printPlacement, resolveRepo, resolveRunner, runnerNames } from './fleet-shared';
+import { ago, type FleetPage, handleFleetError, pageHint, printPlacement, resolveRepo, resolveRunner, runnerNames } from './fleet-shared';
 
 const STATES = ['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING', 'COMPLETED', 'FAILED', 'ESCALATED', 'CRASHED', 'CANCELLED'] as const;
 type JobState = (typeof STATES)[number];
@@ -2334,7 +2403,7 @@ function registerList(job: Command): void {
         }
         process.exit(0);
       } catch (err: unknown) {
-        handleApiError(err);
+        handleFleetError(err);
       }
     });
 }
@@ -2368,7 +2437,7 @@ function registerShow(job: Command): void {
         }
         process.exit(0);
       } catch (err: unknown) {
-        handleApiError(err, { notFoundMessage: `Job not found: ${jobId}` });
+        handleFleetError(err, { notFoundMessage: `Job not found: ${jobId}` });
       }
     });
 }
@@ -2387,7 +2456,7 @@ function registerCancel(job: Command): void {
         else console.log(`Cancel requested: job ${j.id} is ${j.state}`);
         process.exit(0);
       } catch (err: unknown) {
-        handleApiError(err, { notFoundMessage: `Job not found: ${jobId}` });
+        handleFleetError(err, { notFoundMessage: `Job not found: ${jobId}` });
       }
     });
 }
@@ -2406,7 +2475,7 @@ function registerRequeue(job: Command): void {
         else printPlacement(result, result.placement.assigned ? await runnerNames(slug) : new Map());
         process.exit(0);
       } catch (err: unknown) {
-        handleApiError(err, { notFoundMessage: `Job not found: ${jobId}` });
+        handleFleetError(err, { notFoundMessage: `Job not found: ${jobId}` });
       }
     });
 }
@@ -2434,7 +2503,7 @@ function registerBundle(job: Command): void {
           process.exit(1);
           return;
         }
-        handleApiError(err, { notFoundMessage: `No bundle for job ${jobId}` });
+        handleFleetError(err, { notFoundMessage: `No bundle for job ${jobId}` });
       }
     });
 }
