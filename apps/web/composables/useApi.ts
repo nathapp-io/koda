@@ -132,6 +132,26 @@ export function shouldRetryAfter401(
   return status === 401 && isClient && !alreadyRetried
 }
 
+/**
+ * Fleet S1 slice 4c (D127): a download asks for a Blob, so ofetch hands the
+ * error body over as a Blob too and request() cannot read `ret` from it.
+ * Turn a JSON error Blob back into the ApiError every other call throws;
+ * anything else is returned unchanged. Pure and exported for unit testing.
+ */
+export async function blobErrorToApiError(err: unknown): Promise<unknown> {
+  if (err instanceof ApiError || err === null || typeof err !== 'object') return err
+  const data = (err as { data?: unknown }).data
+  if (!(data instanceof Blob)) return err
+  try {
+    const body = JSON.parse(await data.text()) as JsonResponse | null
+    if (body && typeof body.ret === 'number') return new ApiError(body.ret, body.message || 'Request failed', body.errors)
+  }
+  catch {
+    // Not a JSON body: surface the original fetch error.
+  }
+  return err
+}
+
 export const useApi = () => {
   const config = useRuntimeConfig()
   // Server-side: ensure internal URL includes /api (E2E env provides host:port only)
@@ -236,12 +256,26 @@ export const useApi = () => {
   const delete_ = <T = unknown>(path: string, options: Record<string, unknown> = {}) =>
     request<T>(`${baseURL}${path}`, { ...options, method: 'DELETE' })
 
+  // D127: binary GET (job bundle). Same auth, locale and 401 retry as get().
+  const download = async (path: string): Promise<Blob> => {
+    let body: unknown
+    try {
+      body = await request<unknown>(`${baseURL}${path}`, { responseType: 'blob' })
+    }
+    catch (err: unknown) {
+      throw await blobErrorToApiError(err)
+    }
+    if (!(body instanceof Blob)) throw new ApiError(-1, 'Expected a file download')
+    return body
+  }
+
   return {
     $api: {
       get,
       post,
       patch,
       delete: delete_,
+      download,
     },
   }
 }
