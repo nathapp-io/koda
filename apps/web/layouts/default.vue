@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users } from 'lucide-vue-next'
+import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users, Server, FolderGit2 } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const auth = useAuth()
@@ -87,6 +87,10 @@ const backTo = computed(() => {
         <NuxtLink to="/admin/slos" :class="navLinkClass" :active-class="activeClass"><Activity class="h-4 w-4 shrink-0" />{{ t('nav.slos') }}</NuxtLink>
 
         <NuxtLink v-if="isGlobalAdmin" to="/admin/users" :class="navLinkClass" :active-class="activeClass"><Users class="h-4 w-4 shrink-0" />{{ t('nav.users') }}</NuxtLink>
+
+        <NuxtLink v-if="isGlobalAdmin" to="/admin/fleet/runners" :class="navLinkClass" :active-class="activeClass"><Server class="h-4 w-4 shrink-0" />{{ t('nav.fleetRunners') }}</NuxtLink>
+
+        <NuxtLink v-if="isGlobalAdmin" to="/admin/fleet/repos" :class="navLinkClass" :active-class="activeClass"><FolderGit2 class="h-4 w-4 shrink-0" />{{ t('nav.fleetRepos') }}</NuxtLink>
 
         <!-- Project-scoped links -->
         <template v-if="projectSlug">
