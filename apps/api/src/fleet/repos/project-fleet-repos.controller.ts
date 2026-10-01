@@ -1,5 +1,5 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { parseQuery, toPageResult } from '../../common/dto/koda-page.query';
 import { ProjectMembershipGuard } from '../../projects/project-membership.guard';
@@ -10,6 +10,7 @@ import { ListFleetReposQuery } from './dto/list-fleet-repos.query';
 
 @ApiTags('fleet')
 @ApiBearerAuth()
+@ApiParam({ name: 'slug', required: true, schema: { type: 'string' } })
 @Controller('projects/:slug/fleet/repos')
 @UseGuards(ProjectMembershipGuard)
 export class ProjectFleetReposController {

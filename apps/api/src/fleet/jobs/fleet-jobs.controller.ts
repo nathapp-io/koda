@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { CaslPermissionAction, Principal } from '@nathapp/nestjs-auth';
 import { JsonResponse, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { KodaPageQuery, parseQuery, toPageResult } from '../../common/dto/koda-page.query';
@@ -18,6 +18,7 @@ import { ListFleetJobsQuery } from './dto/list-fleet-jobs.query';
 
 @ApiTags('fleet')
 @ApiBearerAuth()
+@ApiParam({ name: 'slug', required: true, schema: { type: 'string' } })
 @Controller('projects/:slug/fleet/jobs')
 @UseGuards(ProjectMembershipGuard)
 export class FleetJobsController {

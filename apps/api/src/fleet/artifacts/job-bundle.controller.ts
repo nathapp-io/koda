@@ -1,5 +1,5 @@
 import { Controller, Get, Param, StreamableFile, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiProduces, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiProduces, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ProjectMembershipGuard } from '../../projects/project-membership.guard';
 import { CurrentProject } from '../../projects/current-project.decorator';
 import type { ProjectContext } from '../../projects/project-context';
@@ -7,6 +7,7 @@ import { BundleService } from './bundle.service';
 
 @ApiTags('fleet')
 @ApiBearerAuth()
+@ApiParam({ name: 'slug', required: true, schema: { type: 'string' } })
 @Controller('projects/:slug/fleet/jobs')
 @UseGuards(ProjectMembershipGuard)
 export class JobBundleController {
