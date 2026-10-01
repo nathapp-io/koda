@@ -9,6 +9,7 @@ import { FleetActivityService } from '../activity/fleet-activity.service';
 import { IRunnerRepository, RUNNER_REPOSITORY, RunnerPatch } from './domain/runner.domain';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { RunnerDto, RunnerView } from './dto/runner.dto';
+import { RunnerSummaryDto } from './dto/runner-summary.dto';
 
 @Injectable()
 export class RunnersService {
@@ -26,6 +27,12 @@ export class RunnersService {
   async list(page: IPageOption, now = new Date()): Promise<IPageResult<RunnerDto>> {
     const view = this.view(now);
     return remapPage(await this.repo.findRunnerPage(page), (r) => RunnerDto.from(r, view));
+  }
+
+  /** Every runner, as a project member may see it (runners are global, overview D118). */
+  async listSummaries(page: IPageOption, now = new Date()): Promise<IPageResult<RunnerSummaryDto>> {
+    const view = this.view(now);
+    return remapPage(await this.repo.findRunnerPage(page), (r) => RunnerSummaryDto.from(r, view));
   }
 
   async get(id: string, now = new Date()): Promise<RunnerDto> {

@@ -1,5 +1,6 @@
 /**
- * Fleet S1 slice 4a: the admin runner view (bootId, bootedAt, online; #158, D116, D117, D131).
+ * Fleet S1 slice 4a: the admin runner view (bootId, bootedAt, online; #158, D116, D117, D131)
+ * and the project-member runner summaries (D118).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/runner-views.integration.spec.ts
  */
 import request from 'supertest';
@@ -67,6 +68,24 @@ describeIntegration('fleet runner views (PG)', () => {
     expect((await adminGet(runner.runnerId)).bootedAt).toBeNull();
     await sync('boot-2');
     expect((await adminGet(runner.runnerId)).bootedAt).toBeNull();
+  });
+
+  interface Summary { id: string; name: string; online: boolean; profiles: string[] }
+
+  it('shows project members runner summaries with machine profile names only (D118)', async () => {
+    const page = data<{ records: Array<Record<string, unknown>> }>(
+      await request(server).get('/api/projects/web/fleet/runners').set(auth(world.tokens.viewer)).expect(200),
+    );
+    expect(page.records).toHaveLength(1);
+    expect(Object.keys(page.records[0]).sort()).toEqual(['arch', 'enabled', 'id', 'labels', 'name', 'online', 'os', 'profiles']);
+    const summary = page.records[0] as unknown as Summary;
+    expect(summary).toEqual(expect.objectContaining({ id: runner.runnerId, name: 'box-1', online: true, profiles: ['fast'] }));
+  });
+
+  it('refuses project runner summaries to outsiders and to runner keys', async () => {
+    await request(server).get('/api/projects/web/fleet/runners').set(auth(world.tokens.outsider)).expect(403);
+    await request(server).get('/api/projects/web/fleet/runners').set(auth(runner.apiKey)).expect(401);
+    await request(server).get('/api/projects/nope/fleet/runners').set(auth(world.tokens.root)).expect(404);
   });
 
   it('reports offline once lastSeenAt is older than FLEET_RUNNER_OFFLINE_SEC, whatever enabled says', async () => {

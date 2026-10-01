@@ -30,6 +30,16 @@ describe('RunnersService', () => {
     expect((await service.get('r1', now)).online).toBe(false);
   });
 
+  it('lists project summaries with online computed at the given time', async () => {
+    const now = new Date('2026-10-01T12:00:00.000Z');
+    repo.findRunnerPage.mockResolvedValue({
+      total: 1, current: 1, size: 100, hasNext: false, hasPrev: false,
+      records: [row({ lastSeenAt: now, capabilities: { profiles: { fast: {} } } })],
+    });
+    const page = await service.listSummaries({ current: 1, size: 100 }, now);
+    expect(page.records).toEqual([expect.objectContaining({ id: 'r1', online: true, profiles: ['fast'] })]);
+  });
+
   it('updates enabled/labels/capacity and records the change', async () => {
     repo.findRunnerById.mockResolvedValue(row());
     repo.updateRunner.mockResolvedValue(row({ enabled: false, labels: ['a', 'b'], capacity: 2 }));
