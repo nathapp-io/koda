@@ -870,6 +870,11 @@
         "pr": "拉取请求",
         "planFrom": "规格路径",
         "escalation": "升级原因",
+        "wipPush": {
+          "pushed": "进度已推送到分支",
+          "none": "没有新的进度需要推送",
+          "failed": "进度推送失败：{reason}"
+        },
         "cancelRequested": "已于 {at} 请求取消"
       },
       "actions": {

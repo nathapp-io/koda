@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 import { createDebouncer } from '~/lib/debounce'
 import { loadFleetJobDetail } from '~/lib/fleet-job-detail'
-import { canCancelJob, canRequeueJob, canWorkOnFleet, isTerminalJobState, mayHaveBundle, mergeEvents, safePrUrl } from '~/lib/fleet-jobs'
+import { canCancelJob, canRequeueJob, canWorkOnFleet, isTerminalJobState, mayHaveBundle, mergeEvents, safePrUrl, wipPushStatus } from '~/lib/fleet-jobs'
 import type { DispatchResultDto, FleetJobDto, FleetJobEventDto } from '~/lib/fleet-types'
 import FleetJobProgress from '~/components/fleet/FleetJobProgress.vue'
 import FleetJobStateBadge from '~/components/fleet/FleetJobStateBadge.vue'
@@ -43,6 +43,7 @@ const canCancel = computed(() => job.value !== null && canCancelJob(job.value, v
 const canRequeue = computed(() => job.value !== null && canRequeueJob(job.value, viewer.value))
 const showBundle = computed(() => job.value !== null && mayHaveBundle(job.value.state))
 const prUrl = computed(() => safePrUrl(job.value?.resultPrUrl))
+const wipPush = computed(() => wipPushStatus(job.value?.wipPush))
 const cancelPending = computed(() => job.value !== null && job.value.cancelRequestedAt !== null && !isTerminalJobState(job.value.state))
 
 /** Events only append (ordered by seq), so refetching from the last loaded page is enough. */
@@ -193,7 +194,7 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.finishedAt') }}</dt><dd>{{ formatTime(job.finishedAt) }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.heartbeat') }}</dt><dd>{{ formatTime(job.lastHeartbeatAt) }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.finishResult') }}</dt><dd data-testid="fleet-job-finish">{{ job.finishResult ?? '-' }}</dd></div>
-        <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.branch') }}</dt><dd class="break-all">{{ job.resultBranch ?? '-' }}<template v-if="job.resultSha"> ({{ job.resultSha.slice(0, 12) }})</template></dd></div>
+        <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.branch') }}</dt><dd class="break-all">{{ job.resultBranch ?? '-' }}<template v-if="job.resultSha"> ({{ job.resultSha.slice(0, 12) }})</template><span v-if="wipPush" class="block text-xs text-muted-foreground">{{ wipPush.key === 'failed' ? t('fleet.jobs.detail.wipPush.failed', { reason: wipPush.reason }) : t(`fleet.jobs.detail.wipPush.${wipPush.key}`) }}</span></dd></div>
         <div v-if="job.planFrom"><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.planFrom') }}</dt><dd class="break-all">{{ job.planFrom }}</dd></div>
         <div>
           <dt class="text-muted-foreground">{{ t('fleet.jobs.detail.pr') }}</dt>

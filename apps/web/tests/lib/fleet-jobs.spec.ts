@@ -14,6 +14,7 @@ import {
   safePrUrl,
   summarizeEvent,
   visibleTimelineEvents,
+  wipPushStatus,
 } from '~/lib/fleet-jobs'
 import type { FleetJobDto, FleetJobEventDto } from '~/lib/fleet-types'
 
@@ -23,7 +24,7 @@ const job = (over: Partial<FleetJobDto> = {}): FleetJobDto => ({
   state: 'QUEUED', stateReason: null, requestedById: 'u1', queuedAt: '2026-10-01T00:00:00.000Z', assignedAt: null,
   startedAt: null, finishedAt: null, cancelRequestedAt: null, naxRunId: null, naxLogRunId: null, naxCostRunId: null,
   progress: null, currentStoryId: null, currentPhase: null, costSpentUsd: '0', lastHeartbeatAt: null,
-  finishResult: null, escalationReason: null, exitCode: null, resultBranch: null, resultSha: null, resultPrUrl: null,
+  finishResult: null, escalationReason: null, exitCode: null, resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null,
   ...over,
 })
 
@@ -106,6 +107,17 @@ describe('safePrUrl', () => {
     expect(safePrUrl('javascript:alert(1)')).toBeNull()
     expect(safePrUrl('not a url')).toBeNull()
     expect(safePrUrl(null)).toBeNull()
+  })
+})
+
+describe('wipPushStatus', () => {
+  test('parses the three outcomes and ignores anything else', () => {
+    expect(wipPushStatus('pushed')).toEqual({ key: 'pushed', reason: null })
+    expect(wipPushStatus('none')).toEqual({ key: 'none', reason: null })
+    expect(wipPushStatus('failed:diverged')).toEqual({ key: 'failed', reason: 'diverged' })
+    expect(wipPushStatus(null)).toBeNull()
+    expect(wipPushStatus(undefined)).toBeNull()
+    expect(wipPushStatus('weird')).toBeNull()
   })
 })
 

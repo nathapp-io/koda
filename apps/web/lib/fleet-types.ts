@@ -170,6 +170,7 @@ export interface FleetJobDto {
   resultBranch: string | null
   resultSha: string | null
   resultPrUrl: string | null
+  wipPush: string | null
 }
 
 export interface FleetJobEventDto {

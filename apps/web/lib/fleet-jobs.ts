@@ -72,6 +72,18 @@ export function safePrUrl(url: string | null | undefined): string | null {
   }
 }
 
+export interface WipPushStatus {
+  readonly key: 'pushed' | 'none' | 'failed'
+  readonly reason: string | null
+}
+
+/** S1b §1.1: the runner's progress-push outcome after an unfinished RUN. */
+export function wipPushStatus(value: string | null | undefined): WipPushStatus | null {
+  if (value === 'pushed' || value === 'none') return { key: value, reason: null }
+  if (typeof value === 'string' && value.startsWith('failed:')) return { key: 'failed', reason: value.slice('failed:'.length) }
+  return null
+}
+
 export type TimelineEntry =
   | { kind: 'transition'; from: string | null; to: string; reason: string | null; source: 'server' | 'runner' }
   | { kind: 'snapshot'; parts: string[] }
