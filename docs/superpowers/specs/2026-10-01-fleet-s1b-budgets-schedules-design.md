@@ -72,7 +72,7 @@ Earlier rulings that still hold: R2 (`runningJobs: finish | cancel`, default `fi
 **Where:** `JobRun.finish()` (`apps/runner/src/supervisor/job-run.ts:267-316`), for `command = RUN`, after the
 verdict is computed and before the `UPLOADING` transition (`:293`). It calls a new `JobExecutor.pushProgress(...)`
 implemented in `HostExecutor` on the model of `HostExecutor.finishPlan`: same credential-helper acquisition, same
-`job.assign.gitIdentity`, same cancel probe while waiting for a git token.
+`job.assign.gitIdentity`; the wait for a git token is probed for a halt (not a cancel, see below).
 
 - **When:** the verdict is not `COMPLETED` (so `FAILED`, `ESCALATED`, or `CANCELLED` after nax exited) and the
   job run is not halted (`this.halted` false: no `ABANDON`, lease held). `COMPLETED` already implies nax's finish
@@ -84,7 +84,8 @@ implemented in `HostExecutor` on the model of `HostExecutor.finishPlan`: same cr
      `chore(nax): progress of <feature> via koda job <jobId>`. Uncommitted story code is never committed.
   2. `git push origin <branchName>`: plain fast-forward, never forced, through the job's credential helper.
   3. Transient failures retry with `PLAN_PUSH_BACKOFF_MS` (2 s, 8 s; `apps/runner/src/executor/plan-commit.ts`).
-     A non-fast-forward rejection is not retried. A cancel during a retry wait stops retrying.
+     A non-fast-forward rejection is not retried. A halt (`ABANDON`) during the token wait or a retry wait stops
+     the push. A cancel does not: a RUN cancelled after nax exited is one of the cases that pushes.
 - **Result:** new snapshot field `wipPush`: `pushed`, `none` (nothing new), or `failed:<reason>` (`failed:diverged`
   for a non-fast-forward). It never changes the job's verdict.
 - **Result branch and sha:** when `wipPush = pushed`, `resultBranch`/`resultSha` are the pushed branch and commit
@@ -133,7 +134,7 @@ The next RUN of the feature continues `origin/<branchName>` on any runner (runne
 ### 1.5 Testing
 
 - 1a unit: the push decision for every verdict and halted state; the prd-only commit; each push failure to its
-  `wipPush` value; result branch/sha precedence; cancel during the retry wait.
+  `wipPush` value; result branch/sha precedence; a halt during the retry wait; a CANCELLED run still pushes.
 - 1a runner integration (real API in process, fake nax, `file://` bare remote): a FAILED RUN and a cost-limit RUN
   both push; a second RUN on a **different** runner starts from the pushed branch and sees the updated
   `prd.json`; a halted job pushes nothing.
