@@ -70,7 +70,9 @@
     "toggleSidebar": "切换侧栏",
     "settings": "设置",
     "slos": "SLO 指标",
-    "users": "用户"
+    "users": "用户",
+    "fleetRunners": "执行机",
+    "fleetRepos": "仓库"
   },
   "admin": {
     "users": {
@@ -632,6 +634,186 @@
       "provenanceCoverage": "来源覆盖率",
       "leakageIncidents": "泄漏事件数",
       "memoryGrowthRate": "内存增长率"
+    }
+  },
+  "fleet": {
+    "common": {
+      "online": "在线",
+      "offline": "离线",
+      "enabled": "已启用",
+      "disabled": "已停用",
+      "adminOnly": "只有全局管理员可以管理执行机群。",
+      "more": "仅显示前 {n} 条。还有更多，请在 API 或 CLI 中筛选。",
+      "stale": "刷新失败，显示的是上一次的数据。",
+      "copy": "复制",
+      "copied": "已复制",
+      "copyFailed": "无法复制，请手动选择文本复制。",
+      "unknown": "未知",
+      "ago": {
+        "s": "{n} 秒前",
+        "m": "{n} 分钟前",
+        "h": "{n} 小时前",
+        "d": "{n} 天前"
+      },
+      "duration": {
+        "s": "{n} 秒",
+        "m": "{n} 分钟",
+        "h": "{n} 小时",
+        "d": "{n} 天"
+      }
+    },
+    "validation": {
+      "labelInvalid": "标签 \"{label}\" 无效：只能使用小写字母、数字和 . _ -（最多 32 个字符，以字母或数字开头）",
+      "labelsTooMany": "最多 20 个标签",
+      "capacityRange": "请输入 1 到 16 之间的整数",
+      "required": "必填",
+      "ownerInvalid": "只能使用字母、数字、. _ - 以及表示分组的 /",
+      "nameInvalid": "只能使用字母、数字和 . _ -"
+    },
+    "state": {
+      "QUEUED": "排队中",
+      "ASSIGNED": "已分配",
+      "RUNNING": "运行中",
+      "UPLOADING": "上传中",
+      "COMPLETED": "已完成",
+      "FAILED": "失败",
+      "ESCALATED": "已升级",
+      "CRASHED": "已崩溃",
+      "CANCELLED": "已取消"
+    },
+    "misfit": {
+      "disabled": "执行机已停用",
+      "offline": "执行机离线",
+      "labels": "执行机缺少所需标签",
+      "executor": "执行机没有主机执行器",
+      "protocol": "某个配置需要执行机的 nax 不支持的协议",
+      "provider_missing": "某个配置需要执行机没有凭据的提供方",
+      "provider_unavailable": "某个提供方凭据当前不可用",
+      "sandbox": "某个配置需要沙箱，但沙箱不可用",
+      "tools": "执行机缺少此仓库所需的 git、gh 或 glab",
+      "busy_repo": "执行机已在运行此仓库的任务",
+      "capacity": "执行机已满载"
+    },
+    "repoReason": {
+      "github_app_not_configured": "koda 服务器未配置 GitHub App",
+      "github_app_key_unreadable": "无法读取 GitHub App 私钥",
+      "app_not_installed": "GitHub App 未安装到此仓库",
+      "app_permissions_insufficient": "GitHub App 缺少执行机任务所需的权限",
+      "repo_not_found": "找不到仓库",
+      "provider_unreachable": "代码托管平台无响应",
+      "provider_error": "代码托管平台返回错误",
+      "vcs_connection_missing": "项目没有 GitLab 连接",
+      "vcs_connection_mismatch": "项目的 GitLab 连接属于另一个仓库",
+      "vcs_encryption_key_missing": "服务器无法解密已保存的 GitLab 令牌",
+      "gitlab_token_invalid": "已保存的 GitLab 令牌无效",
+      "gitlab_access_insufficient": "GitLab 令牌无法推送到此仓库",
+      "gitlab_scope_missing": "GitLab 令牌缺少必需的权限范围"
+    },
+    "runners": {
+      "title": "执行机",
+      "subtitle": "为 koda 运行 nax 任务的机器。",
+      "empty": "还没有执行机。请创建注册令牌，并在机器上运行 koda-runner enroll。",
+      "deleteConfirm": "删除执行机 {name}？其密钥将被吊销。有未完成任务或被固定任务的执行机无法删除。",
+      "table": {
+        "name": "名称",
+        "status": "状态",
+        "labels": "标签",
+        "capacity": "容量",
+        "capabilities": "能力",
+        "lastSeen": "最后在线",
+        "boot": "已运行",
+        "version": "版本"
+      },
+      "actions": {
+        "enroll": "注册令牌",
+        "enable": "启用",
+        "disable": "停用",
+        "edit": "编辑",
+        "delete": "删除"
+      },
+      "chip": {
+        "sandboxOn": "沙箱",
+        "sandboxOff": "无沙箱",
+        "protocol": "{name}",
+        "credential": "{provider}：{kind}",
+        "credentialExpires": "{provider}：{kind}，有效期至 {expires}",
+        "credentialExpired": "{provider}：{kind}，已于 {expires} 过期",
+        "kind": {
+          "api-key": "API 密钥",
+          "oauth": "OAuth",
+          "exec": "外部命令",
+          "ambient": "环境凭据",
+          "none": "无凭据"
+        }
+      },
+      "toast": {
+        "enabled": "执行机已启用",
+        "disabled": "执行机已停用",
+        "updated": "执行机已更新",
+        "deleted": "执行机已删除"
+      },
+      "edit": {
+        "title": "编辑执行机 {name}",
+        "labels": "标签",
+        "labelsHint": "用逗号或空格分隔。",
+        "capacity": "并发任务数",
+        "submit": "保存",
+        "submitting": "保存中…"
+      },
+      "enrollment": {
+        "title": "新建注册令牌",
+        "labels": "新执行机的标签",
+        "labelsHint": "可选。用逗号或空格分隔。",
+        "submit": "创建令牌",
+        "submitting": "创建中…",
+        "tokenOnce": "请立即复制令牌。它只显示一次，将于 {expiresAt} 过期。",
+        "token": "令牌",
+        "command": "注册命令",
+        "commandHint": "请以执行机的服务用户身份运行。如果执行机通过其他地址访问 koda，请替换服务器 URL。除非服务器是本机回环地址或添加 --insecure-http，执行机要求使用 https。"
+      }
+    },
+    "repos": {
+      "title": "仓库",
+      "subtitle": "koda 可为执行机任务克隆和推送的仓库。",
+      "empty": "还没有注册仓库。",
+      "deleteConfirm": "取消注册 {repo}？有未完成任务的仓库无法移除。",
+      "table": {
+        "repo": "仓库",
+        "project": "项目",
+        "provider": "平台",
+        "branch": "默认分支",
+        "reachability": "可达性"
+      },
+      "reach": {
+        "checking": "检查中…",
+        "ok": "可达",
+        "failed": "不可达",
+        "error": "检查失败"
+      },
+      "actions": {
+        "add": "添加仓库",
+        "recheck": "重新检查",
+        "delete": "删除"
+      },
+      "provider": {
+        "github": "GitHub",
+        "gitlab": "GitLab"
+      },
+      "toast": {
+        "added": "仓库已添加",
+        "deleted": "仓库已移除"
+      },
+      "form": {
+        "title": "添加仓库",
+        "hint": "保存前，koda 会检查是否能代理该仓库的 git 访问。",
+        "project": "项目",
+        "projectPlaceholder": "选择项目",
+        "provider": "平台",
+        "owner": "所有者或分组",
+        "name": "仓库名称",
+        "submit": "添加仓库",
+        "submitting": "正在检查访问权限…"
+      }
     }
   }
 }

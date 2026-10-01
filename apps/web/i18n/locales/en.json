@@ -70,7 +70,9 @@
     "toggleSidebar": "Toggle sidebar",
     "settings": "Settings",
     "slos": "SLOs",
-    "users": "Users"
+    "users": "Users",
+    "fleetRunners": "Runners",
+    "fleetRepos": "Repos"
   },
   "admin": {
     "users": {
@@ -632,6 +634,186 @@
       "provenanceCoverage": "Provenance coverage",
       "leakageIncidents": "Leakage incidents",
       "memoryGrowthRate": "Memory growth rate"
+    }
+  },
+  "fleet": {
+    "common": {
+      "online": "Online",
+      "offline": "Offline",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "adminOnly": "Only global administrators can manage the fleet.",
+      "more": "Showing the first {n}. More exist; narrow the list in the API or CLI.",
+      "stale": "Could not refresh. Showing the last data.",
+      "copy": "Copy",
+      "copied": "Copied",
+      "copyFailed": "Could not copy. Select the text and copy it manually.",
+      "unknown": "Unknown",
+      "ago": {
+        "s": "{n}s ago",
+        "m": "{n}m ago",
+        "h": "{n}h ago",
+        "d": "{n}d ago"
+      },
+      "duration": {
+        "s": "{n}s",
+        "m": "{n}m",
+        "h": "{n}h",
+        "d": "{n}d"
+      }
+    },
+    "validation": {
+      "labelInvalid": "Invalid label \"{label}\": use lower case letters, digits, . _ - (max 32, starting with a letter or digit)",
+      "labelsTooMany": "At most 20 labels",
+      "capacityRange": "Enter a whole number from 1 to 16",
+      "required": "Required",
+      "ownerInvalid": "Use letters, digits, . _ - and / for groups",
+      "nameInvalid": "Use letters, digits, . _ -"
+    },
+    "state": {
+      "QUEUED": "Queued",
+      "ASSIGNED": "Assigned",
+      "RUNNING": "Running",
+      "UPLOADING": "Uploading",
+      "COMPLETED": "Completed",
+      "FAILED": "Failed",
+      "ESCALATED": "Escalated",
+      "CRASHED": "Crashed",
+      "CANCELLED": "Cancelled"
+    },
+    "misfit": {
+      "disabled": "Runner is disabled",
+      "offline": "Runner is offline",
+      "labels": "Runner lacks a required label",
+      "executor": "Runner has no host executor",
+      "protocol": "A profile needs a protocol the runner's nax lacks",
+      "provider_missing": "A profile needs a provider the runner has no credential for",
+      "provider_unavailable": "A provider credential is not usable right now",
+      "sandbox": "A profile needs the sandbox, which is unavailable",
+      "tools": "Runner lacks git, gh or glab for this repo",
+      "busy_repo": "Runner already runs a job for this repo",
+      "capacity": "Runner is at capacity"
+    },
+    "repoReason": {
+      "github_app_not_configured": "The GitHub App is not configured on the koda server",
+      "github_app_key_unreadable": "The GitHub App private key cannot be read",
+      "app_not_installed": "The GitHub App is not installed on this repository",
+      "app_permissions_insufficient": "The GitHub App lacks the permissions fleet jobs need",
+      "repo_not_found": "Repository not found",
+      "provider_unreachable": "The forge did not answer",
+      "provider_error": "The forge returned an error",
+      "vcs_connection_missing": "The project has no GitLab connection",
+      "vcs_connection_mismatch": "The project's GitLab connection is for another repository",
+      "vcs_encryption_key_missing": "The server cannot decrypt the stored GitLab token",
+      "gitlab_token_invalid": "The stored GitLab token is invalid",
+      "gitlab_access_insufficient": "The GitLab token cannot push to this repository",
+      "gitlab_scope_missing": "The GitLab token lacks a required scope"
+    },
+    "runners": {
+      "title": "Runners",
+      "subtitle": "Machines that run nax jobs for koda.",
+      "empty": "No runners yet. Create an enrollment token and run koda-runner enroll on a machine.",
+      "deleteConfirm": "Delete runner {name}? Its key is revoked. A runner with unfinished or pinned jobs cannot be deleted.",
+      "table": {
+        "name": "Name",
+        "status": "Status",
+        "labels": "Labels",
+        "capacity": "Capacity",
+        "capabilities": "Capabilities",
+        "lastSeen": "Last seen",
+        "boot": "Up",
+        "version": "Versions"
+      },
+      "actions": {
+        "enroll": "Enrollment token",
+        "enable": "Enable",
+        "disable": "Disable",
+        "edit": "Edit",
+        "delete": "Delete"
+      },
+      "chip": {
+        "sandboxOn": "sandbox",
+        "sandboxOff": "no sandbox",
+        "protocol": "{name}",
+        "credential": "{provider}: {kind}",
+        "credentialExpires": "{provider}: {kind} until {expires}",
+        "credentialExpired": "{provider}: {kind}, expired {expires}",
+        "kind": {
+          "api-key": "API key",
+          "oauth": "OAuth",
+          "exec": "exec helper",
+          "ambient": "ambient",
+          "none": "no credential"
+        }
+      },
+      "toast": {
+        "enabled": "Runner enabled",
+        "disabled": "Runner disabled",
+        "updated": "Runner updated",
+        "deleted": "Runner deleted"
+      },
+      "edit": {
+        "title": "Edit runner {name}",
+        "labels": "Labels",
+        "labelsHint": "Comma or space separated.",
+        "capacity": "Concurrent jobs",
+        "submit": "Save",
+        "submitting": "Saving…"
+      },
+      "enrollment": {
+        "title": "New enrollment token",
+        "labels": "Labels for the new runner",
+        "labelsHint": "Optional. Comma or space separated.",
+        "submit": "Create token",
+        "submitting": "Creating…",
+        "tokenOnce": "Copy the token now. It is shown once and expires {expiresAt}.",
+        "token": "Token",
+        "command": "Enroll command",
+        "commandHint": "Run it as the runner's service user. Replace the server URL if the runner reaches koda at another address. The runner requires https unless the server is loopback or you add --insecure-http."
+      }
+    },
+    "repos": {
+      "title": "Repos",
+      "subtitle": "Repositories koda can clone and push for fleet jobs.",
+      "empty": "No repos registered.",
+      "deleteConfirm": "Unregister {repo}? A repo with unfinished jobs cannot be removed.",
+      "table": {
+        "repo": "Repository",
+        "project": "Project",
+        "provider": "Provider",
+        "branch": "Default branch",
+        "reachability": "Reachability"
+      },
+      "reach": {
+        "checking": "Checking…",
+        "ok": "Reachable",
+        "failed": "Unreachable",
+        "error": "Check failed"
+      },
+      "actions": {
+        "add": "Add repo",
+        "recheck": "Check again",
+        "delete": "Delete"
+      },
+      "provider": {
+        "github": "GitHub",
+        "gitlab": "GitLab"
+      },
+      "toast": {
+        "added": "Repo added",
+        "deleted": "Repo removed"
+      },
+      "form": {
+        "title": "Add repo",
+        "hint": "koda checks that it can broker git access before it saves the repo.",
+        "project": "Project",
+        "projectPlaceholder": "Choose a project",
+        "provider": "Provider",
+        "owner": "Owner or group",
+        "name": "Repository name",
+        "submit": "Add repo",
+        "submitting": "Checking access…"
+      }
     }
   }
 }
