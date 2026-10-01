@@ -7,7 +7,8 @@ import type { IPageResult } from '@nathapp/nestjs-data';
 import { remapPage } from '../../common/dto/koda-page.query';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { IRunnerRepository, RUNNER_REPOSITORY, RunnerPatch } from './domain/runner.domain';
-import { RunnerDto } from './dto/runner.dto';
+import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
+import { RunnerDto, RunnerView } from './dto/runner.dto';
 
 @Injectable()
 export class RunnersService {
@@ -15,16 +16,22 @@ export class RunnersService {
     @Inject(RUNNER_REPOSITORY) private readonly repo: IRunnerRepository,
     private readonly activity: FleetActivityService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'runnerOfflineSec'>,
   ) {}
 
-  async list(page: IPageOption): Promise<IPageResult<RunnerDto>> {
-    return remapPage(await this.repo.findRunnerPage(page), RunnerDto.from);
+  private view(now: Date): RunnerView {
+    return { now, offlineSec: this.fleetConfig.runnerOfflineSec };
   }
 
-  async get(id: string): Promise<RunnerDto> {
+  async list(page: IPageOption, now = new Date()): Promise<IPageResult<RunnerDto>> {
+    const view = this.view(now);
+    return remapPage(await this.repo.findRunnerPage(page), (r) => RunnerDto.from(r, view));
+  }
+
+  async get(id: string, now = new Date()): Promise<RunnerDto> {
     const runner = await this.repo.findRunnerById(id);
     if (!runner) throw new NotFoundAppException({}, 'fleet.runners');
-    return RunnerDto.from(runner);
+    return RunnerDto.from(runner, this.view(now));
   }
 
   async update(actorId: string, id: string, patch: RunnerPatch): Promise<RunnerDto> {
@@ -37,7 +44,7 @@ export class RunnersService {
       if (!(await this.repo.findRunnerById(id))) throw new NotFoundAppException({}, 'fleet.runners');
       const updated = await this.repo.updateRunner(id, clean);
       await this.activity.record({ actorType: 'USER', actorId, action: 'runner.updated', entityType: 'runner', entityId: id, payload: { ...clean } });
-      return RunnerDto.from(updated);
+      return RunnerDto.from(updated, this.view(new Date()));
     });
   }
 

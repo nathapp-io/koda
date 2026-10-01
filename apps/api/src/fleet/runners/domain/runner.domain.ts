@@ -25,6 +25,7 @@ export interface RunnerRecord {
   daemonVersion: string;
   protocolVersion: number;
   bootId: string;
+  bootedAt: Date | null;
   enabled: boolean;
   lastSeenAt: Date;
   createdById: string;
@@ -42,6 +43,7 @@ export interface NewRunner {
   daemonVersion: string;
   protocolVersion: number;
   bootId: string;
+  bootedAt: Date;
   lastSeenAt: Date;
   createdById: string;
 }

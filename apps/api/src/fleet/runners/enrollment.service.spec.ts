@@ -64,6 +64,8 @@ describe('EnrollmentService', () => {
     const data = repo.createRunner.mock.calls[0][0];
     expect(data.labels).toEqual(['darwin', 'fast', 'gpu']);
     expect(data.apiKeyHash).not.toContain(result.apiKey);
+    expect(data.bootedAt).toBeInstanceOf(Date);
+    expect(data.bootedAt).toEqual(data.lastSeenAt);
     expect(repo.linkEnrollment).toHaveBeenCalledWith('e1', 'r1');
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ actorType: 'RUNNER', actorId: 'r1', action: 'runner.enrolled', responsibleUserId: 'u1' }));
   });

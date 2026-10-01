@@ -66,6 +66,7 @@ export class EnrollmentService {
         daemonVersion: body.daemonVersion,
         protocolVersion: body.protocolVersion,
         bootId: body.bootId,
+        bootedAt: now,
         lastSeenAt: now,
         createdById: enrollment.createdById,
       });

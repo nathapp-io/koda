@@ -9,7 +9,7 @@ import type { EnrollmentRecord, IRunnerRepository, NewRunner, RunnerPatch, Runne
 
 const RUNNER_SELECT = {
   id: true, name: true, os: true, arch: true, labels: true, capacity: true, capabilities: true,
-  daemonVersion: true, protocolVersion: true, bootId: true, enabled: true, lastSeenAt: true,
+  daemonVersion: true, protocolVersion: true, bootId: true, bootedAt: true, enabled: true, lastSeenAt: true,
   createdById: true, createdAt: true, updatedAt: true,
 } as const; // never selects apiKeyHash
 

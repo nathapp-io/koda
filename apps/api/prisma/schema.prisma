@@ -571,6 +571,7 @@ model Runner {
   daemonVersion   String
   protocolVersion Int
   bootId          String
+  bootedAt        DateTime? // start of the current daemon boot: set at enroll and when sync reports a new bootId (D131)
   enabled         Boolean  @default(true)
   lastSeenAt      DateTime
   createdById     String // User.id who issued the enrollment token

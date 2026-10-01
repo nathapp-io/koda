@@ -1,4 +1,5 @@
 import type { RunnerCapabilities } from '../common/protocol';
+import { isRunnerOnline } from '../common/runner-online';
 
 /** The first placement rule a runner fails (spec §4), reported per runner at dispatch. */
 export type MisfitReason =
@@ -62,7 +63,7 @@ function capabilityMisfit(job: PlacementJob, caps: RunnerCapabilities): MisfitRe
 /** Spec §4 steps 1-3, in order. Pinned jobs ignore selector labels (the pin is the candidate set). */
 export function firstMisfit(job: PlacementJob, runner: PlacementRunner, load: RunnerLoad, now: Date, offlineSec: number): MisfitReason | null {
   if (!runner.enabled) return 'disabled';
-  if (now.getTime() - runner.lastSeenAt.getTime() > offlineSec * 1000) return 'offline';
+  if (!isRunnerOnline(runner.lastSeenAt, now, offlineSec)) return 'offline';
   if (job.pinnedRunnerId === null && !job.selectorLabels.every((label) => runner.labels.includes(label))) return 'labels';
   if (!runner.capabilities.executors.includes('host')) return 'executor';
   const capability = capabilityMisfit(job, runner.capabilities);
