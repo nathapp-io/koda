@@ -3,6 +3,7 @@ import type { BundleFile } from '../bundle/build-bundle';
 import type { UploadOutcome } from '../bundle/upload-bundle';
 import { errorMessage } from '../errors';
 import type { JobExecutor, JobWatcher } from '../executor/job-executor';
+import { wipPushValue, type ProgressPushOutcome } from '../executor/progress-push';
 import type { Journal } from '../journal/journal';
 import type { JobRow } from '../journal/types';
 import type { Logger } from '../logger';
@@ -264,6 +265,26 @@ export class JobRun {
     return { verdict: runVerdict({ cancelRequested: cancelled, status }), snapshot: status ? mapStatusToSnapshot(status) : {} };
   }
 
+  /**
+   * S1b §1.1 (B5): an unfinished RUN's branch goes to origin so any runner can continue it. D141: a row that already
+   * recorded a pushed sha (a resumed finish) is not pushed again. `null` means halted: report nothing.
+   */
+  private async pushRunProgress(row: JobRow): Promise<{ value: string; result: { branch: string; sha: string } | null } | null> {
+    if (row.resultBranch !== null && row.resultSha !== null) return { value: 'pushed', result: { branch: row.resultBranch, sha: row.resultSha } };
+    let outcome: ProgressPushOutcome;
+    try {
+      outcome = await this.deps.executor.pushProgress(row, { isHalted: () => this.halted });
+    } catch (error) {
+      // The push must never change the verdict: a throw here would reach start()'s failSafe and end FAILED "runner error".
+      this.deps.log.warn('progress push threw', { jobId: this.jobId, error: errorMessage(error) });
+      return this.halted ? null : { value: 'failed:push error', result: null };
+    }
+    if (outcome.kind === 'halted' || this.halted) return null;
+    if (outcome.kind !== 'pushed') return { value: wipPushValue(outcome), result: null };
+    this.deps.journal.updateJob(this.jobId, this.leaseEpoch, { resultBranch: outcome.branch, resultSha: outcome.sha });
+    return { value: 'pushed', result: { branch: outcome.branch, sha: outcome.sha } };
+  }
+
   private async finish(): Promise<void> {
     const row = this.mustRow();
     if (isTerminalState(row.state)) {
@@ -273,6 +294,7 @@ export class JobRun {
     const judged = await this.judge(row);
     let verdict = judged.verdict;
     let result = { branch: row.resultBranch, sha: row.resultSha };
+    let wipPush: string | undefined;
     if (row.command === 'PLAN' && verdict.state === 'COMPLETED' && row.resultSha === null) {
       // The same probe prepare got: a cancel or halt during the push's first-token wait must not hold the repo mutex
       // for tokenWaitMs. A cancelled push is CANCELLED (the verdict planVerdict itself gives), not FAILED.
@@ -288,6 +310,12 @@ export class JobRun {
     } else if (row.command === 'RUN') {
       const ledger = await this.deps.executor.readFinishLedger(row);
       if (ledger) result = { branch: ledger.branch, sha: ledger.headSha };
+      if (verdict.state !== 'COMPLETED') {
+        const progress = await this.pushRunProgress(row);
+        if (progress === null) return;   // halted: ABANDON owns the job now
+        wipPush = progress.value;
+        if (progress.result) result = progress.result;
+      }
     }
     if (this.halted) return;
     if (this.events.currentState() === 'RUNNING') this.events.transition('UPLOADING');
@@ -309,6 +337,7 @@ export class JobRun {
     }
     const snapshot: SnapshotEventPayload = {
       ...judged.snapshot, ...(result.branch ? { resultBranch: result.branch } : {}), ...(result.sha ? { resultSha: result.sha } : {}),
+      ...(wipPush ? { wipPush } : {}),
     };
     if (Object.keys(snapshot).length > 0) this.events.snapshot(snapshot);
     this.events.transition(verdict.state, terminalReason(verdict, outcome));

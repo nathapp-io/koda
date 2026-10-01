@@ -14,11 +14,12 @@ import { Watcher, type WatcherSink } from '../watcher/watcher';
 import { readStatusFile } from '../watcher/status-snapshot';
 import { prepareCheckout } from './checkout';
 import { reasonFromError, type Git } from './git';
-import type { JobExecutor, JobWatcher, FinishPlanOptions, PlanPushOutcome, PrepareOptions, PrepareOutcome, SpawnHandle, WatchOptions } from './job-executor';
+import type { JobExecutor, JobWatcher, FinishPlanOptions, PlanPushOutcome, PrepareOptions, PrepareOutcome, PushProgressOptions, SpawnHandle, WatchOptions } from './job-executor';
 import { deleteJobProfile, jobProfileName, projectNameFor, writeJobProfile } from './job-profile';
 import { buildNaxArgv, isProcessAlive, signalGroup, spawnNax } from './nax-process';
 import { readProcessCommand, reapNaxPids } from './pid-registry';
 import { commitAndPushPlan, stashPlanOutputs } from './plan-commit';
+import { pushProgress, type ProgressPushOutcome } from './progress-push';
 import { cleanWorkspace, ensureClone } from './workspace';
 
 export interface HostExecutorDeps {
@@ -170,6 +171,19 @@ export class HostExecutor implements JobExecutor {
       ...(this.deps.sleep ? { sleep: this.deps.sleep } : {}),
     });
     return result.ok ? { ok: true, branch: result.branch, sha: result.sha } : { ok: false, reason: result.reason };
+  }
+
+  async pushProgress(job: JobRow, options: PushProgressOptions = {}): Promise<ProgressPushOutcome> {
+    const { repoDir } = this.dirs(job);
+    if (job.branch === null) return { kind: 'failed', reason: 'no branch' };
+    const halted = (): boolean => options.isHalted?.() === true;
+    const acquired = await this.deps.credentials.acquire(job, { wait: true, isCancelled: halted });
+    if (!acquired.ok) return acquired.cancelled ? { kind: 'halted' } : { kind: 'failed', reason: acquired.reason };
+    return pushProgress({
+      git: this.deps.git, repoDir, feature: job.assign.feature, jobId: job.jobId, branchName: job.branch,
+      identity: job.assign.gitIdentity, credentialHelper: acquired.credentials.helper, isHalted: halted,
+      ...(this.deps.sleep ? { sleep: this.deps.sleep } : {}),
+    });
   }
 
   async readFinishLedger(job: JobRow): Promise<{ branch: string; headSha: string } | null> {

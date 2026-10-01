@@ -2,15 +2,17 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdir, readFile, stat } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
 import type { AssignPayload } from '@nathapp/fleet-protocol';
-import { CredentialBroker } from '../../src/credentials/broker';
+import { CredentialBroker, type CredentialProvider } from '../../src/credentials/broker';
 import { requestCredential } from '../../src/credentials/git-credential';
 import { socketPathFor } from '../../src/credentials/socket-dir';
 import { TokenCache } from '../../src/credentials/token-cache';
 import { createGit } from '../../src/executor/git';
 import { HostExecutor } from '../../src/executor/host-executor';
 import { Journal } from '../../src/journal/journal';
+import type { JobRow } from '../../src/journal/types';
 import { createMemoryLogger } from '../../src/logger';
 import { jobDirFor } from '../../src/paths/safe-segment';
+import { assignFor } from '../helpers/assign';
 import { installFakeGh } from '../helpers/fake-gh';
 import { git as sh, isolateGit, makeOrigin } from '../helpers/git-fixture';
 import { startGitHttp } from '../helpers/git-http';
@@ -116,5 +118,35 @@ describe('HostExecutor with the credential broker (design §3.1)', () => {
       await w.broker.closeAll();
       w.http.stop();
     }
+  });
+});
+
+describe('HostExecutor.pushProgress (S1b 1a)', () => {
+  const rowWith = (branch: string | null): JobRow => {
+    const journal = Journal.open(':memory:');
+    journal.insertJob({ assign: assignFor('RUN', { jobId: 'pjob1' }), leaseEpoch: 1, repoKey: 'acme/app', jobDir: jobDirFor('/w', 'pjob1') });
+    journal.updateJob('pjob1', 1, { branch });
+    const row = journal.getJob('pjob1', 1);
+    if (!row) throw new Error('row missing');
+    return row;
+  };
+  const executorWith = (acquire: CredentialProvider['acquire']): HostExecutor =>
+    new HostExecutor({
+      config: { workspaceRoot: '/w', naxCommand: ['nax'], naxHome: '/naxhome' }, git: createGit(), log: createMemoryLogger(),
+      nowMs: () => Date.now(), credentials: { acquire, release: async () => undefined },
+    });
+
+  test('a row with no branch fails before touching credentials', async () => {
+    let acquired = false;
+    const ex = executorWith(async () => {
+      acquired = true;
+      return { ok: true, credentials: { helper: null, binDir: null } };
+    });
+    expect(await ex.pushProgress(rowWith(null))).toEqual({ kind: 'failed', reason: 'no branch' });
+    expect(acquired).toBe(false);
+  });
+  test('a cancelled credential wait is a halt, not a failure', async () => {
+    const ex = executorWith(async () => ({ ok: false, reason: 'cancelled', cancelled: true }));
+    expect(await ex.pushProgress(rowWith('feat/feat'))).toEqual({ kind: 'halted' });
   });
 });
