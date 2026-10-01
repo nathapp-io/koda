@@ -7892,6 +7892,37 @@
           "maxCostUsd"
         ]
       },
+      "FleetJobStoryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "nax's story status (pending, in-progress, passed, failed, ...)"
+          },
+          "attempts": {
+            "type": "number"
+          },
+          "dependsOn": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "status",
+          "attempts",
+          "dependsOn"
+        ]
+      },
       "FleetJobDto": {
         "type": "object",
         "properties": {
@@ -8051,6 +8082,18 @@
             "type": "string",
             "nullable": true,
             "description": "pushed | none | failed:<reason> (S1b §1.1)"
+          },
+          "stories": {
+            "nullable": true,
+            "description": "PRD stories in PRD order (S1b §1.2). Null on list pages (D149).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetJobStoryDto"
+            }
+          },
+          "storiesTruncated": {
+            "type": "boolean",
+            "description": "True when the runner cut the story list to fit (S1b §1.2)"
           }
         },
         "required": [
@@ -8068,7 +8111,8 @@
           "state",
           "requestedById",
           "queuedAt",
-          "costSpentUsd"
+          "costSpentUsd",
+          "storiesTruncated"
         ]
       },
       "PlacementMisfitDto": {

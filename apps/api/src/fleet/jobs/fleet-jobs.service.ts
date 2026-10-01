@@ -73,7 +73,7 @@ export class FleetJobsService {
   }
 
   async list(filters: FleetJobFilters, page: IPageOption): Promise<IPageResult<FleetJobDto>> {
-    return remapPage(await this.repo.findPage(filters, page), FleetJobDto.from);
+    return remapPage(await this.repo.findPage(filters, page), FleetJobDto.summary);
   }
 
   /**
@@ -145,7 +145,8 @@ export class FleetJobsService {
             runnerId: null, runnerBootId: null, assignedAt: null, startedAt: null, finishedAt: null, cancelRequestedAt: null,
             naxRunId: null, naxLogRunId: null, naxCostRunId: null, progress: null, currentStoryId: null, currentPhase: null,
             costSpentUsd: '0', lastHeartbeatAt: null, finishResult: null, escalationReason: null, exitCode: null,
-            resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null, ackedRunnerSeq: 0, bumpEpoch: true,
+            resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null, stories: null, storiesTruncated: false,
+            ackedRunnerSeq: 0, bumpEpoch: true,
           },
         });
       });

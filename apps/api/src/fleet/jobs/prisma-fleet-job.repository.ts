@@ -9,7 +9,7 @@ import type { RunnerCapabilities } from '../common/protocol';
 import { ACTIVE_STATES, RUNNER_HELD_STATES } from './job-state';
 import {
   ActiveJobRef, DuplicateActiveJobError, FleetArtifactRecord, FleetCommandRecord, FleetJobEventRecord, FleetJobFilters,
-  FleetJobPatch, FleetJobRecord, FleetRepoRef, IFleetJobRepository, NewFleetJob, PlacementRunnerRow,
+  FleetJobPatch, FleetJobRecord, FleetJobStory, FleetRepoRef, IFleetJobRepository, NewFleetJob, PlacementRunnerRow,
 } from './domain/fleet-job.domain';
 
 const toJob = (r: JobRow): FleetJobRecord => ({
@@ -18,6 +18,7 @@ const toJob = (r: JobRow): FleetJobRecord => ({
   state: r.state as FleetJobState,
   maxCostUsd: r.maxCostUsd.toString(),
   costSpentUsd: r.costSpentUsd.toString(),
+  stories: r.stories as unknown as FleetJobStory[] | null,
 });
 
 const toCommand = (r: FleetCommandRow): FleetCommandRecord => ({ ...r, type: r.type as FleetCommandType });
@@ -98,11 +99,12 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
   }
 
   async update(id: string, patch: FleetJobPatch): Promise<FleetJobRecord> {
-    const { bumpEpoch, costSpentUsd, progress, ...rest } = patch;
+    const { bumpEpoch, costSpentUsd, progress, stories, ...rest } = patch;
     const data: Prisma.FleetJobUpdateInput = {
       ...rest,
       ...(costSpentUsd !== undefined ? { costSpentUsd: new Prisma.Decimal(costSpentUsd) } : {}),
       ...(progress !== undefined ? { progress: progress === null ? Prisma.DbNull : (progress as Prisma.InputJsonValue) } : {}),
+      ...(stories !== undefined ? { stories: stories === null ? Prisma.DbNull : (stories as unknown as Prisma.InputJsonValue) } : {}),
       ...(bumpEpoch ? { leaseEpoch: { increment: 1 } } : {}),
     };
     try {

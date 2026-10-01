@@ -1,5 +1,5 @@
 import { FleetJobState } from '../../common/enums';
-import type { FleetJobPatch } from '../jobs/domain/fleet-job.domain';
+import type { FleetJobPatch, FleetJobStory } from '../jobs/domain/fleet-job.domain';
 
 export type EventEffect =
   | { kind: 'transition'; to: FleetJobState; reason: string | null; exitCode: number | null }
@@ -15,6 +15,34 @@ const COST_RE = /^\d{1,8}(\.\d{1,4})?$/;
 const SHA_RE = /^[0-9a-f]{7,64}$/;
 /** S1b §1.1: `pushed`, `none` or `failed:` plus 1-200 printable ASCII characters. */
 const WIP_PUSH_RE = /^(pushed|none|failed:[\x20-\x7e]{1,200})$/;
+
+/** S1b §1.2 bounds: the runner's STORY_LIMITS (`apps/runner/src/watcher/prd-stories.ts`). */
+const STORIES_MAX = 100;
+const STORIES_MAX_BYTES = 8_192;
+const STORY_ID_MAX = 128;
+const STORY_TITLE_MAX = 80;
+const STORY_DEPENDS_MAX = 10;
+const STORY_ATTEMPTS_MAX = 1_000_000;
+const STORY_STATUS_RE = /^[a-z][a-z-]{0,31}$/;
+
+const isStoryId = (v: unknown): boolean => typeof v === 'string' && v.trim() !== '' && v.length <= STORY_ID_MAX;
+
+function story(v: unknown): FleetJobStory | null {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return null;
+  const { id, title, status, attempts, dependsOn } = v as Obj;
+  if (!isStoryId(id) || typeof title !== 'string' || title.length > STORY_TITLE_MAX) return null;
+  if (typeof status !== 'string' || !STORY_STATUS_RE.test(status)) return null;
+  if (typeof attempts !== 'number' || !Number.isInteger(attempts) || attempts < 0 || attempts > STORY_ATTEMPTS_MAX) return null;
+  if (!Array.isArray(dependsOn) || dependsOn.length > STORY_DEPENDS_MAX || !dependsOn.every(isStoryId)) return null;
+  return { id: id as string, title, status, attempts, dependsOn: dependsOn as string[] };
+}
+
+/** One bad story drops the whole list: it is one mirrored field (S1b §1.3). */
+function storyList(v: unknown): FleetJobStory[] | undefined {
+  if (!Array.isArray(v) || v.length > STORIES_MAX || Buffer.byteLength(JSON.stringify(v), 'utf8') > STORIES_MAX_BYTES) return undefined;
+  const stories = v.map(story);
+  return stories.every((s) => s !== null) ? stories : undefined;
+}
 
 const str = (v: unknown, max: number): string | undefined => (typeof v === 'string' && v.length > 0 && v.length <= max ? v : undefined);
 const strOrNull = (v: unknown, max: number): string | null | undefined => (v === null ? null : str(v, max));
@@ -35,6 +63,7 @@ function mirror(p: Obj): FleetJobPatch {
   const heartbeat = typeof p.heartbeatAt === 'string' && !Number.isNaN(Date.parse(p.heartbeatAt)) ? new Date(p.heartbeatAt) : undefined;
   const progress = typeof p.progress === 'object' && p.progress !== null && !Array.isArray(p.progress) &&
     Buffer.byteLength(JSON.stringify(p.progress), 'utf8') <= MAX_PROGRESS_BYTES ? p.progress : undefined;
+  const stories = storyList(p.stories);
   const entries: Array<[keyof FleetJobPatch, unknown]> = [
     ['naxRunId', str(p.naxRunId, 128)],
     ['naxLogRunId', str(p.naxLogRunId, 128)],
@@ -50,6 +79,8 @@ function mirror(p: Obj): FleetJobPatch {
     ['resultSha', typeof p.resultSha === 'string' && SHA_RE.test(p.resultSha) ? p.resultSha : undefined],
     ['resultPrUrl', httpUrl(p.resultPrUrl)],
     ['wipPush', typeof p.wipPush === 'string' && WIP_PUSH_RE.test(p.wipPush) ? p.wipPush : undefined],
+    ['stories', stories],
+    ['storiesTruncated', stories === undefined ? undefined : p.storiesTruncated === true],   // D150
   ];
   return Object.fromEntries(entries.filter(([, v]) => v !== undefined)) as FleetJobPatch;
 }
