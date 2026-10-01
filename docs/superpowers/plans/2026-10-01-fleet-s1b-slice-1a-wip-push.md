@@ -62,7 +62,7 @@ it, and the web job page shows it next to the result branch.
 **Files:**
 - Modify: `packages/fleet-protocol/src/index.ts` (`SnapshotEventPayload`, ~line 84-101)
 - Modify: `apps/api/prisma/schema.prisma` (`model FleetJob`, after `resultPrUrl`)
-- Create: `apps/api/prisma/migrations/20261002090000_fleet_job_wip_push/migration.sql`
+- Create: `apps/api/prisma/migrations/20261001120000_fleet_job_wip_push/migration.sql`
 - Modify: `apps/api/src/fleet/jobs/domain/fleet-job.domain.ts` (`FleetJobRecord`, `Mutable`)
 - Modify: `apps/api/src/fleet/sync/event-payloads.ts` (`mirror`)
 - Modify: `apps/api/src/fleet/jobs/dto/fleet-job.dto.ts`
@@ -113,7 +113,7 @@ In `packages/fleet-protocol/src/index.ts`, inside `SnapshotEventPayload`, after 
   wipPush           String? // S1b §1.1: pushed | none | failed:<reason>
 ```
 
-Create `apps/api/prisma/migrations/20261002090000_fleet_job_wip_push/migration.sql`:
+Create `apps/api/prisma/migrations/20261001120000_fleet_job_wip_push/migration.sql`:
 
 ```sql
 -- S1b slice 1a: outcome of the runner's work-in-progress push after an unfinished RUN.
