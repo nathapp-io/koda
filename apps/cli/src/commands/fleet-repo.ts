@@ -10,10 +10,11 @@ import {
 } from '../generated';
 import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
+import { handleApiError } from '../utils/error';
 import { requireForce } from '../utils/force';
 import { table } from '../utils/output';
 import { parsePositiveInt } from '../utils/parse-positive-int';
-import { ADMIN_TOKEN_HINT, type FleetPage, handleFleetError, handleFleetValidation, pageHint, splitRepoPath } from './fleet-shared';
+import { ADMIN_TOKEN_HINT, type FleetPage, handleFleetValidation, pageHint, splitRepoPath } from './fleet-shared';
 
 const PROVIDERS = ['github', 'gitlab'] as const;
 type Provider = (typeof PROVIDERS)[number];
@@ -39,7 +40,7 @@ function registerAdd(repo: Command): void {
         else console.log(`Registered ${created.owner}/${created.name} (${created.id}), default branch ${created.defaultBranch}`);
         process.exit(0);
       } catch (err: unknown) {
-        handleFleetError(err, { adminHint: true });
+        handleApiError(err, { forbiddenHint: ADMIN_TOKEN_HINT });
       }
     });
 }
@@ -74,7 +75,7 @@ function registerList(repo: Command): void {
         }
         process.exit(0);
       } catch (err: unknown) {
-        handleFleetError(err, { adminHint: Boolean(options.all) });
+        handleApiError(err, options.all ? { forbiddenHint: ADMIN_TOKEN_HINT } : undefined);
       }
     });
 }
@@ -92,7 +93,7 @@ function registerRemove(repo: Command): void {
         console.log(`Removed repo ${repoId}`);
         process.exit(0);
       } catch (err: unknown) {
-        handleFleetError(err, { adminHint: true, notFoundMessage: `Repo not found: ${repoId}` });
+        handleApiError(err, { forbiddenHint: ADMIN_TOKEN_HINT, notFoundMessage: `Repo not found: ${repoId}` });
       }
     });
 }
@@ -110,7 +111,7 @@ function registerCheck(repo: Command): void {
         else console.log(result.reachable ? `Reachable (${result.checkedAt})` : `Unreachable: ${result.reason ?? 'unknown'} (${result.checkedAt})`);
         process.exit(result.reachable ? 0 : 1);
       } catch (err: unknown) {
-        handleFleetError(err, { adminHint: true, notFoundMessage: `Repo not found: ${repoId}` });
+        handleApiError(err, { forbiddenHint: ADMIN_TOKEN_HINT, notFoundMessage: `Repo not found: ${repoId}` });
       }
     });
 }

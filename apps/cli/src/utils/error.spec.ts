@@ -87,6 +87,40 @@ describe('error', () => {
       expect(exitCode).toBe(3);
     });
 
+    it.each([
+      [40000, 2, 'UNAUTHORIZED', 'Check your API key: koda config set --api-key <key>'],
+      [40003, 2, 'UNAUTHORIZED', 'Check your API key: koda config set --api-key <key>'],
+      [404, 4, 'NOT_FOUND', null],
+      [-2, 3, 'VALIDATION_ERROR', null],
+    ] as const)('maps API envelope ret %s to the expected CLI error', (ret, expectedExit, expectedCode, expectedHint) => {
+      setJsonMode(true);
+      try {
+        handleApiError({ ret, message: `API message ${ret}` }, { notFoundMessage: 'Custom not found' });
+      } catch {
+        // Expected to throw process.exit
+      }
+
+      const parsed = JSON.parse(errorOutput[0]);
+      expect(parsed.error).toMatchObject({
+        code: expectedCode,
+        message: ret === 404 ? 'Custom not found' : `API message ${ret}`,
+        hint: expectedHint,
+      });
+      expect(exitCode).toBe(expectedExit);
+    });
+
+    it('prefers a recognized API ret over a conflicting legacy HTTP status', () => {
+      setJsonMode(true);
+      try {
+        handleApiError({ ret: 40000, status: 404, message: 'Invalid API key' });
+      } catch {
+        // Expected to throw process.exit
+      }
+
+      expect(exitCode).toBe(2);
+      expect(JSON.parse(errorOutput[0]).error.code).toBe('UNAUTHORIZED');
+    });
+
     it('handles AxiosError with response status 401/403 (auth error)', () => {
       const error = {
         response: {

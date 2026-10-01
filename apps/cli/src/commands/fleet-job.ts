@@ -11,9 +11,10 @@ import {
 } from '../generated';
 import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
+import { handleApiError } from '../utils/error';
 import { error, table } from '../utils/output';
 import { parsePositiveInt } from '../utils/parse-positive-int';
-import { ago, type FleetPage, handleFleetError, handleFleetValidation, pageHint, printPlacement, resolveRepo, resolveRunner, runnerNames, runnerNamesOrEmpty } from './fleet-shared';
+import { ago, type FleetPage, handleFleetValidation, pageHint, printPlacement, resolveRepo, resolveRunner, runnerNames, runnerNamesOrEmpty } from './fleet-shared';
 
 const STATES = ['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING', 'COMPLETED', 'FAILED', 'ESCALATED', 'CRASHED', 'CANCELLED'] as const;
 type JobState = (typeof STATES)[number];
@@ -72,7 +73,7 @@ function registerList(job: Command): void {
         }
         process.exit(0);
       } catch (err: unknown) {
-        handleFleetError(err);
+        handleApiError(err);
       }
     });
 }
@@ -106,7 +107,7 @@ function registerShow(job: Command): void {
         }
         process.exit(0);
       } catch (err: unknown) {
-        handleFleetError(err, { notFoundMessage: `Job not found: ${jobId}` });
+        handleApiError(err, { notFoundMessage: `Job not found: ${jobId}` });
       }
     });
 }
@@ -125,7 +126,7 @@ function registerCancel(job: Command): void {
         else console.log(`Cancel requested: job ${j.id} is ${j.state}`);
         process.exit(0);
       } catch (err: unknown) {
-        handleFleetError(err, { notFoundMessage: `Job not found: ${jobId}` });
+        handleApiError(err, { notFoundMessage: `Job not found: ${jobId}` });
       }
     });
 }
@@ -144,7 +145,7 @@ function registerRequeue(job: Command): void {
         else printPlacement(result, result.placement.assigned ? await runnerNamesOrEmpty(slug) : new Map());
         process.exit(0);
       } catch (err: unknown) {
-        handleFleetError(err, { notFoundMessage: `Job not found: ${jobId}` });
+        handleApiError(err, { notFoundMessage: `Job not found: ${jobId}` });
       }
     });
 }
@@ -173,7 +174,7 @@ function registerBundle(job: Command): void {
           process.exit(1);
           return;
         }
-        handleFleetError(err, { notFoundMessage: `No bundle for job ${jobId}` });
+        handleApiError(err, { notFoundMessage: `No bundle for job ${jobId}` });
       }
     });
 }

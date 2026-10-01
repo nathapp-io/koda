@@ -72,6 +72,15 @@ describe('koda fleet runner', () => {
     expect((console.error as jest.Mock).mock.calls.flat().join('\n')).toContain('global-admin user access token');
   });
 
+  it('an invalid API key keeps the API-key hint instead of the admin-token hint', async () => {
+    (runnersControllerList as jest.Mock).mockRejectedValue({ ret: 40000, message: 'Unauthorized' });
+    await run('list');
+    expect(exitSpy).toHaveBeenCalledWith(2);
+    const output = (console.error as jest.Mock).mock.calls.flat().join('\n');
+    expect(output).toContain('koda config set --api-key');
+    expect(output).not.toContain('global-admin user access token');
+  });
+
   it('enable and disable patch only enabled', async () => {
     (runnersControllerUpdate as jest.Mock).mockResolvedValue({ ret: 0, data: runner });
     await run('disable', 'r1');

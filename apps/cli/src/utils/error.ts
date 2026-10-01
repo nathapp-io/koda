@@ -6,6 +6,7 @@ interface HandleApiErrorOpts {
   configError?: boolean;
   validationError?: boolean;
   hint?: string;
+  forbiddenHint?: string;
 }
 
 type ErrorCode = 'CONFIG_ERROR' | 'VALIDATION_ERROR' | 'UNAUTHORIZED' | 'NOT_FOUND' | 'API_ERROR';
@@ -39,6 +40,13 @@ function describeMessage(m: unknown): string | undefined {
   return undefined;
 }
 
+const API_RET_STATUS: ReadonlyMap<number, number> = new Map([
+  [40000, 401],
+  [40003, 403],
+  [404, 404],
+  [-2, 400],
+]);
+
 function getStatusAndMessage(err: unknown): { status: number | undefined; message: string } {
   if (typeof err === 'string') {
     return { status: undefined, message: err || 'Unknown error' };
@@ -46,9 +54,17 @@ function getStatusAndMessage(err: unknown): { status: number | undefined; messag
 
   const e = err as {
     message?: unknown;
+    ret?: unknown;
     statusCode?: number;
     status?: number;
   } | null;
+
+  // The generated client throws the parsed API envelope. Its `ret` is an
+  // application code, so map known values before considering legacy HTTP fields.
+  const mappedStatus = typeof e?.ret === 'number' ? API_RET_STATUS.get(e.ret) : undefined;
+  if (mappedStatus !== undefined) {
+    return { status: mappedStatus, message: describeMessage(e?.message) ?? 'Unknown error' };
+  }
 
   // The generated client throws the parsed error body for HTTP failures
   // (e.g. Nest's { statusCode, message }); `.status` is bridged for errors
@@ -101,7 +117,8 @@ export function handleApiError(err: unknown, opts?: HandleApiErrorOpts): never {
   const { status, message } = getStatusAndMessage(err);
 
   if (status === 401 || status === 403) {
-    emitError(message, 'UNAUTHORIZED', status, opts?.hint ?? 'Check your API key: koda config set --api-key <key>');
+    const hint = status === 403 ? opts?.forbiddenHint ?? opts?.hint : opts?.hint;
+    emitError(message, 'UNAUTHORIZED', status, hint ?? 'Check your API key: koda config set --api-key <key>');
     return process.exit(2);
   }
 

@@ -78,11 +78,11 @@ describe('authCommand', () => {
     });
 
     it('exits non-zero on API error', async () => {
-      mockMe.mockRejectedValue(Object.assign(new Error('Unauthorized'), { status: 401 }));
+      mockMe.mockRejectedValue({ ret: 40000, message: 'Unauthorized' });
 
       await program.parseAsync(['node', 'koda', 'auth', 'me']);
 
-      expect(exitSpy).toHaveBeenCalledWith(expect.any(Number));
+      expect(exitSpy).toHaveBeenCalledWith(2);
     });
   });
 
@@ -139,12 +139,12 @@ describe('authCommand', () => {
     });
 
     it('exits non-zero on API error and does not clear local credentials', async () => {
-      mockLogout.mockRejectedValue(Object.assign(new Error('Unauthorized'), { status: 401 }));
+      mockLogout.mockRejectedValue({ ret: 40000, message: 'Unauthorized' });
 
       await program.parseAsync(['node', 'koda', 'auth', 'logout']);
 
       expect(mockClearApiKey).not.toHaveBeenCalled();
-      expect(exitSpy).toHaveBeenCalledWith(expect.any(Number));
+      expect(exitSpy).toHaveBeenCalledWith(2);
     });
   });
 });

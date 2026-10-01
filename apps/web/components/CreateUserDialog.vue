@@ -35,10 +35,14 @@
           <FormItem>
             <FormLabel>{{ t('admin.users.form.role') }}</FormLabel>
             <FormControl>
-              <select v-bind="componentField" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm">
-                <option value="MEMBER">{{ t('admin.users.roles.MEMBER') }}</option>
-                <option value="ADMIN">{{ t('admin.users.roles.ADMIN') }}</option>
-              </select>
+              <FleetNativeSelect
+                v-bind="componentField"
+                id="role"
+                :options="[
+                  { value: 'MEMBER', label: t('admin.users.roles.MEMBER') },
+                  { value: 'ADMIN', label: t('admin.users.roles.ADMIN') },
+                ]"
+              />
             </FormControl>
             <FormMessage />
           </FormItem>
