@@ -9,9 +9,8 @@ import {
 import { unwrap } from '../utils/api';
 import { apiErrorCode } from '../utils/api-error-code';
 import { withContext } from '../utils/context';
-import { error } from '../utils/output';
 import { parseUsd } from '../utils/parse-usd';
-import { type FleetPage, handleFleetError, printPlacement, resolveRepo, resolveRunner, runnerNamesOrEmpty } from './fleet-shared';
+import { type FleetPage, handleFleetConflict, handleFleetError, handleFleetValidation, printPlacement, resolveRepo, resolveRunner, runnerNamesOrEmpty } from './fleet-shared';
 
 const ACTIVE = new Set(['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING']);
 const collect = (value: string, previous: string[]): string[] => [...previous, value];
@@ -32,9 +31,7 @@ export async function findActiveJob(slug: string, repoId: string, feature: strin
 
 /** Validation failure: message to stderr, exit 3 (`.nax/rules/cli.md`). Returns null so callers can `return invalid(...)`. */
 function invalid(message: string): null {
-  error(message);
-  process.exit(3);
-  return null;
+  return handleFleetValidation(message);
 }
 
 async function buildBody(slug: string, o: DispatchOptions): Promise<DispatchFleetJobDto | null> {
@@ -63,8 +60,7 @@ async function explainConflict(err: unknown, slug: string, body: DispatchFleetJo
     // The lookup is a courtesy; the original 409 is the answer.
   }
   if (!active) return handleFleetError(err);
-  error(`An active job already runs ${body.feature} on this repo: ${active.id} (${active.state}). koda fleet job show ${active.id}`);
-  process.exit(1);
+  handleFleetConflict(`An active job already runs ${body.feature} on this repo: ${active.id} (${active.state}). koda fleet job show ${active.id}`);
 }
 
 export function registerFleetDispatch(fleet: Command): void {

@@ -97,17 +97,19 @@ export class GitHubAppClient {
     return res.status === 201;
   }
 
-  async verifyRepo(owner: string, name: string): Promise<CanonicalRepo & { installationId: bigint }> {
+  async verifyRepo(owner: string, name: string, persistedInstallationId?: bigint): Promise<CanonicalRepo & { installationId: bigint }> {
     const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
-    const appJwt = this.createAppJwt();
+    let installationId = persistedInstallationId;
+    if (installationId === undefined) {
+      const installation = await this.http.request('GET', `${this.api}${repoPath}/installation`, this.headers(this.createAppJwt()));
+      if (installation.status === 404) throw new RepoCheckException('app_not_installed');
+      if (installation.status !== 200) throw new RepoCheckException('provider_error');
+      const discoveredId = obj(installation.body).id;
+      if (typeof discoveredId !== 'number') throw new RepoCheckException('provider_error');
+      installationId = BigInt(discoveredId);
+    }
 
-    const installation = await this.http.request('GET', `${this.api}${repoPath}/installation`, this.headers(appJwt));
-    if (installation.status === 404) throw new RepoCheckException('app_not_installed');
-    if (installation.status !== 200) throw new RepoCheckException('provider_error');
-    const installationId = obj(installation.body).id;
-    if (typeof installationId !== 'number') throw new RepoCheckException('provider_error');
-
-    const { token } = await this.mintInstallationToken(BigInt(installationId), name);
+    const { token } = await this.mintInstallationToken(installationId, name);
 
     const repo = await this.http.request('GET', `${this.api}${repoPath}`, this.headers(token));
     if (repo.status === 404) throw new RepoCheckException('repo_not_found');
@@ -117,6 +119,6 @@ export class GitHubAppClient {
     if (typeof login !== 'string' || typeof body.name !== 'string' || typeof body.default_branch !== 'string') {
       throw new RepoCheckException('provider_error');
     }
-    return { owner: login, name: body.name, defaultBranch: body.default_branch, installationId: BigInt(installationId) };
+    return { owner: login, name: body.name, defaultBranch: body.default_branch, installationId };
   }
 }

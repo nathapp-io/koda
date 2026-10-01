@@ -89,7 +89,10 @@ export class FleetReposService {
     const result = (reachable: boolean, reason: RepoCheckResultDto['reason']) =>
       Object.assign(new RepoCheckResultDto(), { repoId: id, reachable, reason, checkedAt: now.toISOString() });
     try {
-      if (row.provider === 'github') await this.github.verifyRepo(row.owner, row.name);
+      if (row.provider === 'github') {
+        if (row.githubInstallationId === null) throw new RepoCheckException('app_not_installed');
+        await this.github.verifyRepo(row.owner, row.name, row.githubInstallationId);
+      }
       else await this.verifyGitLab(row.projectId, row.owner, row.name);
       return result(true, null);
     } catch (error) {

@@ -7,16 +7,20 @@ jest.mock('../generated', () => ({
 }));
 
 import { projectFleetReposControllerList, projectFleetRunnersControllerList } from '../generated';
+import { setJsonMode } from '../utils/json-mode';
 import { ago, handleFleetError, pageHint, printPlacement, resolveRepo, resolveRunner, runnerNames, splitRepoPath } from './fleet-shared';
 
 const ok = <T>(data: T) => ({ ret: 0, data });
-const page = <T>(records: T[]) => ok({ total: records.length, current: 1, size: 100, hasNext: false, hasPrev: false, records });
+const page = <T>(records: T[], current = 1, hasNext = false) => ok({ total: records.length, current, size: 100, hasNext, hasPrev: current > 1, records });
 const repoA = { id: 'fr1', projectId: 'p', provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', createdAt: '' };
 const repoB = { id: 'fr2', projectId: 'p', provider: 'gitlab', owner: 'group/sub', name: 'svc', defaultBranch: 'main', createdAt: '' };
 const box = { id: 'r1', name: 'box-1', os: 'linux', arch: 'x64', labels: [], enabled: true, online: true, profiles: [] };
 
 describe('fleet-shared', () => {
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => {
+    setJsonMode(false);
+    jest.clearAllMocks();
+  });
 
   it('ago prints a compact age and - for no value', () => {
     const now = new Date('2026-10-01T12:00:00.000Z');
@@ -50,12 +54,33 @@ describe('fleet-shared', () => {
     expect(projectFleetReposControllerList).toHaveBeenCalledWith({ path: { slug: 'web' }, query: { size: 100 } });
   });
 
+  it.each(['fr2', 'GROUP/SUB/SVC'])('resolves a repo by id or path on a later page (%s)', async (ref) => {
+    (projectFleetReposControllerList as jest.Mock)
+      .mockResolvedValueOnce(page([repoA], 1, true))
+      .mockResolvedValueOnce(page([repoB], 2));
+    expect(await resolveRepo('web', ref)).toEqual(repoB);
+    expect(projectFleetReposControllerList).toHaveBeenNthCalledWith(2, { path: { slug: 'web' }, query: { size: 100, current: 2 } });
+  });
+
   it('resolveRunner matches an id or a name; runnerNames maps id to name', async () => {
     (projectFleetRunnersControllerList as jest.Mock).mockResolvedValue(page([box]));
     expect(await resolveRunner('web', 'box-1')).toEqual(box);
     expect(await resolveRunner('web', 'r1')).toEqual(box);
     expect(await resolveRunner('web', 'nope')).toBeNull();
     expect((await runnerNames('web')).get('r1')).toBe('box-1');
+  });
+
+  it('resolves runners by id or name on later pages and includes them in runner names', async () => {
+    (projectFleetRunnersControllerList as jest.Mock)
+      .mockResolvedValueOnce(page([box], 1, true))
+      .mockResolvedValueOnce(page([{ ...box, id: 'r2', name: 'box-2' }], 2))
+      .mockResolvedValueOnce(page([box], 1, true))
+      .mockResolvedValueOnce(page([{ ...box, id: 'r2', name: 'box-2' }], 2))
+      .mockResolvedValueOnce(page([box], 1, true))
+      .mockResolvedValueOnce(page([{ ...box, id: 'r2', name: 'box-2' }], 2));
+    expect(await resolveRunner('web', 'box-2')).toEqual({ ...box, id: 'r2', name: 'box-2' });
+    expect(await resolveRunner('web', 'r2')).toEqual({ ...box, id: 'r2', name: 'box-2' });
+    expect((await runnerNames('web')).get('r2')).toBe('box-2');
   });
 
   describe('handleFleetError', () => {
@@ -92,6 +117,15 @@ describe('fleet-shared', () => {
       err.mockClear();
       handleFleetError({ ret: 40003, message: 'Forbidden' });
       expect(stderr()).not.toContain('global-admin user access token');
+    });
+
+    it('keeps the admin hint inside the structured JSON error', () => {
+      setJsonMode(true);
+      err.mockClear();
+      handleFleetError({ ret: 40003, message: 'Forbidden' }, { adminHint: true });
+      const output = stderr();
+      expect(JSON.parse(output)).toEqual({ error: { code: 'UNAUTHORIZED', message: 'Forbidden', status: 403, hint: 'Requires a global-admin user access token: KODA_API_KEY=<token> koda fleet …' } });
+      expect(err).toHaveBeenCalledTimes(1);
     });
   });
 

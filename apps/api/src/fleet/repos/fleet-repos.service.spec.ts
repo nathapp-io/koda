@@ -69,7 +69,23 @@ describe('FleetReposService', () => {
       repo.findById.mockResolvedValue(created());
       github.verifyRepo.mockResolvedValue({ owner: 'acme', name: 'app', defaultBranch: 'trunk', installationId: BigInt(77) });
       expect(await make().check('fr1', now)).toEqual({ repoId: 'fr1', reachable: true, reason: null, checkedAt: now.toISOString() });
-      expect(github.verifyRepo).toHaveBeenCalledWith('acme', 'app');
+      expect(github.verifyRepo).toHaveBeenCalledWith('acme', 'app', BigInt(77));
+    });
+
+    it('checks the persisted GitHub installation even when the current installation has a different id', async () => {
+      repo.findById.mockResolvedValue(created({ githubInstallationId: BigInt(77) }));
+      github.verifyRepo.mockResolvedValue({ owner: 'acme', name: 'app', defaultBranch: 'trunk', installationId: BigInt(99) });
+
+      await make().check('fr1', now);
+
+      expect(github.verifyRepo).toHaveBeenCalledWith('acme', 'app', BigInt(77));
+    });
+
+    it('reports app_not_installed when a GitHub repo has no persisted installation id', async () => {
+      repo.findById.mockResolvedValue(created({ githubInstallationId: null }));
+      const result = await make().check('fr1', now);
+      expect(result).toMatchObject({ reachable: false, reason: 'app_not_installed' });
+      expect(github.verifyRepo).not.toHaveBeenCalled();
     });
 
     it('answers unreachable with the forge reason instead of throwing', async () => {

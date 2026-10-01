@@ -22,6 +22,7 @@ import {
   projectFleetReposControllerList,
 } from '../generated';
 import { resolveContext } from '../config';
+import { setJsonMode } from '../utils/json-mode';
 
 const CTX = { apiKey: 'jwt', apiUrl: 'https://koda.example.com', projectSlug: 'web' };
 const repo = { id: 'fr1', projectId: 'p', provider: 'gitlab', owner: 'group/sub', name: 'svc', defaultBranch: 'main', githubInstallationId: null, createdAt: '' };
@@ -43,7 +44,10 @@ describe('koda fleet repo', () => {
     jest.spyOn(console, 'error').mockImplementation(() => {});
   });
 
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => {
+    setJsonMode(false);
+    jest.clearAllMocks();
+  });
 
   it('add splits a GitLab subgroup path and sends the project slug in the body', async () => {
     (fleetReposControllerCreate as jest.Mock).mockResolvedValue({ ret: 0, data: repo });
@@ -53,8 +57,12 @@ describe('koda fleet repo', () => {
   });
 
   it('add refuses a path without owner/name and an unknown provider (exit 3, no request)', async () => {
+    setJsonMode(true);
     await run('add', 'svc', '--provider', 'github');
     expect(exitSpy).toHaveBeenCalledWith(3);
+    const error = JSON.parse((console.error as jest.Mock).mock.calls[0][0]);
+    expect(error.error).toMatchObject({ code: 'VALIDATION_ERROR', status: null });
+    exitSpy.mockClear();
     await run('add', 'acme/app', '--provider', 'bitbucket');
     expect(exitSpy).toHaveBeenLastCalledWith(3);
     expect(fleetReposControllerCreate).not.toHaveBeenCalled();

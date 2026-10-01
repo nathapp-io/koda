@@ -20,6 +20,7 @@ import {
   projectFleetRunnersControllerList,
 } from '../generated';
 import { resolveContext } from '../config';
+import { setJsonMode } from '../utils/json-mode';
 
 const CTX = { apiKey: 'jwt', apiUrl: 'https://koda.example.com', projectSlug: 'web' };
 const repo = { id: 'fr1', projectId: 'p', provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', createdAt: '' };
@@ -46,7 +47,10 @@ describe('koda fleet dispatch', () => {
     (projectFleetRunnersControllerList as jest.Mock).mockResolvedValue(page([box]));
   });
 
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => {
+    setJsonMode(false);
+    jest.clearAllMocks();
+  });
 
   it('dispatches a RUN by repo name with profiles and labels, and prints the assigned runner', async () => {
     (fleetJobsControllerDispatch as jest.Mock).mockResolvedValue({ ret: 0, data: { job: job(), placement: { assigned: true, runnerId: 'r1', misfits: [] } } });
@@ -101,6 +105,22 @@ describe('koda fleet dispatch', () => {
     expect(fleetJobsControllerList).toHaveBeenCalledWith({ path: { slug: 'web' }, query: { repoId: 'fr1', feature: 'login', size: 20 } });
     expect(errorSpy.mock.calls.flat().join('\n')).toContain('j0');
     expect(exitSpy).toHaveBeenLastCalledWith(1);
+  });
+
+  it('emits a duplicate-job conflict as one structured JSON error', async () => {
+    setJsonMode(true);
+    (fleetJobsControllerDispatch as jest.Mock).mockRejectedValue({ ret: 409, message: 'duplicate' });
+    (fleetJobsControllerList as jest.Mock).mockResolvedValue(page([job({ state: 'RUNNING' })]));
+    await run('--repo', 'acme/app', '--feature', 'login', '--max-cost', '5', '--json');
+    expect(JSON.parse(errorSpy.mock.calls.flat().join('\n'))).toEqual({ error: {
+      code: 'API_ERROR',
+      message: 'An active job already runs login on this repo: j1 (RUNNING). koda fleet job show j1',
+      status: 409,
+      hint: null,
+    } });
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(exitSpy).toHaveBeenLastCalledWith(1);
+    setJsonMode(false);
   });
 
   it('on a 409 whose job already finished, falls back to the API message', async () => {

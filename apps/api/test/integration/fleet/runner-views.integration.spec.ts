@@ -64,7 +64,7 @@ describeIntegration('fleet runner views (PG)', () => {
   });
 
   it('keeps bootedAt null for a runner row from before the migration', async () => {
-    await prisma.runner.update({ where: { id: runner.runnerId }, data: { bootedAt: null } });
+    await prisma.runner.update({ where: { id: runner.runnerId }, data: { bootId: 'boot-2', bootedAt: null } });
     expect((await adminGet(runner.runnerId)).bootedAt).toBeNull();
     await sync('boot-2');
     expect((await adminGet(runner.runnerId)).bootedAt).toBeNull();

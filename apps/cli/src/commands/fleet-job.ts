@@ -13,15 +13,13 @@ import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
 import { error, table } from '../utils/output';
 import { parsePositiveInt } from '../utils/parse-positive-int';
-import { ago, type FleetPage, handleFleetError, pageHint, printPlacement, resolveRepo, resolveRunner, runnerNames, runnerNamesOrEmpty } from './fleet-shared';
+import { ago, type FleetPage, handleFleetError, handleFleetValidation, pageHint, printPlacement, resolveRepo, resolveRunner, runnerNames, runnerNamesOrEmpty } from './fleet-shared';
 
 const STATES = ['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING', 'COMPLETED', 'FAILED', 'ESCALATED', 'CRASHED', 'CANCELLED'] as const;
 type JobState = (typeof STATES)[number];
 
 function invalid(message: string): null {
-  error(message);
-  process.exit(3);
-  return null;
+  return handleFleetValidation(message);
 }
 
 interface ListOptions { state?: string; repo?: string; runner?: string; requestedBy?: string; feature?: string; page: number; size: number; project?: string; json?: boolean }

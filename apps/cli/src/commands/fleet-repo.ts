@@ -11,9 +11,9 @@ import {
 import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
 import { requireForce } from '../utils/force';
-import { error, table } from '../utils/output';
+import { table } from '../utils/output';
 import { parsePositiveInt } from '../utils/parse-positive-int';
-import { ADMIN_TOKEN_HINT, type FleetPage, handleFleetError, pageHint, splitRepoPath } from './fleet-shared';
+import { ADMIN_TOKEN_HINT, type FleetPage, handleFleetError, handleFleetValidation, pageHint, splitRepoPath } from './fleet-shared';
 
 const PROVIDERS = ['github', 'gitlab'] as const;
 type Provider = (typeof PROVIDERS)[number];
@@ -28,9 +28,7 @@ function registerAdd(repo: Command): void {
     .action(async (ownerAndName: string, options: { provider: string; project?: string; json?: boolean }) => {
       const parts = splitRepoPath(ownerAndName);
       if (!parts || !(PROVIDERS as readonly string[]).includes(options.provider)) {
-        error(!parts ? `Expected owner/name, got "${ownerAndName}"` : `Unknown provider "${options.provider}": github or gitlab`);
-        process.exit(3);
-        return;
+        return handleFleetValidation(!parts ? `Expected owner/name, got "${ownerAndName}"` : `Unknown provider "${options.provider}": github or gitlab`);
       }
       try {
         const ctx = await withContext({ projectSlug: options.project });

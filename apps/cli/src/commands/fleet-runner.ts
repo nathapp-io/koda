@@ -8,9 +8,9 @@ import {
 } from '../generated';
 import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
-import { error, table } from '../utils/output';
+import { table } from '../utils/output';
 import { parsePositiveInt } from '../utils/parse-positive-int';
-import { ADMIN_TOKEN_HINT, ago, type FleetPage, handleFleetError, pageHint } from './fleet-shared';
+import { ADMIN_TOKEN_HINT, ago, type FleetPage, handleFleetError, handleFleetValidation, pageHint } from './fleet-shared';
 
 const LABEL = /^[a-z0-9][a-z0-9._-]{0,31}$/; // UpdateRunnerDto / CreateEnrollmentDto LABEL_PATTERN
 
@@ -81,9 +81,7 @@ function registerEnrollToken(runner: Command): void {
     .action(async (options: { label: string[]; json?: boolean }) => {
       const bad = options.label.find((l) => !LABEL.test(l));
       if (bad !== undefined) {
-        error(`Invalid label "${bad}": lowercase letters, digits, . _ -; at most 32 characters`);
-        process.exit(3);
-        return;
+        return handleFleetValidation(`Invalid label "${bad}": lowercase letters, digits, . _ -; at most 32 characters`);
       }
       try {
         const ctx = await withContext({}, { requireProject: false });

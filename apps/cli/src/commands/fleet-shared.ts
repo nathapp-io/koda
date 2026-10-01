@@ -8,7 +8,7 @@ import {
 import { unwrap } from '../utils/api';
 import { apiErrorCode } from '../utils/api-error-code';
 import { handleApiError } from '../utils/error';
-import { error, table } from '../utils/output';
+import { table } from '../utils/output';
 
 export interface FleetPage<T> {
   total: number;
@@ -47,13 +47,25 @@ export function splitRepoPath(path: string): { owner: string; name: string } | n
   return { owner, name: path.slice(cut + 1) };
 }
 
-// Fleets are a handful of repos and machines (overview D125): one page of 100 is the whole list.
+async function allProjectRecords<T>(fetchPage: (current: number) => Promise<unknown>): Promise<T[]> {
+  const records: T[] = [];
+  for (let current = 1; ; ) {
+    const page = unwrap<FleetPage<T>>(await fetchPage(current));
+    records.push(...page.records);
+    if (!page.hasNext) break;
+    current = page.current + 1;
+  }
+  return records;
+}
+
 async function projectRepos(slug: string): Promise<FleetRepoDto[]> {
-  return unwrap<FleetPage<FleetRepoDto>>(await projectFleetReposControllerList({ path: { slug }, query: { size: 100 } })).records;
+  return allProjectRecords<FleetRepoDto>((current) =>
+    projectFleetReposControllerList({ path: { slug }, query: { size: 100, ...(current > 1 ? { current } : {}) } }));
 }
 
 async function projectRunners(slug: string): Promise<RunnerSummaryDto[]> {
-  return unwrap<FleetPage<RunnerSummaryDto>>(await projectFleetRunnersControllerList({ path: { slug }, query: { size: 100 } })).records;
+  return allProjectRecords<RunnerSummaryDto>((current) =>
+    projectFleetRunnersControllerList({ path: { slug }, query: { size: 100, ...(current > 1 ? { current } : {}) } }));
 }
 
 /** A project repo by id, or by `owner/name` (case-insensitive, D133). */
@@ -91,9 +103,19 @@ const RET_STATUS: ReadonlyMap<number, number> = new Map([[40000, 401], [40003, 4
 export function handleFleetError(err: unknown, opts: { notFoundMessage?: string; adminHint?: boolean } = {}): never {
   const code = apiErrorCode(err);
   const status = code === undefined ? undefined : RET_STATUS.get(code);
-  if (status === 403 && opts.adminHint) error(ADMIN_TOKEN_HINT);
   const mapped = status === undefined ? err : { ...(err as Record<string, unknown>), status };
-  return handleApiError(mapped, opts.notFoundMessage ? { notFoundMessage: opts.notFoundMessage } : undefined);
+  return handleApiError(mapped, {
+    ...(opts.notFoundMessage ? { notFoundMessage: opts.notFoundMessage } : {}),
+    ...(status === 403 && opts.adminHint ? { hint: ADMIN_TOKEN_HINT } : {}),
+  });
+}
+
+export function handleFleetValidation(message: string): never {
+  return handleApiError(message, { validationError: true });
+}
+
+export function handleFleetConflict(message: string): never {
+  return handleApiError({ status: 409, message });
 }
 
 /** Dispatch and requeue answer: the job, and either its runner or why no runner fits now. */
