@@ -113,7 +113,8 @@ const VUE_HELPERS = ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount',
 /** Nuxt auto-import names injected as undefined unless the test supplies them (see MountOptions.globals). */
 const NUXT_AUTO_IMPORTS = [
   'useI18n', 'useAppToast', 'useApi', 'useRuntimeConfig', 'definePageMeta',
-  'useVisiblePolling', 'useFleetRunners', 'useFleetRepos',
+  'useVisiblePolling', 'useFleetRunners', 'useFleetRepos', 'useRoute',
+  'useFleetDispatchOptions', 'useFleetJobs', 'useProjectViewerRole',
 ] as const
 
 /** Defaults for auto-imports a test did not supply; `definePageMeta` is a compile-time no-op macro. */

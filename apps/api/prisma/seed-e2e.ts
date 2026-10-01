@@ -14,6 +14,12 @@ async function main() {
 
   // Wipe all test data so hardcoded keys/slugs do not conflict across runs.
   // Order: deepest relations first to satisfy FK constraints.
+  // Fleet first: jobs reference projects, repos and runners (events, commands, artifacts cascade).
+  await prisma.fleetJob.deleteMany();
+  await prisma.fleetRepo.deleteMany();
+  await prisma.runner.deleteMany();
+  await prisma.runnerEnrollment.deleteMany();
+  await prisma.fleetActivity.deleteMany();
   await prisma.ticketActivity.deleteMany();
   await prisma.comment.deleteMany();
   await prisma.ticketLabel.deleteMany();
@@ -28,12 +34,25 @@ async function main() {
 
   const passwordHash = await bcrypt.hash('E2ePassword1!', 12);
 
-  await prisma.user.create({
+  const admin = await prisma.user.create({
     data: {
       email: 'admin@koda-e2e.test',
       name: 'E2E Admin',
       passwordHash,
       role: 'ADMIN',
+    },
+  });
+
+  // Fleet slice 4c (D138): registering a repo needs a live forge (GitHub App or GitLab token),
+  // which e2e has not got, so the fleet project and its repo are seeded directly.
+  const fleetProject = await prisma.project.create({
+    data: { name: 'E2E Fleet', slug: 'fleet-e2e', key: 'FLTE' },
+  });
+  await prisma.projectMember.create({ data: { projectId: fleetProject.id, userId: admin.id, role: 'ADMIN' } });
+  await prisma.fleetRepo.create({
+    data: {
+      projectId: fleetProject.id, provider: 'github', owner: 'acme', name: 'e2e-app', defaultBranch: 'main',
+      githubInstallationId: BigInt(1), createdById: admin.id,
     },
   });
 

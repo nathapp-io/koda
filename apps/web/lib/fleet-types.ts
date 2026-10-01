@@ -3,6 +3,8 @@
  * Shapes follow docs/superpowers/plans/2026-10-01-fleet-s1-slice-4-overview.md.
  */
 
+import type { FleetJobState } from '~/lib/project-event-stream'
+
 /** Page envelope of every fleet list (`toPageResult`). */
 export interface FleetPage<T> {
   records: T[]
@@ -123,4 +125,83 @@ export interface FleetRepoCheck {
   reachable: boolean
   reason: string | null
   checkedAt: string
+}
+
+export type { FleetJobState }
+
+export type MisfitReason =
+  | 'disabled' | 'offline' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
+  | 'provider_unavailable' | 'sandbox' | 'tools' | 'busy_repo' | 'capacity'
+
+export interface FleetJobDto {
+  id: string
+  projectId: string
+  repoId: string
+  ref: string
+  command: 'RUN' | 'PLAN'
+  feature: string
+  planFrom: string | null
+  profiles: string[]
+  maxCostUsd: string
+  bashMode: string
+  selectorLabels: string[]
+  pinnedRunnerId: string | null
+  runnerId: string | null
+  leaseEpoch: number
+  state: FleetJobState
+  stateReason: string | null
+  requestedById: string
+  queuedAt: string
+  assignedAt: string | null
+  startedAt: string | null
+  finishedAt: string | null
+  cancelRequestedAt: string | null
+  naxRunId: string | null
+  naxLogRunId: string | null
+  naxCostRunId: string | null
+  progress: unknown
+  currentStoryId: string | null
+  currentPhase: string | null
+  costSpentUsd: string
+  lastHeartbeatAt: string | null
+  finishResult: string | null
+  escalationReason: string | null
+  exitCode: number | null
+  resultBranch: string | null
+  resultSha: string | null
+  resultPrUrl: string | null
+}
+
+export interface FleetJobEventDto {
+  id: string
+  seq: number
+  leaseEpoch: number
+  runnerSeq: number | null
+  type: 'state' | 'snapshot' | 'lifecycle' | 'log'
+  payload: unknown
+  createdAt: string
+}
+
+export interface PlacementMisfit {
+  runnerId: string
+  name: string
+  reason: MisfitReason
+}
+
+export interface DispatchResultDto {
+  job: FleetJobDto
+  placement: { assigned: boolean; runnerId: string | null; misfits: PlacementMisfit[] }
+}
+
+/** POST /projects/:slug/fleet/jobs body; bashMode is left to the server default (raw). */
+export interface DispatchBody {
+  repoId: string
+  command: 'RUN' | 'PLAN'
+  feature: string
+  maxCostUsd: number
+  ref?: string
+  planFrom?: string
+  profiles?: string[]
+  selectorLabels?: string[]
+  pinnedRunnerId?: string
 }
