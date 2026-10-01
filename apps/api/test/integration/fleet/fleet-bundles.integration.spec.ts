@@ -7,12 +7,16 @@ import { createHash } from 'crypto';
 import { mkdtempSync, readdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { Readable } from 'stream';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { BundleService } from '../../../src/fleet/artifacts/bundle.service';
+import { FleetFenceException } from '../../../src/fleet/artifacts/bundle.exceptions';
+import { ConflictAppException } from '../../../src/common/exceptions/conflict-app.exception';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const ENV = ['FLEET_ARTIFACT_DIR', 'FLEET_BUNDLE_MAX_BYTES'] as const;
@@ -93,18 +97,49 @@ describeIntegration('fleet bundles (PG)', () => {
   });
 
   it('rejects a bundle whose lease was bumped between uploads (409, ABANDON, prior bundle still downloads)', async () => {
-    // Review 2b BUG-4 (test coverage gap): the lease-mismatch fence path is exercised here at
-    // the first `assertHolder` (bundle.service.ts:88-92). The second lock+re-check inside the
-    // recording transaction (bundle.service.ts:60-74) is exercised by the "fences: stale epoch
-    // 409 + ABANDON, ..." test below (line 85). The "true" mid-stream race — server bumps
-    // leaseEpoch while the body is streaming — is structurally hard to simulate without
-    // injecting into BundleService.
     const j = await job('midstream', 'RUNNING', 2);
     const good = Buffer.from('good-bundle');
     await upload(j.id, good, { epoch: 2 }).expect(201);
     await prisma.fleetJob.update({ where: { id: j.id }, data: { leaseEpoch: j.leaseEpoch + 1 } });
     await upload(j.id, Buffer.from('late'), { epoch: 2 }).expect(409);
     expect(await prisma.fleetCommand.count({ where: { jobId: j.id, type: 'ABANDON' } })).toBe(1);
+    expect((await download(j.id, 'dev').expect(200)).body).toEqual(good);
+  });
+
+  it.each(['lease', 'state'] as const)('rejects a %s change while the bundle body streams and preserves the prior bundle', async (change) => {
+    const j = await job(`stream-${change}`, 'RUNNING');
+    const good = Buffer.from('prior-bundle');
+    await upload(j.id, good).expect(201);
+    const prior = await prisma.fleetJobArtifact.findFirstOrThrow({ where: { jobId: j.id } });
+    const body = Buffer.from('late-bundle');
+    let started!: () => void;
+    let resume!: () => void;
+    const streaming = new Promise<void>((resolve) => { started = resolve; });
+    const resumed = new Promise<void>((resolve) => { resume = resolve; });
+    const stream = Readable.from((async function* () {
+      yield body.subarray(0, 4);
+      started();
+      await resumed;
+      yield body.subarray(4);
+    })());
+    const result = app.get(BundleService).upload({
+      runnerId: runner.runnerId, jobId: j.id, leaseEpochRaw: '1', sha256Header: sha(body),
+      contentType: 'application/gzip', contentLength: String(body.length), body: stream,
+    }).then(() => null, (error: unknown) => error);
+    await streaming;
+    try {
+      // Isolate a state-only race at the held epoch; normal terminal transitions also bump it.
+      await prisma.fleetJob.update({ where: { id: j.id }, data: change === 'lease' ? { leaseEpoch: 2 } : { state: 'CANCELLED' } });
+    } finally {
+      resume();
+    }
+    const error = await result;
+    expect(error).toBeInstanceOf(change === 'lease' ? FleetFenceException : ConflictAppException);
+    expect((error as FleetFenceException).getStatus()).toBe(409);
+    expect(await prisma.fleetCommand.count({ where: { jobId: j.id, runnerId: runner.runnerId, leaseEpoch: 1, type: 'ABANDON' } })).toBe(change === 'lease' ? 1 : 0);
+    expect(await prisma.fleetJobArtifact.findFirstOrThrow({ where: { jobId: j.id } })).toEqual(prior);
+    expect(await prisma.fleetActivity.count({ where: { jobId: j.id, action: 'job.bundle_uploaded' } })).toBe(1);
+    expect(readdirSync(join(process.env.FLEET_ARTIFACT_DIR as string, 'jobs', j.id, '1'))).toEqual([prior.storageKey.split('/').pop()]);
     expect((await download(j.id, 'dev').expect(200)).body).toEqual(good);
   });
 });
