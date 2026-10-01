@@ -19,7 +19,7 @@ export function formatCost(spent: unknown): string | undefined {
 /** The server's `escalationReason` limit (`event-payloads.ts`: `str(p.escalationReason, 2_000)`); an over-limit reason is dropped whole, so clipping here preserves the first 2,000 characters. */
 const ESCALATION_REASON_MAX = 2_000;
 
-function clip(text: string | undefined, max: number): string | undefined {
+export function clip(text: string | undefined, max: number): string | undefined {
   if (text === undefined || text.length <= max) return text;
   const last = text.charCodeAt(max - 1);
   return text.slice(0, last >= 0xd800 && last <= 0xdbff ? max - 1 : max); // never leave half a surrogate pair
