@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AssignPayload } from '@nathapp/fleet-protocol';
+import type { SnapshotEventPayload } from '@nathapp/fleet-protocol';
 import type { CredentialProvider } from '../../src/credentials/broker';
 import { HostExecutor } from '../../src/executor/host-executor';
 import { createGit } from '../../src/executor/git';
@@ -78,6 +79,10 @@ describe('HostExecutor RUN', () => {
     await watcher.tick(true);
     expect(snaps.length).toBeGreaterThan(1);
     expect(logs.join('')).toContain('story US-003 done');
+    // D146: a RUN job's watcher reads the checkout's prd.json (PRD = OLD-1, nothing else set).
+    expect((snaps as SnapshotEventPayload[]).find((s) => s.stories !== undefined)).toMatchObject({
+      stories: [{ id: 'OLD-1', title: '', status: 'pending', attempts: 0, dependsOn: [] }], storiesTruncated: false,
+    });
   });
   test('prepare wipes a previous attempt of the same job (D53) and prepares again', async () => {
     const w = await world();
@@ -260,5 +265,19 @@ describe('HostExecutor credentials wiring (review minors 2, 7)', () => {
     const ex = new HostExecutor({ config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now(), sleep: async () => undefined, credentials });
     expect(await ex.finishPlan(w.row, { isCancelled: () => true })).toEqual({ ok: false, reason: 'cancelled', cancelled: true });
     expect(seen.cancelled).toBe(true);
+  });
+});
+
+describe('HostExecutor PLAN watcher', () => {
+  test('a PLAN job never reads the checkout prd.json (D146)', async () => {
+    const w = await world('PLAN');
+    expect((await w.ex.prepare(w.row)).ok).toBe(true);
+    await mkdir(join(w.row.jobDir, 'nax-out'), { recursive: true });
+    await writeFile(join(w.row.jobDir, 'nax-out', 'status.json'), JSON.stringify({ version: 1, run: { id: 'plan-run', status: 'running' } }));
+    const snaps: SnapshotEventPayload[] = [];
+    const watcher = w.ex.createWatcher(w.row, { snapshot: (p) => { snaps.push(p); }, lifecycle: () => undefined, logLine: () => undefined }, { startAtEnd: false });
+    await watcher.tick(true);
+    expect(snaps).toHaveLength(1);
+    expect(snaps[0]).not.toHaveProperty('stories');
   });
 });

@@ -4,6 +4,8 @@ import { mapStatusToSnapshot, readStatusFile } from './status-snapshot';
 import { FileTail } from './file-tail';
 import { LogBudget, chunkText } from './log-budget';
 import { findCostRunId, findRunLog, runLogId } from './run-log';
+import { featureDirFor } from '../paths/safe-segment';
+import { readPrdStories, type StoryList } from './prd-stories';
 
 export interface WatcherSink {
   snapshot(payload: SnapshotEventPayload): void;
@@ -14,6 +16,8 @@ export interface WatcherSink {
 export interface WatcherOptions {
   readonly outDir: string;
   readonly feature: string;
+  /** D146: RUN jobs only. Stories come from `<repoDir>/.nax/features/<feature>/prd.json` (S1b §1.2). */
+  readonly repoDir?: string;
   readonly stdoutPath: string;
   readonly stderrPath: string;
   readonly startAtEnd: boolean;
@@ -34,6 +38,8 @@ export class Watcher {
   private lastKey = '';
   private lastIds = '';
   private runLogPath: string | null = null;
+  /** D148: the serialized list last sent for this job and epoch (one Watcher per JobRun). */
+  private lastStories = '';
 
   constructor(private readonly sink: WatcherSink, private readonly options: WatcherOptions) {
     this.budget = new LogBudget(options.nowMs);
@@ -61,16 +67,33 @@ export class Watcher {
       costRunId: await findCostRunId(this.options.outDir),
       droppedLogs: this.budget.dropped,
     });
+    const list = await this.readStories();
+    // D148: a failed read keeps the last list's key, so nax caught mid-write emits nothing extra.
+    const storiesKey = list ? JSON.stringify(list) : this.lastStories;
     const { droppedLogs: _dropped, ...stable } = payload;
-    const key = JSON.stringify(stable);
+    const key = `${JSON.stringify(stable)}\n${storiesKey}`;
     if (key === this.lastKey) return;      // lost logs ride the next snapshot that is emitted anyway (D45)
     this.lastKey = key;
     this.budget.takeDropped();
-    this.sink.snapshot(payload);
+    if (list !== null && storiesKey !== this.lastStories) {
+      this.lastStories = storiesKey;
+      this.sink.snapshot({ ...payload, stories: list.stories, storiesTruncated: list.truncated });
+    } else {
+      this.sink.snapshot(payload);
+    }
     const ids = `${status.run.id}|${this.runLogPath ?? ''}`;
     if (ids !== this.lastIds) {
       this.lastIds = ids;
       this.options.onRunIds?.({ naxRunId: status.run.id, logPath: this.runLogPath });
+    }
+  }
+
+  private async readStories(): Promise<StoryList | null> {
+    if (this.options.repoDir === undefined) return null;
+    try {
+      return await readPrdStories(join(featureDirFor(this.options.repoDir, this.options.feature), 'prd.json'));
+    } catch {
+      return null;   // featureDirFor refuses only a feature name the assign validator already refused
     }
   }
 

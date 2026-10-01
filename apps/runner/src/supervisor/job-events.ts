@@ -32,9 +32,13 @@ export class JobEvents implements WatcherSink {
   }
 
   snapshot(payload: SnapshotEventPayload): void {
-    const { progress: _progress, ...rest } = payload;   // `_`-prefixed: ignored by the root eslint varsIgnorePattern '^_'
-    const fits = byteLength(payload) <= SYNC_LIMITS.payloadBytes;
-    this.journal.appendEvent(this.jobId, this.leaseEpoch, 'snapshot', fits ? payload : rest);
+    // `_`-prefixed: ignored by the root eslint varsIgnorePattern '^_'
+    const { progress: _progress, ...noProgress } = payload;
+    const { stories: _stories, storiesTruncated: _truncated, ...noStories } = payload;
+    const { stories: _s, storiesTruncated: _t, ...bare } = noProgress;
+    // D151: progress goes first (as before), then the story list; the rest always fits.
+    const fitting = [payload, noProgress, noStories].find((candidate) => byteLength(candidate) <= SYNC_LIMITS.payloadBytes) ?? bare;
+    this.journal.appendEvent(this.jobId, this.leaseEpoch, 'snapshot', fitting);
   }
 
   lifecycle(level: 'info' | 'warn' | 'error', message: string, details?: readonly unknown[]): void {
