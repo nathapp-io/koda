@@ -122,6 +122,10 @@ ALTER TABLE "FleetJob" ADD COLUMN "wipPush" TEXT;
 
 Run: `cd apps/api && bun run db:generate`
 
+`FleetJobRecord.wipPush` is required, so the typed literal in
+`apps/api/src/fleet/jobs/job-transitions.service.spec.ts` (`job()`, lines 5-13) must gain it: change
+`resultPrUrl: null, eventSeq: 0,` to `resultPrUrl: null, wipPush: null, eventSeq: 0,`.
+
 `apps/api/src/fleet/jobs/domain/fleet-job.domain.ts`: in `FleetJobRecord` after `resultPrUrl: string | null;` add
 `wipPush: string | null;`, and extend `Mutable`:
 
@@ -380,6 +384,7 @@ describe('wipPushValue', () => {
     expect(wipPushValue({ kind: 'none' })).toBe('none');
     expect(wipPushValue({ kind: 'failed', reason: 'diverged' })).toBe('failed:diverged');
     expect(wipPushValue({ kind: 'failed', reason: `x${'y'.repeat(300)}` })).toHaveLength('failed:'.length + 200);
+    expect(wipPushValue({ kind: 'failed', reason: 'bad\nx' })).toBe('failed:bad?x');   // the API drops non-printable values
   });
 });
 ```
@@ -471,7 +476,7 @@ export async function pushProgress(input: ProgressPushInput): Promise<ProgressPu
 
 /** The snapshot's `wipPush` value (S1b §1.1 "Result"). */
 export function wipPushValue(outcome: Exclude<ProgressPushOutcome, { kind: 'halted' }>): string {
-  if (outcome.kind === 'failed') return `failed:${outcome.reason.slice(0, REASON_MAX)}`;
+  if (outcome.kind === 'failed') return `failed:${outcome.reason.replace(/[^\x20-\x7e]/g, '?').slice(0, REASON_MAX) || 'unknown'}`;
   return outcome.kind;
 }
 ```
@@ -479,7 +484,10 @@ export function wipPushValue(outcome: Exclude<ProgressPushOutcome, { kind: 'halt
 - [ ] **Step 4: Run the tests**
 
 Run: `cd apps/runner && bun test test/unit/progress-push.spec.ts`
-Expected: PASS (10 tests). If the diverged test reports `push failed`, print `res.stdout`/`res.stderr` from a
+Expected: PASS (10 tests).
+
+Known and accepted: a provider-side `[remote rejected]` (protected branch, GH006 hook) matches neither `REJECTED`
+nor the auth patterns, so it is retried twice and ends `failed:push failed`. Do not widen `REJECTED` for it. If the diverged test reports `push failed`, print `res.stdout`/`res.stderr` from a
 scratch run and widen `REJECTED` to git's actual wording; do not loosen the test.
 
 - [ ] **Step 5: Lint, type-check, commit**
@@ -609,6 +617,15 @@ describe('RUN progress push (S1b 1a)', () => {
     expect(stateNames(b)).toEqual(['FAILED']);
     expect(lastSnapshot(b)).toMatchObject({ wipPush: 'pushed', resultSha: 'd'.repeat(40) });
   });
+  test('a push that throws keeps the nax verdict and reports failed:push error', async () => {
+    const b = build();
+    b.ex.status = failedStatus;
+    b.ex.pushProgress = async () => { throw new Error('boom'); };
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: 'run status: failed' });
+    expect(lastSnapshot(b)).toMatchObject({ wipPush: 'failed:push error', resultSha: 'b'.repeat(40) });
+  });
   test('PLAN never calls pushProgress', async () => {
     const b = build('PLAN');
     b.ex.dieAfterTicks(1);
@@ -664,7 +681,8 @@ export interface PushProgressOptions {
 
 - [ ] **Step 5: Wire `finish()`**
 
-`apps/runner/src/supervisor/job-run.ts`: import `wipPushValue` from `'../executor/progress-push'`. Add the private
+`apps/runner/src/supervisor/job-run.ts`: import `wipPushValue` and `type ProgressPushOutcome` from
+`'../executor/progress-push'` (`errorMessage` is already imported from `'../errors'`). Add the private
 method next to `judge`:
 
 ```ts
@@ -674,7 +692,14 @@ method next to `judge`:
    */
   private async pushRunProgress(row: JobRow): Promise<{ value: string; result: { branch: string; sha: string } | null } | null> {
     if (row.resultBranch !== null && row.resultSha !== null) return { value: 'pushed', result: { branch: row.resultBranch, sha: row.resultSha } };
-    const outcome = await this.deps.executor.pushProgress(row, { isHalted: () => this.halted });
+    let outcome: ProgressPushOutcome;
+    try {
+      outcome = await this.deps.executor.pushProgress(row, { isHalted: () => this.halted });
+    } catch (error) {
+      // The push must never change the verdict: a throw here would reach start()'s failSafe and end FAILED "runner error".
+      this.deps.log.warn('progress push threw', { jobId: this.jobId, error: errorMessage(error) });
+      return this.halted ? null : { value: 'failed:push error', result: null };
+    }
     if (outcome.kind === 'halted' || this.halted) return null;
     if (outcome.kind !== 'pushed') return { value: wipPushValue(outcome), result: null };
     this.deps.journal.updateJob(this.jobId, this.leaseEpoch, { resultBranch: outcome.branch, resultSha: outcome.sha });
@@ -705,6 +730,13 @@ and the final snapshot:
       ...(wipPush ? { wipPush } : {}),
     };
 ```
+
+- [ ] **Step 5b (optional): Unit-test the HostExecutor wrapper**
+
+`HostExecutor.pushProgress`'s `no branch` and `acquired.cancelled -> halted` branches are otherwise covered only by
+integration. If time allows, add two cases to `apps/runner/test/unit/host-executor-auth.spec.ts` in that file's
+existing style: a row with `branch: null` returns `{ kind: 'failed', reason: 'no branch' }`; a credentials stub whose
+`acquire` returns `{ ok: false, reason: 'cancelled', cancelled: true }` returns `{ kind: 'halted' }`.
 
 - [ ] **Step 6: Run the runner unit suite**
 
@@ -905,6 +937,9 @@ export function wipPushStatus(value: string | null | undefined): WipPushStatus |
 }
 ```
 
+`FleetJobDto.wipPush` is required, so the typed `job()` helper in `apps/web/tests/lib/fleet-jobs.spec.ts`
+(lines 19-27) must gain it: change `resultPrUrl: null,` to `resultPrUrl: null, wipPush: null,`.
+
 Run: `cd apps/web && bun run test -- tests/lib/fleet-jobs.spec.ts`
 Expected: PASS.
 
@@ -972,7 +1007,12 @@ Run: `cd apps/api && bun run test:db:up && bun run test:scoped test/integration/
 Run: `cd apps/runner && KODA_DB_TESTS=1 bun run test:integration`
 Expected: PASS.
 
-- [ ] **Step 3: Contract drift check**
+- [ ] **Step 3: PR description note**
+
+The PR body must state the one deviation from spec §1.5: "a halted job pushes nothing" is covered by unit tests
+only (D144), not by runner integration.
+
+- [ ] **Step 4: Contract drift check**
 
 Run: `bun run generate && git status --short openapi.json apps/cli/src/generated`
 Expected: no changes (Task 1 already committed the regenerated files).
