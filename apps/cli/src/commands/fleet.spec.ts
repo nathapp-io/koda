@@ -13,6 +13,6 @@ describe('fleetCommand', () => {
     const program = new Command();
     fleetCommand(program);
     const fleet = program.commands.find((c) => c.name() === 'fleet');
-    expect(fleet?.commands.map((c) => c.name()).sort()).toEqual(['dispatch', 'repo', 'runner']);
+    expect(fleet?.commands.map((c) => c.name()).sort()).toEqual(['dispatch', 'job', 'repo', 'runner']);
   });
 });

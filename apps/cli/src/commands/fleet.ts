@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { registerFleetDispatch } from './fleet-dispatch';
+import { registerFleetJob } from './fleet-job';
 import { registerFleetRepo } from './fleet-repo';
 import { registerFleetRunner } from './fleet-runner';
 
@@ -10,5 +11,6 @@ export function fleetCommand(program: Command): Command {
   registerFleetRunner(fleet);
   registerFleetRepo(fleet);
   registerFleetDispatch(fleet);
+  registerFleetJob(fleet);
   return fleet;
 }
