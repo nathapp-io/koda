@@ -49,7 +49,7 @@ src/sync/            ServerClient, batching (one entry per jobId, 1 MiB budget),
 src/supervisor/      RepoMutex, JobEvents (legal transitions only), JobRun (one job), Supervisor, CommandHandler
 src/executor/        JobExecutor seam + HostExecutor (git workspace, branch rules, detached nax, PLAN commit)
 src/credentials/     TokenCache, CredentialBroker (one unix socket per job epoch in socketDir), git-cred helper, gh/glab shim
-src/watcher/         status.json poll, run-log and stdout/stderr tails, rate cap
+src/watcher/         status.json poll, run-log and stdout/stderr tails, rate cap; RUN only: prd.json story list (S1b 1b), capped 100 stories / 8 KiB
 src/verdict/         pure verdict functions (S1 spec 5.2 step 6)
 src/bundle/          tar.gz from a file list, upload retry rules (409 is stale or state-conflict)
 src/capabilities/    CapabilityProbe seam: NaxCapabilityProbe (nax JSON) or StaticCapabilityProbe (runner.json override); JobCheck after checkout
