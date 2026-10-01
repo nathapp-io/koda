@@ -4688,6 +4688,45 @@
         ]
       }
     },
+    "/api/fleet/repos/{id}/check": {
+      "post": {
+        "operationId": "FleetReposController_check",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepoCheckResultDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such repo"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Re-run the forge check for a registered repo (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/fleet/repos/{id}": {
       "delete": {
         "operationId": "FleetReposController_remove",
@@ -4743,6 +4782,14 @@
               "default": 20,
               "type": "number"
             }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -4764,7 +4811,16 @@
     "/api/projects/{slug}/fleet/jobs": {
       "post": {
         "operationId": "FleetJobsController_dispatch",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -4883,6 +4939,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -4907,6 +4971,14 @@
         "parameters": [
           {
             "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
             "required": true,
             "in": "path",
             "schema": {
@@ -4951,6 +5023,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -4985,6 +5065,14 @@
         "parameters": [
           {
             "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
             "required": true,
             "in": "path",
             "schema": {
@@ -5048,6 +5136,14 @@
               "maximum": 100,
               "default": 20,
               "type": "number"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -5356,6 +5452,58 @@
         ]
       }
     },
+    "/api/projects/{slug}/fleet/runners": {
+      "get": {
+        "operationId": "ProjectFleetRunnersController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of RunnerSummaryDto, ordered by name"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Runner summaries for dispatch and job lists (project member)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/fleet/runner/sync": {
       "post": {
         "operationId": "RunnerSyncController_sync",
@@ -5472,6 +5620,14 @@
         "parameters": [
           {
             "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
             "required": true,
             "in": "path",
             "schema": {
@@ -7625,6 +7781,45 @@
           "createdAt"
         ]
       },
+      "RepoCheckResultDto": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string"
+          },
+          "reachable": {
+            "type": "boolean"
+          },
+          "reason": {
+            "nullable": true,
+            "enum": [
+              "github_app_not_configured",
+              "github_app_key_unreadable",
+              "app_not_installed",
+              "app_permissions_insufficient",
+              "repo_not_found",
+              "provider_unreachable",
+              "provider_error",
+              "vcs_connection_missing",
+              "vcs_connection_mismatch",
+              "vcs_encryption_key_missing",
+              "gitlab_token_invalid",
+              "gitlab_access_insufficient",
+              "gitlab_scope_missing"
+            ],
+            "type": "string"
+          },
+          "checkedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "repoId",
+          "reachable",
+          "reason",
+          "checkedAt"
+        ]
+      },
       "DispatchFleetJobDto": {
         "type": "object",
         "properties": {
@@ -8100,6 +8295,19 @@
           "protocolVersion": {
             "type": "number"
           },
+          "bootId": {
+            "type": "string",
+            "description": "Id of the daemon boot the runner last reported (#158)"
+          },
+          "bootedAt": {
+            "type": "string",
+            "nullable": true,
+            "description": "Start of the current daemon boot; null until the first boot after 2026-10-01"
+          },
+          "online": {
+            "type": "boolean",
+            "description": "Synced within FLEET_RUNNER_OFFLINE_SEC (the placement rule)"
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -8120,6 +8328,9 @@
           "capabilities",
           "daemonVersion",
           "protocolVersion",
+          "bootId",
+          "bootedAt",
+          "online",
           "enabled",
           "lastSeenAt",
           "createdAt"
@@ -8144,6 +8355,61 @@
             "maximum": 16
           }
         }
+      },
+      "RunnerSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "os": {
+            "type": "string",
+            "enum": [
+              "darwin",
+              "linux"
+            ]
+          },
+          "arch": {
+            "type": "string",
+            "enum": [
+              "arm64",
+              "x64"
+            ]
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "online": {
+            "type": "boolean",
+            "description": "Synced within FLEET_RUNNER_OFFLINE_SEC (the placement rule)"
+          },
+          "profiles": {
+            "description": "Machine profile names, sorted",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "os",
+          "arch",
+          "labels",
+          "enabled",
+          "online",
+          "profiles"
+        ]
       }
     }
   }

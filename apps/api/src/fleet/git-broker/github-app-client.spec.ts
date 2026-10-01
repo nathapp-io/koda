@@ -51,6 +51,21 @@ describe('GitHubAppClient', () => {
     expect(forge.requests.find((r) => r.path === '/repos/Acme/App')?.headers.authorization).toBe('Bearer ghs_x');
   });
 
+  it('checks access through the persisted installation id without rediscovering the current installation', async () => {
+    forge.routes.set('POST /app/installations/77/access_tokens', () => ({ status: 201, body: { token: 'ghs_old', expires_at: '2026-09-30T01:00:00Z' } }));
+    forge.routes.set('GET /repos/Acme/App', () => ({ status: 200, body: { name: 'app', owner: { login: 'acme' }, default_branch: 'trunk' } }));
+
+    await expect(client.verifyRepo('Acme', 'App', BigInt(77))).resolves.toMatchObject({ installationId: BigInt(77) });
+    expect(forge.requests.some((r) => r.path === '/repos/Acme/App/installation')).toBe(false);
+    expect(forge.requests.find((r) => r.path === '/app/installations/77/access_tokens')).toBeDefined();
+    expect(forge.requests.find((r) => r.path === '/repos/Acme/App')?.headers.authorization).toBe('Bearer ghs_old');
+  });
+
+  it('reports an unreachable persisted installation when its token endpoint returns 404', async () => {
+    forge.routes.set('POST /app/installations/77/access_tokens', () => ({ status: 404, body: {} }));
+    await expect(client.verifyRepo('Acme', 'App', BigInt(77))).rejects.toMatchObject({ reason: 'app_not_installed' });
+  });
+
   it.each([
     ['GET /repos/o/r/installation', 404, 'app_not_installed'],
     ['GET /repos/o/r/installation', 500, 'provider_error'],

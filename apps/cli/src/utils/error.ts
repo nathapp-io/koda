@@ -5,6 +5,7 @@ interface HandleApiErrorOpts {
   notFoundMessage?: string;
   configError?: boolean;
   validationError?: boolean;
+  hint?: string;
 }
 
 type ErrorCode = 'CONFIG_ERROR' | 'VALIDATION_ERROR' | 'UNAUTHORIZED' | 'NOT_FOUND' | 'API_ERROR';
@@ -88,32 +89,32 @@ export function handleApiError(err: unknown, opts?: HandleApiErrorOpts): never {
   if (opts?.configError) {
     const configError = err as { message?: string };
     emitError(configError.message ?? 'Configuration error', 'CONFIG_ERROR', undefined);
-    process.exit(2);
+    return process.exit(2);
   }
 
   if (opts?.validationError) {
-    const validationErr = err as { message?: string };
-    emitError(validationErr.message ?? 'Validation error', 'VALIDATION_ERROR', undefined);
-    process.exit(3);
+    const validationMessage = typeof err === 'string' ? err : (err as { message?: string } | null)?.message;
+    emitError(validationMessage ?? 'Validation error', 'VALIDATION_ERROR', undefined);
+    return process.exit(3);
   }
 
   const { status, message } = getStatusAndMessage(err);
 
   if (status === 401 || status === 403) {
-    emitError(message, 'UNAUTHORIZED', status, 'Check your API key: koda config set --api-key <key>');
-    process.exit(2);
+    emitError(message, 'UNAUTHORIZED', status, opts?.hint ?? 'Check your API key: koda config set --api-key <key>');
+    return process.exit(2);
   }
 
   if (status === 400) {
     emitError(message, 'VALIDATION_ERROR', status);
-    process.exit(3);
+    return process.exit(3);
   }
 
   if (status === 404) {
     emitError(opts?.notFoundMessage ?? 'Not found', 'NOT_FOUND', status);
-    process.exit(4);
+    return process.exit(4);
   }
 
   emitError(message, 'API_ERROR', status);
-  process.exit(1);
+  return process.exit(1);
 }

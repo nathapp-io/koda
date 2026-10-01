@@ -268,7 +268,7 @@ describe('labelCommand', () => {
         'node', 'test', '--project', 'koda', '--id', 'nonexistent',
       ]);
 
-      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(exitSpy).toHaveBeenCalledWith(4);
     });
   });
 

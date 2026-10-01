@@ -24,6 +24,7 @@ import { adminCommand } from './commands/admin';
 import { userCommand } from './commands/user';
 import { memberCommand } from './commands/member';
 import { ciWebhookCommand } from './commands/ci-webhook';
+import { fleetCommand } from './commands/fleet';
 import { setJsonMode } from './utils/json-mode';
 import { installSignalHandlers } from './utils/signals';
 import { resolveSecret, API_KEY_SECRET, LOGIN_API_KEY_SECRET } from './utils/secret-input';
@@ -264,6 +265,9 @@ memberCommand(program);
 
 // CI webhook command
 ciWebhookCommand(program);
+
+// Fleet command (runners, repos, dispatch, jobs)
+fleetCommand(program);
 
 // Global error handling for uncaught exceptions
 process.on('uncaughtException', (error: Error) => {

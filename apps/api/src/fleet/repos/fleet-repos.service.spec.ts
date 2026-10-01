@@ -1,5 +1,6 @@
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
+import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { FleetReposService } from './fleet-repos.service';
 
 describe('FleetReposService', () => {
@@ -59,5 +60,59 @@ describe('FleetReposService', () => {
     repo.countUnfinishedJobs.mockResolvedValue(1);
     await expect(make().remove('u9', 'fr1')).rejects.toBeInstanceOf(ConflictAppException);
     expect(repo.delete).not.toHaveBeenCalled();
+  });
+
+  describe('check', () => {
+    const now = new Date('2026-10-01T12:00:00.000Z');
+
+    it('answers reachable for a GitHub repo the App can still reach', async () => {
+      repo.findById.mockResolvedValue(created());
+      github.verifyRepo.mockResolvedValue({ owner: 'acme', name: 'app', defaultBranch: 'trunk', installationId: BigInt(77) });
+      expect(await make().check('fr1', now)).toEqual({ repoId: 'fr1', reachable: true, reason: null, checkedAt: now.toISOString() });
+      expect(github.verifyRepo).toHaveBeenCalledWith('acme', 'app', BigInt(77));
+    });
+
+    it('checks the persisted GitHub installation even when the current installation has a different id', async () => {
+      repo.findById.mockResolvedValue(created({ githubInstallationId: BigInt(77) }));
+      github.verifyRepo.mockResolvedValue({ owner: 'acme', name: 'app', defaultBranch: 'trunk', installationId: BigInt(99) });
+
+      await make().check('fr1', now);
+
+      expect(github.verifyRepo).toHaveBeenCalledWith('acme', 'app', BigInt(77));
+    });
+
+    it('reports app_not_installed when a GitHub repo has no persisted installation id', async () => {
+      repo.findById.mockResolvedValue(created({ githubInstallationId: null }));
+      const result = await make().check('fr1', now);
+      expect(result).toMatchObject({ reachable: false, reason: 'app_not_installed' });
+      expect(github.verifyRepo).not.toHaveBeenCalled();
+    });
+
+    it('answers unreachable with the forge reason instead of throwing', async () => {
+      repo.findById.mockResolvedValue(created());
+      github.verifyRepo.mockRejectedValue(new RepoCheckException('app_not_installed'));
+      expect(await make().check('fr1', now)).toEqual({ repoId: 'fr1', reachable: false, reason: 'app_not_installed', checkedAt: now.toISOString() });
+    });
+
+    it('checks a GitLab repo with the project token, and reports a lost connection as a reason', async () => {
+      repo.findById.mockResolvedValue(created({ provider: 'gitlab', owner: 'group/sub', githubInstallationId: null }));
+      gitlabTokens.resolve.mockRejectedValue(new RepoCheckException('vcs_connection_missing'));
+      const result = await make().check('fr1', now);
+      expect(gitlabTokens.resolve).toHaveBeenCalledWith('p1', 'group/sub', 'app');
+      expect(result.reason).toBe('vcs_connection_missing');
+      expect(gitlab.verifyRepo).not.toHaveBeenCalled();
+    });
+
+    it('rethrows anything that is not a forge verdict', async () => {
+      repo.findById.mockResolvedValue(created());
+      github.verifyRepo.mockRejectedValue(new Error('boom'));
+      await expect(make().check('fr1', now)).rejects.toThrow('boom');
+    });
+
+    it('404s an unknown repo before calling the forge', async () => {
+      repo.findById.mockResolvedValue(null);
+      await expect(make().check('nope', now)).rejects.toBeInstanceOf(NotFoundAppException);
+      expect(github.verifyRepo).not.toHaveBeenCalled();
+    });
   });
 });

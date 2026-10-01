@@ -108,6 +108,28 @@ The runner reports what this machine can really do, bounded by what the server a
 providers each, 64 credentials, and 64 KiB for the whole report. Anything that does not fit is dropped and named in
 `journalctl` as a capability-probe warning, because a report the server rejects leaves the runner unplaceable.
 
+## Operate from the CLI
+
+Runner and repo-registry commands need a global-admin user's access token (`KODA_API_KEY=<token>`); dispatch and
+job commands need project membership (dispatch, cancel others' jobs and requeue need DEVELOPER or higher).
+
+```bash
+koda fleet runner enroll-token --label linux       # prints the token once and the koda-runner enroll line
+koda fleet runner list                             # online, enabled, labels, capacity, nax version, boot age
+koda fleet runner disable <runnerId>               # drain: running jobs finish, nothing new is placed
+koda fleet repo add acme/app --provider github     # GitLab subgroups: group/sub/app
+koda fleet repo check <repoId>                     # exit 1 and a reason when koda can no longer broker git
+koda fleet dispatch --repo acme/app --feature login --max-cost 5 --profile fast
+koda fleet dispatch --repo acme/app --feature login --max-cost 2 --plan docs/specs/login.md --pin box-1
+koda fleet job list --state RUNNING
+koda fleet job show <jobId>
+koda fleet job cancel <jobId>
+koda fleet job bundle <jobId> --out login.tar.gz
+```
+
+`--label` and `--pin` are exclusive. A dispatch for a feature that already has an active job on the repo prints
+that job's id instead of starting a second one.
+
 ## Live check (release gate)
 
 Run once per release of the runner, by a person, with approval: steps 4 and 5 start billed nax runs.

@@ -141,6 +141,8 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
       where: { id: runnerId },
       data: {
         lastSeenAt: s.now, bootId: s.bootId, daemonVersion: s.daemonVersion, protocolVersion: s.protocolVersion,
+        // D131: a new boot id is a daemon restart; the same boot id keeps the recorded start.
+        ...(before.bootId !== s.bootId ? { bootedAt: s.now } : {}),
         ...(s.capabilities ? { capabilities: s.capabilities as unknown as Prisma.InputJsonValue } : {}),
       },
     });
