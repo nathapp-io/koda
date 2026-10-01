@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { realpath, writeFile } from 'node:fs/promises';
+import { chmod, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { createNaxCli, parseNaxJson } from '../../src/nax/nax-cli';
+import { MAX_NAX_OUTPUT_BYTES, createNaxCli, parseNaxJson } from '../../src/nax/nax-cli';
 import { makeTempDirs } from '../helpers/tmp';
 
 const tmp = makeTempDirs();
@@ -45,5 +45,20 @@ describe('createNaxCli (D96)', () => {
     const result = await createNaxCli(['/nonexistent/nax-binary'], '/tmp').run(['--version'], { cwd: await tmp.make('cwd') });
     expect(result.code).toBe(127);
     expect(parseNaxJson(result)).toEqual({ ok: false, code: 'NAX_NOT_FOUND' });
+  });
+  test('a present but non-executable nax is NAX_SPAWN_FAILED, not a missing nax', async () => {
+    const path = join(await tmp.make('naxcli'), 'not-a-program');
+    await writeFile(path, 'not a program\n', { mode: 0o644 });
+    await chmod(path, 0o644);
+    const result = await createNaxCli([path], '/tmp').run(['--version'], { cwd: await tmp.make('cwd') });
+    expect(result.stderr).toMatch(/cannot start \(EACCES\)|permission denied/);
+    expect(parseNaxJson(result)).toEqual({ ok: false, code: 'NAX_SPAWN_FAILED' });
+  });
+  test('a nax that prints more than the read budget is NAX_OUTPUT_TOO_LARGE, not a half-parsed document', async () => {
+    const path = await script(`process.stdout.write('{"pad":"${'x'.repeat(MAX_NAX_OUTPUT_BYTES)}"}');`);
+    const result = await createNaxCli(['bun', path], '/tmp', 20_000).run(['config', '--json'], { cwd: await tmp.make('cwd') });
+    expect(result.tooLarge).toBe(true);
+    expect(result.stdout.length).toBeLessThanOrEqual(MAX_NAX_OUTPUT_BYTES);
+    expect(parseNaxJson(result)).toEqual({ ok: false, code: 'NAX_OUTPUT_TOO_LARGE' });
   });
 });

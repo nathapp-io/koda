@@ -31,12 +31,12 @@ const flag = (args: readonly string[], name: string): string | undefined => {
 
 /** A scripted nax (D96): records every call and answers from `answers`, which a test may replace between calls. */
 export class FakeNaxCli implements NaxCli {
-  readonly calls: Array<{ args: string[]; cwd: string }> = [];
+  readonly calls: Array<{ args: string[]; cwd: string; timeoutMs?: number }> = [];
 
   constructor(public answers: NaxAnswers = {}) {}
 
-  async run(args: readonly string[], options: { cwd: string }): Promise<NaxResult> {
-    this.calls.push({ args: [...args], cwd: options.cwd });
+  async run(args: readonly string[], options: { cwd: string; timeoutMs?: number }): Promise<NaxResult> {
+    this.calls.push({ args: [...args], cwd: options.cwd, timeoutMs: options.timeoutMs });
     return this.answer(args);
   }
 

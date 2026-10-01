@@ -6,10 +6,16 @@ export interface NaxResult {
   readonly stdout: string;
   readonly stderr: string;
   readonly timedOut: boolean;
+  /** The spawn itself failed for a reason other than a missing executable (see `spawnFailure`). */
+  readonly spawnError?: string;
+  /** stdout hit `MAX_NAX_OUTPUT_BYTES`, so `stdout` is a truncated prefix and must not be parsed. */
+  readonly tooLarge?: boolean;
 }
 
 export interface NaxCallOptions {
   readonly cwd: string;
+  /** Overrides the client's own timeout: a short bound for a call on a job's critical path. */
+  readonly timeoutMs?: number;
 }
 
 /** D96: how the runner asks nax a question (its read-only JSON commands). Tests inject a fake. */
@@ -19,13 +25,52 @@ export interface NaxCli {
 
 export const NAX_CALL_TIMEOUT_MS = 30_000;
 const NOT_FOUND = 127;
+/** D96: a nax JSON document is kilobytes; this bounds a runaway, it is not a working limit. */
+export const MAX_NAX_OUTPUT_BYTES = 1_048_576;
+const MAX_STDERR_BYTES = 8_192;
 
-function spawnCall(argv: readonly string[], cwd: string, env: Readonly<Record<string, string | undefined>>, timeoutMs: number) {
+type Spawned = { readonly proc: Bun.Subprocess<'ignore', 'pipe', 'pipe'> } | { readonly errno: string | undefined };
+
+function spawnCall(argv: readonly string[], cwd: string, env: Readonly<Record<string, string | undefined>>, timeoutMs: number): Spawned {
   try {
-    return Bun.spawn([...argv], { cwd, env: { ...env }, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', timeout: timeoutMs, killSignal: 'SIGKILL' });
-  } catch {
-    return null;   // Bun.spawn throws ENOENT synchronously for a missing executable or cwd
+    return { proc: Bun.spawn([...argv], { cwd, env: { ...env }, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', timeout: timeoutMs, killSignal: 'SIGKILL' }) };
+  } catch (error) {
+    // Bun.spawn throws synchronously for a missing executable or cwd, and for EACCES, E2BIG, ENOTDIR, ...
+    return { errno: (error as NodeJS.ErrnoException).code };
   }
+}
+
+/** D96: only a missing executable means "nax is not installed"; anything else gets its own code, so a present-but-wrong binary is never reported as absent. */
+export function spawnFailure(errno: string | undefined, name: string): NaxResult {
+  if (errno === undefined || errno === 'ENOENT') return { code: NOT_FOUND, stdout: '', stderr: `${name}: not found`, timedOut: false };
+  return { code: 126, stdout: '', stderr: `${name}: cannot start (${errno})`, timedOut: false, spawnError: 'NAX_SPAWN_FAILED' };
+}
+
+/**
+ * Drains the pipe (so the child never blocks on a full buffer) but stops accumulating at `cap`: over-long output is a
+ * failure, not a document. Cancelling closes the pipe, so a child still printing gets EPIPE rather than hanging to the timeout.
+ */
+async function readCapped(stream: ReadableStream<Uint8Array>, cap: number): Promise<{ text: string; capped: boolean }> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > cap) {
+      await reader.cancel().catch(() => undefined);
+      return { text: '', capped: true };
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return { text: new TextDecoder().decode(bytes), capped: false };
 }
 
 /** D96: `[...naxCommand, ...args]`, stdin closed, the credential-free environment plus NAX_GLOBAL_CONFIG_DIR, SIGKILL at the timeout. */
@@ -33,10 +78,11 @@ export function createNaxCli(naxCommand: readonly string[], naxHome: string, tim
   return {
     async run(args, options) {
       const env = { ...withoutCredentialVars(process.env), NAX_GLOBAL_CONFIG_DIR: naxHome };
-      const proc = spawnCall([...naxCommand, ...args], options.cwd, env, timeoutMs);
-      if (!proc) return { code: NOT_FOUND, stdout: '', stderr: `${naxCommand[0] ?? 'nax'}: not found`, timedOut: false };
-      const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
-      return { code, stdout, stderr, timedOut: proc.signalCode === 'SIGKILL' };
+      const spawned = spawnCall([...naxCommand, ...args], options.cwd, env, options.timeoutMs ?? timeoutMs);
+      if (!('proc' in spawned)) return spawnFailure(spawned.errno, naxCommand[0] ?? 'nax');
+      const { proc } = spawned;
+      const [stdout, stderr, code] = await Promise.all([readCapped(proc.stdout, MAX_NAX_OUTPUT_BYTES), readCapped(proc.stderr, MAX_STDERR_BYTES), proc.exited]);
+      return { code, stdout: stdout.text, stderr: stderr.text, timedOut: proc.signalCode === 'SIGKILL', tooLarge: stdout.capped || undefined };
     },
   };
 }
@@ -60,6 +106,8 @@ function tryParse(text: string): unknown {
  */
 export function parseNaxJson(result: NaxResult): NaxJson {
   if (result.timedOut) return { ok: false, code: 'NAX_TIMEOUT' };
+  if (result.spawnError !== undefined) return { ok: false, code: result.spawnError };
+  if (result.tooLarge === true) return { ok: false, code: 'NAX_OUTPUT_TOO_LARGE' };
   const value = tryParse(result.stdout);
   if (value === undefined) {
     return { ok: false, code: result.code === NOT_FOUND && result.stdout.trim() === '' ? 'NAX_NOT_FOUND' : 'NAX_OUTPUT_UNPARSEABLE' };

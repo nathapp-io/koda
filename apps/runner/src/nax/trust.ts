@@ -6,8 +6,8 @@ import { parseNaxJson, type NaxCli } from './nax-cli';
 export type TrustVerdict = { readonly trusted: true } | { readonly trusted: false; readonly reason: string };
 
 /** D103: nax's own verdict for the folder (nax #2293). The runner never trusts a folder itself. */
-export async function checkTrust(nax: NaxCli, path: string): Promise<TrustVerdict> {
-  const json = parseNaxJson(await nax.run(['trust', 'check', '--json', path], { cwd: path }));
+export async function checkTrust(nax: NaxCli, path: string, timeoutMs?: number): Promise<TrustVerdict> {
+  const json = parseNaxJson(await nax.run(['trust', 'check', '--json', path], { cwd: path, timeoutMs }));
   if (!json.ok) return { trusted: false, reason: `trust check failed: ${json.code}` };
   const verdict = parseTrustCheck(json.value);
   if (!verdict) return { trusted: false, reason: 'trust check failed: NAX_OUTPUT_UNPARSEABLE' };

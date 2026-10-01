@@ -1,3 +1,6 @@
+/** D112: the first line each rendered file carries, so uninstall-service only removes what install-service wrote. */
+export const UNIT_MARKER = '# Written by koda-runner install-service.';
+export const PLIST_MARKER = '<!-- Written by koda-runner install-service. -->';
 export const SYSTEMD_UNIT = 'koda-runner.service';
 export const SYSTEMD_UNIT_PATH = '/etc/systemd/system/koda-runner.service';
 export const LAUNCHD_LABEL = 'dev.koda.runner';
@@ -50,7 +53,7 @@ const programArguments = (spec: ServiceSpec): string[] => [...spec.command, '--h
 
 export function systemdUnit(spec: ServiceSpec): string {
   return [
-    '# Written by koda-runner install-service.',
+    UNIT_MARKER,
     '[Unit]',
     'Description=Koda fleet runner',
     'After=network-online.target',
@@ -83,7 +86,7 @@ export function launchdPlist(spec: ServiceSpec): string {
   const log = `${spec.runnerHome}/runner.log`;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Written by koda-runner install-service. -->
+${PLIST_MARKER}
 <plist version="1.0">
 <dict>
   <key>Label</key>

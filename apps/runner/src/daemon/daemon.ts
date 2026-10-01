@@ -1,7 +1,7 @@
 import { chmod, mkdir, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { uploadWithRetry } from '../bundle/upload-bundle';
-import { CapabilityReporter, type CapabilityProbe } from '../capabilities/capability-probe';
+import { CapabilityReporter } from '../capabilities/capability-probe';
 import { createCapabilityProbe } from '../capabilities/create-probe';
 import { NaxJobCheck } from '../capabilities/job-check';
 import type { RunnerConfig, RunnerHome } from '../config/runner-config';
@@ -47,8 +47,6 @@ export interface DaemonOptions {
   readonly selfCommand?: readonly string[];
   /** D96: tests inject a scripted nax; otherwise `createNaxCli(config.naxCommand, config.naxHome)`. */
   readonly nax?: NaxCli;
-  /** D95: tests inject a probe; otherwise `createCapabilityProbe(config)`. */
-  readonly capabilityProbe?: CapabilityProbe;
 }
 
 export interface DaemonHandle {
@@ -104,16 +102,16 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   journal.setMeta('boot_id', bootId);
   journal.setMeta('runner_id', identity.runnerId);
   const nax = options.nax ?? createNaxCli(config.naxCommand, config.naxHome, tuning.naxCallTimeoutMs);
-  const probed = config.capabilities === null;   // D95
-  const reporter = new CapabilityReporter(options.capabilityProbe ?? createCapabilityProbe(config, now, nax), journal, log);
+  const naxMode = config.capabilities === null;   // D95: this runner asks nax; runner.json carries no capabilities block
+  const reporter = new CapabilityReporter(createCapabilityProbe(config, now, nax), journal, log);
   try {
     await reporter.refresh();   // D97, D102: nax missing or older than 0.83.1 stops the start
-    if (probed) await assertWorkspaceTrusted(nax, config);   // D103
+    if (naxMode) await assertWorkspaceTrusted(nax, config);   // D103
   } catch (error) {
     journal.close();
     throw error;
   }
-  if (!probed) log.warn('capabilities come from runner.json; nax is not probed (remove the block to probe nax)');
+  if (!naxMode) log.warn('capabilities come from runner.json; nax is not probed (remove the block to probe nax)');
   await sweepOrphanProfiles(config.naxHome, new Set(journal.activeJobs().map((job) => job.jobId)));
   await pruneJobs(journal, config, log);
 
@@ -128,7 +126,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     uid,
   });
 
-  const jobCheck = probed ? new NaxJobCheck({ nax, capabilities: () => reporter.latest() }) : undefined;   // D104
+  const jobCheck = naxMode ? new NaxJobCheck({ nax, capabilities: () => reporter.latest(), timeoutMs: tuning.jobCheckTimeoutMs }) : undefined;   // D104
   const executor = options.executorFactory?.() ?? new HostExecutor({
     config, git, log, nowMs: () => now().getTime(), sleep, credentials: broker, ...(jobCheck ? { jobCheck } : {}),
   });

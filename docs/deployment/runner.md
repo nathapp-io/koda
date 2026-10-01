@@ -74,6 +74,10 @@ It checks the user, the enrolled home (owned by that user), nax on `--path`, and
 `/Library/LaunchDaemons/dev.koda.runner.plist` (`launchctl bootstrap system`). Paths with spaces or quotes are
 refused.
 
+Every command it runs is bounded: the nax trust calls get 30 s, everything else 120 s, and a timeout is reported as
+the failure it is rather than a hang. When a check cannot be completed — nax not on the service user's `PATH`, or
+`/etc/apparmor.d` unreadable — it says so instead of assuming there is nothing to find.
+
 A restart or stop leaves running nax jobs alone (`KillMode=process`, `AbandonProcessGroup`); the next daemon
 re-adopts them. Exit code 2 (the server refused the runner) is not restarted on Linux.
 
@@ -83,7 +87,8 @@ Ubuntu 24.04 sets `kernel.apparmor_restrict_unprivileged_userns=1`, which stops 
 unavailable and profiles that need it are not placed here. `install-service` warns about it. With
 `--apply-apparmor` it writes `/etc/apparmor.d/koda-runner-bwrap`, which lets `bwrap` create user namespaces for
 every user on the machine, and loads it with `apparmor_parser -r`. It refuses when another profile already
-attaches to `bwrap`. Check afterwards, as the service user: `nax sandbox probe --json` reports `available: true`.
+attaches to `bwrap` — and when it cannot read `/etc/apparmor.d` to find out, because a conflict it cannot see would
+make the profile fail to load. Check afterwards, as the service user: `nax sandbox probe --json` reports `available: true`.
 
 ## Operate
 
@@ -96,7 +101,12 @@ attaches to `bwrap`. Check afterwards, as the service user: `nax sandbox probe -
 | Remove | `sudo koda-runner uninstall-service` | same |
 
 A job the machine cannot run fails before nax starts, with a `stateReason` such as
-`capability mismatch: provider zai unavailable` or `project untrusted`.
+`capability mismatch: provider zai unavailable` or `project untrusted`. A provider the machine simply cannot report
+is `unavailable` (the job can be placed elsewhere), never `missing`.
+
+The runner reports what this machine can really do, bounded by what the server accepts: at most 64 profiles, 16
+providers each, 64 credentials, and 64 KiB for the whole report. Anything that does not fit is dropped and named in
+`journalctl` as a capability-probe warning, because a report the server rejects leaves the runner unplaceable.
 
 ## Live check (release gate)
 

@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { NaxUnavailableError } from '../nax/nax-cli';
 import { FakeNaxCli, TIMED_OUT, naxError, type FakeRequirements } from '../../test/helpers/fake-nax-cli';
@@ -31,13 +31,28 @@ function probeWith(home: string, nax: FakeNaxCli, have: readonly string[] = ['gi
   return { run: () => prober.probe(), removed, empty };
 }
 
-describe('listProfileNames (D98)', () => {
-  test('json files only, koda job overlays excluded, sorted by code unit; no profiles dir is empty', async () => {
+describe('listProfileNames (D98, D112)', () => {
+  test('json files only, koda job overlays excluded, sorted by code unit', async () => {
     const home = await naxHome(['beta', 'Alpha', 'koda-job-cabc', 'alpha2']);   // distinct letters: macOS file names are case-insensitive
     await writeFile(join(home, 'profiles', 'notes.txt'), 'x');
     await mkdir(join(home, 'profiles', 'dir.json'));
-    expect(await listProfileNames(home)).toEqual(['Alpha', 'alpha2', 'beta']);
-    expect(await listProfileNames(join(home, 'nowhere'))).toEqual([]);
+    expect(await listProfileNames(home)).toEqual({ names: ['Alpha', 'alpha2', 'beta'], warning: null });
+  });
+  test('a profiles path that is not a directory is simply no profiles', async () => {
+    const home = await tmp.make('notadir');
+    await writeFile(join(home, 'profiles'), 'not a directory');
+    expect(await listProfileNames(home)).toEqual({ names: [], warning: null });
+    expect(await listProfileNames(join(home, 'nowhere'))).toEqual({ names: [], warning: null });
+  });
+  test.skipIf(process.getuid?.() === 0)('D112: a profiles directory this runner cannot read is a warning, not "no profiles"', async () => {
+    const home = await naxHome(['fast']);
+    const dir = join(home, 'profiles');
+    await chmod(dir, 0o000);
+    try {
+      expect(await listProfileNames(home)).toEqual({ names: [], warning: expect.stringContaining('cannot read') });
+    } finally {
+      await chmod(dir, 0o755);   // the temp dir must stay removable
+    }
   });
 });
 
@@ -146,5 +161,30 @@ describe('NaxCapabilityProbe (design §3.2, D98-D101)', () => {
     const { run, removed, empty } = probeWith(home, new FakeNaxCli({ version: '0.83.0' }));
     await expect(run()).rejects.toBeInstanceOf(NaxUnavailableError);
     expect(removed).toEqual([empty]);
+  });
+  test.skipIf(process.getuid?.() === 0)('D112: an unreadable profiles directory warns and reports no profiles, rather than answering silently', async () => {
+    const home = await naxHome(['fast']);
+    const dir = join(home, 'profiles');
+    await chmod(dir, 0o000);
+    try {
+      const { capabilities, warnings } = await probeWith(home, new FakeNaxCli()).run();
+      expect(capabilities.profiles).toEqual({});
+      expect(warnings).toEqual([expect.stringContaining('cannot read')]);
+    } finally {
+      await chmod(dir, 0o755);   // the temp dir must stay removable
+    }
+  });
+  test('D113: the report never exceeds the server\'s 64 KiB cap; the least load-bearing entries are dropped, with a warning', async () => {
+    const names = Array.from({ length: 64 }, (_, i) => `p${String(i).padStart(2, '0')}`);
+    const config = Object.fromEntries(names.map((name, i) => [name, {
+      transport: 'native' as const, providers: Array.from({ length: 16 }, (_, j) => `${'x'.repeat(50)}${i}-${j}`), sandbox: true,
+    }]));
+    const { capabilities, warnings } = await probeWith(await naxHome(names), new FakeNaxCli({ config })).run();
+    expect(Buffer.byteLength(JSON.stringify(capabilities), 'utf8')).toBeLessThanOrEqual(65_536);
+    expect(warnings.some((warning) => warning.includes('65536'))).toBe(true);
+    // The kept profiles stay a prefix of the sorted names, so the report does not flicker between probes.
+    const kept = Object.keys(capabilities.profiles);
+    expect(kept.length).toBeLessThan(64);
+    expect(names.slice(0, kept.length)).toEqual(kept);
   });
 });

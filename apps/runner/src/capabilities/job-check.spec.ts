@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { RunnerCapabilities } from '@nathapp/fleet-protocol';
+import type { NaxCli } from '../nax/nax-cli';
 import { FakeNaxCli, json, naxError, type NaxAnswers } from '../../test/helpers/fake-nax-cli';
 import { NaxJobCheck, firstMismatch } from './job-check';
 
@@ -34,10 +35,10 @@ describe('NaxJobCheck (D104)', () => {
       ['auth', 'list', '--json', 'deepseek'],
     ]);
   });
-  test('an untrusted clone is `project untrusted`, and nothing else is asked', async () => {
+  test('an untrusted clone is `project untrusted`, and no credential listing is asked', async () => {
     const c = checker({ trusted: false });
     expect(await c.check()).toBe('project untrusted');
-    expect(c.nax.calls).toHaveLength(1);
+    expect(c.nax.calls.map((call) => call.args[0])).not.toContain('auth');
   });
   test('a failed trust check is `trust check failed: <code>`', async () => {
     expect(await checker({ trusted: naxError('TRUST_STORE_UNREADABLE') }).check()).toBe('trust check failed: TRUST_STORE_UNREADABLE');
@@ -49,14 +50,45 @@ describe('NaxJobCheck (D104)', () => {
   test('an acp chain on a machine without acp is `protocol acp`', async () => {
     expect(await checker({ config: { cross: { transport: 'acp', providers: [], sandbox: false } } }).check(['cross'])).toBe('capability mismatch: protocol acp');
   });
-  test('a provider nax does not list is missing; one it lists as unusable is unavailable; a failed listing says so', async () => {
+  test('D99: a provider nax does not list is unavailable, never missing — the same answer the probe gives', async () => {
     const needs = { config: { fast: { transport: 'native' as const, providers: ['zai'], sandbox: false } } };
-    expect(await checker({ ...needs, auth: json({ source: 'file', providers: [] }) }).check(['fast'])).toBe('capability mismatch: provider zai missing');
+    expect(await checker({ ...needs, auth: json({ source: 'file', providers: [] }) }).check(['fast'])).toBe('capability mismatch: provider zai unavailable');
+    expect(await checker({ ...needs, auth: json({ source: 'file', providers: [{ providerId: 'zai', stored: null, ambient: 'no', available: true }] }) }).check(['fast']))
+      .toBe('capability mismatch: provider zai unavailable');
+  });
+  test('a provider nax lists as unusable is unavailable; a failed listing says so', async () => {
+    const needs = { config: { fast: { transport: 'native' as const, providers: ['zai'], sandbox: false } } };
     expect(await checker(needs).check(['fast'])).toBe('capability mismatch: provider zai unavailable');
     expect(await checker({ ...needs, auth: naxError('CREDENTIAL_FILE_UNREADABLE') }).check(['fast'])).toBe('capability mismatch: auth list failed (CREDENTIAL_FILE_UNREADABLE)');
   });
   test('a sandbox chain on a machine whose sandbox is unavailable is `sandbox`', async () => {
     expect(await checker({ config: { safe: { transport: 'native', providers: [], sandbox: true } } }).check(['safe'])).toBe('capability mismatch: sandbox');
+  });
+  test('the trust check and the chain resolve overlap, so a job is not serialized behind nax', async () => {
+    const inner = new FakeNaxCli({ config: { default: NONE } });
+    const started: string[] = [];
+    let releaseTrust: () => void = () => undefined;
+    const pending = new Promise<void>((resolve) => { releaseTrust = resolve; });
+    const nax: NaxCli = {
+      async run(args, options) {
+        started.push(args[0] ?? '');
+        if (args[0] === 'config') releaseTrust();   // only a concurrent chain resolve can unblock the trust check
+        if (args[0] === 'trust') await pending;
+        return inner.run(args, options);
+      },
+    };
+    const check = new NaxJobCheck({ nax, capabilities: () => CAPS }).check({ profiles: [] }, REPO);
+    const settled = await Promise.race([
+      check,
+      new Promise<never>((_resolve, reject) => { setTimeout(() => reject(new Error('the chain resolve never started while the trust check was pending')), 500); }),
+    ]);
+    expect(settled).toBeNull();
+    expect(started).toEqual(['trust', 'config']);
+  });
+  test('every call carries the job check timeout, not the probe 30s one', async () => {
+    const nax = new FakeNaxCli({ config: { fast: { transport: 'native', providers: ['deepseek'], sandbox: false } }, auth: [DEEPSEEK] });
+    await new NaxJobCheck({ nax, capabilities: () => CAPS, timeoutMs: 1_234 }).check({ profiles: ['fast'] }, REPO);
+    expect(nax.calls.map((call) => call.timeoutMs)).toEqual([1_234, 1_234, 1_234]);
   });
 });
 

@@ -1,18 +1,24 @@
 import { join } from 'node:path';
 import { parseTrustCheck } from '../capabilities/nax-json';
 import { ConfigError, parseRunnerConfig } from '../config/runner-config';
-import { firstLine } from '../errors';
-import { parseNaxJson } from '../nax/nax-cli';
+import { errorMessage, firstLine } from '../errors';
+import { NAX_CALL_TIMEOUT_MS, parseNaxJson } from '../nax/nax-cli';
 import { APPARMOR_DIR, APPARMOR_MARKER, APPARMOR_PROFILE_NAME, APPARMOR_PROFILE_PATH, USERNS_SYSCTL, apparmorProfile, attachesTo, userNamespacesRestricted } from '../service/apparmor';
 import {
-  LAUNCHD_LABEL, LAUNCHD_PLIST_PATH, SYSTEMD_UNIT, SYSTEMD_UNIT_PATH, ServiceError, assertSafePath, assertUserName, launchdPlist, systemdUnit, validateSpec,
-  type ServiceSpec,
+  LAUNCHD_LABEL, LAUNCHD_PLIST_PATH, PLIST_MARKER, SYSTEMD_UNIT, SYSTEMD_UNIT_PATH, ServiceError, UNIT_MARKER, assertSafePath, assertUserName, launchdPlist,
+  systemdUnit, validateSpec, type ServiceSpec,
 } from '../service/units';
 
 export interface ExecResult {
   readonly code: number;
   readonly stdout: string;
   readonly stderr: string;
+  readonly timedOut: boolean;
+}
+
+export interface ExecOptions {
+  /** D111: omitted means the implementation's own `SERVICE_EXEC_TIMEOUT_MS`; every command is bounded. */
+  readonly timeoutMs?: number;
 }
 
 /** Every effect, injected: tests never write /etc or run systemctl. */
@@ -21,14 +27,17 @@ export interface ServiceDeps {
   readonly euid: number;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly selfCommand: readonly string[];
-  readonly exec: (argv: readonly string[]) => Promise<ExecResult>;
+  readonly exec: (argv: readonly string[], options?: ExecOptions) => Promise<ExecResult>;
   /** null: missing, unreadable or a directory. */
   readonly readFile: (path: string) => Promise<string | null>;
+  /** D112: throws when the path cannot be read — `readFile` cannot tell that from absence. */
+  readonly readFileStrict: (path: string) => Promise<string>;
   /** Mode 0644. */
   readonly writeFile: (path: string, text: string) => Promise<void>;
   readonly removeFile: (path: string) => Promise<void>;
   readonly ownerUid: (path: string) => Promise<number | null>;
-  readonly listDir: (path: string) => Promise<string[]>;
+  /** D112: throws when the directory cannot be listed; only ENOENT may be caught by the caller. */
+  readonly listDir: (path: string) => Promise<readonly string[]>;
   readonly whichOnPath: (command: string, path: string) => string | null;
   readonly realpath: (path: string) => Promise<string>;
   readonly log: (line: string) => void;
@@ -55,9 +64,13 @@ function requireRoot(deps: ServiceDeps): void {
   if (deps.euid !== 0) throw new ServiceError('this command must run as root (sudo); install-service --print shows what it would do');
 }
 
-async function run(deps: ServiceDeps, argv: readonly string[]): Promise<void> {
-  const result = await deps.exec(argv);
-  if (result.code !== 0) throw new ServiceError(`${argv.join(' ')} failed: ${firstLine(result.stderr) || `exit ${result.code}`}`);
+/** D111: `result.timedOut` says so, rather than leaving an operator watching a hung root shell. */
+const whyItFailed = (result: ExecResult, timeoutMs: number | undefined): string =>
+  result.timedOut ? `timed out after ${timeoutMs ?? 'the'} ms` : firstLine(result.stderr) || `exit ${result.code}`;
+
+async function run(deps: ServiceDeps, argv: readonly string[], timeoutMs?: number): Promise<void> {
+  const result = await deps.exec(argv, { timeoutMs });
+  if (result.code !== 0) throw new ServiceError(`${argv.join(' ')} failed: ${whyItFailed(result, timeoutMs)}`);
 }
 
 const missingUser = (user: string): ServiceError =>
@@ -104,23 +117,59 @@ const asUser = (spec: ServiceSpec, files: RunnerFiles, args: readonly string[]):
   'sudo', '-u', spec.user, '-H', 'env', `PATH=${spec.path}`, ...(files.naxHome ? [`NAX_GLOBAL_CONFIG_DIR=${files.naxHome}`] : []), ...files.naxCommand, ...args,
 ];
 
-/** D103: the daemon refuses an untrusted workspace; installing a service that would restart-loop helps nobody. */
+/**
+ * D103: the daemon refuses an untrusted workspace; installing a service that would restart-loop helps nobody.
+ * D111/D112: the nax calls carry the same timeout and the same environment rule as every other nax call, and a failure
+ * names what nax actually said instead of only a code the operator cannot act on.
+ */
 async function ensureTrusted(options: InstallOptions, spec: ServiceSpec, files: RunnerFiles, deps: ServiceDeps): Promise<void> {
-  const check = await deps.exec(asUser(spec, files, ['trust', 'check', '--json', files.workspaceRoot]));
-  const json = parseNaxJson({ ...check, timedOut: false });
+  const check = await deps.exec(asUser(spec, files, ['trust', 'check', '--json', files.workspaceRoot]), { timeoutMs: NAX_CALL_TIMEOUT_MS });
+  const json = parseNaxJson(check);
   const verdict = json.ok ? parseTrustCheck(json.value) : null;
   if (verdict?.trusted) return;
-  const why = verdict ? '' : ` (trust check failed: ${json.ok ? 'NAX_OUTPUT_UNPARSEABLE' : json.code})`;
+  const why = verdict ? '' : ` (trust check failed: ${json.ok ? 'NAX_OUTPUT_UNPARSEABLE' : json.code}; ${whyItFailed(check, NAX_CALL_TIMEOUT_MS)})`;
   if (!options.trustWorkspace) {
     throw new ServiceError(`nax (as ${spec.user}) does not trust ${files.workspaceRoot}${why}; pass --trust-workspace to run "nax trust add ${files.workspaceRoot} --yes" as ${spec.user}, or run it yourself`);
   }
-  await run(deps, asUser(spec, files, ['trust', 'add', files.workspaceRoot, '--yes']));
+  await run(deps, asUser(spec, files, ['trust', 'add', files.workspaceRoot, '--yes']), NAX_CALL_TIMEOUT_MS);
   deps.log(`trusted ${files.workspaceRoot} for nax as ${spec.user}`);
+}
+
+/** D112: a missing /etc/apparmor.d means no other profile can conflict; an unreadable one means we cannot know. */
+async function otherApparmorProfiles(deps: ServiceDeps): Promise<readonly string[]> {
+  try {
+    return (await deps.listDir(APPARMOR_DIR)).filter((name) => name !== APPARMOR_PROFILE_NAME);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw new ServiceError(`cannot read ${APPARMOR_DIR} (${errorMessage(error)}); not writing ${APPARMOR_PROFILE_PATH}, because a profile already attached to bwrap would make ours fail to load`);
+  }
+}
+
+/** D112: refusing beats claiming "no conflicting profile" when we could not read the ones that are there. */
+async function readApparmorProfile(deps: ServiceDeps, name: string): Promise<string> {
+  const path = join(APPARMOR_DIR, name);
+  try {
+    return await deps.readFileStrict(path);
+  } catch (error) {
+    throw new ServiceError(`cannot read ${path} (${errorMessage(error)}); not writing ${APPARMOR_PROFILE_PATH}, because a profile already attached to bwrap would make ours fail to load`);
+  }
+}
+
+/** D112: an unreadable sysctl must not read as "no restriction" in silence. */
+async function usernsRestricted(deps: ServiceDeps): Promise<boolean> {
+  let text: string;
+  try {
+    text = await deps.readFileStrict(USERNS_SYSCTL);
+  } catch (error) {
+    deps.log(`warning: cannot read ${USERNS_SYSCTL} (${errorMessage(error)}); the AppArmor user-namespace check was skipped`);
+    return false;
+  }
+  return userNamespacesRestricted(text);
 }
 
 /** D106: Linux only; a warning without --apply-apparmor, a targeted bwrap profile with it. */
 async function applyApparmor(options: InstallOptions, spec: ServiceSpec, deps: ServiceDeps): Promise<void> {
-  if (!userNamespacesRestricted(await deps.readFile(USERNS_SYSCTL))) return;
+  if (!(await usernsRestricted(deps))) return;
   if (!options.applyApparmor) {
     deps.log('warning: this kernel restricts unprivileged user namespaces (Ubuntu 24.04+), so the nax sandbox (bwrap) cannot start and profiles that need it will not be placed here; re-run with --apply-apparmor to write a targeted AppArmor profile for bwrap');
     return;
@@ -129,9 +178,9 @@ async function applyApparmor(options: InstallOptions, spec: ServiceSpec, deps: S
   if (!found) throw new ServiceError('bwrap is not on the service PATH; install bubblewrap first');
   const bwrap = await deps.realpath(found);
   assertSafePath('the bwrap binary', bwrap);
-  const others = (await deps.listDir(APPARMOR_DIR)).filter((name) => name !== APPARMOR_PROFILE_NAME);
-  const texts = await Promise.all(others.map(async (name) => ({ name, text: await deps.readFile(join(APPARMOR_DIR, name)) })));
-  const conflicts = texts.filter((t) => t.text !== null && attachesTo(t.text, bwrap)).map((t) => t.name);
+  const others = await otherApparmorProfiles(deps);
+  const texts = await Promise.all(others.map(async (name) => ({ name, text: await readApparmorProfile(deps, name) })));
+  const conflicts = texts.filter((t) => attachesTo(t.text, bwrap)).map((t) => t.name);
   if (conflicts.length > 0) throw new ServiceError(`AppArmor profile(s) already attach to ${bwrap}: ${conflicts.join(', ')}; not writing ${APPARMOR_PROFILE_PATH}`);
   await deps.writeFile(APPARMOR_PROFILE_PATH, apparmorProfile(bwrap));
   await run(deps, ['apparmor_parser', '-r', APPARMOR_PROFILE_PATH]);
@@ -190,7 +239,18 @@ export async function installService(options: InstallOptions, deps: ServiceDeps)
 
 async function stopQuietly(deps: ServiceDeps, argv: readonly string[]): Promise<void> {
   const result = await deps.exec(argv);
-  if (result.code !== 0) deps.log(`note: ${argv.join(' ')}: ${firstLine(result.stderr) || `exit ${result.code}`} (not loaded?)`);
+  if (result.code !== 0) deps.log(`note: ${argv.join(' ')}: ${whyItFailed(result, undefined)} (not loaded?)`);
+}
+
+/** D112: install-service refuses to overwrite a unit, so a file at that path may be a package's or the operator's. */
+async function removeOurs(deps: ServiceDeps, path: string, isOurs: (text: string) => boolean): Promise<void> {
+  const text = await deps.readFile(path);
+  if (text === null) return;
+  if (!isOurs(text)) {
+    deps.log(`note: ${path} was not written by koda-runner; leaving it in place`);
+    return;
+  }
+  await deps.removeFile(path);
 }
 
 /** D105: reverses install-service, including the AppArmor profile it wrote (and only that one). */
@@ -199,7 +259,7 @@ export async function uninstallService(deps: ServiceDeps): Promise<void> {
   requireRoot(deps);
   if (platform === 'linux') {
     await stopQuietly(deps, ['systemctl', 'disable', '--now', SYSTEMD_UNIT]);
-    await deps.removeFile(SYSTEMD_UNIT_PATH);
+    await removeOurs(deps, SYSTEMD_UNIT_PATH, (text) => text.startsWith(UNIT_MARKER));
     await run(deps, ['systemctl', 'daemon-reload']);
     if ((await deps.readFile(APPARMOR_PROFILE_PATH))?.startsWith(APPARMOR_MARKER)) {
       await run(deps, ['apparmor_parser', '-R', APPARMOR_PROFILE_PATH]);
@@ -207,7 +267,7 @@ export async function uninstallService(deps: ServiceDeps): Promise<void> {
     }
   } else {
     await stopQuietly(deps, ['launchctl', 'bootout', `system/${LAUNCHD_LABEL}`]);
-    await deps.removeFile(LAUNCHD_PLIST_PATH);
+    await removeOurs(deps, LAUNCHD_PLIST_PATH, (text) => text.includes(PLIST_MARKER));   // the marker follows the XML header
   }
   deps.log('uninstalled; nax jobs that were running keep running until they end, with no daemon reporting them');
 }

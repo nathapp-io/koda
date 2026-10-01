@@ -12,8 +12,10 @@ import { systemNow } from '../../src/time';
  * no nax plan, no trust add). Run it on each runner machine: `KODA_NAX_LIVE=1 bun run test:live`. Never in CI.
  */
 const enabled = process.env['KODA_NAX_LIVE'] === '1';
-// A dynamic import keeps the API's source out of the runner's type-check; bun resolves its dependencies at run time.
-const API_VALIDATOR = join(import.meta.dir, '..', '..', '..', 'api', 'src', 'fleet', 'common', 'capabilities.ts');
+// The validator's core, not `capabilities.ts`: it throws a plain Error and imports nothing from NestJS, so proving a
+// real report is accepted does not depend on the API app's dependency graph. A dynamic import keeps the API's source
+// out of the runner's type-check; bun resolves it at run time.
+const API_VALIDATOR = join(import.meta.dir, '..', '..', '..', 'api', 'src', 'fleet', 'common', 'capabilities-core.ts');
 
 describe.skipIf(!enabled)('merge gate: NaxCapabilityProbe against the installed nax (D107)', () => {
   const naxHome = process.env['NAX_GLOBAL_CONFIG_DIR'] ?? join(homedir(), '.nax');
@@ -24,8 +26,8 @@ describe.skipIf(!enabled)('merge gate: NaxCapabilityProbe against the installed 
     const version = parseNaxVersion(capabilities.nax.version);
     expect(version).not.toBeNull();
     expect(versionAtLeast(version as [number, number, number], MIN_NAX_VERSION)).toBe(true);
-    const api = (await import(API_VALIDATOR)) as { parseCapabilities(raw: unknown): unknown };
-    expect(() => api.parseCapabilities(capabilities)).not.toThrow();
+    const api = (await import(API_VALIDATOR)) as { parseCapabilitiesCore(raw: unknown): unknown };
+    expect(() => api.parseCapabilitiesCore(capabilities)).not.toThrow();
     const summary = {
       nax: capabilities.nax, sandbox: capabilities.sandbox, profiles: Object.keys(capabilities.profiles).length,
       credentials: capabilities.credentials.map((c) => `${c.providerId}:${c.available ? 'available' : 'unavailable'}`), tools: capabilities.tools, warnings,

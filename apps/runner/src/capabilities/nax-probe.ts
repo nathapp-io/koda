@@ -1,3 +1,4 @@
+import type { Dirent } from 'node:fs';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,6 +14,8 @@ import { MAX_PROVIDERS_PER_PROFILE, parseAuthList, parseRequirements, parseSandb
 /** The server validator's limits (apps/api/src/fleet/common/capabilities.ts). */
 export const MAX_PROFILES = 64;
 export const MAX_CREDENTIALS = 64;
+/** D113: the same validator rejects a report over this many bytes, whole, which disables placement for this runner. */
+export const MAX_REPORT_BYTES = 65_536;
 const PROFILE_CONCURRENCY = 4;
 const TOOL_TIMEOUT_MS = 10_000;
 
@@ -51,13 +54,31 @@ export async function toolWorks(command: string): Promise<boolean> {
 }
 
 /** D98: `<naxHome>/profiles/*.json` names without koda's job overlays, sorted by code unit. */
-export async function listProfileNames(naxHome: string): Promise<string[]> {
-  const entries = await readdir(join(naxHome, 'profiles'), { withFileTypes: true }).catch(() => []);
-  return entries
+export interface ProfileListing {
+  readonly names: readonly string[];
+  /** D112: the directory exists but could not be read, so this machine's profile list is unknown, not empty. */
+  readonly warning: string | null;
+}
+
+const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+export async function listProfileNames(naxHome: string): Promise<ProfileListing> {
+  const dir = join(naxHome, 'profiles');
+  let entries: Dirent[];
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    // ENOENT/ENOTDIR: nax has no profiles here, which is an answer. Anything else is a failure we must not answer "none" for.
+    if (code === 'ENOENT' || code === 'ENOTDIR') return { names: [], warning: null };
+    return { names: [], warning: `cannot read ${dir} (${code ?? 'unknown error'}): this machine reports no profiles` };
+  }
+  const names = entries
     .filter((entry) => (entry.isFile() || entry.isSymbolicLink()) && entry.name.endsWith('.json'))
     .map((entry) => entry.name.slice(0, -'.json'.length))
     .filter((name) => !name.startsWith(RESERVED_PREFIX))
-    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    .sort(byCodeUnit);
+  return { names, warning: null };
 }
 
 type Resolved = { readonly name: string; readonly needs: ProfileNeeds } | { readonly name: string; readonly error: string };
@@ -70,6 +91,42 @@ interface ProfileScan {
 
 const byProviderId = (a: RunnerCredential, b: RunnerCredential): number => (a.providerId < b.providerId ? -1 : a.providerId > b.providerId ? 1 : 0);
 
+const reportBytes = (caps: RunnerCapabilities): number => Buffer.byteLength(JSON.stringify(caps), 'utf8');
+const neededProviders = (profiles: RunnerCapabilities['profiles']): ReadonlySet<string> => new Set(Object.values(profiles).flatMap((needs) => needs.providers));
+
+/**
+ * D113: the per-item limits are not enough — the server also rejects a report over `MAX_REPORT_BYTES` whole, which
+ * disables placement for this runner, so the probe sheds entries instead of sending one. Least load-bearing first:
+ * credentials no kept profile needs, then profiles from the end (placement already reads a name it does not report as
+ * unknowable, so the kept set stays a stable prefix), then whatever is still over.
+ */
+function boundReport(caps: RunnerCapabilities): { readonly capabilities: RunnerCapabilities; readonly warnings: readonly string[] } {
+  if (reportBytes(caps) <= MAX_REPORT_BYTES) return { capabilities: caps, warnings: [] };
+  const warnings: string[] = [];
+  const over = `the report would exceed the server's ${MAX_REPORT_BYTES}-byte cap`;
+  let bounded = caps;
+  const needed = neededProviders(bounded.profiles);
+  const extras = bounded.credentials.filter((c) => !needed.has(c.providerId)).length;
+  if (extras > 0) {
+    bounded = { ...bounded, credentials: bounded.credentials.filter((c) => needed.has(c.providerId)) };
+    warnings.push(`dropped ${extras} credential(s) no reported profile needs: ${over}`);
+  }
+  const profileCount = Object.keys(bounded.profiles).length;
+  let shedProfiles = 0;
+  while (shedProfiles < profileCount && reportBytes(bounded) > MAX_REPORT_BYTES) {
+    bounded = { ...bounded, profiles: Object.fromEntries(Object.entries(bounded.profiles).slice(0, -1)) };
+    shedProfiles += 1;
+  }
+  if (shedProfiles > 0) warnings.push(`reported ${profileCount - shedProfiles} of ${profileCount} profiles: ${over}`);
+  let shedCredentials = 0;
+  while (bounded.credentials.length > 0 && reportBytes(bounded) > MAX_REPORT_BYTES) {
+    bounded = { ...bounded, credentials: bounded.credentials.slice(0, -1) };
+    shedCredentials += 1;
+  }
+  if (shedCredentials > 0) warnings.push(`dropped ${shedCredentials} more credential(s): ${over}`);
+  return { capabilities: bounded, warnings };
+}
+
 /** Design §3.2 over nax's JSON commands (D98-D101). Throws NaxUnavailableError when nax is missing or older than 0.83.1. */
 export class NaxCapabilityProbe implements CapabilityProbe {
   constructor(private readonly deps: NaxProbeDeps) {}
@@ -80,22 +137,23 @@ export class NaxCapabilityProbe implements CapabilityProbe {
       const version = await readNaxVersion(this.deps.nax, empty.dir);
       const [scan, sandbox, protocols, tools] = await Promise.all([this.scanProfiles(empty.dir), this.sandbox(empty.dir), this.protocols(), this.tools()]);
       const credentials = await this.credentials(empty.dir, scan.providers);
-      const capabilities: RunnerCapabilities = {
+      const bounded = boundReport({
         nax: { version, protocols },
         sandbox: { ...sandbox, probedAt: this.deps.now().toISOString() },
         profiles: scan.profiles,
         credentials: credentials.list,
         tools,
         executors: ['host'],
-      };
-      return { capabilities, warnings: [...scan.warnings, ...credentials.warnings] };
+      });
+      return { capabilities: bounded.capabilities, warnings: [...scan.warnings, ...credentials.warnings, ...bounded.warnings] };
     } finally {
       await empty.remove();
     }
   }
 
   private async scanProfiles(cwd: string): Promise<ProfileScan> {
-    const names = await listProfileNames(this.deps.naxHome);
+    const listed = await listProfileNames(this.deps.naxHome);
+    const names = listed.names;
     const valid = names.filter((name) => PROFILE_NAME.test(name));
     const invalid = names.filter((name) => !PROFILE_NAME.test(name));
     const resolved = await mapLimit(valid.slice(0, MAX_PROFILES), PROFILE_CONCURRENCY, (name) => this.resolveProfile(cwd, name));
@@ -105,6 +163,7 @@ export class NaxCapabilityProbe implements CapabilityProbe {
       profiles: Object.fromEntries(good.map((r) => [r.name, r.needs])),
       providers: [...new Set(good.flatMap((r) => r.needs.providers))].sort(),
       warnings: [
+        ...(listed.warning === null ? [] : [listed.warning]),
         ...(invalid.length > 0 ? [`skipped ${invalid.length} profile file(s) whose names koda cannot carry: ${quoted}`] : []),
         ...(valid.length > MAX_PROFILES ? [`reported the first ${MAX_PROFILES} of ${valid.length} profiles by name`] : []),
         ...resolved.flatMap((r) => ('error' in r ? [`profile ${r.name} skipped: ${r.error}`] : [])),

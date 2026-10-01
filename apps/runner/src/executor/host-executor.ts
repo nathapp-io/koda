@@ -21,8 +21,6 @@ import { readProcessCommand, reapNaxPids } from './pid-registry';
 import { commitAndPushPlan, stashPlanOutputs } from './plan-commit';
 import { cleanWorkspace, ensureClone } from './workspace';
 
-export { withoutCredentialVars } from '../credentials/credential-env';
-
 export interface HostExecutorDeps {
   readonly config: Pick<RunnerConfig, 'workspaceRoot' | 'naxCommand' | 'naxHome'>;
   readonly git: Git;

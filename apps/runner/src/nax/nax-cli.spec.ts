@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { StartupError } from '../errors';
-import { MIN_NAX_VERSION, NaxUnavailableError, parseNaxJson, parseNaxVersion, readNaxVersion, versionAtLeast, type NaxCli, type NaxResult } from './nax-cli';
+import { MIN_NAX_VERSION, NaxUnavailableError, parseNaxJson, parseNaxVersion, readNaxVersion, spawnFailure, versionAtLeast, type NaxCli, type NaxResult } from './nax-cli';
 
 const result = (over: Partial<NaxResult> = {}): NaxResult => ({ code: 0, stdout: '', stderr: '', timedOut: false, ...over });
 const answering = (r: NaxResult): NaxCli => ({ run: async () => r });
@@ -22,6 +22,20 @@ describe('parseNaxJson (D96)', () => {
   test('a timeout wins over any output; a missing binary is NAX_NOT_FOUND', () => {
     expect(parseNaxJson(result({ timedOut: true, stdout: '{}' }))).toEqual({ ok: false, code: 'NAX_TIMEOUT' });
     expect(parseNaxJson(result({ code: 127 }))).toEqual({ ok: false, code: 'NAX_NOT_FOUND' });
+  });
+  test('output over the read budget is NAX_OUTPUT_TOO_LARGE, never a half-read document', () => {
+    expect(parseNaxJson(result({ tooLarge: true, stdout: '{"available":' }))).toEqual({ ok: false, code: 'NAX_OUTPUT_TOO_LARGE' });
+    expect(parseNaxJson(result({ tooLarge: true, timedOut: true }))).toEqual({ ok: false, code: 'NAX_TIMEOUT' });
+  });
+  test('D96: only a missing executable is NAX_NOT_FOUND; EACCES, E2BIG and the rest are NAX_SPAWN_FAILED', () => {
+    expect(spawnFailure('ENOENT', 'nax')).toEqual({ code: 127, stdout: '', stderr: 'nax: not found', timedOut: false });
+    expect(parseNaxJson(spawnFailure('ENOENT', 'nax'))).toEqual({ ok: false, code: 'NAX_NOT_FOUND' });
+    expect(parseNaxJson(spawnFailure(undefined, 'nax'))).toEqual({ ok: false, code: 'NAX_NOT_FOUND' });
+    for (const errno of ['EACCES', 'E2BIG', 'ENOEXEC', 'ENOTDIR']) {
+      const failure = spawnFailure(errno, 'nax');
+      expect(failure.stderr).toBe(`nax: cannot start (${errno})`);
+      expect(parseNaxJson(failure)).toEqual({ ok: false, code: 'NAX_SPAWN_FAILED' });
+    }
   });
 });
 
