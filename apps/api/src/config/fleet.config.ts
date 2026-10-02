@@ -30,6 +30,8 @@ export interface IFleetConfig {
   gitTokenReuseMarginSec: number;
   /** Seconds a freshly minted GitLab token is considered valid for; the broker never lets it outlive this. */
   gitlabTokenTtlSec: number;
+  /** Test-only HTTP hooks (S1b 3b D213): FLEET_TEST_HOOKS=true, and never under NODE_ENV=production. */
+  testHooksEnabled: boolean;
 }
 
 export class FleetConfigSchema {
@@ -49,6 +51,7 @@ export class FleetConfigSchema {
   @IsOptional() @IsString() FLEET_ENROLLMENT_RETENTION_DAYS: string;
   @IsOptional() @IsString() FLEET_GIT_TOKEN_REUSE_MARGIN_SEC: string;
   @IsOptional() @IsString() FLEET_GITLAB_TOKEN_TTL_SEC: string;
+  @IsOptional() @IsString() FLEET_TEST_HOOKS: string;
 }
 
 const int = (key: string, fallback: number): number => Number.parseInt(process.env[key] ?? String(fallback), 10);
@@ -82,6 +85,7 @@ export const fleetConfig = registerAs(FLEET_CFG, (): IFleetConfig => {
     enrollmentRetentionDays: retentionDays(),
     gitTokenReuseMarginSec: int('FLEET_GIT_TOKEN_REUSE_MARGIN_SEC', 300),
     gitlabTokenTtlSec: int('FLEET_GITLAB_TOKEN_TTL_SEC', 3_600),
+    testHooksEnabled: (process.env['FLEET_TEST_HOOKS'] ?? '').toLowerCase() === 'true' && process.env['NODE_ENV'] !== 'production',
   };
 });
 

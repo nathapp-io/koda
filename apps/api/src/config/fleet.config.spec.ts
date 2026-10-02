@@ -62,6 +62,24 @@ describe('fleet config', () => {
     expect(fleetConfig().enrollmentRetentionDays).toBeNull();
   });
 
+  it('enables the test hooks only for FLEET_TEST_HOOKS=true outside production (3b D213)', () => {
+    process.env.NODE_ENV = 'development';
+    delete process.env.FLEET_TEST_HOOKS;
+    expect(fleetConfig().testHooksEnabled).toBe(false);
+    process.env.FLEET_TEST_HOOKS = 'TRUE';
+    expect(fleetConfig().testHooksEnabled).toBe(true);
+    process.env.FLEET_TEST_HOOKS = 'false';
+    expect(fleetConfig().testHooksEnabled).toBe(false);
+    process.env.NODE_ENV = 'production';
+    process.env.FLEET_TEST_HOOKS = 'true';
+    expect(fleetConfig().testHooksEnabled).toBe(false);
+  });
+
+  it('refuses boot on a FLEET_TEST_HOOKS that is not true or false', () => {
+    expect(() => validate({ ...BASE, FLEET_TEST_HOOKS: 'yes' })).toThrow();
+    expect(() => validate({ ...BASE, FLEET_TEST_HOOKS: 'true' })).not.toThrow();
+  });
+
   it.each([
     ['FLEET_RUNNER_OFFLINE_SEC', '5'],
     ['FLEET_JOB_CRASH_SEC', '10'],
