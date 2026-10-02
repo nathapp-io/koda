@@ -70,7 +70,8 @@ function goTo(next: number): void {
 }
 
 // Live: any fleet job notice of this project refreshes the visible page, debounced (S1 spec §1).
-const liveReload = createDebouncer(() => { void reload() }, 300)
+const banner = ref<{ refresh: () => Promise<void> } | null>(null)
+const liveReload = createDebouncer(() => { void reload(); void banner.value?.refresh() }, 300)
 onBeforeUnmount(() => liveReload.cancel())
 useProjectEvents(slug, {
   onFleetJob: () => liveReload.trigger(),
@@ -84,11 +85,16 @@ const stateLabel = (state: string): string => codeLabel(t, te, 'fleet.state', st
   <div class="space-y-6">
     <PageHeader :title="t('fleet.jobs.title')" :subtitle="t('fleet.jobs.subtitle')">
       <template #actions>
+        <Button variant="outline" data-testid="fleet-budgets-link" @click="navigateTo(`/${slug}/fleet/budgets`)">
+          {{ t('fleet.jobs.budgets') }}
+        </Button>
         <Button v-if="canWork" data-testid="fleet-dispatch-button" @click="navigateTo(`/${slug}/fleet/dispatch`)">
           {{ t('fleet.jobs.dispatch') }}
         </Button>
       </template>
     </PageHeader>
+
+    <FleetBudgetBanner ref="banner" :slug="slug" :repo-name="options.repoName" />
 
     <div class="grid gap-3 sm:grid-cols-4">
       <Select v-model="filters.state">

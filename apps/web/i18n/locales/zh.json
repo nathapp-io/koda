@@ -73,7 +73,8 @@
     "users": "用户",
     "fleetRunners": "执行机",
     "fleetRepos": "仓库",
-    "fleetJobs": "Fleet 任务"
+    "fleetJobs": "Fleet 任务",
+    "fleetBudgets": "预算"
   },
   "admin": {
     "users": {
@@ -788,6 +789,122 @@
         "commandHint": "请以执行机的服务用户身份运行。如果执行机通过其他地址访问 koda，请替换服务器 URL。除非服务器是本机回环地址或添加 --insecure-http，执行机要求使用 https。"
       }
     },
+    "budgets": {
+      "title": "Fleet 预算",
+      "subtitleAdmin": "整个 Fleet 以及单台执行机的支出上限。",
+      "subtitleProject": "此项目及其仓库的支出上限。Fleet 全局上限仅供查看。",
+      "empty": "暂无预算策略。",
+      "readOnly": "只有项目管理员可以修改预算策略。",
+      "forbidden": "您没有访问该项目的权限。",
+      "sections": {
+        "own": "项目与仓库策略",
+        "global": "Fleet 全局策略",
+        "globalHint": "由全局管理员设置，对所有项目生效。"
+      },
+      "actions": {
+        "create": "添加策略",
+        "edit": "编辑",
+        "delete": "删除",
+        "resume": "恢复"
+      },
+      "table": {
+        "scope": "范围",
+        "window": "周期",
+        "spend": "支出",
+        "rules": "规则",
+        "status": "状态"
+      },
+      "scope": {
+        "global": "整个 Fleet",
+        "project": "项目",
+        "repo": "仓库",
+        "runner": "执行机"
+      },
+      "scopeText": {
+        "global": "整个 Fleet",
+        "project": "项目 {name}",
+        "repo": "仓库 {name}",
+        "runner": "执行机 {name}"
+      },
+      "window": {
+        "calendar_month_utc": "自然月（UTC）",
+        "lifetime": "累计"
+      },
+      "windowSince": "自 {date} 起",
+      "status": {
+        "paused": "已暂停",
+        "warning": "预警",
+        "ok": "预算内"
+      },
+      "spend": {
+        "of": "{spent} / {amount}",
+        "percent": "{percent}%"
+      },
+      "rules": {
+        "warnAt": "达到 {percent}% 时预警",
+        "noWarn": "不预警",
+        "hardStopOn": "达到上限时暂停",
+        "hardStopOff": "仅提醒",
+        "runningFinish": "运行中的任务继续完成",
+        "runningCancel": "取消运行中的任务"
+      },
+      "pausedSince": "暂停于 {at}",
+      "runningJobs": {
+        "finish": "让运行中的任务完成",
+        "cancel": "取消运行中的任务"
+      },
+      "hardStop": {
+        "on": "达到上限时暂停该范围",
+        "off": "仅预警，不暂停"
+      },
+      "form": {
+        "createTitle": "添加预算策略",
+        "editTitle": "编辑预算策略",
+        "scopeType": "范围",
+        "scopeRunner": "执行机",
+        "scopeRepo": "仓库",
+        "choosePlaceholder": "请选择...",
+        "windowKind": "周期",
+        "amount": "上限（USD）",
+        "amountHint": "最多 4 位小数，不超过 1,000,000。",
+        "warnPercent": "预警阈值（占上限的百分比）",
+        "warnHint": "1 到 99 的整数，留空表示不预警。",
+        "hardStop": "达到上限时",
+        "runningJobs": "硬性暂停时对运行中的任务",
+        "fixedHint": "创建后范围和周期不可更改。请删除该策略后重新添加。",
+        "submit": "保存",
+        "submitting": "保存中..."
+      },
+      "resume": {
+        "title": "恢复预算",
+        "summary": "本周期已支出 {spent} / {amount}。",
+        "amount": "新的上限（USD）",
+        "keepHint": "留空则保持当前上限。",
+        "raiseHint": "当前上限不高于已支出金额，请输入更高的上限。",
+        "submit": "恢复",
+        "submitting": "恢复中..."
+      },
+      "validation": {
+        "amountInvalid": "请输入大于 0、最多 4 位小数且不超过 1,000,000 的金额。",
+        "warnInvalid": "请输入 1 到 99 的整数，或留空。",
+        "scopeRequired": "请选择范围。",
+        "amountRequired": "当前上限不高于已支出金额，请输入更高的上限。",
+        "resumeNotAbove": "上限必须高于当前已支出的 {spent}。"
+      },
+      "toast": {
+        "created": "预算策略已创建",
+        "updated": "预算策略已保存",
+        "deleted": "预算策略已删除",
+        "resumed": "预算已恢复"
+      },
+      "deleteConfirm": "删除 {scope} 的预算策略？已暂停的范围将立即恢复。",
+      "banner": {
+        "paused": "{scope}的 Fleet 预算已暂停：已支出 {spent} / {amount}。恢复前将拒绝新任务。",
+        "warning": "{scope}的 Fleet 预算已达 {percent}%（{spent} / {amount}）。",
+        "more": "另有 {count} 项",
+        "view": "查看预算"
+      }
+    },
     "repos": {
       "title": "仓库",
       "subtitle": "koda 可为执行机任务克隆和推送的仓库。",
@@ -837,6 +954,7 @@
       "title": "Fleet 任务",
       "subtitle": "派发到 fleet 执行机的 nax run 与 nax plan",
       "dispatch": "派发",
+      "budgets": "预算",
       "empty": "还没有 fleet 任务",
       "total": "共 {total} 个任务",
       "unknownMember": "未知成员",
@@ -894,7 +1012,9 @@
           "phase": "当前阶段：{phase}",
           "truncated": "列表已截断：仅显示前 {count} 个故事。"
         },
-        "cancelRequested": "已于 {at} 请求取消"
+        "cancelRequested": "已于 {at} 请求取消",
+        "budgetStop": "因 Fleet 预算而停止",
+        "budgetStopLink": "查看预算"
       },
       "actions": {
         "cancel": "取消任务",

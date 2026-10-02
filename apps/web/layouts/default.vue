@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users, Server, FolderGit2, Rocket } from 'lucide-vue-next'
+import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users, Server, FolderGit2, Rocket, Wallet } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const auth = useAuth()
@@ -13,6 +13,13 @@ const projectSlug = computed(() => route.params.project as string | undefined)
 const navLinkClass =
   'flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors'
 const activeClass = 'bg-accent text-accent-foreground'
+
+/** The last crumb under `/:project/fleet/*`: dispatch, budgets, or (anything else) a job. */
+function fleetLeaf(project: string, path: string): string {
+  if (path === `/${project}/fleet/dispatch`) return t('fleet.jobs.dispatch')
+  if (path === `/${project}/fleet/budgets`) return t('fleet.budgets.title')
+  return t('fleet.jobs.detail.title')
+}
 
 const breadcrumbItems = computed(() => {
   const project = projectSlug.value
@@ -40,7 +47,7 @@ const breadcrumbItems = computed(() => {
     return [{ label: 'Koda', to: '/' }, projectBase, { label: t('nav.fleetJobs') }]
   }
   if (path.startsWith(`/${project}/fleet/`)) {
-    const leaf = path === `/${project}/fleet/dispatch` ? t('fleet.jobs.dispatch') : t('fleet.jobs.detail.title')
+    const leaf = fleetLeaf(project, path)
     return [{ label: 'Koda', to: '/' }, projectBase, { label: t('nav.fleetJobs'), to: `/${project}/fleet` }, { label: leaf }]
   }
 
@@ -99,6 +106,8 @@ const backTo = computed(() => {
         <NuxtLink v-if="isGlobalAdmin" to="/admin/fleet/runners" :class="navLinkClass" :active-class="activeClass"><Server class="h-4 w-4 shrink-0" />{{ t('nav.fleetRunners') }}</NuxtLink>
 
         <NuxtLink v-if="isGlobalAdmin" to="/admin/fleet/repos" :class="navLinkClass" :active-class="activeClass"><FolderGit2 class="h-4 w-4 shrink-0" />{{ t('nav.fleetRepos') }}</NuxtLink>
+
+        <NuxtLink v-if="isGlobalAdmin" to="/admin/fleet/budgets" :class="navLinkClass" :active-class="activeClass"><Wallet class="h-4 w-4 shrink-0" />{{ t('nav.fleetBudgets') }}</NuxtLink>
 
         <!-- Project-scoped links -->
         <template v-if="projectSlug">

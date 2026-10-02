@@ -87,6 +87,7 @@ export const uiStubs: Record<string, unknown> = Object.fromEntries(
     ['TableRow', 'tr'], ['TableHead', 'th'], ['TableCell', 'td'],
     ['Badge', 'badge'], ['Button', 'button'], ['Input', 'input'], ['Label', 'label'],
     ['LoadingState', 'loading-state'], ['EmptyState', 'empty-state'],
+    ['ErrorState', 'error-state'],
     ['FormItem', 'form-item'], ['FormLabel', 'form-label'], ['FormControl', 'form-control'],
     ['FormMessage', 'form-message'],
     ['FleetAge', 'fleet-age'], ['FleetRunnerCapabilityChips', 'capability-chips'],
@@ -116,6 +117,22 @@ Object.assign(uiStubs, {
     props: ['open'],
     setup(props: { open?: boolean }, { attrs }: { attrs: Record<string, unknown> }) {
       return () => h('x-stub-stub', { ...attrs, 'data-stub': 'fleet-enrollment-token-dialog', open: props.open === true })
+    },
+  },
+  FleetBudgetEditDialog: {
+    name: 'StubFleetBudgetEditDialog',
+    props: ['open', 'policy'],
+    setup(props: { open?: boolean; policy?: { id?: string } | null }, { attrs }: { attrs: Record<string, unknown> }) {
+      return () =>
+        h('x-stub-stub', { ...attrs, 'data-stub': 'fleet-budget-edit-dialog', open: props.open === true, 'data-policy': props.policy?.id ?? '' })
+    },
+  },
+  FleetBudgetResumeDialog: {
+    name: 'StubFleetBudgetResumeDialog',
+    props: ['open', 'policy'],
+    setup(props: { open?: boolean; policy?: { id?: string } | null }, { attrs }: { attrs: Record<string, unknown> }) {
+      return () =>
+        h('x-stub-stub', { ...attrs, 'data-stub': 'fleet-budget-resume-dialog', open: props.open === true, 'data-policy': props.policy?.id ?? '' })
     },
   },
 })

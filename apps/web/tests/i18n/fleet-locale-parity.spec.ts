@@ -28,6 +28,13 @@ const ENUMS: Record<string, string[]> = {
   'fleet.common.duration': ['s', 'm', 'h', 'd'],
   'fleet.repos.provider': ['github', 'gitlab'],
   'fleet.runners.chip.kind': ['api-key', 'oauth', 'exec', 'ambient', 'none'],
+  'fleet.budgets.scope': ['global', 'project', 'repo', 'runner'],
+  'fleet.budgets.scopeText': ['global', 'project', 'repo', 'runner'],
+  'fleet.budgets.window': ['calendar_month_utc', 'lifetime'],
+  'fleet.budgets.status': ['paused', 'warning', 'ok'],
+  'fleet.budgets.runningJobs': ['finish', 'cancel'],
+  'fleet.budgets.hardStop': ['on', 'off'],
+  'fleet.budgets.banner': ['paused', 'warning', 'more', 'view'],
 }
 
 describe('Fleet locale parity (en and zh)', () => {
@@ -47,7 +54,7 @@ describe('Fleet locale parity (en and zh)', () => {
   })
 
   // Parity, not copy: rewording an English label must not fail a green test.
-  test.each(['nav.fleetRunners', 'nav.fleetRepos'])('%s is translated in both locales', (key) => {
+  test.each(['nav.fleetRunners', 'nav.fleetRepos', 'nav.fleetBudgets'])('%s is translated in both locales', (key) => {
     expect(String(at(en, key) ?? '').trim()).not.toBe('')
     expect(String(at(zh, key) ?? '').trim()).not.toBe('')
   })

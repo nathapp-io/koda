@@ -18,5 +18,6 @@ describe('fleet jobs navigation', () => {
     expect(layout).toContain('if (path.startsWith(`/${project}/fleet/`)) {')
     expect(layout).toContain("t('fleet.jobs.dispatch')")
     expect(layout).toContain("t('fleet.jobs.detail.title')")
+    expect(layout).toContain("t('fleet.budgets.title')")
   })
 })

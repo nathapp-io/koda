@@ -115,7 +115,7 @@ const NUXT_AUTO_IMPORTS = [
   'useI18n', 'useAppToast', 'useApi', 'useRuntimeConfig', 'definePageMeta',
   'useVisiblePolling', 'useFleetRunners', 'useFleetRepos', 'useRoute',
   'useFleetDispatchOptions', 'useFleetJobs', 'useProjectViewerRole',
-  'useAdminUsers',
+  'useAdminUsers', 'useProjectEvents',
 ] as const
 
 /** Defaults for auto-imports a test did not supply; `definePageMeta` is a compile-time no-op macro. */
@@ -243,6 +243,7 @@ const FLEET_COMPONENT_FILES: Record<FleetComponentName, string> = {
   FleetRunnerCapabilityChips: 'RunnerCapabilityChips.vue',
   FleetRepoReachabilityBadge: 'RepoReachabilityBadge.vue',
   FleetNativeSelect: 'NativeSelect.vue',
+  FleetBudgetTable: 'BudgetTable.vue',
 }
 
 export function mountSfc(file: string, options: MountOptions = {}): Mounted {
@@ -311,4 +312,5 @@ function vueIconStubs(): Record<string, unknown> {
 export const webFile = (...parts: string[]): string => join(webRoot, ...parts)
 
 /** The `components/fleet/*.vue` files, by the name Nuxt auto-imports them under. */
-export type FleetComponentName = 'FleetAge' | 'FleetRunnerCapabilityChips' | 'FleetRepoReachabilityBadge' | 'FleetNativeSelect'
+export type FleetComponentName =
+  | 'FleetAge' | 'FleetRunnerCapabilityChips' | 'FleetRepoReachabilityBadge' | 'FleetNativeSelect' | 'FleetBudgetTable'
