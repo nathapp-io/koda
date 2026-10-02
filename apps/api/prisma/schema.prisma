@@ -622,7 +622,7 @@ model FleetActivity {
   actorType         String // USER | RUNNER | SYSTEM
   actorId           String
   action            String
-  entityType        String // runner | enrollment | repo | job | budget | schedule
+  entityType        String // runner | enrollment | repo | job | budget | schedule | approval
   entityId          String
   jobId             String?
   projectId         String? // set on job rows and on project/repo budget rows
@@ -670,12 +670,42 @@ model BudgetIncident {
   spentUsd    Decimal  @db.Decimal(12, 4)
   amountUsd   Decimal  @db.Decimal(12, 4)
   actorId     String?
-  approvalId  String? // C8 (S1.5); null until then
+  approvalId  String? // FleetApproval id (S1.5); no FK
   createdAt   DateTime @default(now())
 
   policy BudgetPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
 
   @@index([policyId, createdAt])
+}
+
+/// S1.5 C8 typed approval (spec 2026-10-02 §1.1). Partial unique (policyId) WHERE status = 'pending' is raw SQL.
+/// policyId has no FK: a deleted policy closes its approval (policy_deleted) and the row stays as history.
+model FleetApproval {
+  id          String    @id @default(cuid())
+  type        String // budget_override_required | nax_bash_escalate
+  status      String    @default("pending") // pending | approved | rejected | expired | cancelled
+  projectId   String?
+  jobId       String?
+  leaseEpoch  Int?
+  naxAskId    String?
+  policyId    String?
+  payload     Json
+  outcome     Json?
+  requestedAt DateTime
+  expiresAt   DateTime?
+  decision    String?
+  decidedById String?
+  decidedAt   DateTime?
+  resolvedBy  String? // user | timeout | job_ended | superseded | manual_resume | window_reset | policy_deleted
+  comment     String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([jobId, leaseEpoch, naxAskId])
+  @@index([projectId, status, requestedAt])
+  @@index([status, expiresAt])
+  @@index([jobId, status])
+  @@index([policyId])
 }
 
 /// S1b §3.1 C4 schedule: drives one feature to done with RUNs. repoId and pinnedRunnerId have no foreign key
