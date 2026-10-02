@@ -99,15 +99,15 @@ Numbering continues the S1b register (slice 2a ends at D172; slice 2b uses D173-
 | # | Decision | Why |
 |:--|:--|:--|
 | D190 | Cron parsing uses `cron-parser` `^5.10.1`, added as a direct dependency of `apps/api` and wrapped in one file (`cron-schedule.ts`). The `cron` package already in the tree (via `@nestjs/schedule`) is not used. Ruled by user 10-02: keep `cron-parser`. | The spec names `cron-parser`. It is a pure function of (expression, zone, instant) with no timers, and it follows Vixie semantics (day-of-month OR day-of-week), checked against `cron` 4.4.0 with the same results. `cron` is a timer scheduler we would only borrow `CronTime` from, as an undeclared transitive dependency: `cron@4.4.0` is only a transitive dependency of `@nestjs/schedule`, not a direct one, so using it would also have meant adding a direct dependency. The new dependency adds one package (`luxon` is already installed). |
-| D191 | `cron-parser` pads missing fields, accepts six fields (seconds), `@daily` and `?`. `normalizeCron` therefore requires exactly five whitespace-separated fields and rewrites them single-spaced. The zone is canonicalised through `Intl.DateTimeFormat(...).resolvedOptions().timeZone` (`asia/singapore` is stored as `Asia/Singapore`) and then proven by computing one fire. The 15-minute check walks the next 100 fires from the moment of create or edit, as the spec says; it is an approximation (a short gap that first appears after the 100th fire is not seen). | Without the field check `* * * *` and `* * * * * *` would both be accepted and mean something the user did not type. The zone proof catches zones `Intl` accepts and luxon does not. |
+| D191 | `cron-parser` pads missing fields and accepts six fields (seconds), `@daily`, `?`, `L`, `W` and `#`. `normalizeCron` therefore requires exactly five whitespace-separated fields (rewritten single-spaced) and rejects every non-standard token: after removing the standard day and month names (`MON`..`SUN`, `JAN`..`DEC`, which cron-parser handles as standard cron and are kept), a field may contain only digits, `*`, `,`, `/` and `-`. The zone is canonicalised through `Intl.DateTimeFormat(...).resolvedOptions().timeZone` and then proven by computing one fire; aliases are stored under their canonical name (`EST` becomes `America/Panama`, `US/Eastern` becomes `America/New_York`, `GMT` becomes `UTC`), and a fixed offset (`+08:00`, `-05:00`, `+0800`) is refused because it is not an IANA zone and has no daylight saving. The 15-minute check walks the next 100 fires from the moment of create or edit, as the spec says, but stops at the first fire more than 2 years past `now` (`GAP_CHECK_HORIZON_MS`): `0 0 29 2 *` is 4 years between fires and would otherwise cost seconds of synchronous CPU on every create and edit. It is an approximation (a short gap first appearing after the 100th fire or beyond 2 years is not seen). | Without the field check `* * * *` and `* * * * * *` would both be accepted and mean something the user did not type; `?`, `L`, `W` and `#` are Quartz extensions, not the five-field standard the spec names. The zone proof catches zones `Intl` accepts and luxon does not. The horizon keeps validation bounded (tested by counting walked fires, not wall-clock). |
 | D192 | Modules: `ScheduleStoreModule` (repository + `ScheduleProgressService`) is imported by `FleetJobsModule`; `SchedulesModule` (ticker, management service, controller) imports `FleetJobsModule`, `ScheduleStoreModule`, `FleetActivityModule`; `FleetModule` imports `SchedulesModule`. | `JobTransitionsService` (in `FleetJobsModule`) must call `ScheduleProgressService`, and the ticker needs `FleetJobsService`: one module would be a cycle (same split as 2a D160). `ScheduleProgressService` imports nothing from `jobs/job-transitions.service` (it defines its own `'system'` actor id) so there is no ESM import cycle either. |
 | D193 | `JobSchedule.repoId` and `JobSchedule.pinnedRunnerId` have **no foreign key**. `JobSchedule.projectId` cascades with its project and `createdById` references `User`. `FleetJob.scheduleId` references `JobSchedule` with `ON DELETE SET NULL`. | The spec disables a schedule "on a deleted repo" (`template_invalid`); an FK to `FleetRepo` would delete the schedule with the repo and nobody would see why it stopped. Deleting a schedule must keep its jobs and their history. |
-| D194 | `PrismaScheduleRepository.delete` first detaches the schedule's jobs (`scheduleId = null`), then deletes the row. | Lock order is job row, then schedule row, everywhere (`apply` holds the job lock and then locks the schedule). The FK's own `SET NULL` would lock job rows after the schedule row and could deadlock with a concurrent terminal transition. |
+| D194 | `PrismaScheduleRepository.delete` first detaches the schedule's jobs (`scheduleId = null`), then deletes the schedule row with `deleteMany`; `SchedulesService.remove` checks 404/403 with an **unlocked** `findById` inside its transaction, so the schedule row is locked only after the job rows. `update`, `enable` and `disable` keep `lockById` (they touch no job rows). | Lock order is job row, then schedule row, in every path that touches both: `apply` holds the job lock (`job-report.processor` `lockById`) and then `onJobEnded` locks the schedule, so a `remove` that locked the schedule first and then its jobs would deadlock (Postgres 40P01) with a job ending. The ticker's `claimFire` and `disable` lock only the schedule row and `coalesceIntoQueued` only a job row, so no cycle exists. A PG test holds a job lock open while `remove` runs. |
 | D195 | A `CANCELLED` job does **not** set `scheduleCountedAt`. | The spec says a cancelled end changes neither counter and "it then sets `scheduleCountedAt`" only for counted ends. If a cancelled job set it, a user requeue of that job that later FAILED would never be counted. |
 | D196 | "Counted once" is a compare-and-set: `UPDATE FleetJob SET scheduleCountedAt = now WHERE id = ? AND scheduleCountedAt IS NULL` (`claimCounted`), taken before the schedule row is locked. | Exactly-once holds even if two paths ever end the same job, without relying on the schedule lock. |
 | D197 | A schedule that is already disabled (manual, or by an earlier auto-disable) keeps its `disabledReason`. A late result for it only applies the "progress" verdict (reset `noProgressTicks`, raise `lastPassedCount`); every other verdict is ignored. | A job that was running when a human disabled the schedule must not rewrite `manual` into `completed`, and no webhook fires for a schedule that is already off. |
 | D198 | The ticker claims in its own statement, commits it, and only then calls `FleetJobsService.dispatch` with **no transaction open**. A crash between the claim and the dispatch loses that one fire; the next cron fire runs as usual. `tick` is guarded against re-entry (a tick still running when the 60 s timer fires is skipped). | A 409 from the `(repoId, feature)` index aborts a Prisma interactive transaction and `dispatch` handles it with its own transaction. Losing one fire on a crash is the same trade the spec makes for "missed fires collapse into one". |
-| D199 | Dispatch errors map by exception class, most specific first: `BudgetPausedException` -> skip `budget_paused`; any other `ConflictAppException` -> skip `active_job_elsewhere`; `NotFoundAppException`, `FleetDispatchException`, `ValidationAppException` -> disable `template_invalid`; anything else -> log, skip `error`. | Matches the spec's outcome table. `BudgetPausedException` extends `ConflictAppException` (2a), so the order is the contract. |
+| D199 | Dispatch errors map by exception class, most specific first: `BudgetPausedException` -> skip `budget_paused`; any other `ConflictAppException` -> skip `active_job_elsewhere`; `NotFoundAppException`, `FleetDispatchException`, `ValidationAppException` -> disable `template_invalid`; anything else -> log, then look for the job this tick may just have created (the tick found no active job before dispatching): if one exists the failure was in `dispatch`'s post-commit side effects (placement, live publish), so `lastJobId` is set and the tick counts as `dispatched`; otherwise skip `error`. A schedule deleted between the claim and the dispatch makes `createJob` fail on the `JobSchedule` foreign key (P2003), which `createJob` already maps to `NotFoundAppException`; the ticker then calls `disable`, which finds no row and does nothing (no throw). A schedule disabled or deleted before the claim loses the compare-and-set. | Matches the spec's outcome table. `BudgetPausedException` extends `ConflictAppException` (2a), so the order is the contract. |
 | D200 | Coalescing is one atomic statement, `UPDATE "FleetJob" SET "coalescedCount" = "coalescedCount" + 1 WHERE "scheduleId" = ? AND "state" = 'QUEUED' RETURNING "id"`. Zero rows (the job left QUEUED since we looked) re-reads the schedule's active job; at most 3 rounds, then the tick is recorded as skipped (`busy`). | The job can be assigned between the read and the increment; the guard in the `WHERE` makes the increment itself the check. |
 | D201 | Owner access is the repository's own read (`findOwnerAccess`: user exists, `disabled`, global role, project role), not `ProjectAccessService`. The owner may dispatch when the user exists, is not disabled, and is a global ADMIN or has project role ADMIN or DEVELOPER (the roles that hold CASL `CREATE FleetJob`). | `ProjectAccessService.resolveMembership` throws 403 for a non-member and never looks at `User.disabled`. |
 | D202 | Controller permissions: `POST` uses `@ProjectPermission([CREATE, 'FleetJob'])` (DEVELOPER+); `PATCH`, `DELETE`, `enable`, `disable` use `[UPDATE, 'FleetJob']` (DEVELOPER+) **and** owner-or-project-ADMIN (`ctx.role === 'ADMIN'`, which a global ADMIN resolves to). Reads need a user principal that is a project member. Agent principals are refused everywhere. | The spec names owner or project ADMIN; also requiring DEVELOPER+ means a demoted VIEWER-owner cannot edit a schedule that the ticker is about to disable for lost access. A project ADMIN can still delete it. |
@@ -159,6 +159,7 @@ New, under `apps/api/src/fleet/schedules/`:
 | `prisma-schedule.repository.ts` | PG access: CAS claim, atomic coalesce, counted claim, owner access, cost sums |
 | `schedule-store.module.ts` | Repository + `ScheduleProgressService`, importable by `FleetJobsModule` |
 | `schedule-progress.service.ts` | Applies the verdict to the schedule; auto-disable (activity + webhook) |
+| `schedule-access.ts` | `mayDispatch`: may the owner still dispatch (plan D201) |
 | `schedule-ticker.ts` | The 60 s ticker: claim, coalesce, skip, dispatch, outcome table |
 | `schedules.service.ts` | Management: list, get, create, update, delete, enable, disable |
 | `dto/create-schedule.dto.ts`, `dto/update-schedule.dto.ts`, `dto/schedule.dto.ts` | Request and response DTOs |
@@ -578,7 +579,8 @@ git commit -m "feat(fleet): job schedule table and the FleetJob schedule link"
 
 **Interfaces:**
 - Produces (`cron-schedule.ts`):
-  `MIN_FIRE_GAP_MS = 900_000`, `GAP_CHECK_FIRES = 100`;
+  `MIN_FIRE_GAP_MS = 900_000`, `GAP_CHECK_FIRES = 100`, `GAP_CHECK_HORIZON_MS` (2 years);
+  `walkFires(cron: string, timezone: string, now: Date): number[]` (epoch ms of the upcoming fires the gap check looks at);
   `class CronInputError extends Error { readonly failure: 'syntax' | 'timezone' | 'too_frequent' }`;
   `normalizeCron(expression: string): string`;
   `canonicalTimezone(timezone: string): string`;
@@ -600,7 +602,7 @@ Expected: `apps/api/package.json` gains `"cron-parser": "^5.10.1"` under `depend
 Create `apps/api/src/fleet/schedules/cron-schedule.spec.ts`:
 
 ```ts
-import { assertCronAllowed, canonicalTimezone, CronInputError, nextFireAfter, normalizeCron } from './cron-schedule';
+import { assertCronAllowed, canonicalTimezone, CronInputError, nextFireAfter, normalizeCron, walkFires } from './cron-schedule';
 
 const at = (iso: string): Date => new Date(iso);
 const failure = (fn: () => unknown): string | null => {
@@ -630,6 +632,15 @@ describe('normalizeCron', () => {
   it.each(['* * * *', '* * * * * *', '@daily', '', '   '])('rejects %p (not exactly five fields)', (expression) => {
     expect(failure(() => normalizeCron(expression))).toBe('syntax');
   });
+
+  it.each(['0 9 ? * *', '0 9 L * *', '0 9 15W * *', '0 9 * * 5#2', '0 9 * * 5L', '0 9 * * foo'])('rejects the non-standard token in %p', (expression) => {
+    expect(failure(() => normalizeCron(expression))).toBe('syntax');
+  });
+
+  it.each(['0 9 * * MON-FRI', '0 9 1 JAN *', '0 9 * * wed', '0 9 1 jul *'])('keeps the standard day and month names in %p', (expression) => {
+    expect(normalizeCron(expression)).toBe(expression);
+    expect(nextFireAfter(expression, 'UTC', at('2026-10-02T00:00:00.000Z')).getTime()).toBeGreaterThan(at('2026-10-02T00:00:00.000Z').getTime());
+  });
 });
 
 describe('canonicalTimezone', () => {
@@ -640,6 +651,16 @@ describe('canonicalTimezone', () => {
 
   it.each(['', 'Mars/Base', 'Not a zone'])('rejects %p', (zone) => {
     expect(failure(() => canonicalTimezone(zone))).toBe('timezone');
+  });
+
+  it.each(['+08:00', '-05:00', '+0800'])('rejects the fixed offset %p: it is not an IANA zone (plan D191)', (zone) => {
+    expect(failure(() => canonicalTimezone(zone))).toBe('timezone');
+  });
+
+  it('stores an alias under its canonical name (plan D191)', () => {
+    expect(canonicalTimezone('EST')).toBe('America/Panama');
+    expect(canonicalTimezone('US/Eastern')).toBe('America/New_York');
+    expect(canonicalTimezone('Etc/GMT-8')).toBe('Etc/GMT-8');
   });
 });
 
@@ -695,8 +716,23 @@ describe('assertCronAllowed', () => {
     expect(failure(() => assertCronAllowed(expression, 'UTC', NOW))).toBe('too_frequent');
   });
 
-  it.each(['61 * * * *', '0 0 30 2 *', 'abc * * * *', '* * * *'])('refuses %p as a syntax error', (expression) => {
+  it.each(['61 * * * *', '0 0 30 2 *', 'abc * * * *', '* * * *', '0 9 ? * *', '0 9 L * *'])('refuses %p as a syntax error', (expression) => {
     expect(failure(() => assertCronAllowed(expression, 'UTC', NOW))).toBe('syntax');
+  });
+
+  it('refuses a fixed-offset zone', () => {
+    expect(failure(() => assertCronAllowed('0 * * * *', '+08:00', NOW))).toBe('timezone');
+  });
+
+  it('bounds the gap walk: a 4-year cron stops at the 2-year horizon, a frequent one at 100 fires (plan D191)', () => {
+    expect(walkFires('0 0 29 2 *', 'UTC', NOW).length).toBeLessThanOrEqual(2);
+    expect(assertCronAllowed('0 0 29 2 *', 'UTC', NOW)).toEqual({ cron: '0 0 29 2 *', timezone: 'UTC' });
+    expect(walkFires('*/15 * * * *', 'UTC', NOW)).toHaveLength(100);
+    expect(walkFires('0 9 * * *', 'UTC', NOW)).toHaveLength(100);
+  });
+
+  it('still catches a short gap inside the horizon of a rare cron', () => {
+    expect(failure(() => assertCronAllowed('0,5 0 29 2 *', 'UTC', NOW))).toBe('too_frequent');
   });
 
   it('refuses an unknown zone', () => {
@@ -721,6 +757,8 @@ import { CronExpressionParser } from 'cron-parser';
 export const MIN_FIRE_GAP_MS = 15 * 60 * 1000;
 /** S1b §3.1: how many upcoming fires the gap check walks (plan D191: an approximation). */
 export const GAP_CHECK_FIRES = 100;
+/** Plan D191: the gap walk stops at the first fire further out than this (`0 0 29 2 *` is 4 years between fires). */
+export const GAP_CHECK_HORIZON_MS = 2 * 365 * 24 * 60 * 60 * 1000;
 
 export type CronFailure = 'syntax' | 'timezone' | 'too_frequent';
 
@@ -734,14 +772,21 @@ export class CronInputError extends Error {
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-/** cron-parser pads missing fields and accepts six fields and aliases; a schedule cron is exactly five fields. */
+const NAMES = /(mon|tue|wed|thu|fri|sat|sun|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/gi;
+
+/**
+ * cron-parser pads missing fields and accepts six fields, aliases and Quartz tokens (`?`, `L`, `W`, `#`); a schedule
+ * cron is exactly five standard fields (plan D191). Day and month names are standard and are kept.
+ */
 export function normalizeCron(expression: string): string {
   const fields = expression.trim().split(/\s+/).filter((field) => field !== '');
   if (fields.length !== 5) throw new CronInputError('syntax', 'a schedule cron has exactly five fields: minute hour day month weekday');
+  const odd = fields.find((field) => /[^0-9*,/-]/.test(field.replace(NAMES, '')));
+  if (odd !== undefined) throw new CronInputError('syntax', `unsupported token in ${JSON.stringify(odd)}: use digits, * , / - and day or month names`);
   return fields.join(' ');
 }
 
-/** The canonical IANA name of a zone the runtime and cron-parser both know. */
+/** The canonical IANA name of a zone the runtime and cron-parser both know; aliases are stored canonically (`EST` -> `America/Panama`). */
 export function canonicalTimezone(timezone: string): string {
   let canonical: string;
   try {
@@ -749,6 +794,8 @@ export function canonicalTimezone(timezone: string): string {
   } catch {
     throw new CronInputError('timezone', `unknown timezone ${JSON.stringify(timezone)}`);
   }
+  // Plan D191: Node accepts fixed offsets such as +08:00; they are not IANA zones and have no daylight saving.
+  if (/^[+-]/.test(canonical)) throw new CronInputError('timezone', `${JSON.stringify(timezone)} is a fixed offset, not an IANA zone`);
   try {
     CronExpressionParser.parse('0 0 * * *', { currentDate: new Date(0), tz: canonical }).next();
   } catch {
@@ -762,17 +809,15 @@ export function nextFireAfter(cron: string, timezone: string, after: Date): Date
   return CronExpressionParser.parse(cron, { currentDate: after, tz: timezone }).next().toDate();
 }
 
-/** Validates a cron + zone for create and edit (S1b §3.1) and returns the values to store. */
-export function assertCronAllowed(cron: string, timezone: string, now: Date): { cron: string; timezone: string } {
-  const normalized = normalizeCron(cron);
-  const zone = canonicalTimezone(timezone);
+/** The upcoming fires the gap check looks at: at most GAP_CHECK_FIRES, none further out than the horizon. */
+export function walkFires(cron: string, timezone: string, now: Date): number[] {
   let iterator: ReturnType<typeof CronExpressionParser.parse>;
   try {
-    iterator = CronExpressionParser.parse(normalized, { currentDate: now, tz: zone });
+    iterator = CronExpressionParser.parse(cron, { currentDate: now, tz: timezone });
   } catch (error) {
     throw new CronInputError('syntax', messageOf(error));
   }
-  let previous: number | null = null;
+  const fires: number[] = [];
   for (let i = 0; i < GAP_CHECK_FIRES; i += 1) {
     let at: number;
     try {
@@ -780,10 +825,21 @@ export function assertCronAllowed(cron: string, timezone: string, now: Date): { 
     } catch (error) {
       throw new CronInputError('syntax', messageOf(error));
     }
-    if (previous !== null && at - previous < MIN_FIRE_GAP_MS) {
+    if (at - now.getTime() > GAP_CHECK_HORIZON_MS) break;
+    fires.push(at);
+  }
+  return fires;
+}
+
+/** Validates a cron + zone for create and edit (S1b §3.1) and returns the values to store. */
+export function assertCronAllowed(cron: string, timezone: string, now: Date): { cron: string; timezone: string } {
+  const normalized = normalizeCron(cron);
+  const zone = canonicalTimezone(timezone);
+  const fires = walkFires(normalized, zone, now);
+  for (let i = 1; i < fires.length; i += 1) {
+    if (fires[i] - fires[i - 1] < MIN_FIRE_GAP_MS) {
       throw new CronInputError('too_frequent', `two fires are less than ${MIN_FIRE_GAP_MS / 60_000} minutes apart`);
     }
-    previous = at;
   }
   return { cron: normalized, timezone: zone };
 }
@@ -1363,8 +1419,9 @@ export class PrismaScheduleRepository implements IScheduleRepository {
 
   async delete(id: string): Promise<void> {
     // Plan D194: lock order is job row, then schedule row. Detaching first keeps the FK's SET NULL from doing it the other way round.
+    // deleteMany: a schedule another request just deleted is not an error.
     await this.db.fleetJob.updateMany({ where: { scheduleId: id }, data: { scheduleId: null } });
-    await this.db.jobSchedule.delete({ where: { id } });
+    await this.db.jobSchedule.deleteMany({ where: { id } });
   }
 
   async claimFire(id: string, expectedNextFireAt: Date, nextFireAt: Date, now: Date): Promise<boolean> {
@@ -2090,6 +2147,35 @@ with
           payload: { repoId: repo.id, feature: created.feature, command: created.command, ref: created.ref, ...(opts.scheduleId ? { scheduleId: opts.scheduleId } : {}) },
 ```
 
+In `apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts` `createJob`, the comments are stale once a job can carry a
+`scheduleId`. Replace
+
+```ts
+      // The only unique constraint a new row can hit is the active (repoId, feature) index.
+```
+
+with
+
+```ts
+      // The unique constraints a new row can hit are the active (repoId, feature) index and, for a scheduled job, the
+      // one-QUEUED-job-per-schedule index (S1b §3.1); both mean an active job already exists.
+```
+
+and replace
+
+```ts
+      // A dispatch that waited on the repo's lockForDelete then raced the delete: FK on FleetRepo fails.
+```
+
+with
+
+```ts
+      // A dispatch raced the delete of its repo (FK on FleetRepo) or, for a scheduled job, of its schedule (FK on
+      // JobSchedule). Both answer 404; the schedule ticker treats it as a vanished template (plan D199).
+```
+
+(Match the surrounding lines by reading the file; only the comment text changes.)
+
 - [ ] **Step 4: Add the filter**
 
 In `fleet-job.domain.ts`, `FleetJobFilters` gains `scheduleId?: string;` (after `feature?: string;`).
@@ -2306,6 +2392,15 @@ describe('ScheduleTicker.tick', () => {
     expect(h.repo.update).not.toHaveBeenCalled();
   });
 
+  it('a failure after the job was created (placement, live publish) still links the job and counts as dispatched (plan D199)', async () => {
+    const h = build();
+    h.repo.findActiveJob.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 'job-2', state: 'QUEUED' });
+    h.jobs.dispatch.mockRejectedValue(new Error('placement boom'));
+    expect(await h.ticker.tick(NOW)).toEqual(expect.objectContaining({ dispatched: 1, skipped: 0 }));
+    expect(h.repo.update).toHaveBeenCalledWith('s1', { lastJobId: 'job-2' });
+    expect(h.actions()[0]).toEqual(expect.objectContaining({ action: 'schedule.tick_dispatched', payload: expect.objectContaining({ sideEffectFailed: true }) }));
+  });
+
   it('records why a budget skip and a manual-job skip happened', async () => {
     const budget = build();
     budget.jobs.dispatch.mockRejectedValue(new BudgetPausedException(budgetPolicy));
@@ -2520,11 +2615,16 @@ export class ScheduleTicker implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       return this.onDispatchError(s, error);
     }
-    await this.txManager.run(async () => {
-      await this.repo.update(s.id, { lastJobId: jobId });
-      await this.record(s, 'schedule.tick_dispatched', { jobId });
-    });
+    await this.linkDispatched(s, jobId, {});
     return 'dispatched';
+  }
+
+  /** Sets lastJobId and records the dispatch in one transaction. */
+  private linkDispatched(s: ScheduleRecord, jobId: string, extra: Record<string, unknown>): Promise<void> {
+    return this.txManager.run(async () => {
+      await this.repo.update(s.id, { lastJobId: jobId });
+      await this.record(s, 'schedule.tick_dispatched', { jobId, ...extra });
+    });
   }
 
   /** Plan D199: most specific first; BudgetPausedException is a ConflictAppException. */
@@ -2542,6 +2642,14 @@ export class ScheduleTicker implements OnModuleInit, OnModuleDestroy {
       return 'disabled';
     }
     this.logger.error(`Schedule ${s.id} dispatch failed: ${messageOf(error)}`);
+    // Plan D199: dispatch creates the job in its own transaction and only then places it and publishes. A failure in those
+    // side effects leaves a QUEUED job this tick must still link. fire() found no active job before dispatching, so any
+    // active job now is the one just created.
+    const created = await this.repo.findActiveJob(s.id);
+    if (created) {
+      await this.linkDispatched(s, created.id, { sideEffectFailed: true });
+      return 'dispatched';
+    }
     await this.record(s, 'schedule.tick_skipped', { reason: 'error' });
     return 'skipped';
   }
@@ -2581,6 +2689,8 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { FleetJobsService } from '../../../src/fleet/jobs/fleet-jobs.service';
+import { PrismaScheduleRepository } from '../../../src/fleet/schedules/prisma-schedule.repository';
 import { ScheduleTicker } from '../../../src/fleet/schedules/schedule-ticker';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -2730,6 +2840,41 @@ describeIntegration('schedule ticker (PG)', () => {
     expect(await jobsOf(s.id)).toHaveLength(1);
   });
 
+  it.each(['deleted', 'disabled'] as const)('a schedule %s between findDue and the claim loses the claim: nothing is dispatched, nothing throws', async (change) => {
+    const s = await schedule();
+    const repo = app.get(PrismaScheduleRepository);
+    const original = repo.findDue.bind(repo);
+    const spy = jest.spyOn(repo, 'findDue').mockImplementationOnce(async (now, limit) => {
+      const rows = await original(now, limit);
+      if (change === 'deleted') await prisma.jobSchedule.delete({ where: { id: s.id } });
+      else await prisma.jobSchedule.update({ where: { id: s.id }, data: { enabled: false, disabledReason: 'manual' } });
+      return rows;
+    });
+    try {
+      expect(await ticker.tick(NOW)).toEqual(expect.objectContaining({ claimed: 0, failed: 0 }));
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await prisma.fleetJob.count({ where: { feature: s.feature } })).toBe(0);
+  });
+
+  it('a schedule deleted between the claim and the dispatch: the job insert fails on the schedule FK, the ticker ends as a no-op disable, nothing throws (plan D199)', async () => {
+    const s = await schedule();
+    const jobs = app.get(FleetJobsService);
+    const original = jobs.dispatch.bind(jobs);
+    const spy = jest.spyOn(jobs, 'dispatch').mockImplementationOnce(async (...args) => {
+      await prisma.jobSchedule.delete({ where: { id: s.id } });
+      return original(...args);
+    });
+    try {
+      expect(await ticker.tick(NOW)).toEqual(expect.objectContaining({ failed: 0, dispatched: 0 }));
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await prisma.fleetJob.count({ where: { feature: s.feature } })).toBe(0);
+    expect(await prisma.fleetActivity.count({ where: { entityId: s.id, action: 'schedule.auto_disabled' } })).toBe(0);
+  });
+
   it('a deleted repo disables with template_invalid', async () => {
     const repo = await prisma.fleetRepo.create({
       data: { projectId: world.projectId, provider: 'github', owner: 'acme', name: 'doomed', defaultBranch: 'main', githubInstallationId: BigInt(77), createdById: world.ids.root },
@@ -2797,7 +2942,7 @@ and in `apps/api/src/fleet/fleet.module.ts` import it: add
 - [ ] **Step 8: Run the integration spec and the module guards**
 
 Run: `cd apps/api && bun run test:scoped test/integration/fleet/fleet-schedule-ticker.integration.spec.ts src/fleet/fleet.module.spec.ts`
-Expected: PASS (15 ticker cases; the fleet module compiles with the ticker wired).
+Expected: PASS (18 ticker cases; the fleet module compiles with the ticker wired).
 
 Then once under a non-UTC process zone: `TZ=Asia/Singapore bun run test:scoped test/integration/fleet/fleet-schedule-ticker.integration.spec.ts`
 Expected: PASS.
@@ -2913,7 +3058,7 @@ with
   "scheduleOwnerNoAccess": { "409": "该计划的所有者已无权向此项目派发任务；所有者需要开发者或更高权限" }
 ```
 
-Run the spec again. Expected: PASS (3 cases).
+Run the spec again. Expected: PASS (4 cases).
 
 - [ ] **Step 3: Write the failing service spec**
 
@@ -3086,9 +3231,10 @@ describe('SchedulesService.enable and disable', () => {
 });
 
 describe('SchedulesService.remove, list and get', () => {
-  it('remove deletes under the lock and records a row; a stranger is refused', async () => {
+  it('remove checks access without the schedule lock (plan D194), deletes, and records a row; a stranger is refused', async () => {
     const h = build();
     await h.svc.remove('owner', 'p1', 's1', false);
+    expect(h.repo.lockById).not.toHaveBeenCalled();
     expect(h.repo.delete).toHaveBeenCalledWith('s1');
     expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'schedule.deleted' }));
     await expect(h.svc.remove('other', 'p1', 's1', false)).rejects.toBeInstanceOf(ForbiddenAppException);
@@ -3347,7 +3493,8 @@ export class SchedulesService {
 
   async remove(actorId: string, projectId: string, id: string, canAdminister: boolean): Promise<void> {
     await this.txManager.run(async () => {
-      const current = await this.lockManaged(projectId, id, actorId, canAdminister);
+      // Plan D194: no schedule lock here. delete() locks the job rows first, then the schedule row, the order a job's end uses.
+      const current = this.assertManaged(await this.repo.findById(id), projectId, actorId, canAdminister);
       await this.repo.delete(id);
       await this.record(actorId, 'schedule.deleted', current);
     });
@@ -3410,9 +3557,13 @@ export class SchedulesService {
     };
   }
 
-  /** Under the row lock: 404 for another project's schedule, 403 unless the owner or a project ADMIN. */
+  /** Under the row lock (update, enable, disable touch no job rows): see assertManaged. */
   private async lockManaged(projectId: string, id: string, actorId: string, canAdminister: boolean): Promise<ScheduleRecord> {
-    const schedule = await this.repo.lockById(id);
+    return this.assertManaged(await this.repo.lockById(id), projectId, actorId, canAdminister);
+  }
+
+  /** 404 for a missing schedule or another project's, 403 unless the owner or a project ADMIN. */
+  private assertManaged(schedule: ScheduleRecord | null, projectId: string, actorId: string, canAdminister: boolean): ScheduleRecord {
     if (!schedule || schedule.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.schedules');
     if (!canAdminister && schedule.createdById !== actorId) throw new ForbiddenAppException({}, 'projects');
     return schedule;
@@ -3614,6 +3765,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { SchedulesService } from '../../../src/fleet/schedules/schedules.service';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -3761,6 +3913,34 @@ describeIntegration('fleet schedules API (PG)', () => {
     expect(await prisma.fleetActivity.count({ where: { entityId: row.id, action: 'schedule.deleted' } })).toBe(1);
   });
 
+  it('delete takes the job lock before the schedule lock, so it cannot deadlock with a job ending (plan D194)', async () => {
+    const row = await create();
+    const job = await prisma.fleetJob.create({
+      data: {
+        projectId: world.projectId, repoId: world.repoId, ref: 'trunk', command: 'RUN', feature: row.feature, profiles: [], maxCostUsd: new Prisma.Decimal(5),
+        selectorLabels: [], requestedById: world.ids.dev, scheduleId: row.id, state: 'UPLOADING',
+      },
+    });
+    const holder = new PrismaClient();
+    let removing: Promise<void> = Promise.resolve();
+    try {
+      await holder.$transaction(async (tx) => {
+        // What the sync path does when a job ends: the job row first, then (onJobEnded) the schedule row.
+        await tx.$queryRaw`SELECT "id" FROM "FleetJob" WHERE "id" = ${job.id} FOR UPDATE`;
+        removing = app.get(SchedulesService).remove(world.ids.dev, world.projectId, row.id, false);
+        removing.catch(() => undefined);
+        await new Promise((resolve) => setTimeout(resolve, 500)); // remove is now waiting for the job row
+        await tx.$queryRaw`SELECT "id" FROM "JobSchedule" WHERE "id" = ${row.id} FOR UPDATE`;
+        await tx.jobSchedule.update({ where: { id: row.id }, data: { noProgressTicks: 1 } });
+      }, { timeout: 15_000 });
+      await expect(removing).resolves.toBeUndefined(); // with the schedule locked first this would fail with 40P01
+    } finally {
+      await holder.$disconnect();
+    }
+    expect(await prisma.jobSchedule.count({ where: { id: row.id } })).toBe(0);
+    expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: job.id } })).scheduleId).toBeNull();
+  });
+
   it('totalCostUsd adds the cost of the schedule\'s jobs', async () => {
     const row = await create();
     await prisma.fleetJob.create({
@@ -3791,7 +3971,7 @@ describeIntegration('fleet schedules API (PG)', () => {
 - [ ] **Step 11: Run the HTTP spec**
 
 Run: `cd apps/api && bun run test:scoped test/integration/fleet/fleet-schedules-api.integration.spec.ts`
-Expected: PASS (19 cases). If a whole file fails in under a millisecond with only a `loginToken` frame in the stack,
+Expected: PASS (20 cases). If a whole file fails in under a millisecond with only a `loginToken` frame in the stack,
 it is the known local login throttle: wait a minute and rerun that file alone.
 
 - [ ] **Step 12: Lint and commit**
