@@ -116,6 +116,7 @@ export interface FleetJobFilters {
   runnerId?: string;
   requestedById?: string;
   feature?: string;
+  scheduleId?: string;
 }
 
 export interface FleetJobEventRecord {

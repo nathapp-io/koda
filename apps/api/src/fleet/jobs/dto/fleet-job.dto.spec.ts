@@ -9,7 +9,7 @@ describe('fleet job DTOs', () => {
       maxCostUsd: '5.5', bashMode: 'raw', selectorLabels: [], pinnedRunnerId: null, runnerId: null, runnerBootId: 'boot',
       leaseEpoch: 1, state: 'QUEUED', stateReason: null, requestedById: 'u', queuedAt: now, assignedAt: null,
       startedAt: null, finishedAt: null, cancelRequestedAt: null, naxRunId: null, naxLogRunId: null, naxCostRunId: null,
-      progress: null, currentStoryId: null, currentPhase: null, costSpentUsd: '0.1234', costCarriedUsd: '0', firstStartedAt: null, cancelReason: null, scheduleId: null, coalescedCount: 0, scheduleCountedAt: null, lastHeartbeatAt: null,
+      progress: null, currentStoryId: null, currentPhase: null, costSpentUsd: '0.1234', costCarriedUsd: '0', firstStartedAt: null, cancelReason: null, scheduleId: 's1', coalescedCount: 2, scheduleCountedAt: null, lastHeartbeatAt: null,
       finishResult: null, escalationReason: null, exitCode: null, resultBranch: null, resultSha: null, resultPrUrl: null,
       wipPush: 'failed:diverged', stories: [{ id: 'US-001', title: 't', status: 'passed', attempts: 1, dependsOn: [] }], storiesTruncated: true,
       eventSeq: 3, ackedRunnerSeq: 2, attributedAt: null, updatedAt: now,
@@ -17,8 +17,9 @@ describe('fleet job DTOs', () => {
     const json = JSON.parse(JSON.stringify(dto));
     expect(json).toEqual(expect.objectContaining({ maxCostUsd: '5.5', costSpentUsd: '0.1234', queuedAt: now.toISOString() }));
     expect(json).toEqual(expect.objectContaining({ wipPush: 'failed:diverged' }));
+    expect(json).toEqual(expect.objectContaining({ scheduleId: 's1', coalescedCount: 2 }));
     expect(json).toEqual(expect.objectContaining({ stories: [{ id: 'US-001', title: 't', status: 'passed', attempts: 1, dependsOn: [] }], storiesTruncated: true }));
-    for (const hidden of ['runnerBootId', 'eventSeq', 'ackedRunnerSeq', 'attributedAt']) expect(json).not.toHaveProperty(hidden);
+    for (const hidden of ['runnerBootId', 'eventSeq', 'ackedRunnerSeq', 'attributedAt', 'scheduleCountedAt']) expect(json).not.toHaveProperty(hidden);
     expect(JSON.stringify(FleetJobEventDto.from({ id: 'e', jobId: 'j', seq: 1, leaseEpoch: 0, runnerSeq: null, type: 'state', payload: {}, createdAt: now }))).toContain('"seq":1');
   });
 
