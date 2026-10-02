@@ -41,7 +41,9 @@ describeIntegration('budget approval wiring (PG)', () => {
       maxCostUsd: new Prisma.Decimal(5), selectorLabels: [], requestedById: world.ids.dev, state: 'COMPLETED', firstStartedAt: new Date(), ...over,
     },
   });
-  const approvals = (policyId: string) => prisma.fleetApproval.findMany({ where: { policyId }, orderBy: { createdAt: 'asc' } });
+  // `createdAt` is a TIMESTAMP(3) column and these pairs are created ~20 ms apart, so the id tiebreak is
+  // the repo idiom and keeps six assertions from depending on that gap.
+  const approvals = (policyId: string) => prisma.fleetApproval.findMany({ where: { policyId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
   const hooks = (event: string) => prisma.outboxEvent.count({ where: { type: 'webhook_delivery', payload: { contains: `"event":"${event}"` } } });
   const project = { kind: 'project' as const, projectId: '' };
 
@@ -133,7 +135,9 @@ describeIntegration('budget approval wiring (PG)', () => {
   });
 
   it('a stop after a resume at the same amount still opens an approval with no new incident (D228)', async () => {
-    const policy = await projectPolicy();
+    // `lifetime` rather than the project default `calendar_month_utc`: two `evaluate`s straddling a UTC
+    // month boundary would fall in different windows and insert a second `hard_stop`, reading 2 here.
+    const policy = await projectPolicy({ windowKind: 'lifetime' });
     await job({ costSpentUsd: 10 });
     await evaluator.evaluate(policy.id);
     await prisma.budgetPolicy.update({ where: { id: policy.id }, data: { pausedAt: null, pausedWindowStart: null } });

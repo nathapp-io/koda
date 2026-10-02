@@ -9,14 +9,19 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { ApprovalsService } from '../../../src/fleet/approvals/approvals.service';
 import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
+import enFleet from '../../../src/i18n/en/fleet.json';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 jest.setTimeout(30_000);
 
-interface Approval { id: string; status: string; decision: string | null; resolvedBy: string | null; outcome: { requeueResults?: Array<{ jobId: string; ok: boolean; error?: string }> } | null; requeueCandidates?: Array<{ jobId: string }>; requeueCandidatesTruncated?: boolean }
+interface Approval { id: string; status: string; decision: string | null; resolvedBy: string | null; outcome: { resumedAmountUsd?: string; requeueResults?: Array<{ jobId: string; ok: boolean; error?: string }> } | null; requeueCandidates?: Array<{ jobId: string }>; requeueCandidatesTruncated?: boolean }
 interface Page<T> { total: number; records: T[] }
+
+/** The two race branches the concurrency cases can legitimately lose to, by i18n key. */
+const RACE_CONFLICTS: string[] = [enFleet.approvalNotPending['409'], enFleet.budgetNotPaused['409']];
 
 describeIntegration('fleet approvals API (PG)', () => {
   let app: NathApplication;
@@ -24,6 +29,7 @@ describeIntegration('fleet approvals API (PG)', () => {
   let prisma: PrismaClient;
   let world: FleetHttpWorld;
   let evaluator: BudgetEvaluator;
+  let approvals: ApprovalsService;
   let padmin: string;
   let n = 0;
   const as = (token: string) => ({ Authorization: `Bearer ${token}` });
@@ -58,6 +64,7 @@ describeIntegration('fleet approvals API (PG)', () => {
     prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
     world = await seedFleetHttpWorld(server, prisma);
     evaluator = app.get(BudgetEvaluator);
+    approvals = app.get(ApprovalsService);
     await request(server).post('/api/admin/users').set(tok('root')).send({ email: 'padmin@koda.test', name: 'padmin', password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
     await request(server).post('/api/projects/web/members').set(tok('root')).send({ email: 'padmin@koda.test', role: 'ADMIN' }).expect(201);
     padmin = await loginToken(server, 'padmin@koda.test');
@@ -107,24 +114,31 @@ describeIntegration('fleet approvals API (PG)', () => {
   it('raise and resume lifts the pause and re-queues the selected candidates, including a placement-cancelled job', async () => {
     const { approvalId, policy, queued } = await stopped();
     const later = await job({ state: 'CANCELLED', firstStartedAt: null, startedAt: null, cancelReason: `budget:${policy.id}`, stateReason: `budget:${policy.id}`, finishedAt: new Date(Date.now() + 1_000) });
+    // A fractional amount, so `outcome.resumedAmountUsd` is pinned as the DB decimal string and not as
+    // the request number: `25.5` in JSON must come back as `'25.5'`, never `'25.5000000'` or `25.5`.
     const decided = data<Approval>(await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin))
-      .send({ decision: 'raise_budget_and_resume', amountUsd: 25, requeueJobIds: [queued.id, later.id] }).expect(200));
+      .send({ decision: 'raise_budget_and_resume', amountUsd: 25.5, requeueJobIds: [queued.id, later.id] }).expect(200));
     expect(decided).toEqual(expect.objectContaining({ status: 'approved', decision: 'raise_budget_and_resume' }));
+    expect(decided.outcome?.resumedAmountUsd).toBe('25.5');
     expect(decided.outcome?.requeueResults).toEqual([{ jobId: queued.id, ok: true }, { jobId: later.id, ok: true }]);
     const after = await prisma.budgetPolicy.findUniqueOrThrow({ where: { id: policy.id } });
-    expect(after).toEqual(expect.objectContaining({ pausedAt: null, amountUsd: new Prisma.Decimal(25) }));
+    expect(after).toEqual(expect.objectContaining({ pausedAt: null, amountUsd: new Prisma.Decimal(25.5) }));
     expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: queued.id } })).state).toBe('QUEUED');
     expect((await prisma.budgetIncident.findFirstOrThrow({ where: { policyId: policy.id, kind: 'resumed' } })).approvalId).toBe(approvalId);
     expect(await prisma.outboxEvent.count({ where: { payload: { contains: '"event":"fleet.approval.resolved"' } } })).toBe(1);
   });
 
   it('partial re-queue: an active duplicate fails alone, the resume stands (review focus 2)', async () => {
-    const { approvalId, queued } = await stopped();
+    const { approvalId, policy, queued } = await stopped();
     await job({ state: 'QUEUED', firstStartedAt: null, feature: queued.feature });
     const decided = data<Approval>(await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin))
       .send({ decision: 'raise_budget_and_resume', amountUsd: 25, requeueJobIds: [queued.id] }).expect(200));
     expect(decided.status).toBe('approved');
     expect(decided.outcome?.requeueResults).toEqual([{ jobId: queued.id, ok: false, error: expect.any(String) }]);
+    // The failed re-queue must not have rolled the resume back: the policy row is the proof, `status`
+    // on the approval is only the decision that was already committed.
+    expect(await prisma.budgetPolicy.findUniqueOrThrow({ where: { id: policy.id } }))
+      .toEqual(expect.objectContaining({ pausedAt: null, amountUsd: new Prisma.Decimal(25) }));
   });
 
   it('refuses a missing amount, an amount not above spend, and a non-candidate id', async () => {
@@ -151,7 +165,7 @@ describeIntegration('fleet approvals API (PG)', () => {
     expect(closed).toEqual(expect.objectContaining({ status: 'cancelled', resolvedBy: 'policy_deleted', decidedById: null }));
   });
 
-  it('concurrent evaluate and decide: no deadlock (review focus 1)', async () => {
+  it('concurrent evaluate and decide over HTTP: no deadlock (review focus 1)', async () => {
     const { approvalId, policy } = await stopped();
     // Review focus 1 is the policy -> approval lock nesting (spec §1.4), so `evaluate` has to reach the
     // approval row here. A policy left paused short-circuits at `isEffectivelyPaused` and never opens
@@ -168,12 +182,52 @@ describeIntegration('fleet approvals API (PG)', () => {
     // (budget not paused). Both paths nest policy -> approval, so one commits and the other answers 409;
     // a reversed nesting would deadlock here and surface as a 500 instead.
     expect(res.status).toBe(409);
+    // The status alone cannot tell those two apart, so on a slower box this would quietly degrade into a
+    // check of the fixture. The message names the branch: a deadlock or any other 409 fails here.
+    expect(RACE_CONFLICTS).toContain(res.body.message);
     // Whichever promise took the policy lock first, the stop that got through superseded the pending
     // approval (system close: no human decision) and opened a fresh pending one in its place.
     expect(await prisma.fleetApproval.findUniqueOrThrow({ where: { id: approvalId } }))
       .toEqual(expect.objectContaining({ status: 'cancelled', resolvedBy: 'superseded', decidedById: null }));
     expect(await prisma.fleetApproval.count({ where: { policyId: policy.id, status: 'pending' } })).toBe(1);
     // One hard stop per policy per window (D228): the second `evaluate` sees the pause the first committed.
+    expect(await prisma.budgetIncident.count({ where: { policyId: policy.id, kind: 'hard_stop' } })).toBe(1);
+  });
+
+  /**
+   * Additive to the HTTP case above, which is what exercises the route (ProjectMembershipGuard, the DTO
+   * validation pipe, `route(ctx)`/`ctx.role`, `requireUser`) — but it reaches Postgres so much later than
+   * the in-process `evaluate` that reversing `decide`'s two lock lines still passes it: ~0% mutant
+   * detection. Here both transactions open in one tick, so they really are concurrent on the database.
+   *
+   * One `decide` and one `evaluate`, deliberately. A second `evaluate` (as the HTTP case above fires) just
+   * queues behind the policy lock, and that alone is enough to stop the cycle forming at all: measured on
+   * this box, 3 races out of 3 survived with the lock order reversed. With one of each, the same mutation
+   * is caught roughly one run in eight. So this is a **real but probabilistic** guard: a green run is
+   * evidence, a red run is proof. Do not over-trust it and do not read it as "the lock order is verified".
+   * A true barrier (hold the policy row from a third connection, fire, release) would be deterministic, but
+   * that is a redesign and is not warranted here.
+   */
+  it('concurrent in-process decide and evaluate: no deadlock, and never a P2034 (review focus 1)', async () => {
+    const { approvalId, policy } = await stopped();
+    // Same D228 shape as the HTTP case above: clear the pause so `evaluate` reaches the approval row.
+    await prisma.budgetPolicy.update({ where: { id: policy.id }, data: { pausedAt: null, pausedWindowStart: null } });
+    const [decideResult, evaluateResult] = await Promise.allSettled([
+      approvals.decide({ id: world.ids.root, globalAdmin: true }, { kind: 'admin' }, approvalId, { decision: 'raise_budget_and_resume', amountUsd: 40 }),
+      evaluator.evaluate(policy.id),
+    ]);
+    // The only rejection allowed is the decided-conflict, which is the same 409 the HTTP case sees. With a
+    // reversed nesting the loser blocks on lock 1 while the winner takes lock 2, the cycle is a deadlock,
+    // and Postgres answers `40P01` — which Prisma surfaces as `P2034`.
+    for (const r of [decideResult, evaluateResult]) {
+      if (r.status === 'rejected') expect(String(r.reason)).not.toMatch(/P2034|40P01|deadlock/i);
+    }
+    // One interleaving happened, and it is self-consistent: `evaluate` takes the policy lock from its
+    // first statement while `decide` still owes one round trip to its own pre-lock read, so the stop
+    // supersedes `approvalId` and opens its replacement (one hard stop per policy per window, D228).
+    expect(await prisma.fleetApproval.findUniqueOrThrow({ where: { id: approvalId } }))
+      .toEqual(expect.objectContaining({ status: 'cancelled', resolvedBy: 'superseded', decidedById: null }));
+    expect(await prisma.fleetApproval.count({ where: { policyId: policy.id, status: 'pending' } })).toBe(1);
     expect(await prisma.budgetIncident.count({ where: { policyId: policy.id, kind: 'hard_stop' } })).toBe(1);
   });
 

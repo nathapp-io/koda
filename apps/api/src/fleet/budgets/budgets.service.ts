@@ -94,10 +94,10 @@ export class BudgetsService {
   }
 
   /** Deleting a paused policy lifts its pause (the row is gone) and closes its pending approval (S1.5 §1.4). */
-  async remove(actorId: string, route: BudgetRoute, id: string): Promise<void> {
+  async remove(actorId: string, route: BudgetRoute, id: string, now = new Date()): Promise<void> {
     const live = await this.txManager.run(async () => {
       const policy = await this.lockOwned(route, id);
-      const closed = await this.approvals.closeForPolicy(id, { status: 'cancelled', resolvedBy: 'policy_deleted', actor: userActor(actorId) }, new Date());
+      const closed = await this.approvals.closeForPolicy(id, { status: 'cancelled', resolvedBy: 'policy_deleted', actor: userActor(actorId) }, now);
       await this.repo.delete(id);
       await this.record(actorId, 'budget.deleted', policy, { wasPaused: policy.pausedAt !== null });
       return closed.live;

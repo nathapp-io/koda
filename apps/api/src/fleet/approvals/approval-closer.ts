@@ -3,7 +3,7 @@ import type { LiveFleetApprovalEvent } from '../../live/live-event';
 import { WebhookDispatcherService } from '../../webhook/webhook-dispatcher.service';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
-import { SYSTEM_ACTOR } from '../jobs/job-transitions.service';
+import { SYSTEM_ACTOR } from '../common/system-actor';
 import { ApprovalLivePublisher } from './approval-live.publisher';
 import { approvalActivityPayload, approvalWebhookPayload } from './approval-payloads';
 import {

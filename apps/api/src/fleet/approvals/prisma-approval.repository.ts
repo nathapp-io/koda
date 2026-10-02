@@ -90,6 +90,9 @@ export class PrismaApprovalRepository implements IApprovalRepository {
       by: ['projectId'], where: { status: 'pending', projectId: { in: [...projectIds] } }, _count: { _all: true },
     });
     const ids = groups.map((g) => g.projectId).filter((id): id is string => id !== null);
+    // The badge polls every 60 s and no member project holding a pending approval is the common case;
+    // without this it would still ask Postgres for `id IN ()`.
+    if (ids.length === 0) return [];
     const projects = await this.db.project.findMany({ where: { id: { in: ids } }, select: { id: true, slug: true } });
     const slugOf = new Map(projects.map((p) => [p.id, p.slug]));
     return groups

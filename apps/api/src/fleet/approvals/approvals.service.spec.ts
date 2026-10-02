@@ -1,3 +1,4 @@
+import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { ApprovalsService } from './approvals.service';
 import { MAX_REQUEUE_CANDIDATES, type FleetApprovalRecord } from './domain/approval.domain';
 
@@ -8,7 +9,7 @@ const pendingBudget = (over: Partial<FleetApprovalRecord> = {}): FleetApprovalRe
   resolvedBy: null, comment: null, createdAt: NOW, updatedAt: NOW, ...over,
 });
 
-function build(approval: FleetApprovalRecord | null, policyScope: 'project' | 'global' = 'project') {
+function build(approval: FleetApprovalRecord | null, policyScope: 'project' | 'project-orphan' | 'global' = 'project') {
   let row = approval;
   const repo = {
     findById: jest.fn(async () => row),
@@ -24,10 +25,18 @@ function build(approval: FleetApprovalRecord | null, policyScope: 'project' | 'g
   };
   const policy = policyScope === 'project'
     ? { id: 'pol', scopeType: 'project', projectId: 'p1' }
-    : { id: 'pol', scopeType: 'global', projectId: null };
+    : policyScope === 'project-orphan'
+      ? { id: 'pol', scopeType: 'project', projectId: null } // not producible via the API (resolveScope always sets it)
+      : { id: 'pol', scopeType: 'global', projectId: null };
   const budgetRepo = { lockById: jest.fn(async () => policy) };
-  const budgets = { resume: jest.fn(async () => ({})) };
-  const jobs = { requeue: jest.fn(async (_a: string, _p: string, id: string) => { if (id === 'j2') throw new Error('fleet.jobs'); return {}; }) };
+  // A real decimal string, as Prisma returns it: `outcome.resumedAmountUsd` must carry the DB value.
+  const budgets = { resume: jest.fn(async () => ({ amountUsd: '20.5' })) };
+  const jobs = {
+    requeue: jest.fn(async (_a: string, _p: string, id: string) => {
+      if (id === 'j2') throw new ConflictAppException({ activeJobId: 'j9' }, 'fleet.jobs');
+      return {};
+    }),
+  };
   const closer = { recordResolved: jest.fn(async () => []) };
   const live = { publish: jest.fn() };
   const activity = { memberProjectIds: jest.fn(async () => ['p1']) };
@@ -52,17 +61,50 @@ describe('ApprovalsService.decide (budget)', () => {
 
   it('raise_budget_and_resume resumes on the policy route (D229), then re-queues and keeps failures (A9, D233)', async () => {
     const { service, budgets, jobs } = build(pendingBudget({ projectId: null }), 'global');
-    const dto = await service.decide(ADMIN_CALLER, { kind: 'admin' }, 'a1', { decision: 'raise_budget_and_resume', amountUsd: 20, requeueJobIds: ['j1', 'j2'] }, NOW);
-    expect(budgets.resume).toHaveBeenCalledWith('root', { kind: 'admin' }, 'pol', 20, NOW, { approvalId: 'a1' });
+    const dto = await service.decide(ADMIN_CALLER, { kind: 'admin' }, 'a1', { decision: 'raise_budget_and_resume', amountUsd: 20.5, requeueJobIds: ['j1', 'j2'] }, NOW);
+    expect(budgets.resume).toHaveBeenCalledWith('root', { kind: 'admin' }, 'pol', 20.5, NOW, { approvalId: 'a1' });
     expect(jobs.requeue.mock.calls).toEqual([['root', 'p1', 'j1'], ['root', 'p2', 'j2']]);
     expect(dto.status).toBe('approved');
-    expect(dto.outcome).toEqual({ resumedAmountUsd: '20', requeueResults: [{ jobId: 'j1', ok: true }, { jobId: 'j2', ok: false, error: 'fleet.jobs' }] });
+    // Money crosses as the DB decimal string, never the request number (D233 / review F6).
+    expect(dto.outcome).toEqual({
+      resumedAmountUsd: '20.5',
+      requeueResults: [
+        { jobId: 'j1', ok: true },
+        // The failure keeps its i18n coordinates, so `activeJobId` survives into the persisted outcome.
+        { jobId: 'j2', ok: false, error: JSON.stringify({ code: 'fleet.jobs', args: { activeJobId: 'j9' } }) },
+      ],
+    });
+  });
+
+  it('a re-queue failure that is not an AppException stores no internal text (review F1)', async () => {
+    const { service, jobs } = build(pendingBudget());
+    jobs.requeue.mockRejectedValue(new Error('Connection to the database failed'));
+    const dto = await service.decide(ADMIN_CALLER, PROJECT_ADMIN, 'a1', { decision: 'raise_budget_and_resume', amountUsd: 20.5, requeueJobIds: ['j1'] }, NOW);
+    expect(dto.outcome).toEqual({ resumedAmountUsd: '20.5', requeueResults: [{ jobId: 'j1', ok: false, error: 'unexpected error' }] });
+    expect(JSON.stringify(dto.outcome)).not.toContain('Connection to the database');
+  });
+
+  it('a repeated re-queue id is re-queued once (a subset is a set, spec §1.5)', async () => {
+    const { service, jobs } = build(pendingBudget());
+    const dto = await service.decide(ADMIN_CALLER, PROJECT_ADMIN, 'a1', { decision: 'raise_budget_and_resume', amountUsd: 20.5, requeueJobIds: ['j1', 'j1'] }, NOW);
+    expect(jobs.requeue).toHaveBeenCalledTimes(1);
+    expect(dto.outcome).toEqual({ resumedAmountUsd: '20.5', requeueResults: [{ jobId: 'j1', ok: true }] });
+  });
+
+  it('a project policy with no projectId never resumes on a project route (review F7)', async () => {
+    // Not producible via the API, but a null `projectId` on a project-scope policy must not become
+    // `{kind:'project', projectId: null}` under a cast: `owns()` matches on the id, so a project route
+    // would compare `null === route.projectId` and fail confusingly. It degrades to the admin route,
+    // where `ADMIN_SCOPES` excludes a project scope, so the real BudgetsService answers 404.
+    const { service, budgets } = build(pendingBudget(), 'project-orphan');
+    await service.decide(ADMIN_CALLER, { kind: 'admin' }, 'a1', { decision: 'raise_budget_and_resume', amountUsd: 20.5 }, NOW);
+    expect(budgets.resume).toHaveBeenCalledWith('root', { kind: 'admin' }, 'pol', 20.5, NOW, { approvalId: 'a1' });
   });
 
   it('a project policy decided on the admin prefix resumes on the project route (review focus 5)', async () => {
     const { service, budgets } = build(pendingBudget());
-    await service.decide(ADMIN_CALLER, { kind: 'admin' }, 'a1', { decision: 'raise_budget_and_resume', amountUsd: 20 }, NOW);
-    expect(budgets.resume).toHaveBeenCalledWith('root', { kind: 'project', projectId: 'p1' }, 'pol', 20, NOW, { approvalId: 'a1' });
+    await service.decide(ADMIN_CALLER, { kind: 'admin' }, 'a1', { decision: 'raise_budget_and_resume', amountUsd: 20.5 }, NOW);
+    expect(budgets.resume).toHaveBeenCalledWith('root', { kind: 'project', projectId: 'p1' }, 'pol', 20.5, NOW, { approvalId: 'a1' });
   });
 
   it('refuses: amount missing, foreign re-queue id, project developer, not pending, other project, bash type', async () => {
@@ -72,6 +114,7 @@ describe('ApprovalsService.decide (budget)', () => {
     expect(await statusOf(build(pendingBudget({ status: 'approved' })).service.decide(ADMIN_CALLER, PROJECT_ADMIN, 'a1', { decision: 'keep_paused' }, NOW))).toBe(409);
     expect(await statusOf(build(pendingBudget({ projectId: 'p9' })).service.decide(ADMIN_CALLER, PROJECT_ADMIN, 'a1', { decision: 'keep_paused' }, NOW))).toBe(404);
     expect(await statusOf(build(pendingBudget({ type: 'nax_bash_escalate' })).service.decide(ADMIN_CALLER, PROJECT_ADMIN, 'a1', { decision: 'deny' }, NOW))).toBe(400);
+    expect(await statusOf(build(pendingBudget({ policyId: null })).service.decide(ADMIN_CALLER, PROJECT_ADMIN, 'a1', { decision: 'keep_paused' }, NOW))).toBe(400);
     expect(await statusOf(build(pendingBudget()).service.decide(ADMIN_CALLER, PROJECT_ADMIN, 'a1', { decision: 'allow' }, NOW))).toBe(400);
   });
 

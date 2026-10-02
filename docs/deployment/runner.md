@@ -130,6 +130,9 @@ koda fleet job bundle <jobId> --out login.tar.gz
 koda fleet budget list --project web                # spend against amount; WARN / PAUSED state
 koda fleet budget set --scope project --window month --amount 50 --project web
 koda fleet budget resume <policyId> --amount 80 --project web
+koda fleet approval list                            # pending first; add --page / --size
+koda fleet approval show <approvalId>               # a pending budget override lists its re-queue candidates
+koda fleet approval decide <approvalId> --decision raise_budget_and_resume --amount 80 --project web
 koda fleet schedule add --repo acme/app --feature login --cron "0 9 * * 1-5" --timezone Asia/Singapore --max-cost 5
 koda fleet schedule list                            # next fire, or disabled (completed / no_progress / ...)
 koda fleet schedule show <scheduleId>               # the template and the last 10 jobs it dispatched
@@ -144,9 +147,18 @@ with every story passed, or after three runs in a row without a newly passed sto
 Budgets are also managed on the web: global and runner policies on `/admin/fleet/budgets` (global admins), project and
 repo policies on `/<project>/fleet/budgets` (members read; project ADMINs add, edit, delete and resume). A paused or
 past-warn policy that covers a project shows as a banner on that project's fleet pages. The CLI and the web call the same
-routes, so a pause resumed in one shows in the other within 30 seconds. A hard stop pauses the policy and cancels its
-jobs as before, and now also raises an approval that has to be answered. A global or project ADMIN answers it with
-`koda fleet approval decide`; `koda fleet budget resume` answers it too, and resumes the policy.
+routes, so a pause resumed in one shows in the other within 30 seconds. A hard stop pauses the policy, cancels its
+**queued** jobs, and now also raises an approval that has to be answered. A job that a runner already took
+(ASSIGNED or RUNNING) is only stopped when the policy's `runningJobs` is `cancel`; under the default `finish` it runs
+to completion and keeps billing, so a hard stop is not a kill switch for work already in flight.
+
+A global or project ADMIN answers the approval with `koda fleet approval decide`: `koda fleet approval list --status
+pending` finds it, `koda fleet approval show <approvalId>` shows what it wants, and `decide` either
+`--decision keep_paused` or `--decision raise_budget_and_resume --amount <usd>` — the latter clears the pause and
+re-queues the candidates named with `--requeue` (their job ids come from `show`; `--requeue all` is refused once the
+candidate list is too long to be shown in full). `koda fleet budget resume` answers it too and resumes the policy,
+but it needs `--amount`: without one the amount stays at the value the hard stop fired on, and a resume is only
+accepted when the amount is above this window's spend.
 
 Schedules are also managed on the web: `/<project>/fleet/schedules` lists a project's schedules with their next fire in
 the schedule's timezone and the reason a disabled one stopped; a schedule's page shows its template, the cost so far and

@@ -104,13 +104,14 @@ export class BudgetEvaluator implements OnModuleDestroy {
     : Promise<{ live: LiveFleetJobEvent[]; approvalLive: LiveFleetApprovalEvent[]; wake: string[] }> {
     await this.repo.update(policy.id, { pausedAt: now, pausedWindowStart: start });
     const opened = await this.approvals.openBudget(policy, { windowStart: start, spentUsd: spent }, now);
+    const approvalId = opened.approval?.id ?? null;
     const inserted = await this.repo.insertIncident({
-      policyId: policy.id, kind: 'hard_stop', windowStart: start, spentUsd: spent, amountUsd: policy.amountUsd, actorId: null, approvalId: opened.approval?.id ?? null,
+      policyId: policy.id, kind: 'hard_stop', windowStart: start, spentUsd: spent, amountUsd: policy.amountUsd, actorId: null, approvalId,
     });
     const queued = await this.repo.findQueuedJobIds(policy);
     const held = policy.runningJobs === 'cancel' ? await this.repo.findHeldJobIds(policy) : [];
     const cancel = await this.jobs.cancelForBudget([...queued, ...held], { id: policy.id, responsibleUserId: policy.updatedById }, now);
-    await this.record('budget.hard_stop', policy, { spentUsd: spent, cancelledJobIds: cancel.cancelled, cancelRequestedJobIds: cancel.requested, approvalId: opened.approval?.id ?? null });
+    await this.record('budget.hard_stop', policy, { spentUsd: spent, cancelledJobIds: cancel.cancelled, cancelRequestedJobIds: cancel.requested, approvalId });
     if (inserted && policy.projectId) await this.webhooks.dispatch(policy.projectId, 'fleet.budget.hard_stop', budgetWebhookPayload(policy, spent, start));
     return { live: cancel.live, approvalLive: opened.live, wake: cancel.wake };
   }

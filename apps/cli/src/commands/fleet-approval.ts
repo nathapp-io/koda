@@ -15,7 +15,8 @@ import { withContext } from '../utils/context';
 import { handleApiError } from '../utils/error';
 import { table } from '../utils/output';
 import { parseBudgetUsd } from '../utils/parse-usd';
-import { ADMIN_TOKEN_HINT, type FleetPage } from './fleet-shared';
+import { parsePositiveInt } from '../utils/parse-positive-int';
+import { ADMIN_TOKEN_HINT, type FleetPage, pageHint } from './fleet-shared';
 
 /** The generated list filters, so the two routes share one query shape and nothing is cast. */
 type ListQuery = NonNullable<FleetApprovalsControllerListData['query']>;
@@ -64,16 +65,16 @@ function parseDecision(value: string): DecideApprovalDto['decision'] {
   throw new InvalidArgumentError('expected keep_paused or raise_budget_and_resume');
 }
 
-const APPROVAL_STATUSES: ApprovalStatus[] = ['pending', 'approved', 'rejected', 'expired', 'cancelled'];
-const APPROVAL_TYPES: ApprovalType[] = ['budget_override_required', 'nax_bash_escalate'];
+const APPROVAL_STATUSES = ['pending', 'approved', 'rejected', 'expired', 'cancelled'] as const satisfies readonly ApprovalStatus[];
+const APPROVAL_TYPES = ['budget_override_required', 'nax_bash_escalate'] as const satisfies readonly ApprovalType[];
 
 export function parseStatus(value: string): ApprovalStatus {
-  if ((APPROVAL_STATUSES as string[]).includes(value)) return value as ApprovalStatus;
+  if ((APPROVAL_STATUSES as readonly string[]).includes(value)) return value as ApprovalStatus;
   throw new InvalidArgumentError(`expected ${APPROVAL_STATUSES.join(', ')}`);
 }
 
 export function parseType(value: string): ApprovalType {
-  if ((APPROVAL_TYPES as string[]).includes(value)) return value as ApprovalType;
+  if ((APPROVAL_TYPES as readonly string[]).includes(value)) return value as ApprovalType;
   throw new InvalidArgumentError(`expected ${APPROVAL_TYPES.join(', ')}`);
 }
 
@@ -93,20 +94,31 @@ function printOne(verb: string, a: FleetApprovalDto): void {
   }
 }
 
+interface ListOptions { project?: string; status?: ApprovalStatus; type?: ApprovalType; page: number; size: number; json?: boolean }
+
 function registerList(approval: Command): void {
   approval
     .command('list')
     .description('Approvals, newest first (--project: that project; otherwise all, global admin)')
     .option('--project <slug>', 'Use the project routes')
-    .option('--status <status>', 'pending, approved, rejected, expired or cancelled', parseStatus)
-    .option('--type <type>', 'budget_override_required or nax_bash_escalate', parseType)
+    .option('--status <status>', `One of ${APPROVAL_STATUSES.join(', ')}`, parseStatus)
+    .option('--type <type>', `One of ${APPROVAL_TYPES.join(', ')}`, parseType)
+    .option('--page <n>', 'Page number', parsePositiveInt, 1)
+    .option('--size <n>', 'Page size (1-100)', parsePositiveInt, 20)
     .option('--json', 'Output as JSON')
-    .action(async (options: { project?: string; status?: ApprovalStatus; type?: ApprovalType; json?: boolean }) => {
+    .action(async (options: ListOptions) => {
       try {
-        const query: ListQuery = { ...(options.status ? { status: options.status } : {}), ...(options.type ? { type: options.type } : {}) };
+        const query: ListQuery = {
+          current: options.page, size: options.size,
+          ...(options.status ? { status: options.status } : {}), ...(options.type ? { type: options.type } : {}),
+        };
         const page = unwrap<FleetPage<FleetApprovalDto>>(await (await routeFor(options.project)).list(query));
         if (options.json) console.log(JSON.stringify(page, null, 2));
-        else table(['ID', 'Type', 'Status', 'Requested', 'Summary'], page.records.map((a) => [a.id, a.type, a.status, a.requestedAt, summary(a)]));
+        else {
+          table(['ID', 'Type', 'Status', 'Requested', 'Summary'], page.records.map((a) => [a.id, a.type, a.status, a.requestedAt, summary(a)]));
+          const hint = pageHint(page);
+          if (hint) console.log(hint);
+        }
         process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, adminHint(options.project));
@@ -145,7 +157,7 @@ function registerDecide(approval: Command): void {
     .description('Decide a pending budget override: keep it paused, or raise the amount and resume')
     .requiredOption('--decision <decision>', 'keep_paused or raise_budget_and_resume', parseDecision)
     .option('--amount <usd>', 'raise_budget_and_resume: the new amount, above the window spend', parseBudgetUsd)
-    .option('--requeue <ids>', 'raise_budget_and_resume: all, or comma-separated candidate job ids; omitted = none', parseRequeue)
+    .option('--requeue <ids>', 'raise_budget_and_resume: all, or comma-separated candidate job ids from `koda fleet approval show <id>`; omitted = none', parseRequeue)
     .option('--comment <text>', 'Optional note (at most 1000 characters)')
     .option('--project <slug>', 'Use the project routes')
     .option('--json', 'Output as JSON')
@@ -156,11 +168,17 @@ function registerDecide(approval: Command): void {
         let requeueJobIds: string[] | undefined;
         if (options.requeue === 'all') {
           const a = unwrap<FleetApprovalDto>(await api.get(approvalId));
+          // The API caps the candidate list at MAX_REQUEUE_CANDIDATES (plan D235 / `approvals.service.ts`).
+          // A cancelled job is never pruned, so a policy can hold more; the page the CLI can see is the
+          // oldest slice of them, and the decide server-side-filters on `finishedAt >= requestedAt`, which
+          // filters that whole slice out. `--requeue all` would then send an empty or partial set, the
+          // decide would answer 200, and nothing would say so. Refuse instead. Warn on stderr first, so
+          // the cap is visible, and it never lands in --json stdout.
+          if (a.requeueCandidatesTruncated) {
+            console.error(`More candidates exist; only the first ${a.requeueCandidates?.length ?? 0} are re-queued.`);
+            throw new InvalidArgumentError('too many re-queue candidates to name as `all`; pass the job ids from `koda fleet approval show <id>`');
+          }
           requeueJobIds = (a.requeueCandidates ?? []).map((c) => c.jobId);
-          // The API caps the candidate list at 200 (requeueCandidatesTruncated), so `all` means every id
-          // the user was shown, not every blocked job. Warn on stderr before deciding, so it survives a
-          // refused decide and never lands in --json stdout.
-          if (a.requeueCandidatesTruncated) console.error('More candidates exist; only the first 200 are re-queued.');
         } else if (options.requeue !== undefined) {
           requeueJobIds = options.requeue;
         }

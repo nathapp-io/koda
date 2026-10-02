@@ -7,8 +7,8 @@ import { ApprovalStoreModule } from './approval-store.module';
 
 /**
  * DI guard, as budgets.module.spec.ts: a missing provider or an import cycle fails `bun run test`.
- * Task 4 (budgets) and Task 6 (ApprovalsModule) are the first consumers of these exports, so a dropped
- * export must surface here rather than as an opaque DI failure in a DB-mode run.
+ * `moduleRef.get` is non-strict and resolves from the whole container, so this catches an import cycle
+ * or a provider that is no longer declared at all, not one merely dropped from `exports`.
  */
 describe('ApprovalStoreModule', () => {
   it('compiles and resolves the closer, the live publisher and the repository token', async () => {

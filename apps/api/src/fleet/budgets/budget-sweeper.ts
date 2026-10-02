@@ -58,7 +58,7 @@ export class BudgetSweeper implements OnModuleInit, OnModuleDestroy {
     for (const policy of await this.repo.findAll()) {
       try {
         if (!(await this.repo.scopeExists(policy))) {
-          if (await this.deleteOrphan(policy.id)) result.deleted += 1;
+          if (await this.deleteOrphan(policy.id, now)) result.deleted += 1;
           continue;
         }
         if (isStaleMonthlyPause(policy, now) && (await this.resetWindow(policy.id, now))) result.reset += 1;
@@ -73,12 +73,12 @@ export class BudgetSweeper implements OnModuleInit, OnModuleDestroy {
   }
 
   /** S1b §2.1: a policy whose scope row is gone is deleted with its incidents; S1.5 closes its pending approval. */
-  private async deleteOrphan(id: string): Promise<boolean> {
+  private async deleteOrphan(id: string, now: Date): Promise<boolean> {
     const { deleted, live } = await this.txManager.run(async () => {
       const none: LiveFleetApprovalEvent[] = [];
       const policy = await this.repo.lockById(id);
       if (!policy || (await this.repo.scopeExists(policy))) return { deleted: false, live: none };
-      const closed = await this.approvals.closeForPolicy(id, { status: 'cancelled', resolvedBy: 'policy_deleted', actor: systemActor(policy) }, new Date());
+      const closed = await this.approvals.closeForPolicy(id, { status: 'cancelled', resolvedBy: 'policy_deleted', actor: systemActor(policy) }, now);
       await this.repo.delete(id);
       await this.record('budget.deleted', policy, { reason: 'scope_gone' });
       return { deleted: true, live: closed.live };

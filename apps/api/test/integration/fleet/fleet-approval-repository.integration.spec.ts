@@ -55,6 +55,11 @@ describeIntegration('approval repository (PG)', () => {
     const a = await budget();
     expect(a).toEqual(expect.objectContaining({ status: 'pending', payload: { spentUsd: '10' }, outcome: null }));
     expect((await repo.findPendingForPolicy('pol'))?.id).toBe(a.id);
+    // A second pending approval on another policy, so "the pending one per policy" is a real reading:
+    // `findPendingForPolicy` has to filter by policy, not just find any pending row.
+    const other = await budget({ policyId: 'other' });
+    expect((await repo.findPendingForPolicy('other'))?.id).toBe(other.id);
+    expect((await repo.findPendingForPolicy('pol'))?.id).toBe(a.id);
     const resolved = await tx.run(async () => {
       expect((await repo.lockById(a.id))?.id).toBe(a.id);
       return repo.resolve(a.id, { status: 'rejected', resolvedBy: 'user', decidedAt: T0, decision: 'keep_paused', decidedById: world.ids.root, comment: 'no' });
@@ -62,6 +67,8 @@ describeIntegration('approval repository (PG)', () => {
     expect(resolved).toEqual(expect.objectContaining({ status: 'rejected', decision: 'keep_paused', resolvedBy: 'user', comment: 'no' }));
     expect(resolved.outcome).toBeNull();
     expect(await repo.findPendingForPolicy('pol')).toBeNull();
+    // The other policy's approval is untouched by pol's resolution.
+    expect((await repo.findPendingForPolicy('other'))?.id).toBe(other.id);
     expect((await repo.setOutcome(a.id, { requeueResults: [] })).outcome).toEqual({ requeueResults: [] });
     expect(await tx.run(() => repo.lockById('missing'))).toBeNull();
   });

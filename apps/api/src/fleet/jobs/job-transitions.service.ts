@@ -1,18 +1,18 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { FleetActorType, FleetJobState } from '../../common/enums';
+import type { FleetJobState } from '../../common/enums';
 import type { LiveFleetJobEvent } from '../../live/live-event';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { canTransition, isTerminal, TransitionActor } from './job-state';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import { FLEET_JOB_REPOSITORY, FleetJobPatch, FleetJobRecord, IFleetJobRepository } from './domain/fleet-job.domain';
 import { ScheduleProgressService } from '../schedules/schedule-progress.service';
+import { SYSTEM_ACTOR, type TransitionActorRef } from '../common/system-actor';
 
-export interface TransitionActorRef {
-  type: FleetActorType;
-  id: string;
-}
-
-export const SYSTEM_ACTOR: TransitionActorRef = Object.freeze({ type: 'SYSTEM', id: 'system' });
+// The actor of an automatic action lives in a leaf module so budgets, jobs and approvals can all name it
+// without importing each other's services (§2.4 closes an approval from the jobs side). Re-exported here
+// because this module is where every importer found it first.
+export { SYSTEM_ACTOR };
+export type { TransitionActorRef };
 
 export class InvalidTransitionError extends Error {
   constructor(readonly from: string, readonly to: string, readonly by: TransitionActor) {

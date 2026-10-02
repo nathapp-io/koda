@@ -62,8 +62,23 @@ describe('koda fleet approval', () => {
   it('list uses the admin route without --project and passes filters', async () => {
     (fleetApprovalsControllerList as jest.Mock).mockResolvedValue(ok(page([row()])));
     await run('list', '--status', 'pending');
-    expect(fleetApprovalsControllerList).toHaveBeenCalledWith({ query: { status: 'pending' } });
+    expect(fleetApprovalsControllerList).toHaveBeenCalledWith({ query: { current: 1, size: 20, status: 'pending' } });
     expect(logSpy.mock.calls.flat().join('\n')).toContain('a1');
+  });
+
+  it('list sends --page/--size and prints the next-page hint', async () => {
+    // Without this a >20 approval history looked complete: the API default size is 20 and the CLI printed
+    // `page.records` and stopped.
+    (projectFleetApprovalsControllerList as jest.Mock).mockResolvedValue(ok(page([row()], { current: 2, size: 5, hasNext: true })));
+    await run('list', '--project', 'web', '--page', '2', '--size', '5');
+    expect(projectFleetApprovalsControllerList).toHaveBeenCalledWith({ path: { slug: 'web' }, query: { current: 2, size: 5 } });
+    expect(logged()).toContain('Next: --page 3');
+  });
+
+  it('list prints no hint on the last page', async () => {
+    (projectFleetApprovalsControllerList as jest.Mock).mockResolvedValue(ok(page([row()])));
+    await run('list', '--project', 'web');
+    expect(logged()).not.toContain('Next: --page');
   });
 
   it('decide keep_paused on the project route', async () => {
@@ -76,6 +91,8 @@ describe('koda fleet approval', () => {
     (projectFleetApprovalsControllerGet as jest.Mock).mockResolvedValue(ok(row({ requeueCandidates: [{ jobId: 'j1' }, { jobId: 'j2' }] })));
     (projectFleetApprovalsControllerDecide as jest.Mock).mockResolvedValue(ok(row({ status: 'approved', outcome: { requeueResults: [{ jobId: 'j1', ok: true }, { jobId: 'j2', ok: false, error: 'x' }] } })));
     await run('decide', 'a1', '--project', 'web', '--decision', 'raise_budget_and_resume', '--amount', '25', '--requeue', 'all');
+    // One `get`, not two: an extra round-trip on this path would pass silently without this.
+    expect(projectFleetApprovalsControllerGet).toHaveBeenCalledTimes(1);
     expect(projectFleetApprovalsControllerDecide).toHaveBeenCalledWith({
       path: { slug: 'web', id: 'a1' }, body: { decision: 'raise_budget_and_resume', amountUsd: 25, requeueJobIds: ['j1', 'j2'] },
     });
@@ -108,7 +125,7 @@ describe('koda fleet approval', () => {
   it('list uses the project route with --project and rejects a bad filter before any request', async () => {
     (projectFleetApprovalsControllerList as jest.Mock).mockResolvedValue(ok(page([row()])));
     await run('list', '--project', 'web');
-    expect(projectFleetApprovalsControllerList).toHaveBeenCalledWith({ path: { slug: 'web' }, query: {} });
+    expect(projectFleetApprovalsControllerList).toHaveBeenCalledWith({ path: { slug: 'web' }, query: { current: 1, size: 20 } });
     expect(fleetApprovalsControllerList).not.toHaveBeenCalled();
     await expect(run('list', '--status', 'bogus')).rejects.toThrow(/expected pending, approved, rejected, expired, cancelled/);
     expect(projectFleetApprovalsControllerList).toHaveBeenCalledTimes(1);
@@ -147,18 +164,17 @@ describe('koda fleet approval', () => {
     expect(printed.requeueCandidates).toEqual([expect.objectContaining({ jobId: 'j1', feature: 'login-fix' })]);
   });
 
-  it('decide --requeue all warns on stderr when the candidate list was capped, and still sends every id', async () => {
+  it('decide --requeue all refuses when the candidate list was capped, naming the ids to pass instead', async () => {
+    // A capped list means the page the CLI can see is the oldest slice, which the decide's
+    // `finishedAt >= requestedAt` window filters out — so `all` would silently re-queue nothing.
     (projectFleetApprovalsControllerGet as jest.Mock).mockResolvedValue(ok(row({
       requeueCandidates: [{ jobId: 'j1' }, { jobId: 'j2' }], requeueCandidatesTruncated: true,
     })));
-    (projectFleetApprovalsControllerDecide as jest.Mock).mockResolvedValue(ok(row({ status: 'approved' })));
-    await run('decide', 'a1', '--project', 'web', '--decision', 'raise_budget_and_resume', '--requeue', 'all', '--json');
-    expect(errored()).toContain('More candidates exist; only the first 200 are re-queued.');
-    expect(projectFleetApprovalsControllerDecide).toHaveBeenCalledWith({
-      path: { slug: 'web', id: 'a1' }, body: { decision: 'raise_budget_and_resume', requeueJobIds: ['j1', 'j2'] },
-    });
-    // The warning is advisory only, and lands on stderr: stdout stays one valid --json document.
-    expect(JSON.parse(logged())).toMatchObject({ id: 'a1', status: 'approved' });
+    await run('decide', 'a1', '--project', 'web', '--decision', 'raise_budget_and_resume', '--requeue', 'all');
+    // The count is interpolated, so it cannot drift from MAX_REQUEUE_CANDIDATES.
+    expect(errored()).toContain('More candidates exist; only the first 2 are re-queued.');
+    expect(errored()).toContain('koda fleet approval show');
+    expect(projectFleetApprovalsControllerDecide).not.toHaveBeenCalled();
   });
 
   it('decide --requeue all says nothing when the candidate list was not capped', async () => {

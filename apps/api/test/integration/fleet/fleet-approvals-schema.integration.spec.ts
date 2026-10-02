@@ -7,6 +7,10 @@ import { resetDb } from '../../helpers/reset-db';
 import { applyMigration, scratchSchemaBefore, ScratchSchema } from '../../helpers/migration-schema';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The migration block replays 193 DDL statements across 14 migrations; 13 of the 38 sibling fleet
+// integration specs raise the hook timeout for the same reason and this one has no business being the
+// exception.
+jest.setTimeout(20_000);
 const MIGRATION = '20261003090000_fleet_approvals';
 
 describeIntegration('FleetApproval schema (PG)', () => {
