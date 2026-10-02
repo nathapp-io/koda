@@ -37,6 +37,7 @@ model User {
   comments           Comment[]       @relation("CommentByUser")
   projectMemberships ProjectMember[]
   fleetJobs          FleetJob[]      @relation("FleetJobRequestedBy")
+  jobSchedules       JobSchedule[]   @relation("JobScheduleCreatedBy")
 }
 
 model Agent {
@@ -115,6 +116,7 @@ model Project {
   webhookDeliveries  WebhookDelivery[]
   fleetRepos         FleetRepo[]
   fleetJobs          FleetJob[]
+  jobSchedules       JobSchedule[]
 
   @@index([deletedAt])
 }
@@ -676,6 +678,43 @@ model BudgetIncident {
   @@index([policyId, createdAt])
 }
 
+/// S1b §3.1 C4 schedule: drives one feature to done with RUNs. repoId and pinnedRunnerId have no foreign key
+/// on purpose (plan D193): a deleted repo or runner disables the schedule instead of deleting it.
+/// The partial unique index FleetJob (scheduleId) WHERE state = 'QUEUED' is raw SQL in the migration.
+model JobSchedule {
+  id              String    @id @default(cuid())
+  projectId       String
+  repoId          String
+  name            String
+  cron            String // five fields
+  timezone        String // IANA
+  feature         String
+  ref             String
+  profiles        String[]
+  maxCostUsd      Decimal   @db.Decimal(12, 4)
+  selectorLabels  String[]
+  pinnedRunnerId  String?
+  enabled         Boolean   @default(true)
+  nextFireAt      DateTime
+  lastFiredAt     DateTime?
+  lastJobId       String?
+  lastPassedCount Int       @default(0)
+  noProgressTicks Int       @default(0)
+  noProgressLimit Int       @default(3)
+  disabledReason  String? // completed | finish_failed | no_progress | owner_lost_access | template_invalid | manual
+  createdById     String
+  updatedById     String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User       @relation("JobScheduleCreatedBy", fields: [createdById], references: [id])
+  jobs      FleetJob[]
+
+  @@index([enabled, nextFireAt])
+  @@index([projectId])
+}
+
 /// Fleet S1 slice 2 (spec §2). One dispatched nax run or plan.
 model FleetJob {
   id                String    @id @default(cuid())
@@ -721,6 +760,9 @@ model FleetJob {
   costCarriedUsd    Decimal   @default(0) @db.Decimal(12, 4) // S1b §2.1: spend of earlier attempts, kept across requeue
   firstStartedAt    DateTime? // S1b §2.1: first RUNNING; set once, never cleared; the job's budget window
   cancelReason      String? // S1b §2.2: why the server asked for the cancel, e.g. budget:<policyId>
+  scheduleId        String? // S1b §3.1: the schedule that dispatched this job
+  coalescedCount    Int       @default(0) // S1b §3.2: ticks absorbed while this job sat QUEUED
+  scheduleCountedAt DateTime? // S1b §3.3: set once, when the job's end was counted against its schedule
   eventSeq          Int       @default(0) // server timeline counter (plan D2)
   ackedRunnerSeq    Int       @default(0) // cumulative runner ack for leaseEpoch (plan D2)
   attributedAt      DateTime? // PR/MR attribution comment posted (plan D19)
@@ -731,6 +773,7 @@ model FleetJob {
   runner       Runner?            @relation("FleetJobRunner", fields: [runnerId], references: [id], onDelete: SetNull)
   pinnedRunner Runner?            @relation("FleetJobPinnedRunner", fields: [pinnedRunnerId], references: [id], onDelete: SetNull)
   requestedBy  User               @relation("FleetJobRequestedBy", fields: [requestedById], references: [id])
+  schedule     JobSchedule?       @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
   events       FleetJobEvent[]
   commands     FleetCommand[]
   artifacts    FleetJobArtifact[]
@@ -741,6 +784,7 @@ model FleetJob {
   @@index([projectId, firstStartedAt])
   @@index([repoId, firstStartedAt])
   @@index([runnerId, firstStartedAt])
+  @@index([scheduleId, queuedAt])
 }
 
 /// Job timeline. Runner events dedup on (jobId, leaseEpoch, runnerSeq); server events have runnerSeq null (plan D2).

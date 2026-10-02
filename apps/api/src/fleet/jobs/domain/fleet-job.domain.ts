@@ -61,6 +61,12 @@ export interface FleetJobRecord {
   firstStartedAt: Date | null;
   /** Why the server asked for the cancel (`budget:<policyId>`); becomes stateReason (plan D156). */
   cancelReason: string | null;
+  /** The schedule that dispatched the job (S1b §3.1); null for a manual job or after the schedule was deleted. */
+  scheduleId: string | null;
+  /** Ticks absorbed while this job sat QUEUED (S1b §3.2). */
+  coalescedCount: number;
+  /** Set once when this job's end was counted against its schedule (S1b §3.3, plan D195/D196). */
+  scheduleCountedAt: Date | null;
   lastHeartbeatAt: Date | null;
   finishResult: string | null;
   escalationReason: string | null;
@@ -90,6 +96,7 @@ export interface NewFleetJob {
   selectorLabels: string[];
   pinnedRunnerId: string | null;
   requestedById: string;
+  scheduleId?: string | null;
 }
 
 type Mutable =
