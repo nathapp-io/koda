@@ -24,6 +24,11 @@ describe('buildJobQuery', () => {
     expect(buildJobQuery({ state: 'RUNNING', repoId: '', runnerId: 'r1', page: 1 })).toEqual({ state: 'RUNNING', runnerId: 'r1', size: '20' })
     expect(buildJobQuery({ requestedById: 'u1', page: 3 })).toEqual({ requestedById: 'u1', size: '20', current: '3' })
   })
+
+  test('buildJobQuery passes the schedule filter (S1b 3a D205)', async () => {
+    const { buildJobQuery } = await import(join(__dirname, '../..', 'composables', 'useFleetJobs.ts'))
+    expect(buildJobQuery({ scheduleId: 's1', page: 2 })).toEqual({ scheduleId: 's1', size: '20', current: '2' })
+  })
 })
 
 describe('useFleetJobs', () => {

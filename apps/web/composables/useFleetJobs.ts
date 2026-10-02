@@ -12,6 +12,7 @@ export interface FleetJobFilters {
   repoId?: string
   runnerId?: string
   requestedById?: string
+  scheduleId?: string
   page?: number
 }
 
@@ -22,6 +23,7 @@ export function buildJobQuery(filters: FleetJobFilters): Record<string, string> 
     ['repoId', filters.repoId],
     ['runnerId', filters.runnerId],
     ['requestedById', filters.requestedById],
+    ['scheduleId', filters.scheduleId],
   ]
   const query = Object.fromEntries(entries.filter((e): e is [string, string] => typeof e[1] === 'string' && e[1].length > 0))
   return {
