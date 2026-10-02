@@ -92,8 +92,8 @@ label).
 
 1. Decimal edges: spend `0.1 + 0.2` against an amount of `0.3` must hard-stop, and `amount * warnPercent / 100`
    with a non-terminating quotient must compare exactly. (Task 3 "decimal thresholds".)
-2. A server running in a non-UTC zone at 23:30 local on the last day of a month: the window is still the UTC month.
-   (Task 3 "UTC month".)
+2. A server running in a non-UTC zone near a month boundary: the window is still the UTC month. (Task 3 "UTC
+   month", run once more under `TZ=Asia/Singapore`.)
 3. A debounced signal and the sweep evaluating the same policy at once: one `hard_stop` incident, one webhook outbox
    row, the jobs cancelled once. (Task 8 "concurrent evaluations".)
 4. An admin lowers a policy's amount below the current spend: the scope pauses within a second, and a resume without
@@ -277,10 +277,11 @@ runs are not disturbed:
 ```bash
 docker exec koda-postgres-test-1 psql -U koda -d postgres -c 'CREATE DATABASE koda_shadow'
 cd apps/api
+SQL=$(mktemp)
 bunx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma \
-  --shadow-database-url postgresql://koda:koda@localhost:5433/koda_shadow --script > "$TMPDIR/fleet_budgets.sql"
+  --shadow-database-url postgresql://koda:koda@localhost:5433/koda_shadow --script > "$SQL"
 mkdir -p prisma/migrations/20261002090000_fleet_budgets
-{ echo '-- S1b slice 2a: budget policies and incidents; carried spend, first start and cancel reason on FleetJob.'; cat "$TMPDIR/fleet_budgets.sql"; } \
+{ echo '-- S1b slice 2a: budget policies and incidents; carried spend, first start and cancel reason on FleetJob.'; cat "$SQL"; } \
   > prisma/migrations/20261002090000_fleet_budgets/migration.sql
 ```
 
@@ -364,8 +365,9 @@ The job DTO does not gain these fields in 2a (no client reads them yet).
 
 - [ ] **Step 9: Type-check and run the touched unit specs**
 
-Run: `cd apps/api && bun run type-check && bun run test:scoped src/fleet/jobs/job-transitions.service.spec.ts src/fleet/jobs/dto/fleet-job.dto.spec.ts`
-Expected: PASS.
+Run: `cd apps/api && bun run type-check && bun run test:scoped src/fleet`
+Expected: PASS. (`tsconfig.json` excludes spec and test files, so `type-check` cannot see a missed record literal;
+ts-jest compiling every fleet spec is what catches one.)
 
 - [ ] **Step 10: Commit**
 
@@ -476,8 +478,9 @@ Expected: FAIL (`costCarriedUsd` stays `0.5`).
 
 - [ ] **Step 5: Carry the spend in `requeue`**
 
-In `apps/api/src/fleet/jobs/fleet-jobs.service.ts` add `import { addUsd } from '../budgets/money';` and, in the
-`requeue` transition's `extra`, replace `costSpentUsd: '0',` with:
+In `apps/api/src/fleet/jobs/fleet-jobs.service.ts` add `import { addUsd } from '../budgets/money';`. In the
+`requeue` transition's `extra`, the line starting `costSpentUsd: '0', lastHeartbeatAt: null, ...` holds several
+fields: remove only `costSpentUsd: '0', ` from it (keep the rest of that line) and add this line above it:
 
 ```ts
             // S1b §2.1: requeue keeps spend; the attempt's cost moves into costCarriedUsd.
@@ -856,6 +859,11 @@ export class PauseSnapshot {
 Run: `cd apps/api && bun run test:scoped src/fleet/budgets/budget-rules.spec.ts`
 Expected: PASS (7 cases).
 
+Run it again in a positive-offset zone: `cd apps/api && TZ=Asia/Singapore bun run test:scoped src/fleet/budgets/budget-rules.spec.ts`
+Expected: PASS. A local-time `windowStart` (`getFullYear()`/`getMonth()`) fails here on the `2026-12-31T23:59:59.999Z`
+assertion; a run on a UTC host alone cannot catch it (Jest sandboxes `process.env`, so the test cannot set `TZ`
+itself).
+
 - [ ] **Step 6: Commit**
 
 ```bash
@@ -1083,7 +1091,7 @@ describeIntegration('budget repository (PG)', () => {
 - [ ] **Step 3: Run it to verify it fails**
 
 Run: `cd apps/api && bun run test:scoped test/integration/fleet/fleet-budget-repository.integration.spec.ts`
-Expected: FAIL (`Nest could not find BUDGET_REPOSITORY element`, or a missing-module compile error).
+Expected: FAIL in `beforeAll` (Nest cannot resolve `BUDGET_REPOSITORY`; Jest reports `process.exit called with "1"`).
 
 - [ ] **Step 4: Implement the repository**
 
@@ -1522,9 +1530,10 @@ In `requeue`, inside the transaction, directly after the `canTransition` check l
 (The thrown `BudgetPausedException` rolls the transaction back and is not a `DuplicateActiveJobError`, so it reaches
 the client unchanged.)
 
-In `apps/api/src/fleet/jobs/fleet-jobs.controller.ts`, change the dispatch 409 description to
+In `apps/api/src/fleet/jobs/fleet-jobs.controller.ts`, replace the whole description string of the dispatch 409
+`@ApiResponse` (currently `'An active job already runs this (repo, feature); message names it'`) with
 `'An active job already runs this (repo, feature), or a budget covering the job is paused (fleet.budgetPaused)'`
-and the requeue 409 description to
+and the whole requeue 409 description (currently `'Job not requeueable, or an active duplicate exists'`) with
 `'Job not requeueable, an active duplicate exists, or a budget covering the job is paused'`.
 
 - [ ] **Step 5: Run the tests**
@@ -1701,6 +1710,21 @@ describeIntegration('fleet budget placement (PG)', () => {
     expect(outcome.misfits).toEqual([expect.objectContaining({ runnerId: paused.id, reason: 'budget_paused' })]);
   });
 
+  it('ignores a stale monthly pause from an earlier month (S1b §2.3)', async () => {
+    const runner = await insertRunner(prisma);
+    const job = await queue();
+    const now = new Date();
+    await prisma.budgetPolicy.create({
+      data: {
+        scopeType: 'project', scopeId: base.projectId, scopeKey: `project:${base.projectId}`, projectId: base.projectId,
+        windowKind: 'calendar_month_utc', amountUsd: new Prisma.Decimal(1), createdById: base.adminId, updatedById: base.adminId,
+        pausedAt: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15)),
+        pausedWindowStart: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)),
+      },
+    });
+    expect(await placement.placeJob(job.id)).toEqual(expect.objectContaining({ assigned: true, runnerId: runner.id }));
+  });
+
   it('leaves an unpinned job queued when the only runner is paused, and cancels a job pinned to it', async () => {
     const runner = await insertRunner(prisma);
     const policy = await pause('runner', runner.id);
@@ -1715,7 +1739,8 @@ describeIntegration('fleet budget placement (PG)', () => {
 ```
 
 Run: `cd apps/api && bun run test:scoped test/integration/fleet/fleet-budget-placement.integration.spec.ts`
-Expected: FAIL (jobs are assigned instead of cancelled; no `budget_paused` misfit).
+Expected: 4 cases FAIL (jobs are assigned instead of cancelled; no `budget_paused` misfit); the stale-pause case
+already passes.
 
 - [ ] **Step 4: Add the pre-assign check to `PlacementService`**
 
@@ -1966,8 +1991,7 @@ describeIntegration('cancelForBudget (PG)', () => {
 ```
 
 Run: `cd apps/api && bun run test:scoped test/integration/fleet/fleet-budget-cancel.integration.spec.ts`
-Expected: FAIL (`jobs.cancelForBudget is not a function`, or Nest cannot resolve `FleetJobsService` from the app
-root until it is exported).
+Expected: FAIL at compile time (`Property 'cancelForBudget' does not exist on type 'FleetJobsService'`).
 
 - [ ] **Step 2: Implement `cancelForBudget`**
 
