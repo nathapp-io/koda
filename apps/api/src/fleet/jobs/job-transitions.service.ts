@@ -5,6 +5,7 @@ import { FleetActivityService } from '../activity/fleet-activity.service';
 import { canTransition, isTerminal, TransitionActor } from './job-state';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import { FLEET_JOB_REPOSITORY, FleetJobPatch, FleetJobRecord, IFleetJobRepository } from './domain/fleet-job.domain';
+import { ScheduleProgressService } from '../schedules/schedule-progress.service';
 
 export interface TransitionActorRef {
   type: FleetActorType;
@@ -30,6 +31,7 @@ export class JobTransitionsService {
     @Inject(FLEET_JOB_REPOSITORY) private readonly repo: Pick<IFleetJobRepository, 'update' | 'appendEvent' | 'withdrawPendingCommands'>,
     private readonly activity: FleetActivityService,
     private readonly live: FleetJobLivePublisher,
+    private readonly schedules: ScheduleProgressService,
   ) {}
 
   async apply(input: {
@@ -51,6 +53,8 @@ export class JobTransitionsService {
     };
     const after = await this.repo.update(job.id, patch);
     const live = await this.record({ before: job, after, by, now, actor: input.actor, reason: input.reason });
+    // S1b §3.3: a scheduled job's end moves its schedule's counters in this same transaction.
+    if (terminal && after.scheduleId) await this.schedules.onJobEnded(after, now);
     return { job: after, live };
   }
 

@@ -20,7 +20,8 @@ describe('JobTransitionsService', () => {
   };
   const activity = { record: jest.fn() };
   const live = { event: jest.fn((j: FleetJobRecord) => ({ id: 'e', type: 'fleet_job', projectId: j.projectId, jobId: j.id, state: j.state, at: NOW.toISOString() })), publish: jest.fn() };
-  const svc = new JobTransitionsService(repo as never, activity as never, live as never);
+  const schedules = { onJobEnded: jest.fn(async () => undefined) };
+  const svc = new JobTransitionsService(repo as never, activity as never, live as never, schedules as never);
   afterEach(() => jest.clearAllMocks());
 
   it('refuses a transition outside the table', async () => {
@@ -58,5 +59,20 @@ describe('JobTransitionsService', () => {
     await svc.apply({ job: job({ state: 'UPLOADING' }), to: 'COMPLETED', by: 'runner', now: NOW, actor: SYSTEM_ACTOR });
     await svc.apply({ job: job({ state: 'QUEUED', runnerId: null }), to: 'CANCELLED', by: 'server', now: NOW, actor: SYSTEM_ACTOR });
     for (const [, patch] of repo.update.mock.calls) expect(patch).not.toHaveProperty('bumpEpoch');
+  });
+
+  it('counts the end of a scheduled job against its schedule, in the same call (S1b §3.3)', async () => {
+    const scheduledRepo = { ...repo, update: jest.fn(async () => job({ state: 'FAILED', scheduleId: 's1' })) };
+    const scheduledSvc = new JobTransitionsService(scheduledRepo as never, activity as never, live as never, schedules as never);
+    await scheduledSvc.apply({ job: job({ state: 'UPLOADING', scheduleId: 's1' }), to: 'FAILED', by: 'runner', now: NOW, actor: { type: 'RUNNER', id: 'run-1' } });
+    expect(schedules.onJobEnded).toHaveBeenCalledWith(expect.objectContaining({ id: 'j1', state: 'FAILED', scheduleId: 's1' }), NOW);
+  });
+
+  it('does not touch the schedule for a non-terminal transition or an unscheduled job', async () => {
+    const running = { ...repo, update: jest.fn(async () => job({ state: 'RUNNING', scheduleId: 's1' })) };
+    await new JobTransitionsService(running as never, activity as never, live as never, schedules as never)
+      .apply({ job: job({ scheduleId: 's1' }), to: 'RUNNING', by: 'runner', now: NOW, actor: { type: 'RUNNER', id: 'run-1' } });
+    await svc.apply({ job: job({ state: 'UPLOADING' }), to: 'FAILED', by: 'runner', now: NOW, actor: { type: 'RUNNER', id: 'run-1' } });
+    expect(schedules.onJobEnded).not.toHaveBeenCalled();
   });
 });
