@@ -418,3 +418,8 @@ To verify in the 2a plan, not assumed:
 
 - The `detail` text format is the same in released 0.83.2 and nax main (capture fixtures from both).
 - The minimum nax version the runner requires before reporting `approvals.relay`.
+
+- 1a plan notes (`docs/superpowers/plans/2026-10-02-fleet-s1-5-slice-1a-approvals-core.md`, D226-D238): two modules
+  (store + approvals); the hard stop opens the approval before inserting its incident; the resume route follows the
+  policy scope; an omitted `requeueJobIds` re-queues nothing; counts live at `GET /fleet/approval-counts`; bash
+  approvals answer 400 until 2a.

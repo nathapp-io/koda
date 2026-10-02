@@ -144,7 +144,8 @@ with every story passed, or after three runs in a row without a newly passed sto
 Budgets are also managed on the web: global and runner policies on `/admin/fleet/budgets` (global admins), project and
 repo policies on `/<project>/fleet/budgets` (members read; project ADMINs add, edit, delete and resume). A paused or
 past-warn policy that covers a project shows as a banner on that project's fleet pages. The CLI and the web call the same
-routes, so a pause resumed in one shows in the other within 30 seconds.
+routes, so a pause resumed in one shows in the other within 30 seconds. A hard stop now raises an approval instead of
+pausing on its own; answer it with `koda fleet approval decide`.
 
 Schedules are also managed on the web: `/<project>/fleet/schedules` lists a project's schedules with their next fire in
 the schedule's timezone and the reason a disabled one stopped; a schedule's page shows its template, the cost so far and
