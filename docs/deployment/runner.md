@@ -146,6 +146,15 @@ repo policies on `/<project>/fleet/budgets` (members read; project ADMINs add, e
 past-warn policy that covers a project shows as a banner on that project's fleet pages. The CLI and the web call the same
 routes, so a pause resumed in one shows in the other within 30 seconds.
 
+Schedules are also managed on the web: `/<project>/fleet/schedules` lists a project's schedules with their next fire in
+the schedule's timezone and the reason a disabled one stopped; a schedule's page shows its template, the cost so far and
+every run it dispatched (stories passed against the previous run, cost, merged fires, progress push, stop reason).
+Project DEVELOPERs create schedules; the owner or a project ADMIN edits, enables, disables and deletes them. A job
+dispatched by a schedule links back to it.
+
+`FLEET_TEST_HOOKS=true` exposes a test-only route that fires a schedule at once; it is ignored when `NODE_ENV` is
+`production`. Leave it unset outside the Playwright suite.
+
 ## Live check (release gate)
 
 Run once per release of the runner, by a person, with approval: steps 4 and 5 start billed nax runs.

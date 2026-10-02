@@ -64,6 +64,8 @@ export default defineConfig({
         // long-polling 25 s, and job bundles land outside the repo.
         FLEET_SYNC_WAIT_MS: '1000',
         FLEET_ARTIFACT_DIR: path.join(os.tmpdir(), `koda-e2e-fleet-artifacts-${API_PORT}`),
+        // S1b 3b D213: the schedules e2e fires a schedule through the test-only hook (never on in production).
+        FLEET_TEST_HOOKS: 'true',
       },
     },
     {

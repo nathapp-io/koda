@@ -4,7 +4,7 @@
  */
 const API_URL = process.env['E2E_API_URL'] ?? 'http://localhost:3102';
 
-async function call<T>(method: string, path: string, token: string, body?: unknown): Promise<T> {
+export async function call<T>(method: string, path: string, token: string, body?: unknown): Promise<T> {
   const res = await fetch(`${API_URL}/api${path}`, {
     method,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
