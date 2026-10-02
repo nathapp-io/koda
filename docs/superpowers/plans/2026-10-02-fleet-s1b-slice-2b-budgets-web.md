@@ -72,7 +72,7 @@ Numbered D173-D189 (slice 2a ended at D172; slice 3a uses D190+).
 | D179 | The banner is placed on the jobs list, the dispatch page and the job page, not on the budgets page (its table already shows each policy's state). It loads on its own, stays silent on a failed load (cosmetic), shows paused policies first, then warnings, at most 3 lines and "and N more", and counts a paused policy once even if it is also past its warn threshold. | Spec §2.4: banner on the project's fleet pages when any covering policy is paused or past its warn threshold, linking to the policy. A banner that errors would be noise on a page about something else. |
 | D180 | Every banner line links to `/:project/fleet/budgets`, including lines about a fleet-wide policy (the project page lists it read-only with the admin hint). Banner text names the scope ("the whole fleet", "project x", "repo a/b"). | One destination; a project ADMIN cannot resume a global policy, and the page explains why. |
 | D181 | Percent and bar width are display-only (integer floor of spent * 100 / amount in ten-thousandths, clamped to 100, so 100 appears only at or past the limit). Status badges use the server flags. Decimal comparisons that gate a submit (resume amount vs spend) use integer ten-thousandths (`toUnits`, `BigInt`), never floats. | The `0.1 + 0.2` vs `0.3` class of bug; the server uses `Prisma.Decimal` and the client must agree on equality. |
-| D182 | The create dialog offers the scope types of its route (admin: global, runner; project: project, repo). `runner` and `repo` show a select of runner names (admin runner list) or repo names (project repo list); `global` and `project` send no `scopeId` (the project route sets it). The edit dialog shows no scope or window controls, only a fixed-after-create hint. | Mirrors `resolveScope` in `budgets.service.ts` and D161. |
+| D182 | The create dialog offers the scope types of its route (admin: global, runner; project: project, repo). `runner` and `repo` show a select of runner names (admin runner list) or repo names (project repo list); `global` and `project` send no `scopeId` (the project route sets it). The edit dialog shows no scope or window controls, only a fixed-after-create hint. | Mirrors `resolveScope` in `budgets.service.ts` and D161. D182 note (final review): the scope-id select is mounted only for runner and repo, and vee-validate 4.15 unsets an unmounted field's value (`keepValuesOnUnmount` defaults to false), so the schema defaults `scopeId` to `''` and still requires it for runner and repo; `keepValuesOnUnmount` is left alone. Pinned by a schema test and by the e2e step that switches Runner to Global. |
 | D183 | Form fields are strings in the form and converted on submit: `amountUsd` (regex `^\d{1,7}(\.\d{1,4})?$`, > 0, <= 1,000,000, sent as a number), `warnPercent` (blank = `null` = no warn; create is prefilled with 80), `hardStop` and `runningJobs` as native selects (`FleetNativeSelect`, plan 4b D137: the repo has no shadcn checkbox or switch). Edit always sends all four editable fields, because an explicit `null` warn is meaningful and an omitted one means "unchanged". | Matches the DTO validators; a blank warn field must be able to turn warnings off. |
 | D184 | The resume dialog requires a new amount when the current amount is not above the window spend (the lowered-amount case, 2a Review Focus 4) and rejects a typed amount that is not above the spend, both before the request. Blank otherwise means "keep the amount" and sends `{}`. | The server would answer 400 `fleet.budgetAmountNotAboveSpend`; catching it first gives a precise hint instead of a toast. The server check stays (a race with new spend is still possible). |
 | D185 | A refusal that means "your view is stale" (resume 409 `fleet.budgetNotPaused`, edit or delete 404 `fleet.budgets`) shows the server's message and reloads the list; the dialog stays open and its `failed` event triggers the reload. | No phantom rows, no silent no-ops. |
@@ -131,7 +131,7 @@ Numbered D173-D189 (slice 2a ended at D172; slice 3a uses D190+).
 
 **Interfaces:**
 - Produces (all exported from `~/lib/fleet-budgets`):
-  - `type Translate = (key: string, named?: Record<string, unknown>) => string`
+  - `type TranslateNamed = (key: string, named?: Record<string, unknown>) => string`
   - `MAX_BUDGET_USD = 1_000_000`, `DEFAULT_WARN_PERCENT = 80`, `BANNER_MAX_LINES = 3`
   - `type BudgetRouteKind = 'admin' | 'project'`; `scopesFor(kind): readonly BudgetScopeType[]`; `isManagedOn(kind, policy): boolean`
   - `sortPolicies(policies): BudgetPolicyDto[]`
@@ -439,6 +439,15 @@ describe('buildBudgetSchema', () => {
     expect(result.success ? '' : result.error.issues[0].message).toBe('fleet.budgets.validation.amountInvalid')
   })
 
+  test('a scope id unset by an unmounted field is tolerated for global and project, still required for runner and repo', () => {
+    const rest: Partial<BudgetFormValues> = values({ scopeType: 'global' })
+    delete rest.scopeId
+    expect(schema.safeParse(rest).success).toBe(true)
+    expect(schema.safeParse({ ...rest, scopeType: 'project' }).success).toBe(true)
+    const runner = schema.safeParse({ ...rest, scopeType: 'runner' })
+    expect(runner.success ? [] : runner.error.issues.map((i) => i.path.join('.'))).toEqual(['scopeId'])
+  })
+
   test('runner and repo need a target, global and project do not', () => {
     expect(issuePaths(values({ scopeType: 'runner', scopeId: '' }))).toEqual(['scopeId'])
     expect(issuePaths(values({ scopeType: 'repo', scopeId: '' }))).toEqual(['scopeId'])
@@ -500,7 +509,7 @@ import type {
 } from '~/lib/fleet-types'
 
 /** vue-i18n's `t`, narrowed to what the helpers need. */
-export type Translate = (key: string, named?: Record<string, unknown>) => string
+export type TranslateNamed = (key: string, named?: Record<string, unknown>) => string
 
 /** apps/api create-budget-policy.dto MAX_BUDGET_USD. */
 export const MAX_BUDGET_USD = 1_000_000
@@ -605,10 +614,12 @@ export function initialFormValues(kind: BudgetRouteKind, policy: BudgetPolicyDto
 }
 
 /** The create/edit form. Mirrors the DTO validators; the server's message is still shown for anything else. */
-export function buildBudgetSchema(t: Translate) {
+export function buildBudgetSchema(t: TranslateNamed) {
   return z.object({
     scopeType: z.enum(BUDGET_SCOPE_TYPES),
-    scopeId: z.string(),
+    // Tolerant (D182 note): vee-validate unsets a field's value when its input unmounts (the scope-id
+    // select is under v-if), so after runner -> global the value is undefined, not ''.
+    scopeId: z.string().default(''),
     windowKind: z.enum(BUDGET_WINDOW_KINDS),
     amountUsd: z.string().refine((value) => parseAmount(value) !== null, t('fleet.budgets.validation.amountInvalid')),
     warnPercent: z.string().refine((value) => parseWarn(value).ok, t('fleet.budgets.validation.warnInvalid')),
@@ -648,7 +659,7 @@ export function toPatchBody(values: BudgetFormValues): BudgetPolicyPatchBody {
 }
 
 /** D184: blank keeps the amount only when it is still above the spend; a typed amount must be above it. */
-export function buildResumeSchema(t: Translate, policy: Pick<BudgetPolicyDto, 'amountUsd' | 'spentUsd'>) {
+export function buildResumeSchema(t: TranslateNamed, policy: Pick<BudgetPolicyDto, 'amountUsd' | 'spentUsd'>) {
   return z.object({
     amountUsd: z.string().superRefine((value, ctx) => {
       const trimmed = value.trim()
@@ -726,7 +737,7 @@ export function scopeName(policy: Pick<BudgetPolicyDto, 'scopeType' | 'scopeId'>
 }
 
 /** "the whole fleet" / "project x" / "repo a/b" / "runner r", for sentences. */
-export function scopeText(t: Translate, policy: Pick<BudgetPolicyDto, 'scopeType'>, name: string | null): string {
+export function scopeText(t: TranslateNamed, policy: Pick<BudgetPolicyDto, 'scopeType'>, name: string | null): string {
   return t(`fleet.budgets.scopeText.${policy.scopeType}`, { name: name ?? '' })
 }
 
@@ -1182,7 +1193,7 @@ describe('useFleetBudgetPage', () => {
     await page.refresh()
 
     await page.remove(row('a'), 'sure?')
-    await page.refresh()
+    await Promise.resolve() // remove() already started the reload (void refresh()); let it settle
 
     expect(toasts.errors).toEqual(['Budget policy not found'])
     expect(get).toHaveBeenCalledTimes(2)
@@ -1290,13 +1301,13 @@ export function useFleetBudgetPage(base: BudgetBase) {
 }
 ```
 
-- [ ] **Step 7: Commit (the page-state spec runs green at the end of Task 3)**
+- [ ] **Step 7: Commit (the page-state spec is committed in Task 3, once its toast copy exists)**
 
 Run: `cd apps/web && bun run test -- tests/composables/useFleetBudgets.spec.ts`
 Expected: PASS.
 
 ```bash
-git add apps/web/composables/useFleetBudgets.ts apps/web/composables/useFleetBudgetPage.ts apps/web/tests/composables/useFleetBudgets.spec.ts apps/web/tests/composables/useFleetBudgetPage.spec.ts
+git add apps/web/composables/useFleetBudgets.ts apps/web/composables/useFleetBudgetPage.ts apps/web/tests/composables/useFleetBudgets.spec.ts
 git commit -m "feat(web): fleet budgets transport and page-state composables"
 ```
 
@@ -1632,7 +1643,7 @@ Expected: PASS (9 tests).
 - [ ] **Step 6: Commit**
 
 ```bash
-git add apps/web/i18n/locales/en.json apps/web/i18n/locales/zh.json apps/web/tests/i18n/fleet-locale-parity.spec.ts
+git add apps/web/i18n/locales/en.json apps/web/i18n/locales/zh.json apps/web/tests/i18n/fleet-locale-parity.spec.ts apps/web/tests/composables/useFleetBudgetPage.spec.ts
 git commit -m "feat(web): fleet budgets locale strings (en, zh)"
 ```
 
@@ -2650,7 +2661,7 @@ git commit -m "feat(web): fleet budget policy table and test harness additions"
 **Interfaces:**
 - Consumes: Tasks 1-6. `useFleetRunners` (existing) for runner names and options; `useVisiblePolling` (existing).
 - Produces: route `/admin/fleet/budgets` (global admin). Test ids: header button `fleet-budget-create`. Layout:
-  `fleetLeaf(project, path)` returns the breadcrumb leaf for `/:project/fleet/*` (used again by Task 8's route).
+  `fleetLeaf(project, path)` returns the breadcrumb leaf for `/:project/fleet/*` (Task 8's route reuses it without touching the layout: the `/:project/fleet/budgets` branch is added here).
 
 - [ ] **Step 1: Write the failing page spec**
 
@@ -3920,19 +3931,27 @@ test.describe('Fleet budgets (scripted runner)', () => {
     await page.goto('/admin/fleet/budgets');
     await waitForHydration(page);
 
+    const rows = page.locator('[data-testid^="fleet-budget-row-"]');
+    const before = await rows.count();
+
     await page.getByTestId('fleet-budget-create').click();
+    // Pick Runner (mounts the target select), then back to Global (unmounts it, vee-validate unsets
+    // scopeId): the form must still submit (D182 note).
+    await page.getByTestId('fleet-budget-scope-type').selectOption('runner');
+    await expect(page.getByTestId('fleet-budget-scope-id')).toBeVisible();
+    await page.getByTestId('fleet-budget-scope-type').selectOption('global');
+    await expect(page.getByTestId('fleet-budget-scope-id')).toHaveCount(0);
     await page.getByTestId('fleet-budget-window').selectOption('lifetime');
     await page.getByTestId('fleet-budget-amount').fill('1000');
     await page.getByTestId('fleet-budget-submit').click();
 
-    const rows = page.locator('[data-testid^="fleet-budget-row-"]');
-    await expect(rows).toHaveCount(1);
-    await expect(rows.first()).toContainText('Whole fleet');
-    await expect(rows.first()).toContainText('Lifetime');
+    await expect(rows).toHaveCount(before + 1);
+    const created = rows.filter({ hasText: 'Whole fleet' }).filter({ hasText: 'Lifetime' });
+    await expect(created).toHaveCount(1);
 
     page.once('dialog', (dialog) => { void dialog.accept(); });
-    await rows.first().getByTestId('fleet-budget-delete').click();
-    await expect(rows).toHaveCount(0);
+    await created.getByTestId('fleet-budget-delete').click();
+    await expect(rows).toHaveCount(before);
   });
 });
 ```
@@ -3946,7 +3965,7 @@ cd apps/api && bun run test:db:up
 cd apps/web && bunx playwright test tests/e2e/fleet-budgets.e2e.spec.ts tests/e2e/fleet-dispatch.e2e.spec.ts
 ```
 
-Expected: 3 passed. The dispatch spec running second proves the budgets spec left no paused policy behind. Verified on main: `job-transitions.service.ts:48` sets `firstStartedAt` once on the RUNNING transition and never clears it
+Expected: 3 passed. The dispatch spec running second proves the budgets spec left no paused policy behind. Verified on main: `apps/api/src/fleet/jobs/job-transitions.service.ts:47-48` sets `firstStartedAt` once on the RUNNING transition and never clears it
 (not even on requeue), so the scripted RUNNING report is what puts the job's spend in the window. A 429 on login means the local throttle cascade (the e2e config already raises the limit to 50/min): wait a
 minute and rerun only this file; CI runs the full suite green. Do not run the whole e2e directory locally.
 
