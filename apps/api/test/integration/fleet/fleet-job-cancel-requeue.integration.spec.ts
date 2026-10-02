@@ -92,6 +92,21 @@ describeIntegration('fleet job cancel and requeue (PG)', () => {
     expect(after.costSpentUsd.toString()).toBe('0');
   });
 
+  it('carries the attempt spend into costCarriedUsd on requeue and keeps firstStartedAt (S1b §2.1)', async () => {
+    const runner = await insertRunner(prisma);
+    const first = new Date('2026-10-01T08:00:00.000Z');
+    const job = await insertJob('rq-carry', {
+      state: 'FAILED', runnerId: runner.id, leaseEpoch: 1, costSpentUsd: 1.25, costCarriedUsd: 0.5,
+      firstStartedAt: first, startedAt: new Date(), finishedAt: new Date(), cancelReason: 'budget:old',
+    });
+    await post('dev', job.id, 'requeue').expect(200);
+    const after = await reload(job.id);
+    expect(after.costSpentUsd.toString()).toBe('0');
+    expect(after.costCarriedUsd.toString()).toBe('1.75');
+    expect(after.firstStartedAt).toEqual(first);
+    expect(after.cancelReason).toBeNull();
+  });
+
   it('refuses requeue of a COMPLETED job, of an active duplicate, and by a viewer', async () => {
     await post('dev', (await insertJob('rq-done', { state: 'COMPLETED' })).id, 'requeue').expect(409);
     const failed = await insertJob('rq-dup', { state: 'FAILED' });

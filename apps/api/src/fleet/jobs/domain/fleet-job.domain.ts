@@ -55,6 +55,12 @@ export interface FleetJobRecord {
   currentPhase: string | null;
   /** Decimal as string. */
   costSpentUsd: string;
+  /** Decimal as string. Spend of earlier attempts, added by requeue (S1b §2.1). */
+  costCarriedUsd: string;
+  /** First RUNNING; never cleared. The job's budget window (S1b §2.1). */
+  firstStartedAt: Date | null;
+  /** Why the server asked for the cancel (`budget:<policyId>`); becomes stateReason (plan D156). */
+  cancelReason: string | null;
   lastHeartbeatAt: Date | null;
   finishResult: string | null;
   escalationReason: string | null;
@@ -89,7 +95,8 @@ export interface NewFleetJob {
 type Mutable =
   | 'state' | 'stateReason' | 'runnerId' | 'runnerBootId' | 'assignedAt' | 'startedAt' | 'finishedAt'
   | 'cancelRequestedAt' | 'naxRunId' | 'naxLogRunId' | 'naxCostRunId' | 'progress' | 'currentStoryId'
-  | 'currentPhase' | 'costSpentUsd' | 'lastHeartbeatAt' | 'finishResult' | 'escalationReason' | 'exitCode'
+  | 'currentPhase' | 'costSpentUsd' | 'costCarriedUsd' | 'firstStartedAt' | 'cancelReason' | 'lastHeartbeatAt'
+  | 'finishResult' | 'escalationReason' | 'exitCode'
   | 'resultBranch' | 'resultSha' | 'resultPrUrl' | 'wipPush' | 'stories' | 'storiesTruncated' | 'ackedRunnerSeq';
 
 /** Columns a transition, snapshot or requeue may change. `bumpEpoch` adds one to leaseEpoch (plan D4). */

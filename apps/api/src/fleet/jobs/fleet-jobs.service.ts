@@ -7,12 +7,15 @@ import { remapPage } from '../../common/dto/koda-page.query';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FleetCommandType, FleetJobState } from '../../common/enums';
 import { FleetActivityService } from '../activity/fleet-activity.service';
+import { addUsd } from '../budgets/money';
+import { BudgetGate } from '../budgets/budget-gate';
+import { budgetReason, jobGateKeys } from '../budgets/budget-rules';
 import { normalizeDispatch } from './dispatch-input';
 import { FleetDispatchException } from './fleet-dispatch.exception';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import type { LiveFleetJobEvent } from '../../live/live-event';
 import { canTransition, isTerminal } from './job-state';
-import { JobTransitionsService } from './job-transitions.service';
+import { JobTransitionsService, SYSTEM_ACTOR } from './job-transitions.service';
 import { RunnerNotifier } from './runner-notifier';
 import { PERMANENT_MISFITS } from './placement-rules';
 import { PlacementService, toPlacementJob } from './placement.service';
@@ -20,6 +23,16 @@ import { DuplicateActiveJobError, FLEET_JOB_REPOSITORY, FleetJobFilters, FleetJo
 import { DispatchFleetJobDto } from './dto/dispatch-fleet-job.dto';
 import { DispatchResultDto, FleetJobDto } from './dto/fleet-job.dto';
 import { FleetJobEventDto } from './dto/fleet-job-event.dto';
+
+/** What a budget stop did to its jobs (plan D157). Publish `live` and notify `wake` after the transaction commits. */
+export interface BudgetCancelResult {
+  /** Ended on the server: QUEUED, or ASSIGNED whose ASSIGN was never acked. */
+  cancelled: string[];
+  /** cancelRequestedAt + one CANCEL; the runner reports CANCELLED and keeps the budget reason (plan D156). */
+  requested: string[];
+  live: LiveFleetJobEvent[];
+  wake: string[];
+}
 
 @Injectable()
 export class FleetJobsService {
@@ -30,6 +43,7 @@ export class FleetJobsService {
     private readonly live: FleetJobLivePublisher,
     private readonly transitions: JobTransitionsService,
     private readonly notifier: RunnerNotifier,
+    private readonly budgets: BudgetGate,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
 
@@ -44,6 +58,9 @@ export class FleetJobsService {
       if (verdict === 'not_found') throw new NotFoundAppException({}, 'fleet.runners');
       if (verdict !== null && PERMANENT_MISFITS.has(verdict)) throw new FleetDispatchException(verdict);
     }
+
+    // S1b §2.3: no new job in a paused scope, the pinned runner's included.
+    await this.budgets.assertNotPaused(jobGateKeys({ projectId, repoId: repo.id, pinnedRunnerId: input.pinnedRunnerId }), new Date());
 
     let job: FleetJobRecord;
     try {
@@ -120,6 +137,40 @@ export class FleetJobsService {
     return FleetJobDto.from(job);
   }
 
+  /**
+   * S1b §2.2 hard stop: the scope's QUEUED jobs, and (runningJobs = cancel) its ASSIGNED and RUNNING jobs.
+   * A system action: the activity actor is SYSTEM, the responsible user the policy's last editor.
+   * Call inside txManager.run (the evaluator holds the policy lock); jobs are re-checked under their own row lock.
+   */
+  async cancelForBudget(jobIds: readonly string[], policy: { id: string; responsibleUserId: string }, now = new Date()): Promise<BudgetCancelResult> {
+    const reason = budgetReason(policy.id);
+    const result: BudgetCancelResult = { cancelled: [], requested: [], live: [], wake: [] };
+    for (const id of jobIds) {
+      const job = await this.repo.lockById(id);
+      if (!job || job.cancelRequestedAt) continue;
+      const unacked = job.state === FleetJobState.ASSIGNED &&
+        (await this.repo.findPendingCommand({ jobId: id, type: FleetCommandType.ASSIGN, leaseEpoch: job.leaseEpoch })) !== null;
+      if (job.state === FleetJobState.QUEUED || unacked) {
+        const r = await this.transitions.apply({ job, to: FleetJobState.CANCELLED, by: 'server', now, actor: SYSTEM_ACTOR, reason, extra: { cancelReason: reason } });
+        result.cancelled.push(id);
+        result.live.push(r.live);
+        continue;
+      }
+      if ((job.state !== FleetJobState.ASSIGNED && job.state !== FleetJobState.RUNNING) || !job.runnerId) continue;
+      const updated = await this.repo.update(id, { cancelRequestedAt: now, cancelReason: reason });
+      await this.repo.createCommand({ runnerId: job.runnerId, jobId: id, type: FleetCommandType.CANCEL, leaseEpoch: job.leaseEpoch, payload: {} });
+      await this.repo.appendEvent(id, { leaseEpoch: job.leaseEpoch, runnerSeq: null, type: 'lifecycle', payload: { level: 'info', message: `cancel requested (${reason})` } });
+      await this.activity.record({
+        actorType: 'SYSTEM', actorId: SYSTEM_ACTOR.id, action: 'job.cancel_requested', entityType: 'job', entityId: id, jobId: id,
+        projectId: job.projectId, responsibleUserId: policy.responsibleUserId, payload: { state: job.state, reason },
+      });
+      result.requested.push(id);
+      result.live.push(this.live.event(updated));
+      result.wake.push(job.runnerId);
+    }
+    return result;
+  }
+
   /** Spec §5.3 requeue: CRASHED | FAILED | CANCELLED -> QUEUED, run fields cleared, epoch + 1, then placement. */
   async requeue(actorId: string, projectId: string, jobId: string): Promise<DispatchResultDto> {
     const now = new Date();
@@ -134,6 +185,7 @@ export class FleetJobsService {
         feature = current.feature;
         repoId = current.repoId;
         if (!canTransition(current.state, FleetJobState.QUEUED, 'server')) throw new ConflictAppException({ state: current.state }, 'fleet.jobState');
+        await this.budgets.assertNotPaused(jobGateKeys(current), now);
         // Plan D4: a requeue is a fresh lease (the transition carries `bumpEpoch: true`).
         // Withdraw pending non-ABANDON commands from the prior epoch so a late runner
         // can no longer ack them, and so the next sync sees no orphan ASSIGN/CANCEL.
@@ -144,7 +196,9 @@ export class FleetJobsService {
           extra: {
             runnerId: null, runnerBootId: null, assignedAt: null, startedAt: null, finishedAt: null, cancelRequestedAt: null,
             naxRunId: null, naxLogRunId: null, naxCostRunId: null, progress: null, currentStoryId: null, currentPhase: null,
-            costSpentUsd: '0', lastHeartbeatAt: null, finishResult: null, escalationReason: null, exitCode: null,
+            // S1b §2.1: requeue keeps spend; the attempt's cost moves into costCarriedUsd.
+            costSpentUsd: '0', costCarriedUsd: addUsd(current.costCarriedUsd, current.costSpentUsd), cancelReason: null,
+            lastHeartbeatAt: null, finishResult: null, escalationReason: null, exitCode: null,
             resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null, stories: null, storiesTruncated: false,
             ackedRunnerSeq: 0, bumpEpoch: true,
           },

@@ -111,7 +111,9 @@ providers each, 64 credentials, and 64 KiB for the whole report. Anything that d
 ## Operate from the CLI
 
 Runner and repo-registry commands need a global-admin user's access token (`KODA_API_KEY=<token>`); dispatch and
-job commands need project membership (dispatch, cancel others' jobs and requeue need DEVELOPER or higher).
+job commands need project membership (dispatch, cancel others' jobs and requeue need DEVELOPER or higher). Budget
+commands without `--project` (global and runner policies) need the same admin token; project and repo budgets need
+project ADMIN.
 
 ```bash
 koda fleet runner enroll-token --label linux       # prints the token once and the koda-runner enroll line
@@ -125,6 +127,9 @@ koda fleet job list --state RUNNING
 koda fleet job show <jobId>
 koda fleet job cancel <jobId>
 koda fleet job bundle <jobId> --out login.tar.gz
+koda fleet budget list --project web                # spend against amount; WARN / PAUSED state
+koda fleet budget set --scope project --window month --amount 50 --project web
+koda fleet budget resume <policyId> --amount 80 --project web
 ```
 
 `--label` and `--pin` are exclusive. A dispatch for a feature that already has an active job on the repo prints

@@ -3,6 +3,7 @@ import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { LiveModule } from '../../live/live.module';
 import { ProjectAccessModule } from '../../projects/project-access.module';
 import { FleetActivityModule } from '../activity/fleet-activity.module';
+import { BudgetStoreModule } from '../budgets/budget-store.module';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import { FleetJobsController } from './fleet-jobs.controller';
 import { FleetJobsService } from './fleet-jobs.service';
@@ -14,7 +15,7 @@ import { RunnerNotifier } from './runner-notifier';
 
 /** Fleet jobs (spec §4-§6). Tasks 11-12 add dispatch and the controller. */
 @Module({
-  imports: [PrismaModule, ProjectAccessModule, FleetActivityModule, LiveModule],
+  imports: [PrismaModule, ProjectAccessModule, FleetActivityModule, LiveModule, BudgetStoreModule],
   controllers: [FleetJobsController],
   providers: [
     PrismaFleetJobRepository,
@@ -25,6 +26,6 @@ import { RunnerNotifier } from './runner-notifier';
     PlacementService,
     FleetJobsService,
   ],
-  exports: [FLEET_JOB_REPOSITORY, FleetJobLivePublisher, JobTransitionsService, RunnerNotifier, PlacementService],
+  exports: [FLEET_JOB_REPOSITORY, FleetJobLivePublisher, JobTransitionsService, RunnerNotifier, PlacementService, FleetJobsService],
 })
 export class FleetJobsModule {}

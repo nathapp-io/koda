@@ -3,9 +3,10 @@ import { isRunnerOnline } from '../common/runner-online';
 
 /** The first placement rule a runner fails (spec §4), reported per runner at dispatch. */
 export type MisfitReason =
-  | 'disabled' | 'offline' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
+  | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
   | 'provider_unavailable' | 'sandbox' | 'tools' | 'busy_repo' | 'capacity';
 
+// budget_paused is not permanent either: it clears on resume or month rollover (S1b §2.3).
 // provider_unavailable is not permanent: a later probe may fix it, so the job queues and a
 // pinned dispatch answers 201 (spec §4).
 /** A pinned job whose runner fails one of these can never run there: 422 at dispatch (spec §4). */
@@ -29,6 +30,8 @@ export interface PlacementRunner {
   labels: readonly string[];
   capacity: number;
   capabilities: RunnerCapabilities;
+  /** S1b §2.3, plan D159: the runner's own budget scope is effectively paused. Set by PlacementService; absent = no. */
+  budgetPaused?: boolean;
 }
 
 /** The runner's active jobs (ASSIGNED, RUNNING, UPLOADING). */
@@ -64,6 +67,7 @@ function capabilityMisfit(job: PlacementJob, caps: RunnerCapabilities): MisfitRe
 export function firstMisfit(job: PlacementJob, runner: PlacementRunner, load: RunnerLoad, now: Date, offlineSec: number): MisfitReason | null {
   if (!runner.enabled) return 'disabled';
   if (!isRunnerOnline(runner.lastSeenAt, now, offlineSec)) return 'offline';
+  if (runner.budgetPaused) return 'budget_paused';
   if (job.pinnedRunnerId === null && !job.selectorLabels.every((label) => runner.labels.includes(label))) return 'labels';
   if (!runner.capabilities.executors.includes('host')) return 'executor';
   const capability = capabilityMisfit(job, runner.capabilities);

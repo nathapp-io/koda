@@ -15,5 +15,10 @@
   "sync": { "-2": "无效的同步请求：{reason}" },
   "bundle": { "404": "此任务尚未上传产物包", "413": "产物包超过 {maxBytes} 字节", "415": "产物包必须是 application/gzip", "422": "产物包被拒绝：{reason}" },
   "bundleInput": { "-2": "无效的产物包上传：{reason}" },
-  "fence": { "409": "此执行器不持有该任务的当前租约" }
+  "fence": { "409": "此执行器不持有该任务的当前租约" },
+  "budgets": { "404": "未找到预算策略", "409": "该范围和周期已有预算策略" },
+  "budgetInput": { "-2": "无效的预算策略：{reason}" },
+  "budgetPaused": { "409": "{scope} 的舰队预算已暂停（策略 {policyId}）" },
+  "budgetAmountNotAboveSpend": { "-2": "金额 {amountUsd} 必须高于本周期已花费的 {spentUsd}" },
+  "budgetNotPaused": { "409": "该预算策略未处于暂停状态" }
 }

@@ -84,6 +84,14 @@ describe('placement rules (spec §4)', () => {
     expect(PERMANENT_MISFITS.has('disabled')).toBe(true);
   });
 
+  it('reports budget_paused after offline and before labels, and never as permanent (S1b §2.3)', () => {
+    expect(misfit(job(), runner({ budgetPaused: true }))).toBe('budget_paused');
+    expect(misfit(job(), runner({ budgetPaused: true, lastSeenAt: new Date(NOW.getTime() - 91_000) }))).toBe('offline');
+    expect(misfit(job({ selectorLabels: ['mac'] }), runner({ budgetPaused: true }))).toBe('budget_paused');
+    expect(misfit(job(), runner({ budgetPaused: false }))).toBeNull();
+    expect(PERMANENT_MISFITS.has('budget_paused')).toBe(false);
+  });
+
   it('orders by fewest active jobs, then oldest lastSeenAt, then id', () => {
     const a = { runner: runner({ id: 'a', lastSeenAt: new Date(3) }), load: { active: 1, repoIds: new Set<string>() } };
     const b = { runner: runner({ id: 'b', lastSeenAt: new Date(2) }), load: { active: 0, repoIds: new Set<string>() } };

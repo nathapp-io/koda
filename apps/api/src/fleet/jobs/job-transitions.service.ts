@@ -44,7 +44,8 @@ export class JobTransitionsService {
       ...(input.extra ?? {}),
       state: to,
       stateReason: input.reason ?? null,
-      ...(to === 'RUNNING' ? { startedAt: now } : {}),
+      // S1b §2.1: firstStartedAt is the job's budget window; set once, never cleared (not even by requeue).
+      ...(to === 'RUNNING' ? { startedAt: now, ...(job.firstStartedAt ? {} : { firstStartedAt: now }) } : {}),
       ...(terminal ? { finishedAt: now } : {}),
       ...(bump ? { bumpEpoch: true } : {}),
     };

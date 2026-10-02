@@ -15,5 +15,10 @@
   "sync": { "-2": "Invalid sync request: {reason}" },
   "bundle": { "404": "No bundle has been uploaded for this job", "413": "Bundle larger than {maxBytes} bytes", "415": "Bundles must be application/gzip", "422": "Bundle rejected: {reason}" },
   "bundleInput": { "-2": "Invalid bundle upload: {reason}" },
-  "fence": { "409": "This runner does not hold the job's current lease" }
+  "fence": { "409": "This runner does not hold the job's current lease" },
+  "budgets": { "404": "Budget policy not found", "409": "A budget policy already exists for this scope and window" },
+  "budgetInput": { "-2": "Invalid budget policy: {reason}" },
+  "budgetPaused": { "409": "The fleet budget for {scope} is paused (policy {policyId})" },
+  "budgetAmountNotAboveSpend": { "-2": "The amount {amountUsd} must be above this window's spend of {spentUsd}" },
+  "budgetNotPaused": { "409": "This budget policy is not paused" }
 }

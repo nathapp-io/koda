@@ -560,23 +560,23 @@ model MemoryQueryMetric {
 // Fleet S1 (docs/superpowers/specs/2026-09-29-fleet-s1-dispatch-design.md §2).
 
 model Runner {
-  id              String   @id @default(cuid())
-  name            String   @unique
-  apiKeyHash      String   @unique // HMAC-SHA256 of the kr_ key under API_KEY_SECRET
+  id              String    @id @default(cuid())
+  name            String    @unique
+  apiKeyHash      String    @unique // HMAC-SHA256 of the kr_ key under API_KEY_SECRET
   os              String // darwin | linux
   arch            String // arm64 | x64
   labels          String[]
-  capacity        Int      @default(1)
+  capacity        Int       @default(1)
   capabilities    Json // RunnerCapabilities (packages/fleet-protocol)
   daemonVersion   String
   protocolVersion Int
   bootId          String
   bootedAt        DateTime? // start of the current daemon boot: set at enroll and when sync reports a new bootId (D131)
-  enabled         Boolean  @default(true)
+  enabled         Boolean   @default(true)
   lastSeenAt      DateTime
   createdById     String // User.id who issued the enrollment token
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   jobs       FleetJob[]     @relation("FleetJobRunner")
   pinnedJobs FleetJob[]     @relation("FleetJobPinnedRunner")
@@ -620,10 +620,10 @@ model FleetActivity {
   actorType         String // USER | RUNNER | SYSTEM
   actorId           String
   action            String
-  entityType        String // runner | enrollment | repo | job
+  entityType        String // runner | enrollment | repo | job | budget | schedule
   entityId          String
   jobId             String?
-  projectId         String? // set on job rows
+  projectId         String? // set on job rows and on project/repo budget rows
   responsibleUserId String?
   payload           Json
   createdAt         DateTime @default(now())
@@ -632,6 +632,48 @@ model FleetActivity {
   @@index([jobId])
   @@index([projectId])
   @@index([createdAt])
+}
+
+/// S1b §2.1 C1 budget policy. scopeId is polymorphic (project, repo or runner id): no foreign key.
+model BudgetPolicy {
+  id                String    @id @default(cuid())
+  scopeType         String // global | project | repo | runner
+  scopeId           String? // null for global
+  scopeKey          String // 'global' or '<scopeType>:<scopeId>'
+  projectId         String? // owning project for project and repo scopes; null for global and runner
+  windowKind        String // calendar_month_utc | lifetime
+  amountUsd         Decimal   @db.Decimal(12, 4)
+  warnPercent       Int? // 1-99; null = no warn
+  hardStop          Boolean   @default(true)
+  runningJobs       String    @default("finish") // finish | cancel
+  pausedAt          DateTime?
+  pausedWindowStart DateTime? // window the pause belongs to; the epoch for lifetime (plan D155)
+  createdById       String
+  updatedById       String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  incidents BudgetIncident[]
+
+  @@unique([scopeKey, windowKind])
+  @@index([projectId])
+}
+
+/// S1b §2.1. Partial unique (policyId, kind, windowStart, amountUsd) WHERE kind IN ('warn', 'hard_stop') is raw SQL.
+model BudgetIncident {
+  id          String   @id @default(cuid())
+  policyId    String
+  kind        String // warn | hard_stop | resumed | window_reset
+  windowStart DateTime
+  spentUsd    Decimal  @db.Decimal(12, 4)
+  amountUsd   Decimal  @db.Decimal(12, 4)
+  actorId     String?
+  approvalId  String? // C8 (S1.5); null until then
+  createdAt   DateTime @default(now())
+
+  policy BudgetPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@index([policyId, createdAt])
 }
 
 /// Fleet S1 slice 2 (spec §2). One dispatched nax run or plan.
@@ -676,6 +718,9 @@ model FleetJob {
   wipPush           String? // S1b §1.1: pushed | none | failed:<reason>
   stories           Json? // S1b §1.2: PRD stories, at most 100 and 8 KiB
   storiesTruncated  Boolean   @default(false)
+  costCarriedUsd    Decimal   @default(0) @db.Decimal(12, 4) // S1b §2.1: spend of earlier attempts, kept across requeue
+  firstStartedAt    DateTime? // S1b §2.1: first RUNNING; set once, never cleared; the job's budget window
+  cancelReason      String? // S1b §2.2: why the server asked for the cancel, e.g. budget:<policyId>
   eventSeq          Int       @default(0) // server timeline counter (plan D2)
   ackedRunnerSeq    Int       @default(0) // cumulative runner ack for leaseEpoch (plan D2)
   attributedAt      DateTime? // PR/MR attribution comment posted (plan D19)
@@ -693,6 +738,9 @@ model FleetJob {
   @@index([state])
   @@index([runnerId, state])
   @@index([projectId, queuedAt])
+  @@index([projectId, firstStartedAt])
+  @@index([repoId, firstStartedAt])
+  @@index([runnerId, firstStartedAt])
 }
 
 /// Job timeline. Runner events dedup on (jobId, leaseEpoch, runnerSeq); server events have runnerSeq null (plan D2).
