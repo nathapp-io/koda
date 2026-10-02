@@ -130,7 +130,7 @@ export interface FleetRepoCheck {
 export type { FleetJobState }
 
 export type MisfitReason =
-  | 'disabled' | 'offline' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
+  | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
   | 'provider_unavailable' | 'sandbox' | 'tools' | 'busy_repo' | 'capacity'
 
 export interface FleetJobStoryDto {

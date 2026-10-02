@@ -697,6 +697,7 @@
     "misfit": {
       "disabled": "Runner is disabled",
       "offline": "Runner is offline",
+      "budget_paused": "Runner's fleet budget is paused",
       "labels": "Runner lacks a required label",
       "executor": "Runner has no host executor",
       "protocol": "A profile needs a protocol the runner's nax lacks",

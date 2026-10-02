@@ -5,6 +5,8 @@ import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { IVcsConfig, VCS_CFG } from '../../config/vcs.config';
 import type { LiveFleetJobEvent } from '../../live/live-event';
 import { cloneUrlFor } from '../git-broker/clone-url';
+import { BudgetGate } from '../budgets/budget-gate';
+import { budgetReason, jobGateKeys } from '../budgets/budget-rules';
 import { buildAssignPayload, gitIdentityFor } from './assign-payload';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import { JobTransitionsService, SYSTEM_ACTOR } from './job-transitions.service';
@@ -46,6 +48,7 @@ export class PlacementService {
     private readonly transitions: JobTransitionsService,
     private readonly live: FleetJobLivePublisher,
     private readonly notifier: RunnerNotifier,
+    private readonly budgets: BudgetGate,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(FLEET_CFG) private readonly fleetConfig: IFleetConfig,
     @Inject(VCS_CFG) private readonly vcsConfig: Pick<IVcsConfig, 'githubApiUrl' | 'gitlabApiUrl'>,
@@ -62,7 +65,8 @@ export class PlacementService {
     const [runner] = await this.repo.findPlacementRunners([pinnedRunnerId]);
     if (!runner) return 'not_found';
     const loads = toLoads(await this.repo.findActiveLoads([runner.id]));
-    return firstMisfit(job, runner, loads.get(runner.id) ?? EMPTY_LOAD, now, this.fleetConfig.runnerOfflineSec);
+    const budgetPaused = (await this.budgets.snapshot(now)).runnerPaused(runner.id);
+    return firstMisfit(job, { ...runner, budgetPaused }, loads.get(runner.id) ?? EMPTY_LOAD, now, this.fleetConfig.runnerOfflineSec);
   }
 
   async placeJob(jobId: string, now = new Date()): Promise<PlacementOutcome> {
@@ -73,6 +77,12 @@ export class PlacementService {
       }
       const repo = await this.repo.findRepo(job.repoId);
       if (!repo) throw new Error(`fleet repo ${job.repoId} missing for job ${job.id}`);
+      const pauses = await this.budgets.snapshot(now);
+      // S1b §2.3 shared pre-assign check: a job whose scope paused after it was queued is cancelled, never assigned.
+      const paused = pauses.match(jobGateKeys(job));
+      if (paused) {
+        return { outcome: { assigned: false, runnerId: null, leaseEpoch: null, misfits: [] } as PlacementOutcome, live: [await this.cancelForPause(job, paused.id, now)] };
+      }
       const ids = await this.repo.lockRunners(job.pinnedRunnerId ? [job.pinnedRunnerId] : undefined);
       // Review 2a BUG-3: a pinned runner's state can change between FleetJobsService.dispatch's
       // pre-tx evaluatePinned and the in-tx lock here. Re-evaluate; surface the same verdicts.
@@ -85,7 +95,8 @@ export class PlacementService {
       const runners = await this.repo.findPlacementRunners(ids);
       const loads = toLoads(await this.repo.findActiveLoads(ids));
       const placementJob = toPlacementJob(job, repo);
-      const evaluated = runners.map((runner) => {
+      const evaluated = runners.map((row) => {
+        const runner = { ...row, budgetPaused: pauses.runnerPaused(row.id) };
         const load = loads.get(runner.id) ?? EMPTY_LOAD;
         return { runner, load, reason: firstMisfit(placementJob, runner, load, now, this.fleetConfig.runnerOfflineSec) };
       });
@@ -103,34 +114,51 @@ export class PlacementService {
     return outcome;
   }
 
-  /** Assigns up to min(freeSlots, capacity - active) QUEUED jobs to one runner; returns how many. */
+  /** Assigns up to min(freeSlots, capacity - active) QUEUED jobs to one runner; returns how many were assigned. */
   async fillRunner(runnerId: string, freeSlots: number, now = new Date()): Promise<number> {
     if (freeSlots <= 0) return 0;
-    const live = await this.txManager.run(async () => {
+    const { live, assigned } = await this.txManager.run(async () => {
       const locked = await this.repo.lockRunners([runnerId]);
-      const [runner] = await this.repo.findPlacementRunners(locked);
-      if (!runner || !runner.enabled) return [] as LiveFleetJobEvent[];
+      const [row] = await this.repo.findPlacementRunners(locked);
+      if (!row || !row.enabled) return { live: [] as LiveFleetJobEvent[], assigned: 0 };
+      const pauses = await this.budgets.snapshot(now);
+      const runner = { ...row, budgetPaused: pauses.runnerPaused(row.id) };
       let load = toLoads(await this.repo.findActiveLoads([runner.id])).get(runner.id) ?? EMPTY_LOAD;
       let slots = Math.min(freeSlots, runner.capacity - load.active);
       const events: LiveFleetJobEvent[] = [];
+      let count = 0;
       for (const id of slots > 0 ? await this.repo.findQueuedIds(QUEUED_SCAN_LIMIT) : []) {
         if (slots <= 0) break;
         const job = await this.repo.lockById(id, { skipLocked: true });
         if (!job || job.state !== FleetJobState.QUEUED) continue;
         if (job.pinnedRunnerId && job.pinnedRunnerId !== runner.id) continue;
+        // S1b §2.3: the same pre-assign check as placeJob.
+        const paused = pauses.match(jobGateKeys(job));
+        if (paused) {
+          events.push(await this.cancelForPause(job, paused.id, now));
+          continue;
+        }
         const repo = await this.repo.findRepo(job.repoId);
         if (!repo || firstMisfit(toPlacementJob(job, repo), runner, load, now, this.fleetConfig.runnerOfflineSec) !== null) continue;
-        const assigned = await this.assign(job, repo, runner, now);
-        if (!assigned) continue;
-        events.push(assigned.live);
+        const done = await this.assign(job, repo, runner, now);
+        if (!done) continue;
+        events.push(done.live);
+        count += 1;
         slots -= 1;
         load = { active: load.active + 1, repoIds: new Set([...load.repoIds, job.repoId]) };
       }
-      return events;
+      return { live: events, assigned: count };
     });
     this.live.publish(live);
-    if (live.length > 0) this.notifier.notify(runnerId);
-    return live.length;
+    if (assigned > 0) this.notifier.notify(runnerId);
+    return assigned;
+  }
+
+  /** S1b §2.3: cancel a QUEUED job in a paused scope. The transition's activity row names the policy (plan D170). */
+  private async cancelForPause(job: FleetJobRecord, policyId: string, now: Date): Promise<LiveFleetJobEvent> {
+    const reason = budgetReason(policyId);
+    const r = await this.transitions.apply({ job, to: FleetJobState.CANCELLED, by: 'server', now, actor: SYSTEM_ACTOR, reason, extra: { cancelReason: reason } });
+    return r.live;
   }
 
   private async assign(job: FleetJobRecord, repo: FleetRepoRef, runner: PlacementRunnerRow, now: Date): Promise<{ leaseEpoch: number; live: LiveFleetJobEvent } | null> {

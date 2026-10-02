@@ -697,6 +697,7 @@
     "misfit": {
       "disabled": "执行机已停用",
       "offline": "执行机离线",
+      "budget_paused": "执行机的舰队预算已暂停",
       "labels": "执行机缺少所需标签",
       "executor": "执行机没有主机执行器",
       "protocol": "某个配置需要执行机的 nax 不支持的协议",
