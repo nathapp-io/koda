@@ -15,7 +15,7 @@ import { withContext } from '../utils/context';
 import { handleApiError } from '../utils/error';
 import { table } from '../utils/output';
 import { parseBudgetUsd } from '../utils/parse-usd';
-import { ADMIN_TOKEN_HINT } from './fleet-shared';
+import { ADMIN_TOKEN_HINT, type FleetPage } from './fleet-shared';
 
 /** The generated list filters, so the two routes share one query shape and nothing is cast. */
 type ListQuery = NonNullable<FleetApprovalsControllerListData['query']>;
@@ -28,7 +28,6 @@ interface ApprovalApi {
   get(id: string): Promise<unknown>;
   decide(id: string, body: DecideApprovalDto): Promise<unknown>;
 }
-interface Page { records: FleetApprovalDto[] }
 interface RequeueResult { jobId: string; ok: boolean; error?: string }
 
 const ADMIN_API: ApprovalApi = {
@@ -68,12 +67,12 @@ function parseDecision(value: string): DecideApprovalDto['decision'] {
 const APPROVAL_STATUSES: ApprovalStatus[] = ['pending', 'approved', 'rejected', 'expired', 'cancelled'];
 const APPROVAL_TYPES: ApprovalType[] = ['budget_override_required', 'nax_bash_escalate'];
 
-function parseStatus(value: string): ApprovalStatus {
+export function parseStatus(value: string): ApprovalStatus {
   if ((APPROVAL_STATUSES as string[]).includes(value)) return value as ApprovalStatus;
   throw new InvalidArgumentError(`expected ${APPROVAL_STATUSES.join(', ')}`);
 }
 
-function parseType(value: string): ApprovalType {
+export function parseType(value: string): ApprovalType {
   if ((APPROVAL_TYPES as string[]).includes(value)) return value as ApprovalType;
   throw new InvalidArgumentError(`expected ${APPROVAL_TYPES.join(', ')}`);
 }
@@ -105,8 +104,8 @@ function registerList(approval: Command): void {
     .action(async (options: { project?: string; status?: ApprovalStatus; type?: ApprovalType; json?: boolean }) => {
       try {
         const query: ListQuery = { ...(options.status ? { status: options.status } : {}), ...(options.type ? { type: options.type } : {}) };
-        const page = unwrap<Page>(await (await routeFor(options.project)).list(query));
-        if (options.json) console.log(JSON.stringify(page.records, null, 2));
+        const page = unwrap<FleetPage<FleetApprovalDto>>(await (await routeFor(options.project)).list(query));
+        if (options.json) console.log(JSON.stringify(page, null, 2));
         else table(['ID', 'Type', 'Status', 'Requested', 'Summary'], page.records.map((a) => [a.id, a.type, a.status, a.requestedAt, summary(a)]));
         process.exit(0);
       } catch (err: unknown) {
@@ -154,9 +153,17 @@ function registerDecide(approval: Command): void {
       try {
         const api = await routeFor(options.project);
         // D231: an omitted requeueJobIds re-queues nothing, so `--requeue all` must send the ids explicitly.
-        const requeueJobIds = options.requeue === 'all'
-          ? (unwrap<FleetApprovalDto>(await api.get(approvalId)).requeueCandidates ?? []).map((c) => c.jobId)
-          : options.requeue;
+        let requeueJobIds: string[] | undefined;
+        if (options.requeue === 'all') {
+          const a = unwrap<FleetApprovalDto>(await api.get(approvalId));
+          requeueJobIds = (a.requeueCandidates ?? []).map((c) => c.jobId);
+          // The API caps the candidate list at 200 (requeueCandidatesTruncated), so `all` means every id
+          // the user was shown, not every blocked job. Warn on stderr before deciding, so it survives a
+          // refused decide and never lands in --json stdout.
+          if (a.requeueCandidatesTruncated) console.error('More candidates exist; only the first 200 are re-queued.');
+        } else if (options.requeue !== undefined) {
+          requeueJobIds = options.requeue;
+        }
         const body: DecideApprovalDto = {
           decision: options.decision,
           ...(options.amount !== undefined ? { amountUsd: options.amount } : {}),

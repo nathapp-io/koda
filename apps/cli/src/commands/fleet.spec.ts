@@ -9,7 +9,7 @@ import { Command } from 'commander';
 import { fleetCommand } from './fleet';
 
 describe('fleetCommand', () => {
-  it('registers the fleet group with runner, repo, dispatch, job and budget', () => {
+  it('registers the fleet group with runner, repo, dispatch, job, budget, schedule and approval', () => {
     const program = new Command();
     fleetCommand(program);
     const fleet = program.commands.find((c) => c.name() === 'fleet');

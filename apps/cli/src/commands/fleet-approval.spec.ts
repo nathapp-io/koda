@@ -14,10 +14,12 @@ jest.mock('../generated', () => ({
 jest.mock('../config', () => ({ resolveContext: jest.fn() }));
 
 import { Command } from 'commander';
+import { InvalidArgumentError } from 'commander';
 import { fleetCommand } from './fleet';
-import { parseRequeue } from './fleet-approval';
+import { parseRequeue, parseStatus, parseType } from './fleet-approval';
 import {
-  fleetApprovalsControllerDecide, fleetApprovalsControllerList, projectFleetApprovalsControllerDecide, projectFleetApprovalsControllerGet,
+  fleetApprovalsControllerDecide, fleetApprovalsControllerGet, fleetApprovalsControllerList, projectFleetApprovalsControllerDecide,
+  projectFleetApprovalsControllerGet, projectFleetApprovalsControllerList,
 } from '../generated';
 import { resolveContext } from '../config';
 
@@ -28,10 +30,13 @@ const row = (over: Record<string, unknown> = {}) => ({
   expiresAt: null, decision: null, decidedById: null, decidedAt: null, resolvedBy: null, comment: null, ...over,
 });
 const ok = (data: unknown) => ({ ret: 0, data });
+const page = (records: unknown[], over: Record<string, unknown> = {}) =>
+  ({ total: records.length, current: 1, size: 20, hasNext: false, records, ...over });
 
 describe('koda fleet approval', () => {
   let program: Command;
   let logSpy: jest.SpyInstance;
+  let errSpy: jest.SpyInstance;
   const run = (...args: string[]) => program.parseAsync(['node', 'koda', 'fleet', 'approval', ...args]);
 
   beforeEach(() => {
@@ -41,9 +46,12 @@ describe('koda fleet approval', () => {
     (resolveContext as jest.Mock).mockResolvedValue(CTX);
     jest.spyOn(process, 'exit').mockImplementation((() => {}) as never);
     logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
-    jest.spyOn(console, 'error').mockImplementation(() => {});
+    errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
   });
   afterEach(() => jest.clearAllMocks());
+
+  const logged = () => logSpy.mock.calls.flat().join('\n');
+  const errored = () => errSpy.mock.calls.flat().join('\n');
 
   it('parses --requeue', () => {
     expect(parseRequeue('all')).toBe('all');
@@ -52,7 +60,7 @@ describe('koda fleet approval', () => {
   });
 
   it('list uses the admin route without --project and passes filters', async () => {
-    (fleetApprovalsControllerList as jest.Mock).mockResolvedValue(ok({ total: 1, current: 1, size: 20, records: [row()] }));
+    (fleetApprovalsControllerList as jest.Mock).mockResolvedValue(ok(page([row()])));
     await run('list', '--status', 'pending');
     expect(fleetApprovalsControllerList).toHaveBeenCalledWith({ query: { status: 'pending' } });
     expect(logSpy.mock.calls.flat().join('\n')).toContain('a1');
@@ -78,5 +86,85 @@ describe('koda fleet approval', () => {
     (fleetApprovalsControllerDecide as jest.Mock).mockResolvedValue(ok(row({ status: 'rejected' })));
     await run('decide', 'a1', '--decision', 'keep_paused');
     expect(fleetApprovalsControllerDecide).toHaveBeenCalledWith({ path: { id: 'a1' }, body: { decision: 'keep_paused' } });
+  });
+
+  it('parses the list filters and refuses anything else', () => {
+    expect(parseStatus('pending')).toBe('pending');
+    expect(parseStatus('cancelled')).toBe('cancelled');
+    expect(() => parseStatus('bogus')).toThrow(InvalidArgumentError);
+    expect(() => parseStatus('bogus')).toThrow(/expected pending, approved, rejected, expired, cancelled/);
+    expect(parseType('budget_override_required')).toBe('budget_override_required');
+    expect(() => parseType('bogus')).toThrow(InvalidArgumentError);
+    expect(() => parseType('bogus')).toThrow(/expected budget_override_required, nax_bash_escalate/);
+  });
+
+  it('refuses an undecidable --decision before any request', async () => {
+    // Commander rewraps a parser error as CommanderError, so the parser's own message is the assertion.
+    await expect(run('decide', 'a1', '--decision', 'allow')).rejects.toThrow(/expected keep_paused or raise_budget_and_resume/);
+    expect(fleetApprovalsControllerDecide).not.toHaveBeenCalled();
+    expect(projectFleetApprovalsControllerDecide).not.toHaveBeenCalled();
+  });
+
+  it('list uses the project route with --project and rejects a bad filter before any request', async () => {
+    (projectFleetApprovalsControllerList as jest.Mock).mockResolvedValue(ok(page([row()])));
+    await run('list', '--project', 'web');
+    expect(projectFleetApprovalsControllerList).toHaveBeenCalledWith({ path: { slug: 'web' }, query: {} });
+    expect(fleetApprovalsControllerList).not.toHaveBeenCalled();
+    await expect(run('list', '--status', 'bogus')).rejects.toThrow(/expected pending, approved, rejected, expired, cancelled/);
+    expect(projectFleetApprovalsControllerList).toHaveBeenCalledTimes(1);
+  });
+
+  it('list --json emits the whole page, so a script can tell 20-of-20 from 20-of-500', async () => {
+    (projectFleetApprovalsControllerList as jest.Mock).mockResolvedValue(ok(page([row()], { total: 500, hasNext: true })));
+    await run('list', '--project', 'web', '--json');
+    const printed = JSON.parse(logged());
+    expect(printed).toMatchObject({ total: 500, current: 1, size: 20, hasNext: true });
+    expect(printed.records).toHaveLength(1);
+    expect(printed.records[0]).toMatchObject({ id: 'a1' });
+  });
+
+  it('show uses the project route and lists re-queue candidates with the truncation notice', async () => {
+    (projectFleetApprovalsControllerGet as jest.Mock).mockResolvedValue(ok(row({
+      requeueCandidates: [{ jobId: 'j1', projectId: 'p1', feature: 'login-fix', queuedAt: '2026-10-02T09:00:00.000Z' }],
+      requeueCandidatesTruncated: true,
+    })));
+    await run('show', 'a1', '--project', 'web');
+    expect(projectFleetApprovalsControllerGet).toHaveBeenCalledWith({ path: { slug: 'web', id: 'a1' } });
+    expect(fleetApprovalsControllerGet).not.toHaveBeenCalled();
+    expect(logged()).toContain('Showing approval a1: budget_override_required pending');
+    expect(logged()).toContain('candidate j1 login-fix');
+    expect(logged()).toContain('(more candidates exist)');
+  });
+
+  it('show --json emits the whole approval, candidates included', async () => {
+    (fleetApprovalsControllerGet as jest.Mock).mockResolvedValue(ok(row({
+      requeueCandidates: [{ jobId: 'j1', projectId: 'p1', feature: 'login-fix', queuedAt: '2026-10-02T09:00:00.000Z' }],
+    })));
+    await run('show', 'a1', '--json');
+    expect(fleetApprovalsControllerGet).toHaveBeenCalledWith({ path: { id: 'a1' } });
+    const printed = JSON.parse(logged());
+    expect(printed).toMatchObject({ id: 'a1', status: 'pending' });
+    expect(printed.requeueCandidates).toEqual([expect.objectContaining({ jobId: 'j1', feature: 'login-fix' })]);
+  });
+
+  it('decide --requeue all warns on stderr when the candidate list was capped, and still sends every id', async () => {
+    (projectFleetApprovalsControllerGet as jest.Mock).mockResolvedValue(ok(row({
+      requeueCandidates: [{ jobId: 'j1' }, { jobId: 'j2' }], requeueCandidatesTruncated: true,
+    })));
+    (projectFleetApprovalsControllerDecide as jest.Mock).mockResolvedValue(ok(row({ status: 'approved' })));
+    await run('decide', 'a1', '--project', 'web', '--decision', 'raise_budget_and_resume', '--requeue', 'all', '--json');
+    expect(errored()).toContain('More candidates exist; only the first 200 are re-queued.');
+    expect(projectFleetApprovalsControllerDecide).toHaveBeenCalledWith({
+      path: { slug: 'web', id: 'a1' }, body: { decision: 'raise_budget_and_resume', requeueJobIds: ['j1', 'j2'] },
+    });
+    // The warning is advisory only, and lands on stderr: stdout stays one valid --json document.
+    expect(JSON.parse(logged())).toMatchObject({ id: 'a1', status: 'approved' });
+  });
+
+  it('decide --requeue all says nothing when the candidate list was not capped', async () => {
+    (projectFleetApprovalsControllerGet as jest.Mock).mockResolvedValue(ok(row({ requeueCandidates: [{ jobId: 'j1' }] })));
+    (projectFleetApprovalsControllerDecide as jest.Mock).mockResolvedValue(ok(row({ status: 'approved' })));
+    await run('decide', 'a1', '--project', 'web', '--decision', 'raise_budget_and_resume', '--requeue', 'all');
+    expect(errored()).not.toContain('More candidates exist');
   });
 });

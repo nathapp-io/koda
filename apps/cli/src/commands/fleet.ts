@@ -7,7 +7,7 @@ import { registerFleetRepo } from './fleet-repo';
 import { registerFleetRunner } from './fleet-runner';
 import { registerFleetSchedule } from './fleet-schedule';
 
-/** `koda fleet …`: runners, repos, dispatch, jobs (fleet S1 spec §11), budgets (S1b §2.4) and schedules (S1b §3.4). */
+/** `koda fleet …`: runners, repos, dispatch, jobs (fleet S1 spec §11), budgets (S1b §2.4), schedules (S1b §3.4) and approvals (S1.5 §2.5). */
 export function fleetCommand(program: Command): Command {
   const fleet = program.command('fleet');
   fleet.description('Dispatch nax runs to fleet runners and follow the jobs');
