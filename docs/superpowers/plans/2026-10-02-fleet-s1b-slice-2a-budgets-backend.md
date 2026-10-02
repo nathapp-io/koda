@@ -62,6 +62,9 @@ label).
   `bun test` at the repo root.
 - `bun run generate` (repo root) needs `apps/api/.env`; in a fresh worktree copy it from the main checkout, or
   `api:export-spec` exits 1 with no message. `apps/cli/src/generated` is gitignored; commit only `openapi.json`.
+- Integration files log in over HTTP in `beforeAll` (login throttle 5/min). If a whole file fails in under a
+  millisecond with only a `loginToken` frame in the stack, it is the known local throttle cascade, not this slice:
+  wait a minute and rerun that file alone.
 - No emojis in source; no `console.log` in API source (the CLI prints with `console.log` by design).
 
 ## Decisions
@@ -272,7 +275,8 @@ Expected: both succeed.
 - [ ] **Step 4: Generate the migration, then append the backfill and the partial index**
 
 The test Postgres must be up (`cd apps/api && bun run test:db:up`). Use a scratch shadow database so concurrent test
-runs are not disturbed:
+runs are not disturbed (if another session may be doing the same, give `koda_shadow` a unique suffix in all four
+commands):
 
 ```bash
 docker exec koda-postgres-test-1 psql -U koda -d postgres -c 'CREATE DATABASE koda_shadow'
@@ -357,8 +361,10 @@ so the destructuring line reads
 - [ ] **Step 8: Update the record literals**
 
 In every `FleetJobRecord` literal in `apps/api/src/fleet/jobs/job-transitions.service.spec.ts` (the `job()` factory)
-and `apps/api/src/fleet/jobs/dto/fleet-job.dto.spec.ts` (both records), add
-`costCarriedUsd: '0', firstStartedAt: null, cancelReason: null,` right after the `costSpentUsd` entry. Find any other
+and `apps/api/src/fleet/jobs/dto/fleet-job.dto.spec.ts` (the two records passed to `FleetJobDto.from`/`.summary`),
+add `costCarriedUsd: '0', firstStartedAt: null, cancelReason: null,` right after the `costSpentUsd` entry. Not in the
+`expect(json).toEqual(expect.objectContaining({ maxCostUsd: '5.5', costSpentUsd: '0.1234', ... }))` assertion of
+`fleet-job.dto.spec.ts`: the DTO does not expose the new fields, so adding them there breaks that test. Find any other
 literal with `grep -rn "storiesTruncated:" apps/api/src apps/api/test` and update it the same way.
 
 The job DTO does not gain these fields in 2a (no client reads them yet).
@@ -2094,6 +2100,7 @@ git commit -m "feat(fleet): cancelForBudget for budget hard stops"
 Create `apps/api/src/fleet/budgets/budget-evaluator.spec.ts`:
 
 ```ts
+import { Logger } from '@nestjs/common';
 import { BudgetEvaluator } from './budget-evaluator';
 
 describe('BudgetEvaluator.signal (S1b §2.2, B7)', () => {
@@ -2130,11 +2137,15 @@ describe('BudgetEvaluator.signal (S1b §2.2, B7)', () => {
   });
 
   it('logs and swallows a failed evaluation', async () => {
+    const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     evaluateScope.mockRejectedValueOnce(new Error('db down'));
     evaluator.signal(['global']);
     jest.advanceTimersByTime(1_000);
-    await Promise.resolve();
+    jest.useRealTimers();
+    await new Promise((resolve) => setImmediate(resolve)); // let the rejection handler run
     expect(evaluateScope).toHaveBeenCalledTimes(1);
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('db down'));
+    logged.mockRestore();
   });
 });
 ```
@@ -2617,14 +2628,31 @@ describeIntegration('budget evaluator (PG)', () => {
   });
 
   it('two concurrent evaluations stop once (review focus 3)', async () => {
-    const policy = await projectPolicy();
-    await job({ costSpentUsd: 10 });
-    const queued = await job({ state: 'QUEUED', firstStartedAt: null });
-    const results = await Promise.all([evaluator.evaluate(policy.id), evaluator.evaluate(policy.id)]);
-    expect(results.filter((r) => r.stopped)).toHaveLength(1);
-    expect(await incidents(policy.id, 'hard_stop')).toBe(1);
-    expect(await hooks('fleet.budget.hard_stop')).toBe(1);
-    expect(await prisma.fleetActivity.count({ where: { jobId: queued.id, action: 'job.cancelled' } })).toBe(1);
+    // Five rounds: one race can pass by luck without the policy row lock; five almost never do.
+    for (let round = 0; round < 5; round += 1) {
+      await prisma.budgetPolicy.deleteMany();
+      await prisma.fleetJob.deleteMany();
+      await prisma.outboxEvent.deleteMany();
+      const policy = await projectPolicy();
+      await job({ costSpentUsd: 10 });
+      const queued = await job({ state: 'QUEUED', firstStartedAt: null });
+      const results = await Promise.all([evaluator.evaluate(policy.id), evaluator.evaluate(policy.id)]);
+      expect(results.filter((r) => r.stopped)).toHaveLength(1);
+      expect(await incidents(policy.id, 'hard_stop')).toBe(1);
+      expect(await hooks('fleet.budget.hard_stop')).toBe(1);
+      expect(await prisma.fleetActivity.count({ where: { jobId: queued.id, action: 'job.cancelled' } })).toBe(1);
+    }
+  });
+
+  it('warns again in the same window after the amount was raised (S1b §2.5)', async () => {
+    const policy = await projectPolicy({ hardStop: false });
+    await job({ costSpentUsd: 6 });
+    expect((await evaluator.evaluate(policy.id)).warned).toBe(true);
+    await prisma.budgetPolicy.update({ where: { id: policy.id }, data: { amountUsd: new Prisma.Decimal(20) } });
+    await job({ costSpentUsd: 5 });
+    expect((await evaluator.evaluate(policy.id)).warned).toBe(true);
+    expect(await incidents(policy.id, 'warn')).toBe(2);
+    expect(await hooks('fleet.budget.warn')).toBe(2);
   });
 
   it('signals the job\'s scope keys after a sync that changed its cost, and only then', async () => {
@@ -3267,6 +3295,20 @@ describeIntegration('fleet budgets API (PG)', () => {
     const noWarn = data<Row>(await request(server).patch(`${PROJECT}/${project.id}`).set(as(padmin)).send({ warnPercent: null }).expect(200));
     expect(noWarn.warnPercent).toBeNull();
     await request(server).patch(`${PROJECT}/${project.id}`).set(tok('dev')).send({ amountUsd: 1 }).expect(403);
+    const updatedRows = await prisma.fleetActivity.findMany({ where: { entityId: project.id, action: 'budget.updated' } });
+    expect(updatedRows).toHaveLength(2);
+    expect(updatedRows[0]).toEqual(expect.objectContaining({ actorId: padminId, projectId: world.projectId }));
+  });
+
+  it('shows members the activity of their project\'s budgets only; admins see global ones too', async () => {
+    await prisma.fleetActivity.deleteMany();
+    const global = data<Row>(await request(server).post(ADMIN).set(tok('root')).send({ scopeType: 'global', ...month, amountUsd: 50 }).expect(201));
+    const project = data<Row>(await request(server).post(PROJECT).set(as(padmin)).send({ scopeType: 'project', ...month, amountUsd: 20 }).expect(201));
+    const ids = async (who: string) =>
+      data<{ records: Array<{ entityId: string }> }>(await request(server).get('/api/fleet/activity').query({ entityType: 'budget' }).set(as(who)).expect(200))
+        .records.map((r) => r.entityId);
+    expect(await ids(world.tokens.dev)).toEqual([project.id]);
+    expect((await ids(world.tokens.root)).sort()).toEqual([global.id, project.id].sort());
   });
 
   it('a lowered amount pauses within a second; resume needs an amount above spend, then stops again later (review focus 4)', async () => {
@@ -3658,8 +3700,7 @@ export class BudgetsModule {}
 - [ ] **Step 6: Run the tests**
 
 Run: `cd apps/api && bun run type-check && bun run lint && bun run test:scoped src/fleet/budgets test/integration/fleet/fleet-budgets-api.integration.spec.ts test/integration/fleet/fleet-admin-guards.integration.spec.ts`
-Expected: PASS. (`fleet-admin-guards` covers `fleet/activity` scoping, which now also returns `budget` rows: a
-member sees the rows of their project's policies, an admin sees global and runner ones too.)
+Expected: PASS. (Budget rows in `fleet/activity` are scoped like job rows; the last API case pins it.)
 
 - [ ] **Step 7: Commit**
 
@@ -3803,7 +3844,7 @@ describe('koda fleet budget', () => {
     expect(parseScope('repo:acme/app')).toEqual({ scopeType: 'repo', ref: 'acme/app' });
     expect(() => parseScope('runner:')).toThrow();
     expect(() => parseScope('team')).toThrow();
-    expect(parseWarn('none')).toBeNull();
+    expect(parseWarn('none')).toBe('none');
     expect(parseWarn('75')).toBe(75);
     expect(() => parseWarn('0')).toThrow();
     expect(() => parseWarn('100')).toThrow();
@@ -3868,11 +3909,11 @@ describe('koda fleet budget', () => {
     expect(projectFleetBudgetsControllerResume).toHaveBeenCalledWith({ path: { slug: 'web', id: 'b2' }, body: { amountUsd: 80 } });
   });
 
-  it('surfaces a refused resume (400) as an API error, exit 1', async () => {
+  it('surfaces a refused resume (400) as a validation error, exit 3', async () => {
     (projectFleetBudgetsControllerResume as jest.Mock).mockRejectedValue({ ret: -2, status: 400, message: 'The amount 5 must be above this window\'s spend of 9' });
     await run('resume', 'b2', '--project', 'web');
     expect(projectFleetBudgetsControllerResume).toHaveBeenCalledWith({ path: { slug: 'web', id: 'b2' }, body: {} });
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(exitSpy).toHaveBeenCalledWith(3);
   });
 });
 ```
@@ -3967,9 +4008,11 @@ export function parseWindow(value: string): WindowKind {
   throw new InvalidArgumentError('expected month or lifetime');
 }
 
-/** 1-99, or `none` for no warn. */
-export function parseWarn(value: string): number | null {
-  if (value === 'none') return null;
+export type WarnOption = number | 'none';
+
+/** 1-99, or `none` (no warn). Returns the string 'none', never null: commander turns a null parser result into ''. */
+export function parseWarn(value: string): WarnOption {
+  if (value === 'none') return 'none';
   if (!/^\d{1,2}$/.test(value) || Number(value) < 1) throw new InvalidArgumentError('expected 1-99 or none');
   return Number(value);
 }
@@ -4057,7 +4100,7 @@ interface SetOptions {
   scope: Scope;
   window: WindowKind;
   amount: number;
-  warn?: number | null;
+  warn?: WarnOption;
   hardStop?: boolean;
   running?: 'finish' | 'cancel';
   project?: string;
@@ -4097,7 +4140,7 @@ function registerSet(budget: Command): void {
         }
         const fields: UpdateBudgetPolicyDto = {
           amountUsd: options.amount,
-          ...(options.warn !== undefined ? { warnPercent: options.warn } : {}),
+          ...(options.warn !== undefined ? { warnPercent: options.warn === 'none' ? null : options.warn } : {}),
           ...(options.hardStop !== undefined ? { hardStop: options.hardStop } : {}),
           ...(options.running !== undefined ? { runningJobs: options.running } : {}),
         };
@@ -4187,6 +4230,7 @@ git commit -m "feat(cli): koda fleet budget list, set, rm and resume"
 **Files:**
 - Modify: `docs/superpowers/specs/2026-10-01-fleet-s1b-budgets-schedules-design.md` (§2.2, §2.4 notes)
 - Modify: `.nax/mono/apps/api/context.md` (Fleet section), then regenerate the agent files
+- Modify: `docs/deployment/runner.md` (CLI list)
 
 - [ ] **Step 1: Spec notes**
 
@@ -4211,6 +4255,18 @@ In `.nax/mono/apps/api/context.md`, Fleet section, after the "Publish `fleet_job
 
 From the repo root regenerate the agent files: `nax generate && nax generate --all-packages` (local, not a billed
 run). Include every regenerated file in the commit. Never edit generated `AGENTS.md` / `CLAUDE.md` by hand.
+
+In `docs/deployment/runner.md`, in the `koda fleet` command block, add after the `koda fleet job bundle` line:
+
+```bash
+koda fleet budget list --project web                # spend against amount; WARN / PAUSED state
+koda fleet budget set --scope project --window month --amount 50 --project web
+koda fleet budget resume <policyId> --amount 80 --project web
+```
+
+and after that block's intro sentence ("Runner and repo-registry commands need ..."), append: "Budget commands
+without `--project` (global and runner policies) need the same admin token; project and repo budgets need project
+ADMIN."
 
 - [ ] **Step 3: Repo-wide checks**
 
@@ -4248,7 +4304,7 @@ Expected: PASS. Then the whole fleet integration directory once: `bun run test:s
 - [ ] **Step 4: Commit**
 
 ```bash
-git add docs/superpowers/specs/2026-10-01-fleet-s1b-budgets-schedules-design.md .nax/mono/apps/api/context.md
+git add docs/superpowers/specs/2026-10-01-fleet-s1b-budgets-schedules-design.md .nax/mono/apps/api/context.md docs/deployment/runner.md
 git add -u   # the agent files nax generate rewrote
 git commit -m "docs(fleet): S1b spec notes and api context for budgets"
 ```
