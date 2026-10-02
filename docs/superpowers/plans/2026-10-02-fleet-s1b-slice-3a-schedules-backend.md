@@ -62,8 +62,9 @@ feature). Depends on slice 1a (merged: `wipPush`) and 2a (merged as PR #188: `Bu
   `/token|secret|key|password|credential/i`; never put a `*Key` field in a payload.
 - One migration. The partial unique index `FleetJob (scheduleId) WHERE state = 'QUEUED'` is raw SQL in the migration
   and is added verbatim to `PARTIAL_UNIQUE_INDEXES` in `apps/api/test/helpers/partial-indexes.ts`.
-- Error codes: `fleet.scheduleCronTooFrequent` (400, code `-2`), plus `fleet.scheduleInput` (400, `-2`) and
-  `fleet.schedules` (404). Every key in both `apps/api/src/i18n/en/fleet.json` and `.../zh/fleet.json`.
+- Error codes: `fleet.scheduleCronTooFrequent` (400, code `-2`), plus `fleet.scheduleInput` (400, `-2`),
+  `fleet.schedules` (404) and `fleet.scheduleOwnerNoAccess` (409: enabling a schedule whose owner can no longer
+  dispatch, D211). Every key in both `apps/api/src/i18n/en/fleet.json` and `.../zh/fleet.json`.
 - Single API instance: the ticker is in-process with no distributed lock. The compare-and-set claim is what keeps
   two overlapping ticks (or an accidental second instance) from firing twice.
 - `txManager.run` joins an outer transaction when one is open (ALS); a unique violation inside a Prisma interactive
@@ -97,7 +98,7 @@ Numbering continues the S1b register (slice 2a ends at D172; slice 2b uses D173-
 
 | # | Decision | Why |
 |:--|:--|:--|
-| D190 | Cron parsing uses `cron-parser` `^5.10.1`, added as a direct dependency of `apps/api` and wrapped in one file (`cron-schedule.ts`). The `cron` package already in the tree (via `@nestjs/schedule`) is not used. | The spec names `cron-parser`. It is a pure function of (expression, zone, instant) with no timers, and it follows Vixie semantics (day-of-month OR day-of-week), checked against `cron` 4.4.0 with the same results. `cron` is a timer scheduler we would only borrow `CronTime` from, as an undeclared transitive dependency. The new dependency adds one package (`luxon` is already installed). |
+| D190 | Cron parsing uses `cron-parser` `^5.10.1`, added as a direct dependency of `apps/api` and wrapped in one file (`cron-schedule.ts`). The `cron` package already in the tree (via `@nestjs/schedule`) is not used. Ruled by user 10-02: keep `cron-parser`. | The spec names `cron-parser`. It is a pure function of (expression, zone, instant) with no timers, and it follows Vixie semantics (day-of-month OR day-of-week), checked against `cron` 4.4.0 with the same results. `cron` is a timer scheduler we would only borrow `CronTime` from, as an undeclared transitive dependency: `cron@4.4.0` is only a transitive dependency of `@nestjs/schedule`, not a direct one, so using it would also have meant adding a direct dependency. The new dependency adds one package (`luxon` is already installed). |
 | D191 | `cron-parser` pads missing fields, accepts six fields (seconds), `@daily` and `?`. `normalizeCron` therefore requires exactly five whitespace-separated fields and rewrites them single-spaced. The zone is canonicalised through `Intl.DateTimeFormat(...).resolvedOptions().timeZone` (`asia/singapore` is stored as `Asia/Singapore`) and then proven by computing one fire. The 15-minute check walks the next 100 fires from the moment of create or edit, as the spec says; it is an approximation (a short gap that first appears after the 100th fire is not seen). | Without the field check `* * * *` and `* * * * * *` would both be accepted and mean something the user did not type. The zone proof catches zones `Intl` accepts and luxon does not. |
 | D192 | Modules: `ScheduleStoreModule` (repository + `ScheduleProgressService`) is imported by `FleetJobsModule`; `SchedulesModule` (ticker, management service, controller) imports `FleetJobsModule`, `ScheduleStoreModule`, `FleetActivityModule`; `FleetModule` imports `SchedulesModule`. | `JobTransitionsService` (in `FleetJobsModule`) must call `ScheduleProgressService`, and the ticker needs `FleetJobsService`: one module would be a cycle (same split as 2a D160). `ScheduleProgressService` imports nothing from `jobs/job-transitions.service` (it defines its own `'system'` actor id) so there is no ESM import cycle either. |
 | D193 | `JobSchedule.repoId` and `JobSchedule.pinnedRunnerId` have **no foreign key**. `JobSchedule.projectId` cascades with its project and `createdById` references `User`. `FleetJob.scheduleId` references `JobSchedule` with `ON DELETE SET NULL`. | The spec disables a schedule "on a deleted repo" (`template_invalid`); an FK to `FleetRepo` would delete the schedule with the repo and nobody would see why it stopped. Deleting a schedule must keep its jobs and their history. |
@@ -112,13 +113,13 @@ Numbering continues the S1b register (slice 2a ends at D172; slice 2b uses D173-
 | D202 | Controller permissions: `POST` uses `@ProjectPermission([CREATE, 'FleetJob'])` (DEVELOPER+); `PATCH`, `DELETE`, `enable`, `disable` use `[UPDATE, 'FleetJob']` (DEVELOPER+) **and** owner-or-project-ADMIN (`ctx.role === 'ADMIN'`, which a global ADMIN resolves to). Reads need a user principal that is a project member. Agent principals are refused everywhere. | The spec names owner or project ADMIN; also requiring DEVELOPER+ means a demoted VIEWER-owner cannot edit a schedule that the ticker is about to disable for lost access. A project ADMIN can still delete it. |
 | D203 | A schedule's repo and feature are fixed after create (`PATCH` changes name, cron, timezone, ref, profiles, maxCostUsd, selectorLabels, pinnedRunnerId, noProgressLimit). A cron or timezone change on an enabled schedule recomputes `nextFireAt` from now. Editing never enables a disabled schedule. | `lastPassedCount` counts stories of one feature on one repo; changing either means a new schedule. |
 | D204 | `ref` is stored resolved: an omitted `ref` becomes the repo's default branch at create time. | The spec lists `ref` as a required column; a nax feature continues from `origin/<branch>`, and the base ref is part of the template the user saw. |
-| D205 | Additive job API for the 3b tick history: `FleetJobDto` gains `scheduleId` and `coalescedCount`; `GET /projects/:slug/fleet/jobs` gains a `scheduleId` filter; `ScheduleDto` carries `totalCostUsd` (sum of `costSpentUsd + costCarriedUsd` over the schedule's jobs, decimal string). | Spec §3.4 (3b) needs each tick's job with state, cost, `coalescedCount`, `wipPush` and `stateReason`; reusing the job list avoids a second history endpoint. |
+| D205 | Additive job API for the 3b tick history: `FleetJobDto` gains `scheduleId` and `coalescedCount`; `GET /projects/:slug/fleet/jobs` gains a `scheduleId` filter; `ScheduleDto` carries `totalCostUsd` (sum of `costSpentUsd + costCarriedUsd` over the schedule's jobs, decimal string). | Spec §3.4 (3b) needs each tick's job with state, cost, `coalescedCount`, `wipPush` and `stateReason`; reusing the job list avoids a second history endpoint. Ruled by user 10-02: accepted. |
 | D206 | Activity actions, all `entityType: 'schedule'`: `schedule.created`, `.updated`, `.deleted`, `.enabled`, `.disabled` (manual), `.auto_disabled` (payload `reason`), `.tick_dispatched`, `.tick_coalesced`, `.tick_skipped` (payload `reason`). Automatic rows use `actorType: 'SYSTEM'`, `actorId: 'system'`, `responsibleUserId` = the schedule owner. The `fleet.schedule.disabled` webhook is sent for auto-disables only. | The spec asks for a row on every mutation, auto-disable and skipped tick; coalesce and dispatch rows make the history readable. A manual disable is the user's own action, so it sends no webhook. |
 | D207 | `findDue` returns at most 100 enabled schedules per tick, oldest due first, and skips schedules of soft-deleted projects (`Project.deletedAt` set). | A deleted project must stop dispatching; the cap bounds a tick after a long outage (the rest wait one more minute). |
 | D208 | A stored `cron` that no longer parses when the ticker computes the next fire disables the schedule with `template_invalid` instead of failing every minute. | A library upgrade must not turn into a per-minute error loop. |
-| D209 | CLI: `koda fleet schedule` with `add`, `edit`, `list`, `show`, `rm`, `enable` and `disable`. The stall limit option is `--stall-after <ticks>` (commander reads `--no-progress-limit` as the negation of `--progress-limit`). `--timezone` defaults to the machine's zone (printed back). `edit` has `--unpin`, `--clear-profiles`, `--clear-labels`. `show` prints the last 10 jobs through the job list filter. Lists are plain arrays, not pages. | Each choice avoids a silent surprise: the negation trap, a UTC default for a cron the user wrote in local time, and no way to remove a list. A project holds few schedules (same reasoning as 2a D163). |
+| D209 | CLI: `koda fleet schedule` with `add`, `edit`, `list`, `show`, `rm`, `enable` and `disable`. The stall limit option is `--stall-after <ticks>` (commander reads `--no-progress-limit` as the negation of `--progress-limit`). `--timezone` is REQUIRED on `add` (no default; commander's missing-option usage error) and optional on `edit`. `edit` has `--unpin`, `--clear-profiles`, `--clear-labels`. `show` prints the last 10 jobs through the job list filter. Lists are plain arrays, not pages. | Each choice avoids a silent surprise: the negation trap, an invisible laptop-zone or UTC assumption (the API field is a required IANA zone, spec §3.1), and no way to remove a list. The timezone rule is ruled by user 10-02. A project holds few schedules (same reasoning as 2a D163). |
 | D210 | Fleet endpoint lifecycle coverage lives in `test/integration/fleet/` (as S1 and 2a), not in `test/e2e/api-endpoint/endpoint.e2e.spec.ts`. | `.nax/rules/api-testing.md` asks for the e2e file; no fleet slice has used it and the fleet suites boot the full app with the fleet world fixtures. Recorded so a reviewer does not "fix" it. |
-| D211 | Enabling a schedule whose owner has lost access is allowed; the next tick disables it again with `owner_lost_access` and writes the activity row. | Enabling is the owner-or-admin's right; the access rule belongs to dispatch time. The loop is bounded to one tick and visible. |
+| D211 | Enabling a schedule whose owner can no longer dispatch (user disabled, deleted, or no ADMIN/DEVELOPER role and not a global ADMIN, the D201 rule) is **rejected with 409 `fleet.scheduleOwnerNoAccess`**. Enabling an already enabled schedule stays a no-op. The ticker's auto-disable for an owner who loses access while the schedule is enabled is unchanged. Ruled by user 10-02. | Enabling something the next tick would immediately disable only hides the problem; the caller should hear it at once. The access rule is the same `mayDispatch` the ticker uses. |
 | D212 | This worktree runs DB-mode tests against its own database `koda_slice3a_test` (and `koda_slice3a_shadow` for `prisma migrate diff`) because slice 2b runs against `koda_test` at the same time and every DB-mode Jest run does `prisma db push --force-reset`. `.env.test` is tracked, so the edit is `skip-worktree` and is reverted in Task 11. | `.env.test` overrides an exported `DATABASE_URL`; editing the tracked file without `skip-worktree` would ship the change. |
 
 ## Review Focus
@@ -2857,6 +2858,7 @@ const KEYS: Array<[string, string, string[]]> = [
   ['schedules', '404', []],
   ['scheduleInput', '-2', ['reason']],
   ['scheduleCronTooFrequent', '-2', ['minutes']],
+  ['scheduleOwnerNoAccess', '409', []],
 ];
 
 describe('fleet schedule translation keys', () => {
@@ -2891,7 +2893,8 @@ with
   "budgetNotPaused": { "409": "This budget policy is not paused" },
   "schedules": { "404": "Schedule not found" },
   "scheduleInput": { "-2": "Invalid schedule: {reason}" },
-  "scheduleCronTooFrequent": { "-2": "The schedule fires more often than every {minutes} minutes" }
+  "scheduleCronTooFrequent": { "-2": "The schedule fires more often than every {minutes} minutes" },
+  "scheduleOwnerNoAccess": { "409": "The schedule's owner can no longer dispatch to this project; the owner needs DEVELOPER access or higher" }
 ```
 
 and in `apps/api/src/i18n/zh/fleet.json` replace
@@ -2906,7 +2909,8 @@ with
   "budgetNotPaused": { "409": "该预算策略未处于暂停状态" },
   "schedules": { "404": "未找到计划" },
   "scheduleInput": { "-2": "无效的计划：{reason}" },
-  "scheduleCronTooFrequent": { "-2": "计划的触发间隔不得少于 {minutes} 分钟" }
+  "scheduleCronTooFrequent": { "-2": "计划的触发间隔不得少于 {minutes} 分钟" },
+  "scheduleOwnerNoAccess": { "409": "该计划的所有者已无权向此项目派发任务；所有者需要开发者或更高权限" }
 ```
 
 Run the spec again. Expected: PASS (3 cases).
@@ -2917,6 +2921,7 @@ Create `apps/api/src/fleet/schedules/schedules.service.spec.ts`:
 
 ```ts
 import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FleetDispatchException } from '../jobs/fleet-dispatch.exception';
 import type { ScheduleRecord } from './domain/schedule.domain';
 import { SchedulesService } from './schedules.service';
@@ -2939,6 +2944,7 @@ function build(current: ScheduleRecord | null = schedule()) {
     update: jest.fn(async (_id: string, patch: Partial<ScheduleRecord>) => ({ ...(current as ScheduleRecord), ...patch })),
     delete: jest.fn(async () => undefined),
     sumCostBySchedule: jest.fn(async () => new Map<string, string>()),
+    findOwnerAccess: jest.fn(async () => ({ exists: true, disabled: false, globalRole: 'MEMBER', projectRole: 'DEVELOPER' })),
   };
   const jobsRepo = { findRepo: jest.fn(async () => REPO as typeof REPO | null) };
   const placement = { evaluatePinned: jest.fn(async (): Promise<string | null> => null) };
@@ -3039,9 +3045,24 @@ describe('SchedulesService.enable and disable', () => {
     expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'schedule.enabled' }));
   });
 
+  it.each([
+    ['a disabled owner', { exists: true, disabled: true, globalRole: 'MEMBER', projectRole: 'DEVELOPER' }],
+    ['an owner removed from the project', { exists: true, disabled: false, globalRole: 'MEMBER', projectRole: null }],
+    ['an owner demoted to VIEWER', { exists: true, disabled: false, globalRole: 'MEMBER', projectRole: 'VIEWER' }],
+    ['an owner that no longer exists', { exists: false, disabled: false, globalRole: '', projectRole: null }],
+  ])('enable is refused with a 409 conflict for %s, even when a project admin asks (plan D211)', async (_name, access) => {
+    const h = build(schedule({ enabled: false, disabledReason: 'manual' }));
+    h.repo.findOwnerAccess.mockResolvedValue(access);
+    await expect(h.svc.enable('admin', 'p1', 's1', true, NOW)).rejects.toBeInstanceOf(ConflictAppException);
+    expect(h.repo.update).not.toHaveBeenCalled();
+    expect(h.activity.record).not.toHaveBeenCalled();
+  });
+
   it('enable on an enabled schedule changes nothing', async () => {
     const h = build();
+    h.repo.findOwnerAccess.mockResolvedValue({ exists: false, disabled: false, globalRole: '', projectRole: null });
     await h.svc.enable('owner', 'p1', 's1', false, NOW);
+    expect(h.repo.findOwnerAccess).not.toHaveBeenCalled();
     expect(h.repo.update).not.toHaveBeenCalled();
     expect(h.activity.record).not.toHaveBeenCalled();
   });
@@ -3208,6 +3229,7 @@ Create `apps/api/src/fleet/schedules/schedules.service.ts`:
 import { Inject, Injectable } from '@nestjs/common';
 import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { normalizeDispatch } from '../jobs/dispatch-input';
 import { FleetDispatchException } from '../jobs/fleet-dispatch.exception';
@@ -3220,6 +3242,7 @@ import type { CreateScheduleDto } from './dto/create-schedule.dto';
 import { ScheduleDto } from './dto/schedule.dto';
 import type { UpdateScheduleDto } from './dto/update-schedule.dto';
 import { schedulePayload } from './schedule-payloads';
+import { mayDispatch } from './schedule-access';
 
 const ZERO_USD = '0.0000';
 
@@ -3330,11 +3353,15 @@ export class SchedulesService {
     });
   }
 
-  /** S1b §3.3: re-enabling resets the stall counter and the reason, recomputes nextFireAt from now, keeps lastPassedCount. */
+  /** S1b §3.3: re-enabling resets the stall counter and the reason, recomputes nextFireAt from now, keeps lastPassedCount. 409 when the owner can no longer dispatch (D211). */
   async enable(actorId: string, projectId: string, id: string, canAdminister: boolean, now = new Date()): Promise<ScheduleDto> {
     const result = await this.txManager.run(async () => {
       const current = await this.lockManaged(projectId, id, actorId, canAdminister);
       if (current.enabled) return current;
+      // Plan D211: the owner must still be able to dispatch, or the next tick would disable the schedule again.
+      if (!mayDispatch(await this.repo.findOwnerAccess(projectId, current.createdById))) {
+        throw new ConflictAppException({}, 'fleet.scheduleOwnerNoAccess');
+      }
       const after = await this.repo.update(id, {
         enabled: true, disabledReason: null, noProgressTicks: 0, nextFireAt: nextFireAfter(current.cron, current.timezone, now), updatedById: actorId,
       });
@@ -3500,6 +3527,7 @@ export class ProjectFleetSchedulesController {
   @ProjectPermission([CaslPermissionAction.UPDATE, 'FleetJob'])
   @ApiOperation({ summary: 'Enable a schedule: resets the stall counter and recomputes the next fire (owner or project ADMIN)' })
   @ApiResponse({ status: 200, type: ScheduleDto })
+  @ApiResponse({ status: 409, description: 'fleet.scheduleOwnerNoAccess: the owner is disabled or no longer has DEVELOPER access to the project' })
   async enable(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
     return JsonResponse.Ok(await this.schedules.enable(principal.id, ctx.project.id, id, canAdminister(ctx)));
   }
@@ -3699,6 +3727,25 @@ describeIntegration('fleet schedules API (PG)', () => {
     expect(new Date(on.nextFireAt as string).getTime()).toBeGreaterThan(Date.now());
   });
 
+  it('enable is refused with 409 when the owner can no longer dispatch, and enabling a healthy schedule still works (plan D211)', async () => {
+    const lost = await prisma.user.create({ data: { email: 'lost@koda.test', passwordHash: 'x', role: 'MEMBER' } });
+    const off = await prisma.jobSchedule.create({
+      data: {
+        projectId: world.projectId, repoId: world.repoId, name: 'orphaned', cron: '0 9 * * *', timezone: 'UTC', feature: `own${++n}`, ref: 'trunk',
+        profiles: [], maxCostUsd: new Prisma.Decimal(5), selectorLabels: [], nextFireAt: new Date(), enabled: false, disabledReason: 'owner_lost_access',
+        createdById: lost.id, updatedById: lost.id,
+      },
+    });
+    const res = await request(server).post(`${BASE}/${off.id}/enable`).set(tok('root')).expect(409);
+    expect(res.body.message).toContain('owner');
+    expect(await prisma.jobSchedule.findUniqueOrThrow({ where: { id: off.id } })).toEqual(expect.objectContaining({ enabled: false, disabledReason: 'owner_lost_access' }));
+    await prisma.user.update({ where: { id: lost.id }, data: { disabled: true } });
+    await prisma.projectMember.create({ data: { projectId: world.projectId, userId: lost.id, role: 'DEVELOPER' } });
+    await request(server).post(`${BASE}/${off.id}/enable`).set(tok('root')).expect(409);
+    await prisma.user.update({ where: { id: lost.id }, data: { disabled: false } });
+    data<Row>(await request(server).post(`${BASE}/${off.id}/enable`).set(tok('root')).expect(200));
+  });
+
   it('delete is refused for a stranger and keeps the schedule\'s jobs, detached', async () => {
     const row = await create();
     const job = await prisma.fleetJob.create({
@@ -3744,7 +3791,7 @@ describeIntegration('fleet schedules API (PG)', () => {
 - [ ] **Step 11: Run the HTTP spec**
 
 Run: `cd apps/api && bun run test:scoped test/integration/fleet/fleet-schedules-api.integration.spec.ts`
-Expected: PASS (18 cases). If a whole file fails in under a millisecond with only a `loginToken` frame in the stack,
+Expected: PASS (19 cases). If a whole file fails in under a millisecond with only a `loginToken` frame in the stack,
 it is the known local login throttle: wait a minute and rerun that file alone.
 
 - [ ] **Step 12: Lint and commit**
@@ -3845,7 +3892,7 @@ git commit -m "feat(fleet): openapi contract for schedules"
   `fleetJobsControllerList`, types `ScheduleDto`, `CreateScheduleDto`, `UpdateScheduleDto`, `FleetJobDto`;
   `resolveRepo`, `resolveRunner`, `handleFleetValidation`, `FleetPage` from `fleet-shared`; `parseUsd`.
 - Produces: `registerFleetSchedule(fleet: Command): void`; exported helpers `parseStallAfter(value): number`,
-  `localTimezone(): string`, `scheduleState(s: ScheduleDto): string`, `passedOf(job: FleetJobDto): string`;
+  `scheduleState(s: ScheduleDto): string`, `passedOf(job: FleetJobDto): string`;
   `fleet-shared` gains `repoNamesOrEmpty(slug): Promise<ReadonlyMap<string, string>>`.
 
 - [ ] **Step 1: Write the failing spec**
@@ -3874,7 +3921,7 @@ jest.mock('../config', () => ({ resolveContext: jest.fn() }));
 
 import { Command } from 'commander';
 import { fleetCommand } from './fleet';
-import { localTimezone, parseStallAfter, passedOf, scheduleState } from './fleet-schedule';
+import { parseStallAfter, passedOf, scheduleState } from './fleet-schedule';
 import {
   fleetJobsControllerList,
   projectFleetReposControllerList,
@@ -3929,7 +3976,6 @@ describe('koda fleet schedule', () => {
     expect(scheduleState(row({ enabled: false, disabledReason: 'no_progress' }) as never)).toBe('disabled (no_progress)');
     expect(passedOf({ progress: { passed: 2, total: 5 } } as never)).toBe('2/5');
     expect(passedOf({ progress: null } as never)).toBe('-');
-    expect(localTimezone().length).toBeGreaterThan(0);
   });
 
   it('list prints repo names and the disabled reason; --json prints the rows', async () => {
@@ -3944,15 +3990,21 @@ describe('koda fleet schedule', () => {
     expect(exitSpy).toHaveBeenLastCalledWith(0);
   });
 
-  it('add resolves the repo, sends only what was given, and the machine zone when --timezone is omitted', async () => {
+  it('add resolves the repo and sends only what was given', async () => {
     (projectFleetSchedulesControllerCreate as jest.Mock).mockResolvedValue(ok(row()));
-    await run('add', '--repo', 'acme/app', '--feature', 'login', '--cron', '0 9 * * 1-5', '--max-cost', '5');
+    await run('add', '--repo', 'acme/app', '--feature', 'login', '--cron', '0 9 * * 1-5', '--timezone', 'Asia/Singapore', '--max-cost', '5');
     expect(projectFleetSchedulesControllerCreate).toHaveBeenCalledWith({
       path: { slug: 'web' },
-      body: { name: 'login', repoId: 'fr1', feature: 'login', cron: '0 9 * * 1-5', timezone: localTimezone(), maxCostUsd: 5 },
+      body: { name: 'login', repoId: 'fr1', feature: 'login', cron: '0 9 * * 1-5', timezone: 'Asia/Singapore', maxCostUsd: 5 },
     });
     expect(out()).toContain('s1');
     expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('add requires --timezone: commander errors and nothing is sent (no machine-zone or UTC default)', async () => {
+    await expect(run('add', '--repo', 'acme/app', '--feature', 'login', '--cron', '0 9 * * 1-5', '--max-cost', '5'))
+      .rejects.toMatchObject({ code: 'commander.missingMandatoryOptionValue' });
+    expect(projectFleetSchedulesControllerCreate).not.toHaveBeenCalled();
   });
 
   it('add passes name, zone, ref, profiles, labels and the stall limit; --pin resolves a runner name', async () => {
@@ -3971,16 +4023,16 @@ describe('koda fleet schedule', () => {
   });
 
   it('add refuses --pin with --label, an unknown repo and an unknown runner before any create (exit 3)', async () => {
-    await run('add', '--repo', 'acme/app', '--feature', 'f', '--cron', '0 9 * * *', '--max-cost', '1', '--pin', 'box-1', '--label', 'linux');
-    await run('add', '--repo', 'nope/none', '--feature', 'f', '--cron', '0 9 * * *', '--max-cost', '1');
-    await run('add', '--repo', 'acme/app', '--feature', 'f', '--cron', '0 9 * * *', '--max-cost', '1', '--pin', 'ghost');
+    await run('add', '--repo', 'acme/app', '--feature', 'f', '--cron', '0 9 * * *', '--timezone', 'UTC', '--max-cost', '1', '--pin', 'box-1', '--label', 'linux');
+    await run('add', '--repo', 'nope/none', '--feature', 'f', '--cron', '0 9 * * *', '--timezone', 'UTC', '--max-cost', '1');
+    await run('add', '--repo', 'acme/app', '--feature', 'f', '--cron', '0 9 * * *', '--timezone', 'UTC', '--max-cost', '1', '--pin', 'ghost');
     expect(projectFleetSchedulesControllerCreate).not.toHaveBeenCalled();
     expect(exitSpy.mock.calls.filter((c) => c[0] === 3)).toHaveLength(3);
   });
 
   it('add maps an API 400 (cron too frequent) to exit 3', async () => {
     (projectFleetSchedulesControllerCreate as jest.Mock).mockRejectedValue({ ret: -2, status: 400, message: 'The schedule fires more often than every 15 minutes' });
-    await run('add', '--repo', 'acme/app', '--feature', 'f', '--cron', '*/10 * * * *', '--max-cost', '1');
+    await run('add', '--repo', 'acme/app', '--feature', 'f', '--cron', '*/10 * * * *', '--timezone', 'UTC', '--max-cost', '1');
     expect(exitSpy).toHaveBeenCalledWith(3);
   });
 
@@ -4030,6 +4082,14 @@ describe('koda fleet schedule', () => {
     (projectFleetSchedulesControllerRemove as jest.Mock).mockResolvedValue(undefined);
     await run('rm', 's1', '--force');
     expect(projectFleetSchedulesControllerRemove).toHaveBeenCalledWith({ path: { slug: 'web', id: 's1' } });
+  });
+
+  it('enable maps the 409 for an owner without access to exit 1 and prints the API message (plan D211)', async () => {
+    (projectFleetSchedulesControllerEnable as jest.Mock).mockRejectedValue({ ret: 409, message: "The schedule's owner can no longer dispatch to this project" });
+    const errSpy = jest.spyOn(console, 'error');
+    await run('enable', 's1');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errSpy.mock.calls.flat().join('\n')).toContain('owner can no longer dispatch');
   });
 
   it('a 403 from edit (not the owner) exits 2, the CLI\'s auth-error code', async () => {
@@ -4082,12 +4142,13 @@ import {
   type UpdateScheduleDto,
 } from '../generated';
 import { unwrap } from '../utils/api';
+import { apiErrorCode } from '../utils/api-error-code';
 import { withContext } from '../utils/context';
 import { handleApiError } from '../utils/error';
 import { requireForce } from '../utils/force';
 import { table } from '../utils/output';
 import { parseUsd } from '../utils/parse-usd';
-import { type FleetPage, handleFleetValidation, repoNamesOrEmpty, resolveRepo, resolveRunner } from './fleet-shared';
+import { type FleetPage, handleFleetConflict, handleFleetValidation, repoNamesOrEmpty, resolveRepo, resolveRunner } from './fleet-shared';
 
 const collect = (value: string, previous: string[]): string[] => [...previous, value];
 
@@ -4095,11 +4156,6 @@ const collect = (value: string, previous: string[]): string[] => [...previous, v
 export function parseStallAfter(value: string): number {
   if (!/^\d{1,2}$/.test(value) || Number(value) < 1 || Number(value) > 20) throw new InvalidArgumentError('expected a whole number from 1 to 20');
   return Number(value);
-}
-
-/** The machine's IANA zone: the zone a user means by "9am" (plan D209). It is printed back by `add`. */
-export function localTimezone(): string {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 }
 
 export function scheduleState(s: ScheduleDto): string {
@@ -4174,7 +4230,7 @@ function registerShow(schedule: Command): void {
 }
 
 interface AddOptions {
-  repo: string; feature: string; cron: string; maxCost: number; name?: string; timezone?: string; ref?: string;
+  repo: string; feature: string; cron: string; timezone: string; maxCost: number; name?: string; ref?: string;
   profile: string[]; label: string[]; pin?: string; stallAfter?: number; project?: string; json?: boolean;
 }
 
@@ -4185,9 +4241,9 @@ function registerAdd(schedule: Command): void {
     .requiredOption('--repo <repo>', 'Repo id or owner/name (koda fleet repo list)')
     .requiredOption('--feature <name>', 'nax feature name')
     .requiredOption('--cron <expr>', 'Five-field cron, quoted: "0 9 * * 1-5" (fires at least 15 minutes apart)')
+    .requiredOption('--timezone <iana>', 'IANA timezone the cron is read in, for example Asia/Singapore (required)')
     .requiredOption('--max-cost <usd>', 'Budget of each run in USD, at most 4 decimals', parseUsd)
     .option('--name <name>', 'Display name (default: the feature)')
-    .option('--timezone <iana>', 'Timezone the cron is read in (default: this machine\'s zone)')
     .option('--ref <ref>', 'Git ref to check out (default: the repo default branch)')
     .option('--profile <name>', 'nax profile, repeatable; later wins', collect, [] as string[])
     .option('--label <label>', 'Only runners with this label, repeatable', collect, [] as string[])
@@ -4205,7 +4261,7 @@ function registerAdd(schedule: Command): void {
         const pinned = o.pin ? await resolveRunner(slug, o.pin) : null;
         if (o.pin && !pinned) return handleFleetValidation(`Unknown runner "${o.pin}"`);
         const body: CreateScheduleDto = {
-          name: o.name ?? o.feature, repoId: repo.id, feature: o.feature, cron: o.cron, timezone: o.timezone ?? localTimezone(), maxCostUsd: o.maxCost,
+          name: o.name ?? o.feature, repoId: repo.id, feature: o.feature, cron: o.cron, timezone: o.timezone, maxCostUsd: o.maxCost,
           ...(o.ref ? { ref: o.ref } : {}),
           ...(o.profile.length > 0 ? { profiles: o.profile } : {}),
           ...(o.label.length > 0 ? { selectorLabels: o.label } : {}),
@@ -4302,6 +4358,8 @@ function registerToggle(schedule: Command, verb: 'enable' | 'disable'): void {
         else printSchedule(verb === 'enable' ? 'Enabled' : 'Disabled', result);
         process.exit(0);
       } catch (err: unknown) {
+        // Enable answers 409 when the owner can no longer dispatch (plan D211): exit 1 with the API's message.
+        if (verb === 'enable' && apiErrorCode(err) === 409) return handleFleetConflict(`${(err as { message?: string }).message ?? 'Conflict'}`);
         handleApiError(err, { notFoundMessage: `Schedule not found: ${scheduleId}` });
       }
     });
@@ -4381,7 +4439,7 @@ In §3.4, after the "Web (3b)" bullet list, add:
 ```markdown
 - Additive job API for the 3b history (3a plan D205): `FleetJobDto` carries `scheduleId` and `coalescedCount`,
   `GET /projects/:slug/fleet/jobs` takes a `scheduleId` filter, and `ScheduleDto` carries `totalCostUsd`.
-- Edit and permission details (3a plan D202, D203): the repo and the feature are fixed after create; edit, enable,
+- Enable refuses an owner who can no longer dispatch with 409 `fleet.scheduleOwnerNoAccess` (3a plan D211). Edit and permission details (3a plan D202, D203): the repo and the feature are fixed after create; edit, enable,
   disable and delete need project DEVELOPER+ and the owner or a project ADMIN; the schedule list is a plain array.
 ```
 
@@ -4479,7 +4537,7 @@ Expected: `git status` shows nothing else staged or modified (in particular not 
 The PR body must state: the new dependency `cron-parser` (D190) and the five-field and zone handling (D191); the
 spec narrowings D194 (detach before delete), D195 (CANCELLED is not marked counted), D197 (a disabled schedule keeps
 its reason), D199 (dispatch error mapping), D201-D203 (owner access, permissions, fixed repo and feature), D205 (the
-additive job API fields and `scheduleId` filter); the known limits D191 (the 15-minute check is a 100-fire sample)
+additive job API fields and `scheduleId` filter, accepted), D211 (enable is refused with 409 when the owner has no access); the known limits D191 (the 15-minute check is a 100-fire sample)
 and D198 (a crash between claim and dispatch loses that one fire; single-instance assumption, no distributed lock);
 D210 (endpoint coverage lives in `test/integration/fleet`); and that slice 3b (web and E2E) builds on it.
 
