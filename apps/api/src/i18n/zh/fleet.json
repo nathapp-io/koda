@@ -20,5 +20,9 @@
   "budgetInput": { "-2": "无效的预算策略：{reason}" },
   "budgetPaused": { "409": "{scope} 的舰队预算已暂停（策略 {policyId}）" },
   "budgetAmountNotAboveSpend": { "-2": "金额 {amountUsd} 必须高于本周期已花费的 {spentUsd}" },
-  "budgetNotPaused": { "409": "该预算策略未处于暂停状态" }
+  "budgetNotPaused": { "409": "该预算策略未处于暂停状态" },
+  "schedules": { "404": "未找到计划" },
+  "scheduleInput": { "-2": "无效的计划：{reason}" },
+  "scheduleCronTooFrequent": { "-2": "计划的触发间隔不得少于 {minutes} 分钟" },
+  "scheduleOwnerNoAccess": { "409": "该计划的所有者已无权向此项目派发任务；所有者需要开发者或更高权限" }
 }
