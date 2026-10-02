@@ -77,7 +77,7 @@ Numbered D173-D189 (slice 2a ended at D172; slice 3a uses D190+).
 | D184 | The resume dialog requires a new amount when the current amount is not above the window spend (the lowered-amount case, 2a Review Focus 4) and rejects a typed amount that is not above the spend, both before the request. Blank otherwise means "keep the amount" and sends `{}`. | The server would answer 400 `fleet.budgetAmountNotAboveSpend`; catching it first gives a precise hint instead of a toast. The server check stays (a race with new spend is still possible). |
 | D185 | A refusal that means "your view is stale" (resume 409 `fleet.budgetNotPaused`, edit or delete 404 `fleet.budgets`) shows the server's message and reloads the list; the dialog stays open and its `failed` event triggers the reload. | No phantom rows, no silent no-ops. |
 | D186 | Delete asks `window.confirm` (as the Runners page does) and the text says a paused scope resumes immediately (2a: deleting a paused policy clears the pause). | The consequence is the non-obvious part. |
-| D187 | Navigation: a "Budgets" link in the global-admin sidebar group (Wallet icon, `nav.fleetBudgets`), and a "Budgets" button in the project jobs-list header for every member (plus the banner link). No project sidebar link. Breadcrumb leaf for `/:project/fleet/budgets` is the page title. | The project "Fleet jobs" sidebar link is prefix-active, so a second `/:project/fleet/budgets` link would highlight both. |
+| D187 | (ruled by user 10-02) Navigation: a "Budgets" link in the global-admin sidebar group (Wallet icon, `nav.fleetBudgets`), and a "Budgets" button in the project jobs-list header for every member (plus the banner link). No project sidebar link. Breadcrumb leaf for `/:project/fleet/budgets` is the page title. | The project "Fleet jobs" sidebar link is prefix-active, so a second `/:project/fleet/budgets` link would highlight both. |
 | D188 | The job page renders a `stateReason` of the form `budget:<policyId>` (what a budget cancel writes, 2a D156/D170) as "Stopped by a fleet budget" with a link to the budgets page; the raw reason stays in the element `title`. | Otherwise members read an opaque id. Cheap, pure helper `budgetStopPolicyId`. |
 | D189 | E2E: one spec, two tests. (1) Project flow: create a project policy in the UI, drive a scripted runner past the limit, wait for the API to report `paused`, see the banner on the jobs list, resume with a raised limit in the UI, banner gone. (2) Admin flow: create and delete a global policy. The first test deletes its policy in `afterAll`, because a leftover paused project policy would block the `fleet-dispatch` e2e that runs after it alphabetically. | Needs the evaluator's ~1 s debounce (the test waits on the API, not a fixed sleep) and cleanup that survives a failed assertion. |
 
@@ -3946,10 +3946,8 @@ cd apps/api && bun run test:db:up
 cd apps/web && bunx playwright test tests/e2e/fleet-budgets.e2e.spec.ts tests/e2e/fleet-dispatch.e2e.spec.ts
 ```
 
-Expected: 3 passed. The dispatch spec running second proves the budgets spec left no paused policy behind. If the first test
-times out waiting for `paused`, read `GET /projects/fleet-e2e/fleet/budgets` (the poll's source): a `spentUsd` of `0` means the
-job's `firstStartedAt` was not set by the RUNNING report (a slice 2a behaviour; check `job-transitions.service.ts` before
-changing the web). A 429 on login means the local throttle cascade (the e2e config already raises the limit to 50/min): wait a
+Expected: 3 passed. The dispatch spec running second proves the budgets spec left no paused policy behind. Verified on main: `job-transitions.service.ts:48` sets `firstStartedAt` once on the RUNNING transition and never clears it
+(not even on requeue), so the scripted RUNNING report is what puts the job's spend in the window. A 429 on login means the local throttle cascade (the e2e config already raises the limit to 50/min): wait a
 minute and rerun only this file; CI runs the full suite green. Do not run the whole e2e directory locally.
 
 - [ ] **Step 4: Docs**
