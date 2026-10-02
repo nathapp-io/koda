@@ -43,4 +43,9 @@ describe('fleet jobs list', () => {
     expect(list).toMatch(/<div class="overflow-x-auto">\s*<Table data-testid="fleet-jobs-table">/)
     expect(list).toContain("people.nameOf(job.requestedById) ?? t('fleet.jobs.unknownMember')")
   })
+
+  test('every member gets a Budgets button next to Dispatch (D187)', () => {
+    expect(list).toMatch(/<Button variant="outline" data-testid="fleet-budgets-link" @click="navigateTo\(`\/\$\{slug\}\/fleet\/budgets`\)">/)
+    expect(list.indexOf('fleet-budgets-link')).toBeLessThan(list.indexOf('fleet-dispatch-button'))
+  })
 })
