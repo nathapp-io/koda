@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { registerFleetApproval } from './fleet-approval';
 import { registerFleetBudget } from './fleet-budget';
 import { registerFleetDispatch } from './fleet-dispatch';
 import { registerFleetJob } from './fleet-job';
@@ -15,6 +16,7 @@ export function fleetCommand(program: Command): Command {
   registerFleetDispatch(fleet);
   registerFleetJob(fleet);
   registerFleetBudget(fleet);
+  registerFleetApproval(fleet);
   registerFleetSchedule(fleet);
   return fleet;
 }
