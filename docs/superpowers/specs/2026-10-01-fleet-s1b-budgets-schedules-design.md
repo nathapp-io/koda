@@ -209,7 +209,8 @@ FleetJob += costCarriedUsd Decimal(12,4) @default(0), firstStartedAt DateTime?, 
      - if `runningJobs = cancel`, request cancel of the scope's `ASSIGNED` and `RUNNING` jobs through a new
        system method `FleetJobsService.cancelForBudget(jobIds, policyId)`: it sets `cancelRequestedAt` and
        `cancelReason = 'budget:<policyId>'` and queues `CANCEL`, with a system actor in activity. When the runner
-       later reports `CANCELLED` with no reason, the transition uses `cancelReason` as `stateReason`.
+       later reports `CANCELLED` with no reason, the transition uses `cancelReason` as `stateReason`. A set
+       `cancelReason` wins over any reason the runner sends (2a plan D156).
   4. Live events and runner notifications collected in the transaction are published after it commits, as
      `PlacementService` does.
 - **Sweep:** a `BudgetSweeper` on the `FleetSweeper` pattern (`apps/api/src/fleet/sync/fleet-sweeper.ts:31-39`:
@@ -248,6 +249,9 @@ equals the current window start. A stale monthly pause is therefore not enforced
     the global ones, read-only); create, update and delete of project and repo policies for project ADMIN or
     global ADMIN. A repo-scope policy must name a repo of that project.
   - `POST <either prefix>/:id/resume { amountUsd? }` with the same permission as editing that policy.
+- Each prefix acts only on its own policies (2a plan D162): `/fleet/budgets` on global and runner policies,
+  `/projects/:slug/fleet/budgets` on that project's project and repo policies; another id answers 404. Resume of a
+  policy that is not paused answers 409 `fleet.budgetNotPaused` (D164).
 - **Resume:** optionally set a new amount, then clear the pause, insert a `resumed` incident with `actorId`, and
   write a `FleetActivity` row. 400 `fleet.budgetAmountNotAboveSpend` if the resulting amount is ≤ the current
   window spend. C8 will call the same service method.
