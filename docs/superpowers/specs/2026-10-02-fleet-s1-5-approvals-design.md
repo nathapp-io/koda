@@ -211,8 +211,8 @@ budgets and jobs), it is two modules:
 
 ### 2.2 Creation
 
-- Budget (1a): `BudgetEvaluator.hardStop()` calls `ApprovalCloser.openBudget` in the hard-stop transaction, after
-  `cancelForBudget`, and stamps the incident's `approvalId` when the incident was inserted.
+- Budget (1a): `BudgetEvaluator.hardStop()` calls `ApprovalCloser.openBudget` in the hard-stop transaction and stamps
+  the incident's `approvalId` when the incident was inserted.
 - Bash (2a): `job-report.processor.ts` handles the `approval_request` event in the report transaction, after the lease
   fence passes (a stale epoch is rejected before anything is applied, as today). If the job is RUNNING with
   `bashMode != 'raw'`, it upserts the approval on `(jobId, leaseEpoch, naxAskId)` with
