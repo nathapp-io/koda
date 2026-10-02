@@ -20,5 +20,9 @@
   "budgetInput": { "-2": "Invalid budget policy: {reason}" },
   "budgetPaused": { "409": "The fleet budget for {scope} is paused (policy {policyId})" },
   "budgetAmountNotAboveSpend": { "-2": "The amount {amountUsd} must be above this window's spend of {spentUsd}" },
-  "budgetNotPaused": { "409": "This budget policy is not paused" }
+  "budgetNotPaused": { "409": "This budget policy is not paused" },
+  "schedules": { "404": "Schedule not found" },
+  "scheduleInput": { "-2": "Invalid schedule: {reason}" },
+  "scheduleCronTooFrequent": { "-2": "The schedule fires more often than every {minutes} minutes" },
+  "scheduleOwnerNoAccess": { "409": "The schedule's owner can no longer dispatch to this project; the owner needs DEVELOPER access or higher" }
 }

@@ -48,7 +48,7 @@ export class FleetJobsService {
   ) {}
 
   /** Spec §5.1: validate, insert QUEUED (409 on an active duplicate), record, place. */
-  async dispatch(actorId: string, projectId: string, dto: DispatchFleetJobDto): Promise<DispatchResultDto> {
+  async dispatch(actorId: string, projectId: string, dto: DispatchFleetJobDto, opts: { scheduleId?: string } = {}): Promise<DispatchResultDto> {
     const repo = await this.repo.findRepo(dto.repoId);
     if (!repo || repo.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.repos');
     const input = normalizeDispatch(dto, repo.defaultBranch);
@@ -65,11 +65,14 @@ export class FleetJobsService {
     let job: FleetJobRecord;
     try {
       job = await this.txManager.run(async () => {
-        const created = await this.repo.createJob({ ...input, projectId, requestedById: actorId });
+        const created = await this.repo.createJob({
+          ...input, projectId, requestedById: actorId, ...(opts.scheduleId ? { scheduleId: opts.scheduleId } : {}),
+        });
         await this.repo.appendEvent(created.id, { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });
         await this.activity.record({
           actorType: 'USER', actorId, action: 'job.dispatched', entityType: 'job', entityId: created.id, jobId: created.id,
-          projectId, responsibleUserId: actorId, payload: { repoId: repo.id, feature: created.feature, command: created.command, ref: created.ref },
+          projectId, responsibleUserId: actorId,
+          payload: { repoId: repo.id, feature: created.feature, command: created.command, ref: created.ref, ...(opts.scheduleId ? { scheduleId: opts.scheduleId } : {}) },
         });
         return created;
       });

@@ -50,4 +50,20 @@ describe('fleet OpenAPI contract', () => {
       .toEqual(expect.arrayContaining(['scopeType', 'windowKind', 'amountUsd', 'spentUsd', 'windowStart', 'paused', 'warnReached']));
     expect(JSON.stringify(spec.components.schemas['PlacementMisfitDto'])).toContain('budget_paused');
   });
+
+  it('exposes the schedule routes, the job schedule filter and the job schedule fields (S1b §3.4)', () => {
+    const base = '/api/projects/{slug}/fleet/schedules';
+    expect(spec.paths[base]?.['get']).toBeDefined();
+    expect(spec.paths[base]?.['post']).toBeDefined();
+    expect(spec.paths[`${base}/{id}`]?.['get']).toBeDefined();
+    expect(spec.paths[`${base}/{id}`]?.['patch']).toBeDefined();
+    expect(spec.paths[`${base}/{id}`]?.['delete']).toBeDefined();
+    expect(spec.paths[`${base}/{id}/enable`]?.['post']).toBeDefined();
+    expect(spec.paths[`${base}/{id}/disable`]?.['post']).toBeDefined();
+    expect(Object.keys(spec.components.schemas['ScheduleDto']?.properties ?? {}))
+      .toEqual(expect.arrayContaining(['cron', 'timezone', 'feature', 'enabled', 'nextFireAt', 'disabledReason', 'noProgressTicks', 'lastPassedCount', 'totalCostUsd']));
+    expect(Object.keys(spec.components.schemas['FleetJobDto']?.properties ?? {})).toEqual(expect.arrayContaining(['scheduleId', 'coalescedCount']));
+    const listParams = spec.paths['/api/projects/{slug}/fleet/jobs']?.['get']?.parameters ?? [];
+    expect(listParams.map((p) => p.name)).toContain('scheduleId');
+  });
 });

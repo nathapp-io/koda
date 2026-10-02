@@ -66,8 +66,8 @@ export class FleetJobsController {
   @ApiResponse({ status: 200, description: 'Page of FleetJobDto' })
   async list(@Query() rawQuery: ListFleetJobsQuery, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
     if (!isUserPrincipal(principal)) throw new ForbiddenAppException({}, 'projects');
-    const { current, size, state, repoId, runnerId, requestedById, feature } = parseQuery(ListFleetJobsQuery, rawQuery);
-    return JsonResponse.Ok(toPageResult(await this.jobs.list({ projectId: ctx.project.id, state, repoId, runnerId, requestedById, feature }, { current, size })));
+    const { current, size, state, repoId, runnerId, requestedById, feature, scheduleId } = parseQuery(ListFleetJobsQuery, rawQuery);
+    return JsonResponse.Ok(toPageResult(await this.jobs.list({ projectId: ctx.project.id, state, repoId, runnerId, requestedById, feature, scheduleId }, { current, size })));
   }
 
   @Get(':id')

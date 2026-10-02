@@ -15,7 +15,7 @@ These instructions apply to all AI coding agents in this project.
 
 **Language:** TypeScript
 
-**Key dependencies:** @fastify/static, @fastify/helmet, @nathapp/nestjs-prisma, @nestjs/cache-manager, @nestjs/common, @nestjs/config, @nestjs/core, @nestjs/platform-fastify, @nestjs/schedule, @nestjs/swagger
+**Key dependencies:** @fastify/helmet, @fastify/static, @nathapp/nestjs-prisma, @nestjs/cache-manager, @nestjs/common, @nestjs/config, @nestjs/core, @nestjs/platform-fastify, @nestjs/schedule, @nestjs/swagger
 
 **Commands:** test: `npx turbo test` | lint: `bunx turbo lint` | typecheck: `bunx turbo type-check`
 
@@ -224,6 +224,7 @@ Rules:
 - Server-owned terminal transitions of a held job bump `leaseEpoch` and withdraw pending commands (plan D4). Requeue bumps it too.
 - Publish `fleet_job` live events and wake runners only after the transaction commits.
 - Budgets (`src/fleet/budgets/`, S1b spec §2): window math, scope keys and the effective-pause rule live in `budget-rules.ts`; money is compared with `Prisma.Decimal`, never floats. Dispatch, requeue and both placement entry points read pauses through `BudgetGate`; the evaluator runs only after the sync transaction commits (`BudgetEvaluator.signal`). Budget activity payloads must not carry a `*Key` field (`FleetActivityService` rejects key-like names).
+- Schedules (`src/fleet/schedules/`, S1b spec §3): `cron-schedule.ts` is the only importer of `cron-parser` (five fields, zone proof, 15-minute gap). The ticker claims a due schedule by compare-and-set on `nextFireAt`, then calls `FleetJobsService.dispatch` with no transaction open; a unique violation inside a transaction would abort it. A scheduled job's end is counted in `JobTransitionsService.apply` through `ScheduleProgressService` (same transaction, counted once through `scheduleCountedAt`). `JobSchedule.repoId` and `pinnedRunnerId` have no foreign key on purpose: a deleted repo or runner disables the schedule (`template_invalid`) instead of deleting it.
 - Tests build the schema with `prisma db push`; partial unique indexes live in `test/helpers/partial-indexes.ts` and must also be shipped verbatim by a migration.
 - Every runner write (events, acks, token requests, bundles) is fenced by `(runnerId, leaseEpoch)` through `FenceService`; a mismatch queues one `ABANDON` and stores nothing.
 - Never hold a transaction across the sync long-poll or forge HTTP. One failing job or ack in a sync is logged and skipped, never allowed to fail the whole request.

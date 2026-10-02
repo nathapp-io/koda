@@ -4556,7 +4556,8 @@
                 "enrollment",
                 "repo",
                 "job",
-                "budget"
+                "budget",
+                "schedule"
               ]
             }
           },
@@ -5174,6 +5175,15 @@
             }
           },
           {
+            "name": "scheduleId",
+            "required": false,
+            "in": "query",
+            "description": "Only jobs dispatched by this schedule (S1b §3.4)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "slug",
             "required": true,
             "in": "path",
@@ -5391,6 +5401,326 @@
           }
         ],
         "summary": "Job timeline, ordered by seq (project member)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/schedules": {
+      "get": {
+        "operationId": "ProjectFleetSchedulesController_list",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScheduleDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the project's schedules (project member)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "post": {
+        "operationId": "ProjectFleetSchedulesController_create",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateScheduleDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid template, cron or timezone, or fleet.scheduleCronTooFrequent (fires closer than 15 minutes)"
+          },
+          "404": {
+            "description": "Repo not in this project, or pinned runner unknown"
+          },
+          "422": {
+            "description": "Pinned runner can never run this job"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a schedule that runs one feature on a cron (project DEVELOPER+)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/schedules/{id}": {
+      "get": {
+        "operationId": "ProjectFleetSchedulesController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Schedule not found in this project"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a schedule (project member)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "patch": {
+        "operationId": "ProjectFleetSchedulesController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateScheduleDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the owner and not a project ADMIN"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Change a schedule (owner or project ADMIN)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "delete": {
+        "operationId": "ProjectFleetSchedulesController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a schedule; its jobs are kept (owner or project ADMIN)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/schedules/{id}/enable": {
+      "post": {
+        "operationId": "ProjectFleetSchedulesController_enable",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "fleet.scheduleOwnerNoAccess: the owner is disabled or no longer has DEVELOPER access to the project"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Enable a schedule: resets the stall counter and recomputes the next fire (owner or project ADMIN)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/schedules/{id}/disable": {
+      "post": {
+        "operationId": "ProjectFleetSchedulesController_disable",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Disable a schedule (owner or project ADMIN)",
         "tags": [
           "fleet"
         ]
@@ -8611,6 +8941,15 @@
           "storiesTruncated": {
             "type": "boolean",
             "description": "True when the runner cut the story list to fit (S1b §1.2)"
+          },
+          "scheduleId": {
+            "type": "string",
+            "nullable": true,
+            "description": "The schedule that dispatched the job (S1b §3.1)"
+          },
+          "coalescedCount": {
+            "type": "number",
+            "description": "Schedule ticks absorbed into this job while it sat queued (S1b §3.2)"
           }
         },
         "required": [
@@ -8629,7 +8968,8 @@
           "requestedById",
           "queuedAt",
           "costSpentUsd",
-          "storiesTruncated"
+          "storiesTruncated",
+          "coalescedCount"
         ]
       },
       "PlacementMisfitDto": {
@@ -8701,6 +9041,282 @@
           "job",
           "placement"
         ]
+      },
+      "ScheduleDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "repoId": {
+            "type": "string",
+            "description": "May name a repo that has since been deleted; the schedule is then disabled (template_invalid)"
+          },
+          "name": {
+            "type": "string"
+          },
+          "cron": {
+            "type": "string",
+            "description": "Five-field cron"
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA timezone the cron is read in"
+          },
+          "feature": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "profiles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "maxCostUsd": {
+            "type": "string",
+            "description": "Decimal as string"
+          },
+          "selectorLabels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pinnedRunnerId": {
+            "type": "string",
+            "nullable": true
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "nextFireAt": {
+            "type": "string",
+            "nullable": true,
+            "description": "Next fire; null while disabled"
+          },
+          "lastFiredAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "lastJobId": {
+            "type": "string",
+            "nullable": true
+          },
+          "lastPassedCount": {
+            "type": "number",
+            "description": "Stories passed at the last run that made progress"
+          },
+          "noProgressTicks": {
+            "type": "number",
+            "description": "Runs in a row without a newly passed story"
+          },
+          "noProgressLimit": {
+            "type": "number",
+            "description": "The schedule disables itself at this many"
+          },
+          "disabledReason": {
+            "nullable": true,
+            "enum": [
+              "completed",
+              "finish_failed",
+              "no_progress",
+              "owner_lost_access",
+              "template_invalid",
+              "manual"
+            ],
+            "type": "string"
+          },
+          "totalCostUsd": {
+            "type": "string",
+            "description": "Cost of every job this schedule dispatched, decimal as string"
+          },
+          "createdById": {
+            "type": "string"
+          },
+          "updatedById": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "repoId",
+          "name",
+          "cron",
+          "timezone",
+          "feature",
+          "ref",
+          "profiles",
+          "maxCostUsd",
+          "selectorLabels",
+          "enabled",
+          "lastPassedCount",
+          "noProgressTicks",
+          "noProgressLimit",
+          "totalCostUsd",
+          "createdById",
+          "updatedById",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "CreateScheduleDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "\\S",
+            "description": "Display name"
+          },
+          "repoId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Fleet repo id of this project"
+          },
+          "feature": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "nax feature name; fixed after create"
+          },
+          "cron": {
+            "type": "string",
+            "minLength": 9,
+            "maxLength": 100,
+            "description": "Five-field cron, for example \"0 9 * * 1-5\"; consecutive fires at least 15 minutes apart"
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "IANA timezone the cron is read in, for example Asia/Singapore"
+          },
+          "ref": {
+            "type": "string",
+            "maxLength": 255,
+            "description": "Git ref to check out detached; defaults to the repo default branch at create time"
+          },
+          "profiles": {
+            "maxItems": 8,
+            "description": "nax profile chain, later wins",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "maxCostUsd": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 10000,
+            "description": "Budget of each run in USD, > 0, at most 4 decimals"
+          },
+          "selectorLabels": {
+            "maxItems": 16,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pinnedRunnerId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Run on this runner only"
+          },
+          "noProgressLimit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 20,
+            "description": "Disable after this many runs in a row without a newly passed story (1-20); default 3"
+          }
+        },
+        "required": [
+          "name",
+          "repoId",
+          "feature",
+          "cron",
+          "timezone",
+          "maxCostUsd"
+        ]
+      },
+      "UpdateScheduleDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "\\S"
+          },
+          "cron": {
+            "type": "string",
+            "minLength": 9,
+            "maxLength": 100,
+            "description": "Five-field cron"
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "IANA timezone"
+          },
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "profiles": {
+            "maxItems": 8,
+            "description": "Replaces the profile chain; [] clears it",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "maxCostUsd": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 10000,
+            "description": "USD, > 0, at most 4 decimals"
+          },
+          "selectorLabels": {
+            "maxItems": 16,
+            "description": "Replaces the selector labels; [] clears them",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pinnedRunnerId": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "null unpins"
+          },
+          "noProgressLimit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 20,
+            "description": "1-20"
+          }
+        }
       },
       "CreateFleetRepoDto": {
         "type": "object",

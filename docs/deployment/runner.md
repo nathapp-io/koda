@@ -130,10 +130,16 @@ koda fleet job bundle <jobId> --out login.tar.gz
 koda fleet budget list --project web                # spend against amount; WARN / PAUSED state
 koda fleet budget set --scope project --window month --amount 50 --project web
 koda fleet budget resume <policyId> --amount 80 --project web
+koda fleet schedule add --repo acme/app --feature login --cron "0 9 * * 1-5" --timezone Asia/Singapore --max-cost 5
+koda fleet schedule list                            # next fire, or disabled (completed / no_progress / ...)
+koda fleet schedule show <scheduleId>               # the template and the last 10 jobs it dispatched
+koda fleet schedule disable <scheduleId>
 ```
 
 `--label` and `--pin` are exclusive. A dispatch for a feature that already has an active job on the repo prints
-that job's id instead of starting a second one.
+that job's id instead of starting a second one. A schedule dispatches one RUN of its feature at each fire,
+continues it on whichever runner is free, and disables itself when the feature completes, when its finish fails
+with every story passed, or after three runs in a row without a newly passed story.
 
 Budgets are also managed on the web: global and runner policies on `/admin/fleet/budgets` (global admins), project and
 repo policies on `/<project>/fleet/budgets` (members read; project ADMINs add, edit, delete and resume). A paused or

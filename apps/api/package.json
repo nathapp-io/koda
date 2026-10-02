@@ -34,8 +34,8 @@
   },
   "dependencies": {
     "@casl/ability": "^6.8.1",
-    "@fastify/static": "^10.1.2",
     "@fastify/helmet": "^13.0.0",
+    "@fastify/static": "^10.1.2",
     "@keyv/redis": "^3.0.0",
     "@lancedb/lancedb": "0.17.0",
     "@nathapp/nestjs-app": "^3.3.0",
@@ -61,6 +61,7 @@
     "cacheable": "^1.0.0",
     "class-transformer": "^0.5.0",
     "class-validator": "^0.14.0",
+    "cron-parser": "^5.10.1",
     "joi": "^18.2.3",
     "keyv": "^5.0.0",
     "reflect-metadata": "^0.2.0",

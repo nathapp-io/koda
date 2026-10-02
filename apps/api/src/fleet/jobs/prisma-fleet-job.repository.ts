@@ -45,9 +45,11 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     try {
       return toJob(await this.db.fleetJob.create({ data: { ...data, maxCostUsd: new Prisma.Decimal(data.maxCostUsd) } }));
     } catch (error) {
-      // The only unique constraint a new row can hit is the active (repoId, feature) index.
+      // The unique constraints a new row can hit are the active (repoId, feature) index and, for a scheduled job, the
+      // one-QUEUED-job-per-schedule index (S1b §3.1); both mean an active job already exists.
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new DuplicateActiveJobError();
-      // A dispatch that waited on the repo's lockForDelete then raced the delete: FK on FleetRepo fails.
+      // A dispatch raced the delete of its repo (FK on FleetRepo) or, for a scheduled job, of its schedule (FK on
+      // JobSchedule). Both answer 404; the schedule ticker treats it as a vanished template (plan D199).
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') throw new NotFoundAppException({}, 'fleet.repos');
       throw error;
     }
@@ -80,6 +82,7 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
       ...(f.runnerId ? { runnerId: f.runnerId } : {}),
       ...(f.requestedById ? { requestedById: f.requestedById } : {}),
       ...(f.feature ? { feature: f.feature } : {}),
+      ...(f.scheduleId ? { scheduleId: f.scheduleId } : {}),
     };
     const rows = await Paginate(this.db.fleetJob, page, { where, orderBy: [{ queuedAt: 'desc' }, { id: 'desc' }] });
     return rows.remap((m: JobRow) => toJob(m));

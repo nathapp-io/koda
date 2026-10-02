@@ -360,7 +360,8 @@ Applies when a job with `scheduleId` reaches a terminal state **and** `scheduleC
 `scheduleCountedAt`, so a user requeue of a scheduled job that ends again is not counted twice. Rules, in order:
 
 1. `COMPLETED` (finish results in `COMPLETING_RESULTS`) → disable with `completed`.
-2. `CANCELLED` (by a user or a budget) → no change to either counter.
+2. `CANCELLED` (by a user or a budget) → no change to either counter, and the job is **not** marked counted (3a
+   plan D195): a user requeue of it that later ends is counted then.
 3. `progress` null or without a numeric `passed` → no progress.
 4. `progress.passed` equals `progress.total` (> 0) and the state is not `COMPLETED` → disable with
    `finish_failed` (every story passed but nax's finish did not open a PR; a human must look).
@@ -388,6 +389,10 @@ Re-enabling resets `noProgressTicks`, `disabledReason` and recomputes `nextFireA
   - Schedule detail: the template, and the tick history (each job with state, stories passed delta, cost,
     `coalescedCount`, `wipPush` and `stateReason`, linking to the job page), plus cumulative cost. Refreshed on
     `fleet_job` notices.
+- Additive job API for the 3b history (3a plan D205): `FleetJobDto` carries `scheduleId` and `coalescedCount`,
+  `GET /projects/:slug/fleet/jobs` takes a `scheduleId` filter, and `ScheduleDto` carries `totalCostUsd`.
+- Enable refuses an owner who can no longer dispatch with 409 `fleet.scheduleOwnerNoAccess` (3a plan D211). Edit and permission details (3a plan D202, D203): the repo and the feature are fixed after create; edit, enable,
+  disable and delete need project DEVELOPER+ and the owner or a project ADMIN; the schedule list is a plain array.
 
 ### 3.5 Testing
 
