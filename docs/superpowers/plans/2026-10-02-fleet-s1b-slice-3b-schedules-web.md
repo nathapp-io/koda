@@ -83,15 +83,17 @@ Numbered D213-D225 (slice 3a ended at D212).
 ## Review Focus
 
 1. **Edit switches placement from pin to auto (or labels)**: the PATCH must carry `pinnedRunnerId: null` (and labels `[]`
-   when not labels), not omit them, or the schedule stays pinned. (Task 2 `toSchedulePatchBody`, Task 5 dialog test.)
+   when not labels), not omit them, or the schedule stays pinned. (Task 2 `toSchedulePatchBody` pins the switch; the Task 5 dialog test pins a stored labels schedule sending
+   `pinnedRunnerId: null`. A live switch inside the dialog cannot be driven through the inert `FormField` stub, so it
+   is covered at the library level and by the patch-body contract.)
 2. **A DEVELOPER who is not the owner, and a VIEWER**: the developer sees Create but no edit/enable/disable/delete on
    someone else's schedule; the viewer sees neither and gets the read-only line. (Task 2 `canChangeSchedule`, Tasks 6 and 7.)
 3. **Disabled schedule with `nextFireAt: null` or `disabledReason: null`**: renders `-` and "Disabled", never
    "Invalid Date" or a raw key; a schedule stored in a zone the browser does not know still renders (UTC fallback).
    (Task 2 `formatInZone`/`scheduleStatusKey`, Task 6.)
 4. **Stale view**: enabling a schedule whose owner lost access (409) or deleting one already deleted (404) shows the
-   server message and reloads; a poll that started before a successful mutation does not restore the old row.
-   (Task 4.)
+   server message and reloads; a poll that started before a successful mutation does not restore the old row; on the
+   detail page a schedule that is gone drops to the error state instead of keeping its controls. (Tasks 4 and 8.)
 5. **History delta at a page boundary**: the oldest row of a non-last page shows `-`, not a delta against 0; a job
    without progress between two with progress is skipped as a baseline. (Task 2 `historyRows`, Task 8.)
 
@@ -129,6 +131,7 @@ Numbered D213-D225 (slice 3a ended at D212).
 **Files:**
 - Modify: `apps/api/src/config/fleet.config.ts`, `apps/api/src/config/env.validation.ts`
 - Modify: `apps/api/src/config/fleet.config.spec.ts`
+- Modify: `apps/api/src/common/test-helpers/fleet-config.ts` (the complete `IFleetConfig` literal for unit specs)
 - Create: `apps/api/src/fleet/schedules/fleet-test-hooks.controller.ts`
 - Create: `apps/api/src/fleet/schedules/fleet-test-hooks.controller.spec.ts`
 - Modify: `apps/api/src/fleet/schedules/schedules.module.ts`, `schedules.module.spec.ts`
@@ -197,9 +200,15 @@ In `apps/api/src/config/env.validation.ts`, add after the `FLEET_SWEEP_ENABLED` 
   FLEET_TEST_HOOKS: Joi.string().pattern(/^(true|false)$/i).optional(),
 ```
 
-Then search for complete `IFleetConfig` object literals that the new required field breaks:
-`cd apps/api && grep -rn "gitlabTokenTtlSec:" src test | grep -v fleet.config.ts`. Add `testHooksEnabled: false` to any
-literal typed as the whole `IFleetConfig` (literals typed as `Pick<IFleetConfig, ...>` need nothing).
+In `apps/api/src/common/test-helpers/fleet-config.ts` (`testFleetConfig`, a complete `IFleetConfig`), add after
+`gitlabTokenTtlSec: 3_600,`:
+
+```ts
+    testHooksEnabled: false,
+```
+
+Then confirm no other complete literal remains: `cd apps/api && grep -rn "gitlabTokenTtlSec:" src test | grep -v fleet.config.ts`
+must list only `fleet-config.ts` (literals typed as `Pick<IFleetConfig, ...>` need nothing).
 
 - [ ] **Step 4: Run it to verify it passes**
 
@@ -271,6 +280,7 @@ import { ScheduleTicker } from './schedule-ticker';
  * neither the 60 s timer nor a per-minute cron (the 15-minute gap check refuses one). The claim, coalesce and dispatch
  * path is the real one. 404 unless FLEET_TEST_HOOKS=true outside production; global ADMIN; not in openapi.json.
  */
+// No @ApiTags/@ApiOperation (.nax/rules/api-controllers.md): the controller is excluded from OpenAPI on purpose (D213).
 @ApiExcludeController()
 @Controller('fleet/test-hooks')
 export class FleetTestHooksController {
@@ -422,7 +432,8 @@ Expected: clean.
 - [ ] **Step 12: Commit**
 
 ```bash
-git add apps/api/src/config apps/api/src/fleet/schedules apps/api/src/fleet/fleet-openapi.contract.spec.ts \
+git add apps/api/src/config apps/api/src/common/test-helpers/fleet-config.ts apps/api/src/fleet/schedules \
+  apps/api/src/fleet/fleet-openapi.contract.spec.ts \
   apps/api/test/integration/fleet/fleet-test-hooks.integration.spec.ts
 git commit -m "feat(fleet): test-only hook that fires a schedule at its next fire (S1b 3b D213)"
 ```
@@ -436,8 +447,7 @@ git commit -m "feat(fleet): test-only hook that fires a schedule at its next fir
 - Modify: `apps/web/composables/useFleetJobs.ts` (`scheduleId` filter)
 - Create: `apps/web/lib/fleet-schedules.ts`
 - Create: `apps/web/tests/lib/fleet-schedules.spec.ts`
-- Modify: `apps/web/tests/composables/useFleetJobs.spec.ts`, and every web test fixture typed as `FleetJobDto` that
-  `bun run type-check` flags (known: `tests/lib/fleet-jobs.spec.ts`, `tests/components/fleet-job-stories.spec.ts`)
+- Modify: `apps/web/tests/composables/useFleetJobs.spec.ts`
 
 **Interfaces:**
 - Consumes: `toUnits`, `budgetStopPolicyId`, `TranslateNamed` from `~/lib/fleet-budgets`; `extractProgress`,
@@ -1052,13 +1062,11 @@ export function formatDelta(delta: number | null): string {
 Run: `cd apps/web && bun run test -- tests/lib/fleet-schedules.spec.ts tests/composables/useFleetJobs.spec.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Fix fixtures the new job fields break, then types and lint**
+- [ ] **Step 6: Types and lint**
 
-Run: `cd apps/web && bun run type-check`
-For every error "Property 'scheduleId' is missing" in a test fixture typed as `FleetJobDto`, add
-`scheduleId: null, coalescedCount: 0,` to that literal (known: `tests/lib/fleet-jobs.spec.ts`,
-`tests/components/fleet-job-stories.spec.ts`). Re-run until clean.
-Run: `cd apps/web && bun run lint && bun run test -- tests/lib tests/composables`
+`apps/web/tsconfig.json` excludes `**/*.spec.ts`, so existing `FleetJobDto` fixtures in specs are not type-checked and
+need no edit for the two new fields.
+Run: `cd apps/web && bun run type-check && bun run lint && bun run test -- tests/lib tests/composables`
 Expected: clean; PASS.
 
 - [ ] **Step 7: Commit**
@@ -2140,7 +2148,7 @@ git commit -m "feat(web): schedule create and edit dialog (S1b 3b)"
 
 **Files:**
 - Create: `apps/web/components/fleet/ScheduleTable.vue` (auto-imported as `FleetScheduleTable`)
-- Modify: `apps/web/tests/helpers/mount-sfc.ts` (`FleetComponentName`, `FLEET_COMPONENT_FILES`)
+- Modify: `apps/web/tests/helpers/mount-sfc.ts` (`FleetComponentName`, `FLEET_COMPONENT_FILES`, `NUXT_AUTO_IMPORTS`)
 - Modify: `apps/web/tests/helpers/fleet-harness.ts` (`NuxtLink` stub, `FleetScheduleEditDialog` stub)
 - Create: `apps/web/tests/components/fleet-schedule-table.spec.ts`
 
@@ -2168,6 +2176,19 @@ export type FleetComponentName =
 ```
 
 (`ScheduleHistory.vue` is created in Task 8; nothing instantiates it before then.)
+
+Still in `mount-sfc.ts`, add `'useAuth', 'useProjectMemberNames'` to `NUXT_AUTO_IMPORTS`. Only names on that list reach
+a compiled module's scope; a name passed in `globals` but missing there is a ReferenceError at mount. The schedules
+pages are the first harness-mounted pages that call these two.
+
+```ts
+const NUXT_AUTO_IMPORTS = [
+  'useI18n', 'useAppToast', 'useApi', 'useRuntimeConfig', 'definePageMeta',
+  'useVisiblePolling', 'useFleetRunners', 'useFleetRepos', 'useRoute',
+  'useFleetDispatchOptions', 'useFleetJobs', 'useProjectViewerRole',
+  'useAdminUsers', 'useProjectEvents', 'useAuth', 'useProjectMemberNames',
+] as const
+```
 
 In `apps/web/tests/helpers/fleet-harness.ts`, add `['NuxtLink', 'nuxt-link'],` to the `uiStubs` list (after
 `['PageHeader', 'page-header']`), and add to the `Object.assign(uiStubs, { ... })` block that holds the budget dialog
@@ -2528,6 +2549,7 @@ describe('Schedules list page (behaviour)', () => {
     expect(m.hasTestid('fleet-schedule-create')).toBe(false)
     expect(m.rowButtons('a')).toEqual([])
     expect(m.app.find('[data-stub="fleet-schedule-edit-dialog"]')).toHaveLength(0)
+    expect(m.app.text()).toContain('Only the schedule owner or a project administrator can change a schedule.')
     m.app.unmount()
   })
 
@@ -2873,7 +2895,8 @@ const cell = (app: ReturnType<typeof mountHistory>, rowId: string, testid: strin
 describe('FleetScheduleHistory', () => {
   test('no runs shows the empty line', () => {
     const app = mountHistory([])
-    expect(app.text()).toContain('No runs yet')
+    // The EmptyState stub keeps `message` as a prop (as on the budgets pages), so the copy is asserted there.
+    expect(app.one('[data-stub="empty-state"]')?.props.message).toBe('No runs yet')
     expect(app.find('[data-stub="tr"]').filter((r) => String(r.props['data-testid']).startsWith('fleet-schedule-run-'))).toHaveLength(0)
     app.unmount()
   })
@@ -3030,6 +3053,16 @@ describe('schedule detail page', () => {
     expect(detail).toContain('if (await actions.remove(current)) await navigateTo(`/${slug}/fleet/schedules`)')
   })
 
+  test('a schedule that is gone drops the page to the error state even on a silent reload (Review Focus 4)', () => {
+    expect(detail).toContain('const isNotFound = (err: unknown): boolean => err instanceof ApiError && (err.code === 40004 || err.code === 404)')
+    expect(detail).toMatch(/if \(!silent \|\| isNotFound\(err\)\) \{\s*schedule\.value = null\s*loadFailed\.value = true/)
+    expect(detail).toContain('const actions = useFleetScheduleActions(api, () => { void reload() })')
+  })
+
+  test('polling starts synchronously in onMounted, so leaving during the first load cannot leak it', () => {
+    expect(detail).toMatch(/onMounted\(\(\) => \{[\s\S]*?polling\.start\(\)\s*void loadSchedule\(false\)/)
+  })
+
   test('status, next fire in the schedule zone, and the cost so far are rendered with test ids', () => {
     expect(detail).toContain('data-testid="fleet-schedule-status"')
     expect(detail).toContain(':data-status="scheduleStatusKey(schedule)"')
@@ -3062,7 +3095,7 @@ Create `apps/web/pages/[project]/fleet/schedules/[id].vue`:
 ```vue
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { extractApiError } from '~/composables/useApi'
+import { ApiError, extractApiError } from '~/composables/useApi'
 import { useFleetScheduleActions } from '~/composables/useFleetScheduleActions'
 import { useFleetSchedules } from '~/composables/useFleetSchedules'
 import { createDebouncer } from '~/lib/debounce'
@@ -3113,16 +3146,23 @@ const placementText = computed((): string => {
   }
 })
 
-/** `silent`: live reloads keep the page as it is on failure; the first load reports. */
+/** ApiError.code is the envelope `ret`: a 404 arrives as ret 40004 (same convention as isForbidden). */
+const isNotFound = (err: unknown): boolean => err instanceof ApiError && (err.code === 40004 || err.code === 404)
+
+/**
+ * `silent`: a live reload keeps the page on a transient failure, but a schedule that is gone (deleted elsewhere, or a
+ * refused action found it missing) drops its controls and shows the error state (Review Focus 4). The first load reports.
+ */
 async function loadSchedule(silent: boolean): Promise<void> {
   try {
     schedule.value = await api.get(scheduleId)
     loadFailed.value = false
   }
   catch (err: unknown) {
-    if (!silent) {
+    if (!silent || isNotFound(err)) {
+      schedule.value = null
       loadFailed.value = true
-      toast.error(extractApiError(err))
+      if (!silent) toast.error(extractApiError(err))
     }
   }
   finally {
@@ -3167,10 +3207,11 @@ async function remove(): Promise<void> {
 const polling = useVisiblePolling(reload, POLL_MS)
 const liveReload = createDebouncer(() => { void reload() }, 300)
 
-onMounted(async () => {
-  await loadSchedule(false)
-  void loadHistory()
+onMounted(() => {
+  // Started before any await: if the user leaves during the first load, onBeforeUnmount still stops it.
   polling.start()
+  void loadSchedule(false)
+  void loadHistory()
   // Names are cosmetic: a failure leaves ids on screen.
   void options.load().catch(() => undefined)
   void people.load().catch(() => undefined)
@@ -3354,7 +3395,8 @@ export async function deleteSchedules(token: string, slug: string): Promise<void
 
 /** Runs one ticker round at the schedule's next fire (global admin token). */
 export const fireSchedule = (token: string, id: string): Promise<{ firedAt: string; result: { dispatched: number } }> =>
-  call('POST', `/fleet/test-hooks/schedules/${id}/fire`, token);
+  // `call` always sends Content-Type: application/json; fastify refuses an empty JSON body (FST_ERR_CTP_EMPTY_JSON_BODY).
+  call('POST', `/fleet/test-hooks/schedules/${id}/fire`, token, {});
 ```
 
 - [ ] **Step 2: Write the E2E spec**
@@ -3504,8 +3546,8 @@ dispatched by a schedule links back to it.
 `production`. Leave it unset outside the Playwright suite.
 ```
 
-In `docs/superpowers/specs/2026-10-01-fleet-s1b-budgets-schedules-design.md`, at the end of §3.4 (after the line that
-starts "- Enable refuses an owner"), add:
+In `docs/superpowers/specs/2026-10-01-fleet-s1b-budgets-schedules-design.md`, at the end of §3.4, after the bullet that
+starts "- Enable refuses an owner" and its continuation line ending "the schedule list is a plain array.", add:
 
 ```markdown
 - 3b plan notes (`2026-10-02-fleet-s1b-slice-3b-schedules-web.md`): the E2E fires a schedule through a test-only,
