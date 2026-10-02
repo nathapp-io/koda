@@ -138,10 +138,11 @@ export class HostExecutor implements JobExecutor {
   }
 
   createWatcher(job: JobRow, sink: WatcherSink, options: WatchOptions): JobWatcher {
-    const { jobDir, outDir } = this.dirs(job);
+    const { jobDir, outDir, repoDir } = this.dirs(job);
     return new Watcher(sink, {
       outDir, feature: job.assign.feature, stdoutPath: join(jobDir, 'nax.stdout'), stderrPath: join(jobDir, 'nax.stderr'),
       startAtEnd: options.startAtEnd, nowMs: this.deps.nowMs, onRunIds: options.onRunIds,
+      ...(job.command === 'RUN' ? { repoDir } : {}),   // D146: a PLAN checkout's prd.json is an older plan's
     });
   }
 

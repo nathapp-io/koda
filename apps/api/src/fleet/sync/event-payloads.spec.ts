@@ -39,6 +39,38 @@ describe('interpretEvent', () => {
     }
   });
 
+  const st = (over: Record<string, unknown> = {}) => ({ id: 'US-001', title: 'first', status: 'passed', attempts: 1, dependsOn: [], ...over });
+
+  it('mirrors a valid story list with its truncation flag and strips unknown story keys', () => {
+    expect(interpretEvent('snapshot', { stories: [st({ extra: 'x' }), st({ id: 'US-002', dependsOn: ['US-001'] })], storiesTruncated: true }))
+      .toEqual({ kind: 'mirror', patch: { stories: [st(), st({ id: 'US-002', dependsOn: ['US-001'] })], storiesTruncated: true } });
+    expect(interpretEvent('snapshot', { stories: [] })).toEqual({ kind: 'mirror', patch: { stories: [], storiesTruncated: false } });
+  });
+
+  it('accepts a full 8 KiB list of 100 stories (Review focus 1)', () => {
+    const stories = Array.from({ length: 100 }, (_, i) => st({ id: `S${i}`, title: '' }));
+    expect(Buffer.byteLength(JSON.stringify(stories), 'utf8')).toBeLessThanOrEqual(8_192);
+    expect(interpretEvent('snapshot', { stories })).toEqual({ kind: 'mirror', patch: { stories, storiesTruncated: false } });
+  });
+
+  it('drops an invalid or over-cap list (and its flag) but keeps the rest of the snapshot (D150)', () => {
+    const bad: unknown[] = [
+      'nope', [st(), 'x'], Array.from({ length: 101 }, (_, i) => st({ id: `S${i}`, title: '' })),
+      Array.from({ length: 60 }, (_, i) => st({ id: `S${i}`, title: 't'.repeat(80) })),
+      [st({ id: '' })], [st({ id: 'x'.repeat(129) })], [st({ title: 'x'.repeat(81) })], [st({ title: 3 })],
+      [st({ status: 'Passed' })], [st({ status: 'x'.repeat(33) })], [st({ attempts: -1 })], [st({ attempts: 1.5 })],
+      [st({ attempts: 1_000_001 })], [st({ dependsOn: 'US-001' })], [st({ dependsOn: Array.from({ length: 11 }, (_, i) => `D${i}`) })],
+      [st({ dependsOn: [''] })],
+    ];
+    for (const stories of bad) {
+      expect(interpretEvent('snapshot', { stories, storiesTruncated: true, currentPhase: 'review' })).toEqual({ kind: 'mirror', patch: { currentPhase: 'review' } });
+    }
+  });
+
+  it('an absent list leaves the stored one alone (Review focus 4)', () => {
+    expect(interpretEvent('snapshot', { currentPhase: 'review', storiesTruncated: true })).toEqual({ kind: 'mirror', patch: { currentPhase: 'review' } });
+  });
+
   it('stores lifecycle and log events without effect, and flags an oversized log', () => {
     expect(interpretEvent('lifecycle', { level: 'warn', message: 'watcher error' })).toEqual({ kind: 'none' });
     expect(interpretEvent('log', { stream: 'run', text: 'ok' })).toEqual({ kind: 'none' });

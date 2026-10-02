@@ -82,13 +82,13 @@ describeIntegration('fleet job cancel and requeue (PG)', () => {
     const runner = await insertRunner(prisma);
     const job = await insertJob('rq', {
       state: 'CRASHED', runnerId: runner.id, leaseEpoch: 3, naxRunId: 'run-1', costSpentUsd: 1.5, stateReason: 'runner silent', finishedAt: new Date(),
-      wipPush: 'pushed',
+      wipPush: 'pushed', stories: [{ id: 'US-001', title: 't', status: 'failed', attempts: 2, dependsOn: [] }], storiesTruncated: true,
     });
     const res = data<{ job: { state: string; leaseEpoch: number } }>(await post('dev', job.id, 'requeue').expect(200));
     // 3 -> 4 on requeue, 4 -> 5 on the compare-and-set assignment.
     expect(res.job).toEqual(expect.objectContaining({ state: 'ASSIGNED', leaseEpoch: 5 }));
     const after = await reload(job.id);
-    expect(after).toEqual(expect.objectContaining({ naxRunId: null, finishedAt: null, ackedRunnerSeq: 0, wipPush: null }));
+    expect(after).toEqual(expect.objectContaining({ naxRunId: null, finishedAt: null, ackedRunnerSeq: 0, wipPush: null, stories: null, storiesTruncated: false }));
     expect(after.costSpentUsd.toString()).toBe('0');
   });
 
@@ -121,5 +121,19 @@ describeIntegration('fleet job cancel and requeue (PG)', () => {
     expect(await prisma.fleetCommand.findUniqueOrThrow({ where: { id: abandon.id } })).toEqual(
       expect.objectContaining({ ackResult: null, ackedAt: null }),
     );
+  });
+
+  it('serves stories and wipPush over HTTP; list pages leave the stories out (S1b 1b, D149, #185)', async () => {
+    const stories = [
+      { id: 'US-001', title: 'first', status: 'passed', attempts: 1, dependsOn: [] },
+      { id: 'US-002', title: 'second', status: 'in-progress', attempts: 0, dependsOn: ['US-001'] },
+    ];
+    const job = await insertJob('http-dto', { state: 'FAILED', wipPush: 'failed:diverged', stories, storiesTruncated: true, finishedAt: new Date() });
+    const one = data<Record<string, unknown>>(await request(server).get(`/api/projects/web/fleet/jobs/${job.id}`).set(auth('dev')).expect(200));
+    expect(one).toEqual(expect.objectContaining({ id: job.id, wipPush: 'failed:diverged', stories, storiesTruncated: true }));
+    const page = data<{ records: Array<Record<string, unknown>> }>(
+      await request(server).get('/api/projects/web/fleet/jobs').query({ feature: 'http-dto' }).set(auth('dev')).expect(200),
+    );
+    expect(page.records).toEqual([expect.objectContaining({ id: job.id, wipPush: 'failed:diverged', stories: null, storiesTruncated: false })]);
   });
 });

@@ -682,6 +682,18 @@
       "CRASHED": "Crashed",
       "CANCELLED": "Cancelled"
     },
+    "storyStatus": {
+      "pending": "Pending",
+      "in-progress": "In progress",
+      "passed": "Passed",
+      "failed": "Failed",
+      "skipped": "Skipped",
+      "blocked": "Blocked",
+      "paused": "Paused",
+      "regression-failed": "Regression failed",
+      "decomposed": "Decomposed",
+      "unknown": "Unknown"
+    },
     "misfit": {
       "disabled": "Runner is disabled",
       "offline": "Runner is offline",
@@ -874,6 +886,12 @@
           "pushed": "Progress pushed to the branch",
           "none": "No new progress to push",
           "failed": "Progress push failed: {reason}"
+        },
+        "stories": {
+          "title": "Stories",
+          "attempts": "Attempts: {count}",
+          "phase": "Now: {phase}",
+          "truncated": "List truncated: showing the first {count} stories."
         },
         "cancelRequested": "Cancel requested at {at}"
       },

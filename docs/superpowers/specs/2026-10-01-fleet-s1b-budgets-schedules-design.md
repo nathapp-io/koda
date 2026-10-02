@@ -119,7 +119,7 @@ The next RUN of the feature continues `origin/<branchName>` on any runner (runne
 - The server's snapshot mirror (`apps/api/src/fleet/sync/event-payloads.ts`) validates each field and **drops** an
   invalid or over-cap one, like every other mirrored field; it never rejects the event.
 - `FleetJob` gains `wipPush String?` (1a) and `stories Json?`, `storiesTruncated Boolean @default(false)` (1b),
-  exposed in `FleetJobDto`. `requeue` clears them with the other live fields (`fleet-jobs.service.ts:145-149`).
+  exposed in `FleetJobDto` (list pages carry `stories: null`; 1b plan D149). `requeue` clears them with the other live fields (`fleet-jobs.service.ts:145-149`).
 - The existing `fleet_job` live event (`id/projectId/jobId/state/at`) is unchanged; the job page refetches on it,
   so the new fields appear live without a payload change.
 
@@ -138,6 +138,7 @@ The next RUN of the feature continues `origin/<branchName>` on any runner (runne
 - 1a runner integration (real API in process, fake nax, `file://` bare remote): a FAILED RUN and a cost-limit RUN
   both push; a second RUN on a **different** runner starts from the pushed branch and sees the updated
   `prd.json`; a halted job pushes nothing.
+  The halted case is covered by the 1b plan's D153 test (the harness holds the push).
 - 1b unit: story mapping, clipping, byte-cap truncation, the hash gate, the 1 MiB read cap; server mirror drops an
   invalid or over-cap list and keeps the rest of the snapshot.
 - 1b web unit: the checklist renders, highlights the current story, shows the truncation note, and falls back

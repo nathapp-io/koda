@@ -80,6 +80,18 @@ export type RunnerEventType = 'state' | 'snapshot' | 'lifecycle' | 'log';
 /** A runner-reported transition (§5.4 runner-owned rows only). */
 export interface StateEventPayload { to: FleetJobStateName; reason?: string; exitCode?: number }
 
+/** S1b §1.2: one PRD user story, as the runner read it from nax's prd.json. */
+export interface SnapshotStory {
+  id: string;
+  /** At most 80 UTF-16 units. */
+  title: string;
+  /** nax's story status, passed through (`pending`, `in-progress`, `passed`, ...). */
+  status: string;
+  attempts: number;
+  /** nax's `dependencies`, at most 10 ids. */
+  dependsOn: string[];
+}
+
 /** Mirror of nax status.json (§5.2 step 5). Every field optional; absent = unchanged. */
 export interface SnapshotEventPayload {
   naxRunId?: string;
@@ -99,6 +111,10 @@ export interface SnapshotEventPayload {
   /** S1b §1.1: outcome of the runner's work-in-progress push after an unfinished RUN.
    *  `pushed` | `none` | `failed:<reason>` (printable ASCII, at most 200 chars of reason). */
   wipPush?: string;
+  /** S1b §1.2: the PRD's stories in PRD order, sent only when changed. At most 100 stories and 8 KiB serialized. */
+  stories?: SnapshotStory[];
+  /** S1b §1.2: true when the runner cut `stories` to fit; sent with `stories`. */
+  storiesTruncated?: boolean;
   /** Log events dropped by the runner's rate limit since the last snapshot (§3.2). */
   droppedLogs?: number;
 }

@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { appendFile, mkdir, symlink, truncate, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { LogEventPayload, SnapshotEventPayload } from '@nathapp/fleet-protocol';
+import type { SnapshotStory } from '@nathapp/fleet-protocol';
 import { makeTempDirs } from '../../test/helpers/tmp';
 import { FileTail } from './file-tail';
 import { LogBudget, chunkText } from './log-budget';
@@ -31,6 +32,12 @@ const writeStatus = (over: Record<string, unknown> = {}) => writeFile(join(base,
   cost: { spent: 0.5 }, current: { storyId: 'US-002', phase: 'implement' }, lastHeartbeat: '2026-10-01T00:00:00.000Z', ...over,
 }));
 const runsDir = () => join(base, 'out', 'features', 'feat', 'runs');
+const prdPath = () => join(base, 'repo', '.nax', 'features', 'feat', 'prd.json');
+const writePrd = async (stories: Array<Record<string, unknown>> | string) => {
+  await mkdir(join(base, 'repo', '.nax', 'features', 'feat'), { recursive: true });
+  await writeFile(prdPath(), typeof stories === 'string' ? stories : JSON.stringify({ feature: 'feat', userStories: stories }));
+};
+const story = (over: Partial<SnapshotStory> = {}): SnapshotStory => ({ id: 'US-001', title: 'first', status: 'pending', attempts: 0, dependsOn: [], ...over });
 
 beforeEach(async () => {
   base = await tmp.make('watch');
@@ -203,5 +210,63 @@ describe('FileTail', () => {
     await truncate(path, 0);
     await appendFile(path, 'z\n');
     expect(await tail.readNew()).toBe('z\n');
+  });
+});
+
+describe('story list (S1b §1.2)', () => {
+  test('sends the list with the first snapshot, not again while unchanged, and again on a PRD-only change (Review focus 4)', async () => {
+    const w = new Watcher(sink, options({ repoDir: join(base, 'repo') }));
+    await writeStatus();
+    await writePrd([{ id: 'US-001', title: 'first', status: 'pending' }]);
+    await w.tick();
+    expect(snaps[0]).toMatchObject({ naxRunId: 'run-1', stories: [story()], storiesTruncated: false });
+
+    await writeStatus({ progress: { total: 3, passed: 2, failed: 0, paused: 0, blocked: 0, pending: 1 } });
+    await w.tick();
+    expect(snaps).toHaveLength(2);
+    expect(snaps[1]).not.toHaveProperty('stories');
+    expect(snaps[1]).not.toHaveProperty('storiesTruncated');
+
+    await w.tick();
+    expect(snaps).toHaveLength(2);
+
+    await writePrd([{ id: 'US-001', title: 'first', status: 'passed', attempts: 1 }]);
+    await w.tick();
+    expect(snaps).toHaveLength(3);
+    expect(snaps[2]).toMatchObject({ stories: [story({ status: 'passed', attempts: 1 })], storiesTruncated: false });
+  });
+
+  test('an unreadable PRD omits the list without an extra snapshot; the next good read sends it (Review focus 2)', async () => {
+    const w = new Watcher(sink, options({ repoDir: join(base, 'repo') }));
+    await writeStatus();
+    await writePrd('{"userSto');
+    await w.tick();
+    expect(snaps).toHaveLength(1);
+    expect(snaps[0]).not.toHaveProperty('stories');
+    await w.tick();
+    expect(snaps).toHaveLength(1);
+    await writePrd([{ id: 'US-001', title: 'first' }]);
+    await w.tick();
+    expect(snaps).toHaveLength(2);
+    expect(snaps[1]).toMatchObject({ stories: [story()] });
+    await writePrd('{"userSto');
+    await w.tick();
+    expect(snaps).toHaveLength(2);
+  });
+
+  test('without repoDir (a PLAN job, D146) no list is ever read', async () => {
+    const w = new Watcher(sink, options());
+    await writeStatus();
+    await writePrd([{ id: 'US-001' }]);
+    await w.tick();
+    expect(snaps).toHaveLength(1);
+    expect(snaps[0]).not.toHaveProperty('stories');
+  });
+
+  test('no status.json yet: no snapshot, even with a PRD', async () => {
+    const w = new Watcher(sink, options({ repoDir: join(base, 'repo') }));
+    await writePrd([{ id: 'US-001' }]);
+    await w.tick();
+    expect(snaps).toEqual([]);
   });
 });

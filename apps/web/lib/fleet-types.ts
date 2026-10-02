@@ -133,6 +133,14 @@ export type MisfitReason =
   | 'disabled' | 'offline' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
   | 'provider_unavailable' | 'sandbox' | 'tools' | 'busy_repo' | 'capacity'
 
+export interface FleetJobStoryDto {
+  id: string
+  title: string
+  status: string
+  attempts: number
+  dependsOn: string[]
+}
+
 export interface FleetJobDto {
   id: string
   projectId: string
@@ -171,6 +179,8 @@ export interface FleetJobDto {
   resultSha: string | null
   resultPrUrl: string | null
   wipPush: string | null
+  stories: FleetJobStoryDto[] | null
+  storiesTruncated: boolean
 }
 
 export interface FleetJobEventDto {

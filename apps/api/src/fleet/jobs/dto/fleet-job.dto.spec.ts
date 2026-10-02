@@ -11,13 +11,31 @@ describe('fleet job DTOs', () => {
       startedAt: null, finishedAt: null, cancelRequestedAt: null, naxRunId: null, naxLogRunId: null, naxCostRunId: null,
       progress: null, currentStoryId: null, currentPhase: null, costSpentUsd: '0.1234', lastHeartbeatAt: null,
       finishResult: null, escalationReason: null, exitCode: null, resultBranch: null, resultSha: null, resultPrUrl: null,
-      wipPush: 'failed:diverged',
+      wipPush: 'failed:diverged', stories: [{ id: 'US-001', title: 't', status: 'passed', attempts: 1, dependsOn: [] }], storiesTruncated: true,
       eventSeq: 3, ackedRunnerSeq: 2, attributedAt: null, updatedAt: now,
     });
     const json = JSON.parse(JSON.stringify(dto));
     expect(json).toEqual(expect.objectContaining({ maxCostUsd: '5.5', costSpentUsd: '0.1234', queuedAt: now.toISOString() }));
     expect(json).toEqual(expect.objectContaining({ wipPush: 'failed:diverged' }));
+    expect(json).toEqual(expect.objectContaining({ stories: [{ id: 'US-001', title: 't', status: 'passed', attempts: 1, dependsOn: [] }], storiesTruncated: true }));
     for (const hidden of ['runnerBootId', 'eventSeq', 'ackedRunnerSeq', 'attributedAt']) expect(json).not.toHaveProperty(hidden);
     expect(JSON.stringify(FleetJobEventDto.from({ id: 'e', jobId: 'j', seq: 1, leaseEpoch: 0, runnerSeq: null, type: 'state', payload: {}, createdAt: now }))).toContain('"seq":1');
+  });
+
+  it('a list page leaves the story list out (D149); a single job carries it', () => {
+    const record = {
+      id: 'j', projectId: 'p', repoId: 'r', ref: 'main', command: 'RUN', feature: 'f', planFrom: null, profiles: [],
+      maxCostUsd: '5', bashMode: 'raw', selectorLabels: [], pinnedRunnerId: null, runnerId: null, runnerBootId: null,
+      leaseEpoch: 1, state: 'RUNNING', stateReason: null, requestedById: 'u', queuedAt: now, assignedAt: null,
+      startedAt: null, finishedAt: null, cancelRequestedAt: null, naxRunId: null, naxLogRunId: null, naxCostRunId: null,
+      progress: null, currentStoryId: 'US-001', currentPhase: 'implement', costSpentUsd: '0', lastHeartbeatAt: null,
+      finishResult: null, escalationReason: null, exitCode: null, resultBranch: null, resultSha: null, resultPrUrl: null,
+      wipPush: null, stories: [{ id: 'US-001', title: 't', status: 'in-progress', attempts: 0, dependsOn: [] }], storiesTruncated: true,
+      eventSeq: 0, ackedRunnerSeq: 0, attributedAt: null, updatedAt: now,
+    } as const;
+    const full = JSON.parse(JSON.stringify(FleetJobDto.from({ ...record, stories: [...record.stories] } as never)));
+    expect(full).toEqual(expect.objectContaining({ stories: [record.stories[0]], storiesTruncated: true }));
+    const summary = JSON.parse(JSON.stringify(FleetJobDto.summary({ ...record, stories: [...record.stories] } as never)));
+    expect(summary).toEqual(expect.objectContaining({ id: 'j', currentStoryId: 'US-001', stories: null, storiesTruncated: false }));
   });
 });

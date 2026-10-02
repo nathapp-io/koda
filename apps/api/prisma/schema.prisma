@@ -674,6 +674,8 @@ model FleetJob {
   resultSha         String?
   resultPrUrl       String?
   wipPush           String? // S1b §1.1: pushed | none | failed:<reason>
+  stories           Json? // S1b §1.2: PRD stories, at most 100 and 8 KiB
+  storiesTruncated  Boolean   @default(false)
   eventSeq          Int       @default(0) // server timeline counter (plan D2)
   ackedRunnerSeq    Int       @default(0) // cumulative runner ack for leaseEpoch (plan D2)
   attributedAt      DateTime? // PR/MR attribution comment posted (plan D19)

@@ -52,6 +52,14 @@ describe('payload guards', () => {
     events.snapshot({ naxRunId: 'r', progress: { total: 3 } });
     expect(all()[1].payload).toEqual({ naxRunId: 'r', progress: { total: 3 } });
   });
+  test('D151: a snapshot still too big without progress drops the story list next, and keeps progress when that fits', () => {
+    const stories = [{ id: 'US-001', title: 'x'.repeat(20_000), status: 'pending', attempts: 0, dependsOn: [] }];
+    events.snapshot({ naxRunId: 'r', progress: { total: 3 }, stories, storiesTruncated: false });
+    events.snapshot({ naxRunId: 'r2', progress: { blob: 'x'.repeat(20_000) } as never, stories, storiesTruncated: true });
+    const [first, second] = all().map((e) => e.payload);
+    expect(first).toEqual({ naxRunId: 'r', progress: { total: 3 } });
+    expect(second).toEqual({ naxRunId: 'r2' });
+  });
   test('an oversize log line is cut down', () => {
     events.logLine({ stream: 'run', text: 'y'.repeat(20_000) });
     expect((all()[0].payload as { text: string }).text).toHaveLength(4000);

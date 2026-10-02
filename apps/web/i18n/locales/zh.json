@@ -682,6 +682,18 @@
       "CRASHED": "已崩溃",
       "CANCELLED": "已取消"
     },
+    "storyStatus": {
+      "pending": "待处理",
+      "in-progress": "进行中",
+      "passed": "已通过",
+      "failed": "失败",
+      "skipped": "已跳过",
+      "blocked": "已阻塞",
+      "paused": "已暂停",
+      "regression-failed": "回归失败",
+      "decomposed": "已拆分",
+      "unknown": "未知"
+    },
     "misfit": {
       "disabled": "执行机已停用",
       "offline": "执行机离线",
@@ -874,6 +886,12 @@
           "pushed": "进度已推送到分支",
           "none": "没有新的进度需要推送",
           "failed": "进度推送失败：{reason}"
+        },
+        "stories": {
+          "title": "故事",
+          "attempts": "尝试次数：{count}",
+          "phase": "当前阶段：{phase}",
+          "truncated": "列表已截断：仅显示前 {count} 个故事。"
         },
         "cancelRequested": "已于 {at} 请求取消"
       },

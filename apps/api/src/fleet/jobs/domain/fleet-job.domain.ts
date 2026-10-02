@@ -13,6 +13,15 @@ export class DuplicateActiveJobError extends Error {
   }
 }
 
+/** S1b §1.2: one PRD user story as the runner reported it. */
+export interface FleetJobStory {
+  id: string;
+  title: string;
+  status: string;
+  attempts: number;
+  dependsOn: string[];
+}
+
 export interface FleetJobRecord {
   id: string;
   projectId: string;
@@ -54,6 +63,8 @@ export interface FleetJobRecord {
   resultSha: string | null;
   resultPrUrl: string | null;
   wipPush: string | null;
+  stories: FleetJobStory[] | null;
+  storiesTruncated: boolean;
   eventSeq: number;
   ackedRunnerSeq: number;
   attributedAt: Date | null;
@@ -79,7 +90,7 @@ type Mutable =
   | 'state' | 'stateReason' | 'runnerId' | 'runnerBootId' | 'assignedAt' | 'startedAt' | 'finishedAt'
   | 'cancelRequestedAt' | 'naxRunId' | 'naxLogRunId' | 'naxCostRunId' | 'progress' | 'currentStoryId'
   | 'currentPhase' | 'costSpentUsd' | 'lastHeartbeatAt' | 'finishResult' | 'escalationReason' | 'exitCode'
-  | 'resultBranch' | 'resultSha' | 'resultPrUrl' | 'wipPush' | 'ackedRunnerSeq';
+  | 'resultBranch' | 'resultSha' | 'resultPrUrl' | 'wipPush' | 'stories' | 'storiesTruncated' | 'ackedRunnerSeq';
 
 /** Columns a transition, snapshot or requeue may change. `bumpEpoch` adds one to leaseEpoch (plan D4). */
 export type FleetJobPatch = Partial<Pick<FleetJobRecord, Mutable>> & { bumpEpoch?: boolean };
