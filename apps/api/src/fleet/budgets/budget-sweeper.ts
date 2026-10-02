@@ -1,7 +1,11 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
+import type { LiveFleetApprovalEvent } from '../../live/live-event';
 import { FleetActivityService } from '../activity/fleet-activity.service';
+import type { ApprovalActor } from '../approvals/approval-closer';
+import { ApprovalCloser } from '../approvals/approval-closer';
+import { ApprovalLivePublisher } from '../approvals/approval-live.publisher';
 import { SYSTEM_ACTOR } from '../jobs/job-transitions.service';
 import { BudgetEvaluator } from './budget-evaluator';
 import { budgetActivityPayload } from './budget-payloads';
@@ -32,6 +36,8 @@ export class BudgetSweeper implements OnModuleInit, OnModuleDestroy {
     private readonly activity: FleetActivityService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'sweepEnabled'>,
+    private readonly approvals: ApprovalCloser,
+    private readonly approvalLive: ApprovalLivePublisher,
   ) {}
 
   onModuleInit(): void {
@@ -67,29 +73,42 @@ export class BudgetSweeper implements OnModuleInit, OnModuleDestroy {
     return result;
   }
 
-  /** S1b §2.1: a policy whose scope row is gone is deleted with its incidents. Re-checked under the lock. */
-  private deleteOrphan(id: string): Promise<boolean> {
-    return this.txManager.run(async () => {
+  /** S1b §2.1: a policy whose scope row is gone is deleted with its incidents; S1.5 closes its pending approval. */
+  private async deleteOrphan(id: string): Promise<boolean> {
+    const { deleted, live } = await this.txManager.run(async () => {
+      const none: LiveFleetApprovalEvent[] = [];
       const policy = await this.repo.lockById(id);
-      if (!policy || (await this.repo.scopeExists(policy))) return false;
+      if (!policy || (await this.repo.scopeExists(policy))) return { deleted: false, live: none };
+      const closed = await this.approvals.closeForPolicy(id, { status: 'cancelled', resolvedBy: 'policy_deleted', actor: this.system(policy) }, new Date());
       await this.repo.delete(id);
       await this.record('budget.deleted', policy, { reason: 'scope_gone' });
-      return true;
+      return { deleted: true, live: closed.live };
     });
+    this.approvalLive.publish(live);
+    return deleted;
   }
 
-  /** B8: clear a monthly pause from an earlier window and record the rollover. */
-  private resetWindow(id: string, now: Date): Promise<boolean> {
-    return this.txManager.run(async () => {
+  /** B8: clear a monthly pause from an earlier window and record the rollover; S1.5 closes its pending approval. */
+  private async resetWindow(id: string, now: Date): Promise<boolean> {
+    const { reset, live } = await this.txManager.run(async () => {
+      const none: LiveFleetApprovalEvent[] = [];
       const policy = await this.repo.lockById(id);
-      if (!policy || !isStaleMonthlyPause(policy, now)) return false;
+      if (!policy || !isStaleMonthlyPause(policy, now)) return { reset: false, live: none };
       const start = windowStart(policy.windowKind, now);
       const spent = await this.repo.windowSpend(policy, start);
+      const closed = await this.approvals.closeForPolicy(id, { status: 'cancelled', resolvedBy: 'window_reset', actor: this.system(policy) }, now);
       await this.repo.update(id, { pausedAt: null, pausedWindowStart: null });
-      await this.repo.insertIncident({ policyId: id, kind: 'window_reset', windowStart: start, spentUsd: spent, amountUsd: policy.amountUsd, actorId: null });
+      await this.repo.insertIncident({ policyId: id, kind: 'window_reset', windowStart: start, spentUsd: spent, amountUsd: policy.amountUsd, actorId: null, approvalId: closed.approval?.id ?? null });
       await this.record('budget.window_reset', policy, { spentUsd: spent, windowStart: start.toISOString() });
-      return true;
+      return { reset: true, live: closed.live };
     });
+    this.approvalLive.publish(live);
+    return reset;
+  }
+
+  /** The sweep acts on behalf of the policy's last editor; there is no human in the loop. */
+  private system(policy: BudgetPolicyRecord): ApprovalActor {
+    return { type: 'SYSTEM', id: SYSTEM_ACTOR.id, responsibleUserId: policy.updatedById };
   }
 
   private record(action: string, policy: BudgetPolicyRecord, extra: Record<string, unknown>): Promise<void> {

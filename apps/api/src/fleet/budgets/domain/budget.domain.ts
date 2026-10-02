@@ -57,6 +57,8 @@ export interface NewBudgetIncident {
   spentUsd: string;
   amountUsd: string;
   actorId: string | null;
+  /** S1.5: the approval this incident raised or resolved; omitted = null. */
+  approvalId?: string | null;
 }
 
 /** create() hit the (scopeKey, windowKind) unique index. */
