@@ -1,7 +1,10 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { Prisma } from '@prisma/client';
 import type { LiveFleetJobEvent } from '../../live/live-event';
 import { FleetActivityService } from '../activity/fleet-activity.service';
+import { BudgetEvaluator } from '../budgets/budget-evaluator';
+import { jobSpendKeys } from '../budgets/budget-rules';
 import type { JobAck, JobReport } from '../common/protocol';
 import { FleetJobLivePublisher } from '../jobs/fleet-job-live.publisher';
 import { canTransition } from '../jobs/job-state';
@@ -17,6 +20,12 @@ export interface ReportOutcome {
   live: LiveFleetJobEvent[];
 }
 
+/** The outcome plus the job after the report when its costSpentUsd changed (S1b §2.2 signal). */
+interface Processed {
+  outcome: ReportOutcome;
+  spent: FleetJobRecord | null;
+}
+
 const NONE: ReportOutcome = Object.freeze({ ack: null, unknown: false, live: [] });
 
 /** Plan D156: a server-requested cancel keeps its reason (e.g. `budget:<policyId>`) over the runner's. */
@@ -24,10 +33,14 @@ function cancelReasonFor(job: FleetJobRecord, to: string, reported: string | nul
   return to === 'CANCELLED' && job.cancelReason ? job.cancelReason : reported;
 }
 
+const costChanged = (before: FleetJobRecord, after: FleetJobRecord): boolean =>
+  !new Prisma.Decimal(before.costSpentUsd).eq(after.costSpentUsd);
+
 /**
  * One job's events from one sync, in one transaction (spec §3.2, plan D2/D5/D6): fence,
  * dedup on (epoch, runnerSeq), store, then apply only the contiguous prefix above the
  * cumulative ack. A resent seq with a different payload rejects the whole report.
+ * A cost change signals the budget evaluator after the transaction (S1b §2.2).
  */
 @Injectable()
 export class JobReportProcessor {
@@ -39,35 +52,41 @@ export class JobReportProcessor {
     private readonly live: FleetJobLivePublisher,
     private readonly fence: FenceService,
     private readonly activity: FleetActivityService,
+    private readonly budgets: BudgetEvaluator,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
 
-  process(runnerId: string, report: JobReport, now: Date): Promise<ReportOutcome> {
-    return this.txManager.run(async () => {
-      const job = await this.repo.lockById(report.jobId);
-      if (!job) return { ...NONE, unknown: true };
-      if (!this.fence.holds(job, runnerId, report.leaseEpoch)) {
-        await this.fence.abandon(runnerId, job, report.leaseEpoch);
-        return NONE;
-      }
-      const events = [...report.events].sort((a, b) => a.seq - b.seq);
-      const stored = new Map((await this.repo.findRunnerEvents(job.id, job.leaseEpoch, events.map((e) => e.seq))).map((e) => [e.runnerSeq, e]));
-      const conflict = events.find((e) => {
-        const prior = stored.get(e.seq);
-        return prior !== undefined && (prior.type !== e.type || stableStringify(prior.payload) !== stableStringify(e.payload));
-      });
-      if (conflict) {
-        this.logger.warn(`Protocol error: job ${job.id} epoch ${job.leaseEpoch} seq ${conflict.seq} resent with a different payload`);
-        return { ...NONE, ack: { jobId: job.id, ackedSeq: job.ackedRunnerSeq } };
-      }
-      for (const e of events) {
-        if (!stored.has(e.seq)) await this.repo.appendEvent(job.id, { leaseEpoch: job.leaseEpoch, runnerSeq: e.seq, type: e.type, payload: e.payload });
-      }
-      return this.applyContiguous(job, runnerId, now);
-    });
+  async process(runnerId: string, report: JobReport, now: Date): Promise<ReportOutcome> {
+    const { outcome, spent } = await this.txManager.run(() => this.processLocked(runnerId, report, now));
+    // S1b §2.2: no budget query inside the sync transaction; the evaluator runs after it commits.
+    if (spent) this.budgets.signal(jobSpendKeys(spent));
+    return outcome;
   }
 
-  private async applyContiguous(job: FleetJobRecord, runnerId: string, now: Date): Promise<ReportOutcome> {
+  private async processLocked(runnerId: string, report: JobReport, now: Date): Promise<Processed> {
+    const job = await this.repo.lockById(report.jobId);
+    if (!job) return { outcome: { ...NONE, unknown: true }, spent: null };
+    if (!this.fence.holds(job, runnerId, report.leaseEpoch)) {
+      await this.fence.abandon(runnerId, job, report.leaseEpoch);
+      return { outcome: NONE, spent: null };
+    }
+    const events = [...report.events].sort((a, b) => a.seq - b.seq);
+    const stored = new Map((await this.repo.findRunnerEvents(job.id, job.leaseEpoch, events.map((e) => e.seq))).map((e) => [e.runnerSeq, e]));
+    const conflict = events.find((e) => {
+      const prior = stored.get(e.seq);
+      return prior !== undefined && (prior.type !== e.type || stableStringify(prior.payload) !== stableStringify(e.payload));
+    });
+    if (conflict) {
+      this.logger.warn(`Protocol error: job ${job.id} epoch ${job.leaseEpoch} seq ${conflict.seq} resent with a different payload`);
+      return { outcome: { ...NONE, ack: { jobId: job.id, ackedSeq: job.ackedRunnerSeq } }, spent: null };
+    }
+    for (const e of events) {
+      if (!stored.has(e.seq)) await this.repo.appendEvent(job.id, { leaseEpoch: job.leaseEpoch, runnerSeq: e.seq, type: e.type, payload: e.payload });
+    }
+    return this.applyContiguous(job, runnerId, now);
+  }
+
+  private async applyContiguous(job: FleetJobRecord, runnerId: string, now: Date): Promise<Processed> {
     let current = job;
     let next = job.ackedRunnerSeq + 1;
     let mirrored = false;
@@ -83,7 +102,7 @@ export class JobReportProcessor {
     const ackedSeq = next - 1;
     if (ackedSeq !== job.ackedRunnerSeq) current = await this.repo.update(job.id, { ackedRunnerSeq: ackedSeq });
     if (mirrored && live.length === 0) live.push(this.live.event(current));
-    return { ack: { jobId: job.id, ackedSeq }, unknown: false, live };
+    return { outcome: { ack: { jobId: job.id, ackedSeq }, unknown: false, live }, spent: costChanged(job, current) ? current : null };
   }
 
   private async applyOne(job: FleetJobRecord, event: FleetJobEventRecord, runnerId: string, now: Date): Promise<{ job: FleetJobRecord; live?: LiveFleetJobEvent; mirrored: boolean }> {

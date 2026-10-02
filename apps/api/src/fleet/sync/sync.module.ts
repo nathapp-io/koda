@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { FleetActivityModule } from '../activity/fleet-activity.module';
+import { BudgetsModule } from '../budgets/budgets.module';
 import { GitBrokerModule } from '../git-broker/git-broker.module';
 import { FleetJobsModule } from '../jobs/fleet-jobs.module';
 import { CommandAckProcessor } from './command-ack.processor';
@@ -12,7 +13,7 @@ import { RunnerSyncController } from './runner-sync.controller';
 import { SyncService } from './sync.service';
 
 @Module({
-  imports: [PrismaModule, FleetActivityModule, FleetJobsModule, GitBrokerModule],
+  imports: [PrismaModule, FleetActivityModule, BudgetsModule, FleetJobsModule, GitBrokerModule],
   controllers: [RunnerSyncController],
   providers: [FenceService, JobReportProcessor, CommandAckProcessor, PrAttributionService, SyncService, FleetSweeper],
   exports: [FenceService, FleetSweeper],
