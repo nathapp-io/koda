@@ -265,6 +265,11 @@ equals the current window start. A stale monthly pause is therefore not enforced
   - Each row shows spend against the amount, warn and pause state, refreshed on `fleet_job` notices.
   - A banner on the project's fleet pages when any policy covering the project is effectively paused or past its
     warn threshold, linking to the policy.
+- 2b plan notes (`2026-10-02-fleet-s1b-slice-2b-budgets-web.md`): the admin page lists only global and runner policies,
+  because the admin prefix acts on nothing else (D174); the project page shows its own policies plus the global ones
+  read-only (D175); a poll backs up the `fleet_job` notices because spend changes and warns emit none (D178); the project
+  page is reached from the jobs-list header and the banner, not the sidebar (D187); the job page shows a budget stop
+  reason as text with a link (D188).
 
 ### 2.5 Testing
 

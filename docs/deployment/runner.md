@@ -135,6 +135,11 @@ koda fleet budget resume <policyId> --amount 80 --project web
 `--label` and `--pin` are exclusive. A dispatch for a feature that already has an active job on the repo prints
 that job's id instead of starting a second one.
 
+Budgets are also managed on the web: global and runner policies on `/admin/fleet/budgets` (global admins), project and
+repo policies on `/<project>/fleet/budgets` (members read; project ADMINs add, edit, delete and resume). A paused or
+past-warn policy that covers a project shows as a banner on that project's fleet pages. The CLI and the web call the same
+routes, so a pause resumed in one shows in the other within 30 seconds.
+
 ## Live check (release gate)
 
 Run once per release of the runner, by a person, with approval: steps 4 and 5 start billed nax runs.
