@@ -24,5 +24,9 @@
   "schedules": { "404": "Schedule not found" },
   "scheduleInput": { "-2": "Invalid schedule: {reason}" },
   "scheduleCronTooFrequent": { "-2": "The schedule fires more often than every {minutes} minutes" },
-  "scheduleOwnerNoAccess": { "409": "The schedule's owner can no longer dispatch to this project; the owner needs DEVELOPER access or higher" }
+  "scheduleOwnerNoAccess": { "409": "The schedule's owner can no longer dispatch to this project; the owner needs DEVELOPER access or higher" },
+  "approvals": { "404": "Approval not found" },
+  "approvalNotPending": { "409": "This approval is no longer pending" },
+  "approvalDecisionInvalid": { "-2": "This decision is not allowed: {reason}" },
+  "approvalInput": { "-2": "Invalid approval request: {reason}" }
 }

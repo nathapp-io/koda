@@ -1,0 +1,171 @@
+/**
+ * Fleet S1.5 slice 1a — approvals over HTTP: both prefixes, permissions, decide, re-queue, counts, webhooks (PG).
+ * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-approvals-api.integration.spec.ts
+ */
+import request from 'supertest';
+import { NathApplication } from '@nathapp/nestjs-app';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { Prisma, PrismaClient } from '@prisma/client';
+import { resetDb } from '../../helpers/reset-db';
+import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
+import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
+
+const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+
+jest.setTimeout(30_000);
+
+interface Approval { id: string; status: string; decision: string | null; resolvedBy: string | null; outcome: { requeueResults?: Array<{ jobId: string; ok: boolean; error?: string }> } | null; requeueCandidates?: Array<{ jobId: string }>; requeueCandidatesTruncated?: boolean }
+interface Page<T> { total: number; records: T[] }
+
+describeIntegration('fleet approvals API (PG)', () => {
+  let app: NathApplication;
+  let server: ReturnType<NathApplication['getHttpServer']>;
+  let prisma: PrismaClient;
+  let world: FleetHttpWorld;
+  let evaluator: BudgetEvaluator;
+  let padmin: string;
+  let n = 0;
+  const as = (token: string) => ({ Authorization: `Bearer ${token}` });
+  const tok = (who: keyof FleetHttpWorld['tokens']) => as(world.tokens[who]);
+  const PROJECT = '/api/projects/web/fleet/approvals';
+  const ADMIN = '/api/fleet/approvals';
+
+  const job = (over: Partial<Prisma.FleetJobUncheckedCreateInput> = {}) => prisma.fleetJob.create({
+    data: {
+      projectId: world.projectId, repoId: world.repoId, ref: 'main', command: 'RUN', feature: `ap${++n}`, profiles: [],
+      maxCostUsd: new Prisma.Decimal(5), selectorLabels: [], requestedById: world.ids.dev, state: 'COMPLETED', firstStartedAt: new Date(), ...over,
+    },
+  });
+  /** A paused project policy with its pending approval, one queued job the stop cancels, and the approval id. */
+  const stopped = async (scope: 'project' | 'global' = 'project') => {
+    const policy = await prisma.budgetPolicy.create({
+      data: scope === 'project'
+        ? { scopeType: 'project', scopeId: world.projectId, scopeKey: `project:${world.projectId}`, projectId: world.projectId, windowKind: 'calendar_month_utc', amountUsd: new Prisma.Decimal(10), warnPercent: null, createdById: world.ids.root, updatedById: world.ids.root }
+        : { scopeType: 'global', scopeKey: 'global', windowKind: 'calendar_month_utc', amountUsd: new Prisma.Decimal(10), warnPercent: null, createdById: world.ids.root, updatedById: world.ids.root },
+    });
+    await job({ costSpentUsd: 10 });
+    const queued = await job({ state: 'QUEUED', firstStartedAt: null });
+    await evaluator.evaluate(policy.id);
+    const approval = await prisma.fleetApproval.findFirstOrThrow({ where: { policyId: policy.id, status: 'pending' } });
+    return { policy, queued, approvalId: approval.id };
+  };
+
+  beforeAll(async () => {
+    await resetDb();
+    app = await bootHttpApp({ registrationEnabled: false });
+    server = app.getHttpServer();
+    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    world = await seedFleetHttpWorld(server, prisma);
+    evaluator = app.get(BudgetEvaluator);
+    await request(server).post('/api/admin/users').set(tok('root')).send({ email: 'padmin@koda.test', name: 'padmin', password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
+    await request(server).post('/api/projects/web/members').set(tok('root')).send({ email: 'padmin@koda.test', role: 'ADMIN' }).expect(201);
+    padmin = await loginToken(server, 'padmin@koda.test');
+    await prisma.webhook.create({
+      data: { projectId: world.projectId, url: 'https://hooks.example.com/koda', secret: 's'.repeat(32), events: JSON.stringify(['fleet.approval.requested', 'fleet.approval.resolved']) },
+    });
+  });
+  afterAll(async () => {
+    await app.close();
+  });
+  beforeEach(async () => {
+    await prisma.budgetPolicy.deleteMany();
+    await prisma.fleetApproval.deleteMany();
+    await prisma.fleetCommand.deleteMany();
+    await prisma.fleetJob.deleteMany();
+    await prisma.outboxEvent.deleteMany();
+  });
+
+  it('members list and get; outsiders get 403; candidates on a pending budget approval', async () => {
+    const { approvalId, queued } = await stopped();
+    const page = data<Page<Approval>>(await request(server).get(PROJECT).set(tok('viewer')).expect(200));
+    expect(page.records.map((a) => a.id)).toEqual([approvalId]);
+    const one = data<Approval>(await request(server).get(`${PROJECT}/${approvalId}`).set(tok('viewer')).expect(200));
+    expect(one.requeueCandidates?.map((c) => c.jobId)).toEqual([queued.id]);
+    expect(one.requeueCandidatesTruncated).toBe(false);
+    await request(server).get(PROJECT).set(tok('outsider')).expect(403);
+    await request(server).get(`/api/projects/ops/fleet/approvals/${approvalId}`).set(tok('root')).expect(404);
+  });
+
+  it('a global policy approval is on the admin routes only', async () => {
+    const { approvalId } = await stopped('global');
+    expect(data<Page<Approval>>(await request(server).get(PROJECT).set(tok('root')).expect(200)).total).toBe(0);
+    expect(data<Page<Approval>>(await request(server).get(ADMIN).set(tok('root')).expect(200)).records.map((a) => a.id)).toEqual([approvalId]);
+    await request(server).get(ADMIN).set(tok('dev')).expect(403);
+  });
+
+  it('a developer cannot decide a budget override; a project admin can keep it paused', async () => {
+    const { approvalId, policy } = await stopped();
+    await request(server).post(`${PROJECT}/${approvalId}/decide`).set(tok('dev')).send({ decision: 'keep_paused' }).expect(403);
+    const decided = data<Approval>(await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin)).send({ decision: 'keep_paused' }).expect(200));
+    expect(decided).toEqual(expect.objectContaining({ status: 'rejected', decision: 'keep_paused', resolvedBy: 'user' }));
+    expect((await prisma.budgetPolicy.findUniqueOrThrow({ where: { id: policy.id } })).pausedAt).not.toBeNull();
+    const again = await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin)).send({ decision: 'keep_paused' }).expect(409);
+    expect(again.body.message).toBeDefined();
+  });
+
+  it('raise and resume lifts the pause and re-queues the selected candidates, including a placement-cancelled job', async () => {
+    const { approvalId, policy, queued } = await stopped();
+    const later = await job({ state: 'CANCELLED', firstStartedAt: null, startedAt: null, cancelReason: `budget:${policy.id}`, stateReason: `budget:${policy.id}`, finishedAt: new Date(Date.now() + 1_000) });
+    const decided = data<Approval>(await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin))
+      .send({ decision: 'raise_budget_and_resume', amountUsd: 25, requeueJobIds: [queued.id, later.id] }).expect(200));
+    expect(decided).toEqual(expect.objectContaining({ status: 'approved', decision: 'raise_budget_and_resume' }));
+    expect(decided.outcome?.requeueResults).toEqual([{ jobId: queued.id, ok: true }, { jobId: later.id, ok: true }]);
+    const after = await prisma.budgetPolicy.findUniqueOrThrow({ where: { id: policy.id } });
+    expect(after).toEqual(expect.objectContaining({ pausedAt: null, amountUsd: new Prisma.Decimal(25) }));
+    expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: queued.id } })).state).toBe('QUEUED');
+    expect((await prisma.budgetIncident.findFirstOrThrow({ where: { policyId: policy.id, kind: 'resumed' } })).approvalId).toBe(approvalId);
+    expect(await prisma.outboxEvent.count({ where: { payload: { contains: '"event":"fleet.approval.resolved"' } } })).toBe(1);
+  });
+
+  it('partial re-queue: an active duplicate fails alone, the resume stands (review focus 2)', async () => {
+    const { approvalId, queued } = await stopped();
+    await job({ state: 'QUEUED', firstStartedAt: null, feature: queued.feature });
+    const decided = data<Approval>(await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin))
+      .send({ decision: 'raise_budget_and_resume', amountUsd: 25, requeueJobIds: [queued.id] }).expect(200));
+    expect(decided.status).toBe('approved');
+    expect(decided.outcome?.requeueResults).toEqual([{ jobId: queued.id, ok: false, error: expect.any(String) }]);
+  });
+
+  it('refuses a missing amount, an amount not above spend, and a non-candidate id', async () => {
+    const { approvalId } = await stopped();
+    await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin)).send({ decision: 'raise_budget_and_resume' }).expect(400);
+    await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin)).send({ decision: 'raise_budget_and_resume', amountUsd: 5 }).expect(400);
+    await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin)).send({ decision: 'raise_budget_and_resume', amountUsd: 25, requeueJobIds: ['nope'] }).expect(400);
+    expect((await prisma.fleetApproval.findUniqueOrThrow({ where: { id: approvalId } })).status).toBe('pending');
+  });
+
+  it('admin prefix on a project policy resumes it (review focus 5)', async () => {
+    const { approvalId, policy } = await stopped();
+    await request(server).post(`${ADMIN}/${approvalId}/decide`).set(tok('root')).send({ decision: 'raise_budget_and_resume', amountUsd: 30 }).expect(200);
+    expect((await prisma.budgetPolicy.findUniqueOrThrow({ where: { id: policy.id } })).pausedAt).toBeNull();
+  });
+
+  it('decide after the policy was deleted is 409 (review focus 3)', async () => {
+    const { approvalId, policy } = await stopped();
+    await request(server).delete(`/api/projects/web/fleet/budgets/${policy.id}`).set(as(padmin)).expect(204);
+    await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin)).send({ decision: 'keep_paused' }).expect(409);
+  });
+
+  it('concurrent evaluate and decide: no deadlock (review focus 1)', async () => {
+    const { approvalId, policy } = await stopped();
+    const [res] = await Promise.all([
+      request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin)).send({ decision: 'raise_budget_and_resume', amountUsd: 40 }),
+      evaluator.evaluate(policy.id),
+      evaluator.evaluate(policy.id),
+    ]);
+    expect([200, 409]).toContain(res.status);
+    expect(await prisma.fleetApproval.count({ where: { policyId: policy.id, status: 'pending' } })).toBeLessThanOrEqual(1);
+  });
+
+  it('counts pending over memberships; unscoped for a global admin only', async () => {
+    await stopped();
+    await stopped('global');
+    const forDev = data<{ total: number; unscoped: number; projects: Array<{ slug: string; pending: number }> }>(
+      await request(server).get('/api/fleet/approval-counts').set(tok('dev')).expect(200));
+    expect(forDev).toEqual({ total: 1, unscoped: 0, projects: [expect.objectContaining({ slug: 'web', pending: 1 })] });
+    const forRoot = data<{ total: number; unscoped: number }>(await request(server).get('/api/fleet/approval-counts').set(tok('root')).expect(200));
+    expect(forRoot.unscoped).toBe(1);
+    expect(data<{ total: number }>(await request(server).get('/api/fleet/approval-counts').set(tok('outsider')).expect(200)).total).toBe(0);
+  });
+});

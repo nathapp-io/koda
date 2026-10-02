@@ -5407,6 +5407,391 @@
         ]
       }
     },
+    "/api/projects/{slug}/fleet/approvals": {
+      "get": {
+        "operationId": "ProjectFleetApprovalsController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "approved",
+                "rejected",
+                "expired",
+                "cancelled"
+              ]
+            }
+          },
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "budget_override_required",
+                "nax_bash_escalate"
+              ]
+            }
+          },
+          {
+            "name": "jobId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of FleetApprovalDto"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "This project's approvals, newest first (project member)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/approvals/{id}": {
+      "get": {
+        "operationId": "ProjectFleetApprovalsController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetApprovalDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One approval; a pending budget override includes its re-queue candidates (project member)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/approvals/{id}/decide": {
+      "post": {
+        "operationId": "ProjectFleetApprovalsController_decide",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideApprovalDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetApprovalDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "fleet.approvalDecisionInvalid, fleet.budgetAmountNotAboveSpend"
+          },
+          "409": {
+            "description": "fleet.approvalNotPending, fleet.budgetNotPaused"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Decide a pending approval (budget overrides: project ADMIN)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/approvals": {
+      "get": {
+        "operationId": "FleetApprovalsController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "approved",
+                "rejected",
+                "expired",
+                "cancelled"
+              ]
+            }
+          },
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "budget_override_required",
+                "nax_bash_escalate"
+              ]
+            }
+          },
+          {
+            "name": "jobId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of FleetApprovalDto"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Every approval, newest first (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/approvals/{id}": {
+      "get": {
+        "operationId": "FleetApprovalsController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetApprovalDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One approval with re-queue candidates when pending (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/approvals/{id}/decide": {
+      "post": {
+        "operationId": "FleetApprovalsController_decide",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideApprovalDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetApprovalDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "fleet.approvalDecisionInvalid, fleet.budgetAmountNotAboveSpend"
+          },
+          "409": {
+            "description": "fleet.approvalNotPending, fleet.budgetNotPaused"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Decide a pending approval (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/approval-counts": {
+      "get": {
+        "operationId": "FleetApprovalCountsController_get",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalCountsDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Pending approvals per member project; no-project ones for a global admin",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/projects/{slug}/fleet/schedules": {
       "get": {
         "operationId": "ProjectFleetSchedulesController_list",
@@ -9041,6 +9426,213 @@
         "required": [
           "job",
           "placement"
+        ]
+      },
+      "RequeueCandidateDto": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "feature": {
+            "type": "string"
+          },
+          "queuedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "jobId",
+          "projectId",
+          "feature",
+          "queuedAt"
+        ]
+      },
+      "FleetApprovalDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "budget_override_required",
+              "nax_bash_escalate"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "approved",
+              "rejected",
+              "expired",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string",
+            "nullable": true
+          },
+          "jobId": {
+            "type": "string",
+            "nullable": true
+          },
+          "policyId": {
+            "type": "string",
+            "nullable": true
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outcome": {
+            "type": "object",
+            "additionalProperties": true,
+            "nullable": true
+          },
+          "requestedAt": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "decision": {
+            "nullable": true,
+            "enum": [
+              "allow",
+              "allow_for_job",
+              "deny",
+              "raise_budget_and_resume",
+              "keep_paused"
+            ],
+            "type": "string"
+          },
+          "decidedById": {
+            "type": "string",
+            "nullable": true
+          },
+          "decidedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "resolvedBy": {
+            "nullable": true,
+            "enum": [
+              "user",
+              "timeout",
+              "job_ended",
+              "superseded",
+              "manual_resume",
+              "window_reset",
+              "policy_deleted"
+            ],
+            "type": "string"
+          },
+          "comment": {
+            "type": "string",
+            "nullable": true
+          },
+          "requeueCandidates": {
+            "description": "Pending budget approvals on get only (spec §1.5)",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequeueCandidateDto"
+            }
+          },
+          "requeueCandidatesTruncated": {
+            "type": "boolean",
+            "description": "More than 200 candidates exist"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "status",
+          "payload",
+          "requestedAt"
+        ]
+      },
+      "DecideApprovalDto": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "enum": [
+              "allow",
+              "allow_for_job",
+              "deny",
+              "raise_budget_and_resume",
+              "keep_paused"
+            ],
+            "type": "string"
+          },
+          "amountUsd": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 1000000,
+            "description": "raise_budget_and_resume: the new amount, above the window spend"
+          },
+          "requeueJobIds": {
+            "description": "raise_budget_and_resume: candidate job ids to re-queue; omitted = none (plan D231)",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "comment": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "ProjectApprovalCountDto": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "pending": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "projectId",
+          "slug",
+          "pending"
+        ]
+      },
+      "ApprovalCountsDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "unscoped": {
+            "type": "number"
+          },
+          "projects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProjectApprovalCountDto"
+            }
+          }
+        },
+        "required": [
+          "total",
+          "unscoped",
+          "projects"
         ]
       },
       "ScheduleDto": {
