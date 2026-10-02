@@ -200,13 +200,25 @@ describeIntegration('fleet approvals API (PG)', () => {
    * the in-process `evaluate` that reversing `decide`'s two lock lines still passes it: ~0% mutant
    * detection. Here both transactions open in one tick, so they really are concurrent on the database.
    *
-   * One `decide` and one `evaluate`, deliberately. A second `evaluate` (as the HTTP case above fires) just
-   * queues behind the policy lock, and that alone is enough to stop the cycle forming at all: measured on
-   * this box, 3 races out of 3 survived with the lock order reversed. With one of each, the same mutation
-   * is caught roughly one run in eight. So this is a **real but probabilistic** guard: a green run is
-   * evidence, a red run is proof. Do not over-trust it and do not read it as "the lock order is verified".
-   * A true barrier (hold the policy row from a third connection, fire, release) would be deterministic, but
-   * that is a redesign and is not warranted here.
+   * One `decide` and one `evaluate`, deliberately, and only because a second `evaluate` adds no
+   * concurrency signal to this pair. The cycle under test is `decide` and this `evaluate` alone:
+   * `evaluate` takes the policy lock first and then wants the approval row, while `decide` takes the
+   * policy lock first too and then wants the same approval row, so a reversed nesting anywhere in that
+   * pair is what has to deadlock.
+   *
+   * This is a **real but probabilistic** guard, and it is probabilistic purely because there is no
+   * barrier: nothing holds either row back until both transactions are in flight, so whether they
+   * actually overlap is left to connection scheduling. A green run is evidence, a red run is proof; do
+   * not read it as "the lock order is verified". A true barrier (hold the policy row from a third
+   * connection, fire, release) would be deterministic, but that is a redesign and is not warranted here.
+   *
+   * Postgres picks the deadlock victim, so it is not knowable in advance which of the two promises
+   * rejects — hence `Promise.allSettled` and the loop over both results rather than an await on one.
+   *
+   * The regex below matches the error *text*, not an error code, and that is load-bearing: both lock
+   * statements are `$queryRaw ... FOR UPDATE`, so a `40P01` raised there reaches the test as Prisma
+   * `P2010` (raw query failed), never `P2034` (transaction conflict). Tightening the regex to an error
+   * code would stop matching and silently turn this into a test that always passes.
    */
   it('concurrent in-process decide and evaluate: no deadlock, and never a P2034 (review focus 1)', async () => {
     const { approvalId, policy } = await stopped();
@@ -218,7 +230,8 @@ describeIntegration('fleet approvals API (PG)', () => {
     ]);
     // The only rejection allowed is the decided-conflict, which is the same 409 the HTTP case sees. With a
     // reversed nesting the loser blocks on lock 1 while the winner takes lock 2, the cycle is a deadlock,
-    // and Postgres answers `40P01` — which Prisma surfaces as `P2034`.
+    // and Postgres answers `40P01` — which arrives here as Prisma `P2010` on the raw lock query, so the
+    // match has to be on that text (see the doc comment).
     for (const r of [decideResult, evaluateResult]) {
       if (r.status === 'rejected') expect(String(r.reason)).not.toMatch(/P2034|40P01|deadlock/i);
     }

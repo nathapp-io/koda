@@ -172,11 +172,15 @@ function registerDecide(approval: Command): void {
           // A cancelled job is never pruned, so a policy can hold more; the page the CLI can see is the
           // oldest slice of them, and the decide server-side-filters on `finishedAt >= requestedAt`, which
           // filters that whole slice out. `--requeue all` would then send an empty or partial set, the
-          // decide would answer 200, and nothing would say so. Refuse instead. Warn on stderr first, so
-          // the cap is visible, and it never lands in --json stdout.
+          // decide would answer 200, and nothing would say so. Refuse instead.
+          // The fact goes in the thrown message rather than a separate `console.error`: `handleApiError`
+          // owns stderr, and under --json that is a single machine-readable object. A raw line ahead of
+          // it would break `JSON.parse(stderr)` for any script. The count is interpolated from the
+          // response, never hardcoded, so it cannot drift from MAX_REQUEUE_CANDIDATES.
           if (a.requeueCandidatesTruncated) {
-            console.error(`More candidates exist; only the first ${a.requeueCandidates?.length ?? 0} are re-queued.`);
-            throw new InvalidArgumentError('too many re-queue candidates to name as `all`; pass the job ids from `koda fleet approval show <id>`');
+            throw new InvalidArgumentError(
+              `too many re-queue candidates to name as \`all\`; \`koda fleet approval show ${approvalId}\` lists only the first ${a.requeueCandidates?.length ?? 0}, so pass their job ids instead. Nothing was decided or resumed.`,
+            );
           }
           requeueJobIds = (a.requeueCandidates ?? []).map((c) => c.jobId);
         } else if (options.requeue !== undefined) {

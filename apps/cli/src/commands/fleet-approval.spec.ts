@@ -22,6 +22,7 @@ import {
   projectFleetApprovalsControllerGet, projectFleetApprovalsControllerList,
 } from '../generated';
 import { resolveContext } from '../config';
+import { setJsonMode } from '../utils/json-mode';
 
 const CTX = { apiKey: 'jwt', apiUrl: 'https://koda.example.com', projectSlug: 'web' };
 const row = (over: Record<string, unknown> = {}) => ({
@@ -48,7 +49,11 @@ describe('koda fleet approval', () => {
     logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
     errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
   });
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => {
+    // json-mode is process-global: leaving it set would make later tests' errors emit JSON.
+    setJsonMode(false);
+    jest.clearAllMocks();
+  });
 
   const logged = () => logSpy.mock.calls.flat().join('\n');
   const errored = () => errSpy.mock.calls.flat().join('\n');
@@ -172,8 +177,26 @@ describe('koda fleet approval', () => {
     })));
     await run('decide', 'a1', '--project', 'web', '--decision', 'raise_budget_and_resume', '--requeue', 'all');
     // The count is interpolated, so it cannot drift from MAX_REQUEUE_CANDIDATES.
-    expect(errored()).toContain('More candidates exist; only the first 2 are re-queued.');
+    expect(errored()).toContain('lists only the first 2');
     expect(errored()).toContain('koda fleet approval show');
+    // Nothing ran, so the message must not read as a completed re-queue.
+    expect(errored()).toContain('Nothing was decided or resumed.');
+    expect(projectFleetApprovalsControllerDecide).not.toHaveBeenCalled();
+  });
+
+  it('decide --requeue all --json leaves stderr as the single documented error object', async () => {
+    // `emitError` owns stderr under --json (utils/error.ts). A bare warning line ahead of its JSON
+    // object would break `JSON.parse(stderr)`, so the refusal has to be that object and nothing else.
+    setJsonMode(true);
+    (projectFleetApprovalsControllerGet as jest.Mock).mockResolvedValue(ok(row({
+      requeueCandidates: [{ jobId: 'j1' }, { jobId: 'j2' }], requeueCandidatesTruncated: true,
+    })));
+    await run('decide', 'a1', '--project', 'web', '--decision', 'raise_budget_and_resume', '--requeue', 'all', '--json');
+    // Exactly one write to stderr, so the joined output is parseable rather than JSON-prefixed.
+    expect(errSpy).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(errored())).toEqual({
+      error: expect.objectContaining({ code: 'API_ERROR', status: null, message: expect.stringContaining('Nothing was decided or resumed.') }),
+    });
     expect(projectFleetApprovalsControllerDecide).not.toHaveBeenCalled();
   });
 
@@ -181,6 +204,6 @@ describe('koda fleet approval', () => {
     (projectFleetApprovalsControllerGet as jest.Mock).mockResolvedValue(ok(row({ requeueCandidates: [{ jobId: 'j1' }] })));
     (projectFleetApprovalsControllerDecide as jest.Mock).mockResolvedValue(ok(row({ status: 'approved' })));
     await run('decide', 'a1', '--project', 'web', '--decision', 'raise_budget_and_resume', '--requeue', 'all');
-    expect(errored()).not.toContain('More candidates exist');
+    expect(errored()).toBe('');
   });
 });

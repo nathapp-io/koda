@@ -29,8 +29,11 @@ function build(approval: FleetApprovalRecord | null, policyScope: 'project' | 'p
       ? { id: 'pol', scopeType: 'project', projectId: null } // not producible via the API (resolveScope always sets it)
       : { id: 'pol', scopeType: 'global', projectId: null };
   const budgetRepo = { lockById: jest.fn(async () => policy) };
-  // A real decimal string, as Prisma returns it: `outcome.resumedAmountUsd` must carry the DB value.
-  const budgets = { resume: jest.fn(async () => ({ amountUsd: '20.5' })) };
+  // The DB shape, not the request shape: `amountUsd` is `numeric(12,4)`, so a round-trip of 20.5 reads
+  // back as `'20.5000'` and `String(20.5)` is `'20.5'`. A fake echoing the request number would let a
+  // re-added `?? String(dto.amountUsd)` fallback pass, which is why the store value is scaled here and
+  // the assertions below pin the scaled form.
+  const budgets = { resume: jest.fn(async () => ({ amountUsd: '20.5000' })) };
   const jobs = {
     requeue: jest.fn(async (_a: string, _p: string, id: string) => {
       if (id === 'j2') throw new ConflictAppException({ activeJobId: 'j9' }, 'fleet.jobs');
@@ -65,9 +68,11 @@ describe('ApprovalsService.decide (budget)', () => {
     expect(budgets.resume).toHaveBeenCalledWith('root', { kind: 'admin' }, 'pol', 20.5, NOW, { approvalId: 'a1' });
     expect(jobs.requeue.mock.calls).toEqual([['root', 'p1', 'j1'], ['root', 'p2', 'j2']]);
     expect(dto.status).toBe('approved');
-    // Money crosses as the DB decimal string, never the request number (D233 / review F6).
+    // Money crosses as the DB decimal string, never the request number (D233 / review F6). `'20.5000'`
+    // is what `numeric(12,4)` gives back for 20.5 and `'20.5'` is what `String(20.5)` gives, so this
+    // assertion fails if the value is ever rebuilt from the request instead of read from the store.
     expect(dto.outcome).toEqual({
-      resumedAmountUsd: '20.5',
+      resumedAmountUsd: '20.5000',
       requeueResults: [
         { jobId: 'j1', ok: true },
         // The failure keeps its i18n coordinates, so `activeJobId` survives into the persisted outcome.
@@ -80,7 +85,7 @@ describe('ApprovalsService.decide (budget)', () => {
     const { service, jobs } = build(pendingBudget());
     jobs.requeue.mockRejectedValue(new Error('Connection to the database failed'));
     const dto = await service.decide(ADMIN_CALLER, PROJECT_ADMIN, 'a1', { decision: 'raise_budget_and_resume', amountUsd: 20.5, requeueJobIds: ['j1'] }, NOW);
-    expect(dto.outcome).toEqual({ resumedAmountUsd: '20.5', requeueResults: [{ jobId: 'j1', ok: false, error: 'unexpected error' }] });
+    expect(dto.outcome).toEqual({ resumedAmountUsd: '20.5000', requeueResults: [{ jobId: 'j1', ok: false, error: 'unexpected error' }] });
     expect(JSON.stringify(dto.outcome)).not.toContain('Connection to the database');
   });
 
@@ -88,7 +93,7 @@ describe('ApprovalsService.decide (budget)', () => {
     const { service, jobs } = build(pendingBudget());
     const dto = await service.decide(ADMIN_CALLER, PROJECT_ADMIN, 'a1', { decision: 'raise_budget_and_resume', amountUsd: 20.5, requeueJobIds: ['j1', 'j1'] }, NOW);
     expect(jobs.requeue).toHaveBeenCalledTimes(1);
-    expect(dto.outcome).toEqual({ resumedAmountUsd: '20.5', requeueResults: [{ jobId: 'j1', ok: true }] });
+    expect(dto.outcome).toEqual({ resumedAmountUsd: '20.5000', requeueResults: [{ jobId: 'j1', ok: true }] });
   });
 
   it('a project policy with no projectId never resumes on a project route (review F7)', async () => {
