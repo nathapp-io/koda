@@ -26,6 +26,7 @@ test.describe('Fleet budgets (scripted runner)', () => {
 
   // A paused project policy left behind would block the dispatch e2e that runs after this file.
   test.afterAll(async () => {
+    if (!token) return;
     await deleteOwnPolicies(token, SLUG);
   });
 

@@ -6,6 +6,7 @@ import path from 'node:path'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { uiStubs, enI18n, toastRecorder } from '../helpers/fleet-harness'
 import * as apiModule from '../../composables/useApi'
+import { ApiError } from '../../composables/useApi'
 import type { BudgetPolicyDto } from '../../lib/fleet-types'
 
 const pageFile = webFile('pages', '[project]', 'fleet', 'budgets.vue')
@@ -70,7 +71,7 @@ function mountProject(rows: BudgetPolicyDto[], canManage: boolean, get?: jest.Mo
       .filter((id): id is string => typeof id === 'string' && id.startsWith('fleet-budget-row-'))
       .map((id) => id.replace('fleet-budget-row-', ''))
   const buttonLabels = (): string[] => app.find('[data-stub="button"]').map((b) => app.textOf(b))
-  return { app, api, settle, rowIds, buttonLabels }
+  return { app, api, settle, rowIds, buttonLabels, polling }
 }
 
 afterEach(() => {
@@ -136,6 +137,19 @@ describe('Project budgets page (behaviour)', () => {
     // The EmptyState stub keeps `message` as a prop, so the copy is asserted there (as on the admin page).
     expect(m.app.one('[data-stub="empty-state"]')?.props.message).toBe('No budget policies yet.')
     expect(m.app.find('[data-stub="fleet-budgets-own"]')).toHaveLength(0)
+    m.app.unmount()
+  })
+
+  test('a 403 from the list shows the forbidden line, no rows or tables, and stops polling', async () => {
+    const get = jest.fn(async () => { throw new ApiError(40003, 'forbidden') })
+    const m = mountProject(ROWS, false, get)
+    await m.settle()
+
+    expect(m.app.text()).toContain('You do not have access to this project.')
+    expect(m.app.text()).not.toContain('Only project administrators can change budget policies.')
+    expect(m.rowIds()).toEqual([])
+    expect(m.app.find('[data-stub="fleet-budgets-own"]')).toHaveLength(0)
+    expect(m.polling.stop).toHaveBeenCalled()
     m.app.unmount()
   })
 

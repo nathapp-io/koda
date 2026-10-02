@@ -21,7 +21,7 @@ const { t } = useI18n()
 const { data: viewer } = useProjectViewerRole(slug)
 const options = useFleetDispatchOptions(slug)
 const {
-  policies, pending, loadFailed, stale, editOpen, editing, resumeOpen, resuming,
+  policies, pending, loadFailed, stale, forbidden, editOpen, editing, resumeOpen, resuming,
   refresh, openCreate, openEdit, openResume, remove, onApplied,
 } = useFleetBudgetPage(base)
 
@@ -35,7 +35,13 @@ const nameOf = (p: BudgetPolicyDto): string | null =>
   scopeName(p, { project: slug, repo: options.repoName, runner: (id) => id })
 const confirmText = (p: BudgetPolicyDto): string => t('fleet.budgets.deleteConfirm', { scope: scopeText(t, p, nameOf(p)) })
 
-const polling = useVisiblePolling(refresh, POLL_MS)
+async function poll(): Promise<void> {
+  await refresh()
+  if (forbidden.value) polling.stop()
+}
+
+// Declared after poll, which it runs; poll only reaches `polling` when it is called.
+const polling = useVisiblePolling(poll, POLL_MS)
 const liveReload = createDebouncer(() => { void refresh() }, 300)
 
 onMounted(() => {
@@ -64,12 +70,13 @@ useProjectEvents(slug, {
       </template>
     </PageHeader>
 
-    <p v-if="!canManage" class="text-sm text-muted-foreground" data-testid="fleet-budget-readonly">{{ t('fleet.budgets.readOnly') }}</p>
+    <p v-if="!canManage && !forbidden" class="text-sm text-muted-foreground" data-testid="fleet-budget-readonly">{{ t('fleet.budgets.readOnly') }}</p>
+    <p v-if="forbidden" class="text-sm text-muted-foreground" data-testid="fleet-budget-forbidden">{{ t('fleet.budgets.forbidden') }}</p>
     <p v-if="stale" class="text-sm text-muted-foreground">{{ t('fleet.common.stale') }}</p>
 
     <LoadingState v-if="pending" />
     <ErrorState v-else-if="loadFailed" @retry="refresh()" />
-    <template v-else>
+    <template v-else-if="!forbidden">
       <section class="space-y-2">
         <h2 class="text-sm font-medium">{{ t('fleet.budgets.sections.own') }}</h2>
         <EmptyState v-if="own.length === 0" :message="t('fleet.budgets.empty')" />

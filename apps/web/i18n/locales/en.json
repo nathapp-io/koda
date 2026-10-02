@@ -795,6 +795,7 @@
       "subtitleProject": "Spending caps for this project and its repos. Fleet-wide caps are shown read-only.",
       "empty": "No budget policies yet.",
       "readOnly": "Only project administrators can change budget policies.",
+      "forbidden": "You do not have access to this project.",
       "sections": {
         "own": "Project and repo policies",
         "global": "Fleet-wide policies",

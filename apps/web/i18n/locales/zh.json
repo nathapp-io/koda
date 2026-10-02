@@ -795,6 +795,7 @@
       "subtitleProject": "此项目及其仓库的支出上限。Fleet 全局上限仅供查看。",
       "empty": "暂无预算策略。",
       "readOnly": "只有项目管理员可以修改预算策略。",
+      "forbidden": "您没有访问该项目的权限。",
       "sections": {
         "own": "项目与仓库策略",
         "global": "Fleet 全局策略",
