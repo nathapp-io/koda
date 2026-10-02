@@ -35,6 +35,8 @@ const ENUMS: Record<string, string[]> = {
   'fleet.budgets.runningJobs': ['finish', 'cancel'],
   'fleet.budgets.hardStop': ['on', 'off'],
   'fleet.budgets.banner': ['paused', 'warning', 'more', 'view'],
+  'fleet.schedules.status': ['enabled', 'completed', 'finish_failed', 'no_progress', 'owner_lost_access', 'template_invalid', 'manual'],
+  'fleet.schedules.form.placementMode': ['auto', 'labels', 'pin'],
 }
 
 describe('Fleet locale parity (en and zh)', () => {
@@ -62,6 +64,15 @@ describe('Fleet locale parity (en and zh)', () => {
   test('nav has the project fleet jobs link (slice 4c)', () => {
     expect(at(en, 'nav.fleetJobs')).toBe('Fleet jobs')
     expect(at(zh, 'nav.fleetJobs')).toBeTruthy()
+  })
+
+  test('the schedule keys the pages render exist (S1b 3b)', () => {
+    for (const key of [
+      'fleet.schedules.title', 'fleet.schedules.detailTitle', 'fleet.jobs.schedules', 'fleet.jobs.detail.fromSchedule',
+      'fleet.jobs.detail.openSchedule', 'fleet.jobs.detail.coalesced', 'fleet.schedules.history.storiesValue',
+    ]) {
+      expect(String(at(en, key) ?? '').trim()).not.toBe('')
+    }
   })
 
   test('no fleet message uses the vue-i18n plural or linked-message syntax by accident', () => {

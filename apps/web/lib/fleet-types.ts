@@ -181,6 +181,9 @@ export interface FleetJobDto {
   wipPush: string | null
   stories: FleetJobStoryDto[] | null
   storiesTruncated: boolean
+  /** S1b 3a D205: the schedule that dispatched the job, and fires merged into it while it was QUEUED. */
+  scheduleId: string | null
+  coalescedCount: number
 }
 
 export interface FleetJobEventDto {
@@ -261,4 +264,65 @@ export interface BudgetPolicyPatchBody {
   warnPercent?: number | null
   hardStop?: boolean
   runningJobs?: BudgetRunningJobs
+}
+
+/** S1b slice 3a wire types (apps/api/src/fleet/schedules/dto). Money is a decimal string. */
+export const SCHEDULE_DISABLED_REASONS = ['completed', 'finish_failed', 'no_progress', 'owner_lost_access', 'template_invalid', 'manual'] as const
+export type ScheduleDisabledReason = (typeof SCHEDULE_DISABLED_REASONS)[number]
+
+export interface ScheduleDto {
+  id: string
+  projectId: string
+  /** May name a repo deleted since; the schedule is then disabled (template_invalid). */
+  repoId: string
+  name: string
+  cron: string
+  timezone: string
+  feature: string
+  ref: string
+  profiles: string[]
+  maxCostUsd: string
+  selectorLabels: string[]
+  pinnedRunnerId: string | null
+  enabled: boolean
+  /** Null while disabled. */
+  nextFireAt: string | null
+  lastFiredAt: string | null
+  lastJobId: string | null
+  lastPassedCount: number
+  noProgressTicks: number
+  noProgressLimit: number
+  disabledReason: ScheduleDisabledReason | null
+  totalCostUsd: string
+  createdById: string
+  updatedById: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface NewScheduleBody {
+  name: string
+  repoId: string
+  feature: string
+  cron: string
+  timezone: string
+  ref?: string
+  profiles?: string[]
+  maxCostUsd: number
+  selectorLabels?: string[]
+  pinnedRunnerId?: string
+  noProgressLimit: number
+}
+
+/** The repo and the feature are fixed after create (3a D203). */
+export interface SchedulePatchBody {
+  name: string
+  cron: string
+  timezone: string
+  ref: string
+  profiles: string[]
+  maxCostUsd: number
+  selectorLabels: string[]
+  pinnedRunnerId: string | null
+  noProgressLimit: number
 }

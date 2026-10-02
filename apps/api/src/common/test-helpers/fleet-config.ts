@@ -19,6 +19,7 @@ export function testFleetConfig(overrides: Partial<IFleetConfig> = {}): IFleetCo
     enrollmentRetentionDays: null,
     gitTokenReuseMarginSec: 300,
     gitlabTokenTtlSec: 3_600,
+    testHooksEnabled: false,
     ...overrides,
   };
 }

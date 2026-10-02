@@ -83,6 +83,7 @@ export const uiStubs: Record<string, unknown> = Object.fromEntries(
     ['Dialog', 'dialog'], ['DialogContent', 'dialog-content'], ['DialogHeader', 'dialog-header'],
     ['DialogTitle', 'dialog-title'], ['DialogFooter', 'dialog-footer'], ['DialogDescription', 'dialog-description'],
     ['PageHeader', 'page-header'],
+    ['NuxtLink', 'nuxt-link'],
     ['Table', 'table'], ['TableHeader', 'thead'], ['TableBody', 'tbody'],
     ['TableRow', 'tr'], ['TableHead', 'th'], ['TableCell', 'td'],
     ['Badge', 'badge'], ['Button', 'button'], ['Input', 'input'], ['Label', 'label'],
@@ -133,6 +134,14 @@ Object.assign(uiStubs, {
     setup(props: { open?: boolean; policy?: { id?: string } | null }, { attrs }: { attrs: Record<string, unknown> }) {
       return () =>
         h('x-stub-stub', { ...attrs, 'data-stub': 'fleet-budget-resume-dialog', open: props.open === true, 'data-policy': props.policy?.id ?? '' })
+    },
+  },
+  FleetScheduleEditDialog: {
+    name: 'StubFleetScheduleEditDialog',
+    props: ['open', 'schedule'],
+    setup(props: { open?: boolean; schedule?: { id?: string } | null }, { attrs }: { attrs: Record<string, unknown> }) {
+      return () =>
+        h('x-stub-stub', { ...attrs, 'data-stub': 'fleet-schedule-edit-dialog', open: props.open === true, 'data-schedule': props.schedule?.id ?? '' })
     },
   },
 })

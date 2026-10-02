@@ -187,6 +187,13 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
         <span v-if="cancelPending" class="text-sm text-muted-foreground" data-testid="fleet-job-cancel-pending">
           {{ t('fleet.jobs.detail.cancelRequested', { at: formatTime(job.cancelRequestedAt) }) }}
         </span>
+        <span v-if="job.scheduleId" class="text-sm text-muted-foreground" data-testid="fleet-job-schedule">
+          {{ t('fleet.jobs.detail.fromSchedule') }}
+          <NuxtLink :to="`/${slug}/fleet/schedules/${job.scheduleId}`" class="text-primary underline-offset-4 hover:underline" data-testid="fleet-job-schedule-link">{{ t('fleet.jobs.detail.openSchedule') }}</NuxtLink>
+        </span>
+        <span v-if="job.coalescedCount > 0" class="text-sm text-muted-foreground" data-testid="fleet-job-coalesced">
+          {{ t('fleet.jobs.detail.coalesced', { count: job.coalescedCount }) }}
+        </span>
       </div>
 
       <section v-if="requeueResult" class="space-y-2" data-testid="fleet-job-requeue-result">

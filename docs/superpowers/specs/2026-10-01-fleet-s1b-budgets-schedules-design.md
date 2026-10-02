@@ -393,6 +393,11 @@ Re-enabling resets `noProgressTicks`, `disabledReason` and recomputes `nextFireA
   `GET /projects/:slug/fleet/jobs` takes a `scheduleId` filter, and `ScheduleDto` carries `totalCostUsd`.
 - Enable refuses an owner who can no longer dispatch with 409 `fleet.scheduleOwnerNoAccess` (3a plan D211). Edit and permission details (3a plan D202, D203): the repo and the feature are fixed after create; edit, enable,
   disable and delete need project DEVELOPER+ and the owner or a project ADMIN; the schedule list is a plain array.
+- 3b plan notes (`2026-10-02-fleet-s1b-slice-3b-schedules-web.md`): the E2E fires a schedule through a test-only,
+  env-gated, global-ADMIN route `POST /api/fleet/test-hooks/schedules/:id/fire` that runs one ticker round at the
+  schedule's `nextFireAt` and is excluded from OpenAPI (D213); a short cron is impossible under the 15-minute rule. The
+  web shows next and last fire in the schedule's zone (D220), the stories delta only against a loaded older run (D221),
+  and polls every 60 s besides `fleet_job` notices (D222). A job page links to its schedule (D216).
 
 ### 3.5 Testing
 

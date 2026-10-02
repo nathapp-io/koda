@@ -88,7 +88,7 @@ export interface BudgetFormValues {
 }
 
 /** "5.0000" -> "5", "0.5000" -> "0.5", "12.34" stays. */
-function trimDecimal(decimal: string): string {
+export function trimDecimal(decimal: string): string {
   return decimal.includes('.') ? decimal.replace(/0+$/, '').replace(/\.$/, '') : decimal
 }
 

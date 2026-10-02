@@ -66,4 +66,8 @@ describe('fleet OpenAPI contract', () => {
     const listParams = spec.paths['/api/projects/{slug}/fleet/jobs']?.['get']?.parameters ?? [];
     expect(listParams.map((p) => p.name)).toContain('scheduleId');
   });
+
+  it('keeps the test-only hooks out of the contract (3b D213)', () => {
+    expect(Object.keys(spec.paths).filter((path) => path.includes('test-hooks'))).toEqual([]);
+  });
 });
