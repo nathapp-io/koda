@@ -56,6 +56,11 @@ describe('ApprovalCloser', () => {
     const second = await closer.openBudget(policy(), { windowStart: NOW, spentUsd: '11' }, NOW);
     expect(rows.get(first.approval?.id as string)).toEqual(expect.objectContaining({ status: 'cancelled', resolvedBy: 'superseded' }));
     expect(second.approval?.status).toBe('pending');
+    // The stray's live frame is carried forward alongside the new one; the caller publishes both after commit.
+    expect(second.live).toEqual([
+      { approvalId: first.approval?.id, status: 'cancelled' },
+      { approvalId: second.approval?.id, status: 'pending' },
+    ]);
   });
 
   it('sends no webhook and no live event for a policy with no project', async () => {

@@ -3,8 +3,8 @@ import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { KodaPageQuery } from '../../../common/dto/koda-page.query';
 
 export class ListFleetActivityQuery extends KodaPageQuery {
-  @ApiPropertyOptional({ enum: ['runner', 'enrollment', 'repo', 'job', 'budget', 'schedule'] })
-  @IsOptional() @IsIn(['runner', 'enrollment', 'repo', 'job', 'budget', 'schedule'])
+  @ApiPropertyOptional({ enum: ['runner', 'enrollment', 'repo', 'job', 'budget', 'schedule', 'approval'] })
+  @IsOptional() @IsIn(['runner', 'enrollment', 'repo', 'job', 'budget', 'schedule', 'approval'])
   entityType?: string;
 
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(64)
