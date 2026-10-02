@@ -72,10 +72,11 @@ describe('Fleet admin nav links', () => {
     return renderToString(app)
   }
 
-  test('a global admin sees Runners and Repos links with their nav labels', async () => {
+  test('a global admin sees Runners, Repos and Budgets links with their nav labels', async () => {
     const html = await render(true)
     expect(html.match(/<a href="\/admin\/fleet\/runners"[^>]*>[\s\S]*?<\/a>/)?.[0]).toContain('nav.fleetRunners')
     expect(html.match(/<a href="\/admin\/fleet\/repos"[^>]*>[\s\S]*?<\/a>/)?.[0]).toContain('nav.fleetRepos')
+    expect(html.match(/<a href="\/admin\/fleet\/budgets"[^>]*>[\s\S]*?<\/a>/)?.[0]).toContain('nav.fleetBudgets')
   })
 
   test('a non-admin does not see them', async () => {
@@ -86,6 +87,6 @@ describe('Fleet admin nav links', () => {
   // Guards the drift that caused the harness duplication: an unresolved component renders as a bare
   // tag and this spec would still pass, so the fleet links' icons must actually resolve.
   test('every icon the layout renders is registered, including the two fleet ones', async () => {
-    expect(layoutIconNames(layoutSource)).toEqual(expect.arrayContaining(['Server', 'FolderGit2']))
+    expect(layoutIconNames(layoutSource)).toEqual(expect.arrayContaining(['Server', 'FolderGit2', 'Wallet']))
   })
 })
