@@ -4555,7 +4555,8 @@
                 "runner",
                 "enrollment",
                 "repo",
-                "job"
+                "job",
+                "budget"
               ]
             }
           },
@@ -4598,6 +4599,798 @@
           }
         ],
         "summary": "List fleet activity: global admin sees all, members see their projects' job rows",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/budgets": {
+      "get": {
+        "operationId": "FleetBudgetsController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BudgetPolicyDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Every budget policy with its current window spend (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "post": {
+        "operationId": "FleetBudgetsController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBudgetPolicyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetPolicyDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "fleet.budgetInput: wrong scope for this route"
+          },
+          "404": {
+            "description": "Runner not found"
+          },
+          "409": {
+            "description": "A policy already exists for this scope and window"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a global or runner budget policy (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/budgets/{id}": {
+      "patch": {
+        "operationId": "FleetBudgetsController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBudgetPolicyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetPolicyDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Change the amount, warn, hard stop or running-jobs rule of a global or runner policy (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "delete": {
+        "operationId": "FleetBudgetsController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a global or runner policy; lifts its pause (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/budgets/{id}/resume": {
+      "post": {
+        "operationId": "FleetBudgetsController_resume",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeBudgetPolicyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetPolicyDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "fleet.budgetAmountNotAboveSpend"
+          },
+          "409": {
+            "description": "fleet.budgetNotPaused"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Resume a paused global or runner policy, optionally raising the amount (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/budgets": {
+      "get": {
+        "operationId": "ProjectFleetBudgetsController_list",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BudgetPolicyDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The project's project and repo policies plus the global ones, read-only (project member)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "post": {
+        "operationId": "ProjectFleetBudgetsController_create",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBudgetPolicyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetPolicyDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Repo not in this project"
+          },
+          "409": {
+            "description": "A policy already exists for this scope and window"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a project or repo budget policy (project ADMIN)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/budgets/{id}": {
+      "patch": {
+        "operationId": "ProjectFleetBudgetsController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBudgetPolicyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetPolicyDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Change a project or repo policy (project ADMIN)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "delete": {
+        "operationId": "ProjectFleetBudgetsController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a project or repo policy; lifts its pause (project ADMIN)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/budgets/{id}/resume": {
+      "post": {
+        "operationId": "ProjectFleetBudgetsController_resume",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeBudgetPolicyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetPolicyDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "fleet.budgetAmountNotAboveSpend"
+          },
+          "409": {
+            "description": "fleet.budgetNotPaused"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Resume a paused project or repo policy, optionally raising the amount (project ADMIN)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/jobs": {
+      "post": {
+        "operationId": "FleetJobsController_dispatch",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DispatchFleetJobDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchResultDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Repo not in this project, or pinned runner unknown"
+          },
+          "409": {
+            "description": "An active job already runs this (repo, feature), or a budget covering the job is paused (fleet.budgetPaused)"
+          },
+          "422": {
+            "description": "Pinned runner can never run this job"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Dispatch a nax run or plan to a fleet runner (project DEVELOPER+)",
+        "tags": [
+          "fleet"
+        ]
+      },
+      "get": {
+        "operationId": "FleetJobsController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "state",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "QUEUED",
+                "ASSIGNED",
+                "RUNNING",
+                "UPLOADING",
+                "COMPLETED",
+                "FAILED",
+                "ESCALATED",
+                "CRASHED",
+                "CANCELLED"
+              ]
+            }
+          },
+          {
+            "name": "repoId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "runnerId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "requestedById",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "feature",
+            "required": false,
+            "in": "query",
+            "description": "nax feature name (plan D10)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of FleetJobDto"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List fleet jobs (project member)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/jobs/{id}/cancel": {
+      "post": {
+        "operationId": "FleetJobsController_cancel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetJobDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Job already finished"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Cancel a job (project DEVELOPER+, or the requester)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/jobs/{id}/requeue": {
+      "post": {
+        "operationId": "FleetJobsController_requeue",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchResultDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Job not requeueable, an active duplicate exists, or a budget covering the job is paused"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Requeue a CRASHED, FAILED or CANCELLED job (project DEVELOPER+)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/jobs/{id}": {
+      "get": {
+        "operationId": "FleetJobsController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetJobDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a fleet job (project member)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/jobs/{id}/events": {
+      "get": {
+        "operationId": "FleetJobsController_events",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of FleetJobEventDto"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Job timeline, ordered by seq (project member)",
         "tags": [
           "fleet"
         ]
@@ -4803,361 +5596,6 @@
           }
         ],
         "summary": "The project's fleet repos (project member)",
-        "tags": [
-          "fleet"
-        ]
-      }
-    },
-    "/api/projects/{slug}/fleet/jobs": {
-      "post": {
-        "operationId": "FleetJobsController_dispatch",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DispatchFleetJobDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DispatchResultDto"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Repo not in this project, or pinned runner unknown"
-          },
-          "409": {
-            "description": "An active job already runs this (repo, feature); message names it"
-          },
-          "422": {
-            "description": "Pinned runner can never run this job"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Dispatch a nax run or plan to a fleet runner (project DEVELOPER+)",
-        "tags": [
-          "fleet"
-        ]
-      },
-      "get": {
-        "operationId": "FleetJobsController_list",
-        "parameters": [
-          {
-            "name": "current",
-            "required": false,
-            "in": "query",
-            "description": "Page number (1-based)",
-            "schema": {
-              "minimum": 1,
-              "default": 1,
-              "type": "number"
-            }
-          },
-          {
-            "name": "size",
-            "required": false,
-            "in": "query",
-            "description": "Page size",
-            "schema": {
-              "minimum": 1,
-              "maximum": 100,
-              "default": 20,
-              "type": "number"
-            }
-          },
-          {
-            "name": "state",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": [
-                "QUEUED",
-                "ASSIGNED",
-                "RUNNING",
-                "UPLOADING",
-                "COMPLETED",
-                "FAILED",
-                "ESCALATED",
-                "CRASHED",
-                "CANCELLED"
-              ]
-            }
-          },
-          {
-            "name": "repoId",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "runnerId",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "requestedById",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "feature",
-            "required": false,
-            "in": "query",
-            "description": "nax feature name (plan D10)",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Page of FleetJobDto"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "List fleet jobs (project member)",
-        "tags": [
-          "fleet"
-        ]
-      }
-    },
-    "/api/projects/{slug}/fleet/jobs/{id}/cancel": {
-      "post": {
-        "operationId": "FleetJobsController_cancel",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FleetJobDto"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Job already finished"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Cancel a job (project DEVELOPER+, or the requester)",
-        "tags": [
-          "fleet"
-        ]
-      }
-    },
-    "/api/projects/{slug}/fleet/jobs/{id}/requeue": {
-      "post": {
-        "operationId": "FleetJobsController_requeue",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DispatchResultDto"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Job not requeueable, or an active duplicate exists"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Requeue a CRASHED, FAILED or CANCELLED job (project DEVELOPER+)",
-        "tags": [
-          "fleet"
-        ]
-      }
-    },
-    "/api/projects/{slug}/fleet/jobs/{id}": {
-      "get": {
-        "operationId": "FleetJobsController_get",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FleetJobDto"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Get a fleet job (project member)",
-        "tags": [
-          "fleet"
-        ]
-      }
-    },
-    "/api/projects/{slug}/fleet/jobs/{id}/events": {
-      "get": {
-        "operationId": "FleetJobsController_events",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "current",
-            "required": false,
-            "in": "query",
-            "description": "Page number (1-based)",
-            "schema": {
-              "minimum": 1,
-              "default": 1,
-              "type": "number"
-            }
-          },
-          {
-            "name": "size",
-            "required": false,
-            "in": "query",
-            "description": "Page size",
-            "schema": {
-              "minimum": 1,
-              "maximum": 100,
-              "default": 20,
-              "type": "number"
-            }
-          },
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Page of FleetJobEventDto"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Job timeline, ordered by seq (project member)",
         "tags": [
           "fleet"
         ]
@@ -7706,119 +8144,198 @@
           "message"
         ]
       },
-      "CreateFleetRepoDto": {
-        "type": "object",
-        "properties": {
-          "projectSlug": {
-            "type": "string",
-            "maxLength": 100
-          },
-          "provider": {
-            "enum": [
-              "github",
-              "gitlab"
-            ],
-            "type": "string"
-          },
-          "owner": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
-            "description": "Owner or namespace (GitLab: group/subgroup)"
-          },
-          "name": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9._-]{1,100}$"
-          }
-        },
-        "required": [
-          "projectSlug",
-          "provider",
-          "owner",
-          "name"
-        ]
-      },
-      "FleetRepoDto": {
+      "BudgetPolicyDto": {
         "type": "object",
         "properties": {
           "id": {
             "type": "string"
           },
-          "projectId": {
-            "type": "string"
-          },
-          "provider": {
+          "scopeType": {
             "enum": [
-              "github",
-              "gitlab"
+              "global",
+              "project",
+              "repo",
+              "runner"
             ],
             "type": "string"
           },
-          "owner": {
-            "type": "string"
+          "scopeId": {
+            "type": "string",
+            "nullable": true
           },
-          "name": {
-            "type": "string"
-          },
-          "defaultBranch": {
-            "type": "string"
-          },
-          "githubInstallationId": {
+          "projectId": {
             "type": "string",
             "nullable": true,
-            "description": "GitHub App installation id (BigInt as string)"
+            "description": "Owning project (project and repo scopes)"
+          },
+          "windowKind": {
+            "enum": [
+              "calendar_month_utc",
+              "lifetime"
+            ],
+            "type": "string"
+          },
+          "amountUsd": {
+            "type": "string",
+            "description": "Decimal as string"
+          },
+          "warnPercent": {
+            "type": "number",
+            "nullable": true,
+            "description": "1-99; null = no warn"
+          },
+          "hardStop": {
+            "type": "boolean"
+          },
+          "runningJobs": {
+            "enum": [
+              "finish",
+              "cancel"
+            ],
+            "type": "string"
+          },
+          "paused": {
+            "type": "boolean",
+            "description": "Effectively paused now (S1b §2.3)"
+          },
+          "pausedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "windowStart": {
+            "type": "string",
+            "description": "Start of the current window; the epoch for lifetime"
+          },
+          "spentUsd": {
+            "type": "string",
+            "description": "Current window spend, decimal as string"
+          },
+          "warnReached": {
+            "type": "boolean",
+            "description": "Spend is at or past the warn threshold"
+          },
+          "updatedById": {
+            "type": "string"
           },
           "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
             "type": "string"
           }
         },
         "required": [
           "id",
-          "projectId",
-          "provider",
-          "owner",
-          "name",
-          "defaultBranch",
-          "createdAt"
+          "scopeType",
+          "windowKind",
+          "amountUsd",
+          "hardStop",
+          "runningJobs",
+          "paused",
+          "windowStart",
+          "spentUsd",
+          "warnReached",
+          "updatedById",
+          "createdAt",
+          "updatedAt"
         ]
       },
-      "RepoCheckResultDto": {
+      "CreateBudgetPolicyDto": {
         "type": "object",
         "properties": {
-          "repoId": {
-            "type": "string"
-          },
-          "reachable": {
-            "type": "boolean"
-          },
-          "reason": {
-            "nullable": true,
+          "scopeType": {
             "enum": [
-              "github_app_not_configured",
-              "github_app_key_unreadable",
-              "app_not_installed",
-              "app_permissions_insufficient",
-              "repo_not_found",
-              "provider_unreachable",
-              "provider_error",
-              "vcs_connection_missing",
-              "vcs_connection_mismatch",
-              "vcs_encryption_key_missing",
-              "gitlab_token_invalid",
-              "gitlab_access_insufficient",
-              "gitlab_scope_missing"
+              "global",
+              "project",
+              "repo",
+              "runner"
+            ],
+            "type": "string",
+            "description": "global and runner on /fleet/budgets; project and repo on /projects/:slug/fleet/budgets"
+          },
+          "scopeId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Runner id (runner) or fleet repo id (repo); omitted for global and project"
+          },
+          "windowKind": {
+            "enum": [
+              "calendar_month_utc",
+              "lifetime"
             ],
             "type": "string"
           },
-          "checkedAt": {
-            "type": "string"
+          "amountUsd": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 1000000,
+            "description": "USD, > 0, at most 4 decimals"
+          },
+          "warnPercent": {
+            "type": "number",
+            "nullable": true,
+            "minimum": 1,
+            "maximum": 99,
+            "description": "1-99; omitted = 80; null = no warn"
+          },
+          "hardStop": {
+            "type": "boolean",
+            "description": "Pause the scope at the amount; default true"
+          },
+          "runningJobs": {
+            "enum": [
+              "finish",
+              "cancel"
+            ],
+            "type": "string",
+            "description": "What a hard stop does to running jobs; default finish"
           }
         },
         "required": [
-          "repoId",
-          "reachable",
-          "reason",
-          "checkedAt"
+          "scopeType",
+          "windowKind",
+          "amountUsd"
         ]
+      },
+      "UpdateBudgetPolicyDto": {
+        "type": "object",
+        "properties": {
+          "amountUsd": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 1000000,
+            "description": "USD, > 0, at most 4 decimals"
+          },
+          "warnPercent": {
+            "type": "number",
+            "nullable": true,
+            "minimum": 1,
+            "maximum": 99,
+            "description": "1-99; null = no warn; omitted = unchanged"
+          },
+          "hardStop": {
+            "type": "boolean"
+          },
+          "runningJobs": {
+            "enum": [
+              "finish",
+              "cancel"
+            ],
+            "type": "string"
+          }
+        }
+      },
+      "ResumeBudgetPolicyDto": {
+        "type": "object",
+        "properties": {
+          "amountUsd": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 1000000,
+            "description": "New amount; must be above the current window spend. Omitted = keep the amount."
+          }
+        }
       },
       "DispatchFleetJobDto": {
         "type": "object",
@@ -8128,6 +8645,7 @@
             "enum": [
               "disabled",
               "offline",
+              "budget_paused",
               "labels",
               "executor",
               "protocol",
@@ -8182,6 +8700,120 @@
         "required": [
           "job",
           "placement"
+        ]
+      },
+      "CreateFleetRepoDto": {
+        "type": "object",
+        "properties": {
+          "projectSlug": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "provider": {
+            "enum": [
+              "github",
+              "gitlab"
+            ],
+            "type": "string"
+          },
+          "owner": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+            "description": "Owner or namespace (GitLab: group/subgroup)"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,100}$"
+          }
+        },
+        "required": [
+          "projectSlug",
+          "provider",
+          "owner",
+          "name"
+        ]
+      },
+      "FleetRepoDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "github",
+              "gitlab"
+            ],
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "defaultBranch": {
+            "type": "string"
+          },
+          "githubInstallationId": {
+            "type": "string",
+            "nullable": true,
+            "description": "GitHub App installation id (BigInt as string)"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "provider",
+          "owner",
+          "name",
+          "defaultBranch",
+          "createdAt"
+        ]
+      },
+      "RepoCheckResultDto": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string"
+          },
+          "reachable": {
+            "type": "boolean"
+          },
+          "reason": {
+            "nullable": true,
+            "enum": [
+              "github_app_not_configured",
+              "github_app_key_unreadable",
+              "app_not_installed",
+              "app_permissions_insufficient",
+              "repo_not_found",
+              "provider_unreachable",
+              "provider_error",
+              "vcs_connection_missing",
+              "vcs_connection_mismatch",
+              "vcs_encryption_key_missing",
+              "gitlab_token_invalid",
+              "gitlab_access_insufficient",
+              "gitlab_scope_missing"
+            ],
+            "type": "string"
+          },
+          "checkedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "repoId",
+          "reachable",
+          "reason",
+          "checkedAt"
         ]
       },
       "CreateEnrollmentDto": {

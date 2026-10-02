@@ -37,4 +37,17 @@ describe('fleet OpenAPI contract', () => {
     expect(Object.keys(spec.components.schemas['RepoCheckResultDto']?.properties ?? {}).sort())
       .toEqual(['checkedAt', 'reachable', 'reason', 'repoId']);
   });
+
+  it('exposes the budget routes on both prefixes and the budget_paused misfit (S1b §2.3, §2.4)', () => {
+    for (const base of ['/api/fleet/budgets', '/api/projects/{slug}/fleet/budgets']) {
+      expect(spec.paths[base]?.['get']).toBeDefined();
+      expect(spec.paths[base]?.['post']).toBeDefined();
+      expect(spec.paths[`${base}/{id}`]?.['patch']).toBeDefined();
+      expect(spec.paths[`${base}/{id}`]?.['delete']).toBeDefined();
+      expect(spec.paths[`${base}/{id}/resume`]?.['post']).toBeDefined();
+    }
+    expect(Object.keys(spec.components.schemas['BudgetPolicyDto']?.properties ?? {}))
+      .toEqual(expect.arrayContaining(['scopeType', 'windowKind', 'amountUsd', 'spentUsd', 'windowStart', 'paused', 'warnReached']));
+    expect(JSON.stringify(spec.components.schemas['PlacementMisfitDto'])).toContain('budget_paused');
+  });
 });
