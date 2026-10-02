@@ -46,6 +46,14 @@ const breadcrumbItems = computed(() => {
   if (path === `/${project}/fleet`) {
     return [{ label: 'Koda', to: '/' }, projectBase, { label: t('nav.fleetJobs') }]
   }
+  const fleetJobs = { label: t('nav.fleetJobs'), to: `/${project}/fleet` }
+  if (path === `/${project}/fleet/schedules`) {
+    return [{ label: 'Koda', to: '/' }, projectBase, fleetJobs, { label: t('fleet.schedules.title') }]
+  }
+  if (path.startsWith(`/${project}/fleet/schedules/`)) {
+    const schedules = { label: t('fleet.schedules.title'), to: `/${project}/fleet/schedules` }
+    return [{ label: 'Koda', to: '/' }, projectBase, fleetJobs, schedules, { label: t('fleet.schedules.detailTitle') }]
+  }
   if (path.startsWith(`/${project}/fleet/`)) {
     const leaf = fleetLeaf(project, path)
     return [{ label: 'Koda', to: '/' }, projectBase, { label: t('nav.fleetJobs'), to: `/${project}/fleet` }, { label: leaf }]

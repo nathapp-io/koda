@@ -20,4 +20,13 @@ describe('fleet jobs navigation', () => {
     expect(layout).toContain("t('fleet.jobs.detail.title')")
     expect(layout).toContain("t('fleet.budgets.title')")
   })
+
+  test('breadcrumbs cover the schedules list and a schedule, under Fleet jobs (3b D216)', () => {
+    expect(layout).toContain('if (path === `/${project}/fleet/schedules`) {')
+    expect(layout).toContain('if (path.startsWith(`/${project}/fleet/schedules/`)) {')
+    expect(layout).toContain("t('fleet.schedules.title')")
+    expect(layout).toContain("t('fleet.schedules.detailTitle')")
+    // The schedule branches must come before the generic /fleet/ branch.
+    expect(layout.indexOf('/fleet/schedules/`)')).toBeLessThan(layout.indexOf('if (path.startsWith(`/${project}/fleet/`)) {'))
+  })
 })
