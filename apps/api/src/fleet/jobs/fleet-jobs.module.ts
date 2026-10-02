@@ -26,6 +26,6 @@ import { RunnerNotifier } from './runner-notifier';
     PlacementService,
     FleetJobsService,
   ],
-  exports: [FLEET_JOB_REPOSITORY, FleetJobLivePublisher, JobTransitionsService, RunnerNotifier, PlacementService],
+  exports: [FLEET_JOB_REPOSITORY, FleetJobLivePublisher, JobTransitionsService, RunnerNotifier, PlacementService, FleetJobsService],
 })
 export class FleetJobsModule {}

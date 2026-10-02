@@ -9,13 +9,13 @@ import { FleetCommandType, FleetJobState } from '../../common/enums';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { addUsd } from '../budgets/money';
 import { BudgetGate } from '../budgets/budget-gate';
-import { jobGateKeys } from '../budgets/budget-rules';
+import { budgetReason, jobGateKeys } from '../budgets/budget-rules';
 import { normalizeDispatch } from './dispatch-input';
 import { FleetDispatchException } from './fleet-dispatch.exception';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import type { LiveFleetJobEvent } from '../../live/live-event';
 import { canTransition, isTerminal } from './job-state';
-import { JobTransitionsService } from './job-transitions.service';
+import { JobTransitionsService, SYSTEM_ACTOR } from './job-transitions.service';
 import { RunnerNotifier } from './runner-notifier';
 import { PERMANENT_MISFITS } from './placement-rules';
 import { PlacementService, toPlacementJob } from './placement.service';
@@ -23,6 +23,16 @@ import { DuplicateActiveJobError, FLEET_JOB_REPOSITORY, FleetJobFilters, FleetJo
 import { DispatchFleetJobDto } from './dto/dispatch-fleet-job.dto';
 import { DispatchResultDto, FleetJobDto } from './dto/fleet-job.dto';
 import { FleetJobEventDto } from './dto/fleet-job-event.dto';
+
+/** What a budget stop did to its jobs (plan D157). Publish `live` and notify `wake` after the transaction commits. */
+export interface BudgetCancelResult {
+  /** Ended on the server: QUEUED, or ASSIGNED whose ASSIGN was never acked. */
+  cancelled: string[];
+  /** cancelRequestedAt + one CANCEL; the runner reports CANCELLED and keeps the budget reason (plan D156). */
+  requested: string[];
+  live: LiveFleetJobEvent[];
+  wake: string[];
+}
 
 @Injectable()
 export class FleetJobsService {
@@ -125,6 +135,40 @@ export class FleetJobsService {
     if (live) this.live.publish([live]);
     if (wake) this.notifier.notify(wake);
     return FleetJobDto.from(job);
+  }
+
+  /**
+   * S1b §2.2 hard stop: the scope's QUEUED jobs, and (runningJobs = cancel) its ASSIGNED and RUNNING jobs.
+   * A system action: the activity actor is SYSTEM, the responsible user the policy's last editor.
+   * Call inside txManager.run (the evaluator holds the policy lock); jobs are re-checked under their own row lock.
+   */
+  async cancelForBudget(jobIds: readonly string[], policy: { id: string; responsibleUserId: string }, now = new Date()): Promise<BudgetCancelResult> {
+    const reason = budgetReason(policy.id);
+    const result: BudgetCancelResult = { cancelled: [], requested: [], live: [], wake: [] };
+    for (const id of jobIds) {
+      const job = await this.repo.lockById(id);
+      if (!job || job.cancelRequestedAt) continue;
+      const unacked = job.state === FleetJobState.ASSIGNED &&
+        (await this.repo.findPendingCommand({ jobId: id, type: FleetCommandType.ASSIGN, leaseEpoch: job.leaseEpoch })) !== null;
+      if (job.state === FleetJobState.QUEUED || unacked) {
+        const r = await this.transitions.apply({ job, to: FleetJobState.CANCELLED, by: 'server', now, actor: SYSTEM_ACTOR, reason, extra: { cancelReason: reason } });
+        result.cancelled.push(id);
+        result.live.push(r.live);
+        continue;
+      }
+      if ((job.state !== FleetJobState.ASSIGNED && job.state !== FleetJobState.RUNNING) || !job.runnerId) continue;
+      const updated = await this.repo.update(id, { cancelRequestedAt: now, cancelReason: reason });
+      await this.repo.createCommand({ runnerId: job.runnerId, jobId: id, type: FleetCommandType.CANCEL, leaseEpoch: job.leaseEpoch, payload: {} });
+      await this.repo.appendEvent(id, { leaseEpoch: job.leaseEpoch, runnerSeq: null, type: 'lifecycle', payload: { level: 'info', message: `cancel requested (${reason})` } });
+      await this.activity.record({
+        actorType: 'SYSTEM', actorId: SYSTEM_ACTOR.id, action: 'job.cancel_requested', entityType: 'job', entityId: id, jobId: id,
+        projectId: job.projectId, responsibleUserId: policy.responsibleUserId, payload: { state: job.state, reason },
+      });
+      result.requested.push(id);
+      result.live.push(this.live.event(updated));
+      result.wake.push(job.runnerId);
+    }
+    return result;
   }
 
   /** Spec §5.3 requeue: CRASHED | FAILED | CANCELLED -> QUEUED, run fields cleared, epoch + 1, then placement. */
