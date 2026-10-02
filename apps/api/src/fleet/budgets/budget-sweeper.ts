@@ -3,8 +3,7 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import type { LiveFleetApprovalEvent } from '../../live/live-event';
 import { FleetActivityService } from '../activity/fleet-activity.service';
-import type { ApprovalActor } from '../approvals/approval-closer';
-import { ApprovalCloser } from '../approvals/approval-closer';
+import { ApprovalCloser, systemActor } from '../approvals/approval-closer';
 import { ApprovalLivePublisher } from '../approvals/approval-live.publisher';
 import { SYSTEM_ACTOR } from '../jobs/job-transitions.service';
 import { BudgetEvaluator } from './budget-evaluator';
@@ -79,7 +78,7 @@ export class BudgetSweeper implements OnModuleInit, OnModuleDestroy {
       const none: LiveFleetApprovalEvent[] = [];
       const policy = await this.repo.lockById(id);
       if (!policy || (await this.repo.scopeExists(policy))) return { deleted: false, live: none };
-      const closed = await this.approvals.closeForPolicy(id, { status: 'cancelled', resolvedBy: 'policy_deleted', actor: this.system(policy) }, new Date());
+      const closed = await this.approvals.closeForPolicy(id, { status: 'cancelled', resolvedBy: 'policy_deleted', actor: systemActor(policy) }, new Date());
       await this.repo.delete(id);
       await this.record('budget.deleted', policy, { reason: 'scope_gone' });
       return { deleted: true, live: closed.live };
@@ -96,7 +95,7 @@ export class BudgetSweeper implements OnModuleInit, OnModuleDestroy {
       if (!policy || !isStaleMonthlyPause(policy, now)) return { reset: false, live: none };
       const start = windowStart(policy.windowKind, now);
       const spent = await this.repo.windowSpend(policy, start);
-      const closed = await this.approvals.closeForPolicy(id, { status: 'cancelled', resolvedBy: 'window_reset', actor: this.system(policy) }, now);
+      const closed = await this.approvals.closeForPolicy(id, { status: 'cancelled', resolvedBy: 'window_reset', actor: systemActor(policy) }, now);
       await this.repo.update(id, { pausedAt: null, pausedWindowStart: null });
       await this.repo.insertIncident({ policyId: id, kind: 'window_reset', windowStart: start, spentUsd: spent, amountUsd: policy.amountUsd, actorId: null, approvalId: closed.approval?.id ?? null });
       await this.record('budget.window_reset', policy, { spentUsd: spent, windowStart: start.toISOString() });
@@ -104,11 +103,6 @@ export class BudgetSweeper implements OnModuleInit, OnModuleDestroy {
     });
     this.approvalLive.publish(live);
     return reset;
-  }
-
-  /** The sweep acts on behalf of the policy's last editor; there is no human in the loop. */
-  private system(policy: BudgetPolicyRecord): ApprovalActor {
-    return { type: 'SYSTEM', id: SYSTEM_ACTOR.id, responsibleUserId: policy.updatedById };
   }
 
   private record(action: string, policy: BudgetPolicyRecord, extra: Record<string, unknown>): Promise<void> {

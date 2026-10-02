@@ -80,6 +80,17 @@ describe('ApprovalsService.decide (budget)', () => {
     await service.decide(ADMIN_CALLER, PROJECT_ADMIN, 'a1', { decision: 'keep_paused' }, NOW);
     expect(budgetRepo.lockById.mock.invocationCallOrder[0]).toBeLessThan(repo.lockById.mock.invocationCallOrder[0]);
   });
+
+  it('refuses an unauthorized caller before validating the decision, and takes no lock (spec §2.3)', async () => {
+    const { service, repo, budgetRepo, budgets } = build(pendingBudget());
+    // `allow` does not apply to a budget approval, but role is answered first: the status must not
+    // depend on the request body.
+    expect(await statusOf(service.decide({ id: 'dev', globalAdmin: false }, PROJECT_DEV, 'a1', { decision: 'allow' }, NOW))).toBe(403);
+    expect(await statusOf(service.decide({ id: 'dev', globalAdmin: false }, PROJECT_DEV, 'a1', { decision: 'raise_budget_and_resume', amountUsd: 20 }, NOW))).toBe(403);
+    expect(budgetRepo.lockById).not.toHaveBeenCalled();
+    expect(repo.lockById).not.toHaveBeenCalled();
+    expect(budgets.resume).not.toHaveBeenCalled();
+  });
 });
 
 describe('ApprovalsService.counts', () => {

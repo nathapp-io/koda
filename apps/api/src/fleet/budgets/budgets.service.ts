@@ -3,8 +3,7 @@ import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-co
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FleetActivityService } from '../activity/fleet-activity.service';
-import type { ApprovalActor } from '../approvals/approval-closer';
-import { ApprovalCloser } from '../approvals/approval-closer';
+import { ApprovalCloser, userActor } from '../approvals/approval-closer';
 import { ApprovalLivePublisher } from '../approvals/approval-live.publisher';
 import { BudgetEvaluator } from './budget-evaluator';
 import { budgetActivityPayload } from './budget-payloads';
@@ -32,9 +31,6 @@ function fail(reason: string): never {
 function owns(route: BudgetRoute, p: BudgetPolicyRecord): boolean {
   return route.kind === 'admin' ? ADMIN_SCOPES.includes(p.scopeType) : PROJECT_SCOPES.includes(p.scopeType) && p.projectId === route.projectId;
 }
-
-/** S1.5: the route's user is the approval's actor; the decision columns name them. */
-const userActor = (id: string): ApprovalActor => ({ type: 'USER', id, responsibleUserId: id });
 
 /** S1b §2.4: policy management. Permission (B3) is the controllers' job; ownership by route is checked here. */
 @Injectable()

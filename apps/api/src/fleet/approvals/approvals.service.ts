@@ -8,7 +8,7 @@ import { FleetActivityService } from '../activity/fleet-activity.service';
 import { BudgetRoute, BudgetsService } from '../budgets/budgets.service';
 import { BUDGET_REPOSITORY, BudgetPolicyRecord, IBudgetRepository } from '../budgets/domain/budget.domain';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
-import { ApprovalCloser } from './approval-closer';
+import { ApprovalCloser, userActor } from './approval-closer';
 import { ApprovalLivePublisher } from './approval-live.publisher';
 import {
   APPROVAL_REPOSITORY, ApprovalStatus, ApprovalType, FleetApprovalRecord, IApprovalRepository, MAX_REQUEUE_CANDIDATES, RequeueCandidate,
@@ -17,8 +17,8 @@ import { ApprovalCountsDto } from './dto/approval-counts.dto';
 import type { DecideApprovalDto } from './dto/decide-approval.dto';
 import { FleetApprovalDto } from './dto/fleet-approval.dto';
 
-/** Which prefix a request came through (plan D230); `role` is the caller's project role. */
-export type ApprovalRoute = { kind: 'admin' } | { kind: 'project'; projectId: string; role: string };
+/** Which prefix a request came through (plan D230); `role` is the caller's project role (null for an agent). */
+export type ApprovalRoute = { kind: 'admin' } | { kind: 'project'; projectId: string; role: string | null };
 export interface ApprovalCaller { id: string; globalAdmin: boolean }
 
 interface RequeueResult { jobId: string; ok: boolean; error?: string }
@@ -33,7 +33,7 @@ const visible = (route: ApprovalRoute, a: FleetApprovalRecord): boolean => route
 const budgetRouteOf = (p: BudgetPolicyRecord): BudgetRoute =>
   p.scopeType === 'project' || p.scopeType === 'repo' ? { kind: 'project', projectId: p.projectId as string } : { kind: 'admin' };
 
-/** Spec §1.7: budget asks are decided by whoever may resume the policy (S1b B3). */
+/** Spec §1.7: budget asks are decided by whoever may resume the policy (S1b B3). A null role is not ADMIN. */
 const mayDecideBudget = (route: ApprovalRoute): boolean => route.kind === 'admin' || route.role === 'ADMIN';
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -65,9 +65,11 @@ export class ApprovalsService {
 
   async decide(caller: ApprovalCaller, route: ApprovalRoute, id: string, dto: DecideApprovalDto, now = new Date()): Promise<FleetApprovalDto> {
     const current = await this.findVisible(route, id);
+    // Spec §2.3: permission (1.7) is decided before the decision is validated, so an unauthorized
+    // caller gets 403 whatever they send, and before txManager.run, so it takes no lock and writes nothing.
+    if (!mayDecideBudget(route)) throw new ForbiddenAppException({}, 'projects');
     if (current.type !== 'budget_override_required' || !current.policyId) invalid('bash approvals are not decidable yet'); // plan D236
     if (dto.decision !== 'keep_paused' && dto.decision !== 'raise_budget_and_resume') invalid(`${dto.decision} does not apply to a budget approval`);
-    if (!mayDecideBudget(route)) throw new ForbiddenAppException({}, 'projects');
     const policyId = current.policyId as string;
 
     const t1 = await this.txManager.run(async () => {
@@ -76,7 +78,7 @@ export class ApprovalsService {
       if (!approval || approval.status !== 'pending') throw new ConflictAppException({}, 'fleet.approvalNotPending');
       if (dto.decision === 'keep_paused') {
         const decided = await this.repo.resolve(id, { status: 'rejected', resolvedBy: 'user', decidedAt: now, decision: 'keep_paused', decidedById: caller.id, comment: dto.comment ?? null });
-        return { approval: decided, live: await this.closer.recordResolved(decided, user(caller.id)), requeue: [] as RequeueCandidate[] };
+        return { approval: decided, live: await this.closer.recordResolved(decided, userActor(caller.id)), requeue: [] as RequeueCandidate[] };
       }
       if (dto.amountUsd === undefined) invalid('amountUsd is required to raise and resume');
       if (!policy) throw new ConflictAppException({}, 'fleet.approvalNotPending');
@@ -88,10 +90,10 @@ export class ApprovalsService {
         status: 'approved', resolvedBy: 'user', decidedAt: now, decision: 'raise_budget_and_resume', decidedById: caller.id,
         comment: dto.comment ?? null, outcome: { resumedAmountUsd: resumed.amountUsd ?? String(dto.amountUsd), requeueResults: [] },
       });
-      return { approval: decided, live: await this.closer.recordResolved(decided, user(caller.id)), requeue: selected };
+      return { approval: decided, live: await this.closer.recordResolved(decided, userActor(caller.id)), requeue: selected };
     });
     this.live.publish(t1.live);
-    if (t1.approval.decision !== 'raise_budget_and_resume') return FleetApprovalDto.from(t1.approval);
+    if (dto.decision !== 'raise_budget_and_resume') return FleetApprovalDto.from(t1.approval);
 
     const results: RequeueResult[] = [];
     for (const c of t1.requeue) {
@@ -125,5 +127,3 @@ export class ApprovalsService {
     return { rows: rows.slice(0, MAX_REQUEUE_CANDIDATES), truncated: rows.length > MAX_REQUEUE_CANDIDATES };
   }
 }
-
-const user = (id: string) => ({ type: 'USER' as const, id, responsibleUserId: id });

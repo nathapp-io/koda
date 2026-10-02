@@ -21,6 +21,15 @@ export interface PolicyClose {
 }
 
 /**
+ * The only two actor shapes. Budgets, jobs and approvals all act on the same approval rows, so they
+ * must not each build their own literal: a third copy is how the two lists drift apart.
+ */
+export const userActor = (id: string): ApprovalActor => ({ type: 'USER', id, responsibleUserId: id });
+/** A system action answers to the policy's last editor; there is no human in the loop. */
+export const systemActor = (policy: BudgetPolicyRecord): ApprovalActor =>
+  ({ type: 'SYSTEM', id: SYSTEM_ACTOR.id, responsibleUserId: policy.updatedById });
+
+/**
  * S1.5 §2.1: the narrow port budgets (and, from 2a, jobs) use to open and close approvals inside their own
  * transactions. Callers hold the BudgetPolicy lock (lock order, spec §1.4) and publish `live` after commit.
  */
@@ -34,7 +43,7 @@ export class ApprovalCloser {
   ) {}
 
   async openBudget(policy: BudgetPolicyRecord, at: { windowStart: Date; spentUsd: string }, now: Date): Promise<ApprovalChange> {
-    const system: ApprovalActor = { type: 'SYSTEM', id: SYSTEM_ACTOR.id, responsibleUserId: policy.updatedById };
+    const system = systemActor(policy);
     const stray = await this.closeForPolicy(policy.id, { status: 'cancelled', resolvedBy: 'superseded', actor: system }, now);
     const approval = await this.repo.create({
       type: 'budget_override_required', projectId: policy.projectId, policyId: policy.id, requestedAt: now,
