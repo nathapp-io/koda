@@ -92,6 +92,8 @@ const onSubmit = handleSubmit(async (formValues) => {
   <div class="max-w-3xl space-y-6">
     <PageHeader :title="t('fleet.dispatch.title')" :subtitle="t('fleet.dispatch.subtitle')" />
 
+    <FleetBudgetBanner :slug="slug" :repo-name="options.repoName" />
+
     <p v-if="!canWork" class="text-sm text-muted-foreground" data-testid="dispatch-no-permission">{{ t('fleet.dispatch.noPermission') }}</p>
     <ErrorState v-else-if="loadFailed" @retry="retry()" />
     <p v-else-if="options.repos.value.length === 0" class="text-sm text-muted-foreground" data-testid="dispatch-no-repos">{{ t('fleet.dispatch.noRepos') }}</p>

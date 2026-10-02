@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 import { createDebouncer } from '~/lib/debounce'
+import { budgetStopPolicyId } from '~/lib/fleet-budgets'
 import { loadFleetJobDetail } from '~/lib/fleet-job-detail'
 import { canCancelJob, canRequeueJob, canWorkOnFleet, isTerminalJobState, mayHaveBundle, mergeEvents, safePrUrl, wipPushStatus } from '~/lib/fleet-jobs'
 import type { DispatchResultDto, FleetJobDto, FleetJobEventDto } from '~/lib/fleet-types'
@@ -45,6 +46,7 @@ const canRequeue = computed(() => job.value !== null && canRequeueJob(job.value,
 const showBundle = computed(() => job.value !== null && mayHaveBundle(job.value.state))
 const prUrl = computed(() => safePrUrl(job.value?.resultPrUrl))
 const wipPush = computed(() => wipPushStatus(job.value?.wipPush))
+const budgetPolicyId = computed(() => budgetStopPolicyId(job.value?.stateReason))
 const cancelPending = computed(() => job.value !== null && job.value.cancelRequestedAt !== null && !isTerminalJobState(job.value.state))
 
 /** Events only append (ordered by seq), so refetching from the last loaded page is enough. */
@@ -171,9 +173,17 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
         </template>
       </PageHeader>
 
+      <FleetBudgetBanner :slug="slug" :repo-name="options.repoName" />
+
       <div class="flex flex-wrap items-center gap-3">
         <FleetJobStateBadge :state="job.state" />
-        <span v-if="job.stateReason" class="text-sm text-muted-foreground" data-testid="fleet-job-state-reason">{{ job.stateReason }}</span>
+        <span v-if="job.stateReason" class="text-sm text-muted-foreground" :title="job.stateReason" data-testid="fleet-job-state-reason">
+          <template v-if="budgetPolicyId">
+            {{ t('fleet.jobs.detail.budgetStop') }}
+            <NuxtLink :to="`/${slug}/fleet/budgets`" class="text-primary underline-offset-4 hover:underline" data-testid="fleet-job-budget-link">{{ t('fleet.jobs.detail.budgetStopLink') }}</NuxtLink>
+          </template>
+          <template v-else>{{ job.stateReason }}</template>
+        </span>
         <span v-if="cancelPending" class="text-sm text-muted-foreground" data-testid="fleet-job-cancel-pending">
           {{ t('fleet.jobs.detail.cancelRequested', { at: formatTime(job.cancelRequestedAt) }) }}
         </span>
