@@ -5,4 +5,5 @@
  */
 export const PARTIAL_UNIQUE_INDEXES: readonly string[] = [
   `CREATE UNIQUE INDEX IF NOT EXISTS "FleetJob_active_repo_feature_key" ON "FleetJob" ("repoId", "feature") WHERE "state" IN ('QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING')`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "BudgetIncident_threshold_key" ON "BudgetIncident" ("policyId", "kind", "windowStart", "amountUsd") WHERE "kind" IN ('warn', 'hard_stop')`,
 ];
