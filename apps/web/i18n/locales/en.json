@@ -73,7 +73,8 @@
     "users": "Users",
     "fleetRunners": "Runners",
     "fleetRepos": "Repos",
-    "fleetJobs": "Fleet jobs"
+    "fleetJobs": "Fleet jobs",
+    "fleetBudgets": "Budgets"
   },
   "admin": {
     "users": {
@@ -788,6 +789,121 @@
         "commandHint": "Run it as the runner's service user. Replace the server URL if the runner reaches koda at another address. The runner requires https unless the server is loopback or you add --insecure-http."
       }
     },
+    "budgets": {
+      "title": "Fleet budgets",
+      "subtitleAdmin": "Spending caps for the whole fleet and for single runners.",
+      "subtitleProject": "Spending caps for this project and its repos. Fleet-wide caps are shown read-only.",
+      "empty": "No budget policies yet.",
+      "readOnly": "Only project administrators can change budget policies.",
+      "sections": {
+        "own": "Project and repo policies",
+        "global": "Fleet-wide policies",
+        "globalHint": "Set by a global administrator. They apply to every project."
+      },
+      "actions": {
+        "create": "Add policy",
+        "edit": "Edit",
+        "delete": "Delete",
+        "resume": "Resume"
+      },
+      "table": {
+        "scope": "Scope",
+        "window": "Window",
+        "spend": "Spend",
+        "rules": "Rules",
+        "status": "Status"
+      },
+      "scope": {
+        "global": "Whole fleet",
+        "project": "Project",
+        "repo": "Repo",
+        "runner": "Runner"
+      },
+      "scopeText": {
+        "global": "the whole fleet",
+        "project": "project {name}",
+        "repo": "repo {name}",
+        "runner": "runner {name}"
+      },
+      "window": {
+        "calendar_month_utc": "Calendar month (UTC)",
+        "lifetime": "Lifetime"
+      },
+      "windowSince": "since {date}",
+      "status": {
+        "paused": "Paused",
+        "warning": "Warning",
+        "ok": "Within budget"
+      },
+      "spend": {
+        "of": "{spent} of {amount}",
+        "percent": "{percent}%"
+      },
+      "rules": {
+        "warnAt": "Warns at {percent}%",
+        "noWarn": "No warning",
+        "hardStopOn": "Pauses at the limit",
+        "hardStopOff": "Alerts only",
+        "runningFinish": "Running jobs finish",
+        "runningCancel": "Running jobs are cancelled"
+      },
+      "pausedSince": "Paused {at}",
+      "runningJobs": {
+        "finish": "Let running jobs finish",
+        "cancel": "Cancel running jobs"
+      },
+      "hardStop": {
+        "on": "Pause the scope at the limit",
+        "off": "Only warn, never pause"
+      },
+      "form": {
+        "createTitle": "Add budget policy",
+        "editTitle": "Edit budget policy",
+        "scopeType": "Scope",
+        "scopeRunner": "Runner",
+        "scopeRepo": "Repo",
+        "choosePlaceholder": "Choose...",
+        "windowKind": "Window",
+        "amount": "Limit (USD)",
+        "amountHint": "Up to 4 decimals, at most 1,000,000.",
+        "warnPercent": "Warn at (% of the limit)",
+        "warnHint": "A whole number from 1 to 99. Leave blank for no warning.",
+        "hardStop": "At the limit",
+        "runningJobs": "Running jobs at a hard stop",
+        "fixedHint": "Scope and window cannot change after creation. Delete the policy and add a new one instead.",
+        "submit": "Save",
+        "submitting": "Saving..."
+      },
+      "resume": {
+        "title": "Resume budget",
+        "summary": "Spent {spent} of {amount} in this window.",
+        "amount": "New limit (USD)",
+        "keepHint": "Leave blank to keep the current limit.",
+        "raiseHint": "The current limit is not above the spend. Enter a higher limit.",
+        "submit": "Resume",
+        "submitting": "Resuming..."
+      },
+      "validation": {
+        "amountInvalid": "Enter an amount above 0 with at most 4 decimals, up to 1,000,000.",
+        "warnInvalid": "Enter a whole number from 1 to 99, or leave blank.",
+        "scopeRequired": "Choose a scope.",
+        "amountRequired": "The limit is not above the current spend. Enter a higher limit.",
+        "resumeNotAbove": "The limit must be above the current spend of {spent}."
+      },
+      "toast": {
+        "created": "Budget policy created",
+        "updated": "Budget policy saved",
+        "deleted": "Budget policy deleted",
+        "resumed": "Budget resumed"
+      },
+      "deleteConfirm": "Delete the budget policy for {scope}? A paused scope resumes immediately.",
+      "banner": {
+        "paused": "Fleet budget paused for {scope}: {spent} of {amount} spent. New jobs are refused until it is resumed.",
+        "warning": "Fleet budget for {scope} is at {percent}% ({spent} of {amount}).",
+        "more": "and {count} more",
+        "view": "View budgets"
+      }
+    },
     "repos": {
       "title": "Repos",
       "subtitle": "Repositories koda can clone and push for fleet jobs.",
@@ -837,6 +953,7 @@
       "title": "Fleet jobs",
       "subtitle": "nax runs and plans dispatched to fleet runners",
       "dispatch": "Dispatch",
+      "budgets": "Budgets",
       "empty": "No fleet jobs yet",
       "total": "{total} jobs",
       "unknownMember": "Unknown member",
@@ -894,7 +1011,9 @@
           "phase": "Now: {phase}",
           "truncated": "List truncated: showing the first {count} stories."
         },
-        "cancelRequested": "Cancel requested at {at}"
+        "cancelRequested": "Cancel requested at {at}",
+        "budgetStop": "Stopped by a fleet budget",
+        "budgetStopLink": "View budgets"
       },
       "actions": {
         "cancel": "Cancel job",
