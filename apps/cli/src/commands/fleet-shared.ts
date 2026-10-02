@@ -91,6 +91,15 @@ export async function runnerNamesOrEmpty(slug: string): Promise<ReadonlyMap<stri
   }
 }
 
+/** `owner/name` by repo id, for tables; an empty map when the lookup fails, so the table still prints ids. */
+export async function repoNamesOrEmpty(slug: string): Promise<ReadonlyMap<string, string>> {
+  try {
+    return new Map((await projectRepos(slug)).map((r): [string, string] => [r.id, `${r.owner}/${r.name}`]));
+  } catch {
+    return new Map();
+  }
+}
+
 export function handleFleetValidation(message: string): never {
   return handleApiError(message, { validationError: true });
 }
