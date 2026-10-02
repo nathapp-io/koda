@@ -79,7 +79,6 @@ async function setup(server: FakeServer) {
   return { base, home, config, identity, ex };
 }
 const tuning = { syncMinGapMs: 5, statusPollMs: 5, syncTimeoutMs: 2_000, ackPollMs: 5 };
-const settle = (): Promise<void> => new Promise<void>((resolve) => setTimeout(resolve, 0));
 const events = (server: FakeServer) => server.syncs.flatMap((s) => s.jobs.flatMap((j) => j.events.map((e) => ({ ...e, jobId: j.jobId }))));
 
 describe('startDaemon', () => {
@@ -265,9 +264,14 @@ describe('startDaemon', () => {
       let closed = false;
       const close = daemon.journal.close.bind(daemon.journal);
       daemon.journal.close = () => { closed = true; close(); };
+      // The halt is set by supervisor.shutdown(); wait for that observable point instead of a fixed
+      // number of loop turns — under CI load two settles let the gated run resume and spawn first.
+      const halted = new Promise<void>((resolve) => {
+        const shutdown = daemon.supervisor.shutdown.bind(daemon.supervisor);
+        daemon.supervisor.shutdown = () => { resolve(); shutdown(); };
+      });
       const stopping = daemon.stop();
-      await settle();
-      await settle();
+      await halted;
       expect(closed).toBe(false);                                     // the run is still inside prepare
       release();
       await stopping;
