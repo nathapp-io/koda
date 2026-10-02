@@ -7,6 +7,7 @@ import { remapPage } from '../../common/dto/koda-page.query';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FleetCommandType, FleetJobState } from '../../common/enums';
 import { FleetActivityService } from '../activity/fleet-activity.service';
+import { addUsd } from '../budgets/money';
 import { normalizeDispatch } from './dispatch-input';
 import { FleetDispatchException } from './fleet-dispatch.exception';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
@@ -144,7 +145,9 @@ export class FleetJobsService {
           extra: {
             runnerId: null, runnerBootId: null, assignedAt: null, startedAt: null, finishedAt: null, cancelRequestedAt: null,
             naxRunId: null, naxLogRunId: null, naxCostRunId: null, progress: null, currentStoryId: null, currentPhase: null,
-            costSpentUsd: '0', lastHeartbeatAt: null, finishResult: null, escalationReason: null, exitCode: null,
+            // S1b §2.1: requeue keeps spend; the attempt's cost moves into costCarriedUsd.
+            costSpentUsd: '0', costCarriedUsd: addUsd(current.costCarriedUsd, current.costSpentUsd), cancelReason: null,
+            lastHeartbeatAt: null, finishResult: null, escalationReason: null, exitCode: null,
             resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null, stories: null, storiesTruncated: false,
             ackedRunnerSeq: 0, bumpEpoch: true,
           },

@@ -40,6 +40,14 @@ describe('JobTransitionsService', () => {
     expect(ev).toEqual(expect.objectContaining({ type: 'fleet_job', jobId: after.id, state: 'RUNNING' }));
   });
 
+  it('sets firstStartedAt on the first RUNNING only (S1b §2.1)', async () => {
+    await svc.apply({ job: job(), to: 'RUNNING', by: 'runner', now: NOW, actor: { type: 'RUNNER', id: 'run-1' } });
+    expect(repo.update).toHaveBeenLastCalledWith('j1', expect.objectContaining({ startedAt: NOW, firstStartedAt: NOW }));
+    const earlier = new Date('2026-09-01T00:00:00.000Z');
+    await svc.apply({ job: job({ firstStartedAt: earlier }), to: 'RUNNING', by: 'runner', now: NOW, actor: { type: 'RUNNER', id: 'run-1' } });
+    expect(repo.update.mock.calls[1][1]).not.toHaveProperty('firstStartedAt');
+  });
+
   it('bumps the epoch and withdraws commands on a server-owned terminal transition of a held job (plan D4)', async () => {
     await svc.apply({ job: job(), to: 'CANCELLED', by: 'server', now: NOW, actor: SYSTEM_ACTOR, reason: 'cancelled before start' });
     expect(repo.update).toHaveBeenCalledWith('j1', expect.objectContaining({ state: 'CANCELLED', finishedAt: NOW, bumpEpoch: true, stateReason: 'cancelled before start' }));

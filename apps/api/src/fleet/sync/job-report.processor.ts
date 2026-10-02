@@ -19,6 +19,11 @@ export interface ReportOutcome {
 
 const NONE: ReportOutcome = Object.freeze({ ack: null, unknown: false, live: [] });
 
+/** Plan D156: a server-requested cancel keeps its reason (e.g. `budget:<policyId>`) over the runner's. */
+function cancelReasonFor(job: FleetJobRecord, to: string, reported: string | null): string | null {
+  return to === 'CANCELLED' && job.cancelReason ? job.cancelReason : reported;
+}
+
 /**
  * One job's events from one sync, in one transaction (spec §3.2, plan D2/D5/D6): fence,
  * dedup on (epoch, runnerSeq), store, then apply only the contiguous prefix above the
@@ -87,7 +92,7 @@ export class JobReportProcessor {
     if (effect.kind === 'mirror') return { job: await this.repo.update(job.id, effect.patch), mirrored: true };
     if (effect.kind === 'transition' && canTransition(job.state, effect.to, 'runner')) {
       const r = await this.transitions.apply({
-        job, to: effect.to, by: 'runner', now, actor: { type: 'RUNNER', id: runnerId }, reason: effect.reason,
+        job, to: effect.to, by: 'runner', now, actor: { type: 'RUNNER', id: runnerId }, reason: cancelReasonFor(job, effect.to, effect.reason),
         extra: effect.exitCode === null ? {} : { exitCode: effect.exitCode },
       });
       return { job: r.job, live: r.live, mirrored: false };
