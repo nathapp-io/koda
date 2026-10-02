@@ -145,17 +145,36 @@ describeIntegration('fleet approvals API (PG)', () => {
     const { approvalId, policy } = await stopped();
     await request(server).delete(`/api/projects/web/fleet/budgets/${policy.id}`).set(as(padmin)).expect(204);
     await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin)).send({ decision: 'keep_paused' }).expect(409);
+    // Review focus 3 also covers the delete's own half: the approval is closed, not left pending or
+    // approved, and with no human decision attached, so the later decide fails on state, not on a missing policy.
+    const closed = await prisma.fleetApproval.findUniqueOrThrow({ where: { id: approvalId } });
+    expect(closed).toEqual(expect.objectContaining({ status: 'cancelled', resolvedBy: 'policy_deleted', decidedById: null }));
   });
 
   it('concurrent evaluate and decide: no deadlock (review focus 1)', async () => {
     const { approvalId, policy } = await stopped();
+    // Review focus 1 is the policy -> approval lock nesting (spec §1.4), so `evaluate` has to reach the
+    // approval row here. A policy left paused short-circuits at `isEffectivelyPaused` and never opens
+    // or closes an approval, so both calls would contend on the policy row alone and prove nothing.
+    // Task 4's D228 shape: clear the pause, keep the amount, so the same window spend still hard-stops.
+    await prisma.budgetPolicy.update({ where: { id: policy.id }, data: { pausedAt: null, pausedWindowStart: null } });
     const [res] = await Promise.all([
       request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin)).send({ decision: 'raise_budget_and_resume', amountUsd: 40 }),
       evaluator.evaluate(policy.id),
       evaluator.evaluate(policy.id),
     ]);
-    expect([200, 409]).toContain(res.status);
-    expect(await prisma.fleetApproval.count({ where: { policyId: policy.id, status: 'pending' } })).toBeLessThanOrEqual(1);
+    // The decide can never win this race to a 200: it holds the policy lock from its first query, so the
+    // pause it needs is either already superseded (approval not pending) or the one the test just cleared
+    // (budget not paused). Both paths nest policy -> approval, so one commits and the other answers 409;
+    // a reversed nesting would deadlock here and surface as a 500 instead.
+    expect(res.status).toBe(409);
+    // Whichever promise took the policy lock first, the stop that got through superseded the pending
+    // approval (system close: no human decision) and opened a fresh pending one in its place.
+    expect(await prisma.fleetApproval.findUniqueOrThrow({ where: { id: approvalId } }))
+      .toEqual(expect.objectContaining({ status: 'cancelled', resolvedBy: 'superseded', decidedById: null }));
+    expect(await prisma.fleetApproval.count({ where: { policyId: policy.id, status: 'pending' } })).toBe(1);
+    // One hard stop per policy per window (D228): the second `evaluate` sees the pause the first committed.
+    expect(await prisma.budgetIncident.count({ where: { policyId: policy.id, kind: 'hard_stop' } })).toBe(1);
   });
 
   it('counts pending over memberships; unscoped for a global admin only', async () => {

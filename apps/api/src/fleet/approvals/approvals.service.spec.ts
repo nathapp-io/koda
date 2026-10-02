@@ -1,5 +1,5 @@
 import { ApprovalsService } from './approvals.service';
-import type { FleetApprovalRecord } from './domain/approval.domain';
+import { MAX_REQUEUE_CANDIDATES, type FleetApprovalRecord } from './domain/approval.domain';
 
 const NOW = new Date('2026-10-02T10:00:00.000Z');
 const pendingBudget = (over: Partial<FleetApprovalRecord> = {}): FleetApprovalRecord => ({
@@ -97,5 +97,24 @@ describe('ApprovalsService.counts', () => {
   it('sums member projects, plus unscoped for a global admin only (D235)', async () => {
     expect(await build(null).service.counts({ id: 'root', globalAdmin: true })).toEqual({ total: 5, unscoped: 3, projects: [{ projectId: 'p1', slug: 'web', pending: 2 }] });
     expect(await build(null).service.counts({ id: 'dev', globalAdmin: false })).toEqual({ total: 2, unscoped: 0, projects: [{ projectId: 'p1', slug: 'web', pending: 2 }] });
+  });
+});
+
+describe('ApprovalsService.get re-queue candidates', () => {
+  it('over-fetches by one, returns the capped page and flags the truncation', async () => {
+    const { service, repo } = build(pendingBudget());
+    repo.findRequeueCandidates.mockResolvedValue(
+      Array.from({ length: MAX_REQUEUE_CANDIDATES + 1 }, (_, i) => ({ jobId: `j${i}`, projectId: 'p1', feature: `f${i}`, queuedAt: NOW })),
+    );
+    const dto = await service.get(PROJECT_ADMIN, 'a1');
+    expect(repo.findRequeueCandidates).toHaveBeenCalledWith('pol', NOW, MAX_REQUEUE_CANDIDATES + 1);
+    expect(dto.requeueCandidates).toHaveLength(MAX_REQUEUE_CANDIDATES);
+    expect(dto.requeueCandidates?.at(-1)).toEqual(expect.objectContaining({ jobId: `j${MAX_REQUEUE_CANDIDATES - 1}` }));
+    expect(dto.requeueCandidatesTruncated).toBe(true);
+  });
+
+  it('an exact page is not flagged as truncated', async () => {
+    const { service } = build(pendingBudget());
+    expect(await service.get(PROJECT_ADMIN, 'a1')).toEqual(expect.objectContaining({ requeueCandidatesTruncated: false }));
   });
 });
