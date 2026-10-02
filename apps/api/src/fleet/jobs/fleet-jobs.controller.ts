@@ -33,7 +33,7 @@ export class FleetJobsController {
   @ApiOperation({ summary: 'Dispatch a nax run or plan to a fleet runner (project DEVELOPER+)' })
   @ApiResponse({ status: 201, type: DispatchResultDto })
   @ApiResponse({ status: 404, description: 'Repo not in this project, or pinned runner unknown' })
-  @ApiResponse({ status: 409, description: 'An active job already runs this (repo, feature); message names it' })
+  @ApiResponse({ status: 409, description: 'An active job already runs this (repo, feature), or a budget covering the job is paused (fleet.budgetPaused)' })
   @ApiResponse({ status: 422, description: 'Pinned runner can never run this job' })
   async dispatch(@Body() dto: DispatchFleetJobDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
     return JsonResponse.Ok(await this.jobs.dispatch(principal.id, ctx.project.id, dto));
@@ -56,7 +56,7 @@ export class FleetJobsController {
   @ProjectPermission([CaslPermissionAction.UPDATE, 'FleetJob'])
   @ApiOperation({ summary: 'Requeue a CRASHED, FAILED or CANCELLED job (project DEVELOPER+)' })
   @ApiResponse({ status: 200, type: DispatchResultDto })
-  @ApiResponse({ status: 409, description: 'Job not requeueable, or an active duplicate exists' })
+  @ApiResponse({ status: 409, description: 'Job not requeueable, an active duplicate exists, or a budget covering the job is paused' })
   async requeue(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
     return JsonResponse.Ok(await this.jobs.requeue(principal.id, ctx.project.id, id));
   }

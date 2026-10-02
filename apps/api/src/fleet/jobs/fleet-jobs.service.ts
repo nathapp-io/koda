@@ -8,6 +8,8 @@ import { ConflictAppException } from '../../common/exceptions/conflict-app.excep
 import { FleetCommandType, FleetJobState } from '../../common/enums';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { addUsd } from '../budgets/money';
+import { BudgetGate } from '../budgets/budget-gate';
+import { jobGateKeys } from '../budgets/budget-rules';
 import { normalizeDispatch } from './dispatch-input';
 import { FleetDispatchException } from './fleet-dispatch.exception';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
@@ -31,6 +33,7 @@ export class FleetJobsService {
     private readonly live: FleetJobLivePublisher,
     private readonly transitions: JobTransitionsService,
     private readonly notifier: RunnerNotifier,
+    private readonly budgets: BudgetGate,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
 
@@ -45,6 +48,9 @@ export class FleetJobsService {
       if (verdict === 'not_found') throw new NotFoundAppException({}, 'fleet.runners');
       if (verdict !== null && PERMANENT_MISFITS.has(verdict)) throw new FleetDispatchException(verdict);
     }
+
+    // S1b §2.3: no new job in a paused scope, the pinned runner's included.
+    await this.budgets.assertNotPaused(jobGateKeys({ projectId, repoId: repo.id, pinnedRunnerId: input.pinnedRunnerId }), new Date());
 
     let job: FleetJobRecord;
     try {
@@ -135,6 +141,7 @@ export class FleetJobsService {
         feature = current.feature;
         repoId = current.repoId;
         if (!canTransition(current.state, FleetJobState.QUEUED, 'server')) throw new ConflictAppException({ state: current.state }, 'fleet.jobState');
+        await this.budgets.assertNotPaused(jobGateKeys(current), now);
         // Plan D4: a requeue is a fresh lease (the transition carries `bumpEpoch: true`).
         // Withdraw pending non-ABANDON commands from the prior epoch so a late runner
         // can no longer ack them, and so the next sync sees no orphan ASSIGN/CANCEL.
