@@ -79,4 +79,11 @@ describe('job detail', () => {
   test('renders the story checklist under the progress block', () => {
     expect(detail).toMatch(/<FleetJobProgress :job="job" \/>\s*<FleetJobStories :job="job" \/>/)
   })
+
+  test('a scheduled job links back to its schedule and shows merged fires (3b D216)', () => {
+    expect(detail).toContain('<span v-if="job.scheduleId"')
+    expect(detail).toContain(':to="`/${slug}/fleet/schedules/${job.scheduleId}`"')
+    expect(detail).toContain('data-testid="fleet-job-schedule-link"')
+    expect(detail).toContain("t('fleet.jobs.detail.coalesced', { count: job.coalescedCount })")
+  })
 })
