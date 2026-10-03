@@ -26,7 +26,8 @@ describeIntegration('schedule repository (PG)', () => {
 
   const make = (over: Partial<NewSchedule> = {}) => repo.create({
     projectId: base.projectId, repoId: base.repoId, name: `s${++n}`, cron: '0 * * * *', timezone: 'UTC', feature: `rf${n}`,
-    ref: 'main', profiles: [], maxCostUsd: '5', selectorLabels: [], pinnedRunnerId: null, noProgressLimit: 3,
+    ref: 'main', profiles: [], maxCostUsd: '5', selectorLabels: [], bashMode: 'raw', approvalTimeoutSec: 600,
+    pinnedRunnerId: null, noProgressLimit: 3,
     nextFireAt: DUE, createdById: base.adminId, ...over,
   });
   const job = (scheduleId: string | null, over: Partial<Prisma.FleetJobUncheckedCreateInput> = {}) => prisma.fleetJob.create({
