@@ -91,6 +91,14 @@ export interface IApprovalRepository {
   /** SELECT ... FOR UPDATE (inside txManager.run); null when the approval is gone. */
   lockById(id: string): Promise<FleetApprovalRecord | null>;
   findPendingForPolicy(policyId: string): Promise<FleetApprovalRecord | null>;
+  /** S1.5 2a: re-reported asks are idempotent on (jobId, leaseEpoch, naxAskId). */
+  findByAsk(jobId: string, leaseEpoch: number, naxAskId: string): Promise<FleetApprovalRecord | null>;
+  /** Pending bash approvals of one job, oldest first. */
+  findPendingForJob(jobId: string): Promise<FleetApprovalRecord[]>;
+  /** Pending bash approvals whose expiresAt has passed, soonest first. */
+  findExpiredPending(now: Date, limit: number): Promise<FleetApprovalRecord[]>;
+  /** Pending approval count per job id; jobs with none are absent. */
+  countPendingByJob(jobIds: readonly string[]): Promise<Map<string, number>>;
   resolve(id: string, r: ApprovalResolution): Promise<FleetApprovalRecord>;
   setOutcome(id: string, outcome: Record<string, unknown>): Promise<FleetApprovalRecord>;
   /** Newest first. */

@@ -10,7 +10,7 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { PrismaApprovalRepository } from '../../../src/fleet/approvals/prisma-approval.repository';
-import type { ApprovalResolution } from '../../../src/fleet/approvals/domain/approval.domain';
+import type { ApprovalResolution, NewFleetApproval } from '../../../src/fleet/approvals/domain/approval.domain';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -144,5 +144,58 @@ describeIntegration('approval repository (PG)', () => {
   it('finds a project slug', async () => {
     expect(await repo.findProjectSlug(world.projectId)).toBe('web');
     expect(await repo.findProjectSlug('missing')).toBeNull();
+  });
+});
+
+describe('bash lookups (S1.5 2a)', () => {
+  let app: NathApplication;
+  let prisma: PrismaClient;
+  let world: FleetHttpWorld;
+  let repo: PrismaApprovalRepository;
+  let n = 0;
+  const T0 = new Date('2026-10-02T10:00:00.000Z');
+  const job = (over: Partial<Prisma.FleetJobUncheckedCreateInput> = {}) => prisma.fleetJob.create({
+    data: {
+      projectId: world.projectId, repoId: world.repoId, ref: 'main', command: 'RUN', feature: `rp${++n}`, profiles: [],
+      maxCostUsd: new Prisma.Decimal(5), selectorLabels: [], requestedById: world.ids.dev, state: 'CANCELLED',
+      cancelReason: 'budget:pol', startedAt: null, finishedAt: new Date(T0.getTime() + 1_000), queuedAt: new Date(T0.getTime() + n), ...over,
+    },
+  });
+
+  beforeAll(async () => {
+    await resetDb();
+    app = await bootHttpApp({ registrationEnabled: false });
+    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
+    repo = app.get(PrismaApprovalRepository);
+  });
+  afterAll(async () => {
+    await app.close();
+  });
+  beforeEach(async () => {
+    await prisma.fleetApproval.deleteMany();
+    await prisma.fleetJob.deleteMany();
+  });
+
+  let projectId!: string;
+  let jobId!: string;
+  beforeEach(async () => { projectId = world.projectId; jobId = (await job()).id; });
+  const bash = (over: Partial<NewFleetApproval> = {}): NewFleetApproval => ({
+    type: 'nax_bash_escalate', projectId, policyId: null, jobId, leaseEpoch: 1, naxAskId: 'ask-a', payload: {},
+    requestedAt: new Date('2026-10-04T10:00:00Z'), expiresAt: new Date('2026-10-04T10:10:00Z'), ...over,
+  });
+
+  it('finds by ask, lists pending for a job, finds expired, counts by job', async () => {
+    const a = await repo.create(bash());
+    await repo.create(bash({ naxAskId: 'ask-b', expiresAt: new Date('2026-10-04T10:01:00Z') }));
+    const c = await repo.create(bash({ naxAskId: 'ask-c' }));
+    await repo.resolve(c.id, { status: 'cancelled', resolvedBy: 'job_ended', decidedAt: new Date() });
+
+    expect((await repo.findByAsk(jobId, 1, 'ask-a'))?.id).toBe(a.id);
+    expect(await repo.findByAsk(jobId, 2, 'ask-a')).toBeNull();
+    expect((await repo.findPendingForJob(jobId)).map((r) => r.naxAskId)).toEqual(['ask-a', 'ask-b']);
+    expect((await repo.findExpiredPending(new Date('2026-10-04T10:05:00Z'), 10)).map((r) => r.naxAskId)).toEqual(['ask-b']);
+    expect(await repo.countPendingByJob([jobId, 'nope'])).toEqual(new Map([[jobId, 2]]));
+    expect(await repo.countPendingByJob([])).toEqual(new Map());
   });
 });

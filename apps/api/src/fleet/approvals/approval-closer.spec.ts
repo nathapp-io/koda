@@ -20,6 +20,10 @@ function fakes() {
       return row;
     }),
     findPendingForPolicy: jest.fn(async (id: string) => [...rows.values()].find((r) => r.policyId === id && r.status === 'pending') ?? null),
+    findByAsk: jest.fn(async (jobId: string, leaseEpoch: number, naxAskId: string) =>
+      [...rows.values()].find((r) => r.jobId === jobId && r.leaseEpoch === leaseEpoch && r.naxAskId === naxAskId) ?? null),
+    findPendingForJob: jest.fn(async (jobId: string) =>
+      [...rows.values()].filter((r) => r.jobId === jobId && r.status === 'pending')),
     lockById: jest.fn(async (id: string) => rows.get(id) ?? null),
     resolve: jest.fn(async (id: string, x: Partial<FleetApprovalRecord>) => {
       const row = { ...(rows.get(id) as FleetApprovalRecord), ...x };
@@ -90,5 +94,75 @@ describe('ApprovalCloser', () => {
     const r = await closer.closeForPolicy('pol', { status: 'cancelled', resolvedBy: 'policy_deleted', actor: { type: 'USER', id: 'u9', responsibleUserId: 'u9' } }, NOW);
     expect(r.approval).toEqual(expect.objectContaining({ status: 'cancelled', decidedById: null, decision: null }));
     expect(activity.record).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'approval.cancelled' }));
+  });
+});
+
+describe('bash (S1.5 2a)', () => {
+  let closer!: ReturnType<typeof fakes>['closer'];
+  let repo!: ReturnType<typeof fakes>['repo'];
+  let activity!: ReturnType<typeof fakes>['activity'];
+  let webhooks!: ReturnType<typeof fakes>['webhooks'];
+  let rows!: ReturnType<typeof fakes>['rows'];
+  beforeEach(() => { ({ closer, repo, activity, webhooks, rows } = fakes()); });
+  const job = { id: 'j1', projectId: 'p1', leaseEpoch: 2, state: 'RUNNING', bashMode: 'escalate', approvalTimeoutSec: 600, requestedById: 'u9' } as const;
+  const ask = (over: Partial<{ naxAskId: string; deadlineAt: Date }> = {}) => ({
+    naxAskId: 'ask-1f2e3d4c', deadlineAt: new Date(NOW.getTime() + 300_000), payload: { command: 'bun run test' }, ...over,
+  });
+
+  it('opens a pending ask expiring at the earlier of nax deadline and job timeout, with requested activity and webhook', async () => {
+    const { approval, live } = await closer.openBash(job, ask(), 'r1', NOW);
+    expect(approval).toEqual(expect.objectContaining({
+      type: 'nax_bash_escalate', status: 'pending', projectId: 'p1', jobId: 'j1', leaseEpoch: 2, naxAskId: 'ask-1f2e3d4c',
+      policyId: null, expiresAt: new Date(NOW.getTime() + 300_000),
+    }));
+    expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ actorType: 'RUNNER', actorId: 'r1', responsibleUserId: 'u9', action: 'approval.requested' }));
+    expect(webhooks.dispatch).toHaveBeenCalledWith('p1', 'fleet.approval.requested', expect.anything());
+    expect(live).toHaveLength(1);
+  });
+
+  it('caps expiresAt at requestedAt + approvalTimeoutSec', async () => {
+    const { approval } = await closer.openBash({ ...job, approvalTimeoutSec: 60 }, ask(), 'r1', NOW);
+    expect(approval?.expiresAt).toEqual(new Date(NOW.getTime() + 60_000));
+  });
+
+  it('is idempotent on (jobId, leaseEpoch, naxAskId)', async () => {
+    const first = await closer.openBash(job, ask(), 'r1', NOW);
+    const again = await closer.openBash(job, ask(), 'r1', NOW);
+    expect(again.approval?.id).toBe(first.approval?.id);
+    expect(again.live).toEqual([]);
+    expect(repo.create).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [{ state: 'UPLOADING' }, 'cancelled', 'job_ended'],
+    [{ bashMode: 'raw' }, 'cancelled', 'job_ended'],
+  ] as const)('a job %p gives a born-closed ask %s/%s without a webhook (D261)', async (over, status, resolvedBy) => {
+    const { approval } = await closer.openBash({ ...job, ...over }, ask(), 'r1', NOW);
+    expect(approval).toEqual(expect.objectContaining({ status, resolvedBy }));
+    expect(webhooks.dispatch).not.toHaveBeenCalled();
+    expect(activity.record).toHaveBeenCalledTimes(1);
+  });
+
+  it('a deadline already past gives expired/timeout', async () => {
+    const { approval } = await closer.openBash(job, ask({ deadlineAt: new Date(NOW.getTime() - 1) }), 'r1', NOW);
+    expect(approval).toEqual(expect.objectContaining({ status: 'expired', resolvedBy: 'timeout' }));
+    expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'approval.expired' }));
+  });
+
+  it('closeForJob cancels every pending ask of the job with job_ended and a resolved webhook', async () => {
+    await closer.openBash(job, ask(), 'r1', NOW);
+    await closer.openBash(job, ask({ naxAskId: 'ask-00000002' }), 'r1', NOW);
+    webhooks.dispatch.mockClear();
+    const live = await closer.closeForJob(job, NOW);
+    expect(live).toHaveLength(2);
+    expect([...rows.values()].every((r) => r.status === 'cancelled' && r.resolvedBy === 'job_ended')).toBe(true);
+    expect(webhooks.dispatch).toHaveBeenCalledWith('p1', 'fleet.approval.resolved', expect.anything());
+  });
+
+  it('expire marks expired/timeout with approval.expired activity (D262)', async () => {
+    const { approval } = await closer.openBash(job, ask(), 'r1', NOW);
+    const { approval: expired } = await closer.expire(approval!, job, NOW);
+    expect(expired).toEqual(expect.objectContaining({ status: 'expired', resolvedBy: 'timeout', decidedAt: NOW }));
+    expect(activity.record).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'approval.expired', actorType: 'SYSTEM', responsibleUserId: 'u9' }));
   });
 });
