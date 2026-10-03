@@ -147,7 +147,7 @@ describeIntegration('approval repository (PG)', () => {
   });
 });
 
-describe('bash lookups (S1.5 2a)', () => {
+describeIntegration('bash lookups (S1.5 2a)', () => {
   let app: NathApplication;
   let prisma: PrismaClient;
   let world: FleetHttpWorld;
