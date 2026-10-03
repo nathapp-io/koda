@@ -256,9 +256,10 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     return r ? toCommand(r) : null;
   }
 
-  async withdrawPendingCommands(jobId: string, now: Date): Promise<number> {
+  async withdrawPendingCommands(jobId: string, now: Date, opts: { types?: readonly FleetCommandType[] } = {}): Promise<number> {
+    const type = opts.types ? { in: [...opts.types] } : { not: FleetCommandType.ABANDON };
     const { count } = await this.db.fleetCommand.updateMany({
-      where: { jobId, ackedAt: null, type: { not: FleetCommandType.ABANDON } },
+      where: { jobId, ackedAt: null, type },
       data: { ackedAt: now, ackResult: FleetCommandAckResult.WITHDRAWN },
     });
     return count;

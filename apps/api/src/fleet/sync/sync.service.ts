@@ -56,8 +56,9 @@ export class SyncService {
     });
     if (!seen) throw new AuthException({}, 'fleet.runnerAuth');
 
-    const live: LiveFleetJobEvent[] = [...(await this.acks.process(runnerId, req.bootId, req.commandAcks, now))];
-    const approvalLive: LiveFleetApprovalEvent[] = [];
+    const { live: ackLive, approvalLive: ackApprovalLive } = await this.acks.process(runnerId, req.bootId, req.commandAcks, now);
+    const live: LiveFleetJobEvent[] = [...ackLive];
+    const approvalLive: LiveFleetApprovalEvent[] = [...ackApprovalLive];
     const jobAcks: JobAck[] = [];
     const unknownJobIds: string[] = [];
     for (const report of req.jobs) {

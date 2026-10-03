@@ -212,8 +212,8 @@ export interface IFleetJobRepository {
   findCommand(id: string): Promise<FleetCommandRecord | null>;
   ackCommand(id: string, result: string, now: Date): Promise<void>;
   findPendingCommand(filter: { jobId: string; type: FleetCommandType; runnerId?: string; leaseEpoch?: number }): Promise<FleetCommandRecord | null>;
-  /** Plan D4: marks the job's pending non-ABANDON commands withdrawn; returns how many. */
-  withdrawPendingCommands(jobId: string, now: Date): Promise<number>;
+  /** Plan D4: marks the job's pending non-ABANDON commands withdrawn; returns how many. With `types`, only those types (plan D263: RUNNING -> UPLOADING). */
+  withdrawPendingCommands(jobId: string, now: Date, opts?: { types?: readonly FleetCommandType[] }): Promise<number>;
 
   upsertArtifact(artifact: Omit<FleetArtifactRecord, 'id' | 'createdAt'>): Promise<FleetArtifactRecord>;
   findArtifact(jobId: string, kind: string, leaseEpoch: number): Promise<FleetArtifactRecord | null>;

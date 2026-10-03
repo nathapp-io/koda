@@ -1,13 +1,17 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FleetCommandAckResult, FleetCommandType, FleetJobState } from '../../common/enums';
-import type { LiveFleetJobEvent } from '../../live/live-event';
+import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-event';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import type { CommandAck } from '../common/protocol';
 import { canTransition } from '../jobs/job-state';
 import { JobTransitionsService } from '../jobs/job-transitions.service';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { FenceService } from './fence.service';
+
+/** An ack either changed the job (live event plus the approval events of any exit from RUNNING) or did nothing (plan D263). */
+interface Applied { live: LiveFleetJobEvent | null; approvalLive: LiveFleetApprovalEvent[] }
+const NO_CHANGE: Applied = { live: null, approvalLive: [] };
 
 /** Command acks (spec §3.2, plan D8) and the boot-id reconcile (spec §5.3, C3). */
 @Injectable()
@@ -23,36 +27,38 @@ export class CommandAckProcessor {
   ) {}
 
   /** One transaction per ack, and a failing ack is logged and skipped, so one bad ack never blocks the rest. */
-  async process(runnerId: string, bootId: string, acks: readonly CommandAck[], now: Date): Promise<LiveFleetJobEvent[]> {
+  async process(runnerId: string, bootId: string, acks: readonly CommandAck[], now: Date): Promise<{ live: LiveFleetJobEvent[]; approvalLive: LiveFleetApprovalEvent[] }> {
     const live: LiveFleetJobEvent[] = [];
+    const approvalLive: LiveFleetApprovalEvent[] = [];
     for (const ack of acks) {
       try {
-        const event = await this.txManager.run(() => this.processOne(runnerId, bootId, ack, now));
-        if (event) live.push(event);
+        const applied = await this.txManager.run(() => this.processOne(runnerId, bootId, ack, now));
+        if (applied.live) live.push(applied.live);
+        approvalLive.push(...applied.approvalLive);
       } catch (error) {
         // Left unacked: the runner re-acks it next sync (review M2).
         this.logger.error(`Ack ${ack.commandId} from runner ${runnerId} failed: ${error instanceof Error ? error.name : 'unknown'}`);
       }
     }
-    return live;
+    return { live, approvalLive };
   }
 
-  private async processOne(runnerId: string, bootId: string, ack: CommandAck, now: Date): Promise<LiveFleetJobEvent | null> {
+  private async processOne(runnerId: string, bootId: string, ack: CommandAck, now: Date): Promise<Applied> {
     const command = await this.repo.findCommand(ack.commandId);
     if (!command || command.runnerId !== runnerId || command.leaseEpoch !== ack.leaseEpoch) {
       this.logger.warn(`Ignoring ack for unknown or foreign command ${ack.commandId} from runner ${runnerId}`);
-      return null;
+      return NO_CHANGE;
     }
-    if (command.ackedAt) return null; // already applied, withdrawn or stale: idempotent
+    if (command.ackedAt) return NO_CHANGE; // already applied, withdrawn or stale: idempotent
     if (command.type === FleetCommandType.ABANDON) {
       await this.repo.ackCommand(command.id, ack.result, now);
-      return null;
+      return NO_CHANGE;
     }
     const job = await this.repo.lockById(command.jobId);
     if (!job || !this.fence.holds(job, runnerId, command.leaseEpoch)) {
       await this.repo.ackCommand(command.id, FleetCommandAckResult.STALE, now);
       if (job) await this.fence.abandon(runnerId, job, command.leaseEpoch);
-      return null;
+      return NO_CHANGE;
     }
     await this.repo.ackCommand(command.id, ack.result, now);
     const actor = { type: 'RUNNER' as const, id: runnerId };
@@ -61,18 +67,21 @@ export class CommandAckProcessor {
     if (command.type === FleetCommandType.READOPT) {
       if (ack.result === 'ok') {
         await this.repo.update(job.id, { runnerBootId: bootId });
-        return null;
+        return NO_CHANGE;
       }
-      return (await this.transitions.apply({ job, to: FleetJobState.CRASHED, by: 'server', now, actor, reason: `readopt rejected: ${detail}` })).live;
+      const r = await this.transitions.apply({ job, to: FleetJobState.CRASHED, by: 'server', now, actor, reason: `readopt rejected: ${detail}` });
+      return { live: r.live, approvalLive: r.approvalLive };
     }
-    if (ack.result === 'ok') return null;
+    if (ack.result === 'ok') return NO_CHANGE;
     if (command.type === FleetCommandType.ASSIGN && canTransition(job.state, FleetJobState.FAILED, 'runner')) {
-      return (await this.transitions.apply({ job, to: FleetJobState.FAILED, by: 'runner', now, actor, reason: `assign rejected: ${detail}` })).live;
+      const r = await this.transitions.apply({ job, to: FleetJobState.FAILED, by: 'runner', now, actor, reason: `assign rejected: ${detail}` });
+      return { live: r.live, approvalLive: r.approvalLive };
     }
     if (command.type === FleetCommandType.CANCEL && canTransition(job.state, FleetJobState.CANCELLED, 'runner')) {
-      return (await this.transitions.apply({ job, to: FleetJobState.CANCELLED, by: 'runner', now, actor, reason: 'cancel: runner does not hold job' })).live;
+      const r = await this.transitions.apply({ job, to: FleetJobState.CANCELLED, by: 'runner', now, actor, reason: 'cancel: runner does not hold job' });
+      return { live: r.live, approvalLive: r.approvalLive };
     }
-    return null;
+    return NO_CHANGE;
   }
 
   /**

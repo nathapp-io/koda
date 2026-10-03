@@ -38,7 +38,8 @@ describe('EnrollmentService', () => {
   });
 
   it('rejects an unsupported protocol version before touching the token', async () => {
-    await expect(service.enroll({ ...body, protocolVersion: 2 } as never)).rejects.toBeInstanceOf(ProtocolVersionException);
+    // 2 became supported with protocol v2 (S1.5); 99 stays unsupported for every version of the table.
+    await expect(service.enroll({ ...body, protocolVersion: 99 } as never)).rejects.toBeInstanceOf(ProtocolVersionException);
     expect(repo.consumeEnrollment).not.toHaveBeenCalled();
   });
 

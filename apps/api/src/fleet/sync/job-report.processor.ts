@@ -3,7 +3,9 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { Prisma } from '@prisma/client';
 import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-event';
 import { FleetActivityService } from '../activity/fleet-activity.service';
-import type { BashAsk, ApprovalCloser } from '../approvals/approval-closer';
+import type { BashAsk } from '../approvals/approval-closer';
+// Value import (not `import type`): Nest reads the class from emitDecoratorMetadata to resolve the token.
+import { ApprovalCloser } from '../approvals/approval-closer';
 import { BudgetEvaluator } from '../budgets/budget-evaluator';
 import { jobSpendKeys } from '../budgets/budget-rules';
 import type { JobAck, JobReport } from '../common/protocol';
@@ -124,7 +126,7 @@ export class JobReportProcessor {
         job, to: effect.to, by: 'runner', now, actor: { type: 'RUNNER', id: runnerId }, reason: cancelReasonFor(job, effect.to, effect.reason),
         extra: effect.exitCode === null ? {} : { exitCode: effect.exitCode },
       });
-      return { job: r.job, live: r.live, mirrored: false };
+      return { job: r.job, live: r.live, approvalLive: r.approvalLive, mirrored: false };
     }
     const reason = effect.kind === 'invalid' ? effect.reason : `transition ${job.state} -> ${effect.to}`;
     this.logger.warn(`Rejected runner event on job ${job.id} (runnerSeq ${event.runnerSeq}): ${reason}`);
