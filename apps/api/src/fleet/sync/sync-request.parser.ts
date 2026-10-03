@@ -2,7 +2,7 @@ import { ValidationAppException } from '@nathapp/nestjs-common';
 import type { CommandAck, JobReport, RunnerEvent, SyncRequest, TokenRequest } from '../common/protocol';
 
 export const SYNC_LIMITS = Object.freeze({ jobs: 64, eventsPerJob: 500, acks: 256, tokenRequests: 64, payloadBytes: 16_384 });
-const EVENT_TYPES: readonly string[] = ['state', 'snapshot', 'lifecycle', 'log'];
+const EVENT_TYPES: readonly string[] = ['state', 'snapshot', 'lifecycle', 'log', 'approval_request'];
 const MAX_INT = 2_147_483_647;
 
 export type ParsedSync = Omit<SyncRequest, 'capabilities'> & { capabilities?: unknown };

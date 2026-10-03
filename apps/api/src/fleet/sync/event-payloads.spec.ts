@@ -1,5 +1,11 @@
 import { interpretEvent } from './event-payloads';
 
+const VALID_ASK = {
+  naxAskId: 'ask-1f2e3d4c', deadlineAt: '2026-10-04T10:10:00.000Z', command: 'bun run test', commandTruncated: false,
+  maskedCount: 0, root: '/work/repo', stage: 'execution', storyId: 'US-001', featureName: 'demo', reason: 'matched ask rule',
+  options: ['allow', 'allow-remember', 'deny'],
+};
+
 describe('interpretEvent', () => {
   it('reads a state event', () => {
     expect(interpretEvent('state', { to: 'RUNNING' })).toEqual({ kind: 'transition', to: 'RUNNING', reason: null, exitCode: null });
@@ -75,5 +81,10 @@ describe('interpretEvent', () => {
     expect(interpretEvent('lifecycle', { level: 'warn', message: 'watcher error' })).toEqual({ kind: 'none' });
     expect(interpretEvent('log', { stream: 'run', text: 'ok' })).toEqual({ kind: 'none' });
     expect(interpretEvent('log', { stream: 'run', text: 'x'.repeat(8_193) })).toEqual(expect.objectContaining({ kind: 'invalid' }));
+  });
+
+  it('interprets approval_request as an approval effect, or invalid', () => {
+    expect(interpretEvent('approval_request', VALID_ASK)).toEqual(expect.objectContaining({ kind: 'approval' }));
+    expect(interpretEvent('approval_request', { ...VALID_ASK, options: [] })).toEqual({ kind: 'invalid', reason: 'approval_request.options' });
   });
 });

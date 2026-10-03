@@ -1,8 +1,9 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { Prisma } from '@prisma/client';
-import type { LiveFleetJobEvent } from '../../live/live-event';
+import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-event';
 import { FleetActivityService } from '../activity/fleet-activity.service';
+import type { BashAsk, ApprovalCloser } from '../approvals/approval-closer';
 import { BudgetEvaluator } from '../budgets/budget-evaluator';
 import { jobSpendKeys } from '../budgets/budget-rules';
 import type { JobAck, JobReport } from '../common/protocol';
@@ -18,6 +19,7 @@ export interface ReportOutcome {
   ack: JobAck | null;
   unknown: boolean;
   live: LiveFleetJobEvent[];
+  approvalLive: LiveFleetApprovalEvent[];
 }
 
 /** The outcome plus the job after the report when its costSpentUsd changed (S1b §2.2 signal). */
@@ -26,7 +28,7 @@ interface Processed {
   spent: FleetJobRecord | null;
 }
 
-const NONE: ReportOutcome = Object.freeze({ ack: null, unknown: false, live: [] });
+const NONE: ReportOutcome = Object.freeze({ ack: null, unknown: false, live: [], approvalLive: [] });
 
 /** Plan D156: a server-requested cancel keeps its reason (e.g. `budget:<policyId>`) over the runner's. */
 function cancelReasonFor(job: FleetJobRecord, to: string, reported: string | null): string | null {
@@ -53,6 +55,7 @@ export class JobReportProcessor {
     private readonly fence: FenceService,
     private readonly activity: FleetActivityService,
     private readonly budgets: BudgetEvaluator,
+    private readonly approvals: ApprovalCloser,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
 
@@ -91,24 +94,31 @@ export class JobReportProcessor {
     let next = job.ackedRunnerSeq + 1;
     let mirrored = false;
     const live: LiveFleetJobEvent[] = [];
+    const approvalLive: LiveFleetApprovalEvent[] = [];
     for (const event of await this.repo.findRunnerEventsAfter(job.id, job.leaseEpoch, job.ackedRunnerSeq)) {
       if (event.runnerSeq !== next) break;
       const applied = await this.applyOne(current, event, runnerId, now);
       current = applied.job;
       if (applied.live) live.push(applied.live);
+      approvalLive.push(...(applied.approvalLive ?? []));
       mirrored = mirrored || applied.mirrored;
       next += 1;
     }
     const ackedSeq = next - 1;
     if (ackedSeq !== job.ackedRunnerSeq) current = await this.repo.update(job.id, { ackedRunnerSeq: ackedSeq });
     if (mirrored && live.length === 0) live.push(this.live.event(current));
-    return { outcome: { ack: { jobId: job.id, ackedSeq }, unknown: false, live }, spent: costChanged(job, current) ? current : null };
+    return { outcome: { ack: { jobId: job.id, ackedSeq }, unknown: false, live, approvalLive }, spent: costChanged(job, current) ? current : null };
   }
 
-  private async applyOne(job: FleetJobRecord, event: FleetJobEventRecord, runnerId: string, now: Date): Promise<{ job: FleetJobRecord; live?: LiveFleetJobEvent; mirrored: boolean }> {
+  private async applyOne(job: FleetJobRecord, event: FleetJobEventRecord, runnerId: string, now: Date): Promise<{ job: FleetJobRecord; live?: LiveFleetJobEvent; approvalLive?: LiveFleetApprovalEvent[]; mirrored: boolean }> {
     const effect = interpretEvent(event.type, event.payload);
     if (effect.kind === 'none') return { job, mirrored: false };
     if (effect.kind === 'mirror') return { job: await this.repo.update(job.id, effect.patch), mirrored: true };
+    if (effect.kind === 'approval') {
+      // Spec §2.2: inside the report transaction, after the lease fence; the job row is locked (lock order job -> approval).
+      const change = await this.approvals.openBash(job, effect.ask, runnerId, now);
+      return { job, approvalLive: change.live, mirrored: false };
+    }
     if (effect.kind === 'transition' && canTransition(job.state, effect.to, 'runner')) {
       const r = await this.transitions.apply({
         job, to: effect.to, by: 'runner', now, actor: { type: 'RUNNER', id: runnerId }, reason: cancelReasonFor(job, effect.to, effect.reason),
