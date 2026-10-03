@@ -1058,7 +1058,8 @@
       },
       "summary": {
         "budget": "Budget for {scope} stopped at {spent} of {amount}",
-        "bash": "A job asks to run a shell command"
+        "bash": "A job asks to run a shell command",
+        "bashCommand": "Run {command} ({stage})"
       },
       "empty": { "pending": "Nothing is waiting for a decision.", "all": "No approvals yet." },
       "linked": "Linked approval",

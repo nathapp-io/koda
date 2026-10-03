@@ -15,7 +15,8 @@ export const BADGE_CAP = 99
 export const MAX_COMMENT = 1000
 
 export type ApprovalBase = { kind: 'admin' } | { kind: 'project'; slug: string }
-export type ApprovalViewer = { kind: 'admin' } | { kind: 'project'; canManage: boolean }
+/** D290: `canManage` = project ADMIN (budget overrides), `canWork` = DEVELOPER+ (bash asks), both from the members endpoint. */
+export type ApprovalViewer = { kind: 'admin' } | { kind: 'project'; canManage: boolean; canWork: boolean }
 
 export const INBOX_TABS = ['pending', 'all'] as const
 export type InboxTab = (typeof INBOX_TABS)[number]
@@ -75,10 +76,62 @@ export function budgetPayload(a: Pick<FleetApprovalDto, 'type' | 'payload'>): Bu
   }
 }
 
-/** D244 (spec §1.7): budget overrides only in 1b; the server stays the gate. */
+/** The choices nax offers on a bash ask (2a `ApprovalOption`). */
+export const APPROVAL_OPTIONS = ['allow', 'allow-remember', 'deny'] as const
+export type ApprovalOption = (typeof APPROVAL_OPTIONS)[number]
+
+/** Spec §1.2 bash payload; `rawDetail` is null when the runner parsed nax's text. */
+export interface BashApprovalPayload {
+  command: string
+  commandTruncated: boolean
+  maskedCount: number
+  root: string
+  stage: string
+  storyId: string | null
+  featureName: string
+  reason: string
+  options: ApprovalOption[]
+  rawDetail: string | null
+}
+
+const isOption = (value: unknown): value is ApprovalOption => (APPROVAL_OPTIONS as readonly unknown[]).includes(value)
+
+/** D289: the bash payload, or null for another type or a payload without the shape (only Deny is then offered). */
+export function bashPayload(a: Pick<FleetApprovalDto, 'type' | 'payload'>): BashApprovalPayload | null {
+  if (a.type !== 'nax_bash_escalate') return null
+  const p = a.payload
+  const storyId = p.storyId ?? null
+  const rawDetail = p.rawDetail ?? null
+  if (!isString(p.command) || typeof p.commandTruncated !== 'boolean') return null
+  if (typeof p.maskedCount !== 'number' || !Number.isInteger(p.maskedCount) || p.maskedCount < 0) return null
+  if (!isString(p.root) || !isString(p.stage) || !isString(p.featureName) || !isString(p.reason)) return null
+  if (storyId !== null && !isString(storyId)) return null
+  if (rawDetail !== null && !isString(rawDetail)) return null
+  if (!Array.isArray(p.options) || !p.options.every(isOption)) return null
+  if (p.command === '' && (rawDetail === null || rawDetail === '')) return null   // nothing a human could read
+  return {
+    command: p.command, commandTruncated: p.commandTruncated, maskedCount: p.maskedCount, root: p.root, stage: p.stage,
+    storyId, featureName: p.featureName, reason: p.reason, options: [...p.options], rawDetail,
+  }
+}
+
+export type BashDecision = 'allow' | 'allow_for_job' | 'deny'
+
+/** D291 (2a `checkBashDecision`): a cut or unreadable ask is deny-only; otherwise only what nax offered, then deny. */
+export function bashChoices(p: BashApprovalPayload | null): BashDecision[] {
+  if (p === null || p.commandTruncated) return ['deny']
+  return [
+    ...(p.options.includes('allow') ? ['allow' as const] : []),
+    ...(p.options.includes('allow-remember') ? ['allow_for_job' as const] : []),
+    'deny',
+  ]
+}
+
+/** Spec §1.7 (D244, D290): budget overrides by project ADMIN, bash asks by DEVELOPER+, everything on the admin inbox. */
 export function canDecide(a: Pick<FleetApprovalDto, 'type' | 'status'>, viewer: ApprovalViewer): boolean {
-  if (a.status !== 'pending' || a.type !== 'budget_override_required') return false
-  return viewer.kind === 'admin' || viewer.canManage
+  if (a.status !== 'pending') return false
+  if (viewer.kind === 'admin') return true
+  return a.type === 'budget_override_required' ? viewer.canManage : viewer.canWork
 }
 
 export type RaiseError = 'amountInvalid' | 'notAbove' | null
@@ -105,6 +158,57 @@ export function toRaiseBody(input: { amount: string; selected: readonly string[]
 }
 
 export const toKeepPausedBody = (comment: string): DecideApprovalBody => ({ decision: 'keep_paused', ...commentField(comment) })
+
+/** D293: a bash decide never carries budget fields (2a D287 answers 400). */
+export const toBashBody = (decision: BashDecision, comment: string): DecideApprovalBody => ({ decision, ...commentField(comment) })
+
+/** D292: whole seconds before nax denies the ask, 0 once passed; null without a readable expiry. */
+export function secondsLeft(expiresAt: string | null, now: Date): number | null {
+  if (expiresAt === null) return null
+  const at = Date.parse(expiresAt)
+  if (Number.isNaN(at)) return null
+  return Math.max(0, Math.ceil((at - now.getTime()) / 1000))
+}
+
+const pad2 = (n: number): string => String(n).padStart(2, '0')
+
+/** D292: `m:ss`, or `h:mm:ss` from an hour (a skewed expiry can sit past the 60-minute cap). */
+export function countdownText(sec: number): string {
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  const s = sec % 60
+  return h > 0 ? `${h}:${pad2(m)}:${pad2(s)}` : `${m}:${pad2(s)}`
+}
+
+export type DeliveryView = { state: 'delivered' } | { state: 'failed'; detail: string | null } | { state: 'waiting' }
+
+/**
+ * D294 (2a D268): the runner's ack of the answer, for a bash ask a user decided. Null where nothing was sent (a
+ * timeout or job-end close, or a budget approval). An unknown stored shape reads as failed: never a false "delivered".
+ */
+export function deliveryView(a: Pick<FleetApprovalDto, 'type' | 'resolvedBy' | 'outcome'>): DeliveryView | null {
+  if (a.type !== 'nax_bash_escalate' || a.resolvedBy !== 'user') return null
+  const raw = a.outcome?.delivery
+  if (raw === undefined || raw === null) return { state: 'waiting' }
+  if (typeof raw !== 'object') return { state: 'failed', detail: null }
+  const { result, detail } = raw as { result?: unknown; detail?: unknown }
+  if (result === 'ok') return { state: 'delivered' }
+  return { state: 'failed', detail: result === 'rejected' && isString(detail) ? detail : null }
+}
+
+const PREVIEW_CHARS = 80
+
+/** D296: the first line of the command (or of nax's raw text), cut at 80 characters; `...` marks anything left out. */
+export function commandPreview(p: BashApprovalPayload): string {
+  const text = p.command !== '' ? p.command : (p.rawDetail ?? '')
+  const first = text.split('\n')[0] ?? ''
+  if (first.length > PREVIEW_CHARS) return `${first.slice(0, PREVIEW_CHARS)}...`
+  return text.includes('\n') ? `${first}...` : first
+}
+
+/** D297: the job's pending ask that nax denies first (the job-page callout opens it). */
+export const firstPending = (rows: readonly FleetApprovalDto[]): FleetApprovalDto | null =>
+  sortPending(rows.filter((r) => r.status === 'pending'))[0] ?? null
 
 export const REQUEUE_FAILURES = ['gone', 'activeJob', 'notCancelled', 'paused', 'unknown'] as const
 export type RequeueFailure = (typeof REQUEUE_FAILURES)[number]
@@ -200,6 +304,8 @@ export function approvalSummary(
       amount: formatUsd(budget.amountUsd),
     })
   }
+  const bash = bashPayload(a)
+  if (bash) return t('fleet.approvals.summary.bashCommand', { command: commandPreview(bash), stage: bash.stage })
   return a.type === 'nax_bash_escalate' ? t('fleet.approvals.summary.bash') : t('fleet.approvals.type.budget_override_required')
 }
 

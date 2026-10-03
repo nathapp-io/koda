@@ -1058,7 +1058,8 @@
       },
       "summary": {
         "budget": "{scope} 的预算在 {spent} / {amount} 时停止",
-        "bash": "有任务请求运行 shell 命令"
+        "bash": "有任务请求运行 shell 命令",
+        "bashCommand": "运行 {command}（{stage}）"
       },
       "empty": { "pending": "没有等待决定的审批。", "all": "暂无审批。" },
       "linked": "链接的审批",
