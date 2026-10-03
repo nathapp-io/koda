@@ -5,18 +5,18 @@ import path from 'node:path'
 const source = readFileSync(path.join(__dirname, '../../composables/useProjectEvents.ts'), 'utf-8')
 
 describe('useProjectEvents', () => {
-  test('opens the stream only on mount (never during SSR) and closes on unmount', () => {
-    expect(source).toMatch(/onMounted\(\(\) => \{[\s\S]*createProjectEventStream/)
-    expect(source).toMatch(/onBeforeUnmount\(\(\) => \{[\s\S]*stream\?\.close\(\)/)
+  test('subscribes only on mount (never during SSR) and unsubscribes on unmount', () => {
+    expect(source).toMatch(/onMounted\(\(\) => \{[\s\S]*\.subscribe\(/)
+    expect(source).toMatch(/onBeforeUnmount\(\(\) => \{[\s\S]*unsubscribe\?\.\(\)/)
   })
 
   test('targets the proxied events route with the slug encoded by apiPath', () => {
     expect(source).toContain('apiPath`/api/projects/${slug}/events`')
   })
 
-  test('refreshes auth through useAuth, resolved during setup', () => {
+  test('refreshes auth through useAuth, resolved during setup, read at call time by the shared hub', () => {
     expect(source).toContain('const { refresh } = useAuth()')
-    expect(source).toContain('refreshAuth: refresh')
+    expect(source).toContain('refreshAuth: () => latestRefresh()')
   })
 
   test('guards environments without EventSource', () => {
