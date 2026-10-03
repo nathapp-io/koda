@@ -32,7 +32,9 @@ Slice 1a plan (D226-D238) and 1b plan (D239-D254) for the code this builds on.
   30..3600, default 600, stored for every job and schedule, used only for non-raw jobs.
 - Ask payload caps: `command` at most **12 KiB UTF-8** (`12_288` bytes), prefix kept and `commandTruncated: true` on
   overflow; `rawDetail` the same cap and flag; every other string field at most 2000 chars; `options` a non-empty
-  subset of `allow`, `allow-remember`, `deny` that contains `deny`. Sync event payloads stay at most 16 KiB.
+  subset of `allow`, `allow-remember`, `deny` that contains `deny`. The server's sync parser refuses the **whole sync**
+  (400) when any event payload's `JSON.stringify` exceeds 16 KiB, so the **runner** guarantees it: it caps the short
+  fields at 500 chars and shrinks `command`/`rawDetail` until the JSON-encoded payload fits (Task 13).
 - `APPROVAL_ANSWER` payload `{ approvalId, naxAskId, choice: 'allow' | 'allow-remember' | 'deny' }`. Ack details
   (rejected): `ask_not_pending`, `job_not_running`, `callback_failed:<status>` where `<status>` is the HTTP status,
   `timeout` or `error`. The ack is stored on the approval as `outcome.delivery = { result, detail, at }`.
@@ -55,6 +57,11 @@ Slice 1a plan (D226-D238) and 1b plan (D239-D254) for the code this builds on.
 - Integration files log in over HTTP in `beforeAll` (login throttle 5/min). A whole file failing in under a millisecond
   with only a `loginToken` frame is the local throttle cascade: wait a minute and rerun that file alone.
 - No emojis in source; no `console.log` in API or runner `src` (the fake-nax fixture may print).
+- **`apps/api` compiles with `strictNullChecks: false`** (`packages/typescript-config/nestjs.json`): a check on a boolean
+  discriminant such as `r.ok` does **not** narrow a union. Discriminate result unions with `'ask' in r` / `'reason' in r`
+  (as `sync.service.ts` already does). The runner and CLI are strict; `r.ok` narrows there.
+- Every snippet below names the real fields and helpers of the file it edits. Where a step says "the spec's existing
+  X", X exists under that name; if a name in a snippet does not exist, that is a plan defect: stop and report it.
 
 ## Decisions
 
@@ -63,9 +70,9 @@ Numbered from D255 (slice 1b ended at D254).
 | # | Decision | Why |
 |:--|:--|:--|
 | D255 | **Spec correction:** nax's `request:` line is masked and capped at 200 chars (`askSummary`, nax v0.83.2 `src/tools/ask-request.ts:38-51`: "Mask the FULL line, then cut"), and it may span several lines because it embeds the command. The runner does not strip it from `rawDetail`; the parsed payload simply has no field for it. Spec §1.2 and §4.3 are updated in Task 19. | Verified in source; the spec's "unmasked" claim came from the `summary` docstring in `permissions/types.ts`, which describes a different field. |
-| D256 | `detail` parser: take `stage:`, `reason:`, `runs in:` from the last three lines (each single-line); the head before them must start with a fence line. Split candidates are every `\n` + fence + `\n` that is followed by an optional `N secret value(s) masked; ...` line and then `request: `. A candidate is **consistent** when `` `${tool} command=${command}` `` starts with the request text (`tool` = request text up to its first space). Exactly one consistent candidate gives a parsed ask; zero or several, a command-less detail, or a missing tail line give an unparsed ask (`rawDetail`). | Fixture (c) shows a command may contain fences and the request text repeats the command over several lines; a crafted command could fake a second split, and ambiguity must never pick one silently. |
+| D256 | `detail` parser: take `stage:`, `reason:`, `runs in:` from the last three lines (each single-line); the head before them must start with a fence line. Split candidates are every `\n` + fence + `\n` that is followed by an optional `N secret value(s) masked; ...` line and then `request: `. Let `recon` = `` `${tool} command=${command}` `` (`tool` = request text up to its first space). A candidate is **consistent** when the request text is shorter than 200 chars and equals `recon.trim()` exactly, or is exactly 200 chars and `recon` starts with it (nax cut it). Exactly one consistent candidate gives a parsed ask; zero or several, a command-less detail, or a missing tail line give an unparsed ask (`rawDetail`). Exact equality makes a fake split impossible unless nax itself cut the summary. An unparsed detail with no fence whose `request:` text is 200+ chars is flagged `commandTruncated` (a cut Write/Edit path must not be approvable). | Fixture (c) shows a command may contain fences and the request text repeats the command over several lines; a crafted command could fake a second split, and ambiguity must never pick one silently. |
 | D257 | `deadlineAt = createdAt + timeout` from nax's request (both ms). nax starts its own timer later (after its POST returns), so koda's deadline is never later than nax's. | The conservative direction: koda may expire an ask nax would still accept, never the reverse. |
-| D258 | The runner reports `approvals: { relay: true }` only when nax's version parses at least **0.83.0** (first release with `allow-remember` gated on a remember sink, #2252; the escalate out-of-bounds refusal #2250 is in 0.82.2). The runner's existing floor `MIN_NAX_VERSION = 0.83.1` is already above it, so in practice every supported runner reports it; the check documents the floor. Static capability mode reports what `runner.json` declares. | Spec §8 "to verify in the 2a plan"; verified across tags v0.82.0..v0.83.2 and main `a755a5464`. |
+| D258 | The runner reports `approvals: { relay: true }` only when nax's version parses at least **0.83.0** (first release with `allow-remember` gated on a remember sink, #2252; the escalate out-of-bounds refusal #2250 is in 0.82.2). The runner's existing floor `MIN_NAX_VERSION = 0.83.1` is already above it, so in practice every probing runner reports it; the check documents the floor. **Static capability mode never offers the relay** (`runner-config.ts` `parseCapabilities` keeps only the six S1 keys): fail-closed, accepted for 2a. | Spec §8 "to verify in the 2a plan"; verified across tags v0.82.0..v0.83.2 and main `a755a5464`. |
 | D259 | `detail` format is identical in released v0.83.2 (`bcfcddb01`) and nax main (`a755a5464`): the builder (`interaction/ask-link-session.ts:163-202`), `InteractionRequest`, the webhook POST, callback server and response schema differ only in import paths. Fixtures are captured from both and are byte-identical. | Spec §8 "to verify in the 2a plan". Note: `c6ab5d52c` (cited in the spec as 0.83.2) is 151 commits after the tag; the spec line is corrected in Task 19. |
 | D260 | `ApprovalActor.type` widens to `'USER' \| 'SYSTEM' \| 'RUNNER'`. A runner-raised ask is recorded as `{ type: 'RUNNER', id: runnerId, responsibleUserId: job.requestedById }`; job-end and timeout closes use `jobSystemActor(job)` = `{ type: 'SYSTEM', id: SYSTEM_ACTOR.id, responsibleUserId: job.requestedById }`. | `FleetActorType` already has RUNNER; activity needs a responsible user. |
 | D261 | An ask born closed (job not RUNNING or `raw`: `cancelled`/`job_ended`; deadline already past: `expired`/`timeout`) gets one activity row and a live event, but **no webhook**. | Nobody can act on it; a requested+resolved webhook pair for a dead ask is noise. |
@@ -81,16 +88,20 @@ Numbered from D255 (slice 1b ended at D254).
 | D271 | `parseCapabilitiesCore` accepts `approvals` only as exactly `{ relay: true }` (anything else fails `approvals`, like every other capability field) and returns it only when present. | Capabilities are strict everywhere else; a silent drop would hide a runner bug. |
 | D272 | `FleetJobDto` gains `approvalTimeoutSec` and `pendingApprovals`. List pages run one grouped count over the page's job ids (`countPendingByJob`); `get`, `cancel` and `requeue` count one id; `dispatch` returns 0. `FleetJobDto.from(r, pendingApprovals = 0)`. | Spec §1.6; the `sumCostBySchedule` pattern. |
 | D273 | Runner: `HostExecutor.prepare` opens the relay (before `writeJobProfile`, which needs its port and secret) for non-raw jobs; `cleanup` closes it; `JobExecutor.resumeApprovals(job)` re-binds it on a READOPT `watch`, next to `resumeCredentials`. A failed re-bind is a lifecycle `error` and the run is still watched (asks then time out and deny). | Spec §4.1, §4.5; mirrors D90 for credentials. |
-| D274 | The receiver accepts an ask only when `callbackUrl` is exactly `http://127.0.0.1:<port>/nax/interact/<id>` with `<id>` equal to the request `id`; otherwise 400 (nax's POST fails, so nax denies). | The runner POSTs a signed answer to that URL; it must never be steered elsewhere. |
+| D274 | The receiver accepts a request only when `callbackUrl` is exactly `http://127.0.0.1:<port>/nax/interact/<id>` with `<id>` (any characters except `/?#` and whitespace, at most 200; nax does not URL-encode ids, and story-derived ids such as `ix-US-001-size-gate` must pass) equal to the request `id`; otherwise 400 (nax's POST fails, so nax denies). | The runner POSTs a signed answer to that URL; it must never be steered elsewhere. |
 | D275 | Profile overlay: `execution.bashApproval`, `execution.approvalTimeout` (ms), `interaction.plugin = "webhook"`, `interaction.config = { url, secret, requireSecret: true, callbackPort: 0 }`, `interaction.triggers` with the nine `TriggerName`s set to `false`. | Spec §4.1, A1; `interaction.config` deep-merges key-wise over the repo's config, so `callbackPort: 0` overrides a repo-pinned port. |
-| D276 | `APPROVAL_ANSWER` is handled inline in the command loop with a 10 s callback deadline. A slow nax callback delays the rest of that sync's commands by at most 10 s. | Accepted; no queueing machinery for one rare command. |
-| D277 | A non-approval ask (no `metadata.approvalPrompt === true`, e.g. a trigger) is answered `{ action: "skip" }` on its callback at once, with a lifecycle `warn`; the receiver returns 200. | Spec §4.2 step 2. |
+| D276 | `APPROVAL_ANSWER` is handled inline in the command loop with a 10 s callback deadline. nax asks serially per run, so there is at most one answer per job in flight; a slow nax callback delays that sync's other commands by at most 10 s per answering job. Known window: if the daemon dies after nax accepted the POST but before the command is recorded, the re-sent command acks `ask_not_pending` and the approval shows delivery `rejected` although nax got the answer (never an allow nax did not get). | Accepted; no queueing machinery for one rare command. |
+| D277 | **Spec amendment (A1):** two nax prompts are not trigger-guarded and fire whenever a chain exists (nax v0.83.2 `precheck-runner.ts:139` story-size gate, `run-setup-init.ts:227` paused stories). Headless runs today never prompt (flagged stories run; paused stories stay paused). To keep that, a non-approval request is answered at once on its callback, with a lifecycle `info`: id `^ix-.+-size-gate$` -> `{ action: "approve" }`; id `^ix-.+-paused-resume$` -> `{ action: "choose", value: "keep" }`; anything else (a trigger, which A1 disables, or an unverified ACP-bridge/auth prompt) -> `{ action: "skip" }` with a lifecycle `warn`. The receiver returns 200. | Verified in source; the spec's blanket `skip` would permanently skip paused stories and silently skip flagged ones. |
 | D278 | Journal tables `approval_receivers (job_id, lease_epoch, port, secret, created_at)` PK `(job_id, lease_epoch)` and `pending_asks (job_id, lease_epoch, nax_ask_id, callback_url, deadline_at, created_at)` PK `(job_id, lease_epoch, nax_ask_id)`. Daemon start deletes rows of jobs that are not active. | Spec §4.1, §4.5; the journal file is already mode 0600 (SEC-1). |
 | D279 | The schedule template gains `bashMode` and `approvalTimeoutSec`, validated through `normalizeDispatch` (RUN), copied by `toDispatchDto`. | Spec §1.6. |
 | D280 | CLI `koda fleet approval decide` accepts `allow`, `allow_for_job`, `deny` too; `show` prints the bash payload fields (command, root, stage, story, reason, rule, options, `rawDetail` when unparsed). | Spec §2.5; the CLI is the only decide surface until 2b. |
 | D281 | Web in 2a: `MisfitReason` gets `approvals_relay` (types, en/zh labels, parity list) and `fleet-types.ts` widens `bashMode` and adds `approvalTimeoutSec` and `pendingApprovals`. No new UI. | The misfit parity spec and type-check need them; the panel is 2b. |
+| D284 | The relay secret sits in the 0600 job profile and the 0600 journal; anything running as the runner user (including the agent's own granted Bash) could read it and the pending ask id and forge an answer. Accepted: the runner user is the trust boundary for every runner secret already (git credentials, API key). | Threat-model note; no mitigation in 2a. |
+| D285 | Relay state is **per (jobId, leaseEpoch)** everywhere: `close(jobId, leaseEpoch)`, `deleteApprovalState(jobId, leaseEpoch)`, journal `abandon`/`prune` per epoch, and a new `JobExecutor.releaseApprovals(job)` called in `JobRun.abandonCleanup` next to `releaseCredentials` (before the higher-epoch early return). | A stale epoch's abandon must not kill a live requeued epoch's receiver (mirrors D90 credentials). |
+| D286 | `ApprovalRelay.open` on a re-prepare re-binds the stored port; if that port is taken it binds a fresh port and secret and overwrites the row (nax was not spawned yet, so nothing holds the old address). Only `resume` (a live nax) must keep the stored port. `insertPendingAsk` returns whether it inserted; a re-sent nax POST appends no second event. | Review findings: a reprepare must not fail the job on EADDRINUSE; no duplicate events. |
+| D287 | No CLI `--bash-mode` / `--approval-timeout` on `koda fleet dispatch` or `schedule` in 2a: a gated/escalate job is dispatched over the API (or the 2b web form). `decide` refuses `amountUsd`/`requeueJobIds` on a bash approval (400 `fleet.approvalInput`). | Keeps 2a scope; budget-only fields must not be silently ignored. |
 | D282 | The fake nax gains an `ask` scenario (a separate fixture module) that POSTs a real-shaped, signed ask to the profile's webhook URL, serves its own signed callback, records the answer to `<outputDir>/fake-ask.json`, and then completes. | Spec §7 runner integration; lets the real-API world prove the whole loop. |
-| D283 | The ask payload has **no `rule`** field: nax prints `reason: ${req.reason ?? req.rule}` on one line, so the two cannot be told apart. `stage`, `storyId` and `featureName` come from nax's top-level request fields, not from `detail`; `root`, `reason`, `maskedCount` and the command come from `detail`. Spec §1.2, §3 and §5 are updated in Task 19. | Verified in `ask-link-session.ts:181-193`; the top-level fields are typed, the text is not. |
+| D283 | The ask payload has **no `rule`** field: nax prints `reason: ${req.reason ?? req.rule}` on one line, so the two cannot be told apart. `storyId` and `featureName` come from nax's top-level request fields; `stage` comes from the detail's `stage:` line (nax's real policy stage; the top-level field defaults to `execution`), falling back to the top-level field when unparsed; `root`, `reason`, `maskedCount` and the command come from `detail`. Spec §1.2, §3 and §5 are updated in Task 19. | Verified in `ask-link-session.ts:181-193`; the top-level fields are typed, the text is not. |
 
 ## Review Focus
 
@@ -105,6 +116,8 @@ Numbered from D255 (slice 1b ended at D254).
    nax is not POSTed twice. (Task 17 "re-sent answer".)
 5. A non-raw dispatch pinned to a runner without the relay is 422 `approvals_relay`; an unpinned one waits QUEUED with
    that misfit rather than running raw. (Task 3 "pinned 422" and Task 11 "unpinned waits".)
+6. A relayed run whose PRD has a size-flagged or a paused story: the story runs (flagged) or stays paused (paused)
+   exactly as a headless run does, never silently skipped (D277). (Task 15 "size gate and paused prompts".)
 
 ## File Map
 
@@ -151,8 +164,8 @@ Numbered from D255 (slice 1b ended at D254).
 - Modify: `apps/api/src/fleet/common/protocol.ts:38-46`
 - Modify: `apps/api/src/fleet/common/protocol.spec.ts`
 - Modify: `apps/api/src/fleet/common/capabilities-core.ts:79-110`
-- Modify: `apps/api/src/fleet/common/capabilities-core.spec.ts` (or `capabilities.spec.ts`, whichever holds the
-  `parseCapabilitiesCore` cases)
+- Modify: `apps/api/src/fleet/common/capabilities.spec.ts` (the `parseCapabilitiesCore` describe at the bottom; its
+  valid fixture is named `valid`)
 - Modify: `apps/api/src/common/enums.ts:139` (`FleetCommandType`)
 - Modify: `apps/api/prisma/schema.prisma` (`FleetCommand.type` comment only)
 
@@ -202,18 +215,17 @@ In the `parseCapabilitiesCore` spec add:
 ```ts
 describe('approvals (S1.5 §3, plan D271)', () => {
   it('keeps { relay: true }', () => {
-    expect(parseCapabilitiesCore({ ...VALID_CAPS, approvals: { relay: true } }).approvals).toEqual({ relay: true });
+    expect(parseCapabilitiesCore({ ...valid, approvals: { relay: true } }).approvals).toEqual({ relay: true });
   });
   it('omits approvals when absent', () => {
-    expect(parseCapabilitiesCore(VALID_CAPS)).not.toHaveProperty('approvals');
+    expect(parseCapabilitiesCore(valid)).not.toHaveProperty('approvals');
   });
   it.each([[{ relay: false }], [{ relay: 'yes' }], [{ relay: true, extra: 1 }], [true], [{}]])('refuses approvals %p', (approvals) => {
-    expect(() => parseCapabilitiesCore({ ...VALID_CAPS, approvals })).toThrow(/approvals/);
+    expect(() => parseCapabilitiesCore({ ...valid, approvals })).toThrow(/approvals/);
   });
 });
 ```
 
-(`VALID_CAPS` is the spec's existing valid fixture; if it is named differently there, use that name.)
 
 - [ ] **Step 2: Run them to verify they fail**
 
@@ -331,7 +343,7 @@ export const FleetCommandType = {
 } as const;
 ```
 
-(keep the file's existing one-key-per-line layout if that is what it uses). In `schema.prisma` change the
+(the file declares this object on one line; keep it on one line with the new key). In `schema.prisma` change the
 `FleetCommand.type` comment to `// ASSIGN | CANCEL | READOPT | ABANDON | APPROVAL_ANSWER`.
 
 - [ ] **Step 5: Run the tests and both type-checks**
@@ -339,8 +351,9 @@ export const FleetCommandType = {
 Run: `cd apps/api && bun run test:scoped src/fleet/common && bun run type-check`
 Expected: PASS.
 Run: `cd apps/runner && bun run type-check && bun run test`
-Expected: PASS. The runner now sends `protocolVersion: 2`; if a runner spec asserts the literal `1`, change it to
-`FLEET_PROTOCOL_VERSION` (import from the package) rather than to `2`.
+Expected: the runner now sends `protocolVersion: 2`, so three specs that assert the literal `1` fail:
+`src/sync/sync-loop.spec.ts:82`, `src/sync/batch.spec.ts:54`, `test/unit/daemon.spec.ts:92`. Change each to
+`FLEET_PROTOCOL_VERSION` (imported from `@nathapp/fleet-protocol`), then PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -364,6 +377,19 @@ git commit -m "feat(fleet): protocol v2 types for the approval relay (S1.5 2a)"
 - Modify: `packages/fleet-protocol/src/index.ts` (`AssignPayload`)
 - Modify: `apps/runner/src/supervisor/assign-parser.ts:52,69` (+ `assign-parser.spec.ts`)
 - Modify: `apps/runner/test/helpers/assign.ts`, `apps/runner/src/journal/journal.spec.ts` (inline assign builder)
+- Modify (fixtures that stop compiling once the fields are required; add `approvalTimeoutSec: 600` next to
+  `bashMode: 'raw'`, and `bashMode: 'raw', approvalTimeoutSec: 600` to `ScheduleRecord`/`NewSchedule` literals in
+  Task 4):
+  - runner: `test/unit/checkout.spec.ts:29`, `test/unit/host-executor-auth.spec.ts:51`, `test/unit/job-check.spec.ts:41`,
+    `test/unit/host-executor.spec.ts:34,223`, `src/executor/nax-process.spec.ts:13`, `src/sync/sync-loop.spec.ts:11`,
+    `src/sync/batch.spec.ts:8`
+  - API: `src/fleet/jobs/dispatch-input.spec.ts:12`, `src/fleet/jobs/dto/fleet-job.dto.spec.ts:9,29`,
+    `src/fleet/jobs/job-transitions.service.spec.ts:7`, `test/integration/fleet/fleet-job-repository.integration.spec.ts:37`
+  - CLI: `src/commands/fleet-job.spec.ts:37` (after Task 10 regenerates the client)
+- Modify (assertions this task flips): `apps/api/test/integration/fleet/fleet-jobs.integration.spec.ts:71` row
+  `['bashMode gated', ...]` expecting 400 -> use `bashMode: 'yolo'`; `apps/runner/src/supervisor/assign-parser.spec.ts:41`
+  row `['bashMode gated' ...]` -> `bashMode: 'yolo'`; `dispatch-input.spec.ts` "fills defaults" exact `toEqual` gains
+  `approvalTimeoutSec: 600`.
 
 **Interfaces:**
 - Consumes: `BashMode`, `DEFAULT_APPROVAL_TIMEOUT_SEC`, `MIN_/MAX_APPROVAL_TIMEOUT_SEC` (Task 1).
@@ -388,7 +414,7 @@ describe('bashMode and approvalTimeoutSec (S1.5 §1.6)', () => {
   });
   it('refuses a non-raw PLAN', () => {
     expect(() => normalizeDispatch({ ...run, command: 'PLAN', planFrom: 'docs/s.md', bashMode: 'escalate' }, 'main'))
-      .toThrow(expect.objectContaining({ response: expect.objectContaining({ reason: 'bashMode must be raw for PLAN' }) }));
+      .toThrow(expect.objectContaining({ args: { reason: 'bashMode must be raw for PLAN' } }));
   });
   it('stores the timeout of a raw job too (unused)', () => {
     expect(normalizeDispatch({ ...run, approvalTimeoutSec: 45 }, 'main').approvalTimeoutSec).toBe(45);
@@ -396,8 +422,7 @@ describe('bashMode and approvalTimeoutSec (S1.5 §1.6)', () => {
 });
 ```
 
-If the spec's existing failure assertions use a different matcher for `ValidationAppException` (e.g. a helper that
-reads `getResponse()`), use that helper here instead of `expect.objectContaining({ response: ... })`.
+(`AppException` exposes `args` and `prefix` getters.)
 
 `apps/api/src/fleet/jobs/assign-payload.spec.ts` (create if absent; copy the job/repo fixture from the closest
 existing assign test, e.g. in `placement.service.spec.ts`):
@@ -409,7 +434,8 @@ it('carries bashMode and approvalTimeoutSec from the job', () => {
 });
 ```
 
-DTO validation, in the dispatch DTO spec if one exists (else add to `fleet-jobs.integration.spec.ts` in Task 11):
+DTO validation (no dispatch DTO spec exists; create `apps/api/src/fleet/jobs/dto/dispatch-fleet-job.dto.spec.ts` with
+`import 'reflect-metadata'; import { plainToInstance } from 'class-transformer'; import { validate } from 'class-validator';`):
 
 ```ts
 it.each([[29], [3601], [1.5]])('refuses approvalTimeoutSec %p', async (approvalTimeoutSec) => {
@@ -448,7 +474,7 @@ describe('bashMode and approvalTimeoutSec (S1.5 §4.1)', () => {
 });
 ```
 
-(`cmd(...)` = the spec's existing helper that wraps a payload in a `FleetCommandOut`; reuse whatever it is called.)
+(`cmd(payload, over?)` is the spec's existing helper (`assign-parser.spec.ts:7`) that wraps a payload in a `FleetCommandOut`.)
 
 - [ ] **Step 2: Run them to verify they fail**
 
@@ -593,27 +619,26 @@ git commit -m "feat(fleet): bashMode and approvalTimeoutSec through dispatch and
 
 - [ ] **Step 1: Write the failing tests**
 
-`placement-rules.spec.ts` (reuse the spec's `caps`/`job`/`runner` fixtures):
+`placement-rules.spec.ts` (its `caps`, `runner`, `job` are factories taking overrides; `misfit(j, r)` wraps
+`firstMisfit`). First add `bashMode: 'raw'` to the `job()` factory defaults (the field is now required). Then:
 
 ```ts
 describe('approvals relay (S1.5 §3, plan D270)', () => {
   it.each(['gated', 'escalate'] as const)('a %s job needs a relay runner', (bashMode) => {
-    expect(capabilityMisfit({ ...job, bashMode }, caps)).toBe('approvals_relay');
-    expect(capabilityMisfit({ ...job, bashMode }, { ...caps, approvals: { relay: true } })).toBeNull();
+    expect(misfit(job({ bashMode }), runner())).toBe('approvals_relay');
+    expect(misfit(job({ bashMode }), runner({ capabilities: caps({ approvals: { relay: true } }) }))).toBeNull();
   });
   it('a raw job does not care', () => {
-    expect(capabilityMisfit({ ...job, bashMode: 'raw' }, caps)).toBeNull();
+    expect(misfit(job({ bashMode: 'raw' }), runner())).toBeNull();
   });
-  it('is checked before profile and tool misfits', () => {
-    expect(capabilityMisfit({ ...job, bashMode: 'escalate' }, { ...caps, tools: { git: false, gh: false, glab: false } })).toBe('approvals_relay');
+  it('is checked before tool misfits', () => {
+    expect(misfit(job({ bashMode: 'escalate' }), runner({ capabilities: caps({ tools: { git: false, gh: false, glab: false } }) }))).toBe('approvals_relay');
   });
   it('is permanent (a pinned dispatch is refused)', () => {
     expect(PERMANENT_MISFITS.has('approvals_relay')).toBe(true);
   });
 });
 ```
-
-If `capabilityMisfit` is not exported, test through `firstMisfit` with an online, enabled, labelled runner instead.
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -638,7 +663,8 @@ Add `'approvals_relay'` to `PERMANENT_MISFITS`. Add `bashMode: BashMode;` to `Pl
   if (job.bashMode !== 'raw' && caps.approvals?.relay !== true) return 'approvals_relay';
 ```
 
-`placement.service.ts` `toPlacementJob`: add `bashMode: source.bashMode,` (the parameter name in that function).
+`placement.service.ts:35` `toPlacementJob(job: Pick<FleetJobRecord, ...>, ...)`: add `'bashMode'` to the `Pick` list
+and `bashMode: job.bashMode,` to the returned object.
 
 `fleet-job.dto.ts:86`: add `'approvals_relay'` to the literal enum array, in the same position as the union.
 
@@ -672,6 +698,8 @@ git commit -m "feat(fleet): placement requires the approval relay for gated/esca
 - Modify: `apps/api/src/fleet/schedules/schedules.service.ts:22-44,80-118,159-184`
 - Modify: `apps/api/src/fleet/schedules/schedule-template.ts:4-21` (+ its spec)
 - Test: `apps/api/src/fleet/schedules/schedules.service.spec.ts`, `schedule-template.spec.ts`
+- Modify (fixtures): every `ScheduleRecord` literal in `schedule-ticker.spec.ts`, `schedule-progress.service.spec.ts`,
+  `schedules.service.spec.ts` gains `bashMode: 'raw', approvalTimeoutSec: 600`
 
 **Interfaces:**
 - Consumes: `normalizeDispatch` bash rules (Task 2).
@@ -680,14 +708,18 @@ git commit -m "feat(fleet): placement requires the approval relay for gated/esca
 
 - [ ] **Step 1: Write the failing tests**
 
-`schedule-template.spec.ts`:
+`schedule-template.spec.ts` (it has no shared template; its existing exact `toEqual` cases gain
+`bashMode: 'raw', approvalTimeoutSec: 600` on both sides):
 
 ```ts
 it('copies bashMode and approvalTimeoutSec into the dispatch (S1.5 §1.6)', () => {
-  expect(toDispatchDto({ ...template, bashMode: 'escalate', approvalTimeoutSec: 300 }))
-    .toEqual(expect.objectContaining({ bashMode: 'escalate', approvalTimeoutSec: 300 }));
+  const template = { repoId: 'r1', feature: 'f', ref: null, profiles: [], maxCostUsd: '5', selectorLabels: [], pinnedRunnerId: null,
+    bashMode: 'escalate' as const, approvalTimeoutSec: 300 };
+  expect(toDispatchDto(template)).toEqual(expect.objectContaining({ bashMode: 'escalate', approvalTimeoutSec: 300 }));
 });
 ```
+
+(If `ScheduleTemplate.ref` is `string` rather than `string | null`, use `'main'`.)
 
 `schedules.service.spec.ts` (reuse the spec's create fixture and repo fake):
 
@@ -699,8 +731,8 @@ it('stores bashMode and approvalTimeoutSec, defaulting to raw and 600', async ()
   expect(repo.create).toHaveBeenLastCalledWith(expect.objectContaining({ bashMode: 'gated', approvalTimeoutSec: 120 }));
 });
 it('keeps the stored mode on an update that omits it', async () => {
-  repo.findById.mockResolvedValue({ ...stored, bashMode: 'escalate', approvalTimeoutSec: 90 });
-  await service.update(actor, projectId, stored.id, { name: 'renamed' });
+  repo.lockById.mockResolvedValue({ ...stored, bashMode: 'escalate', approvalTimeoutSec: 90 });   // update reads under lockById
+  await service.update(actor, projectId, stored.id, { name: 'renamed' }, true, NOW);   // (actorId, projectId, id, dto, canAdminister, now)
   expect(repo.update).toHaveBeenCalledWith(stored.id, expect.objectContaining({ bashMode: 'escalate', approvalTimeoutSec: 90 }));
 });
 ```
@@ -773,11 +805,18 @@ git commit -m "feat(fleet): schedule templates carry bashMode and approvalTimeou
 
 - [ ] **Step 1: Write the failing closer tests**
 
-Add to `approval-closer.spec.ts` (extend its in-memory repo fake with `findByAsk`, `findPendingForJob`; the fake's
-`create` should give the row `status: 'pending'` and the given fields):
+Add to `approval-closer.spec.ts`. Its `fakes()` returns `{ closer, repo, activity, webhooks, rows }` per test; extend
+the in-memory repo inside `fakes()` with `findByAsk(jobId, epoch, askId)` and `findPendingForJob(jobId)` (both read
+`rows`), make `create` store `status: 'pending'` plus the given fields, and make `lockById` return the stored row:
 
 ```ts
 describe('bash (S1.5 2a)', () => {
+  let closer!: ReturnType<typeof fakes>['closer'];
+  let repo!: ReturnType<typeof fakes>['repo'];
+  let activity!: ReturnType<typeof fakes>['activity'];
+  let webhooks!: ReturnType<typeof fakes>['webhooks'];
+  let rows!: ReturnType<typeof fakes>['rows'];
+  beforeEach(() => { ({ closer, repo, activity, webhooks, rows } = fakes()); });
   const job = { id: 'j1', projectId: 'p1', leaseEpoch: 2, state: 'RUNNING', bashMode: 'escalate', approvalTimeoutSec: 600, requestedById: 'u9' } as const;
   const ask = (over: Partial<{ naxAskId: string; deadlineAt: Date }> = {}) => ({
     naxAskId: 'ask-1f2e3d4c', deadlineAt: new Date(NOW.getTime() + 300_000), payload: { command: 'bun run test' }, ...over,
@@ -842,15 +881,18 @@ describe('bash (S1.5 2a)', () => {
 });
 ```
 
-(`rows` is the fake's backing `Map`; `NOW`, `repo`, `activity`, `webhooks` are the spec's existing fakes.)
+(`NOW` is the spec's constant.)
 
 - [ ] **Step 2: Write the failing repository integration tests**
 
-Add to `fleet-approval-repository.integration.spec.ts` (seed one job the way
-`fleet-approval-budget-wiring.integration.spec.ts` does, with `prisma.fleetJob.create`):
+Add to `fleet-approval-repository.integration.spec.ts` (it has `world.projectId`, a `job()` helper that creates a job
+row, and `beforeEach` deletes; add `import type { NewFleetApproval } from '../../../src/fleet/approvals/domain/approval.domain';`):
 
 ```ts
 describe('bash lookups (S1.5 2a)', () => {
+  let projectId!: string;
+  let jobId!: string;
+  beforeEach(async () => { projectId = world.projectId; jobId = (await job()).id; });
   const bash = (over: Partial<NewFleetApproval> = {}): NewFleetApproval => ({
     type: 'nax_bash_escalate', projectId, policyId: null, jobId, leaseEpoch: 1, naxAskId: 'ask-a', payload: {},
     requestedAt: new Date('2026-10-04T10:00:00Z'), expiresAt: new Date('2026-10-04T10:10:00Z'), ...over,
@@ -892,7 +934,7 @@ Expected: FAIL (methods missing).
   countPendingByJob(jobIds: readonly string[]): Promise<Map<string, number>>;
 ```
 
-`prisma-approval.repository.ts` (use the file's existing `toApproval` row mapper, whatever its name):
+`prisma-approval.repository.ts` (the file's row mapper is `toApproval`, line 16):
 
 ```ts
   async findByAsk(jobId: string, leaseEpoch: number, naxAskId: string): Promise<FleetApprovalRecord | null> {
@@ -1064,11 +1106,11 @@ describe('parseApprovalRequest (S1.5 §3)', () => {
 
   it('keeps rawDetail for an unparsed ask with an empty command', () => {
     const r = parseApprovalRequest({ ...valid, command: '', rawDetail: 'request: x\nruns in: /w\nreason:  r\nstage:   s' });
-    expect(r.ok && r.ask.payload['rawDetail']).toContain('runs in: /w');
+    expect('ask' in r && r.ask.payload['rawDetail']).toContain('runs in: /w');
   });
 
   it('accepts a null storyId', () => {
-    expect(parseApprovalRequest({ ...valid, storyId: null }).ok).toBe(true);
+    expect('ask' in parseApprovalRequest({ ...valid, storyId: null })).toBe(true);
   });
 
   it.each([
@@ -1163,8 +1205,15 @@ it('interprets approval_request as an approval effect, or invalid', () => {
 
 `sync-request.parser.spec.ts`: an event of type `approval_request` with an object payload parses.
 
-`job-report.processor.spec.ts` (the spec builds the processor with fakes; add a `closer` fake with
-`openBash: jest.fn().mockResolvedValue({ approval: { id: 'a1' }, live: [APPROVAL_LIVE] })`):
+Create `apps/api/src/fleet/sync/job-report.processor.spec.ts` (none exists). Constructor order after this task:
+`new JobReportProcessor(repo, transitions, live, fence, activity, budgets, approvals, tx)` (the new `approvals` goes
+between `budgets` and the transaction manager, which stays last). Fakes, all `as never`: an in-memory `repo` with
+`seed(job)` plus the methods `process` calls (`lockById`, `findRunnerEvents`, `appendEvent`, `findRunnerEventsAfter`,
+`update` — `update` also persists `ackedRunnerSeq`; `findRunnerEventsAfter` returns the appended events with
+`runnerSeq` above the given seq; read `job-report.processor.ts:59-126`); `fence = { holds: (j, r, e) => j.runnerId === r && j.leaseEpoch === e, abandon: jest.fn() }`;
+`activity = { record: jest.fn() }`; `budgets = { signal: jest.fn() }`; `live = { event: jest.fn(() => JOB_LIVE) }`;
+`tx = { run: (fn) => fn() }`; `closer = { openBash: jest.fn().mockResolvedValue({ approval: { id: 'a1' }, live: [APPROVAL_LIVE] }) }`;
+`runningJob` = a `FleetJobRecord` with `state: 'RUNNING'`, `runnerId: 'r1'`, `leaseEpoch: 1`, `ackedRunnerSeq: 0`:
 
 ```ts
 it('opens a bash approval for an approval_request on a RUNNING job and returns its live event', async () => {
@@ -1190,7 +1239,6 @@ it('a stale epoch is fenced before any ask is applied', async () => {
 });
 ```
 
-(Use the spec's existing job seeding and fake names.)
 
 - [ ] **Step 4: Implement interpret, processor and publishing**
 
@@ -1217,12 +1265,13 @@ export type EventEffect =
 ```ts
     case 'approval_request': {
       const parsed = parseApprovalRequest(payload);
-      return parsed.ok ? { kind: 'approval', ask: parsed.ask } : { kind: 'invalid', reason: parsed.reason };
+      // strictNullChecks is off in apps/api: `parsed.ok` does not narrow, `in` does.
+      return 'ask' in parsed ? { kind: 'approval', ask: parsed.ask } : { kind: 'invalid', reason: parsed.reason };
     }
 ```
 
 `job-report.processor.ts`:
-- Inject `private readonly approvals: ApprovalCloser` (constructor, after `budgets`).
+- Inject `private readonly approvals: ApprovalCloser` (constructor, after `budgets`, before the transaction manager).
 - `ReportOutcome` gains `approvalLive: LiveFleetApprovalEvent[]`; the `NONE` constant gets `approvalLive: []`.
 - `applyOne` returns `{ job; live?: LiveFleetJobEvent; approvalLive?: LiveFleetApprovalEvent[]; mirrored }`. Add before
   the transition branch:
@@ -1299,23 +1348,29 @@ describe('leaving RUNNING (S1.5 §1.4, plan D263)', () => {
 });
 ```
 
-`fleet-job-repository.integration.spec.ts`:
+`fleet-job-repository.integration.spec.ts` (use the file's `repo`, `base` job input and `runnerId`):
 
 ```ts
 it('withdraws only the given command types when asked (plan D263)', async () => {
-  const job = await seedJob();
+  const job = await repo.createJob({ ...base, feature: 'withdraw-types' });
   await repo.createCommand({ runnerId, jobId: job.id, type: 'CANCEL', leaseEpoch: 1, payload: {} });
   await repo.createCommand({ runnerId, jobId: job.id, type: 'APPROVAL_ANSWER', leaseEpoch: 1, payload: { approvalId: 'a', naxAskId: 'ask-1', choice: 'deny' } });
   expect(await repo.withdrawPendingCommands(job.id, new Date(), { types: ['APPROVAL_ANSWER'] })).toBe(1);
-  expect((await repo.findPendingCommands(runnerId)).map((c) => c.type)).toEqual(['CANCEL']);
+  expect((await repo.findPendingCommands(runnerId)).filter((c) => c.jobId === job.id).map((c) => c.type)).toEqual(['CANCEL']);
 });
 ```
 
-`fleet-sweeper.spec.ts`: when the crashed job's `apply` returns `approvalLive: [APPROVAL_LIVE]`, the sweeper calls
-`approvalLive.publish([APPROVAL_LIVE])` (add an `ApprovalLivePublisher` fake to its constructor).
+`fleet-sweeper.spec.ts` today only covers timer scheduling with `new FleetSweeper({}, {}, {}, {}, cfg, {})` (six
+positional args). Add the `ApprovalLivePublisher` as a new last constructor parameter and pass `{}` for it in those
+calls. Add one `tick` case: fakes `repo.findStaleHeld`-style finder (read `fleet-sweeper.ts` for the real method that
+lists silent runner-held jobs and the `lockById(..., { skipLocked: true })` call), `transitions.apply` resolving
+`{ job, live: JOB_LIVE, approvalLive: [APPROVAL_LIVE] }`, `tx.run = (fn) => fn()`; assert
+`approvalPublisher.publish` was called with `[APPROVAL_LIVE]`.
 
-`command-ack.processor.spec.ts`: update existing expectations from `LiveFleetJobEvent[]` to
-`{ live, approvalLive }`; add one case: a rejected READOPT on a RUNNING job returns the transition's `approvalLive`.
+Create `apps/api/src/fleet/sync/command-ack.processor.spec.ts` (none exists). Constructor today:
+`new CommandAckProcessor(repo, transitions, fence, activity, tx)` (Task 8 inserts `approvals` before `tx`). Cover: an
+`ok` ASSIGN ack returns `{ live: [], approvalLive: [] }`; a rejected READOPT on a RUNNING job (fake
+`transitions.apply` resolving `{ job, live: JOB_LIVE, approvalLive: [APPROVAL_LIVE] }`) returns both lists.
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -1421,6 +1476,9 @@ describe('checkBashDecision (spec §1.3, plan D267)', () => {
     expect(checkBashDecision(payload({ commandTruncated: true }), 'allow_for_job').ok).toBe(false);
     expect(checkBashDecision(payload({ commandTruncated: true }), 'deny').ok).toBe(true);
   });
+  it('refuses allow when nax did not offer it (defence in depth)', () => {
+    expect(checkBashDecision(payload({ options: ['deny'] }), 'allow')).toEqual({ ok: false, reason: 'nax did not offer allow for this ask' });
+  });
   it('refuses allow_for_job when nax did not offer allow-remember', () => {
     expect(checkBashDecision(payload({ options: ['allow', 'deny'] }), 'allow_for_job')).toEqual({ ok: false, reason: 'nax did not offer allow-remember for this ask' });
   });
@@ -1445,8 +1503,9 @@ export function checkBashDecision(payload: Record<string, unknown>, decision: Ap
   if (decision === 'deny') return { ok: true, choice: 'deny', status: 'rejected' };
   if (decision !== 'allow' && decision !== 'allow_for_job') return { ok: false, reason: `${decision} does not apply to a bash approval` };
   if (payload['commandTruncated'] === true) return { ok: false, reason: 'the command was truncated; it can only be denied' };
-  if (decision === 'allow') return { ok: true, choice: 'allow', status: 'approved' };
-  const offered = Array.isArray(payload['options']) && payload['options'].includes('allow-remember');
+  const options = Array.isArray(payload['options']) ? payload['options'] : [];
+  if (decision === 'allow') return options.includes('allow') ? { ok: true, choice: 'allow', status: 'approved' } : { ok: false, reason: 'nax did not offer allow for this ask' };
+  const offered = options.includes('allow-remember');
   return offered ? { ok: true, choice: 'allow-remember', status: 'approved' } : { ok: false, reason: 'nax did not offer allow-remember for this ask' };
 }
 ```
@@ -1455,9 +1514,15 @@ Run: `cd apps/api && bun run test:scoped src/fleet/approvals/bash-decision.spec.
 
 - [ ] **Step 3: Write the failing service tests**
 
-`approvals.service.spec.ts` (add fakes: `jobRepo = { lockById: jest.fn(), createCommand: jest.fn() }`,
-`notifier = { notify: jest.fn() }`, and extend the approval repo fake; the existing D236 test "bash approvals are not
-decidable yet" is **deleted**):
+`approvals.service.spec.ts`. Its `build(approval, policyScope)` constructs
+`new ApprovalsService(repo, budgetRepo, budgets, jobs, closer, live, activity, tx)`; this task appends two parameters,
+so it becomes `(..., activity, tx, jobRepo, notifier)` — update `build()` to create
+`jobRepo = { lockById: jest.fn(), createCommand: jest.fn() }` and `notifier = { notify: jest.fn() }`, pass them last
+and return them. In the combined "refuses" test (`:115-121`) the `nax_bash_escalate` row (`decision: 'deny'`, no
+`jobId`) still answers 400, now because the approval has no job: rename that clause "bash with no job". For the bash
+cases below, write a `buildBash()` beside `build()` that uses a **real** `ApprovalCloser` over an in-memory approval
+repo (copy the fake from `approval-closer.spec.ts`) so `expire`/`recordResolved` really resolve rows; it returns
+`{ service, rows, seed, jobRepo, notifier }`, and `seed(approval)` stores a row. `DEV_CALLER = { id: 'dev', globalAdmin: false }`:
 
 ```ts
 describe('bash decide (S1.5 §2.3, plan D265-D267)', () => {
@@ -1468,7 +1533,7 @@ describe('bash decide (S1.5 §2.3, plan D265-D267)', () => {
 
   it('a DEVELOPER allows: approved, APPROVAL_ANSWER for the job runner and epoch, notify after commit', async () => {
     seed(pending); jobRepo.lockById.mockResolvedValue(running);
-    const dto = await service.decide(CALLER, dev, 'a1', { decision: 'allow' }, NOW);
+    const dto = await service.decide(DEV_CALLER, dev, 'a1', { decision: 'allow' }, NOW);
     expect(dto).toEqual(expect.objectContaining({ status: 'approved', decision: 'allow', resolvedBy: 'user' }));
     expect(jobRepo.createCommand).toHaveBeenCalledWith({ runnerId: 'r1', jobId: 'j1', type: 'APPROVAL_ANSWER', leaseEpoch: 2,
       payload: { approvalId: 'a1', naxAskId: 'ask-1f2e3d4c', choice: 'allow' } });
@@ -1477,45 +1542,51 @@ describe('bash decide (S1.5 §2.3, plan D265-D267)', () => {
 
   it('deny is rejected and sends choice deny', async () => {
     seed(pending); jobRepo.lockById.mockResolvedValue(running);
-    await expect(service.decide(CALLER, dev, 'a1', { decision: 'deny' }, NOW)).resolves.toEqual(expect.objectContaining({ status: 'rejected' }));
+    await expect(service.decide(DEV_CALLER, dev, 'a1', { decision: 'deny' }, NOW)).resolves.toEqual(expect.objectContaining({ status: 'rejected' }));
     expect(jobRepo.createCommand).toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ choice: 'deny' }) }));
   });
 
   it.each(['VIEWER', 'MEMBER', 'AGENT', null])('role %p is forbidden (D266)', async (role) => {
     seed(pending);
-    await expect(service.decide(CALLER, { ...dev, role }, 'a1', { decision: 'deny' }, NOW)).rejects.toThrow(ForbiddenAppException);
+    await expect(service.decide(DEV_CALLER, { ...dev, role }, 'a1', { decision: 'deny' }, NOW)).rejects.toThrow(ForbiddenAppException);
   });
 
   it('expired at decide commits the expiry, then answers 409 (D265)', async () => {
     seed({ ...pending, expiresAt: new Date(NOW.getTime() - 1) }); jobRepo.lockById.mockResolvedValue(running);
-    await expect(service.decide(CALLER, dev, 'a1', { decision: 'allow' }, NOW)).rejects.toThrow(ConflictAppException);
+    await expect(service.decide(DEV_CALLER, dev, 'a1', { decision: 'allow' }, NOW)).rejects.toThrow(ConflictAppException);
     expect(rows.get('a1')).toEqual(expect.objectContaining({ status: 'expired', resolvedBy: 'timeout' }));
     expect(jobRepo.createCommand).not.toHaveBeenCalled();
   });
 
   it('a job that left RUNNING closes the ask job_ended, then 409', async () => {
     seed(pending); jobRepo.lockById.mockResolvedValue({ ...running, state: 'UPLOADING' });
-    await expect(service.decide(CALLER, dev, 'a1', { decision: 'allow' }, NOW)).rejects.toThrow(ConflictAppException);
+    await expect(service.decide(DEV_CALLER, dev, 'a1', { decision: 'allow' }, NOW)).rejects.toThrow(ConflictAppException);
     expect(rows.get('a1')).toEqual(expect.objectContaining({ status: 'cancelled', resolvedBy: 'job_ended' }));
   });
 
   it('a second decide gets 409', async () => {
     seed({ ...pending, status: 'approved' }); jobRepo.lockById.mockResolvedValue(running);
-    await expect(service.decide(CALLER, dev, 'a1', { decision: 'deny' }, NOW)).rejects.toThrow(ConflictAppException);
+    await expect(service.decide(DEV_CALLER, dev, 'a1', { decision: 'deny' }, NOW)).rejects.toThrow(ConflictAppException);
+  });
+
+  it('budget-only fields on a bash decide are 400 (D287)', async () => {
+    seed(pending);
+    await expect(service.decide(DEV_CALLER, dev, 'a1', { decision: 'deny', amountUsd: 5 }, NOW)).rejects.toThrow(ValidationAppException);
   });
 
   it('allow on a truncated command is 400 before any lock', async () => {
     seed({ ...pending, payload: { ...pending.payload, commandTruncated: true } });
-    await expect(service.decide(CALLER, dev, 'a1', { decision: 'allow' }, NOW)).rejects.toThrow(ValidationAppException);
+    await expect(service.decide(DEV_CALLER, dev, 'a1', { decision: 'allow' }, NOW)).rejects.toThrow(ValidationAppException);
     expect(jobRepo.lockById).not.toHaveBeenCalled();
   });
 });
 ```
 
-(`seed`, `rows`, `CALLER`, `NOW` follow the spec's existing fake-repo helpers; the closer may be the real
-`ApprovalCloser` over the fake repo, as the 1a spec does, so `expire`/`closeForJob` really resolve rows.)
+(Each `it` starts with `const { service, rows, seed, jobRepo, notifier } = buildBash();`.)
 
-`command-ack.processor.spec.ts`:
+`command-ack.processor.spec.ts` (created in Task 7; add `approvals = { lockById: jest.fn(), setOutcome: jest.fn() }`
+to its construction, and two helpers: `seedCommand(c)` makes the repo fake's `findCommand` return `c`, `seedJob(j)`
+makes `lockById` return `j`):
 
 ```ts
 describe('APPROVAL_ANSWER acks (spec §3, plan D268)', () => {
@@ -1534,8 +1605,13 @@ describe('APPROVAL_ANSWER acks (spec §3, plan D268)', () => {
 - [ ] **Step 4: Implement decide**
 
 `approvals.service.ts`:
-- Constructor gains `@Inject(FLEET_JOB_REPOSITORY) private readonly jobs: Pick<IFleetJobRepository, 'lockById' | 'createCommand'>`
-  and `private readonly notifier: RunnerNotifier`.
+- Constructor gains, **appended after the transaction manager**,
+  `@Inject(FLEET_JOB_REPOSITORY) private readonly jobRepo: Pick<IFleetJobRepository, 'lockById' | 'createCommand'>` and
+  `private readonly notifier: RunnerNotifier` (the class already has `jobs: FleetJobsService` and
+  `live: ApprovalLivePublisher`; do not rename those). New imports: `FleetCommandType` (`../../common/enums`),
+  `jobSystemActor` (`./approval-closer`), `checkBashDecision` (`./bash-decision`), `FLEET_JOB_REPOSITORY`,
+  `IFleetJobRepository` (`../jobs/domain/fleet-job.domain`), `RunnerNotifier` (`../jobs/runner-notifier`),
+  `LiveFleetApprovalEvent` (type, `../../live/live-event`).
 - Add beside `mayDecideBudget`:
 
 ```ts
@@ -1560,12 +1636,15 @@ type BashResult =
 ```ts
   private async decideBash(caller: ApprovalCaller, route: ApprovalRoute, current: FleetApprovalRecord, dto: DecideApprovalDto, now: Date): Promise<FleetApprovalDto> {
     if (!mayDecideBash(route)) throw new ForbiddenAppException({}, 'projects');
+    if (dto.amountUsd !== undefined || dto.requeueJobIds !== undefined) {
+      throw new ValidationAppException({ reason: 'amountUsd and requeueJobIds apply only to budget approvals' }, 'fleet.approvalInput');   // plan D287
+    }
     const checked = checkBashDecision(current.payload, dto.decision);
-    if (!checked.ok) invalid(checked.reason);
+    if ('reason' in checked) invalid(checked.reason);   // strictNullChecks is off: `in` narrows, `.ok` does not
     const jobId = current.jobId;
     if (!jobId) invalid('a bash approval with no job cannot be decided');
     const result = await this.txManager.run(async (): Promise<BashResult> => {
-      const job = await this.jobs.lockById(jobId);   // lock order: job first, then approval (spec §1.4)
+      const job = await this.jobRepo.lockById(jobId);   // lock order: job first, then approval (spec §1.4)
       const approval = await this.repo.lockById(current.id);
       if (!job || !approval || approval.status !== 'pending') return { kind: 'not_pending' };
       if (job.state !== 'RUNNING' || job.leaseEpoch !== approval.leaseEpoch || job.runnerId === null) {
@@ -1580,26 +1659,29 @@ type BashResult =
         status: checked.status, resolvedBy: 'user', decision: dto.decision, decidedById: caller.id, decidedAt: now,
         comment: dto.comment ?? null,
       });
-      await this.jobs.createCommand({
+      await this.jobRepo.createCommand({
         runnerId: job.runnerId, jobId: job.id, type: FleetCommandType.APPROVAL_ANSWER, leaseEpoch: job.leaseEpoch,
         payload: { approvalId: decided.id, naxAskId: decided.naxAskId, choice: checked.choice },
       });
       return { kind: 'decided', approval: decided, live: await this.closer.recordResolved(decided, userActor(caller.id)), runnerId: job.runnerId };
     });
     // Plan D265: the expiry or job-end close above has committed; only now refuse the decide.
-    if (result.kind !== 'not_pending') this.approvalLive.publish(result.live);
+    if (result.kind !== 'not_pending') this.live.publish(result.live);
     if (result.kind !== 'decided') throw new ConflictAppException({}, 'fleet.approvalNotPending');
     this.notifier.notify(result.runnerId);
     return FleetApprovalDto.from(result.approval);
   }
 ```
 
-(`jobSystemActor` is exported from `approval-closer.ts` by Task 5. `this.closer`, `this.approvalLive`, `this.repo`, `this.txManager`, `invalid`, `userActor` are the names already in
-the file; if the live publisher field is named differently there, use that name.)
+(`jobSystemActor` is exported from `approval-closer.ts` by Task 5; `this.closer`, `this.live`, `this.repo`,
+`this.txManager`, `invalid`, `userActor` are the names already in the file. The `'decided'`/`'closed'` checks use
+`result.kind`, a string discriminant, which narrows without strictNullChecks.)
 
 - [ ] **Step 5: Implement delivery on ack**
 
-`command-ack.processor.ts`: inject `@Inject(APPROVAL_REPOSITORY) private readonly approvals: Pick<IApprovalRepository, 'lockById' | 'setOutcome'>`.
+`command-ack.processor.ts`: inject `@Inject(APPROVAL_REPOSITORY) private readonly approvals: Pick<IApprovalRepository, 'lockById' | 'setOutcome'>`
+as the parameter before the transaction manager (constructor becomes `(repo, transitions, fence, activity, approvals, tx)`;
+update the Task 7 spec's construction). `NO_CHANGE` is the constant Task 7 introduced.
 After `await this.repo.ackCommand(command.id, ack.result, now);` and the `detail` line:
 
 ```ts
@@ -1815,7 +1897,8 @@ it('maps bashMode, approvalTimeoutSec and pendingApprovals (S1.5 §1.6)', () => 
 });
 ```
 
-`fleet-jobs.service.spec.ts` (add `approvals = { countPendingByJob: jest.fn() }` to the constructor fakes):
+`fleet-jobs.service.spec.ts` (create it if absent; `approvals = { countPendingByJob: jest.fn() }` is the last
+constructor argument, every other one an `as never` fake):
 
 ```ts
 it('list counts pending approvals for the whole page in one query (D272)', async () => {
@@ -1836,26 +1919,29 @@ it('get counts the job pending approvals', async () => {
 
 (Use the service's real `list` signature; the point is one grouped call per page.)
 
-`apps/cli/src/commands/fleet-approval.spec.ts`:
+`apps/cli/src/commands/fleet-approval.spec.ts` (harness: `run(...args)` prefixes `fleet approval`; the generated
+client functions are `jest.mock`ed; `ok(row(over))` builds a response; `logged()` joins console output):
 
 ```ts
 it.each(['allow', 'allow_for_job', 'deny'])('decide accepts the bash decision %s (D280)', async (decision) => {
-  await run(['fleet', 'approval', 'decide', 'a1', '--project', 'web', '--decision', decision]);
-  expect(client.post).toHaveBeenCalledWith('/projects/web/fleet/approvals/a1/decide', expect.objectContaining({ decision }));
+  (projectFleetApprovalsControllerDecide as jest.Mock).mockResolvedValue(ok(row({ type: 'nax_bash_escalate', status: 'approved', decision })));
+  await run('decide', 'a1', '--project', 'web', '--decision', decision);
+  expect(projectFleetApprovalsControllerDecide).toHaveBeenCalledWith({ path: { slug: 'web', id: 'a1' }, body: { decision } });
 });
 
-it('show prints a bash ask without the request line', async () => {
-  client.get.mockResolvedValue({ id: 'a1', type: 'nax_bash_escalate', status: 'pending', projectId: 'p1', jobId: 'j1',
+it('show prints a bash ask', async () => {
+  (projectFleetApprovalsControllerGet as jest.Mock).mockResolvedValue(ok(row({ type: 'nax_bash_escalate', jobId: 'j1', policyId: null,
     payload: { command: 'bun run test', commandTruncated: false, maskedCount: 1, root: '/w', stage: 'execution', storyId: 'US-001',
-      featureName: 'demo', reason: 'matched ask rule', options: ['allow', 'deny'] }, expiresAt: '2026-10-04T10:10:00Z' });
-  const out = await capture(() => run(['fleet', 'approval', 'show', 'a1', '--project', 'web']));
-  expect(out).toContain('bun run test');
-  expect(out).toContain('1 secret value(s) masked');
-  expect(out).toContain('Options:  allow, deny');
+      featureName: 'demo', reason: 'matched ask rule', options: ['allow', 'deny'] }, expiresAt: '2026-10-04T10:10:00Z' })));
+  await run('show', 'a1', '--project', 'web');
+  expect(logged()).toContain('bun run test');
+  expect(logged()).toContain('1 secret value(s) masked');
+  expect(logged()).toContain('Options:  allow, deny');
 });
 ```
 
-(`run`, `client`, `capture` are the spec's existing harness; match the route it already asserts for budget decides.)
+The existing test "refuses an undecidable --decision before any request" (`:123-125`) passes `allow`, which is now
+valid: change it to `--decision bogus` and its expected message to `/one of allow, allow_for_job, deny, raise_budget_and_resume, keep_paused/`.
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -1902,7 +1988,11 @@ Expected: FAIL.
   }
 ```
 
-`get`, `cancel` and `requeue` return `this.withPending(record)`; `dispatch` keeps `FleetJobDto.from(job)` (0).
+`get` and `cancel` return `this.withPending(record)`; `requeue` returns a `DispatchResultDto`, so its `job` becomes
+`await this.withPending(fresh)`; `dispatch` keeps `FleetJobDto.from(job)` (0). Constructor: append the new
+`approvals` parameter last, and update the construction in any spec that builds `FleetJobsService` directly (grep
+`new FleetJobsService(`; if no unit spec exists, create `fleet-jobs.service.spec.ts` for the two tests above with
+`as never` fakes for every other parameter).
 
 - [ ] **Step 4: Regenerate OpenAPI**
 
@@ -1925,9 +2015,11 @@ function parseDecision(value: string): DecideApprovalDto['decision'] {
 }
 ```
 
-(delete the D236 comment). Option text at line 158: `'allow, allow_for_job, deny, keep_paused or raise_budget_and_resume'`.
-`--amount` and `--requeue` keep their budget-only meaning; the server refuses them on a bash decide through the
-decision check, so the CLI adds no rule.
+(delete the D236 comment). Option text at line 158: `'allow, allow_for_job, deny, keep_paused or raise_budget_and_resume'`;
+the `decide` command description (line 157) becomes `'Decide an approval (budget override or bash ask)'`.
+`--amount` and `--requeue` keep their budget-only meaning; the server answers 400 when they are sent on a bash decide
+(D287), so the CLI adds no rule. In the list renderer's one-line `summary()`, a bash row with an empty `command` shows
+the first line of `payload.rawDetail` instead of a blank.
 
 Add a bash renderer used by `show` when `type === 'nax_bash_escalate'` (beside the existing budget renderer):
 
@@ -1952,9 +2044,9 @@ Also print `Expires:` from `expiresAt` for bash approvals and the `outcome.deliv
 
 - [ ] **Step 6: Web types**
 
-`apps/web/lib/fleet-types.ts`, `FleetJob`: `bashMode: 'raw' | 'gated' | 'escalate';`, add
+`apps/web/lib/fleet-types.ts`, `FleetJobDto` (line ~144): `bashMode: 'raw' | 'gated' | 'escalate';`, add
 `approvalTimeoutSec: number;` and `pendingApprovals: number;`. Update any web test fixture that builds a full
-`FleetJob` literal (type-check will name them) with `approvalTimeoutSec: 600, pendingApprovals: 0`.
+`FleetJobDto` literal (type-check will name them) with `approvalTimeoutSec: 600, pendingApprovals: 0`.
 
 - [ ] **Step 7: Run everything touched**
 
@@ -1992,7 +2084,7 @@ import type { INestApplication } from '@nestjs/common';
 import type { PrismaClient } from '@prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import request from 'supertest';
-import type { SyncRequest, SyncResponse } from '@nathapp/fleet-protocol';
+import type { ApprovalRequestEventPayload, SyncRequest, SyncResponse } from '@nathapp/fleet-protocol';
 import { ApprovalExpirySweeper } from '../../../src/fleet/approvals/approval-expiry-sweeper';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, FLEET_CAPS, seedFleetHttpWorld, syncBody } from '../../helpers/fleet-fixtures';
@@ -2000,7 +2092,7 @@ import { resetDb } from '../../helpers/reset-db';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
-const ask = (naxAskId: string, deadlineMs = 300_000) => ({
+const ask = (naxAskId: string, deadlineMs = 300_000): ApprovalRequestEventPayload => ({
   naxAskId, deadlineAt: new Date(Date.now() + deadlineMs).toISOString(), command: 'bun run test', commandTruncated: false,
   maskedCount: 0, root: '/work/repo', stage: 'execution', storyId: 'US-001', featureName: 'relay', reason: 'matched ask rule',
   options: ['allow', 'allow-remember', 'deny'],
@@ -2019,14 +2111,24 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
   const dispatch = (body: object, expected = 201) =>
     request(server).post('/api/projects/web/fleet/jobs').set(auth(world.tokens.dev)).send({ repoId: world.repoId, command: 'RUN', maxCostUsd: 5, ...body }).expect(expected);
   const approvals = async (jobId: string) =>
-    data<{ records: Array<Record<string, unknown>> }>(await request(server).get(`/api/projects/web/fleet/approvals?jobId=${jobId}&status=`).set(auth(world.tokens.dev)).expect(200)).records;
+    data<{ records: Array<Record<string, unknown>> }>(await request(server).get(`/api/projects/web/fleet/approvals?jobId=${jobId}`).set(auth(world.tokens.dev)).expect(200)).records;
   const decide = (id: string, token: string, decision: string) =>
     request(server).post(`/api/projects/web/fleet/approvals/${id}/decide`).set(auth(token)).send({ decision });
+
+  /**
+   * One repo and one runner: placement refuses a second job on a busy repo (`busy_repo`), so every test that starts a
+   * job ends it with `finish` (UPLOADING then COMPLETED, as runner-sync-lifecycle.integration.spec.ts does).
+   */
+  const finish = (jobId: string, leaseEpoch: number, seq: number, fromUploading = false) =>
+    sync({ jobs: [{ jobId, leaseEpoch, events: [
+      ...(fromUploading ? [] : [{ seq, type: 'state' as const, payload: { to: 'UPLOADING' as const } }]),
+      { seq: fromUploading ? seq : seq + 1, type: 'state' as const, payload: { to: 'COMPLETED' as const } },
+    ] }] });
 
   /** ASSIGN -> ack -> RUNNING at seq 1; returns the job id and its epoch. */
   async function startRunning(feature: string, body: object = {}): Promise<{ jobId: string; leaseEpoch: number }> {
     const jobId = data<{ job: { id: string } }>(await dispatch({ feature, bashMode: 'escalate', approvalTimeoutSec: 600, ...body })).job.id;
-    const assign = (await sync()).commands.find((c) => c.type === 'ASSIGN' && c.jobId === jobId);
+    const assign = (await sync({ freeSlots: 1 })).commands.find((c) => c.type === 'ASSIGN' && c.jobId === jobId);
     if (!assign) throw new Error('no ASSIGN');
     expect(assign.payload).toEqual(expect.objectContaining({ bashMode: 'escalate', approvalTimeoutSec: 600 }));
     await sync({ commandAcks: [{ commandId: assign.commandId, leaseEpoch: assign.leaseEpoch, result: 'ok' }],
@@ -2051,9 +2153,9 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     const pinned = await dispatch({ feature: 'pinned', bashMode: 'escalate', pinnedRunnerId: runner.runnerId }, 422);
     expect(JSON.stringify(pinned.body)).toContain('approvals_relay');
     const jobId = data<{ job: { id: string } }>(await dispatch({ feature: 'waits', bashMode: 'gated' })).job.id;
-    expect((await sync()).commands.some((c) => c.jobId === jobId)).toBe(false);
+    expect((await sync({ freeSlots: 1 })).commands.some((c) => c.jobId === jobId)).toBe(false);   // a free slot, still no ASSIGN
     expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: jobId } })).state).toBe('QUEUED');
-    await request(server).post(`/api/projects/web/fleet/jobs/${jobId}/cancel`).set(auth(world.tokens.dev)).expect(201);
+    await request(server).post(`/api/projects/web/fleet/jobs/${jobId}/cancel`).set(auth(world.tokens.dev)).expect(200);
   });
 
   it('report ask -> pending approval -> DEVELOPER allows -> APPROVAL_ANSWER -> ack ok -> delivery', async () => {
@@ -2067,7 +2169,7 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     expect(job.pendingApprovals).toBe(1);
 
     await decide(String(pending.id), world.tokens.viewer, 'allow').expect(403);
-    await decide(String(pending.id), world.tokens.dev, 'allow').expect(201);
+    await decide(String(pending.id), world.tokens.dev, 'allow').expect(200);
     await decide(String(pending.id), world.tokens.dev, 'deny').expect(409);
 
     const answer = (await sync()).commands.find((c) => c.type === 'APPROVAL_ANSWER' && c.jobId === jobId);
@@ -2075,6 +2177,7 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     await sync({ commandAcks: [{ commandId: answer!.commandId, leaseEpoch, result: 'ok' }] });
     const [decided] = await approvals(jobId);
     expect(decided).toEqual(expect.objectContaining({ status: 'approved', decision: 'allow', outcome: { delivery: expect.objectContaining({ result: 'ok' }) } }));
+    await finish(jobId, leaseEpoch, 3);
   });
 
   it('a re-reported ask (same seq, or a new seq with the same naxAskId) stays one approval', async () => {
@@ -2084,6 +2187,7 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     await sync({ jobs: [{ jobId, leaseEpoch, events: [event] }] });
     await sync({ jobs: [{ jobId, leaseEpoch, events: [{ ...event, seq: 3 }] }] });
     expect(await approvals(jobId)).toHaveLength(1);
+    await finish(jobId, leaseEpoch, 4);
   });
 
   it('an unanswered ask expires through the sweeper; a decide after it is 409 and leaves it expired', async () => {
@@ -2094,12 +2198,14 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     const [expired] = await approvals(jobId);
     expect(expired).toEqual(expect.objectContaining({ status: 'expired', resolvedBy: 'timeout' }));
     await decide(String(expired.id), world.tokens.dev, 'allow').expect(409);
+    await finish(jobId, leaseEpoch, 3);
   });
 
   it('an ask past its deadline on arrival is born expired', async () => {
     const { jobId, leaseEpoch } = await startRunning('late');
     await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-0000000d', -1_000) }] }] });
     expect((await approvals(jobId))[0]).toEqual(expect.objectContaining({ status: 'expired', resolvedBy: 'timeout' }));
+    await finish(jobId, leaseEpoch, 3);
   });
 
   it('the job leaving RUNNING cancels its asks job_ended and withdraws an unsent answer', async () => {
@@ -2109,11 +2215,12 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
       { seq: 3, type: 'approval_request', payload: ask('ask-0000000f') },
     ] }] });
     const [first] = (await approvals(jobId)).filter((a) => a.status === 'pending');
-    await decide(String(first.id), world.tokens.dev, 'deny').expect(201);   // answer queued, not yet synced down
+    await decide(String(first.id), world.tokens.dev, 'deny').expect(200);   // answer queued, not yet synced down
     const after = await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 4, type: 'state', payload: { to: 'UPLOADING' } }] }] });
     expect(after.commands.some((c) => c.type === 'APPROVAL_ANSWER' && c.jobId === jobId)).toBe(false);
     const rows = await approvals(jobId);
     expect(rows.find((a) => a.id !== first.id)).toEqual(expect.objectContaining({ status: 'cancelled', resolvedBy: 'job_ended' }));
+    await finish(jobId, leaseEpoch, 5, true);
   });
 
   it('a malformed ask is a rejected event, not a sync failure (D269)', async () => {
@@ -2121,6 +2228,7 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     const res = await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: { ...ask('ask-00000010'), options: [] } }] }] });
     expect(res.jobAcks).toContainEqual({ jobId, ackedSeq: 2 });
     expect(await approvals(jobId)).toHaveLength(0);
+    await finish(jobId, leaseEpoch, 3);
   });
 
   it('a v1 sync is still accepted (deploy order: server first)', async () => {
@@ -2130,11 +2238,11 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
 ```
 
 Notes for the implementer:
-- If `dispatch` returns the job directly (not `{ job }`), adjust the two `data<...>` reads; check the response of the
-  existing `fleet-jobs.integration.spec.ts` dispatch.
 - If `syncBody` already sets `protocolVersion`, the override above still wins.
-- `startRunning` relies on `freeSlots` from `syncBody`; if one runner slot is the default, finish each job's lease
-  (report `UPLOADING` then `COMPLETED`) at the end of the test that started it, or raise `freeSlots` in the override.
+- `syncBody` defaults `freeSlots: 0`; `startRunning` syncs with `freeSlots: 1` so placement assigns. Decide and cancel
+  answer **200** (`@HttpCode(200)`); dispatch answers 201 with `{ job, placement }`.
+- If COMPLETED needs a bundle or result fields in this API, copy exactly what `runner-sync-lifecycle.integration.spec.ts`
+  sends around its `:105` to finish a job.
 - Add one webhook assertion in the loop test following `fleet-approvals-api.integration.spec.ts` (how it asserts
   `fleet.approval.requested`): a bash approval produces `fleet.approval.requested` then `fleet.approval.resolved`, and
   neither payload contains `bun run test`.
@@ -2181,22 +2289,9 @@ describe('relaySupported (plan D258)', () => {
 });
 ```
 
-`nax-probe.spec.ts` (the spec drives `NaxCapabilityProbe` through `test/helpers/fake-nax-cli.ts`; reuse its happy
-fixture):
-
-```ts
-test('reports approvals.relay for nax 0.83.x (S1.5 §3)', async () => {
-  const result = await probeWith({ version: '0.83.2' });
-  expect(result.capabilities.approvals).toEqual({ relay: true });
-});
-test('omits approvals for an older nax that still passes the probe floor in a test double', async () => {
-  const result = await probeWith({ version: '0.82.9' });
-  expect(result.capabilities).not.toHaveProperty('approvals');
-});
-```
-
-(`probeWith` = whatever helper the spec uses to build a probe over a scripted nax; if the probe itself refuses
-versions below 0.83.1, drop the second case and keep the `relaySupported` table as the floor test.)
+`nax-probe.spec.ts`: the happy-path test near `:60-80` asserts the whole report with `toEqual({...})` for
+`version: '0.83.1'`; add `approvals: { relay: true }` to that expected object. No below-floor probe case is possible
+(`readNaxVersion` throws under `MIN_NAX_VERSION` 0.83.1), so the `relaySupported` table is the floor test.
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -2221,8 +2316,7 @@ export function relaySupported(version: string): boolean {
 ```
 
 `nax-probe.ts` `probe()`: pass `...(relaySupported(version) ? { approvals: { relay: true as const } } : {})` in the object
-given to `boundReport`, and make sure `boundReport` copies it through (if it rebuilds the report field by field, add
-`...(report.approvals ? { approvals: report.approvals } : {})` to its return).
+given to `boundReport` (`boundReport` spreads the report, so the key survives).
 
 - [ ] **Step 4: Run tests**
 
@@ -2268,7 +2362,7 @@ and the webhook plugin's payload assembly from extracted sources at tag `v0.83.2
 
 ```ts
 import { describe, expect, test } from 'bun:test';
-import fixtures from '../../test/fixtures/nax-asks/v0.83.2.json';
+import fixtures from '../../test/fixtures/nax-asks/v0.83.2.json' with { type: 'json' };
 import { parseDetail } from './detail-parser';
 
 const FENCE = '```';
@@ -2284,7 +2378,7 @@ const naxDetail = (command: string, opts: { masked?: number; root?: string; reas
 
 describe('parseDetail on captured nax v0.83.2 asks (plan D256, D259)', () => {
   test('a: simple command', () => {
-    expect(parseDetail(fixtures.a_simple.detail)).toEqual({ command: 'bun run test', maskedCount: 0, root: '/work/repo', reason: 'matched ask rule' });
+    expect(parseDetail(fixtures.a_simple.detail)).toEqual({ command: 'bun run test', maskedCount: 0, root: '/work/repo', reason: 'matched ask rule', stage: 'execution' });
   });
   test('b: two masked secrets', () => {
     const parsed = parseDetail(fixtures.b_two_secrets.detail);
@@ -2313,6 +2407,23 @@ describe('parseDetail edge cases', () => {
     const command = `echo hi\n${FENCE}\nrequest: Bash command=echo hi`;
     expect(parseDetail(naxDetail(command))).toBeNull();
   });
+  test('a summary nax did not cut must equal the command exactly (a diverging summary is not parsed)', () => {
+    const detail = [FENCE, 'ls', FENCE, 'request: Bash command=rm', 'runs in: /w', 'reason:  r', 'stage:   execution'].join('\n');
+    expect(parseDetail(detail)).toBeNull();
+  });
+  test('a real split that diverges plus one crafted consistent fake is still not parsed (two candidates)', () => {
+    const fakeSummary = 'Bash command=DIFFERENT';
+    const command = `ls\n${FENCE}\nrequest: ${fakeSummary}\n${FENCE}\nrequest: Bash command=ls`;
+    const detail = [FENCE, command, FENCE, `request: ${fakeSummary}`, 'runs in: /w', 'reason:  r', 'stage:   execution'].join('\n');
+    expect(parseDetail(detail)).toBeNull();
+  });
+  test('a 200-char summary is checked as a prefix (nax cut it)', () => {
+    const command = 'x'.repeat(187);   // "Bash command=" + 187 = exactly 200
+    expect(parseDetail(naxDetail(command))?.command).toBe(command);
+  });
+  test('stage comes from the detail line', () => {
+    expect(parseDetail(naxDetail('ls', { stage: 'review' }))?.stage).toBe('review');
+  });
   test('a missing tail line is not parsed', () => {
     expect(parseDetail(naxDetail('ls').split('\n').slice(0, -1).join('\n'))).toBeNull();
   });
@@ -2337,39 +2448,46 @@ describe('parseDetail edge cases', () => {
  *
  *   ```\n<command>\n```\n[N secret value(s) masked; the approved command contains them\n]request: <summary>\nruns in: <root>\nreason:  <reason>\nstage:   <stage>
  *
- * `<summary>` is `<tool> command=<command>` masked and cut to 200 chars, so it may span lines. The command may contain
- * fences. Any ambiguity returns null: the caller then relays the raw text, never a guessed command.
+ * `<summary>` is `<tool> command=<command>` masked, trimmed and cut to 200 chars, so it may span lines. Any ambiguity
+ * returns null: the caller then relays the raw text, never a guessed command.
  */
-export interface ParsedDetail { command: string; maskedCount: number; root: string; reason: string }
+export interface ParsedDetail { command: string; maskedCount: number; root: string; reason: string; stage: string }
 
 const FENCE = '```';
 const FOOTER = /^(\d+) secret value\(s\) masked; the approved command contains them\n/;
 const TAIL = [/^runs in: (.*)$/, /^reason:\s+(.*)$/, /^stage:\s+(.*)$/] as const;
 const REQUEST = 'request: ';
+/** nax cuts the summary to this many chars (tools/ask-request.ts MAX_ASK_SUMMARY_CHARS). */
+const SUMMARY_MAX = 200;
 
 export function parseDetail(detail: string): ParsedDetail | null {
   const lines = detail.split('\n');
   if (lines.length < 4) return null;
   const tail = lines.slice(-3).map((line, i) => TAIL[i].exec(line)?.[1]);
   if (tail.some((value) => value === undefined)) return null;
-  const [root, reason] = tail as [string, string, string];
+  const [root, reason, stage] = tail as [string, string, string];
   const head = lines.slice(0, -3).join('\n');
   if (!head.startsWith(`${FENCE}\n`)) return null;
 
   const separator = `\n${FENCE}\n`;
-  const found: Array<{ command: string; maskedCount: number }> = [];
+  const candidates: Array<{ command: string; maskedCount: number; summary: string }> = [];
   for (let at = head.indexOf(separator, FENCE.length); at !== -1; at = head.indexOf(separator, at + 1)) {
-    const command = head.slice(FENCE.length + 1, at);
     let rest = head.slice(at + separator.length);
     const footer = FOOTER.exec(rest);
     if (footer) rest = rest.slice(footer[0].length);
-    if (!rest.startsWith(REQUEST)) continue;
-    const summary = rest.slice(REQUEST.length);
-    const tool = summary.split(' ', 1)[0];
-    if (tool !== '' && `${tool} command=${command}`.startsWith(summary)) found.push({ command, maskedCount: footer ? Number(footer[1]) : 0 });
+    if (rest.startsWith(REQUEST)) {
+      candidates.push({ command: head.slice(FENCE.length + 1, at), maskedCount: footer ? Number(footer[1]) : 0, summary: rest.slice(REQUEST.length) });
+    }
   }
-  if (found.length !== 1) return null;
-  return { ...found[0], root, reason };
+  // A command that itself contains a closing fence followed by a request line makes the layout ambiguous: never guess.
+  if (candidates.length !== 1) return null;
+  const { command, maskedCount, summary } = candidates[0];
+  const tool = summary.split(' ', 1)[0];
+  const recon = `${tool} command=${command}`;
+  // Exact when nax did not cut the summary; a prefix only when it did (exactly 200 chars).
+  const consistent = summary.length < SUMMARY_MAX ? recon.trim() === summary : summary.length === SUMMARY_MAX && recon.startsWith(summary);
+  if (tool === '' || !consistent) return null;
+  return { command, maskedCount, root, reason, stage };
 }
 ```
 
@@ -2381,7 +2499,7 @@ Run: `cd apps/runner && bun test src/approvals/detail-parser.spec.ts` — Expect
 
 ```ts
 import { describe, expect, test } from 'bun:test';
-import fixtures from '../../test/fixtures/nax-asks/v0.83.2.json';
+import fixtures from '../../test/fixtures/nax-asks/v0.83.2.json' with { type: 'json' };
 import { buildAskPayload, capUtf8 } from './ask-payload';
 
 const a = fixtures.a_simple;
@@ -2410,11 +2528,24 @@ describe('buildAskPayload (spec §1.2, §4.2, plan D283)', () => {
     expect(Buffer.byteLength(payload.command, 'utf8')).toBeLessThanOrEqual(12_288);
     expect(payload.command).not.toContain('�');
   });
-  test('the whole payload always fits the 16 KiB sync event limit', () => {
-    const command = 'x'.repeat(12_000);
-    const detail = ['```', command, '```', `request: Bash command=${command}`.slice(0, 209), `runs in: /${'é'.repeat(1500)}`, `reason:  ${'é'.repeat(1500)}`, 'stage:   execution'].join('\n');
-    const payload = buildAskPayload({ ...a, detail, featureName: 'é'.repeat(400) })!;
-    expect(Buffer.byteLength(JSON.stringify(payload), 'utf8')).toBeLessThanOrEqual(16_384);
+  const naxDetail = (command: string, over: { root?: string; reason?: string } = {}) =>
+    ['```', command, '```', `request: ${`Bash command=${command}`.slice(0, 200)}`, `runs in: ${over.root ?? '/w'}`, `reason:  ${over.reason ?? 'r'}`, 'stage:   execution'].join('\n');
+  const json = (p: unknown) => Buffer.byteLength(JSON.stringify(p), 'utf8');
+
+  test.each([
+    ['a 12 KiB command of quotes (JSON doubles them)', { detail: naxDetail('"'.repeat(12_288)) }],
+    ['control characters (JSON escapes them to 6 bytes)', { detail: naxDetail('\u0001'.repeat(4_000)) }],
+    ['500-char 3-byte short fields', { detail: naxDetail('x'.repeat(12_000), { root: `/${'中'.repeat(500)}`, reason: '中'.repeat(500) }), featureName: '中'.repeat(500), storyId: '中'.repeat(500) }],
+  ])('%s still fits the 16 KiB sync event limit, flagged', (_name, over) => {
+    const payload = buildAskPayload({ ...a, ...over })!;
+    expect(json(payload)).toBeLessThanOrEqual(16_384);
+    expect(payload.commandTruncated).toBe(true);
+    expect(payload.command.length).toBeGreaterThan(0);
+  });
+  test('a command-less ask whose summary nax cut at 200 chars is deny-only (D256)', () => {
+    const detail = `request: Write path=${'p'.repeat(191)}\nruns in: /w\nreason:  r\nstage:   execution`;
+    expect(buildAskPayload({ ...a, detail })?.commandTruncated).toBe(true);
+    expect(buildAskPayload({ ...a, detail: 'request: Write path=/a\nruns in: /w\nreason:  r\nstage:   execution' })?.commandTruncated).toBe(false);
   });
   test.each([
     ['a non-approval ask', { metadata: {} }],
@@ -2464,6 +2595,8 @@ const ASK_ID = /^ask-[0-9a-f]{1,16}$/;
 const OPTION_KEYS: readonly string[] = ['allow', 'allow-remember', 'deny'];
 /** Runner-side cap for the short text fields, so the event fits 16 KiB even with a 12 KiB command (server allows 2000). */
 const FIELD_MAX_CHARS = 500;
+/** `request: ` plus nax's 200-char summary: a line this long may have been cut by nax. */
+const SUMMARY_LINE_MAX = 'request: '.length + 200;
 
 export function capUtf8(text: string, maxBytes: number): { text: string; cut: boolean } {
   const bytes = Buffer.from(text, 'utf8');
@@ -2490,38 +2623,50 @@ export function buildAskPayload(request: NaxAskRequest): ApprovalRequestEventPay
     deadlineAt: new Date(request.createdAt + request.timeout).toISOString(),
     maskedCount: parsed?.maskedCount ?? 0,
     root: short(parsed?.root ?? ''),
-    stage: short(request.stage),
+    stage: short(parsed?.stage ?? request.stage),
     storyId: request.storyId === undefined ? null : short(request.storyId),
     featureName: short(request.featureName),
     reason: short(parsed?.reason ?? ''),
     options,
   };
-  return fit(parsed ? { ...base, ...cut('command', parsed.command) } : { ...base, command: '', ...cut('rawDetail', request.detail) });
+  if (parsed) {
+    const command = capUtf8(parsed.command, APPROVAL_TEXT_MAX_BYTES);
+    return fit({ ...base, command: command.text, commandTruncated: command.cut });
+  }
+  const raw = capUtf8(request.detail, APPROVAL_TEXT_MAX_BYTES);
+  // Plan D256: a command-less ask (Write/Edit) carries only nax's 200-char summary; a cut one must not be approvable.
+  const cutSummary = !request.detail.startsWith('```') && request.detail.split('\n').some((l) => l.startsWith('request: ') && l.length >= SUMMARY_LINE_MAX);
+  return fit({ ...base, command: '', rawDetail: raw.text, commandTruncated: raw.cut || cutSummary });
 }
 
-function cut(field: 'command' | 'rawDetail', text: string): { command?: string; rawDetail?: string; commandTruncated: boolean } {
-  const capped = capUtf8(text, APPROVAL_TEXT_MAX_BYTES);
-  return { [field]: capped.text, commandTruncated: capped.cut };
-}
-
-/** The 16 KiB sync payload limit is a hard server rule (a bigger event fails the sync); shorten the text, flag it. */
+/**
+ * The server refuses the whole sync when an event's JSON exceeds 16 KiB (`sync-request.parser.ts` parseEvent), so the
+ * payload must fit. `byteLength` (batch.ts) measures JSON, which escapes quotes, backslashes and control characters, so
+ * the text is shrunk proportionally in raw bytes until the JSON fits. A shrunk text is flagged: deny-only.
+ */
 function fit(payload: ApprovalRequestEventPayload): ApprovalRequestEventPayload {
-  const over = byteLength(payload) - SYNC_LIMITS.payloadBytes;
-  if (over <= 0) return payload;
-  const field = payload.rawDetail !== undefined ? 'rawDetail' : 'command';
-  const text = payload[field] ?? '';
-  return { ...payload, [field]: capUtf8(text, Math.max(0, byteLength(text) - over - 64)).text, commandTruncated: true };
+  const field: 'command' | 'rawDetail' = payload.rawDetail !== undefined ? 'rawDetail' : 'command';
+  let fitted = payload;
+  for (let round = 0; round < 8 && byteLength(fitted) > SYNC_LIMITS.payloadBytes; round += 1) {
+    const text = fitted[field] ?? '';
+    const jsonBytes = byteLength(text);
+    const allowed = jsonBytes - (byteLength(fitted) - SYNC_LIMITS.payloadBytes) - 64;
+    const target = Math.max(0, Math.floor((Buffer.byteLength(text, 'utf8') * allowed) / jsonBytes));
+    fitted = { ...fitted, [field]: capUtf8(text, target).text, commandTruncated: true };
+  }
+  return fitted;
 }
 ```
 
-(`byteLength` in `batch.ts` measures `JSON.stringify(value)`; if it measures a string instead, use
-`Buffer.byteLength(JSON.stringify(payload), 'utf8')` in `fit` and `Buffer.byteLength(text, 'utf8')` for the text.)
+(`byteLength` in `batch.ts:30` is `Buffer.byteLength(JSON.stringify(value), 'utf8')`. The prototype of this function
+was run against: a 12,288-byte command of `"`, 4,000 `\u0001` characters, and 500-char 3-byte fields; each result was
+16,319 bytes and flagged.)
 
 - [ ] **Step 6: Run tests**
 
 Run: `cd apps/runner && bun test src/approvals && bun run type-check`
-Expected: PASS. (`resolveJsonModule` is needed for the fixture import; the runner's tsconfig has it if other specs
-import JSON; otherwise read the file with `readFileSync` + `JSON.parse` in both specs.)
+Expected: PASS. (`resolveJsonModule` is on via the shared base tsconfig; `with { type: 'json' }` is the runner's
+convention, as in `src/version.ts`.)
 
 - [ ] **Step 7: Commit**
 
@@ -2543,7 +2688,7 @@ git commit -m "feat(runner): parse nax approval asks into relay events (S1.5 2a)
   - `signNax(secret: string, body: string | Uint8Array): string` (hex HMAC-SHA256)
   - `verifyNax(secret: string, body: Uint8Array, header: string | null): boolean` (constant time)
   - `class ApprovalReceiver { static start(opts: { port: number; secret: string; onRequest: (body: unknown) => Promise<number> }): ApprovalReceiver; readonly port: number; stop(): void }`
-  - `interface NaxAnswer { requestId: string; action: 'choose' | 'skip'; value?: string; respondedBy: string; respondedAt: number }`
+  - `interface NaxAnswer { requestId: string; action: 'choose' | 'skip' | 'approve'; value?: string; respondedBy: string; respondedAt: number }`
   - `postToNax(callbackUrl: string, secret: string, answer: NaxAnswer, opts?: { timeoutMs?: number; fetch?: typeof fetch }): Promise<{ ok: true } | { ok: false; detail: string }>`
   - `callbackUrlFor(request: { id: unknown; callbackUrl: unknown }): string | null` (D274)
 
@@ -2578,6 +2723,8 @@ describe('callbackUrlFor (plan D274)', () => {
     [{ id: 'ask-1', callbackUrl: 'https://127.0.0.1:43210/nax/interact/ask-1' }, null],
     [{ id: 'ask-1', callbackUrl: 'http://127.0.0.1:43210/nax/interact/ask-1?x=1' }, null],
     [{ id: 'ask-1', callbackUrl: 'http://127.0.0.1:99999/nax/interact/ask-1' }, null],
+    [{ id: 'ix-US_1.2-size-gate', callbackUrl: 'http://127.0.0.1:43210/nax/interact/ix-US_1.2-size-gate' }, 'http://127.0.0.1:43210/nax/interact/ix-US_1.2-size-gate'],
+    [{ id: 'a/b', callbackUrl: 'http://127.0.0.1:43210/nax/interact/a/b' }, null],
   ])('%p -> %p', (input, expected) => {
     expect(callbackUrlFor(input)).toBe(expected);
   });
@@ -2601,7 +2748,10 @@ describe('postToNax (spec §4.4)', () => {
       .toEqual({ ok: false, detail: `callback_failed:${status}` });
   });
   test('an unreachable callback is callback_failed:error; a slow one callback_failed:timeout', async () => {
-    expect(await postToNax('http://127.0.0.1:9/nax/interact/ask-1', 's', { requestId: 'ask-1', action: 'skip', respondedBy: 'koda', respondedAt: 1 }))
+    const gone = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('x') });
+    const deadPort = gone.port;
+    gone.stop(true);   // a port that was just free and is now closed
+    expect(await postToNax(`http://127.0.0.1:${deadPort}/nax/interact/ask-1`, 's', { requestId: 'ask-1', action: 'skip', respondedBy: 'koda', respondedAt: 1 }))
       .toEqual({ ok: false, detail: 'callback_failed:error' });
     server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Promise<Response>(() => undefined) });
     expect(await postToNax(`http://127.0.0.1:${server.port}/nax/interact/ask-1`, 's', { requestId: 'ask-1', action: 'skip', respondedBy: 'koda', respondedAt: 1 }, { timeoutMs: 50 }))
@@ -2670,9 +2820,10 @@ Expected: FAIL (modules missing).
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 /** nax's answer schema (webhook.ts:56-62): `respondedAt` is a number (epoch ms), never an ISO string. */
-export interface NaxAnswer { requestId: string; action: 'choose' | 'skip'; value?: string; respondedBy: string; respondedAt: number }
+export interface NaxAnswer { requestId: string; action: 'choose' | 'skip' | 'approve'; value?: string; respondedBy: string; respondedAt: number }
 
-const CALLBACK = /^http:\/\/127\.0\.0\.1:(\d{1,5})\/nax\/interact\/([A-Za-z0-9-]{1,64})$/;
+// Plan D274: nax does not URL-encode ids (`ix-<storyId>-size-gate` carries a story id), so accept any id without / ? # or whitespace.
+const CALLBACK = /^http:\/\/127\.0\.0\.1:(\d{1,5})\/nax\/interact\/([^/?#\s]{1,200})$/;
 const DEFAULT_TIMEOUT_MS = 10_000;
 
 export function signNax(secret: string, body: string | Uint8Array): string {
@@ -2790,44 +2941,45 @@ git commit -m "feat(runner): loopback approval receiver and signed nax callback 
 - Create: `apps/runner/src/approvals/approval-relay.ts` (+ `.spec.ts`)
 
 **Interfaces:**
-- Consumes: `ApprovalReceiver`, `postToNax`, `callbackUrlFor` (Task 14); `buildAskPayload`, `NaxAskRequest` (Task 13);
-  `ApprovalAnswerPayload` (Task 1).
-- Produces (journal):
+- Consumes: `ApprovalReceiver`, `postToNax`, `callbackUrlFor`, `NaxAnswer` (Task 14); `buildAskPayload`,
+  `NaxAskRequest` (Task 13); `ApprovalAnswerPayload` (Task 1).
+- Produces (journal; everything keyed by `(jobId, leaseEpoch)`, plan D285):
   - `interface ApprovalReceiverRow { jobId: string; leaseEpoch: number; port: number; secret: string }`
   - `interface PendingAskRow { jobId: string; leaseEpoch: number; naxAskId: string; callbackUrl: string; deadlineAt: string }`
-  - `putApprovalReceiver(row)`, `getApprovalReceiver(jobId, leaseEpoch)`, `insertPendingAsk(row)`,
-    `getPendingAsk(jobId, leaseEpoch, naxAskId)`, `deletePendingAsk(jobId, leaseEpoch, naxAskId)`,
-    `deleteApprovalState(jobId)`, `approvalStateJobIds(): string[]`
+  - `putApprovalReceiver(row): void`, `getApprovalReceiver(jobId, leaseEpoch): ApprovalReceiverRow | null`,
+    `insertPendingAsk(row): boolean` (false when it already existed), `getPendingAsk(jobId, leaseEpoch, naxAskId)`,
+    `deletePendingAsk(jobId, leaseEpoch, naxAskId)`, `deleteApprovalState(jobId, leaseEpoch)`,
+    `approvalStateKeys(): Array<{ jobId: string; leaseEpoch: number }>`
 - Produces (events): `JobEvents.approvalRequest(payload: ApprovalRequestEventPayload): void`
 - Produces (relay):
   - `interface RelayEndpoint { url: string; secret: string }`
-  - `class ApprovalRelay { open(job: JobRow): Promise<RelayEndpoint>; resume(job: JobRow): Promise<void>; close(jobId: string): Promise<void>; sweepOrphans(activeJobIds: ReadonlySet<string>): void; answer(command: FleetCommandOut): Promise<{ result: 'ok' | 'rejected'; detail?: string }>; stopAll(): void }`
+  - `class ApprovalRelay { open(job: JobRow): Promise<RelayEndpoint>; resume(job: JobRow): Promise<void>; close(jobId: string, leaseEpoch: number): Promise<void>; sweepOrphans(active: readonly JobRow[]): void; answer(command: FleetCommandOut): Promise<{ result: 'ok' | 'rejected'; detail?: string }>; stopAll(): void }`
+- `journal.pendingEvents(jobId, leaseEpoch, limit)` takes a **limit** (`LIMIT ?`); the tests pass `1_000`.
 
 - [ ] **Step 1: Write the failing journal tests**
 
 `journal.spec.ts` (inside the existing `beforeEach` `Journal.open(':memory:', now)` setup):
 
 ```ts
-describe('approval relay state (S1.5 §4.1, plan D278)', () => {
+describe('approval relay state (S1.5 §4.1, plan D278, D285)', () => {
   test('stores a receiver per (job, epoch) and pending asks per ask id', () => {
     journal.putApprovalReceiver({ jobId: 'j1', leaseEpoch: 1, port: 43_210, secret: 'a'.repeat(64) });
     expect(journal.getApprovalReceiver('j1', 1)).toEqual({ jobId: 'j1', leaseEpoch: 1, port: 43_210, secret: 'a'.repeat(64) });
     expect(journal.getApprovalReceiver('j1', 2)).toBeNull();
 
     const ask = { jobId: 'j1', leaseEpoch: 1, naxAskId: 'ask-1', callbackUrl: 'http://127.0.0.1:5/nax/interact/ask-1', deadlineAt: '2026-10-04T10:10:00.000Z' };
-    journal.insertPendingAsk(ask);
-    journal.insertPendingAsk(ask);   // a re-sent nax POST is idempotent
+    expect(journal.insertPendingAsk(ask)).toBe(true);
+    expect(journal.insertPendingAsk(ask)).toBe(false);   // a re-sent nax POST is idempotent (D286)
     expect(journal.getPendingAsk('j1', 1, 'ask-1')).toEqual(ask);
     journal.deletePendingAsk('j1', 1, 'ask-1');
     expect(journal.getPendingAsk('j1', 1, 'ask-1')).toBeNull();
   });
-  test('deleteApprovalState removes every epoch of a job; approvalStateJobIds lists jobs with state', () => {
+  test('deleteApprovalState removes one epoch only (D285)', () => {
     journal.putApprovalReceiver({ jobId: 'j1', leaseEpoch: 1, port: 1, secret: 's' });
-    journal.putApprovalReceiver({ jobId: 'j2', leaseEpoch: 1, port: 2, secret: 's' });
+    journal.putApprovalReceiver({ jobId: 'j1', leaseEpoch: 2, port: 2, secret: 's' });
     journal.insertPendingAsk({ jobId: 'j1', leaseEpoch: 1, naxAskId: 'ask-1', callbackUrl: 'u', deadlineAt: 'd' });
-    expect(journal.approvalStateJobIds().sort()).toEqual(['j1', 'j2']);
-    journal.deleteApprovalState('j1');
-    expect(journal.approvalStateJobIds()).toEqual(['j2']);
+    journal.deleteApprovalState('j1', 1);
+    expect(journal.approvalStateKeys()).toEqual([{ jobId: 'j1', leaseEpoch: 2 }]);
     expect(journal.getPendingAsk('j1', 1, 'ask-1')).toBeNull();
   });
 });
@@ -2840,13 +2992,12 @@ test('approvalRequest appends an approval_request event (and wakes the sync loop
   let writes = 0;
   journal.onWrite(() => { writes += 1; });
   events.approvalRequest(ASK_PAYLOAD);
-  expect(journal.pendingEvents('j1', 1).at(-1)).toEqual(expect.objectContaining({ type: 'approval_request', payload: ASK_PAYLOAD }));
+  expect(journal.pendingEvents('j1', 1, 1_000).at(-1)).toEqual(expect.objectContaining({ type: 'approval_request', payload: ASK_PAYLOAD }));
   expect(writes).toBeGreaterThan(0);
 });
 ```
 
-(`ASK_PAYLOAD` = `buildAskPayload(fixtures.a_simple)`; `pendingEvents` = the journal's existing reader of unacked
-events; use its real name and arguments.)
+(`ASK_PAYLOAD` = `buildAskPayload(fixtures.a_simple)!`, importing the fixture with `with { type: 'json' }`.)
 
 - [ ] **Step 2: Implement the journal and event**
 
@@ -2873,7 +3024,8 @@ CREATE TABLE IF NOT EXISTS pending_asks (
 ```
 
 Update the schema comment line to add "S1.5 2a: approval_receivers, pending_asks (plan D278)". `types.ts`: the two
-row interfaces above. `journal.ts` (prepared statements in the file's style; `now()` is the injected clock):
+row interfaces above. `journal.ts` (prepared statements in the file's style; `this.now` is the injected clock,
+`private readonly now: Now`, line 41):
 
 ```ts
   putApprovalReceiver(row: ApprovalReceiverRow): void {
@@ -2882,14 +3034,16 @@ row interfaces above. `journal.ts` (prepared statements in the file's style; `no
   }
 
   getApprovalReceiver(jobId: string, leaseEpoch: number): ApprovalReceiverRow | null {
-    const r = this.db.query('SELECT job_id, lease_epoch, port, secret FROM approval_receivers WHERE job_id = ? AND lease_epoch = ?')
-      .get(jobId, leaseEpoch) as { job_id: string; lease_epoch: number; port: number; secret: string } | null;
-    return r ? { jobId: r.job_id, leaseEpoch: r.lease_epoch, port: r.port, secret: r.secret } : null;
+    const r = this.db.query('SELECT port, secret FROM approval_receivers WHERE job_id = ? AND lease_epoch = ?')
+      .get(jobId, leaseEpoch) as { port: number; secret: string } | null;
+    return r ? { jobId, leaseEpoch, port: r.port, secret: r.secret } : null;
   }
 
-  insertPendingAsk(row: PendingAskRow): void {
-    this.db.query('INSERT OR IGNORE INTO pending_asks (job_id, lease_epoch, nax_ask_id, callback_url, deadline_at, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+  /** Plan D286: false when the ask was already journalled (a re-sent nax POST). */
+  insertPendingAsk(row: PendingAskRow): boolean {
+    const result = this.db.query('INSERT OR IGNORE INTO pending_asks (job_id, lease_epoch, nax_ask_id, callback_url, deadline_at, created_at) VALUES (?, ?, ?, ?, ?, ?)')
       .run(row.jobId, row.leaseEpoch, row.naxAskId, row.callbackUrl, row.deadlineAt, this.now().toISOString());
+    return result.changes > 0;
   }
 
   getPendingAsk(jobId: string, leaseEpoch: number, naxAskId: string): PendingAskRow | null {
@@ -2902,20 +3056,23 @@ row interfaces above. `journal.ts` (prepared statements in the file's style; `no
     this.db.query('DELETE FROM pending_asks WHERE job_id = ? AND lease_epoch = ? AND nax_ask_id = ?').run(jobId, leaseEpoch, naxAskId);
   }
 
-  deleteApprovalState(jobId: string): void {
+  /** Plan D285: per epoch, like `abandon`; a stale epoch must never touch a live requeued epoch's relay. */
+  deleteApprovalState(jobId: string, leaseEpoch: number): void {
     this.tx(() => {
-      this.db.query('DELETE FROM pending_asks WHERE job_id = ?').run(jobId);
-      this.db.query('DELETE FROM approval_receivers WHERE job_id = ?').run(jobId);
+      this.db.query('DELETE FROM pending_asks WHERE job_id = ? AND lease_epoch = ?').run(jobId, leaseEpoch);
+      this.db.query('DELETE FROM approval_receivers WHERE job_id = ? AND lease_epoch = ?').run(jobId, leaseEpoch);
     });
   }
 
-  approvalStateJobIds(): string[] {
-    return (this.db.query('SELECT job_id FROM approval_receivers UNION SELECT job_id FROM pending_asks').all() as Array<{ job_id: string }>).map((r) => r.job_id);
+  approvalStateKeys(): Array<{ jobId: string; leaseEpoch: number }> {
+    const rows = this.db.query('SELECT job_id, lease_epoch FROM approval_receivers UNION SELECT job_id, lease_epoch FROM pending_asks')
+      .all() as Array<{ job_id: string; lease_epoch: number }>;
+    return rows.map((r) => ({ jobId: r.job_id, leaseEpoch: r.lease_epoch }));
   }
 ```
 
-(If the class's clock field or `tx` helper have different names, use them; `abandon` and `prune` should also call
-`deleteApprovalState(jobId)` for the jobs they remove.)
+`abandon(jobId, leaseEpoch)` and each `(jobId, leaseEpoch)` that `prune` removes also call
+`deleteApprovalState(jobId, leaseEpoch)` inside their transaction.
 
 `job-events.ts`:
 
@@ -2934,7 +3091,7 @@ Run: `cd apps/runner && bun test src/journal src/supervisor/job-events.spec.ts` 
 
 ```ts
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import fixtures from '../../test/fixtures/nax-asks/v0.83.2.json';
+import fixtures from '../../test/fixtures/nax-asks/v0.83.2.json' with { type: 'json' };
 import { assignFor } from '../../test/helpers/assign';
 import { Journal } from '../journal/journal';
 import { ApprovalRelay } from './approval-relay';
@@ -2946,7 +3103,7 @@ const silent = { info: () => undefined, warn: () => undefined, error: () => unde
 let journal: Journal;
 let relay: ApprovalRelay;
 let nax: ReturnType<typeof Bun.serve> | null;
-let answers: Array<{ body: unknown; sig: string | null }>;
+let answers: Array<{ path: string; body: unknown; sig: string | null }>;
 let naxStatus: number;
 
 beforeEach(() => {
@@ -2955,13 +3112,19 @@ beforeEach(() => {
   journal.updateJob('j1', 1, { state: 'RUNNING' });
   relay = new ApprovalRelay({ journal, log: silent, now: () => NOW, randomSecret: () => 'f'.repeat(64) });
   answers = []; naxStatus = 200;
-  nax = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async (req) => { answers.push({ body: await req.json(), sig: req.headers.get('x-nax-signature') }); return new Response('OK', { status: naxStatus }); } });
+  nax = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async (req) => {
+    answers.push({ path: new URL(req.url).pathname, body: await req.json(), sig: req.headers.get('x-nax-signature') });
+    return new Response('OK', { status: naxStatus });
+  } });
 });
 afterEach(() => { relay.stopAll(); nax?.stop(true); journal.close(); });
 
 const job = () => journal.getJob('j1', 1)!;
-const naxAsk = (id = 'ask-1f2e3d4c') => ({ ...fixtures.a_simple, id, callbackUrl: `http://127.0.0.1:${nax!.port}/nax/interact/${id}` });
-async function sendAsk(endpoint: { url: string; secret: string }, body: object): Promise<number> {
+const events = () => journal.pendingEvents('j1', 1, 1_000);
+const callbackFor = (id: string) => `http://127.0.0.1:${nax!.port}/nax/interact/${id}`;
+const naxAsk = (id = 'ask-1f2e3d4c') => ({ ...fixtures.a_simple, id, callbackUrl: callbackFor(id) });
+const prompt = (id: string) => ({ id, type: 'choose', featureName: 'fa', stage: 'pre-flight', summary: 's', createdAt: 1, timeout: 300_000, fallback: 'continue', callbackUrl: callbackFor(id) });
+async function send(endpoint: { url: string; secret: string }, body: object): Promise<number> {
   const raw = JSON.stringify(body);
   return (await fetch(endpoint.url, { method: 'POST', headers: { 'x-nax-signature': signNax(endpoint.secret, raw) }, body: raw })).status;
 }
@@ -2977,47 +3140,67 @@ describe('ApprovalRelay (spec §4)', () => {
     expect(await relay.open(job())).toEqual(endpoint);
   });
 
-  test('an ask is journalled, appended as approval_request, and answered 200', async () => {
+  test('a re-prepare whose stored port is taken gets a fresh port and secret (D286)', async () => {
     const endpoint = await relay.open(job());
-    expect(await sendAsk(endpoint, naxAsk())).toBe(200);
+    relay.stopAll();
+    const squatter = Bun.serve({ hostname: '127.0.0.1', port: Number(new URL(endpoint.url).port), fetch: () => new Response('x') });
+    try {
+      const fresh = new ApprovalRelay({ journal, log: silent, now: () => NOW, randomSecret: () => '0'.repeat(64) });
+      const reopened = await fresh.open(job());
+      expect(reopened.url).not.toBe(endpoint.url);
+      expect(reopened.secret).toBe('0'.repeat(64));
+      expect(journal.getApprovalReceiver('j1', 1)?.port).toBe(Number(new URL(reopened.url).port));
+      fresh.stopAll();
+    } finally {
+      squatter.stop(true);
+    }
+  });
+
+  test('an ask is journalled, appended once as approval_request, and answered 200', async () => {
+    const endpoint = await relay.open(job());
+    expect(await send(endpoint, naxAsk())).toBe(200);
+    expect(await send(endpoint, naxAsk())).toBe(200);   // a re-sent POST: no second event (D286)
     expect(journal.getPendingAsk('j1', 1, 'ask-1f2e3d4c')).toEqual(expect.objectContaining({ deadlineAt: new Date(fixtures.a_simple.createdAt + fixtures.a_simple.timeout).toISOString() }));
-    expect(journal.pendingEvents('j1', 1).at(-1)).toEqual(expect.objectContaining({ type: 'approval_request', payload: expect.objectContaining({ naxAskId: 'ask-1f2e3d4c', command: 'bun run test' }) }));
+    expect(events().filter((e) => e.type === 'approval_request')).toHaveLength(1);
+    expect(events().at(-1)).toEqual(expect.objectContaining({ type: 'approval_request', payload: expect.objectContaining({ naxAskId: 'ask-1f2e3d4c', command: 'bun run test' }) }));
   });
 
   test('a foreign callbackUrl is refused 400 and nothing is journalled (D274)', async () => {
     const endpoint = await relay.open(job());
-    expect(await sendAsk(endpoint, { ...naxAsk(), callbackUrl: 'http://10.0.0.1:1/nax/interact/ask-1f2e3d4c' })).toBe(400);
+    expect(await send(endpoint, { ...naxAsk(), callbackUrl: 'http://10.0.0.1:1/nax/interact/ask-1f2e3d4c' })).toBe(400);
     expect(journal.getPendingAsk('j1', 1, 'ask-1f2e3d4c')).toBeNull();
   });
 
-  test('a non-approval ask is answered skip at once with a lifecycle warn (D277)', async () => {
+  test('size gate and paused prompts get the headless answers; any other prompt gets skip (D277, Review Focus 6)', async () => {
     const endpoint = await relay.open(job());
-    const trigger = { ...naxAsk('ask-00000001'), type: 'confirm', metadata: { trigger: 'cost-warning' } };
-    expect(await sendAsk(endpoint, trigger)).toBe(200);
-    await Bun.sleep(50);
-    expect(answers[0]?.body).toEqual(expect.objectContaining({ requestId: 'ask-00000001', action: 'skip' }));
-    expect(journal.pendingEvents('j1', 1).some((e) => e.type === 'lifecycle')).toBe(true);
+    expect(await send(endpoint, prompt('ix-US-001-size-gate'))).toBe(200);
+    expect(await send(endpoint, prompt('ix-US_1.2-paused-resume'))).toBe(200);
+    expect(await send(endpoint, { ...prompt('trigger-cost-warning-1-abcdef12'), type: 'confirm', metadata: { trigger: 'cost-warning' } })).toBe(200);
+    await Bun.sleep(100);
+    const byPath = Object.fromEntries(answers.map((a) => [a.path.split('/').pop(), a.body]));
+    expect(byPath['ix-US-001-size-gate']).toEqual(expect.objectContaining({ action: 'approve' }));
+    expect(byPath['ix-US_1.2-paused-resume']).toEqual(expect.objectContaining({ action: 'choose', value: 'keep' }));
+    expect(byPath['trigger-cost-warning-1-abcdef12']).toEqual(expect.objectContaining({ action: 'skip' }));
+    expect(events().filter((e) => e.type === 'approval_request')).toHaveLength(0);
   });
 
   test('answer POSTs the signed choice, acks ok and clears the ask', async () => {
     const endpoint = await relay.open(job());
-    await sendAsk(endpoint, naxAsk());
+    await send(endpoint, naxAsk());
     expect(await relay.answer(answerCommand('allow'))).toEqual({ result: 'ok' });
     expect(answers[0]?.body).toEqual({ requestId: 'ask-1f2e3d4c', action: 'choose', value: 'allow', respondedBy: 'koda', respondedAt: expect.any(Number) });
     expect(answers[0]?.sig).toBe(signNax('f'.repeat(64), JSON.stringify(answers[0]?.body)));
     expect(journal.getPendingAsk('j1', 1, 'ask-1f2e3d4c')).toBeNull();
   });
 
-  test.each([
-    ['an unknown ask', () => answerCommand('allow', 'ask-99999999'), 'ask_not_pending'],
-  ])('%s is rejected %s', async (_name, command, detail) => {
+  test('an unknown ask is rejected ask_not_pending', async () => {
     await relay.open(job());
-    expect(await relay.answer(command())).toEqual({ result: 'rejected', detail });
+    expect(await relay.answer(answerCommand('allow', 'ask-99999999'))).toEqual({ result: 'rejected', detail: 'ask_not_pending' });
   });
 
   test('a job that is no longer RUNNING is rejected job_not_running', async () => {
     const endpoint = await relay.open(job());
-    await sendAsk(endpoint, naxAsk());
+    await send(endpoint, naxAsk());
     journal.updateJob('j1', 1, { state: 'UPLOADING' });
     expect(await relay.answer(answerCommand('allow'))).toEqual({ result: 'rejected', detail: 'job_not_running' });
     expect(answers).toHaveLength(0);
@@ -3025,7 +3208,7 @@ describe('ApprovalRelay (spec §4)', () => {
 
   test('a 429 from nax is callback_failed:429 and the ask stays journalled', async () => {
     const endpoint = await relay.open(job());
-    await sendAsk(endpoint, naxAsk());
+    await send(endpoint, naxAsk());
     naxStatus = 429;
     expect(await relay.answer(answerCommand('deny'))).toEqual({ result: 'rejected', detail: 'callback_failed:429' });
     expect(journal.getPendingAsk('j1', 1, 'ask-1f2e3d4c')).not.toBeNull();
@@ -3037,10 +3220,12 @@ describe('ApprovalRelay (spec §4)', () => {
       .toEqual({ result: 'rejected', detail: 'invalid payload' });
   });
 
-  test('close stops the receiver and deletes the journal state', async () => {
+  test('close stops that epoch receiver and deletes only its journal state (D285)', async () => {
     const endpoint = await relay.open(job());
-    await relay.close('j1');
+    journal.putApprovalReceiver({ jobId: 'j1', leaseEpoch: 2, port: 1, secret: 's' });
+    await relay.close('j1', 1);
     expect(journal.getApprovalReceiver('j1', 1)).toBeNull();
+    expect(journal.getApprovalReceiver('j1', 2)).not.toBeNull();
     await expect(fetch(endpoint.url, { method: 'POST', body: '{}' })).rejects.toThrow();
   });
 
@@ -3049,7 +3234,7 @@ describe('ApprovalRelay (spec §4)', () => {
     relay.stopAll();                       // the daemon died; the journal survives
     const fresh = new ApprovalRelay({ journal, log: silent, now: () => NOW, randomSecret: () => '0'.repeat(64) });
     await fresh.resume(job());
-    expect(await sendAsk(endpoint, naxAsk())).toBe(200);   // same url, same secret
+    expect(await send(endpoint, naxAsk())).toBe(200);   // same url, same secret
     fresh.stopAll();
     const squatter = Bun.serve({ hostname: '127.0.0.1', port: Number(new URL(endpoint.url).port), fetch: () => new Response('x') });
     try {
@@ -3059,10 +3244,11 @@ describe('ApprovalRelay (spec §4)', () => {
     }
   });
 
-  test('sweepOrphans deletes state of jobs that are not active', async () => {
+  test('sweepOrphans deletes state of (job, epoch) pairs that are not active', async () => {
     await relay.open(job());
-    relay.sweepOrphans(new Set());
-    expect(journal.approvalStateJobIds()).toEqual([]);
+    journal.putApprovalReceiver({ jobId: 'old', leaseEpoch: 3, port: 1, secret: 's' });
+    relay.sweepOrphans([job()]);
+    expect(journal.approvalStateKeys()).toEqual([{ jobId: 'j1', leaseEpoch: 1 }]);
   });
 });
 ```
@@ -3082,7 +3268,7 @@ import { JobEvents } from '../supervisor/job-events';
 import type { Now } from '../time';
 import { ApprovalReceiver } from './approval-receiver';
 import { buildAskPayload, type NaxAskRequest } from './ask-payload';
-import { callbackUrlFor, postToNax } from './nax-callback';
+import { callbackUrlFor, postToNax, type NaxAnswer } from './nax-callback';
 
 export interface RelayEndpoint { url: string; secret: string }
 export interface ApprovalRelayDeps {
@@ -3094,21 +3280,39 @@ export interface ApprovalRelayDeps {
 type Outcome = { result: 'ok' | 'rejected'; detail?: string };
 
 const CHOICES: readonly string[] = ['allow', 'allow-remember', 'deny'];
+const SIZE_GATE = /^ix-.+-size-gate$/;
+const PAUSED_RESUME = /^ix-.+-paused-resume$/;
 const key = (jobId: string, leaseEpoch: number): string => `${jobId}:${leaseEpoch}`;
 const urlOf = (port: number): string => `http://127.0.0.1:${port}/ask`;
 
-/** Spec §4: one loopback receiver per non-raw job; asks go up as events, answers come down as commands. */
+/**
+ * Plan D277: a headless nax run never prompts (null chain). With the relay's chain present, two prompts that are not
+ * trigger-guarded would fire; answer them as headless behaves: a size-flagged story runs, a paused story stays paused.
+ */
+function headlessAnswer(id: string): Pick<NaxAnswer, 'action' | 'value'> & { known: boolean } {
+  if (SIZE_GATE.test(id)) return { action: 'approve', known: true };
+  if (PAUSED_RESUME.test(id)) return { action: 'choose', value: 'keep', known: true };
+  return { action: 'skip', known: false };
+}
+
+/** Spec §4: one loopback receiver per non-raw (job, epoch); asks go up as events, answers come down as commands. */
 export class ApprovalRelay {
   private readonly receivers = new Map<string, ApprovalReceiver>();
 
   constructor(private readonly deps: ApprovalRelayDeps) {}
 
-  /** Spec §4.1: fresh 32-byte secret, free port. Idempotent for a re-prepared job (same endpoint). */
+  /** Spec §4.1: fresh 32-byte secret, free port. Re-prepare: same endpoint, or a fresh one if its port was taken (D286). */
   async open(job: JobRow): Promise<RelayEndpoint> {
+    const k = key(job.jobId, job.leaseEpoch);
     const stored = this.deps.journal.getApprovalReceiver(job.jobId, job.leaseEpoch);
     if (stored) {
-      if (!this.receivers.has(key(job.jobId, job.leaseEpoch))) this.bind(job, stored.port, stored.secret);
-      return { url: urlOf(stored.port), secret: stored.secret };
+      if (this.receivers.has(k)) return { url: urlOf(stored.port), secret: stored.secret };
+      try {
+        this.bind(job, stored.port, stored.secret);
+        return { url: urlOf(stored.port), secret: stored.secret };
+      } catch {
+        // nax was not spawned yet (this is prepare), so nothing holds the old address: take a new one.
+      }
     }
     const secret = (this.deps.randomSecret ?? (() => randomBytes(32).toString('hex')))();
     const receiver = this.bind(job, 0, secret);
@@ -3116,28 +3320,28 @@ export class ApprovalRelay {
     return { url: urlOf(receiver.port), secret };
   }
 
-  /** Spec §4.5 / plan D273: READOPT re-binds the journalled port and secret. Throws when the port is taken. */
+  /** Spec §4.5 / plan D273: READOPT re-binds the journalled port and secret (a live nax holds them). Throws when taken. */
   async resume(job: JobRow): Promise<void> {
     const stored = this.deps.journal.getApprovalReceiver(job.jobId, job.leaseEpoch);
     if (!stored || this.receivers.has(key(job.jobId, job.leaseEpoch))) return;
     this.bind(job, stored.port, stored.secret);
   }
 
-  async close(jobId: string): Promise<void> {
-    for (const [k, receiver] of this.receivers) {
-      if (!k.startsWith(`${jobId}:`)) continue;
-      receiver.stop();
-      this.receivers.delete(k);
-    }
-    this.deps.journal.deleteApprovalState(jobId);
+  /** Plan D285: one epoch only. */
+  async close(jobId: string, leaseEpoch: number): Promise<void> {
+    const k = key(jobId, leaseEpoch);
+    this.receivers.get(k)?.stop();
+    this.receivers.delete(k);
+    this.deps.journal.deleteApprovalState(jobId, leaseEpoch);
   }
 
-  /** Daemon start: a crash can leave state of jobs that have since ended. */
-  sweepOrphans(activeJobIds: ReadonlySet<string>): void {
-    for (const jobId of this.deps.journal.approvalStateJobIds()) if (!activeJobIds.has(jobId)) this.deps.journal.deleteApprovalState(jobId);
+  /** Daemon start: a crash can leave state of (job, epoch) pairs that have since ended. */
+  sweepOrphans(active: readonly JobRow[]): void {
+    const live = new Set(active.map((j) => key(j.jobId, j.leaseEpoch)));
+    for (const s of this.deps.journal.approvalStateKeys()) if (!live.has(key(s.jobId, s.leaseEpoch))) this.deps.journal.deleteApprovalState(s.jobId, s.leaseEpoch);
   }
 
-  /** Daemon shutdown: stop listening; the journal keeps the state for the next boot's READOPT. */
+  /** Daemon stop or crash: stop listening; the journal keeps the state for the next boot's READOPT. */
   stopAll(): void {
     for (const receiver of this.receivers.values()) receiver.stop();
     this.receivers.clear();
@@ -3174,14 +3378,16 @@ export class ApprovalRelay {
     const request = (body ?? {}) as NaxAskRequest;
     const callbackUrl = callbackUrlFor(request);
     if (!callbackUrl) {
-      events.lifecycle('warn', 'nax approval ask refused: unexpected callback address');
+      events.lifecycle('warn', 'nax interaction refused: unexpected callback address');
       return 400;
     }
     if (request.metadata?.['approvalPrompt'] !== true) {
-      // Plan D277: triggers are disabled in the job profile (A1); answer skip so nax does not wait on one.
-      events.lifecycle('warn', `nax sent a non-approval ask (${String(request.type)}); answered skip`);
-      void postToNax(callbackUrl, secret, { requestId: request.id, action: 'skip', respondedBy: 'koda', respondedAt: Date.now() })
-        .catch((error: unknown) => this.deps.log.warn('skip answer failed', { error: errorMessage(error) }));
+      const reply = headlessAnswer(request.id);
+      events.lifecycle(reply.known ? 'info' : 'warn', `nax prompt ${request.id} answered ${reply.value ?? reply.action} (headless behaviour, plan D277)`);
+      const { known: _known, ...answer } = reply;
+      void postToNax(callbackUrl, secret, { requestId: request.id, ...answer, respondedBy: 'koda', respondedAt: Date.now() })
+        .then((posted) => { if (!posted.ok) this.deps.log.warn('nax prompt answer failed', { jobId: job.jobId, detail: posted.detail }); })
+        .catch((error: unknown) => this.deps.log.warn('nax prompt answer failed', { jobId: job.jobId, error: errorMessage(error) }));
       return 200;
     }
     const payload = buildAskPayload(request);
@@ -3190,13 +3396,15 @@ export class ApprovalRelay {
       return 400;
     }
     this.deps.journal.tx(() => {
-      this.deps.journal.insertPendingAsk({ jobId: job.jobId, leaseEpoch: job.leaseEpoch, naxAskId: payload.naxAskId, callbackUrl, deadlineAt: payload.deadlineAt });
-      events.approvalRequest(payload);
+      const fresh = this.deps.journal.insertPendingAsk({ jobId: job.jobId, leaseEpoch: job.leaseEpoch, naxAskId: payload.naxAskId, callbackUrl, deadlineAt: payload.deadlineAt });
+      if (fresh) events.approvalRequest(payload);   // plan D286: a re-sent nax POST appends nothing
     });
     return 200;
   }
 }
 ```
+
+(`NaxAnswer.action` is `'choose' | 'skip' | 'approve'` since Task 14; nax's response schema accepts all three.)
 
 - [ ] **Step 5: Run tests**
 
@@ -3218,9 +3426,14 @@ git commit -m "feat(runner): approval relay with journalled receivers and pendin
 - Create: `apps/runner/src/approvals/nax-triggers.ts` (+ `.spec.ts`), `apps/runner/test/live/nax-triggers.live.spec.ts`
 - Modify: `apps/runner/src/executor/job-profile.ts` (+ `job-profile.spec.ts`)
 - Modify: `apps/runner/src/executor/job-executor.ts`, `src/executor/host-executor.ts` (+ `test/unit/host-executor.spec.ts`)
-- Modify: `apps/runner/src/supervisor/job-run.ts:93-110` (+ `job-run.spec.ts`)
+- Create: `apps/runner/test/helpers/no-approvals.ts` (like `no-credentials.ts`)
+- Modify (every `new HostExecutor({...})` must now pass `approvals`; add `approvals: NO_APPROVALS`):
+  `test/unit/host-executor.spec.ts:39,227,265`, `test/unit/host-executor-auth.spec.ts:55,134`, `test/unit/job-check.spec.ts:46`
+  (grep `new HostExecutor(` for any other site)
+- Modify: `apps/runner/src/supervisor/job-run.ts:91-110,170-185` (+ `job-run.spec.ts`)
 - Modify: `apps/runner/test/helpers/fake-executor.ts`
-- Modify: `apps/runner/src/daemon/daemon.ts:100-216`
+- Modify: `apps/runner/src/daemon/daemon.ts:100-216` (relay construction, HostExecutor deps, orphan sweep, stop/crash;
+  the `CommandHandler` wiring is Task 17)
 
 **Interfaces:**
 - Consumes: `ApprovalRelay`, `RelayEndpoint` (Task 15).
@@ -3229,8 +3442,10 @@ git commit -m "feat(runner): approval relay with journalled receivers and pendin
   - `interface RelayOverlay { bashMode: 'gated' | 'escalate'; approvalTimeoutSec: number; endpoint: RelayEndpoint }`
   - `jobProfileContent(outputDir: string, projectName: string, relay?: RelayOverlay): Record<string, unknown>`
   - `writeJobProfile(naxHome, jobId, outputDir, projectName, relay?: RelayOverlay)` (mode 0600)
-  - `JobExecutor.resumeApprovals(job: JobRow): Promise<void>`
-  - `HostExecutorDeps.approvals: Pick<ApprovalRelay, 'open' | 'close' | 'resume'>`
+  - `JobExecutor.resumeApprovals(job: JobRow): Promise<void>` and `JobExecutor.releaseApprovals(job: JobRow): Promise<void>` (D285)
+  - `HostExecutorDeps.approvals: Pick<ApprovalRelay, 'open' | 'close' | 'resume'>` (a `type` import: a value import
+    would create an executor -> approvals -> supervisor import cycle)
+  - `NO_APPROVALS` test helper
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3267,10 +3482,13 @@ describeLive('nax TriggerName drift (spec §4.1)', () => {
 });
 ```
 
-`job-profile.spec.ts`:
+`job-profile.spec.ts` (add `import { NAX_TRIGGER_NAMES } from '../approvals/nax-triggers';`, `stat` from
+`node:fs/promises`, and the spec's temp-dir helper for a `naxHome`):
 
 ```ts
 describe('relay overlay (spec §4.1, plan D275)', () => {
+  let naxHome!: string;
+  beforeEach(async () => { naxHome = await tmp.make('profile-relay'); });
   const relay = { bashMode: 'escalate' as const, approvalTimeoutSec: 90, endpoint: { url: 'http://127.0.0.1:43210/ask', secret: 'f'.repeat(64) } };
 
   test('a raw job keeps the bare overlay', () => {
@@ -3297,32 +3515,66 @@ describe('relay overlay (spec §4.1, plan D275)', () => {
 });
 ```
 
-`test/unit/host-executor.spec.ts` (the spec builds `HostExecutor` with deps; add
-`approvals = { open: mock(async () => ({ url: 'http://127.0.0.1:1/ask', secret: 's' })), close: mock(async () => {}), resume: mock(async () => {}) }`):
+`apps/runner/test/helpers/no-approvals.ts`:
 
 ```ts
-test('prepare opens the relay and writes the overlay for a non-raw RUN only (plan D273)', async () => {
-  await executor.prepare(rowFor(assignFor('RUN', { bashMode: 'gated', approvalTimeoutSec: 60 })));
-  expect(approvals.open).toHaveBeenCalledTimes(1);
-  const profile = JSON.parse(await readFile(jobProfilePath(config.naxHome, 'j1'), 'utf8'));
-  expect(profile.execution).toEqual({ bashApproval: 'gated', approvalTimeout: 60_000 });
-  await executor.prepare(rowFor(assignFor('RUN')));
-  expect(approvals.open).toHaveBeenCalledTimes(1);
-});
-test('cleanup closes the relay and still releases credentials', async () => {
-  await executor.cleanup(rowFor(assignFor('RUN', { bashMode: 'escalate' })));
-  expect(approvals.close).toHaveBeenCalledWith('j1');
-  expect(credentials.release).toHaveBeenCalledTimes(1);
-});
-test('resumeApprovals resumes only non-raw jobs', async () => {
-  await executor.resumeApprovals(rowFor(assignFor('RUN')));
-  expect(approvals.resume).not.toHaveBeenCalled();
-  await executor.resumeApprovals(rowFor(assignFor('RUN', { bashMode: 'escalate' })));
-  expect(approvals.resume).toHaveBeenCalledTimes(1);
+import type { ApprovalRelay } from '../../src/approvals/approval-relay';
+
+/** A raw-only executor never opens a relay; tests that do not exercise it pass this (mirrors NO_CREDENTIALS). */
+export const NO_APPROVALS: Pick<ApprovalRelay, 'open' | 'close' | 'resume'> = {
+  open: async () => { throw new Error('NO_APPROVALS: a test opened a relay without providing one'); },
+  close: async () => undefined,
+  resume: async () => undefined,
+};
+```
+
+`test/unit/host-executor.spec.ts`: give `world()` a fourth parameter `approvals = NO_APPROVALS` passed into
+`new HostExecutor({ ..., approvals })`, then:
+
+```ts
+describe('HostExecutor approval relay (plan D273, D285)', () => {
+  const spy = () => ({
+    open: mock(async () => ({ url: 'http://127.0.0.1:1/ask', secret: 's' })),
+    close: mock(async () => undefined),
+    resume: mock(async () => undefined),
+  });
+
+  test('prepare opens the relay and writes the overlay for a non-raw RUN', async () => {
+    const approvals = spy();
+    const w = await world('RUN', { bashMode: 'gated', approvalTimeoutSec: 60 }, {}, approvals);
+    expect(await w.ex.prepare(w.row)).toEqual({ ok: true, branch: 'feat/feat' });
+    expect(approvals.open).toHaveBeenCalledTimes(1);
+    const profile = JSON.parse(await readFile(jobProfilePath(w.naxHome, 'cjob1'), 'utf8'));
+    expect(profile.execution).toEqual({ bashApproval: 'gated', approvalTimeout: 60_000 });
+  });
+  test('a raw RUN never opens the relay', async () => {
+    const approvals = spy();
+    const w = await world('RUN', {}, {}, approvals);
+    await w.ex.prepare(w.row);
+    expect(approvals.open).not.toHaveBeenCalled();
+  });
+  test('cleanup and releaseApprovals close this epoch only', async () => {
+    const approvals = spy();
+    const w = await world('RUN', { bashMode: 'escalate' }, {}, approvals);
+    await w.ex.cleanup(w.row);
+    expect(approvals.close).toHaveBeenCalledWith('cjob1', 1);
+    await w.ex.releaseApprovals(w.row);
+    expect(approvals.close).toHaveBeenCalledTimes(2);
+  });
+  test('resumeApprovals resumes only non-raw jobs', async () => {
+    const approvals = spy();
+    const raw = await world('RUN', {}, {}, approvals);
+    await raw.ex.resumeApprovals(raw.row);
+    expect(approvals.resume).not.toHaveBeenCalled();
+    const gated = await world('RUN', { bashMode: 'escalate' }, {}, approvals);
+    await gated.ex.resumeApprovals(gated.row);
+    expect(approvals.resume).toHaveBeenCalledTimes(1);
+  });
 });
 ```
 
-(`rowFor` / `executor` / `config` / `credentials` follow the spec's existing helpers and fakes.)
+(`mock` comes from `bun:test`; `world()` builds a real origin and checkout, so the prepare test exercises the whole
+prepare path.)
 
 `job-run.spec.ts`, next to the `resumeCredentials` cases:
 
@@ -3336,6 +3588,17 @@ test('a watch start resumes approvals before the first tick', async () => {
   await b.run.start('watch');
   expect(resumedFirst).toBe(true);
 });
+test('abandon of a lower epoch releases its relay even when a higher epoch is live (plan D285)', async () => {
+  const b = build();
+  b.ex.onTick = () => undefined;
+  const running = b.run.start('prepare');
+  await waitFor(() => b.ex.calls.includes('spawn:j1') && b.ex.ticks >= 1);
+  b.journal.insertJob({ assign: assignFor('RUN'), leaseEpoch: 2, repoKey: 'acme/app', jobDir: '/w/.jobs/j1' });   // the requeued attempt
+  const callsBefore = b.ex.calls.length;
+  await b.run.abandon();
+  await running;
+  expect(b.ex.calls.slice(callsBefore)).toEqual(['releaseCredentials:j1', 'releaseApprovals:j1']);   // no reap, no cleanup
+});
 test('a failing approvals resume is a lifecycle error and the run is still watched (plan D273)', async () => {
   const b = build();
   b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
@@ -3343,7 +3606,7 @@ test('a failing approvals resume is a lifecycle error and the run is still watch
   b.ex.resumeApprovalsError = new Error('EADDRINUSE');
   b.ex.dieAfterTicks(1);
   await b.run.start('watch');
-  expect(b.journal.pendingEvents('j1', 1).some((e) => e.type === 'lifecycle' && JSON.stringify(e.payload).includes('approval relay could not be restored'))).toBe(true);
+  expect(events(b).some((e) => e.type === 'lifecycle' && JSON.stringify(e.payload).includes('approval relay could not be restored'))).toBe(true);
   expect(b.ex.calls.some((c) => c.startsWith('tick'))).toBe(true);
 });
 ```
@@ -3411,9 +3674,12 @@ export async function writeJobProfile(naxHome: string, jobId: string, outputDir:
 ```ts
   /** Plan D273: READOPT `watch` re-binds the job's approval receiver (no-op for raw jobs). */
   resumeApprovals(job: JobRow): Promise<void>;
+  /** Plan D285: an abandoned epoch closes its own receiver even when a live higher epoch keeps the profile. */
+  releaseApprovals(job: JobRow): Promise<void>;
 ```
 
-`host-executor.ts`: add `readonly approvals: Pick<ApprovalRelay, 'open' | 'close' | 'resume'>;` to `HostExecutorDeps`.
+`host-executor.ts`: add `import type { ApprovalRelay } from '../approvals/approval-relay';` and
+`readonly approvals: Pick<ApprovalRelay, 'open' | 'close' | 'resume'>;` to `HostExecutorDeps`.
 In `prepare`, replace the `writeJobProfile` line:
 
 ```ts
@@ -3431,7 +3697,7 @@ In `prepare`, replace the `writeJobProfile` line:
       await deleteJobProfile(this.deps.config.naxHome, job.jobId);
     } finally {
       try {
-        await this.deps.approvals.close(job.jobId);
+        await this.deps.approvals.close(job.jobId, job.leaseEpoch);
       } finally {
         await this.deps.credentials.release(job);
       }
@@ -3440,6 +3706,10 @@ In `prepare`, replace the `writeJobProfile` line:
 
   async resumeApprovals(job: JobRow): Promise<void> {
     if (job.assign.bashMode !== 'raw') await this.deps.approvals.resume(job);
+  }
+
+  async releaseApprovals(job: JobRow): Promise<void> {
+    await this.deps.approvals.close(job.jobId, job.leaseEpoch);
   }
 ```
 
@@ -3450,7 +3720,24 @@ In `prepare`, replace the `writeJobProfile` line:
     this.calls.push(`resumeApprovals:${job.jobId}`);
     if (this.resumeApprovalsError) throw this.resumeApprovalsError;
   }
+
+  async releaseApprovals(job: JobRow): Promise<void> {
+    this.calls.push(`releaseApprovals:${job.jobId}`);
+  }
 ```
+
+`job-run.ts` `abandonCleanup` (line ~170), right after the `releaseCredentials` call and before the
+`higherEpochLive()` early return:
+
+```ts
+      // Plan D285: the receiver is per epoch, like the credential socket (D90).
+      await this.deps.executor.releaseApprovals(row).catch((error: unknown) => {
+        this.deps.log.warn('approval relay release failed', { jobId: this.jobId, error: errorMessage(error) });
+      });
+```
+
+The existing D64 case at `job-run.spec.ts:494` asserts the exact list `['releaseCredentials:j1']`; change it to
+`['releaseCredentials:j1', 'releaseApprovals:j1']`.
 
 `job-run.ts` `lifecycle`:
 
@@ -3476,16 +3763,15 @@ In `prepare`, replace the `writeJobProfile` line:
 
 `daemon.ts`:
 - After the journal is opened (~line 100): `const approvals = new ApprovalRelay({ journal, log, now });`
-- Next to `sweepOrphanProfiles` (~line 115): `approvals.sweepOrphans(new Set(journal.activeJobs().map((j) => j.jobId)));`
-- Pass `approvals` into `new HostExecutor({ ..., approvals })` (~line 130) and into `new CommandHandler({ ..., approvals })`
-  (Task 17 adds the field).
-- On shutdown, before both `journal.close()` calls (~lines 202 and 215): `approvals.stopAll();`
+- Next to `sweepOrphanProfiles` (~line 115): `approvals.sweepOrphans(journal.activeJobs());`
+- Pass `approvals` into `new HostExecutor({ ..., approvals })` (~line 130). (`CommandHandler` gets it in Task 17.)
+- In both `stop` (~line 193) and `crash` (~line 213), right after `supervisor.shutdown();`: `approvals.stopAll();` (no
+  new asks are accepted while runs drain; a killed daemon's listeners die with it, and READOPT re-binds).
 
 - [ ] **Step 5: Run tests**
 
 Run: `cd apps/runner && bun run test && bun run type-check && bun run lint`
-Expected: PASS (Task 17 adds `approvals` to `CommandHandlerDeps`; if type-check fails only on that call, do Task 17
-Step 3 now and run again).
+Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -3500,6 +3786,7 @@ git commit -m "feat(runner): relay overlay in the job profile, executor and read
 
 **Files:**
 - Modify: `apps/runner/src/supervisor/command-handler.ts:10-89` (+ `command-handler.spec.ts`)
+- Modify: `apps/runner/src/daemon/daemon.ts:144` (`new CommandHandler({ ..., approvals })`)
 
 **Interfaces:**
 - Consumes: `ApprovalRelay.answer` (Task 15).
@@ -3507,7 +3794,10 @@ git commit -m "feat(runner): relay overlay in the job profile, executor and read
 
 - [ ] **Step 1: Write the failing tests**
 
-`command-handler.spec.ts` (add `approvals = { answer: mock(async () => ({ result: 'ok' as const })) }` to the deps):
+`command-handler.spec.ts`: its `build()` returns `{ time, journal, ex, supervisor, handler }`; create
+`const approvals = { answer: mock(async (): Promise<{ result: 'ok' | 'rejected'; detail?: string }> => ({ result: 'ok' })) };`
+inside `build()`, pass it in the `CommandHandler` deps and return it. In the cases below, start with
+`const { handler, approvals } = build();`:
 
 ```ts
 describe('APPROVAL_ANSWER (spec §4.4)', () => {
@@ -3534,7 +3824,9 @@ Expected: FAIL (`unknown command type`).
 
 - [ ] **Step 3: Implement**
 
-`command-handler.ts`: add `readonly approvals: Pick<ApprovalRelay, 'answer'>;` to `CommandHandlerDeps`, and in `apply`:
+`command-handler.ts`: add `import type { ApprovalRelay } from '../approvals/approval-relay';` and
+`readonly approvals: Pick<ApprovalRelay, 'answer'>;` to `CommandHandlerDeps`; in `daemon.ts` pass `approvals` into
+`new CommandHandler({ ... })`. In `apply`:
 
 ```ts
       case 'APPROVAL_ANSWER': {
@@ -3633,20 +3925,28 @@ export async function askOnce(profile: FakeProfile, outDir: string): Promise<voi
 }
 ```
 
-`fake-nax.ts`: widen the profile type at line 47 to `FakeProfile` (import it), and at the start of `run()` (before the
-first `flush()` is fine, after the `hang` SIGTERM handler):
+`fake-nax.ts`: widen the profile type at line 47 to `FakeProfile` (import it). In `run()`, **after** the first
+`flush()` (so `status.json` exists and the watcher has the run id; READOPT needs it) and before the `hang` block:
 
 ```ts
-  if (scenario === 'ask') await askOnce(profile, outDir);
+  if (scenario === 'ask') {
+    // Keep status.json fresh while blocked: READOPT's `fresh(status)` needs a heartbeat within 120 s.
+    const heartbeat = setInterval(flush, 200);
+    try {
+      await askOnce(profile, outDir);
+    } finally {
+      clearInterval(heartbeat);
+    }
+  }
 ```
 
 - [ ] **Step 2: Extend the world harness**
 
 `world.ts`:
-- `dispatch` input type gains `bashMode?: 'raw' | 'gated' | 'escalate'; approvalTimeoutSec?: number;` and passes
-  them through in the POST body (line ~175).
-- Add to `World` and implement with the same base URL and admin token `dispatch` already uses (the admin routes see
-  every project):
+- `dispatch` input type gains `bashMode?: 'raw' | 'gated' | 'escalate'; approvalTimeoutSec?: number;` and its body
+  (line ~177) gains `...(input.bashMode ? { bashMode: input.bashMode } : {}), ...(input.approvalTimeoutSec ? { approvalTimeoutSec: input.approvalTimeoutSec } : {}),`.
+- Add to `World` (the local `http(method, path, { body?, token? })` prefixes `/api` itself; `admin` is the global
+  ADMIN token the harness registered; admin decide answers **200**):
 
 ```ts
   approvals(jobId: string): Promise<Array<{ id: string; status: string; resolvedBy: string | null; outcome: Record<string, unknown> | null }>>;
@@ -3655,16 +3955,13 @@ first `flush()` is fine, after the `hang` SIGTERM handler):
 
 ```ts
     async approvals(jobId) {
-      const res = await http('GET', `/api/fleet/approvals?jobId=${encodeURIComponent(jobId)}`);
+      const res = await http('GET', `/fleet/approvals?jobId=${encodeURIComponent(jobId)}`, { token: admin });
       return (res.body as { data: { records: Array<{ id: string; status: string; resolvedBy: string | null; outcome: Record<string, unknown> | null }> } }).data.records;
     },
     async decide(approvalId, decision) {
-      return (await http('POST', `/api/fleet/approvals/${approvalId}/decide`, { decision })).status;
+      return (await http('POST', `/fleet/approvals/${approvalId}/decide`, { token: admin, body: { decision } })).status;
     },
 ```
-
-(`http` = whatever request helper `dispatch` uses inside `createWorld`; if it builds `fetch` inline, factor that into a
-local helper first. The response envelope is `{ ret, data }` — match what `dispatch` reads.)
 
 - [ ] **Step 3: Write the integration spec**
 
@@ -3712,7 +4009,7 @@ describe('approval relay (S1.5 2a)', () => {
     await world.withFake({ FAKE_NAX_SCENARIO: 'ask', FAKE_NAX_STEPS: '1' }, async () => {
       const jobId = await world.dispatch({ feature: 'fa', bashMode: 'escalate', approvalTimeoutSec: 60 });
       const ask = await pendingAsk(jobId);
-      expect(await world.decide(ask.id, 'allow')).toBe(201);
+      expect(await world.decide(ask.id, 'allow')).toBe(200);
       await world.waitForJob(jobId, (j) => j.state === 'COMPLETED', 60_000);
       expect(fakeAsk(jobId)).toEqual(expect.objectContaining({ action: 'choose', value: 'allow', respondedBy: 'koda' }));
       await waitFor(async () => (await world.approvals(jobId))[0]?.outcome?.['delivery'] !== undefined, { timeoutMs: 15_000 });
@@ -3724,7 +4021,7 @@ describe('approval relay (S1.5 2a)', () => {
     await world.withFake({ FAKE_NAX_SCENARIO: 'ask', FAKE_NAX_STEPS: '1' }, async () => {
       const jobId = await world.dispatch({ feature: 'fb', bashMode: 'gated', approvalTimeoutSec: 60 });
       const ask = await pendingAsk(jobId);
-      expect(await world.decide(ask.id, 'deny')).toBe(201);
+      expect(await world.decide(ask.id, 'deny')).toBe(200);
       await world.waitForJob(jobId, (j) => j.state === 'COMPLETED', 60_000);
       expect(fakeAsk(jobId)).toEqual(expect.objectContaining({ value: 'deny' }));
     });
@@ -3736,7 +4033,7 @@ describe('approval relay (S1.5 2a)', () => {
       const ask = await pendingAsk(jobId);
       runner.crash();
       await runner.start();                       // READOPT -> watch -> resumeApprovals re-binds port + secret
-      expect(await world.decide(ask.id, 'allow')).toBe(201);
+      expect(await world.decide(ask.id, 'allow')).toBe(200);
       await world.waitForJob(jobId, (j) => j.state === 'COMPLETED', 90_000);
       expect(fakeAsk(jobId)).toEqual(expect.objectContaining({ value: 'allow' }));
     });
@@ -3754,12 +4051,11 @@ describe('approval relay (S1.5 2a)', () => {
 ```
 
 Notes for the implementer:
-- `world.dispatch` and `waitForJob` signatures are the harness's; `waitFor` comes from `test/helpers/wait.ts` and
-  accepts an async predicate only if it awaits it — check, and wrap with a sync flag if it does not.
-- If `runner.crash()` also kills the detached fake nax in this harness (it should not: nax is spawned `detached`),
-  replace the restart test's `crash()` with `await runner.stop()` and note why in a comment.
-- `FAKE_NAX_STEPS: '1'` keeps each run short; the fake's ask happens before the steps loop, so the job is RUNNING
-  while the ask is pending.
+- `waitFor(cond, { timeoutMs })` (`test/helpers/wait.ts`) accepts an async predicate.
+- `runner.crash()` is the in-process stand-in for `kill -9`: it stops the daemon's listeners (Task 16 adds
+  `approvals.stopAll()` there) but not the detached fake nax, which keeps its heartbeat while it waits.
+- `FAKE_NAX_STEPS: '1'` keeps each run short; the fake asks after its first status flush and before the steps loop,
+  so the job is RUNNING while the ask is pending.
 
 - [ ] **Step 4: Run it**
 
@@ -3785,9 +4081,12 @@ git commit -m "test(runner): end-to-end approval relay with a fake nax ask (S1.5
 
 - [ ] **Step 1: Spec corrections (D255, D259, D283)**
 
-- In "Why the relay works", change "verified at nax `c6ab5d52c`, 2026-10-02, released 0.83.2" to
-  "verified at nax v0.83.2 (`bcfcddb01`, released 2026-10-01) and main `a755a5464` (2026-10-03); `c6ab5d52c` is a
-  later main commit with the same protocol code".
+- In the "Why the relay works" heading, replace "(verified at nax `c6ab5d52c`, 2026-10-02, released 0.83.2; still
+  true at `df55f5da3`)" with "(verified at nax v0.83.2 `bcfcddb01`, released 2026-10-01, and main `a755a5464`,
+  2026-10-03; `c6ab5d52c` and `df55f5da3` are main commits in between with the same protocol code)".
+- In that section's trigger bullet, after "keeps a trigger silent with a chain present", add: "Two prompts are not
+  trigger-guarded (story-size gate `precheck-runner.ts:139`, paused stories `run-setup-init.ts:227`); the runner answers
+  them as a headless run behaves (plan D277)." In ruling A1, add "(see plan D277 for the two unguarded prompts)".
 - Replace the sentence "The `request:` line is the ask summary and is not masked the way the command is." with
   "The `request:` line is the ask summary: masked, cut to 200 chars, and may span lines because it embeds the
   command (`tools/ask-request.ts:38-51`)."
@@ -3796,18 +4095,21 @@ git commit -m "test(runner): end-to-end approval relay with a fake nax ask (S1.5
   `featureName` come from nax's top-level request fields." and change the `rawDetail` bullet to "`rawDetail` is kept
   only when the runner could not parse `detail` (4.3), verbatim and capped."
 - §3 `approval_request` payload: remove `rule`.
-- §4.3: replace "The `request:` value is dropped." with "Split candidates are checked against the request text (plan
-  D256); zero or several consistent candidates are 'unparsed'." and "(with any `request:` line removed, truncated to
-  the cap)" with "(verbatim, truncated to the cap)".
+- §4.3: replace "The `request:` value is dropped." with "There must be exactly one split candidate, and its request
+  text must match the command (plan D256); anything else is 'unparsed'." and "(with any `request:` line removed,
+  truncated to the cap)" (it wraps across two lines in the spec) with "(verbatim, truncated to the cap)".
+- §4.2 step 2: replace "answers `skip` to its `callbackUrl` at once and records a lifecycle `warn`" with "answers it at
+  once as a headless run would (plan D277) and records a lifecycle entry".
 - §5 bash row-expand bullet: remove "rule".
 - §8: delete the two "To verify in the 2a plan" bullets and add:
 
 ```markdown
-- 2a plan notes (`docs/superpowers/plans/2026-10-03-fleet-s1-5-slice-2a-approval-relay.md`, D255-D283): the `detail`
+- 2a plan notes (`docs/superpowers/plans/2026-10-03-fleet-s1-5-slice-2a-approval-relay.md`, D255-D287): the `detail`
   format is identical in nax v0.83.2 and main; the relay needs nax >= 0.83.0 (the runner floor 0.83.1 already
   exceeds it); the `request:` line is masked, so `rawDetail` keeps it; the payload has no `rule`; the detail parser
-  refuses ambiguous splits; a decide that finds the ask expired or its job gone commits that close and then answers
-  409; `APPROVAL_ANSWER` acks are stored as `outcome.delivery`.
+  refuses ambiguous splits; the size-gate and paused-story prompts are answered as headless runs behave; relay state
+  is per (job, epoch); a decide that finds the ask expired or its job gone commits that close and then answers 409;
+  `APPROVAL_ANSWER` acks are stored as `outcome.delivery`; static-capability runners never offer the relay.
 ```
 
 - [ ] **Step 2: Runner deployment doc**
