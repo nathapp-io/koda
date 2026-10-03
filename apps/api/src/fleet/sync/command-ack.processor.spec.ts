@@ -25,17 +25,22 @@ const command = (over: Partial<FleetCommandRecord> = {}): FleetCommandRecord => 
 });
 
 function makeProcessor(commandRecord: FleetCommandRecord) {
+  let cmd = commandRecord;
+  let job: FleetJobRecord = runningJob;
   const repo = {
-    findCommand: jest.fn(async () => commandRecord),
-    lockById: jest.fn(async () => runningJob),
+    findCommand: jest.fn(async () => cmd),
+    lockById: jest.fn(async () => job),
     ackCommand: jest.fn(),
   };
   const transitions = { apply: jest.fn(async () => ({ job: runningJob, live: JOB_LIVE, approvalLive: [APPROVAL_LIVE] })) };
   const fence = { holds: jest.fn(() => true), abandon: jest.fn() };
   const activity = { record: jest.fn() };
+  const approvals = { lockById: jest.fn(), setOutcome: jest.fn() };
   const tx = { run: (fn: () => unknown) => fn() };
-  const processor = new CommandAckProcessor(repo as never, transitions as never, fence as never, activity as never, tx as never);
-  return { processor, repo, transitions, fence };
+  const processor = new CommandAckProcessor(repo as never, transitions as never, fence as never, activity as never, approvals as never, tx as never);
+  const seedCommand = (c: FleetCommandRecord) => { cmd = c; };
+  const seedJob = (j: FleetJobRecord) => { job = j; };
+  return { processor, repo, transitions, fence, approvals, seedCommand, seedJob };
 }
 
 describe('CommandAckProcessor live lists (S1.5 2a)', () => {
@@ -50,5 +55,18 @@ describe('CommandAckProcessor live lists (S1.5 2a)', () => {
     const result = await processor.process('r1', 'boot-2', [{ commandId: 'cmd-1', leaseEpoch: 1, result: 'rejected', detail: 'no' }], NOW);
     expect(transitions.apply).toHaveBeenCalledWith(expect.objectContaining({ to: 'CRASHED', by: 'server' }));
     expect(result).toEqual({ live: [JOB_LIVE], approvalLive: [APPROVAL_LIVE] });
+  });
+});
+
+describe('APPROVAL_ANSWER acks (spec §3, plan D268)', () => {
+  it.each([['ok', undefined], ['rejected', 'callback_failed:429']] as const)('stores %s as outcome.delivery', async (result, detail) => {
+    const { processor, approvals, transitions, seedCommand, seedJob } = makeProcessor(command({ type: 'APPROVAL_ANSWER', leaseEpoch: 2, payload: { approvalId: 'a1', naxAskId: 'ask-1', choice: 'allow' } }));
+    seedCommand({ id: 'c1', type: 'APPROVAL_ANSWER', runnerId: 'r1', jobId: 'j1', leaseEpoch: 2, payload: { approvalId: 'a1', naxAskId: 'ask-1', choice: 'allow' }, createdAt: NOW, deliveredAt: NOW, ackedAt: null, ackResult: null });
+    seedJob({ ...runningJob, id: 'j1', runnerId: 'r1', leaseEpoch: 2, state: 'RUNNING' });
+    approvals.lockById.mockResolvedValue({ id: 'a1', outcome: null });
+    const out = await processor.process('r1', 'boot', [{ commandId: 'c1', leaseEpoch: 2, result, ...(detail ? { detail } : {}) }], NOW);
+    expect(approvals.setOutcome).toHaveBeenCalledWith('a1', { delivery: { result, detail: detail ?? null, at: NOW.toISOString() } });
+    expect(out.live).toEqual([]);
+    expect(transitions.apply).not.toHaveBeenCalled();
   });
 });
