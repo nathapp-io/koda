@@ -1,7 +1,7 @@
 /**
  * S1.5 2a end to end: real API + real runner daemon + fake nax. An escalate job raises an ask through the relay; a
  * decision in koda reaches nax's callback; the delivery is recorded; a daemon restart keeps the ask answerable.
- * Run: cd apps/runner && bun run test:integration test/integration/approval-relay.integration.spec.ts
+ * Run: cd apps/runner && KODA_DB_TESTS=1 bun test test/integration/approval-relay.integration.spec.ts
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -9,17 +9,10 @@ import { join } from 'node:path';
 import { createWorld, type TestRunner, type World } from './harness/world';
 import { waitFor } from '../helpers/wait';
 
+const enabled = process.env['KODA_DB_TESTS'] === '1';
+
 let world: World;
 let runner: TestRunner;
-
-beforeAll(async () => {
-  world = await createWorld();
-  runner = await world.addRunner('relay');
-  await runner.start();
-}, 120_000);
-afterAll(async () => {
-  await world.close();
-});
 
 const fakeAsk = (jobId: string): Record<string, unknown> | null => {
   try {
@@ -36,7 +29,16 @@ async function pendingAsk(jobId: string): Promise<{ id: string }> {
   return found;
 }
 
-describe('approval relay (S1.5 2a)', () => {
+describe.skipIf(!enabled)('approval relay (S1.5 2a)', () => {
+  beforeAll(async () => {
+    world = await createWorld();
+    runner = await world.addRunner('relay');
+    await runner.start();
+  }, 120_000);
+  afterAll(async () => {
+    await world?.close();
+  });
+
   test('allow: the decision reaches nax signed, delivery ok, the job completes', async () => {
     await world.withFake({ FAKE_NAX_SCENARIO: 'ask', FAKE_NAX_STEPS: '1' }, async () => {
       const jobId = await world.dispatch({ feature: 'fa', bashMode: 'escalate', approvalTimeoutSec: 60 });

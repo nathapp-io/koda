@@ -31,7 +31,7 @@ afterEach(() => { relay.stopAll(); nax?.stop(true); journal.close(); });
 const job = () => journal.getJob('j1', 1) as JobRow;
 const events = () => journal.pendingEvents('j1', 1, 1_000);
 const callbackFor = (id: string) => `http://127.0.0.1:${nax?.port ?? 0}/nax/interact/${id}`;
-const naxAsk = (id = 'ask-1f2e3d4c') => ({ ...fixtures.a_simple, id, callbackUrl: callbackFor(id) });
+const naxAsk = (id = 'ask-1f2e3d4c') => ({ ...fixtures.a_simple, id, createdAt: NOW.getTime(), callbackUrl: callbackFor(id) });
 const prompt = (id: string) => ({ id, type: 'choose', featureName: 'fa', stage: 'pre-flight', summary: 's', createdAt: 1, timeout: 300_000, fallback: 'continue', callbackUrl: callbackFor(id) });
 async function send(endpoint: { url: string; secret: string }, body: object): Promise<number> {
   const raw = JSON.stringify(body);
@@ -69,7 +69,7 @@ describe('ApprovalRelay (spec §4)', () => {
     const endpoint = await relay.open(job());
     expect(await send(endpoint, naxAsk())).toBe(200);
     expect(await send(endpoint, naxAsk())).toBe(200);   // a re-sent POST: no second event (D286)
-    expect(journal.getPendingAsk('j1', 1, 'ask-1f2e3d4c')).toEqual(expect.objectContaining({ deadlineAt: new Date(fixtures.a_simple.createdAt + fixtures.a_simple.timeout).toISOString() }));
+    expect(journal.getPendingAsk('j1', 1, 'ask-1f2e3d4c')).toEqual(expect.objectContaining({ deadlineAt: new Date(NOW.getTime() + fixtures.a_simple.timeout).toISOString() }));
     expect(events().filter((e) => e.type === 'approval_request')).toHaveLength(1);
     expect(events().at(-1)).toEqual(expect.objectContaining({ type: 'approval_request', payload: expect.objectContaining({ naxAskId: 'ask-1f2e3d4c', command: 'bun run test' }) }));
   });
@@ -105,6 +105,14 @@ describe('ApprovalRelay (spec §4)', () => {
   test('an unknown ask is rejected ask_not_pending', async () => {
     await relay.open(job());
     expect(await relay.answer(answerCommand('allow', 'ask-99999999'))).toEqual({ result: 'rejected', detail: 'ask_not_pending' });
+  });
+
+  test('an answer after nax\'s deadline is refused ask_expired, never posted, and the ask is cleared (D302)', async () => {
+    const endpoint = await relay.open(job());
+    await send(endpoint, { ...naxAsk(), createdAt: NOW.getTime() - fixtures.a_simple.timeout });   // deadline == NOW
+    expect(await relay.answer(answerCommand('allow'))).toEqual({ result: 'rejected', detail: 'ask_expired' });
+    expect(answers).toHaveLength(0);
+    expect(journal.getPendingAsk('j1', 1, 'ask-1f2e3d4c')).toBeNull();
   });
 
   test('a job that is no longer RUNNING is rejected job_not_running', async () => {
