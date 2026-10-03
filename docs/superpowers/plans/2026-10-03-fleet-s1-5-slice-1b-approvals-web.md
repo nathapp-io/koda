@@ -77,17 +77,17 @@ Numbered D239-D254 (slice 1a ended at D238).
 | # | Decision | Why |
 |:--|:--|:--|
 | D239 | Pages: project inbox `/:project/fleet/approvals`, admin inbox `/admin/fleet/approvals`. Navigation: an "Approvals" outline button first in the jobs-list header for every member; a sidebar "Approvals" link (icon `Inbox`) after Budgets for a global ADMIN; breadcrumb Fleet jobs > Approvals. | Same placement rules as Budgets and Schedules (D187, D216). |
-| D240 | Pending tab loads **one page of 100** (`status=pending&size=100`) and shows `fleet.common.more` when `hasNext`; All tab pages 20 at a time, newest first. Pending is sorted client-side by `sortPending`: rows with `expiresAt` soonest first, then rows without one in the server's newest-first order. | Spec §5 "Pending sorted by soonest expiry"; the API has no expiry ordering and a pending queue past 100 is not a 1b concern. |
+| D240 | Pending tab loads **one page of 100** (`status=pending&size=100`) and shows `fleet.approvals.more` when `hasNext`; All tab pages 20 at a time, newest first. Pending is sorted client-side by `sortPending`: rows with `expiresAt` soonest first, then rows without one in the server's newest-first order. | Spec §5 "Pending sorted by soonest expiry"; the API has no expiry ordering and a pending queue past 100 is not a 1b concern. |
 | D241 | One row expanded at a time; expanding fetches `GET :id` (candidates exist only there) and writes `?id=` with `router.replace`; collapsing removes it. A `?id=` on load expands that id; when it is not in the loaded list it is shown first as a "Linked approval" row. A 404 toasts the server message and clears the expansion. | Webhook `path` and the banner link both use `?id=` (spec §2.5). |
 | D242 | The open panel is keyed `${id}:${status}`: a poll or live notice re-fetches the expanded approval **only when its status in the list changed**, so a human typing a new limit is never reset by a refresh. | A 30 s poll must not wipe a half-filled decision. |
-| D243 | Budget panel: plain `ref` form state (no vee-validate: three fields, no FormField indirection to stub). Amount must parse (`parseAmount`) and be above the **payload's** `spentUsd` (`isAboveSpend`, integer units); errors show after the first submit attempt. Candidates are native checkboxes, all ticked (A4); `requeueJobIds` is **always sent** for a raise, `[]` when none ticked. Comment trimmed, blank omitted, over 1000 chars blocks submit. Truncated candidates show one note (the API gives a flag, not a count). | The server is still the authority (spend may have grown since the stop; its 400 message is shown). Sending `[]` explicitly keeps the body honest about D231. |
+| D243 | Budget panel: `ref` form state validated by a zod schema (`buildRaiseSchema`, satisfying `.nax/rules/web.md` "schema-backed validation"), without vee-validate (three fields; no `FormField` indirection, which the harness stubs inertly). Amount must parse (`parseAmount`) and be above the **payload's** `spentUsd` (`isAboveSpend`, integer units); errors show after the first Raise attempt. Candidates are native checkboxes, all ticked (A4); `requeueJobIds` is **always sent** for a raise, `[]` when none ticked. Comment trimmed, blank omitted, over 1000 chars blocks submit. Truncated candidates show one note (the API gives a flag, not a count). | The server is still the authority (spend may have grown since the stop; its 400 message is shown). Sending `[]` explicitly keeps the body honest about D231. |
 | D244 | Who may decide (`canDecide`): status `pending` **and** type budget **and** (admin inbox **or** `viewer.canManage`). Bash rows are never decidable in 1b and show `fleet.approvals.bashLater`. Non-deciders see `fleet.approvals.readOnly`. | Spec §1.7, §5 "hidden, not disabled"; 2b adds the bash rules. |
 | D245 | Decided view (`FleetApprovalOutcome`): status, decision, `resolvedBy`, decided time, decider name, comment, raised limit, re-queue results. Re-queue results are shown **only for `resolvedBy: 'user'` raises**; a `manual_resume` shows "Resumed from the budgets page" and no list. A failed re-queue shows a translated reason from the stored code (`fleet.jobs` + `activeJobId` -> activeJob, `fleet.jobs` -> gone, `fleet.jobState` -> notCancelled, `fleet.budgetPaused` -> paused, anything else -> unknown), never raw JSON. | Settles #193 deferred item 2 in the UI without an API change: D234's `[]` on a manual resume must not read as "nothing was selected". |
 | D246 | `useProjectEvents` shares **one EventSource per project URL per tab** through a ref-counted hub (`lib/project-event-hub.ts`); each subscriber gets every event type it has a handler for; the stream closes when the last subscriber leaves. | The header badge and the page both subscribe; two streams per tab would halve the browser's six-connection budget per origin. |
 | D247 | Header badge (`FleetApprovalBadge`) for every signed-in user: `GET /fleet/approval-counts` on mount, 60 s visible-tab poll, `fleet_approval` notices of the current project (debounced 300 ms), and a module-level `approvalsVersion` bump after every successful decide. Hidden when the total is 0 or before the first successful load; a failed refresh keeps the last count. Shows the total, capped `99+`. Links to the current project's inbox; outside a project to the admin inbox for a global ADMIN, else to the first project with pending approvals. | Spec §5. The version bump covers the admin inbox, which has no live channel. |
 | D248 | `BudgetBanner` also loads the project's pending budget approvals (`status=pending&type=budget_override_required&size=100`); a **paused** line whose policy has one gets a "Review override" link to `/<slug>/fleet/approvals?id=<id>`. A failed approvals load keeps the lines without links. Fleet-wide (global) policies never get the link in a project banner: their approval has no project (the badge and admin inbox carry it). | Spec §5; no `pendingApprovalId` on `BudgetPolicyDto`, so no API change. |
 | D249 | `useFleetApprovals` keeps a module-level mutation epoch (D224): a load that started before a successful decide is dropped. `decide` puts the returned row in the list in place. | A slow poll must not resurrect a pending row. |
-| D250 | Decide errors: every refusal toasts `extractApiError`; a **409** (`ret 40009` or `409`) also re-fetches the open approval and reloads the list (spec §5 "reload the row"). A success toasts the decision; a raise with failed re-queues also toasts how many failed. | The first decider wins; the second must see what happened. |
+| D250 | Decide errors: every refusal toasts `extractApiError` and re-fetches the open approval (the panel is keyed with a fetch counter, so fresh candidates and spend remount the form; a stale ticked candidate cannot make every retry fail); a **409** (`ret 409`, or `40009`) also reloads the list (spec §5 "reload the row"). A success toasts the decision; a raise with failed re-queues also toasts how many failed. | The first decider wins; the second must see what happened. |
 | D251 | Admin inbox names: project column and candidate job links from `useFleetRepos().loadProjects()` (id -> slug); decider names from the first page of `/admin/users`; unknown ids show `fleet.approvals.outcome.unknownUser`. Project inbox names from `useProjectMemberNames`. Budget scope text reuses `scopeName`/`scopeText` from `lib/fleet-budgets.ts`. | Names are cosmetic: a failed lookup leaves ids or the fallback on screen. |
 | D252 | Live: the project inbox reloads on `fleet_approval` notices and resync (debounced 300 ms) plus a 30 s visible-tab poll; the admin inbox polls every 15 s (no live channel, spec "Out of scope"). | Same cadences as the budgets pages (D178). |
 | D253 | `LiveFleetApprovalEvent` parsing accepts any non-empty `status` string (D139 rule: a notice only triggers a refetch). | A new API status must not be dropped. |
@@ -176,6 +176,7 @@ Numbered D239-D254 (slice 1a ended at D238).
   - `badgeTarget(counts: ApprovalCountsDto, ctx: { slug: string | null; globalAdmin: boolean }): string | null`
   - `badgeText(total: number): string`; `BADGE_CAP = 99`
   - `approvalSummary(t: TranslateNamed, a: FleetApprovalDto, scopeLabel: (p: BudgetApprovalPayload) => string | null): string`
+  - (Task 2) `buildRaiseSchema(t: TranslateNamed, spentUsd: string)`: zod object `{ amount: string; comment: string }`
   - `INBOX_PENDING_SIZE = 100`, `INBOX_PAGE_SIZE = 20`
 
 - [ ] **Step 1: Write the failing test**
@@ -185,12 +186,11 @@ Create `apps/web/tests/lib/fleet-approvals.spec.ts`:
 ```ts
 import { describe, test, expect } from '@jest/globals'
 import {
-  approvalSummary, badgeTarget, badgeText, budgetPayload, buildApprovalQuery, canDecide, commentTooLong, inboxPath,
+  badgeTarget, badgeText, budgetPayload, buildApprovalQuery, canDecide, commentTooLong, inboxPath,
   pendingByPolicy, raiseAmountError, requeueFailure, requeueResults, resumedAmount, sortPending, toKeepPausedBody,
   toRaiseBody,
 } from '../../lib/fleet-approvals'
 import type { FleetApprovalDto } from '../../lib/fleet-types'
-import { enI18n } from '../helpers/fleet-harness'
 
 const budget = { scopeType: 'project', scopeId: 'p1', windowKind: 'calendar_month_utc', windowStart: '2026-10-01T00:00:00.000Z', spentUsd: '0.6000', amountUsd: '0.5000' }
 
@@ -340,17 +340,6 @@ describe('paths and badge (D241, D247)', () => {
     expect(badgeText(7)).toBe('7')
     expect(badgeText(99)).toBe('99')
     expect(badgeText(100)).toBe('99+')
-  })
-})
-
-describe('approvalSummary', () => {
-  const { t } = enI18n()
-  test('a budget override names the scope and the stop', () => {
-    expect(approvalSummary(t, approval('a'), () => 'koda')).toBe('Budget for project koda stopped at $0.60 of $0.50')
-  })
-  test('a bash ask and a malformed budget fall back to fixed text', () => {
-    expect(approvalSummary(t, approval('a', { type: 'nax_bash_escalate', payload: {} }), () => null)).toBe('A job asks to run a shell command')
-    expect(approvalSummary(t, approval('a', { payload: {} }), () => null)).toBe('Budget override')
   })
 })
 ```
@@ -564,6 +553,8 @@ export interface RequeueResultView {
 /**
  * D245: the re-queue record of a raise decided in the inbox. Null for anything else, including a manual resume, whose
  * stored `[]` means "not offered", not "none selected" (#193 deferred item 2). Malformed entries are skipped.
+ * Known gap: between the decide's first commit and its final `setOutcome` (or if the API dies there) a raise is
+ * stored with `requeueResults: []`, which reads as "none selected". Rare and self-healing once the decide finishes.
  */
 export function requeueResults(a: Pick<FleetApprovalDto, 'decision' | 'resolvedBy' | 'outcome'>): RequeueResultView[] | null {
   if (a.decision !== 'raise_budget_and_resume' || a.resolvedBy !== 'user') return null
@@ -625,13 +616,12 @@ export function approvalSummary(
 }
 ```
 
-Note: the `approvalSummary` test asserts English copy, so it only passes after Task 2 adds the keys. Run Step 5 with that
-one `describe` expected to fail, and confirm it passes at the end of Task 2.
+`approvalSummary` and `buildRaiseSchema` render English copy, so their tests are added in Task 2 with the strings.
 
-- [ ] **Step 5: Run test to verify it passes (except approvalSummary)**
+- [ ] **Step 5: Run test to verify it passes**
 
 Run: `cd apps/web && bun run test -- tests/lib/fleet-approvals.spec.ts`
-Expected: every test PASS except the two in `describe('approvalSummary')`, which fail on missing i18n keys.
+Expected: PASS.
 
 - [ ] **Step 6: Type-check and commit**
 
@@ -697,10 +687,43 @@ And add after the schedule-keys test:
   })
 ```
 
+Append to `apps/web/tests/lib/fleet-approvals.spec.ts` (add `approvalSummary, buildRaiseSchema` to its
+`../../lib/fleet-approvals` import and `import { enI18n } from '../helpers/fleet-harness'`):
+
+```ts
+describe('approvalSummary', () => {
+  const { t } = enI18n()
+  test('a budget override names the scope and the stop', () => {
+    expect(approvalSummary(t, approval('a'), () => 'koda')).toBe('Budget for project koda stopped at $0.60 of $0.50')
+  })
+  test('a bash ask and a malformed budget fall back to fixed text', () => {
+    expect(approvalSummary(t, approval('a', { type: 'nax_bash_escalate', payload: {} }), () => null)).toBe('A job asks to run a shell command')
+    expect(approvalSummary(t, approval('a', { payload: {} }), () => null)).toBe('Budget override')
+  })
+})
+
+describe('buildRaiseSchema (D243)', () => {
+  const { t } = enI18n()
+  const schema = buildRaiseSchema(t, '0.6000')
+  const errors = (amount: string, comment = '') => {
+    const result = schema.safeParse({ amount, comment })
+    return result.success ? {} : result.error.flatten().fieldErrors
+  }
+  test('a valid amount above the spend and a short comment pass', () => {
+    expect(errors('2', 'ok')).toEqual({})
+  })
+  test('each field reports its own translated message', () => {
+    expect(errors('abc').amount).toEqual(['Enter an amount above 0 with at most 4 decimals.'])
+    expect(errors('0.6').amount).toEqual(['The new limit must be above $0.60.'])
+    expect(errors('2', 'x'.repeat(1001)).comment).toEqual(['Keep the comment to 1000 characters.'])
+  })
+})
+```
+
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd apps/web && bun run test -- tests/i18n/fleet-locale-parity.spec.ts`
-Expected: FAIL (`fleet.approvals` missing; `fleet.budgets.banner` lacks `review`).
+Run: `cd apps/web && bun run test -- tests/i18n/fleet-locale-parity.spec.ts tests/lib/fleet-approvals.spec.ts`
+Expected: FAIL (`fleet.approvals` missing; `fleet.budgets.banner` lacks `review`; `buildRaiseSchema` not exported).
 
 - [ ] **Step 3: Add the English strings**
 
@@ -738,6 +761,7 @@ In `en.json`: add `"fleetApprovals": "Approvals"` to `nav`; add `"approvals": "A
   },
   "empty": { "pending": "Nothing is waiting for a decision.", "all": "No approvals yet." },
   "linked": "Linked approval",
+  "more": "Showing the first {n} pending approvals.",
   "noProject": "Fleet-wide",
   "readOnly": "You can read this approval. Only a project admin can decide a budget override.",
   "bashLater": "Shell command approvals are answered on this page from a later release.",
@@ -760,7 +784,7 @@ In `en.json`: add `"fleetApprovals": "Approvals"` to `nav`; add `"approvals": "A
   },
   "outcome": {
     "decidedBy": "By {name}",
-    "unknownUser": "a former member",
+    "unknownUser": "an unknown user",
     "decidedAt": "On {at}",
     "manualResume": "Resumed from the budgets page. No jobs were offered for re-queue.",
     "raisedTo": "Limit raised to {amount}",
@@ -821,6 +845,7 @@ In `zh.json`: `nav.fleetApprovals`: `"审批"`; `fleet.jobs.approvals`: `"审批
   },
   "empty": { "pending": "没有等待决定的审批。", "all": "暂无审批。" },
   "linked": "链接的审批",
+  "more": "仅显示前 {n} 个待处理审批。",
   "noProject": "全局",
   "readOnly": "你可以查看此审批。只有项目管理员可以决定预算超额。",
   "bashLater": "Shell 命令审批将在后续版本中在此页面处理。",
@@ -843,7 +868,7 @@ In `zh.json`: `nav.fleetApprovals`: `"审批"`; `fleet.jobs.approvals`: `"审批
   },
   "outcome": {
     "decidedBy": "由 {name}",
-    "unknownUser": "已离开的成员",
+    "unknownUser": "未知用户",
     "decidedAt": "于 {at}",
     "manualResume": "已在预算页面恢复。没有提供可重新排队的任务。",
     "raisedTo": "限额已提高到 {amount}",
@@ -868,16 +893,36 @@ In `zh.json`: `nav.fleetApprovals`: `"审批"`; `fleet.jobs.approvals`: `"审批
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [ ] **Step 5: Add the raise schema**
+
+Append to `apps/web/lib/fleet-approvals.ts` (and add `import * as z from 'zod'` at the top). D243: schema-backed
+validation per `.nax/rules/web.md`, without vee-validate (the panel has no `FormField` indirection):
+
+```ts
+/** D243: the raise form's schema; messages are translated, `spent` is the spend recorded at the stop. */
+export function buildRaiseSchema(t: TranslateNamed, spentUsd: string) {
+  return z.object({
+    amount: z.string().superRefine((value, ctx) => {
+      const error = raiseAmountError(value, spentUsd)
+      if (error !== null) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: t(`fleet.approvals.validation.${error}`, { spent: formatUsd(spentUsd) }) })
+      }
+    }),
+    comment: z.string().refine((value) => !commentTooLong(value), t('fleet.approvals.validation.commentTooLong')),
+  })
+}
+```
+
+- [ ] **Step 6: Run tests to verify they pass**
 
 Run: `cd apps/web && bun run test -- tests/i18n tests/lib/fleet-approvals.spec.ts`
-Expected: PASS, including `describe('approvalSummary')` from Task 1 and `used-keys-exist`.
+Expected: PASS, including `used-keys-exist`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add apps/web/i18n/locales/en.json apps/web/i18n/locales/zh.json apps/web/tests/i18n/fleet-locale-parity.spec.ts
-git commit -m "feat(web): approval strings in en and zh (S1.5 1b)"
+git add apps/web/i18n/locales/en.json apps/web/i18n/locales/zh.json apps/web/tests/i18n/fleet-locale-parity.spec.ts apps/web/lib/fleet-approvals.ts apps/web/tests/lib/fleet-approvals.spec.ts
+git commit -m "feat(web): approval strings in en and zh, raise form schema (S1.5 1b)"
 ```
 
 ---
@@ -911,7 +956,7 @@ const approvalEvent = (id: string, over: Partial<LiveFleetApprovalEvent> = {}): 
 describe('fleet_approval notices (S1.5 1b)', () => {
   test('parses a notice and accepts any non-empty status (D253)', () => {
     expect(parseFleetApprovalEvent(JSON.stringify(approvalEvent('e1')))).toEqual(approvalEvent('e1'))
-    expect(parseFleetApprovalEvent(JSON.stringify(approvalEvent('e1', { status: 'brand_new' }))))?.toBeTruthy()
+    expect(parseFleetApprovalEvent(JSON.stringify(approvalEvent('e1', { status: 'brand_new' })))).toBeTruthy()
   })
 
   test('rejects other shapes', () => {
@@ -1139,6 +1184,8 @@ export interface ProjectEventHub {
 /**
  * D246: one EventSource per URL, shared by every subscriber in the tab (a page and the header badge). The fan-out
  * handlers define every event type, so the stream listens for all of them; each subscriber gets the ones it handles.
+ * A stream that gave up (MAX_TERMINAL_FAILURES) stays registered until its last subscriber leaves, so a later
+ * subscriber on the same page shares the dead stream and relies on its own poll, exactly as a lone page did before.
  */
 export function createProjectEventHub(deps: ProjectEventStreamDeps): ProjectEventHub {
   let entries: ReadonlyMap<string, readonly Entry[]> = new Map()
@@ -1227,8 +1274,7 @@ export function useProjectEvents(slug: string, handlers: ProjectEventHandlers): 
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `cd apps/web && bun run test -- tests/lib/project-event-stream.spec.ts tests/lib/project-event-stream-fleet.spec.ts tests/lib/project-event-hub.spec.ts tests/composables/useProjectEvents.spec.ts tests/pages/live-wiring.spec.ts`
-Expected: PASS. If `live-wiring.spec.ts` asserts the old composable source, update only the assertions that name
-`createProjectEventStream`/`stream?.close()` inside `useProjectEvents.ts` to the hub equivalents above.
+Expected: PASS (`live-wiring.spec.ts` does not read `useProjectEvents.ts`; it is run as a regression check).
 
 - [ ] **Step 7: Commit**
 
@@ -1237,7 +1283,6 @@ git add apps/web/lib/project-event-stream.ts apps/web/lib/project-event-hub.ts a
 git commit -m "feat(web): fleet_approval live notices and one shared event stream per project (S1.5 1b D246)"
 ```
 
-(add `tests/pages/live-wiring.spec.ts` only if Step 6 changed it)
 
 ---
 
@@ -1701,9 +1746,9 @@ describe('FleetApprovalOutcome', () => {
     expect(reset.byId('fleet-approval-outcome-by')).toHaveLength(0)
   })
 
-  test('a decider who is no longer a member gets the fallback name', () => {
+  test('a decider the page cannot name gets the fallback name', () => {
     const m = mount(decided(), () => null)
-    expect(m.app.textOf(m.byId('fleet-approval-outcome-by')[0])).toBe('By a former member')
+    expect(m.app.textOf(m.byId('fleet-approval-outcome-by')[0])).toBe('By an unknown user')
   })
 })
 ```
@@ -1742,7 +1787,7 @@ Create `apps/web/components/fleet/ApprovalBudgetPanel.vue`:
             :data-testid="`fleet-approval-candidate-${c.jobId}`"
             @change="toggle(c.jobId)"
           >
-          <NuxtLink v-if="jobLink(c.projectId, c.jobId)" :to="jobLink(c.projectId, c.jobId)" class="text-primary underline-offset-4 hover:underline">{{ c.feature }}</NuxtLink>
+          <NuxtLink v-if="c.href" :to="c.href ?? ''" class="text-primary underline-offset-4 hover:underline">{{ c.feature }}</NuxtLink>
           <span v-else>{{ c.feature }}</span>
           <span class="font-mono text-xs text-muted-foreground">{{ c.jobId.slice(0, 8) }}</span>
         </label>
@@ -1754,7 +1799,7 @@ Create `apps/web/components/fleet/ApprovalBudgetPanel.vue`:
       <div class="space-y-1">
         <Label for="fleet-approval-comment">{{ t('fleet.approvals.budget.comment') }}</Label>
         <Textarea id="fleet-approval-comment" v-model="comment" rows="2" data-testid="fleet-approval-comment" />
-        <p v-if="commentInvalid" class="text-xs text-destructive" data-testid="fleet-approval-comment-error">{{ t('fleet.approvals.validation.commentTooLong') }}</p>
+        <p v-if="commentInvalid" class="text-xs text-destructive" data-testid="fleet-approval-comment-error">{{ fieldErrors.comment?.[0] }}</p>
       </div>
 
       <div class="flex flex-wrap gap-2">
@@ -1772,7 +1817,7 @@ Create `apps/web/components/fleet/ApprovalBudgetPanel.vue`:
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { budgetPayload, commentTooLong, raiseAmountError, toKeepPausedBody, toRaiseBody } from '~/lib/fleet-approvals'
+import { budgetPayload, buildRaiseSchema, commentTooLong, toKeepPausedBody, toRaiseBody } from '~/lib/fleet-approvals'
 import { formatUsd } from '~/lib/fleet-jobs'
 import type { DecideApprovalBody, FleetApprovalDto } from '~/lib/fleet-types'
 
@@ -1791,7 +1836,9 @@ const { t } = useI18n()
 const payload = computed(() => budgetPayload(props.approval))
 /** A malformed payload leaves the spend unknown: any valid amount passes here and the server decides. */
 const spent = computed(() => payload.value?.spentUsd ?? '0')
-const candidates = computed(() => props.approval.requeueCandidates ?? [])
+/** `href` precomputed: `:to` must be a string, and v-if does not narrow a call expression. */
+const candidates = computed(() =>
+  (props.approval.requeueCandidates ?? []).map((c) => ({ ...c, href: props.jobLink(c.projectId, c.jobId) })))
 
 const amount = ref('')
 const comment = ref('')
@@ -1799,11 +1846,14 @@ const comment = ref('')
 const selected = ref<readonly string[]>((props.approval.requeueCandidates ?? []).map((c) => c.jobId))
 const attempted = ref(false)
 
-const amountError = computed(() => raiseAmountError(amount.value, spent.value))
-const amountMessage = computed(() => {
-  if (!attempted.value || amountError.value === null) return ''
-  return t(`fleet.approvals.validation.${amountError.value}`, { spent: formatUsd(spent.value) })
+// D243: schema-backed validation (.nax/rules/web.md); built once, the panel is remounted per approval and status.
+const schema = buildRaiseSchema(t, spent.value)
+const fieldErrors = computed(() => {
+  const result = schema.safeParse({ amount: amount.value, comment: comment.value })
+  return result.success ? {} : result.error.flatten().fieldErrors
 })
+/** Shown after the first Raise attempt; Keep paused never needs an amount. */
+const amountMessage = computed(() => (attempted.value ? (fieldErrors.value.amount?.[0] ?? '') : ''))
 const commentInvalid = computed(() => commentTooLong(comment.value))
 
 function toggle(jobId: string): void {
@@ -1812,7 +1862,7 @@ function toggle(jobId: string): void {
 
 function raise(): void {
   attempted.value = true
-  if (amountError.value !== null || commentInvalid.value) return
+  if (fieldErrors.value.amount || fieldErrors.value.comment) return
   emit('decide', toRaiseBody({ amount: amount.value, selected: selected.value, comment: comment.value }))
 }
 
@@ -1855,7 +1905,7 @@ Create `apps/web/components/fleet/ApprovalOutcome.vue`:
           :data-testid="`fleet-approval-requeue-result-${r.jobId}`"
           :data-ok="String(r.ok)"
         >
-          <NuxtLink v-if="link(r.jobId)" :to="link(r.jobId)" class="font-mono text-xs text-primary underline-offset-4 hover:underline">{{ r.jobId.slice(0, 8) }}</NuxtLink>
+          <NuxtLink v-if="r.href" :to="r.href ?? ''" class="font-mono text-xs text-primary underline-offset-4 hover:underline">{{ r.jobId.slice(0, 8) }}</NuxtLink>
           <span v-else class="font-mono text-xs">{{ r.jobId.slice(0, 8) }}</span>
           <span :class="r.ok ? '' : 'text-destructive'">
             {{ r.ok ? t('fleet.approvals.outcome.requeueOk') : t(`fleet.approvals.requeueFailure.${r.reason ?? 'unknown'}`) }}
@@ -1885,7 +1935,8 @@ const { t, te } = useI18n()
 const label = (prefix: string, code: string): string => codeLabel(t, te, prefix, code)
 
 const raised = computed(() => resumedAmount(props.approval))
-const results = computed(() => requeueResults(props.approval))
+/** `href` precomputed: `:to` must be a string, and v-if does not narrow a call expression. */
+const results = computed(() => requeueResults(props.approval)?.map((r) => ({ ...r, href: link(r.jobId) })) ?? null)
 const deciderName = computed(() =>
   (props.approval.decidedById ? props.nameOf(props.approval.decidedById) : null) ?? t('fleet.approvals.outcome.unknownUser'))
 /** Re-queued jobs live in the approval's project; a no-project approval has no project to link into. */
@@ -1932,7 +1983,8 @@ git commit -m "feat(web): budget override decide panel and decided outcome (S1.5
 - [ ] **Step 1: Register the component in the harness**
 
 In `apps/web/tests/helpers/mount-sfc.ts` add `FleetApprovalInbox: 'ApprovalInbox.vue',` to `FLEET_COMPONENT_FILES` and
-`| 'FleetApprovalInbox'` to `FleetComponentName`.
+`| 'FleetApprovalInbox'` to `FleetComponentName`, and add `'useRouter'` to `NUXT_AUTO_IMPORTS` (only listed names are
+injected into a mounted SFC; without it the inbox throws `ReferenceError: useRouter is not defined`).
 
 - [ ] **Step 2: Write the failing test**
 
@@ -1944,8 +1996,11 @@ import * as Vue from 'vue'
 import { ref, computed, watch, nextTick } from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { uiStubs, enI18n, toastRecorder } from '../helpers/fleet-harness'
-import { ApiError } from '../../composables/useApi'
+import * as apiModule from '../../composables/useApi'
 import type { FleetApprovalDto } from '../../lib/fleet-types'
+
+// mountSfc re-instantiates `~/…` imports; aliasing useApi keeps `instanceof ApiError` true inside the component.
+const { ApiError } = apiModule
 
 const inbox = webFile('components', 'fleet', 'ApprovalInbox.vue')
 
@@ -1980,6 +2035,7 @@ function mount(opts: {
   const app = mountSfc(inbox, {
     components: uiStubs,
     fleetComponents: ['FleetApprovalBudgetPanel', 'FleetApprovalOutcome', 'FleetNativeSelect', 'FleetAge'],
+    alias: { '~/composables/useApi': apiModule },
     props: {
       base: { kind: 'project', slug: 'koda' },
       viewer: { kind: 'project', canManage: true },
@@ -2126,6 +2182,30 @@ describe('FleetApprovalInbox', () => {
     m.app.unmount()
   })
 
+  test('a 400 re-fetches the approval so a stale candidate is dropped from the form (D250)', async () => {
+    let refreshed = false
+    const candidate = (jobId: string) => ({ jobId, projectId: 'p1', feature: jobId, queuedAt: '2026-10-03T09:00:00.000Z' })
+    const get = jest.fn(async (path: string) => {
+      if (path.endsWith('/a1')) return row('a1', { requeueCandidates: refreshed ? [candidate('j2')] : [candidate('j1'), candidate('j2')] })
+      return page([row('a1')])
+    })
+    const post = jest.fn(async () => {
+      refreshed = true
+      throw new ApiError(400, 'Job j1 is not a re-queue candidate')
+    })
+    const m = mount({ get, post })
+    await m.settle()
+    await m.toggle('a1')
+    ;(m.byId('fleet-approval-amount')[0].props['onUpdate:modelValue'] as (v: string) => void)('2')
+    await m.settle()
+    ;(m.byId('fleet-approval-raise')[0].props.onClick as () => void)()
+    await m.settle()
+    expect(m.toast.errors).toEqual(['Job j1 is not a re-queue candidate'])
+    expect(m.byId('fleet-approval-candidate-j1')).toHaveLength(0)
+    expect(m.byId('fleet-approval-candidate-j2')[0].props.checked).toBe(true)
+    m.app.unmount()
+  })
+
   test('a refresh with an unchanged status keeps the half-filled form (D242, Review Focus 1)', async () => {
     const get = jest.fn(async (path: string) => (path.endsWith('/a1') ? row('a1', { requeueCandidates: [] }) : page([row('a1'), row('a2')])))
     const m = mount({ get })
@@ -2142,11 +2222,11 @@ describe('FleetApprovalInbox', () => {
     m.app.unmount()
   })
 
-  test('a refresh that finds the open approval decided elsewhere re-fetches it', async () => {
+  test('a refresh that finds the open approval decided elsewhere re-fetches it (it leaves the Pending list)', async () => {
     let elsewhere = false
     const get = jest.fn(async (path: string) => {
       if (path.endsWith('/a1')) return elsewhere ? row('a1', { status: 'approved', decision: 'raise_budget_and_resume', resolvedBy: 'manual_resume' }) : row('a1', { requeueCandidates: [] })
-      return page([row('a1', elsewhere ? { status: 'approved' } : {})])
+      return page(elsewhere ? [row('a2')] : [row('a1'), row('a2')])
     })
     const m = mount({ get })
     await m.settle()
@@ -2296,7 +2376,7 @@ Create `apps/web/components/fleet/ApprovalInbox.vue`:
             <template v-else>
               <FleetApprovalBudgetPanel
                 v-if="detail.type === 'budget_override_required' && detail.status === 'pending'"
-                :key="`${detail.id}:${detail.status}`"
+                :key="`${detail.id}:${detail.status}:${detailVersion}`"
                 :approval="detail"
                 :can-decide="canDecide(detail, viewer)"
                 :busy="deciding"
@@ -2313,7 +2393,7 @@ Create `apps/web/components/fleet/ApprovalInbox.vue`:
       </ul>
 
       <p v-if="tab === 'pending' && api.hasNext.value" class="text-sm text-muted-foreground" data-testid="fleet-approvals-more">
-        {{ t('fleet.common.more', { n: INBOX_PENDING_SIZE }) }}
+        {{ t('fleet.approvals.more', { n: INBOX_PENDING_SIZE }) }}
       </p>
       <div v-if="tab === 'all' && (page > 1 || api.hasNext.value)" class="flex justify-end gap-2">
         <Button variant="outline" size="sm" :disabled="page <= 1" data-testid="fleet-approvals-prev" @click="goTo(page - 1)">{{ t('fleet.jobs.previous') }}</Button>
@@ -2378,6 +2458,8 @@ const initialId = typeof route.query.id === 'string' && route.query.id !== '' ? 
 const expandedId = ref<string | null>(initialId)
 /** GET :id of the expanded approval (candidates exist only there). */
 const detail = ref<FleetApprovalDto | null>(null)
+/** Bumped on every fetch of the open approval: part of the panel key, so fresh candidates remount the form (D250). */
+const detailVersion = ref(0)
 
 /** D241: the expanded approval first when it is not on the loaded page. */
 const displayRows = computed(() => {
@@ -2397,7 +2479,9 @@ function writeQuery(id: string | null): void {
 async function loadDetail(id: string): Promise<void> {
   try {
     const fetched = await api.get(id)
-    if (expandedId.value === id) detail.value = fetched
+    if (expandedId.value !== id) return
+    detail.value = fetched
+    detailVersion.value += 1
   } catch (err: unknown) {
     if (expandedId.value !== id) return
     toast.error(extractApiError(err))
@@ -2407,12 +2491,16 @@ async function loadDetail(id: string): Promise<void> {
   }
 }
 
-/** D242: the open approval is re-fetched only when its status in the list changed. */
+/**
+ * D242: the open approval is re-fetched only when its status changed: its listed status differs, or it was pending and
+ * has left a complete Pending list (decided elsewhere, so it is no longer returned for `status=pending`).
+ */
 function statusChanged(): boolean {
   const open = detail.value
   if (open === null) return false
   const listed = api.approvals.value.find((r) => r.id === open.id)
-  return listed !== undefined && listed.status !== open.status
+  if (listed !== undefined) return listed.status !== open.status
+  return open.status === 'pending' && tab.value === 'pending' && !api.hasNext.value
 }
 
 async function reload(): Promise<void> {
@@ -2465,10 +2553,10 @@ async function onDecide(body: DecideApprovalBody): Promise<void> {
     if (failed > 0) toast.error(t('fleet.approvals.toast.requeueFailed', { count: failed }))
   } catch (err: unknown) {
     toast.error(extractApiError(err))
-    if (isConflict(err)) {
-      await loadDetail(id)
-      await reload()
-    }
+    // D250: any refusal re-fetches the approval (spend or candidates may have changed, e.g. a 400 "not a candidate");
+    // a 409 also reloads the list, since someone else decided first.
+    await loadDetail(id)
+    if (isConflict(err)) await reload()
   } finally {
     deciding.value = false
   }
@@ -2600,7 +2688,7 @@ describe('project approvals page', () => {
     const scopeLabel = props.scopeLabel as (p: { scopeType: string; scopeId: string | null }) => string | null
     expect(scopeLabel({ scopeType: 'project', scopeId: 'p1' })).toBe('koda')
     expect(scopeLabel({ scopeType: 'repo', scopeId: 'r1' })).toBe('repo-r1')
-    expect(app.text()).toContain('Approvals')
+    expect(app.one('[data-stub="page-header"]')?.props.title).toBe('Approvals')
     app.unmount()
   })
 })
@@ -2662,13 +2750,22 @@ Extend `apps/web/tests/layouts/default-fleet-nav.spec.ts`'s first test:
 
 and add `'Inbox'` to the `arrayContaining` list of the icon test.
 
-In `apps/web/tests/layouts/fleet-jobs-nav.spec.ts`, add the breadcrumb case next to the existing budgets/schedules
-cases, asserting the leaf for `/<project>/fleet/approvals` is `fleet.approvals.title` (follow that file's existing
-breadcrumb assertion style).
+In `apps/web/tests/layouts/fleet-jobs-nav.spec.ts` (a source-grep spec; `layout` is the layout source), add:
 
-In `apps/web/tests/pages/fleet-jobs-list.spec.ts`, next to the existing Schedules/Budgets button assertions, assert a
-`fleet-approvals-link` button exists for every member and navigates to `/koda/fleet/approvals` (follow the file's
-`fleet-schedules-link` assertion).
+```ts
+  test('the approvals inbox has its own breadcrumb leaf (S1.5 1b D239)', () => {
+    expect(layout).toContain('if (path === `/${project}/fleet/approvals`) return t(\'fleet.approvals.title\')')
+  })
+```
+
+In `apps/web/tests/pages/fleet-jobs-list.spec.ts` (source-grep; `list` is the page source), add:
+
+```ts
+  test('every member gets an Approvals button first (S1.5 1b D239)', () => {
+    expect(list).toMatch(/<Button variant="outline" data-testid="fleet-approvals-link" @click="navigateTo\(`\/\$\{slug\}\/fleet\/approvals`\)">/)
+    expect(list.indexOf('fleet-approvals-link')).toBeLessThan(list.indexOf('fleet-schedules-link'))
+  })
+```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -2825,7 +2922,6 @@ git commit -m "feat(web): project and admin approvals pages, nav and breadcrumbs
 **Files:**
 - Create: `apps/web/components/fleet/ApprovalBadge.vue`
 - Modify: `apps/web/layouts/default.vue`
-- Modify: every layout spec that renders `default.vue` with a component map (`grep -l "layouts', 'default.vue'\|layouts/default.vue\|'default.vue'" apps/web/tests -r`): register `FleetApprovalBadge: stub('FleetApprovalBadge')` (or that spec's equivalent stub helper) so the header renders.
 - Test: `apps/web/tests/components/fleet-approval-badge.spec.ts`
 
 **Interfaces:**
@@ -2842,6 +2938,10 @@ import * as Vue from 'vue'
 import { ref, computed, watch } from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { uiStubs, enI18n } from '../helpers/fleet-harness'
+import * as approvalsModule from '../../composables/useFleetApprovals'
+
+// mountSfc re-instantiates `~/…` imports; aliasing the module lets the test bump the badge's own approvalsVersion.
+const { approvalsVersion } = approvalsModule
 
 const badge = webFile('components', 'fleet', 'ApprovalBadge.vue')
 
@@ -2860,6 +2960,7 @@ function mount(get: jest.Mock, opts: { slug?: string | null; role?: 'ADMIN' | 'M
   const app = mountSfc(badge, {
     components: uiStubs,
     props: { slug: opts.slug === undefined ? 'koda' : opts.slug },
+    alias: { '~/composables/useFleetApprovals': approvalsModule },
     globals: {
       ref, computed, watch,
       onMounted: Vue.onMounted,
@@ -2971,12 +3072,11 @@ describe('FleetApprovalBadge (D247)', () => {
 })
 ```
 
-Add the decide-signal test inside the same `describe` (the badge imports the composable module explicitly, so the
-test and the badge share one `approvalsVersion` ref in the jest module registry):
+Add the decide-signal test inside the same `describe` (the alias above makes the badge use the test's module instance,
+so both see one `approvalsVersion` ref):
 
 ```ts
   test('a decide anywhere in the tab refreshes after 300 ms (approvalsVersion)', async () => {
-    const { approvalsVersion } = await import('../../composables/useFleetApprovals')
     const get = jest.fn(async () => counts(2))
     const m = mount(get, { slug: null, role: 'ADMIN' })
     await m.settle()
@@ -3077,9 +3177,8 @@ In `apps/web/layouts/default.vue`, inside `<div class="flex items-center gap-4">
           <FleetApprovalBadge v-if="auth.user.value" :key="projectSlug ?? ''" :slug="projectSlug ?? null" />
 ```
 
-Register `FleetApprovalBadge` as a stub in each layout spec that mounts `default.vue` with an explicit component map
-(see Files). Run `cd apps/web && bun run test -- tests/layouts tests/app-nuxt-layout.spec.ts tests/composables/logout-async.spec.ts tests/pages`
-and add the stub wherever a spec now fails or warns about an unresolved `FleetApprovalBadge`.
+The layout specs are source-grep or string-template SSR renders, so an unregistered `FleetApprovalBadge` only warns;
+no spec change is needed.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -3091,7 +3190,7 @@ Expected: PASS.
 Run: `cd apps/web && bun run lint && bun run type-check`
 
 ```bash
-git add apps/web/components/fleet/ApprovalBadge.vue apps/web/layouts/default.vue apps/web/tests
+git add apps/web/components/fleet/ApprovalBadge.vue apps/web/layouts/default.vue apps/web/tests/components/fleet-approval-badge.spec.ts
 git commit -m "feat(web): pending approvals badge in the header (S1.5 1b D247)"
 ```
 
@@ -3104,7 +3203,7 @@ git commit -m "feat(web): pending approvals badge in the header (S1.5 1b D247)"
 - Test: `apps/web/tests/components/fleet-budget-banner.spec.ts` (extend)
 
 **Interfaces:**
-- Consumes: `approvalRoot` (Task 4), `pendingByPolicy`, `inboxPath` (Task 1).
+- Consumes: `useFleetApprovals` (Task 4), `pendingByPolicy`, `inboxPath` (Task 1).
 - Produces: per paused line, `fleet-budget-banner-review` link (`data-policy` = policy id). `defineExpose({ refresh })`
   unchanged.
 
@@ -3186,25 +3285,25 @@ with:
       </NuxtLink>
 ```
 
-In the script, add `ref` to the existing `vue` import, then these imports and state:
+In the script, add `ref` to the existing `vue` import, then these imports and state (API calls stay inside a
+composable, `.nax/rules/web.md`):
 
 ```ts
-import { approvalRoot } from '~/composables/useFleetApprovals'
+import { useFleetApprovals } from '~/composables/useFleetApprovals'
 import { inboxPath, pendingByPolicy } from '~/lib/fleet-approvals'
-import type { FleetApprovalDto, FleetPage } from '~/lib/fleet-types'
 ```
 
 ```ts
-const { $api } = useApi()
+const overrides = useFleetApprovals({ kind: 'project', slug: props.slug })
 /** D248: policy id -> its pending override; empty when the request fails. */
 const reviewIds = ref<ReadonlyMap<string, string>>(new Map())
 
 async function loadReviews(): Promise<void> {
   try {
-    const res = await $api.get<FleetPage<FleetApprovalDto>>(approvalRoot({ kind: 'project', slug: props.slug }), {
-      query: { status: 'pending', type: 'budget_override_required', size: '100' },
-    })
-    reviewIds.value = pendingByPolicy(res.records ?? [])
+    // Sends status=pending&type=budget_override_required&size=100 (buildApprovalQuery).
+    if (await overrides.load({ tab: 'pending', type: 'budget_override_required' })) {
+      reviewIds.value = pendingByPolicy(overrides.approvals.value)
+    }
   } catch {
     reviewIds.value = new Map()
   }
@@ -3369,9 +3468,13 @@ test.describe('Fleet approvals (scripted runner)', () => {
     await row.getByTestId('fleet-approval-amount').fill('2');
     await row.getByTestId('fleet-approval-raise').click();
 
-    // 5. The outcome shows B re-queued; the badge drops by one.
+    // 5. The outcome shows B re-queued; the badge drops by one (at 0 it is not rendered at all).
     await expect(row.getByTestId(`fleet-approval-requeue-result-${jobB}`)).toHaveAttribute('data-ok', 'true');
-    await expect.poll(async () => Number((await badge.getAttribute('data-count')) ?? '0'), { timeout: 10_000 }).toBe(before - 1);
+    if (before === 1) {
+      await expect(badge).toHaveCount(0, { timeout: 10_000 });
+    } else {
+      await expect(badge).toHaveAttribute('data-count', String(before - 1), { timeout: 10_000 });
+    }
     expect(await jobState(token, SLUG, jobB)).toBe('QUEUED');
 
     // 6. A finishes; B is assigned again and runs.
