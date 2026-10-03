@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import type { BashMode } from '../../common/protocol';
 import { SCHEDULE_DISABLED_REASONS, ScheduleDisabledReason, ScheduleRecord } from '../domain/schedule.domain';
 
 const iso = (d: Date | null): string | null => (d ? d.toISOString() : null);
@@ -16,6 +17,8 @@ export class ScheduleDto {
   @ApiProperty({ type: [String] }) declare profiles: string[];
   @ApiProperty({ type: String, description: 'Decimal as string' }) declare maxCostUsd: string;
   @ApiProperty({ type: [String] }) declare selectorLabels: string[];
+  @ApiProperty({ enum: ['raw', 'gated', 'escalate'], description: 'S1.5: gated/escalate relay bash asks to the approvals inbox. RUN only; needs a runner with the approval relay.' }) declare bashMode: BashMode;
+  @ApiProperty({ description: 'Seconds a bash ask waits for a decision before nax denies it. Used only when bashMode is not raw.' }) declare approvalTimeoutSec: number;
   @ApiPropertyOptional({ type: String, nullable: true }) declare pinnedRunnerId: string | null;
   @ApiProperty() declare enabled: boolean;
   @ApiPropertyOptional({ type: String, nullable: true, description: 'Next fire; null while disabled' }) declare nextFireAt: string | null;
@@ -34,7 +37,8 @@ export class ScheduleDto {
   static from(s: ScheduleRecord, totalCostUsd: string): ScheduleDto {
     return Object.assign(new ScheduleDto(), {
       id: s.id, projectId: s.projectId, repoId: s.repoId, name: s.name, cron: s.cron, timezone: s.timezone, feature: s.feature, ref: s.ref,
-      profiles: s.profiles, maxCostUsd: s.maxCostUsd, selectorLabels: s.selectorLabels, pinnedRunnerId: s.pinnedRunnerId, enabled: s.enabled,
+      profiles: s.profiles, maxCostUsd: s.maxCostUsd, selectorLabels: s.selectorLabels, bashMode: s.bashMode, approvalTimeoutSec: s.approvalTimeoutSec,
+      pinnedRunnerId: s.pinnedRunnerId, enabled: s.enabled,
       nextFireAt: s.enabled ? s.nextFireAt.toISOString() : null, lastFiredAt: iso(s.lastFiredAt), lastJobId: s.lastJobId,
       lastPassedCount: s.lastPassedCount, noProgressTicks: s.noProgressTicks, noProgressLimit: s.noProgressLimit,
       disabledReason: s.disabledReason, totalCostUsd, createdById: s.createdById, updatedById: s.updatedById,

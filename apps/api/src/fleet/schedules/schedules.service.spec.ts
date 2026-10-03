@@ -7,7 +7,8 @@ import { SchedulesService } from './schedules.service';
 const NOW = new Date('2026-10-02T03:00:30.000Z');
 const schedule = (over: Partial<ScheduleRecord> = {}): ScheduleRecord => ({
   id: 's1', projectId: 'p1', repoId: 'r1', name: 'nightly', cron: '0 9 * * *', timezone: 'UTC', feature: 'login', ref: 'main', profiles: [],
-  maxCostUsd: '5', selectorLabels: [], pinnedRunnerId: null, enabled: true, nextFireAt: new Date('2026-10-02T09:00:00.000Z'), lastFiredAt: null,
+  maxCostUsd: '5', selectorLabels: [], pinnedRunnerId: null, bashMode: 'raw', approvalTimeoutSec: 600, enabled: true,
+  nextFireAt: new Date('2026-10-02T09:00:00.000Z'), lastFiredAt: null,
   lastJobId: null, lastPassedCount: 4, noProgressTicks: 2, noProgressLimit: 3, disabledReason: null, createdById: 'owner', updatedById: 'owner',
   createdAt: NOW, updatedAt: NOW, ...over,
 });
@@ -41,7 +42,8 @@ describe('SchedulesService.create', () => {
     await h.svc.create('u9', 'p1', input(), NOW);
     expect(h.repo.create).toHaveBeenCalledWith({
       projectId: 'p1', repoId: 'r1', name: 'nightly', cron: '0 9 * * *', timezone: 'Asia/Singapore', feature: 'login', ref: 'trunk', profiles: [],
-      maxCostUsd: '5', selectorLabels: [], pinnedRunnerId: null, noProgressLimit: 3, nextFireAt: new Date('2026-10-03T01:00:00.000Z'), createdById: 'u9',
+      maxCostUsd: '5', selectorLabels: [], pinnedRunnerId: null, bashMode: 'raw', approvalTimeoutSec: 600, noProgressLimit: 3,
+      nextFireAt: new Date('2026-10-03T01:00:00.000Z'), createdById: 'u9',
     });
     expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'schedule.created', entityType: 'schedule', actorType: 'USER', actorId: 'u9', projectId: 'p1' }));
   });
@@ -75,6 +77,14 @@ describe('SchedulesService.create', () => {
     h.placement.evaluatePinned.mockResolvedValue('capacity');
     await expect(h.svc.create('u9', 'p1', input({ pinnedRunnerId: 'run-1' }), NOW)).resolves.toBeDefined();
   });
+
+  it('stores bashMode and approvalTimeoutSec, defaulting to raw and 600', async () => {
+    const h = build();
+    await h.svc.create('u9', 'p1', input(), NOW);
+    expect(h.repo.create).toHaveBeenCalledWith(expect.objectContaining({ bashMode: 'raw', approvalTimeoutSec: 600 }));
+    await h.svc.create('u9', 'p1', input({ name: 'b', bashMode: 'gated', approvalTimeoutSec: 120 }), NOW);
+    expect(h.repo.create).toHaveBeenLastCalledWith(expect.objectContaining({ bashMode: 'gated', approvalTimeoutSec: 120 }));
+  });
 });
 
 describe('SchedulesService.update', () => {
@@ -102,6 +112,13 @@ describe('SchedulesService.update', () => {
     const kept = build(schedule({ pinnedRunnerId: 'run-1' }));
     await kept.svc.update('owner', 'p1', 's1', { name: 'x' } as never, false, NOW);
     expect(kept.repo.update.mock.calls[0][1]).toEqual(expect.objectContaining({ pinnedRunnerId: 'run-1' }));
+  });
+
+  it('keeps the stored mode on an update that omits it', async () => {
+    const stored = schedule({ bashMode: 'escalate', approvalTimeoutSec: 90 });
+    const h = build(stored);
+    await h.svc.update('owner', 'p1', 's1', { name: 'renamed' } as never, false, NOW);
+    expect(h.repo.update).toHaveBeenCalledWith('s1', expect.objectContaining({ bashMode: 'escalate', approvalTimeoutSec: 90 }));
   });
 
   it('refuses another developer, allows a project admin, and 404s another project\'s schedule', async () => {

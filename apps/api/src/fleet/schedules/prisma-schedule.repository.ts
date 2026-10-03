@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { JobSchedule as ScheduleRow, Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { FleetJobState } from '../../common/enums';
+import type { BashMode } from '../common/protocol';
 import { ACTIVE_STATES } from '../jobs/job-state';
 import {
   IScheduleRepository, NewSchedule, OwnerAccess, ScheduleActiveJob, ScheduleDisabledReason, SchedulePatch, ScheduleRecord,
@@ -10,6 +11,7 @@ import {
 const toSchedule = (r: ScheduleRow): ScheduleRecord => ({
   ...r,
   maxCostUsd: r.maxCostUsd.toString(),
+  bashMode: r.bashMode as BashMode,
   disabledReason: r.disabledReason as ScheduleDisabledReason | null,
 });
 

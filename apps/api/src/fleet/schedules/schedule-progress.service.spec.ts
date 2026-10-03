@@ -5,7 +5,7 @@ import { ScheduleProgressService } from './schedule-progress.service';
 const NOW = new Date('2026-10-02T03:00:30.000Z');
 const schedule = (over: Partial<ScheduleRecord> = {}): ScheduleRecord => ({
   id: 's1', projectId: 'p1', repoId: 'r1', name: 'nightly', cron: '0 * * * *', timezone: 'UTC', feature: 'f', ref: 'main', profiles: [],
-  maxCostUsd: '5', selectorLabels: [], pinnedRunnerId: null, enabled: true, nextFireAt: NOW, lastFiredAt: null, lastJobId: 'j1',
+  maxCostUsd: '5', selectorLabels: [], pinnedRunnerId: null, bashMode: 'raw', approvalTimeoutSec: 600, enabled: true, nextFireAt: NOW, lastFiredAt: null, lastJobId: 'j1',
   lastPassedCount: 0, noProgressTicks: 0, noProgressLimit: 3, disabledReason: null, createdById: 'u1', updatedById: 'u1',
   createdAt: NOW, updatedAt: NOW, ...over,
 });

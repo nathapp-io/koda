@@ -13,7 +13,7 @@ const OWNER_OK: OwnerAccess = { exists: true, disabled: false, globalRole: 'MEMB
 
 const schedule = (over: Partial<ScheduleRecord> = {}): ScheduleRecord => ({
   id: 's1', projectId: 'p1', repoId: 'r1', name: 'nightly', cron: '0 * * * *', timezone: 'UTC', feature: 'login', ref: 'main', profiles: ['fast'],
-  maxCostUsd: '5', selectorLabels: [], pinnedRunnerId: null, enabled: true, nextFireAt: DUE, lastFiredAt: null, lastJobId: null,
+  maxCostUsd: '5', selectorLabels: [], pinnedRunnerId: null, bashMode: 'raw', approvalTimeoutSec: 600, enabled: true, nextFireAt: DUE, lastFiredAt: null, lastJobId: null,
   lastPassedCount: 0, noProgressTicks: 0, noProgressLimit: 3, disabledReason: null, createdById: 'u1', updatedById: 'u1',
   createdAt: NOW, updatedAt: NOW, ...over,
 });
@@ -42,7 +42,7 @@ describe('ScheduleTicker.tick', () => {
     expect(await h.ticker.tick(NOW)).toEqual({ claimed: 1, dispatched: 1, coalesced: 0, skipped: 0, disabled: 0, failed: 0 });
     expect(h.repo.claimFire).toHaveBeenCalledWith('s1', DUE, NEXT, NOW);
     expect(h.jobs.dispatch).toHaveBeenCalledWith(
-      'u1', 'p1', { repoId: 'r1', command: 'RUN', feature: 'login', ref: 'main', profiles: ['fast'], maxCostUsd: 5, selectorLabels: [] }, { scheduleId: 's1' },
+      'u1', 'p1', { repoId: 'r1', command: 'RUN', feature: 'login', ref: 'main', profiles: ['fast'], maxCostUsd: 5, selectorLabels: [], bashMode: 'raw', approvalTimeoutSec: 600 }, { scheduleId: 's1' },
     );
     expect(h.repo.update).toHaveBeenCalledWith('s1', { lastJobId: 'job-1' });
     expect(h.actions().map((a) => a.action)).toEqual(['schedule.tick_dispatched']);
