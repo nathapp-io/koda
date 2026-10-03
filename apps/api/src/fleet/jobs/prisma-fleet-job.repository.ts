@@ -5,7 +5,7 @@ import { NotFoundAppException } from '@nathapp/nestjs-common';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { FleetCommandAckResult, FleetCommandType, FleetJobState, FleetJobKind } from '../../common/enums';
-import type { RunnerCapabilities } from '../common/protocol';
+import type { RunnerCapabilities, BashMode } from '../common/protocol';
 import { ACTIVE_STATES, RUNNER_HELD_STATES } from './job-state';
 import {
   ActiveJobRef, DuplicateActiveJobError, FleetArtifactRecord, FleetCommandRecord, FleetJobEventRecord, FleetJobFilters,
@@ -17,6 +17,7 @@ const toJob = (r: JobRow): FleetJobRecord => ({
   command: r.command as FleetJobKind,
   state: r.state as FleetJobState,
   maxCostUsd: r.maxCostUsd.toString(),
+  bashMode: r.bashMode as BashMode,
   costSpentUsd: r.costSpentUsd.toString(),
   costCarriedUsd: r.costCarriedUsd.toString(),
   stories: r.stories as unknown as FleetJobStory[] | null,

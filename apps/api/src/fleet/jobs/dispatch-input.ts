@@ -1,5 +1,7 @@
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { PROFILE_NAME_RE } from '../common/capabilities';
+import { DEFAULT_APPROVAL_TIMEOUT_SEC } from '../common/protocol';
+import type { BashMode } from '../common/protocol';
 import type { NewFleetJob } from './domain/fleet-job.domain';
 import type { DispatchFleetJobDto } from './dto/dispatch-fleet-job.dto';
 
@@ -30,6 +32,8 @@ export function normalizeDispatch(dto: DispatchFleetJobDto, defaultBranch: strin
   if (new Set(profiles).size !== profiles.length) fail('duplicate profile');
   const ref = dto.ref ?? defaultBranch;
   if (!GIT_REF_RE.test(ref)) fail('ref');
+  const bashMode: BashMode = dto.bashMode ?? 'raw';
+  if (dto.command === 'PLAN' && bashMode !== 'raw') fail('bashMode must be raw for PLAN');
   return {
     repoId: dto.repoId,
     ref,
@@ -38,7 +42,8 @@ export function normalizeDispatch(dto: DispatchFleetJobDto, defaultBranch: strin
     planFrom: dto.command === 'PLAN' ? checkPlanFrom(dto.planFrom as string) : null,
     profiles: [...profiles],
     maxCostUsd: String(dto.maxCostUsd),
-    bashMode: 'raw',
+    bashMode,
+    approvalTimeoutSec: dto.approvalTimeoutSec ?? DEFAULT_APPROVAL_TIMEOUT_SEC,
     selectorLabels: [...new Set(dto.selectorLabels ?? [])].sort(),
     pinnedRunnerId: dto.pinnedRunnerId ?? null,
   };

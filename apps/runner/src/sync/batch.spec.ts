@@ -6,7 +6,7 @@ import { ACK_DETAIL_MAX, FULL_SCALE, MAX_BODY_BYTES, SYNC_LIMITS, buildSyncReque
 
 const assign = (jobId: string): AssignPayload => ({
   jobId, command: 'RUN', repo: { provider: 'github', owner: 'a', name: 'b', defaultBranch: 'main', cloneUrl: 'https://x/a/b.git' },
-  ref: 'main', feature: 'f', planFrom: null, profiles: [], maxCostUsd: '1', bashMode: 'raw', gitIdentity: { name: 'n', email: 'e' },
+  ref: 'main', feature: 'f', planFrom: null, profiles: [], maxCostUsd: '1', bashMode: 'raw', approvalTimeoutSec: 600, gitIdentity: { name: 'n', email: 'e' },
 });
 let j: Journal;
 beforeEach(() => { j = Journal.open(':memory:'); });

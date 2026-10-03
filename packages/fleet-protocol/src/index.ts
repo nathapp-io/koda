@@ -200,7 +200,9 @@ export interface AssignPayload {
   profiles: string[];
   /** Decimal string. */
   maxCostUsd: string;
-  bashMode: 'raw';
+  bashMode: BashMode;
+  /** S1.5 §1.6: seconds nax waits on a bash ask; 30..3600. Used only when bashMode is not raw. */
+  approvalTimeoutSec: number;
   gitIdentity: GitIdentity;
 }
 export interface ReadoptPayload { naxRunId: string | null }

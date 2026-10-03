@@ -26,7 +26,7 @@ async function setup(files: Record<string, string> = { '.nax/features/f/prd.json
 }
 const assign = (over: Partial<AssignPayload> = {}): AssignPayload => ({
   jobId: 'j1', command: 'RUN', repo: { provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', cloneUrl: 'x' },
-  ref: 'main', feature: 'f', planFrom: null, profiles: [], maxCostUsd: '5', bashMode: 'raw', gitIdentity: identity, ...over,
+  ref: 'main', feature: 'f', planFrom: null, profiles: [], maxCostUsd: '5', bashMode: 'raw', approvalTimeoutSec: 600, gitIdentity: identity, ...over,
 });
 const head = (repoDir: string) => sh(repoDir, 'rev-parse', 'HEAD');
 const branchOf = (repoDir: string) => sh(repoDir, 'symbolic-ref', '--short', 'HEAD');

@@ -31,7 +31,7 @@ async function world(command: 'RUN' | 'PLAN' = 'RUN', over: Partial<AssignPayloa
   const naxHome = join(base, 'naxhome');
   const assign: AssignPayload = {
     jobId: 'cjob1', command, repo: { provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', cloneUrl: origin.url },
-    ref: 'main', feature: 'feat', planFrom: command === 'PLAN' ? 'docs/spec.md' : null, profiles: [], maxCostUsd: '5', bashMode: 'raw',
+    ref: 'main', feature: 'feat', planFrom: command === 'PLAN' ? 'docs/spec.md' : null, profiles: [], maxCostUsd: '5', bashMode: 'raw', approvalTimeoutSec: 600,
     gitIdentity: { name: 'koda-fleet[bot]', email: 'bot@x' }, ...over,
   };
   const journal = Journal.open(':memory:');
@@ -220,7 +220,7 @@ describe('HostExecutor PLAN', () => {
     const workspaceRoot = join(base, 'ws');
     const assign: AssignPayload = {
       jobId: 'cjob2', command: 'PLAN', repo: { provider: 'github', owner: 'acme', name: 'bare', defaultBranch: 'main', cloneUrl: origin.url },
-      ref: 'main', feature: 'feat', planFrom: 'docs/spec.md', profiles: [], maxCostUsd: '1', bashMode: 'raw', gitIdentity: { name: 'b', email: 'b@x' },
+      ref: 'main', feature: 'feat', planFrom: 'docs/spec.md', profiles: [], maxCostUsd: '1', bashMode: 'raw', approvalTimeoutSec: 600, gitIdentity: { name: 'b', email: 'b@x' },
     };
     const journal = Journal.open(':memory:');
     const row = journal.insertJob({ assign, leaseEpoch: 1, repoKey: 'acme/bare', jobDir: jobDirFor(workspaceRoot, 'cjob2') }).row;

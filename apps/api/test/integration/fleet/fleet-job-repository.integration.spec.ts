@@ -34,7 +34,7 @@ describeIntegration('PrismaFleetJobRepository (PG)', () => {
     runnerId = runner.id;
     base = {
       projectId: project.id, repoId: fleetRepo.id, ref: 'main', command: 'RUN', planFrom: null, profiles: ['fast'],
-      maxCostUsd: '5.25', bashMode: 'raw', selectorLabels: [], pinnedRunnerId: null, requestedById: user.id,
+      maxCostUsd: '5.25', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null, requestedById: user.id,
     };
   });
   afterAll(async () => {

@@ -38,7 +38,7 @@ async function world(profiles: string[]) {
   await mkdir(naxHome, { recursive: true });
   const assign: AssignPayload = {
     jobId: 'cjob1', command: 'RUN', repo: { provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', cloneUrl: origin.url },
-    ref: 'main', feature: 'feat', planFrom: null, profiles, maxCostUsd: '5', bashMode: 'raw', gitIdentity: { name: 'koda-fleet[bot]', email: 'bot@x' },
+    ref: 'main', feature: 'feat', planFrom: null, profiles, maxCostUsd: '5', bashMode: 'raw', approvalTimeoutSec: 600, gitIdentity: { name: 'koda-fleet[bot]', email: 'bot@x' },
   };
   const row = Journal.open(':memory:').insertJob({ assign, leaseEpoch: 1, repoKey: 'acme/app', jobDir: jobDirFor(workspaceRoot, assign.jobId) }).row;
   const caps = { current: CAPS };

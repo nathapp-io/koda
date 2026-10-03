@@ -724,6 +724,8 @@ model JobSchedule {
   maxCostUsd      Decimal   @db.Decimal(12, 4)
   selectorLabels  String[]
   pinnedRunnerId  String?
+  bashMode        String    @default("raw") // S1.5 §1.6, copied into each dispatched job
+  approvalTimeoutSec Int    @default(600)
   enabled         Boolean   @default(true)
   nextFireAt      DateTime
   lastFiredAt     DateTime?
@@ -756,7 +758,8 @@ model FleetJob {
   planFrom          String? // repo-relative spec path, PLAN only
   profiles          String[]
   maxCostUsd        Decimal   @db.Decimal(12, 4)
-  bashMode          String    @default("raw") // S1 accepts raw only
+  bashMode          String    @default("raw") // raw | gated | escalate (S1.5 §1.6); PLAN is always raw
+  approvalTimeoutSec Int      @default(600) // S1.5 §1.6: 30..3600, used only when bashMode != raw
   selectorLabels    String[]
   pinnedRunnerId    String?
   runnerId          String?

@@ -48,7 +48,7 @@ async function world(command: 'RUN' | 'PLAN' = 'RUN') {
   const workspaceRoot = join(base, 'ws');
   const assign: AssignPayload = {
     jobId: 'cjob1', command, repo: { provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', cloneUrl: `${http.url}/acme/app.git` },
-    ref: 'main', feature: 'feat', planFrom: command === 'PLAN' ? 'docs/spec.md' : null, profiles: [], maxCostUsd: '5', bashMode: 'raw',
+    ref: 'main', feature: 'feat', planFrom: command === 'PLAN' ? 'docs/spec.md' : null, profiles: [], maxCostUsd: '5', bashMode: 'raw', approvalTimeoutSec: 600,
     gitIdentity: { name: 'koda-fleet[bot]', email: 'bot@x' },
   };
   const row = Journal.open(':memory:').insertJob({ assign, leaseEpoch: 1, repoKey: 'acme/app', jobDir: jobDirFor(workspaceRoot, assign.jobId) }).row;

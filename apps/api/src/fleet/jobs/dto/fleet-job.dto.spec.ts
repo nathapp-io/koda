@@ -6,7 +6,7 @@ describe('fleet job DTOs', () => {
   it('serialise with decimals and dates as strings and hide internal columns', () => {
     const dto = FleetJobDto.from({
       id: 'j', projectId: 'p', repoId: 'r', ref: 'main', command: 'RUN', feature: 'f', planFrom: null, profiles: [],
-      maxCostUsd: '5.5', bashMode: 'raw', selectorLabels: [], pinnedRunnerId: null, runnerId: null, runnerBootId: 'boot',
+      maxCostUsd: '5.5', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null, runnerId: null, runnerBootId: 'boot',
       leaseEpoch: 1, state: 'QUEUED', stateReason: null, requestedById: 'u', queuedAt: now, assignedAt: null,
       startedAt: null, finishedAt: null, cancelRequestedAt: null, naxRunId: null, naxLogRunId: null, naxCostRunId: null,
       progress: null, currentStoryId: null, currentPhase: null, costSpentUsd: '0.1234', costCarriedUsd: '0', firstStartedAt: null, cancelReason: null, scheduleId: 's1', coalescedCount: 2, scheduleCountedAt: null, lastHeartbeatAt: null,
@@ -26,7 +26,7 @@ describe('fleet job DTOs', () => {
   it('a list page leaves the story list out (D149); a single job carries it', () => {
     const record = {
       id: 'j', projectId: 'p', repoId: 'r', ref: 'main', command: 'RUN', feature: 'f', planFrom: null, profiles: [],
-      maxCostUsd: '5', bashMode: 'raw', selectorLabels: [], pinnedRunnerId: null, runnerId: null, runnerBootId: null,
+      maxCostUsd: '5', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null, runnerId: null, runnerBootId: null,
       leaseEpoch: 1, state: 'RUNNING', stateReason: null, requestedById: 'u', queuedAt: now, assignedAt: null,
       startedAt: null, finishedAt: null, cancelRequestedAt: null, naxRunId: null, naxLogRunId: null, naxCostRunId: null,
       progress: null, currentStoryId: 'US-001', currentPhase: 'implement', costSpentUsd: '0', costCarriedUsd: '0', firstStartedAt: null, cancelReason: null, scheduleId: null, coalescedCount: 0, scheduleCountedAt: null, lastHeartbeatAt: null,

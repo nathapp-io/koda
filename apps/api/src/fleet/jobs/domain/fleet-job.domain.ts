@@ -1,7 +1,7 @@
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import type { FleetCommandType, FleetJobKind, FleetJobState } from '../../../common/enums';
-import type { RunnerCapabilities } from '../../common/protocol';
+import type { RunnerCapabilities, BashMode } from '../../common/protocol';
 import type { PlacementRunner } from '../placement-rules';
 
 export const FLEET_JOB_REPOSITORY = Symbol('FLEET_JOB_REPOSITORY');
@@ -33,7 +33,8 @@ export interface FleetJobRecord {
   profiles: string[];
   /** Decimal as string. */
   maxCostUsd: string;
-  bashMode: string;
+  bashMode: BashMode;
+  approvalTimeoutSec: number;
   selectorLabels: string[];
   pinnedRunnerId: string | null;
   runnerId: string | null;
@@ -92,7 +93,8 @@ export interface NewFleetJob {
   planFrom: string | null;
   profiles: string[];
   maxCostUsd: string;
-  bashMode: 'raw';
+  bashMode: BashMode;
+  approvalTimeoutSec: number;
   selectorLabels: string[];
   pinnedRunnerId: string | null;
   requestedById: string;

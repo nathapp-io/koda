@@ -1,9 +1,12 @@
-import type { AssignPayload, FleetCommandOut } from '@nathapp/fleet-protocol';
+import type { AssignPayload, BashMode, FleetCommandOut } from '@nathapp/fleet-protocol';
 import { assertCloneUrl } from '../executor/workspace';
 import { COST_RE, PROFILE_NAME, RESERVED_PREFIX } from '../executor/nax-process';
 import { PathError, assertFeature, assertOwner, assertRelativePath, assertSegment } from '../paths/safe-segment';
 
 export type ParsedAssign = { ok: true; assign: AssignPayload } | { ok: false; detail: string };
+
+const BASH_MODES: readonly string[] = ['raw', 'gated', 'escalate'];
+const DEFAULT_APPROVAL_TIMEOUT_SEC = 600;
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -49,7 +52,10 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   const profiles = p['profiles'];
   if (!Array.isArray(profiles) || profiles.length > 8 || !profiles.every((n) => typeof n === 'string' && PROFILE_NAME.test(n) && !n.startsWith(RESERVED_PREFIX))) return bad('profiles');
   if (typeof p['maxCostUsd'] !== 'string' || !COST_RE.test(p['maxCostUsd'])) return bad('maxCostUsd');
-  if (p['bashMode'] !== 'raw') return bad('bashMode');
+  if (typeof p['bashMode'] !== 'string' || !BASH_MODES.includes(p['bashMode']) || (isPlan && p['bashMode'] !== 'raw')) return bad('bashMode');
+  // A server that predates S1.5 2a sends no timeout; it also only sends raw jobs.
+  const approvalTimeoutSec = p['approvalTimeoutSec'] ?? DEFAULT_APPROVAL_TIMEOUT_SEC;
+  if (typeof approvalTimeoutSec !== 'number' || !Number.isInteger(approvalTimeoutSec) || approvalTimeoutSec < 30 || approvalTimeoutSec > 3600) return bad('approvalTimeoutSec');
   const identity = p['gitIdentity'];
   if (!isObj(identity) || !plain(identity['name'], 200) || !plain(identity['email'], 200)) return bad('gitIdentity');
   return {
@@ -66,7 +72,8 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
       planFrom: isPlan ? (p['planFrom'] as string) : null,
       profiles: [...(profiles as string[])],
       maxCostUsd: p['maxCostUsd'],
-      bashMode: 'raw',
+      bashMode: p['bashMode'] as BashMode,
+      approvalTimeoutSec,
       gitIdentity: { name: identity['name'] as string, email: identity['email'] as string },
     },
   };

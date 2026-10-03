@@ -9,7 +9,7 @@ const SKIP_FILEMODE = process.platform === 'win32' || (typeof process.getuid ===
 
 const assign = (jobId = 'j1'): AssignPayload => ({
   jobId, command: 'RUN', repo: { provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', cloneUrl: 'https://github.com/acme/app.git' },
-  ref: 'main', feature: 'feat', planFrom: null, profiles: [], maxCostUsd: '5', bashMode: 'raw', gitIdentity: { name: 'bot', email: 'bot@x' },
+  ref: 'main', feature: 'feat', planFrom: null, profiles: [], maxCostUsd: '5', bashMode: 'raw', approvalTimeoutSec: 600, gitIdentity: { name: 'bot', email: 'bot@x' },
 });
 const job = (jobId = 'j1', leaseEpoch = 1) => ({ assign: assign(jobId), leaseEpoch, repoKey: 'acme/app', jobDir: `/w/.jobs/${jobId}` });
 
