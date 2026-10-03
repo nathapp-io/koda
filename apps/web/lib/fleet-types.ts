@@ -131,7 +131,7 @@ export type { FleetJobState }
 
 export type MisfitReason =
   | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
-  | 'provider_unavailable' | 'sandbox' | 'tools' | 'busy_repo' | 'capacity'
+  | 'provider_unavailable' | 'sandbox' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity'
 
 export interface FleetJobStoryDto {
   id: string
@@ -151,7 +151,11 @@ export interface FleetJobDto {
   planFrom: string | null
   profiles: string[]
   maxCostUsd: string
-  bashMode: string
+  bashMode: 'raw' | 'gated' | 'escalate'
+  /** S1.5 2a: seconds a bash ask waits; used only when bashMode is not raw. */
+  approvalTimeoutSec: number
+  /** S1.5 2a: pending bash approvals of this job. */
+  pendingApprovals: number
   selectorLabels: string[]
   pinnedRunnerId: string | null
   runnerId: string | null

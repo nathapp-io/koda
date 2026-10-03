@@ -1,7 +1,7 @@
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import type { FleetCommandType, FleetJobKind, FleetJobState } from '../../../common/enums';
-import type { RunnerCapabilities } from '../../common/protocol';
+import type { RunnerCapabilities, BashMode } from '../../common/protocol';
 import type { PlacementRunner } from '../placement-rules';
 
 export const FLEET_JOB_REPOSITORY = Symbol('FLEET_JOB_REPOSITORY');
@@ -33,7 +33,8 @@ export interface FleetJobRecord {
   profiles: string[];
   /** Decimal as string. */
   maxCostUsd: string;
-  bashMode: string;
+  bashMode: BashMode;
+  approvalTimeoutSec: number;
   selectorLabels: string[];
   pinnedRunnerId: string | null;
   runnerId: string | null;
@@ -92,7 +93,8 @@ export interface NewFleetJob {
   planFrom: string | null;
   profiles: string[];
   maxCostUsd: string;
-  bashMode: 'raw';
+  bashMode: BashMode;
+  approvalTimeoutSec: number;
   selectorLabels: string[];
   pinnedRunnerId: string | null;
   requestedById: string;
@@ -210,8 +212,8 @@ export interface IFleetJobRepository {
   findCommand(id: string): Promise<FleetCommandRecord | null>;
   ackCommand(id: string, result: string, now: Date): Promise<void>;
   findPendingCommand(filter: { jobId: string; type: FleetCommandType; runnerId?: string; leaseEpoch?: number }): Promise<FleetCommandRecord | null>;
-  /** Plan D4: marks the job's pending non-ABANDON commands withdrawn; returns how many. */
-  withdrawPendingCommands(jobId: string, now: Date): Promise<number>;
+  /** Plan D4: marks the job's pending non-ABANDON commands withdrawn; returns how many. With `types`, only those types (plan D263: RUNNING -> UPLOADING). */
+  withdrawPendingCommands(jobId: string, now: Date, opts?: { types?: readonly FleetCommandType[] }): Promise<number>;
 
   upsertArtifact(artifact: Omit<FleetArtifactRecord, 'id' | 'createdAt'>): Promise<FleetArtifactRecord>;
   findArtifact(jobId: string, kind: string, leaseEpoch: number): Promise<FleetArtifactRecord | null>;

@@ -1,4 +1,6 @@
+import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
+import { ApprovalCloser } from './approval-closer';
 import { ApprovalsService } from './approvals.service';
 import { MAX_REQUEUE_CANDIDATES, type FleetApprovalRecord } from './domain/approval.domain';
 
@@ -44,8 +46,53 @@ function build(approval: FleetApprovalRecord | null, policyScope: 'project' | 'p
   const live = { publish: jest.fn() };
   const activity = { memberProjectIds: jest.fn(async () => ['p1']) };
   const tx = { run: jest.fn(async (fn: () => Promise<unknown>) => fn()) };
-  const service = new ApprovalsService(repo as never, budgetRepo as never, budgets as never, jobs as never, closer as never, live as never, activity as never, tx as never);
-  return { service, repo, budgets, jobs, budgetRepo };
+  const jobRepo = { lockById: jest.fn(), createCommand: jest.fn() };
+  const notifier = { notify: jest.fn() };
+  const service = new ApprovalsService(repo as never, budgetRepo as never, budgets as never, jobs as never, closer as never, live as never, activity as never, tx as never, jobRepo as never, notifier as never);
+  return { service, repo, budgets, jobs, budgetRepo, jobRepo, notifier };
+}
+
+/**
+ * Bash decide goes through a real ApprovalCloser over an in-memory approval repo (the fake from
+ * approval-closer.spec.ts, plus `findById` for `findVisible`), so `expire`/`recordResolved` really
+ * resolve rows and write activity.
+ */
+function buildBash() {
+  const rows = new Map<string, FleetApprovalRecord>();
+  const repo = {
+    findById: jest.fn(async (id: string) => rows.get(id) ?? null),
+    lockById: jest.fn(async (id: string) => rows.get(id) ?? null),
+    resolve: jest.fn(async (id: string, x: Partial<FleetApprovalRecord>) => {
+      const row = { ...(rows.get(id) as FleetApprovalRecord), ...x };
+      rows.set(id, row);
+      return row;
+    }),
+    create: jest.fn(),
+    findPendingForPolicy: jest.fn(async () => null),
+    findByAsk: jest.fn(async () => null),
+    findPendingForJob: jest.fn(async () => []),
+    findProjectSlug: jest.fn(async () => 'web'),
+  };
+  const activity = { record: jest.fn(async () => undefined), memberProjectIds: jest.fn(async () => ['p1']) };
+  const webhooks = { dispatch: jest.fn(async () => undefined) };
+  const closerLive = { event: jest.fn((a: FleetApprovalRecord) => (a.projectId ? [{ approvalId: a.id, status: a.status }] : [])) };
+  const closer = new ApprovalCloser(repo as never, activity as never, webhooks as never, closerLive as never);
+  const live = { publish: jest.fn() };
+  const budgetRepo = { lockById: jest.fn() };
+  const budgets = { resume: jest.fn() };
+  const jobs = { requeue: jest.fn() };
+  const tx = { run: jest.fn(async (fn: () => Promise<unknown>) => fn()) };
+  const jobRepo = { lockById: jest.fn(), createCommand: jest.fn() };
+  const notifier = { notify: jest.fn() };
+  const service = new ApprovalsService(repo as never, budgetRepo as never, budgets as never, jobs as never, closer as never, live as never, activity as never, tx as never, jobRepo as never, notifier as never);
+  // Defaults the brief's row literals leave out but the service/DTO touch (e.g. requestedAt).
+  const seed = (a: Record<string, unknown> & { id: string }) => {
+    rows.set(a.id, {
+      requestedAt: NOW, outcome: null, policyId: null, decision: null, decidedById: null, decidedAt: null,
+      resolvedBy: null, comment: null, createdAt: NOW, updatedAt: NOW, ...a,
+    } as FleetApprovalRecord);
+  };
+  return { service, rows, seed, jobRepo, notifier };
 }
 
 /** AppException carries its HTTP status in the `httpStatus` getter; 0 = resolved. */
@@ -112,7 +159,7 @@ describe('ApprovalsService.decide (budget)', () => {
     expect(budgets.resume).toHaveBeenCalledWith('root', { kind: 'project', projectId: 'p1' }, 'pol', 20.5, NOW, { approvalId: 'a1' });
   });
 
-  it('refuses: amount missing, foreign re-queue id, project developer, not pending, other project, bash type', async () => {
+  it('refuses: amount missing, foreign re-queue id, project developer, not pending, other project, bash with no job', async () => {
     expect(await statusOf(build(pendingBudget()).service.decide(ADMIN_CALLER, PROJECT_ADMIN, 'a1', { decision: 'raise_budget_and_resume' }, NOW))).toBe(400);
     expect(await statusOf(build(pendingBudget()).service.decide(ADMIN_CALLER, PROJECT_ADMIN, 'a1', { decision: 'raise_budget_and_resume', amountUsd: 20, requeueJobIds: ['zzz'] }, NOW))).toBe(400);
     expect(await statusOf(build(pendingBudget()).service.decide({ id: 'dev', globalAdmin: false }, PROJECT_DEV, 'a1', { decision: 'keep_paused' }, NOW))).toBe(403);
@@ -145,6 +192,71 @@ describe('ApprovalsService.counts', () => {
   it('sums member projects, plus unscoped for a global admin only (D235)', async () => {
     expect(await build(null).service.counts({ id: 'root', globalAdmin: true })).toEqual({ total: 5, unscoped: 3, projects: [{ projectId: 'p1', slug: 'web', pending: 2 }] });
     expect(await build(null).service.counts({ id: 'dev', globalAdmin: false })).toEqual({ total: 2, unscoped: 0, projects: [{ projectId: 'p1', slug: 'web', pending: 2 }] });
+  });
+});
+
+describe('bash decide (S1.5 §2.3, plan D265-D267)', () => {
+  const pending = { id: 'a1', type: 'nax_bash_escalate', status: 'pending', projectId: 'p1', jobId: 'j1', leaseEpoch: 2,
+    naxAskId: 'ask-1f2e3d4c', expiresAt: new Date(NOW.getTime() + 60_000), payload: { command: 'ls', commandTruncated: false, options: ['allow', 'deny'] } };
+  const running = { id: 'j1', state: 'RUNNING', leaseEpoch: 2, runnerId: 'r1', requestedById: 'u9' };
+  const dev = { kind: 'project', projectId: 'p1', role: 'DEVELOPER' } as const;
+  const DEV_CALLER = { id: 'dev', globalAdmin: false };
+
+  it('a DEVELOPER allows: approved, APPROVAL_ANSWER for the job runner and epoch, notify after commit', async () => {
+    const { service, seed, jobRepo, notifier } = buildBash();
+    seed(pending); jobRepo.lockById.mockResolvedValue(running);
+    const dto = await service.decide(DEV_CALLER, dev, 'a1', { decision: 'allow' }, NOW);
+    expect(dto).toEqual(expect.objectContaining({ status: 'approved', decision: 'allow', resolvedBy: 'user' }));
+    expect(jobRepo.createCommand).toHaveBeenCalledWith({ runnerId: 'r1', jobId: 'j1', type: 'APPROVAL_ANSWER', leaseEpoch: 2,
+      payload: { approvalId: 'a1', naxAskId: 'ask-1f2e3d4c', choice: 'allow' } });
+    expect(notifier.notify).toHaveBeenCalledWith('r1');
+  });
+
+  it('deny is rejected and sends choice deny', async () => {
+    const { service, seed, jobRepo } = buildBash();
+    seed(pending); jobRepo.lockById.mockResolvedValue(running);
+    await expect(service.decide(DEV_CALLER, dev, 'a1', { decision: 'deny' }, NOW)).resolves.toEqual(expect.objectContaining({ status: 'rejected' }));
+    expect(jobRepo.createCommand).toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ choice: 'deny' }) }));
+  });
+
+  it.each(['VIEWER', 'MEMBER', 'AGENT', null])('role %p is forbidden (D266)', async (role) => {
+    const { service, seed } = buildBash();
+    seed(pending);
+    await expect(service.decide(DEV_CALLER, { ...dev, role }, 'a1', { decision: 'deny' }, NOW)).rejects.toThrow(ForbiddenAppException);
+  });
+
+  it('expired at decide commits the expiry, then answers 409 (D265)', async () => {
+    const { service, rows, seed, jobRepo } = buildBash();
+    seed({ ...pending, expiresAt: new Date(NOW.getTime() - 1) }); jobRepo.lockById.mockResolvedValue(running);
+    await expect(service.decide(DEV_CALLER, dev, 'a1', { decision: 'allow' }, NOW)).rejects.toThrow(ConflictAppException);
+    expect(rows.get('a1')).toEqual(expect.objectContaining({ status: 'expired', resolvedBy: 'timeout' }));
+    expect(jobRepo.createCommand).not.toHaveBeenCalled();
+  });
+
+  it('a job that left RUNNING closes the ask job_ended, then 409', async () => {
+    const { service, rows, seed, jobRepo } = buildBash();
+    seed(pending); jobRepo.lockById.mockResolvedValue({ ...running, state: 'UPLOADING' });
+    await expect(service.decide(DEV_CALLER, dev, 'a1', { decision: 'allow' }, NOW)).rejects.toThrow(ConflictAppException);
+    expect(rows.get('a1')).toEqual(expect.objectContaining({ status: 'cancelled', resolvedBy: 'job_ended' }));
+  });
+
+  it('a second decide gets 409', async () => {
+    const { service, seed, jobRepo } = buildBash();
+    seed({ ...pending, status: 'approved' }); jobRepo.lockById.mockResolvedValue(running);
+    await expect(service.decide(DEV_CALLER, dev, 'a1', { decision: 'deny' }, NOW)).rejects.toThrow(ConflictAppException);
+  });
+
+  it('budget-only fields on a bash decide are 400 (D287)', async () => {
+    const { service, seed } = buildBash();
+    seed(pending);
+    await expect(service.decide(DEV_CALLER, dev, 'a1', { decision: 'deny', amountUsd: 5 }, NOW)).rejects.toThrow(ValidationAppException);
+  });
+
+  it('allow on a truncated command is 400 before any lock', async () => {
+    const { service, seed, jobRepo } = buildBash();
+    seed({ ...pending, payload: { ...pending.payload, commandTruncated: true } });
+    await expect(service.decide(DEV_CALLER, dev, 'a1', { decision: 'allow' }, NOW)).rejects.toThrow(ValidationAppException);
+    expect(jobRepo.lockById).not.toHaveBeenCalled();
   });
 });
 

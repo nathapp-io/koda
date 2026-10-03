@@ -11,6 +11,7 @@ import { createMemoryLogger } from '../../src/logger';
 import { createNaxCli } from '../../src/nax/nax-cli';
 import { jobDirFor } from '../../src/paths/safe-segment';
 import { isolateGit, makeOrigin } from '../helpers/git-fixture';
+import { NO_APPROVALS } from '../helpers/no-approvals';
 import { NO_CREDENTIALS } from '../helpers/no-credentials';
 import { makeTempDirs } from '../helpers/tmp';
 
@@ -38,14 +39,14 @@ async function world(profiles: string[]) {
   await mkdir(naxHome, { recursive: true });
   const assign: AssignPayload = {
     jobId: 'cjob1', command: 'RUN', repo: { provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', cloneUrl: origin.url },
-    ref: 'main', feature: 'feat', planFrom: null, profiles, maxCostUsd: '5', bashMode: 'raw', gitIdentity: { name: 'koda-fleet[bot]', email: 'bot@x' },
+    ref: 'main', feature: 'feat', planFrom: null, profiles, maxCostUsd: '5', bashMode: 'raw', approvalTimeoutSec: 600, gitIdentity: { name: 'koda-fleet[bot]', email: 'bot@x' },
   };
   const row = Journal.open(':memory:').insertJob({ assign, leaseEpoch: 1, repoKey: 'acme/app', jobDir: jobDirFor(workspaceRoot, assign.jobId) }).row;
   const caps = { current: CAPS };
   const jobCheck = new NaxJobCheck({ nax: createNaxCli(['bun', FAKE], naxHome), capabilities: () => caps.current });
   const ex = new HostExecutor({
     config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now(),
-    sleep: async () => undefined, credentials: NO_CREDENTIALS, jobCheck,
+    sleep: async () => undefined, credentials: NO_CREDENTIALS, approvals: NO_APPROVALS, jobCheck,
   });
   return { naxHome, row, ex, caps };
 }

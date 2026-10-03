@@ -38,7 +38,7 @@ describe('parseAssign (D30)', () => {
     ['nine profiles', { ...assignFor(), profiles: Array.from({ length: 9 }, (_, i) => `p${i}`) }, 'profiles'],
     ['a cost of 1e9', { ...assignFor(), maxCostUsd: '1e9' }, 'maxCostUsd'],
     ['a numeric cost', { ...assignFor(), maxCostUsd: 5 }, 'maxCostUsd'],
-    ['bashMode gated', { ...assignFor(), bashMode: 'gated' }, 'bashMode'],
+    ['bashMode yolo', { ...assignFor(), bashMode: 'yolo' }, 'bashMode'],
     ['an identity with a newline', { ...assignFor(), gitIdentity: { name: 'a\nb', email: 'e@x' } }, 'gitIdentity'],
     ['a missing identity', { ...assignFor(), gitIdentity: undefined }, 'gitIdentity'],
     ['a ref over 255 characters', { ...assignFor(), ref: 'r'.repeat(256) }, 'ref'],
@@ -56,5 +56,27 @@ describe('parseAssign (D30)', () => {
   });
   test('STYLE-5: a PathError thrown from a validator returns false (the parse-time rejection path)', () => {
     expect(__checked(() => { throw new PathError('invalid owner'); })).toBe(false);
+  });
+});
+
+describe('bashMode and approvalTimeoutSec (S1.5 §4.1)', () => {
+  test.each(['raw', 'gated', 'escalate'] as const)('accepts %s on RUN', (bashMode) => {
+    const r = parseAssign(cmd(assignFor('RUN', { bashMode, approvalTimeoutSec: 90 })));
+    expect(r.ok && r.assign.bashMode).toBe(bashMode);
+    expect(r.ok && r.assign.approvalTimeoutSec).toBe(90);
+  });
+  test('refuses a non-raw PLAN', () => {
+    expect(parseAssign(cmd(assignFor('PLAN', { bashMode: 'gated' })))).toEqual({ ok: false, detail: 'invalid bashMode' });
+  });
+  test('refuses an unknown mode', () => {
+    expect(parseAssign(cmd({ ...assignFor('RUN'), bashMode: 'yolo' } as never))).toEqual({ ok: false, detail: 'invalid bashMode' });
+  });
+  test.each([29, 3601, 1.5, '60'])('refuses approvalTimeoutSec %p', (approvalTimeoutSec) => {
+    expect(parseAssign(cmd({ ...assignFor('RUN'), approvalTimeoutSec } as never))).toEqual({ ok: false, detail: 'invalid approvalTimeoutSec' });
+  });
+  test('defaults a missing timeout to 600 (a server that predates the field)', () => {
+    const { approvalTimeoutSec: _omit, ...legacy } = assignFor('RUN');
+    const r = parseAssign(cmd(legacy as never));
+    expect(r.ok && r.assign.approvalTimeoutSec).toBe(600);
   });
 });

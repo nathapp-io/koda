@@ -84,4 +84,16 @@ describe('parseCapabilitiesCore', () => {
     expect(() => parseCapabilitiesCore({ ...valid, executors: ['vm'] })).toThrow(/executors/);
     expect(() => parseCapabilitiesCore('x')).toThrow(CapabilityValidationError);
   });
+
+  describe('approvals (S1.5 §3, plan D271)', () => {
+    it('keeps { relay: true }', () => {
+      expect(parseCapabilitiesCore({ ...valid, approvals: { relay: true } }).approvals).toEqual({ relay: true });
+    });
+    it('omits approvals when absent', () => {
+      expect(parseCapabilitiesCore(valid)).not.toHaveProperty('approvals');
+    });
+    it.each([[{ relay: false }], [{ relay: 'yes' }], [{ relay: true, extra: 1 }], [true], [{}]])('refuses approvals %p', (approvals) => {
+      expect(() => parseCapabilitiesCore({ ...valid, approvals })).toThrow(/approvals/);
+    });
+  });
 });

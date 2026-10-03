@@ -1,17 +1,17 @@
-import type { RunnerCapabilities } from '../common/protocol';
+import type { RunnerCapabilities, BashMode } from '../common/protocol';
 import { isRunnerOnline } from '../common/runner-online';
 
 /** The first placement rule a runner fails (spec §4), reported per runner at dispatch. */
 export type MisfitReason =
   | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
-  | 'provider_unavailable' | 'sandbox' | 'tools' | 'busy_repo' | 'capacity';
+  | 'provider_unavailable' | 'sandbox' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity';
 
 // budget_paused is not permanent either: it clears on resume or month rollover (S1b §2.3).
 // provider_unavailable is not permanent: a later probe may fix it, so the job queues and a
 // pinned dispatch answers 201 (spec §4).
 /** A pinned job whose runner fails one of these can never run there: 422 at dispatch (spec §4). */
 export const PERMANENT_MISFITS: ReadonlySet<MisfitReason> = new Set<MisfitReason>([
-  'disabled', 'executor', 'protocol', 'provider_missing', 'sandbox', 'tools',
+  'disabled', 'executor', 'protocol', 'provider_missing', 'sandbox', 'tools', 'approvals_relay',
 ]);
 
 export interface PlacementJob {
@@ -20,6 +20,7 @@ export interface PlacementJob {
   profiles: readonly string[];
   selectorLabels: readonly string[];
   pinnedRunnerId: string | null;
+  bashMode: BashMode;
 }
 
 export interface PlacementRunner {
@@ -45,6 +46,8 @@ export const EMPTY_LOAD: RunnerLoad = Object.freeze({ active: 0, repoIds: new Se
 const own = (obj: object, key: string): boolean => Object.prototype.hasOwnProperty.call(obj, key);
 
 function capabilityMisfit(job: PlacementJob, caps: RunnerCapabilities): MisfitReason | null {
+  // Plan D270: a gated/escalate job on a runner without the relay would have every ask denied (A7), so never place it.
+  if (job.bashMode !== 'raw' && caps.approvals?.relay !== true) return 'approvals_relay';
   for (const name of job.profiles) {
     // A name the runner does not report is repo-provided and unknowable before clone (spec §2.1).
     if (!own(caps.profiles, name)) continue;

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { FLEET_PROTOCOL_VERSION } from '@nathapp/fleet-protocol';
 import type { AssignPayload, CommandAck, FleetCommandOut, SyncRequest, SyncResponse } from '@nathapp/fleet-protocol';
 import { Journal } from '../journal/journal';
 import { createMemoryLogger } from '../logger';
@@ -8,7 +9,7 @@ import { SyncLoop, PENDING_ACK_TTL_MS, type CapabilityReport, type StopReason, t
 const empty: SyncResponse = { jobAcks: [], commands: [], gitTokens: [], gitTokenErrors: [], unknownJobIds: [] };
 const assign = (jobId: string): AssignPayload => ({
   jobId, command: 'RUN', repo: { provider: 'github', owner: 'a', name: 'b', defaultBranch: 'main', cloneUrl: 'https://x/a/b.git' },
-  ref: 'main', feature: 'f', planFrom: null, profiles: [], maxCostUsd: '1', bashMode: 'raw', gitIdentity: { name: 'n', email: 'e' },
+  ref: 'main', feature: 'f', planFrom: null, profiles: [], maxCostUsd: '1', bashMode: 'raw', approvalTimeoutSec: 600, gitIdentity: { name: 'n', email: 'e' },
 });
 const caps = (v: string): CapabilityReport => ({
   hash: v,
@@ -79,7 +80,7 @@ describe('acks and the cursor', () => {
   test('sends free slots and identity on every request', async () => {
     script.push(ok());
     await makeLoop({ freeSlots: () => 3 }).syncOnce();
-    expect(calls[0]).toMatchObject({ protocolVersion: 1, bootId: 'boot-1', daemonVersion: '0.1.0', freeSlots: 3, jobs: [] });
+    expect(calls[0]).toMatchObject({ protocolVersion: FLEET_PROTOCOL_VERSION, bootId: 'boot-1', daemonVersion: '0.1.0', freeSlots: 3, jobs: [] });
   });
 });
 

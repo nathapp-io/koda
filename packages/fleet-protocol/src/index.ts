@@ -1,9 +1,12 @@
 /**
  * Koda fleet protocol (spec docs/superpowers/specs/2026-09-29-fleet-s1-dispatch-design.md).
  * Shared by apps/api (type-only) and apps/runner. Bump FLEET_PROTOCOL_VERSION on any
- * incompatible wire change.
+ * incompatible wire change. v2 (S1.5): approval relay.
  */
-export const FLEET_PROTOCOL_VERSION = 1 as const;
+export const FLEET_PROTOCOL_VERSION = 2 as const;
+
+/** S1.5 §1.6: `gated` and `escalate` relay nax bash asks to the approvals inbox (protocol v2 runners only). */
+export type BashMode = 'raw' | 'gated' | 'escalate';
 
 export type RunnerOs = 'darwin' | 'linux';
 export type RunnerArch = 'arm64' | 'x64';
@@ -41,6 +44,8 @@ export interface RunnerCapabilities {
   credentials: RunnerCredential[];
   tools: { git: boolean; gh: boolean; glab: boolean };
   executors: RunnerExecutor[];
+  /** S1.5 §3: present only when the runner hosts the nax approval relay (protocol v2, nax >= 0.83.0). */
+  approvals?: { relay: true };
 }
 
 export interface EnrollRequest {
@@ -74,8 +79,8 @@ export type FleetJobStateName =
   | 'QUEUED' | 'ASSIGNED' | 'RUNNING' | 'UPLOADING'
   | 'COMPLETED' | 'FAILED' | 'ESCALATED' | 'CRASHED' | 'CANCELLED';
 export type FleetJobKindName = 'RUN' | 'PLAN';
-export type FleetCommandTypeName = 'ASSIGN' | 'CANCEL' | 'READOPT' | 'ABANDON';
-export type RunnerEventType = 'state' | 'snapshot' | 'lifecycle' | 'log';
+export type FleetCommandTypeName = 'ASSIGN' | 'CANCEL' | 'READOPT' | 'ABANDON' | 'APPROVAL_ANSWER';
+export type RunnerEventType = 'state' | 'snapshot' | 'lifecycle' | 'log' | 'approval_request';
 
 /** A runner-reported transition (§5.4 runner-owned rows only). */
 export interface StateEventPayload { to: FleetJobStateName; reason?: string; exitCode?: number }
@@ -125,11 +130,44 @@ export interface LifecycleEventPayload { level: 'info' | 'warn' | 'error'; messa
 /** At most 8 KiB of text (§3.2). */
 export interface LogEventPayload { stream: 'stdout' | 'stderr' | 'run'; text: string }
 
+// ---- S1.5 slice 2a: approval relay (spec §3, §4) ----
+
+/** The choices nax offers on a bash ask; `allow-remember` only when nax can remember it. */
+export type ApprovalOption = 'allow' | 'allow-remember' | 'deny';
+
+/** Cap for `command` and `rawDetail` (UTF-8 bytes); keeps the event under the 16 KiB sync payload limit. */
+export const APPROVAL_TEXT_MAX_BYTES = 12_288;
+
+/**
+ * One nax bash ask, relayed by the runner (spec §1.2, plan D256/D283). `command` is nax's masked command; on a
+ * detail the runner could not parse, `command` is '' and `rawDetail` holds nax's text. `commandTruncated` is true
+ * when either text was cut to the cap; such an ask can only be denied.
+ */
+export interface ApprovalRequestEventPayload {
+  /** nax's request id, `ask-<hex>`. */
+  naxAskId: string;
+  /** ISO time: nax's `createdAt + timeout` (plan D257). */
+  deadlineAt: string;
+  command: string;
+  commandTruncated: boolean;
+  maskedCount: number;
+  root: string;
+  stage: string;
+  storyId: string | null;
+  featureName: string;
+  reason: string;
+  options: ApprovalOption[];
+  rawDetail?: string;
+}
+
+/** Server -> runner: the human's answer to one ask. */
+export interface ApprovalAnswerPayload { approvalId: string; naxAskId: string; choice: ApprovalOption }
+
 export interface RunnerEvent {
   /** Per job and lease epoch, starting at 1, contiguous. */
   seq: number;
   type: RunnerEventType;
-  payload: StateEventPayload | SnapshotEventPayload | LifecycleEventPayload | LogEventPayload;
+  payload: StateEventPayload | SnapshotEventPayload | LifecycleEventPayload | LogEventPayload | ApprovalRequestEventPayload;
 }
 
 export interface JobReport { jobId: string; leaseEpoch: number; events: RunnerEvent[] }
@@ -162,7 +200,9 @@ export interface AssignPayload {
   profiles: string[];
   /** Decimal string. */
   maxCostUsd: string;
-  bashMode: 'raw';
+  bashMode: BashMode;
+  /** S1.5 §1.6: seconds nax waits on a bash ask; 30..3600. Used only when bashMode is not raw. */
+  approvalTimeoutSec: number;
   gitIdentity: GitIdentity;
 }
 export interface ReadoptPayload { naxRunId: string | null }
@@ -173,7 +213,7 @@ export interface FleetCommandOut {
   type: FleetCommandTypeName;
   jobId: string;
   leaseEpoch: number;
-  payload: AssignPayload | ReadoptPayload | AbandonPayload | Record<string, never>;
+  payload: AssignPayload | ReadoptPayload | AbandonPayload | ApprovalAnswerPayload | Record<string, never>;
 }
 
 export interface GitToken { jobId: string; token: string; expiresAt: string; username: 'x-access-token' | 'oauth2' }

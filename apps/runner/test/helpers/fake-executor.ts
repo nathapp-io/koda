@@ -29,6 +29,7 @@ export class FakeExecutor implements JobExecutor {
   bundle: BundleFile = { path: '/b.tgz', size: 1, sha256: 'c'.repeat(64) };
   bundleError: Error | null = null;
   resumeError: Error | null = null;
+  resumeApprovalsError: Error | null = null;
   ticks = 0;
   onTick: (n: number, final: boolean, sink: WatcherSink) => void = () => undefined;
   onKill: (signal: 'SIGTERM' | 'SIGKILL') => void = () => { this.alive = false; };
@@ -122,5 +123,14 @@ export class FakeExecutor implements JobExecutor {
 
   async releaseCredentials(job: JobRow): Promise<void> {
     this.note('releaseCredentials', job);
+  }
+
+  async resumeApprovals(job: JobRow): Promise<void> {
+    this.calls.push(`resumeApprovals:${job.jobId}`);
+    if (this.resumeApprovalsError) throw this.resumeApprovalsError;
+  }
+
+  async releaseApprovals(job: JobRow): Promise<void> {
+    this.calls.push(`releaseApprovals:${job.jobId}`);
   }
 }

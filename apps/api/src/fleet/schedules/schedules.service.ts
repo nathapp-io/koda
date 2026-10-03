@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
+import type { BashMode } from '../common/protocol';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { normalizeDispatch } from '../jobs/dispatch-input';
 import { FleetDispatchException } from '../jobs/fleet-dispatch.exception';
@@ -29,6 +30,8 @@ interface TemplateInput {
   maxCostUsd: number;
   selectorLabels?: string[];
   pinnedRunnerId?: string | null;
+  bashMode?: BashMode;
+  approvalTimeoutSec?: number;
 }
 
 interface CheckedTemplate {
@@ -41,6 +44,8 @@ interface CheckedTemplate {
   maxCostUsd: string;
   selectorLabels: string[];
   pinnedRunnerId: string | null;
+  bashMode: BashMode;
+  approvalTimeoutSec: number;
 }
 
 /** Plan D191: a cron or zone refusal is a 400; too frequent has its own code. */
@@ -83,6 +88,7 @@ export class SchedulesService {
       const schedule = await this.repo.create({
         projectId, repoId: t.repoId, name: dto.name.trim(), cron: t.cron, timezone: t.timezone, feature: t.feature, ref: t.ref,
         profiles: t.profiles, maxCostUsd: t.maxCostUsd, selectorLabels: t.selectorLabels, pinnedRunnerId: t.pinnedRunnerId,
+        bashMode: t.bashMode, approvalTimeoutSec: t.approvalTimeoutSec,
         noProgressLimit: dto.noProgressLimit ?? DEFAULT_NO_PROGRESS_LIMIT, nextFireAt: nextFireAfter(t.cron, t.timezone, now), createdById: actorId,
       });
       await this.record(actorId, 'schedule.created', schedule);
@@ -101,12 +107,13 @@ export class SchedulesService {
         ref: dto.ref ?? current.ref, profiles: dto.profiles ?? current.profiles, maxCostUsd: dto.maxCostUsd ?? Number(current.maxCostUsd),
         selectorLabels: dto.selectorLabels ?? current.selectorLabels,
         pinnedRunnerId: dto.pinnedRunnerId === undefined ? current.pinnedRunnerId : dto.pinnedRunnerId,
+        bashMode: dto.bashMode ?? current.bashMode, approvalTimeoutSec: dto.approvalTimeoutSec ?? current.approvalTimeoutSec,
       }, now);
       const moved = (dto.cron !== undefined || dto.timezone !== undefined) && current.enabled;
       const after = await this.repo.update(id, {
         ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
         cron: t.cron, timezone: t.timezone, ref: t.ref, profiles: t.profiles, maxCostUsd: t.maxCostUsd,
-        selectorLabels: t.selectorLabels, pinnedRunnerId: t.pinnedRunnerId,
+        selectorLabels: t.selectorLabels, pinnedRunnerId: t.pinnedRunnerId, bashMode: t.bashMode, approvalTimeoutSec: t.approvalTimeoutSec,
         ...(dto.noProgressLimit !== undefined ? { noProgressLimit: dto.noProgressLimit } : {}),
         ...(moved ? { nextFireAt: nextFireAfter(t.cron, t.timezone, now) } : {}),
         updatedById: actorId,
@@ -171,6 +178,8 @@ export class SchedulesService {
       ...(input.profiles !== undefined ? { profiles: input.profiles } : {}),
       ...(input.selectorLabels !== undefined ? { selectorLabels: input.selectorLabels } : {}),
       ...(input.pinnedRunnerId ? { pinnedRunnerId: input.pinnedRunnerId } : {}),
+      ...(input.bashMode !== undefined ? { bashMode: input.bashMode } : {}),
+      ...(input.approvalTimeoutSec !== undefined ? { approvalTimeoutSec: input.approvalTimeoutSec } : {}),
     }, repo.defaultBranch);
     if (normalized.pinnedRunnerId) {
       const verdict = await this.placement.evaluatePinned(normalized.pinnedRunnerId, toPlacementJob(normalized, repo));
@@ -180,6 +189,7 @@ export class SchedulesService {
     return {
       repoId: input.repoId, feature: normalized.feature, cron: zoned.cron, timezone: zoned.timezone, ref: normalized.ref,
       profiles: normalized.profiles, maxCostUsd: normalized.maxCostUsd, selectorLabels: normalized.selectorLabels, pinnedRunnerId: normalized.pinnedRunnerId,
+      bashMode: normalized.bashMode, approvalTimeoutSec: normalized.approvalTimeoutSec,
     };
   }
 

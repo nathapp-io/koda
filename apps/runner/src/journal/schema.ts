@@ -1,4 +1,4 @@
-/** Slice 3 design §1.4 plus D23 (cancel_requested_at, result_branch, result_sha, applied_commands.detail). */
+/** Slice 3 design §1.4 plus D23 (cancel_requested_at, result_branch, result_sha, applied_commands.detail); S1.5 2a: approval_receivers, pending_asks (plan D278). */
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS jobs (
   job_id TEXT NOT NULL,
@@ -42,4 +42,21 @@ CREATE TABLE IF NOT EXISTS applied_commands (
   applied_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS approval_receivers (
+  job_id TEXT NOT NULL,
+  lease_epoch INTEGER NOT NULL,
+  port INTEGER NOT NULL,
+  secret TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (job_id, lease_epoch)
+);
+CREATE TABLE IF NOT EXISTS pending_asks (
+  job_id TEXT NOT NULL,
+  lease_epoch INTEGER NOT NULL,
+  nax_ask_id TEXT NOT NULL,
+  callback_url TEXT NOT NULL,
+  deadline_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (job_id, lease_epoch, nax_ask_id)
+);
 `;

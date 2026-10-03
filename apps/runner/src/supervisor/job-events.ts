@@ -1,4 +1,4 @@
-import type { FleetJobStateName, LogEventPayload, SnapshotEventPayload, StateEventPayload } from '@nathapp/fleet-protocol';
+import type { ApprovalRequestEventPayload, FleetJobStateName, LogEventPayload, SnapshotEventPayload, StateEventPayload } from '@nathapp/fleet-protocol';
 import type { Journal } from '../journal/journal';
 import type { JobPatch } from '../journal/types';
 import type { Logger } from '../logger';
@@ -51,5 +51,10 @@ export class JobEvents implements WatcherSink {
   logLine(payload: LogEventPayload): void {
     const fits = byteLength(payload) <= SYNC_LIMITS.payloadBytes;
     this.journal.appendEvent(this.jobId, this.leaseEpoch, 'log', fits ? payload : { ...payload, text: payload.text.slice(0, MAX_LOG_TEXT) });
+  }
+
+  /** Spec §4.2 step 4: the ask goes up in the job's report; ask-payload.ts already fit it to the 16 KiB limit. */
+  approvalRequest(payload: ApprovalRequestEventPayload): void {
+    this.journal.appendEvent(this.jobId, this.leaseEpoch, 'approval_request', payload);
   }
 }

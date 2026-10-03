@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
+import type { ApprovalRequestEventPayload } from '@nathapp/fleet-protocol';
+import fixtures from '../../test/fixtures/nax-asks/v0.83.2.json' with { type: 'json' };
+import { buildAskPayload } from '../approvals/ask-payload';
 import { Journal } from '../journal/journal';
 import { createMemoryLogger, type MemoryLogger } from '../logger';
 import { assignFor } from '../../test/helpers/assign';
@@ -73,5 +76,16 @@ describe('a job that is gone (abandoned)', () => {
     expect(events.transition('RUNNING')).toBe(false);
     expect(() => { events.snapshot({ naxRunId: 'r' }); events.lifecycle('info', 'x'); events.logLine({ stream: 'run', text: 'x' }); }).not.toThrow();
     expect(journal.pendingEvents('j1', 1, 10)).toEqual([]);
+  });
+});
+
+describe('approvalRequest (S1.5 2a)', () => {
+  const ASK_PAYLOAD = buildAskPayload(fixtures.a_simple) as ApprovalRequestEventPayload;
+  test('approvalRequest appends an approval_request event (and wakes the sync loop through onWrite)', () => {
+    let writes = 0;
+    journal.onWrite(() => { writes += 1; });
+    events.approvalRequest(ASK_PAYLOAD);
+    expect(journal.pendingEvents('j1', 1, 1_000).at(-1)).toEqual(expect.objectContaining({ type: 'approval_request', payload: ASK_PAYLOAD }));
+    expect(writes).toBeGreaterThan(0);
   });
 });

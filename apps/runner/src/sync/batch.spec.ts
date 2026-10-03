@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { FLEET_PROTOCOL_VERSION } from '@nathapp/fleet-protocol';
 import type { AssignPayload } from '@nathapp/fleet-protocol';
 import { Journal } from '../journal/journal';
 import { ACK_DETAIL_MAX, FULL_SCALE, MAX_BODY_BYTES, SYNC_LIMITS, buildSyncRequest, byteLength, clampAck, doubleScale, halveScale } from './batch';
 
 const assign = (jobId: string): AssignPayload => ({
   jobId, command: 'RUN', repo: { provider: 'github', owner: 'a', name: 'b', defaultBranch: 'main', cloneUrl: 'https://x/a/b.git' },
-  ref: 'main', feature: 'f', planFrom: null, profiles: [], maxCostUsd: '1', bashMode: 'raw', gitIdentity: { name: 'n', email: 'e' },
+  ref: 'main', feature: 'f', planFrom: null, profiles: [], maxCostUsd: '1', bashMode: 'raw', approvalTimeoutSec: 600, gitIdentity: { name: 'n', email: 'e' },
 });
 let j: Journal;
 beforeEach(() => { j = Journal.open(':memory:'); });
@@ -51,7 +52,7 @@ describe('buildSyncRequest', () => {
     expect(req.jobs).toHaveLength(1);
     expect(req.jobs[0]).toMatchObject({ jobId: 'a', leaseEpoch: 1 });
     expect(req.jobs[0].events.map((e) => e.seq)).toEqual([1, 2, 3]);
-    expect(req).toMatchObject({ protocolVersion: 1, bootId: 'boot', daemonVersion: '0.1.0', freeSlots: 1, commandAcks: [], tokenRequests: [] });
+    expect(req).toMatchObject({ protocolVersion: FLEET_PROTOCOL_VERSION, bootId: 'boot', daemonVersion: '0.1.0', freeSlots: 1, commandAcks: [], tokenRequests: [] });
   });
   test('jobs with nothing pending are not reported', () => {
     add('a');

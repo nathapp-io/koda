@@ -20,6 +20,7 @@ import { RunnerNotifier } from './runner-notifier';
 import { PERMANENT_MISFITS } from './placement-rules';
 import { PlacementService, toPlacementJob } from './placement.service';
 import { DuplicateActiveJobError, FLEET_JOB_REPOSITORY, FleetJobFilters, FleetJobRecord, IFleetJobRepository } from './domain/fleet-job.domain';
+import { APPROVAL_REPOSITORY, type IApprovalRepository } from '../approvals/domain/approval.domain';
 import { DispatchFleetJobDto } from './dto/dispatch-fleet-job.dto';
 import { DispatchResultDto, FleetJobDto } from './dto/fleet-job.dto';
 import { FleetJobEventDto } from './dto/fleet-job-event.dto';
@@ -45,6 +46,7 @@ export class FleetJobsService {
     private readonly notifier: RunnerNotifier,
     private readonly budgets: BudgetGate,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    @Inject(APPROVAL_REPOSITORY) private readonly approvals: Pick<IApprovalRepository, 'countPendingByJob'>,
   ) {}
 
   /** Spec §5.1: validate, insert QUEUED (409 on an active duplicate), record, place. */
@@ -93,7 +95,10 @@ export class FleetJobsService {
   }
 
   async list(filters: FleetJobFilters, page: IPageOption): Promise<IPageResult<FleetJobDto>> {
-    return remapPage(await this.repo.findPage(filters, page), FleetJobDto.summary);
+    const pageResult = await this.repo.findPage(filters, page);
+    // Plan D272: one grouped count per page, never one per row.
+    const pending = await this.approvals.countPendingByJob(pageResult.records.map((r) => r.id));
+    return remapPage(pageResult, (r) => FleetJobDto.summary(r, pending.get(r.id) ?? 0));
   }
 
   /**
@@ -137,7 +142,12 @@ export class FleetJobsService {
     });
     if (live) this.live.publish([live]);
     if (wake) this.notifier.notify(wake);
-    return FleetJobDto.from(job);
+    return this.withPending(job);
+  }
+
+  /** S1.5 2a: one pending-approval count for the single job (plan D272). */
+  private async withPending(r: FleetJobRecord): Promise<FleetJobDto> {
+    return FleetJobDto.from(r, (await this.approvals.countPendingByJob([r.id])).get(r.id) ?? 0);
   }
 
   /**
@@ -218,13 +228,13 @@ export class FleetJobsService {
     const outcome = await this.placement.placeJob(queued.id);
     const fresh = (await this.repo.findById(queued.id)) ?? queued;
     return Object.assign(new DispatchResultDto(), {
-      job: FleetJobDto.from(fresh),
+      job: await this.withPending(fresh),
       placement: { assigned: outcome.assigned, runnerId: outcome.runnerId, misfits: outcome.misfits },
     });
   }
 
   async get(projectId: string, id: string): Promise<FleetJobDto> {
-    return FleetJobDto.from(await this.findInProject(projectId, id));
+    return this.withPending(await this.findInProject(projectId, id));
   }
 
   async events(projectId: string, id: string, page: IPageOption): Promise<IPageResult<FleetJobEventDto>> {

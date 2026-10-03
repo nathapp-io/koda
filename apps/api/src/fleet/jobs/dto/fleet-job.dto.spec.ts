@@ -6,7 +6,7 @@ describe('fleet job DTOs', () => {
   it('serialise with decimals and dates as strings and hide internal columns', () => {
     const dto = FleetJobDto.from({
       id: 'j', projectId: 'p', repoId: 'r', ref: 'main', command: 'RUN', feature: 'f', planFrom: null, profiles: [],
-      maxCostUsd: '5.5', bashMode: 'raw', selectorLabels: [], pinnedRunnerId: null, runnerId: null, runnerBootId: 'boot',
+      maxCostUsd: '5.5', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null, runnerId: null, runnerBootId: 'boot',
       leaseEpoch: 1, state: 'QUEUED', stateReason: null, requestedById: 'u', queuedAt: now, assignedAt: null,
       startedAt: null, finishedAt: null, cancelRequestedAt: null, naxRunId: null, naxLogRunId: null, naxCostRunId: null,
       progress: null, currentStoryId: null, currentPhase: null, costSpentUsd: '0.1234', costCarriedUsd: '0', firstStartedAt: null, cancelReason: null, scheduleId: 's1', coalescedCount: 2, scheduleCountedAt: null, lastHeartbeatAt: null,
@@ -26,7 +26,7 @@ describe('fleet job DTOs', () => {
   it('a list page leaves the story list out (D149); a single job carries it', () => {
     const record = {
       id: 'j', projectId: 'p', repoId: 'r', ref: 'main', command: 'RUN', feature: 'f', planFrom: null, profiles: [],
-      maxCostUsd: '5', bashMode: 'raw', selectorLabels: [], pinnedRunnerId: null, runnerId: null, runnerBootId: null,
+      maxCostUsd: '5', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null, runnerId: null, runnerBootId: null,
       leaseEpoch: 1, state: 'RUNNING', stateReason: null, requestedById: 'u', queuedAt: now, assignedAt: null,
       startedAt: null, finishedAt: null, cancelRequestedAt: null, naxRunId: null, naxLogRunId: null, naxCostRunId: null,
       progress: null, currentStoryId: 'US-001', currentPhase: 'implement', costSpentUsd: '0', costCarriedUsd: '0', firstStartedAt: null, cancelReason: null, scheduleId: null, coalescedCount: 0, scheduleCountedAt: null, lastHeartbeatAt: null,
@@ -38,5 +38,12 @@ describe('fleet job DTOs', () => {
     expect(full).toEqual(expect.objectContaining({ stories: [record.stories[0]], storiesTruncated: true }));
     const summary = JSON.parse(JSON.stringify(FleetJobDto.summary({ ...record, stories: [...record.stories] } as never)));
     expect(summary).toEqual(expect.objectContaining({ id: 'j', currentStoryId: 'US-001', stories: null, storiesTruncated: false }));
+  });
+
+  it('maps bashMode, approvalTimeoutSec and pendingApprovals (S1.5 §1.6)', () => {
+    const record = { id: 'j', bashMode: 'raw', approvalTimeoutSec: 600, queuedAt: now };
+    const dto = FleetJobDto.from({ ...record, bashMode: 'escalate', approvalTimeoutSec: 120 } as never, 2);
+    expect(dto).toEqual(expect.objectContaining({ bashMode: 'escalate', approvalTimeoutSec: 120, pendingApprovals: 2 }));
+    expect(FleetJobDto.summary(record as never).pendingApprovals).toBe(0);
   });
 });

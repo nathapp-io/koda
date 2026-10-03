@@ -4,6 +4,7 @@
  * a job profile supplies outputDir, SIGTERM makes nax write run.status = crashed, and `plan` leaves untracked files.
  */
 import { execFileSync } from 'node:child_process';
+import { askOnce, type FakeProfile } from './fake-nax-ask';
 import { answerProbe } from './fake-nax-probe';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -44,7 +45,7 @@ if (!feature || !jobProfile) {
   process.exit(2);
 }
 const naxHome = process.env['NAX_GLOBAL_CONFIG_DIR'] ?? join(homedir(), '.nax');
-const profile = JSON.parse(readFileSync(join(naxHome, 'profiles', `${jobProfile}.json`), 'utf8')) as { outputDir?: string };
+const profile = JSON.parse(readFileSync(join(naxHome, 'profiles', `${jobProfile}.json`), 'utf8')) as FakeProfile;
 if (!profile.outputDir || !isAbsolute(profile.outputDir)) {
   console.error('fake-nax: the job profile has no absolute outputDir');
   process.exit(2);
@@ -113,6 +114,16 @@ async function run(): Promise<void> {
     });
   }
   flush();
+
+  if (scenario === 'ask') {
+    // Keep status.json fresh while blocked: READOPT's `fresh(status)` needs a heartbeat within 120 s.
+    const heartbeat = setInterval(flush, 200);
+    try {
+      await askOnce(profile, outDir);
+    } finally {
+      clearInterval(heartbeat);
+    }
+  }
 
   if (scenario === 'hang') {
     setInterval(flush, 100);

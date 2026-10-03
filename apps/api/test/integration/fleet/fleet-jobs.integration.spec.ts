@@ -68,7 +68,7 @@ describeIntegration('fleet jobs (PG)', () => {
 
   it.each([
     ['PLAN without planFrom', { feature: 'p1', command: 'PLAN' }],
-    ['bashMode gated', { feature: 'p2', bashMode: 'gated' }],
+    ['bashMode yolo', { feature: 'p2', bashMode: 'yolo' }],
     ['a reserved profile', { feature: 'p3', profiles: ['koda-job-1'] }],
     ['maxCostUsd 0', { feature: 'p4', maxCostUsd: 0 }],
     ['a bad feature', { feature: '../x' }],

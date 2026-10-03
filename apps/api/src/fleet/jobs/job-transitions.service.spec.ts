@@ -1,10 +1,13 @@
 import { InvalidTransitionError, JobTransitionsService, SYSTEM_ACTOR } from './job-transitions.service';
+import type { LiveFleetApprovalEvent } from '../../live/live-event';
 import type { FleetJobRecord } from './domain/fleet-job.domain';
 
 const NOW = new Date('2026-10-01T00:00:00.000Z');
+
+const APPROVAL_LIVE: LiveFleetApprovalEvent = { id: 'lv-1', type: 'fleet_approval', projectId: 'p1', approvalId: 'a1', status: 'cancelled', at: NOW.toISOString() };
 const job = (over: Partial<FleetJobRecord> = {}): FleetJobRecord => ({
   id: 'j1', projectId: 'p1', repoId: 'r1', ref: 'main', command: 'RUN', feature: 'f', planFrom: null, profiles: [],
-  maxCostUsd: '5', bashMode: 'raw', selectorLabels: [], pinnedRunnerId: null, runnerId: 'run-1', runnerBootId: 'b1',
+  maxCostUsd: '5', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null, runnerId: 'run-1', runnerBootId: 'b1',
   leaseEpoch: 2, state: 'ASSIGNED', stateReason: null, requestedById: 'u1', queuedAt: NOW, assignedAt: NOW,
   startedAt: null, finishedAt: null, cancelRequestedAt: null, naxRunId: null, naxLogRunId: null, naxCostRunId: null,
   progress: null, currentStoryId: null, currentPhase: null, costSpentUsd: '0', costCarriedUsd: '0', firstStartedAt: null, cancelReason: null, scheduleId: null, coalescedCount: 0, scheduleCountedAt: null, lastHeartbeatAt: null, finishResult: null,
@@ -21,8 +24,27 @@ describe('JobTransitionsService', () => {
   const activity = { record: jest.fn() };
   const live = { event: jest.fn((j: FleetJobRecord) => ({ id: 'e', type: 'fleet_job', projectId: j.projectId, jobId: j.id, state: j.state, at: NOW.toISOString() })), publish: jest.fn() };
   const schedules = { onJobEnded: jest.fn(async () => undefined) };
-  const svc = new JobTransitionsService(repo as never, activity as never, live as never, schedules as never);
+  const closer = { closeForJob: jest.fn().mockResolvedValue([APPROVAL_LIVE]) };
+  const svc = new JobTransitionsService(repo as never, activity as never, live as never, schedules as never, closer as never);
   afterEach(() => jest.clearAllMocks());
+
+  const ACTOR = { type: 'RUNNER', id: 'run-1' } as const;
+
+  describe('leaving RUNNING (S1.5 §1.4, plan D263)', () => {
+    it.each([['UPLOADING', 'runner'], ['CANCELLED', 'runner'], ['CRASHED', 'server']] as const)(
+      'RUNNING -> %s closes the asks and withdraws unsent answers', async (to, by) => {
+        const r = await svc.apply({ job: { ...job(), state: 'RUNNING' }, to, by, now: NOW, actor: ACTOR });
+        expect(repo.withdrawPendingCommands).toHaveBeenCalledWith(job().id, NOW, { types: ['APPROVAL_ANSWER'] });
+        expect(closer.closeForJob).toHaveBeenCalledWith(expect.objectContaining({ id: job().id }), NOW);
+        expect(r.approvalLive).toEqual([APPROVAL_LIVE]);
+      });
+
+    it('a move that does not leave RUNNING touches no approvals', async () => {
+      const r = await svc.apply({ job: { ...job(), state: 'ASSIGNED' }, to: 'RUNNING', by: 'runner', now: NOW, actor: ACTOR });
+      expect(closer.closeForJob).not.toHaveBeenCalled();
+      expect(r.approvalLive).toEqual([]);
+    });
+  });
 
   it('refuses a transition outside the table', async () => {
     await expect(svc.apply({ job: job({ state: 'RUNNING' }), to: 'COMPLETED', by: 'runner', now: NOW, actor: SYSTEM_ACTOR }))
@@ -63,14 +85,14 @@ describe('JobTransitionsService', () => {
 
   it('counts the end of a scheduled job against its schedule, in the same call (S1b §3.3)', async () => {
     const scheduledRepo = { ...repo, update: jest.fn(async () => job({ state: 'FAILED', scheduleId: 's1' })) };
-    const scheduledSvc = new JobTransitionsService(scheduledRepo as never, activity as never, live as never, schedules as never);
+    const scheduledSvc = new JobTransitionsService(scheduledRepo as never, activity as never, live as never, schedules as never, closer as never);
     await scheduledSvc.apply({ job: job({ state: 'UPLOADING', scheduleId: 's1' }), to: 'FAILED', by: 'runner', now: NOW, actor: { type: 'RUNNER', id: 'run-1' } });
     expect(schedules.onJobEnded).toHaveBeenCalledWith(expect.objectContaining({ id: 'j1', state: 'FAILED', scheduleId: 's1' }), NOW);
   });
 
   it('does not touch the schedule for a non-terminal transition or an unscheduled job', async () => {
     const running = { ...repo, update: jest.fn(async () => job({ state: 'RUNNING', scheduleId: 's1' })) };
-    await new JobTransitionsService(running as never, activity as never, live as never, schedules as never)
+    await new JobTransitionsService(running as never, activity as never, live as never, schedules as never, closer as never)
       .apply({ job: job({ scheduleId: 's1' }), to: 'RUNNING', by: 'runner', now: NOW, actor: { type: 'RUNNER', id: 'run-1' } });
     await svc.apply({ job: job({ state: 'UPLOADING' }), to: 'FAILED', by: 'runner', now: NOW, actor: { type: 'RUNNER', id: 'run-1' } });
     expect(schedules.onJobEnded).not.toHaveBeenCalled();

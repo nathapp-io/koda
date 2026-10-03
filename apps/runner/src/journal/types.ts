@@ -49,3 +49,18 @@ export interface CommandRecord {
   readonly detail: string | null;
   readonly appliedAt: string;
 }
+
+export interface ApprovalReceiverRow {
+  readonly jobId: string;
+  readonly leaseEpoch: number;
+  readonly port: number;
+  readonly secret: string;
+}
+
+export interface PendingAskRow {
+  readonly jobId: string;
+  readonly leaseEpoch: number;
+  readonly naxAskId: string;
+  readonly callbackUrl: string;
+  readonly deadlineAt: string;
+}

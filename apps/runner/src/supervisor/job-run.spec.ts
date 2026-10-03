@@ -491,7 +491,7 @@ describe('abandon and halt', () => {
     await b.run.abandon();
     await running;
     expect(b.ex.killed).toEqual([{ pgid: 4242, signal: 'SIGKILL' }]);       // that pid is epoch 1's
-    expect(b.ex.calls.slice(callsBefore)).toEqual(['releaseCredentials:j1']);   // D90: epoch 1's socket closes; no reap, no cleanup
+    expect(b.ex.calls.slice(callsBefore)).toEqual(['releaseCredentials:j1', 'releaseApprovals:j1']);   // D90: epoch 1's socket closes; no reap, no cleanup
     expect(b.journal.getJob('j1', 1)).toBeNull();
     expect(b.journal.getJob('j1', 2)).not.toBeNull();
   });
@@ -597,6 +597,39 @@ describe('git credentials across a restart (D90)', () => {
     await b.run.abandon();
     await running;
     expect(b.ex.calls).toContain('releaseCredentials:j1');
+  });
+});
+
+describe('approval relay across the run lifecycle (plan D273, D285)', () => {
+  test('a watch start resumes approvals before the first tick', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    b.ex.alive = true;
+    let resumedFirst = false;
+    b.ex.onTick = (n) => { if (n === 1) resumedFirst = b.ex.calls.includes('resumeApprovals:j1'); if (n >= 1) b.ex.alive = false; };
+    await b.run.start('watch');
+    expect(resumedFirst).toBe(true);
+  });
+  test('abandon of a lower epoch releases its relay even when a higher epoch is live (plan D285)', async () => {
+    const b = build();
+    b.ex.onTick = () => undefined;
+    const running = b.run.start('prepare');
+    await waitFor(() => b.ex.calls.includes('spawn:j1') && b.ex.ticks >= 1);
+    b.journal.insertJob({ assign: assignFor('RUN'), leaseEpoch: 2, repoKey: 'acme/app', jobDir: '/w/.jobs/j1' });   // the requeued attempt
+    const callsBefore = b.ex.calls.length;
+    await b.run.abandon();
+    await running;
+    expect(b.ex.calls.slice(callsBefore)).toEqual(['releaseCredentials:j1', 'releaseApprovals:j1']);   // no reap, no cleanup
+  });
+  test('a failing approvals resume is a lifecycle error and the run is still watched (plan D273)', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    b.ex.alive = true;
+    b.ex.resumeApprovalsError = new Error('EADDRINUSE');
+    b.ex.dieAfterTicks(1);
+    await b.run.start('watch');
+    expect(events(b).some((e) => e.type === 'lifecycle' && JSON.stringify(e.payload).includes('approval relay could not be restored'))).toBe(true);
+    expect(b.ex.ticks).toBeGreaterThanOrEqual(1);   // the run is still watched (FakeExecutor counts ticks, not 'tick' calls)
   });
 });
 

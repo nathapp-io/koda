@@ -1,4 +1,5 @@
 import type { FleetJobState } from '../../../common/enums';
+import type { BashMode } from '../../common/protocol';
 
 export const SCHEDULE_REPOSITORY = Symbol('SCHEDULE_REPOSITORY');
 
@@ -25,6 +26,10 @@ export interface ScheduleRecord {
   /** Decimal as string. */
   maxCostUsd: string;
   selectorLabels: string[];
+  /** S1.5 §1.6: copied into each dispatched job; PLAN always runs raw. */
+  bashMode: BashMode;
+  /** S1.5 §1.6: seconds a bash ask waits (30..3600, default 600); used only when bashMode is not raw. */
+  approvalTimeoutSec: number;
   /** No foreign key (plan D193). */
   pinnedRunnerId: string | null;
   enabled: boolean;
@@ -44,12 +49,13 @@ export interface ScheduleRecord {
 export type NewSchedule = Pick<
   ScheduleRecord,
   'projectId' | 'repoId' | 'name' | 'cron' | 'timezone' | 'feature' | 'ref' | 'profiles' | 'maxCostUsd' | 'selectorLabels'
-  | 'pinnedRunnerId' | 'noProgressLimit' | 'nextFireAt' | 'createdById'
+  | 'bashMode' | 'approvalTimeoutSec' | 'pinnedRunnerId' | 'noProgressLimit' | 'nextFireAt' | 'createdById'
 >;
 
 export type SchedulePatch = Partial<Pick<
   ScheduleRecord,
-  'name' | 'cron' | 'timezone' | 'ref' | 'profiles' | 'maxCostUsd' | 'selectorLabels' | 'pinnedRunnerId' | 'enabled'
+  'name' | 'cron' | 'timezone' | 'ref' | 'profiles' | 'maxCostUsd' | 'selectorLabels' | 'bashMode' | 'approvalTimeoutSec'
+  | 'pinnedRunnerId' | 'enabled'
   | 'nextFireAt' | 'lastFiredAt' | 'lastJobId' | 'lastPassedCount' | 'noProgressTicks' | 'noProgressLimit'
   | 'disabledReason' | 'updatedById'
 >>;

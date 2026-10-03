@@ -136,7 +136,7 @@ export const FleetJobKind = { RUN: 'RUN', PLAN: 'PLAN' } as const;
 export type FleetJobKind = (typeof FleetJobKind)[keyof typeof FleetJobKind];
 
 /** Fleet S1: FleetCommand.type. */
-export const FleetCommandType = { ASSIGN: 'ASSIGN', CANCEL: 'CANCEL', READOPT: 'READOPT', ABANDON: 'ABANDON' } as const;
+export const FleetCommandType = { ASSIGN: 'ASSIGN', CANCEL: 'CANCEL', READOPT: 'READOPT', ABANDON: 'ABANDON', /** S1.5 §3: a human's answer to a relayed nax bash ask. */ APPROVAL_ANSWER: 'APPROVAL_ANSWER' } as const;
 export type FleetCommandType = (typeof FleetCommandType)[keyof typeof FleetCommandType];
 
 /** Fleet S1: FleetCommand.ackResult. `withdrawn` and `stale` are server-set (plan D4, D8). */

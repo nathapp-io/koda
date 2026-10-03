@@ -40,4 +40,14 @@ describe('parseSyncRequest (spec §3.2)', () => {
     const parsed = parseSyncRequest({ ...base, jobs: [{ jobId: 'j', leaseEpoch: 1, events: [ev(1, 'snapshot', { resultBranch: 'a\u0000b', ['k\u0000']: ['x\u0000'] })] }] });
     expect(parsed.jobs[0].events[0].payload).toEqual({ resultBranch: 'a\uFFFDb', ['k\uFFFD']: ['x\uFFFD'] });
   });
+
+  it('accepts an approval_request event with an object payload', () => {
+    const payload = {
+      naxAskId: 'ask-1f2e3d4c', deadlineAt: '2026-10-04T10:10:00.000Z', command: 'bun run test', commandTruncated: false,
+      maskedCount: 0, root: '/work/repo', stage: 'execution', storyId: 'US-001', featureName: 'demo', reason: 'matched ask rule',
+      options: ['allow', 'allow-remember', 'deny'],
+    };
+    const parsed = parseSyncRequest({ ...base, jobs: [{ jobId: 'j', leaseEpoch: 1, events: [ev(1, 'approval_request', payload)] }] });
+    expect(parsed.jobs[0].events[0]).toEqual({ seq: 1, type: 'approval_request', payload });
+  });
 });

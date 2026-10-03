@@ -33,7 +33,8 @@ export function buildAssignPayload(job: FleetJobRecord, repo: FleetRepoRef, clon
     planFrom: job.planFrom,
     profiles: [...job.profiles],
     maxCostUsd: job.maxCostUsd,
-    bashMode: 'raw',
+    bashMode: job.bashMode,
+    approvalTimeoutSec: job.approvalTimeoutSec,
     gitIdentity,
   };
 }

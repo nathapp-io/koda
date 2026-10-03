@@ -58,6 +58,34 @@ export class PrismaApprovalRepository implements IApprovalRepository {
     return r ? toApproval(r) : null;
   }
 
+  async findByAsk(jobId: string, leaseEpoch: number, naxAskId: string): Promise<FleetApprovalRecord | null> {
+    const row = await this.db.fleetApproval.findUnique({ where: { jobId_leaseEpoch_naxAskId: { jobId, leaseEpoch, naxAskId } } });
+    return row ? toApproval(row) : null;
+  }
+
+  async findPendingForJob(jobId: string): Promise<FleetApprovalRecord[]> {
+    const rows = await this.db.fleetApproval.findMany({
+      where: { jobId, status: 'pending', type: 'nax_bash_escalate' }, orderBy: [{ requestedAt: 'asc' }, { id: 'asc' }],
+    });
+    return rows.map(toApproval);
+  }
+
+  async findExpiredPending(now: Date, limit: number): Promise<FleetApprovalRecord[]> {
+    const rows = await this.db.fleetApproval.findMany({
+      where: { status: 'pending', type: 'nax_bash_escalate', expiresAt: { lte: now } },
+      orderBy: [{ expiresAt: 'asc' }, { id: 'asc' }], take: limit,
+    });
+    return rows.map(toApproval);
+  }
+
+  async countPendingByJob(jobIds: readonly string[]): Promise<Map<string, number>> {
+    if (jobIds.length === 0) return new Map();
+    const groups = await this.db.fleetApproval.groupBy({
+      by: ['jobId'], where: { status: 'pending', jobId: { in: [...jobIds] } }, _count: { _all: true },
+    });
+    return new Map(groups.filter((g) => g.jobId !== null).map((g) => [g.jobId as string, g._count._all]));
+  }
+
   async resolve(id: string, x: ApprovalResolution): Promise<FleetApprovalRecord> {
     return toApproval(await this.db.fleetApproval.update({
       where: { id },

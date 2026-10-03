@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ArrayMaxSize, IsArray, IsInt, IsNumber, IsOptional, IsString, Length, Matches, Max, MaxLength, Min } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, Length, Matches, Max, MaxLength, Min } from 'class-validator';
+import type { BashMode } from '../../common/protocol';
 import { LABEL_PATTERN } from '../../runners/dto/create-enrollment.dto';
 
 export const MAX_NO_PROGRESS_LIMIT = 20;
@@ -17,6 +18,10 @@ export class CreateScheduleDto {
   @IsOptional() @IsArray() @ArrayMaxSize(8) @IsString({ each: true }) @MaxLength(64, { each: true }) profiles?: string[];
   @ApiProperty({ description: 'Budget of each run in USD, > 0, at most 4 decimals' })
   @IsNumber({ maxDecimalPlaces: 4, allowNaN: false, allowInfinity: false }) @Min(0.0001) @Max(10_000) declare maxCostUsd: number;
+  @ApiPropertyOptional({ enum: ['raw', 'gated', 'escalate'], default: 'raw', description: 'S1.5: gated/escalate relay bash asks to the approvals inbox. RUN only; needs a runner with the approval relay.' })
+  @IsOptional() @IsIn(['raw', 'gated', 'escalate']) bashMode?: BashMode;
+  @ApiPropertyOptional({ minimum: 30, maximum: 3600, default: 600, description: 'Seconds a bash ask waits for a decision before nax denies it. Used only when bashMode is not raw.' })
+  @IsOptional() @IsInt() @Min(30) @Max(3600) approvalTimeoutSec?: number;
   @ApiPropertyOptional({ type: [String] })
   @IsOptional() @IsArray() @ArrayMaxSize(16) @Matches(LABEL_PATTERN, { each: true }) selectorLabels?: string[];
   @ApiPropertyOptional({ description: 'Run on this runner only' }) @IsOptional() @IsString() @Length(1, 64) pinnedRunnerId?: string;

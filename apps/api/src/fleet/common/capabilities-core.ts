@@ -79,7 +79,7 @@ function parseCredential(c: unknown, i: number): RunnerCredential {
 export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
   if (!isObj(raw)) fail('not an object');
   if (Buffer.byteLength(JSON.stringify(raw), 'utf8') > MAX_CAPABILITIES_BYTES) fail('too large');
-  const { nax, sandbox, profiles, credentials, tools, executors } = raw;
+  const { nax, sandbox, profiles, credentials, tools, executors, approvals } = raw;
 
   if (
     !isObj(nax) || !isStr(nax.version) || !Array.isArray(nax.protocols) || nax.protocols.length === 0 ||
@@ -92,6 +92,8 @@ export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
   if (credentials.length > MAX_CREDENTIALS) fail('too many credentials');
   if (!isObj(tools) || !isBool(tools.git) || !isBool(tools.gh) || !isBool(tools.glab)) fail('tools');
   if (!Array.isArray(executors) || !executors.every((e) => (EXECUTORS as readonly unknown[]).includes(e))) fail('executors');
+  // Plan D271: strict like every other field; only exactly { relay: true } is meaningful.
+  if (approvals !== undefined && !(isObj(approvals) && approvals.relay === true && Object.keys(approvals).length === 1)) fail('approvals');
 
   const parsedCredentials = credentials.map(parseCredential);
 
@@ -106,5 +108,6 @@ export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
     credentials: parsedCredentials,
     tools: { git: tools.git as boolean, gh: tools.gh as boolean, glab: tools.glab as boolean },
     executors: [...(executors as Array<'host'>)],
+    ...(approvals !== undefined ? { approvals: { relay: true as const } } : {}),
   };
 }

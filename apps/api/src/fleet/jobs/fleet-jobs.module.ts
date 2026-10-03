@@ -4,6 +4,7 @@ import { LiveModule } from '../../live/live.module';
 import { ProjectAccessModule } from '../../projects/project-access.module';
 import { FleetActivityModule } from '../activity/fleet-activity.module';
 import { BudgetStoreModule } from '../budgets/budget-store.module';
+import { ApprovalStoreModule } from '../approvals/approval-store.module';
 import { ScheduleStoreModule } from '../schedules/schedule-store.module';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import { FleetJobsController } from './fleet-jobs.controller';
@@ -16,7 +17,7 @@ import { RunnerNotifier } from './runner-notifier';
 
 /** Fleet jobs (spec §4-§6). Tasks 11-12 add dispatch and the controller. */
 @Module({
-  imports: [PrismaModule, ProjectAccessModule, FleetActivityModule, LiveModule, BudgetStoreModule, ScheduleStoreModule],
+  imports: [PrismaModule, ProjectAccessModule, FleetActivityModule, LiveModule, BudgetStoreModule, ApprovalStoreModule, ScheduleStoreModule],
   controllers: [FleetJobsController],
   providers: [
     PrismaFleetJobRepository,

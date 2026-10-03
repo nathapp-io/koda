@@ -23,7 +23,8 @@ describeIntegration('fleet jobs schedule link (PG)', () => {
   let prisma: PrismaClient;
   let world: FleetHttpWorld;
   const template = (feature: string) => toDispatchDto({
-    repoId: world.repoId, feature, ref: 'trunk', profiles: [], maxCostUsd: '5', selectorLabels: [], pinnedRunnerId: null,
+    repoId: world.repoId, feature, ref: 'trunk', profiles: [], maxCostUsd: '5', selectorLabels: [],
+    bashMode: 'raw', approvalTimeoutSec: 600, pinnedRunnerId: null,
   });
 
   beforeAll(async () => {

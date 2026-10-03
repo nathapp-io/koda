@@ -1,6 +1,7 @@
 import { chmod, mkdir, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { uploadWithRetry } from '../bundle/upload-bundle';
+import { ApprovalRelay } from '../approvals/approval-relay';
 import { CapabilityReporter } from '../capabilities/capability-probe';
 import { createCapabilityProbe } from '../capabilities/create-probe';
 import { NaxJobCheck } from '../capabilities/job-check';
@@ -98,6 +99,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   await ensureSocketDir(socketDir, uid);   // D78: refuse to start before anything could listen in an unsafe place
 
   const journal = Journal.open(home.journalPath, now);
+  const approvals = new ApprovalRelay({ journal, log, now });
   const bootId = options.bootId ?? newBootId();
   journal.setMeta('boot_id', bootId);
   journal.setMeta('runner_id', identity.runnerId);
@@ -113,6 +115,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   }
   if (!naxMode) log.warn('capabilities come from runner.json; nax is not probed (remove the block to probe nax)');
   await sweepOrphanProfiles(config.naxHome, new Set(journal.activeJobs().map((job) => job.jobId)));
+  approvals.sweepOrphans(journal.activeJobs());
   await pruneJobs(journal, config, log);
 
   const client = new ServerClient({ serverUrl: config.serverUrl, apiKey: identity.apiKey, fetchFn: options.fetchFn, syncTimeoutMs: tuning.syncTimeoutMs });
@@ -128,7 +131,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
 
   const jobCheck = naxMode ? new NaxJobCheck({ nax, capabilities: () => reporter.latest(), timeoutMs: tuning.jobCheckTimeoutMs }) : undefined;   // D104
   const executor = options.executorFactory?.() ?? new HostExecutor({
-    config, git, log, nowMs: () => now().getTime(), sleep, credentials: broker, ...(jobCheck ? { jobCheck } : {}),
+    config, git, log, nowMs: () => now().getTime(), sleep, credentials: broker, approvals, ...(jobCheck ? { jobCheck } : {}),
   });
   const uploader: BundleUploader = {
     upload: (job, file, rebuild) => uploadWithRetry({
@@ -141,7 +144,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     tuning: { statusPollMs: tuning.statusPollMs, killGraceMs: tuning.killGraceMs, ackPollMs: tuning.ackPollMs, uploadAckWaitMs: tuning.uploadAckWaitMs },
     readoptHeartbeatMs: tuning.readoptHeartbeatMs,
   });
-  const handler = new CommandHandler({ journal, supervisor, workspaceRoot: config.workspaceRoot, log, now });
+  const handler = new CommandHandler({ journal, supervisor, workspaceRoot: config.workspaceRoot, log, now, approvals });
 
   let stopReason: StopReason | null = null;
   const loop = new SyncLoop({
@@ -191,6 +194,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       stopNeedListener();
       await running;
       supervisor.shutdown();
+      approvals.stopAll();   // no new asks are accepted while runs drain; READOPT re-binds on the next boot
       await broker.closeAll();   // D90: sockets close; a prepare waiting for its first token ends now instead of in 120 s
       // D67: a halted run ends at its next check, or when its current executor call returns. The journal must outlive it.
       const notice = setTimeout(() => log.warn('waiting for halted job runs to end before closing the journal'), SHUTDOWN_NOTICE_MS);
@@ -211,6 +215,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     loop.stop();
     stopNeedListener();
     supervisor.shutdown();   // a real kill ends every run; in one process they must at least stop emitting
+    approvals.stopAll();   // a killed daemon's listeners die with it; READOPT re-binds on the next boot
     void broker.closeAll();   // D90: a killed daemon's listeners die with it; the files stay (the next daemon replaces them)
     journal.close();
   };

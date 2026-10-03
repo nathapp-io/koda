@@ -10,7 +10,7 @@ const tmp = makeTempDirs();
 afterAll(() => tmp.cleanup());
 const assign = (over: Partial<AssignPayload> = {}): AssignPayload => ({
   jobId: 'cj1', command: 'RUN', repo: { provider: 'github', owner: 'a', name: 'b', defaultBranch: 'main', cloneUrl: 'x' },
-  ref: 'main', feature: 'feat', planFrom: null, profiles: ['fast', 'strict'], maxCostUsd: '5.25', bashMode: 'raw', gitIdentity: { name: 'n', email: 'e' }, ...over,
+  ref: 'main', feature: 'feat', planFrom: null, profiles: ['fast', 'strict'], maxCostUsd: '5.25', bashMode: 'raw', approvalTimeoutSec: 600, gitIdentity: { name: 'n', email: 'e' }, ...over,
 });
 
 describe('buildNaxArgv (S1 spec §5.2 step 4)', () => {

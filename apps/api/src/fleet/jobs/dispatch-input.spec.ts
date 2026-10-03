@@ -9,7 +9,7 @@ describe('normalizeDispatch (spec §5.1)', () => {
   it('fills defaults', () => {
     expect(normalizeDispatch(dto(), 'trunk')).toEqual({
       repoId: 'repo-1', ref: 'trunk', command: 'RUN', feature: 'auth-flow', planFrom: null, profiles: [],
-      maxCostUsd: '5', bashMode: 'raw', selectorLabels: [], pinnedRunnerId: null,
+      maxCostUsd: '5', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null,
     });
   });
 
@@ -38,4 +38,23 @@ describe('normalizeDispatch (spec §5.1)', () => {
       expect(GIT_REF_RE.test(ref)).toBe(ok);
     },
   );
+});
+
+describe('bashMode and approvalTimeoutSec (S1.5 §1.6)', () => {
+  const run = { repoId: 'r1', command: 'RUN' as const, feature: 'f', maxCostUsd: 5 };
+
+  it('defaults to raw and 600 s', () => {
+    expect(normalizeDispatch(run, 'main')).toEqual(expect.objectContaining({ bashMode: 'raw', approvalTimeoutSec: 600 }));
+  });
+  it.each(['gated', 'escalate'] as const)('keeps %s with its timeout for RUN', (bashMode) => {
+    expect(normalizeDispatch({ ...run, bashMode, approvalTimeoutSec: 90 }, 'main'))
+      .toEqual(expect.objectContaining({ bashMode, approvalTimeoutSec: 90 }));
+  });
+  it('refuses a non-raw PLAN', () => {
+    expect(() => normalizeDispatch({ ...run, command: 'PLAN', planFrom: 'docs/s.md', bashMode: 'escalate' }, 'main'))
+      .toThrow(expect.objectContaining({ args: { reason: 'bashMode must be raw for PLAN' } }));
+  });
+  it('stores the timeout of a raw job too (unused)', () => {
+    expect(normalizeDispatch({ ...run, approvalTimeoutSec: 45 }, 'main').approvalTimeoutSec).toBe(45);
+  });
 });

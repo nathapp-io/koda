@@ -3,12 +3,17 @@ import { AppException, ForbiddenAppException, NotFoundAppException, ValidationAp
 import { IPageResult, ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { remapPage } from '../../common/dto/koda-page.query';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
+import { FleetCommandType } from '../../common/enums';
+import type { LiveFleetApprovalEvent } from '../../live/live-event';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { BudgetRoute, BudgetsService } from '../budgets/budgets.service';
 import { BUDGET_REPOSITORY, BudgetPolicyRecord, IBudgetRepository } from '../budgets/domain/budget.domain';
+import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
+import { RunnerNotifier } from '../jobs/runner-notifier';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
-import { ApprovalCloser, userActor } from './approval-closer';
+import { ApprovalCloser, jobSystemActor, userActor } from './approval-closer';
 import { ApprovalLivePublisher } from './approval-live.publisher';
+import { checkBashDecision } from './bash-decision';
 import {
   APPROVAL_REPOSITORY, ApprovalStatus, ApprovalType, FleetApprovalRecord, IApprovalRepository, MAX_REQUEUE_CANDIDATES, RequeueCandidate,
 } from './domain/approval.domain';
@@ -35,6 +40,14 @@ const budgetRouteOf = (p: BudgetPolicyRecord): BudgetRoute =>
 /** Spec §1.7: budget asks are decided by whoever may resume the policy (S1b B3). A null role is not ADMIN. */
 const mayDecideBudget = (route: ApprovalRoute): boolean => route.kind === 'admin' || route.role === 'ADMIN';
 
+/** Spec §1.7 / A6 / plan D266: bash asks are decided by project DEVELOPER+ (or a global ADMIN on the admin prefix). */
+const mayDecideBash = (route: ApprovalRoute): boolean => route.kind === 'admin' || route.role === 'ADMIN' || route.role === 'DEVELOPER';
+
+type BashResult =
+  | { kind: 'decided'; approval: FleetApprovalRecord; live: LiveFleetApprovalEvent[]; runnerId: string }
+  | { kind: 'closed'; live: LiveFleetApprovalEvent[] }
+  | { kind: 'not_pending' };
+
 /**
  * Plan D233: `error` is an i18n coordinate, not free text. `HttpException.initMessage()` falls back to the
  * class name when the response object carries no `message`, so `error.message` stores "Conflict App
@@ -57,6 +70,8 @@ export class ApprovalsService {
     private readonly live: ApprovalLivePublisher,
     private readonly activity: FleetActivityService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    @Inject(FLEET_JOB_REPOSITORY) private readonly jobRepo: Pick<IFleetJobRepository, 'lockById' | 'createCommand'>,
+    private readonly notifier: RunnerNotifier,
   ) {}
 
   async list(route: ApprovalRoute, q: { status?: ApprovalStatus; type?: ApprovalType; jobId?: string }, page: IPageOption): Promise<IPageResult<FleetApprovalDto>> {
@@ -74,8 +89,8 @@ export class ApprovalsService {
     const current = await this.findVisible(route, id);
     // Spec §2.3: permission (1.7) is decided before the decision is validated, so an unauthorized
     // caller gets 403 whatever they send, and before txManager.run, so it takes no lock and writes nothing.
+    if (current.type === 'nax_bash_escalate') return this.decideBash(caller, route, current, dto, now);
     if (!mayDecideBudget(route)) throw new ForbiddenAppException({}, 'projects');
-    if (current.type !== 'budget_override_required') invalid('bash approvals are not decidable yet'); // plan D236
     if (!current.policyId) invalid('a budget approval with no policy cannot be decided'); // plan D236
     if (dto.decision !== 'keep_paused' && dto.decision !== 'raise_budget_and_resume') invalid(`${dto.decision} does not apply to a budget approval`);
     const policyId: string = current.policyId;
@@ -120,6 +135,44 @@ export class ApprovalsService {
     }
     const final = await this.repo.setOutcome(id, { ...(t1.approval.outcome ?? {}), requeueResults: results });
     return FleetApprovalDto.from(final);
+  }
+
+  private async decideBash(caller: ApprovalCaller, route: ApprovalRoute, current: FleetApprovalRecord, dto: DecideApprovalDto, now: Date): Promise<FleetApprovalDto> {
+    if (!mayDecideBash(route)) throw new ForbiddenAppException({}, 'projects');
+    if (dto.amountUsd !== undefined || dto.requeueJobIds !== undefined) {
+      throw new ValidationAppException({ reason: 'amountUsd and requeueJobIds apply only to budget approvals' }, 'fleet.approvalInput');   // plan D287
+    }
+    const checked = checkBashDecision(current.payload, dto.decision);
+    if ('reason' in checked) invalid(checked.reason);   // strictNullChecks is off: `in` narrows, `.ok` does not
+    const jobId = current.jobId;
+    if (!jobId) invalid('a bash approval with no job cannot be decided');
+    const result = await this.txManager.run(async (): Promise<BashResult> => {
+      const job = await this.jobRepo.lockById(jobId);   // lock order: job first, then approval (spec §1.4)
+      const approval = await this.repo.lockById(current.id);
+      if (!job || !approval || approval.status !== 'pending') return { kind: 'not_pending' };
+      if (job.state !== 'RUNNING' || job.leaseEpoch !== approval.leaseEpoch || job.runnerId === null) {
+        // nax has exited or is exiting. Close only THIS ask: on an epoch mismatch the job's other asks belong to a newer lease.
+        const ended = await this.repo.resolve(approval.id, { status: 'cancelled', resolvedBy: 'job_ended', decidedAt: now });
+        return { kind: 'closed', live: await this.closer.recordResolved(ended, jobSystemActor(job)) };
+      }
+      if (approval.expiresAt && approval.expiresAt.getTime() <= now.getTime()) {
+        return { kind: 'closed', live: (await this.closer.expire(approval, job, now)).live };   // nax has already denied
+      }
+      const decided = await this.repo.resolve(approval.id, {
+        status: checked.status, resolvedBy: 'user', decision: dto.decision, decidedById: caller.id, decidedAt: now,
+        comment: dto.comment ?? null,
+      });
+      await this.jobRepo.createCommand({
+        runnerId: job.runnerId, jobId: job.id, type: FleetCommandType.APPROVAL_ANSWER, leaseEpoch: job.leaseEpoch,
+        payload: { approvalId: decided.id, naxAskId: decided.naxAskId, choice: checked.choice },
+      });
+      return { kind: 'decided', approval: decided, live: await this.closer.recordResolved(decided, userActor(caller.id)), runnerId: job.runnerId };
+    });
+    // Plan D265: the expiry or job-end close above has committed; only now refuse the decide.
+    if (result.kind !== 'not_pending') this.live.publish(result.live);
+    if (result.kind !== 'decided') throw new ConflictAppException({}, 'fleet.approvalNotPending');
+    this.notifier.notify(result.runnerId);
+    return FleetApprovalDto.from(result.approval);
   }
 
   async counts(caller: ApprovalCaller): Promise<ApprovalCountsDto> {

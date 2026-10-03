@@ -712,30 +712,32 @@ model FleetApproval {
 /// on purpose (plan D193): a deleted repo or runner disables the schedule instead of deleting it.
 /// The partial unique index FleetJob (scheduleId) WHERE state = 'QUEUED' is raw SQL in the migration.
 model JobSchedule {
-  id              String    @id @default(cuid())
-  projectId       String
-  repoId          String
-  name            String
-  cron            String // five fields
-  timezone        String // IANA
-  feature         String
-  ref             String
-  profiles        String[]
-  maxCostUsd      Decimal   @db.Decimal(12, 4)
-  selectorLabels  String[]
-  pinnedRunnerId  String?
-  enabled         Boolean   @default(true)
-  nextFireAt      DateTime
-  lastFiredAt     DateTime?
-  lastJobId       String?
-  lastPassedCount Int       @default(0)
-  noProgressTicks Int       @default(0)
-  noProgressLimit Int       @default(3)
-  disabledReason  String? // completed | finish_failed | no_progress | owner_lost_access | template_invalid | manual
-  createdById     String
-  updatedById     String
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                 String    @id @default(cuid())
+  projectId          String
+  repoId             String
+  name               String
+  cron               String // five fields
+  timezone           String // IANA
+  feature            String
+  ref                String
+  profiles           String[]
+  maxCostUsd         Decimal   @db.Decimal(12, 4)
+  selectorLabels     String[]
+  pinnedRunnerId     String?
+  bashMode           String    @default("raw") // S1.5 §1.6, copied into each dispatched job
+  approvalTimeoutSec Int       @default(600)
+  enabled            Boolean   @default(true)
+  nextFireAt         DateTime
+  lastFiredAt        DateTime?
+  lastJobId          String?
+  lastPassedCount    Int       @default(0)
+  noProgressTicks    Int       @default(0)
+  noProgressLimit    Int       @default(3)
+  disabledReason     String? // completed | finish_failed | no_progress | owner_lost_access | template_invalid | manual
+  createdById        String
+  updatedById        String
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
   createdBy User       @relation("JobScheduleCreatedBy", fields: [createdById], references: [id])
@@ -747,56 +749,57 @@ model JobSchedule {
 
 /// Fleet S1 slice 2 (spec §2). One dispatched nax run or plan.
 model FleetJob {
-  id                String    @id @default(cuid())
-  projectId         String
-  repoId            String
-  ref               String
-  command           String // RUN | PLAN
-  feature           String
-  planFrom          String? // repo-relative spec path, PLAN only
-  profiles          String[]
-  maxCostUsd        Decimal   @db.Decimal(12, 4)
-  bashMode          String    @default("raw") // S1 accepts raw only
-  selectorLabels    String[]
-  pinnedRunnerId    String?
-  runnerId          String?
-  runnerBootId      String?
-  leaseEpoch        Int       @default(0)
-  state             String    @default("QUEUED") // QUEUED | ASSIGNED | RUNNING | UPLOADING | COMPLETED | FAILED | ESCALATED | CRASHED | CANCELLED
-  stateReason       String?
-  requestedById     String
-  queuedAt          DateTime  @default(now())
-  assignedAt        DateTime?
-  startedAt         DateTime?
-  finishedAt        DateTime?
-  cancelRequestedAt DateTime?
-  naxRunId          String?
-  naxLogRunId       String?
-  naxCostRunId      String?
-  progress          Json?
-  currentStoryId    String?
-  currentPhase      String?
-  costSpentUsd      Decimal   @default(0) @db.Decimal(12, 4)
-  lastHeartbeatAt   DateTime?
-  finishResult      String?
-  escalationReason  String?
-  exitCode          Int?
-  resultBranch      String?
-  resultSha         String?
-  resultPrUrl       String?
-  wipPush           String? // S1b §1.1: pushed | none | failed:<reason>
-  stories           Json? // S1b §1.2: PRD stories, at most 100 and 8 KiB
-  storiesTruncated  Boolean   @default(false)
-  costCarriedUsd    Decimal   @default(0) @db.Decimal(12, 4) // S1b §2.1: spend of earlier attempts, kept across requeue
-  firstStartedAt    DateTime? // S1b §2.1: first RUNNING; set once, never cleared; the job's budget window
-  cancelReason      String? // S1b §2.2: why the server asked for the cancel, e.g. budget:<policyId>
-  scheduleId        String? // S1b §3.1: the schedule that dispatched this job
-  coalescedCount    Int       @default(0) // S1b §3.2: ticks absorbed while this job sat QUEUED
-  scheduleCountedAt DateTime? // S1b §3.3: set once, when the job's end was counted against its schedule
-  eventSeq          Int       @default(0) // server timeline counter (plan D2)
-  ackedRunnerSeq    Int       @default(0) // cumulative runner ack for leaseEpoch (plan D2)
-  attributedAt      DateTime? // PR/MR attribution comment posted (plan D19)
-  updatedAt         DateTime  @updatedAt
+  id                 String    @id @default(cuid())
+  projectId          String
+  repoId             String
+  ref                String
+  command            String // RUN | PLAN
+  feature            String
+  planFrom           String? // repo-relative spec path, PLAN only
+  profiles           String[]
+  maxCostUsd         Decimal   @db.Decimal(12, 4)
+  bashMode           String    @default("raw") // raw | gated | escalate (S1.5 §1.6); PLAN is always raw
+  approvalTimeoutSec Int       @default(600) // S1.5 §1.6: 30..3600, used only when bashMode != raw
+  selectorLabels     String[]
+  pinnedRunnerId     String?
+  runnerId           String?
+  runnerBootId       String?
+  leaseEpoch         Int       @default(0)
+  state              String    @default("QUEUED") // QUEUED | ASSIGNED | RUNNING | UPLOADING | COMPLETED | FAILED | ESCALATED | CRASHED | CANCELLED
+  stateReason        String?
+  requestedById      String
+  queuedAt           DateTime  @default(now())
+  assignedAt         DateTime?
+  startedAt          DateTime?
+  finishedAt         DateTime?
+  cancelRequestedAt  DateTime?
+  naxRunId           String?
+  naxLogRunId        String?
+  naxCostRunId       String?
+  progress           Json?
+  currentStoryId     String?
+  currentPhase       String?
+  costSpentUsd       Decimal   @default(0) @db.Decimal(12, 4)
+  lastHeartbeatAt    DateTime?
+  finishResult       String?
+  escalationReason   String?
+  exitCode           Int?
+  resultBranch       String?
+  resultSha          String?
+  resultPrUrl        String?
+  wipPush            String? // S1b §1.1: pushed | none | failed:<reason>
+  stories            Json? // S1b §1.2: PRD stories, at most 100 and 8 KiB
+  storiesTruncated   Boolean   @default(false)
+  costCarriedUsd     Decimal   @default(0) @db.Decimal(12, 4) // S1b §2.1: spend of earlier attempts, kept across requeue
+  firstStartedAt     DateTime? // S1b §2.1: first RUNNING; set once, never cleared; the job's budget window
+  cancelReason       String? // S1b §2.2: why the server asked for the cancel, e.g. budget:<policyId>
+  scheduleId         String? // S1b §3.1: the schedule that dispatched this job
+  coalescedCount     Int       @default(0) // S1b §3.2: ticks absorbed while this job sat QUEUED
+  scheduleCountedAt  DateTime? // S1b §3.3: set once, when the job's end was counted against its schedule
+  eventSeq           Int       @default(0) // server timeline counter (plan D2)
+  ackedRunnerSeq     Int       @default(0) // cumulative runner ack for leaseEpoch (plan D2)
+  attributedAt       DateTime? // PR/MR attribution comment posted (plan D19)
+  updatedAt          DateTime  @updatedAt
 
   project      Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
   repo         FleetRepo          @relation(fields: [repoId], references: [id], onDelete: Cascade)
@@ -839,7 +842,7 @@ model FleetCommand {
   id          String    @id @default(cuid())
   runnerId    String
   jobId       String
-  type        String // ASSIGN | CANCEL | READOPT | ABANDON
+  type        String // ASSIGN | CANCEL | READOPT | ABANDON | APPROVAL_ANSWER
   leaseEpoch  Int
   payload     Json // never a secret
   createdAt   DateTime  @default(now())

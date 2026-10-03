@@ -5,6 +5,7 @@ import { FleetActivityModule } from '../activity/fleet-activity.module';
 import { BudgetStoreModule } from '../budgets/budget-store.module';
 import { BudgetsModule } from '../budgets/budgets.module';
 import { FleetJobsModule } from '../jobs/fleet-jobs.module';
+import { ApprovalExpirySweeper } from './approval-expiry-sweeper';
 import { ApprovalStoreModule } from './approval-store.module';
 import { ApprovalsService } from './approvals.service';
 import { FleetApprovalCountsController } from './fleet-approval-counts.controller';
@@ -15,6 +16,6 @@ import { ProjectFleetApprovalsController } from './project-fleet-approvals.contr
 @Module({
   imports: [PrismaModule, ProjectAccessModule, ApprovalStoreModule, BudgetStoreModule, BudgetsModule, FleetJobsModule, FleetActivityModule],
   controllers: [ProjectFleetApprovalsController, FleetApprovalsController, FleetApprovalCountsController],
-  providers: [ApprovalsService],
+  providers: [ApprovalsService, ApprovalExpirySweeper],
 })
 export class ApprovalsModule {}

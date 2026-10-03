@@ -34,7 +34,7 @@ describeIntegration('PrismaFleetJobRepository (PG)', () => {
     runnerId = runner.id;
     base = {
       projectId: project.id, repoId: fleetRepo.id, ref: 'main', command: 'RUN', planFrom: null, profiles: ['fast'],
-      maxCostUsd: '5.25', bashMode: 'raw', selectorLabels: [], pinnedRunnerId: null, requestedById: user.id,
+      maxCostUsd: '5.25', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null, requestedById: user.id,
     };
   });
   afterAll(async () => {
@@ -82,6 +82,14 @@ describeIntegration('PrismaFleetJobRepository (PG)', () => {
     expect(await repo.withdrawPendingCommands(job.id, new Date())).toBe(1);
     expect((await repo.findPendingCommands(runnerId)).map((c) => c.type)).toEqual(['ABANDON']);
     expect((await repo.findCommand(assign.id))?.ackResult).toBe('withdrawn');
+  });
+
+  it('withdraws only the given command types when asked (plan D263)', async () => {
+    const job = await repo.createJob({ ...base, feature: 'withdraw-types' });
+    await repo.createCommand({ runnerId, jobId: job.id, type: 'CANCEL', leaseEpoch: 1, payload: {} });
+    await repo.createCommand({ runnerId, jobId: job.id, type: 'APPROVAL_ANSWER', leaseEpoch: 1, payload: { approvalId: 'a', naxAskId: 'ask-1', choice: 'deny' } });
+    expect(await repo.withdrawPendingCommands(job.id, new Date(), { types: ['APPROVAL_ANSWER'] })).toBe(1);
+    expect((await repo.findPendingCommands(runnerId)).filter((c) => c.jobId === job.id).map((c) => c.type)).toEqual(['CANCEL']);
   });
 
   it('skips a job row another transaction holds when asked to', async () => {

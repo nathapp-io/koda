@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nest
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FleetJobState } from '../../common/enums';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
+import { ApprovalLivePublisher } from '../approvals/approval-live.publisher';
 import { FleetJobLivePublisher } from '../jobs/fleet-job-live.publisher';
 import { RUNNER_HELD_STATES } from '../jobs/job-state';
 import { JobTransitionsService, SYSTEM_ACTOR } from '../jobs/job-transitions.service';
@@ -26,6 +27,7 @@ export class FleetSweeper implements OnModuleInit, OnModuleDestroy {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'sweepEnabled' | 'jobCrashSec'>,
     private readonly attribution: PrAttributionService,
+    private readonly approvalLive: ApprovalLivePublisher,
   ) {}
 
   onModuleInit(): void {
@@ -45,15 +47,16 @@ export class FleetSweeper implements OnModuleInit, OnModuleDestroy {
     const cutoff = new Date(now.getTime() - this.fleetConfig.jobCrashSec * 1000);
     let crashed = 0;
     for (const id of await this.repo.findSilentHeldIds(cutoff)) {
-      const event = await this.txManager.run(async () => {
+      const result = await this.txManager.run(async () => {
         const job = await this.repo.lockById(id, { skipLocked: true });
         if (!job || !(RUNNER_HELD_STATES as readonly string[]).includes(job.state) || !job.runnerId) return null;
         const [runner] = await this.repo.findPlacementRunners([job.runnerId]);
         if (runner && runner.lastSeenAt.getTime() >= cutoff.getTime()) return null;
-        return (await this.transitions.apply({ job, to: FleetJobState.CRASHED, by: 'server', now, actor: SYSTEM_ACTOR, reason: 'runner silent' })).live;
+        return this.transitions.apply({ job, to: FleetJobState.CRASHED, by: 'server', now, actor: SYSTEM_ACTOR, reason: 'runner silent' });
       });
-      if (event) {
-        this.live.publish([event]);
+      if (result) {
+        this.live.publish([result.live]);
+        this.approvalLive.publish(result.approvalLive);
         void this.attribution.attribute(id); // fire-and-forget; never throws
         crashed += 1;
       }

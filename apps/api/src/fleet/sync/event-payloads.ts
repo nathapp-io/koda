@@ -1,9 +1,12 @@
 import { FleetJobState } from '../../common/enums';
+import type { BashAsk } from '../approvals/approval-closer';
 import type { FleetJobPatch, FleetJobStory } from '../jobs/domain/fleet-job.domain';
+import { parseApprovalRequest } from './approval-request-payload';
 
 export type EventEffect =
   | { kind: 'transition'; to: FleetJobState; reason: string | null; exitCode: number | null }
   | { kind: 'mirror'; patch: FleetJobPatch }
+  | { kind: 'approval'; ask: BashAsk }
   | { kind: 'none' }
   | { kind: 'invalid'; reason: string };
 
@@ -102,6 +105,11 @@ export function interpretEvent(type: string, payload: unknown): EventEffect {
       return { kind: 'none' };
     case 'lifecycle':
       return { kind: 'none' };
+    case 'approval_request': {
+      const parsed = parseApprovalRequest(payload);
+      // strictNullChecks is off in apps/api: `parsed.ok` does not narrow, `in` does.
+      return 'ask' in parsed ? { kind: 'approval', ask: parsed.ask } : { kind: 'invalid', reason: parsed.reason };
+    }
     default:
       return { kind: 'invalid', reason: `type ${type}` };
   }

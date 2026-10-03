@@ -9,7 +9,7 @@ const SKIP_FILEMODE = process.platform === 'win32' || (typeof process.getuid ===
 
 const assign = (jobId = 'j1'): AssignPayload => ({
   jobId, command: 'RUN', repo: { provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', cloneUrl: 'https://github.com/acme/app.git' },
-  ref: 'main', feature: 'feat', planFrom: null, profiles: [], maxCostUsd: '5', bashMode: 'raw', gitIdentity: { name: 'bot', email: 'bot@x' },
+  ref: 'main', feature: 'feat', planFrom: null, profiles: [], maxCostUsd: '5', bashMode: 'raw', approvalTimeoutSec: 600, gitIdentity: { name: 'bot', email: 'bot@x' },
 });
 const job = (jobId = 'j1', leaseEpoch = 1) => ({ assign: assign(jobId), leaseEpoch, repoKey: 'acme/app', jobDir: `/w/.jobs/${jobId}` });
 
@@ -205,5 +205,28 @@ describe('file permissions (SEC-1)', () => {
     expect((await stat(`${path}-wal`)).mode & 0o777).toBe(0o600);
     expect((await stat(`${path}-shm`)).mode & 0o777).toBe(0o600);
     j.close();
+  });
+});
+
+describe('approval relay state (S1.5 §4.1, plan D278, D285)', () => {
+  test('stores a receiver per (job, epoch) and pending asks per ask id', () => {
+    j.putApprovalReceiver({ jobId: 'j1', leaseEpoch: 1, port: 43_210, secret: 'a'.repeat(64) });
+    expect(j.getApprovalReceiver('j1', 1)).toEqual({ jobId: 'j1', leaseEpoch: 1, port: 43_210, secret: 'a'.repeat(64) });
+    expect(j.getApprovalReceiver('j1', 2)).toBeNull();
+
+    const ask = { jobId: 'j1', leaseEpoch: 1, naxAskId: 'ask-1', callbackUrl: 'http://127.0.0.1:5/nax/interact/ask-1', deadlineAt: '2026-10-04T10:10:00.000Z' };
+    expect(j.insertPendingAsk(ask)).toBe(true);
+    expect(j.insertPendingAsk(ask)).toBe(false);   // a re-sent nax POST is idempotent (D286)
+    expect(j.getPendingAsk('j1', 1, 'ask-1')).toEqual(ask);
+    j.deletePendingAsk('j1', 1, 'ask-1');
+    expect(j.getPendingAsk('j1', 1, 'ask-1')).toBeNull();
+  });
+  test('deleteApprovalState removes one epoch only (D285)', () => {
+    j.putApprovalReceiver({ jobId: 'j1', leaseEpoch: 1, port: 1, secret: 's' });
+    j.putApprovalReceiver({ jobId: 'j1', leaseEpoch: 2, port: 2, secret: 's' });
+    j.insertPendingAsk({ jobId: 'j1', leaseEpoch: 1, naxAskId: 'ask-1', callbackUrl: 'u', deadlineAt: 'd' });
+    j.deleteApprovalState('j1', 1);
+    expect(j.approvalStateKeys()).toEqual([{ jobId: 'j1', leaseEpoch: 2 }]);
+    expect(j.getPendingAsk('j1', 1, 'ask-1')).toBeNull();
   });
 });

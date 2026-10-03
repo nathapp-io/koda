@@ -59,10 +59,11 @@ export function parseRequeue(value: string): 'all' | string[] {
   return ids;
 }
 
-/** D236: a bash approval is not decidable in this slice, so only the two budget decisions are offered. */
+const DECISIONS = ['allow', 'allow_for_job', 'deny', 'raise_budget_and_resume', 'keep_paused'] as const;
+
 function parseDecision(value: string): DecideApprovalDto['decision'] {
-  if (value === 'keep_paused' || value === 'raise_budget_and_resume') return value;
-  throw new InvalidArgumentError('expected keep_paused or raise_budget_and_resume');
+  if (!(DECISIONS as readonly string[]).includes(value)) throw new InvalidArgumentError(`one of ${DECISIONS.join(', ')}`);
+  return value as DecideApprovalDto['decision'];
 }
 
 const APPROVAL_STATUSES = ['pending', 'approved', 'rejected', 'expired', 'cancelled'] as const satisfies readonly ApprovalStatus[];
@@ -82,15 +83,38 @@ export function parseType(value: string): ApprovalType {
 function summary(a: FleetApprovalDto): string {
   const p = a.payload as Record<string, unknown>;
   if (a.type === 'budget_override_required') return `${String(p['scopeType'] ?? '')} spent $${String(p['spentUsd'] ?? '?')} of $${String(p['amountUsd'] ?? '?')}`;
-  return String(p['command'] ?? '').slice(0, 60);
+  const command = String(p['command'] ?? '');
+  if (command !== '') return command.slice(0, 60);
+  // D280: a bash ask whose command was not captured still shows its raw detail, never a blank.
+  return String(p['rawDetail'] ?? '').split('\n')[0]?.slice(0, 60) ?? '';
+}
+
+/** Plan D280: never the request line (nax does not send it separately and the CLI never rebuilds it). */
+function bashLines(p: Record<string, unknown>): string[] {
+  const command = typeof p['command'] === 'string' && p['command'] !== '' ? p['command'] : null;
+  return [
+    ...(command ? ['Command:', ...command.split('\n').map((l) => `  ${l}`)] : ['Detail (not parsed):', ...String(p['rawDetail'] ?? '').split('\n').map((l) => `  ${l}`)]),
+    ...(p['commandTruncated'] === true ? ['  (truncated: this ask can only be denied)'] : []),
+    ...(typeof p['maskedCount'] === 'number' && p['maskedCount'] > 0 ? [`  ${p['maskedCount']} secret value(s) masked`] : []),
+    `Runs in:  ${String(p['root'] ?? '')}`,
+    `Stage:    ${String(p['stage'] ?? '')}`,
+    `Story:    ${String(p['storyId'] ?? '-')}`,
+    `Reason:   ${String(p['reason'] ?? '')}`,
+    `Options:  ${Array.isArray(p['options']) ? p['options'].join(', ') : ''}`,
+  ];
 }
 
 function printOne(verb: string, a: FleetApprovalDto): void {
   console.log(`${verb} approval ${a.id}: ${a.type} ${a.status}${a.decision ? ` (${a.decision})` : ''}`);
-  const results = ((a.outcome as Record<string, unknown> | null)?.['requeueResults'] ?? []) as RequeueResult[];
+  const outcome = a.outcome as Record<string, unknown> | null;
+  const results = (outcome?.['requeueResults'] ?? []) as RequeueResult[];
   if (results.length > 0) {
     console.log(`${results.filter((r) => r.ok).length} of ${results.length} re-queued`);
     for (const r of results.filter((x) => !x.ok)) console.log(`  ${r.jobId}: ${r.error ?? 'failed'}`);
+  }
+  const delivery = outcome?.['delivery'];
+  if (delivery !== undefined && delivery !== null) {
+    console.log(`Delivery: ${typeof delivery === 'string' ? delivery : JSON.stringify(delivery)}`);
   }
 }
 
@@ -139,6 +163,10 @@ function registerShow(approval: Command): void {
           console.log(JSON.stringify(a, null, 2));
         } else {
           printOne('Showing', a);
+          if (a.type === 'nax_bash_escalate') {
+            for (const line of bashLines(a.payload as Record<string, unknown>)) console.log(line);
+            if (a.expiresAt) console.log(`Expires:  ${a.expiresAt}`);
+          }
           for (const c of a.requeueCandidates ?? []) console.log(`  candidate ${c.jobId} ${c.feature}`);
           if (a.requeueCandidatesTruncated) console.log('  (more candidates exist)');
         }
@@ -154,8 +182,8 @@ interface DecideOptions { project?: string; decision: DecideApprovalDto['decisio
 function registerDecide(approval: Command): void {
   approval
     .command('decide <approvalId>')
-    .description('Decide a pending budget override: keep it paused, or raise the amount and resume')
-    .requiredOption('--decision <decision>', 'keep_paused or raise_budget_and_resume', parseDecision)
+    .description('Decide an approval (budget override or bash ask)')
+    .requiredOption('--decision <decision>', 'allow, allow_for_job, deny, keep_paused or raise_budget_and_resume', parseDecision)
     .option('--amount <usd>', 'raise_budget_and_resume: the new amount, above the window spend', parseBudgetUsd)
     .option('--requeue <ids>', 'raise_budget_and_resume: all, or comma-separated candidate job ids from `koda fleet approval show <id>`; omitted = none', parseRequeue)
     .option('--comment <text>', 'Optional note (at most 1000 characters)')
