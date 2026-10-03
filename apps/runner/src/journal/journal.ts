@@ -3,7 +3,7 @@ import { chmodSync } from 'node:fs';
 import type { RunnerEvent, RunnerEventType } from '@nathapp/fleet-protocol';
 import { systemNow, type Now } from '../time';
 import { SCHEMA_SQL } from './schema';
-import type { CommandRecord, EventRow, JobPatch, JobRow, NewJob } from './types';
+import type { ApprovalReceiverRow, CommandRecord, EventRow, JobPatch, JobRow, NewJob, PendingAskRow } from './types';
 
 type Row = Record<string, unknown>;
 const SKIP_FILEMODE = process.platform === 'win32' || (typeof process.getuid === 'function' && process.getuid() === 0);
@@ -197,10 +197,54 @@ export class Journal {
     return row ? toCommand(row) : null;
   }
 
+  putApprovalReceiver(row: ApprovalReceiverRow): void {
+    this.db.query('INSERT OR REPLACE INTO approval_receivers (job_id, lease_epoch, port, secret, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(row.jobId, row.leaseEpoch, row.port, row.secret, this.now().toISOString());
+  }
+
+  getApprovalReceiver(jobId: string, leaseEpoch: number): ApprovalReceiverRow | null {
+    const r = this.db.query('SELECT port, secret FROM approval_receivers WHERE job_id = ? AND lease_epoch = ?')
+      .get(jobId, leaseEpoch) as { port: number; secret: string } | null;
+    return r ? { jobId, leaseEpoch, port: r.port, secret: r.secret } : null;
+  }
+
+  /** Plan D286: false when the ask was already journalled (a re-sent nax POST). */
+  insertPendingAsk(row: PendingAskRow): boolean {
+    const result = this.db.query('INSERT OR IGNORE INTO pending_asks (job_id, lease_epoch, nax_ask_id, callback_url, deadline_at, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(row.jobId, row.leaseEpoch, row.naxAskId, row.callbackUrl, row.deadlineAt, this.now().toISOString());
+    return result.changes > 0;
+  }
+
+  getPendingAsk(jobId: string, leaseEpoch: number, naxAskId: string): PendingAskRow | null {
+    const r = this.db.query('SELECT callback_url, deadline_at FROM pending_asks WHERE job_id = ? AND lease_epoch = ? AND nax_ask_id = ?')
+      .get(jobId, leaseEpoch, naxAskId) as { callback_url: string; deadline_at: string } | null;
+    return r ? { jobId, leaseEpoch, naxAskId, callbackUrl: r.callback_url, deadlineAt: r.deadline_at } : null;
+  }
+
+  deletePendingAsk(jobId: string, leaseEpoch: number, naxAskId: string): void {
+    this.db.query('DELETE FROM pending_asks WHERE job_id = ? AND lease_epoch = ? AND nax_ask_id = ?').run(jobId, leaseEpoch, naxAskId);
+  }
+
+  /** Plan D285: per epoch, like `abandon`; a stale epoch must never touch a live requeued epoch's relay. */
+  deleteApprovalState(jobId: string, leaseEpoch: number): void {
+    this.tx(() => {
+      this.db.query('DELETE FROM pending_asks WHERE job_id = ? AND lease_epoch = ?').run(jobId, leaseEpoch);
+      this.db.query('DELETE FROM approval_receivers WHERE job_id = ? AND lease_epoch = ?').run(jobId, leaseEpoch);
+    });
+  }
+
+  approvalStateKeys(): Array<{ jobId: string; leaseEpoch: number }> {
+    const rows = this.db.query('SELECT job_id, lease_epoch FROM approval_receivers UNION SELECT job_id, lease_epoch FROM pending_asks')
+      .all() as Array<{ job_id: string; lease_epoch: number }>;
+    return rows.map((r) => ({ jobId: r.job_id, leaseEpoch: r.lease_epoch }));
+  }
+
   abandon(jobId: string, leaseEpoch: number): void {
     this.tx(() => {
       this.db.query('DELETE FROM events WHERE job_id = ? AND lease_epoch = ?').run(jobId, leaseEpoch);
       this.db.query('DELETE FROM jobs WHERE job_id = ? AND lease_epoch = ?').run(jobId, leaseEpoch);
+      this.db.query('DELETE FROM pending_asks WHERE job_id = ? AND lease_epoch = ?').run(jobId, leaseEpoch);
+      this.db.query('DELETE FROM approval_receivers WHERE job_id = ? AND lease_epoch = ?').run(jobId, leaseEpoch);
     });
   }
 
@@ -212,6 +256,8 @@ export class Journal {
         const key: [string, number] = [r['job_id'] as string, r['lease_epoch'] as number];
         this.db.query('DELETE FROM events WHERE job_id = ? AND lease_epoch = ?').run(...key);
         this.db.query('DELETE FROM jobs WHERE job_id = ? AND lease_epoch = ?').run(...key);
+        this.db.query('DELETE FROM pending_asks WHERE job_id = ? AND lease_epoch = ?').run(...key);
+        this.db.query('DELETE FROM approval_receivers WHERE job_id = ? AND lease_epoch = ?').run(...key);
       }
       this.db.query('DELETE FROM applied_commands WHERE applied_at < ?').run(cutoff);
       return old.map((r) => ({ jobId: r['job_id'] as string, leaseEpoch: r['lease_epoch'] as number, jobDir: r['job_dir'] as string }));
