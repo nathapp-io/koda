@@ -102,6 +102,9 @@ export class ApprovalRelay {
       requestId: p.naxAskId, action: 'choose', value: p.choice, respondedBy: 'koda', respondedAt: Date.now(),
     });
     if (!posted.ok) return { result: 'rejected', detail: posted.detail };
+    // @design plan D276: nax has the answer before this delete; a crash here leaves the ask journalled, so a
+    // re-sent command acks ask_not_pending — never an allow nax did not get. It cannot move earlier: a failed
+    // POST must keep the ask pending for the retry.
     journal.deletePendingAsk(command.jobId, command.leaseEpoch, p.naxAskId);
     return { result: 'ok' };
   }
@@ -115,6 +118,17 @@ export class ApprovalRelay {
   /** Spec §4.2: answer nax at once; the human's answer arrives later through `answer`. */
   private async onRequest(job: JobRow, secret: string, body: unknown): Promise<number> {
     const events = new JobEvents(this.deps.journal, job.jobId, job.leaseEpoch, this.deps.log);
+    try {
+      return await this.handleAsk(job, events, secret, body);
+    } catch (error) {
+      // Review ENH-1: a journal failure still denies (the receiver turns this into 500), but never silently.
+      this.deps.log.error('nax ask handling failed', { jobId: job.jobId, error: errorMessage(error) });
+      events.lifecycle('error', `nax approval ask failed: ${errorMessage(error)}`);
+      return 500;
+    }
+  }
+
+  private async handleAsk(job: JobRow, events: JobEvents, secret: string, body: unknown): Promise<number> {
     const request = (body ?? {}) as NaxAskRequest;
     const callbackUrl = callbackUrlFor(request);
     if (!callbackUrl) {

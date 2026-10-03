@@ -129,6 +129,15 @@ describe('ApprovalRelay (spec §4)', () => {
       .toEqual({ result: 'rejected', detail: 'invalid payload' });
   });
 
+  test('a journal failure answers 500 and records a lifecycle error, never silence (review ENH-1)', async () => {
+    const endpoint = await relay.open(job());
+    journal.insertPendingAsk = () => { throw new Error('disk full'); };
+    expect(await send(endpoint, naxAsk())).toBe(500);
+    expect(journal.getPendingAsk('j1', 1, 'ask-1f2e3d4c')).toBeNull();
+    const lifecycle = events().find((e) => e.type === 'lifecycle');
+    expect(lifecycle?.payload).toEqual(expect.objectContaining({ level: 'error', message: expect.stringContaining('disk full') }));
+  });
+
   test('close stops that epoch receiver and deletes only its journal state (D285)', async () => {
     const endpoint = await relay.open(job());
     journal.putApprovalReceiver({ jobId: 'j1', leaseEpoch: 2, port: 1, secret: 's' });

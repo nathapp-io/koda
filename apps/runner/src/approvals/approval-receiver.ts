@@ -45,6 +45,7 @@ export class ApprovalReceiver {
     } catch {
       return new Response('Bad Request', { status: 400 });
     }
+    // Backstop only: onRequest logs its own failures (review ENH-1); this guards a logging-side throw.
     const status = await options.onRequest(body).catch(() => 500);
     return new Response(status === 200 ? 'OK' : 'Rejected', { status });
   }
