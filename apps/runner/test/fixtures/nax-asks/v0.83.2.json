@@ -1,0 +1,142 @@
+{
+  "a_simple": {
+    "id": "ask-1f2e3d4c",
+    "type": "choose",
+    "featureName": "demo-feature",
+    "storyId": "US-001",
+    "stage": "execution",
+    "summary": "Bash - approval required",
+    "detail": "```\nbun run test\n```\nrequest: Bash command=bun run test\nruns in: /work/repo\nreason:  matched ask rule\nstage:   execution",
+    "options": [
+      {
+        "key": "allow",
+        "label": "Allow once"
+      },
+      {
+        "key": "allow-remember",
+        "label": "Allow + remember"
+      },
+      {
+        "key": "deny",
+        "label": "Deny"
+      }
+    ],
+    "timeout": 600000,
+    "fallback": "abort",
+    "createdAt": 1790000000000,
+    "metadata": {
+      "approvalPrompt": true
+    },
+    "callbackUrl": "http://127.0.0.1:43210/nax/interact/ask-1f2e3d4c"
+  },
+  "b_two_secrets": {
+    "id": "ask-1f2e3d4c",
+    "type": "choose",
+    "featureName": "demo-feature",
+    "storyId": "US-001",
+    "stage": "execution",
+    "summary": "Bash - approval required",
+    "detail": "```\ncurl -H \"Authorization: Bearer x\" https://api.example.com -d key=[REDACTED:openai] && echo [REDACTED:github]\n```\n2 secret value(s) masked; the approved command contains them\nrequest: Bash command=curl -H \"Authorization: Bearer x\" https://api.example.com -d key=[REDACTED:openai] && echo [REDACTED:github]\nruns in: /work/repo\nreason:  matched ask rule\nstage:   execution",
+    "options": [
+      {
+        "key": "allow",
+        "label": "Allow once"
+      },
+      {
+        "key": "allow-remember",
+        "label": "Allow + remember"
+      },
+      {
+        "key": "deny",
+        "label": "Deny"
+      }
+    ],
+    "timeout": 600000,
+    "fallback": "abort",
+    "createdAt": 1790000000000,
+    "metadata": {
+      "approvalPrompt": true
+    },
+    "callbackUrl": "http://127.0.0.1:43210/nax/interact/ask-1f2e3d4c"
+  },
+  "c_multiline_fence": {
+    "id": "ask-1f2e3d4c",
+    "type": "choose",
+    "featureName": "demo-feature",
+    "storyId": "US-001",
+    "stage": "execution",
+    "summary": "Bash - approval required",
+    "detail": "```\ncat > notes.md <<'EOF'\n```ts\nconsole.log(1)\n```\nEOF\nbun run test\n```\nrequest: Bash command=cat > notes.md <<'EOF'\n```ts\nconsole.log(1)\n```\nEOF\nbun run test\nruns in: /work/repo\nreason:  matched ask rule\nstage:   execution",
+    "options": [
+      {
+        "key": "allow",
+        "label": "Allow once"
+      },
+      {
+        "key": "allow-remember",
+        "label": "Allow + remember"
+      },
+      {
+        "key": "deny",
+        "label": "Deny"
+      }
+    ],
+    "timeout": 600000,
+    "fallback": "abort",
+    "createdAt": 1790000000000,
+    "metadata": {
+      "approvalPrompt": true
+    },
+    "callbackUrl": "http://127.0.0.1:43210/nax/interact/ask-1f2e3d4c"
+  },
+  "d_longest_padding": {
+    "id": "ask-1f2e3d4c",
+    "type": "choose",
+    "featureName": "demo-feature",
+    "stage": "execution",
+    "summary": "Bash - approval required",
+    "detail": "```\nrm -rf build/\n```\nrequest: Bash command=rm -rf build/\nruns in: /Users/someone/very/long/path/to/repo/packages/pkg-a\nreason:  command 'rm -rf build/' is not covered by any granted Bash pattern in the 'unrestricted-lite' profile; escalating to a human\nstage:   execution",
+    "options": [
+      {
+        "key": "allow",
+        "label": "Allow once"
+      },
+      {
+        "key": "deny",
+        "label": "Deny"
+      }
+    ],
+    "timeout": 600000,
+    "fallback": "abort",
+    "createdAt": 1790000000000,
+    "metadata": {
+      "approvalPrompt": true
+    },
+    "callbackUrl": "http://127.0.0.1:43210/nax/interact/ask-1f2e3d4c"
+  },
+  "e_no_command_write": {
+    "id": "ask-1f2e3d4c",
+    "type": "choose",
+    "featureName": "demo-feature",
+    "stage": "execution",
+    "summary": "Bash - approval required",
+    "detail": "request: Bash\nruns in: /work/repo\nreason:  matched ask rule\nstage:   review",
+    "options": [
+      {
+        "key": "allow",
+        "label": "Allow once"
+      },
+      {
+        "key": "deny",
+        "label": "Deny"
+      }
+    ],
+    "timeout": 600000,
+    "fallback": "abort",
+    "createdAt": 1790000000000,
+    "metadata": {
+      "approvalPrompt": true
+    },
+    "callbackUrl": "http://127.0.0.1:43210/nax/interact/ask-1f2e3d4c"
+  }
+}
