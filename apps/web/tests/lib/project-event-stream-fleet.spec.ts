@@ -1,8 +1,10 @@
 import { describe, expect, jest, test } from '@jest/globals'
 import {
   createProjectEventStream,
+  parseFleetApprovalEvent,
   parseFleetJobEvent,
   type EventSourceLike,
+  type LiveFleetApprovalEvent,
   type LiveFleetJobEvent,
   type ProjectEventHandlers,
 } from '~/lib/project-event-stream'
@@ -110,5 +112,34 @@ describe('createProjectEventStream with onFleetJob', () => {
     const es = open({ onFleetJob, onResync: jest.fn() })
     expect(() => es.emit('ticket', { id: 't1', type: 'ticket', action: 'created', projectId: 'p1', ticketId: 't1', actorId: 'u1', at: 'x' })).not.toThrow()
     expect(onFleetJob).not.toHaveBeenCalled()
+  })
+})
+
+const approvalEvent = (id: string, over: Partial<LiveFleetApprovalEvent> = {}): LiveFleetApprovalEvent => ({
+  id, type: 'fleet_approval', projectId: 'p1', approvalId: 'a1', status: 'pending', at: '2026-10-03T00:00:00.000Z', ...over,
+})
+
+describe('fleet_approval notices (S1.5 1b)', () => {
+  test('parses a notice and accepts any non-empty status (D253)', () => {
+    expect(parseFleetApprovalEvent(JSON.stringify(approvalEvent('e1')))).toEqual(approvalEvent('e1'))
+    expect(parseFleetApprovalEvent(JSON.stringify(approvalEvent('e1', { status: 'brand_new' })))).toBeTruthy()
+  })
+
+  test('rejects other shapes', () => {
+    expect(parseFleetApprovalEvent('not json')).toBeNull()
+    expect(parseFleetApprovalEvent(JSON.stringify({ ...approvalEvent('e1'), type: 'fleet_job' }))).toBeNull()
+    expect(parseFleetApprovalEvent(JSON.stringify({ ...approvalEvent('e1'), approvalId: 5 }))).toBeNull()
+    expect(parseFleetApprovalEvent(JSON.stringify({ ...approvalEvent('e1'), status: '' }))).toBeNull()
+  })
+
+  test('delivers fleet_approval events once each, only when a handler is given', () => {
+    const onFleetApproval = jest.fn()
+    const source = open({ onFleetApproval, onResync: () => undefined })
+    source.emit('fleet_approval', approvalEvent('e1'))
+    source.emit('fleet_approval', approvalEvent('e1'))
+    expect(onFleetApproval).toHaveBeenCalledTimes(1)
+
+    const silent = open({ onResync: () => undefined })
+    expect(silent.listenerTypes()).not.toContain('fleet_approval')
   })
 })

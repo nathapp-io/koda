@@ -87,6 +87,7 @@ export const uiStubs: Record<string, unknown> = Object.fromEntries(
     ['Table', 'table'], ['TableHeader', 'thead'], ['TableBody', 'tbody'],
     ['TableRow', 'tr'], ['TableHead', 'th'], ['TableCell', 'td'],
     ['Badge', 'badge'], ['Button', 'button'], ['Input', 'input'], ['Label', 'label'],
+    ['Textarea', 'textarea'],
     ['LoadingState', 'loading-state'], ['EmptyState', 'empty-state'],
     ['ErrorState', 'error-state'],
     ['FormItem', 'form-item'], ['FormLabel', 'form-label'], ['FormControl', 'form-control'],

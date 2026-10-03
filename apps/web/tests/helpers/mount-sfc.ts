@@ -113,7 +113,7 @@ const VUE_HELPERS = ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount',
 /** Nuxt auto-import names injected as undefined unless the test supplies them (see MountOptions.globals). */
 const NUXT_AUTO_IMPORTS = [
   'useI18n', 'useAppToast', 'useApi', 'useRuntimeConfig', 'definePageMeta',
-  'useVisiblePolling', 'useFleetRunners', 'useFleetRepos', 'useRoute',
+  'useVisiblePolling', 'useFleetRunners', 'useFleetRepos', 'useRoute', 'useRouter',
   'useFleetDispatchOptions', 'useFleetJobs', 'useProjectViewerRole',
   'useAdminUsers', 'useProjectEvents', 'useAuth', 'useProjectMemberNames',
 ] as const
@@ -202,6 +202,10 @@ function withEmitRecorder(inner: Component, record: (name: string, args: unknown
   const names = Array.isArray(declared) ? declared : Object.keys(declared ?? {})
   return {
     name: 'EmitRecorder',
+    // Without this, Vue's attr fallthrough clones the component root vnode and mergeProps
+    // concatenates the recorded listener with the raw one (onDecide -> [record, raw]), so every
+    // emit reached the root prop handler twice. The render below forwards attrs explicitly.
+    inheritAttrs: false,
     setup(_props: unknown, { attrs }: { attrs: Record<string, unknown> }) {
       const listeners: Record<string, unknown> = {}
       for (const name of names) {
@@ -246,6 +250,9 @@ const FLEET_COMPONENT_FILES: Record<FleetComponentName, string> = {
   FleetBudgetTable: 'BudgetTable.vue',
   FleetScheduleTable: 'ScheduleTable.vue',
   FleetScheduleHistory: 'ScheduleHistory.vue',
+  FleetApprovalBudgetPanel: 'ApprovalBudgetPanel.vue',
+  FleetApprovalOutcome: 'ApprovalOutcome.vue',
+  FleetApprovalInbox: 'ApprovalInbox.vue',
 }
 
 export function mountSfc(file: string, options: MountOptions = {}): Mounted {
@@ -317,3 +324,4 @@ export const webFile = (...parts: string[]): string => join(webRoot, ...parts)
 export type FleetComponentName =
   | 'FleetAge' | 'FleetRunnerCapabilityChips' | 'FleetRepoReachabilityBadge' | 'FleetNativeSelect' | 'FleetBudgetTable'
   | 'FleetScheduleTable' | 'FleetScheduleHistory'
+  | 'FleetApprovalBudgetPanel' | 'FleetApprovalOutcome' | 'FleetApprovalInbox'

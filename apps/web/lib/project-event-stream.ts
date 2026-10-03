@@ -37,10 +37,22 @@ export interface LiveFleetJobEvent {
   at: string
 }
 
-/** Both event handlers are optional; a page subscribes to what it shows. */
+/** S1.5 §2.5: content-free approval notice; the page refetches (project-scoped approvals only). */
+export interface LiveFleetApprovalEvent {
+  id: string
+  type: 'fleet_approval'
+  projectId: string
+  approvalId: string
+  /** Any non-empty string (D253, same rule as D139). */
+  status: string
+  at: string
+}
+
+/** All event handlers except the resync are optional; a page subscribes to what it shows. */
 export interface ProjectEventHandlers {
   onEvent?: (event: LiveTicketEvent) => void
   onFleetJob?: (event: LiveFleetJobEvent) => void
+  onFleetApproval?: (event: LiveFleetApprovalEvent) => void
   onResync: () => void
 }
 
@@ -88,6 +100,19 @@ export function parseFleetJobEvent(raw: string): LiveFleetJobEvent | null {
     if (value.type !== 'fleet_job' || typeof value.id !== 'string' || typeof value.jobId !== 'string') return null
     if (typeof value.state !== 'string' || value.state.length === 0) return null
     return value as LiveFleetJobEvent
+  }
+  catch {
+    return null
+  }
+}
+
+export function parseFleetApprovalEvent(raw: string): LiveFleetApprovalEvent | null {
+  try {
+    const value = JSON.parse(raw) as Partial<LiveFleetApprovalEvent> | null
+    if (!value || typeof value !== 'object') return null
+    if (value.type !== 'fleet_approval' || typeof value.id !== 'string' || typeof value.approvalId !== 'string') return null
+    if (typeof value.status !== 'string' || value.status.length === 0) return null
+    return value as LiveFleetApprovalEvent
   }
   catch {
     return null
@@ -153,6 +178,13 @@ export function createProjectEventStream(
       es.addEventListener('fleet_job', (ev) => {
         const event = parseFleetJobEvent(ev.data)
         if (event && isNew(event.id)) onFleetJob(event)
+      })
+    }
+    const onFleetApproval = handlers.onFleetApproval
+    if (onFleetApproval) {
+      es.addEventListener('fleet_approval', (ev) => {
+        const event = parseFleetApprovalEvent(ev.data)
+        if (event && isNew(event.id)) onFleetApproval(event)
       })
     }
     es.onerror = () => {

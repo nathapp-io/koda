@@ -54,3 +54,20 @@ export async function deleteOwnPolicies(token: string, slug: string): Promise<vo
     await call<void>('DELETE', `/projects/${slug}/fleet/budgets/${row.id}`, token);
   }
 }
+
+/**
+ * The project's calendar-month fleet spend, read the same way the budget evaluator computes it: a
+ * throwaway project policy with a limit no job can reach answers its own window spend (PolicyRow.spentUsd).
+ * The probe is deleted before any runner sync, so it never gates a dispatch or pauses the project.
+ * The whole fleet suite shares one calendar-month window per run, so policy-creating specs state
+ * amounts as headroom above this value to stay correct in every file order.
+ */
+export async function monthSpendUsd(token: string, slug: string): Promise<number> {
+  const created = await call<{ id: string }>('POST', `/projects/${slug}/fleet/budgets`, token, {
+    scopeType: 'project', windowKind: 'calendar_month_utc', amountUsd: 1_000_000, warnPercent: null, hardStop: true, runningJobs: 'finish',
+  });
+  const probe = (await listPolicies(token, slug)).find((r) => r.id === created.id);
+  if (!probe) throw new Error(`Probe policy ${created.id} not found in ${slug}`);
+  await call<void>('DELETE', `/projects/${slug}/fleet/budgets/${created.id}`, token);
+  return Number(probe.spentUsd);
+}

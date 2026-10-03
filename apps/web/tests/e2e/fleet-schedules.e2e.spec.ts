@@ -53,14 +53,11 @@ test.describe('Fleet schedules (scripted runner)', () => {
     const scheduleId = ((await row.getAttribute('data-testid')) ?? '').replace('fleet-schedule-row-', '');
     expect(scheduleId).not.toBe('');
 
-    // 2. Open the schedule and wait for its live stream before anything happens.
-    const streamOpen = page.waitForResponse(
-      (res) => res.url().includes(`/api/projects/${SLUG}/events`) && res.status() === 200,
-      { timeout: 10_000 },
-    );
+    // 2. Open the schedule. Since S1.5 1b (D246) the tab shares one project EventSource, opened by
+    // the header badge on the list page, so no fresh /events response fires on this navigation:
+    // the detail page just subscribes to the already-open stream on mount.
     await row.getByTestId('fleet-schedule-link').click();
     await page.waitForURL(new RegExp(`/${SLUG}/fleet/schedules/${scheduleId}$`));
-    await streamOpen;
     await waitForHydration(page);
     await expect(page.getByTestId('fleet-schedule-history-empty')).toBeVisible();
 

@@ -74,7 +74,8 @@
     "fleetRunners": "Runners",
     "fleetRepos": "Repos",
     "fleetJobs": "Fleet jobs",
-    "fleetBudgets": "Budgets"
+    "fleetBudgets": "Budgets",
+    "fleetApprovals": "Approvals"
   },
   "admin": {
     "users": {
@@ -902,7 +903,8 @@
         "paused": "Fleet budget paused for {scope}: {spent} of {amount} spent. New jobs are refused until it is resumed.",
         "warning": "Fleet budget for {scope} is at {percent}% ({spent} of {amount}).",
         "more": "and {count} more",
-        "view": "View budgets"
+        "view": "View budgets",
+        "review": "Review override"
       }
     },
     "schedules": {
@@ -1029,6 +1031,82 @@
         "budgetStop": "Stopped by a fleet budget"
       }
     },
+    "approvals": {
+      "title": "Approvals",
+      "subtitleProject": "Decisions this project's fleet is waiting on.",
+      "subtitleAdmin": "Every fleet decision, including fleet-wide and runner budgets.",
+      "tabs": { "pending": "Pending", "all": "All" },
+      "filters": { "type": "Type", "allTypes": "All types" },
+      "type": { "budget_override_required": "Budget override", "nax_bash_escalate": "Shell command" },
+      "status": { "pending": "Pending", "approved": "Approved", "rejected": "Rejected", "expired": "Expired", "cancelled": "Cancelled" },
+      "decision": {
+        "allow": "Allowed once",
+        "allow_for_job": "Allowed for this job",
+        "deny": "Denied",
+        "raise_budget_and_resume": "Raised and resumed",
+        "keep_paused": "Kept paused"
+      },
+      "resolvedBy": {
+        "user": "Decided in the inbox",
+        "timeout": "Timed out",
+        "job_ended": "The job ended first",
+        "superseded": "Replaced by a newer stop",
+        "manual_resume": "Resumed from the budgets page",
+        "window_reset": "The budget window rolled over",
+        "policy_deleted": "The budget policy was deleted"
+      },
+      "summary": {
+        "budget": "Budget for {scope} stopped at {spent} of {amount}",
+        "bash": "A job asks to run a shell command"
+      },
+      "empty": { "pending": "Nothing is waiting for a decision.", "all": "No approvals yet." },
+      "linked": "Linked approval",
+      "more": "Showing the first {n} pending approvals.",
+      "noProject": "Fleet-wide",
+      "readOnly": "You can read this approval. Only a project admin can decide a budget override.",
+      "bashLater": "Shell command approvals are answered on this page from a later release.",
+      "budget": {
+        "summary": "{spent} spent of a {amount} limit ({window}).",
+        "amount": "New limit (USD)",
+        "amountHint": "Must be above the {spent} already spent.",
+        "requeueTitle": "Re-queue jobs the pause cancelled before they started",
+        "noCandidates": "No cancelled jobs to re-queue.",
+        "truncated": "More cancelled jobs exist than are listed. Only the listed ones can be re-queued here.",
+        "comment": "Comment (optional)",
+        "raise": "Raise and resume",
+        "keep": "Keep paused",
+        "submitting": "Saving..."
+      },
+      "validation": {
+        "amountInvalid": "Enter an amount above 0 with at most 4 decimals.",
+        "notAbove": "The new limit must be above {spent}.",
+        "commentTooLong": "Keep the comment to 1000 characters."
+      },
+      "outcome": {
+        "decidedBy": "By {name}",
+        "unknownUser": "an unknown user",
+        "decidedAt": "On {at}",
+        "manualResume": "Resumed from the budgets page. No jobs were offered for re-queue.",
+        "raisedTo": "Limit raised to {amount}",
+        "requeueTitle": "Re-queue",
+        "requeueNone": "No jobs were selected for re-queue.",
+        "requeueOk": "Re-queued",
+        "comment": "Comment: {comment}"
+      },
+      "requeueFailure": {
+        "gone": "Not re-queued: the job no longer exists.",
+        "activeJob": "Not re-queued: another job for this feature is active.",
+        "notCancelled": "Not re-queued: the job is no longer cancelled.",
+        "paused": "Not re-queued: a fleet budget still pauses it.",
+        "unknown": "Not re-queued."
+      },
+      "toast": {
+        "raise_budget_and_resume": "Budget raised and resumed.",
+        "keep_paused": "The budget stays paused.",
+        "requeueFailed": "{count} job(s) could not be re-queued."
+      },
+      "badge": { "label": "{count} approvals waiting" }
+    },
     "repos": {
       "title": "Repos",
       "subtitle": "Repositories koda can clone and push for fleet jobs.",
@@ -1080,6 +1158,7 @@
       "dispatch": "Dispatch",
       "budgets": "Budgets",
       "schedules": "Schedules",
+      "approvals": "Approvals",
       "empty": "No fleet jobs yet",
       "total": "{total} jobs",
       "unknownMember": "Unknown member",

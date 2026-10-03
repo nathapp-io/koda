@@ -43,14 +43,12 @@ test.describe('Fleet dispatch (scripted runner)', () => {
 
     await expect(page.getByTestId('placement-assigned')).toContainText(runner.name);
 
-    // Open the job and wait for its live stream before the runner reports anything.
-    const streamOpen = page.waitForResponse(
-      (res) => res.url().includes(`/api/projects/${SLUG}/events`) && res.status() === 200,
-      { timeout: 10_000 },
-    );
+    // Open the job. Since S1.5 1b (D246) the tab shares one project EventSource, opened by the
+    // header badge on the dispatch page, so no fresh /events response fires on this navigation:
+    // the job page just subscribes to the already-open stream on mount.
     await page.getByTestId('placement-open-job').click();
     await page.waitForURL(new RegExp(`/${SLUG}/fleet/jobs/[^/]+$`));
-    await streamOpen;
+    await waitForHydration(page);
     const jobId = page.url().split('/').pop() ?? '';
     await expectState(page, 'ASSIGNED');
     await page.evaluate(() => { (window as unknown as { __noReload: boolean }).__noReload = true; });

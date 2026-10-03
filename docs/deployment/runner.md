@@ -160,6 +160,11 @@ candidate list is too long to be shown in full). `koda fleet budget resume` answ
 but it needs `--amount`: without one the amount stays at the value the hard stop fired on, and a resume is only
 accepted when the amount is above this window's spend.
 
+Answer the override in the web: the header badge counts pending approvals, the jobs-list banner has a "Review
+override" link, and `/<project>/fleet/approvals` (project and repo budgets) or `/admin/fleet/approvals` (fleet-wide
+and runner budgets) lists them. "Raise and resume" takes a new limit above the spend and re-queues the ticked jobs the
+pause cancelled before they started; "Keep paused" leaves the pause (resume later from the budgets page).
+
 Schedules are also managed on the web: `/<project>/fleet/schedules` lists a project's schedules with their next fire in
 the schedule's timezone and the reason a disabled one stopped; a schedule's page shows its template, the cost so far and
 every run it dispatched (stories passed against the previous run, cost, merged fires, progress push, stop reason).

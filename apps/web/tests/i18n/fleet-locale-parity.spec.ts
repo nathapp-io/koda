@@ -34,9 +34,18 @@ const ENUMS: Record<string, string[]> = {
   'fleet.budgets.status': ['paused', 'warning', 'ok'],
   'fleet.budgets.runningJobs': ['finish', 'cancel'],
   'fleet.budgets.hardStop': ['on', 'off'],
-  'fleet.budgets.banner': ['paused', 'warning', 'more', 'view'],
+  'fleet.budgets.banner': ['paused', 'warning', 'more', 'view', 'review'],
   'fleet.schedules.status': ['enabled', 'completed', 'finish_failed', 'no_progress', 'owner_lost_access', 'template_invalid', 'manual'],
   'fleet.schedules.form.placementMode': ['auto', 'labels', 'pin'],
+  'fleet.approvals.type': ['budget_override_required', 'nax_bash_escalate'],
+  'fleet.approvals.status': ['pending', 'approved', 'rejected', 'expired', 'cancelled'],
+  'fleet.approvals.decision': ['allow', 'allow_for_job', 'deny', 'raise_budget_and_resume', 'keep_paused'],
+  'fleet.approvals.resolvedBy': ['user', 'timeout', 'job_ended', 'superseded', 'manual_resume', 'window_reset', 'policy_deleted'],
+  'fleet.approvals.requeueFailure': ['gone', 'activeJob', 'notCancelled', 'paused', 'unknown'],
+  'fleet.approvals.tabs': ['pending', 'all'],
+  'fleet.approvals.empty': ['pending', 'all'],
+  'fleet.approvals.validation': ['amountInvalid', 'notAbove', 'commentTooLong'],
+  'fleet.approvals.toast': ['raise_budget_and_resume', 'keep_paused', 'requeueFailed'],
 }
 
 describe('Fleet locale parity (en and zh)', () => {
@@ -56,7 +65,7 @@ describe('Fleet locale parity (en and zh)', () => {
   })
 
   // Parity, not copy: rewording an English label must not fail a green test.
-  test.each(['nav.fleetRunners', 'nav.fleetRepos', 'nav.fleetBudgets'])('%s is translated in both locales', (key) => {
+  test.each(['nav.fleetRunners', 'nav.fleetRepos', 'nav.fleetBudgets', 'nav.fleetApprovals'])('%s is translated in both locales', (key) => {
     expect(String(at(en, key) ?? '').trim()).not.toBe('')
     expect(String(at(zh, key) ?? '').trim()).not.toBe('')
   })
@@ -70,6 +79,17 @@ describe('Fleet locale parity (en and zh)', () => {
     for (const key of [
       'fleet.schedules.title', 'fleet.schedules.detailTitle', 'fleet.jobs.schedules', 'fleet.jobs.detail.fromSchedule',
       'fleet.jobs.detail.openSchedule', 'fleet.jobs.detail.coalesced', 'fleet.schedules.history.storiesValue',
+    ]) {
+      expect(String(at(en, key) ?? '').trim()).not.toBe('')
+    }
+  })
+
+  test('the approval keys the pages render exist (S1.5 1b)', () => {
+    for (const key of [
+      'fleet.approvals.title', 'fleet.approvals.subtitleProject', 'fleet.approvals.subtitleAdmin', 'fleet.approvals.readOnly',
+      'fleet.approvals.bashLater', 'fleet.approvals.linked', 'fleet.approvals.noProject', 'fleet.approvals.filters.allTypes',
+      'fleet.approvals.summary.budget', 'fleet.approvals.summary.bash', 'fleet.approvals.budget.raise', 'fleet.approvals.budget.keep',
+      'fleet.approvals.outcome.manualResume', 'fleet.approvals.outcome.requeueOk', 'fleet.approvals.badge.label', 'fleet.jobs.approvals',
     ]) {
       expect(String(at(en, key) ?? '').trim()).not.toBe('')
     }

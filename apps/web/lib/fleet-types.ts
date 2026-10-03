@@ -326,3 +326,54 @@ export interface SchedulePatchBody {
   pinnedRunnerId: string | null
   noProgressLimit: number
 }
+
+/** S1.5 slice 1a wire types (apps/api/src/fleet/approvals/dto). Money inside payload/outcome is a decimal string. */
+export const APPROVAL_TYPES = ['budget_override_required', 'nax_bash_escalate'] as const
+export type ApprovalType = (typeof APPROVAL_TYPES)[number]
+export const APPROVAL_STATUSES = ['pending', 'approved', 'rejected', 'expired', 'cancelled'] as const
+export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number]
+export const APPROVAL_DECISIONS = ['allow', 'allow_for_job', 'deny', 'raise_budget_and_resume', 'keep_paused'] as const
+export type ApprovalDecision = (typeof APPROVAL_DECISIONS)[number]
+export const APPROVAL_RESOLVED_BY = ['user', 'timeout', 'job_ended', 'superseded', 'manual_resume', 'window_reset', 'policy_deleted'] as const
+export type ApprovalResolvedBy = (typeof APPROVAL_RESOLVED_BY)[number]
+
+export interface RequeueCandidateDto {
+  jobId: string
+  projectId: string
+  feature: string
+  queuedAt: string
+}
+
+export interface FleetApprovalDto {
+  id: string
+  type: ApprovalType
+  status: ApprovalStatus
+  projectId: string | null
+  jobId: string | null
+  policyId: string | null
+  payload: Record<string, unknown>
+  outcome: Record<string, unknown> | null
+  requestedAt: string
+  expiresAt: string | null
+  decision: ApprovalDecision | null
+  decidedById: string | null
+  decidedAt: string | null
+  resolvedBy: ApprovalResolvedBy | null
+  comment: string | null
+  /** GET :id of a pending budget approval only (spec §1.5). */
+  requeueCandidates?: RequeueCandidateDto[]
+  requeueCandidatesTruncated?: boolean
+}
+
+export interface ApprovalCountsDto {
+  total: number
+  unscoped: number
+  projects: Array<{ projectId: string; slug: string; pending: number }>
+}
+
+export interface DecideApprovalBody {
+  decision: ApprovalDecision
+  amountUsd?: number
+  requeueJobIds?: string[]
+  comment?: string
+}

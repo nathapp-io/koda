@@ -74,7 +74,8 @@
     "fleetRunners": "执行机",
     "fleetRepos": "仓库",
     "fleetJobs": "Fleet 任务",
-    "fleetBudgets": "预算"
+    "fleetBudgets": "预算",
+    "fleetApprovals": "审批"
   },
   "admin": {
     "users": {
@@ -902,7 +903,8 @@
         "paused": "{scope}的 Fleet 预算已暂停：已支出 {spent} / {amount}。恢复前将拒绝新任务。",
         "warning": "{scope}的 Fleet 预算已达 {percent}%（{spent} / {amount}）。",
         "more": "另有 {count} 项",
-        "view": "查看预算"
+        "view": "查看预算",
+        "review": "处理超额审批"
       }
     },
     "schedules": {
@@ -1029,6 +1031,82 @@
         "budgetStop": "被舰队预算停止"
       }
     },
+    "approvals": {
+      "title": "审批",
+      "subtitleProject": "本项目的集群正在等待的决定。",
+      "subtitleAdmin": "集群中的所有决定，包括全局和运行器预算。",
+      "tabs": { "pending": "待处理", "all": "全部" },
+      "filters": { "type": "类型", "allTypes": "全部类型" },
+      "type": { "budget_override_required": "预算超额", "nax_bash_escalate": "Shell 命令" },
+      "status": { "pending": "待处理", "approved": "已批准", "rejected": "已拒绝", "expired": "已过期", "cancelled": "已取消" },
+      "decision": {
+        "allow": "允许一次",
+        "allow_for_job": "本任务内允许",
+        "deny": "已拒绝",
+        "raise_budget_and_resume": "已提高并恢复",
+        "keep_paused": "保持暂停"
+      },
+      "resolvedBy": {
+        "user": "在收件箱中决定",
+        "timeout": "已超时",
+        "job_ended": "任务已先结束",
+        "superseded": "被新的停止取代",
+        "manual_resume": "已在预算页面恢复",
+        "window_reset": "预算周期已滚动",
+        "policy_deleted": "预算策略已删除"
+      },
+      "summary": {
+        "budget": "{scope} 的预算在 {spent} / {amount} 时停止",
+        "bash": "有任务请求运行 shell 命令"
+      },
+      "empty": { "pending": "没有等待决定的审批。", "all": "暂无审批。" },
+      "linked": "链接的审批",
+      "more": "仅显示前 {n} 个待处理审批。",
+      "noProject": "全局",
+      "readOnly": "你可以查看此审批。只有项目管理员可以决定预算超额。",
+      "bashLater": "Shell 命令审批将在后续版本中在此页面处理。",
+      "budget": {
+        "summary": "已花费 {spent}，限额 {amount}（{window}）。",
+        "amount": "新限额（美元）",
+        "amountHint": "必须高于已花费的 {spent}。",
+        "requeueTitle": "重新排队在暂停时尚未开始就被取消的任务",
+        "noCandidates": "没有可重新排队的已取消任务。",
+        "truncated": "已取消的任务多于所列数量。此处只能重新排队所列任务。",
+        "comment": "备注（可选）",
+        "raise": "提高并恢复",
+        "keep": "保持暂停",
+        "submitting": "正在保存..."
+      },
+      "validation": {
+        "amountInvalid": "请输入大于 0 且最多 4 位小数的金额。",
+        "notAbove": "新限额必须高于 {spent}。",
+        "commentTooLong": "备注不能超过 1000 个字符。"
+      },
+      "outcome": {
+        "decidedBy": "由 {name}",
+        "unknownUser": "未知用户",
+        "decidedAt": "于 {at}",
+        "manualResume": "已在预算页面恢复。没有提供可重新排队的任务。",
+        "raisedTo": "限额已提高到 {amount}",
+        "requeueTitle": "重新排队",
+        "requeueNone": "没有选择要重新排队的任务。",
+        "requeueOk": "已重新排队",
+        "comment": "备注：{comment}"
+      },
+      "requeueFailure": {
+        "gone": "未重新排队：任务已不存在。",
+        "activeJob": "未重新排队：此功能已有活动任务。",
+        "notCancelled": "未重新排队：任务已不再是取消状态。",
+        "paused": "未重新排队：仍被集群预算暂停。",
+        "unknown": "未重新排队。"
+      },
+      "toast": {
+        "raise_budget_and_resume": "预算已提高并恢复。",
+        "keep_paused": "预算保持暂停。",
+        "requeueFailed": "{count} 个任务无法重新排队。"
+      },
+      "badge": { "label": "{count} 个审批等待处理" }
+    },
     "repos": {
       "title": "仓库",
       "subtitle": "koda 可为执行机任务克隆和推送的仓库。",
@@ -1080,6 +1158,7 @@
       "dispatch": "派发",
       "budgets": "预算",
       "schedules": "定时计划",
+      "approvals": "审批",
       "empty": "还没有 fleet 任务",
       "total": "共 {total} 个任务",
       "unknownMember": "未知成员",

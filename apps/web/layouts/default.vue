@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users, Server, FolderGit2, Rocket, Wallet } from 'lucide-vue-next'
+import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users, Server, FolderGit2, Rocket, Wallet, Inbox } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const auth = useAuth()
@@ -14,10 +14,11 @@ const navLinkClass =
   'flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors'
 const activeClass = 'bg-accent text-accent-foreground'
 
-/** The last crumb under `/:project/fleet/*`: dispatch, budgets, or (anything else) a job. */
+/** The last crumb under `/:project/fleet/*`: dispatch, budgets, approvals, or (anything else) a job. */
 function fleetLeaf(project: string, path: string): string {
   if (path === `/${project}/fleet/dispatch`) return t('fleet.jobs.dispatch')
   if (path === `/${project}/fleet/budgets`) return t('fleet.budgets.title')
+  if (path === `/${project}/fleet/approvals`) return t('fleet.approvals.title')
   return t('fleet.jobs.detail.title')
 }
 
@@ -117,6 +118,8 @@ const backTo = computed(() => {
 
         <NuxtLink v-if="isGlobalAdmin" to="/admin/fleet/budgets" :class="navLinkClass" :active-class="activeClass"><Wallet class="h-4 w-4 shrink-0" />{{ t('nav.fleetBudgets') }}</NuxtLink>
 
+        <NuxtLink v-if="isGlobalAdmin" to="/admin/fleet/approvals" :class="navLinkClass" :active-class="activeClass"><Inbox class="h-4 w-4 shrink-0" />{{ t('nav.fleetApprovals') }}</NuxtLink>
+
         <!-- Project-scoped links -->
         <template v-if="projectSlug">
           <NuxtLink
@@ -209,6 +212,7 @@ const backTo = computed(() => {
         </Button>
 
         <div class="flex items-center gap-4">
+          <FleetApprovalBadge v-if="auth.user.value" :key="projectSlug ?? ''" :slug="projectSlug ?? null" />
           <span class="text-sm font-medium text-foreground">
             {{ auth.user.value?.email }}
           </span>
