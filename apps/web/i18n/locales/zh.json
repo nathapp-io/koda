@@ -1207,6 +1207,7 @@
       "schedules": "定时计划",
       "approvals": "审批",
       "approvalsSection": { "title": "审批", "empty": "尚无 Shell 命令询问。", "open": "打开" },
+      "needsApproval": "待审批（{count}）",
       "empty": "还没有 fleet 任务",
       "total": "共 {total} 个任务",
       "unknownMember": "未知成员",

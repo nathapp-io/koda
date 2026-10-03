@@ -75,6 +75,7 @@ const liveReload = createDebouncer(() => { void reload(); void banner.value?.ref
 onBeforeUnmount(() => liveReload.cancel())
 useProjectEvents(slug, {
   onFleetJob: () => liveReload.trigger(),
+  onFleetApproval: () => liveReload.trigger(),
   onResync: () => liveReload.trigger(),
 })
 
@@ -159,7 +160,12 @@ const stateLabel = (state: string): string => codeLabel(t, te, 'fleet.state', st
               <TableCell>{{ job.command }}</TableCell>
               <TableCell>{{ options.repoName(job.repoId) }}</TableCell>
               <TableCell>{{ options.runnerName(job.runnerId) ?? '-' }}</TableCell>
-              <TableCell><FleetJobStateBadge :state="job.state" /></TableCell>
+              <TableCell>
+                <div class="flex flex-wrap items-center gap-2">
+                  <FleetJobStateBadge :state="job.state" />
+                  <Badge v-if="job.pendingApprovals > 0" variant="default" :data-testid="`fleet-job-needs-approval-${job.id}`">{{ t('fleet.jobs.needsApproval', { count: job.pendingApprovals }) }}</Badge>
+                </div>
+              </TableCell>
               <TableCell>{{ formatUsd(job.costSpentUsd) }}</TableCell>
               <TableCell>{{ people.nameOf(job.requestedById) ?? t('fleet.jobs.unknownMember') }}</TableCell>
               <TableCell>{{ new Date(job.queuedAt).toLocaleString() }}</TableCell>

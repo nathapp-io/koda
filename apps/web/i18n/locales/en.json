@@ -1207,6 +1207,7 @@
       "schedules": "Schedules",
       "approvals": "Approvals",
       "approvalsSection": { "title": "Approvals", "empty": "No shell command asks yet.", "open": "Open" },
+      "needsApproval": "Needs approval ({count})",
       "empty": "No fleet jobs yet",
       "total": "{total} jobs",
       "unknownMember": "Unknown member",
