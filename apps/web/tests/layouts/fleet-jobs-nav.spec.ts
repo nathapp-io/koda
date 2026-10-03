@@ -29,4 +29,8 @@ describe('fleet jobs navigation', () => {
     // The schedule branches must come before the generic /fleet/ branch.
     expect(layout.indexOf('/fleet/schedules/`)')).toBeLessThan(layout.indexOf('if (path.startsWith(`/${project}/fleet/`)) {'))
   })
+
+  test('the approvals inbox has its own breadcrumb leaf (S1.5 1b D239)', () => {
+    expect(layout).toContain('if (path === `/${project}/fleet/approvals`) return t(\'fleet.approvals.title\')')
+  })
 })

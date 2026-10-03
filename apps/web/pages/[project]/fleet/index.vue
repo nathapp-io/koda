@@ -85,6 +85,9 @@ const stateLabel = (state: string): string => codeLabel(t, te, 'fleet.state', st
   <div class="space-y-6">
     <PageHeader :title="t('fleet.jobs.title')" :subtitle="t('fleet.jobs.subtitle')">
       <template #actions>
+        <Button variant="outline" data-testid="fleet-approvals-link" @click="navigateTo(`/${slug}/fleet/approvals`)">
+          {{ t('fleet.jobs.approvals') }}
+        </Button>
         <Button variant="outline" data-testid="fleet-schedules-link" @click="navigateTo(`/${slug}/fleet/schedules`)">
           {{ t('fleet.jobs.schedules') }}
         </Button>
