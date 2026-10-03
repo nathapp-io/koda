@@ -131,7 +131,7 @@ export type { FleetJobState }
 
 export type MisfitReason =
   | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
-  | 'provider_unavailable' | 'sandbox' | 'tools' | 'busy_repo' | 'capacity'
+  | 'provider_unavailable' | 'sandbox' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity'
 
 export interface FleetJobStoryDto {
   id: string

@@ -707,6 +707,7 @@
       "provider_unavailable": "某个提供方凭据当前不可用",
       "sandbox": "某个配置需要沙箱，但沙箱不可用",
       "tools": "执行机缺少此仓库所需的 git、gh 或 glab",
+      "approvals_relay": "该运行器无法转发 bash 审批（需要协议 v2 和 nax 0.83 或更高版本）",
       "busy_repo": "执行机已在运行此仓库的任务",
       "capacity": "执行机已满载"
     },

@@ -32,8 +32,8 @@ const toLoads = (refs: readonly ActiveJobRef[]): ReadonlyMap<string, RunnerLoad>
     return new Map([...acc, [runnerId, { active: prev.active + 1, repoIds: new Set([...prev.repoIds, repoId]) }]]);
   }, new Map<string, RunnerLoad>());
 
-export const toPlacementJob = (job: Pick<FleetJobRecord, 'repoId' | 'profiles' | 'selectorLabels' | 'pinnedRunnerId'>, repo: Pick<FleetRepoRef, 'provider'>): PlacementJob => ({
-  repoId: job.repoId, provider: repo.provider, profiles: job.profiles, selectorLabels: job.selectorLabels, pinnedRunnerId: job.pinnedRunnerId,
+export const toPlacementJob = (job: Pick<FleetJobRecord, 'repoId' | 'profiles' | 'selectorLabels' | 'pinnedRunnerId' | 'bashMode'>, repo: Pick<FleetRepoRef, 'provider'>): PlacementJob => ({
+  repoId: job.repoId, provider: repo.provider, profiles: job.profiles, selectorLabels: job.selectorLabels, pinnedRunnerId: job.pinnedRunnerId, bashMode: job.bashMode,
 });
 
 /**

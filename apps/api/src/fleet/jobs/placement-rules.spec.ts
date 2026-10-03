@@ -17,7 +17,7 @@ const runner = (over: Partial<PlacementRunner> = {}): PlacementRunner => ({
   labels: ['linux', 'gpu'], capacity: 1, capabilities: caps(), ...over,
 });
 const job = (over: Partial<PlacementJob> = {}): PlacementJob => ({
-  repoId: 'repo-1', provider: 'github', profiles: ['fast'], selectorLabels: ['linux'], pinnedRunnerId: null, ...over,
+  repoId: 'repo-1', provider: 'github', profiles: ['fast'], selectorLabels: ['linux'], pinnedRunnerId: null, bashMode: 'raw', ...over,
 });
 const misfit = (j: PlacementJob, r: PlacementRunner, load = EMPTY_LOAD) => firstMisfit(j, r, load, NOW, 90);
 
@@ -90,6 +90,22 @@ describe('placement rules (spec §4)', () => {
     expect(misfit(job({ selectorLabels: ['mac'] }), runner({ budgetPaused: true }))).toBe('budget_paused');
     expect(misfit(job(), runner({ budgetPaused: false }))).toBeNull();
     expect(PERMANENT_MISFITS.has('budget_paused')).toBe(false);
+  });
+
+  describe('approvals relay (S1.5 §3, plan D270)', () => {
+    it.each(['gated', 'escalate'] as const)('a %s job needs a relay runner', (bashMode) => {
+      expect(misfit(job({ bashMode }), runner())).toBe('approvals_relay');
+      expect(misfit(job({ bashMode }), runner({ capabilities: caps({ approvals: { relay: true } }) }))).toBeNull();
+    });
+    it('a raw job does not care', () => {
+      expect(misfit(job({ bashMode: 'raw' }), runner())).toBeNull();
+    });
+    it('is checked before tool misfits', () => {
+      expect(misfit(job({ bashMode: 'escalate' }), runner({ capabilities: caps({ tools: { git: false, gh: false, glab: false } }) }))).toBe('approvals_relay');
+    });
+    it('is permanent (a pinned dispatch is refused)', () => {
+      expect(PERMANENT_MISFITS.has('approvals_relay')).toBe(true);
+    });
   });
 
   it('orders by fewest active jobs, then oldest lastSeenAt, then id', () => {

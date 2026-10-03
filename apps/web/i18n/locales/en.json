@@ -707,6 +707,7 @@
       "provider_unavailable": "A provider credential is not usable right now",
       "sandbox": "A profile needs the sandbox, which is unavailable",
       "tools": "Runner lacks git, gh or glab for this repo",
+      "approvals_relay": "The runner cannot relay bash approvals (needs protocol v2 and nax 0.83 or later)",
       "busy_repo": "Runner already runs a job for this repo",
       "capacity": "Runner is at capacity"
     },
