@@ -29,9 +29,10 @@ export interface Lease {
 
 interface SyncCommand {
   commandId: string;
-  type: 'ASSIGN' | 'CANCEL' | 'READOPT' | 'ABANDON';
+  type: 'ASSIGN' | 'CANCEL' | 'READOPT' | 'ABANDON' | 'APPROVAL_ANSWER';
   jobId: string;
   leaseEpoch: number;
+  payload: Record<string, unknown>;
 }
 
 interface SyncReply {
@@ -39,7 +40,7 @@ interface SyncReply {
   commands: SyncCommand[];
 }
 
-type EventType = 'state' | 'snapshot' | 'lifecycle' | 'log';
+type EventType = 'state' | 'snapshot' | 'lifecycle' | 'log' | 'approval_request';
 
 async function call<T>(path: string, init: { method: string; token?: string; body?: unknown }): Promise<T> {
   const res = await fetch(`${API_URL}/api${path}`, {
@@ -64,19 +65,25 @@ export class ScriptedRunner {
     readonly id: string,
     readonly name: string,
     private readonly apiKey: string,
+    private readonly protocolVersion: number,
   ) {}
 
-  /** Issues a single-use enrollment token as the admin and enrolls over HTTP, like `koda-runner enroll`. */
-  static async enroll(adminToken: string, name: string): Promise<ScriptedRunner> {
+  /**
+   * Issues a single-use enrollment token as the admin and enrolls over HTTP, like `koda-runner enroll`. With `relay`
+   * the runner speaks protocol v2 and reports the approval relay (S1.5 2a D271), so gated/escalate jobs place on it.
+   */
+  static async enroll(adminToken: string, name: string, opts: { relay?: boolean } = {}): Promise<ScriptedRunner> {
+    const protocolVersion = opts.relay ? 2 : 1;
+    const capabilities = opts.relay ? { ...E2E_RUNNER_CAPABILITIES, approvals: { relay: true } } : E2E_RUNNER_CAPABILITIES;
     const { token } = await call<{ token: string }>('/fleet/enrollments', { method: 'POST', token: adminToken, body: { labels: ['e2e'] } });
     const { runnerId, apiKey } = await call<{ runnerId: string; apiKey: string }>('/fleet/runner/enroll', {
       method: 'POST',
       body: {
         enrollmentToken: token, name, os: 'linux', arch: 'x64', daemonVersion: DAEMON_VERSION,
-        protocolVersion: 1, bootId: BOOT_ID, labels: [], capabilities: E2E_RUNNER_CAPABILITIES,
+        protocolVersion, bootId: BOOT_ID, labels: [], capabilities,
       },
     });
-    return new ScriptedRunner(runnerId, name, apiKey);
+    return new ScriptedRunner(runnerId, name, apiKey, protocolVersion);
   }
 
   /** One idle sync: refreshes lastSeenAt so placement sees the runner online (FLEET_RUNNER_OFFLINE_SEC). */
@@ -89,7 +96,7 @@ export class ScriptedRunner {
       method: 'POST',
       token: this.apiKey,
       body: {
-        protocolVersion: 1, bootId: BOOT_ID, daemonVersion: DAEMON_VERSION, freeSlots: 0,
+        protocolVersion: this.protocolVersion, bootId: BOOT_ID, daemonVersion: DAEMON_VERSION, freeSlots: 0,
         jobs: [], commandAcks: [], tokenRequests: [], ...over,
       },
     });
@@ -107,6 +114,30 @@ export class ScriptedRunner {
       }
     }
     throw new Error(`No ASSIGN for job ${jobId} within ${timeoutMs} ms`);
+  }
+
+  /** Idle syncs until a command of `type` for `jobId` arrives; acks it with `ack` and returns it (S1.5 APPROVAL_ANSWER). */
+  async takeCommand(
+    type: SyncCommand['type'],
+    jobId: string,
+    ack: { result: 'ok' | 'rejected'; detail?: string },
+    timeoutMs = 15_000,
+  ): Promise<SyncCommand> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const reply = await this.sync({});
+      const found = reply.commands.find((c) => c.type === type && c.jobId === jobId);
+      if (found) {
+        await this.sync({ commandAcks: [{ commandId: found.commandId, leaseEpoch: found.leaseEpoch, result: ack.result, ...(ack.detail ? { detail: ack.detail } : {}) }] });
+        return found;
+      }
+    }
+    throw new Error(`No ${type} for job ${jobId} within ${timeoutMs} ms`);
+  }
+
+  /** One idle sync: the commands the server has for `jobId` right now (none are acked). */
+  async commandsFor(jobId: string): Promise<SyncCommand[]> {
+    return (await this.sync({})).commands.filter((c) => c.jobId === jobId);
   }
 
   /** Sends events with the next runner seqs and checks the server stored all of them (cumulative ack). */

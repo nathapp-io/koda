@@ -38,7 +38,7 @@ export async function repoIdOf(token: string, slug: string, fullName: string): P
 export async function dispatchRun(
   token: string,
   slug: string,
-  input: { repoId: string; feature: string; maxCostUsd: number; pinnedRunnerId: string },
+  input: { repoId: string; feature: string; maxCostUsd: number; pinnedRunnerId: string; bashMode?: 'raw' | 'gated' | 'escalate'; approvalTimeoutSec?: number },
 ): Promise<string> {
   const result = await call<{ job: { id: string } }>('POST', `/projects/${slug}/fleet/jobs`, token, { command: 'RUN', ...input });
   return result.job.id;
