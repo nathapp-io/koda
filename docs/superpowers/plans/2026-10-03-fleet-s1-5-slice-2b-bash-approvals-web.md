@@ -74,13 +74,13 @@ Numbered D288-D306 (slice 2a ended at D287).
 | # | Decision | Why |
 |:--|:--|:--|
 | D288 | **No API change.** Every screen reads the 2a contract as merged: `pendingApprovals` drives the callout and the jobs-list marker, `?jobId=` lists a job's asks, `expiresAt` drives the countdown, `outcome.delivery` the delivery line. | 2a shipped the whole wire contract (D281: "Web: types + i18n parity only"); 2b is the UI on it. |
-| D289 | `bashPayload(a)` guards the payload like `budgetPayload` does: every field type-checked; `command === ''` without `rawDetail` is malformed. A malformed bash payload renders "This ask could not be read" and offers **Deny only**. | Fail closed (spec success criterion 4): a human never allows text the page could not show. The server accepts a deny on any bash ask. |
+| D289 | `bashPayload(a)` guards the payload like `budgetPayload` does: every field type-checked; `command === ''` without a non-empty `rawDetail` is malformed (the server accepts `rawDetail: ''`). A malformed bash payload renders "This ask could not be read" and offers **Deny only**. | Fail closed (spec success criterion 4): a human never allows text the page could not show. The server accepts a deny on any bash ask. |
 | D290 | `ApprovalViewer` for a project gains `canWork` (`canWorkOnFleet(role)`). `canDecide`: pending, and admin inbox, or budget + `canManage`, or bash + `canWork`. A bash non-decider sees `fleet.approvals.readOnlyBash`. | Spec §1.7: bash = DEVELOPER+, budget = ADMIN; 1b's `canDecide` refused every bash ask. |
 | D291 | `bashChoices(payload)`: a cut command (`commandTruncated`) offers `['deny']`; otherwise `allow` when `allow` is offered, `allow_for_job` when `allow-remember` is offered, and always `deny`, in that order. An unparsed ask (`command === ''`) is decided on `rawDetail` under the same rules, with a note that nax's text could not be split into a command. | Mirrors 2a `checkBashDecision` (the server refuses anything else with 400); 2a Review Focus 1 allows raw text only when not cut. |
 | D292 | Countdown: `secondsLeft(expiresAt, now)` (ceil, floored at 0, null without an expiry) and `countdownText` (`m:ss`, `h:mm:ss` from an hour). `useApprovalCountdown()` ticks a `now` ref every second while mounted (`createCountdownClock` is the testable core). At 0 the bash panel hides its buttons and says nax has denied the command; the server sweep (15 s) then marks it expired. | Spec §5 countdown; deciding at 0 can only end in a 409 (`expiresAt` is `min(nax deadline, requestedAt + timeout)`), so offering buttons there would mislead. |
 | D293 | Bash decide body `{ decision, comment? }` (`toBashBody`), never `amountUsd` or `requeueJobIds`. One optional comment (max 1000, same rule as budget). Toasts `fleet.approvals.toast.<decision>`. | 2a D287 400s budget fields on a bash decide. |
 | D294 | Decided bash approvals (`FleetApprovalOutcome`): the command (or raw text) read-only, then a delivery line for `resolvedBy: 'user'` only: `delivered` (`result: 'ok'`), `failed` (`rejected`, shows the runner detail), or `waiting` (no delivery stored yet; any other stored shape reads as `failed` with no detail). | Spec §5 "delivery result"; a timeout or job-end close sent nothing, so no delivery line. |
-| D295 | While the open approval is a bash ask decided by a user whose delivery is still `waiting`, every inbox reload (30 s poll, live notice) also re-fetches it. | 2a D268 publishes no live event for the ack; without this the line would read "waiting" until the human re-opened the row. Bounded to one GET per reload while one row is open. |
+| D295 | While the open approval is a bash ask decided by a user whose delivery is still `waiting`, every inbox reload (30 s poll, live notice) also re-fetches it, for at most 10 minutes after `decidedAt` (a runner that never acks, e.g. the job ended first, stops the refetch). | 2a D268 publishes no live event for the ack; without this the line would read "waiting" until the human re-opened the row. One GET per reload while one row is open. |
 | D296 | Row summary for a bash ask: `Run {command} ({stage})` with the first line of the command (or of `rawDetail`), cut at 80 characters with `...` when longer or multi-line. A pending bash row also shows its countdown. | Spec §5 "summary"; the full text is in the panel. |
 | D297 | Job page: (1) a "Shell approvals" line in the details grid (`Off` or `Escalate, asks wait 10 min`); (2) a callout "Waiting for approval (N)" when `pendingApprovals > 0`, with **Review** linking to the inbox `?id=` of the job's pending ask that expires first (the inbox root when the list is not loaded); (3) an **Approvals** section (`FleetJobApprovals`) listing the job's approvals (`?jobId=`, size 100): type, command preview, status, decision or `resolvedBy`, countdown when pending, "Open" link to the inbox row. The section shows when the job is not raw or has approvals. The page reloads the job and its approvals on `fleet_approval` notices (debounced with the existing 300 ms reload). Decisions are made in the inbox only. (4) The timeline renders `approval_request` events as "Approval requested: {command}". | Spec §5 "callout" and "Approvals timeline section"; one decide surface keeps the 409/expiry handling in one place. The `approval_request` event is already stored as a job event (2a appends every runner event). |
 | D298 | Web timeout fields are **minutes** (spec §5): text input, a number with at most 2 decimals, converted with `Math.round(min * 60)` and valid when the result is 30..3600 s (0.5 to 60 min). `minutesText(sec)` shows a stored value with at most 2 decimals; every whole second in range round-trips exactly, so editing a schedule whose timeout came from the CLI (say 90 s) never changes it. Default 10 (600 s). | The API takes seconds; the spec asks for minutes; the round-trip property keeps PATCH honest. |
@@ -90,7 +90,7 @@ Numbered D288-D306 (slice 2a ended at D287).
 | D302 | Runner (2a deferred item 1): `ApprovalRelay.answer` refuses an ask whose journalled `deadlineAt` has passed: it deletes the pending ask, sends no POST, and acks `rejected` / `ask_expired`. | Closes the clock-skew audit window: nax has already denied that ask, so a recorded `ok` would be false. |
 | D303 | Runner (2a deferred item 3): `test/integration/approval-relay.integration.spec.ts` is wrapped in `describe.skipIf(!enabled)` with `enabled = KODA_DB_TESTS === '1'`, like every other runner integration spec. | Gate parity; CI already sets the variable. |
 | D304 | Not taken, not filed: 2a deferred items 2 (`fit()` may shrink a parsed command to empty; it fails safe as a rejected event) and 4 (sweeper `jobId IS NOT NULL`, receiver content-length pre-check), and 1b deferred item 1 (`badgeTarget` defensive). Nil blast radius. | Scope discipline; each fails safe today. |
-| D305 | E2E `fleet-bash-approvals.e2e.spec.ts`, two tests on one relay-capable scripted runner (enrolled with protocol v2 and `approvals: { relay: true }`). (2) escalate RUN -> `approval_request` -> jobs-list marker -> job-page callout -> Review -> inbox row with the command, masked note and countdown -> **Allow once** -> outcome "waiting" -> the runner receives `APPROVAL_ANSWER { choice: 'allow' }` and acks ok -> reload shows "delivered" -> job completes; the job page lists the ask as approved and the timeline shows "Approval requested". (3) An ask with a deadline 8 s out: the panel's buttons disappear when the countdown reaches 0; the API reports `expired` within 45 s (sweeper); the reloaded row reads Expired / Timed out; no `APPROVAL_ANSWER` reaches the runner. API polling stays at 1 request per 2 s (global throttle 100/min; `/fleet/runner/*` is exempt). | Spec §7 E2E (2)(3) through real endpoints; scripted runner as in 1b (D128 pattern). |
+| D305 | E2E `fleet-bash-approvals.e2e.spec.ts`, two tests on one relay-capable scripted runner (enrolled with protocol v2 and `approvals: { relay: true }`). (2) escalate RUN -> `approval_request` -> jobs-list marker -> job-page callout -> Review -> inbox row with the command, masked note and countdown -> **Allow once** -> outcome "waiting" -> the runner receives `APPROVAL_ANSWER { choice: 'allow' }` and acks ok -> reload shows "delivered" -> job completes; the job page lists the ask as approved and the timeline shows "Approval requested". (3) An ask with a deadline 35 s out (job timeout 60 s): the panel's buttons disappear when the countdown reaches 0 (or the sweep has already shown the outcome); the API reports `expired` within 45 s more (sweeper); the reloaded row reads Expired / Timed out; no `APPROVAL_ANSWER` reaches the runner. API polling stays at 1 request per 2 s (global throttle 100/min; `/fleet/runner/*` is exempt). | Spec §7 E2E (2)(3) through real endpoints; scripted runner as in 1b (D128 pattern). |
 | D306 | Live check (spec §7) is **human-run and billed**, approval at launch, after the PR's gates are green: one real `nax run` with `bashMode: escalate` on one local runner against a local koda; one ask allowed, one denied; the job page and nax's `approval-audit/<runId>.jsonl` agree. It needs a GitHub App on the test repo (R5 brokers all runner git); if that is not available the check is reported as blocked, like the S1 live check. | Spec §7; never launched by an executor (standing ruling: billed runs need approval at launch). |
 
 ## Review Focus
@@ -279,10 +279,11 @@ export interface DispatchBody {
 
 6. In `NewScheduleBody`, after `noProgressLimit: number`, add `bashMode?: BashMode` and `approvalTimeoutSec?: number`.
 
-7. In `SchedulePatchBody`, after `noProgressLimit: number`, add:
+7. In `SchedulePatchBody`, after `noProgressLimit: number`, add (optional until Task 8 makes `bashMode` required
+   together with `toSchedulePatchBody`; an omitted field means unchanged, 3a D203):
 
 ```ts
-  bashMode: BashMode
+  bashMode?: BashMode
   /** Omitted for raw: the stored value is kept (D300). */
   approvalTimeoutSec?: number
 ```
@@ -401,7 +402,8 @@ Expected: PASS.
 
 Run: `cd apps/web && bun run type-check`
 Expected: clean. (The web tsconfig excludes specs, so test fixtures that lack the new `ScheduleDto` fields are fixed
-in Task 8, where their expectations change; no source file builds a `ScheduleDto` literal.)
+in Task 8, where their expectations change. No source file builds a `ScheduleDto` literal; `toSchedulePatchBody` builds
+a `SchedulePatchBody` literal, which is why `bashMode` stays optional there until Task 8.)
 
 - [ ] **Step 7: Commit**
 
@@ -504,6 +506,7 @@ describe('bashPayload (D289, Review Focus 1)', () => {
     ['options that are not a list', { options: 'allow' }],
     ['a numeric story id', { storyId: 7 }],
     ['a numeric raw detail', { rawDetail: 3 }],
+    ['an empty command with empty raw text', { command: '', rawDetail: '' }],
   ])('%s is malformed', (_name, over) => {
     expect(bashPayload(bashRow({}, over))).toBeNull()
   })
@@ -666,7 +669,7 @@ export function bashPayload(a: Pick<FleetApprovalDto, 'type' | 'payload'>): Bash
   if (storyId !== null && !isString(storyId)) return null
   if (rawDetail !== null && !isString(rawDetail)) return null
   if (!Array.isArray(p.options) || !p.options.every(isOption)) return null
-  if (p.command === '' && rawDetail === null) return null
+  if (p.command === '' && (rawDetail === null || rawDetail === '')) return null   // nothing a human could read
   return {
     command: p.command, commandTruncated: p.commandTruncated, maskedCount: p.maskedCount, root: p.root, stage: p.stage,
     storyId, featureName: p.featureName, reason: p.reason, options: [...p.options], rawDetail,
@@ -782,8 +785,9 @@ git commit -m "feat(web): bash approval payload, choices, countdown and delivery
 - Produces:
   - `createCountdownClock(timers?: { set: (fn: () => void, ms: number) => unknown; clear: (handle: unknown) => void }, tickMs?: number): { now: Ref<Date>; start(): void; stop(): void }`
   - `useApprovalCountdown(): { now: Ref<Date> }` (ticks while the calling component is mounted)
-  - `FleetApprovalBashPanel` props `{ approval: FleetApprovalDto; canDecide: boolean; busy: boolean; now: Date }`,
-    emits `decide(body: DecideApprovalBody)`. Test ids: `fleet-approval-bash-panel`, `-bash-command`, `-bash-raw`,
+  - `FleetApprovalBashPanel` props `{ approval: FleetApprovalDto; canDecide: boolean; busy: boolean; now: Date;
+    jobHref?: string | null }`, emits `decide(body: DecideApprovalBody)`. Test ids: `fleet-approval-bash-panel`,
+    `-bash-job` (spec §5 "job link"), `-bash-command`, `-bash-raw`,
     `-bash-raw-hint`, `-bash-unreadable`, `-bash-masked`, `-bash-truncated`, `-bash-countdown`, `-bash-allow`,
     `-bash-allow_for_job`, `-bash-deny`, `fleet-approval-comment`, `fleet-approval-readonly`.
 
@@ -923,10 +927,19 @@ function mount(approval: FleetApprovalDto, props: Record<string, unknown> = {}) 
 }
 
 describe('FleetApprovalBashPanel', () => {
+  test('links to the job when the inbox knows its page (spec §5)', () => {
+    const linked = mount(ask(), { jobHref: '/koda/fleet/jobs/j1' })
+    expect(linked.byId('fleet-approval-bash-job')[0].props.to).toBe('/koda/fleet/jobs/j1')
+    linked.app.unmount()
+    const unlinked = mount(ask())
+    expect(unlinked.byId('fleet-approval-bash-job')).toHaveLength(0)
+    unlinked.app.unmount()
+  })
+
   test('shows the masked command, the masked count and the facts', () => {
     const m = mount(ask())
     expect(m.app.textOf(m.byId('fleet-approval-bash-command')[0])).toBe('git push --force origin HEAD')
-    expect(m.app.textOf(m.byId('fleet-approval-bash-masked')[0])).toContain('2 secret values masked')
+    expect(m.app.textOf(m.byId('fleet-approval-bash-masked')[0])).toContain('2 secret value(s) masked')
     const text = m.app.text()
     for (const fact of ['/work/app', 'execution', 'US-001', 'login', 'not covered by the stage grants']) expect(text).toContain(fact)
     m.app.unmount()
@@ -1022,6 +1035,7 @@ Create `apps/web/components/fleet/ApprovalBashPanel.vue`:
 ```vue
 <template>
   <div class="space-y-3 text-sm" data-testid="fleet-approval-bash-panel">
+    <NuxtLink v-if="jobHref" :to="jobHref" class="text-primary underline-offset-4 hover:underline" data-testid="fleet-approval-bash-job">{{ t('fleet.approvals.bash.openJob') }}</NuxtLink>
     <p v-if="payload === null" class="text-destructive" data-testid="fleet-approval-bash-unreadable">{{ t('fleet.approvals.bash.unreadable') }}</p>
     <template v-else>
       <div v-if="payload.command !== ''" class="space-y-1">
@@ -1086,6 +1100,8 @@ const props = defineProps<{
   busy: boolean
   /** The inbox's 1-second clock (D292). */
   now: Date
+  /** The job page, when the inbox can link it (spec §5 "job link"). */
+  jobHref?: string | null
 }>()
 
 const emit = defineEmits<{ (e: 'decide', body: DecideApprovalBody): void }>()
@@ -1116,13 +1132,14 @@ function decide(choice: BashDecision): void {
   "rawDetail": "What nax sent",
   "rawHint": "The runner could not split nax's text into a command. You are deciding on the full text below.",
   "unreadable": "This ask could not be read. It can only be denied.",
-  "masked": "{count} secret values masked",
+  "masked": "{count} secret value(s) masked",
   "truncated": "The command is too long to show in full. It can only be denied.",
   "root": "Runs in",
   "stage": "Stage",
   "story": "Story",
   "feature": "Feature",
   "reason": "Why nax asks",
+  "openJob": "Open the job",
   "expiresIn": "nax denies it in {time} unless answered.",
   "timedOut": "This ask timed out and nax has denied the command.",
   "action": {
@@ -1149,6 +1166,7 @@ function decide(choice: BashDecision): void {
   "story": "故事",
   "feature": "功能",
   "reason": "nax 询问的原因",
+  "openJob": "打开任务",
   "expiresIn": "若不答复，nax 将在 {time} 后拒绝。",
   "timedOut": "此询问已超时，nax 已拒绝该命令。",
   "action": {
@@ -1339,12 +1357,37 @@ and the default viewer prop becomes `viewer: { kind: 'project', canManage: true,
   })
 ```
 
-4. In `apps/web/tests/pages/fleet-approvals-pages.spec.ts`, change the viewer expectation to
-   `expect(props.viewer).toEqual({ kind: 'project', canManage: true, canWork: true })` (the stubbed role is
-   `{ canManage: true, viewerRole: 'ADMIN' }`), and add a second mount with
-   `useProjectViewerRole: () => ({ data: ref({ canManage: false, viewerRole: 'DEVELOPER' }) })` that expects
-   `{ kind: 'project', canManage: false, canWork: true }` (copy the first mount block of that test; only the role stub
-   and the expectation change).
+4. In `apps/web/tests/pages/fleet-approvals-pages.spec.ts`, change the viewer expectation in the existing project
+   test to `expect(props.viewer).toEqual({ kind: 'project', canManage: true, canWork: true })` (its stubbed role is
+   `{ canManage: true, viewerRole: 'ADMIN' }`), then add, inside `describe('project approvals page'`:
+
+```ts
+  test.each([
+    ['DEVELOPER', { canManage: false, viewerRole: 'DEVELOPER' }, { kind: 'project', canManage: false, canWork: true }],
+    ['VIEWER', { canManage: false, viewerRole: 'VIEWER' }, { kind: 'project', canManage: false, canWork: false }],
+  ])('a %s gets canWork from canWorkOnFleet (D290)', async (_name, role, expected) => {
+    const seen: Array<Record<string, unknown>> = []
+    const app = mountSfc(projectPage, {
+      components: { ...uiStubs, FleetApprovalInbox: inboxStub(seen) },
+      globals: {
+        ref, computed,
+        onMounted: Vue.onMounted,
+        definePageMeta: () => undefined,
+        useRoute: () => ({ params: { project: 'koda' } }),
+        useI18n: () => enI18n(),
+        useProjectViewerRole: () => ({ data: ref(role) }),
+        useProjectMemberNames: () => ({ load: jest.fn(async () => undefined), nameOf: () => null }),
+        useFleetDispatchOptions: () => ({ load: jest.fn(async () => undefined), repoName: (id: string) => id }),
+      },
+    })
+    await settle()
+    expect(seen[0]?.viewer).toEqual(expected)
+    app.unmount()
+  })
+```
+
+(If the existing project test passes more globals than these, copy its `globals` block and change only
+`useProjectViewerRole`.)
 
 - [ ] **Step 3: Run them to verify they fail**
 
@@ -1420,8 +1463,14 @@ const displayRows = computed(() => {
 4. Add after `statusChanged()`:
 
 ```ts
-/** D295: the runner's ack has no live event, so a decided ask whose delivery is not in yet is re-fetched on reload. */
-const awaitingDelivery = (): boolean => detail.value !== null && deliveryView(detail.value)?.state === 'waiting'
+/** D295: acks have no live event, so a decided ask still waiting for one is re-fetched on reload, for 10 minutes at most. */
+const DELIVERY_WATCH_MS = 600_000
+const awaitingDelivery = (): boolean => {
+  const open = detail.value
+  if (open === null || deliveryView(open)?.state !== 'waiting') return false
+  const decidedAt = Date.parse(open.decidedAt ?? '')
+  return Number.isNaN(decidedAt) || Date.now() - decidedAt < DELIVERY_WATCH_MS
+}
 ```
 
 and in `reload()` change the re-fetch line to:
@@ -1451,6 +1500,7 @@ and in `reload()` change the re-fetch line to:
                 :can-decide="canDecide(detail, viewer)"
                 :busy="deciding"
                 :now="now"
+                :job-href="detail.projectId && detail.jobId ? jobLink(detail.projectId, detail.jobId) : null"
                 @decide="onDecide"
               />
 ```
@@ -1474,7 +1524,7 @@ add:
 ```json
 "delivery": {
   "delivered": "Delivered to nax.",
-  "failed": "Not delivered to nax ({detail}). nax denies the command when its timeout passes.",
+  "failed": "The runner did not deliver the answer to nax ({detail}). nax denies a command it gets no answer for.",
   "waiting": "Not confirmed by the runner yet."
 }
 ```
@@ -1484,7 +1534,7 @@ add:
 ```json
 "delivery": {
   "delivered": "已送达 nax。",
-  "failed": "未送达 nax（{detail}）。超时后 nax 将拒绝该命令。",
+  "failed": "runner 未能将答复送达 nax（{detail}）。nax 会拒绝未获答复的命令。",
   "waiting": "runner 尚未确认。"
 }
 ```
@@ -1770,7 +1820,8 @@ async function loadApprovals(): Promise<void> {
 
 4. In `initializeRelatedData()`, add `void loadApprovals().catch((err: unknown) => toast.error(extractApiError(err)))`.
 
-5. In `reloadSilently()`, after `job.value = await jobsApi.get(jobId)`, add `await loadApprovals()`.
+5. In `reloadSilently()`, after `await catchUpEvents()`, add `await loadApprovals()` (last, so a failed approvals GET
+   never stops the timeline catching up; the existing `catch {}` still swallows it).
 
 6. In `useProjectEvents(slug, {`, add `onFleetApproval: () => liveReload.trigger(),` before `onResync`.
 
@@ -2158,6 +2209,9 @@ and in its `superRefine`, add:
 
 6. `toSchedulePatchBody`: add `...bashPatchFields(v.bashMode, v.approvalTimeoutMinutes),` as the last line of the object.
 
+7. In `apps/web/lib/fleet-types.ts` `SchedulePatchBody`, make the mode required now that every patch sends it:
+   `bashMode: BashMode` (drop the `?` and the "optional until Task 8" note added in Task 1).
+
 - [ ] **Step 4: Implement the dialog and the detail page**
 
 In `apps/web/components/fleet/ScheduleEditDialog.vue`:
@@ -2267,13 +2321,16 @@ describe('bash mode flags (D301)', () => {
     });
   });
 
-  it('refuses a relay mode on a PLAN, and a timeout without a relay mode, before dispatching (exit 3)', async () => {
-    await run('--repo', 'acme/app', '--feature', 'f', '--max-cost', '1', '--plan', 'docs/s.md', '--bash-mode', 'gated');
+  // One `it` per case: commander 12 keeps option values across parseAsync calls on one program, and `dispatch` has no
+  // option reset, so a second run in the same test would inherit --plan / --bash-mode from the first.
+  it.each([
+    ['a relay mode on a PLAN', ['--plan', 'docs/s.md', '--bash-mode', 'gated'], '--plan job stays raw'],
+    ['a timeout without a mode', ['--approval-timeout', '60'], '--approval-timeout needs'],
+    ['a timeout with raw', ['--bash-mode', 'raw', '--approval-timeout', '60'], '--approval-timeout needs'],
+  ])('refuses %s before dispatching (exit 3)', async (_name, extra, message) => {
+    await run('--repo', 'acme/app', '--feature', 'f', '--max-cost', '1', ...extra);
     expect(exitSpy).toHaveBeenLastCalledWith(3);
-    await run('--repo', 'acme/app', '--feature', 'f', '--max-cost', '1', '--approval-timeout', '60');
-    expect(exitSpy).toHaveBeenLastCalledWith(3);
-    await run('--repo', 'acme/app', '--feature', 'f', '--max-cost', '1', '--bash-mode', 'raw', '--approval-timeout', '60');
-    expect(exitSpy).toHaveBeenLastCalledWith(3);
+    expect(errorSpy.mock.calls.flat().join('\n')).toContain(message);
     expect(fleetJobsControllerDispatch).not.toHaveBeenCalled();
   });
 
@@ -2469,7 +2526,7 @@ In `ApprovalRelay.answer`, right after `if (!ask) return { result: 'rejected', d
 
 ```ts
     // Plan D302: nax has already denied an ask past its deadline; recording "ok" for it would be false.
-    if (Date.parse(ask.deadlineAt) <= this.deps.now().getTime()) {
+    if (!(Date.parse(ask.deadlineAt) > this.deps.now().getTime())) {   // an unreadable deadline fails closed too
       journal.deletePendingAsk(command.jobId, command.leaseEpoch, p.naxAskId);
       return { result: 'rejected', detail: 'ask_expired' };
     }
@@ -2484,15 +2541,16 @@ In `apps/runner/test/integration/approval-relay.integration.spec.ts`:
    `describe.skipIf(!enabled)('approval relay (S1.5 2a)', () => {`.
 3. `afterAll(async () => { await world?.close(); });` (world is unset when skipped).
 4. Update the header comment's run line to
-   `Run: cd apps/runner && KODA_DB_TESTS=1 bun run test:integration test/integration/approval-relay.integration.spec.ts`.
+   `Run: cd apps/runner && KODA_DB_TESTS=1 bun test test/integration/approval-relay.integration.spec.ts`
+   (`bun run test:integration <file>` expands to `bun test test/integration <file>`, which runs every integration file).
 
 - [ ] **Step 5: Run the tests**
 
-Run: `cd apps/runner && bun test src/approvals && bun run test:integration test/integration/approval-relay.integration.spec.ts`
+Run: `cd apps/runner && bun test src/approvals && bun test test/integration/approval-relay.integration.spec.ts`
 Expected: unit PASS; the integration file reports its tests as skipped (no `KODA_DB_TESTS`).
 Run: `cd apps/runner && bun run lint && bun run type-check`
 Expected: clean.
-If the API test database is up, also run `cd apps/runner && KODA_DB_TESTS=1 bun run test:integration test/integration/approval-relay.integration.spec.ts` (it needs `bunx turbo run build --filter=@nathapp/koda-api` first) and expect PASS.
+If the API test database is up, also run `cd apps/runner && KODA_DB_TESTS=1 bun test test/integration/approval-relay.integration.spec.ts` (it needs `bunx turbo run build --filter=@nathapp/koda-api` first) and expect PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -2507,7 +2565,7 @@ git commit -m "fix(runner): refuse approval answers past nax's deadline; gate re
 
 **Files:**
 - Modify: `apps/web/tests/e2e/fixtures/scripted-runner.ts`, `apps/web/tests/e2e/fixtures/fleet-budgets-api.ts`,
-  `apps/web/tests/e2e/fixtures/fleet-approvals-api.ts`
+  `apps/web/tests/e2e/fixtures/fleet-approvals-api.ts`, `apps/web/playwright.config.ts`
 - Create: `apps/web/tests/e2e/fleet-bash-approvals.e2e.spec.ts`
 
 **Interfaces:**
@@ -2630,6 +2688,13 @@ export async function jobApprovals(token: string, slug: string, jobId: string): 
 }
 ```
 
+In `apps/web/playwright.config.ts`, in the API `webServer.env`, after `FLEET_TEST_HOOKS: 'true',`, add:
+
+```ts
+        // S1.5 2b: the bash e2e waits for the 15 s approval expiry sweep; do not depend on NODE_ENV defaults.
+        FLEET_SWEEP_ENABLED: 'true',
+```
+
 - [ ] **Step 2: Write the spec**
 
 Create `apps/web/tests/e2e/fleet-bash-approvals.e2e.spec.ts`:
@@ -2730,9 +2795,9 @@ test.describe('Fleet bash approvals (scripted relay runner)', () => {
   test('(3) an unanswered ask times out: buttons disappear at 0, the row expires, no answer reaches the runner', async ({ page }) => {
     test.setTimeout(150_000);
     const feature = `bash-expire-${suffix}`;
-    const { jobId, lease } = await startEscalateJob(feature, 30);
-    // expiresAt = min(nax deadline, requestedAt + 30 s): the 20 s deadline wins.
-    const ask = bashAsk({ featureName: feature, deadlineAt: new Date(Date.now() + 20_000).toISOString() });
+    const { jobId, lease } = await startEscalateJob(feature, 60);
+    // expiresAt = min(nax deadline, requestedAt + 60 s): the 35 s deadline wins, leaving time to load the page first.
+    const ask = bashAsk({ featureName: feature, deadlineAt: new Date(Date.now() + 35_000).toISOString() });
     await runner.report(lease, [{ type: 'approval_request', payload: ask }]);
     await expect.poll(async () => (await jobApprovals(token, SLUG, jobId)).length, { timeout: 10_000, ...POLL }).toBe(1);
     const [approval] = await jobApprovals(token, SLUG, jobId);
@@ -2742,9 +2807,10 @@ test.describe('Fleet bash approvals (scripted relay runner)', () => {
     await waitForHydration(page);
     const row = page.getByTestId(`fleet-approval-row-${approval.id}`);
     await expect(row.getByTestId('fleet-approval-bash-deny')).toBeVisible();
-    // At 0 the panel stops offering a decision before the server sweep runs (D292).
-    await expect(row.getByTestId('fleet-approval-bash-deny')).toHaveCount(0, { timeout: 25_000 });
-    await expect(row.getByTestId('fleet-approval-bash-countdown')).toContainText('timed out');
+    // At 0 the panel stops offering a decision (D292). The 15 s sweep may already have replaced the panel with the
+    // outcome (its live notice re-fetches the row), so either end state is accepted here.
+    await expect(row.getByTestId('fleet-approval-bash-deny')).toHaveCount(0, { timeout: 45_000 });
+    await expect(row.getByTestId('fleet-approval-bash-countdown').or(row.getByTestId('fleet-approval-outcome-decision'))).toBeVisible();
 
     // The 15 s sweeper marks it expired; the reloaded row reads Expired, Timed out.
     await expect.poll(async () => (await jobApprovals(token, SLUG, jobId))[0]?.status, { timeout: 45_000, ...POLL }).toBe('expired');
@@ -2765,6 +2831,10 @@ Run: `cd apps/web && bun run test:e2e -- tests/e2e/fleet-bash-approvals.e2e.spec
 Expected: all PASS. (The 1b approvals spec still enrolls a v1 runner; the dispatch and schedules specs exercise the
 changed forms with raw defaults.)
 
+If an `expect.poll(... jobApprovals ...)` times out, the server rejected the ask event (the report still acks it):
+look for "Rejected runner event" in the API output or a `job.event_rejected` activity; the usual causes are a
+`naxAskId` not matching `/^ask-[0-9a-f]{1,16}$/`, a `root`/`stage`/`featureName`/`reason` over 2000 characters, or
+`options` without `deny`.
 If (2) fails at `toHaveText(ask.command)` because the row is not expanded, check that `?id=` survived the `Review` link
 (the callout href must be `inboxPath(...)` with the id). If (3) fails at the sweep poll, confirm the e2e API runs with
 sweeps on: `FLEET_SWEEP_ENABLED` is unset there and `NODE_ENV` is not `test`, so `sweepEnabled` defaults to true
@@ -2793,7 +2863,9 @@ In `docs/deployment/runner.md`, section "Bash approvals (S1.5)", append:
   and an ask timeout in minutes; the CLI takes `--bash-mode gated|escalate` and `--approval-timeout <seconds>` on
   `koda fleet dispatch`, `koda fleet schedule add` and `schedule edit`.
 - Answer asks in the project's approvals inbox (`/<project>/fleet/approvals`) or with
-  `koda fleet approval decide <id> allow|allow_for_job|deny`. Project developers and admins may answer; the job page
+  `koda fleet approval decide <approvalId> --decision allow|allow_for_job|deny --project <slug>` (find ids with
+  `koda fleet approval list --project <slug>`; without `--project` the CLI uses the global-admin routes). Project
+  developers and admins may answer; the job page
   shows "Waiting for approval" while an ask is open, and the inbox shows whether the runner delivered the answer.
 - An answer that reaches the runner after nax's deadline is not sent (`ask_expired`): nax has already denied it.
 ```
@@ -2816,6 +2888,11 @@ In `docs/superpowers/specs/2026-10-02-fleet-s1-5-approvals-design.md` §8, after
   seconds), the CLI takes seconds; a raw schedule PATCH omits the timeout; the runner refuses answers past nax's
   deadline (`ask_expired`).
 ```
+
+In the same spec, §6 failure table, replace the row
+`| Answer reaches the runner after nax timed out | nax drops the unknown id with 200; ack `ok`; approval already expired |`
+with
+`| Answer reaches the runner after nax timed out | not sent; ack `rejected: ask_expired` (2b D302); approval already expired |`.
 
 - [ ] **Step 3: Full gates**
 
@@ -2850,14 +2927,20 @@ check as **blocked** in the PR and stop; nax >= 0.83.1 on this machine with a wo
 `Bash(bun test:*)`) so that stage gets the Bash tool, and a tiny feature whose story makes the agent run two commands
 outside that grant (for example `ls -la /tmp` and `cat /etc/hosts`).
 
-- [ ] **Step 1:** Enroll one local runner against the local API (`koda-runner enroll` with an admin token) and start it;
-  `koda fleet runner list` shows it online with the relay capability.
+- [ ] **Step 1:** Register and enroll, as a global ADMIN (`KODA_API_KEY=<admin token>`):
+  `koda fleet repo add <owner/name> --provider github --project <slug>` then `koda fleet repo check <repoId>` (id from `koda fleet repo list --project <slug>`);
+  `koda fleet runner enroll-token --label live` (prints `ke_...`);
+  `koda-runner enroll --server http://localhost:<api port> --token ke_...` (loopback http is allowed);
+  `nax trust add ~/.koda-runner/workspace --yes` (the daemon refuses to start without it);
+  `koda-runner run` (foreground, in its own terminal).
+  `koda fleet runner list --json` shows the runner online with `capabilities.approvals.relay: true`.
 - [ ] **Step 2 (billed, approval at launch):** `koda fleet dispatch --repo <owner/name> --feature <feature> --max-cost 1
-  --bash-mode escalate --approval-timeout 900 --pin <runner>`.
+  --bash-mode escalate --approval-timeout 900 --pin <runner> --project <slug>`.
 - [ ] **Step 3:** When the first ask appears in the inbox, **Allow once**; when the second appears, **Deny**. Both rows
   show "Delivered to nax".
 - [ ] **Step 4:** After the job ends, compare the job page's Approvals section with
-  `<job outputDir>/approval-audit/<runId>.jsonl` on the runner: two entries, decisions allow and deny, `decidedBy`
-  koda, same commands.
+  `<workspaceRoot>/.jobs/<jobId>/nax-out/approval-audit/<runId>.jsonl` on the runner (default workspaceRoot
+  `~/.koda-runner/workspace`; kept for `jobRetentionDays`, and included in `koda fleet job bundle <jobId>`): two
+  entries with the same commands, decisions allow and deny, and a `decidedBy` present on both.
 - [ ] **Step 5:** Record the outcome (job id, cost, both decisions, audit lines, anything odd) in the PR body under
   "Live check".
