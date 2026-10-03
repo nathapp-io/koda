@@ -1013,6 +1013,7 @@
         "owner": "Owner",
         "unknownOwner": "Former member",
         "totalCost": "Cost so far",
+        "bash": "Shell approvals",
         "status": "Status"
       },
       "history": {

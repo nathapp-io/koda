@@ -1013,6 +1013,7 @@
         "owner": "创建者",
         "unknownOwner": "已离开的成员",
         "totalCost": "累计费用",
+        "bash": "Shell 审批",
         "status": "状态"
       },
       "history": {

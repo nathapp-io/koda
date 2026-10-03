@@ -48,4 +48,9 @@ describe('schedule detail page', () => {
     expect(detail).toContain('formatInZone(schedule.nextFireAt, schedule.timezone)')
     expect(detail).toContain('data-testid="fleet-schedule-total-cost"')
   })
+
+  test('the template shows the shell approvals line (D300)', () => {
+    expect(detail).toContain('data-testid="fleet-schedule-bash"')
+    expect(detail).toContain('bashSummary(t, schedule.bashMode, schedule.approvalTimeoutSec)')
+  })
 })

@@ -7,7 +7,8 @@ import {
 import { extractProgress, formatUsd, wipPushStatus } from '~/lib/fleet-jobs'
 import type { WipPushStatus } from '~/lib/fleet-jobs'
 import { LABEL_PATTERN } from '~/lib/fleet-validation'
-import type { FleetJobDto, NewScheduleBody, ScheduleDisabledReason, ScheduleDto, SchedulePatchBody } from '~/lib/fleet-types'
+import { BASH_MODES, bashCreateFields, bashPatchFields, DEFAULT_APPROVAL_TIMEOUT_SEC, isBashTimeoutValid, minutesText } from '~/lib/fleet-bash-mode'
+import type { BashMode, FleetJobDto, NewScheduleBody, ScheduleDisabledReason, ScheduleDto, SchedulePatchBody } from '~/lib/fleet-types'
 
 /** CreateScheduleDto limits (apps/api/src/fleet/schedules/dto). */
 export const MAX_NAME_LENGTH = 80
@@ -35,6 +36,8 @@ export interface ScheduleFormValues {
   selectorLabels: string[]
   pinnedRunnerId: string
   noProgressLimit: string
+  bashMode: BashMode
+  approvalTimeoutMinutes: string
 }
 
 const cronFields = (input: string): string[] => input.trim().split(/\s+/).filter((field) => field !== '')
@@ -118,6 +121,8 @@ export function buildScheduleSchema(t: TranslateNamed, mode: ScheduleFormMode) {
       .refine((l) => l.every((label) => LABEL_PATTERN.test(label)), t('fleet.schedules.validation.labels')),
     pinnedRunnerId: text,
     noProgressLimit: z.string().refine((v) => parseNoProgressLimit(v) !== null, t('fleet.schedules.validation.noProgressLimit')),
+    bashMode: z.enum(BASH_MODES).default('raw'),
+    approvalTimeoutMinutes: text,
   }).superRefine((v, ctx) => {
     const issue = (path: string, key: string): void => {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message: t(key) })
@@ -130,6 +135,7 @@ export function buildScheduleSchema(t: TranslateNamed, mode: ScheduleFormMode) {
     if (mode === 'edit' && v.ref.trim() === '') issue('ref', 'fleet.schedules.validation.refRequired')
     if (v.placement === 'pin' && v.pinnedRunnerId.trim() === '') issue('pinnedRunnerId', 'fleet.schedules.validation.pinRequired')
     if (v.placement === 'labels' && v.selectorLabels.length === 0) issue('selectorLabels', 'fleet.schedules.validation.labelsRequired')
+    if (!isBashTimeoutValid(v.bashMode, v.approvalTimeoutMinutes)) issue('approvalTimeoutMinutes', 'fleet.bash.validation.timeout')
   })
 }
 
@@ -141,12 +147,14 @@ export function initialScheduleValues(s: ScheduleDto | null, timezone: string): 
     return {
       name: '', repoId: '', feature: '', cron: '', timezone, ref: '', profiles: [], maxCostUsd: DEFAULT_MAX_COST,
       placement: 'auto', selectorLabels: [], pinnedRunnerId: '', noProgressLimit: String(DEFAULT_NO_PROGRESS_LIMIT),
+      bashMode: 'raw', approvalTimeoutMinutes: minutesText(DEFAULT_APPROVAL_TIMEOUT_SEC),
     }
   }
   return {
     name: s.name, repoId: s.repoId, feature: s.feature, cron: s.cron, timezone: s.timezone, ref: s.ref,
     profiles: [...s.profiles], maxCostUsd: trimDecimal(s.maxCostUsd), placement: placementOf(s),
     selectorLabels: [...s.selectorLabels], pinnedRunnerId: s.pinnedRunnerId ?? '', noProgressLimit: String(s.noProgressLimit),
+    bashMode: s.bashMode, approvalTimeoutMinutes: minutesText(s.approvalTimeoutSec),
   }
 }
 
@@ -172,6 +180,7 @@ export function toCreateScheduleBody(v: ScheduleFormValues): NewScheduleBody {
     ...numbers(v),
     ...(v.placement === 'pin' && pin ? { pinnedRunnerId: pin } : {}),
     ...(v.placement === 'labels' && v.selectorLabels.length > 0 ? { selectorLabels: [...v.selectorLabels] } : {}),
+    ...bashCreateFields(v.bashMode, v.approvalTimeoutMinutes),
   }
 }
 
@@ -186,6 +195,7 @@ export function toSchedulePatchBody(v: ScheduleFormValues): SchedulePatchBody {
     ...numbers(v),
     selectorLabels: v.placement === 'labels' ? [...v.selectorLabels] : [],
     pinnedRunnerId: v.placement === 'pin' ? v.pinnedRunnerId.trim() : null,
+    ...bashPatchFields(v.bashMode, v.approvalTimeoutMinutes),
   }
 }
 

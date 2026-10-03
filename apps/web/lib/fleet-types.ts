@@ -340,7 +340,7 @@ export interface SchedulePatchBody {
   selectorLabels: string[]
   pinnedRunnerId: string | null
   noProgressLimit: number
-  bashMode?: BashMode
+  bashMode: BashMode
   /** Omitted for raw: the stored value is kept (D300). */
   approvalTimeoutSec?: number
 }

@@ -128,6 +128,29 @@
           </FormItem>
         </FormField>
 
+        <FormField v-slot="{ componentField }" name="bashMode">
+          <FormItem>
+            <FormLabel>{{ t('fleet.bash.modeLabel') }}</FormLabel>
+            <FormControl>
+              <FleetNativeSelect v-bind="componentField" :options="bashOptions" testid="fleet-schedule-bash-mode" />
+            </FormControl>
+            <p class="text-xs text-muted-foreground">{{ t('fleet.bash.modeHint') }}</p>
+            <FormMessage />
+          </FormItem>
+        </FormField>
+
+        <template v-if="formValues.bashMode && formValues.bashMode !== 'raw'">
+          <FormField v-slot="{ componentField }" name="approvalTimeoutMinutes">
+            <FormItem>
+              <FormLabel>{{ t('fleet.bash.timeout') }}</FormLabel>
+              <FormControl><Input v-bind="componentField" inputmode="decimal" data-testid="fleet-schedule-approval-timeout" /></FormControl>
+              <p class="text-xs text-muted-foreground">{{ t('fleet.bash.timeoutHint') }}</p>
+              <FormMessage />
+            </FormItem>
+          </FormField>
+          <p class="text-xs text-muted-foreground" data-testid="fleet-schedule-bash-warning">{{ t('fleet.bash.scheduleWarning') }}</p>
+        </template>
+
         <div class="flex justify-end gap-2">
           <Button type="button" variant="outline" @click="$emit('update:open', false)">{{ t('common.cancel') }}</Button>
           <Button type="submit" :disabled="isSubmitting" data-testid="fleet-schedule-submit">
@@ -145,6 +168,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { extractApiError } from '~/composables/useApi'
 import { useFleetSchedules } from '~/composables/useFleetSchedules'
+import { BASH_MODES } from '~/lib/fleet-bash-mode'
 import {
   browserTimeZone, buildScheduleSchema, initialScheduleValues, PLACEMENT_MODES, timeZoneOptions, toCreateScheduleBody,
   toSchedulePatchBody,
@@ -175,6 +199,7 @@ const { create, update } = useFleetSchedules(props.slug)
 
 const zones = timeZoneOptions()
 const placementOptions = computed(() => PLACEMENT_MODES.map((mode) => ({ value: mode, label: t(`fleet.schedules.form.placementMode.${mode}`) })))
+const bashOptions = computed(() => BASH_MODES.map((mode) => ({ value: mode, label: t(`fleet.bash.mode.${mode}`) })))
 const initialValues = () => initialScheduleValues(props.schedule, browserTimeZone())
 
 // D218: values under v-if stay put when their input unmounts; the body mappers read only the chosen placement.
