@@ -161,7 +161,8 @@ describe('bash (S1.5 2a)', () => {
 
   it('expire marks expired/timeout with approval.expired activity (D262)', async () => {
     const { approval } = await closer.openBash(job, ask(), 'r1', NOW);
-    const { approval: expired } = await closer.expire(approval!, job, NOW);
+    expect(approval).toBeDefined();
+    const { approval: expired } = await closer.expire(approval as FleetApprovalRecord, job, NOW);
     expect(expired).toEqual(expect.objectContaining({ status: 'expired', resolvedBy: 'timeout', decidedAt: NOW }));
     expect(activity.record).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'approval.expired', actorType: 'SYSTEM', responsibleUserId: 'u9' }));
   });
