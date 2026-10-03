@@ -1,3 +1,4 @@
+import { InvalidArgumentError } from 'commander';
 import {
   projectFleetReposControllerList,
   projectFleetRunnersControllerList,
@@ -102,6 +103,33 @@ export async function repoNamesOrEmpty(slug: string): Promise<ReadonlyMap<string
 
 export function handleFleetValidation(message: string): never {
   return handleApiError(message, { validationError: true });
+}
+
+/** S1.5 §1.6: gated/escalate relay nax's bash asks to the koda approvals inbox (RUN jobs only). */
+export type BashMode = 'raw' | 'gated' | 'escalate';
+const BASH_MODES: readonly BashMode[] = ['raw', 'gated', 'escalate'];
+
+export function parseBashMode(value: string): BashMode {
+  if (!(BASH_MODES as readonly string[]).includes(value)) throw new InvalidArgumentError('expected raw, gated or escalate');
+  return value as BashMode;
+}
+
+/** 30..3600 whole seconds (DispatchFleetJobDto.approvalTimeoutSec). */
+export function parseApprovalTimeout(value: string): number {
+  if (!/^\d{2,4}$/.test(value) || Number(value) < 30 || Number(value) > 3600) {
+    throw new InvalidArgumentError('expected a whole number of seconds from 30 to 3600');
+  }
+  return Number(value);
+}
+
+export const bashModeText = (mode: BashMode, sec: number): string => (mode === 'raw' ? 'raw' : `${mode} (asks wait ${sec} s)`);
+
+/** D301: a timeout means nothing without a relay mode; a PLAN job stays raw. Returns the refusal, or null. */
+export function bashFlagProblem(o: { bashMode?: BashMode; approvalTimeout?: number; plan?: string }): string | null {
+  const relay = o.bashMode !== undefined && o.bashMode !== 'raw';
+  if (relay && o.plan) return '--bash-mode gated/escalate applies to nax run only: a --plan job stays raw';
+  if (o.approvalTimeout !== undefined && !relay) return '--approval-timeout needs --bash-mode gated or escalate';
+  return null;
 }
 
 export function handleFleetConflict(message: string): never {

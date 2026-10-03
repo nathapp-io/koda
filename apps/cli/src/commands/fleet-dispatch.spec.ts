@@ -98,6 +98,34 @@ describe('koda fleet dispatch', () => {
     expect(fleetJobsControllerDispatch).not.toHaveBeenCalled();
   });
 
+  it('sends --bash-mode and --approval-timeout on a RUN (D301)', async () => {
+    (fleetJobsControllerDispatch as jest.Mock).mockResolvedValue({ ret: 0, data: { job: job(), placement: { assigned: true, runnerId: 'r1', misfits: [] } } });
+    await run('--repo', 'acme/app', '--feature', 'login', '--max-cost', '5', '--bash-mode', 'escalate', '--approval-timeout', '900');
+    expect(fleetJobsControllerDispatch).toHaveBeenCalledWith({
+      path: { slug: 'web' },
+      body: { repoId: 'fr1', command: 'RUN', feature: 'login', maxCostUsd: 5, bashMode: 'escalate', approvalTimeoutSec: 900 },
+    });
+  });
+
+  // One `it` per case: commander 12 keeps option values across parseAsync calls on one program, and `dispatch` has no
+  // option reset, so a second run in the same test would inherit --plan / --bash-mode from the first.
+  it.each([
+    ['a relay mode on a PLAN', ['--plan', 'docs/s.md', '--bash-mode', 'gated'], '--plan job stays raw'],
+    ['a timeout without a mode', ['--approval-timeout', '60'], '--approval-timeout needs'],
+    ['a timeout with raw', ['--bash-mode', 'raw', '--approval-timeout', '60'], '--approval-timeout needs'],
+  ])('refuses %s before dispatching (exit 3)', async (_name, extra, message) => {
+    await run('--repo', 'acme/app', '--feature', 'f', '--max-cost', '1', ...extra);
+    expect(exitSpy).toHaveBeenLastCalledWith(3);
+    expect(errorSpy.mock.calls.flat().join('\n')).toContain(message);
+    expect(fleetJobsControllerDispatch).not.toHaveBeenCalled();
+  });
+
+  it('rejects a bad --bash-mode or --approval-timeout before any request', async () => {
+    await expect(run('--repo', 'acme/app', '--feature', 'f', '--max-cost', '1', '--bash-mode', 'loud')).rejects.toMatchObject({ code: 'commander.invalidArgument' });
+    await expect(run('--repo', 'acme/app', '--feature', 'f', '--max-cost', '1', '--approval-timeout', '5')).rejects.toMatchObject({ code: 'commander.invalidArgument' });
+    expect(fleetJobsControllerDispatch).not.toHaveBeenCalled();
+  });
+
   it('on a duplicate (409) names the active job and exits 1', async () => {
     (fleetJobsControllerDispatch as jest.Mock).mockRejectedValue({ ret: 409, message: 'An active job already runs this feature: j0' });
     (fleetJobsControllerList as jest.Mock).mockResolvedValue(page([job({ id: 'j9', state: 'COMPLETED' }), job({ id: 'j0', state: 'RUNNING' })]));

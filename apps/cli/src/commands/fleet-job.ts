@@ -14,7 +14,7 @@ import { withContext } from '../utils/context';
 import { handleApiError } from '../utils/error';
 import { error, table } from '../utils/output';
 import { parsePositiveInt } from '../utils/parse-positive-int';
-import { ago, type FleetPage, handleFleetValidation, pageHint, printPlacement, resolveRepo, resolveRunner, runnerNames, runnerNamesOrEmpty } from './fleet-shared';
+import { ago, bashModeText, type FleetPage, handleFleetValidation, pageHint, printPlacement, resolveRepo, resolveRunner, runnerNames, runnerNamesOrEmpty } from './fleet-shared';
 
 const STATES = ['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING', 'COMPLETED', 'FAILED', 'ESCALATED', 'CRASHED', 'CANCELLED'] as const;
 type JobState = (typeof STATES)[number];
@@ -82,7 +82,9 @@ function showRows(j: FleetJobDto, runner: string): string[][] {
   const opt = (v: string | null | undefined) => v ?? '-';
   return [
     ['ID', j.id], ['State', j.state], ['Reason', opt(j.stateReason)], ['Command', j.command], ['Feature', j.feature],
-    ['Plan from', opt(j.planFrom)], ['Ref', j.ref], ['Profiles', j.profiles.join(',') || '-'], ['Runner', runner],
+    ['Plan from', opt(j.planFrom)], ['Ref', j.ref], ['Profiles', j.profiles.join(',') || '-'],
+    ['Bash mode', bashModeText(j.bashMode, j.approvalTimeoutSec)], ['Pending approvals', String(j.pendingApprovals)],
+    ['Runner', runner],
     ['Story', opt(j.currentStoryId)], ['Phase', opt(j.currentPhase)], ['Cost (USD)', `${j.costSpentUsd} of ${j.maxCostUsd}`],
     ['Finish', opt(j.finishResult)], ['Escalation', opt(j.escalationReason)], ['Branch', opt(j.resultBranch)],
     ['PR', opt(j.resultPrUrl)], ['Queued', j.queuedAt], ['Finished', opt(j.finishedAt)],

@@ -38,6 +38,7 @@ const CTX = { apiKey: 'key', apiUrl: 'https://koda.example.com', projectSlug: 'w
 const row = (over: Record<string, unknown> = {}) => ({
   id: 's1', projectId: 'p', repoId: 'fr1', name: 'nightly', cron: '0 9 * * 1-5', timezone: 'Asia/Singapore', feature: 'login', ref: 'main',
   profiles: [], maxCostUsd: '5', selectorLabels: [], pinnedRunnerId: null, enabled: true, nextFireAt: '2026-10-03T01:00:00.000Z',
+  bashMode: 'raw', approvalTimeoutSec: 600,
   lastFiredAt: null, lastJobId: null, lastPassedCount: 0, noProgressTicks: 0, noProgressLimit: 3, disabledReason: null, totalCostUsd: '0.0000',
   createdById: 'u', updatedById: 'u', createdAt: '', updatedAt: '', ...over,
 });
@@ -128,6 +129,26 @@ describe('koda fleet schedule', () => {
     expect(exitSpy.mock.calls.filter((c) => c[0] === 3)).toHaveLength(3);
   });
 
+  it('add and edit pass --bash-mode and --approval-timeout (D301)', async () => {
+    (projectFleetSchedulesControllerCreate as jest.Mock).mockResolvedValue(ok(row()));
+    await run('add', '--repo', 'acme/app', '--feature', 'login', '--cron', '0 9 * * 1-5', '--timezone', 'UTC', '--max-cost', '5', '--bash-mode', 'gated', '--approval-timeout', '120');
+    expect(projectFleetSchedulesControllerCreate).toHaveBeenLastCalledWith({
+      path: { slug: 'web' },
+      body: { name: 'login', repoId: 'fr1', feature: 'login', cron: '0 9 * * 1-5', timezone: 'UTC', maxCostUsd: 5, bashMode: 'gated', approvalTimeoutSec: 120 },
+    });
+    (projectFleetSchedulesControllerUpdate as jest.Mock).mockResolvedValue(ok(row()));
+    await run('edit', 's1', '--approval-timeout', '300');
+    expect(projectFleetSchedulesControllerUpdate).toHaveBeenLastCalledWith({ path: { slug: 'web', id: 's1' }, body: { approvalTimeoutSec: 300 } });
+    await run('edit', 's1', '--bash-mode', 'raw');
+    expect(projectFleetSchedulesControllerUpdate).toHaveBeenLastCalledWith({ path: { slug: 'web', id: 's1' }, body: { bashMode: 'raw' } });
+  });
+
+  it('add refuses a timeout without a relay mode (exit 3)', async () => {
+    await run('add', '--repo', 'acme/app', '--feature', 'login', '--cron', '0 9 * * 1-5', '--timezone', 'UTC', '--max-cost', '5', '--approval-timeout', '120');
+    expect(exitSpy).toHaveBeenLastCalledWith(3);
+    expect(projectFleetSchedulesControllerCreate).not.toHaveBeenCalled();
+  });
+
   it('add maps an API 400 (cron too frequent) to exit 3', async () => {
     (projectFleetSchedulesControllerCreate as jest.Mock).mockRejectedValue({ ret: -2, status: 400, message: 'The schedule fires more often than every 15 minutes' });
     await run('add', '--repo', 'acme/app', '--feature', 'f', '--cron', '*/10 * * * *', '--timezone', 'UTC', '--max-cost', '1');
@@ -164,6 +185,7 @@ describe('koda fleet schedule', () => {
     expect(fleetJobsControllerList).toHaveBeenCalledWith({ path: { slug: 'web' }, query: { scheduleId: 's1', size: 10 } });
     expect(out()).toContain('3/5');
     expect(out()).toContain('pushed');
+    expect(out()).toContain('bash raw');
     expect(exitSpy).toHaveBeenLastCalledWith(0);
   });
 

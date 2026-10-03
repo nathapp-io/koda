@@ -82,11 +82,11 @@ describe('koda fleet job', () => {
   });
 
   it('show prints the job fields with runner name, story, phase and cost', async () => {
-    (fleetJobsControllerGet as jest.Mock).mockResolvedValue({ ret: 0, data: job() });
+    (fleetJobsControllerGet as jest.Mock).mockResolvedValue({ ret: 0, data: job({ bashMode: 'escalate', approvalTimeoutSec: 600, pendingApprovals: 2 }) });
     await run('show', 'j1');
     expect(fleetJobsControllerGet).toHaveBeenCalledWith({ path: { slug: 'web', id: 'j1' } });
     const out = logSpy.mock.calls.flat().join('\n');
-    for (const want of ['RUNNING', 'box-1', 'US-002', 'implement', '1.2500', '5']) expect(out).toContain(want);
+    for (const want of ['RUNNING', 'box-1', 'US-002', 'implement', '1.2500', '5', 'escalate (asks wait 600 s)', 'Pending approvals']) expect(out).toContain(want);
   });
 
   it('cancel posts and prints the new state', async () => {

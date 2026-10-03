@@ -11,14 +11,15 @@ import { apiErrorCode } from '../utils/api-error-code';
 import { withContext } from '../utils/context';
 import { handleApiError } from '../utils/error';
 import { parseUsd } from '../utils/parse-usd';
-import { type FleetPage, handleFleetConflict, handleFleetValidation, printPlacement, resolveRepo, resolveRunner, runnerNamesOrEmpty } from './fleet-shared';
+import { type BashMode, type FleetPage, bashFlagProblem, handleFleetConflict, handleFleetValidation, parseApprovalTimeout, parseBashMode, printPlacement, resolveRepo, resolveRunner, runnerNamesOrEmpty } from './fleet-shared';
 
 const ACTIVE = new Set(['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING']);
 const collect = (value: string, previous: string[]): string[] => [...previous, value];
 
 interface DispatchOptions {
   repo: string; feature: string; maxCost: number; plan?: string; ref?: string;
-  profile: string[]; label: string[]; pin?: string; project?: string; json?: boolean;
+  profile: string[]; label: string[]; pin?: string; bashMode?: BashMode; approvalTimeout?: number;
+  project?: string; json?: boolean;
 }
 
 /**
@@ -36,6 +37,8 @@ function invalid(message: string): null {
 }
 
 async function buildBody(slug: string, o: DispatchOptions): Promise<DispatchFleetJobDto | null> {
+  const bashProblem = bashFlagProblem(o);
+  if (bashProblem) return invalid(bashProblem);
   if (o.pin && o.label.length > 0) return invalid('Use --label or --pin, not both: a pinned job ignores labels');
   const repo = await resolveRepo(slug, o.repo);
   if (!repo) return invalid(`Unknown repo "${o.repo}" in project ${slug}: koda fleet repo list`);
@@ -48,6 +51,8 @@ async function buildBody(slug: string, o: DispatchOptions): Promise<DispatchFlee
     ...(o.label.length > 0 ? { selectorLabels: o.label } : {}),
     ...(pinned ? { pinnedRunnerId: pinned.id } : {}),
     ...(o.ref ? { ref: o.ref } : {}),
+    ...(o.bashMode ? { bashMode: o.bashMode } : {}),
+    ...(o.approvalTimeout !== undefined ? { approvalTimeoutSec: o.approvalTimeout } : {}),
   };
 }
 
@@ -76,6 +81,8 @@ export function registerFleetDispatch(fleet: Command): void {
     .option('--profile <name>', 'nax profile, repeatable; later wins', collect, [] as string[])
     .option('--label <label>', 'Only runners with this label, repeatable', collect, [] as string[])
     .option('--pin <runner>', 'Run on this runner (id or name); excludes --label')
+    .option('--bash-mode <mode>', 'Shell command approvals: raw (default), gated or escalate; gated/escalate send asks to the approvals inbox (RUN only)', parseBashMode)
+    .option('--approval-timeout <seconds>', 'Seconds an ask waits for a decision before nax denies it (30-3600, default 600); gated/escalate only', parseApprovalTimeout)
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .option('--json', 'Output as JSON')
     .action(async (options: DispatchOptions) => {
