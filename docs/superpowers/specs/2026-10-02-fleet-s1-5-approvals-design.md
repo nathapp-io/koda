@@ -423,3 +423,7 @@ To verify in the 2a plan, not assumed:
   (store + approvals); the hard stop opens the approval before inserting its incident; the resume route follows the
   policy scope; an omitted `requeueJobIds` re-queues nothing; counts live at `GET /fleet/approval-counts`; bash
   approvals answer 400 until 2a.
+- 1b plan notes (`docs/superpowers/plans/2026-10-03-fleet-s1-5-slice-1b-approvals-web.md`, D239-D254): Pending tab is
+  one page of 100 sorted by expiry; one shared EventSource per project per tab (page + header badge); the open
+  approval is re-fetched only when its status changes; re-queue results are shown only for inbox raises (a manual
+  resume's `[]` is not "none selected"); the banner link reads the project's pending overrides (no API change).

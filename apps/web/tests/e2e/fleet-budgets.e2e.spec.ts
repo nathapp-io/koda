@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { login, E2E_ADMIN } from './fixtures/api-client';
-import { deleteOwnPolicies, dispatchRun, listPolicies, repoIdOf } from './fixtures/fleet-budgets-api';
+import { deleteOwnPolicies, dispatchRun, listPolicies, monthSpendUsd, repoIdOf } from './fixtures/fleet-budgets-api';
 import { waitForHydration, webLogin } from './fixtures/page-helpers';
 import { ScriptedRunner, type Lease } from './fixtures/scripted-runner';
 
@@ -10,6 +10,9 @@ import { ScriptedRunner, type Lease } from './fixtures/scripted-runner';
  * Project `fleet-e2e` and repo acme/e2e-app come from prisma/seed-e2e.ts.
  */
 const SLUG = 'fleet-e2e';
+
+/** Two decimals, so float dust from summing policy spend never reaches an amount input. */
+const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 test.describe('Fleet budgets (scripted runner)', () => {
   let token = '';
@@ -34,12 +37,16 @@ test.describe('Fleet budgets (scripted runner)', () => {
     test.setTimeout(120_000);
     await webLogin(page);
 
-    // 1. Create a $0.50 monthly project policy in the UI.
+    // 1. Create a $0.50 monthly project policy in the UI. The amount rides $0.50 above the window's
+    // existing spend ($0 on a clean database, where the numbers are exactly the slice 2b plan's), so
+    // fleet specs that ran earlier in the same run (they share the calendar-month window) cannot
+    // make the fresh policy born over-limit.
+    const priorSpend = await monthSpendUsd(token, SLUG);
     await page.goto(`/${SLUG}/fleet/budgets`);
     await waitForHydration(page);
     await page.getByTestId('fleet-budget-create').click();
     await page.getByTestId('fleet-budget-scope-type').selectOption('project');
-    await page.getByTestId('fleet-budget-amount').fill('0.5');
+    await page.getByTestId('fleet-budget-amount').fill((round2(priorSpend) + 0.5).toFixed(2));
     await page.getByTestId('fleet-budget-submit').click();
     const rows = page.getByTestId('fleet-budgets-own').locator('[data-testid^="fleet-budget-row-"]');
     await expect(rows).toHaveCount(1);
@@ -66,7 +73,7 @@ test.describe('Fleet budgets (scripted runner)', () => {
     const banner = page.getByTestId('fleet-budget-banner');
     await expect(banner).toBeVisible();
     await expect(banner.getByTestId('fleet-budget-banner-line')).toHaveAttribute('data-status', 'paused');
-    await expect(banner).toContainText('$0.60 of $0.50');
+    await expect(banner).toContainText(`$${(round2(priorSpend) + 0.6).toFixed(2)} of $${(round2(priorSpend) + 0.5).toFixed(2)}`);
 
     // 5. Follow the banner link and resume with a raised limit.
     await banner.getByTestId('fleet-budget-banner-link').click();
@@ -74,7 +81,7 @@ test.describe('Fleet budgets (scripted runner)', () => {
     await waitForHydration(page);
     await expect(rows.first()).toHaveAttribute('data-status', 'paused');
     await rows.first().getByTestId('fleet-budget-resume').click();
-    await page.getByTestId('fleet-budget-resume-amount').fill('2');
+    await page.getByTestId('fleet-budget-resume-amount').fill((round2(priorSpend) + 2).toFixed(2));
     await page.getByTestId('fleet-budget-resume-submit').click();
     await expect(rows.first()).toHaveAttribute('data-status', 'ok');
 
