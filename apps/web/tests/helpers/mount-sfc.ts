@@ -113,7 +113,7 @@ const VUE_HELPERS = ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount',
 /** Nuxt auto-import names injected as undefined unless the test supplies them (see MountOptions.globals). */
 const NUXT_AUTO_IMPORTS = [
   'useI18n', 'useAppToast', 'useApi', 'useRuntimeConfig', 'definePageMeta',
-  'useVisiblePolling', 'useFleetRunners', 'useFleetRepos', 'useRoute',
+  'useVisiblePolling', 'useFleetRunners', 'useFleetRepos', 'useRoute', 'useRouter',
   'useFleetDispatchOptions', 'useFleetJobs', 'useProjectViewerRole',
   'useAdminUsers', 'useProjectEvents', 'useAuth', 'useProjectMemberNames',
 ] as const
@@ -252,6 +252,7 @@ const FLEET_COMPONENT_FILES: Record<FleetComponentName, string> = {
   FleetScheduleHistory: 'ScheduleHistory.vue',
   FleetApprovalBudgetPanel: 'ApprovalBudgetPanel.vue',
   FleetApprovalOutcome: 'ApprovalOutcome.vue',
+  FleetApprovalInbox: 'ApprovalInbox.vue',
 }
 
 export function mountSfc(file: string, options: MountOptions = {}): Mounted {
@@ -323,4 +324,4 @@ export const webFile = (...parts: string[]): string => join(webRoot, ...parts)
 export type FleetComponentName =
   | 'FleetAge' | 'FleetRunnerCapabilityChips' | 'FleetRepoReachabilityBadge' | 'FleetNativeSelect' | 'FleetBudgetTable'
   | 'FleetScheduleTable' | 'FleetScheduleHistory'
-  | 'FleetApprovalBudgetPanel' | 'FleetApprovalOutcome'
+  | 'FleetApprovalBudgetPanel' | 'FleetApprovalOutcome' | 'FleetApprovalInbox'
