@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, mock, test } from 'bun:test';
 import type { FleetCommandOut } from '@nathapp/fleet-protocol';
 import { Journal } from '../journal/journal';
 import { createMemoryLogger } from '../logger';
@@ -19,8 +19,9 @@ function build() {
     journal, executor: ex, mutex: new RepoMutex(), log, now: time.now, sleep: time.sleep,
     uploader: { upload: async () => ({ kind: 'ok' }) }, tuning: { statusPollMs: 2_000, killGraceMs: 30_000, ackPollMs: 250, uploadAckWaitMs: 0 }, readoptHeartbeatMs: 120_000,
   });
-  const handler = new CommandHandler({ journal, supervisor, workspaceRoot: '/work/space', log, now: time.now });
-  return { time, journal, ex, supervisor, handler };
+  const approvals = { answer: mock(async (): Promise<{ result: 'ok' | 'rejected'; detail?: string }> => ({ result: 'ok' })) };
+  const handler = new CommandHandler({ journal, supervisor, workspaceRoot: '/work/space', log, now: time.now, approvals });
+  return { time, journal, ex, supervisor, handler, approvals };
 }
 const assignCmd = (id = 'c1', jobId = 'j1', epoch = 1): FleetCommandOut => ({ commandId: id, type: 'ASSIGN', jobId, leaseEpoch: epoch, payload: assignFor('RUN', { jobId }) });
 const other = (type: FleetCommandOut['type'], id: string, epoch = 1): FleetCommandOut => ({ commandId: id, type, jobId: 'j1', leaseEpoch: epoch, payload: {} });
@@ -150,5 +151,23 @@ describe('CANCEL, ABANDON, READOPT and unknown types', () => {
     const acks = await b.handler.handle([{ ...other('CANCEL', 'u1'), type: 1 as never }]);
     expect(acks[0]).toMatchObject({ result: 'rejected', detail: 'unknown command type' });
     expect(b.journal.getCommand('u1')).toMatchObject({ type: 'unknown', result: 'rejected', detail: 'unknown command type' });
+  });
+});
+
+describe('APPROVAL_ANSWER (spec §4.4)', () => {
+  const answer = { commandId: 'c9', type: 'APPROVAL_ANSWER', jobId: 'j1', leaseEpoch: 1, payload: { approvalId: 'a1', naxAskId: 'ask-1', choice: 'allow' } } as const;
+
+  test('delegates to the relay and acks its outcome', async () => {
+    const { handler, approvals } = build();
+    expect(await handler.handle([answer])).toEqual([{ commandId: 'c9', leaseEpoch: 1, result: 'ok' }]);
+    approvals.answer.mockResolvedValueOnce({ result: 'rejected', detail: 'callback_failed:429' });
+    expect(await handler.handle([{ ...answer, commandId: 'c10' }])).toEqual([{ commandId: 'c10', leaseEpoch: 1, result: 'rejected', detail: 'callback_failed:429' }]);
+  });
+
+  test('a re-sent answer is acked from the applied-command record; nax is not POSTed twice (Review Focus 4)', async () => {
+    const { handler, approvals } = build();
+    await handler.handle([answer]);
+    expect(await handler.handle([answer])).toEqual([{ commandId: 'c9', leaseEpoch: 1, result: 'ok' }]);
+    expect(approvals.answer).toHaveBeenCalledTimes(1);
   });
 });

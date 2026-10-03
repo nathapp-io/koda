@@ -1,4 +1,5 @@
 import type { CommandAck, FleetCommandOut } from '@nathapp/fleet-protocol';
+import type { ApprovalRelay } from '../approvals/approval-relay';
 import { errorMessage } from '../errors';
 import type { Journal } from '../journal/journal';
 import type { Logger } from '../logger';
@@ -13,6 +14,7 @@ export interface CommandHandlerDeps {
   readonly workspaceRoot: string;
   readonly log: Logger;
   readonly now: Now;
+  readonly approvals: Pick<ApprovalRelay, 'answer'>;
 }
 
 type Outcome = { result: 'ok' | 'rejected'; detail?: string };
@@ -77,6 +79,12 @@ export class CommandHandler {
       }
       case 'READOPT': {
         const outcome = await supervisor.readopt(command.jobId, command.leaseEpoch);
+        this.record(command, outcome);
+        return outcome;
+      }
+      case 'APPROVAL_ANSWER': {
+        // Spec §4.4 / plan D276: inline, bounded by the 10 s callback deadline; recorded so a re-sent command is not re-POSTed.
+        const outcome = await this.deps.approvals.answer(command);
         this.record(command, outcome);
         return outcome;
       }

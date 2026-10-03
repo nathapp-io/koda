@@ -144,7 +144,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     tuning: { statusPollMs: tuning.statusPollMs, killGraceMs: tuning.killGraceMs, ackPollMs: tuning.ackPollMs, uploadAckWaitMs: tuning.uploadAckWaitMs },
     readoptHeartbeatMs: tuning.readoptHeartbeatMs,
   });
-  const handler = new CommandHandler({ journal, supervisor, workspaceRoot: config.workspaceRoot, log, now });
+  const handler = new CommandHandler({ journal, supervisor, workspaceRoot: config.workspaceRoot, log, now, approvals });
 
   let stopReason: StopReason | null = null;
   const loop = new SyncLoop({
