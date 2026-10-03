@@ -1,3 +1,4 @@
+import * as z from 'zod'
 import { isAboveSpend, parseAmount, scopeText } from '~/lib/fleet-budgets'
 import type { TranslateNamed } from '~/lib/fleet-budgets'
 import { formatUsd } from '~/lib/fleet-jobs'
@@ -200,4 +201,17 @@ export function approvalSummary(
     })
   }
   return a.type === 'nax_bash_escalate' ? t('fleet.approvals.summary.bash') : t('fleet.approvals.type.budget_override_required')
+}
+
+/** D243: the raise form's schema; messages are translated, `spent` is the spend recorded at the stop. */
+export function buildRaiseSchema(t: TranslateNamed, spentUsd: string) {
+  return z.object({
+    amount: z.string().superRefine((value, ctx) => {
+      const error = raiseAmountError(value, spentUsd)
+      if (error !== null) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: t(`fleet.approvals.validation.${error}`, { spent: formatUsd(spentUsd) }) })
+      }
+    }),
+    comment: z.string().refine((value) => !commentTooLong(value), t('fleet.approvals.validation.commentTooLong')),
+  })
 }

@@ -1,10 +1,11 @@
 import { describe, test, expect } from '@jest/globals'
 import {
-  badgeTarget, badgeText, budgetPayload, buildApprovalQuery, canDecide, commentTooLong, inboxPath,
-  pendingByPolicy, raiseAmountError, requeueFailure, requeueResults, resumedAmount, sortPending, toKeepPausedBody,
-  toRaiseBody,
+  approvalSummary, badgeTarget, badgeText, budgetPayload, buildApprovalQuery, buildRaiseSchema, canDecide,
+  commentTooLong, inboxPath, pendingByPolicy, raiseAmountError, requeueFailure, requeueResults, resumedAmount,
+  sortPending, toKeepPausedBody, toRaiseBody,
 } from '../../lib/fleet-approvals'
 import type { FleetApprovalDto } from '../../lib/fleet-types'
+import { enI18n } from '../helpers/fleet-harness'
 
 const budget = { scopeType: 'project', scopeId: 'p1', windowKind: 'calendar_month_utc', windowStart: '2026-10-01T00:00:00.000Z', spentUsd: '0.6000', amountUsd: '0.5000' }
 
@@ -154,5 +155,33 @@ describe('paths and badge (D241, D247)', () => {
     expect(badgeText(7)).toBe('7')
     expect(badgeText(99)).toBe('99')
     expect(badgeText(100)).toBe('99+')
+  })
+})
+
+describe('approvalSummary', () => {
+  const { t } = enI18n()
+  test('a budget override names the scope and the stop', () => {
+    expect(approvalSummary(t, approval('a'), () => 'koda')).toBe('Budget for project koda stopped at $0.60 of $0.50')
+  })
+  test('a bash ask and a malformed budget fall back to fixed text', () => {
+    expect(approvalSummary(t, approval('a', { type: 'nax_bash_escalate', payload: {} }), () => null)).toBe('A job asks to run a shell command')
+    expect(approvalSummary(t, approval('a', { payload: {} }), () => null)).toBe('Budget override')
+  })
+})
+
+describe('buildRaiseSchema (D243)', () => {
+  const { t } = enI18n()
+  const schema = buildRaiseSchema(t, '0.6000')
+  const errors = (amount: string, comment = '') => {
+    const result = schema.safeParse({ amount, comment })
+    return result.success ? {} : result.error.flatten().fieldErrors
+  }
+  test('a valid amount above the spend and a short comment pass', () => {
+    expect(errors('2', 'ok')).toEqual({})
+  })
+  test('each field reports its own translated message', () => {
+    expect(errors('abc').amount).toEqual(['Enter an amount above 0 with at most 4 decimals.'])
+    expect(errors('0.6').amount).toEqual(['The new limit must be above $0.60.'])
+    expect(errors('2', 'x'.repeat(1001)).comment).toEqual(['Keep the comment to 1000 characters.'])
   })
 })
