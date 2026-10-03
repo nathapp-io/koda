@@ -1088,7 +1088,6 @@
           "deny": "Deny"
         }
       },
-      "bashLater": "Shell command approvals are answered on this page from a later release.",
       "budget": {
         "summary": "{spent} spent of a {amount} limit ({window}).",
         "amount": "New limit (USD)",
@@ -1127,7 +1126,15 @@
       "toast": {
         "raise_budget_and_resume": "Budget raised and resumed.",
         "keep_paused": "The budget stays paused.",
-        "requeueFailed": "{count} job(s) could not be re-queued."
+        "requeueFailed": "{count} job(s) could not be re-queued.",
+        "allow": "Allowed. The runner passes the answer to nax.",
+        "allow_for_job": "Allowed for this job. The runner passes the answer to nax.",
+        "deny": "Denied. The runner passes the answer to nax."
+      },
+      "delivery": {
+        "delivered": "Delivered to nax.",
+        "failed": "The runner did not deliver the answer to nax ({detail}). nax denies a command it gets no answer for.",
+        "waiting": "Not confirmed by the runner yet."
       },
       "badge": { "label": "{count} approvals waiting" }
     },

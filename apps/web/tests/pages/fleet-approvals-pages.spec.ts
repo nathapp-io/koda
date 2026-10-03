@@ -46,13 +46,36 @@ describe('project approvals page', () => {
     await settle()
     const props = seen[0]
     expect(props.base).toEqual({ kind: 'project', slug: 'koda' })
-    expect(props.viewer).toEqual({ kind: 'project', canManage: true })
+    expect(props.viewer).toEqual({ kind: 'project', canManage: true, canWork: true })
     expect((props.nameOf as (id: string) => string | null)('u1')).toBe('Ada')
     expect((props.jobLink as (p: string, j: string) => string | null)('p1', 'j1')).toBe('/koda/fleet/jobs/j1')
     const scopeLabel = props.scopeLabel as (p: { scopeType: string; scopeId: string | null }) => string | null
     expect(scopeLabel({ scopeType: 'project', scopeId: 'p1' })).toBe('koda')
     expect(scopeLabel({ scopeType: 'repo', scopeId: 'r1' })).toBe('repo-r1')
     expect(app.one('[data-stub="page-header"]')?.props.title).toBe('Approvals')
+    app.unmount()
+  })
+
+  test.each([
+    ['DEVELOPER', { canManage: false, viewerRole: 'DEVELOPER' }, { kind: 'project', canManage: false, canWork: true }],
+    ['VIEWER', { canManage: false, viewerRole: 'VIEWER' }, { kind: 'project', canManage: false, canWork: false }],
+  ])('a %s gets canWork from canWorkOnFleet (D290)', async (_name, role, expected) => {
+    const seen: Array<Record<string, unknown>> = []
+    const app = mountSfc(projectPage, {
+      components: { ...uiStubs, FleetApprovalInbox: inboxStub(seen) },
+      globals: {
+        ref, computed,
+        onMounted: Vue.onMounted,
+        definePageMeta: () => undefined,
+        useRoute: () => ({ params: { project: 'koda' } }),
+        useI18n: () => enI18n(),
+        useProjectViewerRole: () => ({ data: ref(role) }),
+        useProjectMemberNames: () => ({ load: jest.fn(async () => undefined), nameOf: () => null }),
+        useFleetDispatchOptions: () => ({ load: jest.fn(async () => undefined), repoName: (id: string) => id }),
+      },
+    })
+    await settle()
+    expect(seen[0]?.viewer).toEqual(expected)
     app.unmount()
   })
 })

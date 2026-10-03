@@ -31,6 +31,7 @@ function mount(opts: {
   post?: jest.Mock
   query?: Record<string, string>
   props?: Record<string, unknown>
+  now?: Date
 }) {
   const api = { get: opts.get, post: opts.post ?? jest.fn() }
   ;(globalThis as Record<string, unknown>).useApi = () => ({ $api: api })
@@ -39,13 +40,18 @@ function mount(opts: {
   let pollTask: () => Promise<void> = async () => undefined
   let live: Handlers | null = null
   const forbidden: unknown[] = []
+  const clock = Vue.ref(opts.now ?? new Date('2026-10-03T10:05:00.000Z'))
   const app = mountSfc(inbox, {
     components: uiStubs,
-    fleetComponents: ['FleetApprovalBudgetPanel', 'FleetApprovalOutcome', 'FleetNativeSelect', 'FleetAge'],
-    alias: { '~/composables/useApi': apiModule },
+    fleetComponents: ['FleetApprovalBudgetPanel', 'FleetApprovalBashPanel', 'FleetApprovalOutcome', 'FleetNativeSelect', 'FleetAge'],
+    alias: {
+      '~/composables/useApi': apiModule,
+      // D292: a fixed clock; the real one ticks with setInterval.
+      '~/composables/useApprovalCountdown': { useApprovalCountdown: () => ({ now: clock }) },
+    },
     props: {
       base: { kind: 'project', slug: 'koda' },
-      viewer: { kind: 'project', canManage: true },
+      viewer: { kind: 'project', canManage: true, canWork: true },
       scopeLabel: () => 'koda',
       nameOf: (id: string) => (id === 'u1' ? 'Ada' : null),
       jobLink: (_p: string, j: string) => `/koda/fleet/jobs/${j}`,
@@ -247,7 +253,7 @@ describe('FleetApprovalInbox', () => {
 
   test('a reader without the right sees no decide buttons (Review Focus 5)', async () => {
     const get = jest.fn(async (path: string) => (path.endsWith('/a1') ? row('a1', { requeueCandidates: [] }) : page([row('a1')])))
-    const m = mount({ get, props: { viewer: { kind: 'project', canManage: false } } })
+    const m = mount({ get, props: { viewer: { kind: 'project', canManage: false, canWork: false } } })
     await m.settle()
     await m.toggle('a1')
     expect(m.byId('fleet-approval-readonly')).toHaveLength(1)
@@ -255,16 +261,80 @@ describe('FleetApprovalInbox', () => {
     m.app.unmount()
   })
 
-  test('a pending bash ask renders read-only with the later-release note (Review Focus 5)', async () => {
-    const bash = row('b1', { type: 'nax_bash_escalate', policyId: null, jobId: 'j1', payload: { command: 'rm -rf /' }, expiresAt: '2026-10-03T10:10:00.000Z' })
+  const bashPayloadFields = { command: 'rm -rf build', commandTruncated: false, maskedCount: 0, root: '/w', stage: 'execution',
+    storyId: 'US-001', featureName: 'login', reason: 'outside the grants', options: ['allow', 'allow-remember', 'deny'] }
+  const bashRow = (id: string, over: Partial<FleetApprovalDto> = {}) =>
+    row(id, { type: 'nax_bash_escalate', policyId: null, jobId: 'j1', payload: { ...bashPayloadFields }, expiresAt: '2026-10-03T10:10:00.000Z', ...over })
+
+  test('a pending bash ask shows its command and countdown in the row and opens the bash panel', async () => {
+    const bash = bashRow('b1')
     const get = jest.fn(async (path: string) => (path.endsWith('/b1') ? bash : page([bash])))
     const m = mount({ get })
     await m.settle()
-    expect(m.app.textOf(m.rowEl('b1'))).toContain('A job asks to run a shell command')
+    expect(m.app.textOf(m.rowEl('b1'))).toContain('Run rm -rf build (execution)')
+    expect(m.app.textOf(m.app.find('[data-testid="fleet-approval-countdown"]', m.rowEl('b1'))[0])).toBe('5:00')
     await m.toggle('b1')
-    expect(m.byId('fleet-approval-bash-later')).toHaveLength(1)
-    expect(m.app.text()).not.toContain('rm -rf')
+    expect(m.byId('fleet-approval-bash-panel')).toHaveLength(1)
+    expect(m.byId('fleet-approval-bash-allow')).toHaveLength(1)
     m.app.unmount()
+  })
+
+  test('a developer allows; the outcome waits for delivery and the next poll re-fetches it (D295, Review Focus 3)', async () => {
+    const bash = bashRow('b1')
+    const decided = bashRow('b1', { status: 'approved', decision: 'allow', resolvedBy: 'user', decidedById: 'u1', outcome: null })
+    const delivered = { ...decided, outcome: { delivery: { result: 'ok', detail: null, at: '2026-10-03T10:05:10.000Z' } } }
+    let stored: FleetApprovalDto = bash
+    const get = jest.fn(async (path: string) => (path.endsWith('/b1') ? stored : page(stored.status === 'pending' ? [stored] : [])))
+    const post = jest.fn(async () => { stored = decided; return decided })
+    const m = mount({ get, post, props: { viewer: { kind: 'project', canManage: false, canWork: true } } })
+    await m.settle()
+    await m.toggle('b1')
+    ;(m.byId('fleet-approval-bash-allow')[0].props.onClick as () => void)()
+    await m.settle()
+    expect(post).toHaveBeenCalledWith('/projects/koda/fleet/approvals/b1/decide', { decision: 'allow' })
+    expect(m.toast.successes).toEqual(['Allowed. The runner passes the answer to nax.'])
+    expect(m.byId('fleet-approval-outcome-delivery')[0].props['data-delivery']).toBe('waiting')
+    stored = delivered
+    await m.poll()
+    await m.settle()
+    expect(m.byId('fleet-approval-outcome-delivery')[0].props['data-delivery']).toBe('delivered')
+    m.app.unmount()
+  })
+
+  test('a bash decide that races expiry gets 409: toast, and the row is re-fetched as expired (Review Focus 2)', async () => {
+    const bash = bashRow('b1')
+    const expired = bashRow('b1', { status: 'expired', resolvedBy: 'timeout' })
+    let stored: FleetApprovalDto = bash
+    const get = jest.fn(async (path: string) => (path.endsWith('/b1') ? stored : page(stored.status === 'pending' ? [stored] : [])))
+    const post = jest.fn(async () => { stored = expired; throw new ApiError(409, 'This approval is no longer pending') })
+    const m = mount({ get, post })
+    await m.settle()
+    await m.toggle('b1')
+    ;(m.byId('fleet-approval-bash-deny')[0].props.onClick as () => void)()
+    await m.settle()
+    expect(m.toast.errors).toEqual(['This approval is no longer pending'])
+    expect(m.app.textOf(m.byId('fleet-approval-outcome-decision')[0])).toContain('Expired')
+    m.app.unmount()
+  })
+
+  test('a viewer reads a bash ask; a developer gets bash buttons but no budget buttons (Review Focus 4)', async () => {
+    const bash = bashRow('b1')
+    const budgetRow = row('a1', { requeueCandidates: [] })
+    const get = jest.fn(async (path: string) => (path.endsWith('/b1') ? bash : path.endsWith('/a1') ? budgetRow : page([bash, row('a1')])))
+    const viewerOnly = mount({ get, props: { viewer: { kind: 'project', canManage: false, canWork: false } } })
+    await viewerOnly.settle()
+    await viewerOnly.toggle('b1')
+    expect(viewerOnly.byId('fleet-approval-readonly')).toHaveLength(1)
+    expect(viewerOnly.byId('fleet-approval-bash-deny')).toHaveLength(0)
+    viewerOnly.app.unmount()
+    const developer = mount({ get, props: { viewer: { kind: 'project', canManage: false, canWork: true } } })
+    await developer.settle()
+    await developer.toggle('b1')
+    expect(developer.byId('fleet-approval-bash-deny')).toHaveLength(1)
+    await developer.toggle('a1')
+    expect(developer.byId('fleet-approval-raise')).toHaveLength(0)
+    expect(developer.byId('fleet-approval-readonly')).toHaveLength(1)
+    developer.app.unmount()
   })
 
   test('the admin inbox reports a 403 and stops (no rows, no toast)', async () => {

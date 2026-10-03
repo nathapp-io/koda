@@ -63,3 +63,41 @@ describe('FleetApprovalOutcome', () => {
     expect(m.app.textOf(m.byId('fleet-approval-outcome-by')[0])).toBe('By an unknown user')
   })
 })
+
+const bashDecided = (over: Partial<FleetApprovalDto> = {}): FleetApprovalDto => ({
+  id: 'b1', type: 'nax_bash_escalate', status: 'approved', projectId: 'p1', jobId: 'j1', policyId: null,
+  payload: { command: 'git push --force origin HEAD', commandTruncated: false, maskedCount: 0, root: '/w', stage: 'execution',
+    storyId: null, featureName: 'login', reason: 'r', options: ['allow', 'deny'] },
+  outcome: null, requestedAt: '2026-10-03T10:00:00.000Z', expiresAt: '2026-10-03T10:10:00.000Z', decision: 'allow',
+  decidedById: 'u1', decidedAt: '2026-10-03T10:01:00.000Z', resolvedBy: 'user', comment: null, ...over,
+})
+
+describe('FleetApprovalOutcome, bash (D294)', () => {
+  test('shows the command and a waiting delivery until the runner acks', () => {
+    const m = mount(bashDecided())
+    expect(m.app.textOf(m.byId('fleet-approval-outcome-command')[0])).toBe('git push --force origin HEAD')
+    expect(m.byId('fleet-approval-outcome-delivery')[0].props['data-delivery']).toBe('waiting')
+    m.app.unmount()
+  })
+
+  test('delivered and failed acks', () => {
+    const ok = mount(bashDecided({ outcome: { delivery: { result: 'ok', detail: null, at: 'x' } } }))
+    expect(ok.byId('fleet-approval-outcome-delivery')[0].props['data-delivery']).toBe('delivered')
+    ok.app.unmount()
+    const bad = mount(bashDecided({ outcome: { delivery: { result: 'rejected', detail: 'callback_failed:429', at: 'x' } } }))
+    expect(bad.byId('fleet-approval-outcome-delivery')[0].props['data-delivery']).toBe('failed')
+    expect(bad.app.text()).toContain('callback_failed:429')
+    bad.app.unmount()
+  })
+
+  test('an ask that timed out shows its raw text and no delivery line', () => {
+    const m = mount(bashDecided({
+      status: 'expired', decision: null, resolvedBy: 'timeout', decidedById: null,
+      payload: { ...bashDecided().payload, command: '', rawDetail: 'request: ls' },
+    }))
+    expect(m.app.textOf(m.byId('fleet-approval-outcome-command')[0])).toBe('request: ls')
+    expect(m.byId('fleet-approval-outcome-delivery')).toHaveLength(0)
+    expect(m.app.text()).toContain('Timed out')
+    m.app.unmount()
+  })
+})

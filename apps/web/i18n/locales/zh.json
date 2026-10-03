@@ -1088,7 +1088,6 @@
           "deny": "拒绝"
         }
       },
-      "bashLater": "Shell 命令审批将在后续版本中在此页面处理。",
       "budget": {
         "summary": "已花费 {spent}，限额 {amount}（{window}）。",
         "amount": "新限额（美元）",
@@ -1127,7 +1126,15 @@
       "toast": {
         "raise_budget_and_resume": "预算已提高并恢复。",
         "keep_paused": "预算保持暂停。",
-        "requeueFailed": "{count} 个任务无法重新排队。"
+        "requeueFailed": "{count} 个任务无法重新排队。",
+        "allow": "已允许，runner 会将答复转交 nax。",
+        "allow_for_job": "已在本任务内允许，runner 会将答复转交 nax。",
+        "deny": "已拒绝，runner 会将答复转交 nax。"
+      },
+      "delivery": {
+        "delivered": "已送达 nax。",
+        "failed": "runner 未能将答复送达 nax（{detail}）。nax 会拒绝未获答复的命令。",
+        "waiting": "runner 尚未确认。"
       },
       "badge": { "label": "{count} 个审批等待处理" }
     },
