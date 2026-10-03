@@ -71,11 +71,13 @@ export interface World {
   readonly gitRequests: readonly GitHttpRequest[];
   readonly fakeGh: { binDir: string; logPath: string };
   readonly forgeCloneUrl: string;
-  dispatch(input: { feature: string; command?: 'RUN' | 'PLAN'; ref?: string; planFrom?: string; profiles?: string[]; pinnedRunnerId?: string }): Promise<string>;
+  dispatch(input: { feature: string; command?: 'RUN' | 'PLAN'; ref?: string; planFrom?: string; profiles?: string[]; pinnedRunnerId?: string; bashMode?: 'raw' | 'gated' | 'escalate'; approvalTimeoutSec?: number }): Promise<string>;
   job(id: string): Promise<JobView>;
   events(id: string): Promise<EventView[]>;
   waitForJob(id: string, predicate: (job: JobView) => boolean, timeoutMs?: number): Promise<JobView>;
   cancel(id: string): Promise<void>;
+  approvals(jobId: string): Promise<Array<{ id: string; status: string; resolvedBy: string | null; outcome: Record<string, unknown> | null }>>;
+  decide(approvalId: string, decision: 'allow' | 'allow_for_job' | 'deny'): Promise<number>;
   downloadBundle(id: string): Promise<{ status: number; bytes: Uint8Array }>;
   addRunner(name: string): Promise<TestRunner>;
   withFake<T>(env: Record<string, string>, fn: () => Promise<T>): Promise<T>;
@@ -175,7 +177,7 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
     async dispatch(input) {
       const res = await http('POST', '/projects/web/fleet/jobs', {
         token: admin,
-        body: { repoId, command: input.command ?? 'RUN', feature: input.feature, ...(input.ref ? { ref: input.ref } : {}), ...(input.planFrom ? { planFrom: input.planFrom } : {}), ...(input.profiles ? { profiles: input.profiles } : {}), ...(input.pinnedRunnerId ? { pinnedRunnerId: input.pinnedRunnerId } : {}), maxCostUsd: 5 },
+        body: { repoId, command: input.command ?? 'RUN', feature: input.feature, ...(input.ref ? { ref: input.ref } : {}), ...(input.planFrom ? { planFrom: input.planFrom } : {}), ...(input.profiles ? { profiles: input.profiles } : {}), ...(input.pinnedRunnerId ? { pinnedRunnerId: input.pinnedRunnerId } : {}), ...(input.bashMode ? { bashMode: input.bashMode } : {}), ...(input.approvalTimeoutSec ? { approvalTimeoutSec: input.approvalTimeoutSec } : {}), maxCostUsd: 5 },
       });
       if (res.status !== 201) throw new Error(`dispatch failed: ${JSON.stringify(res.body)}`);
       return res.body.data.job.id as string;
@@ -198,6 +200,13 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
     async cancel(id) {
       const res = await http('POST', `/projects/web/fleet/jobs/${id}/cancel`, { token: admin });
       if (res.status !== 200) throw new Error(`cancel failed: ${JSON.stringify(res.body)}`);
+    },
+    async approvals(jobId) {
+      const res = await http('GET', `/fleet/approvals?jobId=${encodeURIComponent(jobId)}`, { token: admin });
+      return (res.body as { data: { records: Array<{ id: string; status: string; resolvedBy: string | null; outcome: Record<string, unknown> | null }> } }).data.records;
+    },
+    async decide(approvalId, decision) {
+      return (await http('POST', `/fleet/approvals/${approvalId}/decide`, { token: admin, body: { decision } })).status;
     },
     async downloadBundle(id) {
       const res = await fetch(`${api.url}/api/projects/web/fleet/jobs/${id}/bundle`, { headers: { authorization: `Bearer ${admin}` } });
