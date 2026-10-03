@@ -1066,6 +1066,28 @@
       "more": "Showing the first {n} pending approvals.",
       "noProject": "Fleet-wide",
       "readOnly": "You can read this approval. Only a project admin can decide a budget override.",
+      "readOnlyBash": "You can read this ask. Only a project developer or admin can answer it.",
+      "bash": {
+        "command": "Command (secrets masked by nax)",
+        "rawDetail": "What nax sent",
+        "rawHint": "The runner could not split nax's text into a command. You are deciding on the full text below.",
+        "unreadable": "This ask could not be read. It can only be denied.",
+        "masked": "{count} secret value(s) masked",
+        "truncated": "The command is too long to show in full. It can only be denied.",
+        "root": "Runs in",
+        "stage": "Stage",
+        "story": "Story",
+        "feature": "Feature",
+        "reason": "Why nax asks",
+        "openJob": "Open the job",
+        "expiresIn": "nax denies it in {time} unless answered.",
+        "timedOut": "This ask timed out and nax has denied the command.",
+        "action": {
+          "allow": "Allow once",
+          "allow_for_job": "Allow for this job",
+          "deny": "Deny"
+        }
+      },
       "bashLater": "Shell command approvals are answered on this page from a later release.",
       "budget": {
         "summary": "{spent} spent of a {amount} limit ({window}).",

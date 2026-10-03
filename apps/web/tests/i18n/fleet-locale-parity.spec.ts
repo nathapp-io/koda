@@ -45,6 +45,7 @@ const ENUMS: Record<string, string[]> = {
   'fleet.approvals.tabs': ['pending', 'all'],
   'fleet.approvals.empty': ['pending', 'all'],
   'fleet.approvals.validation': ['amountInvalid', 'notAbove', 'commentTooLong'],
+  'fleet.approvals.bash.action': ['allow', 'allow_for_job', 'deny'],
   'fleet.approvals.toast': ['raise_budget_and_resume', 'keep_paused', 'requeueFailed'],
   'fleet.bash.mode': ['raw', 'gated', 'escalate'],
 }
