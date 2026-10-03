@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { FLEET_PROTOCOL_VERSION } from '@nathapp/fleet-protocol';
 import type { AssignPayload, FleetCommandOut, SyncRequest } from '@nathapp/fleet-protocol';
 import { parseRunnerConfig, resolveHome } from '../../src/config/runner-config';
 import { startDaemon } from '../../src/daemon/daemon';
@@ -89,7 +90,7 @@ describe('startDaemon', () => {
     const daemon = await startDaemon({ home: s.home, config: s.config, identity: s.identity, tuning, log, executorFactory: () => s.ex });
     try {
       await waitFor(() => server.syncs.length >= 1);
-      expect(server.syncs[0]).toMatchObject({ protocolVersion: 1, bootId: daemon.bootId, freeSlots: 2, jobs: [] });
+      expect(server.syncs[0]).toMatchObject({ protocolVersion: FLEET_PROTOCOL_VERSION, bootId: daemon.bootId, freeSlots: 2, jobs: [] });
       expect(server.syncs[0].capabilities).toMatchObject({ nax: { version: '0.83.0' }, tools: { gh: true }, executors: ['host'] });
       await waitFor(() => server.syncs.length >= 2);
       expect(server.syncs[1].capabilities).toBeUndefined();          // confirmed after the first success

@@ -1,8 +1,8 @@
 import { readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
-import { FLEET_PROTOCOL_VERSION } from '@nathapp/fleet-protocol';
+import { APPROVAL_TEXT_MAX_BYTES as PACKAGE_APPROVAL_TEXT_MAX_BYTES, FLEET_PROTOCOL_VERSION } from '@nathapp/fleet-protocol';
 import type { FleetCommandTypeName, FleetJobKindName, FleetJobStateName } from '@nathapp/fleet-protocol';
-import { SUPPORTED_FLEET_PROTOCOL_VERSIONS, isSupportedProtocolVersion } from './protocol';
+import { APPROVAL_TEXT_MAX_BYTES, DEFAULT_APPROVAL_TIMEOUT_SEC, SUPPORTED_FLEET_PROTOCOL_VERSIONS, isSupportedProtocolVersion } from './protocol';
 import { FleetCommandType, FleetJobKind, FleetJobState } from '../../common/enums';
 
 const SRC = join(__dirname, '..', '..');
@@ -20,15 +20,15 @@ describe('fleet protocol', () => {
     expect(SUPPORTED_FLEET_PROTOCOL_VERSIONS).toContain(FLEET_PROTOCOL_VERSION);
   });
 
-  it.each([
-    [1, true],
-    [0, false],
-    [2, false],
-    ['1', false],
-    [1.5, false],
-    [undefined, false],
-  ])('isSupportedProtocolVersion(%p) is %p', (value, expected) => {
-    expect(isSupportedProtocolVersion(value)).toBe(expected);
+  it.each([[1, true], [2, true], [0, false], [3, false], ['2', false], [1.5, false], [undefined, false]])(
+    'isSupportedProtocolVersion(%p) is %p', (value, expected) => {
+      expect(isSupportedProtocolVersion(value)).toBe(expected);
+    },
+  );
+
+  it('keeps the local approval text cap equal to the package (the API image does not ship the package)', () => {
+    expect(APPROVAL_TEXT_MAX_BYTES).toBe(PACKAGE_APPROVAL_TEXT_MAX_BYTES);
+    expect(DEFAULT_APPROVAL_TIMEOUT_SEC).toBe(600);
   });
 
   // The production image never ships packages/ (apps/api/Dockerfile final stage),
@@ -48,7 +48,7 @@ describe('API enums match the protocol unions', () => {
     FAILED: true, ESCALATED: true, CRASHED: true, CANCELLED: true,
   };
   const kinds: Record<FleetJobKindName, true> = { RUN: true, PLAN: true };
-  const commands: Record<FleetCommandTypeName, true> = { ASSIGN: true, CANCEL: true, READOPT: true, ABANDON: true };
+  const commands: Record<FleetCommandTypeName, true> = { ASSIGN: true, CANCEL: true, READOPT: true, ABANDON: true, APPROVAL_ANSWER: true };
 
   it.each([
     ['FleetJobState', FleetJobState, states],

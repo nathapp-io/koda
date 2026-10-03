@@ -839,7 +839,7 @@ model FleetCommand {
   id          String    @id @default(cuid())
   runnerId    String
   jobId       String
-  type        String // ASSIGN | CANCEL | READOPT | ABANDON
+  type        String // ASSIGN | CANCEL | READOPT | ABANDON | APPROVAL_ANSWER
   leaseEpoch  Int
   payload     Json // never a secret
   createdAt   DateTime  @default(now())
