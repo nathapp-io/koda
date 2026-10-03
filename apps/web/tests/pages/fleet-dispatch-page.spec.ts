@@ -40,4 +40,11 @@ describe('dispatch page', () => {
   test('only project ADMIN and DEVELOPER get the form, through the shared rule', () => {
     expect(dispatch).toContain('const canWork = computed(() => canWorkOnFleet(viewer.value))')
   })
+
+  test('bash mode select and timeout only for RUN; the timeout only for gated/escalate (D299)', () => {
+    expect(dispatch).toMatch(/<template v-if="values\.command === 'RUN'">[\s\S]*?name="bashMode"[\s\S]*?testid="dispatch-bash-mode"/)
+    expect(dispatch).toMatch(/<FormField v-if="values\.bashMode !== 'raw'" v-slot="\{ componentField \}" name="approvalTimeoutMinutes">/)
+    expect(dispatch).toContain('data-testid="dispatch-approval-timeout"')
+    expect(dispatch).toContain("BASH_MODES.map(mode => ({ value: mode, label: t(`fleet.bash.mode.${mode}`) }))")
+  })
 })

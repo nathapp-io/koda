@@ -78,6 +78,34 @@ describe('toDispatchBody', () => {
   })
 })
 
+describe('bash fields (D299)', () => {
+  test('defaults: raw, 10 minutes', () => {
+    expect(DISPATCH_DEFAULTS.bashMode).toBe('raw')
+    expect(DISPATCH_DEFAULTS.approvalTimeoutMinutes).toBe('10')
+  })
+
+  test('a gated or escalate RUN needs a valid timeout; raw and PLAN do not', () => {
+    expect(messages(valid({ bashMode: 'escalate', approvalTimeoutMinutes: '' }))).toEqual(['fleet.bash.validation.timeout'])
+    expect(messages(valid({ bashMode: 'gated', approvalTimeoutMinutes: '61' }))).toEqual(['fleet.bash.validation.timeout'])
+    expect(messages(valid({ bashMode: 'escalate', approvalTimeoutMinutes: '5' }))).toEqual([])
+    expect(messages(valid({ bashMode: 'raw', approvalTimeoutMinutes: '' }))).toEqual([])
+    expect(messages(valid({ command: 'PLAN', planFrom: 'docs/s.md', bashMode: 'escalate', approvalTimeoutMinutes: '' }))).toEqual([])
+  })
+
+  test('the timeout field may arrive undefined (unmounted under v-if) for a raw job', () => {
+    expect(messages({ ...valid(), approvalTimeoutMinutes: undefined })).toEqual([])
+  })
+
+  test('body: raw sends no bash fields; an escalate RUN sends both; a PLAN never does', () => {
+    expect(toDispatchBody(valid())).not.toHaveProperty('bashMode')
+    expect(toDispatchBody(valid())).not.toHaveProperty('approvalTimeoutSec')
+    expect(toDispatchBody(valid({ bashMode: 'escalate', approvalTimeoutMinutes: '2' }))).toEqual(expect.objectContaining({ bashMode: 'escalate', approvalTimeoutSec: 120 }))
+    const plan = toDispatchBody(valid({ command: 'PLAN', planFrom: 'docs/s.md', bashMode: 'escalate', approvalTimeoutMinutes: '2' }))
+    expect(plan).not.toHaveProperty('bashMode')
+    expect(plan).not.toHaveProperty('approvalTimeoutSec')
+  })
+})
+
 describe('token lists', () => {
   test('addToken trims, skips blanks and duplicates, never mutates', () => {
     const list = ['a']
