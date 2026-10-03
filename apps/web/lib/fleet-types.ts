@@ -151,7 +151,11 @@ export interface FleetJobDto {
   planFrom: string | null
   profiles: string[]
   maxCostUsd: string
-  bashMode: string
+  bashMode: 'raw' | 'gated' | 'escalate'
+  /** S1.5 2a: seconds a bash ask waits; used only when bashMode is not raw. */
+  approvalTimeoutSec: number
+  /** S1.5 2a: pending bash approvals of this job. */
+  pendingApprovals: number
   selectorLabels: string[]
   pinnedRunnerId: string | null
   runnerId: string | null

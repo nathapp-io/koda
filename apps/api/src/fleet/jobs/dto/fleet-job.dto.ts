@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import type { BashMode } from '../../common/protocol';
 import type { FleetJobRecord } from '../domain/fleet-job.domain';
 import type { MisfitReason } from '../placement-rules';
 
@@ -23,7 +24,11 @@ export class FleetJobDto {
   @ApiPropertyOptional({ type: String, nullable: true }) declare planFrom: string | null;
   @ApiProperty({ type: [String] }) declare profiles: string[];
   @ApiProperty({ type: String, description: 'Decimal as string' }) declare maxCostUsd: string;
-  @ApiProperty() declare bashMode: string;
+  @ApiProperty({ enum: ['raw', 'gated', 'escalate'] }) declare bashMode: BashMode;
+  @ApiProperty({ minimum: 30, maximum: 3600, description: 'S1.5: seconds a bash ask waits; used only when bashMode is not raw' })
+  declare approvalTimeoutSec: number;
+  @ApiProperty({ description: 'S1.5: pending bash approvals of this job' })
+  declare pendingApprovals: number;
   @ApiProperty({ type: [String] }) declare selectorLabels: string[];
   @ApiPropertyOptional({ type: String, nullable: true }) declare pinnedRunnerId: string | null;
   @ApiPropertyOptional({ type: String, nullable: true }) declare runnerId: string | null;
@@ -57,10 +62,11 @@ export class FleetJobDto {
   @ApiProperty({ description: 'Schedule ticks absorbed into this job while it sat queued (S1b §3.2)' }) declare coalescedCount: number;
 
   /** Internal columns (runnerBootId, eventSeq, ackedRunnerSeq, attributedAt) stay server-side. */
-  static from(r: FleetJobRecord): FleetJobDto {
+  static from(r: FleetJobRecord, pendingApprovals = 0): FleetJobDto {
     return Object.assign(new FleetJobDto(), {
       id: r.id, projectId: r.projectId, repoId: r.repoId, ref: r.ref, command: r.command, feature: r.feature,
       planFrom: r.planFrom, profiles: r.profiles, maxCostUsd: r.maxCostUsd, bashMode: r.bashMode,
+      approvalTimeoutSec: r.approvalTimeoutSec, pendingApprovals,
       selectorLabels: r.selectorLabels, pinnedRunnerId: r.pinnedRunnerId, runnerId: r.runnerId, leaseEpoch: r.leaseEpoch,
       state: r.state, stateReason: r.stateReason, requestedById: r.requestedById, queuedAt: r.queuedAt.toISOString(),
       assignedAt: iso(r.assignedAt), startedAt: iso(r.startedAt), finishedAt: iso(r.finishedAt),
@@ -75,8 +81,8 @@ export class FleetJobDto {
   }
 
   /** D149: a list page leaves the story list out (100 rows of up to 8 KiB each); `GET :id` carries it. */
-  static summary(r: FleetJobRecord): FleetJobDto {
-    return Object.assign(FleetJobDto.from(r), { stories: null, storiesTruncated: false });
+  static summary(r: FleetJobRecord, pendingApprovals = 0): FleetJobDto {
+    return Object.assign(FleetJobDto.from(r, pendingApprovals), { stories: null, storiesTruncated: false });
   }
 }
 

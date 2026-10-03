@@ -9099,11 +9099,21 @@
             "description": "USD, > 0, at most 4 decimals"
           },
           "bashMode": {
-            "type": "string",
             "enum": [
-              "raw"
+              "raw",
+              "gated",
+              "escalate"
             ],
-            "description": "Only raw until S1.5"
+            "type": "string",
+            "default": "raw",
+            "description": "S1.5: gated/escalate relay bash asks to the approvals inbox. RUN only; needs a runner with the approval relay."
+          },
+          "approvalTimeoutSec": {
+            "type": "number",
+            "minimum": 30,
+            "maximum": 3600,
+            "default": 600,
+            "description": "Seconds a bash ask waits for a decision before nax denies it. Used only when bashMode is not raw."
           },
           "selectorLabels": {
             "maxItems": 16,
@@ -9196,7 +9206,22 @@
             "description": "Decimal as string"
           },
           "bashMode": {
+            "enum": [
+              "raw",
+              "gated",
+              "escalate"
+            ],
             "type": "string"
+          },
+          "approvalTimeoutSec": {
+            "type": "number",
+            "minimum": 30,
+            "maximum": 3600,
+            "description": "S1.5: seconds a bash ask waits; used only when bashMode is not raw"
+          },
+          "pendingApprovals": {
+            "type": "number",
+            "description": "S1.5: pending bash approvals of this job"
           },
           "selectorLabels": {
             "type": "array",
@@ -9348,6 +9373,8 @@
           "profiles",
           "maxCostUsd",
           "bashMode",
+          "approvalTimeoutSec",
+          "pendingApprovals",
           "selectorLabels",
           "leaseEpoch",
           "state",
@@ -9379,6 +9406,7 @@
               "provider_unavailable",
               "sandbox",
               "tools",
+              "approvals_relay",
               "busy_repo",
               "capacity"
             ],
@@ -9681,6 +9709,19 @@
               "type": "string"
             }
           },
+          "bashMode": {
+            "enum": [
+              "raw",
+              "gated",
+              "escalate"
+            ],
+            "type": "string",
+            "description": "S1.5: gated/escalate relay bash asks to the approvals inbox. RUN only; needs a runner with the approval relay."
+          },
+          "approvalTimeoutSec": {
+            "type": "number",
+            "description": "Seconds a bash ask waits for a decision before nax denies it. Used only when bashMode is not raw."
+          },
           "pinnedRunnerId": {
             "type": "string",
             "nullable": true
@@ -9754,6 +9795,8 @@
           "profiles",
           "maxCostUsd",
           "selectorLabels",
+          "bashMode",
+          "approvalTimeoutSec",
           "enabled",
           "lastPassedCount",
           "noProgressTicks",
@@ -9817,6 +9860,23 @@
             "minimum": 0.0001,
             "maximum": 10000,
             "description": "Budget of each run in USD, > 0, at most 4 decimals"
+          },
+          "bashMode": {
+            "enum": [
+              "raw",
+              "gated",
+              "escalate"
+            ],
+            "type": "string",
+            "default": "raw",
+            "description": "S1.5: gated/escalate relay bash asks to the approvals inbox. RUN only; needs a runner with the approval relay."
+          },
+          "approvalTimeoutSec": {
+            "type": "number",
+            "minimum": 30,
+            "maximum": 3600,
+            "default": 600,
+            "description": "Seconds a bash ask waits for a decision before nax denies it. Used only when bashMode is not raw."
           },
           "selectorLabels": {
             "maxItems": 16,
@@ -9887,6 +9947,21 @@
             "minimum": 0.0001,
             "maximum": 10000,
             "description": "USD, > 0, at most 4 decimals"
+          },
+          "bashMode": {
+            "enum": [
+              "raw",
+              "gated",
+              "escalate"
+            ],
+            "type": "string",
+            "description": "S1.5: gated/escalate relay bash asks to the approvals inbox. RUN only; needs a runner with the approval relay."
+          },
+          "approvalTimeoutSec": {
+            "type": "number",
+            "minimum": 30,
+            "maximum": 3600,
+            "description": "Seconds a bash ask waits for a decision before nax denies it. Used only when bashMode is not raw."
           },
           "selectorLabels": {
             "maxItems": 16,

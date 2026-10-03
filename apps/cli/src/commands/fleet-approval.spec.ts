@@ -122,9 +122,15 @@ describe('koda fleet approval', () => {
 
   it('refuses an undecidable --decision before any request', async () => {
     // Commander rewraps a parser error as CommanderError, so the parser's own message is the assertion.
-    await expect(run('decide', 'a1', '--decision', 'allow')).rejects.toThrow(/expected keep_paused or raise_budget_and_resume/);
+    await expect(run('decide', 'a1', '--decision', 'bogus')).rejects.toThrow(/one of allow, allow_for_job, deny, raise_budget_and_resume, keep_paused/);
     expect(fleetApprovalsControllerDecide).not.toHaveBeenCalled();
     expect(projectFleetApprovalsControllerDecide).not.toHaveBeenCalled();
+  });
+
+  it.each(['allow', 'allow_for_job', 'deny'])('decide accepts the bash decision %s (D280)', async (decision) => {
+    (projectFleetApprovalsControllerDecide as jest.Mock).mockResolvedValue(ok(row({ type: 'nax_bash_escalate', status: 'approved', decision })));
+    await run('decide', 'a1', '--project', 'web', '--decision', decision);
+    expect(projectFleetApprovalsControllerDecide).toHaveBeenCalledWith({ path: { slug: 'web', id: 'a1' }, body: { decision } });
   });
 
   it('list uses the project route with --project and rejects a bad filter before any request', async () => {
@@ -167,6 +173,16 @@ describe('koda fleet approval', () => {
     const printed = JSON.parse(logged());
     expect(printed).toMatchObject({ id: 'a1', status: 'pending' });
     expect(printed.requeueCandidates).toEqual([expect.objectContaining({ jobId: 'j1', feature: 'login-fix' })]);
+  });
+
+  it('show prints a bash ask', async () => {
+    (projectFleetApprovalsControllerGet as jest.Mock).mockResolvedValue(ok(row({ type: 'nax_bash_escalate', jobId: 'j1', policyId: null,
+      payload: { command: 'bun run test', commandTruncated: false, maskedCount: 1, root: '/w', stage: 'execution', storyId: 'US-001',
+        featureName: 'demo', reason: 'matched ask rule', options: ['allow', 'deny'] }, expiresAt: '2026-10-04T10:10:00Z' })));
+    await run('show', 'a1', '--project', 'web');
+    expect(logged()).toContain('bun run test');
+    expect(logged()).toContain('1 secret value(s) masked');
+    expect(logged()).toContain('Options:  allow, deny');
   });
 
   it('decide --requeue all refuses when the candidate list was capped, naming the ids to pass instead', async () => {

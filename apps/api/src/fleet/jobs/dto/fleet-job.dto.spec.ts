@@ -39,4 +39,11 @@ describe('fleet job DTOs', () => {
     const summary = JSON.parse(JSON.stringify(FleetJobDto.summary({ ...record, stories: [...record.stories] } as never)));
     expect(summary).toEqual(expect.objectContaining({ id: 'j', currentStoryId: 'US-001', stories: null, storiesTruncated: false }));
   });
+
+  it('maps bashMode, approvalTimeoutSec and pendingApprovals (S1.5 §1.6)', () => {
+    const record = { id: 'j', bashMode: 'raw', approvalTimeoutSec: 600, queuedAt: now };
+    const dto = FleetJobDto.from({ ...record, bashMode: 'escalate', approvalTimeoutSec: 120 } as never, 2);
+    expect(dto).toEqual(expect.objectContaining({ bashMode: 'escalate', approvalTimeoutSec: 120, pendingApprovals: 2 }));
+    expect(FleetJobDto.summary(record as never).pendingApprovals).toBe(0);
+  });
 });
