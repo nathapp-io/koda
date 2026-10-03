@@ -10,7 +10,7 @@ import {
 } from './domain/fleet-activity.domain';
 import { FleetActivityDto } from './dto/fleet-activity.dto';
 
-const SECRET_KEY = /token|secret|key|password|credential/i;
+export const FLEET_ACTIVITY_SECRET_KEY = /token|secret|key|password|credential/i;
 
 @Injectable()
 export class FleetActivityService {
@@ -19,7 +19,7 @@ export class FleetActivityService {
   /** Call inside the mutating txManager.run so the row commits or rolls back with it (spec §8). */
   async record(entry: FleetActivityEntry): Promise<void> {
     const payload = entry.payload ?? {};
-    if (Object.keys(payload).some((k) => SECRET_KEY.test(k))) {
+    if (Object.keys(payload).some((k) => FLEET_ACTIVITY_SECRET_KEY.test(k))) {
       throw new Error('activity payload must not contain secrets');
     }
     await this.repo.create({

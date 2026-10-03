@@ -3,6 +3,8 @@ import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-co
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FleetActivityService } from '../activity/fleet-activity.service';
+import { ApprovalCloser, userActor } from '../approvals/approval-closer';
+import { ApprovalLivePublisher } from '../approvals/approval-live.publisher';
 import { BudgetEvaluator } from './budget-evaluator';
 import { budgetActivityPayload } from './budget-payloads';
 import { isAboveSpend, isEffectivelyPaused, scopeKeyOf, spendSince, warnReached, windowStart } from './budget-rules';
@@ -38,6 +40,8 @@ export class BudgetsService {
     private readonly evaluator: BudgetEvaluator,
     private readonly activity: FleetActivityService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly approvals: ApprovalCloser,
+    private readonly approvalLive: ApprovalLivePublisher,
   ) {}
 
   /** Admin: every policy. Project: the global ones plus the project's project and repo policies. */
@@ -89,31 +93,45 @@ export class BudgetsService {
     return this.toDto(updated, now);
   }
 
-  /** Deleting a paused policy lifts its pause (the row is gone). */
-  async remove(actorId: string, route: BudgetRoute, id: string): Promise<void> {
-    await this.txManager.run(async () => {
+  /** Deleting a paused policy lifts its pause (the row is gone) and closes its pending approval (S1.5 §1.4). */
+  async remove(actorId: string, route: BudgetRoute, id: string, now = new Date()): Promise<void> {
+    const live = await this.txManager.run(async () => {
       const policy = await this.lockOwned(route, id);
+      const closed = await this.approvals.closeForPolicy(id, { status: 'cancelled', resolvedBy: 'policy_deleted', actor: userActor(actorId) }, now);
       await this.repo.delete(id);
       await this.record(actorId, 'budget.deleted', policy, { wasPaused: policy.pausedAt !== null });
+      return closed.live;
     });
+    this.approvalLive.publish(live);
   }
 
   /**
    * S1b §2.4, B1: optionally raise the amount, clear the pause, record a `resumed` incident.
-   * C8's `raise_budget_and_resume` decision will call this method.
+   * S1.5: with `opts.approvalId` (a raise_budget_and_resume decision) the incident carries that id and nothing is
+   * closed here; without it (the budgets page) the pending approval is closed as manual_resume (plan D234).
    */
-  async resume(actorId: string, route: BudgetRoute, id: string, amountUsd: number | undefined, now = new Date()): Promise<BudgetPolicyDto> {
-    const resumed = await this.txManager.run(async () => {
+  async resume(
+    actorId: string, route: BudgetRoute, id: string, amountUsd: number | undefined, now = new Date(), opts: { approvalId?: string } = {},
+  ): Promise<BudgetPolicyDto> {
+    const { resumed, live } = await this.txManager.run(async () => {
       const policy = await this.lockOwned(route, id);
       if (!policy.pausedAt) throw new ConflictAppException({}, 'fleet.budgetNotPaused'); // plan D164
       const spent = await this.repo.windowSpend(policy, spendSince(policy.windowKind, now));
       const amount = amountUsd === undefined ? policy.amountUsd : String(amountUsd);
       if (!isAboveSpend(amount, spent)) throw new ValidationAppException({ amountUsd: amount, spentUsd: spent }, 'fleet.budgetAmountNotAboveSpend');
       const after = await this.repo.update(id, { amountUsd: amount, pausedAt: null, pausedWindowStart: null, updatedById: actorId });
-      await this.repo.insertIncident({ policyId: id, kind: 'resumed', windowStart: windowStart(policy.windowKind, now), spentUsd: spent, amountUsd: amount, actorId });
-      await this.record(actorId, 'budget.resumed', after, { spentUsd: spent, previousAmountUsd: policy.amountUsd });
-      return after;
+      const closed = opts.approvalId
+        ? { approval: null, live: [] }
+        : await this.approvals.closeForPolicy(id, {
+          status: 'approved', resolvedBy: 'manual_resume', decision: 'raise_budget_and_resume', actor: userActor(actorId),
+          outcome: { resumedAmountUsd: amount, requeueResults: [] },
+        }, now);
+      const approvalId = opts.approvalId ?? closed.approval?.id ?? null;
+      await this.repo.insertIncident({ policyId: id, kind: 'resumed', windowStart: windowStart(policy.windowKind, now), spentUsd: spent, amountUsd: amount, actorId, approvalId });
+      await this.record(actorId, 'budget.resumed', after, { spentUsd: spent, previousAmountUsd: policy.amountUsd, approvalId });
+      return { resumed: after, live: closed.live };
     });
+    this.approvalLive.publish(live);
     return this.toDto(resumed, now);
   }
 

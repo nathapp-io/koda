@@ -1,6 +1,6 @@
 import type { ScheduleDisabledReason, ScheduleRecord } from './domain/schedule.domain';
 
-/** The activity actor id of an automatic action (the same value as `SYSTEM_ACTOR.id` in the jobs module). */
+/** The activity actor id of an automatic action (the same value as `SYSTEM_ACTOR.id` in `common/system-actor.ts`). */
 export const SYSTEM_ACTOR_ID = 'system';
 
 /**

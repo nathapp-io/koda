@@ -7,7 +7,7 @@ describe('BudgetEvaluator.signal (S1b §2.2, B7)', () => {
 
   beforeEach(() => {
     jest.useFakeTimers();
-    evaluator = new BudgetEvaluator({} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    evaluator = new BudgetEvaluator({} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
     evaluateScope = jest.spyOn(evaluator, 'evaluateScope').mockResolvedValue(undefined);
   });
   afterEach(() => {

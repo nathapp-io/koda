@@ -113,9 +113,9 @@ export class PrismaBudgetRepository implements IBudgetRepository {
   async insertIncident(i: NewBudgetIncident): Promise<boolean> {
     // Bind timestamps as ISO text cast to timestamp(3) (UTC), as casAssign does.
     const rows = await this.db.$queryRaw<Array<{ id: string }>>`
-      INSERT INTO "BudgetIncident" ("id", "policyId", "kind", "windowStart", "spentUsd", "amountUsd", "actorId")
+      INSERT INTO "BudgetIncident" ("id", "policyId", "kind", "windowStart", "spentUsd", "amountUsd", "actorId", "approvalId")
       VALUES (${randomUUID()}, ${i.policyId}, ${i.kind}, CAST(${i.windowStart.toISOString()} AS timestamp(3)),
-              CAST(${i.spentUsd} AS DECIMAL(12,4)), CAST(${i.amountUsd} AS DECIMAL(12,4)), ${i.actorId})
+              CAST(${i.spentUsd} AS DECIMAL(12,4)), CAST(${i.amountUsd} AS DECIMAL(12,4)), ${i.actorId}, ${i.approvalId ?? null})
       ON CONFLICT DO NOTHING
       RETURNING "id"`;
     return rows.length > 0;

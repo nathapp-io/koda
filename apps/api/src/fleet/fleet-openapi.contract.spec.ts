@@ -70,4 +70,18 @@ describe('fleet OpenAPI contract', () => {
   it('keeps the test-only hooks out of the contract (3b D213)', () => {
     expect(Object.keys(spec.paths).filter((path) => path.includes('test-hooks'))).toEqual([]);
   });
+
+  it('exposes the approval routes, the counts route and the approval schemas (S1.5 §2.3)', () => {
+    for (const base of ['/api/fleet/approvals', '/api/projects/{slug}/fleet/approvals']) {
+      expect(spec.paths[base]?.['get']).toBeDefined();
+      expect(spec.paths[`${base}/{id}`]?.['get']).toBeDefined();
+      expect(spec.paths[`${base}/{id}/decide`]?.['post']).toBeDefined();
+    }
+    expect(spec.paths['/api/fleet/approval-counts']?.['get']).toBeDefined();
+    expect(Object.keys(spec.components.schemas['FleetApprovalDto']?.properties ?? {}))
+      .toEqual(expect.arrayContaining(['type', 'status', 'payload', 'outcome', 'decision', 'resolvedBy', 'requeueCandidates']));
+    expect(Object.keys(spec.components.schemas['DecideApprovalDto']?.properties ?? {}).sort())
+      .toEqual(['amountUsd', 'comment', 'decision', 'requeueJobIds']);
+    expect(Object.keys(spec.components.schemas['ApprovalCountsDto']?.properties ?? {}).sort()).toEqual(['projects', 'total', 'unscoped']);
+  });
 });
