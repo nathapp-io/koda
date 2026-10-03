@@ -14,6 +14,14 @@ const policy = (id: string, over: Partial<BudgetPolicyDto> = {}): BudgetPolicyDt
   createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', ...over,
 })
 
+const routed = (policies: unknown, approvals: unknown = { records: [] }) =>
+  jest.fn(async (path: string) => (path.includes('/fleet/approvals') ? approvals : policies))
+
+const pendingApproval = (id: string, policyId: string) => ({
+  id, type: 'budget_override_required', status: 'pending', projectId: 'p1', jobId: null, policyId, payload: {}, outcome: null,
+  requestedAt: '2026-10-03T10:00:00.000Z', expiresAt: null, decision: null, decidedById: null, decidedAt: null, resolvedBy: null, comment: null,
+})
+
 const NuxtLink = {
   name: 'StubNuxtLink',
   props: ['to'],
@@ -54,7 +62,7 @@ afterEach(() => { delete (globalThis as Record<string, unknown>).useApi })
 
 describe('FleetBudgetBanner', () => {
   test('loads the project list and shows paused before warning, each with scope, spend and amount', async () => {
-    const get = jest.fn(async () => [
+    const get = routed([
       policy('w', { scopeType: 'repo', scopeId: 'r1', warnReached: true, spentUsd: '4.2500' }),
       policy('p', { paused: true, spentUsd: '6.0000', warnReached: true }),
     ])
@@ -62,6 +70,7 @@ describe('FleetBudgetBanner', () => {
     await m.settle()
 
     expect(get).toHaveBeenCalledWith('/projects/koda/fleet/budgets')
+    expect(get).toHaveBeenCalledWith('/projects/koda/fleet/approvals', { query: { status: 'pending', type: 'budget_override_required', size: '100' } })
     expect(m.lines().map((l) => [l.props['data-policy'], l.props['data-status']])).toEqual([['p', 'paused'], ['w', 'warning']])
     expect(m.app.textOf(m.lines()[0])).toBe('Fleet budget paused for the whole fleet: $6.00 of $5.00 spent. New jobs are refused until it is resumed.')
     expect(m.app.textOf(m.lines()[1])).toBe('Fleet budget for repo acme/app is at 85% ($4.25 of $5.00).')
@@ -69,7 +78,7 @@ describe('FleetBudgetBanner', () => {
   })
 
   test('links to the project budgets page', async () => {
-    const m = mountBanner(jest.fn(async () => [policy('p', { paused: true })]))
+    const m = mountBanner(routed([policy('p', { paused: true })]))
     await m.settle()
     const link = m.app.find('[data-testid="fleet-budget-banner-link"]')
     expect(link).toHaveLength(1)
@@ -79,7 +88,7 @@ describe('FleetBudgetBanner', () => {
   })
 
   test('nothing flagged renders nothing (Review Focus 5)', async () => {
-    const m = mountBanner(jest.fn(async () => [policy('ok'), policy('ok2', { scopeId: 'x', scopeType: 'project' })]))
+    const m = mountBanner(routed([policy('ok'), policy('ok2', { scopeId: 'x', scopeType: 'project' })]))
     await m.settle()
     expect(m.app.find('[data-testid="fleet-budget-banner"]')).toHaveLength(0)
     m.app.unmount()
@@ -94,7 +103,7 @@ describe('FleetBudgetBanner', () => {
 
   test('more than three flagged policies show three lines and a count of the rest', async () => {
     const rows = ['a', 'b', 'c', 'd', 'e'].map((id, i) => policy(id, { scopeType: 'repo', scopeId: `r${i}`, paused: i < 2, warnReached: true }))
-    const m = mountBanner(jest.fn(async () => rows))
+    const m = mountBanner(routed(rows))
     await m.settle()
 
     expect(m.lines()).toHaveLength(3)
@@ -104,24 +113,56 @@ describe('FleetBudgetBanner', () => {
   })
 
   test('a paused policy that is also past its warn threshold is one line', async () => {
-    const m = mountBanner(jest.fn(async () => [policy('p', { paused: true, warnReached: true })]))
+    const m = mountBanner(routed([policy('p', { paused: true, warnReached: true })]))
     await m.settle()
     expect(m.lines()).toHaveLength(1)
     m.app.unmount()
   })
 
   test('a repo the page does not know shows its raw id', async () => {
-    const m = mountBanner(jest.fn(async () => [policy('p', { scopeType: 'repo', scopeId: 'gone', paused: true })]))
+    const m = mountBanner(routed([policy('p', { scopeType: 'repo', scopeId: 'gone', paused: true })]))
     await m.settle()
     expect(m.app.textOf(m.lines()[0])).toContain('repo gone')
     m.app.unmount()
   })
 
   test('polls on its own every 30 seconds', async () => {
-    const m = mountBanner(jest.fn(async () => []))
+    const m = mountBanner(routed([]))
     await m.settle()
     expect(m.polling.start).toHaveBeenCalled()
     m.app.unmount()
     expect(m.polling.stop).toHaveBeenCalled()
+  })
+
+  test('a paused policy with a pending override links to it (D248)', async () => {
+    const m = mountBanner(routed([policy('p', { scopeType: 'project', scopeId: 'p1', paused: true })], { records: [pendingApproval('a1', 'p')] }))
+    await m.settle()
+    const review = m.app.find('[data-testid="fleet-budget-banner-review"]')
+    expect(review).toHaveLength(1)
+    expect(review[0].props.to).toBe('/koda/fleet/approvals?id=a1')
+    expect(m.app.textOf(review[0])).toBe('Review override')
+    m.app.unmount()
+  })
+
+  test('no link for a warning line or a paused policy without a pending override', async () => {
+    const m = mountBanner(routed(
+      [policy('w', { scopeType: 'repo', scopeId: 'r1', warnReached: true }), policy('p', { paused: true })],
+      { records: [pendingApproval('a1', 'w')] },
+    ))
+    await m.settle()
+    expect(m.app.find('[data-testid="fleet-budget-banner-review"]')).toHaveLength(0)
+    m.app.unmount()
+  })
+
+  test('a failed approvals load keeps the lines without links', async () => {
+    const get = jest.fn(async (path: string) => {
+      if (path.includes('/fleet/approvals')) throw new Error('down')
+      return [policy('p', { paused: true })]
+    })
+    const m = mountBanner(get)
+    await m.settle()
+    expect(m.lines()).toHaveLength(1)
+    expect(m.app.find('[data-testid="fleet-budget-banner-review"]')).toHaveLength(0)
+    m.app.unmount()
   })
 })
