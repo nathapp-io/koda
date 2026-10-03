@@ -90,6 +90,21 @@ every user on the machine, and loads it with `apparmor_parser -r`. It refuses wh
 attaches to `bwrap` — and when it cannot read `/etc/apparmor.d` to find out, because a conflict it cannot see would
 make the profile fail to load. Check afterwards, as the service user: `nax sandbox probe --json` reports `available: true`.
 
+## Bash approvals (S1.5)
+
+A job dispatched with `bashMode: gated` or `escalate` relays nax's bash approval asks to the koda approvals inbox.
+
+- Upgrade the **API first**: it accepts protocol v1 and v2. A v2 runner against an older API gets 426 and stops.
+- The runner reports the relay only with nax 0.83.0 or later. Placement never sends a gated/escalate job to a runner
+  without it (misfit `approvals_relay`; a pinned dispatch to such a runner is refused).
+- For each such job the runner listens on `127.0.0.1` on a free port and writes the address and a per-job secret into
+  `~/.nax/profiles/koda-job-<id>.json` (mode 0600). Nothing listens on other interfaces.
+- The repo's nax config needs `Bash(...)` allow rules for the stages that should run commands; a stage without one
+  never gets the Bash tool and never asks.
+- If the daemon is down when nax asks, nax denies the command (it is not queued). After a restart the receiver
+  re-binds its port; if that port was taken meanwhile, pending asks time out and are denied.
+- An unanswered ask is denied at the job's `approvalTimeoutSec` (default 600 s).
+
 ## Operate
 
 | Task | Linux | macOS |

@@ -29,7 +29,7 @@ Let a human answer, from koda, the two decisions that end in a hard "no" today:
 
 | # | Ruling |
 |:--|:--|
-| A1 | The relay carries **bash approval asks only**. nax trigger confirmations are **disabled** in the per-job profile, so runs behave as headless runs do today. Relaying triggers is a later slice. |
+| A1 | The relay carries **bash approval asks only**. nax trigger confirmations are **disabled** in the per-job profile, so runs behave as headless runs do today (see plan D277 for the two unguarded prompts). Relaying triggers is a later slice. |
 | A2 | Notification is the **web inbox + badge** and an **outbound project webhook** (`fleet.approval.requested` / `fleet.approval.resolved`). No built-in chat integration. |
 | A3 | The ask timeout is a **dispatch field** `approvalTimeoutSec` (default 600, range 30..3600), also on schedule templates. The runner writes it into the per-job nax profile; the approval shows a countdown to the same deadline. |
 | A4 | "Raise and resume" **offers to re-queue** the jobs the pause cancelled before they started (checkbox list, all ticked by default). Jobs that were running are never re-run automatically (S1 manual-requeue rule). |
@@ -42,7 +42,8 @@ Let a human answer, from koda, the two decisions that end in a hard "no" today:
 Earlier rulings that still hold: single-instance API (in-process sweepers and bus), all runner git traffic brokered
 (R5), `--max-cost` is the hard per-job cap (S1b B2), budget policy permissions (S1b B3).
 
-### Why the relay works (verified at nax `c6ab5d52c`, 2026-10-02, released 0.83.2; still true at `df55f5da3`)
+### Why the relay works (verified at nax v0.83.2 `bcfcddb01`, released 2026-10-01, and main `a755a5464`,
+2026-10-03; `c6ab5d52c` and `df55f5da3` are main commits in between with the same protocol code)
 
 Paths are under `packages/nax/src` (`N/`) and `packages/nax-agent/src` (`A/`).
 
@@ -65,14 +66,17 @@ Paths are under `packages/nax/src` (`N/`) and `packages/nax-agent/src` (`A/`).
   permitting options permits (`N/interaction/chain.ts:133-137`, `ask-link-session.ts:39`); an `allow-remember` that
   was not offered is a deny.
 - nax passes the command verbatim and untruncated so a human never approves unseen text
-  (`A/permissions/types.ts:29-33`). The `request:` line is the ask summary and is not masked the way the command is.
+  (`A/permissions/types.ts:29-33`). The `request:` line is the ask summary: masked, cut to 200 chars, and may span
+  lines because it embeds the command (`tools/ask-request.ts:38-51`).
 - The ask timeout is `execution.approvalTimeout` (ms; default 600000, range 30000..3600000); a timeout is always a deny
   (`ask-link-session.ts:214`). Asks are serial per run.
 - `allow-remember` writes to the approvals store under the run's `outputDir`. koda gives every job its own `outputDir`
   (per-job profile), so "remember" lasts for that job only.
 - Every trigger call site is guarded by `ctx.interactionChain && isTriggerEnabled(...)` (e.g.
   `N/execution/cost-guard.ts:31`), and `isTriggerEnabled` returns a boolean setting as given (`N/interaction/triggers.ts:28-33`),
-  so `interaction.triggers.<name>: false` keeps a trigger silent with a chain present. The nine names are in
+  so `interaction.triggers.<name>: false` keeps a trigger silent with a chain present. Two prompts are not
+  trigger-guarded (story-size gate `precheck-runner.ts:139`, paused stories `run-setup-init.ts:227`); the runner answers
+  them as a headless run behaves (plan D277). The nine names are in
   `N/interaction/types.ts:78-87` (`TriggerName`).
 - Profiles deep-merge after the project config (`N/config/loader.ts:302`), so the per-job profile overrides any
   `interaction` block in the repo's config. `$VAR` resolution skips keys matching `url|secret|...`
@@ -123,13 +127,14 @@ approval and on the `resumed` incident a decision or manual resume produces.
 
 ### 1.2 Payloads
 
-- `nax_bash_escalate`: `{ command, commandTruncated, maskedCount, root, stage, storyId, featureName, reason, rule,
+- `nax_bash_escalate`: `{ command, commandTruncated, maskedCount, root, stage, storyId, featureName, reason,
   options[], rawDetail? }`.
   - `command` arrives secret-masked by nax. The runner caps it at 12 KiB (under the 16 KiB sync event limit); on
     overflow it sends the prefix and `commandTruncated: true`.
   - `options` are the choices nax offered (`allow`, `deny`, and `allow-remember` when offered).
-  - The `request:` line is not stored anywhere (it is unmasked).
-  - `rawDetail` is kept only when the runner could not parse `detail` (4.3), with the `request:` line removed.
+  - There is no `rule`: nax prints `reason ?? rule` on one line. `stage`, `storyId` and `featureName` come from
+    nax's top-level request fields.
+  - `rawDetail` is kept only when the runner could not parse `detail` (4.3), verbatim and capped.
 - `budget_override_required`: `{ scopeType, scopeId, windowKind, windowStart, spentUsd, amountUsd }` at the time of
   the stop.
 
@@ -281,7 +286,7 @@ Deploy order: server first (a v2 runner against a v1-only server gets 426).
 - Placement treats `bashMode != 'raw'` as requiring it: new `MisfitReason` `approvals_relay`, in `PERMANENT_MISFITS`
   (a pinned dispatch to such a runner is 422), with web labels and the OpenAPI enum.
 - `RunnerEventType` gains `approval_request` (sync parser `EVENT_TYPES`, `interpretEvent` effect), payload
-  `{ naxAskId, deadlineAt, command, commandTruncated, maskedCount, root, stage, storyId, featureName, reason, rule,
+  `{ naxAskId, deadlineAt, command, commandTruncated, maskedCount, root, stage, storyId, featureName, reason,
   options[], rawDetail? }` (caps as 1.2). `JobReportProcessor`'s live output widens to `LiveEvent[]`.
 - `FleetCommandTypeName` gains `APPROVAL_ANSWER`, payload `{ approvalId, naxAskId, choice: 'allow' | 'allow-remember' | 'deny' }`.
 - `AssignPayload.bashMode` widens to `'raw' | 'gated' | 'escalate'`; new `approvalTimeoutSec: number`.
@@ -309,8 +314,8 @@ Only for an ASSIGN with `bashMode` `gated` or `escalate`:
 nax POSTs to `/ask`. The receiver:
 
 1. Verifies `X-Nax-Signature` in constant time (401 on mismatch) and caps the body at 64 KiB (413).
-2. If `metadata.approvalPrompt` is not true (a non-approval ask; should not happen with A1), answers `skip` to its
-   `callbackUrl` at once and records a lifecycle `warn`.
+2. If `metadata.approvalPrompt` is not true (a non-approval ask; should not happen with A1), answers it at
+   once as a headless run would (plan D277) and records a lifecycle entry.
 3. Parses `detail` (4.3); keeps `id`, `callbackUrl`, `options` and `deadlineAt = createdAt + timeout`.
 4. Journals the pending ask, appends an `approval_request` event to the job's outgoing report, and wakes an idle sync
    poll.
@@ -320,9 +325,10 @@ nax POSTs to `/ask`. The receiver:
 
 Pure function over nax's flattened text, parsed from the end: the trailing `stage:`, `reason:`, `runs in:` and
 `request:` lines (any padding after the colon), then an optional `N secret value(s) masked` line (`maskedCount`),
-then the fenced block before them is the command, whatever fences it contains. The `request:` value is dropped.
-Fixtures are real requests captured from nax 0.83.x. If parsing fails, the event carries `rawDetail` (with any
-`request:` line removed, truncated to the cap) and empty fields, and the UI shows the raw text.
+then the fenced block before them is the command, whatever fences it contains. There must be exactly one split
+candidate, and its request text must match the command (plan D256); anything else is 'unparsed'.
+Fixtures are real requests captured from nax 0.83.x. If parsing fails, the event carries `rawDetail` (verbatim,
+truncated to the cap) and empty fields, and the UI shows the raw text.
 
 ### 4.4 Answer down
 
@@ -348,7 +354,7 @@ acks `rejected: callback_failed:<status>`. Re-sent commands are no-ops through c
   link, story/stage, requested time, countdown for bash asks.
 - Row-expand panel:
   - Bash: masked command in a monospace block (with "N secret values masked" when `maskedCount > 0`), root, stage,
-    story, reason, rule. **Allow once**, **Allow for this job** (only when offered), **Deny**; optional comment. A
+    story, reason. **Allow once**, **Allow for this job** (only when offered), **Deny**; optional comment. A
     truncated command shows a notice and only **Deny**. Unparsed asks show `rawDetail`.
   - Budget: spent / amount / window; amount input (must exceed spend) and **Raise and resume**; checklist of
     re-queue candidates, all ticked ("and N more" when truncated); **Keep paused**.
@@ -414,10 +420,12 @@ acks `rejected: callback_failed:<status>`. Re-sent commands are no-ops through c
 | 2a | Protocol v2, `approval_request` event, `APPROVAL_ANSWER`, `ApprovalReceiver` + profile overlay + journal tables, `bashMode` / `approvalTimeoutSec` through schema, DTOs, schedules, ASSIGN and runner parser, placement capability, expiry sweeper, job-leaves-RUNNING cleanup, `pendingApprovals`. | 1a |
 | 2b | Bash panel, job-page callout and timeline, dispatch and schedule fields, jobs-list marker, E2E (2) and (3), live check. | 1b, 2a |
 
-To verify in the 2a plan, not assumed:
-
-- The `detail` text format is the same in released 0.83.2 and nax main (capture fixtures from both).
-- The minimum nax version the runner requires before reporting `approvals.relay`.
+- 2a plan notes (`docs/superpowers/plans/2026-10-03-fleet-s1-5-slice-2a-approval-relay.md`, D255-D287): the `detail`
+  format is identical in nax v0.83.2 and main; the relay needs nax >= 0.83.0 (the runner floor 0.83.1 already
+  exceeds it); the `request:` line is masked, so `rawDetail` keeps it; the payload has no `rule`; the detail parser
+  refuses ambiguous splits; the size-gate and paused-story prompts are answered as headless runs behave; relay state
+  is per (job, epoch); a decide that finds the ask expired or its job gone commits that close and then answers 409;
+  `APPROVAL_ANSWER` acks are stored as `outcome.delivery`; static-capability runners never offer the relay.
 
 - 1a plan notes (`docs/superpowers/plans/2026-10-02-fleet-s1-5-slice-1a-approvals-core.md`, D226-D238): two modules
   (store + approvals); the hard stop opens the approval before inserting its incident; the resume route follows the
