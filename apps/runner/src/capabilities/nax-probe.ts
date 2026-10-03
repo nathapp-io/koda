@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { NaxProtocol, ProfileNeeds, RunnerCapabilities, RunnerCredential } from '@nathapp/fleet-protocol';
 import { withoutCredentialVars } from '../credentials/credential-env';
 import { PROFILE_NAME, RESERVED_PREFIX } from '../executor/nax-process';
-import { parseNaxJson, readNaxVersion, type NaxCli } from '../nax/nax-cli';
+import { parseNaxJson, readNaxVersion, relaySupported, type NaxCli } from '../nax/nax-cli';
 import type { Now } from '../time';
 import type { CapabilityProbe, ProbeResult } from './capability-probe';
 import { mapLimit } from './map-limit';
@@ -144,6 +144,7 @@ export class NaxCapabilityProbe implements CapabilityProbe {
         credentials: credentials.list,
         tools,
         executors: ['host'],
+        ...(relaySupported(version) ? { approvals: { relay: true as const } } : {}),
       });
       return { capabilities: bounded.capabilities, warnings: [...scan.warnings, ...credentials.warnings, ...bounded.warnings] };
     } finally {

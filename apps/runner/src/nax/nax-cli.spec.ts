@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { StartupError } from '../errors';
-import { MIN_NAX_VERSION, NaxUnavailableError, parseNaxJson, parseNaxVersion, readNaxVersion, spawnFailure, versionAtLeast, type NaxCli, type NaxResult } from './nax-cli';
+import { MIN_NAX_VERSION, NaxUnavailableError, parseNaxJson, parseNaxVersion, readNaxVersion, relaySupported, spawnFailure, versionAtLeast, type NaxCli, type NaxResult } from './nax-cli';
 
 const result = (over: Partial<NaxResult> = {}): NaxResult => ({ code: 0, stdout: '', stderr: '', timedOut: false, ...over });
 const answering = (r: NaxResult): NaxCli => ({ run: async () => r });
@@ -61,4 +61,11 @@ describe('nax version floor (D97)', () => {
     await expect(readNaxVersion(answering(result({ code: 127 })), '/')).rejects.toBeInstanceOf(StartupError);
     await expect(readNaxVersion(answering(result({ timedOut: true, stdout: '0.90.0' })), '/')).rejects.toThrow(/timed out/);
   });
+});
+
+describe('relaySupported (plan D258)', () => {
+  test.each([['0.83.0', true], ['0.83.2', true], ['0.84.0', true], ['1.0.0', true], ['0.83.1-fake', true], ['0.82.2', false], ['garbage', false]])(
+    '%s -> %p', (version, expected) => {
+      expect(relaySupported(version)).toBe(expected);
+    });
 });

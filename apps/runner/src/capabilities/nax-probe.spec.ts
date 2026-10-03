@@ -86,6 +86,7 @@ describe('NaxCapabilityProbe (design §3.2, D98-D101)', () => {
       ],
       tools: { git: true, gh: true, glab: false },
       executors: ['host'],
+      approvals: { relay: true },
     });
     expect(warnings).toEqual([]);
     expect(nax.calls.filter((c) => c.args[0] === 'config').map((c) => c.args)).toEqual([

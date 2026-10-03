@@ -135,6 +135,17 @@ export function versionAtLeast(version: readonly [number, number, number], min: 
   return version[2] >= min[2];
 }
 
+/**
+ * Plan D258: the first nax with the relay's guarantees: allow-remember offered only when nax can remember (#2252,
+ * 0.83.0), escalate refusing out-of-bounds commands instead of asking (#2250, 0.82.2). Verified v0.82.0..v0.83.2.
+ */
+export const RELAY_MIN_NAX_VERSION: readonly [number, number, number] = [0, 83, 0];
+
+export function relaySupported(version: string): boolean {
+  const parsed = parseNaxVersion(version);
+  return parsed !== null && versionAtLeast(parsed, RELAY_MIN_NAX_VERSION);
+}
+
 export class NaxUnavailableError extends StartupError {
   constructor(message: string) {
     super(message);
