@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { login, createProject, deleteProject, E2E_ADMIN } from './fixtures/api-client';
-import { webLogin, generateUniqueProjectKey } from './fixtures/page-helpers';
+import { webLogin, generateUniqueProjectKey, waitForHydration } from './fixtures/page-helpers';
 
 const PROJECT_SAVE_REGEX = /Save Project|保存项目/i;
 const VCS_TAB_REGEX = /VCS|集成/i;
@@ -51,7 +51,8 @@ test.describe('Settings Project + VCS Sync PR', () => {
     );
 
     await page.goto(`/${projectSlug}/settings`);
-    await page.waitForLoadState('networkidle');
+    // The header badge holds a live EventSource open, so 'networkidle' never settles.
+    await waitForHydration(page);
     await page.getByRole('tab', { name: VCS_TAB_REGEX }).click();
 
     // Wait for VCS tab content to render

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { login, createProject, deleteProject, E2E_ADMIN } from './fixtures/api-client';
-import { webLogin, generateUniqueProjectKey } from './fixtures/page-helpers';
+import { webLogin, generateUniqueProjectKey, waitForHydration } from './fixtures/page-helpers';
 
 const API_URL = process.env['E2E_API_URL'] ?? 'http://localhost:3102';
 const EDIT_REGEX = /Edit|编辑/i;
@@ -42,7 +42,8 @@ test.describe('Labels Inline Update', () => {
   test('inline edit sends PATCH /projects/:slug/labels/:id', async ({ page }) => {
     const label = await createLabel(token, projectSlug, `e2e-label-${Date.now()}`);
     await page.goto(`/${projectSlug}/labels`);
-    await page.waitForLoadState('networkidle');
+    // The header badge holds a live EventSource open, so 'networkidle' never settles.
+    await waitForHydration(page);
 
     const row = page.locator('tr', { hasText: label.name }).first();
     await expect(row).toBeVisible({ timeout: 10000 });
