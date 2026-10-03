@@ -130,6 +130,7 @@ export type TimelineEntry =
   | { kind: 'snapshot'; parts: string[] }
   | { kind: 'lifecycle'; level: string; message: string }
   | { kind: 'log'; text: string }
+  | { kind: 'approval'; command: string }
   | { kind: 'unknown'; type: string }
 
 const LOG_PREVIEW = 300
@@ -161,6 +162,12 @@ export function summarizeEvent(event: Pick<FleetJobEventDto, 'type' | 'payload' 
     case 'log': {
       const body = text(p.text) ?? ''
       return { kind: 'log', text: body.length > LOG_PREVIEW ? `${body.slice(0, LOG_PREVIEW)}...` : body }
+    }
+    case 'approval_request': {
+      // S1.5 2a: a relayed bash ask; the full text lives on the approval, the timeline shows its first line.
+      const body = text(p.command) ?? text(p.rawDetail) ?? ''
+      const first = body.split('\n')[0] ?? ''
+      return { kind: 'approval', command: first.length > LOG_PREVIEW ? `${first.slice(0, LOG_PREVIEW)}...` : first }
     }
     default:
       return { kind: 'unknown', type: event.type }

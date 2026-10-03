@@ -254,6 +254,7 @@ const FLEET_COMPONENT_FILES: Record<FleetComponentName, string> = {
   FleetApprovalOutcome: 'ApprovalOutcome.vue',
   FleetApprovalInbox: 'ApprovalInbox.vue',
   FleetApprovalBashPanel: 'ApprovalBashPanel.vue',
+  FleetJobApprovals: 'JobApprovals.vue',
 }
 
 export function mountSfc(file: string, options: MountOptions = {}): Mounted {
@@ -326,3 +327,4 @@ export type FleetComponentName =
   | 'FleetAge' | 'FleetRunnerCapabilityChips' | 'FleetRepoReachabilityBadge' | 'FleetNativeSelect' | 'FleetBudgetTable'
   | 'FleetScheduleTable' | 'FleetScheduleHistory'
   | 'FleetApprovalBudgetPanel' | 'FleetApprovalOutcome' | 'FleetApprovalInbox' | 'FleetApprovalBashPanel'
+  | 'FleetJobApprovals'

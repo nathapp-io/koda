@@ -198,6 +198,16 @@ describe('summarizeEvent', () => {
   })
 })
 
+describe('approval_request timeline rows (D297)', () => {
+  test('the command\'s first line, or the raw text when the command was not parsed', () => {
+    expect(summarizeEvent({ type: 'approval_request', runnerSeq: 4, payload: { command: 'git push\nmore' } }))
+      .toEqual({ kind: 'approval', command: 'git push' })
+    expect(summarizeEvent({ type: 'approval_request', runnerSeq: 4, payload: { command: '', rawDetail: 'request: ls' } }))
+      .toEqual({ kind: 'approval', command: 'request: ls' })
+    expect(summarizeEvent({ type: 'approval_request', runnerSeq: 4, payload: null })).toEqual({ kind: 'approval', command: '' })
+  })
+})
+
 describe('visibleTimelineEvents', () => {
   const ev = (id: string, type: FleetJobEventDto['type'], runnerSeq: number | null): FleetJobEventDto =>
     ({ id, seq: 0, leaseEpoch: 1, runnerSeq, type, payload: {}, createdAt: '2026-10-01T00:00:00.000Z' })

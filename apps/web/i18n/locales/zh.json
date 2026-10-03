@@ -1206,6 +1206,7 @@
       "budgets": "预算",
       "schedules": "定时计划",
       "approvals": "审批",
+      "approvalsSection": { "title": "审批", "empty": "尚无 Shell 命令询问。", "open": "打开" },
       "empty": "还没有 fleet 任务",
       "total": "共 {total} 个任务",
       "unknownMember": "未知成员",
@@ -1268,7 +1269,10 @@
         "budgetStopLink": "查看预算",
         "fromSchedule": "由定时计划派发",
         "openSchedule": "查看定时计划",
-        "coalesced": "之后的 {count} 次触发已合并到此任务"
+        "coalesced": "之后的 {count} 次触发已合并到此任务",
+        "bash": "Shell 审批",
+        "waitingApproval": "等待审批（{count}）",
+        "reviewApproval": "查看"
       },
       "actions": {
         "cancel": "取消任务",
@@ -1294,6 +1298,7 @@
         "snapshotEmpty": "状态更新",
         "lifecycle": "执行机 {level}：{message}",
         "log": "日志：{text}",
+        "approval": "请求审批：{command}",
         "unknown": "未知事件 {type}"
       }
     },

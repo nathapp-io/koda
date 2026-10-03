@@ -1206,6 +1206,7 @@
       "budgets": "Budgets",
       "schedules": "Schedules",
       "approvals": "Approvals",
+      "approvalsSection": { "title": "Approvals", "empty": "No shell command asks yet.", "open": "Open" },
       "empty": "No fleet jobs yet",
       "total": "{total} jobs",
       "unknownMember": "Unknown member",
@@ -1268,7 +1269,10 @@
         "budgetStopLink": "View budgets",
         "fromSchedule": "Dispatched by a schedule",
         "openSchedule": "View schedule",
-        "coalesced": "{count} later fires merged into this job"
+        "coalesced": "{count} later fires merged into this job",
+        "bash": "Shell approvals",
+        "waitingApproval": "Waiting for approval ({count})",
+        "reviewApproval": "Review"
       },
       "actions": {
         "cancel": "Cancel job",
@@ -1294,6 +1298,7 @@
         "snapshotEmpty": "Status update",
         "lifecycle": "Runner {level}: {message}",
         "log": "Log: {text}",
+        "approval": "Approval requested: {command}",
         "unknown": "Unknown event {type}"
       }
     },

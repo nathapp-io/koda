@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
-import { buildApprovalQuery, sortPending } from '~/lib/fleet-approvals'
+import { buildApprovalQuery, INBOX_PENDING_SIZE, sortPending } from '~/lib/fleet-approvals'
 import type { ApprovalBase, ApprovalListFilters } from '~/lib/fleet-approvals'
 import type { ApprovalCountsDto, DecideApprovalBody, FleetApprovalDto, FleetPage } from '~/lib/fleet-types'
 
@@ -48,7 +48,13 @@ export function useFleetApprovals(base: ApprovalBase) {
     return decided
   }
 
-  return { approvals, total, page, hasNext, load, get, decide }
+  /** D297: every approval of one job (job page), newest first, one page of 100. */
+  async function listForJob(jobId: string): Promise<FleetApprovalDto[]> {
+    const res = await $api.get<FleetPage<FleetApprovalDto>>(approvalRoot(base), { query: { jobId, size: String(INBOX_PENDING_SIZE) } })
+    return res.records ?? []
+  }
+
+  return { approvals, total, page, hasNext, load, get, decide, listForJob }
 }
 
 export type FleetApprovalsApi = ReturnType<typeof useFleetApprovals>
