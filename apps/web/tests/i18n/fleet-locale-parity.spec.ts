@@ -46,6 +46,7 @@ const ENUMS: Record<string, string[]> = {
   'fleet.approvals.empty': ['pending', 'all'],
   'fleet.approvals.validation': ['amountInvalid', 'notAbove', 'commentTooLong'],
   'fleet.approvals.toast': ['raise_budget_and_resume', 'keep_paused', 'requeueFailed'],
+  'fleet.bash.mode': ['raw', 'gated', 'escalate'],
 }
 
 describe('Fleet locale parity (en and zh)', () => {

@@ -1108,6 +1108,22 @@
       },
       "badge": { "label": "{count} approvals waiting" }
     },
+    "bash": {
+      "mode": {
+        "raw": "Off",
+        "gated": "Gated",
+        "escalate": "Escalate"
+      },
+      "modeLabel": "Shell command approvals",
+      "modeHint": "Gated asks only on the repo's ask rules; escalate also asks for any command outside the stage's grants. Both need Bash(...) allow rules in the repo's nax config and a runner with the approval relay.",
+      "timeout": "Ask timeout (minutes)",
+      "timeoutHint": "An unanswered ask is denied after this long (0.5 to 60 minutes).",
+      "scheduleWarning": "A scheduled run may raise asks when nobody is watching. They are denied when the timeout passes.",
+      "summary": "{mode}, asks wait {minutes} min",
+      "validation": {
+        "timeout": "Enter 0.5 to 60 minutes, with at most 2 decimals."
+      }
+    },
     "repos": {
       "title": "Repos",
       "subtitle": "Repositories koda can clone and push for fleet jobs.",

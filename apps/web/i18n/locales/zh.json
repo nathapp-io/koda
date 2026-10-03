@@ -1108,6 +1108,22 @@
       },
       "badge": { "label": "{count} 个审批等待处理" }
     },
+    "bash": {
+      "mode": {
+        "raw": "关闭",
+        "gated": "受控",
+        "escalate": "升级审批"
+      },
+      "modeLabel": "Shell 命令审批",
+      "modeHint": "受控模式只在仓库的 ask 规则命中时询问；升级审批模式对阶段授权之外的任何命令也会询问。两者都需要仓库 nax 配置中的 Bash(...) 允许规则，以及带审批中继的 runner。",
+      "timeout": "询问超时（分钟）",
+      "timeoutHint": "未答复的询问在此时间后被拒绝（0.5 到 60 分钟）。",
+      "scheduleWarning": "定时运行可能在无人值守时发起询问，超时后会被拒绝。",
+      "summary": "{mode}，询问等待 {minutes} 分钟",
+      "validation": {
+        "timeout": "请输入 0.5 到 60 分钟，最多两位小数。"
+      }
+    },
     "repos": {
       "title": "仓库",
       "subtitle": "koda 可为执行机任务克隆和推送的仓库。",
