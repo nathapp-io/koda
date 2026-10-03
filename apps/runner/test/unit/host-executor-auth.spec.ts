@@ -16,6 +16,7 @@ import { assignFor } from '../helpers/assign';
 import { installFakeGh } from '../helpers/fake-gh';
 import { git as sh, isolateGit, makeOrigin } from '../helpers/git-fixture';
 import { startGitHttp } from '../helpers/git-http';
+import { NO_APPROVALS } from '../helpers/no-approvals';
 import { makeTempDirs } from '../helpers/tmp';
 import { waitFor } from '../helpers/wait';
 
@@ -54,7 +55,7 @@ async function world(command: 'RUN' | 'PLAN' = 'RUN') {
   const row = Journal.open(':memory:').insertJob({ assign, leaseEpoch: 1, repoKey: 'acme/app', jobDir: jobDirFor(workspaceRoot, assign.jobId) }).row;
   const ex = new HostExecutor({
     config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome: join(base, 'naxhome') }, git: createGit(), log: createMemoryLogger(),
-    nowMs: () => Date.now(), sleep: async () => undefined, credentials: broker,
+    nowMs: () => Date.now(), sleep: async () => undefined, credentials: broker, approvals: NO_APPROVALS,
   });
   const grant = (): void => {
     tokens.want(row.jobId, row.leaseEpoch);
@@ -133,7 +134,7 @@ describe('HostExecutor.pushProgress (S1b 1a)', () => {
   const executorWith = (acquire: CredentialProvider['acquire']): HostExecutor =>
     new HostExecutor({
       config: { workspaceRoot: '/w', naxCommand: ['nax'], naxHome: '/naxhome' }, git: createGit(), log: createMemoryLogger(),
-      nowMs: () => Date.now(), credentials: { acquire, release: async () => undefined },
+      nowMs: () => Date.now(), credentials: { acquire, release: async () => undefined }, approvals: NO_APPROVALS,
     });
 
   test('a row with no branch fails before touching credentials', async () => {

@@ -1,5 +1,6 @@
 import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
+import type { ApprovalRelay } from '../approvals/approval-relay';
 import { NO_JOB_CHECK, type JobCheck } from '../capabilities/job-check';
 import { buildBundle, type BundleFile } from '../bundle/build-bundle';
 import type { RunnerConfig } from '../config/runner-config';
@@ -31,6 +32,8 @@ export interface HostExecutorDeps {
   readonly sleep?: (ms: number) => Promise<void>;
   /** Design §3.1: per-job git credentials (the broker; a stub in `file://` specs). */
   readonly credentials: CredentialProvider;
+  /** Spec §4.1: the approval relay; a `type` import — a value import would make an executor -> approvals -> supervisor cycle. */
+  readonly approvals: Pick<ApprovalRelay, 'open' | 'close' | 'resume'>;
   /** D104: nax mode only. Absent: no post-checkout check (static capabilities, unit specs). */
   readonly jobCheck?: JobCheck;
 }
@@ -85,7 +88,9 @@ export class HostExecutor implements JobExecutor {
       if (assign.command === 'PLAN') await this.moveStalePlanFiles(repoDir, jobDir, assign.feature);
       if (cancelled()) return CANCELLED;
       await mkdir(outDir, { recursive: true });
-      await writeJobProfile(this.deps.config.naxHome, job.jobId, outDir, projectNameFor(assign.repo.owner, assign.repo.name));
+      const relay = assign.bashMode === 'raw' ? undefined
+        : { bashMode: assign.bashMode, approvalTimeoutSec: assign.approvalTimeoutSec, endpoint: await this.deps.approvals.open(job) };
+      await writeJobProfile(this.deps.config.naxHome, job.jobId, outDir, projectNameFor(assign.repo.owner, assign.repo.name), relay);
       return { ok: true, branch: checkout.branch };
     } catch (error) {
       return { ok: false, reason: reasonFromError(error) };
@@ -207,7 +212,11 @@ export class HostExecutor implements JobExecutor {
     try {
       await deleteJobProfile(this.deps.config.naxHome, job.jobId);
     } finally {
-      await this.deps.credentials.release(job);
+      try {
+        await this.deps.approvals.close(job.jobId, job.leaseEpoch);
+      } finally {
+        await this.deps.credentials.release(job);
+      }
     }
   }
 
@@ -217,5 +226,13 @@ export class HostExecutor implements JobExecutor {
 
   async releaseCredentials(job: JobRow): Promise<void> {
     await this.deps.credentials.release(job);
+  }
+
+  async resumeApprovals(job: JobRow): Promise<void> {
+    if (job.assign.bashMode !== 'raw') await this.deps.approvals.resume(job);
+  }
+
+  async releaseApprovals(job: JobRow): Promise<void> {
+    await this.deps.approvals.close(job.jobId, job.leaseEpoch);
   }
 }

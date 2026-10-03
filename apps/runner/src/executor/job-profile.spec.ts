@@ -1,9 +1,10 @@
-import { afterAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { NAX_TRIGGER_NAMES } from '../approvals/nax-triggers';
 import { makeTempDirs } from '../../test/helpers/tmp';
-import { deleteJobProfile, jobProfileName, jobProfilePath, projectNameFor, sweepOrphanProfiles, writeJobProfile } from './job-profile';
+import { deleteJobProfile, jobProfileContent, jobProfileName, jobProfilePath, projectNameFor, sweepOrphanProfiles, writeJobProfile } from './job-profile';
 
 const tmp = makeTempDirs();
 afterAll(() => tmp.cleanup());
@@ -31,6 +32,34 @@ describe('projectNameFor (design §2 step 5)', () => {
   test('an all-symbol name falls back to "repo"; distinct repos with the same slug get distinct names', () => {
     expect(projectNameFor('...', '---')).toMatch(/^repo-[0-9a-f]{8}$/);
     expect(projectNameFor('a.b', 'c')).not.toBe(projectNameFor('a-b', 'c'));
+  });
+});
+
+describe('relay overlay (spec §4.1, plan D275)', () => {
+  let naxHome!: string;
+  beforeEach(async () => { naxHome = await tmp.make('profile-relay'); });
+  const relay = { bashMode: 'escalate' as const, approvalTimeoutSec: 90, endpoint: { url: 'http://127.0.0.1:43210/ask', secret: 'f'.repeat(64) } };
+
+  test('a raw job keeps the bare overlay', () => {
+    expect(jobProfileContent('/out', 'acme-app-1234abcd')).toEqual({ outputDir: '/out', name: 'acme-app-1234abcd' });
+  });
+
+  test('a relayed job sets bash approval, the webhook plugin and silences every trigger', () => {
+    expect(jobProfileContent('/out', 'p', relay)).toEqual({
+      outputDir: '/out', name: 'p',
+      execution: { bashApproval: 'escalate', approvalTimeout: 90_000 },
+      interaction: {
+        plugin: 'webhook',
+        config: { url: 'http://127.0.0.1:43210/ask', secret: 'f'.repeat(64), requireSecret: true, callbackPort: 0 },
+        triggers: Object.fromEntries(NAX_TRIGGER_NAMES.map((n) => [n, false])),
+      },
+    });
+  });
+
+  test('the written profile is mode 0600 (it now holds a secret)', async () => {
+    const path = await writeJobProfile(naxHome, 'j1', '/out', 'p', relay);
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(await readFile(path, 'utf8')).interaction.config.secret).toBe('f'.repeat(64));
   });
 });
 

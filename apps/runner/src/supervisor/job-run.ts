@@ -92,7 +92,10 @@ export class JobRun {
 
   private async lifecycle(from: RunStart): Promise<void> {
     if ((from === 'prepare' || from === 'reprepare') && !(await this.prepareAndSpawn(from === 'reprepare'))) return;
-    if (from === 'watch') await this.resumeCredentials();
+    if (from === 'watch') {
+      await this.resumeCredentials();
+      await this.resumeApprovals();
+    }
     if (from !== 'finish') await this.watchUntilExit(from === 'watch');
     if (this.halted) return;
     await this.finish();
@@ -106,6 +109,17 @@ export class JobRun {
       await this.deps.executor.resumeCredentials(row);
     } catch (error) {
       this.events.lifecycle('warn', `git credentials could not be restored: ${errorMessage(error)}`);
+    }
+  }
+
+  /** Plan D273: asks raised before the restart stay answerable; a failure means they time out and nax denies. */
+  private async resumeApprovals(): Promise<void> {
+    const row = this.row();
+    if (!row) return;
+    try {
+      await this.deps.executor.resumeApprovals(row);
+    } catch (error) {
+      this.events.lifecycle('error', `approval relay could not be restored: ${errorMessage(error)}; pending asks will time out and be denied`);
     }
   }
 
@@ -173,6 +187,10 @@ export class JobRun {
       // D90: the socket is per epoch, so it closes even when a live higher epoch keeps the reap and the profile.
       await this.deps.executor.releaseCredentials(row).catch((error: unknown) => {
         this.deps.log.warn('credential release failed', { jobId: this.jobId, error: errorMessage(error) });
+      });
+      // Plan D285: the receiver is per epoch, like the credential socket (D90).
+      await this.deps.executor.releaseApprovals(row).catch((error: unknown) => {
+        this.deps.log.warn('approval relay release failed', { jobId: this.jobId, error: errorMessage(error) });
       });
       if (this.higherEpochLive()) {
         this.deps.log.info('abandon leaves reap and cleanup to the live higher epoch', { jobId: this.jobId, leaseEpoch: this.leaseEpoch });

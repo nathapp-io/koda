@@ -1,8 +1,9 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AssignPayload } from '@nathapp/fleet-protocol';
 import type { SnapshotEventPayload } from '@nathapp/fleet-protocol';
+import type { ApprovalRelay } from '../../src/approvals/approval-relay';
 import type { CredentialProvider } from '../../src/credentials/broker';
 import { HostExecutor } from '../../src/executor/host-executor';
 import { createGit } from '../../src/executor/git';
@@ -14,6 +15,7 @@ import { createMemoryLogger } from '../../src/logger';
 import { jobDirFor } from '../../src/paths/safe-segment';
 import { runVerdict } from '../../src/verdict/run-verdict';
 import { git as sh, isolateGit, makeOrigin } from '../helpers/git-fixture';
+import { NO_APPROVALS } from '../helpers/no-approvals';
 import { NO_CREDENTIALS } from '../helpers/no-credentials';
 import { makeTempDirs } from '../helpers/tmp';
 import { waitFor } from '../helpers/wait';
@@ -24,7 +26,7 @@ const PRD = JSON.stringify({ branchName: 'feat/feat', userStories: [{ id: 'OLD-1
 beforeAll(() => { isolateGit(); process.env['FAKE_NAX_STEP_MS'] = '10'; });
 afterAll(() => { delete process.env['FAKE_NAX_STEP_MS']; delete process.env['FAKE_NAX_SCENARIO']; return tmp.cleanup(); });
 
-async function world(command: 'RUN' | 'PLAN' = 'RUN', over: Partial<AssignPayload> = {}, extraFiles: Record<string, string> = {}) {
+async function world(command: 'RUN' | 'PLAN' = 'RUN', over: Partial<AssignPayload> = {}, extraFiles: Record<string, string> = {}, approvals: Pick<ApprovalRelay, 'open' | 'close' | 'resume'> = NO_APPROVALS) {
   const base = await tmp.make('host');
   const origin = await makeOrigin(base, 'origin', { files: { 'README.md': 'x', 'docs/spec.md': '# spec from repo\n', '.nax/features/feat/prd.json': PRD, ...extraFiles } });
   const workspaceRoot = join(base, 'ws');
@@ -36,7 +38,7 @@ async function world(command: 'RUN' | 'PLAN' = 'RUN', over: Partial<AssignPayloa
   };
   const journal = Journal.open(':memory:');
   const row: JobRow = journal.insertJob({ assign, leaseEpoch: 1, repoKey: 'acme/app', jobDir: jobDirFor(workspaceRoot, assign.jobId) }).row;
-  const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now(), sleep: async () => undefined, credentials: NO_CREDENTIALS });
+  const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now(), sleep: async () => undefined, credentials: NO_CREDENTIALS, approvals });
   return { base, origin, workspaceRoot, naxHome, assign, row, ex, journal };
 }
 
@@ -224,7 +226,7 @@ describe('HostExecutor PLAN', () => {
     };
     const journal = Journal.open(':memory:');
     const row = journal.insertJob({ assign, leaseEpoch: 1, repoKey: 'acme/bare', jobDir: jobDirFor(workspaceRoot, 'cjob2') }).row;
-    const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome: join(base, 'nh') }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now(), credentials: NO_CREDENTIALS });
+    const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome: join(base, 'nh') }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now(), credentials: NO_CREDENTIALS, approvals: NO_APPROVALS });
     expect(await ex.prepare(row)).toEqual({ ok: false, reason: 'no .nax dir' });
   });
 });
@@ -262,7 +264,7 @@ describe('HostExecutor credentials wiring (review minors 2, 7)', () => {
       },
       release: async () => undefined,
     };
-    const ex = new HostExecutor({ config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now(), sleep: async () => undefined, credentials });
+    const ex = new HostExecutor({ config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now(), sleep: async () => undefined, credentials, approvals: NO_APPROVALS });
     expect(await ex.finishPlan(w.row, { isCancelled: () => true })).toEqual({ ok: false, reason: 'cancelled', cancelled: true });
     expect(seen.cancelled).toBe(true);
   });
@@ -279,5 +281,45 @@ describe('HostExecutor PLAN watcher', () => {
     await watcher.tick(true);
     expect(snaps).toHaveLength(1);
     expect(snaps[0]).not.toHaveProperty('stories');
+  });
+});
+
+describe('HostExecutor approval relay (plan D273, D285)', () => {
+  const spy = () => ({
+    open: mock(async () => ({ url: 'http://127.0.0.1:1/ask', secret: 's' })),
+    close: mock(async () => undefined),
+    resume: mock(async () => undefined),
+  });
+
+  test('prepare opens the relay and writes the overlay for a non-raw RUN', async () => {
+    const approvals = spy();
+    const w = await world('RUN', { bashMode: 'gated', approvalTimeoutSec: 60 }, {}, approvals);
+    expect(await w.ex.prepare(w.row)).toEqual({ ok: true, branch: 'feat/feat' });
+    expect(approvals.open).toHaveBeenCalledTimes(1);
+    const profile = JSON.parse(await readFile(jobProfilePath(w.naxHome, 'cjob1'), 'utf8'));
+    expect(profile.execution).toEqual({ bashApproval: 'gated', approvalTimeout: 60_000 });
+  });
+  test('a raw RUN never opens the relay', async () => {
+    const approvals = spy();
+    const w = await world('RUN', {}, {}, approvals);
+    await w.ex.prepare(w.row);
+    expect(approvals.open).not.toHaveBeenCalled();
+  });
+  test('cleanup and releaseApprovals close this epoch only', async () => {
+    const approvals = spy();
+    const w = await world('RUN', { bashMode: 'escalate' }, {}, approvals);
+    await w.ex.cleanup(w.row);
+    expect(approvals.close).toHaveBeenCalledWith('cjob1', 1);
+    await w.ex.releaseApprovals(w.row);
+    expect(approvals.close).toHaveBeenCalledTimes(2);
+  });
+  test('resumeApprovals resumes only non-raw jobs', async () => {
+    const approvals = spy();
+    const raw = await world('RUN', {}, {}, approvals);
+    await raw.ex.resumeApprovals(raw.row);
+    expect(approvals.resume).not.toHaveBeenCalled();
+    const gated = await world('RUN', { bashMode: 'escalate' }, {}, approvals);
+    await gated.ex.resumeApprovals(gated.row);
+    expect(approvals.resume).toHaveBeenCalledTimes(1);
   });
 });

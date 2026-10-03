@@ -63,4 +63,8 @@ export interface JobExecutor {
   resumeCredentials(job: JobRow): Promise<void>;
   /** D90: close this epoch's credential socket and forget its token; other epochs of the job are untouched. */
   releaseCredentials(job: JobRow): Promise<void>;
+  /** Plan D273: READOPT `watch` re-binds the job's approval receiver (no-op for raw jobs). */
+  resumeApprovals(job: JobRow): Promise<void>;
+  /** Plan D285: an abandoned epoch closes its own receiver even when a live higher epoch keeps the profile. */
+  releaseApprovals(job: JobRow): Promise<void>;
 }
