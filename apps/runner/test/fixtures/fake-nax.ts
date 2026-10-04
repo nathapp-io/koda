@@ -6,7 +6,7 @@
 import { execFileSync } from 'node:child_process';
 import { askOnce, type FakeProfile } from './fake-nax-ask';
 import { answerProbe } from './fake-nax-probe';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, symlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 
@@ -138,10 +138,25 @@ async function run(): Promise<void> {
   }
   const padTo = Number(process.env['FAKE_NAX_LOG_BYTES'] ?? 0);
   const padLine = `${JSON.stringify({ level: 'debug', msg: 'pad', data: 'p'.repeat(980) })}\n`;
+  // S2a slice 2 D360 (live check): FAKE_NAX_PACE_MS sleeps between batches, so the log grows over minutes with a fresh
+  // heartbeat (READOPT needs one); FAKE_NAX_STDIO_BYTES writes that much stdout and stderr alongside, 64 KiB a batch.
+  const paceMs = Number(process.env['FAKE_NAX_PACE_MS'] ?? 0);
+  const stdioBytes = Number(process.env['FAKE_NAX_STDIO_BYTES'] ?? 0);
+  let stdioWritten = 0;
   for (let written = existsSync(join(runsDir, logName)) ? statSync(join(runsDir, logName)).size : 0; written < padTo;) {
     const batch = padLine.repeat(64);
     appendFileSync(join(runsDir, logName), batch);
     written += batch.length;
+    if (stdioWritten < stdioBytes) {
+      const line = `stdio ${stdioWritten} ${'o'.repeat(1000)}\n`.repeat(64);
+      writeSync(1, line);                                            // fd 1/2 are nax.stdout/nax.stderr (the runner's spawn)
+      writeSync(2, line.replaceAll('o', 'e'));
+      stdioWritten += line.length;
+    }
+    if (paceMs > 0) {
+      flush();
+      await sleep(paceMs);
+    }
   }
 
   for (let i = 1; i <= steps; i += 1) {

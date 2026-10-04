@@ -7,6 +7,7 @@
  */
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
+import { pack } from 'tar-stream';
 
 const API_URL = process.env['E2E_API_URL'] ?? 'http://localhost:3102';
 const BOOT_ID = 'e2e-boot-1';
@@ -42,6 +43,30 @@ interface SyncReply {
 
 type EventType = 'state' | 'snapshot' | 'lifecycle' | 'log' | 'approval_request';
 
+/** S2a §2.2 (D307): the 200 body of a log upload. */
+export interface LogUploadAnswer {
+  outcome: 'appended' | 'duplicate' | 'offset' | 'complete' | 'stream_cap' | 'rate_limited';
+  size: number;
+  retryAfterMs?: number;
+}
+
+const sha256Hex = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex');
+
+/** A tar.gz with one regular file per entry, laid out like the runner's bundle (S2a §2.5 member names). */
+async function tarGz(members: Readonly<Record<string, string>>): Promise<Buffer> {
+  const archive = pack();
+  const chunks: Buffer[] = [];
+  archive.on('data', (chunk: unknown) => { chunks.push(Buffer.from(chunk as Uint8Array)); });
+  const done = new Promise<void>((resolve, reject) => {
+    archive.on('end', () => resolve());
+    archive.on('error', reject);
+  });
+  for (const [name, text] of Object.entries(members)) archive.entry({ name, mtime: new Date() }, text);
+  archive.finalize();
+  await done;
+  return gzipSync(Buffer.concat(chunks));
+}
+
 async function call<T>(path: string, init: { method: string; token?: string; body?: unknown }): Promise<T> {
   const res = await fetch(`${API_URL}/api${path}`, {
     method: init.method,
@@ -71,9 +96,10 @@ export class ScriptedRunner {
   /**
    * Issues a single-use enrollment token as the admin and enrolls over HTTP, like `koda-runner enroll`. With `relay`
    * the runner speaks protocol v2 and reports the approval relay (S1.5 2a D271), so gated/escalate jobs place on it.
+   * With `logs` it speaks protocol v3 (S2a R1): it streams logs over `putLog` and sends no `log` sync events.
    */
-  static async enroll(adminToken: string, name: string, opts: { relay?: boolean } = {}): Promise<ScriptedRunner> {
-    const protocolVersion = opts.relay ? 2 : 1;
+  static async enroll(adminToken: string, name: string, opts: { relay?: boolean; logs?: boolean } = {}): Promise<ScriptedRunner> {
+    const protocolVersion = opts.logs ? 3 : opts.relay ? 2 : 1;
     const capabilities = opts.relay ? { ...E2E_RUNNER_CAPABILITIES, approvals: { relay: true } } : E2E_RUNNER_CAPABILITIES;
     const { token } = await call<{ token: string }>('/fleet/enrollments', { method: 'POST', token: adminToken, body: { labels: ['e2e'] } });
     const { runnerId, apiKey } = await call<{ runnerId: string; apiKey: string }>('/fleet/runner/enroll', {
@@ -153,13 +179,37 @@ export class ScriptedRunner {
 
   /** PUT the run bundle (accepted while RUNNING or UPLOADING, spec §3.3). */
   async uploadBundle(lease: Lease, content: string): Promise<void> {
-    const body = gzipSync(Buffer.from(content, 'utf8'));
-    const sha256 = createHash('sha256').update(body).digest('hex');
+    await this.putBundle(lease, gzipSync(Buffer.from(content, 'utf8')));
+  }
+
+  /** PUT a real tar.gz bundle whose members the API's log fallback reads (S2a §2.5), e.g. `nax.stdout`. */
+  async uploadTarBundle(lease: Lease, members: Readonly<Record<string, string>>): Promise<void> {
+    await this.putBundle(lease, await tarGz(members));
+  }
+
+  private async putBundle(lease: Lease, body: Buffer): Promise<void> {
     const res = await fetch(`${API_URL}/api/fleet/runner/jobs/${lease.jobId}/bundle?leaseEpoch=${lease.leaseEpoch}`, {
       method: 'PUT',
-      headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/gzip', 'X-Content-SHA256': sha256 },
-      body,
+      headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/gzip', 'X-Content-SHA256': sha256Hex(body) },
+      body: new Uint8Array(body),
     });
     if (res.status !== 201) throw new Error(`Bundle upload failed: ${res.status} ${await res.text()}`);
+  }
+
+  /**
+   * S2a §2.2: append `text` to one log stream at `offset` (the bytes the server holds), like the runner's LogShipper.
+   * `final` marks the stream complete. Throws unless the server answers HTTP 200.
+   */
+  async putLog(lease: Lease, stream: 'run' | 'stdout' | 'stderr', offset: number, text: string, final = false): Promise<LogUploadAnswer> {
+    const body = Buffer.from(text, 'utf8');
+    const query = `leaseEpoch=${lease.leaseEpoch}&offset=${offset}${final ? '&final=1' : ''}`;
+    const res = await fetch(`${API_URL}/api/fleet/runner/jobs/${lease.jobId}/logs/${stream}?${query}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/octet-stream', 'X-Content-SHA256': sha256Hex(body) },
+      body,
+    });
+    const raw = await res.text();
+    if (res.status !== 200) throw new Error(`Log upload failed: ${res.status} ${raw}`);
+    return (JSON.parse(raw) as { data: LogUploadAnswer }).data;
   }
 }
