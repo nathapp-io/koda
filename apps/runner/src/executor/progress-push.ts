@@ -5,7 +5,7 @@ import { PLAN_PUSH_BACKOFF_MS } from './plan-commit';
 
 export type ProgressPushOutcome =
   | { readonly kind: 'pushed'; readonly branch: string; readonly sha: string }
-  | { readonly kind: 'none' }
+  | { readonly kind: 'none'; readonly branch: string; readonly sha: string }
   | { readonly kind: 'failed'; readonly reason: string }
   | { readonly kind: 'halted' };
 
@@ -58,7 +58,7 @@ async function pushOnce(input: ProgressPushInput): Promise<Attempt> {
   return { reason: 'push failed', retry: true };
 }
 
-/** S1b §1.1 (B5): after an unfinished RUN, put the branch on origin so any runner can continue it. Never forced. */
+/** S1b §1.1 (B5), #204: preserve unfinished or completed-without-finish RUN output on origin. Never forced. */
 export async function pushProgress(input: ProgressPushInput): Promise<ProgressPushOutcome> {
   const { git, repoDir, branchName } = input;
   const head = (await git.run(['symbolic-ref', '--short', '-q', 'HEAD'], { cwd: repoDir })).stdout.trim();
@@ -72,8 +72,8 @@ export async function pushProgress(input: ProgressPushInput): Promise<ProgressPu
   for (let attempt = 0; ; attempt += 1) {
     if (input.isHalted?.() === true) return { kind: 'halted' };
     const result = await pushOnce(input);
-    if (result === 'none') return { kind: 'none' };
-    if (result === 'pushed') return { kind: 'pushed', branch: branchName, sha: (await git.ok(['rev-parse', 'HEAD'], { cwd: repoDir })).trim() };
+    // Both successful outcomes confirm origin has HEAD, including a retry after a lost push response.
+    if (result === 'none' || result === 'pushed') return { kind: result, branch: branchName, sha: (await git.ok(['rev-parse', 'HEAD'], { cwd: repoDir })).trim() };
     const backoff = PLAN_PUSH_BACKOFF_MS[attempt];
     if (!result.retry || backoff === undefined) return { kind: 'failed', reason: result.reason };
     await sleep(backoff);
