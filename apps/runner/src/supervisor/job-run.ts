@@ -329,9 +329,9 @@ export class JobRun {
       return this.halted ? null : { value: 'failed:push error', result: null };
     }
     if (outcome.kind === 'halted' || this.halted) return null;
-    if (outcome.kind !== 'pushed') return { value: wipPushValue(outcome), result: null };
+    if (outcome.kind === 'failed') return { value: wipPushValue(outcome), result: null };
     this.deps.journal.updateJob(this.jobId, this.leaseEpoch, { resultBranch: outcome.branch, resultSha: outcome.sha });
-    return { value: 'pushed', result: { branch: outcome.branch, sha: outcome.sha } };
+    return { value: wipPushValue(outcome), result: { branch: outcome.branch, sha: outcome.sha } };
   }
 
   private async finish(): Promise<void> {

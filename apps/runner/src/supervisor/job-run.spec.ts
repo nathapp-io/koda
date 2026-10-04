@@ -713,10 +713,21 @@ describe('RUN progress push (S1b 1a)', () => {
     expect(stateNames(b)).toEqual(['COMPLETED']);
     expect(lastSnapshot(b)).toMatchObject({ wipPush: 'pushed', resultBranch: 'feat/x', resultSha: 'd'.repeat(40) });
   });
-  test('ESCALATED with nothing new reports none and keeps the ledger result (D145)', async () => {
+  test('a COMPLETED run resumed after publication but before recording the SHA recovers its output', async () => {
+    const b = build();
+    b.ex.status = { run: { id: 'r', status: 'completed' } };
+    b.ex.ledger = null;
+    b.ex.progressPush = { kind: 'none', branch: 'feat/x', sha: 'd'.repeat(40) };
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', branch: 'feat/x', pid: 1, pgid: 1 });
+    await b.run.start('finish');
+    expect(stateNames(b)).toEqual(['UPLOADING', 'COMPLETED']);
+    expect(lastSnapshot(b)).toMatchObject({ wipPush: 'none', resultBranch: 'feat/x', resultSha: 'd'.repeat(40) });
+    expect(b.journal.getJob('j1', 1)).toMatchObject({ resultBranch: 'feat/x', resultSha: 'd'.repeat(40) });
+  });
+  test('ESCALATED with nothing new reports none and the published result (D145)', async () => {
     const b = build();
     b.ex.status = { run: { id: 'r', status: 'completed' }, postRun: { finish: { result: 'escalated', escalationReason: 'review' } } };
-    b.ex.progressPush = { kind: 'none' };
+    b.ex.progressPush = { kind: 'none', branch: 'feat/x', sha: 'b'.repeat(40) };
     b.ex.dieAfterTicks(1);
     await b.run.start('prepare');
     expect(lastSnapshot(b)).toMatchObject({ wipPush: 'none', resultBranch: 'feat/x', resultSha: 'b'.repeat(40) });

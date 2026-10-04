@@ -5,7 +5,7 @@ import { PLAN_PUSH_BACKOFF_MS } from './plan-commit';
 
 export type ProgressPushOutcome =
   | { readonly kind: 'pushed'; readonly branch: string; readonly sha: string }
-  | { readonly kind: 'none' }
+  | { readonly kind: 'none'; readonly branch: string; readonly sha: string }
   | { readonly kind: 'failed'; readonly reason: string }
   | { readonly kind: 'halted' };
 
@@ -72,8 +72,8 @@ export async function pushProgress(input: ProgressPushInput): Promise<ProgressPu
   for (let attempt = 0; ; attempt += 1) {
     if (input.isHalted?.() === true) return { kind: 'halted' };
     const result = await pushOnce(input);
-    if (result === 'none') return { kind: 'none' };
-    if (result === 'pushed') return { kind: 'pushed', branch: branchName, sha: (await git.ok(['rev-parse', 'HEAD'], { cwd: repoDir })).trim() };
+    // Both successful outcomes confirm origin has HEAD, including a retry after a lost push response.
+    if (result === 'none' || result === 'pushed') return { kind: result, branch: branchName, sha: (await git.ok(['rev-parse', 'HEAD'], { cwd: repoDir })).trim() };
     const backoff = PLAN_PUSH_BACKOFF_MS[attempt];
     if (!result.retry || backoff === undefined) return { kind: 'failed', reason: result.reason };
     await sleep(backoff);

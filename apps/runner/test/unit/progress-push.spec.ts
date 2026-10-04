@@ -63,10 +63,11 @@ describe('pushProgress', () => {
     expect(await sh(s.origin.dir, 'show', `feat/f:${PRD}`)).toBe(prdText('passed').trim());
   });
 
-  test('nothing new to push is none', async () => {
+  test('an already-published branch returns none with its branch and SHA for recovery', async () => {
     const s = await setup();
     await sh(s.repoDir, 'push', '-q', 'origin', 'feat/f');
-    expect(await pushProgress(s.input)).toEqual({ kind: 'none' });
+    const tip = await sh(s.origin.dir, 'rev-parse', 'feat/f');
+    expect(await pushProgress(s.input)).toEqual({ kind: 'none', branch: 'feat/f', sha: tip });
   });
 
   test('non-fast-forward is failed:diverged and is not retried', async () => {
@@ -125,7 +126,7 @@ describe('pushProgress', () => {
 describe('wipPushValue', () => {
   test('maps each outcome to its snapshot value', () => {
     expect(wipPushValue({ kind: 'pushed', branch: 'b', sha: 'a'.repeat(40) })).toBe('pushed');
-    expect(wipPushValue({ kind: 'none' })).toBe('none');
+    expect(wipPushValue({ kind: 'none', branch: 'b', sha: 'a'.repeat(40) })).toBe('none');
     expect(wipPushValue({ kind: 'failed', reason: 'diverged' })).toBe('failed:diverged');
     expect(wipPushValue({ kind: 'failed', reason: `x${'y'.repeat(300)}` })).toHaveLength('failed:'.length + 200);
     expect(wipPushValue({ kind: 'failed', reason: 'bad\nx' })).toBe('failed:bad?x');   // the API drops non-printable values
