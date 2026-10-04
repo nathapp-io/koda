@@ -137,10 +137,32 @@ describe('koda fleet schedule', () => {
       body: { name: 'login', repoId: 'fr1', feature: 'login', cron: '0 9 * * 1-5', timezone: 'UTC', maxCostUsd: 5, bashMode: 'gated', approvalTimeoutSec: 120 },
     });
     (projectFleetSchedulesControllerUpdate as jest.Mock).mockResolvedValue(ok(row()));
+    (projectFleetSchedulesControllerGet as jest.Mock).mockResolvedValue(ok(row({ bashMode: 'gated', approvalTimeoutSec: 120 })));
     await run('edit', 's1', '--approval-timeout', '300');
     expect(projectFleetSchedulesControllerUpdate).toHaveBeenLastCalledWith({ path: { slug: 'web', id: 's1' }, body: { approvalTimeoutSec: 300 } });
     await run('edit', 's1', '--bash-mode', 'raw');
     expect(projectFleetSchedulesControllerUpdate).toHaveBeenLastCalledWith({ path: { slug: 'web', id: 's1' }, body: { bashMode: 'raw' } });
+  });
+
+  it('edit refuses a timeout without a relay mode on a raw schedule (D301, exit 3)', async () => {
+    (projectFleetSchedulesControllerGet as jest.Mock).mockResolvedValue(ok(row({ bashMode: 'raw' })));
+    await run('edit', 's1', '--approval-timeout', '300');
+    expect(exitSpy).toHaveBeenLastCalledWith(3);
+    expect(projectFleetSchedulesControllerUpdate).not.toHaveBeenCalled();
+  });
+
+  it('edit refuses --bash-mode raw with --approval-timeout without fetching the stored mode (D301, exit 3)', async () => {
+    await run('edit', 's1', '--bash-mode', 'raw', '--approval-timeout', '300');
+    expect(exitSpy).toHaveBeenLastCalledWith(3);
+    expect(projectFleetSchedulesControllerGet).not.toHaveBeenCalled();
+    expect(projectFleetSchedulesControllerUpdate).not.toHaveBeenCalled();
+  });
+
+  it('edit accepts --bash-mode gated with --approval-timeout without fetching the stored mode (D301)', async () => {
+    (projectFleetSchedulesControllerUpdate as jest.Mock).mockResolvedValue(ok(row()));
+    await run('edit', 's1', '--bash-mode', 'gated', '--approval-timeout', '90');
+    expect(projectFleetSchedulesControllerUpdate).toHaveBeenLastCalledWith({ path: { slug: 'web', id: 's1' }, body: { bashMode: 'gated', approvalTimeoutSec: 90 } });
+    expect(projectFleetSchedulesControllerGet).not.toHaveBeenCalled();
   });
 
   it('add refuses a timeout without a relay mode (exit 3)', async () => {

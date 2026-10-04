@@ -211,6 +211,13 @@ function registerEdit(schedule: Command): void {
           if (!runner) return handleFleetValidation(`Unknown runner "${o.pin}"`);
           pinned = runner.id;
         }
+        // D301: the API accepts a timeout on a raw schedule and then silently ignores it, so refuse it here. An
+        // explicit mode is enough; only an edit that names no mode looks up the stored one.
+        if (o.approvalTimeout !== undefined) {
+          const mode = o.bashMode
+            ?? unwrap<ScheduleDto>(await projectFleetSchedulesControllerGet({ path: { slug, id: scheduleId } })).bashMode;
+          if (mode === 'raw') return handleFleetValidation('--approval-timeout needs --bash-mode gated or escalate');
+        }
         const body = editBody(o, pinned);
         if (Object.keys(body).length === 0) return handleFleetValidation('Nothing to change: give at least one option');
         const updated = unwrap<ScheduleDto>(await projectFleetSchedulesControllerUpdate({ path: { slug, id: scheduleId }, body }));

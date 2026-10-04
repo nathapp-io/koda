@@ -430,7 +430,8 @@ acks `rejected: callback_failed:<status>`. Re-sent commands are no-ops through c
   change; bash asks are decided by DEVELOPER+ in the inbox only (the job page links there); a cut or unreadable ask is
   deny-only and the panel hides its buttons when the countdown reaches 0; the delivery line re-fetches the open row on
   each reload because acks have no live event; web timeouts are minutes with 2 decimals (exact round trip of stored
-  seconds), the CLI takes seconds; a raw schedule PATCH omits the timeout; the runner refuses answers past nax's
+  seconds), the CLI takes seconds; a raw schedule PATCH omits the timeout and the CLI refuses a timeout-only edit on a
+  raw schedule; the runner refuses answers past nax's
   deadline (`ask_expired`).
 
 - 1a plan notes (`docs/superpowers/plans/2026-10-02-fleet-s1-5-slice-1a-approvals-core.md`, D226-D238): two modules

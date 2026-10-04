@@ -207,7 +207,10 @@ const awaitingDelivery = (): boolean => {
   const open = detail.value
   if (open === null || deliveryView(open)?.state !== 'waiting') return false
   const decidedAt = Date.parse(open.decidedAt ?? '')
-  return Number.isNaN(decidedAt) || Date.now() - decidedAt < DELIVERY_WATCH_MS
+  if (Number.isNaN(decidedAt)) return true
+  const elapsed = Date.now() - decidedAt
+  // Stop watching once the window has passed; a negative elapsed (a client clock behind the server) counts as past it.
+  return elapsed >= 0 && elapsed < DELIVERY_WATCH_MS
 }
 
 async function reload(): Promise<void> {

@@ -31,8 +31,8 @@
 
     <template v-if="canDecide && left !== 0">
       <div class="space-y-1">
-        <Label for="fleet-approval-bash-comment">{{ t('fleet.approvals.budget.comment') }}</Label>
-        <Textarea id="fleet-approval-bash-comment" v-model="comment" rows="2" data-testid="fleet-approval-comment" />
+        <Label :for="commentId">{{ t('fleet.approvals.budget.comment') }}</Label>
+        <Textarea :id="commentId" v-model="comment" rows="2" data-testid="fleet-approval-comment" />
         <p v-if="commentInvalid" class="text-xs text-destructive" data-testid="fleet-approval-comment-error">{{ t('fleet.approvals.validation.commentTooLong') }}</p>
       </div>
       <div class="flex flex-wrap gap-2">
@@ -78,6 +78,8 @@ const choices = computed(() => bashChoices(payload.value))
 const left = computed(() => secondsLeft(props.approval.expiresAt, props.now))
 const comment = ref('')
 const commentInvalid = computed(() => commentTooLong(comment.value))
+/** SSR-safe unique id, so the comment label binds to this panel's textarea only. */
+const commentId = useId()
 
 function decide(choice: BashDecision): void {
   if (commentInvalid.value) return

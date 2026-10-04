@@ -301,6 +301,30 @@ describe('FleetApprovalInbox', () => {
     m.app.unmount()
   })
 
+  test('a decided ask whose decidedAt is ahead of the clock is not re-fetched forever (D295 clock guard)', async () => {
+    const decidedFuture = bashRow('b1', { status: 'approved', decision: 'allow', resolvedBy: 'user', decidedById: 'u1', decidedAt: '2099-01-01T00:00:00.000Z', outcome: null })
+    const get = jest.fn(async (path: string) => (path.endsWith('/b1') ? decidedFuture : page([])))
+    const m = mount({ get, query: { id: 'b1' } })
+    await m.settle()
+    const detailCalls = get.mock.calls.filter(([p]) => String(p).endsWith('/b1')).length
+    await m.poll()
+    await m.settle()
+    expect(get.mock.calls.filter(([p]) => String(p).endsWith('/b1')).length).toBe(detailCalls)
+    m.app.unmount()
+  })
+
+  test('a decided ask with a recent decidedAt is still re-fetched on the next reload (D295)', async () => {
+    const decidedRecent = bashRow('b1', { status: 'approved', decision: 'allow', resolvedBy: 'user', decidedById: 'u1', decidedAt: new Date(Date.now() - 1_000).toISOString(), outcome: null })
+    const get = jest.fn(async (path: string) => (path.endsWith('/b1') ? decidedRecent : page([])))
+    const m = mount({ get, query: { id: 'b1' } })
+    await m.settle()
+    const detailCalls = get.mock.calls.filter(([p]) => String(p).endsWith('/b1')).length
+    await m.poll()
+    await m.settle()
+    expect(get.mock.calls.filter(([p]) => String(p).endsWith('/b1')).length).toBe(detailCalls + 1)
+    m.app.unmount()
+  })
+
   test('a bash decide that races expiry gets 409: toast, and the row is re-fetched as expired (Review Focus 2)', async () => {
     const bash = bashRow('b1')
     const expired = bashRow('b1', { status: 'expired', resolvedBy: 'timeout' })

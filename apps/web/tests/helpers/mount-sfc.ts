@@ -108,7 +108,7 @@ const renderer = Vue.createRenderer({
  * Vue's reactivity helpers, injected from the real `vue` so a mounted component shares one runtime.
  * The rest are Nuxt auto-imports a test supplies per mount.
  */
-const VUE_HELPERS = ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount', 'onUnmounted', 'nextTick'] as const
+const VUE_HELPERS = ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount', 'onUnmounted', 'nextTick', 'useId'] as const
 
 /** Nuxt auto-import names injected as undefined unless the test supplies them (see MountOptions.globals). */
 const NUXT_AUTO_IMPORTS = [

@@ -107,7 +107,8 @@ export function bashPayload(a: Pick<FleetApprovalDto, 'type' | 'payload'>): Bash
   if (!isString(p.root) || !isString(p.stage) || !isString(p.featureName) || !isString(p.reason)) return null
   if (storyId !== null && !isString(storyId)) return null
   if (rawDetail !== null && !isString(rawDetail)) return null
-  if (!Array.isArray(p.options) || !p.options.every(isOption)) return null
+  if (!Array.isArray(p.options) || p.options.length === 0 || !p.options.every(isOption)
+    || new Set(p.options).size !== p.options.length || !p.options.includes('deny')) return null
   if (p.command === '' && (rawDetail === null || rawDetail === '')) return null   // nothing a human could read
   return {
     command: p.command, commandTruncated: p.commandTruncated, maskedCount: p.maskedCount, root: p.root, stage: p.stage,
