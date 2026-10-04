@@ -811,6 +811,10 @@ model FleetJob {
   commands     FleetCommand[]
   artifacts    FleetJobArtifact[]
   logs         FleetJobLog[]
+  ingests       FleetBundleIngest[]
+  costEvents    FleetCostEvent[]
+  storyResults  FleetStoryResult[]
+  reviewResults FleetReviewResult[]
 
   @@index([state])
   @@index([runnerId, state])
@@ -873,6 +877,8 @@ model FleetJobArtifact {
 
   job FleetJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
+  ingest FleetBundleIngest?
+
   @@unique([jobId, kind, leaseEpoch])
 }
 
@@ -894,4 +900,122 @@ model FleetJobLog {
 
   @@unique([jobId, leaseEpoch, stream])
   @@index([jobId])
+}
+
+/// Fleet S2b (d) §1.1: one row per bundle artifact; the ingest queue and its outcome.
+model FleetBundleIngest {
+  id            String    @id @default(cuid())
+  artifactId    String    @unique
+  jobId         String
+  leaseEpoch    Int
+  status        String    @default("pending") // pending | running | done | partial | failed
+  parserVersion Int
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime?
+  claimedAt     DateTime?
+  files         Json      @default("{}")
+  liveCostUsd   Decimal?  @db.Decimal(14, 8)
+  ledgerCostUsd Decimal?  @db.Decimal(14, 8)
+  error         String?
+  ingestedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  artifact FleetJobArtifact @relation(fields: [artifactId], references: [id], onDelete: Cascade)
+  job      FleetJob         @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([jobId])
+}
+
+/// Fleet S2b (d) §1.2: one row per nax cost-ledger line. Kept forever (A4).
+model FleetCostEvent {
+  id               String   @id @default(cuid())
+  jobId            String
+  leaseEpoch       Int
+  projectId        String
+  repoId           String
+  runnerId         String?
+  naxRunId         String?
+  at               DateTime
+  agentName        String
+  model            String
+  modelTier        String?
+  profile          String?
+  stage            String
+  sessionRole      String?
+  featureName      String
+  storyId          String?
+  callId           String
+  inputTokens      Int
+  outputTokens     Int
+  cacheReadTokens  Int
+  cacheWriteTokens Int
+  costUsd          Decimal  @db.Decimal(14, 8)
+  pricingSource    String?
+  confidence       String?
+  durationMs       Int?
+
+  job FleetJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, leaseEpoch, callId])
+  @@index([projectId, at])
+  @@index([repoId, at])
+  @@index([runnerId, at])
+  @@index([model, at])
+}
+
+/// Fleet S2b (d) §1.3: one row per story per attempt, from metrics.json.
+model FleetStoryResult {
+  id                String    @id @default(cuid())
+  jobId             String
+  leaseEpoch        Int
+  projectId         String
+  repoId            String
+  featureName       String
+  storyId           String
+  complexity        String?
+  initialComplexity String?
+  modelTier         String?
+  finalTier         String?
+  modelUsed         String?
+  agentUsed         String?
+  attempts          Int
+  success           Boolean
+  firstPassSuccess  Boolean
+  costUsd           Decimal   @db.Decimal(14, 8)
+  durationMs        Int?
+  inputTokens       Int
+  outputTokens      Int
+  cacheReadTokens   Int
+  cacheWriteTokens  Int
+  startedAt         DateTime?
+  completedAt       DateTime?
+
+  job FleetJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, leaseEpoch, storyId])
+  @@index([projectId, completedAt])
+}
+
+/// Fleet S2b (d) §1.4: one row per review-audit record.
+model FleetReviewResult {
+  id                 String   @id @default(cuid())
+  jobId              String
+  leaseEpoch         Int
+  projectId          String
+  storyId            String?
+  reviewer           String
+  recordId           String
+  passed             Boolean
+  failOpen           Boolean
+  findingCount       Int
+  findingsBySeverity Json
+  advisoryCount      Int
+  at                 DateTime
+
+  job FleetJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, leaseEpoch, recordId])
+  @@index([projectId, at])
 }

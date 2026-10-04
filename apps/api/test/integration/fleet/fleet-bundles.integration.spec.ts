@@ -14,8 +14,10 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { tarGz } from '../../helpers/tar-gz';
 import { BundleService } from '../../../src/fleet/artifacts/bundle.service';
 import { FleetFenceException } from '../../../src/fleet/artifacts/bundle.exceptions';
+import { BundleIngestService } from '../../../src/fleet/ingest/bundle-ingest.service';
 import { ConflictAppException } from '../../../src/common/exceptions/conflict-app.exception';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -141,5 +143,20 @@ describeIntegration('fleet bundles (PG)', () => {
     expect(await prisma.fleetActivity.count({ where: { jobId: j.id, action: 'job.bundle_uploaded' } })).toBe(1);
     expect(readdirSync(join(process.env.FLEET_ARTIFACT_DIR as string, 'jobs', j.id, '1'))).toEqual([prior.storageKey.split('/').pop()]);
     expect((await download(j.id, 'dev').expect(200)).body).toEqual(good);
+  });
+
+  it('enqueues ingest in the upload transaction; a re-upload resets the same row (S2b §2.1, Review Focus 1)', async () => {
+    const j = await job('ingest', 'UPLOADING');
+    const gz = await tarGz([{ name: 'nax-out/cost/u.jsonl', body: JSON.stringify({ ts: 0, schemaVersion: 8, agentName: 'native', model: 'm', stage: 'run', featureName: 'f', callId: 'c1', tokens: {}, costUsd: 0.01 }) }]);
+    await upload(j.id, gz).expect(201);
+    const first = await prisma.fleetBundleIngest.findMany({ where: { jobId: j.id } });
+    expect(first).toHaveLength(1);
+    expect(first[0]).toMatchObject({ status: 'pending', leaseEpoch: 1, parserVersion: 1 });
+    await upload(j.id, gz).expect(201);
+    const second = await prisma.fleetBundleIngest.findMany({ where: { jobId: j.id } });
+    expect(second.map((r) => r.id)).toEqual([first[0].id]);
+    await prisma.fleetJob.update({ where: { id: j.id }, data: { state: 'COMPLETED', finishedAt: new Date() } });
+    await app.get(BundleIngestService).drain();
+    expect(await prisma.fleetCostEvent.count({ where: { jobId: j.id } })).toBe(1);
   });
 });
