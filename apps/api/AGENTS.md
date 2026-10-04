@@ -235,3 +235,8 @@ Rules:
   Reads are lock-free and bounded: one entries request scans at most `FLEET_LOG_SCAN_BYTES` and always moves its
   cursor (`log-lines.ts` is the cursor contract). Retention (`FleetLogRetentionProcessor`) deletes files first, then
   marks rows expired under the job row lock, and never touches attempts newer than the epoch it selected.
+- `src/fleet/ingest/` (S2b): parses uploaded run bundles of terminal jobs into `FleetCostEvent`, `FleetStoryResult`
+  and `FleetReviewResult` rows (kept forever), and corrects the job: cost raised to the ledger total, COMPLETED ->
+  ESCALATED from finish-audit, "nothing pushed" reason. The queue is `FleetBundleIngest` (enqueued in the bundle
+  upload transaction, drained by a kick plus a 30 s sweeper gated by `FLEET_SWEEP_ENABLED`). Bundle contents are
+  untrusted: only allowlisted paths, capped sizes, typed field readers. Admin routes: `fleet/ingest`.

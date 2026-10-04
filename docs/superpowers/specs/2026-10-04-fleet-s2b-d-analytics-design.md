@@ -181,10 +181,11 @@ No new table. Ingest corrects existing `FleetJob` fields (§3.2).
   - `nax-out/review-audit/*/*.json`
   - `nax-out/finish-audit/*/*.result.json` and `nax-out/finish-audit/*/last.json`
   - `nax-out/status.json` (for the nax run id and the finish fallback)
-- **Untrusted input.** Every row is validated with a zod schema chosen by `schemaVersion` (cost ledger: v8; other
-  files: shape-checked). Strings are capped (model/profile/stage/role 120 chars, ids 200, reasons 2,000). Numbers
-  must be finite and `>= 0`. Per-file cap 32 MiB; per-bundle cap 50,000 cost events, 2,000 story rows, 5,000 review
-  rows. Anything over a cap stops that file and marks the bundle `partial` with the reason.
+- **Untrusted input.** Every row is validated by the typed field readers in `src/fleet/ingest/parsers/fields.ts`
+  (plan D365), chosen by `schemaVersion` (cost ledger: v8; other files: shape-checked). Strings are capped
+  (model/profile/stage/role 120 chars, ids 200, reasons 2,000). Numbers must be finite and `>= 0`. Per-file cap
+  32 MiB; per-bundle cap 50,000 cost events, 2,000 story rows, 5,000 review rows. Anything over a cap stops that
+  file and marks the bundle `partial` with the reason.
 - An unknown `schemaVersion` -> that file is `skipped:v<n>`, the others continue, status `partial`.
 - A missing file is `absent` (not an error): PLAN bundles have no `metrics.json`, review-audit or finish-audit.
 
@@ -206,10 +207,10 @@ After commit: publish `fleet_job {jobId, state}` (so an open job page refetches)
 
 ### 2.6 Backfill and re-ingest
 
-- `POST /admin/fleet/ingest/backfill`: create `pending` rows for every unexpired bundle artifact without one.
-- `POST /admin/fleet/ingest/:jobId/rerun`: reset that job's ingest rows to `pending` (attempts 0).
-- `POST /admin/fleet/ingest/rerun?all=true`: reset every `done`/`partial`/`failed` row whose `parserVersion` is older
-  than the current one and whose bundle is unexpired.
+- `POST /fleet/ingest/backfill`: create `pending` rows for every unexpired bundle artifact without one.
+- `POST /fleet/ingest/jobs/:jobId/rerun`: reset that job's ingest rows to `pending` (attempts 0).
+- `POST /fleet/ingest/rerun-outdated`: reset every `done`/`partial`/`failed` row whose `parserVersion` is older than
+  the current one and whose bundle is unexpired.
 - Each is recorded in `FleetActivity` (`ingest.backfill`, `ingest.rerun`).
 
 ## 3. Corrections applied by ingest (slice 1a)
@@ -279,11 +280,12 @@ membership (any role); admin routes need global ADMIN.
 
 ### 4.3 Admin routes
 
-- `GET /admin/fleet/analytics/spend` — as 4.2 spend, across projects, `groupBy` also accepts `project`.
-- `GET /admin/fleet/ingest?status=pending|running|partial|failed&page&size` — ingest rows with job, project, error.
-- `POST /admin/fleet/ingest/backfill`, `POST /admin/fleet/ingest/:jobId/rerun`, `POST /admin/fleet/ingest/rerun?all=true`
-  (§2.6) -> `{ queued: n }`.
-- `DELETE /admin/fleet/analytics?projectId&before` with body `{ confirm: "<projectSlug or 'ALL'>" }` — deletes
+- `GET /fleet/ingest?status=pending|running|partial|failed&current&size` — ingest rows with job, project, error.
+- `POST /fleet/ingest/backfill`, `POST /fleet/ingest/jobs/:jobId/rerun`, `POST /fleet/ingest/rerun-outdated`
+  (§2.6) -> `{ queued: n }`. All ingest routes are `RequiredPermission('ADMIN')`.
+- Admin analytics routes in slice 1b use `fleet/analytics/...` + `RequiredPermission('ADMIN')`: `GET
+  /fleet/analytics/spend` — as 4.2 spend, across projects, `groupBy` also accepts `project` — and `DELETE
+  /fleet/analytics?projectId&before` with body `{ confirm: "<projectSlug or 'ALL'>" }`, which deletes
   `FleetCostEvent`, `FleetStoryResult`, `FleetReviewResult` rows (by `at`/`completedAt` < `before`); ingest rows are
   kept and marked `files.deleted = true`. Recorded in `FleetActivity` (`analytics.deleted`, with counts).
 
