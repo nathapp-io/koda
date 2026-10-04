@@ -12,16 +12,17 @@ story, stage and session role, without a shell on the runner machine. Old logs a
 
 ## Success criteria
 
-1. While a RUN job is RUNNING, the viewer shows every line nax wrote to its run JSONL, stdout and stderr, in order,
-   within a few seconds of the write. No line is dropped or sampled (the S1 60-events-per-minute budget no longer
-   applies to v3 runners).
-2. After the job ends, the stored run log is byte-identical to the file nax wrote (same SHA-256), including across a
-   runner daemon restart mid-run.
-3. The run log can be filtered by minimum level, story, stage, session role and text, server-side, on logs up to the
-   256 MiB per-stream cap, without loading the whole log into the browser.
+1. While a RUN job is RUNNING on a v3 runner, the viewer shows every line nax wrote to its run JSONL, stdout and
+   stderr, in order, within a few seconds of the write. No line is sampled away.
+2. After the job ends, each stored stream is byte-identical to the file on the runner (same SHA-256), including across
+   a runner daemon restart mid-run and a restart after nax exited.
+3. The run log can be filtered by minimum level, story, stage, session role and text, server-side, up to the 256 MiB
+   per-stream cap, without loading the whole log into the browser. Cost is accepted explicitly: each request scans at
+   most 2 MiB, so a rare filter on a 256 MiB log takes up to 128 requests; the viewer shows scan progress and pages on
+   demand ("Keep searching"), never in an unbounded loop.
 4. A stream the runner could not finish uploading is filled from the job's bundle and says so.
-5. Logs, bundles and `log` timeline events of jobs that ended more than 30 days ago are deleted daily; the job row,
-   its other events, approvals, budget incidents and costs stay, and the pages say the logs expired.
+5. Logs, bundles and `log` timeline events of jobs that ended more than 30 days ago are deleted daily; the job row, its
+   other events, approvals, budget incidents and costs stay, and the pages say the logs expired.
 6. v1/v2 runners keep working unchanged.
 
 ## Rulings (user, 2026-10-04)
@@ -36,73 +37,109 @@ story, stage and session role, without a shell on the runner machine. Old logs a
 | L6 | The CLI gains `koda fleet job logs`. |
 | L7 | No new run list/detail pages: the jobs list and job page are the run list and run detail. S2a adds a log viewer page linked from the job page. |
 
+## Review rulings (spec review 2026-10-04, three read-only reviewers; decided while folding fixes)
+
+| # | Ruling |
+|:--|:--|
+| R1 | **No `logs.stream` capability.** Protocol v3 itself means "this runner streams logs": a v3 runner never sends `log` sync events. API-first deploy is a **hard rule**, not a degradation path: a v3 runner against a `[1,2]` API gets 426 at enroll and sync, and the sync loop stops the daemon (`sync-loop.ts`). |
+| R2 | The upload route accepts **ASSIGNED, RUNNING, UPLOADING** (the fence already proves the lease; the runner journals RUNNING before the server applies it). A terminal state answers 409 `job_state`, and the uploader stops. |
+| R3 | **No resume probe route.** The uploader resumes by sending from offset 0 (or its last acked offset); the duplicate/conflict answers carry the server's size and the uploader jumps there. One re-sent window per stream per restart is accepted. |
+| R4 | The uploader is an **independent async pump**, never awaited by the 2 s watch tick. A runner-wide `LogShipper` owns all streams of all jobs: at most 2 PUTs in flight, round-robin across streams, a 30 s per-PUT timeout, `Retry-After` pauses the whole shipper. |
+| R5 | **Drain** starts after the final tick and reap, runs concurrently with the existing judge/push/finish work, and is awaited (bounded by `logDrainTimeoutMs`) just before the UPLOADING transition. The re-adopt `finish` path (nax exited while the daemon was down) creates an uploader and drains too. |
+| R6 | A stream whose local file **shrinks** below the acked offset, or whose server size exceeds the local file, is marked `diverged` on the runner: it stops, emits a lifecycle warning, and is left to the bundle fallback. |
+| R7 | Bundle extraction uses the **`tar-stream`** npm package with `zlib` gunzip in the API (no shell `tar`, no image dependency), streams the member, and caps extracted bytes at `FLEET_LOG_MAX_BYTES`. Fallback runs **after** the bundle response, off the request path. |
+| R8 | Once a stream is `complete` or `truncated`, appends are refused (409 `complete` / 413 `stream_cap`); a repeated `final=1` at the same size is an idempotent 200. `replace` (fallback) takes the same per-key lock and is compare-and-set on `complete = false`. |
+| R9 | The entries route serves **all three streams** as lines (stdout/stderr: `q` filter only), with one cursor contract (§3.3). The raw route is for download and the CLI only. |
+| R10 | Log read routes are user-only (`isUserPrincipal`, like the fleet jobs controller) and carry a dedicated throttle of **600 req/min** per user instead of the global 100. |
+| R11 | The entries scan bound is **2 MiB** per request, read asynchronously and parsed in 256 KiB slices with `setImmediate` yields; `q` matches the lowercased raw line (keys and escapes included). |
+| R12 | A single line longer than the window (1 MiB upload, 2 MiB scan) is never a stall: the uploader sends a full window without a newline; the reader returns the window as one `unparsed` entry with `truncatedLine: true` and advances. |
+| R13 | Query naming is `leaseEpoch` on every route (runner and user). |
+| R14 | Slices: **1a** API transport + storage + fallback + event; **1b** runner shipper; **1c** read routes + CLI + retention; **2** web + E2E + live check. |
+
 ## Ground truth (verified on main `a759759f`)
 
-- The runner already tails three streams per job (`apps/runner/src/watcher/watcher.ts`): `run` = nax's run JSONL
+- The runner tails three streams per job (`apps/runner/src/watcher/watcher.ts`): `run` = nax's run JSONL
   (`<jobDir>/nax-out/features/<f>/runs/<logRunId>.jsonl`, found by `findRunLog`), `stdout` = `<jobDir>/nax.stdout`,
-  `stderr` = `<jobDir>/nax.stderr`. `FileTail.readNew` returns whole lines only (unless `final`), at most 1 MiB per read.
-- Today each read is cut into 8,000-byte chunks and sent as `log` sync events `{stream, text}` through a 60-per-minute
+  `stderr` = `<jobDir>/nax.stderr`. `FileTail.readNew` returns whole lines only (unless `final`, or a 1 MiB window with
+  no newline), at most 1 MiB per read, as a utf8 string; it silently resets to 0 when the file shrinks.
+- Each read is cut into 8,000-byte chunks and sent as `log` sync events `{stream, text}` through a 60-per-minute
   `LogBudget`; the excess is counted in `droppedLogs` and lost (`watcher/log-budget.ts`). The events are stored as
   `FleetJobEvent` rows of type `log` and rendered as one-line rows by `FleetJobTimeline.vue`.
-- A daemon that re-adopts a running job after a restart tails from the **end** of each file (`startAtEnd: resumed`,
-  `supervisor/job-run.ts:259`), so bytes written while it was down are never sent.
-- At job end the runner uploads a `tar.gz` bundle (all of `nax-out/` minus `prompt-audit`, `nax.stdout`, `nax.stderr`,
-  `bundle-manifest.json`, and `plan-logs/*.jsonl` for PLAN) to `PUT /fleet/runner/jobs/:jobId/bundle?leaseEpoch=`,
-  stored through `ArtifactStore` (`LocalDiskArtifactStore` under `FLEET_ARTIFACT_DIR`) with a `FleetJobArtifact` row
-  unique per `(jobId, kind, leaseEpoch)`.
-- `ArtifactStore.put` is an atomic whole-object replace; it has no append.
-- Attempts are lease epochs on one `FleetJob`; a requeue bumps `leaseEpoch`. `FenceService.holds` checks
-  `job.runnerId` and `job.leaseEpoch`.
-- Live updates: `ProjectEventBus` (in-process, single API instance) feeds the SSE route `GET /projects/:slug/events`;
-  events are content-free (`fleet_job`, `fleet_approval`) and the page refetches. SSE is browser-only.
+- Re-adopt after a daemon restart (`supervisor/supervisor.ts`): a live nax goes the `watch` path and tails from the
+  **end** of each file (`startAtEnd: resumed`, `supervisor/job-run.ts:259`), so bytes written while the daemon was down
+  are never sent; a nax that exited meanwhile goes the `finish` path, which creates no watcher at all.
+- In the `watch` path the final tick is followed by `reapQuietly` (`job-run.ts:272-273`); `finish()` then runs
+  judge / progress push / PLAN finish before UPLOADING and the bundle.
+- The bundle (`runner/src/bundle/build-bundle.ts`) is a `tar.gz` of `nax-out/` (without any `prompt-audit` path),
+  `nax.stdout`, `nax.stderr`, `bundle-manifest.json`, and `plan-logs/*.jsonl` for PLAN, uploaded to
+  `PUT /fleet/runner/jobs/:jobId/bundle?leaseEpoch=` and stored through `ArtifactStore` (`LocalDiskArtifactStore` under
+  `FLEET_ARTIFACT_DIR`) with a `FleetJobArtifact` row unique per `(jobId, kind, leaseEpoch)`. The upload is allowed in
+  RUNNING (partial bundle on cancel) and UPLOADING.
+- `ArtifactStore.put` is an atomic whole-object replace; it has no append. The API has no tar reader dependency.
+- Fastify parses `application/gzip` as an unbuffered raw stream (`common/hooks/bundle-content-parser.ts`, registered
+  in `main.ts`); Fastify's `bodyLimit` does not meter such a stream.
+- Job states: the runner reports ASSIGNED→RUNNING→UPLOADING→terminal (`jobs/job-state.ts`); RUNNING→CANCELLED is direct.
+  A requeue (CRASHED/FAILED/CANCELLED → QUEUED) bumps `leaseEpoch` and nulls `finishedAt` and `naxLogRunId`.
+- `FenceService.holds(job, runnerId, leaseEpoch)` is a pure check; `FenceService.abandon(runnerId, job, leaseEpoch)`
+  queues ABANDON and must run inside a transaction under the job row lock (as `BundleService.assertHolder` does).
+- `parseCapabilitiesCore` builds a clean copy of known keys only; `SUPPORTED_FLEET_PROTOCOL_VERSIONS = [1, 2]`
+  (`common/protocol.ts`), `FLEET_PROTOCOL_VERSION = 2` (`packages/fleet-protocol`).
+- Live updates: `ProjectEventBus` (in-process, single API instance) feeds `GET /projects/:slug/events`; events are
+  content-free (`fleet_job`, `fleet_approval`), the web registers named listeners only (an unknown type is ignored) and
+  dedupes by event `id`. SSE is browser-only.
 - Throttling: global `ThrottlerModule` 100 req/min; only the sync route and the SSE route are `@SkipThrottle`.
-- Fastify parses `application/gzip` as a raw stream via `common/hooks/bundle-content-parser.ts`.
+- The runner's architecture rule: only `src/sync/` talks to the server; the bundle upload is an injected
+  `BundleUploader` built in `daemon.ts` over `ServerClient` (`sync/http.ts`).
 - No retention exists for artifacts or job events; the only fleet `@Cron` is enrollment retention
-  (`fleet/runners/enrollment-retention.processor.ts`, `30 4 * * *`).
+  (`fleet/runners/enrollment-retention.processor.ts`, `30 4 * * *`), which is off under `NODE_ENV=test`.
+- nax `LogEntry` (`packages/nax/src/logger/types.ts`): `timestamp, level, stage, storyId?, sessionRole?, message,
+  data?`; `level ∈ silent|error|warn|info|debug` (`silent` is never written).
 
 ## Out of scope
 
 - Ledger cost reconciliation at bundle ingest (L3, stays deferred).
 - Fleet dashboard, artifact analytics, OTel ingestion (S2b).
 - Object storage (S3); local disk only, behind the `LogStore` interface.
-- Streaming PLAN `plan-logs/*.jsonl` live (PLAN jobs stream stdout/stderr; plan logs come from the bundle).
+- Streaming PLAN `plan-logs/*.jsonl` live (PLAN jobs stream stdout/stderr; plan logs come from the bundle download).
 - prompt-audit ingestion (design doc §6 Q3, still open).
 - Per-project retention settings; one global window.
-- Multi-instance API (the per-key append lock is in-process, as is the event bus).
+- Multi-instance API (the per-key append lock, the shipper rate bucket and the event coalescer are in-process).
+- Agent (non-user) principals reading logs.
 
-## 1. Storage
+## 1. Storage (slice 1a)
 
-### 1.1 `LogStore` (API)
+### 1.1 `LogStore`
 
-A new interface next to `ArtifactStore`, because logs need appends and `ArtifactStore.put` is a whole-object replace:
+A new interface next to `ArtifactStore`, because logs need appends:
 
 ```ts
 export const LOG_STORE = Symbol('LOG_STORE');
 
 export interface LogStore {
-  /** Appends iff offset === current size. Returns the size after the call. */
+  /** Under the key's lock: appends iff offset === current size. */
   append(key: string, offset: number, bytes: Buffer): Promise<AppendResult>;
-  size(key: string): Promise<number>;          // 0 when absent
+  size(key: string): Promise<number>;                     // 0 when absent
   read(key: string, from: number, to: number): Promise<Buffer>;
-  /** Writes a whole object (bundle fallback, §2.5). Atomic replace. */
-  replace(key: string, source: Readable): Promise<number>;
-  deletePrefix(prefix: string): Promise<void>; // absent prefix is a no-op
+  stream(key: string): Promise<Readable>;                 // whole object, for download
+  /** Under the key's lock: atomic whole-object replace (fallback, §2.5), at most maxBytes. */
+  replace(key: string, source: Readable, maxBytes: number): Promise<number>;
+  deletePrefix(prefix: string): Promise<void>;            // absent prefix is a no-op
+  withLock<T>(key: string, fn: () => Promise<T>): Promise<T>;
 }
 
 export type AppendResult =
   | { kind: 'appended'; size: number }
-  | { kind: 'duplicate'; size: number }   // offset + length <= size: already have these bytes
-  | { kind: 'conflict'; size: number };   // anything else: gap or partial overlap
+  | { kind: 'duplicate'; size: number }   // offset + length <= size
+  | { kind: 'conflict'; size: number };   // gap or partial overlap
 ```
 
-- `LocalDiskLogStore` lives under `FLEET_ARTIFACT_DIR` (same root as bundles). Key:
-  `logs/<jobId>/<leaseEpoch>/<stream>.log`, `stream ∈ {run, stdout, stderr}`. Keys are server-built; route parameters
-  are validated against the enum and the epoch is an integer, so no path segment comes from free text.
-- Appends to one key are serialized by an in-process per-key mutex (single API instance, see Out of scope). The append
-  opens the file with `O_APPEND` after the size check under the lock and `fsync`s before returning.
-- A `duplicate` never compares bytes; exact-offset idempotency plus the per-request SHA (§2.2) is the integrity check.
+- `LocalDiskLogStore` under `FLEET_ARTIFACT_DIR`. Key `logs/<jobId>/<leaseEpoch>/<stream>.log`,
+  `stream ∈ {run, stdout, stderr}`. Keys are server-built from validated parts (enum stream, integer epoch, job id from
+  the database).
+- A per-key in-process mutex serializes `append`, `replace` and every DB update of that stream's row (`withLock`).
+  Append: size check, `appendFile`, `fsync`, then return. `size()` reads the file, never the row.
 
-### 1.2 `FleetJobLog` (index row)
+### 1.2 `FleetJobLog`
 
 ```prisma
 model FleetJobLog {
@@ -111,8 +148,8 @@ model FleetJobLog {
   leaseEpoch Int
   stream     String    // run | stdout | stderr
   sizeBytes  BigInt    @default(0)
-  complete   Boolean   @default(false)  // runner sent final=1, or filled from the bundle
-  truncated  Boolean   @default(false)  // hit FLEET_LOG_MAX_BYTES
+  complete   Boolean   @default(false)   // final=1 accepted, or filled from the bundle
+  truncated  Boolean   @default(false)   // hit FLEET_LOG_MAX_BYTES; terminal, never complete
   source     String    @default("stream") // stream | bundle
   expiredAt  DateTime?
   updatedAt  DateTime  @updatedAt
@@ -125,227 +162,315 @@ model FleetJobLog {
 }
 ```
 
-`FleetJobArtifact` gains `expiredAt DateTime?`. The job page, retention and the live event read `FleetJobLog`; the
-bytes live in `LogStore` (C6 split: small index in Postgres, bulk on disk).
+- `FleetJobArtifact` gains `expiredAt DateTime?`. `FleetJob` gains `@@index([state, finishedAt])` for retention.
+- The row is upserted inside the key lock after every append that grew the file, so it never goes backwards. A crash
+  between `fsync` and the upsert leaves the row behind the file; the next append or `final=1` heals it (both read
+  `LogStore.size`).
+- DTOs expose `sizeBytes` as a JSON number (max 256 MiB, safe).
 
-## 2. Runner upload
+## 2. Transport
 
-### 2.1 Protocol v3
+### 2.1 Protocol v3 (slices 1a + 1b, R1)
 
-- `packages/fleet-protocol` `FLEET_PROTOCOL_VERSION = 3`; the API accepts `[1, 2, 3]`.
-- v3 adds the capability `logs: { stream: true }`. Deploy the API first (same rule as 2a).
-- A v3 runner with `logs.stream` sends **no** `log` sync events. v1/v2 runners are unchanged (sampled `log` events,
-  `droppedLogs`).
-- The server never rejects a v3 runner's `log` event (it stores it as today), so a mixed or downgraded daemon cannot
-  break sync.
+- API: `SUPPORTED_FLEET_PROTOCOL_VERSIONS = [1, 2, 3]` (update the `protocol.spec.ts` pin). Runner:
+  `FLEET_PROTOCOL_VERSION = 3`. No capability key.
+- A v3 runner never sends `log` sync events; the server still stores any `log` event it receives (no rejection).
+- Deploy order is a hard rule: API first.
 
-### 2.2 Route
+### 2.2 Upload route (slice 1a)
 
 `PUT /fleet/runner/jobs/:jobId/logs/:stream?leaseEpoch=<int>&offset=<int>[&final=1]`
 
-- `@RunnerRoute()`, `@SkipThrottle()`. Body: raw bytes, `Content-Type: application/octet-stream` (a raw-stream parser
-  registered beside the gzip one), at most `FLEET_LOG_CHUNK_MAX_BYTES` = 1 MiB; `X-Content-SHA256` required.
-- Checks, in order:
-  1. `stream` ∈ enum, `leaseEpoch` and `offset` non-negative integers → else 400.
-  2. `FenceService.holds(runner, job, leaseEpoch)` and job state ∈ {RUNNING, UPLOADING} → else 409
-     `{ reason: 'stale_lease' | 'job_state' }`.
-  3. Body length ≤ chunk max → else 413. SHA mismatch → 422.
-  4. Per-runner byte rate over `FLEET_LOG_RUNNER_BYTES_PER_SEC` (default 2 MiB/s, token bucket, in-process) → 429
-     with `Retry-After`.
-  5. `offset + length > FLEET_LOG_MAX_BYTES` (default 256 MiB) → append the bytes that fit (none if already full),
-     set `truncated = true`, respond 413 `{ reason: 'stream_cap', size }`. The runner stops that stream.
-  6. Disk write failure (ENOSPC etc.) → 507.
-- Otherwise `LogStore.append`:
-  - `appended` / `duplicate` → 200 `{ size }`; upsert `FleetJobLog.sizeBytes`.
-  - `conflict` → 409 `{ reason: 'offset', size }`.
-- `final=1` (empty body allowed): requires `offset === size`; sets `complete = true`; 200 `{ size }`. A final at a
-  different offset is a 409 `offset` like any other.
-- An empty, non-final body is a 400.
+- Controller-level `@RunnerRoute()` and `@SkipThrottle()`. `Content-Type: application/octet-stream`, registered in
+  `main.ts` beside the gzip parser as a raw stream (widen the `FastifyLike` type). `X-Content-SHA256` required.
+- Order of checks:
+  1. `stream` ∈ enum, `leaseEpoch` and `offset` non-negative integers, `final` absent or `1` → else 400. A non-final
+     empty body → 400.
+  2. Per-runner rate (§2.2.1) → 429 with `Retry-After` **before** the body is read.
+  3. Load the job (`findById`, no lock). `FenceService.holds(job, runnerId, leaseEpoch)` false → open a transaction,
+     lock the row, re-check, call `FenceService.abandon` if still not held, answer 409 `{ reason: 'stale_lease' }`.
+  4. State ∉ {ASSIGNED, RUNNING, UPLOADING} → 409 `{ reason: 'job_state' }` (R2).
+  5. Read the body into a Buffer with a hard counter; past `FLEET_LOG_CHUNK_MAX_BYTES` (1 MiB) abort and answer 413
+     `{ reason: 'chunk_size' }`. `Content-Length` is advisory. SHA mismatch → 422.
+  6. Under the key lock:
+     - Row `complete` → `final=1` with `offset === size` and empty body → 200 `{ size }`; anything else → 409
+       `{ reason: 'complete', size }`.
+     - Row `truncated` → 413 `{ reason: 'stream_cap', size }`.
+     - Cap: if `offset + length > FLEET_LOG_MAX_BYTES`, cut the body to `max(0, cap - offset)` bytes, append that
+       through the normal rule (it comes back appended or duplicate), set `truncated = true`, answer 413
+       `{ reason: 'stream_cap', size }`. The cut may split a line or a UTF-8 sequence; readers tolerate it.
+     - Else `LogStore.append`: `appended`/`duplicate` → 200 `{ size }`; `conflict` → 409 `{ reason: 'offset', size }`.
+     - `final=1`: requires `offset === size` after any body; sets `complete = true`; 200 `{ size }`. Otherwise 409
+       `offset`.
+     - Disk write failure → 507 `{ reason: 'storage' }`.
+  7. Upsert the `FleetJobLog` row (inside the lock), then publish `fleet_log` (§2.3) after the lock is released.
+- Error reasons get API i18n keys (en + zh) following the `fleet.bundleInput` / `fleet.jobState` pattern.
 
-`GET /fleet/runner/jobs/:jobId/logs?leaseEpoch=<int>` (same guard, fence and state checks, `@SkipThrottle()`) →
-`{ streams: { run: size, stdout: size, stderr: size } }` (0 for a stream with no bytes). This is the uploader's
-resume probe (§2.4).
+#### 2.2.1 Rate
 
-### 2.3 Live event
+A per-runner token bucket, `FLEET_LOG_RUNNER_BYTES_PER_SEC` (default 4 MiB/s, burst one chunk), charged by
+`Content-Length` before the read and corrected by the actual length after. In-process, single instance.
 
-After a successful append that grew the stream (and after `final=1`), publish a content-free
-`fleet_log { id, projectId, jobId, leaseEpoch, stream, size, complete, at }` on `ProjectEventBus`, coalesced to at most
-one per job per second (trailing edge, so the last size always goes out).
+### 2.3 Live event (slice 1a)
 
-### 2.4 Runner uploader
+- New `LiveFleetLogEvent` in the `LiveEvent` union: `fleet_log { id, projectId, jobId, leaseEpoch, stream, size,
+  complete, at }`, `id = randomUUID()` per publish (the web dedupes by id).
+- Coalesced per `(jobId, leaseEpoch, stream)` to at most one per second, trailing edge (the latest size always goes
+  out). `final=1`, the cap and the fallback publish **immediately** and clear that key's timer. Timers are cleared on
+  module shutdown; a key with no publish for 60 s is dropped from the map.
 
-- One `LogUploader` per job attempt and stream, fed by the `Watcher` when the runner advertises `logs.stream`. The
-  watcher still owns tailing; for v3 its `logLine` sink is replaced by `uploader.push(bytes)`; the `LogBudget` and
-  `chunkText` are bypassed.
-- **The file on disk is the buffer.** The uploader keeps only `ackedOffset` per stream and reads ranges from the file
-  (up to 1 MiB, cut at the last newline unless at end-of-run, the same rule as `FileTail`). It holds nothing in memory
-  beyond the chunk in flight.
-- Loop: send `[ackedOffset, ackedOffset + n)`; on 200 set `ackedOffset = size`; on 409 `offset` set
-  `ackedOffset = size` (jump to the server); on 429 wait `Retry-After`; on 5xx or network error back off exponentially
-  to 30 s; on 409 `stale_lease`/`job_state` stop (sync already delivers `ABANDON`); on 413 `stream_cap` stop that
-  stream.
-- **Resume from the server, not the file end.** On start and on re-adopt the uploader first calls the size probe
-  (`GET .../logs?leaseEpoch=`) and sets each stream's `ackedOffset` to the server's size. The v3 path therefore
-  ignores `startAtEnd`; a daemon restart loses nothing that is still on disk.
-- **Drain before UPLOADING.** When nax exits, the job run reads every stream to end (`final` read), uploads until
-  `ackedOffset == file size`, then sends `final=1` per stream, then reports UPLOADING and uploads the bundle. The drain
-  is bounded by `logDrainTimeoutMs` (default 120 s); on timeout it proceeds without `final=1` and the bundle fallback
-  (§2.5) fills the rest.
-- The `run` stream starts when `findRunLog` first finds the file. PLAN jobs upload `stdout` and `stderr` only.
+### 2.4 Runner `LogShipper` (slice 1b)
 
-### 2.5 Bundle fallback
+- **Seams.** `ServerClient` (`sync/http.ts`) gains `putLog(jobId, stream, leaseEpoch, offset, bytes, final)` sending
+  the bearer token, `accept-language: en`, `content-type: application/octet-stream` and the chunk's
+  `x-content-sha256`, and returning `{ status, size?, reason?, retryAfterMs? }` (the 409/413 body fields and the
+  `Retry-After` header, which `uploadBundle` drops today). A runner-wide `LogShipper` is built in `daemon.ts` over the
+  client and injected into `JobRunDeps` (the executor stays client-free; `FakeExecutor` is unaffected). Update
+  `.nax/mono/apps/runner/context.md`.
+- **Per stream state:** `{ path, ackedOffset, state: active | done | stopped | diverged }`. The file on disk is the
+  buffer; the shipper reads raw bytes (`Bun.file().slice`) — never `FileTail` strings — up to 1 MiB, cut after the last
+  `\n`, or the full window when it holds no newline (R12), or everything when draining.
+- **Scheduling (R4).** One loop for the whole runner: at most 2 PUTs in flight, round-robin over streams with unsent
+  bytes, 30 s timeout per PUT (aborted via `AbortController`), `Retry-After` pauses all streams. The 2 s watch tick only
+  calls `shipper.wake(jobKey)`; nothing in the tick awaits the network.
+- **Responses:**
 
-On a successful bundle upload, for each stream of that attempt whose `FleetJobLog` row is missing or has
-`complete = false` **and** `truncated = false`:
+  | Answer | Action |
+  |:--|:--|
+  | 200 `{size}` | `ackedOffset = size` |
+  | 409 `offset` / `complete` `{size}` | `ackedOffset = size`; if `size > local file size` → `diverged` (R6) |
+  | 409 `stale_lease` | stop all streams of the job |
+  | 409 `job_state` | stop all streams of the job (R2: only terminal states answer this) |
+  | 413 `stream_cap` | `stopped` for that stream |
+  | 413 `chunk_size`, 400 | `stopped` + lifecycle error (a bug, not retried) |
+  | 401 | stop the job's streams; the sync loop owns re-auth |
+  | 422 | retry the same offset (counts toward backoff) |
+  | 429 | pause the shipper for `Retry-After` |
+  | 507, other 5xx, network, timeout | exponential backoff 1 s → 30 s, jittered; bounded by the drain deadline when draining |
 
-1. Extract the stream's file from the bundle (`nax-out/features/<f>/runs/<naxLogRunId>.jsonl` for `run`,
-   `nax.stdout`, `nax.stderr`; PLAN `run` stays absent).
-2. If found and its size ≥ the stored size, `LogStore.replace` it, set `sizeBytes`, `complete = true`,
-   `source = 'bundle'`, and publish `fleet_log`.
-3. If not found, or smaller than what was streamed, leave the row as is (`complete = false`).
+- **Start and resume (R3).** A stream registers when its file first exists (`run` via `findRunLog`, which the shipper
+  calls itself; PLAN jobs never register `run`). `ackedOffset` starts at 0 for a new attempt and on re-adopt; the first
+  answer jumps it to the server size. v3 ignores `startAtEnd`. The v3 `Watcher` creates no `FileTail`s and no
+  `LogBudget` (no double read); v1/v2 behaviour is unchanged.
+- **Shrink (R6).** Before each read: local size `< ackedOffset` → `diverged`, lifecycle warning, never rewind.
+- **Drain (R5).** In the `watch` path, after the final tick and `reapQuietly`, the job run calls
+  `shipper.drain(jobKey, deadline)`: every active stream ships to its file end (no newline cut), then sends `final=1`.
+  The drain promise runs concurrently with judge / progress push / PLAN finish and is awaited just before the
+  UPLOADING transition, bounded by `logDrainTimeoutMs` (120 s) from its start. On timeout the job's streams are
+  stopped (in-flight PUTs aborted) and the run proceeds; the bundle fallback fills the rest. The `finish` re-adopt path
+  registers the job's streams and drains the same way. `halt()` and `abandon()` stop the job's streams; every await in
+  the drain checks `halted`.
+- **Throughput note.** 2 in flight × 1 MiB against the 4 MiB/s server bucket shared by all of a runner's jobs; a
+  120 s drain moves at most ~480 MiB per runner, enough for the 256 MiB/stream cap on one job with backlog.
 
-A truncated stream is never refilled (the bundle copy would exceed the cap too); its full text stays in the bundle
-download. The fallback runs after the bundle row commits and never fails the bundle upload; an extraction error is
-logged and leaves the stream incomplete.
+### 2.5 Bundle fallback (slice 1a, R7)
 
-## 3. Read side
+After a bundle upload commits and its response is sent, an async task (errors logged, never surfaced to the runner)
+handles each stream of that attempt whose row is missing or has `complete = false` and `truncated = false`:
 
-All routes are project-scoped, readable by any project member (same rule as the job page), and resolve the job by
-`(project, id)` so a member of another project gets 404.
+1. Locate the member: `stdout` → `nax.stdout`, `stderr` → `nax.stderr`, `run` (RUN jobs only) →
+   `nax-out/features/<job.feature>/runs/<naxLogRunId>.jsonl` when `naxLogRunId` is set, else the single
+   non-`latest.jsonl` `.jsonl` member of that directory, else the newest by tar mtime. Never another feature's dir;
+   skip symlink members.
+2. Stream-extract with `tar-stream` + `zlib.createGunzip`, capped at `FLEET_LOG_MAX_BYTES`.
+3. Under the key lock, compare-and-set on `complete = false`: if the member was found and its size ≥ the stored size,
+   `LogStore.replace`, set `sizeBytes`, `complete = true`, `source = 'bundle'`, publish `fleet_log` immediately.
+   Otherwise leave the row (`complete = false`).
+
+A `truncated` stream is never refilled; its full text stays in the bundle download. A `diverged` stream (runner side)
+is just an incomplete stream here; the bundle copy replaces it when it is at least as long.
+
+## 3. Read side (slice 1c)
+
+Routes live under `/projects/:slug/fleet/jobs/:id/logs`, user principals only, project members (same rule as the job
+page), job resolved by `(project, id)` (404 otherwise), and a dedicated `@Throttle` of 600 req/min per user (R10).
+An expired stream answers 410.
 
 ### 3.1 List
 
-`GET /projects/:slug/fleet/jobs/:id/logs` →
-`{ streams: [{ leaseEpoch, stream, sizeBytes, complete, truncated, source, expired, updatedAt }] }`, plus
-`legacySampled: true` for attempts that have `log` events but no `FleetJobLog` rows (v1/v2 runners).
+`GET .../logs` → `{ attempts: [{ leaseEpoch, legacySampled, streams: [{ stream, sizeBytes, complete, truncated,
+source, expired, updatedAt }] }] }`, latest epoch first.
 
-### 3.2 Raw
+`legacySampled` is per attempt: true when the attempt has `log` events and no `FleetJobLog` rows (a v1/v2 runner while
+running). It turns false once the bundle fallback creates rows, and after retention (events deleted, rows expired).
 
-`GET /projects/:slug/fleet/jobs/:id/logs/:stream/raw?epoch=&from=&to=` → `text/plain; charset=utf-8` bytes of
-`[from, to)`, `to - from ≤ 1 MiB` (else 400), clamped to the stored size. Headers `X-Log-Size`, `X-Log-Complete`.
-`Content-Disposition: attachment` when `download=1` (the whole stream, streamed, no 1 MiB limit). Expired → 410.
+### 3.2 Raw (download and CLI)
 
-### 3.3 Entries (run stream)
+`GET .../logs/:stream/raw?leaseEpoch=&from=&to=` → `text/plain; charset=utf-8`, `[from, to)` clamped to the size,
+`to - from ≤ 1 MiB`, `@ApiProduces('text/plain')`. `download=1` streams the whole stream as an attachment (no 1 MiB
+limit). Errors use the JSON envelope like `job-bundle.controller.ts`.
 
-`GET /projects/:slug/fleet/jobs/:id/logs/run/entries?epoch=&cursor=&direction=forward|backward&limit=&level=&storyId=&stage=&role=&q=`
+### 3.3 Entries (all streams, R9)
 
-- Reads lines from `cursor` (a byte offset at a line start; default 0 forward, or the stored size backward), parses
-  each as a nax `LogEntry` (`timestamp, level, stage, storyId?, sessionRole?, message, data?`), applies the filters,
-  and returns `{ entries: [{ offset, length, timestamp, level, stage, storyId, sessionRole, message, data }
-  | { offset, length, unparsed: true, text }], nextCursor, scannedTo, atEnd }`.
-- `level` is a minimum (`debug < info < warn < error`). `q` is a case-insensitive substring over `message` and the
-  JSON of `data`. `limit` default 200, max 500.
-- Each request scans at most `FLEET_LOG_SCAN_BYTES` (4 MiB) and returns early with the cursor where it stopped, so a
-  rare filter yields several short pages, not one long request. A trailing partial line (no newline yet) is not
-  returned and not passed by the cursor.
-- An unparseable line is returned as `unparsed`, never dropped; an `unparsed` line matches a filter only through `q`.
-- Expired → 410.
+`GET .../logs/:stream/entries?leaseEpoch=&cursor=&direction=forward|backward&limit=&level=&storyId=&stage=&role=&q=`
 
-### 3.4 CLI (L6)
+Response: `{ entries, nextCursor, scannedFrom, scannedTo, atEnd, size, complete, truncated }`.
 
-`koda fleet job logs <id> --project <slug> [--stream run|stdout|stderr] [--epoch <n>] [--follow] [--level <l>]
-[--story <id>] [--stage <s>] [--role <r>] [--grep <text>] [--json]`
+- **Line model.** A line is the bytes from a line start up to and including its `\n`. Entry `offset` = line start,
+  `length` includes the `\n`. A trailing partial line (no `\n` yet) is invisible while the stream is not `complete`;
+  once `complete`, it is the last line.
+- **Forward** from `cursor` (default 0; must be a line start the server returned, else the server snaps forward to the
+  next line start): scan `[cursor, min(cursor + 2 MiB, size))`, return complete lines in ascending order.
+  `nextCursor` = the end of the last complete line scanned; `atEnd` = `nextCursor` reached the end of the last complete
+  line in the stream.
+- **Backward** from `cursor` (default = end of the last complete line): scan `[max(0, cursor − 2 MiB), cursor)`, drop
+  the leading partial line unless the window starts at 0, return lines in **ascending** order. `nextCursor` = start of
+  the first complete line in the window; `atEnd` = `nextCursor === 0`.
+- **Overlong line (R12).** A window with no `\n`: return one entry `{ offset, length: windowLength, unparsed: true,
+  truncatedLine: true, text }` and advance past the window (forward) or to the window start (backward).
+- **Run stream:** each line is parsed as a nax `LogEntry`. A line that fails to parse, or has a `level` outside
+  `debug|info|warn|error`, is `{ offset, length, unparsed: true, text }`. Filters: `level` = minimum
+  (`debug < info < warn < error`), `storyId`, `stage`, `role` exact, `q` = case-insensitive substring of the raw line
+  (R11). Unparsed lines match only `q` (and match when no other filter is set).
+- **stdout/stderr:** entries are `{ offset, length, text }`; only `q` applies.
+- `limit` default 200, max 500. A full `limit` stops the scan early; `nextCursor` is then the line after the last
+  returned entry.
+- Reading is async (`fs.read` slices of 256 KiB, `setImmediate` between slices); text is decoded per line with the
+  `utf8` decoder's replacement on invalid sequences.
 
-- `run` prints `HH:MM:SS LEVEL [stage] [story] message`; `--json` prints the raw JSONL entries. stdout/stderr print raw.
-- `--follow` polls the entries/raw route every 2 s from the last cursor until the stream is `complete` (SSE is
-  browser-only). Default epoch is the latest.
+### 3.4 CLI `koda fleet job logs` (L6)
 
-## 4. Web
+`koda fleet job logs <id> --project <slug> [--stream run|stdout|stderr] [--lease-epoch <n>] [--follow] [--level
+debug|info|warn|error] [--story <id>] [--stage <s>] [--role <r>] [--grep <text>] [--json]`
 
-### 4.1 Viewer page
+- Uses the entries route through the generated client. `run` prints `HH:MM:SS LEVEL [stage] [story] message`
+  (unparsed lines raw); stdout/stderr print the text. `--json` prints one JSON object per entry (NDJSON), including in
+  follow mode.
+- `--follow`: poll forward from `nextCursor` every 2 s; stop with exit 0 when the response says `complete` (or
+  `truncated`) and `atEnd`, or when the job is terminal (job GET every 10th poll) and `atEnd`.
+- Default epoch: the latest attempt from the list route. `--level` is validated by commander (`InvalidArgumentError`).
+- Exit codes follow the existing commands: 0 ok (Ctrl-C in follow is 0), API errors through `handleApiError`
+  (404 / 410 expired / 400). `logs` is added to the `job` command description.
 
-`/[project]/fleet/jobs/[id]/logs`, linked from the job page header and from each attempt.
+## 4. Web (slice 2)
 
-- Tabs `Run log`, `stdout`, `stderr`; attempt picker (default the latest epoch).
+### 4.1 Viewer page `/[project]/fleet/jobs/[id]/logs`
+
+- Tabs `Run log`, `stdout`, `stderr`; attempt picker (default latest).
 - Run log rows: time, level badge, stage, story, role, message; click to expand `data` as formatted JSON. Unparsed
-  lines render as plain text with a muted "unparsed" tag. stdout/stderr render as monospaced lines from the raw route.
-- Filters: minimum level, story (from the job's `stories`), stage, role, text. Filters live in the URL query.
-- Follow mode (default on while the job is RUNNING): on `fleet_log` for this job and stream, fetch forward from the
-  last cursor. Scrolling up turns follow off; a "Jump to latest" button turns it back on.
-- A window of at most 5,000 rows in the DOM; "Load earlier" (backward cursor) / "Load more" at the edges evict from
-  the other end.
+  lines render as plain text with an "unparsed" tag (plus "line cut" for `truncatedLine`). stdout/stderr rows are
+  monospaced text. Every tab uses the entries route (R9).
+- Filters (run log): minimum level, story (free text with suggestions from `job.stories` when present), stage, role,
+  text; stdout/stderr: text only. Filters live in the URL query; a change resets the cursor.
+- Opening: backward from the end (latest lines). Follow mode default on while the job is RUNNING: on `fleet_log` for
+  this job, epoch and stream, fetch forward from the last `nextCursor`. Scrolling up turns follow off; "Jump to latest"
+  turns it on.
+- At most 5,000 rows in the DOM; "Load earlier" (backward) and "Load more" (forward) evict from the other end.
+- A filtered page that returns no entries and is not `atEnd` shows "Searched up to {scannedTo} of {size} — Keep
+  searching"; the viewer never auto-loops past one request per click (criterion 3).
+- 429: back off (2 s, 4 s, 8 s) and show a quiet "Rate limited, retrying".
 - Notices: "Filled from the bundle (the live upload did not finish)" (`source = bundle`); "Truncated at 256 MiB —
-  download the bundle for the full log" (`truncated`); "Log incomplete (n bytes received)" (ended, `complete = false`);
-  "Logs expired after 30 days" (`expired`); "Sampled live log from an older runner; the full log appears after the
-  run" (`legacySampled` while running, falling back to the bundle-filled streams afterwards).
-- Download button per stream (`raw?download=1`).
+  download the bundle for the full log" (`truncated`); "Log incomplete ({size} received)" (job terminal,
+  `complete = false`); "Logs expired after {days} days" (`expired`); "Sampled live log from an older runner; the full
+  log appears after the run" (`legacySampled`, with the timeline's sampled lines linked).
+- Download per stream: a plain anchor to the proxied `raw?download=1` URL (the Nuxt proxy streams; never `$api.download`,
+  which buffers a blob).
+- i18n: every label and notice in `apps/web/i18n/locales/{en,zh}.json`, kept in parity.
 
-### 4.2 Job page and timeline
+### 4.2 Job page, timeline and live events
 
-- Header gains "Logs" (link to the viewer). The bundle download shows "Expired" when the artifact has `expiredAt`.
-- `FleetJobTimeline` keeps rendering v1/v2 `log` events as today. For v3 attempts there are none; the timeline shows a
-  single "Logs →" link row per attempt once its first `FleetJobLog` row exists.
+- `lib/project-event-stream.ts` and the project event hub gain a `fleet_log` parser and `onFleetLog` handler.
+- Job page header: "Logs" link. The bundle button shows "Expired" when the artifact has `expiredAt`;
+  `findLatestArtifact` ignores expired rows; the bundle download answers 410 for an expired artifact (API part in 1c).
+- `FleetJobTimeline` keeps rendering v1/v2 `log` events. For v3 attempts it shows one "Logs →" row per attempt once the
+  list route reports a stream for it.
 
-## 5. Retention (L4)
+## 5. Retention (slice 1c, L4)
 
-- `FleetLogRetentionProcessor`, `@Cron('45 4 * * *')`, skipped when `FLEET_LOG_RETENTION_DAYS = 0`.
-- Selects jobs with `state ∈ {COMPLETED, FAILED, ESCALATED, CRASHED, CANCELLED}` and
-  `finishedAt < now - days`, that still have an unexpired `FleetJobLog` or `FleetJobArtifact` row or any `log` event;
-  200 per batch, loops until none remain. It records each job's `leaseEpoch` at selection (`E`).
-- Per job, only for attempts `≤ E`, in order: `LogStore.deletePrefix('logs/<jobId>/<epoch>/')` per epoch;
-  `ArtifactStore.delete` for each bundle key of those epochs; delete `FleetJobEvent` rows of type `log` with
-  `leaseEpoch ≤ E`; set `expiredAt` on those epochs' `FleetJobLog` and `FleetJobArtifact` rows. Files first, rows
-  second: a crash between them leaves rows pointing at missing files, and the next run finishes the job (deletes of
-  absent files are no-ops).
-- A job requeued between selection and deletion only gains attempts `> E`, which this pass never touches, so a new
-  attempt's logs are never deleted. The old attempts are expired as planned (they were past the window).
-- Bundle download of an expired artifact → 410 Gone. Log routes → 410 / `expired: true`.
+- `FleetLogRetentionProcessor`, `@Cron('45 4 * * *')`. `FLEET_LOG_RETENTION_DAYS` default 30; `0` disables; off
+  under `NODE_ENV=test` like enrollment retention.
+- Select jobs with `state ∈ {COMPLETED, FAILED, ESCALATED, CRASHED, CANCELLED}`, `finishedAt < now − days`, and an
+  unexpired `FleetJobLog` / `FleetJobArtifact` row or any `log` event; 200 per batch until none remain. Record each
+  job's `leaseEpoch` at selection (`E`).
+- Per job, only attempts `≤ E`:
+  1. Files: `LogStore.deletePrefix('logs/<jobId>/<epoch>/')` per epoch, `ArtifactStore.delete` per bundle key.
+  2. Rows, in a transaction under the job row lock with a state re-check: delete `log` events with `leaseEpoch ≤ E`
+     (this also drops their runner-seq dedup rows, harmless for terminal attempts), set `expiredAt` on those epochs'
+     `FleetJobLog` and `FleetJobArtifact` rows.
+- If the re-check finds the job requeued, the files of attempts `≤ E` are already gone and the rows are still marked
+  expired (they describe deleted files); attempts `> E` are never touched.
+- A crash between files and rows leaves rows pointing at missing files; the next run finishes them (absent deletes are
+  no-ops).
 - Never touched: the job row, non-`log` events, approvals, budget incidents, cost fields.
 
 ## 6. Failure modes
 
 | Failure | Behaviour |
 |:--|:--|
-| API unreachable mid-run | Uploader backs off (≤ 30 s); bytes wait on disk; resumes at the server size. |
-| Runner daemon restarts mid-run | Re-adopt probes each stream's server size and resumes there; no loss (v3). |
-| Runner machine dies mid-run | Job goes CRASHED via the existing sweeper; streams stay `complete = false`; no bundle, so the viewer shows "Log incomplete (n bytes received)". |
-| Drain exceeds `logDrainTimeoutMs` | Bundle uploaded anyway; fallback fills incomplete streams. |
-| Disk full on the API | 507; runner backs off; fallback may fill after the run if space returns. |
-| Stream exceeds 256 MiB | Bytes up to the cap kept, `truncated`; viewer notice; full text in the bundle. |
-| Stale lease (requeued / reassigned) | 409 `stale_lease`; uploader stops; sync delivers ABANDON. |
-| Corrupted chunk in transit | 422 on SHA mismatch; retried from the same offset. |
-| Duplicate / reordered chunk | Exact-offset rule: duplicate → 200 no-op; gap → 409 with the server size. |
-| Bundle missing or unreadable at fallback | Stream stays incomplete; error logged; bundle upload unaffected. |
+| API unreachable mid-run | Shipper backs off (≤ 30 s); bytes wait on disk; resumes at the server size. |
+| Daemon restarts, nax alive (`watch`) | Streams re-register at offset 0, jump to the server size; nothing lost. |
+| Daemon restarts, nax exited (`finish`) | Streams register and drain before UPLOADING. |
+| Runner machine dies mid-run | Job goes CRASHED via the sweeper; streams stay incomplete; no bundle; "Log incomplete". |
+| Drain exceeds `logDrainTimeoutMs` | Streams stopped; bundle uploaded; fallback fills incomplete streams. |
+| Straggler writes after final | Cannot happen in the `watch` path (drain starts after reap); in `finish`, nax is already gone. |
+| File shrinks / server ahead of file | `diverged`; stream stopped; fallback replaces it if the bundle copy is at least as long. |
+| Disk full on the API | 507; shipper backs off; fallback may fill after the run. |
+| Stream exceeds 256 MiB | Kept up to the cap, `truncated`; viewer notice; full text in the bundle. |
+| Stale lease | 409 `stale_lease` + ABANDON queued; shipper stops the job's streams. |
+| Job cancelled mid-run | Uploads keep working until the job is terminal; then 409 `job_state`; partial bundle (if uploaded in RUNNING) feeds the fallback. |
+| Corrupted chunk | 422; retried from the same offset. |
+| Duplicate / reordered chunk | Duplicate → 200 no-op; gap → 409 with the server size. |
+| Bundle missing, unreadable or without the member | Stream stays incomplete; error logged; bundle upload unaffected. |
 
 ## 7. Configuration
+
+API (`FleetConfigSchema`, `IFleetConfig`, `fleetConfig()` in `config/fleet.config.ts`; documented in the env docs):
 
 | Env | Default | Meaning |
 |:--|:--|:--|
 | `FLEET_LOG_MAX_BYTES` | 268435456 | Per stream per attempt cap |
 | `FLEET_LOG_CHUNK_MAX_BYTES` | 1048576 | Max body per upload |
-| `FLEET_LOG_RUNNER_BYTES_PER_SEC` | 2097152 | Per-runner upload rate |
-| `FLEET_LOG_SCAN_BYTES` | 4194304 | Max bytes scanned per entries request |
-| `FLEET_LOG_RETENTION_DAYS` | 30 | `0` disables retention |
+| `FLEET_LOG_RUNNER_BYTES_PER_SEC` | 4194304 | Per-runner upload rate |
+| `FLEET_LOG_SCAN_BYTES` | 2097152 | Max bytes scanned per entries request |
+| `FLEET_LOG_RETENTION_DAYS` | 30 | `0` disables; off under `NODE_ENV=test` |
 
-Runner tuning: `logDrainTimeoutMs` 120000.
+Runner (`Tuning` in `daemon/tuning.ts`, mapped into `JobRunTuning` in `daemon.ts`; overridable only through
+`startDaemon` options): `logChunkBytes` 1048576, `logMaxInFlight` 2, `logPutTimeoutMs` 30000, `logBackoffMaxMs`
+30000, `logDrainTimeoutMs` 120000.
+
+New API dependency: `tar-stream` (+ types). `openapi.json` and the CLI client are regenerated (`bun run generate`) in
+1a (runner route) and 1c (read routes).
 
 ## 8. Testing
 
-- **API unit:** `LocalDiskLogStore` (exact-offset append, duplicate, gap, partial overlap, concurrent appends to one
-  key serialized, `deletePrefix` of an absent prefix); upload controller (fence, state, 400/409/413/422/429/507,
-  `final=1` offset rule, cap partial append); entries reader (each filter, `level` minimum, `q` over data, a line
-  straddling the 4 MiB scan bound, trailing partial line, unparsed lines, forward/backward cursor round trip);
-  bundle fallback (incomplete vs truncated vs complete, missing file, smaller file); `fleet_log` coalescing (one per
-  second, trailing edge); retention selection, order, requeue race, 410s.
-- **API integration (`KODA_DB_TESTS=1`):** `FleetJobLog` upsert under concurrent appends; retention batch on a real
-  database; fallback from a real bundle.
-- **Runner unit:** uploader loop (200 advance, 409 jump, 429 wait, backoff, stale stop, cap stop); re-adopt resumes at
-  the server size; drain then `final=1` before UPLOADING; drain timeout; v2 vs v3 sink selection; `run` stream starts
-  when the log appears.
-- **CLI unit:** `job logs` formatting, `--json`, filters mapped to query params, `--follow` stops on `complete`.
-- **Web unit:** cursor and follow state, URL-synced filters, 5,000-row window eviction, row expansion, every notice.
-- **E2E (Playwright), scripted runner speaking v3:**
+- **1a API unit:** `LocalDiskLogStore` (exact-offset append, duplicate, gap, partial overlap, serialized concurrent
+  appends, `replace` under the lock, absent `deletePrefix`); upload controller (400s, 429 before body read, stale lease
+  → ABANDON queued, ASSIGNED accepted, terminal → `job_state`, 413 `chunk_size` by counting not header, 422, cap cut +
+  `truncated`, `complete` refusals, idempotent repeated `final`, 507); row upsert monotonic; fallback (incomplete vs
+  truncated vs complete, member by `naxLogRunId`, by single file, by newest, missing member, member smaller than
+  stored, corrupt gzip, extraction cap, CAS against a concurrent `final`); `fleet_log` coalescing (one per second,
+  trailing edge, immediate on final/fallback, map cleanup); protocol `[1,2,3]`.
+- **1a API integration (`KODA_DB_TESTS=1`):** concurrent appends + row upsert on Postgres; fallback from a real
+  `tar.gz` built like the runner's.
+- **1b runner unit:** shipper loop (every row of the response table), in-flight cap and round-robin across two jobs,
+  `Retry-After` pauses all, 30 s timeout abort; tick cadence unaffected by a hanging PUT; overlong line sent as a full
+  window; shrink → diverged; server ahead → diverged; drain after reap then `final=1` before UPLOADING; drain timeout;
+  halt mid-drain; `watch` re-adopt resumes at the server size; `finish` re-adopt drains; PLAN never registers `run`;
+  v2 vs v3 watcher behaviour; protocol constant 3. Real files via `test/fixtures/fake-nax.ts` extended for large JSONL
+  and long lines; injected fetch, sleep, jitter, now.
+- **1c API unit:** entries contract (forward, backward ascending, leading partial dropped, trailing partial invisible
+  until complete, overlong line, cursor snap, limit stop, each filter, unknown level → unparsed, `q` on raw line,
+  stdout/stderr text entries, `size/complete/truncated` in the body); raw range limits + download streaming; list +
+  `legacySampled`; 410s; throttle 600/min; retention (selection, `≤ E` only, requeue race, lock + re-check, crash
+  between files and rows, `0` disables, test-env off); expired bundle → 410 and `findLatestArtifact` skips it.
+  **1c CLI unit:** formatting, NDJSON, filters → query params, follow stop rules, `--level` validation, exit codes.
+- **2 web unit:** cursor/follow state machine, URL-synced filters, 5,000-row eviction, keep-searching, 429 backoff,
+  every notice, `fleet_log` parsing and dedupe, i18n parity.
+- **2 E2E (Playwright).** Fixture work: the scripted runner gains a v3 enroll option, `putLog`, and a real tar.gz
+  bundle writer (`tar-stream` in the fixture). Tests:
   1. Viewer open while RUNNING: lines arrive in follow mode; filter by story and level; scroll up turns follow off.
-  2. Job ends with stdout/stderr present; one stream's upload is cut before `final`; the bundle fills it and the
-     notice shows.
-- **Live check (unbilled, no approval needed):** a real `koda-runner` against a local koda, with a stub `nax` binary
-  that writes ~50 MB of JSONL plus stdout/stderr over ~2 minutes. Kill and restart the daemon mid-run. Pass when each
-  stored stream's SHA-256 equals the file on disk and the viewer filters work on it.
+  2. Job ends with stdout complete and the run stream cut before `final`; the bundle (containing the full run log)
+     fills it; the "Filled from the bundle" notice shows.
+- **2 live check (unbilled, no approval needed):** a real `koda-runner` against a local koda with a stub `nax` binary
+  writing ~50 MB of JSONL (including one 3 MiB line) plus stdout/stderr over ~2 minutes. Kill and restart the daemon
+  mid-run, and once more after the stub exits. Pass when each stored stream's SHA-256 equals the file on disk and the
+  viewer filters work on it.
 
-## 9. Slices
+## 9. Slices (R14)
 
 | Slice | Scope | Deps |
 |:--|:--|:--|
-| 1a transport + storage | `LogStore` + `LocalDiskLogStore`, `FleetJobLog` + `FleetJobArtifact.expiredAt` migration, upload route + octet-stream parser, protocol v3 + capability, runner `LogUploader` + drain + re-adopt probe, bundle fallback, `fleet_log` event | — |
-| 1b read side + retention | list / raw / entries routes, CLI `job logs`, retention cron, 410 handling, openapi + CLI client regen | 1a |
-| 2 web + E2E | viewer page, job page + timeline links, notices, E2E (1)(2), unbilled live check | 1b |
+| 1a API transport + storage | `LogStore` + `LocalDiskLogStore`, migration (`FleetJobLog`, `FleetJobArtifact.expiredAt`, `FleetJob(state, finishedAt)` index), octet-stream parser, upload route + rate bucket, protocol `[1,2,3]`, bundle fallback (`tar-stream`), `fleet_log` event + coalescer, config keys, i18n reasons, openapi regen | — |
+| 1b runner shipper | `ServerClient.putLog`, `LogShipper`, watcher v3 mode, drain in `watch` and `finish`, shrink/diverged, tuning, protocol 3, runner context.md | 1a |
+| 1c read side + CLI + retention | list / raw / entries routes, throttle, CLI `job logs`, retention cron, expired-bundle 410 + `findLatestArtifact`, openapi + CLI regen | 1a |
+| 2 web + E2E | viewer page, live-event parser, job page + timeline links, expired bundle UI, notices, i18n, E2E fixture + tests (1)(2), unbilled live check | 1b, 1c |
