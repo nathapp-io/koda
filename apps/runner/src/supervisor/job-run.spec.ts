@@ -1,11 +1,18 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { FleetJobKindName, SnapshotEventPayload, StateEventPayload } from '@nathapp/fleet-protocol';
 import type { UploadOutcome } from '../bundle/upload-bundle';
+import { LogShipper } from '../logs/log-shipper';
 import { Journal } from '../journal/journal';
 import { createMemoryLogger } from '../logger';
+import { systemSleep } from '../time';
 import { assignFor } from '../../test/helpers/assign';
 import { FakeExecutor } from '../../test/helpers/fake-executor';
+import { fakeLogServer } from '../../test/helpers/fake-log-server';
+import { FakeLogShipping } from '../../test/helpers/fake-log-shipping';
 import { fakeTime } from '../../test/helpers/fake-time';
+import { makeTempDirs } from '../../test/helpers/tmp';
 import { waitFor } from '../../test/helpers/wait';
 import type { EventRow } from '../journal/types';
 import { JobRun, type BundleUploader, type JobRunDeps, type JobRunTuning } from './job-run';
@@ -25,12 +32,14 @@ function build(command: FleetJobKindName = 'RUN', jobId = 'j1', tuning: Partial<
   };
   const mutex = new RepoMutex();
   const log = createMemoryLogger();
+  const logs = new FakeLogShipping();
   const deps: JobRunDeps = {
     journal, executor: ex, mutex, uploader, log, now: time.now, sleep: time.sleep,
-    tuning: { statusPollMs: 2_000, killGraceMs: 30_000, ackPollMs: 250, uploadAckWaitMs: 0, ...tuning },   // 0: unit tests do not wait for acks unless they say so
+    tuning: { statusPollMs: 2_000, killGraceMs: 30_000, ackPollMs: 250, uploadAckWaitMs: 0, logDrainTimeoutMs: 120_000, ...tuning },   // 0: unit tests do not wait for acks unless they say so
+    logs,
   };
   journal.insertJob({ assign: assignFor(command, { jobId }), leaseEpoch: 1, repoKey: 'acme/app', jobDir: `/w/.jobs/${jobId}` });
-  return { time, journal, ex, outcomes, uploads, mutex, deps, log, acked: [] as EventRow[], run: new JobRun(deps, jobId, 1) };
+  return { time, journal, ex, outcomes, uploads, mutex, deps, log, logs, acked: [] as EventRow[], run: new JobRun(deps, jobId, 1) };
 }
 type Built = ReturnType<typeof build>;
 const events = (b: Built, jobId = 'j1') => b.journal.pendingEvents(jobId, 1, 1_000);
@@ -48,6 +57,10 @@ const everyStateName = (b: Built) => everything(b).filter((e) => e.type === 'sta
 const pendingStates = (b: Built) => events(b).filter((e) => e.type === 'state').map((e) => (e.payload as StateEventPayload).to);
 const settle = (): Promise<void> => new Promise<void>((resolve) => setTimeout(resolve, 0));
 const lastSnapshot = (b: Built) => events(b).filter((e) => e.type === 'snapshot').at(-1)?.payload as SnapshotEventPayload | undefined;
+const inOrder = (all: string[], wanted: string[]) => wanted.every((s, i) => all.indexOf(s) >= 0 && (i === 0 || all.indexOf(s) > all.indexOf(wanted[i - 1])));
+const lifecycles = (b: Built) => everything(b).filter((e) => e.type === 'lifecycle').map((e) => e.payload as { level: string; message: string });
+const tmpLogs = makeTempDirs();
+afterAll(() => tmpLogs.cleanup());
 
 describe('RUN happy path (D35)', () => {
   test('RUNNING -> UPLOADING -> COMPLETED, pid recorded with RUNNING, final snapshot with the ledger result, cleanup and done', async () => {
@@ -427,6 +440,7 @@ describe('resume (readopt)', () => {
     b.ex.dieAfterTicks(2);
     await b.run.start('watch');
     expect(b.ex.watchOptions).toHaveLength(1);
+    expect(b.logs.calls).toContain('logs.register:j1');
     expect(b.ex.calls).not.toContain('prepare:j1');
     expect(b.ex.calls).not.toContain('spawn:j1');
     expect(b.ex.killed[0]).toEqual({ pgid: 4242, signal: 'SIGTERM' });
@@ -734,5 +748,152 @@ describe('RUN progress push (S1b 1a)', () => {
     b.ex.dieAfterTicks(1);
     await b.run.start('prepare');
     expect(b.ex.calls).not.toContain('pushProgress:j1');
+  });
+});
+
+describe('log shipping (S2a §2.4, plan D327)', () => {
+  test('registers after spawn with the executor\'s log sources; its lifecycle callback writes journal lifecycle events', async () => {
+    const b = build();
+    const logs = new FakeLogShipping(b.ex.calls);
+    b.ex.dieAfterTicks(1);
+    await new JobRun({ ...b.deps, logs }, 'j1', 1).start('prepare');
+    expect(inOrder(b.ex.calls, ['spawn:j1', 'logs.register:j1'])).toBe(true);
+    expect(logs.jobs[0]).toMatchObject({ jobId: 'j1', leaseEpoch: 1, sources: b.ex.logFiles });
+    expect(logs.calls.filter((c) => c === 'logs.register:j1')).toHaveLength(1);
+  });
+  test('a lifecycle message from the shipper lands on the job\'s timeline', async () => {
+    const b = build();
+    b.ex.dieAfterTicks(1);
+    b.ex.onTick = (n) => {
+      if (n === 1) b.logs.jobs[0].lifecycle('warn', 'the stdout log shrank');
+      b.ex.alive = false;
+    };
+    await b.run.start('prepare');
+    expect(lifecycles(b)).toContainEqual({ level: 'warn', message: 'the stdout log shrank' });
+  });
+  test('wakes the shipper after every tick, the final one included', async () => {
+    const b = build();
+    b.ex.dieAfterTicks(2);
+    await b.run.start('prepare');
+    expect(b.ex.ticks).toBe(3);
+    expect(b.logs.wakes).toBe(3);
+  });
+  test('drains after the final tick and reap, concurrently with the progress push, and awaits it before UPLOADING (R5)', async () => {
+    const b = build();
+    const logs = new FakeLogShipping(b.ex.calls);
+    logs.holdDrain();
+    b.ex.status = { run: { id: 'run-1', status: 'failed' } };
+    b.ex.dieAfterTicks(1);
+    const done = new JobRun({ ...b.deps, logs }, 'j1', 1).start('prepare');
+    await waitFor(() => b.ex.calls.includes('pushProgress:j1'));
+    expect(inOrder(b.ex.calls, ['reap:j1', 'logs.drain:j1', 'pushProgress:j1'])).toBe(true);
+    await settle();
+    expect(stateNames(b)).toEqual(['RUNNING']);
+    logs.releaseDrain();
+    await done;
+    expect(stateNames(b)).toEqual(['RUNNING', 'UPLOADING', 'FAILED']);
+    expect(inOrder(b.ex.calls, ['logs.drain:j1', 'collectBundle:j1', 'logs.stop:j1', 'cleanup:j1'])).toBe(true);
+  });
+  test('a drain timeout is a lifecycle warning and the run goes on to its verdict and bundle', async () => {
+    const b = build();
+    b.logs.drainResult = 'timeout';
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    expect(lifecycles(b)).toContainEqual({ level: 'warn', message: 'log upload did not finish within 120 s; the bundle fills the rest' });
+    expect(stateNames(b)).toEqual(['RUNNING', 'UPLOADING', 'COMPLETED']);
+  });
+  test('a halt during the drain stops the job\'s logs and reports nothing more (Review focus 4)', async () => {
+    const b = build();
+    const logs = new FakeLogShipping(b.ex.calls);
+    logs.holdDrain();
+    b.ex.dieAfterTicks(1);
+    const run = new JobRun({ ...b.deps, logs }, 'j1', 1);
+    const done = run.start('prepare');
+    await waitFor(() => logs.calls.includes('logs.drain:j1'));
+    run.halt();
+    await done;
+    expect(logs.calls).toContain('logs.stop:j1');
+    expect(stateNames(b)).toEqual(['RUNNING']);
+    expect(b.uploads).toEqual([]);
+  });
+  test('the finish path (nax exited while the daemon was down) registers and drains before UPLOADING (R5)', async () => {
+    const b = build();
+    const logs = new FakeLogShipping(b.ex.calls);
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242, naxRunId: 'run-1' });
+    await new JobRun({ ...b.deps, logs }, 'j1', 1).start('finish');
+    expect(inOrder(b.ex.calls, ['logs.register:j1', 'logs.drain:j1', 'collectBundle:j1'])).toBe(true);
+    expect(stateNames(b)).toEqual(['UPLOADING', 'COMPLETED']);
+  });
+  test('the watch path registers the job\'s logs too', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242, naxRunId: 'run-1' });
+    b.ex.alive = true;
+    b.ex.dieAfterTicks(1);
+    await b.run.start('watch');
+    expect(b.logs.calls).toEqual(expect.arrayContaining(['logs.register:j1', 'logs.drain:j1', 'logs.stop:j1']));
+  });
+  test('a job that never spawns never registers, and its cleanup still releases the key', async () => {
+    const b = build();
+    b.ex.prepareResult = { ok: false, reason: 'checkout failed' };
+    await b.run.start('prepare');
+    expect(b.logs.calls).toEqual(['logs.stop:j1', 'logs.stop:j1']);   // cleanup(), then start()'s finally (idempotent)
+  });
+  test('PLAN: the drain overlaps finishPlan and completes before UPLOADING', async () => {
+    const b = build('PLAN');
+    const logs = new FakeLogShipping(b.ex.calls);
+    logs.holdDrain();
+    b.ex.dieAfterTicks(1);
+    const done = new JobRun({ ...b.deps, logs }, 'j1', 1).start('prepare');
+    await waitFor(() => b.ex.calls.includes('finishPlan:j1'));
+    expect(inOrder(b.ex.calls, ['logs.drain:j1', 'finishPlan:j1'])).toBe(true);
+    await settle();
+    expect(stateNames(b)).toEqual(['RUNNING']);
+    logs.releaseDrain();
+    await done;
+    expect(stateNames(b)).toEqual(['RUNNING', 'UPLOADING', 'COMPLETED']);
+  });
+  test('a runner error drains the logs before its UPLOADING -> FAILED report (no bundle follows)', async () => {
+    const b = build();
+    const logs = new FakeLogShipping(b.ex.calls);
+    b.ex.statusError = new Error('disk gone');
+    b.ex.dieAfterTicks(1);
+    await new JobRun({ ...b.deps, logs }, 'j1', 1).start('prepare');
+    expect(stateNames(b)).toEqual(['RUNNING', 'UPLOADING', 'FAILED']);
+    expect(inOrder(b.ex.calls, ['logs.register:j1', 'logs.drain:j1', 'logs.stop:j1', 'cleanup:j1'])).toBe(true);
+    expect(b.uploads).toEqual([]);
+  });
+  test('a re-adopted row that is already terminal never registers its logs', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'COMPLETED', pid: 4242, pgid: 4242 });
+    await b.run.start('finish');
+    expect(b.logs.calls).toEqual(['logs.stop:j1', 'logs.stop:j1']);
+  });
+  test('abandon of a run that never started (after a restart) stops the key and registers nothing', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    await new JobRun(b.deps, 'j1', 1).abandon();
+    expect(b.logs.calls).toEqual(['logs.stop:j1']);
+  });
+  test('with the real shipper, a PUT that never answers does not slow the watch loop; the drain times out (R4, R5)', async () => {
+    const dir = await tmpLogs.make('jr');
+    await writeFile(join(dir, 'nax.stdout'), 'line\n');
+    const server = fakeLogServer();
+    for (let i = 0; i < 10; i += 1) server.overrides.push('hold');
+    const shipper = new LogShipper({
+      transport: server.transport, log: createMemoryLogger(), nowMs: () => Date.now(), sleep: systemSleep, random: () => 0,
+      tuning: { chunkBytes: 1_024, maxInFlight: 2, putTimeoutMs: 60_000, backoffMaxMs: 1_000 },
+    });
+    try {
+      const b = build('RUN', 'j1', { logDrainTimeoutMs: 1_000 });
+      b.ex.logFiles = { outDir: join(dir, 'nax-out'), feature: 'f', stdoutPath: join(dir, 'nax.stdout'), stderrPath: join(dir, 'nax.stderr'), runLog: false };
+      b.ex.dieAfterTicks(5);
+      await new JobRun({ ...b.deps, logs: shipper }, 'j1', 1).start('prepare');
+      expect(b.ex.ticks).toBe(6);
+      await waitFor(() => server.inFlight === 0);
+      expect(lifecycles(b)).toContainEqual({ level: 'warn', message: 'log upload did not finish within 1 s; the bundle fills the rest' });
+      expect(stateNames(b)).toEqual(['RUNNING', 'UPLOADING', 'COMPLETED']);
+    } finally {
+      await shipper.close();
+    }
   });
 });

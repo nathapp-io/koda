@@ -7,6 +7,7 @@ import { wipPushValue, type ProgressPushOutcome } from '../executor/progress-pus
 import type { Journal } from '../journal/journal';
 import type { JobRow } from '../journal/types';
 import type { Logger } from '../logger';
+import type { DrainResult, LogShipping } from '../logs/types';
 import type { Now, Sleep } from '../time';
 import { planVerdict } from '../verdict/plan-verdict';
 import { runVerdict, type Verdict } from '../verdict/run-verdict';
@@ -26,6 +27,8 @@ export interface JobRunTuning {
   /** D60: how often, and for how long, the run waits for the server to ack its UPLOADING event. 0 waits for nothing. */
   readonly ackPollMs: number;
   readonly uploadAckWaitMs: number;
+  /** S2a §2.4 (R5): how long the run waits for its logs to reach the server before UPLOADING. */
+  readonly logDrainTimeoutMs: number;
 }
 
 export interface JobRunDeps {
@@ -37,6 +40,8 @@ export interface JobRunDeps {
   readonly now: Now;
   readonly sleep: Sleep;
   readonly tuning: JobRunTuning;
+  /** S2a §2.4 (plan D321): the runner-wide log shipper; nothing in a tick awaits it. */
+  readonly logs: LogShipping;
 }
 
 export type RunStart = 'prepare' | 'reprepare' | 'watch' | 'finish';
@@ -74,6 +79,16 @@ export class JobRun {
   }
 
   async start(from: RunStart): Promise<void> {
+    try {
+      await this.run(from);
+    } finally {
+      // Plan D327: every exit releases the job's log streams, including `stale`, a halt and a failSafe whose own
+      // recording failed. Idempotent: cleanup() has normally stopped the key already, before markDone.
+      this.deps.logs.stopJob(this.jobId, this.leaseEpoch);
+    }
+  }
+
+  private async run(from: RunStart): Promise<void> {
     const first = this.row();
     if (!first) return;
     this.queued = from === 'prepare' || from === 'reprepare';
@@ -92,6 +107,7 @@ export class JobRun {
 
   private async lifecycle(from: RunStart): Promise<void> {
     if ((from === 'prepare' || from === 'reprepare') && !(await this.prepareAndSpawn(from === 'reprepare'))) return;
+    this.registerLogs();
     if (from === 'watch') {
       await this.resumeCredentials();
       await this.resumeApprovals();
@@ -99,6 +115,20 @@ export class JobRun {
     if (from !== 'finish') await this.watchUntilExit();
     if (this.halted) return;
     await this.finish();
+  }
+
+  /**
+   * Plan D327: R3 resume — the shipper starts at offset 0 and jumps to the server's size on its first answer.
+   * Not after a halt that landed during spawn (halt() already stopped the key), and not for a re-adopted row that is
+   * already terminal (its uploads would only collect 409s).
+   */
+  private registerLogs(): void {
+    const row = this.mustRow();
+    if (this.halted || isTerminalState(row.state)) return;
+    this.deps.logs.register({
+      jobId: this.jobId, leaseEpoch: this.leaseEpoch, sources: this.deps.executor.logSources(row),
+      lifecycle: (level, message) => this.events.lifecycle(level, message),
+    });
   }
 
   /** D90: a readopted nax may still push; its socket died with the previous daemon. A failure is reported, not fatal. */
@@ -154,6 +184,7 @@ export class JobRun {
 
   halt(): void {
     this.halted = true;
+    this.deps.logs.stopJob(this.jobId, this.leaseEpoch);
   }
 
   private async reapQuietly(row: JobRow): Promise<void> {
@@ -167,7 +198,7 @@ export class JobRun {
   }
 
   async abandon(): Promise<void> {
-    this.halted = true;
+    this.halt();
     const row = this.row();
     if (!row) return;
     // The halted run lets go of the repo mutex as soon as it notices; cleanup must not overlap another job's prepare.
@@ -236,6 +267,7 @@ export class JobRun {
       this.tickErrors += 1;
       if (this.tickErrors % TICK_WARN_EVERY === 1) this.events.lifecycle('warn', `watcher error: ${errorMessage(error)}`);
     }
+    this.deps.logs.wake(this.jobId, this.leaseEpoch);
   }
 
   private escalateKill(row: JobRow): void {
@@ -308,6 +340,8 @@ export class JobRun {
       await this.cleanup();
       return;
     }
+    // S2a §2.4 (R5): the logs drain while the verdict, progress push and PLAN finish run; awaited before UPLOADING.
+    const drained = this.deps.logs.drain(this.jobId, this.leaseEpoch, this.deps.tuning.logDrainTimeoutMs);
     const judged = await this.judge(row);
     let verdict = judged.verdict;
     let result = { branch: row.resultBranch, sha: row.resultSha };
@@ -335,6 +369,8 @@ export class JobRun {
       }
     }
     if (this.halted) return;
+    await this.awaitLogs(drained);
+    if (this.halted) return;
     if (this.events.currentState() === 'RUNNING') this.events.transition('UPLOADING');
     if (!(await this.waitUntil(() => !this.uploadingPending())) && !this.halted) {
       this.events.lifecycle('warn', 'UPLOADING event not acked in time; uploading anyway');
@@ -359,6 +395,13 @@ export class JobRun {
     if (Object.keys(snapshot).length > 0) this.events.snapshot(snapshot);
     this.events.transition(verdict.state, terminalReason(verdict, outcome));
     await this.cleanup();
+  }
+
+  /** Plan D327: a timed-out drain is reported; the bundle fallback (slice 1a) fills the incomplete streams. */
+  private async awaitLogs(drained: Promise<DrainResult>): Promise<void> {
+    if ((await drained) !== 'timeout') return;
+    const seconds = Math.max(1, Math.round(this.deps.tuning.logDrainTimeoutMs / 1000));
+    this.events.lifecycle('warn', `log upload did not finish within ${seconds} s; the bundle fills the rest`);
   }
 
   /** D60: true when the journal holds no unacked UPLOADING state event (the server has applied it). */
@@ -407,6 +450,7 @@ export class JobRun {
   }
 
   private async cleanup(): Promise<void> {
+    this.deps.logs.stopJob(this.jobId, this.leaseEpoch);
     const row = this.row();
     if (!row) return;
     try {
@@ -430,7 +474,12 @@ export class JobRun {
         // jobDir would still be inside `since = createdAt`, so reap could SIGKILL someone else's pid. Skip it.
         if (row.pid !== null) await this.reapQuietly(row);
       }
-      if (this.events.currentState() === 'RUNNING') this.events.transition('UPLOADING');
+      // Plan D327: no bundle follows a runner error, so whatever nax wrote must reach the server now.
+      if (this.events.currentState() === 'RUNNING') {
+        await this.awaitLogs(this.deps.logs.drain(this.jobId, this.leaseEpoch, this.deps.tuning.logDrainTimeoutMs));
+        if (this.halted) return;
+        this.events.transition('UPLOADING');
+      }
       this.events.transition('FAILED', `runner error: ${errorMessage(error)}`);
       await this.cleanup();
     } catch (inner) {

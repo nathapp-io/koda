@@ -6,6 +6,7 @@ import { assignFor } from '../../test/helpers/assign';
 import { FakeExecutor } from '../../test/helpers/fake-executor';
 import { fakeTime } from '../../test/helpers/fake-time';
 import { waitFor } from '../../test/helpers/wait';
+import { NO_LOG_SHIPPING } from '../../test/helpers/fake-log-shipping';
 import { CommandHandler } from './command-handler';
 import { RepoMutex } from './repo-mutex';
 import { Supervisor } from './supervisor';
@@ -17,7 +18,8 @@ function build() {
   const log = createMemoryLogger();
   const supervisor = new Supervisor({
     journal, executor: ex, mutex: new RepoMutex(), log, now: time.now, sleep: time.sleep,
-    uploader: { upload: async () => ({ kind: 'ok' }) }, tuning: { statusPollMs: 2_000, killGraceMs: 30_000, ackPollMs: 250, uploadAckWaitMs: 0 }, readoptHeartbeatMs: 120_000,
+    uploader: { upload: async () => ({ kind: 'ok' }) }, tuning: { statusPollMs: 2_000, killGraceMs: 30_000, ackPollMs: 250, uploadAckWaitMs: 0, logDrainTimeoutMs: 120_000 }, readoptHeartbeatMs: 120_000,
+    logs: NO_LOG_SHIPPING,
   });
   const approvals = { answer: mock(async (): Promise<{ result: 'ok' | 'rejected'; detail?: string }> => ({ result: 'ok' })) };
   const handler = new CommandHandler({ journal, supervisor, workspaceRoot: '/work/space', log, now: time.now, approvals });

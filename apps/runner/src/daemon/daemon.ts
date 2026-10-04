@@ -17,6 +17,7 @@ import { sweepOrphanProfiles } from '../executor/job-profile';
 import { newBootId, type RunnerIdentityFile } from '../identity/identity-store';
 import { Journal } from '../journal/journal';
 import { createConsoleLogger, type Logger } from '../logger';
+import { LogShipper } from '../logs/log-shipper';
 import { createNaxCli, type NaxCli } from '../nax/nax-cli';
 import { assertWorkspaceTrusted } from '../nax/trust';
 import { assertInside } from '../paths/safe-segment';
@@ -139,10 +140,17 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       rebuild, sleep, log,
     }, job.jobId, job.leaseEpoch, file),
   };
+  // S2a §2.4 (plan D321, D328): one shipper for every job; only this transport talks to the server.
+  const shipper = new LogShipper({
+    transport: { putLog: (args) => client.putLog(args) },
+    log, nowMs: () => now().getTime(), sleep, random: Math.random,
+    tuning: { chunkBytes: tuning.logChunkBytes, maxInFlight: tuning.logMaxInFlight, putTimeoutMs: tuning.logPutTimeoutMs, backoffMaxMs: tuning.logBackoffMaxMs },
+  });
   const supervisor = new Supervisor({
     journal, executor, mutex: new RepoMutex(), uploader, log, now, sleep,
-    tuning: { statusPollMs: tuning.statusPollMs, killGraceMs: tuning.killGraceMs, ackPollMs: tuning.ackPollMs, uploadAckWaitMs: tuning.uploadAckWaitMs },
+    tuning: { statusPollMs: tuning.statusPollMs, killGraceMs: tuning.killGraceMs, ackPollMs: tuning.ackPollMs, uploadAckWaitMs: tuning.uploadAckWaitMs, logDrainTimeoutMs: tuning.logDrainTimeoutMs },
     readoptHeartbeatMs: tuning.readoptHeartbeatMs,
+    logs: shipper,
   });
   const handler = new CommandHandler({ journal, supervisor, workspaceRoot: config.workspaceRoot, log, now, approvals });
 
@@ -194,6 +202,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       stopNeedListener();
       await running;
       supervisor.shutdown();
+      await shipper.close();
       approvals.stopAll();   // no new asks are accepted while runs drain; READOPT re-binds on the next boot
       await broker.closeAll();   // D90: sockets close; a prepare waiting for its first token ends now instead of in 120 s
       // D67: a halted run ends at its next check, or when its current executor call returns. The journal must outlive it.
@@ -215,6 +224,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     loop.stop();
     stopNeedListener();
     supervisor.shutdown();   // a real kill ends every run; in one process they must at least stop emitting
+    void shipper.close();   // a killed daemon's uploads die with it; the next daemon resumes at the server's size (R3)
     approvals.stopAll();   // a killed daemon's listeners die with it; READOPT re-binds on the next boot
     void broker.closeAll();   // D90: a killed daemon's listeners die with it; the files stay (the next daemon replaces them)
     journal.close();

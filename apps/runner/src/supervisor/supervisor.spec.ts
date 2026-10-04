@@ -7,6 +7,7 @@ import { assignFor } from '../../test/helpers/assign';
 import { FakeExecutor } from '../../test/helpers/fake-executor';
 import { fakeTime } from '../../test/helpers/fake-time';
 import { waitFor } from '../../test/helpers/wait';
+import { NO_LOG_SHIPPING } from '../../test/helpers/fake-log-shipping';
 import { RepoMutex } from './repo-mutex';
 import { Supervisor } from './supervisor';
 
@@ -18,7 +19,8 @@ function build() {
   const supervisor = new Supervisor({
     journal, executor: ex, mutex: new RepoMutex(), log: createMemoryLogger(), now: time.now, sleep: time.sleep,
     uploader: { upload: async () => outcomes.shift() ?? { kind: 'ok' } },
-    tuning: { statusPollMs: 2_000, killGraceMs: 30_000, ackPollMs: 250, uploadAckWaitMs: 0 }, readoptHeartbeatMs: 120_000,
+    tuning: { statusPollMs: 2_000, killGraceMs: 30_000, ackPollMs: 250, uploadAckWaitMs: 0, logDrainTimeoutMs: 120_000 }, readoptHeartbeatMs: 120_000,
+    logs: NO_LOG_SHIPPING,
   });
   const add = (over: Partial<AssignPayload> = {}, epoch = 1, command: 'RUN' | 'PLAN' = 'RUN') =>
     journal.insertJob({ assign: assignFor(command, over), leaseEpoch: epoch, repoKey: 'acme/app', jobDir: `/w/.jobs/${over.jobId ?? 'j1'}` }).row;

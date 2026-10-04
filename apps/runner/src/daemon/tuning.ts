@@ -24,6 +24,16 @@ export interface Tuning {
   readonly naxCallTimeoutMs: number;
   /** D111: the timeout of one nax call in the post-checkout job check, which holds the per-repo mutex. */
   readonly jobCheckTimeoutMs: number;
+  /** S2a §7: the largest log window one PUT carries. */
+  readonly logChunkBytes: number;
+  /** S2a R4: log PUTs in flight at once, across every job of the runner. */
+  readonly logMaxInFlight: number;
+  /** S2a R4: a log PUT is aborted after this long. */
+  readonly logPutTimeoutMs: number;
+  /** S2a §2.4: the ceiling of the log upload backoff. */
+  readonly logBackoffMaxMs: number;
+  /** S2a R5: how long a finished job waits for its logs before UPLOADING. */
+  readonly logDrainTimeoutMs: number;
 }
 
 /** D42: the design's constants in one place; only `startDaemon` options (tests) override them, runner.json cannot. */
@@ -45,4 +55,9 @@ export const TUNING: Tuning = Object.freeze({
   capabilityProbeMs: 600_000,
   naxCallTimeoutMs: 30_000,
   jobCheckTimeoutMs: 10_000,
+  logChunkBytes: 1_048_576,
+  logMaxInFlight: 2,
+  logPutTimeoutMs: 30_000,
+  logBackoffMaxMs: 30_000,
+  logDrainTimeoutMs: 120_000,
 });
