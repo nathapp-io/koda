@@ -55,6 +55,8 @@ export interface JobExecutor {
   logSources(job: JobRow): JobLogSources;
   readStatus(job: JobRow): Promise<StatusView | null>;
   readPlan(job: JobRow): Promise<PlanCheck>;
+  /** #203: absolute spend from this PLAN attempt's cost ledgers, in snapshot decimal format. */
+  readPlanCost(job: JobRow): Promise<string | undefined>;
   finishPlan(job: JobRow, options?: FinishPlanOptions): Promise<PlanPushOutcome>;
   /** S1b §1.1 (B5): after an unfinished RUN, commit the PRD and fast-forward the feature branch on origin. */
   pushProgress(job: JobRow, options?: PushProgressOptions): Promise<ProgressPushOutcome>;

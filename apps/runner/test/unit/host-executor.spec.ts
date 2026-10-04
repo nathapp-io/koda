@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AssignPayload } from '@nathapp/fleet-protocol';
 import type { SnapshotEventPayload } from '@nathapp/fleet-protocol';
@@ -157,6 +157,26 @@ describe('HostExecutor RUN', () => {
 });
 
 describe('HostExecutor PLAN', () => {
+  test('reads this attempt\'s fixture ledger without status.json and excludes previous attempts (#203)', async () => {
+    const w = await world('PLAN');
+    await w.ex.prepare(w.row);
+    const costDir = join(w.row.jobDir, 'nax-out', 'cost');
+    await mkdir(costDir);
+    await copyFile(join(import.meta.dir, '../fixtures/plan-cost.jsonl'), join(costDir, 'plan.jsonl'));
+    expect(await w.ex.readStatus(w.row)).toBeNull();
+    expect(await w.ex.readPlanCost(w.row)).toBe('0.0045');
+    await w.ex.prepare(w.row);
+    expect(await w.ex.readPlanCost(w.row)).toBe('0.0000');
+  });
+
+  test('an unreadable ledger is warned about and does not fail the verdict (#203)', async () => {
+    const w = await world('PLAN');
+    await w.ex.prepare(w.row);
+    await writeFile(join(w.row.jobDir, 'nax-out', 'cost'), 'not a directory');
+    expect(await w.ex.readPlanCost(w.row)).toBeUndefined();
+    expect(w.log.lines).toContainEqual(expect.objectContaining({ level: 'warn', message: 'PLAN cost ledger unreadable', fields: { jobId: 'cjob1' } }));
+  });
+
   test('wires the production logger into PLAN commit failures (#186)', async () => {
     const w = await world('PLAN');
     await w.ex.prepare(w.row);

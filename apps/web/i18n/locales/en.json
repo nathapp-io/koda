@@ -1137,7 +1137,15 @@
         "failed": "The runner did not deliver the answer to nax ({detail}). nax denies a command it gets no answer for.",
         "waiting": "Not confirmed by the runner yet."
       },
-      "badge": { "label": "{count} approvals waiting" }
+      "badge": { "label": "{count} approvals waiting", "waiting": "{count} waiting" },
+      "notifications": {
+        "title": "Approval waiting",
+        "job": "Job {job}",
+        "remaining": "{time} remaining",
+        "review": "Review",
+        "enable": "Enable browser approval notifications",
+        "disable": "Disable browser approval notifications"
+      }
     },
     "bash": {
       "mode": {

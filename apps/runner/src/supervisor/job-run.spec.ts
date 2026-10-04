@@ -238,6 +238,34 @@ describe('cancel while running', () => {
 });
 
 describe('PLAN', () => {
+  test.each(['COMPLETED', 'FAILED', 'CANCELLED'] as const)('%s PLAN reports ledger spend before its terminal state without status.json (#203)', async (terminal) => {
+    const b = build('PLAN');
+    b.ex.status = null;
+    b.ex.planCost = '0.0044';
+    if (terminal === 'FAILED') b.ex.plan = { ok: false, reason: 'no prd.json produced', branchName: null };
+    b.ex.onTick = () => {
+      if (terminal === 'CANCELLED') b.run.requestCancel();
+      b.ex.alive = false;
+    };
+    await b.run.start('prepare');
+    expect(states(b).at(-1)?.to).toBe(terminal);
+    expect(lastSnapshot(b)?.costSpentUsd).toBe('0.0044');
+    const all = events(b);
+    const cost = all.find((e) => e.type === 'snapshot' && (e.payload as SnapshotEventPayload).costSpentUsd === '0.0044');
+    const terminalEvent = all.find((e) => e.type === 'state' && (e.payload as StateEventPayload).to === terminal);
+    expect(cost?.seq).toBeLessThan(terminalEvent?.seq ?? 0);
+  });
+
+  test('resumed PLAN finish reports the same absolute spend without charging it twice (#203)', async () => {
+    const b = build('PLAN');
+    b.ex.status = null;
+    b.ex.planCost = '0.0044';
+    b.journal.updateJob('j1', 1, { state: 'UPLOADING', resultBranch: 'feat/x', resultSha: 'd'.repeat(40), pid: 1, pgid: 1 });
+    await b.run.start('finish');
+    expect(lastSnapshot(b)).toMatchObject({ costSpentUsd: '0.0044', resultSha: 'd'.repeat(40) });
+    expect(states(b).at(-1)?.to).toBe('COMPLETED');
+  });
+
   test('a valid plan is pushed while RUNNING, then bundled; the push result rides the final snapshot', async () => {
     const b = build('PLAN');
     b.ex.dieAfterTicks(1);

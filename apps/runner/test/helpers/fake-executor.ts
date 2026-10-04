@@ -25,6 +25,7 @@ export class FakeExecutor implements JobExecutor {
   status: StatusView | null = { run: { id: 'run-1', status: 'completed' }, postRun: { finish: { status: 'passed', result: 'opened', url: 'https://example.test/pr/1' } } };
   statusError: Error | null = null;
   plan: PlanCheck = { ok: true, reason: null, branchName: 'feat/x' };
+  planCost: string | undefined = '0.0000';
   planPush: PlanPushOutcome = { ok: true, branch: 'feat/x', sha: 'a'.repeat(40) };
   ledger: { branch: string; headSha: string } | null = { branch: 'feat/x', headSha: 'b'.repeat(40) };
   bundle: BundleFile = { path: '/b.tgz', size: 1, sha256: 'c'.repeat(64) };
@@ -98,6 +99,10 @@ export class FakeExecutor implements JobExecutor {
   async readPlan(job: JobRow): Promise<PlanCheck> {
     this.note('readPlan', job);
     return this.plan;
+  }
+
+  async readPlanCost(): Promise<string | undefined> {
+    return this.planCost;
   }
 
   async finishPlan(job: JobRow, options: FinishPlanOptions = {}): Promise<PlanPushOutcome> {

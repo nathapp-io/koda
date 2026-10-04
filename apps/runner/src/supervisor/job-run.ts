@@ -309,7 +309,8 @@ export class JobRun {
     const cancelled = row.cancelRequestedAt !== null;
     if (row.command === 'PLAN') {
       const check = await this.deps.executor.readPlan(row);
-      return { verdict: planVerdict({ cancelRequested: cancelled, check }), snapshot: {} };
+      const costSpentUsd = await this.deps.executor.readPlanCost(row);
+      return { verdict: planVerdict({ cancelRequested: cancelled, check }), snapshot: costSpentUsd === undefined ? {} : { costSpentUsd } };
     }
     const status = await this.deps.executor.readStatus(row);
     return { verdict: runVerdict({ cancelRequested: cancelled, status }), snapshot: status ? mapStatusToSnapshot(status) : {} };
