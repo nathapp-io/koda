@@ -1279,7 +1279,9 @@
       "actions": {
         "cancel": "取消任务",
         "requeue": "重新排队",
-        "bundle": "下载产物包"
+        "bundle": "下载产物包",
+        "bundleExpired": "产物包已过期",
+        "logs": "日志"
       },
       "confirmCancel": {
         "title": "取消这个任务？",
@@ -1301,8 +1303,35 @@
         "lifecycle": "执行机 {level}：{message}",
         "log": "日志：{text}",
         "approval": "请求审批：{command}",
-        "unknown": "未知事件 {type}"
+        "unknown": "未知事件 {type}",
+        "logs": "第 {epoch} 次尝试的完整日志"
       }
+    },
+    "logs": {
+      "title": "日志",
+      "back": "返回任务",
+      "streams": { "run": "运行日志", "stdout": "stdout", "stderr": "stderr" },
+      "attempt": "尝试",
+      "attemptOption": "第 {epoch} 次尝试",
+      "filters": { "level": "最低级别", "anyLevel": "任意级别", "story": "故事", "stage": "阶段", "role": "角色", "text": "文本", "clear": "清除筛选" },
+      "tags": { "unparsed": "未解析", "cut": "行被截断" },
+      "empty": "还没有日志行",
+      "emptyFiltered": "已搜索的部分中没有匹配的行",
+      "loadEarlier": "加载更早",
+      "loadMore": "加载更多",
+      "jumpToLatest": "跳到最新",
+      "following": "跟随中",
+      "searching": { "forward": "已搜索到 {scanned} / {size}", "backward": "已向前搜索到 {scanned} / {size}", "keep": "继续搜索" },
+      "rateLimited": "请求过于频繁，正在重试",
+      "download": "下载",
+      "notice": {
+        "bundle": "已从产物包补全（实时上传未完成）",
+        "truncated": "已在 {size} 处截断；完整日志请下载产物包",
+        "incomplete": "日志不完整（已收到 {size}）",
+        "expired": "此日志已在保留期满后删除",
+        "legacy": "来自旧版运行器的采样实时日志；完整日志在运行结束后出现。"
+      },
+      "legacyLink": "在时间线中查看采样行"
     },
     "dispatch": {
       "title": "派发任务",

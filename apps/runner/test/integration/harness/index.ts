@@ -1,2 +1,2 @@
 export { assertPartialIndex } from './database';
-export { createWorld, FEATURES, type EventView, type JobView, type NetControl, type SyncRecord, type TestRunner, type World } from './world';
+export { createWorld, FEATURES, HARNESS_ADMIN, type EventView, type JobView, type NetControl, type SyncRecord, type TestRunner, type World } from './world';

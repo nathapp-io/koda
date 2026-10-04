@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { extractApiError } from '~/composables/useApi'
+import { ApiError, extractApiError } from '~/composables/useApi'
 import { createDebouncer } from '~/lib/debounce'
 import { budgetStopPolicyId } from '~/lib/fleet-budgets'
 import { loadFleetJobDetail } from '~/lib/fleet-job-detail'
@@ -16,6 +16,8 @@ import { useFleetApprovals } from '~/composables/useFleetApprovals'
 import { firstPending, inboxPath } from '~/lib/fleet-approvals'
 import { bashSummary } from '~/lib/fleet-bash-mode'
 import FleetJobApprovals from '~/components/fleet/JobApprovals.vue'
+import { bundleExpiredByLogs, logAttemptEpochs } from '~/lib/fleet-job-logs-link'
+import type { FleetJobLogListDto } from '~/lib/fleet-log-types'
 
 definePageMeta({ layout: 'default' })
 
@@ -29,6 +31,12 @@ const jobsApi = useFleetJobs(slug)
 const options = useFleetDispatchOptions(slug)
 const people = useProjectMemberNames(slug)
 const { data: viewerRole } = useProjectViewerRole(slug)
+
+const logsApi = useFleetJobLogs(slug, jobId)
+/** S2a §4.2: the log list drives the timeline's "Full log" rows and the expired-bundle button. */
+const logList = ref<FleetJobLogListDto | null>(null)
+/** D357: a bundle download answered 410. */
+const bundleGone = ref(false)
 
 const approvalsApi = useFleetApprovals({ kind: 'project', slug })
 const { now } = useApprovalCountdown()
@@ -54,6 +62,9 @@ const viewer = computed(() => ({
 const canCancel = computed(() => job.value !== null && canCancelJob(job.value, viewer.value))
 const canRequeue = computed(() => job.value !== null && canRequeueJob(job.value, viewer.value))
 const showBundle = computed(() => job.value !== null && mayHaveBundle(job.value.state))
+const bundleExpired = computed(() => bundleGone.value || bundleExpiredByLogs(logList.value))
+const logAttempts = computed(() => logAttemptEpochs(logList.value))
+const logsHref = `/${slug}/fleet/jobs/${jobId}/logs`
 const prUrl = computed(() => safePrUrl(job.value?.resultPrUrl))
 const wipPush = computed(() => wipPushStatus(job.value?.wipPush))
 const budgetPolicyId = computed(() => budgetStopPolicyId(job.value?.stateReason))
@@ -64,6 +75,10 @@ const reviewHref = computed(() => inboxPath({ kind: 'project', slug }, firstPend
 
 async function loadApprovals(): Promise<void> {
   jobApprovals.value = await approvalsApi.listForJob(jobId)
+}
+
+async function loadLogList(): Promise<void> {
+  logList.value = await logsApi.list()
 }
 
 /** Events only append (ordered by seq), so refetching from the last loaded page is enough. */
@@ -101,6 +116,8 @@ function initializeRelatedData(): void {
   void loadEventsFrom(1).catch((err: unknown) => toast.error(extractApiError(err)))
   // Approvals are secondary: a failure leaves the page usable.
   void loadApprovals().catch((err: unknown) => toast.error(extractApiError(err)))
+  // Logs are secondary too: without the list the timeline has no "Full log" rows, the header link still works.
+  void loadLogList().catch(() => undefined)
   // Names are cosmetic: a failure leaves ids (or "Unknown member") on screen.
   void options.load().catch(() => undefined)
   void people.load().catch(() => undefined)
@@ -127,6 +144,7 @@ async function reloadSilently(): Promise<void> {
     job.value = await jobsApi.get(jobId)
     await catchUpEvents()
     await loadApprovals()
+    await loadLogList()
   }
   catch {
     // The next live event or a resync retries.
@@ -140,6 +158,10 @@ useProjectEvents(slug, {
     if (event.jobId === jobId) liveReload.trigger()
   },
   onFleetApproval: () => liveReload.trigger(),
+  // A new attempt's first bytes add its "Full log" row; growth of a known stream changes nothing here.
+  onFleetLog: (event) => {
+    if (event.jobId === jobId && !logAttempts.value.includes(event.leaseEpoch)) liveReload.trigger()
+  },
   onResync: () => liveReload.trigger(),
 })
 
@@ -170,7 +192,16 @@ const requeueJob = (): Promise<void> => act(async () => {
   await catchUpEvents()
 })
 
-const downloadBundle = (): Promise<void> => act(() => jobsApi.downloadBundle(jobId))
+/** D357: a 410 turns the button into "Bundle expired" for the rest of the visit. */
+const downloadBundle = (): Promise<void> => act(async () => {
+  try {
+    await jobsApi.downloadBundle(jobId)
+  }
+  catch (err: unknown) {
+    if (err instanceof ApiError && err.code === 410) bundleGone.value = true
+    throw err
+  }
+})
 
 const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocaleString() : '-')
 </script>
@@ -182,8 +213,11 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
     <template v-else>
       <PageHeader :title="job.feature" :subtitle="`${job.command} | ${options.repoName(job.repoId)} @ ${job.ref}`">
         <template #actions>
-          <Button v-if="showBundle" variant="outline" :disabled="busy" data-testid="fleet-job-bundle" @click="downloadBundle()">
-            {{ t('fleet.jobs.actions.bundle') }}
+          <NuxtLink :to="logsHref" class="inline-flex h-10 items-center rounded-md border border-input px-4 text-sm hover:bg-muted" data-testid="fleet-job-logs-link">
+            {{ t('fleet.jobs.actions.logs') }}
+          </NuxtLink>
+          <Button v-if="showBundle" variant="outline" :disabled="busy || bundleExpired" data-testid="fleet-job-bundle" @click="downloadBundle()">
+            {{ bundleExpired ? t('fleet.jobs.actions.bundleExpired') : t('fleet.jobs.actions.bundle') }}
           </Button>
           <Button v-if="canRequeue" variant="outline" :disabled="busy" data-testid="fleet-job-requeue" @click="requeueJob()">
             {{ t('fleet.jobs.actions.requeue') }}
@@ -258,7 +292,7 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
 
       <FleetJobApprovals v-if="showApprovals" :slug="slug" :approvals="jobApprovals" :now="now" />
 
-      <FleetJobTimeline :events="events" :has-more="moreEvents" :loading="loadingEvents" @load-more="loadEventsFrom(eventPage + 1)" />
+      <FleetJobTimeline :events="events" :has-more="moreEvents" :loading="loadingEvents" :log-attempts="logAttempts" :logs-href="logsHref" @load-more="loadEventsFrom(eventPage + 1)" />
 
       <Dialog :open="confirmCancel" @update:open="confirmCancel = $event">
         <DialogContent>

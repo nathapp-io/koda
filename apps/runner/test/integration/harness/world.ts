@@ -22,9 +22,11 @@ import { startGitFront, type PushHold } from './git-front';
 import { HARNESS_TOKEN, startForge, type Forge } from './forge';
 
 const PASSWORD = 'Admin1234!Aa';
+/** The admin `createWorld` registers; S2a slice 2's live check prints it for a manual look at the web viewer. */
+export const HARNESS_ADMIN = { email: 'root@koda.test', password: PASSWORD } as const;
 const FAKE_NAX = join(import.meta.dir, '..', '..', 'fixtures', 'fake-nax.ts');
 const SELF = [process.execPath, join(import.meta.dir, '..', '..', '..', 'src', 'main.ts')];
-export const FEATURES: readonly string[] = ['fa', 'fb', 'fc', 'fd', 'fe', 'ff', 'fg', 'fh', 'la', 'lb', 'lc'];
+export const FEATURES: readonly string[] = ['fa', 'fb', 'fc', 'fd', 'fe', 'ff', 'fg', 'fh', 'la', 'lb', 'lc', 'lv'];
 
 export interface JobView {
   id: string; state: string; stateReason: string | null; leaseEpoch: number; runnerId: string | null;
@@ -64,6 +66,8 @@ export interface TestRunner {
 
 export interface World {
   readonly base: string;
+  /** The registered admin's access token (project `web`), for user routes such as the log reads (S2a slice 2). */
+  readonly adminToken: string;
   readonly api: RunningApi;
   readonly prisma: PrismaClient;
   readonly origin: Origin;
@@ -135,7 +139,7 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
     const text = await res.text();
     return { status: res.status, body: text ? JSON.parse(text) : null };
   };
-  const registered = await http('POST', '/auth/register', { body: { email: 'root@koda.test', name: 'Root', password: PASSWORD } });
+  const registered = await http('POST', '/auth/register', { body: { email: HARNESS_ADMIN.email, name: 'Root', password: PASSWORD } });
   if (registered.status !== 201) throw new Error(`register failed: ${JSON.stringify(registered.body)}`);
   const admin: string = registered.body.data.accessToken;
   await http('POST', '/projects', { token: admin, body: { name: 'Web', slug: 'web', key: 'WEB' } });
@@ -173,7 +177,7 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
   };
 
   const world: World = {
-    base, api, prisma, origin, forge, gitRequests: front.requests, holdPushes: () => front.holdPushes(), fakeGh, forgeCloneUrl,
+    base, adminToken: admin, api, prisma, origin, forge, gitRequests: front.requests, holdPushes: () => front.holdPushes(), fakeGh, forgeCloneUrl,
     async dispatch(input) {
       const res = await http('POST', '/projects/web/fleet/jobs', {
         token: admin,

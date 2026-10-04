@@ -51,6 +51,17 @@ describe('createProjectEventHub (D246)', () => {
     expect(badge.onFleetApproval).toHaveBeenCalledTimes(1)
   })
 
+  test('fleet_log reaches only the subscribers that handle it (S2a §4.2)', () => {
+    const { h, sources } = hub()
+    const viewer = { onFleetLog: jest.fn(), onResync: jest.fn() }
+    const badge = { onFleetApproval: jest.fn(), onResync: jest.fn() }
+    h.subscribe('/u', viewer)
+    h.subscribe('/u', badge)
+    sources[0].emit('fleet_log', { id: 'e3', type: 'fleet_log', projectId: 'p1', jobId: 'j1', leaseEpoch: 1, stream: 'stdout', size: 5, complete: false, at: 'x' })
+    expect(viewer.onFleetLog).toHaveBeenCalledTimes(1)
+    expect(badge.onFleetApproval).not.toHaveBeenCalled()
+  })
+
   test('a resync reaches every subscriber', () => {
     const { h, sources } = hub()
     const a = { onResync: jest.fn() }

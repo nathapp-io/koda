@@ -352,22 +352,26 @@ debug|info|warn|error] [--story <id>] [--stage <s>] [--role <r>] [--grep <text>]
 
 ### 4.1 Viewer page `/[project]/fleet/jobs/[id]/logs`
 
+The job page moves from `[id].vue` to `[id]/index.vue` so the viewer can be its sibling route (slice 2 plan D352).
+
 - Tabs `Run log`, `stdout`, `stderr`; attempt picker (default latest).
 - Run log rows: time, level badge, stage, story, role, message; click to expand `data` as formatted JSON. Unparsed
   lines render as plain text with an "unparsed" tag (plus "line cut" for `truncatedLine`). stdout/stderr rows are
   monospaced text. Every tab uses the entries route (R9).
 - Filters (run log): minimum level, story (free text with suggestions from `job.stories` when present), stage, role,
   text; stdout/stderr: text only. Filters live in the URL query; a change resets the cursor.
-- Opening: backward from the end (latest lines). Follow mode default on while the job is RUNNING: on `fleet_log` for
+- Opening: backward from the end (latest lines). Follow mode default on while the job is active (QUEUED through
+  UPLOADING, slice 2 plan D356): on `fleet_log` for
   this job, epoch and stream, fetch forward from the last `nextCursor`. Scrolling up turns follow off; "Jump to latest"
   turns it on.
 - At most 5,000 rows in the DOM; "Load earlier" (backward) and "Load more" (forward) evict from the other end.
 - A filtered page that returns no entries and is not `atEnd` shows "Searched up to {scannedTo} of {size} — Keep
   searching"; the viewer never auto-loops past one request per click (criterion 3).
 - 429: back off (2 s, 4 s, 8 s) and show a quiet "Rate limited, retrying".
-- Notices: "Filled from the bundle (the live upload did not finish)" (`source = bundle`); "Truncated at 256 MiB —
-  download the bundle for the full log" (`truncated`); "Log incomplete ({size} received)" (job terminal,
-  `complete = false`); "Logs expired after {days} days" (`expired`); "Sampled live log from an older runner; the full
+- Notices: "Filled from the bundle (the live upload did not finish)" (`source = bundle`); "Truncated at {size}; download
+  the bundle for the full log" (`truncated`, the stored size: the cap is configurable, D358); "Log incomplete ({size} received)" (job terminal,
+  `complete = false`); "This log was deleted after the retention
+  window" (`expired`; the web cannot read `FLEET_LOG_RETENTION_DAYS`, D358); "Sampled live log from an older runner; the full
   log appears after the run" (`legacySampled`, with the timeline's sampled lines linked).
 - Download per stream: a plain anchor to the proxied `raw?download=1` URL (the Nuxt proxy streams; never `$api.download`,
   which buffers a blob).

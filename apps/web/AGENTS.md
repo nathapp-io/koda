@@ -68,6 +68,7 @@ Current route areas:
 - `/:project/kb`
 - `/:project/labels`
 - `/:project/tickets/:ref`
+- `/:project/fleet/jobs/:id/logs` (fleet run-log viewer, S2a: entries pages, live `fleet_log` events, filters in the URL)
 
 ## API Access Pattern
 
@@ -91,6 +92,8 @@ Main folders:
 - `composables/` for API, auth, and toast behavior
 - `layouts/` for page shells
 - `tests/` for unit/component/page coverage
+
+Run logs and other runner- or agent-written text render through `{{ }}` interpolation only, never `v-html`: a log line is untrusted text.
 
 ## i18n Rules
 

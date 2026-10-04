@@ -1279,7 +1279,9 @@
       "actions": {
         "cancel": "Cancel job",
         "requeue": "Requeue",
-        "bundle": "Download bundle"
+        "bundle": "Download bundle",
+        "bundleExpired": "Bundle expired",
+        "logs": "Logs"
       },
       "confirmCancel": {
         "title": "Cancel this job?",
@@ -1301,8 +1303,35 @@
         "lifecycle": "Runner {level}: {message}",
         "log": "Log: {text}",
         "approval": "Approval requested: {command}",
-        "unknown": "Unknown event {type}"
+        "unknown": "Unknown event {type}",
+        "logs": "Full log of attempt {epoch}"
       }
+    },
+    "logs": {
+      "title": "Logs",
+      "back": "Back to job",
+      "streams": { "run": "Run log", "stdout": "stdout", "stderr": "stderr" },
+      "attempt": "Attempt",
+      "attemptOption": "Attempt {epoch}",
+      "filters": { "level": "Minimum level", "anyLevel": "Any level", "story": "Story", "stage": "Stage", "role": "Role", "text": "Text", "clear": "Clear filters" },
+      "tags": { "unparsed": "unparsed", "cut": "line cut" },
+      "empty": "No log lines yet",
+      "emptyFiltered": "No matching lines in what was searched",
+      "loadEarlier": "Load earlier",
+      "loadMore": "Load more",
+      "jumpToLatest": "Jump to latest",
+      "following": "Following",
+      "searching": { "forward": "Searched up to {scanned} of {size}", "backward": "Searched back to {scanned} of {size}", "keep": "Keep searching" },
+      "rateLimited": "Rate limited, retrying",
+      "download": "Download",
+      "notice": {
+        "bundle": "Filled from the bundle (the live upload did not finish)",
+        "truncated": "Truncated at {size}; download the bundle for the full log",
+        "incomplete": "Log incomplete ({size} received)",
+        "expired": "This log was deleted after the retention window",
+        "legacy": "Sampled live log from an older runner; the full log appears after the run."
+      },
+      "legacyLink": "See the sampled lines in the timeline"
     },
     "dispatch": {
       "title": "Dispatch a job",

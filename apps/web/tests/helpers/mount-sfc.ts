@@ -115,7 +115,7 @@ const NUXT_AUTO_IMPORTS = [
   'useI18n', 'useAppToast', 'useApi', 'useRuntimeConfig', 'definePageMeta',
   'useVisiblePolling', 'useFleetRunners', 'useFleetRepos', 'useRoute', 'useRouter',
   'useFleetDispatchOptions', 'useFleetJobs', 'useProjectViewerRole',
-  'useAdminUsers', 'useProjectEvents', 'useAuth', 'useProjectMemberNames',
+  'useAdminUsers', 'useProjectEvents', 'useAuth', 'useProjectMemberNames', 'useFleetJobLogs',
 ] as const
 
 /** Defaults for auto-imports a test did not supply; `definePageMeta` is a compile-time no-op macro. */

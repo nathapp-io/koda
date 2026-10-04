@@ -3,9 +3,11 @@ import {
   createProjectEventStream,
   parseFleetApprovalEvent,
   parseFleetJobEvent,
+  parseFleetLogEvent,
   type EventSourceLike,
   type LiveFleetApprovalEvent,
   type LiveFleetJobEvent,
+  type LiveFleetLogEvent,
   type ProjectEventHandlers,
 } from '~/lib/project-event-stream'
 
@@ -141,5 +143,42 @@ describe('fleet_approval notices (S1.5 1b)', () => {
 
     const silent = open({ onResync: () => undefined })
     expect(silent.listenerTypes()).not.toContain('fleet_approval')
+  })
+})
+
+const logEvent = (id: string, over: Partial<LiveFleetLogEvent> = {}): LiveFleetLogEvent => ({
+  id, type: 'fleet_log', projectId: 'p1', jobId: 'j1', leaseEpoch: 1, stream: 'run', size: 120, complete: false, at: '2026-10-04T00:00:00.000Z', ...over,
+})
+
+describe('fleet_log notices (S2a §2.3)', () => {
+  test('parses a notice for each stream', () => {
+    for (const stream of ['run', 'stdout', 'stderr'] as const) {
+      expect(parseFleetLogEvent(JSON.stringify(logEvent('e1', { stream })))).toEqual(logEvent('e1', { stream }))
+    }
+    expect(parseFleetLogEvent(JSON.stringify(logEvent('e1', { complete: true, size: 0, leaseEpoch: 0 })))).toBeTruthy()
+  })
+
+  test.each([
+    ['not JSON', 'not json'],
+    ['another type', JSON.stringify({ ...logEvent('e1'), type: 'fleet_job' })],
+    ['an unknown stream', JSON.stringify({ ...logEvent('e1'), stream: 'plan' })],
+    ['a negative size', JSON.stringify({ ...logEvent('e1'), size: -1 })],
+    ['a fractional epoch', JSON.stringify({ ...logEvent('e1'), leaseEpoch: 1.5 })],
+    ['a string complete', JSON.stringify({ ...logEvent('e1'), complete: 'true' })],
+    ['a missing job id', JSON.stringify({ ...logEvent('e1'), jobId: undefined })],
+  ])('rejects %s', (_label, raw) => {
+    expect(parseFleetLogEvent(raw)).toBeNull()
+  })
+
+  test('delivers fleet_log events once each, only when a handler is given', () => {
+    const onFleetLog = jest.fn()
+    const source = open({ onFleetLog, onResync: () => undefined })
+    source.emit('fleet_log', logEvent('e1'))
+    source.emit('fleet_log', logEvent('e1'))
+    source.emit('fleet_log', logEvent('e2', { size: 240 }))
+    expect(onFleetLog.mock.calls.map(([e]) => (e as LiveFleetLogEvent).size)).toEqual([120, 240])
+
+    const silent = open({ onResync: () => undefined })
+    expect(silent.listenerTypes()).not.toContain('fleet_log')
   })
 })

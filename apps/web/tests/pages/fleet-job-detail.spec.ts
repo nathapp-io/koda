@@ -5,7 +5,7 @@ import { loadFleetJobDetail } from '~/lib/fleet-job-detail'
 
 const webDir = path.join(__dirname, '../..')
 const read = (...parts: string[]): string => readFileSync(path.join(webDir, ...parts), 'utf-8')
-const detail = read('pages', '[project]', 'fleet', 'jobs', '[id].vue')
+const detail = read('pages', '[project]', 'fleet', 'jobs', '[id]', 'index.vue')
 const timeline = read('components', 'fleet', 'FleetJobTimeline.vue')
 
 /** The body of the object literal passed to useProjectEvents(...). */
@@ -99,5 +99,17 @@ describe('job detail', () => {
     expect(liveHandlers(detail)).toContain('onFleetApproval: () => liveReload.trigger()')
     expect(detail).toMatch(/async function reloadSilently\(\)[\s\S]*?await loadApprovals\(\)/)
     expect(timeline).toContain("case 'approval':")
+  })
+
+  test('S2a §4.2: Logs link, expired bundle, timeline log rows, and a list reload for a new attempt (D357)', () => {
+    expect(detail).toContain('data-testid="fleet-job-logs-link"')
+    expect(detail).toContain('const logsHref = `/${slug}/fleet/jobs/${jobId}/logs`')
+    expect(detail).toContain(':disabled="busy || bundleExpired"')
+    expect(detail).toContain("bundleExpired ? t('fleet.jobs.actions.bundleExpired') : t('fleet.jobs.actions.bundle')")
+    expect(detail).toContain('if (err instanceof ApiError && err.code === 410) bundleGone.value = true')
+    expect(detail).toContain(':log-attempts="logAttempts" :logs-href="logsHref"')
+    expect(detail).toMatch(/function initializeRelatedData\(\): void[\s\S]*?void loadLogList\(\)\.catch\(\(\) => undefined\)/)
+    expect(detail).toMatch(/async function reloadSilently\(\)[\s\S]*?await loadLogList\(\)/)
+    expect(liveHandlers(detail)).toContain('if (event.jobId === jobId && !logAttempts.value.includes(event.leaseEpoch)) liveReload.trigger()')
   })
 })
