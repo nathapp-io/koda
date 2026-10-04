@@ -222,6 +222,7 @@ async function preflight(plan: Plan, deps: ServiceDeps): Promise<RunnerFiles> {
 export async function installService(options: InstallOptions, deps: ServiceDeps): Promise<void> {
   const platform = platformOf(deps);
   const plan = await planInstall(options, platform, deps);
+  deps.log('note: launchd/systemd do not load shell startup files. For nax plugin credentials, set runner.json naxCommand to an absolute wrapper that loads a service-user-owned 0600 env file and validates required variables; see docs/deployment/runner.md (Service environment). Never put tokens in the plist/unit.');
   if (options.print) {
     deps.log(`# ${plan.target}\n${plan.content}# then:\n${plan.commands.map((c) => c.join(' ')).join('\n')}`);
     return;

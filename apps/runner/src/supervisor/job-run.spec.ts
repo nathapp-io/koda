@@ -94,6 +94,32 @@ describe('RUN happy path (D35)', () => {
 });
 
 describe('verdicts', () => {
+  test.each(['PLAN', 'RUN'] as const)('%s missing output reports nax stderr through a lifecycle event (#207)', async (command) => {
+    const b = build(command);
+    const dir = await tmpLogs.make('stderr');
+    const stderrPath = join(dir, 'nax.stderr');
+    await writeFile(stderrPath, '\n[interaction] Failed to initialize interaction plugin: Telegram plugin requires botToken and chatId\n');
+    b.ex.logFiles = { ...b.ex.logFiles, stderrPath };
+    b.ex.plan = { ok: false, reason: 'no prd.json produced', branchName: null };
+    b.ex.status = null;
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    expect(lifecycles(b)).toContainEqual({ level: 'error', message: 'nax stderr: [interaction] Failed to initialize interaction plugin: Telegram plugin requires botToken and chatId' });
+    expect(states(b).at(-1)).toEqual({ to: 'FAILED', reason: command === 'PLAN' ? 'no prd.json produced' : 'no status.json' });
+  });
+
+  test('a cancelled job never promotes stderr into a failure diagnostic', async () => {
+    const b = build('PLAN');
+    const dir = await tmpLogs.make('stderr-cancel');
+    const stderrPath = join(dir, 'nax.stderr');
+    await writeFile(stderrPath, 'plugin init failed');
+    b.ex.logFiles = { ...b.ex.logFiles, stderrPath };
+    b.ex.plan = { ok: false, reason: 'no prd.json produced', branchName: null };
+    b.ex.onTick = () => { b.run.requestCancel(); b.ex.alive = false; };
+    await b.run.start('prepare');
+    expect(states(b).at(-1)?.to).toBe('CANCELLED');
+    expect(lifecycles(b).some((event) => event.message.startsWith('nax stderr:'))).toBe(false);
+  });
   test('escalated keeps nax reason', async () => {
     const b = build();
     b.ex.status = { run: { id: 'r', status: 'completed' }, postRun: { finish: { result: 'escalated', escalationReason: 'blocked by review' } } };

@@ -1,6 +1,7 @@
 import type { GitIdentity } from '@nathapp/fleet-protocol';
 import { systemSleep } from '../time';
-import { NO_CREDENTIALS_REASON, isAuthFailure, type Git } from './git';
+import type { Logger } from '../logger';
+import { NO_CREDENTIALS_REASON, isAuthFailure, gitFailureFields, type Git } from './git';
 import { PLAN_PUSH_BACKOFF_MS } from './plan-commit';
 
 export type ProgressPushOutcome =
@@ -20,6 +21,7 @@ export interface ProgressPushInput {
   /** True after an ABANDON: stop before the next push attempt. A cancel never stops it (S1b §1.1). */
   readonly isHalted?: () => boolean;
   readonly sleep?: (ms: number) => Promise<void>;
+  readonly log?: Logger;
 }
 
 const REASON_MAX = 200;
@@ -65,7 +67,8 @@ export async function pushProgress(input: ProgressPushInput): Promise<ProgressPu
   if (head !== branchName) return { kind: 'failed', reason: 'not on branch' };   // D143
   try {
     await commitPrd(input);
-  } catch {
+  } catch (error) {
+    input.log?.warn('progress commit failed', { jobId: input.jobId, ...gitFailureFields(error) });
     return { kind: 'failed', reason: 'commit failed' };
   }
   const sleep = input.sleep ?? systemSleep;

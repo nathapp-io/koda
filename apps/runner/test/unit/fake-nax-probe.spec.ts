@@ -65,6 +65,17 @@ describe('answerProbe (D108)', () => {
 });
 
 describe('the fake nax as a real process', () => {
+  test('a protected naxCommand wrapper loads service env and validates it during startup/reprobe (#207)', async () => {
+    const h = await home();
+    const envFile = join(h.naxHome, 'service.env');
+    const wrapper = join(h.naxHome, 'nax-service');
+    await writeFile(envFile, "KODA_TEST_PLUGIN_TOKEN='private-service-token'\n", { mode: 0o600 });
+    await writeFile(wrapper, `#!/bin/sh\nset -eu\nset -a\n. '${envFile}'\nset +a\n: "\${KODA_TEST_PLUGIN_TOKEN:?KODA_TEST_PLUGIN_TOKEN is required in the service env file}"\nexec '${process.execPath}' '${FAKE}' "$@"\n`, { mode: 0o700 });
+    const probe = new NaxCapabilityProbe({ nax: createNaxCli([wrapper], h.naxHome), naxHome: h.naxHome, now: () => new Date(0), toolWorks: async () => true });
+    expect((await probe.probe()).capabilities.nax.version).toBe('0.83.1-fake');
+    await writeFile(envFile, 'unset KODA_TEST_PLUGIN_TOKEN\n');
+    await expect(probe.probe()).rejects.toThrow(/KODA_TEST_PLUGIN_TOKEN:.*is required in the service env file/);
+  });
   test('--version prints FAKE_NAX_VERSION or 0.83.1-fake; NaxCapabilityProbe reads the fake end to end', async () => {
     const h = await home();
     const { FAKE_NAX_VERSION: _unset, ...env } = process.env;

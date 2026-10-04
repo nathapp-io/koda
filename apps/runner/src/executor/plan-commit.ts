@@ -3,8 +3,9 @@ import { join } from 'node:path';
 import type { GitIdentity } from '@nathapp/fleet-protocol';
 import { featureDirFor } from '../paths/safe-segment';
 import { systemSleep } from '../time';
+import type { Logger } from '../logger';
 import { checkoutArgs, planBranch, validateBranchName } from './branch';
-import { NO_CREDENTIALS_REASON, isAuthFailure, type Git, GitError } from './git';
+import { NO_CREDENTIALS_REASON, isAuthFailure, gitFailureFields, type Git, GitError } from './git';
 
 /**
  * D77: back-off before each retry of a failed PLAN push (so 3 pushes in all). A transient failure is recovered inside
@@ -64,6 +65,7 @@ export interface PlanPushInput {
   readonly identity: GitIdentity;
   readonly credentialHelper?: string | null;
   readonly sleep?: (ms: number) => Promise<void>;
+  readonly log?: Logger;
 }
 
 export type PlanPushResult = { ok: true; branch: string; sha: string; committed: boolean } | { ok: false; reason: string };
@@ -84,7 +86,13 @@ async function commitStep(input: PlanPushInput, files: readonly string[]): Promi
   const message = `chore(plan): ${feature} PRD via koda job ${input.jobId}`;
   // D69: the identity is passed explicitly, so a missing or different repo config cannot fail or alter the commit.
   const commit = ['-c', `user.name=${input.identity.name}`, '-c', `user.email=${input.identity.email}`, '-c', 'commit.gpgsign=false', 'commit', '--no-verify', '-q', '-m', message];
-  await git.ok(commit, { cwd: repoDir });
+  await git.ok(commit, {
+    cwd: repoDir,
+    env: {
+      GIT_AUTHOR_NAME: input.identity.name, GIT_AUTHOR_EMAIL: input.identity.email,
+      GIT_COMMITTER_NAME: input.identity.name, GIT_COMMITTER_EMAIL: input.identity.email,
+    },
+  });
   return { committed: true };
 }
 
@@ -115,7 +123,8 @@ export async function commitAndPushPlan(input: PlanPushInput): Promise<PlanPushR
     const step = await commitStep(input, files);
     if ('failure' in step) return { ok: false, reason: step.failure };
     committed = step.committed;
-  } catch {
+  } catch (error) {
+    input.log?.warn('plan commit failed', { jobId: input.jobId, ...gitFailureFields(error) });
     return { ok: false, reason: 'plan commit failed' };
   }
   const failure = await pushWithRetry(input);

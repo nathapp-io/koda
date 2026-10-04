@@ -2,6 +2,7 @@ import type { SnapshotEventPayload, StateEventPayload } from '@nathapp/fleet-pro
 import type { BundleFile } from '../bundle/build-bundle';
 import type { UploadOutcome } from '../bundle/upload-bundle';
 import { errorMessage } from '../errors';
+import { readDiagnosticTail } from '../diagnostics';
 import type { JobExecutor, JobWatcher } from '../executor/job-executor';
 import { wipPushValue, type ProgressPushOutcome } from '../executor/progress-push';
 import type { Journal } from '../journal/journal';
@@ -343,6 +344,10 @@ export class JobRun {
     // S2a §2.4 (R5): the logs drain while the verdict, progress push and PLAN finish run; awaited before UPLOADING.
     const drained = this.deps.logs.drain(this.jobId, this.leaseEpoch, this.deps.tuning.logDrainTimeoutMs);
     const judged = await this.judge(row);
+    if (judged.verdict.state === 'FAILED' && (judged.verdict.reason === 'no prd.json produced' || judged.verdict.reason === 'no status.json')) {
+      const detail = await readDiagnosticTail(this.deps.executor.logSources(row).stderrPath);
+      if (detail) this.events.lifecycle('error', `nax stderr: ${detail}`);
+    }
     let verdict = judged.verdict;
     let result = { branch: row.resultBranch, sha: row.resultSha };
     let wipPush: string | undefined;

@@ -40,6 +40,15 @@ describe('parseNaxJson (D96)', () => {
 });
 
 describe('nax version floor (D97)', () => {
+  test('startup probe reports sanitized stderr from a failing service wrapper (#207)', async () => {
+    const nax = answering(result({ code: 2, stderr: 'NAX_TELEGRAM_TOKEN is required; token="private value"' }));
+    await expect(readNaxVersion(nax, '/')).rejects.toThrow('NAX_TELEGRAM_TOKEN is required');
+    try {
+      await readNaxVersion(nax, '/');
+    } catch (error) {
+      expect((error as Error).message).not.toContain('private value');
+    }
+  });
   test.each([
     ['0.83.1', [0, 83, 1]], ['v1.2.3', [1, 2, 3]], ['0.84.0-canary.1', [0, 84, 0]], [' 0.83.1\n', [0, 83, 1]], ['nax 0.83.1', null], ['0.83', null],
   ])('parseNaxVersion(%j)', (text, expected) => {

@@ -6,6 +6,7 @@ import { PLAN_PUSH_BACKOFF_MS } from '../../src/executor/plan-commit';
 import { pushProgress, wipPushValue, type ProgressPushInput } from '../../src/executor/progress-push';
 import { git as sh, isolateGit, makeOrigin, pushCommit } from '../helpers/git-fixture';
 import { makeTempDirs } from '../helpers/tmp';
+import { createMemoryLogger } from '../../src/logger';
 
 const tmp = makeTempDirs();
 beforeAll(() => isolateGit());
@@ -40,6 +41,14 @@ function scriptedPush(results: GitResult[]): { git: Git; pushes: () => number } 
 }
 
 describe('pushProgress', () => {
+  test('logs the Git failure before returning the stable progress commit failure code (#186)', async () => {
+    const s = await setup();
+    await writeFile(join(s.repoDir, PRD), prdText('passed'));
+    await writeFile(join(s.repoDir, '.git', 'index.lock'), 'locked');
+    const log = createMemoryLogger();
+    expect(await pushProgress({ ...s.input, log })).toEqual({ kind: 'failed', reason: 'commit failed' });
+    expect(log.lines).toContainEqual(expect.objectContaining({ level: 'warn', fields: expect.objectContaining({ jobId: 'job-1', exitCode: 128, stderr: expect.stringContaining('index.lock') }) }));
+  });
   test('pushes the local story commits; no PRD change means no extra commit', async () => {
     const s = await setup();
     const out = await pushProgress(s.input);

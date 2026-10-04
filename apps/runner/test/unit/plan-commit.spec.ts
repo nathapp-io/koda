@@ -6,6 +6,7 @@ import { commitAndPushPlan, PLAN_PUSH_BACKOFF_MS, stashPlanOutputs } from '../..
 import { cleanWorkspace, ensureClone } from '../../src/executor/workspace';
 import { git as sh, isolateGit, makeOrigin, pushCommit } from '../helpers/git-fixture';
 import { makeTempDirs } from '../helpers/tmp';
+import { createMemoryLogger } from '../../src/logger';
 
 const tmp = makeTempDirs();
 beforeAll(() => isolateGit());
@@ -93,6 +94,31 @@ describe('stashPlanOutputs', () => {
 });
 
 describe('commitAndPushPlan', () => {
+  test('pins author and committer to the job identity despite inherited Git identity variables (#184)', async () => {
+    const s = await setup();
+    await planOutputs(s.repoDir);
+    const stray = { GIT_AUTHOR_NAME: 'stray author', GIT_AUTHOR_EMAIL: 'author@stray.test', GIT_COMMITTER_NAME: 'stray committer', GIT_COMMITTER_EMAIL: 'committer@stray.test' };
+    const saved = Object.keys(stray).map((key) => [key, process.env[key]] as const);
+    Object.assign(process.env, stray);
+    try {
+      expect(await commitAndPushPlan(input(s))).toMatchObject({ ok: true });
+      expect(await sh(s.origin.dir, 'log', '-1', '--format=%an|%ae|%cn|%ce', 'feat/f'))
+        .toBe(`${identity.name}|${identity.email}|${identity.name}|${identity.email}`);
+    } finally {
+      for (const [key, value] of saved) {
+        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
+    }
+  });
+
+  test('logs the Git failure before returning the stable PLAN commit failure code (#186)', async () => {
+    const s = await setup();
+    await planOutputs(s.repoDir);
+    const log = createMemoryLogger();
+    await writeFile(join(s.repoDir, '.git', 'index.lock'), 'locked');
+    expect(await commitAndPushPlan(input(s, { log }))).toEqual({ ok: false, reason: 'plan commit failed' });
+    expect(log.lines).toContainEqual(expect.objectContaining({ level: 'warn', fields: expect.objectContaining({ jobId: 'j1', exitCode: 128, stderr: expect.stringContaining('index.lock') }) }));
+  });
   test('creates the branch from the ref, commits only the allowlist as the assigned identity, and pushes', async () => {
     const s = await setup();
     await planOutputs(s.repoDir);

@@ -38,11 +38,21 @@ async function world(command: 'RUN' | 'PLAN' = 'RUN', over: Partial<AssignPayloa
   };
   const journal = Journal.open(':memory:');
   const row: JobRow = journal.insertJob({ assign, leaseEpoch: 1, repoKey: 'acme/app', jobDir: jobDirFor(workspaceRoot, assign.jobId) }).row;
-  const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log: createMemoryLogger(), nowMs: () => Date.now(), sleep: async () => undefined, credentials: NO_CREDENTIALS, approvals });
-  return { base, origin, workspaceRoot, naxHome, assign, row, ex, journal };
+  const log = createMemoryLogger();
+  const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log, nowMs: () => Date.now(), sleep: async () => undefined, credentials: NO_CREDENTIALS, approvals });
+  return { base, origin, workspaceRoot, naxHome, assign, row, ex, journal, log };
 }
 
 describe('HostExecutor RUN', () => {
+  test('wires the production logger into progress commit failures (#186)', async () => {
+    const w = await world();
+    await w.ex.prepare(w.row);
+    const repoDir = join(w.workspaceRoot, 'acme', 'app');
+    await writeFile(join(repoDir, '.nax/features/feat/prd.json'), `${PRD}\n`);
+    await writeFile(join(repoDir, '.git/index.lock'), 'locked');
+    expect(await w.ex.pushProgress({ ...w.row, branch: 'feat/feat' })).toEqual({ kind: 'failed', reason: 'commit failed' });
+    expect(w.log.lines).toContainEqual(expect.objectContaining({ level: 'warn', message: 'progress commit failed', fields: expect.objectContaining({ jobId: 'cjob1', exitCode: 128, stderr: expect.stringContaining('index.lock') }) }));
+  });
   test('prepare, spawn, watch the files, verdict, ledger, bundle, cleanup', async () => {
     const w = await world();
     expect(await w.ex.prepare(w.row)).toEqual({ ok: true, branch: 'feat/feat' });
@@ -147,6 +157,15 @@ describe('HostExecutor RUN', () => {
 });
 
 describe('HostExecutor PLAN', () => {
+  test('wires the production logger into PLAN commit failures (#186)', async () => {
+    const w = await world('PLAN');
+    await w.ex.prepare(w.row);
+    const repoDir = join(w.workspaceRoot, 'acme', 'app');
+    await writeFile(join(repoDir, '.nax/features/feat/prd.json'), PRD);
+    await writeFile(join(repoDir, '.git/index.lock'), 'locked');
+    expect(await w.ex.finishPlan(w.row)).toEqual({ ok: false, reason: 'plan commit failed' });
+    expect(w.log.lines).toContainEqual(expect.objectContaining({ level: 'warn', message: 'plan commit failed', fields: expect.objectContaining({ jobId: 'cjob1', exitCode: 128, stderr: expect.stringContaining('index.lock') }) }));
+  });
   test('a stale PRD is moved aside, the new one is checked and pushed on its branch, logs reach the bundle', async () => {
     const w = await world('PLAN');
     expect(await w.ex.prepare(w.row)).toEqual({ ok: true, branch: null });
