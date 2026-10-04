@@ -5,7 +5,7 @@ import { loadFleetJobDetail } from '~/lib/fleet-job-detail'
 
 const webDir = path.join(__dirname, '../..')
 const read = (...parts: string[]): string => readFileSync(path.join(webDir, ...parts), 'utf-8')
-const detail = read('pages', '[project]', 'fleet', 'jobs', '[id].vue')
+const detail = read('pages', '[project]', 'fleet', 'jobs', '[id]', 'index.vue')
 const timeline = read('components', 'fleet', 'FleetJobTimeline.vue')
 
 /** The body of the object literal passed to useProjectEvents(...). */

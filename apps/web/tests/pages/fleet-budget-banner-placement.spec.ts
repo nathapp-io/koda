@@ -6,7 +6,7 @@ const webDir = path.join(__dirname, '../..')
 const read = (...parts: string[]): string => readFileSync(path.join(webDir, ...parts), 'utf-8')
 const list = read('pages', '[project]', 'fleet', 'index.vue')
 const dispatch = read('pages', '[project]', 'fleet', 'dispatch.vue')
-const detail = read('pages', '[project]', 'fleet', 'jobs', '[id].vue')
+const detail = read('pages', '[project]', 'fleet', 'jobs', '[id]', 'index.vue')
 
 describe('budget banner placement (D179)', () => {
   test.each([
