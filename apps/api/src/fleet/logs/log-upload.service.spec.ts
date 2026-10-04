@@ -5,31 +5,15 @@ import { join } from 'path';
 import { Readable } from 'stream';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FleetFenceException } from '../artifacts/bundle.exceptions';
-import type { FleetJobLogRecord, LogStreamName, LogStreamPatch } from './domain/fleet-job-log.domain';
 import { LocalDiskLogStore } from './local-disk-log.store';
 import { logKey } from './log-store';
+import { MemoryLogRepo } from './test-helpers/memory-log-repo';
 import { FleetLogException } from './log-upload.exceptions';
 import { LogUpload, LogUploadService } from './log-upload.service';
 
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 /** HTTP status of a rejected call (AppException extends HttpException). */
 const statusOf = (p: Promise<unknown>) => p.then(() => 0, (e: { getStatus(): number }) => e.getStatus());
-
-class MemoryLogRepo {
-  rows: ReadonlyMap<string, FleetJobLogRecord> = new Map();
-  private k = (j: string, e: number, s: string) => `${j}:${e}:${s}`;
-  async findStream(j: string, e: number, s: LogStreamName) { return this.rows.get(this.k(j, e, s)) ?? null; }
-  async upsertStream(j: string, e: number, s: LogStreamName, p: LogStreamPatch) {
-    const prev = this.rows.get(this.k(j, e, s));
-    const row: FleetJobLogRecord = {
-      id: prev?.id ?? `${j}-${e}-${s}`, jobId: j, leaseEpoch: e, stream: s, source: prev?.source ?? 'stream', expiredAt: null,
-      createdAt: new Date(0), updatedAt: new Date(0), complete: p.complete ?? prev?.complete ?? false,
-      truncated: p.truncated ?? prev?.truncated ?? false, sizeBytes: p.sizeBytes,
-    };
-    this.rows = new Map([...this.rows, [this.k(j, e, s), row]]);
-    return row;
-  }
-}
 
 describe('LogUploadService', () => {
   const root = mkdtempSync(join(tmpdir(), 'koda-log-upload-'));

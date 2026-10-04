@@ -3,33 +3,17 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { Readable } from 'stream';
 import { tarGz } from '../../../test/helpers/tar-gz';
-import type { FleetJobLogRecord, LogStreamName } from './domain/fleet-job-log.domain';
+import type { LogStreamName } from './domain/fleet-job-log.domain';
 import { LocalDiskLogStore } from './local-disk-log.store';
 import { logKey } from './log-store';
 import { LogFallbackService } from './log-fallback.service';
-
-class Repo {
-  rows: ReadonlyMap<string, FleetJobLogRecord> = new Map();
-  private k = (j: string, e: number, s: string) => `${j}:${e}:${s}`;
-  set(r: Partial<FleetJobLogRecord> & { jobId: string; leaseEpoch: number; stream: LogStreamName }) {
-    const row = { id: 'x', sizeBytes: 0, complete: false, truncated: false, source: 'stream', expiredAt: null, createdAt: new Date(0), updatedAt: new Date(0), ...r } as FleetJobLogRecord;
-    this.rows = new Map([...this.rows, [this.k(r.jobId, r.leaseEpoch, r.stream), row]]);
-  }
-  get(j: string, e: number, s: string) { return this.rows.get(this.k(j, e, s)) ?? null; }
-  async listForAttempt(j: string, e: number) { return [...this.rows.values()].filter((r) => r.jobId === j && r.leaseEpoch === e); }
-  async completeFromBundle(j: string, e: number, s: LogStreamName, r: { sizeBytes: number; truncated: boolean }) {
-    const prev = this.get(j, e, s);
-    if (prev && (prev.complete || prev.truncated)) return false;
-    this.set({ jobId: j, leaseEpoch: e, stream: s, sizeBytes: r.sizeBytes, complete: !r.truncated, truncated: r.truncated, source: 'bundle' });
-    return true;
-  }
-}
+import { MemoryLogRepo } from './test-helpers/memory-log-repo';
 
 describe('LogFallbackService', () => {
   const root = mkdtempSync(join(tmpdir(), 'koda-fallback-'));
   const store = new LocalDiskLogStore({ artifactDir: root });
   const live = { touch: jest.fn() };
-  let repo: Repo;
+  let repo: MemoryLogRepo;
   let bundle: Buffer;
   let job: { id: string; projectId: string; command: string; feature: string; naxLogRunId: string | null; leaseEpoch: number };
   const artifacts = { get: jest.fn(async () => Readable.from([bundle])) };
@@ -41,7 +25,7 @@ describe('LogFallbackService', () => {
 
   beforeEach(() => {
     n += 1;
-    repo = new Repo();
+    repo = new MemoryLogRepo();
     job = { id: `jf${n}`, projectId: 'p1', command: 'RUN', feature: 'f', naxLogRunId: 'r1', leaseEpoch: 1 };
   });
   afterEach(() => jest.clearAllMocks());
