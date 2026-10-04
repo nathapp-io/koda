@@ -228,3 +228,5 @@ Rules:
 - Never hold a transaction across the sync long-poll or forge HTTP. One failing job or ack in a sync is logged and skipped, never allowed to fail the whole request.
 - Runner strings are untrusted: parse through `parseSyncRequest` (NUL replaced) and `interpretEvent` (bounded fields dropped, never fatal).
 - Git tokens exist only in `GitTokenBroker`'s memory cache and the sync response: never logged, stored, or put in a command or activity payload.
+- Fleet logs (S2a): `src/fleet/logs/`. `LogStore.append`/`replace` assume the caller holds `withLock(key)`; every
+  `FleetJobLog` write for that key happens inside the same lock. Upload outcomes are HTTP 200 bodies, not errors.

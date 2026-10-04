@@ -6807,6 +6807,98 @@
           "fleet"
         ]
       }
+    },
+    "/api/fleet/runner/jobs/{jobId}/logs/{stream}": {
+      "put": {
+        "operationId": "LogUploadController_append",
+        "parameters": [
+          {
+            "name": "jobId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "stream",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "leaseEpoch",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "final",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-content-sha256",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "content-length",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ outcome: appended|duplicate|offset|complete|stream_cap|rate_limited, size, retryAfterMs? }"
+          },
+          "400": {
+            "description": "Invalid stream, leaseEpoch, offset, final, X-Content-SHA256, or an empty non-final body"
+          },
+          "409": {
+            "description": "Stale lease (ABANDON queued) or the job is in a terminal state"
+          },
+          "413": {
+            "description": "Body larger than FLEET_LOG_CHUNK_MAX_BYTES"
+          },
+          "422": {
+            "description": "X-Content-SHA256 mismatch"
+          },
+          "507": {
+            "description": "The server could not store the bytes"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Append bytes to a log stream of the held attempt at an exact offset (S2a §2.2)",
+        "tags": [
+          "fleet-runner"
+        ]
+      }
     }
   },
   "info": {
