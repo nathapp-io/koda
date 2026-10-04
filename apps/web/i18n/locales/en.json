@@ -1013,6 +1013,7 @@
         "owner": "Owner",
         "unknownOwner": "Former member",
         "totalCost": "Cost so far",
+        "bash": "Shell approvals",
         "status": "Status"
       },
       "history": {
@@ -1058,14 +1059,36 @@
       },
       "summary": {
         "budget": "Budget for {scope} stopped at {spent} of {amount}",
-        "bash": "A job asks to run a shell command"
+        "bash": "A job asks to run a shell command",
+        "bashCommand": "Run {command} ({stage})"
       },
       "empty": { "pending": "Nothing is waiting for a decision.", "all": "No approvals yet." },
       "linked": "Linked approval",
       "more": "Showing the first {n} pending approvals.",
       "noProject": "Fleet-wide",
       "readOnly": "You can read this approval. Only a project admin can decide a budget override.",
-      "bashLater": "Shell command approvals are answered on this page from a later release.",
+      "readOnlyBash": "You can read this ask. Only a project developer or admin can answer it.",
+      "bash": {
+        "command": "Command (secrets masked by nax)",
+        "rawDetail": "What nax sent",
+        "rawHint": "The runner could not split nax's text into a command. You are deciding on the full text below.",
+        "unreadable": "This ask could not be read. It can only be denied.",
+        "masked": "{count} secret value(s) masked",
+        "truncated": "The command is too long to show in full. It can only be denied.",
+        "root": "Runs in",
+        "stage": "Stage",
+        "story": "Story",
+        "feature": "Feature",
+        "reason": "Why nax asks",
+        "openJob": "Open the job",
+        "expiresIn": "nax denies it in {time} unless answered.",
+        "timedOut": "This ask timed out and nax has denied the command.",
+        "action": {
+          "allow": "Allow once",
+          "allow_for_job": "Allow for this job",
+          "deny": "Deny"
+        }
+      },
       "budget": {
         "summary": "{spent} spent of a {amount} limit ({window}).",
         "amount": "New limit (USD)",
@@ -1104,9 +1127,33 @@
       "toast": {
         "raise_budget_and_resume": "Budget raised and resumed.",
         "keep_paused": "The budget stays paused.",
-        "requeueFailed": "{count} job(s) could not be re-queued."
+        "requeueFailed": "{count} job(s) could not be re-queued.",
+        "allow": "Allowed. The runner passes the answer to nax.",
+        "allow_for_job": "Allowed for this job. The runner passes the answer to nax.",
+        "deny": "Denied. The runner passes the answer to nax."
+      },
+      "delivery": {
+        "delivered": "Delivered to nax.",
+        "failed": "The runner did not deliver the answer to nax ({detail}). nax denies a command it gets no answer for.",
+        "waiting": "Not confirmed by the runner yet."
       },
       "badge": { "label": "{count} approvals waiting" }
+    },
+    "bash": {
+      "mode": {
+        "raw": "Off",
+        "gated": "Gated",
+        "escalate": "Escalate"
+      },
+      "modeLabel": "Shell command approvals",
+      "modeHint": "Gated asks only on the repo's ask rules; escalate also asks for any command outside the stage's grants. Both need Bash(...) allow rules in the repo's nax config and a runner with the approval relay.",
+      "timeout": "Ask timeout (minutes)",
+      "timeoutHint": "An unanswered ask is denied after this long (0.5 to 60 minutes).",
+      "scheduleWarning": "A scheduled run may raise asks when nobody is watching. They are denied when the timeout passes.",
+      "summary": "{mode}, asks wait {minutes} min",
+      "validation": {
+        "timeout": "Enter 0.5 to 60 minutes, with at most 2 decimals."
+      }
     },
     "repos": {
       "title": "Repos",
@@ -1160,6 +1207,8 @@
       "budgets": "Budgets",
       "schedules": "Schedules",
       "approvals": "Approvals",
+      "approvalsSection": { "title": "Approvals", "empty": "No shell command asks yet.", "open": "Open" },
+      "needsApproval": "Needs approval ({count})",
       "empty": "No fleet jobs yet",
       "total": "{total} jobs",
       "unknownMember": "Unknown member",
@@ -1222,7 +1271,10 @@
         "budgetStopLink": "View budgets",
         "fromSchedule": "Dispatched by a schedule",
         "openSchedule": "View schedule",
-        "coalesced": "{count} later fires merged into this job"
+        "coalesced": "{count} later fires merged into this job",
+        "bash": "Shell approvals",
+        "waitingApproval": "Waiting for approval ({count})",
+        "reviewApproval": "Review"
       },
       "actions": {
         "cancel": "Cancel job",
@@ -1248,6 +1300,7 @@
         "snapshotEmpty": "Status update",
         "lifecycle": "Runner {level}: {message}",
         "log": "Log: {text}",
+        "approval": "Approval requested: {command}",
         "unknown": "Unknown event {type}"
       }
     },

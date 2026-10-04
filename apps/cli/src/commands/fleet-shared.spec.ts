@@ -7,7 +7,7 @@ jest.mock('../generated', () => ({
 }));
 
 import { projectFleetReposControllerList, projectFleetRunnersControllerList } from '../generated';
-import { ago, pageHint, printPlacement, resolveRepo, resolveRunner, runnerNames, splitRepoPath } from './fleet-shared';
+import { ago, bashModeText, pageHint, parseApprovalTimeout, parseBashMode, printPlacement, resolveRepo, resolveRunner, runnerNames, splitRepoPath } from './fleet-shared';
 
 const ok = <T>(data: T) => ({ ret: 0, data });
 const page = <T>(records: T[], current = 1, hasNext = false) => ok({ total: records.length, current, size: 100, hasNext, hasPrev: current > 1, records });
@@ -95,5 +95,23 @@ describe('fleet-shared', () => {
     expect(out).toContain('Queued: no runner fits now');
     expect(out).toContain('offline');
     log.mockRestore();
+  });
+
+  describe('bash mode flags (D301)', () => {
+    it('parses the three modes and refuses anything else', () => {
+      expect(parseBashMode('escalate')).toBe('escalate');
+      expect(() => parseBashMode('yolo')).toThrow('expected raw, gated or escalate');
+    });
+
+    it('parses whole seconds 30..3600', () => {
+      expect(parseApprovalTimeout('30')).toBe(30);
+      expect(parseApprovalTimeout('3600')).toBe(3600);
+      for (const bad of ['29', '3601', '1.5', '10m', '', '-60']) expect(() => parseApprovalTimeout(bad)).toThrow('whole number of seconds');
+    });
+
+    it('describes a job or schedule mode', () => {
+      expect(bashModeText('raw', 600)).toBe('raw');
+      expect(bashModeText('escalate', 90)).toBe('escalate (asks wait 90 s)');
+    });
   });
 });

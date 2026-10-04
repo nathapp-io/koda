@@ -5,6 +5,7 @@ import { useFleetScheduleActions } from '~/composables/useFleetScheduleActions'
 import { useFleetSchedules } from '~/composables/useFleetSchedules'
 import { createDebouncer } from '~/lib/debounce'
 import { canWorkOnFleet, formatUsd } from '~/lib/fleet-jobs'
+import { bashSummary } from '~/lib/fleet-bash-mode'
 import { canChangeSchedule, formatInZone, historyRows, placementOf, scheduleStatusKey } from '~/lib/fleet-schedules'
 import type { ScheduleViewer } from '~/lib/fleet-schedules'
 import type { ScheduleDto } from '~/lib/fleet-types'
@@ -171,6 +172,7 @@ const runnerOptions = computed(() => options.runners.value.map((r) => ({ value: 
           <div><dt class="text-muted-foreground">{{ t('fleet.schedules.detail.profiles') }}</dt><dd>{{ schedule.profiles.length > 0 ? schedule.profiles.join(' > ') : '-' }}</dd></div>
           <div><dt class="text-muted-foreground">{{ t('fleet.schedules.detail.maxCost') }}</dt><dd>{{ formatUsd(schedule.maxCostUsd) }}</dd></div>
           <div><dt class="text-muted-foreground">{{ t('fleet.schedules.detail.placement') }}</dt><dd>{{ placementText }}</dd></div>
+          <div><dt class="text-muted-foreground">{{ t('fleet.schedules.detail.bash') }}</dt><dd data-testid="fleet-schedule-bash">{{ bashSummary(t, schedule.bashMode, schedule.approvalTimeoutSec) }}</dd></div>
           <div><dt class="text-muted-foreground">{{ t('fleet.schedules.detail.cron') }}</dt><dd class="font-mono">{{ schedule.cron }}</dd></div>
           <div><dt class="text-muted-foreground">{{ t('fleet.schedules.detail.nextFire') }}</dt><dd data-testid="fleet-schedule-next-fire">{{ schedule.nextFireAt ? t('fleet.schedules.inZone', { time: formatInZone(schedule.nextFireAt, schedule.timezone), zone: schedule.timezone }) : '-' }}</dd></div>
           <div><dt class="text-muted-foreground">{{ t('fleet.schedules.detail.lastFired') }}</dt><dd>{{ schedule.lastFiredAt ? t('fleet.schedules.inZone', { time: formatInZone(schedule.lastFiredAt, schedule.timezone), zone: schedule.timezone }) : '-' }}</dd></div>

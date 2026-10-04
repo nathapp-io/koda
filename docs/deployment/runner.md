@@ -104,6 +104,15 @@ A job dispatched with `bashMode: gated` or `escalate` relays nax's bash approval
 - If the daemon is down when nax asks, nax denies the command (it is not queued). After a restart the receiver
   re-binds its port; if that port was taken meanwhile, pending asks time out and are denied.
 - An unanswered ask is denied at the job's `approvalTimeoutSec` (default 600 s).
+- Choose the mode per job: the web dispatch form and schedule dialog have a "Shell command approvals" select (RUN only)
+  and an ask timeout in minutes; the CLI takes `--bash-mode gated|escalate` and `--approval-timeout <seconds>` on
+  `koda fleet dispatch`, `koda fleet schedule add` and `schedule edit`.
+- Answer asks in the project's approvals inbox (`/<project>/fleet/approvals`) or with
+  `koda fleet approval decide <approvalId> --decision allow|allow_for_job|deny --project <slug>` (find ids with
+  `koda fleet approval list --project <slug>`; without `--project` the CLI uses the global-admin routes). Project
+  developers and admins may answer; the job page
+  shows "Waiting for approval" while an ask is open, and the inbox shows whether the runner delivered the answer.
+- An answer that reaches the runner after nax's deadline is not sent (`ask_expired`): nax has already denied it.
 
 ## Operate
 
@@ -138,6 +147,7 @@ koda fleet repo add acme/app --provider github     # GitLab subgroups: group/sub
 koda fleet repo check <repoId>                     # exit 1 and a reason when koda can no longer broker git
 koda fleet dispatch --repo acme/app --feature login --max-cost 5 --profile fast
 koda fleet dispatch --repo acme/app --feature login --max-cost 2 --plan docs/specs/login.md --pin box-1
+koda fleet dispatch --repo acme/app --feature login --max-cost 5 --bash-mode escalate --approval-timeout 900
 koda fleet job list --state RUNNING
 koda fleet job show <jobId>
 koda fleet job cancel <jobId>

@@ -86,4 +86,18 @@ describe('job detail', () => {
     expect(detail).toContain('data-testid="fleet-job-schedule-link"')
     expect(detail).toContain("t('fleet.jobs.detail.coalesced', { count: job.coalescedCount })")
   })
+
+  test('S1.5 2b: callout, shell approvals line, approvals section, live reload on fleet_approval (D297)', () => {
+    expect(detail).toContain("import { useFleetApprovals } from '~/composables/useFleetApprovals'")
+    expect(detail).toContain("import { useApprovalCountdown } from '~/composables/useApprovalCountdown'")
+    expect(detail).toMatch(/<div v-if="job\.pendingApprovals > 0"[^>]*data-testid="fleet-job-approval-callout"/)
+    expect(detail).toContain(':to="reviewHref"')
+    expect(detail).toContain("inboxPath({ kind: 'project', slug }, firstPending(jobApprovals.value)?.id)")
+    expect(detail).toContain('bashSummary(t, job.bashMode, job.approvalTimeoutSec)')
+    expect(detail).toMatch(/<FleetJobApprovals v-if="showApprovals" :slug="slug" :approvals="jobApprovals" :now="now" \/>/)
+    expect(detail).toContain("job.value.bashMode !== 'raw' || jobApprovals.value.length > 0")
+    expect(liveHandlers(detail)).toContain('onFleetApproval: () => liveReload.trigger()')
+    expect(detail).toMatch(/async function reloadSilently\(\)[\s\S]*?await loadApprovals\(\)/)
+    expect(timeline).toContain("case 'approval':")
+  })
 })

@@ -48,6 +48,12 @@
             <Badge :variant="entry.row.status === 'pending' ? 'default' : 'secondary'" data-testid="fleet-approval-status">
               {{ label('fleet.approvals.status', entry.row.status) }}
             </Badge>
+            <span
+              v-if="entry.left !== null"
+              class="font-mono text-xs"
+              :class="entry.left === 0 ? 'text-destructive' : 'text-muted-foreground'"
+              data-testid="fleet-approval-countdown"
+            >{{ countdownText(entry.left) }}</span>
             <span class="text-xs text-muted-foreground"><FleetAge :iso="entry.row.requestedAt" :now="now" mode="ago" /></span>
           </button>
           <div v-if="expandedId === entry.row.id" class="border-t border-border px-3 py-3" data-testid="fleet-approval-panel">
@@ -62,9 +68,16 @@
                 :job-link="jobLink"
                 @decide="onDecide"
               />
-              <p v-else-if="detail.status === 'pending'" class="text-sm text-muted-foreground" data-testid="fleet-approval-bash-later">
-                {{ t('fleet.approvals.bashLater') }}
-              </p>
+              <FleetApprovalBashPanel
+                v-else-if="detail.type === 'nax_bash_escalate' && detail.status === 'pending'"
+                :key="`${detail.id}:${detail.status}:${detailVersion}`"
+                :approval="detail"
+                :can-decide="canDecide(detail, viewer)"
+                :busy="deciding"
+                :now="now"
+                :job-href="detail.projectId && detail.jobId ? jobLink(detail.projectId, detail.jobId) : null"
+                @decide="onDecide"
+              />
               <FleetApprovalOutcome v-else :approval="detail" :name-of="nameOf" :job-link="jobLink" />
             </template>
           </div>
@@ -84,11 +97,14 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useApprovalCountdown } from '~/composables/useApprovalCountdown'
 import { ApiError, extractApiError } from '~/composables/useApi'
 import { useFleetApprovals } from '~/composables/useFleetApprovals'
 import { isForbidden } from '~/composables/useFleetBudgetPage'
 import { createDebouncer } from '~/lib/debounce'
-import { approvalSummary, canDecide, INBOX_PENDING_SIZE, INBOX_TABS, requeueResults } from '~/lib/fleet-approvals'
+import {
+  approvalSummary, canDecide, countdownText, deliveryView, INBOX_PENDING_SIZE, INBOX_TABS, requeueResults, secondsLeft,
+} from '~/lib/fleet-approvals'
 import type { ApprovalBase, ApprovalViewer, BudgetApprovalPayload, InboxTab } from '~/lib/fleet-approvals'
 import { codeLabel } from '~/lib/fleet-i18n'
 import { APPROVAL_TYPES } from '~/lib/fleet-types'
@@ -125,7 +141,8 @@ const typeOptions = computed(() => [
 const tab = ref<InboxTab>('pending')
 const type = ref<string>(ALL)
 const page = ref(1)
-const now = ref(new Date())
+/** D292: one clock for row ages and countdowns. */
+const { now } = useApprovalCountdown()
 const pending = ref(true)
 const loaded = ref(false)
 const loadFailed = ref(false)
@@ -140,12 +157,14 @@ const detail = ref<FleetApprovalDto | null>(null)
 /** Bumped on every fetch of the open approval: part of the panel key, so fresh candidates remount the form (D250). */
 const detailVersion = ref(0)
 
-/** D241: the expanded approval first when it is not on the loaded page. */
+/** D241: the expanded approval first when it is not on the loaded page. `left` drives the row countdown (D296). */
 const displayRows = computed(() => {
-  const rows = api.approvals.value.map((row) => ({ row, linked: false }))
+  const withLeft = (row: FleetApprovalDto, linked: boolean) =>
+    ({ row, linked, left: row.status === 'pending' ? secondsLeft(row.expiresAt, now.value) : null })
+  const rows = api.approvals.value.map((row) => withLeft(row, false))
   const open = detail.value
   if (open === null || api.approvals.value.some((r) => r.id === open.id)) return rows
-  return [{ row: open, linked: true }, ...rows]
+  return [withLeft(open, true), ...rows]
 })
 
 const isConflict = (err: unknown): boolean => err instanceof ApiError && (err.code === 40009 || err.code === 409)
@@ -182,15 +201,26 @@ function statusChanged(): boolean {
   return open.status === 'pending' && tab.value === 'pending' && !api.hasNext.value
 }
 
+/** D295: acks have no live event, so a decided ask still waiting for one is re-fetched on reload, for 10 minutes at most. */
+const DELIVERY_WATCH_MS = 600_000
+const awaitingDelivery = (): boolean => {
+  const open = detail.value
+  if (open === null || deliveryView(open)?.state !== 'waiting') return false
+  const decidedAt = Date.parse(open.decidedAt ?? '')
+  if (Number.isNaN(decidedAt)) return true
+  const elapsed = Date.now() - decidedAt
+  // Stop watching once the window has passed; a negative elapsed (a client clock behind the server) counts as past it.
+  return elapsed >= 0 && elapsed < DELIVERY_WATCH_MS
+}
+
 async function reload(): Promise<void> {
-  now.value = new Date()
   try {
     const accepted = await api.load({ tab: tab.value, type: (type.value || undefined) as ApprovalType | undefined, page: page.value })
     if (!accepted) return
     loaded.value = true
     loadFailed.value = false
     stale.value = false
-    if (statusChanged() && expandedId.value !== null) await loadDetail(expandedId.value)
+    if ((statusChanged() || awaitingDelivery()) && expandedId.value !== null) await loadDetail(expandedId.value)
   } catch (err: unknown) {
     if (isForbidden(err)) {
       forbidden.value = true

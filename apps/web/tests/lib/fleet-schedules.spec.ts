@@ -11,7 +11,7 @@ const t = (key: string): string => key
 
 const schedule = (over: Partial<ScheduleDto> = {}): ScheduleDto => ({
   id: 's1', projectId: 'p1', repoId: 'r1', name: 'nightly', cron: '0 9 * * 1-5', timezone: 'Asia/Singapore', feature: 'login',
-  ref: 'main', profiles: ['fast'], maxCostUsd: '5.0000', selectorLabels: [], pinnedRunnerId: 'run1', enabled: true,
+  ref: 'main', profiles: ['fast'], maxCostUsd: '5.0000', selectorLabels: [], pinnedRunnerId: 'run1', bashMode: 'raw', approvalTimeoutSec: 600, enabled: true,
   nextFireAt: '2026-10-05T01:00:00.000Z', lastFiredAt: null, lastJobId: null, lastPassedCount: 0, noProgressTicks: 0,
   noProgressLimit: 3, disabledReason: null, totalCostUsd: '0.0000', createdById: 'u1', updatedById: 'u1',
   createdAt: '2026-10-02T00:00:00.000Z', updatedAt: '2026-10-02T00:00:00.000Z', ...over,
@@ -31,7 +31,7 @@ const p = (passed: number, total = 5) => ({ total, passed, failed: 0, paused: 0,
 
 const form = (over: Partial<ScheduleFormValues> = {}): ScheduleFormValues => ({
   name: ' nightly ', repoId: 'r1', feature: ' login ', cron: ' 0  9 * * 1-5 ', timezone: ' UTC ', ref: '', profiles: [],
-  maxCostUsd: '2.5', placement: 'auto', selectorLabels: [], pinnedRunnerId: '', noProgressLimit: '3', ...over,
+  maxCostUsd: '2.5', placement: 'auto', selectorLabels: [], pinnedRunnerId: '', noProgressLimit: '3', bashMode: 'raw', approvalTimeoutMinutes: '10', ...over,
 })
 
 describe('cron and timezone checks (D219)', () => {
@@ -124,7 +124,7 @@ describe('bodies (D218)', () => {
   test('patch sends every editable field and clears the placement it does not use (Review Focus 1)', () => {
     expect(toSchedulePatchBody(form({ ref: 'main', placement: 'auto', pinnedRunnerId: 'run1', selectorLabels: ['gpu'] }))).toEqual({
       name: 'nightly', cron: '0 9 * * 1-5', timezone: 'UTC', ref: 'main', profiles: [], maxCostUsd: 2.5, noProgressLimit: 3,
-      selectorLabels: [], pinnedRunnerId: null,
+      selectorLabels: [], pinnedRunnerId: null, bashMode: 'raw',
     })
     expect(toSchedulePatchBody(form({ ref: 'main', placement: 'pin', pinnedRunnerId: 'run1' }))).toEqual(
       expect.objectContaining({ selectorLabels: [], pinnedRunnerId: 'run1' }),
@@ -140,13 +140,44 @@ describe('bodies (D218)', () => {
   test('initial values: create defaults, edit from the stored schedule', () => {
     expect(initialScheduleValues(null, 'Asia/Singapore')).toEqual({
       name: '', repoId: '', feature: '', cron: '', timezone: 'Asia/Singapore', ref: '', profiles: [], maxCostUsd: '5',
-      placement: 'auto', selectorLabels: [], pinnedRunnerId: '', noProgressLimit: '3',
+      placement: 'auto', selectorLabels: [], pinnedRunnerId: '', noProgressLimit: '3', bashMode: 'raw', approvalTimeoutMinutes: '10',
     })
     expect(initialScheduleValues(schedule(), 'UTC')).toEqual(expect.objectContaining({
       timezone: 'Asia/Singapore', maxCostUsd: '5', placement: 'pin', pinnedRunnerId: 'run1', noProgressLimit: '3', ref: 'main',
     }))
     expect(placementOf(schedule({ pinnedRunnerId: null, selectorLabels: ['gpu'] }))).toBe('labels')
     expect(placementOf(schedule({ pinnedRunnerId: null }))).toBe('auto')
+  })
+})
+
+describe('bash fields (D300, Review Focus 5)', () => {
+  test('a relay mode needs a valid timeout; raw does not, even with the field emptied', () => {
+    const bad = buildScheduleSchema(t, 'create').safeParse(form({ bashMode: 'escalate', approvalTimeoutMinutes: '' }))
+    expect(bad.success ? [] : bad.error.issues.map((i) => i.path.join('.'))).toContain('approvalTimeoutMinutes')
+    expect(buildScheduleSchema(t, 'edit').safeParse(form({ ref: 'main', bashMode: 'raw', approvalTimeoutMinutes: '' })).success).toBe(true)
+  })
+
+  test('fields may arrive undefined and default to raw', () => {
+    const values = { ...form(), bashMode: undefined, approvalTimeoutMinutes: undefined }
+    expect(buildScheduleSchema(t, 'create').safeParse(values).success).toBe(true)
+  })
+
+  test('create: raw sends nothing, escalate sends both', () => {
+    expect(toCreateScheduleBody(form())).not.toHaveProperty('bashMode')
+    expect(toCreateScheduleBody(form({ bashMode: 'escalate', approvalTimeoutMinutes: '15' })))
+      .toEqual(expect.objectContaining({ bashMode: 'escalate', approvalTimeoutSec: 900 }))
+  })
+
+  test('patch: the mode always travels; raw omits the timeout so the stored one is kept', () => {
+    expect(toSchedulePatchBody(form({ ref: 'main', bashMode: 'raw', approvalTimeoutMinutes: '' }))).not.toHaveProperty('approvalTimeoutSec')
+    expect(toSchedulePatchBody(form({ ref: 'main', bashMode: 'gated', approvalTimeoutMinutes: '1.5' })))
+      .toEqual(expect.objectContaining({ bashMode: 'gated', approvalTimeoutSec: 90 }))
+  })
+
+  test('a CLI-made 90 s timeout loads as 1.5 minutes and patches back as 90 s', () => {
+    const values = initialScheduleValues(schedule({ bashMode: 'escalate', approvalTimeoutSec: 90 }), 'UTC')
+    expect(values).toEqual(expect.objectContaining({ bashMode: 'escalate', approvalTimeoutMinutes: '1.5' }))
+    expect(toSchedulePatchBody(values)).toEqual(expect.objectContaining({ approvalTimeoutSec: 90 }))
   })
 })
 

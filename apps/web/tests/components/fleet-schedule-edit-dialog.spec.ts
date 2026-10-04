@@ -11,7 +11,7 @@ const dialog = webFile('components', 'fleet', 'ScheduleEditDialog.vue')
 
 const schedule = (over: Partial<ScheduleDto> = {}): ScheduleDto => ({
   id: 's1', projectId: 'p1', repoId: 'r1', name: 'nightly', cron: '0 9 * * 1-5', timezone: 'Asia/Singapore', feature: 'login',
-  ref: 'main', profiles: ['fast'], maxCostUsd: '5.0000', selectorLabels: [], pinnedRunnerId: 'run1', enabled: true,
+  ref: 'main', profiles: ['fast'], maxCostUsd: '5.0000', selectorLabels: [], pinnedRunnerId: 'run1', bashMode: 'raw', approvalTimeoutSec: 600, enabled: true,
   nextFireAt: '2026-10-05T01:00:00.000Z', lastFiredAt: null, lastJobId: null, lastPassedCount: 0, noProgressTicks: 0,
   noProgressLimit: 3, disabledReason: null, totalCostUsd: '0.0000', createdById: 'u1', updatedById: 'u1',
   createdAt: '2026-10-02T00:00:00.000Z', updatedAt: '2026-10-02T00:00:00.000Z', ...over,
@@ -74,7 +74,7 @@ describe('FleetScheduleEditDialog (behaviour)', () => {
 
     expect(api.patch).toHaveBeenCalledWith('/projects/koda/fleet/schedules/s1', {
       name: 'nightly', cron: '0 9 * * 1-5', timezone: 'Asia/Singapore', ref: 'main', profiles: ['fast'], maxCostUsd: 5,
-      noProgressLimit: 3, selectorLabels: [], pinnedRunnerId: 'run1',
+      noProgressLimit: 3, selectorLabels: [], pinnedRunnerId: 'run1', bashMode: 'raw',
     })
     expect(app.emitted('saved')).toHaveLength(1)
     expect(app.emitted('update:open').at(-1)).toEqual([false])
@@ -125,6 +125,28 @@ describe('FleetScheduleEditDialog (behaviour)', () => {
     await submit(app)
     await flush()
     expect(api.post).not.toHaveBeenCalled()
+    app.unmount()
+  })
+
+  test('an escalate schedule shows the timeout and the warning, and patches the stored 90 s back unchanged', async () => {
+    const { api, toasts, flush } = harness()
+    const app = mountDialog({ open: true, schedule: schedule({ bashMode: 'escalate', approvalTimeoutSec: 90 }) }, api, toasts)
+    await flush()
+    expect(testids(app)).toEqual(expect.arrayContaining(['fleet-schedule-bash-mode', 'fleet-schedule-approval-timeout']))
+    expect(app.find('[data-testid="fleet-schedule-bash-warning"]')).toHaveLength(1)
+    await submit(app)
+    await flush()
+    expect(api.patch).toHaveBeenCalledWith('/projects/koda/fleet/schedules/s1', expect.objectContaining({ bashMode: 'escalate', approvalTimeoutSec: 90 }))
+    app.unmount()
+  })
+
+  test('a raw schedule hides the timeout and the warning', async () => {
+    const { api, toasts, flush } = harness()
+    const app = mountDialog({ open: true, schedule: schedule() }, api, toasts)
+    await flush()
+    expect(testids(app)).toContain('fleet-schedule-bash-mode')
+    expect(testids(app)).not.toContain('fleet-schedule-approval-timeout')
+    expect(app.find('[data-testid="fleet-schedule-bash-warning"]')).toHaveLength(0)
     app.unmount()
   })
 

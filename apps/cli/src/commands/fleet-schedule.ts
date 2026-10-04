@@ -20,7 +20,7 @@ import { handleApiError } from '../utils/error';
 import { requireForce } from '../utils/force';
 import { table } from '../utils/output';
 import { parseUsd } from '../utils/parse-usd';
-import { type FleetPage, handleFleetConflict, handleFleetValidation, repoNamesOrEmpty, resolveRepo, resolveRunner } from './fleet-shared';
+import { type BashMode, type FleetPage, bashFlagProblem, bashModeText, handleFleetConflict, handleFleetValidation, parseApprovalTimeout, parseBashMode, repoNamesOrEmpty, resolveRepo, resolveRunner } from './fleet-shared';
 
 const collect = (value: string, previous: string[]): string[] => [...previous, value];
 
@@ -88,7 +88,7 @@ function registerShow(schedule: Command): void {
           console.log(JSON.stringify({ schedule: found, jobs: page.records }, null, 2));
         } else {
           printSchedule('Schedule', found);
-          console.log(`Template: ${found.maxCostUsd} USD per run, ref ${found.ref}, stalls after ${found.noProgressLimit} runs without progress (${found.noProgressTicks} so far)`);
+          console.log(`Template: ${found.maxCostUsd} USD per run, ref ${found.ref}, bash ${bashModeText(found.bashMode, found.approvalTimeoutSec)}, stalls after ${found.noProgressLimit} runs without progress (${found.noProgressTicks} so far)`);
           console.log(`Stories passed so far: ${found.lastPassedCount}; total cost $${found.totalCostUsd}`);
           table(['Job', 'State', 'Passed', 'Cost', 'Coalesced', 'WIP push', 'Reason'], page.records.map((j) => [
             j.id, j.state, passedOf(j), `$${j.costSpentUsd}`, String(j.coalescedCount), j.wipPush ?? '-', j.stateReason ?? '-',
@@ -103,7 +103,8 @@ function registerShow(schedule: Command): void {
 
 interface AddOptions {
   repo: string; feature: string; cron: string; timezone: string; maxCost: number; name?: string; ref?: string;
-  profile: string[]; label: string[]; pin?: string; stallAfter?: number; project?: string; json?: boolean;
+  profile: string[]; label: string[]; pin?: string; bashMode?: BashMode; approvalTimeout?: number;
+  stallAfter?: number; project?: string; json?: boolean;
 }
 
 function registerAdd(schedule: Command): void {
@@ -120,6 +121,8 @@ function registerAdd(schedule: Command): void {
     .option('--profile <name>', 'nax profile, repeatable; later wins', collect, [] as string[])
     .option('--label <label>', 'Only runners with this label, repeatable', collect, [] as string[])
     .option('--pin <runner>', 'Run on this runner (id or name); excludes --label')
+    .option('--bash-mode <mode>', 'Shell command approvals: raw (default), gated or escalate; gated/escalate asks of a scheduled run may wait until the timeout', parseBashMode)
+    .option('--approval-timeout <seconds>', 'Seconds an ask waits for a decision before nax denies it (30-3600, default 600); gated/escalate only', parseApprovalTimeout)
     .option('--stall-after <ticks>', 'Disable after this many runs in a row without a newly passed story (1-20, default 3)', parseStallAfter)
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .option('--json', 'Output as JSON')
@@ -128,6 +131,8 @@ function registerAdd(schedule: Command): void {
         const ctx = await withContext({ projectSlug: o.project });
         const slug = ctx.projectSlug;
         if (o.pin && o.label.length > 0) return handleFleetValidation('Use --label or --pin, not both: a pinned job ignores labels');
+        const bashProblem = bashFlagProblem(o);
+        if (bashProblem) return handleFleetValidation(bashProblem);
         const repo = await resolveRepo(slug, o.repo);
         if (!repo) return handleFleetValidation(`Unknown repo "${o.repo}" in project ${slug}: koda fleet repo list`);
         const pinned = o.pin ? await resolveRunner(slug, o.pin) : null;
@@ -139,6 +144,8 @@ function registerAdd(schedule: Command): void {
           ...(o.label.length > 0 ? { selectorLabels: o.label } : {}),
           ...(pinned ? { pinnedRunnerId: pinned.id } : {}),
           ...(o.stallAfter !== undefined ? { noProgressLimit: o.stallAfter } : {}),
+          ...(o.bashMode ? { bashMode: o.bashMode } : {}),
+          ...(o.approvalTimeout !== undefined ? { approvalTimeoutSec: o.approvalTimeout } : {}),
         };
         const created = unwrap<ScheduleDto>(await projectFleetSchedulesControllerCreate({ path: { slug }, body }));
         if (o.json) console.log(JSON.stringify(created, null, 2));
@@ -152,7 +159,8 @@ function registerAdd(schedule: Command): void {
 
 interface EditOptions {
   name?: string; cron?: string; timezone?: string; maxCost?: number; ref?: string; profile: string[]; label: string[]; pin?: string;
-  unpin?: boolean; clearProfiles?: boolean; clearLabels?: boolean; stallAfter?: number; project?: string; json?: boolean;
+  unpin?: boolean; clearProfiles?: boolean; clearLabels?: boolean; stallAfter?: number; bashMode?: BashMode; approvalTimeout?: number;
+  project?: string; json?: boolean;
 }
 
 /** Only the fields the user gave; `pinned` is the resolved runner id, null to unpin, undefined to leave alone. */
@@ -167,6 +175,8 @@ function editBody(o: EditOptions, pinned: string | null | undefined): UpdateSche
     ...(o.clearLabels ? { selectorLabels: [] } : o.label.length > 0 ? { selectorLabels: o.label } : {}),
     ...(pinned !== undefined ? { pinnedRunnerId: pinned } : {}),
     ...(o.stallAfter !== undefined ? { noProgressLimit: o.stallAfter } : {}),
+    ...(o.bashMode ? { bashMode: o.bashMode } : {}),
+    ...(o.approvalTimeout !== undefined ? { approvalTimeoutSec: o.approvalTimeout } : {}),
   };
 }
 
@@ -185,6 +195,8 @@ function registerEdit(schedule: Command): void {
     .option('--clear-labels', 'Remove every selector label')
     .option('--pin <runner>', 'Run on this runner (id or name)')
     .option('--unpin', 'Stop pinning to a runner')
+    .option('--bash-mode <mode>', 'Change the shell command approval mode', parseBashMode)
+    .option('--approval-timeout <seconds>', 'Seconds an ask waits (30-3600)', parseApprovalTimeout)
     .option('--stall-after <ticks>', 'Disable after this many runs without a newly passed story (1-20)', parseStallAfter)
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .option('--json', 'Output as JSON')
@@ -198,6 +210,13 @@ function registerEdit(schedule: Command): void {
           const runner = await resolveRunner(slug, o.pin);
           if (!runner) return handleFleetValidation(`Unknown runner "${o.pin}"`);
           pinned = runner.id;
+        }
+        // D301: the API accepts a timeout on a raw schedule and then silently ignores it, so refuse it here. An
+        // explicit mode is enough; only an edit that names no mode looks up the stored one.
+        if (o.approvalTimeout !== undefined) {
+          const mode = o.bashMode
+            ?? unwrap<ScheduleDto>(await projectFleetSchedulesControllerGet({ path: { slug, id: scheduleId } })).bashMode;
+          if (mode === 'raw') return handleFleetValidation('--approval-timeout needs --bash-mode gated or escalate');
         }
         const body = editBody(o, pinned);
         if (Object.keys(body).length === 0) return handleFleetValidation('Nothing to change: give at least one option');

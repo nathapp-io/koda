@@ -380,7 +380,7 @@ acks `rejected: callback_failed:<status>`. Re-sent commands are no-ops through c
 | Daemon down when nax asks | nax POST fails -> deny / `unavailable` (A7) |
 | Ask reaches koda after its deadline | created `expired`; nax already denied |
 | Decide after `expiresAt`, before the sweep | 409, approval marked `expired` |
-| Answer reaches the runner after nax timed out | nax drops the unknown id with 200; ack `ok`; approval already expired |
+| Answer reaches the runner after nax timed out | not sent; ack `rejected: ask_expired` (2b D302); approval already expired |
 | Runner cannot reach nax's callback, or 429 | ack `rejected: callback_failed:<status>` shown on the approval; no retry; nax times out -> deny |
 | Command over 12 KiB | `commandTruncated`; only Deny is allowed |
 | `allow-remember` not offered by nax | "Allow for this job" hidden; the API refuses it (400) |
@@ -426,6 +426,13 @@ acks `rejected: callback_failed:<status>`. Re-sent commands are no-ops through c
   refuses ambiguous splits; the size-gate and paused-story prompts are answered as headless runs behave; relay state
   is per (job, epoch); a decide that finds the ask expired or its job gone commits that close and then answers 409;
   `APPROVAL_ANSWER` acks are stored as `outcome.delivery`; static-capability runners never offer the relay.
+- 2b plan notes (`docs/superpowers/plans/2026-10-03-fleet-s1-5-slice-2b-bash-approvals-web.md`, D288-D306): no API
+  change; bash asks are decided by DEVELOPER+ in the inbox only (the job page links there); a cut or unreadable ask is
+  deny-only and the panel hides its buttons when the countdown reaches 0; the delivery line re-fetches the open row on
+  each reload because acks have no live event; web timeouts are minutes with 2 decimals (exact round trip of stored
+  seconds), the CLI takes seconds; a raw schedule PATCH omits the timeout and the CLI refuses a timeout-only edit on a
+  raw schedule; the runner refuses answers past nax's
+  deadline (`ask_expired`).
 
 - 1a plan notes (`docs/superpowers/plans/2026-10-02-fleet-s1-5-slice-1a-approvals-core.md`, D226-D238): two modules
   (store + approvals); the hard stop opens the approval before inserting its incident; the resume route follows the

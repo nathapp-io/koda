@@ -9,6 +9,14 @@
       <span v-if="approval.decidedById" data-testid="fleet-approval-outcome-by">{{ t('fleet.approvals.outcome.decidedBy', { name: deciderName }) }}</span>
       <span v-if="approval.decidedAt" class="ml-2">{{ t('fleet.approvals.outcome.decidedAt', { at: new Date(approval.decidedAt).toLocaleString() }) }}</span>
     </p>
+    <pre
+      v-if="bashText !== null"
+      class="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-3 font-mono text-xs"
+      data-testid="fleet-approval-outcome-command"
+    >{{ bashText }}</pre>
+    <p v-if="delivery" :data-delivery="delivery.state" :class="delivery.state === 'failed' ? 'text-destructive' : 'text-muted-foreground'" data-testid="fleet-approval-outcome-delivery">
+      {{ deliveryText }}
+    </p>
     <p v-if="raised" data-testid="fleet-approval-outcome-raised">{{ t('fleet.approvals.outcome.raisedTo', { amount: formatUsd(raised) }) }}</p>
     <p v-if="approval.resolvedBy === 'manual_resume'" class="text-muted-foreground" data-testid="fleet-approval-outcome-manual">
       {{ t('fleet.approvals.outcome.manualResume') }}
@@ -40,7 +48,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { requeueResults, resumedAmount } from '~/lib/fleet-approvals'
+import { bashPayload, deliveryView, requeueResults, resumedAmount } from '~/lib/fleet-approvals'
 import { codeLabel } from '~/lib/fleet-i18n'
 import { formatUsd } from '~/lib/fleet-jobs'
 import type { FleetApprovalDto } from '~/lib/fleet-types'
@@ -61,4 +69,18 @@ const deciderName = computed(() =>
   (props.approval.decidedById ? props.nameOf(props.approval.decidedById) : null) ?? t('fleet.approvals.outcome.unknownUser'))
 /** Re-queued jobs live in the approval's project; a no-project approval has no project to link into. */
 const link = (jobId: string): string | null => (props.approval.projectId ? props.jobLink(props.approval.projectId, jobId) : null)
+
+/** D294: what the human decided on: the command, or nax's raw text when it was not parsed. */
+const bashText = computed(() => {
+  const bash = bashPayload(props.approval)
+  return bash === null ? null : (bash.command !== '' ? bash.command : (bash.rawDetail ?? ''))
+})
+const delivery = computed(() => deliveryView(props.approval))
+const deliveryText = computed(() => {
+  const d = delivery.value
+  if (d === null) return ''
+  return d.state === 'failed'
+    ? t('fleet.approvals.delivery.failed', { detail: d.detail ?? '-' })
+    : t(`fleet.approvals.delivery.${d.state}`)
+})
 </script>

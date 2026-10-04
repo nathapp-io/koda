@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { scopeName } from '~/lib/fleet-budgets'
+import { canWorkOnFleet } from '~/lib/fleet-jobs'
 import type { ApprovalBase, ApprovalViewer, BudgetApprovalPayload } from '~/lib/fleet-approvals'
 
 definePageMeta({ layout: 'default' })
@@ -13,8 +14,8 @@ const { data: role } = useProjectViewerRole(slug)
 const people = useProjectMemberNames(slug)
 const options = useFleetDispatchOptions(slug)
 
-// D244: canManage is project ADMIN, and a global ADMIN resolves to project ADMIN.
-const viewer = computed<ApprovalViewer>(() => ({ kind: 'project', canManage: role.value.canManage }))
+// D244 / D290: canManage is project ADMIN (a global ADMIN resolves to it); canWork is DEVELOPER+.
+const viewer = computed<ApprovalViewer>(() => ({ kind: 'project', canManage: role.value.canManage, canWork: canWorkOnFleet(role.value) }))
 const scopeLabel = (p: BudgetApprovalPayload): string | null =>
   scopeName(p, { project: slug, repo: options.repoName, runner: (id) => id })
 // A project inbox holds only this project's approvals (D230), so every candidate is a job of this project.

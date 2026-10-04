@@ -141,6 +141,9 @@ export interface FleetJobStoryDto {
   dependsOn: string[]
 }
 
+/** S1.5 §1.6: gated/escalate relay nax's bash asks to the approvals inbox; RUN jobs only. */
+export type BashMode = 'raw' | 'gated' | 'escalate'
+
 export interface FleetJobDto {
   id: string
   projectId: string
@@ -151,7 +154,7 @@ export interface FleetJobDto {
   planFrom: string | null
   profiles: string[]
   maxCostUsd: string
-  bashMode: 'raw' | 'gated' | 'escalate'
+  bashMode: BashMode
   /** S1.5 2a: seconds a bash ask waits; used only when bashMode is not raw. */
   approvalTimeoutSec: number
   /** S1.5 2a: pending bash approvals of this job. */
@@ -195,7 +198,8 @@ export interface FleetJobEventDto {
   seq: number
   leaseEpoch: number
   runnerSeq: number | null
-  type: 'state' | 'snapshot' | 'lifecycle' | 'log'
+  /** `approval_request`: a bash ask the runner relayed (S1.5 2a); its payload carries the masked command. */
+  type: 'state' | 'snapshot' | 'lifecycle' | 'log' | 'approval_request'
   payload: unknown
   createdAt: string
 }
@@ -211,7 +215,7 @@ export interface DispatchResultDto {
   placement: { assigned: boolean; runnerId: string | null; misfits: PlacementMisfit[] }
 }
 
-/** POST /projects/:slug/fleet/jobs body; bashMode is left to the server default (raw). */
+/** POST /projects/:slug/fleet/jobs body; a raw job sends neither bash field (server default raw / 600 s). */
 export interface DispatchBody {
   repoId: string
   command: 'RUN' | 'PLAN'
@@ -222,6 +226,8 @@ export interface DispatchBody {
   profiles?: string[]
   selectorLabels?: string[]
   pinnedRunnerId?: string
+  bashMode?: BashMode
+  approvalTimeoutSec?: number
 }
 
 /** S1b slice 2a wire types (apps/api/src/fleet/budgets/dto). Money is a decimal string. */
@@ -288,6 +294,9 @@ export interface ScheduleDto {
   maxCostUsd: string
   selectorLabels: string[]
   pinnedRunnerId: string | null
+  /** S1.5 2a: copied into every job the schedule dispatches. */
+  bashMode: BashMode
+  approvalTimeoutSec: number
   enabled: boolean
   /** Null while disabled. */
   nextFireAt: string | null
@@ -316,6 +325,8 @@ export interface NewScheduleBody {
   selectorLabels?: string[]
   pinnedRunnerId?: string
   noProgressLimit: number
+  bashMode?: BashMode
+  approvalTimeoutSec?: number
 }
 
 /** The repo and the feature are fixed after create (3a D203). */
@@ -329,6 +340,9 @@ export interface SchedulePatchBody {
   selectorLabels: string[]
   pinnedRunnerId: string | null
   noProgressLimit: number
+  bashMode: BashMode
+  /** Omitted for raw: the stored value is kept (D300). */
+  approvalTimeoutSec?: number
 }
 
 /** S1.5 slice 1a wire types (apps/api/src/fleet/approvals/dto). Money inside payload/outcome is a decimal string. */

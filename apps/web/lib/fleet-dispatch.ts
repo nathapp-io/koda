@@ -1,5 +1,6 @@
 import * as z from 'zod'
 import type { DispatchBody } from '~/lib/fleet-types'
+import { BASH_MODES, bashCreateFields, DEFAULT_APPROVAL_TIMEOUT_SEC, isBashTimeoutValid, minutesText } from '~/lib/fleet-bash-mode'
 import { LABEL_PATTERN } from '~/lib/fleet-validation'
 
 /** apps/api/src/fleet/jobs/dispatch-input.ts FEATURE_RE (nax validateFeatureName). */
@@ -37,12 +38,18 @@ export function buildDispatchSchema(t: Translate) {
     selectorLabels: z.array(z.string()).max(MAX_SELECTOR_LABELS, t('fleet.dispatch.validation.labelsMax'))
       .refine(list => list.every(l => LABEL_PATTERN.test(l)), t('fleet.dispatch.validation.label')),
     pinnedRunnerId: z.string().optional(),
+    bashMode: z.enum(BASH_MODES),
+    /** Under v-if: may be undefined when unmounted (the D182 trap). */
+    approvalTimeoutMinutes: z.string().optional(),
   }).superRefine((v, ctx) => {
     if (v.command === 'PLAN' && !(v.planFrom ?? '').trim()) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['planFrom'], message: t('fleet.dispatch.validation.planFromRequired') })
     }
     if (v.pinnedRunnerId && v.selectorLabels.length > 0) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['selectorLabels'], message: t('fleet.dispatch.validation.labelsOrPin') })
+    }
+    if (v.command === 'RUN' && !isBashTimeoutValid(v.bashMode, v.approvalTimeoutMinutes ?? '')) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['approvalTimeoutMinutes'], message: t('fleet.bash.validation.timeout') })
     }
   })
 }
@@ -59,9 +66,11 @@ export const DISPATCH_DEFAULTS: DispatchFormValues = {
   maxCostUsd: 5,
   selectorLabels: [],
   pinnedRunnerId: '',
+  bashMode: 'raw',
+  approvalTimeoutMinutes: minutesText(DEFAULT_APPROVAL_TIMEOUT_SEC),
 }
 
-/** Form values -> request body: trims, drops empty optionals, planFrom only for PLAN. */
+/** Form values -> request body: trims, drops empty optionals, planFrom only for PLAN, bash fields only for a gated/escalate RUN (D299). */
 export function toDispatchBody(v: DispatchFormValues): DispatchBody {
   const ref = (v.ref ?? '').trim()
   const planFrom = (v.planFrom ?? '').trim()
@@ -75,6 +84,7 @@ export function toDispatchBody(v: DispatchFormValues): DispatchBody {
     ...(v.command === 'PLAN' && planFrom ? { planFrom } : {}),
     ...(v.profiles.length > 0 ? { profiles: [...v.profiles] } : {}),
     ...(pin ? { pinnedRunnerId: pin } : v.selectorLabels.length > 0 ? { selectorLabels: [...v.selectorLabels] } : {}),
+    ...(v.command === 'RUN' ? bashCreateFields(v.bashMode, v.approvalTimeoutMinutes ?? '') : {}),
   }
 }
 

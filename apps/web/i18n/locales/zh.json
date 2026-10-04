@@ -1013,6 +1013,7 @@
         "owner": "创建者",
         "unknownOwner": "已离开的成员",
         "totalCost": "累计费用",
+        "bash": "Shell 审批",
         "status": "状态"
       },
       "history": {
@@ -1058,14 +1059,36 @@
       },
       "summary": {
         "budget": "{scope} 的预算在 {spent} / {amount} 时停止",
-        "bash": "有任务请求运行 shell 命令"
+        "bash": "有任务请求运行 shell 命令",
+        "bashCommand": "运行 {command}（{stage}）"
       },
       "empty": { "pending": "没有等待决定的审批。", "all": "暂无审批。" },
       "linked": "链接的审批",
       "more": "仅显示前 {n} 个待处理审批。",
       "noProject": "全局",
       "readOnly": "你可以查看此审批。只有项目管理员可以决定预算超额。",
-      "bashLater": "Shell 命令审批将在后续版本中在此页面处理。",
+      "readOnlyBash": "你可以查看此询问。只有项目开发者或管理员可以答复。",
+      "bash": {
+        "command": "命令（nax 已遮蔽密钥）",
+        "rawDetail": "nax 发送的内容",
+        "rawHint": "runner 无法从 nax 的文本中拆出命令。你将基于下面的完整文本做出决定。",
+        "unreadable": "无法读取此询问，只能拒绝。",
+        "masked": "已遮蔽 {count} 个密钥值",
+        "truncated": "命令过长，无法完整显示，只能拒绝。",
+        "root": "运行目录",
+        "stage": "阶段",
+        "story": "故事",
+        "feature": "功能",
+        "reason": "nax 询问的原因",
+        "openJob": "打开任务",
+        "expiresIn": "若不答复，nax 将在 {time} 后拒绝。",
+        "timedOut": "此询问已超时，nax 已拒绝该命令。",
+        "action": {
+          "allow": "允许一次",
+          "allow_for_job": "本任务内允许",
+          "deny": "拒绝"
+        }
+      },
       "budget": {
         "summary": "已花费 {spent}，限额 {amount}（{window}）。",
         "amount": "新限额（美元）",
@@ -1104,9 +1127,33 @@
       "toast": {
         "raise_budget_and_resume": "预算已提高并恢复。",
         "keep_paused": "预算保持暂停。",
-        "requeueFailed": "{count} 个任务无法重新排队。"
+        "requeueFailed": "{count} 个任务无法重新排队。",
+        "allow": "已允许，runner 会将答复转交 nax。",
+        "allow_for_job": "已在本任务内允许，runner 会将答复转交 nax。",
+        "deny": "已拒绝，runner 会将答复转交 nax。"
+      },
+      "delivery": {
+        "delivered": "已送达 nax。",
+        "failed": "runner 未能将答复送达 nax（{detail}）。nax 会拒绝未获答复的命令。",
+        "waiting": "runner 尚未确认。"
       },
       "badge": { "label": "{count} 个审批等待处理" }
+    },
+    "bash": {
+      "mode": {
+        "raw": "关闭",
+        "gated": "受控",
+        "escalate": "升级审批"
+      },
+      "modeLabel": "Shell 命令审批",
+      "modeHint": "受控模式只在仓库的 ask 规则命中时询问；升级审批模式对阶段授权之外的任何命令也会询问。两者都需要仓库 nax 配置中的 Bash(...) 允许规则，以及带审批中继的 runner。",
+      "timeout": "询问超时（分钟）",
+      "timeoutHint": "未答复的询问在此时间后被拒绝（0.5 到 60 分钟）。",
+      "scheduleWarning": "定时运行可能在无人值守时发起询问，超时后会被拒绝。",
+      "summary": "{mode}，询问等待 {minutes} 分钟",
+      "validation": {
+        "timeout": "请输入 0.5 到 60 分钟，最多两位小数。"
+      }
     },
     "repos": {
       "title": "仓库",
@@ -1160,6 +1207,8 @@
       "budgets": "预算",
       "schedules": "定时计划",
       "approvals": "审批",
+      "approvalsSection": { "title": "审批", "empty": "尚无 Shell 命令询问。", "open": "打开" },
+      "needsApproval": "待审批（{count}）",
       "empty": "还没有 fleet 任务",
       "total": "共 {total} 个任务",
       "unknownMember": "未知成员",
@@ -1222,7 +1271,10 @@
         "budgetStopLink": "查看预算",
         "fromSchedule": "由定时计划派发",
         "openSchedule": "查看定时计划",
-        "coalesced": "之后的 {count} 次触发已合并到此任务"
+        "coalesced": "之后的 {count} 次触发已合并到此任务",
+        "bash": "Shell 审批",
+        "waitingApproval": "等待审批（{count}）",
+        "reviewApproval": "查看"
       },
       "actions": {
         "cancel": "取消任务",
@@ -1248,6 +1300,7 @@
         "snapshotEmpty": "状态更新",
         "lifecycle": "执行机 {level}：{message}",
         "log": "日志：{text}",
+        "approval": "请求审批：{command}",
         "unknown": "未知事件 {type}"
       }
     },

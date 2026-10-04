@@ -108,7 +108,7 @@ const renderer = Vue.createRenderer({
  * Vue's reactivity helpers, injected from the real `vue` so a mounted component shares one runtime.
  * The rest are Nuxt auto-imports a test supplies per mount.
  */
-const VUE_HELPERS = ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount', 'onUnmounted', 'nextTick'] as const
+const VUE_HELPERS = ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount', 'onUnmounted', 'nextTick', 'useId'] as const
 
 /** Nuxt auto-import names injected as undefined unless the test supplies them (see MountOptions.globals). */
 const NUXT_AUTO_IMPORTS = [
@@ -253,6 +253,8 @@ const FLEET_COMPONENT_FILES: Record<FleetComponentName, string> = {
   FleetApprovalBudgetPanel: 'ApprovalBudgetPanel.vue',
   FleetApprovalOutcome: 'ApprovalOutcome.vue',
   FleetApprovalInbox: 'ApprovalInbox.vue',
+  FleetApprovalBashPanel: 'ApprovalBashPanel.vue',
+  FleetJobApprovals: 'JobApprovals.vue',
 }
 
 export function mountSfc(file: string, options: MountOptions = {}): Mounted {
@@ -324,4 +326,5 @@ export const webFile = (...parts: string[]): string => join(webRoot, ...parts)
 export type FleetComponentName =
   | 'FleetAge' | 'FleetRunnerCapabilityChips' | 'FleetRepoReachabilityBadge' | 'FleetNativeSelect' | 'FleetBudgetTable'
   | 'FleetScheduleTable' | 'FleetScheduleHistory'
-  | 'FleetApprovalBudgetPanel' | 'FleetApprovalOutcome' | 'FleetApprovalInbox'
+  | 'FleetApprovalBudgetPanel' | 'FleetApprovalOutcome' | 'FleetApprovalInbox' | 'FleetApprovalBashPanel'
+  | 'FleetJobApprovals'

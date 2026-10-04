@@ -83,6 +83,15 @@ describe('useFleetApprovals', () => {
     expect(api.approvals.value[0].status).toBe('pending')
     expect(approvalsVersion.value).toBe(0)
   })
+
+  test('listForJob reads one job\'s approvals, one page of 100 (D297)', async () => {
+    const get = jest.fn(async () => page([row('b1', { type: 'nax_bash_escalate', jobId: 'j1' })]))
+    install({ get })
+    const { useFleetApprovals } = await fresh()
+    const api = useFleetApprovals({ kind: 'project', slug: 'koda' })
+    expect((await api.listForJob('j1')).map((a) => a.id)).toEqual(['b1'])
+    expect(get).toHaveBeenCalledWith('/projects/koda/fleet/approvals', { query: { jobId: 'j1', size: '100' } })
+  })
 })
 
 describe('useFleetApprovalCounts', () => {

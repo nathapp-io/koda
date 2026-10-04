@@ -58,4 +58,10 @@ describe('fleet jobs list', () => {
     expect(list).toMatch(/<Button variant="outline" data-testid="fleet-approvals-link" @click="navigateTo\(`\/\$\{slug\}\/fleet\/approvals`\)">/)
     expect(list.indexOf('fleet-approvals-link')).toBeLessThan(list.indexOf('fleet-schedules-link'))
   })
+
+  test('a job with pending approvals is marked next to its state, and the list reloads on fleet_approval (spec §5)', () => {
+    expect(list).toMatch(/<FleetJobStateBadge :state="job\.state" \/>\s*<Badge v-if="job\.pendingApprovals > 0"[^>]*:data-testid="`fleet-job-needs-approval-\$\{job\.id\}`"/)
+    expect(list).toContain("t('fleet.jobs.needsApproval', { count: job.pendingApprovals })")
+    expect(liveHandlers(list)).toContain('onFleetApproval: () => liveReload.trigger()')
+  })
 })

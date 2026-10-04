@@ -5,12 +5,17 @@ import { createDebouncer } from '~/lib/debounce'
 import { budgetStopPolicyId } from '~/lib/fleet-budgets'
 import { loadFleetJobDetail } from '~/lib/fleet-job-detail'
 import { canCancelJob, canRequeueJob, canWorkOnFleet, isTerminalJobState, mayHaveBundle, mergeEvents, safePrUrl, wipPushStatus } from '~/lib/fleet-jobs'
-import type { DispatchResultDto, FleetJobDto, FleetJobEventDto } from '~/lib/fleet-types'
+import type { DispatchResultDto, FleetApprovalDto, FleetJobDto, FleetJobEventDto } from '~/lib/fleet-types'
 import FleetJobProgress from '~/components/fleet/FleetJobProgress.vue'
 import FleetJobStories from '~/components/fleet/FleetJobStories.vue'
 import FleetJobStateBadge from '~/components/fleet/FleetJobStateBadge.vue'
 import FleetJobTimeline from '~/components/fleet/FleetJobTimeline.vue'
 import FleetPlacementResult from '~/components/fleet/FleetPlacementResult.vue'
+import { useApprovalCountdown } from '~/composables/useApprovalCountdown'
+import { useFleetApprovals } from '~/composables/useFleetApprovals'
+import { firstPending, inboxPath } from '~/lib/fleet-approvals'
+import { bashSummary } from '~/lib/fleet-bash-mode'
+import FleetJobApprovals from '~/components/fleet/JobApprovals.vue'
 
 definePageMeta({ layout: 'default' })
 
@@ -24,6 +29,11 @@ const jobsApi = useFleetJobs(slug)
 const options = useFleetDispatchOptions(slug)
 const people = useProjectMemberNames(slug)
 const { data: viewerRole } = useProjectViewerRole(slug)
+
+const approvalsApi = useFleetApprovals({ kind: 'project', slug })
+const { now } = useApprovalCountdown()
+/** D297: this job's approvals (bash asks), newest first. */
+const jobApprovals = ref<FleetApprovalDto[]>([])
 
 const job = ref<FleetJobDto | null>(null)
 const pending = ref(true)
@@ -48,6 +58,13 @@ const prUrl = computed(() => safePrUrl(job.value?.resultPrUrl))
 const wipPush = computed(() => wipPushStatus(job.value?.wipPush))
 const budgetPolicyId = computed(() => budgetStopPolicyId(job.value?.stateReason))
 const cancelPending = computed(() => job.value !== null && job.value.cancelRequestedAt !== null && !isTerminalJobState(job.value.state))
+const showApprovals = computed(() => job.value !== null && (job.value.bashMode !== 'raw' || jobApprovals.value.length > 0))
+/** D297: Review opens the ask nax denies first; the inbox itself before the list has loaded. */
+const reviewHref = computed(() => inboxPath({ kind: 'project', slug }, firstPending(jobApprovals.value)?.id))
+
+async function loadApprovals(): Promise<void> {
+  jobApprovals.value = await approvalsApi.listForJob(jobId)
+}
 
 /** Events only append (ordered by seq), so refetching from the last loaded page is enough. */
 async function loadEventsFrom(pageNo: number): Promise<void> {
@@ -82,6 +99,8 @@ async function loadJob(): Promise<boolean> {
 function initializeRelatedData(): void {
   // An empty timeline must not read as "No events yet" when the load failed.
   void loadEventsFrom(1).catch((err: unknown) => toast.error(extractApiError(err)))
+  // Approvals are secondary: a failure leaves the page usable.
+  void loadApprovals().catch((err: unknown) => toast.error(extractApiError(err)))
   // Names are cosmetic: a failure leaves ids (or "Unknown member") on screen.
   void options.load().catch(() => undefined)
   void people.load().catch(() => undefined)
@@ -107,6 +126,7 @@ async function reloadSilently(): Promise<void> {
   try {
     job.value = await jobsApi.get(jobId)
     await catchUpEvents()
+    await loadApprovals()
   }
   catch {
     // The next live event or a resync retries.
@@ -119,6 +139,7 @@ useProjectEvents(slug, {
   onFleetJob: (event) => {
     if (event.jobId === jobId) liveReload.trigger()
   },
+  onFleetApproval: () => liveReload.trigger(),
   onResync: () => liveReload.trigger(),
 })
 
@@ -196,6 +217,11 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
         </span>
       </div>
 
+      <div v-if="job.pendingApprovals > 0" class="flex flex-wrap items-center gap-3 rounded-md border border-primary p-4 text-sm" data-testid="fleet-job-approval-callout">
+        <span class="font-medium">{{ t('fleet.jobs.detail.waitingApproval', { count: job.pendingApprovals }) }}</span>
+        <NuxtLink :to="reviewHref" class="text-primary underline-offset-4 hover:underline" data-testid="fleet-job-approval-review">{{ t('fleet.jobs.detail.reviewApproval') }}</NuxtLink>
+      </div>
+
       <section v-if="requeueResult" class="space-y-2" data-testid="fleet-job-requeue-result">
         <h2 class="text-sm font-medium">{{ t('fleet.jobs.requeuePlacement') }}</h2>
         <FleetPlacementResult v-if="requeueResult" :slug="slug" :result="requeueResult" :runner-name="options.runnerName" hide-open-link />
@@ -208,6 +234,7 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.runner') }}</dt><dd data-testid="fleet-job-runner">{{ options.runnerName(job.runnerId) ?? t('fleet.jobs.detail.unassigned') }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.requester') }}</dt><dd>{{ people.nameOf(job.requestedById) ?? t('fleet.jobs.unknownMember') }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.profiles') }}</dt><dd>{{ job.profiles.length > 0 ? job.profiles.join(' > ') : '-' }}</dd></div>
+        <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.bash') }}</dt><dd data-testid="fleet-job-bash">{{ bashSummary(t, job.bashMode, job.approvalTimeoutSec) }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.queuedAt') }}</dt><dd>{{ formatTime(job.queuedAt) }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.startedAt') }}</dt><dd>{{ formatTime(job.startedAt) }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.finishedAt') }}</dt><dd>{{ formatTime(job.finishedAt) }}</dd></div>
@@ -228,6 +255,8 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
         <p class="font-medium">{{ t('fleet.jobs.detail.escalation') }}</p>
         <p class="whitespace-pre-wrap text-muted-foreground">{{ job.escalationReason }}</p>
       </div>
+
+      <FleetJobApprovals v-if="showApprovals" :slug="slug" :approvals="jobApprovals" :now="now" />
 
       <FleetJobTimeline :events="events" :has-more="moreEvents" :loading="loadingEvents" @load-more="loadEventsFrom(eventPage + 1)" />
 

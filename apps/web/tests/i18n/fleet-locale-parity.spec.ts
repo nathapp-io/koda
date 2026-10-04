@@ -45,7 +45,10 @@ const ENUMS: Record<string, string[]> = {
   'fleet.approvals.tabs': ['pending', 'all'],
   'fleet.approvals.empty': ['pending', 'all'],
   'fleet.approvals.validation': ['amountInvalid', 'notAbove', 'commentTooLong'],
-  'fleet.approvals.toast': ['raise_budget_and_resume', 'keep_paused', 'requeueFailed'],
+  'fleet.approvals.bash.action': ['allow', 'allow_for_job', 'deny'],
+  'fleet.approvals.toast': ['raise_budget_and_resume', 'keep_paused', 'requeueFailed', 'allow', 'allow_for_job', 'deny'],
+  'fleet.approvals.delivery': ['delivered', 'failed', 'waiting'],
+  'fleet.bash.mode': ['raw', 'gated', 'escalate'],
 }
 
 describe('Fleet locale parity (en and zh)', () => {
@@ -87,7 +90,7 @@ describe('Fleet locale parity (en and zh)', () => {
   test('the approval keys the pages render exist (S1.5 1b)', () => {
     for (const key of [
       'fleet.approvals.title', 'fleet.approvals.subtitleProject', 'fleet.approvals.subtitleAdmin', 'fleet.approvals.readOnly',
-      'fleet.approvals.bashLater', 'fleet.approvals.linked', 'fleet.approvals.noProject', 'fleet.approvals.filters.allTypes',
+      'fleet.approvals.linked', 'fleet.approvals.noProject', 'fleet.approvals.filters.allTypes',
       'fleet.approvals.summary.budget', 'fleet.approvals.summary.bash', 'fleet.approvals.budget.raise', 'fleet.approvals.budget.keep',
       'fleet.approvals.outcome.manualResume', 'fleet.approvals.outcome.requeueOk', 'fleet.approvals.badge.label', 'fleet.jobs.approvals',
     ]) {

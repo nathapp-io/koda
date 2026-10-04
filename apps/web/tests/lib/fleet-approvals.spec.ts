@@ -1,8 +1,9 @@
 import { describe, test, expect } from '@jest/globals'
 import {
-  approvalSummary, badgeTarget, badgeText, budgetPayload, buildApprovalQuery, buildRaiseSchema, canDecide,
-  commentTooLong, inboxPath, pendingByPolicy, raiseAmountError, requeueFailure, requeueResults, resumedAmount,
-  sortPending, toKeepPausedBody, toRaiseBody,
+  approvalSummary, badgeTarget, badgeText, bashChoices, bashPayload, budgetPayload, buildApprovalQuery,
+  buildRaiseSchema, canDecide, commandPreview, commentTooLong, countdownText, deliveryView, firstPending,
+  inboxPath, pendingByPolicy, raiseAmountError, requeueFailure, requeueResults, resumedAmount, secondsLeft,
+  sortPending, toBashBody, toKeepPausedBody, toRaiseBody,
 } from '../../lib/fleet-approvals'
 import type { FleetApprovalDto } from '../../lib/fleet-types'
 import { enI18n } from '../helpers/fleet-harness'
@@ -56,16 +57,23 @@ describe('budgetPayload', () => {
 
 describe('canDecide (D244, Review Focus 5)', () => {
   const admin = { kind: 'admin' } as const
-  const manager = { kind: 'project', canManage: true } as const
-  const member = { kind: 'project', canManage: false } as const
+  const manager = { kind: 'project', canManage: true, canWork: true } as const
+  const member = { kind: 'project', canManage: false, canWork: false } as const
+  const developer = { kind: 'project', canManage: false, canWork: true } as const
   test('a pending budget override: admin inbox or project ADMIN', () => {
     expect(canDecide(approval('a'), admin)).toBe(true)
     expect(canDecide(approval('a'), manager)).toBe(true)
     expect(canDecide(approval('a'), member)).toBe(false)
   })
-  test('never once decided, never a bash ask in 1b', () => {
+  test('never once decided; a pending bash ask is decided by DEVELOPER+ (D290)', () => {
     expect(canDecide(approval('a', { status: 'approved' }), admin)).toBe(false)
-    expect(canDecide(approval('a', { type: 'nax_bash_escalate' }), admin)).toBe(false)
+    // D290: bash asks are decided by DEVELOPER+, budget overrides still by ADMIN only.
+    const bash = approval('a', { type: 'nax_bash_escalate', policyId: null })
+    expect(canDecide(bash, admin)).toBe(true)
+    expect(canDecide(bash, developer)).toBe(true)
+    expect(canDecide(bash, member)).toBe(false)
+    expect(canDecide(approval('a'), developer)).toBe(false)
+    expect(canDecide({ ...bash, status: 'expired' }, admin)).toBe(false)
   })
 })
 
@@ -163,7 +171,9 @@ describe('approvalSummary', () => {
   test('a budget override names the scope and the stop', () => {
     expect(approvalSummary(t, approval('a'), () => 'koda')).toBe('Budget for project koda stopped at $0.60 of $0.50')
   })
-  test('a bash ask and a malformed budget fall back to fixed text', () => {
+  test('a bash ask names its command and stage; malformed payloads fall back to fixed text (D296)', () => {
+    expect(approvalSummary(t, approval('a', { type: 'nax_bash_escalate', payload: bashFields() }), () => null))
+      .toBe('Run git push --force origin HEAD (execution)')
     expect(approvalSummary(t, approval('a', { type: 'nax_bash_escalate', payload: {} }), () => null)).toBe('A job asks to run a shell command')
     expect(approvalSummary(t, approval('a', { payload: {} }), () => null)).toBe('Budget override')
   })
@@ -183,5 +193,137 @@ describe('buildRaiseSchema (D243)', () => {
     expect(errors('abc').amount).toEqual(['Enter an amount above 0 with at most 4 decimals.'])
     expect(errors('0.6').amount).toEqual(['The new limit must be above $0.60.'])
     expect(errors('2', 'x'.repeat(1001)).comment).toEqual(['Keep the comment to 1000 characters.'])
+  })
+})
+
+const bashFields = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  command: 'git push --force origin HEAD', commandTruncated: false, maskedCount: 1, root: '/work/app', stage: 'execution',
+  storyId: 'US-001', featureName: 'login', reason: 'not covered by the stage grants', options: ['allow', 'allow-remember', 'deny'],
+  ...over,
+})
+const bashRow = (over: Partial<FleetApprovalDto> = {}, payload: Record<string, unknown> = {}): FleetApprovalDto =>
+  approval('b1', { type: 'nax_bash_escalate', policyId: null, jobId: 'j1', payload: bashFields(payload), expiresAt: '2026-10-03T10:10:00.000Z', ...over })
+
+describe('bashPayload (D289, Review Focus 1)', () => {
+  test('a well-formed ask is read in full; rawDetail is null when absent', () => {
+    expect(bashPayload(bashRow())).toEqual({ ...bashFields(), rawDetail: null })
+  })
+  test('an unparsed ask carries its raw text', () => {
+    expect(bashPayload(bashRow({}, { command: '', rawDetail: 'request: rm -rf build' }))?.rawDetail).toBe('request: rm -rf build')
+  })
+  test.each([
+    ['a missing command', { command: undefined }],
+    ['an empty command without raw text', { command: '' }],
+    ['a non-boolean truncation flag', { commandTruncated: 'no' }],
+    ['a negative masked count', { maskedCount: -1 }],
+    ['a fractional masked count', { maskedCount: 1.5 }],
+    ['an unknown option', { options: ['allow', 'yolo'] }],
+    ['options that are not a list', { options: 'allow' }],
+    ['options without deny', { options: ['allow', 'allow-remember'] }],
+    ['options that are empty', { options: [] }],
+    ['options with a duplicate', { options: ['allow', 'allow', 'deny'] }],
+    ['a numeric story id', { storyId: 7 }],
+    ['a numeric raw detail', { rawDetail: 3 }],
+    ['an empty command with empty raw text', { command: '', rawDetail: '' }],
+  ])('%s is malformed', (_name, over) => {
+    expect(bashPayload(bashRow({}, over))).toBeNull()
+  })
+  test('a budget approval is not a bash ask', () => {
+    expect(bashPayload(approval('a'))).toBeNull()
+  })
+})
+
+describe('bashChoices (D291, Review Focus 1)', () => {
+  const p = (over: Record<string, unknown> = {}) => bashPayload(bashRow({}, over))
+  test('every offered choice, in order', () => {
+    expect(bashChoices(p())).toEqual(['allow', 'allow_for_job', 'deny'])
+  })
+  test('allow-remember not offered: no "for this job"', () => {
+    expect(bashChoices(p({ options: ['allow', 'deny'] }))).toEqual(['allow', 'deny'])
+  })
+  test('a cut command can only be denied', () => {
+    expect(bashChoices(p({ commandTruncated: true }))).toEqual(['deny'])
+  })
+  test('an unreadable payload can only be denied', () => {
+    expect(bashChoices(null)).toEqual(['deny'])
+  })
+  test('an unparsed, uncut ask is decided like any other', () => {
+    expect(bashChoices(p({ command: '', rawDetail: 'x' }))).toEqual(['allow', 'allow_for_job', 'deny'])
+  })
+})
+
+describe('toBashBody (D293)', () => {
+  test('decision and trimmed comment only, never budget fields', () => {
+    expect(toBashBody('allow', '  ok  ')).toEqual({ decision: 'allow', comment: 'ok' })
+    expect(toBashBody('deny', '   ')).toEqual({ decision: 'deny' })
+  })
+})
+
+describe('countdown (D292)', () => {
+  const now = new Date('2026-10-03T10:00:00.000Z')
+  test('whole seconds left, rounded up, floored at 0', () => {
+    expect(secondsLeft('2026-10-03T10:00:00.500Z', now)).toBe(1)
+    expect(secondsLeft('2026-10-03T10:10:00.000Z', now)).toBe(600)
+    expect(secondsLeft('2026-10-03T09:59:00.000Z', now)).toBe(0)
+  })
+  test('no expiry, or an unreadable one, has no countdown', () => {
+    expect(secondsLeft(null, now)).toBeNull()
+    expect(secondsLeft('soon', now)).toBeNull()
+  })
+  test('m:ss under an hour, h:mm:ss from an hour', () => {
+    expect(countdownText(0)).toBe('0:00')
+    expect(countdownText(65)).toBe('1:05')
+    expect(countdownText(600)).toBe('10:00')
+    expect(countdownText(3725)).toBe('1:02:05')
+  })
+})
+
+describe('deliveryView (D294, Review Focus 3)', () => {
+  const decided = (outcome: Record<string, unknown> | null, resolvedBy: FleetApprovalDto['resolvedBy'] = 'user') =>
+    bashRow({ status: 'approved', decision: 'allow', resolvedBy, outcome })
+  test('no ack yet reads as waiting', () => {
+    expect(deliveryView(decided(null))).toEqual({ state: 'waiting' })
+    expect(deliveryView(decided({}))).toEqual({ state: 'waiting' })
+  })
+  test('ok and rejected acks', () => {
+    expect(deliveryView(decided({ delivery: { result: 'ok', detail: null, at: 'x' } }))).toEqual({ state: 'delivered' })
+    expect(deliveryView(decided({ delivery: { result: 'rejected', detail: 'callback_failed:429', at: 'x' } })))
+      .toEqual({ state: 'failed', detail: 'callback_failed:429' })
+  })
+  test('an unknown stored shape never claims delivery', () => {
+    expect(deliveryView(decided({ delivery: { result: 'maybe' } }))).toEqual({ state: 'failed', detail: null })
+    expect(deliveryView(decided({ delivery: 'ok' }))).toEqual({ state: 'failed', detail: null })
+  })
+  test('a timeout, a job end or a budget approval has no delivery line', () => {
+    expect(deliveryView(decided(null, 'timeout'))).toBeNull()
+    expect(deliveryView(approval('a', { status: 'approved', resolvedBy: 'user' }))).toBeNull()
+  })
+})
+
+describe('commandPreview (D296)', () => {
+  const p = (over: Record<string, unknown>) => {
+    const parsed = bashPayload(bashRow({}, over))
+    if (parsed === null) throw new Error('commandPreview: the payload should have parsed')
+    return parsed
+  }
+  test('the first line, cut at 80 characters', () => {
+    expect(commandPreview(p({}))).toBe('git push --force origin HEAD')
+    expect(commandPreview(p({ command: 'x'.repeat(81) }))).toBe(`${'x'.repeat(80)}...`)
+    expect(commandPreview(p({ command: 'echo a\necho b' }))).toBe('echo a...')
+  })
+  test('an unparsed ask previews its raw text', () => {
+    expect(commandPreview(p({ command: '', rawDetail: 'request: ls\nruns in: /w' }))).toBe('request: ls...')
+  })
+})
+
+describe('firstPending (D297)', () => {
+  test('the pending ask that expires first', () => {
+    const rows = [
+      bashRow({ id: 'late', expiresAt: '2026-10-03T10:20:00.000Z' }),
+      bashRow({ id: 'done', status: 'approved', expiresAt: '2026-10-03T10:01:00.000Z' }),
+      bashRow({ id: 'soon', expiresAt: '2026-10-03T10:05:00.000Z' }),
+    ]
+    expect(firstPending(rows)?.id).toBe('soon')
+    expect(firstPending([])).toBeNull()
   })
 })

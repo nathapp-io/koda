@@ -4,6 +4,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { ApiError, extractApiError } from '~/composables/useApi'
 import { buildDispatchSchema, DISPATCH_DEFAULTS, toDispatchBody } from '~/lib/fleet-dispatch'
+import { BASH_MODES } from '~/lib/fleet-bash-mode'
 import { canWorkOnFleet } from '~/lib/fleet-jobs'
 import type { DispatchResultDto, FleetJobDto, FleetRunnerSummary } from '~/lib/fleet-types'
 import FleetPlacementResult from '~/components/fleet/FleetPlacementResult.vue'
@@ -64,6 +65,7 @@ const commandOptions = computed(() => [
   { value: 'RUN', label: t('fleet.dispatch.commandRun') },
   { value: 'PLAN', label: t('fleet.dispatch.commandPlan') },
 ])
+const bashOptions = computed(() => BASH_MODES.map(mode => ({ value: mode, label: t(`fleet.bash.mode.${mode}`) })))
 function runnerOptionLabel(runner: FleetRunnerSummary): string {
   if (!runner.enabled) return `${runner.name} (${t('fleet.dispatch.runnerDisabled')})`
   return runner.online ? runner.name : `${runner.name} (${t('fleet.dispatch.runnerOffline')})`
@@ -177,6 +179,29 @@ const onSubmit = handleSubmit(async (formValues) => {
           <FormMessage />
         </FormItem>
       </FormField>
+
+      <template v-if="values.command === 'RUN'">
+        <FormField v-slot="{ componentField }" name="bashMode">
+          <FormItem>
+            <FormLabel>{{ t('fleet.bash.modeLabel') }}</FormLabel>
+            <FormControl>
+              <FleetNativeSelect v-bind="componentField" :options="bashOptions" testid="dispatch-bash-mode" />
+            </FormControl>
+            <p class="text-xs text-muted-foreground">{{ t('fleet.bash.modeHint') }}</p>
+            <FormMessage />
+          </FormItem>
+        </FormField>
+        <FormField v-if="values.bashMode !== 'raw'" v-slot="{ componentField }" name="approvalTimeoutMinutes">
+          <FormItem>
+            <FormLabel>{{ t('fleet.bash.timeout') }}</FormLabel>
+            <FormControl>
+              <Input v-bind="componentField" inputmode="decimal" data-testid="dispatch-approval-timeout" />
+            </FormControl>
+            <p class="text-xs text-muted-foreground">{{ t('fleet.bash.timeoutHint') }}</p>
+            <FormMessage />
+          </FormItem>
+        </FormField>
+      </template>
 
       <div class="space-y-3">
         <Label>{{ t('fleet.dispatch.placement') }}</Label>

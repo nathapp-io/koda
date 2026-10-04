@@ -25,6 +25,8 @@ function describe(entry: TimelineEntry): string {
       return t('fleet.jobs.timeline.lifecycle', { level: entry.level, message: entry.message })
     case 'log':
       return t('fleet.jobs.timeline.log', { text: entry.text })
+    case 'approval':
+      return t('fleet.jobs.timeline.approval', { command: entry.command })
     default:
       return t('fleet.jobs.timeline.unknown', { type: entry.type })
   }

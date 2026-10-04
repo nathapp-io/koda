@@ -94,6 +94,11 @@ export class ApprovalRelay {
     const { journal } = this.deps;
     const ask = journal.getPendingAsk(command.jobId, command.leaseEpoch, p.naxAskId);
     if (!ask) return { result: 'rejected', detail: 'ask_not_pending' };
+    // Plan D302: nax has already denied an ask past its deadline; recording "ok" for it would be false.
+    if (!(Date.parse(ask.deadlineAt) > this.deps.now().getTime())) {   // an unreadable deadline fails closed too
+      journal.deletePendingAsk(command.jobId, command.leaseEpoch, p.naxAskId);
+      return { result: 'rejected', detail: 'ask_expired' };
+    }
     const row = journal.getJob(command.jobId, command.leaseEpoch);
     if (!row || row.doneAt !== null || row.state !== 'RUNNING') return { result: 'rejected', detail: 'job_not_running' };
     const receiver = journal.getApprovalReceiver(command.jobId, command.leaseEpoch);
