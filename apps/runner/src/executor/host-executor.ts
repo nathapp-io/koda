@@ -182,6 +182,7 @@ export class HostExecutor implements JobExecutor {
       git: this.deps.git, repoDir, jobDir, feature: job.assign.feature, jobId: job.jobId,
       branchName: check.branchName, refSha, defaultBranch: job.assign.repo.defaultBranch, identity: job.assign.gitIdentity,
       credentialHelper: acquired.credentials.helper,
+      log: this.deps.log,
       ...(this.deps.sleep ? { sleep: this.deps.sleep } : {}),
     });
     return result.ok ? { ok: true, branch: result.branch, sha: result.sha } : { ok: false, reason: result.reason };
@@ -196,6 +197,7 @@ export class HostExecutor implements JobExecutor {
     return pushProgress({
       git: this.deps.git, repoDir, feature: job.assign.feature, jobId: job.jobId, branchName: job.branch,
       identity: job.assign.gitIdentity, credentialHelper: acquired.credentials.helper, isHalted: halted,
+      log: this.deps.log,
       ...(this.deps.sleep ? { sleep: this.deps.sleep } : {}),
     });
   }

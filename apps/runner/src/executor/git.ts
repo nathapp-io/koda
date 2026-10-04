@@ -1,4 +1,6 @@
 import { errorMessage, firstLine } from '../errors';
+import { sanitizeDiagnostic } from '../diagnostics';
+import type { LogFields } from '../logger';
 
 export interface GitResult {
   readonly code: number;
@@ -24,6 +26,13 @@ export class GitError extends Error {
 export interface Git {
   run(args: readonly string[], options: GitOptions): Promise<GitResult>;
   ok(args: readonly string[], options: GitOptions): Promise<string>;
+}
+
+/** #186: log actionable command/exit/stderr details without exposing credential-bearing text. */
+export function gitFailureFields(error: unknown): LogFields {
+  return error instanceof GitError
+    ? { command: sanitizeDiagnostic(`git ${error.args.join(' ')}`), exitCode: error.result.code, stderr: sanitizeDiagnostic(error.result.stderr) }
+    : { error: sanitizeDiagnostic(errorMessage(error)) };
 }
 
 const DEFAULT_TIMEOUT_MS = 10 * 60_000;

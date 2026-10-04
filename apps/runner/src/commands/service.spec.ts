@@ -101,6 +101,9 @@ describe('installService on Linux (D105)', () => {
     expect(w.execs).toEqual([['getent', 'passwd', 'koda-runner']]);
     expect(w.lines.join('\n')).toContain('KillMode=process');
     expect(w.lines.join('\n')).toContain('systemctl enable --now koda-runner.service');
+    expect(w.lines.join('\n')).toContain('shell startup files');
+    expect(w.lines.join('\n')).toContain('naxCommand');
+    expect(w.lines.join('\n')).toContain('0600');
   });
   test('D103: an untrusted workspace is refused without --trust-workspace, and trusted with it', async () => {
     const w = world();

@@ -1,5 +1,6 @@
 import { withoutCredentialVars } from '../credentials/credential-env';
 import { StartupError } from '../errors';
+import { sanitizeDiagnostic } from '../diagnostics';
 
 export interface NaxResult {
   readonly code: number;
@@ -161,7 +162,8 @@ export async function readNaxVersion(nax: NaxCli, cwd: string): Promise<string> 
   const floor = MIN_NAX_VERSION.join('.');
   if (!parsed) {
     const why = result.timedOut ? 'timed out' : `exit ${result.code}`;
-    throw new NaxUnavailableError(`nax did not answer --version (${why}); koda-runner needs nax ${floor} or newer on the PATH of the runner's user`);
+    const detail = sanitizeDiagnostic(result.stderr);
+    throw new NaxUnavailableError(`nax did not answer --version (${why}); koda-runner needs nax ${floor} or newer on the PATH of the runner's user${detail ? `; ${detail}` : ''}`);
   }
   if (!versionAtLeast(parsed, MIN_NAX_VERSION)) throw new NaxUnavailableError(`koda-runner needs nax ${floor} or newer (found ${line})`);
   return line;

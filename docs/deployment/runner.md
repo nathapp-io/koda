@@ -81,6 +81,61 @@ the failure it is rather than a hang. When a check cannot be completed — nax n
 A restart or stop leaves running nax jobs alone (`KillMode=process`, `AbandonProcessGroup`); the next daemon
 re-adopts them. Exit code 2 (the server refused the runner) is not restarted on Linux.
 
+### Service environment
+
+launchd and systemd do not load shell startup files (`.zshrc`, `.bashrc`, etc.). Installing the runner as a
+service does not copy the environment of the terminal used to enroll it. Set `--path` explicitly, and provide
+any nax plugin credentials separately. Never put tokens in the generated, world-readable plist/unit or in
+`runner.json`.
+
+Both platforms support a wrapper through the existing `naxCommand` setting. As the service user, create a
+private directory and a credentials file (directory mode `0700`, file mode `0600`, owned by that user):
+
+```bash
+mkdir -p ~/.config/koda-runner
+chmod 700 ~/.config/koda-runner
+install -m 600 /dev/null ~/.config/koda-runner/nax.env
+```
+
+Edit `nax.env` privately, using shell assignments for the variables your resolved nax configuration needs,
+for example `NAX_TELEGRAM_TOKEN='...'` and `NAX_TELEGRAM_CHAT_ID='...'`. Treat this file as trusted shell code;
+do not source a repository-controlled file or copy your whole shell startup file.
+
+Create `~/.config/koda-runner/nax-service` with mode `0700`:
+
+```sh
+#!/bin/sh
+set -eu
+set -a
+. "$HOME/.config/koda-runner/nax.env"
+set +a
+# Adapt these checks to the plugins this runner uses. They run for probe commands too.
+: "${NAX_TELEGRAM_TOKEN:?NAX_TELEGRAM_TOKEN is required in the service env file}"
+: "${NAX_TELEGRAM_CHAT_ID:?NAX_TELEGRAM_CHAT_ID is required in the service env file}"
+exec /absolute/path/to/nax "$@"
+```
+
+Use the wrapper's **absolute path** in `runner.json`, for example:
+
+```json
+{ "naxCommand": ["/Users/koda-runner/.config/koda-runner/nax-service"] }
+```
+
+Merge that setting into the existing config. The wrapper is used by the startup/HUP capability probe,
+post-checkout job checks, and PLAN/RUN processes. It inherits the runner's credential-filtered environment;
+do not add GitHub/GitLab tokens to this file, since git credentials belong to the per-job broker.
+Changing the file affects the next nax invocation. After configuring the wrapper, restart the service so
+the daemon reloads `runner.json`, then request a capability refresh when credentials change. Already running
+jobs keep their original environment. Test the wrapper as the service user with the service PATH before
+dispatching a job; `nax config --json` can resolve config but does **not** initialize interaction plugins.
+The wrapper's explicit checks catch missing required variables without contacting Telegram or billing a model.
+A general plugin-initialization dry probe requires nax support; koda does not duplicate plugin-specific rules.
+
+If PLAN produces no PRD, or RUN produces no status file, the runner emits an error lifecycle event containing
+the last five non-empty lines of `nax.stderr` (at most 800 characters, secrets masked). The short failure reason
+stays stable; inspect the job's lifecycle events for the underlying startup error. Full logs remain available
+through the log viewer and run bundle under their existing access controls.
+
 ### Linux 24.04 and newer: AppArmor
 
 Ubuntu 24.04 sets `kernel.apparmor_restrict_unprivileged_userns=1`, which stops `bwrap`, so the nax sandbox is
