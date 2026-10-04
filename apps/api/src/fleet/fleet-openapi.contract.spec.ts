@@ -84,4 +84,17 @@ describe('fleet OpenAPI contract', () => {
       .toEqual(['amountUsd', 'comment', 'decision', 'requeueJobIds']);
     expect(Object.keys(spec.components.schemas['ApprovalCountsDto']?.properties ?? {}).sort()).toEqual(['projects', 'total', 'unscoped']);
   });
+
+  it('exposes the log read routes and their schemas (S2a §3)', () => {
+    const base = '/api/projects/{slug}/fleet/jobs/{id}/logs';
+    expect(spec.paths[base]?.['get']).toBeDefined();
+    expect(spec.paths[`${base}/{stream}/entries`]?.['get']).toBeDefined();
+    expect(spec.paths[`${base}/{stream}/raw`]?.['get']).toBeDefined();
+    expect((spec.paths[`${base}/{stream}/entries`]?.['get']?.parameters ?? []).map((p) => p.name))
+      .toEqual(expect.arrayContaining(['slug', 'id', 'stream', 'leaseEpoch', 'cursor', 'direction', 'limit', 'level', 'storyId', 'stage', 'role', 'q']));
+    expect(Object.keys(spec.components.schemas['FleetJobLogEntriesDto']?.properties ?? {}).sort())
+      .toEqual(['atEnd', 'complete', 'entries', 'nextCursor', 'scannedFrom', 'scannedTo', 'size', 'truncated']);
+    expect(Object.keys(spec.components.schemas['FleetJobLogStreamDto']?.properties ?? {}))
+      .toEqual(expect.arrayContaining(['stream', 'sizeBytes', 'complete', 'truncated', 'source', 'expired', 'updatedAt']));
+  });
 });

@@ -6876,6 +6876,9 @@
           "400": {
             "description": "Invalid stream, leaseEpoch, offset, final, X-Content-SHA256, or an empty non-final body"
           },
+          "404": {
+            "description": "No such job"
+          },
           "409": {
             "description": "Stale lease (ABANDON queued) or the job is in a terminal state"
           },
@@ -6897,6 +6900,315 @@
         "summary": "Append bytes to a log stream of the held attempt at an exact offset (S2a §2.2)",
         "tags": [
           "fleet-runner"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/jobs/{id}/logs": {
+      "get": {
+        "operationId": "FleetJobLogsController_list",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetJobLogListDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job in this project"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Log streams of every attempt of a job, latest first (project member, S2a §3.1)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/jobs/{id}/logs/{stream}/entries": {
+      "get": {
+        "operationId": "FleetJobLogsController_entries",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "stream",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "enum": [
+                "run",
+                "stdout",
+                "stderr"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "leaseEpoch",
+            "required": false,
+            "in": "query",
+            "description": "Attempt; defaults to the job's current leaseEpoch (D332)",
+            "schema": {
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "A nextCursor from an earlier page; forward default 0, backward default the visible end",
+            "schema": {
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          {
+            "name": "direction",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "forward",
+              "type": "string",
+              "enum": [
+                "forward",
+                "backward"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 500,
+              "default": 200,
+              "type": "number"
+            }
+          },
+          {
+            "name": "level",
+            "required": false,
+            "in": "query",
+            "description": "Minimum level (run stream)",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "debug",
+                "info",
+                "warn",
+                "error"
+              ]
+            }
+          },
+          {
+            "name": "storyId",
+            "required": false,
+            "in": "query",
+            "description": "Exact story id (run stream)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "stage",
+            "required": false,
+            "in": "query",
+            "description": "Exact stage (run stream)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "role",
+            "required": false,
+            "in": "query",
+            "description": "Exact nax sessionRole (run stream)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Case-insensitive substring of the raw line",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetJobLogEntriesDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid stream or query"
+          },
+          "404": {
+            "description": "No such job, or leaseEpoch is past the current attempt of the job"
+          },
+          "410": {
+            "description": "The stream was deleted by retention"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One page of log lines, filtered server-side within a bounded scan (project member, S2a §3.3)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/jobs/{id}/logs/{stream}/raw": {
+      "get": {
+        "operationId": "FleetJobLogsController_raw",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "stream",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "enum": [
+                "run",
+                "stdout",
+                "stderr"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "leaseEpoch",
+            "required": false,
+            "in": "query",
+            "description": "Attempt; defaults to the job's current leaseEpoch (D332)",
+            "schema": {
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 0,
+              "default": 0,
+              "type": "number"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "description": "Exclusive; default from + 1 MiB; to - from at most 1 MiB",
+            "schema": {
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          {
+            "name": "download",
+            "required": false,
+            "in": "query",
+            "description": "1 = the whole stream as an attachment (no range limit)",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "text/plain; charset=utf-8"
+          },
+          "400": {
+            "description": "Invalid stream or range"
+          },
+          "404": {
+            "description": "No such job or attempt, or nothing stored to download"
+          },
+          "410": {
+            "description": "The stream was deleted by retention"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Raw bytes of a log stream: a range of at most 1 MiB, or download=1 for all of it (S2a §3.2)",
+        "tags": [
+          "fleet"
         ]
       }
     }
@@ -10466,6 +10778,195 @@
           "enabled",
           "online",
           "profiles"
+        ]
+      },
+      "FleetJobLogStreamDto": {
+        "type": "object",
+        "properties": {
+          "stream": {
+            "type": "string",
+            "enum": [
+              "run",
+              "stdout",
+              "stderr"
+            ]
+          },
+          "sizeBytes": {
+            "type": "number",
+            "description": "Bytes stored (at most FLEET_LOG_MAX_BYTES)"
+          },
+          "complete": {
+            "type": "boolean",
+            "description": "final=1 accepted, or filled from the bundle"
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "Cut at FLEET_LOG_MAX_BYTES; the full text is in the bundle"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "stream",
+              "bundle"
+            ]
+          },
+          "expired": {
+            "type": "boolean",
+            "description": "Deleted by retention (spec §5); reads answer 410"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "stream",
+          "sizeBytes",
+          "complete",
+          "truncated",
+          "source",
+          "expired",
+          "updatedAt"
+        ]
+      },
+      "FleetJobLogAttemptDto": {
+        "type": "object",
+        "properties": {
+          "leaseEpoch": {
+            "type": "number"
+          },
+          "legacySampled": {
+            "type": "boolean",
+            "description": "The attempt has only sampled `log` timeline events (a v1/v2 runner)"
+          },
+          "streams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetJobLogStreamDto"
+            }
+          }
+        },
+        "required": [
+          "leaseEpoch",
+          "legacySampled",
+          "streams"
+        ]
+      },
+      "FleetJobLogListDto": {
+        "type": "object",
+        "properties": {
+          "attempts": {
+            "description": "Latest attempt first",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetJobLogAttemptDto"
+            }
+          }
+        },
+        "required": [
+          "attempts"
+        ]
+      },
+      "FleetJobLogEntryDto": {
+        "type": "object",
+        "properties": {
+          "offset": {
+            "type": "number",
+            "description": "Byte offset of the line start"
+          },
+          "length": {
+            "type": "number",
+            "description": "Bytes of the line, including its newline"
+          },
+          "unparsed": {
+            "type": "boolean",
+            "description": "Run stream: the line is not a nax LogEntry"
+          },
+          "truncatedLine": {
+            "type": "boolean",
+            "description": "The entry is a piece of a line (overlong, or read from mid-line)"
+          },
+          "text": {
+            "type": "string",
+            "description": "The raw line without its newline (unparsed, stdout, stderr)"
+          },
+          "timestamp": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "debug",
+              "info",
+              "warn",
+              "error"
+            ]
+          },
+          "stage": {
+            "type": "string"
+          },
+          "storyId": {
+            "type": "string"
+          },
+          "sessionRole": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object",
+            "description": "LogEntry.data as nax wrote it"
+          }
+        },
+        "required": [
+          "offset",
+          "length"
+        ]
+      },
+      "FleetJobLogEntriesDto": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "description": "Ascending by offset in both directions",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetJobLogEntryDto"
+            }
+          },
+          "nextCursor": {
+            "type": "number",
+            "description": "Cursor for the next request in the same direction"
+          },
+          "scannedFrom": {
+            "type": "number"
+          },
+          "scannedTo": {
+            "type": "number"
+          },
+          "atEnd": {
+            "type": "boolean",
+            "description": "Forward: no complete line after nextCursor. Backward: nextCursor is 0"
+          },
+          "size": {
+            "type": "number",
+            "description": "Bytes stored now"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "entries",
+          "nextCursor",
+          "scannedFrom",
+          "scannedTo",
+          "atEnd",
+          "size",
+          "complete",
+          "truncated"
         ]
       }
     }
