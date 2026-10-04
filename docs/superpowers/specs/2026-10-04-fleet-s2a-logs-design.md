@@ -183,6 +183,11 @@ model FleetJobLog {
 
 - Controller-level `@RunnerRoute()` and `@SkipThrottle()`. `Content-Type: application/octet-stream`, registered in
   `main.ts` beside the gzip parser as a raw stream (widen the `FastifyLike` type). `X-Content-SHA256` required.
+- **Response contract (slice 1a plan D307):** every protocol outcome is HTTP **200** `{ outcome, size, retryAfterMs? }`
+  with `outcome ∈ appended | duplicate | offset | complete | stream_cap | rate_limited` (the API's error envelope
+  carries only a translated message, so a 409 could not return the size). HTTP errors are only 400 input, 404 job,
+  409 fence or job state, 413 chunk too large, 422 SHA mismatch, 507 storage. Below, "409 `offset`" etc. name the
+  outcome, not a status.
 - Order of checks:
   1. `stream` ∈ enum, `leaseEpoch` and `offset` non-negative integers, `final` absent or `1` → else 400. A non-final
      empty body → 400.
@@ -237,15 +242,15 @@ A per-runner token bucket, `FLEET_LOG_RUNNER_BYTES_PER_SEC` (default 4 MiB/s, bu
 
   | Answer | Action |
   |:--|:--|
-  | 200 `{size}` | `ackedOffset = size` |
-  | 409 `offset` / `complete` `{size}` | `ackedOffset = size`; if `size > local file size` → `diverged` (R6) |
-  | 409 `stale_lease` | stop all streams of the job |
-  | 409 `job_state` | stop all streams of the job (R2: only terminal states answer this) |
-  | 413 `stream_cap` | `stopped` for that stream |
-  | 413 `chunk_size`, 400 | `stopped` + lifecycle error (a bug, not retried) |
+  | 200 `appended` / `duplicate` | `ackedOffset = size` |
+  | 200 `offset` | `ackedOffset = size`; if `size > local file size` → `diverged` (R6) |
+  | 200 `complete` | stream `done` |
+  | 200 `stream_cap` | `stopped` for that stream |
+  | 200 `rate_limited` | pause the shipper for `retryAfterMs` |
+  | 409 (stale lease or terminal job) | stop all streams of the job (R2: only terminal states fail the state check) |
+  | 413, 400 | `stopped` + lifecycle error (a bug, not retried) |
   | 401 | stop the job's streams; the sync loop owns re-auth |
   | 422 | retry the same offset (counts toward backoff) |
-  | 429 | pause the shipper for `Retry-After` |
   | 507, other 5xx, network, timeout | exponential backoff 1 s → 30 s, jittered; bounded by the drain deadline when draining |
 
 - **Start and resume (R3).** A stream registers when its file first exists (`run` via `findRunLog`, which the shipper
