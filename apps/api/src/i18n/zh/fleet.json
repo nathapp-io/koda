@@ -28,5 +28,9 @@
   "approvals": { "404": "未找到该审批" },
   "approvalNotPending": { "409": "该审批已不再处于待处理状态" },
   "approvalDecisionInvalid": { "-2": "不允许此决定：{reason}" },
-  "approvalInput": { "-2": "审批请求无效：{reason}" }
+  "approvalInput": { "-2": "审批请求无效：{reason}" },
+  "logInput": { "-2": "无效的日志上传：{reason}" },
+  "logChunk": { "413": "日志块超过 {maxBytes} 字节" },
+  "logHash": { "422": "日志块被拒绝：sha256 不匹配" },
+  "logStorage": { "507": "服务器无法保存日志块" }
 }

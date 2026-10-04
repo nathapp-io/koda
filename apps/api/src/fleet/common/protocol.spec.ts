@@ -20,7 +20,7 @@ describe('fleet protocol', () => {
     expect(SUPPORTED_FLEET_PROTOCOL_VERSIONS).toContain(FLEET_PROTOCOL_VERSION);
   });
 
-  it.each([[1, true], [2, true], [0, false], [3, false], ['2', false], [1.5, false], [undefined, false]])(
+  it.each([[1, true], [2, true], [3, true], [0, false], [4, false], ['2', false], [1.5, false], [undefined, false]])(
     'isSupportedProtocolVersion(%p) is %p', (value, expected) => {
       expect(isSupportedProtocolVersion(value)).toBe(expected);
     },

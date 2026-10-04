@@ -810,9 +810,11 @@ model FleetJob {
   events       FleetJobEvent[]
   commands     FleetCommand[]
   artifacts    FleetJobArtifact[]
+  logs         FleetJobLog[]
 
   @@index([state])
   @@index([runnerId, state])
+  @@index([state, finishedAt]) // S2a retention (spec §5)
   @@index([projectId, queuedAt])
   @@index([projectId, firstStartedAt])
   @@index([repoId, firstStartedAt])
@@ -867,8 +869,29 @@ model FleetJobArtifact {
   sizeBytes  BigInt
   sha256     String
   createdAt  DateTime @default(now())
+  expiredAt  DateTime? // S2a retention: the file is gone (spec §5)
 
   job FleetJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@unique([jobId, kind, leaseEpoch])
+}
+
+/// Fleet S2a §1.2: index row of one log stream of one attempt; the bytes live in LogStore.
+model FleetJobLog {
+  id         String    @id @default(cuid())
+  jobId      String
+  leaseEpoch Int
+  stream     String // run | stdout | stderr
+  sizeBytes  BigInt    @default(0)
+  complete   Boolean   @default(false) // final=1 accepted, or filled from the bundle
+  truncated  Boolean   @default(false) // hit FLEET_LOG_MAX_BYTES; terminal, never complete
+  source     String    @default("stream") // stream | bundle
+  expiredAt  DateTime?
+  updatedAt  DateTime  @updatedAt
+  createdAt  DateTime  @default(now())
+
+  job FleetJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, leaseEpoch, stream])
+  @@index([jobId])
 }

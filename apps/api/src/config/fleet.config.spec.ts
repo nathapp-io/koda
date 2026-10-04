@@ -40,11 +40,13 @@ describe('fleet config', () => {
     process.env.NODE_ENV = 'production';
     for (const k of ['FLEET_RUNNER_OFFLINE_SEC', 'FLEET_JOB_CRASH_SEC', 'FLEET_SYNC_WAIT_MS', 'FLEET_SWEEP_ENABLED',
       'FLEET_BUNDLE_MAX_BYTES', 'FLEET_ARTIFACT_DIR', 'FLEET_GITLAB_BOT_NAME', 'FLEET_GITLAB_BOT_EMAIL',
-      'FLEET_ENROLLMENT_RETENTION_DAYS']) delete process.env[k];
+      'FLEET_ENROLLMENT_RETENTION_DAYS', 'FLEET_LOG_MAX_BYTES', 'FLEET_LOG_CHUNK_MAX_BYTES',
+      'FLEET_LOG_RUNNER_BYTES_PER_SEC']) delete process.env[k];
     const cfg = fleetConfig();
     expect(cfg).toEqual(expect.objectContaining({
       runnerOfflineSec: 90, jobCrashSec: 300, syncWaitMs: 25_000, sweepEnabled: true,
-      bundleMaxBytes: 200 * 1024 * 1024, gitlabBotName: 'koda-fleet', enrollmentRetentionDays: 30,
+      bundleMaxBytes: 200 * 1024 * 1024, logMaxBytes: 268435456, logChunkMaxBytes: 1048576,
+      logRunnerBytesPerSec: 4194304, gitlabBotName: 'koda-fleet', enrollmentRetentionDays: 30,
     }));
     expect(cfg.artifactDir).toMatch(/data[/\\]fleet-artifacts$/);
     expect(cfg.artifactDir.startsWith('/') || /^[A-Z]:/i.test(cfg.artifactDir)).toBe(true);

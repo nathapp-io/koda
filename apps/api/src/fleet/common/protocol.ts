@@ -42,8 +42,9 @@ export type {
  * Protocol versions this API accepts. Kept local (not imported from the package at
  * runtime) because the production image does not ship workspace packages; the spec
  * pins it to FLEET_PROTOCOL_VERSION.
+ * v3 (S2a): the runner streams logs over PUT .../logs/:stream instead of log events.
  */
-export const SUPPORTED_FLEET_PROTOCOL_VERSIONS: readonly number[] = Object.freeze([1, 2]);
+export const SUPPORTED_FLEET_PROTOCOL_VERSIONS: readonly number[] = Object.freeze([1, 2, 3]);
 
 export function isSupportedProtocolVersion(value: unknown): value is number {
   return typeof value === 'number' && SUPPORTED_FLEET_PROTOCOL_VERSIONS.includes(value);

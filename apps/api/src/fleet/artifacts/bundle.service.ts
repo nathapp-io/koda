@@ -7,6 +7,7 @@ import { FleetJobState } from '../../common/enums';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { FleetActivityService } from '../activity/fleet-activity.service';
+import { LogFallbackService } from '../logs/log-fallback.service';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { FenceService } from '../sync/fence.service';
 import { ARTIFACT_STORE, ArtifactHashMismatchError, ArtifactStore, ArtifactTooLargeError } from './artifact-store';
@@ -36,6 +37,7 @@ export class BundleService {
     private readonly activity: FleetActivityService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'bundleMaxBytes'>,
+    private readonly fallback: LogFallbackService,
   ) {}
 
   /** Spec §3.3: fenced, RUNNING (partial bundle on cancel) or UPLOADING only, streamed, hash-checked. */
@@ -82,6 +84,8 @@ export class BundleService {
       // Throw after commit so the stale lease's ABANDON is not rolled back.
       throw recorded.error;
     }
+    // S2a §2.5: fill unfinished log streams from this bundle, off the request path.
+    this.fallback.schedule({ jobId: u.jobId, leaseEpoch, storageKey: key });
     if (recorded.replacedKey) {
       try {
         await this.store.delete(recorded.replacedKey);

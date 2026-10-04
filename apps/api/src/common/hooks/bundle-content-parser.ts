@@ -9,3 +9,8 @@ type FastifyLike = { addContentTypeParser: (type: string, parser: (req: unknown,
 export function registerBundleContentParser(fastify: FastifyLike): void {
   fastify.addContentTypeParser('application/gzip', (_req, payload, done) => done(null, payload));
 }
+
+/** Fleet log uploads (S2a §2.2): raw stream; LogUploadService counts the bytes itself (plan D312). */
+export function registerLogContentParser(fastify: FastifyLike): void {
+  fastify.addContentTypeParser('application/octet-stream', (_req, payload, done) => done(null, payload));
+}
