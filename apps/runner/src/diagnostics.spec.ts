@@ -8,6 +8,13 @@ const tmp = makeTempDirs();
 afterAll(() => tmp.cleanup());
 
 describe('diagnostics', () => {
+  test('normalizes terminal formatting before masking known environment secrets', () => {
+    const env = { API_KEY: 'private-service-token' };
+    expect(sanitizeDiagnostic('plugin rejected credential: private-\u001b[31mservice\u001b[0m-token', env))
+      .toBe('plugin rejected credential: [redacted]');
+    expect(sanitizeDiagnostic('plugin rejected credential: private-\u0000service-token', env))
+      .toBe('plugin rejected credential: [redacted]');
+  });
   test('masks HTTP Basic credentials in diagnostics', () => {
     expect(sanitizeDiagnostic('Authorization: Basic dXNlcjpwYXNz')).not.toContain('dXNlcjpwYXNz');
   });

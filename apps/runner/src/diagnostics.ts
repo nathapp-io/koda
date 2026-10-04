@@ -6,19 +6,19 @@ const SECRET_NAME = /token|secret|password|api[_-]?key|authorization/i;
 
 /** Free text needs value redaction too: Logger.redact only handles structured field names. */
 export function sanitizeDiagnostic(text: string, env: Readonly<Record<string, string | undefined>> = process.env): string {
-  let clean = text;
+  let clean = text
+    // eslint-disable-next-line no-control-regex -- Normalize terminal formatting before matching secret values.
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    // eslint-disable-next-line no-control-regex -- Remove controls before matching values split by nonprinting bytes.
+    .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '');
   const secrets = Object.entries(env).filter(([key, value]) => SECRET_NAME.test(key) && value && value.length >= 4)
     .map(([, value]) => value as string).sort((a, b) => b.length - a.length);
   for (const secret of secrets) clean = clean.split(secret).join('[redacted]');
   return clean
-    // eslint-disable-next-line no-control-regex -- Remove terminal escape sequences from untrusted diagnostic text.
-    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
     .replace(/(https?:\/\/)[^\s/@]+(?::[^\s/@]*)?@/gi, '$1[redacted]@')
     .replace(/\b(Bearer|Basic)\s+[^\s,;]+/gi, '$1 [redacted]')
     .replace(/\b((?:[A-Za-z0-9_-]*(?:token|secret|password|api[_-]?key)[A-Za-z0-9_-]*|authorization)["']?\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)/gi, '$1[redacted]')
     .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+|(?:bot)?\d{6,12}:[A-Za-z0-9_-]{20,})\b/g, '[redacted]')
-    // eslint-disable-next-line no-control-regex -- Keep only printable text plus newline/tab in diagnostics.
-    .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
     .trim().slice(0, MAX_DIAGNOSTIC);
 }
 
