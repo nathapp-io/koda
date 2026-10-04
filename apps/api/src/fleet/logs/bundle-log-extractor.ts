@@ -15,7 +15,9 @@ const normalise = (name: string): string => name.replace(/^\.\//, '');
 /**
  * Plan D316: walks the archive; `onFile` gets each regular file; every entry is drained.
  * tar-stream 3 entries are streamx streams: `readableEnded` does not exist and `end` may fire before `onFile`
- * resolves, so advance on `close` (fires after end or destroy), attached synchronously, at most once.
+ * resolves, so advance on `close` (fires after end or destroy), attached synchronously, at most once — and only
+ * after `onFile` has settled, so a sink that hands the entry to another pipeline (e.g. LogStore.replace) is awaited
+ * before the walk reports completion.
  */
 function walk(bundle: Readable, onFile: (h: Header, member: BundleMember, entry: Readable) => Promise<void>): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -27,18 +29,28 @@ function walk(bundle: Readable, onFile: (h: Header, member: BundleMember, entry:
     x.on('entry', (header, entry, next) => {
       const member = { name: normalise(header.name), size: header.size ?? 0, mtimeMs: header.mtime?.getTime() ?? 0 };
       let advanced = false;
+      let settled = false;
+      let closed = false;
       const advance = () => {
-        if (!advanced) {
+        if (!advanced && settled && closed) {
           advanced = true;
           next();
         }
       };
-      entry.once('close', advance);
+      entry.once('close', () => {
+        closed = true;
+        advance();
+      });
       if (header.type !== 'file') {
+        settled = true; // no sink to await
         entry.resume();
         return;
       }
-      onFile(header, member, entry as unknown as Readable).then(() => entry.resume(), (error: unknown) => x.destroy(error as Error));
+      onFile(header, member, entry as unknown as Readable).then(() => {
+        entry.resume();
+        settled = true;
+        advance();
+      }, (error: unknown) => x.destroy(error as Error));
     });
     x.on('finish', resolve);
     x.on('error', fail);
