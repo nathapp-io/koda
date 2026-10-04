@@ -26,6 +26,8 @@ export interface IFleetConfig {
   logChunkMaxBytes: number;
   /** S2a §2.2.1: per-runner upload rate. */
   logRunnerBytesPerSec: number;
+  /** S2a §3.3 / R11: max bytes one entries request scans. */
+  logScanBytes: number;
   /** Absolute root of LocalDiskArtifactStore (spec §8). */
   artifactDir: string;
   gitlabBotName: string;
@@ -54,6 +56,7 @@ export class FleetConfigSchema {
   @IsOptional() @IsString() FLEET_LOG_MAX_BYTES: string;
   @IsOptional() @IsString() FLEET_LOG_CHUNK_MAX_BYTES: string;
   @IsOptional() @IsString() FLEET_LOG_RUNNER_BYTES_PER_SEC: string;
+  @IsOptional() @IsString() FLEET_LOG_SCAN_BYTES: string;
   @IsOptional() @IsString() FLEET_ARTIFACT_DIR: string;
   @IsOptional() @IsString() FLEET_GITLAB_BOT_NAME: string;
   @IsOptional() @IsString() FLEET_GITLAB_BOT_EMAIL: string;
@@ -91,6 +94,7 @@ export const fleetConfig = registerAs(FLEET_CFG, (): IFleetConfig => {
     logMaxBytes: int('FLEET_LOG_MAX_BYTES', 256 * 1024 * 1024),
     logChunkMaxBytes: int('FLEET_LOG_CHUNK_MAX_BYTES', 1024 * 1024),
     logRunnerBytesPerSec: int('FLEET_LOG_RUNNER_BYTES_PER_SEC', 4 * 1024 * 1024),
+    logScanBytes: int('FLEET_LOG_SCAN_BYTES', 2 * 1024 * 1024),
     artifactDir: resolve(process.env['FLEET_ARTIFACT_DIR'] || './data/fleet-artifacts'),
     gitlabBotName: process.env['FLEET_GITLAB_BOT_NAME'] || 'koda-fleet',
     gitlabBotEmail: process.env['FLEET_GITLAB_BOT_EMAIL'] || 'koda-fleet@users.noreply.invalid',

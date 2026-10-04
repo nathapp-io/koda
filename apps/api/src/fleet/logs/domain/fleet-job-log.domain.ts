@@ -31,6 +31,10 @@ export const FLEET_JOB_LOG_REPOSITORY = Symbol('FLEET_JOB_LOG_REPOSITORY');
 export interface IFleetJobLogRepository {
   findStream(jobId: string, leaseEpoch: number, stream: LogStreamName): Promise<FleetJobLogRecord | null>;
   listForAttempt(jobId: string, leaseEpoch: number): Promise<FleetJobLogRecord[]>;
+  /** Every row of the job, latest epoch first (S2a §3.1). */
+  listForJob(jobId: string): Promise<FleetJobLogRecord[]>;
+  /** Epochs that have `log` timeline events (v1/v2 runners), latest first (S2a §3.1 legacySampled). */
+  findLogEventEpochs(jobId: string): Promise<number[]>;
   /** Caller holds LogStore.withLock for the stream's key. */
   upsertStream(jobId: string, leaseEpoch: number, stream: LogStreamName, patch: LogStreamPatch): Promise<FleetJobLogRecord>;
   /**

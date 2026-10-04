@@ -32,5 +32,8 @@
   "logInput": { "-2": "Invalid log upload: {reason}" },
   "logChunk": { "413": "Log chunk larger than {maxBytes} bytes" },
   "logHash": { "422": "Log chunk rejected: sha256 mismatch" },
-  "logStorage": { "507": "The server could not store the log chunk" }
+  "logStorage": { "507": "The server could not store the log chunk" },
+  "logQuery": { "-2": "Invalid log request: {reason}" },
+  "logs": { "404": "No log is stored for this stream or attempt" },
+  "logExpired": { "410": "This log was deleted after the retention window" }
 }

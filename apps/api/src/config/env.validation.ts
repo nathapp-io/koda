@@ -66,6 +66,7 @@ const envSchema = Joi.object({
   FLEET_ARTIFACT_DIR: Joi.string().optional(),
   FLEET_GITLAB_BOT_NAME: Joi.string().max(100).optional(),
   FLEET_GITLAB_BOT_EMAIL: Joi.string().email({ tlds: false }).optional(),
+  FLEET_LOG_SCAN_BYTES: Joi.number().integer().min(65_536).max(16_777_216).optional(),
   FLEET_ENROLLMENT_RETENTION_DAYS: Joi.number().integer().min(0).max(3_650).optional(),
   FLEET_GIT_TOKEN_REUSE_MARGIN_SEC: Joi.number().integer().min(1).max(3_600).optional(),
   FLEET_GITLAB_TOKEN_TTL_SEC: Joi.number().integer().min(60).max(86_400).optional(),
