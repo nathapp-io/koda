@@ -29,6 +29,7 @@ apps/web/generated/
 logs/
 # Fleet log transport source code is not runtime logs (S2a)
 !apps/api/src/fleet/logs/
+!apps/runner/src/logs/
 
 # OS
 .DS_Store

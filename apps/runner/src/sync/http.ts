@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import type { EnrollRequest, EnrollResponse, RunnerIdentity, SyncRequest, SyncResponse } from '@nathapp/fleet-protocol';
+import type { PutLogAnswer, PutLogArgs, PutLogOutcome } from '../logs/types';
 import { errorMessage } from '../errors';
 
 export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
@@ -26,10 +28,33 @@ export interface ServerClientOptions {
 }
 
 const UPLOAD_TIMEOUT_MS = 10 * 60_000;
+/** Plan D322: a backstop only; the LogShipper aborts a PUT after its own logPutTimeoutMs. */
+const LOG_PUT_TIMEOUT_MS = 60_000;
+const LOG_OUTCOMES: ReadonlySet<string> = new Set(['appended', 'duplicate', 'offset', 'complete', 'stream_cap', 'rate_limited']);
 const isAbort = (error: unknown): boolean => error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
 
 function messageOf(body: unknown): string | null {
   return typeof body === 'object' && body !== null && typeof (body as { message?: unknown }).message === 'string' ? (body as { message: string }).message : null;
+}
+
+/** The 2xx body of a log upload (slice 1a D307): `{ ret: 0, data: { outcome, size, retryAfterMs? } }`. Anything else yields no fields. */
+function logAnswerFields(text: string): Omit<PutLogAnswer, 'status'> {
+  let body: unknown = null;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    return {};
+  }
+  const envelope = body as { ret?: unknown; data?: unknown } | null;
+  if (envelope === null || typeof envelope !== 'object' || envelope.ret !== 0) return {};
+  const data = envelope.data as { outcome?: unknown; size?: unknown; retryAfterMs?: unknown } | null;
+  if (data === null || typeof data !== 'object') return {};
+  if (typeof data.outcome !== 'string' || !LOG_OUTCOMES.has(data.outcome) || typeof data.size !== 'number') return {};
+  return {
+    outcome: data.outcome as PutLogOutcome,
+    size: data.size,
+    ...(typeof data.retryAfterMs === 'number' ? { retryAfterMs: data.retryAfterMs } : {}),
+  };
 }
 
 export class ServerClient {
@@ -105,5 +130,21 @@ export class ServerClient {
     }
     const message = messageOf(body);
     return message === null ? { status: response.status } : { status: response.status, message };
+  }
+
+  /** S2a §2.4, plan D322: one exact-offset append. Protocol outcomes come back as data; only the network throws. */
+  async putLog(args: PutLogArgs): Promise<PutLogAnswer> {
+    const query = `leaseEpoch=${args.leaseEpoch}&offset=${args.offset}${args.final ? '&final=1' : ''}`;
+    const url = `${this.url(`/fleet/runner/jobs/${encodeURIComponent(args.jobId)}/logs/${args.stream}`)}?${query}`;
+    const headers = {
+      ...this.bearer(),
+      'content-type': 'application/octet-stream',
+      'accept-language': 'en',
+      'x-content-sha256': createHash('sha256').update(args.bytes).digest('hex'),
+    };
+    const response = await this.send(url, { method: 'PUT', headers, body: args.bytes }, LOG_PUT_TIMEOUT_MS, args.signal);
+    const text = await response.text().catch(() => '');
+    if (!response.ok) return { status: response.status };
+    return { status: response.status, ...logAnswerFields(text) };
   }
 }

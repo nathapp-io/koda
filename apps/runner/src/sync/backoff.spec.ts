@@ -13,4 +13,10 @@ describe('backoffDelay (full jitter, 1 s to 60 s)', () => {
     expect(backoffDelay(5, () => 0)).toBe(0);
     expect(backoffDelay(0, () => 0.5)).toBe(500);
   });
+  test('an optional cap replaces 60 s (S2a plan D326)', () => {
+    const top = () => 0.999999;
+    expect(backoffDelay(10, top, 30_000)).toBeLessThan(30_000);
+    expect(backoffDelay(10, top, 30_000)).toBeGreaterThan(29_000);
+    expect(backoffDelay(1, top, 30_000)).toBe(1999);
+  });
 });
