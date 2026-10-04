@@ -24,7 +24,7 @@ import { HARNESS_TOKEN, startForge, type Forge } from './forge';
 const PASSWORD = 'Admin1234!Aa';
 const FAKE_NAX = join(import.meta.dir, '..', '..', 'fixtures', 'fake-nax.ts');
 const SELF = [process.execPath, join(import.meta.dir, '..', '..', '..', 'src', 'main.ts')];
-export const FEATURES: readonly string[] = ['fa', 'fb', 'fc', 'fd', 'fe', 'ff', 'fg', 'fh'];
+export const FEATURES: readonly string[] = ['fa', 'fb', 'fc', 'fd', 'fe', 'ff', 'fg', 'fh', 'la', 'lb', 'lc'];
 
 export interface JobView {
   id: string; state: string; stateReason: string | null; leaseEpoch: number; runnerId: string | null;
