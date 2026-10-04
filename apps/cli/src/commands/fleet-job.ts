@@ -14,6 +14,7 @@ import { withContext } from '../utils/context';
 import { handleApiError } from '../utils/error';
 import { error, table } from '../utils/output';
 import { parsePositiveInt } from '../utils/parse-positive-int';
+import { registerLogs } from './fleet-job-logs';
 import { ago, bashModeText, type FleetPage, handleFleetValidation, pageHint, printPlacement, resolveRepo, resolveRunner, runnerNames, runnerNamesOrEmpty } from './fleet-shared';
 
 const STATES = ['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING', 'COMPLETED', 'FAILED', 'ESCALATED', 'CRASHED', 'CANCELLED'] as const;
@@ -183,10 +184,11 @@ function registerBundle(job: Command): void {
 
 export function registerFleetJob(fleet: Command): void {
   const job = fleet.command('job');
-  job.description('Fleet jobs: list, show, cancel, requeue, bundle');
+  job.description('Fleet jobs: list, show, cancel, requeue, bundle, logs');
   registerList(job);
   registerShow(job);
   registerCancel(job);
   registerRequeue(job);
   registerBundle(job);
+  registerLogs(job);
 }
