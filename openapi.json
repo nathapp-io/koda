@@ -7214,6 +7214,155 @@
           "fleet"
         ]
       }
+    },
+    "/api/fleet/ingest": {
+      "get": {
+        "operationId": "FleetIngestController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "running",
+                "done",
+                "partial",
+                "failed"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of IngestRowDto"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List bundle ingest rows (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/ingest/backfill": {
+      "post": {
+        "operationId": "FleetIngestController_backfill",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestQueuedDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Queue every unexpired bundle that has no ingest row (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/ingest/jobs/{jobId}/rerun": {
+      "post": {
+        "operationId": "FleetIngestController_rerunJob",
+        "parameters": [
+          {
+            "name": "jobId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestQueuedDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Re-ingest a job's bundles (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/ingest/rerun-outdated": {
+      "post": {
+        "operationId": "FleetIngestController_rerunOutdated",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestQueuedDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Re-ingest bundles ingested by an older parser version (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      }
     }
   },
   "info": {
@@ -10970,6 +11119,17 @@
           "size",
           "complete",
           "truncated"
+        ]
+      },
+      "IngestQueuedDto": {
+        "type": "object",
+        "properties": {
+          "queued": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "queued"
         ]
       }
     }
