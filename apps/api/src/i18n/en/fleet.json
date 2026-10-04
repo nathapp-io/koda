@@ -13,7 +13,7 @@
   "dispatch": { "422": "The pinned runner can never run this job: {reason}" },
   "dispatchInput": { "-2": "Invalid dispatch: {reason}" },
   "sync": { "-2": "Invalid sync request: {reason}" },
-  "bundle": { "404": "No bundle has been uploaded for this job", "413": "Bundle larger than {maxBytes} bytes", "415": "Bundles must be application/gzip", "422": "Bundle rejected: {reason}" },
+  "bundle": { "404": "No bundle has been uploaded for this job", "413": "Bundle larger than {maxBytes} bytes", "415": "Bundles must be application/gzip", "422": "Bundle rejected: {reason}", "410": "The bundle was deleted after the retention window" },
   "bundleInput": { "-2": "Invalid bundle upload: {reason}" },
   "fence": { "409": "This runner does not hold the job's current lease" },
   "budgets": { "404": "Budget policy not found", "409": "A budget policy already exists for this scope and window" },
@@ -32,5 +32,8 @@
   "logInput": { "-2": "Invalid log upload: {reason}" },
   "logChunk": { "413": "Log chunk larger than {maxBytes} bytes" },
   "logHash": { "422": "Log chunk rejected: sha256 mismatch" },
-  "logStorage": { "507": "The server could not store the log chunk" }
+  "logStorage": { "507": "The server could not store the log chunk" },
+  "logQuery": { "-2": "Invalid log request: {reason}" },
+  "logs": { "404": "No log is stored for this stream or attempt" },
+  "logExpired": { "410": "This log was deleted after the retention window" }
 }

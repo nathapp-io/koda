@@ -12,9 +12,11 @@ const keyOf = (jobId: string, leaseEpoch: number, stream: string) => `${jobId}:$
  * succeeds when the row is absent or has both `complete = false` and `truncated = false`.
  */
 export class MemoryLogRepo
-  implements Pick<IFleetJobLogRepository, 'findStream' | 'listForAttempt' | 'upsertStream' | 'completeFromBundle'>
+  implements Pick<IFleetJobLogRepository, 'findStream' | 'listForAttempt' | 'listForJob' | 'findLogEventEpochs' | 'upsertStream' | 'completeFromBundle'>
 {
   rows: ReadonlyMap<string, FleetJobLogRecord> = new Map();
+  /** Epochs with `log` events, per job; seed with `setEventEpochs`. */
+  eventEpochs: ReadonlyMap<string, readonly number[]> = new Map();
 
   async findStream(jobId: string, leaseEpoch: number, stream: LogStreamName): Promise<FleetJobLogRecord | null> {
     return this.rows.get(keyOf(jobId, leaseEpoch, stream)) ?? null;
@@ -22,6 +24,18 @@ export class MemoryLogRepo
 
   async listForAttempt(jobId: string, leaseEpoch: number): Promise<FleetJobLogRecord[]> {
     return [...this.rows.values()].filter((r) => r.jobId === jobId && r.leaseEpoch === leaseEpoch);
+  }
+
+  async listForJob(jobId: string): Promise<FleetJobLogRecord[]> {
+    return [...this.rows.values()].filter((r) => r.jobId === jobId).sort((a, b) => b.leaseEpoch - a.leaseEpoch);
+  }
+
+  async findLogEventEpochs(jobId: string): Promise<number[]> {
+    return [...(this.eventEpochs.get(jobId) ?? [])].sort((a, b) => b - a);
+  }
+
+  setEventEpochs(jobId: string, epochs: readonly number[]): void {
+    this.eventEpochs = new Map([...this.eventEpochs, [jobId, epochs]]);
   }
 
   async upsertStream(jobId: string, leaseEpoch: number, stream: LogStreamName, patch: LogStreamPatch): Promise<FleetJobLogRecord> {

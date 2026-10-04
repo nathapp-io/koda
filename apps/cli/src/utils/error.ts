@@ -44,6 +44,7 @@ const API_RET_STATUS: ReadonlyMap<number, number> = new Map([
   [40000, 401],
   [40003, 403],
   [404, 404],
+  [410, 410],
   [-2, 400],
 ]);
 

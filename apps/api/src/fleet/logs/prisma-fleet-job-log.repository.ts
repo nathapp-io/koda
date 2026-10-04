@@ -27,6 +27,17 @@ export class PrismaFleetJobLogRepository implements IFleetJobLogRepository {
     return (await this.db.fleetJobLog.findMany({ where: { jobId, leaseEpoch }, orderBy: { stream: 'asc' } })).map(toRecord);
   }
 
+  async listForJob(jobId: string): Promise<FleetJobLogRecord[]> {
+    return (await this.db.fleetJobLog.findMany({ where: { jobId }, orderBy: [{ leaseEpoch: 'desc' }, { stream: 'asc' }] })).map(toRecord);
+  }
+
+  async findLogEventEpochs(jobId: string): Promise<number[]> {
+    const rows = await this.db.fleetJobEvent.findMany({
+      where: { jobId, type: 'log' }, distinct: ['leaseEpoch'], select: { leaseEpoch: true }, orderBy: { leaseEpoch: 'desc' },
+    });
+    return rows.map((r) => r.leaseEpoch);
+  }
+
   async upsertStream(jobId: string, leaseEpoch: number, stream: LogStreamName, patch: LogStreamPatch): Promise<FleetJobLogRecord> {
     const data = {
       sizeBytes: BigInt(patch.sizeBytes),

@@ -154,6 +154,8 @@ export interface FleetArtifactRecord {
   sizeBytes: bigint;
   sha256: string;
   createdAt: Date;
+  /** S2a §5: retention deleted the file; the row stays. */
+  expiredAt: Date | null;
 }
 
 export interface FleetRepoRef {
@@ -215,9 +217,10 @@ export interface IFleetJobRepository {
   /** Plan D4: marks the job's pending non-ABANDON commands withdrawn; returns how many. With `types`, only those types (plan D263: RUNNING -> UPLOADING). */
   withdrawPendingCommands(jobId: string, now: Date, opts?: { types?: readonly FleetCommandType[] }): Promise<number>;
 
-  upsertArtifact(artifact: Omit<FleetArtifactRecord, 'id' | 'createdAt'>): Promise<FleetArtifactRecord>;
+  upsertArtifact(artifact: Omit<FleetArtifactRecord, 'id' | 'createdAt' | 'expiredAt'>): Promise<FleetArtifactRecord>;
   findArtifact(jobId: string, kind: string, leaseEpoch: number): Promise<FleetArtifactRecord | null>;
-  findLatestArtifact(jobId: string, kind: string): Promise<FleetArtifactRecord | null>;
+  /** Newest attempt's artifact; unexpired only unless `includeExpired` (S2a D341). */
+  findLatestArtifact(jobId: string, kind: string, opts?: { includeExpired?: boolean }): Promise<FleetArtifactRecord | null>;
 
   /** Plan D19: sets attributedAt when still null; true when this call claimed it. */
   claimAttribution(jobId: string, now: Date): Promise<boolean>;

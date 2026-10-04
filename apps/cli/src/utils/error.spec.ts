@@ -92,6 +92,7 @@ describe('error', () => {
       [40003, 2, 'UNAUTHORIZED', 'Check your API key: koda config set --api-key <key>'],
       [404, 4, 'NOT_FOUND', null],
       [-2, 3, 'VALIDATION_ERROR', null],
+      [410, 1, 'API_ERROR', null],
     ] as const)('maps API envelope ret %s to the expected CLI error', (ret, expectedExit, expectedCode, expectedHint) => {
       setJsonMode(true);
       try {
@@ -106,6 +107,7 @@ describe('error', () => {
         message: ret === 404 ? 'Custom not found' : `API message ${ret}`,
         hint: expectedHint,
       });
+      if (ret === 410) expect(parsed.error.status).toBe(410); // D348
       expect(exitCode).toBe(expectedExit);
     });
 

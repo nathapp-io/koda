@@ -41,12 +41,13 @@ describe('fleet config', () => {
     for (const k of ['FLEET_RUNNER_OFFLINE_SEC', 'FLEET_JOB_CRASH_SEC', 'FLEET_SYNC_WAIT_MS', 'FLEET_SWEEP_ENABLED',
       'FLEET_BUNDLE_MAX_BYTES', 'FLEET_ARTIFACT_DIR', 'FLEET_GITLAB_BOT_NAME', 'FLEET_GITLAB_BOT_EMAIL',
       'FLEET_ENROLLMENT_RETENTION_DAYS', 'FLEET_LOG_MAX_BYTES', 'FLEET_LOG_CHUNK_MAX_BYTES',
-      'FLEET_LOG_RUNNER_BYTES_PER_SEC']) delete process.env[k];
+      'FLEET_LOG_RUNNER_BYTES_PER_SEC', 'FLEET_LOG_SCAN_BYTES', 'FLEET_LOG_RETENTION_DAYS']) delete process.env[k];
     const cfg = fleetConfig();
     expect(cfg).toEqual(expect.objectContaining({
       runnerOfflineSec: 90, jobCrashSec: 300, syncWaitMs: 25_000, sweepEnabled: true,
       bundleMaxBytes: 200 * 1024 * 1024, logMaxBytes: 268435456, logChunkMaxBytes: 1048576,
       logRunnerBytesPerSec: 4194304, gitlabBotName: 'koda-fleet', enrollmentRetentionDays: 30,
+      logScanBytes: 2097152, logRetentionDays: 30,
     }));
     expect(cfg.artifactDir).toMatch(/data[/\\]fleet-artifacts$/);
     expect(cfg.artifactDir.startsWith('/') || /^[A-Z]:/i.test(cfg.artifactDir)).toBe(true);
@@ -62,6 +63,16 @@ describe('fleet config', () => {
     expect(fleetConfig()).toEqual(expect.objectContaining({ sweepEnabled: true, enrollmentRetentionDays: 7 }));
     process.env.FLEET_ENROLLMENT_RETENTION_DAYS = '0';
     expect(fleetConfig().enrollmentRetentionDays).toBeNull();
+  });
+
+  it('turns log retention off under NODE_ENV=test unless set; 0 disables (S2a §5)', () => {
+    process.env.NODE_ENV = 'test';
+    delete process.env.FLEET_LOG_RETENTION_DAYS;
+    expect(fleetConfig().logRetentionDays).toBeNull();
+    process.env.FLEET_LOG_RETENTION_DAYS = '14';
+    expect(fleetConfig().logRetentionDays).toBe(14);
+    process.env.FLEET_LOG_RETENTION_DAYS = '0';
+    expect(fleetConfig().logRetentionDays).toBeNull();
   });
 
   it('enables the test hooks only for FLEET_TEST_HOOKS=true outside production (3b D213)', () => {
@@ -90,6 +101,8 @@ describe('fleet config', () => {
     ['FLEET_BUNDLE_MAX_BYTES', '10'],
     ['FLEET_GITLAB_BOT_EMAIL', 'not-an-email'],
     ['FLEET_ENROLLMENT_RETENTION_DAYS', '-3'],
+    ['FLEET_LOG_SCAN_BYTES', '1024'],
+    ['FLEET_LOG_RETENTION_DAYS', '-1'],
   ])('refuses boot on a bad slice 2 value %s=%s', (key, value) => {
     expect(() => validate({ ...BASE, [key]: value })).toThrow();
   });

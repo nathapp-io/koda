@@ -50,7 +50,7 @@ story, stage and session role, without a shell on the runner machine. Old logs a
 | R7 | Bundle extraction uses the **`tar-stream`** npm package with `zlib` gunzip in the API (no shell `tar`, no image dependency), streams the member, and caps extracted bytes at `FLEET_LOG_MAX_BYTES`. Fallback runs **after** the bundle response, off the request path. |
 | R8 | Once a stream is `complete` or `truncated`, every later upload answers outcome `complete` / `stream_cap` (HTTP 200, D307), including a repeated `final=1`. `replace` (fallback) takes the same per-key lock and is compare-and-set on `complete = false`. |
 | R9 | The entries route serves **all three streams** as lines (stdout/stderr: `q` filter only), with one cursor contract (§3.3). The raw route is for download and the CLI only. |
-| R10 | Log read routes are user-only (`isUserPrincipal`, like the fleet jobs controller) and carry a dedicated throttle of **600 req/min** per user instead of the global 100. |
+| R10 | Log read routes are user-only (`isUserPrincipal`, like the fleet jobs controller) and carry a dedicated throttle of **600 req/min** per client IP per route (1c plan D331: koda's throttler tracks by IP) instead of the global 100. |
 | R11 | The entries scan bound is **2 MiB** per request, read asynchronously and parsed in 256 KiB slices with `setImmediate` yields; `q` matches the lowercased raw line (keys and escapes included). |
 | R12 | A single line longer than the window (1 MiB upload, 2 MiB scan) is never a stall: the uploader sends a full window without a newline; the reader returns the window as one `unparsed` entry with `truncatedLine: true` and advances. |
 | R13 | Query naming is `leaseEpoch` on every route (runner and user). |
@@ -288,7 +288,7 @@ is just an incomplete stream here; the bundle copy replaces it when it is at lea
 ## 3. Read side (slice 1c)
 
 Routes live under `/projects/:slug/fleet/jobs/:id/logs`, user principals only, project members (same rule as the job
-page), job resolved by `(project, id)` (404 otherwise), and a dedicated `@Throttle` of 600 req/min per user (R10).
+page), job resolved by `(project, id)` (404 otherwise), and a dedicated `@Throttle` of 600 req/min per client IP (R10, D331).
 An expired stream answers 410.
 
 ### 3.1 List
@@ -314,8 +314,9 @@ Response: `{ entries, nextCursor, scannedFrom, scannedTo, atEnd, size, complete,
 - **Line model.** A line is the bytes from a line start up to and including its `\n`. Entry `offset` = line start,
   `length` includes the `\n`. A trailing partial line (no `\n` yet) is invisible while the stream is not `complete`;
   once `complete`, it is the last line.
-- **Forward** from `cursor` (default 0; must be a line start the server returned, else the server snaps forward to the
-  next line start): scan `[cursor, min(cursor + 2 MiB, size))`, return complete lines in ascending order.
+- **Forward** from `cursor` (default 0): scan `[cursor, min(cursor + 2 MiB, size))`, return complete lines in
+  ascending order. The server does not snap: a cursor that is not a line start yields its first entry as a
+  `truncatedLine` fragment (1c plan D336; after an overlong line the server's own `nextCursor` is mid-line).
   `nextCursor` = the end of the last complete line scanned; `atEnd` = `nextCursor` reached the end of the last complete
   line in the stream.
 - **Backward** from `cursor` (default = end of the last complete line): scan `[max(0, cursor − 2 MiB), cursor)`, drop

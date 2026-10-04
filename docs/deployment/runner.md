@@ -152,6 +152,7 @@ koda fleet job list --state RUNNING
 koda fleet job show <jobId>
 koda fleet job cancel <jobId>
 koda fleet job bundle <jobId> --out login.tar.gz
+koda fleet job logs <jobId> --follow               # nax run log as it streams; --stream stdout|stderr, --level warn, --grep text
 koda fleet budget list --project web                # spend against amount; WARN / PAUSED state
 koda fleet budget set --scope project --window month --amount 50 --project web
 koda fleet budget resume <policyId> --amount 80 --project web

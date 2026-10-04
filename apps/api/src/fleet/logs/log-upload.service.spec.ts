@@ -127,4 +127,23 @@ describe('LogUploadService', () => {
     expect(res.outcome).toBe('rate_limited');
     expect(res.retryAfterMs).toBeGreaterThan(0);
   });
+
+  it('answers 507 when the disk refuses the size read or the append; other errors stay errors (D349)', async () => {
+    const fail = (code: string) => async () => {
+      throw Object.assign(new Error(code), { code });
+    };
+    const withStore = (over: object) => new LogUploadService(
+      jobs as never, fence as never, tx as never,
+      { withLock: (_key: string, fn: () => Promise<unknown>) => fn(), size: async () => 0, ...over } as never,
+      logs as never, live as never, cfg as never,
+    );
+    const bytes = Buffer.from('x\n');
+    const call = (s: LogUploadService) => s.upload({
+      runnerId: 'r1', jobId: job.id, streamRaw: 'run', leaseEpochRaw: '1', offsetRaw: '0', finalRaw: undefined,
+      sha256Header: sha(bytes), contentLength: '1', body: Readable.from([bytes]),
+    });
+    await expect(statusOf(call(withStore({ size: fail('EIO') })))).resolves.toBe(507);
+    await expect(statusOf(call(withStore({ append: fail('ENOSPC') })))).resolves.toBe(507);
+    await expect(call(withStore({ append: fail('EACCES') }))).rejects.toThrow('EACCES');
+  });
 });

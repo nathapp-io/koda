@@ -18,6 +18,7 @@ export class JobBundleController {
   @ApiOperation({ summary: 'Download the latest run bundle (project member)' })
   @ApiResponse({ status: 200, description: 'tar.gz stream' })
   @ApiResponse({ status: 404, description: 'No such job or no bundle yet' })
+  @ApiResponse({ status: 410, description: 'The bundle was deleted by retention (S2a §5)' })
   async download(@Param('id') id: string, @CurrentProject() ctx: ProjectContext): Promise<StreamableFile> {
     const { stream, leaseEpoch, sizeBytes } = await this.bundles.download(ctx.project.id, id);
     return new StreamableFile(stream, {
