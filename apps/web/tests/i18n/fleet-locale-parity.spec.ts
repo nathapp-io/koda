@@ -38,6 +38,8 @@ const ENUMS: Record<string, string[]> = {
   'fleet.schedules.status': ['enabled', 'completed', 'finish_failed', 'no_progress', 'owner_lost_access', 'template_invalid', 'manual'],
   'fleet.schedules.form.placementMode': ['auto', 'labels', 'pin'],
   'fleet.approvals.type': ['budget_override_required', 'nax_bash_escalate'],
+  'fleet.logs.streams': ['run', 'stdout', 'stderr'],
+  'fleet.logs.notice': ['bundle', 'truncated', 'incomplete', 'expired', 'legacy'],
   'fleet.approvals.status': ['pending', 'approved', 'rejected', 'expired', 'cancelled'],
   'fleet.approvals.decision': ['allow', 'allow_for_job', 'deny', 'raise_budget_and_resume', 'keep_paused'],
   'fleet.approvals.resolvedBy': ['user', 'timeout', 'job_ended', 'superseded', 'manual_resume', 'window_reset', 'policy_deleted'],
