@@ -13,7 +13,21 @@ export interface FallbackInput {
   storageKey: string;
 }
 
-/** Spec §2.5, plan D316-D318: fill streams the runner did not finish from the attempt's bundle, off the request path. */
+/**
+ * Spec §2.5, plan D316-D318: fill streams the runner did not finish from the attempt's bundle, off the request path.
+ *
+ * @design The two `artifacts.get(storageKey)` calls (one per walk) are intentional: the
+ * 200 MiB bundle must not be buffered in memory, and we need every header before picking
+ * the run member by newest mtime. On the local-disk store this is `2·bundle_size` of
+ * read IO; on the future S3 port either cache the member listing alongside the artifact
+ * row or pick in a single pass over the source.
+ *
+ * @design `schedule()` runs on an in-process promise chain. A process restart between
+ * `BundleService.upload` and the queued `fill()` loses the fill; the bundle row and file
+ * stay intact, so an operator can re-trigger by re-uploading. The recovery path
+ * (a fleet-level sweeper keyed on the new `FleetJob (state, finishedAt)` index from
+ * S2a §5) is a deliberate follow-up.
+ */
 @Injectable()
 export class LogFallbackService {
   private readonly logger = new Logger(LogFallbackService.name);

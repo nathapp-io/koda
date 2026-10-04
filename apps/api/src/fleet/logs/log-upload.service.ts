@@ -132,7 +132,16 @@ export class LogUploadService {
     return { stream: u.streamRaw, leaseEpoch: Number(u.leaseEpochRaw), offset: Number(u.offsetRaw), final: u.finalRaw === '1', sha256: u.sha256Header as string };
   }
 
-  /** Plan D310: unlocked read on the hot path; lock + ABANDON only when the fence fails. */
+  /**
+   * Plan D310: unlocked read on the hot path; lock + ABANDON only when the fence fails.
+   *
+   * @design The `state` check is on the unlocked row. A terminal transition racing
+   * the append is invisible to this check, and the upload is stored for a job that
+   * just ended. The consequence is bounded: the reader serves the bytes like any
+   * other bytes, and the `leaseEpoch` bump that comes with a requeue is the real
+   * fence. `BundleService.upload` re-checks `state` under the lock; we accept the
+   * looser invariant here for the per-chunk hot path.
+   */
   private async assertHolder(runnerId: string, jobId: string, leaseEpoch: number) {
     const job = await this.jobs.findById(jobId);
     if (!job) throw new NotFoundAppException({}, 'fleet.jobs');

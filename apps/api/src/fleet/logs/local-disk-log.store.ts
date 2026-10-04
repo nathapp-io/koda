@@ -9,6 +9,7 @@ import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { KeyedMutex } from './keyed-mutex';
 import type { AppendResult, LogStore } from './log-store';
 
+/** @design linux-only: the path regex matches `/` separators; the `resolve + startsWith(root + sep)` check below is the path-traversal defence and is platform-portable. */
 const KEY_RE = /^logs\/[A-Za-z0-9_-]+(\/[A-Za-z0-9_.-]+)*\/?$/;
 
 @Injectable()
