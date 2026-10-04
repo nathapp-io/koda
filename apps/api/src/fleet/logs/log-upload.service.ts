@@ -93,11 +93,11 @@ export class LogUploadService {
   }
 
   private async write(jobId: string, key: string, p: Parsed, bytes: Buffer): Promise<LogUploadResult> {
-    const row = await this.logs.findStream(jobId, p.leaseEpoch, p.stream);
-    const size = await this.store.size(key);
-    if (row?.complete) return { outcome: 'complete', size };
-    if (row?.truncated) return { outcome: 'stream_cap', size };
     try {
+      const row = await this.logs.findStream(jobId, p.leaseEpoch, p.stream);
+      const size = await this.store.size(key);
+      if (row?.complete) return { outcome: 'complete', size };
+      if (row?.truncated) return { outcome: 'stream_cap', size };
       if (p.offset + bytes.length > this.cfg.logMaxBytes) {
         const fit = bytes.subarray(0, Math.max(0, this.cfg.logMaxBytes - p.offset));
         const r = fit.length > 0 ? await this.store.append(key, p.offset, fit) : { kind: p.offset <= size ? ('duplicate' as const) : ('conflict' as const), size };

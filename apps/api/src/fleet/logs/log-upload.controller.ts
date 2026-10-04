@@ -22,6 +22,7 @@ export class LogUploadController {
   @ApiOperation({ summary: 'Append bytes to a log stream of the held attempt at an exact offset (S2a §2.2)' })
   @ApiResponse({ status: 200, description: '{ outcome: appended|duplicate|offset|complete|stream_cap|rate_limited, size, retryAfterMs? }' })
   @ApiResponse({ status: 400, description: 'Invalid stream, leaseEpoch, offset, final, X-Content-SHA256, or an empty non-final body' })
+  @ApiResponse({ status: 404, description: 'No such job' })
   @ApiResponse({ status: 409, description: 'Stale lease (ABANDON queued) or the job is in a terminal state' })
   @ApiResponse({ status: 413, description: 'Body larger than FLEET_LOG_CHUNK_MAX_BYTES' })
   @ApiResponse({ status: 422, description: 'X-Content-SHA256 mismatch' })
