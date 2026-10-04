@@ -6795,6 +6795,9 @@
           },
           "404": {
             "description": "No such job or no bundle yet"
+          },
+          "410": {
+            "description": "The bundle was deleted by retention (S2a §5)"
           }
         },
         "security": [

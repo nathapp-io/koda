@@ -110,7 +110,11 @@ export class BundleService {
     const job = await this.repo.findById(jobId);
     if (!job || job.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.jobs');
     const artifact = await this.repo.findLatestArtifact(jobId, 'bundle');
-    if (!artifact) throw new NotFoundAppException({}, 'fleet.bundle');
+    if (!artifact) {
+      // S2a D341: a bundle that retention deleted answers 410, never-uploaded answers 404.
+      if (await this.repo.findLatestArtifact(jobId, 'bundle', { includeExpired: true })) throw new FleetBundleException(410);
+      throw new NotFoundAppException({}, 'fleet.bundle');
+    }
     return { stream: await this.store.get(artifact.storageKey), leaseEpoch: artifact.leaseEpoch, sizeBytes: artifact.sizeBytes };
   }
 

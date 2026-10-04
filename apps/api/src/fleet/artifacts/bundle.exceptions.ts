@@ -1,8 +1,8 @@
 import { AppException } from '@nathapp/nestjs-common';
 
-/** 413 too large, 415 not gzip, 422 hash mismatch (spec §3.3). */
+/** 410 expired by retention (S2a D341), 413 too large, 415 not gzip, 422 hash mismatch (spec §3.3). */
 export class FleetBundleException extends AppException {
-  constructor(status: 413 | 415 | 422, args: Record<string, unknown> = {}) {
+  constructor(status: 410 | 413 | 415 | 422, args: Record<string, unknown> = {}) {
     super(status, args, 'fleet.bundle', status);
   }
 }

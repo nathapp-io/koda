@@ -265,7 +265,7 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     return count;
   }
 
-  upsertArtifact(a: Omit<FleetArtifactRecord, 'id' | 'createdAt'>): Promise<FleetArtifactRecord> {
+  upsertArtifact(a: Omit<FleetArtifactRecord, 'id' | 'createdAt' | 'expiredAt'>): Promise<FleetArtifactRecord> {
     return this.db.fleetJobArtifact.upsert({
       where: { jobId_kind_leaseEpoch: { jobId: a.jobId, kind: a.kind, leaseEpoch: a.leaseEpoch } },
       create: a,
@@ -277,8 +277,11 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     return this.db.fleetJobArtifact.findUnique({ where: { jobId_kind_leaseEpoch: { jobId, kind, leaseEpoch } } });
   }
 
-  findLatestArtifact(jobId: string, kind: string): Promise<FleetArtifactRecord | null> {
-    return this.db.fleetJobArtifact.findFirst({ where: { jobId, kind }, orderBy: { leaseEpoch: 'desc' } });
+  findLatestArtifact(jobId: string, kind: string, opts: { includeExpired?: boolean } = {}): Promise<FleetArtifactRecord | null> {
+    return this.db.fleetJobArtifact.findFirst({
+      where: { jobId, kind, ...(opts.includeExpired ? {} : { expiredAt: null }) },
+      orderBy: { leaseEpoch: 'desc' },
+    });
   }
 
   async claimAttribution(jobId: string, now: Date): Promise<boolean> {
