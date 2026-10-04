@@ -27,6 +27,7 @@ export function createProjectEventHub(deps: ProjectEventStreamDeps): ProjectEven
     onEvent: (event) => { for (const e of current(url)) e.handlers.onEvent?.(event) },
     onFleetJob: (event) => { for (const e of current(url)) e.handlers.onFleetJob?.(event) },
     onFleetApproval: (event) => { for (const e of current(url)) e.handlers.onFleetApproval?.(event) },
+    onFleetLog: (event) => { for (const e of current(url)) e.handlers.onFleetLog?.(event) },
     onResync: () => { for (const e of current(url)) e.handlers.onResync() },
   })
 

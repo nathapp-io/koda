@@ -48,11 +48,25 @@ export interface LiveFleetApprovalEvent {
   at: string
 }
 
+/** S2a §2.3: content-free log growth of one stream of one attempt; the viewer fetches from its cursor. */
+export interface LiveFleetLogEvent {
+  id: string
+  type: 'fleet_log'
+  projectId: string
+  jobId: string
+  leaseEpoch: number
+  stream: 'run' | 'stdout' | 'stderr'
+  size: number
+  complete: boolean
+  at: string
+}
+
 /** All event handlers except the resync are optional; a page subscribes to what it shows. */
 export interface ProjectEventHandlers {
   onEvent?: (event: LiveTicketEvent) => void
   onFleetJob?: (event: LiveFleetJobEvent) => void
   onFleetApproval?: (event: LiveFleetApprovalEvent) => void
+  onFleetLog?: (event: LiveFleetLogEvent) => void
   onResync: () => void
 }
 
@@ -113,6 +127,23 @@ export function parseFleetApprovalEvent(raw: string): LiveFleetApprovalEvent | n
     if (value.type !== 'fleet_approval' || typeof value.id !== 'string' || typeof value.approvalId !== 'string') return null
     if (typeof value.status !== 'string' || value.status.length === 0) return null
     return value as LiveFleetApprovalEvent
+  }
+  catch {
+    return null
+  }
+}
+
+const FLEET_LOG_STREAMS: readonly string[] = ['run', 'stdout', 'stderr']
+const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+
+export function parseFleetLogEvent(raw: string): LiveFleetLogEvent | null {
+  try {
+    const value = JSON.parse(raw) as Partial<LiveFleetLogEvent> | null
+    if (!value || typeof value !== 'object') return null
+    if (value.type !== 'fleet_log' || typeof value.id !== 'string' || typeof value.jobId !== 'string') return null
+    if (!isCount(value.leaseEpoch) || !isCount(value.size) || typeof value.complete !== 'boolean') return null
+    if (!FLEET_LOG_STREAMS.includes(value.stream as string)) return null
+    return value as LiveFleetLogEvent
   }
   catch {
     return null
@@ -185,6 +216,13 @@ export function createProjectEventStream(
       es.addEventListener('fleet_approval', (ev) => {
         const event = parseFleetApprovalEvent(ev.data)
         if (event && isNew(event.id)) onFleetApproval(event)
+      })
+    }
+    const onFleetLog = handlers.onFleetLog
+    if (onFleetLog) {
+      es.addEventListener('fleet_log', (ev) => {
+        const event = parseFleetLogEvent(ev.data)
+        if (event && isNew(event.id)) onFleetLog(event)
       })
     }
     es.onerror = () => {
