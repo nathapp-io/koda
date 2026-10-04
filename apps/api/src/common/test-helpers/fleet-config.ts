@@ -17,6 +17,7 @@ export function testFleetConfig(overrides: Partial<IFleetConfig> = {}): IFleetCo
     logChunkMaxBytes: 1024 * 1024,
     logRunnerBytesPerSec: 4 * 1024 * 1024,
     logScanBytes: 2 * 1024 * 1024,
+    logRetentionDays: null,
     artifactDir: '/tmp/koda-fleet-artifacts-unit',
     gitlabBotName: 'koda-fleet',
     gitlabBotEmail: 'koda-fleet@users.noreply.invalid',
