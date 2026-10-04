@@ -137,11 +137,13 @@ export function createLogViewer(deps: LogViewerDeps, initial: { follow: boolean 
   const keepSearching = (): Promise<void> => (state.view?.searching?.direction === 'backward' ? loadEarlier() : loadMore())
 
   async function onGrowth(): Promise<void> {
-    if (!state.follow || !state.view || disposed) return
+    if (!state.follow || disposed) return
+    // Recorded even while the opening request runs (no view yet): its answer may predate this growth.
     if (state.loading) {
       growthPending = true
       return
     }
+    if (!state.view) return
     await exclusive(followForward)
   }
 

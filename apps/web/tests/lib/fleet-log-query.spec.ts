@@ -29,6 +29,15 @@ describe('parseLogViewQuery (spec §4.1 URL filters)', () => {
   })
 })
 
+describe('parseLogViewQuery cuts never split a character (final review #6)', () => {
+  test('an emoji across the 256th position is dropped whole, so the value still URL-encodes', () => {
+    const p = parseLogViewQuery({ q: `${'a'.repeat(255)}\u{1F600}`, story: `${'s'.repeat(127)}\u{1F600}` })
+    expect(p.filters.q).toBe('a'.repeat(255))
+    expect(p.filters.storyId).toBe('s'.repeat(127))
+    expect(() => encodeURIComponent(p.filters.q)).not.toThrow()
+  })
+})
+
 describe('logViewQuery', () => {
   test('round-trips through parseLogViewQuery, omitting defaults', () => {
     const p = params({ stream: 'stdout', epoch: 0, filters: { ...EMPTY_LOG_FILTERS, q: 'err' } })

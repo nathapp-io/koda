@@ -55,8 +55,9 @@ const downloadHref = computed(() => (activeEpoch.value !== null && summary.value
   : null))
 const timelineHref = `/${slug}/fleet/jobs/${jobId}#timeline`
 
+/** Final review #2 (D355): a tab or filter change keeps the attempt being read, even after a requeue reorders the list. */
 function navigate(next: LogViewParams): void {
-  void router.replace({ query: logViewQuery(next) })
+  void router.replace({ query: logViewQuery({ ...next, epoch: next.epoch ?? activeEpoch.value }) })
 }
 const selectStream = (stream: LogStream): void => navigate({ ...params.value, stream })
 const selectAttempt = (value: string): void => navigate({ ...params.value, epoch: Number(value) })

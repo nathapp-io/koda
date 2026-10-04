@@ -70,6 +70,17 @@ describe('createLogViewer (spec §4.1)', () => {
     expect(h.last().view?.rows).toHaveLength(5)
   })
 
+  test('growth while the opening request is in flight is not lost: one forward fetch from the opened tail (final review #1)', async () => {
+    const slow = deferred<FleetJobLogEntriesDto>()
+    const h = harness([slow.promise, page({ entries: lines(8, 9), nextCursor: 90, atEnd: true, size: 90 })])
+    const opened = h.viewer.open()
+    await h.viewer.onGrowth()
+    slow.resolve(opening)
+    await opened
+    expect(h.calls.map((c) => c.cursor)).toEqual([undefined, 80])
+    expect(h.last().view?.rows.map((r) => r.offset)).toEqual([50, 60, 70, 80])
+  })
+
   test('following catches up a burst page by page until atEnd', async () => {
     const h = harness([
       opening,

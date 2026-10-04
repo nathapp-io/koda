@@ -30,6 +30,13 @@ function first(value: QueryValue): string {
   return typeof raw === 'string' ? raw.trim() : ''
 }
 
+/** Cut to `max` UTF-16 units without leaving half of a surrogate pair (encodeURIComponent throws on one). */
+function cut(value: string, max: number): string {
+  if (value.length <= max) return value
+  const head = value.slice(0, max)
+  return /[\uD800-\uDBFF]$/.test(head) ? head.slice(0, -1) : head
+}
+
 function epochOf(value: QueryValue): number | null {
   const raw = first(value)
   if (!/^\d{1,9}$/.test(raw)) return null
@@ -45,10 +52,10 @@ export function parseLogViewQuery(query: Record<string, QueryValue>): LogViewPar
     epoch: epochOf(query.epoch),
     filters: {
       level: isLogLevel(level) ? level : null,
-      storyId: first(query.story).slice(0, MAX_FIELD),
-      stage: first(query.stage).slice(0, MAX_FIELD),
-      role: first(query.role).slice(0, MAX_FIELD),
-      q: first(query.q).slice(0, MAX_Q),
+      storyId: cut(first(query.story), MAX_FIELD),
+      stage: cut(first(query.stage), MAX_FIELD),
+      role: cut(first(query.role), MAX_FIELD),
+      q: cut(first(query.q), MAX_Q),
     },
   }
 }

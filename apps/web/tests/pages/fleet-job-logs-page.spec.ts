@@ -22,7 +22,7 @@ const logEvent = (over: Partial<LiveFleetLogEvent> = {}): LiveFleetLogEvent => (
   id: `e${Math.random()}`, type: 'fleet_log', projectId: 'p1', jobId: 'j1', leaseEpoch: 1, stream: 'run', size: 80, complete: false, at: 'x', ...over,
 })
 
-function mountPage(opts: { state?: string; list?: FleetJobLogListDto; entries?: Array<FleetJobLogEntriesDto | Error>; query?: Record<string, string> } = {}) {
+function mountPage(opts: { state?: string; list?: FleetJobLogListDto; lists?: FleetJobLogListDto[]; entries?: Array<FleetJobLogEntriesDto | Error>; query?: Record<string, string> } = {}) {
   const route = reactive({ params: { project: 'koda', id: 'j1' }, query: { ...(opts.query ?? {}) } as Record<string, string>, fullPath: '/koda/fleet/jobs/j1/logs' })
   const replace = jest.fn(async ({ query }: { query: Record<string, string> }) => {
     route.query = query
@@ -34,6 +34,7 @@ function mountPage(opts: { state?: string; list?: FleetJobLogListDto; entries?: 
     if (next instanceof Error) throw next
     return next
   })
+  const lists = [...(opts.lists ?? [])]
   let handlers: ProjectEventHandlers | null = null
   const job = { id: 'j1', feature: 'login', command: 'RUN', state: opts.state ?? 'RUNNING', leaseEpoch: 1, stories: [{ id: 'US-001' }, { id: 'US-002' }] }
   const app = mountSfc(pageFile, {
@@ -47,7 +48,7 @@ function mountPage(opts: { state?: string; list?: FleetJobLogListDto; entries?: 
       useI18n: () => enI18n(),
       useFleetJobs: () => ({ get: jest.fn(async () => job) }),
       useFleetJobLogs: () => ({
-        list: jest.fn(async () => opts.list ?? list()),
+        list: jest.fn(async () => (lists.length > 1 ? lists.shift() : lists[0]) ?? opts.list ?? list()),
         entries,
         downloadHref: (stream: string, epoch: number) => `/api/dl/${stream}/${epoch}`,
       }),
@@ -99,12 +100,12 @@ describe('Job logs page (spec §4.1)', () => {
     await p.settle()
     p.click('fleet-log-tab-stdout')
     await p.settle()
-    expect(p.replace).toHaveBeenLastCalledWith({ query: { stream: 'stdout' } })
+    expect(p.replace).toHaveBeenLastCalledWith({ query: { stream: 'stdout', epoch: '1' } })
     expect(p.entries).toHaveBeenLastCalledWith('stdout', { direction: 'backward', limit: '200', leaseEpoch: '1' })
     expect(p.app.text()).toContain('hello')
     ;(p.byId('fleet-log-filter-text')[0].props.onChange as (e: unknown) => void)({ target: { value: 'boom' } })
     await p.settle()
-    expect(p.replace).toHaveBeenLastCalledWith({ query: { stream: 'stdout', q: 'boom' } })
+    expect(p.replace).toHaveBeenLastCalledWith({ query: { stream: 'stdout', epoch: '1', q: 'boom' } })
     expect(p.entries).toHaveBeenLastCalledWith('stdout', { direction: 'backward', limit: '200', leaseEpoch: '1', q: 'boom' })
     p.app.unmount()
   })
@@ -167,6 +168,20 @@ describe('Job logs page (spec §4.1)', () => {
     expect(p.replace).toHaveBeenLastCalledWith({ query: { epoch: '1' } })
     expect(p.entries).toHaveBeenLastCalledWith('run', { direction: 'backward', limit: '200', leaseEpoch: '1' })
     expect(p.byId('fleet-log-notice-legacy')).toHaveLength(1)
+    p.app.unmount()
+  })
+
+  test('after a requeue, a tab or filter change stays on the attempt being read (final review #2, D355)', async () => {
+    const attempt = (leaseEpoch: number) => ({ leaseEpoch, legacySampled: false, streams: [] })
+    const p = mountPage({ lists: [{ attempts: [attempt(1)] }, { attempts: [attempt(2), attempt(1)] }], entries: [page(), page(), page()] })
+    await p.settle()
+    p.fire(logEvent({ leaseEpoch: 2, stream: 'stdout', size: 5 }))                 // the requeued attempt's first bytes
+    await new Promise((resolve) => { setTimeout(resolve, 350) })                     // the list reload is debounced 300 ms
+    await p.settle()
+    p.click('fleet-log-tab-stdout')
+    await p.settle()
+    expect(p.replace).toHaveBeenLastCalledWith({ query: { stream: 'stdout', epoch: '1' } })
+    expect(p.entries).toHaveBeenLastCalledWith('stdout', { direction: 'backward', limit: '200', leaseEpoch: '1' })
     p.app.unmount()
   })
 })
