@@ -28,5 +28,9 @@
   "approvals": { "404": "Approval not found" },
   "approvalNotPending": { "409": "This approval is no longer pending" },
   "approvalDecisionInvalid": { "-2": "This decision is not allowed: {reason}" },
-  "approvalInput": { "-2": "Invalid approval request: {reason}" }
+  "approvalInput": { "-2": "Invalid approval request: {reason}" },
+  "logInput": { "-2": "Invalid log upload: {reason}" },
+  "logChunk": { "413": "Log chunk larger than {maxBytes} bytes" },
+  "logHash": { "422": "Log chunk rejected: sha256 mismatch" },
+  "logStorage": { "507": "The server could not store the log chunk" }
 }
