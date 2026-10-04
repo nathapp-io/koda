@@ -25,12 +25,14 @@ interface FakeServer {
   uploads: Array<{ path: string; epoch: string | null; sha: string | null; bytes: number }>;
   queue: FleetCommandOut[];
   mode: { status: number; capacity: number };
+  logs: Map<string, string>;
+  order: string[];
   stop(): void;
 }
 
 function fakeServer(): FakeServer {
   const acked = new Map<string, number>();
-  const server: FakeServer = { url: '', syncs: [], uploads: [], queue: [], mode: { status: 200, capacity: 2 }, stop: () => undefined };
+  const server: FakeServer = { url: '', syncs: [], uploads: [], queue: [], mode: { status: 200, capacity: 2 }, logs: new Map(), order: [], stop: () => undefined };
   const bun = Bun.serve({
     port: 0,
     async fetch(req) {
@@ -46,6 +48,7 @@ function fakeServer(): FakeServer {
         if (server.mode.status !== 200) return new Response(JSON.stringify({ ret: 1, message: 'Unsupported protocol version' }), { status: server.mode.status });
         const body = (await req.json()) as SyncRequest;
         server.syncs.push(body);
+        for (const job of body.jobs) for (const e of job.events) if (e.type === 'state') server.order.push(`state:${(e.payload as { to: string }).to}`);
         const jobAcks = body.jobs.map((j) => {
           let next = (acked.get(j.jobId) ?? 0) + 1;
           for (const e of [...j.events].sort((a, b) => a.seq - b.seq)) if (e.seq === next) next += 1;
@@ -55,6 +58,19 @@ function fakeServer(): FakeServer {
         const commands = server.queue.splice(0);
         if (jobAcks.length === 0 && commands.length === 0) await Bun.sleep(25);
         return envelope({ jobAcks, commands, gitTokens: [], gitTokenErrors: [], unknownJobIds: [] });
+      }
+      const logRoute = /^\/api\/fleet\/runner\/jobs\/([^/]+)\/logs\/(run|stdout|stderr)$/.exec(url.pathname);
+      if (logRoute && req.method === 'PUT') {
+        const key = `${logRoute[1]}:${logRoute[2]}`;
+        const text = Buffer.from(await req.arrayBuffer()).toString('utf8');
+        const offset = Number(url.searchParams.get('offset'));
+        const final = url.searchParams.get('final') === '1';
+        const current = server.logs.get(key) ?? '';
+        const next = offset === current.length ? current + text : current;
+        server.logs.set(key, next);
+        if (final) server.order.push(`log-final:${logRoute[2]}`);
+        const outcome = final && offset + text.length === next.length ? 'complete' : offset === current.length ? 'appended' : 'offset';
+        return envelope({ outcome, size: next.length });
       }
       return new Response('nope', { status: 404 });
     },
@@ -103,6 +119,33 @@ describe('startDaemon', () => {
       expect(daemon.journal.getJob('j1', 1)?.doneAt).not.toBeNull();
       await waitFor(() => server.syncs.at(-1)?.freeSlots === 2);
       expect(JSON.stringify(log.lines)).not.toContain('kr_test');
+    } finally {
+      await daemon.stop();
+      server.stop();
+    }
+  });
+
+  test('S2a 1b: a job\'s stdout and stderr reach PUT /logs and complete before the UPLOADING event (plan D327, D328)', async () => {
+    const server = fakeServer();
+    const s = await setup(server);
+    const files = await tmp.make('logs');
+    await writeFile(join(files, 'nax.stdout'), 'hello\nworld\n');
+    await writeFile(join(files, 'nax.stderr'), 'tail without newline');
+    s.ex.logFiles = { outDir: join(files, 'nax-out'), feature: 'f', stdoutPath: join(files, 'nax.stdout'), stderrPath: join(files, 'nax.stderr'), runLog: false };
+    const daemon = await startDaemon({ home: s.home, config: s.config, identity: s.identity, tuning, log: createMemoryLogger(), executorFactory: () => s.ex });
+    try {
+      await waitFor(() => server.syncs.length >= 1);
+      expect(server.syncs[0].protocolVersion).toBe(3);
+      server.queue.push({ commandId: 'c1', type: 'ASSIGN', jobId: 'j1', leaseEpoch: 1, payload: assignFor('RUN') });
+      await waitFor(() => server.order.includes('state:COMPLETED'), { timeoutMs: 8_000 });
+      expect(server.logs.get('j1:stdout')).toBe('hello\nworld\n');
+      expect(server.logs.get('j1:stderr')).toBe('tail without newline');
+      expect(server.order).toContain('log-final:stdout');
+      expect(server.order).toContain('log-final:stderr');
+      const uploading = server.order.indexOf('state:UPLOADING');
+      expect(server.order.indexOf('log-final:stdout')).toBeLessThan(uploading);
+      expect(server.order.indexOf('log-final:stderr')).toBeLessThan(uploading);
+      expect(events(server).some((e) => e.type === 'log')).toBe(false);
     } finally {
       await daemon.stop();
       server.stop();
