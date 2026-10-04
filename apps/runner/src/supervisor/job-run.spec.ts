@@ -675,12 +675,43 @@ describe('RUN progress push (S1b 1a)', () => {
     expect(lastSnapshot(b)).toMatchObject({ wipPush: 'pushed', resultBranch: 'feat/x', resultSha: 'e'.repeat(40) });
     expect(b.journal.getJob('j1', 1)).toMatchObject({ resultBranch: 'feat/x', resultSha: 'e'.repeat(40) });
   });
-  test('a COMPLETED run does not push and reports no wipPush', async () => {
+  test('a COMPLETED run with a finish ledger does not push and reports no wipPush', async () => {
     const b = build();
     b.ex.dieAfterTicks(1);
     await b.run.start('prepare');
     expect(b.ex.calls).not.toContain('pushProgress:j1');
     expect(lastSnapshot(b)?.wipPush).toBeUndefined();
+  });
+  test.each([undefined, { finish: { status: 'skipped' } }])('a COMPLETED run without a finish ledger pushes and records its output (postRun=%j)', async (postRun) => {
+    const b = build();
+    b.ex.status = { run: { id: 'r', status: 'completed' }, ...(postRun ? { postRun } : {}) };
+    b.ex.ledger = null;
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    expect(states(b).at(-1)).toEqual({ to: 'COMPLETED' });
+    expect(lastSnapshot(b)).toMatchObject({ wipPush: 'pushed', resultBranch: 'feat/x', resultSha: 'e'.repeat(40) });
+    expect(b.journal.getJob('j1', 1)).toMatchObject({ resultBranch: 'feat/x', resultSha: 'e'.repeat(40) });
+  });
+  test('a failed fallback push is visible without changing the COMPLETED verdict', async () => {
+    const b = build();
+    b.ex.status = { run: { id: 'r', status: 'completed' } };
+    b.ex.ledger = null;
+    b.ex.progressPush = { kind: 'failed', reason: 'diverged' };
+    b.ex.dieAfterTicks(1);
+    await b.run.start('prepare');
+    expect(states(b).at(-1)).toEqual({ to: 'COMPLETED' });
+    expect(lastSnapshot(b)).toMatchObject({ wipPush: 'failed:diverged' });
+    expect(b.journal.getJob('j1', 1)).toMatchObject({ resultBranch: null, resultSha: null });
+  });
+  test('a COMPLETED run resumed after its fallback push reuses the persisted output', async () => {
+    const b = build();
+    b.ex.status = { run: { id: 'r', status: 'completed' } };
+    b.ex.ledger = null;
+    b.journal.updateJob('j1', 1, { state: 'UPLOADING', branch: 'feat/x', resultBranch: 'feat/x', resultSha: 'd'.repeat(40), pid: 1, pgid: 1 });
+    await b.run.start('finish');
+    expect(b.ex.calls).not.toContain('pushProgress:j1');
+    expect(stateNames(b)).toEqual(['COMPLETED']);
+    expect(lastSnapshot(b)).toMatchObject({ wipPush: 'pushed', resultBranch: 'feat/x', resultSha: 'd'.repeat(40) });
   });
   test('ESCALATED with nothing new reports none and keeps the ledger result (D145)', async () => {
     const b = build();

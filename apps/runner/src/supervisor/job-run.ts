@@ -315,7 +315,7 @@ export class JobRun {
   }
 
   /**
-   * S1b §1.1 (B5): an unfinished RUN's branch goes to origin so any runner can continue it. D141: a row that already
+   * S1b §1.1 (B5), #204: a RUN without published output goes to origin so any runner can access it. D141: a row that already
    * recorded a pushed sha (a resumed finish) is not pushed again. `null` means halted: report nothing.
    */
   private async pushRunProgress(row: JobRow): Promise<{ value: string; result: { branch: string; sha: string } | null } | null> {
@@ -361,7 +361,8 @@ export class JobRun {
     } else if (row.command === 'RUN') {
       const ledger = await this.deps.executor.readFinishLedger(row);
       if (ledger) result = { branch: ledger.branch, sha: ledger.headSha };
-      if (verdict.state !== 'COMPLETED') {
+      // A completed run with finish disabled has no ledger: preserve its commits on origin too (#204).
+      if (verdict.state !== 'COMPLETED' || ledger === null) {
         const progress = await this.pushRunProgress(row);
         if (progress === null) return;   // halted: ABANDON owns the job now
         wipPush = progress.value;

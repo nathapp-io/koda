@@ -58,7 +58,7 @@ async function pushOnce(input: ProgressPushInput): Promise<Attempt> {
   return { reason: 'push failed', retry: true };
 }
 
-/** S1b §1.1 (B5): after an unfinished RUN, put the branch on origin so any runner can continue it. Never forced. */
+/** S1b §1.1 (B5), #204: preserve unfinished or completed-without-finish RUN output on origin. Never forced. */
 export async function pushProgress(input: ProgressPushInput): Promise<ProgressPushOutcome> {
   const { git, repoDir, branchName } = input;
   const head = (await git.run(['symbolic-ref', '--short', '-q', 'HEAD'], { cwd: repoDir })).stdout.trim();
