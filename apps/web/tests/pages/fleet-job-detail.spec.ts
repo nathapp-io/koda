@@ -100,4 +100,16 @@ describe('job detail', () => {
     expect(detail).toMatch(/async function reloadSilently\(\)[\s\S]*?await loadApprovals\(\)/)
     expect(timeline).toContain("case 'approval':")
   })
+
+  test('S2a §4.2: Logs link, expired bundle, timeline log rows, and a list reload for a new attempt (D357)', () => {
+    expect(detail).toContain('data-testid="fleet-job-logs-link"')
+    expect(detail).toContain('const logsHref = `/${slug}/fleet/jobs/${jobId}/logs`')
+    expect(detail).toContain(':disabled="busy || bundleExpired"')
+    expect(detail).toContain("bundleExpired ? t('fleet.jobs.actions.bundleExpired') : t('fleet.jobs.actions.bundle')")
+    expect(detail).toContain('if (err instanceof ApiError && err.code === 410) bundleGone.value = true')
+    expect(detail).toContain(':log-attempts="logAttempts" :logs-href="logsHref"')
+    expect(detail).toMatch(/function initializeRelatedData\(\): void[\s\S]*?void loadLogList\(\)\.catch\(\(\) => undefined\)/)
+    expect(detail).toMatch(/async function reloadSilently\(\)[\s\S]*?await loadLogList\(\)/)
+    expect(liveHandlers(detail)).toContain('if (event.jobId === jobId && !logAttempts.value.includes(event.leaseEpoch)) liveReload.trigger()')
+  })
 })

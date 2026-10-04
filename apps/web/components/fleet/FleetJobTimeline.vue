@@ -4,7 +4,14 @@ import { codeLabel } from '~/lib/fleet-i18n'
 import { summarizeEvent, visibleTimelineEvents, type TimelineEntry } from '~/lib/fleet-jobs'
 import type { FleetJobEventDto } from '~/lib/fleet-types'
 
-const props = defineProps<{ events: FleetJobEventDto[]; hasMore: boolean; loading: boolean }>()
+const props = withDefaults(defineProps<{
+  events: FleetJobEventDto[]
+  hasMore: boolean
+  loading: boolean
+  /** S2a §4.2: attempts with stored log streams, latest first; each gets a "Full log" row. */
+  logAttempts?: readonly number[]
+  logsHref?: string
+}>(), { logAttempts: () => [], logsHref: '' })
 const emit = defineEmits<{ loadMore: [] }>()
 const { t, te } = useI18n()
 
@@ -45,8 +52,15 @@ const rows = computed(() => visibleTimelineEvents(props.events).map((event) => {
 </script>
 
 <template>
-  <section class="space-y-3" data-testid="fleet-job-timeline">
+  <section id="timeline" class="space-y-3" data-testid="fleet-job-timeline">
     <h2 class="text-lg font-semibold">{{ t('fleet.jobs.timeline.title') }}</h2>
+    <ul v-if="logsHref && logAttempts.length > 0" class="space-y-1 text-sm">
+      <li v-for="epoch in logAttempts" :key="epoch">
+        <NuxtLink :to="{ path: logsHref, query: { epoch: String(epoch) } }" class="text-primary underline-offset-4 hover:underline" data-testid="fleet-job-timeline-logs">
+          {{ t('fleet.jobs.timeline.logs', { epoch }) }} &rarr;
+        </NuxtLink>
+      </li>
+    </ul>
     <p v-if="rows.length === 0 && !loading" class="text-sm text-muted-foreground">{{ t('fleet.jobs.timeline.empty') }}</p>
     <ol class="space-y-2">
       <li v-for="row in rows" :key="row.id" class="flex gap-3 text-sm" data-testid="fleet-job-event">
