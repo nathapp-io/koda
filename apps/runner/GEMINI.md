@@ -80,7 +80,7 @@ src/paths/           safe path segments
 - `install-service` and `uninstall-service` do every effect through `ServiceDeps`; tests never write /etc or /Library and never run systemctl, launchctl, sudo or apparmor_parser.
 - Timing constants live in `src/daemon/tuning.ts`; only tests override them. In tests an `expect` inside a callback that a `try/catch` swallows proves nothing.
 - Logs travel only through the `LogShipper` (protocol v3): never as `log` sync events. A job run registers its streams after spawn or re-adopt, wakes the shipper each tick, drains before UPLOADING (bounded by `logDrainTimeoutMs`), and stops its streams on halt, abandon and cleanup. Nothing in the watch tick awaits the network.
-- A log stream that shrinks, or that the server holds more of than the file, is `diverged`: it stops and the bundle fills it. The shipper never rewinds.
+- A log stream that shrinks, that the server holds more of than the file, or whose acked size the server answers below, is `diverged`: it stops and the bundle fills it. The shipper never rewinds. A `final` PUT the server acks without `complete` backs off; it is never re-sent at once.
 
 ## Testing
 
@@ -91,7 +91,7 @@ src/paths/           safe path segments
 - Authenticated git in specs uses `test/helpers/git-http.ts` (`git http-backend` behind Basic auth); `file://` origins never call a credential helper. `startDaemon` in tests needs `selfCommand: [process.execPath, <src/main.ts>]`.
 - Integration specs run the built API against their own database `koda_runner_test`: `cd apps/runner && KODA_DB_TESTS=1 bun run test:integration`. `daemon.crash()` is the in-process kill; `TestRunner.net` cuts the network (`down`, or `dropResponse` to lose only the answers).
 - Use `FakeExecutor` only for `JobRun` and `Supervisor` state-machine tests.
-- Unit tests inject nax (`FakeNaxCli`, `test/helpers/fake-nax-cli.ts`) and `toolWorks`; they never depend on what the machine has installed. The fake nax process answers the probe commands from files in its nax home (`test/fixtures/fake-nax-probe.ts`). `test/live/` (`KODA_NAX_LIVE=1 bun run test:live`) is the merge gate against the installed nax, never in CI.
+- Unit tests inject nax (`FakeNaxCli`, `test/helpers/fake-nax-cli.ts`) and `toolWorks`; they never depend on what the machine has installed. The fake nax process answers the probe commands from files in its nax home (`test/fixtures/fake-nax-probe.ts`). `test/live/` (`KODA_NAX_LIVE=1 bun run test:live`) is the merge gate against the installed nax, never in CI. `test/live/log-shipping.live.spec.ts` (`KODA_DB_TESTS=1 KODA_LOG_LIVE=1`, S2a) runs `koda-runner run` as its own process against the built API with a paced fake nax (`FAKE_NAX_PACE_MS`, `FAKE_NAX_STDIO_BYTES`), SIGKILLs it twice and compares every stored log stream's SHA-256; unbilled, never in CI.
 
 ## Generated Files
 
