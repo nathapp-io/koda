@@ -7,6 +7,7 @@ import { assignFor } from '../../test/helpers/assign';
 import { FakeExecutor } from '../../test/helpers/fake-executor';
 import { fakeTime } from '../../test/helpers/fake-time';
 import { waitFor } from '../../test/helpers/wait';
+import { NO_LOG_SHIPPING } from '../../test/helpers/fake-log-shipping';
 import { RepoMutex } from './repo-mutex';
 import { Supervisor } from './supervisor';
 
@@ -18,7 +19,8 @@ function build() {
   const supervisor = new Supervisor({
     journal, executor: ex, mutex: new RepoMutex(), log: createMemoryLogger(), now: time.now, sleep: time.sleep,
     uploader: { upload: async () => outcomes.shift() ?? { kind: 'ok' } },
-    tuning: { statusPollMs: 2_000, killGraceMs: 30_000, ackPollMs: 250, uploadAckWaitMs: 0 }, readoptHeartbeatMs: 120_000,
+    tuning: { statusPollMs: 2_000, killGraceMs: 30_000, ackPollMs: 250, uploadAckWaitMs: 0, logDrainTimeoutMs: 120_000 }, readoptHeartbeatMs: 120_000,
+    logs: NO_LOG_SHIPPING,
   });
   const add = (over: Partial<AssignPayload> = {}, epoch = 1, command: 'RUN' | 'PLAN' = 'RUN') =>
     journal.insertJob({ assign: assignFor(command, over), leaseEpoch: epoch, repoKey: 'acme/app', jobDir: `/w/.jobs/${over.jobId ?? 'j1'}` }).row;
@@ -128,7 +130,7 @@ describe('readopt (design §2 control paths, D33, D54)', () => {
     b.ex.status = { run: { id: 'run-1', status: 'running' }, lastHeartbeat: b.time.now().toISOString() };
     expect(await b.supervisor.readopt('j1', 1)).toEqual({ result: 'ok' });
     await b.supervisor.idle();
-    expect(b.ex.watchOptions[0].startAtEnd).toBe(true);
+    expect(b.ex.watchOptions).toHaveLength(1);
     expect(b.ex.calls).not.toContain('prepare:j1');
   });
   test('a second READOPT while attached is ok and starts nothing new', async () => {
@@ -185,7 +187,7 @@ describe('readopt (design §2 control paths, D33, D54)', () => {
     b.ex.dieAfterTicks(1);
     expect(await b.supervisor.readopt('j1', 1)).toEqual({ result: 'ok' });
     await b.supervisor.idle();
-    expect(b.ex.watchOptions[0].startAtEnd).toBe(true);
+    expect(b.ex.watchOptions).toHaveLength(1);
   });
   test('D77: the newer of lastHeartbeat and updatedAt decides freshness', async () => {
     const b = build();

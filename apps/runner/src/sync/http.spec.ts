@@ -124,3 +124,72 @@ describe('uploadBundle', () => {
     expect(await client(async () => new Response('not json', { status: 502 })).uploadBundle({ jobId: 'j', leaseEpoch: 1, filePath: file, sha256: 'b'.repeat(64) })).toEqual({ status: 502 });
   });
 });
+
+describe('putLog (S2a §2.4, plan D322)', () => {
+  test('PUTs the bytes with octet-stream type, their sha256, the bearer key, en, and the epoch/offset/final query', async () => {
+    let seen = null as { method: string; url: URL; headers: Headers; body: Buffer } | null;
+    const server = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        seen = { method: req.method, url: new URL(req.url), headers: req.headers, body: Buffer.from(await req.arrayBuffer()) };
+        return new Response(JSON.stringify({ ret: 0, data: { outcome: 'appended', size: 11 } }), { status: 200 });
+      },
+    });
+    try {
+      const c = new ServerClient({ serverUrl: `http://127.0.0.1:${server.port}`, apiKey: 'kr_x' });
+      const answer = await c.putLog({ jobId: 'j 1', stream: 'stdout', leaseEpoch: 2, offset: 5, bytes: Buffer.from('hello\n'), final: true });
+      expect(answer).toEqual({ status: 200, outcome: 'appended', size: 11 });
+      expect(seen?.method).toBe('PUT');
+      expect(seen?.url.pathname).toBe('/api/fleet/runner/jobs/j%201/logs/stdout');
+      expect(Object.fromEntries(seen?.url.searchParams ?? [])).toEqual({ leaseEpoch: '2', offset: '5', final: '1' });
+      expect(seen?.headers.get('content-type')).toBe('application/octet-stream');
+      expect(seen?.headers.get('authorization')).toBe('Bearer kr_x');
+      expect(seen?.headers.get('accept-language')).toBe('en');
+      expect(seen?.headers.get('x-content-sha256')).toBe(new Bun.CryptoHasher('sha256').update('hello\n').digest('hex'));
+      expect(seen?.body.toString()).toBe('hello\n');
+    } finally {
+      server.stop(true);
+    }
+  });
+  test('a non-final PUT has no final param; an empty final body is sent as zero bytes', async () => {
+    const urls: string[] = [];
+    const lengths: number[] = [];
+    const c = client(async (url, init) => {
+      urls.push(url);
+      lengths.push((init?.body as Uint8Array).byteLength);
+      return ok({ outcome: 'complete', size: 0 });
+    });
+    await c.putLog({ jobId: 'j1', stream: 'run', leaseEpoch: 1, offset: 0, bytes: Buffer.from('x'), final: false });
+    await c.putLog({ jobId: 'j1', stream: 'run', leaseEpoch: 1, offset: 1, bytes: new Uint8Array(0), final: true });
+    expect(new URL(urls[0]).searchParams.has('final')).toBe(false);
+    expect(new URL(urls[1]).searchParams.get('final')).toBe('1');
+    expect(lengths).toEqual([1, 0]);
+  });
+  test('carries retryAfterMs; a non-2xx is just its status; a malformed 2xx body has no outcome', async () => {
+    const answers = [
+      ok({ outcome: 'rate_limited', size: -1, retryAfterMs: 250 }),
+      new Response(JSON.stringify({ ret: 1, message: 'Job not found' }), { status: 409 }),
+      new Response('not json', { status: 200 }),
+      ok({ outcome: 'weird', size: 3 }),
+      ok({ outcome: 'appended' }),
+    ];
+    const c = client(async () => answers.shift() as Response);
+    const put = () => c.putLog({ jobId: 'j1', stream: 'stderr', leaseEpoch: 1, offset: 0, bytes: Buffer.from('a'), final: false });
+    expect(await put()).toEqual({ status: 200, outcome: 'rate_limited', size: -1, retryAfterMs: 250 });
+    expect(await put()).toEqual({ status: 409 });
+    expect(await put()).toEqual({ status: 200 });
+    expect(await put()).toEqual({ status: 200 });
+    expect(await put()).toEqual({ status: 200 });
+  });
+  test('a network failure throws NetworkError; an abort rejects with the abort reason', async () => {
+    const down = client(async () => { throw new TypeError('connect ECONNREFUSED'); });
+    await expect(down.putLog({ jobId: 'j1', stream: 'run', leaseEpoch: 1, offset: 0, bytes: Buffer.from('a'), final: false })).rejects.toBeInstanceOf(NetworkError);
+    const hanging = client((_url, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init?.signal?.reason), { once: true });
+    }));
+    const controller = new AbortController();
+    const pending = hanging.putLog({ jobId: 'j1', stream: 'run', leaseEpoch: 1, offset: 0, bytes: Buffer.from('a'), final: false, signal: controller.signal });
+    controller.abort(new Error('shipper timeout'));
+    await expect(pending).rejects.toThrow('shipper timeout');
+  });
+});

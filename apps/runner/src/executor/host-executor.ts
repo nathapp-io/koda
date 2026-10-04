@@ -7,6 +7,7 @@ import type { RunnerConfig } from '../config/runner-config';
 import type { CredentialProvider } from '../credentials/broker';
 import { withoutCredentialVars } from '../credentials/credential-env';
 import type { JobRow } from '../journal/types';
+import type { JobLogSources } from '../logs/types';
 import type { Logger } from '../logger';
 import { assertInside, featureDirFor, repoDirFor } from '../paths/safe-segment';
 import { checkPlanPrd, type PlanCheck } from '../verdict/plan-verdict';
@@ -143,12 +144,19 @@ export class HostExecutor implements JobExecutor {
   }
 
   createWatcher(job: JobRow, sink: WatcherSink, options: WatchOptions): JobWatcher {
-    const { jobDir, outDir, repoDir } = this.dirs(job);
+    const { outDir, repoDir } = this.dirs(job);
     return new Watcher(sink, {
-      outDir, feature: job.assign.feature, stdoutPath: join(jobDir, 'nax.stdout'), stderrPath: join(jobDir, 'nax.stderr'),
-      startAtEnd: options.startAtEnd, nowMs: this.deps.nowMs, onRunIds: options.onRunIds,
+      outDir, feature: job.assign.feature, onRunIds: options.onRunIds,
       ...(job.command === 'RUN' ? { repoDir } : {}),   // D146: a PLAN checkout's prd.json is an older plan's
     });
+  }
+
+  logSources(job: JobRow): JobLogSources {
+    const { jobDir, outDir } = this.dirs(job);
+    return {
+      outDir, feature: job.assign.feature, stdoutPath: join(jobDir, 'nax.stdout'), stderrPath: join(jobDir, 'nax.stderr'),
+      runLog: job.command === 'RUN',   // spec §2.4: PLAN jobs never stream a run log
+    };
   }
 
   async readStatus(job: JobRow): Promise<StatusView | null> {

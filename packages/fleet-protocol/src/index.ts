@@ -1,9 +1,10 @@
 /**
  * Koda fleet protocol (spec docs/superpowers/specs/2026-09-29-fleet-s1-dispatch-design.md).
  * Shared by apps/api (type-only) and apps/runner. Bump FLEET_PROTOCOL_VERSION on any
- * incompatible wire change. v2 (S1.5): approval relay.
+ * incompatible wire change. v2 (S1.5): approval relay. v3 (S2a): logs stream over
+ * PUT /fleet/runner/jobs/:jobId/logs/:stream; a v3 runner sends no `log` sync events.
  */
-export const FLEET_PROTOCOL_VERSION = 2 as const;
+export const FLEET_PROTOCOL_VERSION = 3 as const;
 
 /** S1.5 §1.6: `gated` and `escalate` relay nax bash asks to the approvals inbox (protocol v2 runners only). */
 export type BashMode = 'raw' | 'gated' | 'escalate';

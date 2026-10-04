@@ -7,7 +7,6 @@ export interface SnapshotExtras {
   readonly costRunId?: string | null;
   readonly resultBranch?: string;
   readonly resultSha?: string;
-  readonly droppedLogs?: number;
 }
 
 /** Decimal string with at most 4 fraction digits, the server's COST_RE (`event-payloads.ts`). */
@@ -43,7 +42,6 @@ export function mapStatusToSnapshot(status: StatusView, extras: SnapshotExtras =
     ['escalationReason', clip(finish?.escalationReason, ESCALATION_REASON_MAX)],
     ['resultBranch', extras.resultBranch],
     ['resultSha', extras.resultSha],
-    ['droppedLogs', extras.droppedLogs && extras.droppedLogs > 0 ? extras.droppedLogs : undefined],
   ];
   return Object.fromEntries(entries.filter(([, v]) => v !== undefined)) as SnapshotEventPayload;
 }

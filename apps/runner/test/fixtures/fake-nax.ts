@@ -6,7 +6,7 @@
 import { execFileSync } from 'node:child_process';
 import { askOnce, type FakeProfile } from './fake-nax-ask';
 import { answerProbe } from './fake-nax-probe';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 
@@ -128,6 +128,20 @@ async function run(): Promise<void> {
   if (scenario === 'hang') {
     setInterval(flush, 100);
     await new Promise<void>(() => undefined);
+  }
+
+  // S2a plan D330: big run logs for the log shipper tests. One long JSONL line, then ~1 KiB debug lines in 64 KiB
+  // batches until the log holds at least FAKE_NAX_LOG_BYTES.
+  const longLine = Number(process.env['FAKE_NAX_LONG_LINE_BYTES'] ?? 0);
+  if (longLine > 0) {
+    appendFileSync(join(runsDir, logName), `${JSON.stringify({ level: 'info', msg: 'long line', data: 'L'.repeat(Math.max(0, longLine - 48)) })}\n`);
+  }
+  const padTo = Number(process.env['FAKE_NAX_LOG_BYTES'] ?? 0);
+  const padLine = `${JSON.stringify({ level: 'debug', msg: 'pad', data: 'p'.repeat(980) })}\n`;
+  for (let written = existsSync(join(runsDir, logName)) ? statSync(join(runsDir, logName)).size : 0; written < padTo;) {
+    const batch = padLine.repeat(64);
+    appendFileSync(join(runsDir, logName), batch);
+    written += batch.length;
   }
 
   for (let i = 1; i <= steps; i += 1) {

@@ -53,7 +53,9 @@ describe.skipIf(!enabled)('runner 3a against the real API: RUN, PLAN, cancel', (
     const events = await world.events(id);
     expect(inOrder(runnerStates(events), ['ASSIGNED', 'RUNNING', 'UPLOADING', 'COMPLETED'])).toBe(true);
     expect(events.some((e) => e.type === 'snapshot')).toBe(true);
-    expect(events.some((e) => e.type === 'log' && (e.payload as { stream: string }).stream === 'run')).toBe(true);
+    expect(events.some((e) => e.type === 'log')).toBe(false);                 // protocol v3: logs go through PUT /logs (S2a)
+    const runLog = await world.prisma.fleetJobLog.findUnique({ where: { jobId_leaseEpoch_stream: { jobId: id, leaseEpoch: 1, stream: 'run' } } });
+    expect(runLog).toMatchObject({ complete: true, truncated: false, source: 'stream' });
     const seqs = events.filter((e) => e.runnerSeq !== null).map((e) => e.runnerSeq);
     expect(seqs).toEqual([...seqs].sort((a, b) => (a as number) - (b as number)));
 

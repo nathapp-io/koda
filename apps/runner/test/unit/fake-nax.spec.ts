@@ -118,6 +118,18 @@ describe('fake nax: run scenarios', () => {
     const proc = spawnFake(ctx, ['run', '-f', 'feat', '--profile', 'fast']);
     expect(await proc.exited).toBe(2);
   });
+  test('FAKE_NAX_LONG_LINE_BYTES and FAKE_NAX_LOG_BYTES grow the run log with one long line and ~1 KiB lines (S2a plan D330)', async () => {
+    const ctx = await setup();
+    const proc = spawnFake(ctx, RUN, { FAKE_NAX_LONG_LINE_BYTES: '200000', FAKE_NAX_LOG_BYTES: '600000' });
+    expect(await proc.exited).toBe(0);
+    const runs = join(ctx.outDir, 'features', 'feat', 'runs');
+    const name = (await readdir(runs)).find((n) => n !== 'latest.jsonl') as string;
+    const lines = (await readFile(join(runs, name), 'utf8')).split('\n').filter(Boolean);
+    expect(lines[0].length).toBeGreaterThanOrEqual(199_000);
+    expect(JSON.parse(lines[0])).toMatchObject({ level: 'info', msg: 'long line' });
+    expect((await stat(join(runs, name))).size).toBeGreaterThanOrEqual(600_000);
+    expect(lines.at(-1)).toContain('story US-003 done');
+  });
 });
 
 describe('fake nax: plan scenarios', () => {

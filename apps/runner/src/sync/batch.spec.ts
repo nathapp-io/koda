@@ -105,6 +105,9 @@ describe('buildSyncRequest', () => {
     j.appendEvent('a', 1, 'log', { stream: 'run', text: 'y'.repeat(8_000) });
     expect(build().jobs[0].events).toHaveLength(1);
   });
+  test('a runner from S2a 1b on speaks protocol v3: it streams logs and sends no log sync events (spec R1, plan D328)', () => {
+    expect(FLEET_PROTOCOL_VERSION).toBe(3);
+  });
 });
 
 describe('token requests (design §3.1)', () => {

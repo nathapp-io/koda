@@ -70,21 +70,29 @@ describe('HostExecutor RUN', () => {
     await w.ex.cleanup(w.row);
     await expect(stat(jobProfilePath(w.naxHome, 'cjob1'))).rejects.toThrow();
   });
-  test('the watcher sees snapshots and log lines from the real process', async () => {
+  test('the watcher sees snapshots from the real process', async () => {
     const w = await world();
     await w.ex.prepare(w.row);
     const handle = await w.ex.spawn(w.row);
     const snaps: unknown[] = [];
-    const logs: string[] = [];
-    const watcher = w.ex.createWatcher(w.row, { snapshot: (p) => { snaps.push(p); }, lifecycle: () => undefined, logLine: (l) => { logs.push(l.text); } }, { startAtEnd: false });
+    const watcher = w.ex.createWatcher(w.row, { snapshot: (p) => { snaps.push(p); }, lifecycle: () => undefined }, {});
     while (w.ex.isAlive(handle.pid)) { await watcher.tick(); await Bun.sleep(15); }
     await watcher.tick(true);
     expect(snaps.length).toBeGreaterThan(1);
-    expect(logs.join('')).toContain('story US-003 done');
+    expect(await readFile(join(w.row.jobDir, 'nax.stdout'), 'utf8')).toContain('story US-003 done');
     // D146: a RUN job's watcher reads the checkout's prd.json (PRD = OLD-1, nothing else set).
     expect((snaps as SnapshotEventPayload[]).find((s) => s.stories !== undefined)).toMatchObject({
       stories: [{ id: 'OLD-1', title: '', status: 'pending', attempts: 0, dependsOn: [] }], storiesTruncated: false,
     });
+  });
+  test('logSources names the job\'s three log files; only a RUN job has a run log (S2a §2.4, plan D321)', async () => {
+    const run = await world();
+    expect(run.ex.logSources(run.row)).toEqual({
+      outDir: join(run.row.jobDir, 'nax-out'), feature: run.row.assign.feature,
+      stdoutPath: join(run.row.jobDir, 'nax.stdout'), stderrPath: join(run.row.jobDir, 'nax.stderr'), runLog: true,
+    });
+    const plan = await world('PLAN');
+    expect(plan.ex.logSources(plan.row).runLog).toBe(false);
   });
   test('prepare wipes a previous attempt of the same job (D53) and prepares again', async () => {
     const w = await world();
@@ -277,7 +285,7 @@ describe('HostExecutor PLAN watcher', () => {
     await mkdir(join(w.row.jobDir, 'nax-out'), { recursive: true });
     await writeFile(join(w.row.jobDir, 'nax-out', 'status.json'), JSON.stringify({ version: 1, run: { id: 'plan-run', status: 'running' } }));
     const snaps: SnapshotEventPayload[] = [];
-    const watcher = w.ex.createWatcher(w.row, { snapshot: (p) => { snaps.push(p); }, lifecycle: () => undefined, logLine: () => undefined }, { startAtEnd: false });
+    const watcher = w.ex.createWatcher(w.row, { snapshot: (p) => { snaps.push(p); }, lifecycle: () => undefined }, {});
     await watcher.tick(true);
     expect(snaps).toHaveLength(1);
     expect(snaps[0]).not.toHaveProperty('stories');

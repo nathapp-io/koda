@@ -29,9 +29,9 @@ describe('mapStatusToSnapshot (slice 3 design §1.3)', () => {
   test('maps the finish block and the extras', () => {
     const snap = mapStatusToSnapshot(
       { run: { id: 'r', status: 'completed' }, postRun: { finish: { status: 'passed', result: 'opened', url: 'https://github.com/a/b/pull/1' } } },
-      { resultBranch: 'feat/x', resultSha: 'a'.repeat(40), droppedLogs: 4 },
+      { resultBranch: 'feat/x', resultSha: 'a'.repeat(40) },
     );
-    expect(snap).toMatchObject({ finishResult: 'opened', resultPrUrl: 'https://github.com/a/b/pull/1', resultBranch: 'feat/x', resultSha: 'a'.repeat(40), droppedLogs: 4 });
+    expect(snap).toMatchObject({ finishResult: 'opened', resultPrUrl: 'https://github.com/a/b/pull/1', resultBranch: 'feat/x', resultSha: 'a'.repeat(40) });
     const esc = mapStatusToSnapshot({ run: { id: 'r', status: 'completed' }, postRun: { finish: { result: 'escalated', escalationReason: 'blocked' } } });
     expect(esc).toMatchObject({ finishResult: 'escalated', escalationReason: 'blocked' });
     expect(esc).not.toHaveProperty('resultPrUrl');
@@ -41,9 +41,6 @@ describe('mapStatusToSnapshot (slice 3 design §1.3)', () => {
     expect(long.escalationReason).toHaveLength(2_000);
     const pair = mapStatusToSnapshot({ run: { id: 'r', status: 'completed' }, postRun: { finish: { result: 'escalated', escalationReason: `${'y'.repeat(1_999)}\u{1F600}` } } });
     expect(pair.escalationReason).toBe('y'.repeat(1_999));
-  });
-  test('zero dropped logs are not reported', () => {
-    expect(mapStatusToSnapshot({ run: { id: 'r', status: 'running' } }, { droppedLogs: 0 })).not.toHaveProperty('droppedLogs');
   });
 });
 

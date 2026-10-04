@@ -4,10 +4,10 @@ This is the app-specific source-of-truth context for `apps/runner` (`@nathapp/ko
 
 ## Role In The Monorepo
 
-`apps/runner` is the fleet runner daemon. It enrolls with the koda API, long-polls `POST /fleet/runner/sync`, runs `nax run` / `nax plan` jobs on a host checkout, reports progress and a verdict, uploads the run bundle and re-adopts running jobs after a restart. The foundations (config, identity, journal, server client, sync loop, verdicts) sit beside the execution half: git workspace, executor, watcher, bundle, supervisor, daemon and the CLI.
+`apps/runner` is the fleet runner daemon. It enrolls with the koda API, long-polls `POST /fleet/runner/sync`, runs `nax run` / `nax plan` jobs on a host checkout, reports progress and a verdict, streams the run log, stdout and stderr, uploads the run bundle and re-adopts running jobs after a restart. The foundations (config, identity, journal, server client, sync loop, verdicts) sit beside the execution half: git workspace, executor, watcher, bundle, supervisor, daemon and the CLI.
 
 It should not:
-- talk to the server from anywhere but `src/sync/` (other modules write journal events; the sync loop ships them)
+- talk to the server from anywhere but `src/sync/` (other modules write journal events; the sync loop ships them; the bundle and log uploads get transports built in `daemon.ts` over `ServerClient`)
 - decide a job's outcome from an exit code (nax exits 0 on failure; verdicts come from `status.json` and files)
 - hold git credentials of its own: a per-job token comes over sync, lives only in daemon memory, and reaches git and gh/glab through the job's socket (3b-1); an authentication failure fails the job with `git auth failed`, and git never prompts
 
@@ -29,7 +29,8 @@ src/sync/            ServerClient, batching (one entry per jobId, 1 MiB budget),
 src/supervisor/      RepoMutex, JobEvents (legal transitions only), JobRun (one job), Supervisor, CommandHandler
 src/executor/        JobExecutor seam + HostExecutor (git workspace, branch rules, detached nax, PLAN commit)
 src/credentials/     TokenCache, CredentialBroker (one unix socket per job epoch in socketDir), git-cred helper, gh/glab shim
-src/watcher/         status.json poll, run-log and stdout/stderr tails, rate cap; RUN only: prd.json story list (S1b 1b), capped 100 stories / 8 KiB
+src/watcher/         status.json poll and run ids; RUN only: prd.json story list (S1b 1b), capped 100 stories / 8 KiB
+src/logs/            LogShipper (S2a): raw byte windows of the run log, stdout and stderr PUT at exact offsets, 2 in flight, drained with final=1 before UPLOADING
 src/verdict/         pure verdict functions (S1 spec 5.2 step 6)
 src/bundle/          tar.gz from a file list, upload retry rules (409 is stale or state-conflict)
 src/capabilities/    CapabilityProbe seam: NaxCapabilityProbe (nax JSON) or StaticCapabilityProbe (runner.json override); JobCheck after checkout
@@ -58,6 +59,8 @@ src/paths/           safe path segments
 - nax 0.83.1 or newer. The daemon refuses to start without it, or while nax does not trust `workspaceRoot`; the runner never trusts a folder itself. After checkout, a job whose needs the machine does not meet fails with `project untrusted` or `capability mismatch: ...` before nax spawns.
 - `install-service` and `uninstall-service` do every effect through `ServiceDeps`; tests never write /etc or /Library and never run systemctl, launchctl, sudo or apparmor_parser.
 - Timing constants live in `src/daemon/tuning.ts`; only tests override them. In tests an `expect` inside a callback that a `try/catch` swallows proves nothing.
+- Logs travel only through the `LogShipper` (protocol v3): never as `log` sync events. A job run registers its streams after spawn or re-adopt, wakes the shipper each tick, drains before UPLOADING (bounded by `logDrainTimeoutMs`), and stops its streams on halt, abandon and cleanup. Nothing in the watch tick awaits the network.
+- A log stream that shrinks, or that the server holds more of than the file, is `diverged`: it stops and the bundle fills it. The shipper never rewinds.
 
 ## Testing
 
