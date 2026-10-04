@@ -42,13 +42,13 @@ story, stage and session role, without a shell on the runner machine. Old logs a
 | # | Ruling |
 |:--|:--|
 | R1 | **No `logs.stream` capability.** Protocol v3 itself means "this runner streams logs": a v3 runner never sends `log` sync events. API-first deploy is a **hard rule**, not a degradation path: a v3 runner against a `[1,2]` API gets 426 at enroll and sync, and the sync loop stops the daemon (`sync-loop.ts`). |
-| R2 | The upload route accepts **ASSIGNED, RUNNING, UPLOADING** (the fence already proves the lease; the runner journals RUNNING before the server applies it). A terminal state answers 409 `job_state`, and the uploader stops. |
+| R2 | The upload route accepts **ASSIGNED, RUNNING, UPLOADING** (the fence already proves the lease; the runner journals RUNNING before the server applies it). A terminal state answers HTTP 409 (`fleet.jobState`), and the uploader stops. |
 | R3 | **No resume probe route.** The uploader resumes by sending from offset 0 (or its last acked offset); the duplicate/conflict answers carry the server's size and the uploader jumps there. One re-sent window per stream per restart is accepted. |
 | R4 | The uploader is an **independent async pump**, never awaited by the 2 s watch tick. A runner-wide `LogShipper` owns all streams of all jobs: at most 2 PUTs in flight, round-robin across streams, a 30 s per-PUT timeout, `Retry-After` pauses the whole shipper. |
 | R5 | **Drain** starts after the final tick and reap, runs concurrently with the existing judge/push/finish work, and is awaited (bounded by `logDrainTimeoutMs`) just before the UPLOADING transition. The re-adopt `finish` path (nax exited while the daemon was down) creates an uploader and drains too. |
 | R6 | A stream whose local file **shrinks** below the acked offset, or whose server size exceeds the local file, is marked `diverged` on the runner: it stops, emits a lifecycle warning, and is left to the bundle fallback. |
 | R7 | Bundle extraction uses the **`tar-stream`** npm package with `zlib` gunzip in the API (no shell `tar`, no image dependency), streams the member, and caps extracted bytes at `FLEET_LOG_MAX_BYTES`. Fallback runs **after** the bundle response, off the request path. |
-| R8 | Once a stream is `complete` or `truncated`, appends are refused (409 `complete` / 413 `stream_cap`); a repeated `final=1` at the same size is an idempotent 200. `replace` (fallback) takes the same per-key lock and is compare-and-set on `complete = false`. |
+| R8 | Once a stream is `complete` or `truncated`, every later upload answers outcome `complete` / `stream_cap` (HTTP 200, D307), including a repeated `final=1`. `replace` (fallback) takes the same per-key lock and is compare-and-set on `complete = false`. |
 | R9 | The entries route serves **all three streams** as lines (stdout/stderr: `q` filter only), with one cursor contract (§3.3). The raw route is for download and the CLI only. |
 | R10 | Log read routes are user-only (`isUserPrincipal`, like the fleet jobs controller) and carry a dedicated throttle of **600 req/min** per user instead of the global 100. |
 | R11 | The entries scan bound is **2 MiB** per request, read asynchronously and parsed in 256 KiB slices with `setImmediate` yields; `q` matches the lowercased raw line (keys and escapes included). |
@@ -191,23 +191,24 @@ model FleetJobLog {
 - Order of checks:
   1. `stream` ∈ enum, `leaseEpoch` and `offset` non-negative integers, `final` absent or `1` → else 400. A non-final
      empty body → 400.
-  2. Per-runner rate (§2.2.1) → 429 with `Retry-After` **before** the body is read.
+  2. Per-runner rate (§2.2.1) → outcome `rate_limited` with `retryAfterMs`, **before** the body is read (the body is
+     drained).
   3. Load the job (`findById`, no lock). `FenceService.holds(job, runnerId, leaseEpoch)` false → open a transaction,
-     lock the row, re-check, call `FenceService.abandon` if still not held, answer 409 `{ reason: 'stale_lease' }`.
-  4. State ∉ {ASSIGNED, RUNNING, UPLOADING} → 409 `{ reason: 'job_state' }` (R2).
-  5. Read the body into a Buffer with a hard counter; past `FLEET_LOG_CHUNK_MAX_BYTES` (1 MiB) abort and answer 413
-     `{ reason: 'chunk_size' }`. `Content-Length` is advisory. SHA mismatch → 422.
+     lock the row, re-check, call `FenceService.abandon` if still not held, answer HTTP 409 (`fleet.fence`).
+  4. State ∉ {ASSIGNED, RUNNING, UPLOADING} → HTTP 409 (`fleet.jobState`) (R2).
+  5. Read the body with a hard counter; past `FLEET_LOG_CHUNK_MAX_BYTES` (1 MiB) answer HTTP 413 (the rest of the body
+     is read and discarded up to 4x the cap so the answer reaches the client). `Content-Length` is advisory. SHA
+     mismatch → HTTP 422.
   6. Under the key lock:
-     - Row `complete` → `final=1` with `offset === size` and empty body → 200 `{ size }`; anything else → 409
-       `{ reason: 'complete', size }`.
-     - Row `truncated` → 413 `{ reason: 'stream_cap', size }`.
+     - Row `complete` → outcome `complete` with the size (covers a repeated `final=1`).
+     - Row `truncated` → outcome `stream_cap` with the size.
      - Cap: if `offset + length > FLEET_LOG_MAX_BYTES`, cut the body to `max(0, cap - offset)` bytes, append that
-       through the normal rule (it comes back appended or duplicate), set `truncated = true`, answer 413
-       `{ reason: 'stream_cap', size }`. The cut may split a line or a UTF-8 sequence; readers tolerate it.
-     - Else `LogStore.append`: `appended`/`duplicate` → 200 `{ size }`; `conflict` → 409 `{ reason: 'offset', size }`.
-     - `final=1`: requires `offset === size` after any body; sets `complete = true`; 200 `{ size }`. Otherwise 409
-       `offset`.
-     - Disk write failure → 507 `{ reason: 'storage' }`.
+       through the normal rule, set `truncated = true`, answer outcome `stream_cap`. The cut may split a line or a
+       UTF-8 sequence; readers tolerate it.
+     - Else `LogStore.append`: outcome `appended` / `duplicate`; `conflict` → outcome `offset`, each with the size.
+     - `final=1`: requires `offset === size` after any body; sets `complete = true`; outcome `complete`. Otherwise
+       outcome `offset`.
+     - Disk write failure → HTTP 507.
   7. Upsert the `FleetJobLog` row (inside the lock), then publish `fleet_log` (§2.3) after the lock is released.
 - Error reasons get API i18n keys (en + zh) following the `fleet.bundleInput` / `fleet.jobState` pattern.
 
@@ -228,8 +229,7 @@ A per-runner token bucket, `FLEET_LOG_RUNNER_BYTES_PER_SEC` (default 4 MiB/s, bu
 
 - **Seams.** `ServerClient` (`sync/http.ts`) gains `putLog(jobId, stream, leaseEpoch, offset, bytes, final)` sending
   the bearer token, `accept-language: en`, `content-type: application/octet-stream` and the chunk's
-  `x-content-sha256`, and returning `{ status, size?, reason?, retryAfterMs? }` (the 409/413 body fields and the
-  `Retry-After` header, which `uploadBundle` drops today). A runner-wide `LogShipper` is built in `daemon.ts` over the
+  `x-content-sha256`, and returning `{ status, outcome?, size?, retryAfterMs? }` (the 200 body fields of D307). A runner-wide `LogShipper` is built in `daemon.ts` over the
   client and injected into `JobRunDeps` (the executor stays client-free; `FakeExecutor` is unaffected). Update
   `.nax/mono/apps/runner/context.md`.
 - **Per stream state:** `{ path, ackedOffset, state: active | done | stopped | diverged }`. The file on disk is the
@@ -411,10 +411,10 @@ debug|info|warn|error] [--story <id>] [--stage <s>] [--role <r>] [--grep <text>]
 | File shrinks / server ahead of file | `diverged`; stream stopped; fallback replaces it if the bundle copy is at least as long. |
 | Disk full on the API | 507; shipper backs off; fallback may fill after the run. |
 | Stream exceeds 256 MiB | Kept up to the cap, `truncated`; viewer notice; full text in the bundle. |
-| Stale lease | 409 `stale_lease` + ABANDON queued; shipper stops the job's streams. |
-| Job cancelled mid-run | Uploads keep working until the job is terminal; then 409 `job_state`; partial bundle (if uploaded in RUNNING) feeds the fallback. |
+| Stale lease | HTTP 409 + ABANDON queued; shipper stops the job's streams. |
+| Job cancelled mid-run | Uploads keep working until the job is terminal; then HTTP 409; partial bundle (if uploaded in RUNNING) feeds the fallback. |
 | Corrupted chunk | 422; retried from the same offset. |
-| Duplicate / reordered chunk | Duplicate → 200 no-op; gap → 409 with the server size. |
+| Duplicate / reordered chunk | Outcome `duplicate` (no write); gap → outcome `offset` with the server size. |
 | Bundle missing, unreadable or without the member | Stream stays incomplete; error logged; bundle upload unaffected. |
 
 ## 7. Configuration
@@ -439,8 +439,8 @@ New API dependency: `tar-stream` (+ types). `openapi.json` and the CLI client ar
 ## 8. Testing
 
 - **1a API unit:** `LocalDiskLogStore` (exact-offset append, duplicate, gap, partial overlap, serialized concurrent
-  appends, `replace` under the lock, absent `deletePrefix`); upload controller (400s, 429 before body read, stale lease
-  → ABANDON queued, ASSIGNED accepted, terminal → `job_state`, 413 `chunk_size` by counting not header, 422, cap cut +
+  appends, `replace` under the lock, absent `deletePrefix`); upload controller (400s, `rate_limited` before body read, stale lease
+  → 409 + ABANDON queued, ASSIGNED accepted, terminal → 409, 413 by counting not header, 422, cap cut +
   `truncated`, `complete` refusals, idempotent repeated `final`, 507); row upsert monotonic; fallback (incomplete vs
   truncated vs complete, member by `naxLogRunId`, by single file, by newest, missing member, member smaller than
   stored, corrupt gzip, extraction cap, CAS against a concurrent `final`); `fleet_log` coalescing (one per second,
