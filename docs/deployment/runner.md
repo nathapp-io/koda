@@ -114,6 +114,26 @@ A job dispatched with `bashMode: gated` or `escalate` relays nax's bash approval
   shows "Waiting for approval" while an ask is open, and the inbox shows whether the runner delivered the answer.
 - An answer that reaches the runner after nax's deadline is not sent (`ask_expired`): nax has already denied it.
 
+## Run logs (S2a)
+
+A runner with protocol v3 streams nax's run log, stdout and stderr to koda while the job runs; nothing is sampled.
+
+- Upgrade the **API first**: it accepts protocol v1, v2 and v3. A v3 runner against an older API gets 426 at enroll and
+  sync and stops. Deploy the API and web of the same release before any v3 runner: until the web has the log viewer,
+  a v3 job shows no log lines anywhere but `koda fleet job logs`.
+- Read a job's logs on its page (Logs) at `/<project>/fleet/jobs/<id>/logs`: tabs for the run log, stdout and stderr,
+  an attempt picker, and filters (minimum level, story, stage, role, text) that run on the server and live in the URL.
+  While the job runs the viewer follows new lines; scroll up to stop, "Jump to latest" to resume. A filtered search
+  reads at most 2 MiB per request and asks before reading further ("Keep searching"). Download saves a whole stream.
+- A stream the runner could not finish uploading is filled from the job's bundle after it arrives; the viewer says
+  "Filled from the bundle". A stream cut at `FLEET_LOG_MAX_BYTES` (256 MiB) keeps its full text only in the bundle.
+- Logs, bundles and `log` timeline events of jobs that ended more than `FLEET_LOG_RETENTION_DAYS` (default 30, `0`
+  keeps them) days ago are deleted at 04:45 every night; the job page then shows "Bundle expired".
+- Unbilled check of the whole path on one machine (real daemon process, fake nax, ~50 MiB of logs, two daemon
+  kills): `cd apps/api && bun run test:db:up && cd ../.. && bunx turbo run build --filter=@nathapp/koda-api`, then
+  `cd apps/runner && KODA_DB_TESTS=1 KODA_LOG_LIVE=1 bun test test/live/log-shipping.live.spec.ts`. With
+  `KODA_LOG_LIVE_KEEP=1` it leaves the stack up and prints how to open the web viewer on it.
+
 ## Operate
 
 | Task | Linux | macOS |
