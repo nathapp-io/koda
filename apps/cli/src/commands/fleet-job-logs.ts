@@ -38,12 +38,21 @@ export function parseEpoch(value: string): number {
   return Number(value.trim());
 }
 
-/** D347: `HH:MM:SS LEVEL [stage] [story] message` for a parsed run line; the raw text otherwise. */
+// C0 controls except tab, DEL and C1 controls: log text comes from the job's workload and must not drive the terminal.
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\x00-\x08\x0a-\x1f\x7f-\x9f]/g;
+
+/** Shows control characters as `\xNN` so a log line cannot move the cursor, set titles or write the clipboard. */
+export function escapeControls(text: string): string {
+  return text.replace(CONTROL_CHARS, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
+}
+
+/** D347: `HH:MM:SS LEVEL [stage] [story] message` for a parsed run line; the raw text otherwise. Control bytes escaped. */
 export function formatEntry(stream: Stream, e: FleetJobLogEntryDto): string {
-  if (stream !== 'run' || e.unparsed || !e.level) return e.text ?? '';
+  if (stream !== 'run' || e.unparsed || !e.level) return escapeControls(e.text ?? '');
   const time = /^\d{4}-\d{2}-\d{2}T(\d{2}:\d{2}:\d{2})/.exec(e.timestamp ?? '')?.[1] ?? '--:--:--';
   const parts = [time, e.level.toUpperCase().padEnd(5), e.stage ? `[${e.stage}]` : null, e.storyId ? `[${e.storyId}]` : null, e.message ?? ''];
-  return parts.filter((p): p is string => p !== null).join(' ');
+  return escapeControls(parts.filter((p): p is string => p !== null).join(' '));
 }
 
 export interface LogsOptions {

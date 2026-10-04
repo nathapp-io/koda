@@ -147,6 +147,14 @@ describe('koda fleet job logs', () => {
 });
 
 describe('formatEntry (D347)', () => {
+  it('renders terminal control bytes visibly instead of sending them to the terminal (review: escape injection)', () => {
+    expect(formatEntry('stdout', { offset: 0, length: 1, text: 'ok\x1b]52;c;ZXZpbA==\x07 \rfake\tcol\x9b2J' }))
+      .toBe('ok\\x1b]52;c;ZXZpbA==\\x07 \\x0dfake\tcol\\x9b2J');
+    expect(formatEntry('run', { offset: 0, length: 1, level: 'info', stage: 's\x1b[2K', storyId: 'US\x08', message: 'm\x7f', timestamp: '2026-10-04T08:00:00Z' }))
+      .toBe('08:00:00 INFO  [s\\x1b[2K] [US\\x08] m\\x7f');
+  });
+
+
   it('cuts the time from the ISO timestamp and omits missing stage and story', () => {
     expect(formatEntry('run', { offset: 0, length: 1, level: 'error', message: 'x', timestamp: 'bad' })).toBe('--:--:-- ERROR x');
     expect(formatEntry('run', { offset: 0, length: 1, unparsed: true, text: 'raw' })).toBe('raw');
