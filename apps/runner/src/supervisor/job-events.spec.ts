@@ -63,10 +63,6 @@ describe('payload guards', () => {
     expect(first).toEqual({ naxRunId: 'r', progress: { total: 3 } });
     expect(second).toEqual({ naxRunId: 'r2' });
   });
-  test('an oversize log line is cut down', () => {
-    events.logLine({ stream: 'run', text: 'y'.repeat(20_000) });
-    expect((all()[0].payload as { text: string }).text).toHaveLength(4000);
-  });
 });
 
 describe('a job that is gone (abandoned)', () => {
@@ -74,7 +70,7 @@ describe('a job that is gone (abandoned)', () => {
     journal.abandon('j1', 1);
     expect(events.currentState()).toBeNull();
     expect(events.transition('RUNNING')).toBe(false);
-    expect(() => { events.snapshot({ naxRunId: 'r' }); events.lifecycle('info', 'x'); events.logLine({ stream: 'run', text: 'x' }); }).not.toThrow();
+    expect(() => { events.snapshot({ naxRunId: 'r' }); events.lifecycle('info', 'x'); }).not.toThrow();
     expect(journal.pendingEvents('j1', 1, 10)).toEqual([]);
   });
 });

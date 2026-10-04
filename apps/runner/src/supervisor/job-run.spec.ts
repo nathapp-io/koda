@@ -419,14 +419,14 @@ describe('runner errors', () => {
 });
 
 describe('resume (readopt)', () => {
-  test('watch attaches with startAtEnd and never re-runs prepare or spawn; a cancel recorded while down is re-sent', async () => {
+  test('watch attaches a watcher and never re-runs prepare or spawn; a cancel recorded while down is re-sent', async () => {
     const b = build();
     b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242, naxRunId: 'run-1', cancelRequestedAt: '2026-10-01T00:00:00.000Z' });
     b.ex.alive = true;
     b.ex.status = { run: { id: 'run-1', status: 'crashed' } };
     b.ex.dieAfterTicks(2);
     await b.run.start('watch');
-    expect(b.ex.watchOptions[0].startAtEnd).toBe(true);
+    expect(b.ex.watchOptions).toHaveLength(1);
     expect(b.ex.calls).not.toContain('prepare:j1');
     expect(b.ex.calls).not.toContain('spawn:j1');
     expect(b.ex.killed[0]).toEqual({ pgid: 4242, signal: 'SIGTERM' });

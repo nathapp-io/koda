@@ -96,7 +96,7 @@ export class JobRun {
       await this.resumeCredentials();
       await this.resumeApprovals();
     }
-    if (from !== 'finish') await this.watchUntilExit(from === 'watch');
+    if (from !== 'finish') await this.watchUntilExit();
     if (this.halted) return;
     await this.finish();
   }
@@ -246,7 +246,7 @@ export class JobRun {
     this.deps.executor.kill(row.pgid, 'SIGKILL');
   }
 
-  private async watchUntilExit(resumed: boolean): Promise<void> {
+  private async watchUntilExit(): Promise<void> {
     const start = this.mustRow();
     // BUG-2: a RUNNING row with pid === null is corrupt (journal patch missing or DB race); fall through to
     // finish() would upload a partial bundle and call it FAILED with 'no status.json' — honest, but reachable on
@@ -256,7 +256,6 @@ export class JobRun {
       return;
     }
     const watcher = this.deps.executor.createWatcher(start, this.events, {
-      startAtEnd: resumed,
       onRunIds: (ids) => { this.deps.journal.updateJob(this.jobId, this.leaseEpoch, { naxRunId: ids.naxRunId, logPath: ids.logPath }); },
     });
     if (start.cancelRequestedAt !== null && start.state === 'RUNNING') this.sendTerm(start);

@@ -1,4 +1,5 @@
 import type { BundleFile } from '../bundle/build-bundle';
+import type { JobLogSources } from '../logs/types';
 import type { JobRow } from '../journal/types';
 import type { PlanCheck } from '../verdict/plan-verdict';
 import type { StatusView } from '../verdict/status-view';
@@ -28,7 +29,6 @@ export interface SpawnHandle {
 }
 
 export interface WatchOptions {
-  readonly startAtEnd: boolean;
   readonly onRunIds?: (ids: { naxRunId: string; logPath: string | null }) => void;
 }
 
@@ -51,6 +51,8 @@ export interface JobExecutor {
   kill(pgid: number, signal: 'SIGTERM' | 'SIGKILL'): boolean;
   reap(job: JobRow, since: Date): Promise<void>;
   createWatcher(job: JobRow, sink: WatcherSink, options: WatchOptions): JobWatcher;
+  /** S2a §2.4, plan D321: where this job's nax writes its run log, stdout and stderr (no I/O). */
+  logSources(job: JobRow): JobLogSources;
   readStatus(job: JobRow): Promise<StatusView | null>;
   readPlan(job: JobRow): Promise<PlanCheck>;
   finishPlan(job: JobRow, options?: FinishPlanOptions): Promise<PlanPushOutcome>;

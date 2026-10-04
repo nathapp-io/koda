@@ -128,7 +128,7 @@ describe('readopt (design §2 control paths, D33, D54)', () => {
     b.ex.status = { run: { id: 'run-1', status: 'running' }, lastHeartbeat: b.time.now().toISOString() };
     expect(await b.supervisor.readopt('j1', 1)).toEqual({ result: 'ok' });
     await b.supervisor.idle();
-    expect(b.ex.watchOptions[0].startAtEnd).toBe(true);
+    expect(b.ex.watchOptions).toHaveLength(1);
     expect(b.ex.calls).not.toContain('prepare:j1');
   });
   test('a second READOPT while attached is ok and starts nothing new', async () => {
@@ -185,7 +185,7 @@ describe('readopt (design §2 control paths, D33, D54)', () => {
     b.ex.dieAfterTicks(1);
     expect(await b.supervisor.readopt('j1', 1)).toEqual({ result: 'ok' });
     await b.supervisor.idle();
-    expect(b.ex.watchOptions[0].startAtEnd).toBe(true);
+    expect(b.ex.watchOptions).toHaveLength(1);
   });
   test('D77: the newer of lastHeartbeat and updatedAt decides freshness', async () => {
     const b = build();

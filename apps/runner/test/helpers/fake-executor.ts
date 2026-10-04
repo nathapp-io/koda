@@ -2,6 +2,7 @@ import type { BundleFile } from '../../src/bundle/build-bundle';
 import type { JobExecutor, JobWatcher, FinishPlanOptions, PlanPushOutcome, PrepareOptions, PrepareOutcome, PushProgressOptions, SpawnHandle, WatchOptions } from '../../src/executor/job-executor';
 import type { ProgressPushOutcome } from '../../src/executor/progress-push';
 import type { JobRow } from '../../src/journal/types';
+import type { JobLogSources } from '../../src/logs/types';
 import type { PlanCheck } from '../../src/verdict/plan-verdict';
 import type { StatusView } from '../../src/verdict/status-view';
 import type { WatcherSink } from '../../src/watcher/watcher';
@@ -30,6 +31,11 @@ export class FakeExecutor implements JobExecutor {
   bundleError: Error | null = null;
   resumeError: Error | null = null;
   resumeApprovalsError: Error | null = null;
+  /** S2a: paths the job's logs live at; the default points nowhere, so the shipper finds no file. */
+  logFiles: JobLogSources = {
+    outDir: '/nonexistent/koda-fake/nax-out', feature: 'f',
+    stdoutPath: '/nonexistent/koda-fake/nax.stdout', stderrPath: '/nonexistent/koda-fake/nax.stderr', runLog: false,
+  };
   ticks = 0;
   onTick: (n: number, final: boolean, sink: WatcherSink) => void = () => undefined;
   onKill: (signal: 'SIGTERM' | 'SIGKILL') => void = () => { this.alive = false; };
@@ -77,6 +83,10 @@ export class FakeExecutor implements JobExecutor {
   createWatcher(_job: JobRow, sink: WatcherSink, options: WatchOptions): JobWatcher {
     this.watchOptions.push(options);
     return { tick: async (final = false) => { this.ticks += 1; this.onTick(this.ticks, final, sink); } };
+  }
+
+  logSources(): JobLogSources {
+    return this.logFiles;
   }
 
   async readStatus(job: JobRow): Promise<StatusView | null> {
