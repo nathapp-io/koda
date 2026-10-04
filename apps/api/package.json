@@ -66,6 +66,7 @@
     "keyv": "^5.0.0",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.0",
+    "tar-stream": "^3.2.2",
     "ts-morph": "^28.0.0"
   },
   "devDependencies": {
