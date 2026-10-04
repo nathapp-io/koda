@@ -272,8 +272,19 @@ export class LogShipper implements LogShipping {
           this.diverge(entry, `the server holds more of the ${entry.stream} log than the file (${action.size} > ${sent.fileSize} bytes); the bundle fills it`);
           return;
         }
+        if (action.size < entry.acked) {
+          // S2a slice 2 D350: the server's stream only grows; a smaller size is a server fault, never a rewind.
+          this.diverge(entry, `the server holds less of the ${entry.stream} log than it acked before (${action.size} < ${entry.acked} bytes); the bundle fills it`);
+          return;
+        }
         if (action.size <= sent.sentFrom && sent.sentBytes > 0 && !sent.final && action.size === entry.acked) {
           this.backoff(entry, `no progress: the server answered size ${action.size} for bytes at ${sent.sentFrom}`);
+          return;
+        }
+        if (sent.final && action.size >= sent.sentFrom + sent.sentBytes) {
+          // S2a slice 2 D351: every byte is held but final was not accepted; re-sending at once would hot-loop.
+          entry.acked = action.size;
+          this.backoff(entry, `final was not accepted: the server answered size ${action.size} without complete`);
           return;
         }
         entry.acked = action.size;

@@ -172,6 +172,23 @@ describe('the answer table (spec §2.4, plan D323)', () => {
     t.clock.advance(500);
     await waitFor(() => t.server.stored('j1:1:stdout') === 'a\n');
   });
+  test('an ack below what the server already acked is diverged, never a rewind (S2a slice 2 D350)', async () => {
+    const t = setup();
+    const j = await job('rewind');
+    await writeFile(j.sources.stdoutPath, 'a\nb\n');
+    t.register('j1', j.sources);
+    await waitFor(() => t.server.stored('j1:1:stdout') === 'a\nb\n');
+    t.server.overrides.push({ status: 200, outcome: 'appended', size: 1 });
+    await appendFile(j.sources.stdoutPath, 'c\n');
+    t.shipper.wake('j1', 1);
+    await waitFor(() => t.notes.length === 1);
+    expect(t.notes[0]).toMatchObject({ level: 'warn' });
+    expect(t.notes[0].message).toContain('less of the stdout log');
+    await appendFile(j.sources.stdoutPath, 'd\n');
+    t.shipper.wake('j1', 1);
+    await Bun.sleep(30);
+    expect(t.server.calls.filter((c) => c.stream === 'stdout').map((c) => c.offset)).toEqual([0, 4]);
+  });
   test('offset or duplicate with a size above the local file: diverged, lifecycle warn, no further PUT (R6)', async () => {
     for (const outcome of ['offset', 'duplicate'] as const) {
       const t = setup();
@@ -316,6 +333,22 @@ describe('drain, stop and close (spec §2.4 R5)', () => {
     for (const stream of ['stdout', 'stderr', 'run']) expect(t.server.isComplete(`j1:1:${stream}`)).toBe(true);
     expect(t.server.calls.filter((c) => c.final)).toHaveLength(3);
     expect(t.server.calls.find((c) => c.key === 'j1:1:stderr')).toMatchObject({ offset: 0, text: '', final: true });
+  });
+  test('a final PUT answered with a plain ack backs off instead of re-sending final at once (S2a slice 2 D351)', async () => {
+    const t = setup({ random: () => 0.5 });
+    const j = await job('final-ack');
+    await writeFile(j.sources.stdoutPath, 'a\n');                   // only stdout exists: the override is its final PUT
+    t.register('j1', j.sources);
+    await waitFor(() => t.server.stored('j1:1:stdout') === 'a\n');
+    t.server.overrides.push({ status: 200, outcome: 'duplicate', size: 2 });
+    const drained = t.shipper.drain('j1', 1, 120_000);
+    await waitFor(() => t.server.calls.some((c) => c.stream === 'stdout' && c.final));
+    await Bun.sleep(30);
+    expect(t.server.calls.filter((c) => c.stream === 'stdout' && c.final)).toHaveLength(1);
+    t.clock.advance(500);
+    expect(await drained).toBe('drained');
+    expect(t.server.isComplete('j1:1:stdout')).toBe(true);
+    expect(t.server.calls.filter((c) => c.stream === 'stdout' && c.final)).toHaveLength(2);
   });
   test('drain during an in-flight PUT: final goes only after that window is acked and the rest is read (Review focus 1)', async () => {
     const t = setup();
