@@ -51,15 +51,15 @@ Numbered from D320 (slice 1a ended at D319).
 
 | # | Decision | Why |
 |:--|:--|:--|
-| D320 | **Spec correction (§2.4, §8):** the runner's sync-event log path is **removed**, not kept as a v2 mode: `watcher/file-tail.ts`, `watcher/log-budget.ts` (with `chunkText`), `WatcherSink.logLine`, `JobEvents.logLine`, `SnapshotExtras.droppedLogs`, `WatchOptions.startAtEnd` and the watcher's `stdoutPath`/`stderrPath`/`startAtEnd`/`nowMs` options. Spec §8's "v2 vs v3 watcher behaviour" test becomes "the watcher reads no log file and emits no `log` event". The protocol types `LogEventPayload` and `SnapshotEventPayload.droppedLogs` stay: the API still accepts both from v1/v2 runners. | After this slice the binary only speaks v3, and R1 rules out falling back to v2 (a `[1,2]` API answers 426 and the sync loop stops the daemon). A v2 mode would be unreachable code that still has to be maintained. |
+| D320 | **Spec correction (§2.4, §8; release gate):** the runner's sync-event log path is **removed**, not kept as a v2 mode: `watcher/file-tail.ts`, `watcher/log-budget.ts` (with `chunkText`), `WatcherSink.logLine`, `JobEvents.logLine`, `SnapshotExtras.droppedLogs`, `WatchOptions.startAtEnd` and the watcher's `stdoutPath`/`stderrPath`/`startAtEnd`/`nowMs` options. Spec §8's "v2 vs v3 watcher behaviour" test becomes "the watcher reads no log file and emits no `log` event". The protocol types `LogEventPayload` and `SnapshotEventPayload.droppedLogs` stay: the API still accepts both from v1/v2 runners. | After this slice the binary only speaks v3, and R1 rules out falling back to v2 (a `[1,2]` API answers 426 and the sync loop stops the daemon). A v2 mode would be unreachable code that still has to be maintained. **Release gate (final review):** between 1b and slice 2, a v3 runner's job page shows no log text (the timeline rendered `log` events; the viewer and its read routes arrive in 2 and 1c). Do not release a runner build containing 1b before 1c and 2 are deployed; API first (R1). |
 | D321 | Seams: `src/logs/` is client-free and journal-free. It gets a `LogTransport` (daemon-built over `ServerClient.putLog`) and, per job, a `lifecycle(level, message)` callback (JobRun passes `JobEvents.lifecycle`). The job's file layout comes from a new `JobExecutor.logSources(job): JobLogSources` (the executor owns the layout, as `createWatcher` did). `JobRun` depends on the `LogShipping` interface only. | Keeps the "only `src/sync/` talks to the server" rule and lets `JobRun` specs use a fake shipper beside `FakeExecutor`. |
-| D322 | `ServerClient.putLog(args)` takes an args object `{ jobId, stream, leaseEpoch, offset, bytes, final, signal? }` (like `uploadBundle`), hashes the body itself, and returns `{ status }` for a non-2xx, `{ status, outcome, size, retryAfterMs? }` for a well-formed 2xx, `{ status }` for a malformed 2xx. A network failure throws `NetworkError`; an abort throws the abort reason (as `send()` does). `send()` gets a 60 s backstop timeout; the shipper's own 30 s abort governs. | The spec lists positional parameters; an object reads better and matches the neighbour. The shipper decides everything from status + outcome. |
-| D323 | Answer table (`classifyAnswer`), extending spec §2.4: 2xx `appended`/`duplicate`/`offset` → ack size; `complete` → done; `stream_cap` → stopped + lifecycle warn; `rate_limited` → pause the whole shipper for `retryAfterMs` (1 s if absent); malformed 2xx → backoff. 401, 404, 409 → stop every stream of the job (no lifecycle; 404 = job gone). 408, 422, 429, 5xx (incl. 507), network error, timeout → backoff. Any other status (400, 413, 426, ...) → that stream stopped + lifecycle error. An ack whose size is above the local file size → `diverged` (R6). | Spec table plus the statuses it leaves open; none of them may loop or crash the shipper. |
+| D322 | `ServerClient.putLog(args)` takes an args object `{ jobId, stream, leaseEpoch, offset, bytes, final, signal? }` (like `uploadBundle`), hashes the body itself, and returns `{ status }` for a non-2xx, `{ status, outcome, size, retryAfterMs? }` for a well-formed 2xx, `{ status }` for a malformed 2xx. A network failure throws `NetworkError`; an abort throws the abort reason (as `send()` does). `putLog` passes `LOG_PUT_TIMEOUT_MS` (60 s) to `send()` as a backstop; the shipper's own 30 s abort governs. | The spec lists positional parameters; an object reads better and matches the neighbour. The shipper decides everything from status + outcome. |
+| D323 | Answer table (`classifyAnswer`), extending spec §2.4: 2xx `appended`/`duplicate`/`offset` with a size ≥ 0 → ack size (a negative size is malformed → backoff; an ack that does not move past a non-empty non-final PUT's offset is treated as a backoff, so a buggy server cannot cause a hot loop); `complete` → done; `stream_cap` → stopped + lifecycle warn; `rate_limited` → pause the whole shipper for `retryAfterMs` (1 s if absent, at most 60 s); malformed 2xx → backoff. 401, 404, 409 → stop every stream of the job (no lifecycle; 404 = job gone). 408, 422, 429, 5xx (incl. 507), network error, timeout → backoff. Any other status (400, 413, 426, ...) → that stream stopped + lifecycle error. An ack whose size is above the local file size → `diverged` (R6). | Spec table plus the statuses it leaves open; none of them may loop or crash the shipper. |
 | D324 | Scheduling: `maxInFlight` worker loops, each doing one PUT at a time, so at most `maxInFlight` PUTs are in flight. Streams sit in one flat list in registration order; a worker scans it round-robin from the last pick and takes the first stream that is `active`, not `busy`, `dirty`, past its `retryAt`, while the shipper is not paused. Picking clears `dirty`; `wake`, `drain`, an ack, a backoff and a pause set it again; a read that finds nothing new leaves it clear. An idle worker sleeps until the earliest `retryAt`/pause end, or until the next `wake` (an `AbortController` swapped on every wake). | R4 with no timer per stream; a stream that cannot send costs nothing until the next tick. |
 | D325 | `final=1` rides the last chunk when a draining stream reaches its file end; with nothing left it is an empty-body PUT at the acked offset. A stream whose file does not exist when it is drained becomes `done` with no PUT (no server row). | One PUT fewer per stream; an absent file has nothing to complete. |
 | D326 | `backoffDelay(attempt, random, maxMs = 60_000)` gains the `maxMs` parameter (the sync loop keeps 60 s). The shipper uses full jitter from 1 s, capped at `logBackoffMaxMs`; a stream's failure count resets on any 2xx. Failures are logged on the 1st and every 10th attempt. The drain timer bounds the backoff while draining. | Reuse, not a second backoff function. |
-| D327 | JobRun lifecycle: register after a successful spawn (prepare/reprepare) or at the start of `watch`/`finish`; `wake` after every watcher tick (including the final one, and when the tick threw); `drain` starts at the top of `finish()` after the terminal-state check, which in the `watch` path is after the final tick and `reapQuietly`; it is awaited just before the UPLOADING transition. A `timeout` adds lifecycle warn `log upload did not finish within <N> s; the bundle fills the rest`. `halt()` (and so `abandon()`) and `cleanup()` call `stopJob` (cleanup before `markDone`). | R5. Every way a run ends releases the job's streams, so the shipper never writes a lifecycle event for a job that is done. |
-| D328 | Daemon: one `LogShipper` per daemon, `close()`d on `stop()` (after `supervisor.shutdown()`) and on `crash()`. The protocol constant moves to 3 in the same task as this wiring. | A v3 runner must stream (R1), so the bump ships with the shipper (D308). |
+| D327 | JobRun lifecycle: register after a successful spawn (prepare/reprepare) or at the start of `watch`/`finish`; `wake` after every watcher tick (including the final one, and when the tick threw); `drain` starts at the top of `finish()` after the terminal-state check, which in the `watch` path is after the final tick and `reapQuietly`; it is awaited just before the UPLOADING transition. A `timeout` adds lifecycle warn `log upload did not finish within <N> s; the bundle fills the rest`. `halt()` (and so `abandon()`) and `cleanup()` call `stopJob` (cleanup before `markDone`), and `start()` calls it again in a `finally` (idempotent) for the exits that skip `cleanup()` (`stale`, a halted finish, a failSafe whose recording failed). `registerLogs()` does nothing after a halt (a halt during spawn) or for a re-adopted terminal row. `failSafe()` drains before its UPLOADING → FAILED report, because no bundle follows a runner error. | R5. Every way a run ends releases the job's streams, so the shipper never writes a lifecycle event for a job that is done. |
+| D328 | Daemon: one `LogShipper` per daemon, `close()`d on `stop()` (after `supervisor.shutdown()`) and on `crash()`. The wiring lands in Task 5 (so every commit type-checks); the protocol constant moves to 3 in Task 6, in the same PR. | A v3 runner must stream (R1), so the bump ships with the shipper (D308). |
 | D329 | Integration tests check stored bytes on disk (`<FLEET_ARTIFACT_DIR>/logs/<jobId>/<epoch>/<stream>.log`) and `FleetJobLog` rows through the harness `prisma`. | The 1c read routes do not exist yet. |
 | D330 | The fake nax gains `FAKE_NAX_LONG_LINE_BYTES` (one JSONL line of about that length, written first) and `FAKE_NAX_LOG_BYTES` (debug lines of about 1 KiB appended in 64 KiB batches until the run log holds at least that many bytes), both before the first story. | Spec §8: large JSONL and long lines through a real file. |
 
@@ -274,11 +274,13 @@ describe('classifyAnswer (spec §2.4 table, plan D323)', () => {
     expect(classifyAnswer({ status: 200, outcome: 'stream_cap', size: 99 })).toEqual({ kind: 'cap', size: 99 });
     expect(classifyAnswer({ status: 200, outcome: 'rate_limited', size: -1, retryAfterMs: 300 })).toEqual({ kind: 'pause', ms: 300 });
     expect(classifyAnswer({ status: 200, outcome: 'rate_limited', size: -1 })).toEqual({ kind: 'pause', ms: 1_000 });
+    expect(classifyAnswer({ status: 200, outcome: 'rate_limited', size: -1, retryAfterMs: 3_600_000 })).toEqual({ kind: 'pause', ms: 60_000 });
   });
   test('a 2xx without a usable outcome and size backs off', () => {
     expect(classifyAnswer({ status: 200 })).toEqual({ kind: 'backoff', detail: 'malformed 2xx answer' });
     expect(classifyAnswer({ status: 200, outcome: 'appended' })).toEqual({ kind: 'backoff', detail: 'malformed 2xx answer' });
     expect(classifyAnswer({ status: 200, outcome: 'appended', size: 1.5 })).toEqual({ kind: 'backoff', detail: 'malformed 2xx answer' });
+    expect(classifyAnswer({ status: 200, outcome: 'appended', size: -1 })).toEqual({ kind: 'backoff', detail: 'malformed 2xx answer' });
   });
   test('401, 404 and 409 stop the whole job', () => {
     for (const status of [401, 404, 409]) expect(classifyAnswer({ status })).toEqual({ kind: 'stop-job', status });
@@ -388,6 +390,8 @@ export type AnswerAction =
   | { readonly kind: 'backoff'; readonly detail: string };
 
 const DEFAULT_PAUSE_MS = 1_000;
+/** Final review: a buggy or hostile retryAfterMs must not freeze every job's logs. */
+const MAX_PAUSE_MS = 60_000;
 
 /** Spec §2.4 response table, extended by plan D323. Pure: the shipper applies the action. */
 export function classifyAnswer(answer: PutLogAnswer): AnswerAction {
@@ -395,6 +399,7 @@ export function classifyAnswer(answer: PutLogAnswer): AnswerAction {
   if (status >= 200 && status < 300) {
     const { outcome, size } = answer;
     if (outcome === undefined || size === undefined || !Number.isSafeInteger(size)) return { kind: 'backoff', detail: 'malformed 2xx answer' };
+    if (outcome !== 'rate_limited' && size < 0) return { kind: 'backoff', detail: 'malformed 2xx answer' };
     switch (outcome) {
       case 'appended':
       case 'duplicate':
@@ -405,7 +410,7 @@ export function classifyAnswer(answer: PutLogAnswer): AnswerAction {
       case 'stream_cap':
         return { kind: 'cap', size };
       case 'rate_limited':
-        return { kind: 'pause', ms: answer.retryAfterMs !== undefined && answer.retryAfterMs > 0 ? answer.retryAfterMs : DEFAULT_PAUSE_MS };
+        return { kind: 'pause', ms: answer.retryAfterMs !== undefined && answer.retryAfterMs > 0 ? Math.min(answer.retryAfterMs, MAX_PAUSE_MS) : DEFAULT_PAUSE_MS };
       default:
         return { kind: 'backoff', detail: 'malformed 2xx answer' };
     }
@@ -787,6 +792,8 @@ describe('shipping while the job runs', () => {
     const plan = await job('plan', false);
     t.register('run', run.sources);
     t.register('plan', plan.sources);
+    await Bun.sleep(30);                                            // the first search has come back empty
+    expect(t.server.calls).toEqual([]);
     await writeRun(run.runPath, '{"msg":"a"}\n');
     await writeRun(plan.runPath, '{"msg":"p"}\n');
     t.shipper.wake('run', 1);
@@ -795,7 +802,7 @@ describe('shipping while the job runs', () => {
     await Bun.sleep(30);
     expect(t.server.calls.some((c) => c.key === 'plan:1:run')).toBe(false);
   });
-  test('at most maxInFlight PUTs at once, round-robin across the streams of two jobs (R4)', async () => {
+  test('at most maxInFlight PUTs at once (R4)', async () => {
     const t = setup();
     const a = await job('a');
     const b = await job('b');
@@ -807,11 +814,26 @@ describe('shipping while the job runs', () => {
     await Bun.sleep(30);
     expect(t.server.inFlight).toBe(2);
     t.server.release();
-    await waitFor(() => t.server.calls.some((c) => c.key === 'b:1:stdout'));   // the third hold is registered with its call
+    await waitFor(() => t.server.calls.length === 3 && t.server.inFlight === 1);   // the third hold is registered
     t.server.release();
-    await waitFor(() => t.server.stored('b:1:stdout') === 'x\n' && t.server.stored('a:1:stderr') === 'x\n');
+    await waitFor(() => ['a:1:stdout', 'a:1:stderr', 'b:1:stdout'].every((k) => t.server.stored(k) === 'x\n'));
     expect(t.server.maxInFlight).toBe(2);
-    expect(new Set(t.server.calls.slice(0, 3).map((c) => c.key))).toEqual(new Set(['a:1:stdout', 'a:1:stderr', 'b:1:stdout']));
+  });
+  test('round-robin: a chatty stream does not starve another job\'s stream (R4)', async () => {
+    const t = setup({ tuning: { maxInFlight: 1 } });
+    const chatty = await job('chatty');
+    const quiet = await job('quiet');
+    await writeFile(chatty.sources.stdoutPath, `${'c'.repeat(63)}\n`.repeat(5));   // five 64-byte chunks
+    t.server.overrides.push('hold');
+    t.register('chatty', chatty.sources);
+    await waitFor(() => t.server.inFlight === 1);
+    await writeFile(quiet.sources.stdoutPath, 'q\n');
+    t.register('quiet', quiet.sources);
+    t.server.release();
+    await waitFor(() => t.server.stored('chatty:1:stdout').length === 320 && t.server.stored('quiet:1:stdout') === 'q\n');
+    const order = t.server.calls.filter((c) => c.stream === 'stdout').map((c) => c.key);
+    expect(order.indexOf('quiet:1:stdout')).toBeLessThan(order.lastIndexOf('chatty:1:stdout'));
+    expect(order.indexOf('quiet:1:stdout')).toBeLessThanOrEqual(2);
   });
   test('wake returns at once while a PUT hangs: the watch tick never waits on the network (R4)', async () => {
     const t = setup();
@@ -831,10 +853,36 @@ describe('the answer table (spec §2.4, plan D323)', () => {
     const t = setup();
     const j = await job('offset');
     await writeFile(j.sources.stdoutPath, 'a\nb\n');
+    t.server.seed('j1:1:stdout', 'a\n');
     t.server.overrides.push({ status: 200, outcome: 'offset', size: 2 });
     t.register('j1', j.sources);
-    await waitFor(() => t.server.calls.length === 2);
+    await waitFor(() => t.server.stored('j1:1:stdout') === 'a\nb\n');
     expect(t.server.calls[1].offset).toBe(2);
+  });
+  test('404 stops every stream of the job like 409 (the job is gone)', async () => {
+    const t = setup();
+    const j = await job('gone');
+    await writeFile(j.sources.stdoutPath, 'a\n');
+    t.server.overrides.push({ status: 404 });
+    t.register('j1', j.sources);
+    await waitFor(() => t.server.calls.length === 1);
+    await writeFile(j.sources.stderrPath, 'e\n');
+    t.shipper.wake('j1', 1);
+    await Bun.sleep(30);
+    expect(t.server.calls).toHaveLength(1);
+    expect(await t.shipper.drain('j1', 1, 1_000)).toBe('drained');
+  });
+  test('an ack that does not move past a non-empty PUT backs off instead of re-sending at once', async () => {
+    const t = setup({ random: () => 0.5 });
+    const j = await job('stuck');
+    await writeFile(j.sources.stdoutPath, 'a\n');
+    t.server.overrides.push({ status: 200, outcome: 'appended', size: 0 });
+    t.register('j1', j.sources);
+    await waitFor(() => t.server.calls.length === 1);
+    await Bun.sleep(30);
+    expect(t.server.calls).toHaveLength(1);
+    t.clock.advance(500);
+    await waitFor(() => t.server.stored('j1:1:stdout') === 'a\n');
   });
   test('offset or duplicate with a size above the local file: diverged, lifecycle warn, no further PUT (R6)', async () => {
     for (const outcome of ['offset', 'duplicate'] as const) {
@@ -1038,6 +1086,27 @@ describe('drain, stop and close (spec §2.4 R5)', () => {
     expect(t.notes).toEqual([]);
     expect(t.server.calls).toHaveLength(1);
   });
+  test('a stream backing off is bounded by the drain deadline', async () => {
+    const t = setup({ random: () => 0.999 });
+    const j = await job('drain-backoff');
+    await writeFile(j.sources.stdoutPath, 'a\n');
+    t.server.overrides.push({ status: 503 }, { status: 503 }, { status: 503 }, { status: 503 }, { status: 503 }, { status: 503 });
+    t.register('j1', j.sources);
+    await waitFor(() => t.server.calls.length === 1);
+    const drained = t.shipper.drain('j1', 1, 1_500);
+    t.clock.advance(1_500);
+    expect(await drained).toBe('timeout');
+  });
+  test('a lifecycle callback that throws still settles the stream, so the drain finishes', async () => {
+    const t = setup();
+    const j = await job('throwing');
+    await writeFile(j.sources.stdoutPath, 'a\n');
+    t.server.overrides.push({ status: 200, outcome: 'offset', size: 99 });
+    t.shipper.register({ jobId: 'j1', leaseEpoch: 1, sources: j.sources, lifecycle: () => { throw new Error('journal closed'); } });
+    await waitFor(() => t.server.calls.length === 1);
+    expect(await t.shipper.drain('j1', 1, 120_000)).toBe('drained');
+    expect(t.log.lines.some((l) => l.message === 'log lifecycle callback failed')).toBe(true);
+  });
   test('drain of an unknown or already finished job resolves drained at once', async () => {
     const t = setup();
     expect(await t.shipper.drain('nobody', 1, 1_000)).toBe('drained');
@@ -1124,6 +1193,13 @@ interface JobEntry {
 }
 
 type PutResult = { readonly kind: 'answer'; readonly answer: PutLogAnswer } | { readonly kind: 'error'; readonly message: string };
+
+interface SentWindow {
+  readonly fileSize: number;
+  readonly sentFrom: number;
+  readonly sentBytes: number;
+  readonly final: boolean;
+}
 
 const IDLE_MS = 60_000;
 const ERROR_PAUSE_MS = 1_000;
@@ -1225,14 +1301,18 @@ export class LogShipper implements LogShipping {
 
   private async work(): Promise<void> {
     while (!this.closed) {
+      // Final review: the signal is taken BEFORE any await, so a kick() during discover() or ship() is never lost.
+      const signal = this.wakeSignal.signal;
       try {
         await this.discover();
-        const next = this.pick();
+        const now = this.deps.nowMs();   // one clock read for pick and idleMs, so a due retry is never slept past
+        const next = this.pick(now);
         if (next) await this.ship(next);
-        else await this.deps.sleep(this.idleMs(), this.wakeSignal.signal);
+        else if (this.closed || [...this.jobs.values()].some((job) => job.runSearch)) continue;
+        else await this.deps.sleep(this.idleMs(now), signal);
       } catch (error) {
         this.deps.log.warn('log shipper error', { error: errorMessage(error) });
-        await this.deps.sleep(ERROR_PAUSE_MS, this.wakeSignal.signal);
+        if (!this.closed) await this.deps.sleep(ERROR_PAUSE_MS, signal);
       }
     }
   }
@@ -1243,7 +1323,13 @@ export class LogShipper implements LogShipping {
       if (!job.runSearch) continue;
       job.runSearch = false;
       const searchedWhileDraining = job.draining;
-      const path = await findRunLog(job.spec.sources.outDir, job.spec.sources.feature);
+      let path: string | null;
+      try {
+        path = await findRunLog(job.spec.sources.outDir, job.spec.sources.feature);
+      } catch (error) {
+        job.runSearch = true;   // a file vanished mid-search: look again (work() paces a repeated throw at 1 s)
+        throw error;
+      }
       if (this.jobs.get(job.key) !== job) continue;
       if (path !== null && this.lacksRun(job)) this.addStream(job, 'run', path);
       if (path !== null || searchedWhileDraining) job.runResolved = true;
@@ -1251,8 +1337,7 @@ export class LogShipper implements LogShipping {
     }
   }
 
-  private pick(): StreamEntry | null {
-    const now = this.deps.nowMs();
+  private pick(now: number): StreamEntry | null {
     if (now < this.pausedUntil || this.order.length === 0) return null;
     for (let step = 1; step <= this.order.length; step += 1) {
       const index = (this.cursor + step) % this.order.length;
@@ -1266,8 +1351,7 @@ export class LogShipper implements LogShipping {
     return null;
   }
 
-  private idleMs(): number {
-    const now = this.deps.nowMs();
+  private idleMs(now: number): number {
     const waits = [this.pausedUntil - now, ...this.order.filter((s) => s.status === 'active' && !s.busy && s.dirty).map((s) => s.retryAt - now)]
       .filter((ms) => ms > 0);
     return waits.length > 0 ? Math.min(...waits) : IDLE_MS;
@@ -1287,9 +1371,14 @@ export class LogShipper implements LogShipping {
       }
       const final = entry.job.draining && entry.acked + window.bytes.length >= window.fileSize;
       if (window.bytes.length === 0 && !final) return;
+      const sentFrom = entry.acked;
       const result = await this.put(entry, window.bytes, final);
       if (entry.status !== 'active') return;
-      this.apply(entry, result, window.fileSize);
+      this.apply(entry, result, { fileSize: window.fileSize, sentFrom, sentBytes: window.bytes.length, final });
+    } catch (error) {
+      // Final review: a read error (EACCES, a file replaced mid-read) or a throwing callback must not strand the
+      // stream with dirty=false; it backs off and is retried, so a drain still converges or times out cleanly.
+      if (entry.status === 'active') this.backoff(entry, errorMessage(error));
     } finally {
       entry.busy = false;
       entry.inFlight = null;
@@ -1314,13 +1403,17 @@ export class LogShipper implements LogShipping {
     }
   }
 
-  private apply(entry: StreamEntry, result: PutResult, fileSize: number): void {
+  private apply(entry: StreamEntry, result: PutResult, sent: SentWindow): void {
     const action: AnswerAction = result.kind === 'answer' ? classifyAnswer(result.answer) : { kind: 'backoff', detail: result.message };
-    const { jobId, leaseEpoch, lifecycle } = entry.job.spec;
+    const { jobId, leaseEpoch } = entry.job.spec;
     switch (action.kind) {
       case 'ack':
-        if (action.size > fileSize) {
-          this.diverge(entry, `the server holds more of the ${entry.stream} log than the file (${action.size} > ${fileSize} bytes); the bundle fills it`);
+        if (action.size > sent.fileSize) {
+          this.diverge(entry, `the server holds more of the ${entry.stream} log than the file (${action.size} > ${sent.fileSize} bytes); the bundle fills it`);
+          return;
+        }
+        if (action.size <= sent.sentFrom && sent.sentBytes > 0 && !sent.final && action.size === entry.acked) {
+          this.backoff(entry, `no progress: the server answered size ${action.size} for bytes at ${sent.sentFrom}`);
           return;
         }
         entry.acked = action.size;
@@ -1332,7 +1425,7 @@ export class LogShipper implements LogShipping {
         this.settle(entry, 'done');
         return;
       case 'cap':
-        lifecycle('warn', `the ${entry.stream} log reached the server's size cap at ${action.size} bytes; the full text is in the bundle`);
+        this.notify(entry, 'warn', `the ${entry.stream} log reached the server's size cap at ${action.size} bytes; the full text is in the bundle`);
         this.settle(entry, 'stopped');
         return;
       case 'pause':
@@ -1345,22 +1438,36 @@ export class LogShipper implements LogShipping {
         this.endJob(entry.job, 'stopped');
         return;
       case 'fail-stream':
-        lifecycle('error', `${entry.stream} log upload refused (HTTP ${action.status}); the bundle fills it`);
+        this.notify(entry, 'error', `${entry.stream} log upload refused (HTTP ${action.status}); the bundle fills it`);
         this.settle(entry, 'stopped');
         return;
       case 'backoff':
-        entry.failures += 1;
-        entry.retryAt = this.deps.nowMs() + backoffDelay(entry.failures - 1, this.deps.random, this.deps.tuning.backoffMaxMs);
-        entry.dirty = true;
-        if (entry.failures === 1 || entry.failures % 10 === 0) {
-          this.deps.log.warn('log upload failed; backing off', { jobId, leaseEpoch, stream: entry.stream, failures: entry.failures, detail: action.detail });
-        }
+        this.backoff(entry, action.detail);
         return;
     }
   }
 
+  private backoff(entry: StreamEntry, detail: string): void {
+    const { jobId, leaseEpoch } = entry.job.spec;
+    entry.failures += 1;
+    entry.retryAt = this.deps.nowMs() + backoffDelay(entry.failures - 1, this.deps.random, this.deps.tuning.backoffMaxMs);
+    entry.dirty = true;
+    if (entry.failures === 1 || entry.failures % 10 === 0) {
+      this.deps.log.warn('log upload failed; backing off', { jobId, leaseEpoch, stream: entry.stream, failures: entry.failures, detail });
+    }
+  }
+
+  /** A lifecycle callback that throws must not skip the state change that follows it. */
+  private notify(entry: StreamEntry, level: 'info' | 'warn' | 'error', message: string): void {
+    try {
+      entry.job.spec.lifecycle(level, message);
+    } catch (error) {
+      this.deps.log.warn('log lifecycle callback failed', { jobId: entry.job.spec.jobId, error: errorMessage(error) });
+    }
+  }
+
   private diverge(entry: StreamEntry, message: string): void {
-    entry.job.spec.lifecycle('warn', message);
+    this.notify(entry, 'warn', message);
     this.settle(entry, 'diverged');
   }
 
@@ -1392,6 +1499,8 @@ export class LogShipper implements LogShipping {
 
 Notes for the implementer:
 - `checkDrained` inside `drain()` covers a job whose streams are all already finished.
+- `work()` never sleeps while closed or while a job still wants a run-log search (final review: a `close()` or a
+  `drain()` that lands while a worker is inside `discover()` would otherwise be slept past for up to 60 s).
 - A `ship` that resumes after `endJob` sees `status !== 'active'` and returns before any lifecycle call
   (Review focus 4).
 - `endJob` aborts the in-flight `AbortController`; the fake transport and `ServerClient.send` both reject on abort,
@@ -1434,7 +1543,8 @@ git commit -m "feat(runner): runner-wide LogShipper with drain, backoff and dive
 - [ ] **Step 1: Write the failing tests**
 
 In `apps/runner/src/watcher/watcher.spec.ts`:
-1. Remove the imports of `FileTail` and `LogBudget, chunkText`, the `LogEventPayload` type import, the `logs` variable,
+1. Remove the imports of `FileTail` and `LogBudget, chunkText`, `truncate` from the `node:fs/promises` import (only
+   the deleted shrink test used it; eslint runs with `--max-warnings=0`), the `LogEventPayload` type import, the `logs` variable,
    `logLine` in `sink`, `logs = [];` in `beforeEach`, and the `stdoutPath`, `stderrPath`, `startAtEnd` and `nowMs`
    keys in `options()` (keep `clock` only if still used; delete it and `clock = 0` otherwise).
 2. Delete the whole `describe('log tails', ...)`, `describe('the log rate cap (D45)', ...)`, `describe('chunkText', ...)`
@@ -1630,8 +1740,9 @@ type from `../logs/types`):
   }
 ```
 
-If `HostExecutorDeps.nowMs` is now unused anywhere in `host-executor.ts`, leave it (other code may use it; check with
-`grep -n "nowMs" apps/runner/src/executor/host-executor.ts` and keep it if any use remains).
+Leave `nowMs` in `HostExecutorDeps`: it now has no reader in `host-executor.ts`, but existing specs
+(`test/unit/host-executor-auth.spec.ts`, `test/unit/job-check.spec.ts`) and `daemon.ts` pass it. `JobWatcher.tick(final?)`
+also stays: `FakeExecutor.onTick` receives `final`, and JobRun keeps passing it.
 
 `apps/runner/test/helpers/fake-executor.ts` — add the field and method (no `note()`: existing specs assert exact
 `calls` arrays):
@@ -1696,11 +1807,14 @@ git commit -m "refactor(runner): drop the sync-event log tail; executors name th
 - Modify: `apps/runner/src/supervisor/job-run.ts`
 - Test: `apps/runner/src/supervisor/job-run.spec.ts`
 - Modify (deps only): `apps/runner/src/supervisor/supervisor.spec.ts:18-22`, `apps/runner/src/supervisor/command-handler.spec.ts:18-22`
+- Modify: `apps/runner/src/daemon/tuning.ts`, test `apps/runner/src/daemon/tuning.spec.ts`
+- Modify: `apps/runner/src/daemon/daemon.ts` (shipper construction, Supervisor deps, `close()` in `stop()`/`crash()`)
 
 **Interfaces:**
 - Consumes: `LogShipping`, `DrainResult` (Task 1), `LogShipper` + `fakeLogServer` + `manualClock` (Task 3),
   `JobExecutor.logSources`, `FakeExecutor.logFiles` (Task 4).
-- Produces: `JobRunDeps.logs: LogShipping`; `JobRunTuning.logDrainTimeoutMs: number`; `FakeLogShipping`, `NO_LOG_SHIPPING`.
+- Produces: `JobRunDeps.logs: LogShipping`; `JobRunTuning.logDrainTimeoutMs: number`; `FakeLogShipping`, `NO_LOG_SHIPPING`;
+  `Tuning.logChunkBytes`, `logMaxInFlight`, `logPutTimeoutMs`, `logBackoffMaxMs`, `logDrainTimeoutMs`.
 
 - [ ] **Step 1: Write the doubles**
 
@@ -1874,6 +1988,42 @@ describe('log shipping (S2a §2.4, plan D327)', () => {
     const b = build();
     b.ex.prepareResult = { ok: false, reason: 'checkout failed' };
     await b.run.start('prepare');
+    expect(b.logs.calls).toEqual(['logs.stop:j1', 'logs.stop:j1']);   // cleanup(), then start()'s finally (idempotent)
+  });
+  test('PLAN: the drain overlaps finishPlan and completes before UPLOADING', async () => {
+    const b = build('PLAN');
+    const logs = new FakeLogShipping(b.ex.calls);
+    logs.holdDrain();
+    b.ex.dieAfterTicks(1);
+    const done = new JobRun({ ...b.deps, logs }, 'j1', 1).start('prepare');
+    await waitFor(() => b.ex.calls.includes('finishPlan:j1'));
+    expect(inOrder(b.ex.calls, ['logs.drain:j1', 'finishPlan:j1'])).toBe(true);
+    await settle();
+    expect(stateNames(b)).toEqual(['RUNNING']);
+    logs.releaseDrain();
+    await done;
+    expect(stateNames(b)).toEqual(['RUNNING', 'UPLOADING', 'COMPLETED']);
+  });
+  test('a runner error drains the logs before its UPLOADING -> FAILED report (no bundle follows)', async () => {
+    const b = build();
+    const logs = new FakeLogShipping(b.ex.calls);
+    b.ex.statusError = new Error('disk gone');
+    b.ex.dieAfterTicks(1);
+    await new JobRun({ ...b.deps, logs }, 'j1', 1).start('prepare');
+    expect(stateNames(b)).toEqual(['RUNNING', 'UPLOADING', 'FAILED']);
+    expect(inOrder(b.ex.calls, ['logs.register:j1', 'logs.drain:j1', 'logs.stop:j1', 'cleanup:j1'])).toBe(true);
+    expect(b.uploads).toEqual([]);
+  });
+  test('a re-adopted row that is already terminal never registers its logs', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'COMPLETED', pid: 4242, pgid: 4242 });
+    await b.run.start('finish');
+    expect(b.logs.calls).toEqual(['logs.stop:j1', 'logs.stop:j1']);
+  });
+  test('abandon of a run that never started (after a restart) stops the key and registers nothing', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    await new JobRun(b.deps, 'j1', 1).abandon();
     expect(b.logs.calls).toEqual(['logs.stop:j1']);
   });
   test('with the real shipper, a PUT that never answers does not slow the watch loop; the drain times out (R4, R5)', async () => {
@@ -1886,13 +2036,13 @@ describe('log shipping (S2a §2.4, plan D327)', () => {
       tuning: { chunkBytes: 1_024, maxInFlight: 2, putTimeoutMs: 60_000, backoffMaxMs: 1_000 },
     });
     try {
-      const b = build('RUN', 'j1', { logDrainTimeoutMs: 50 });
+      const b = build('RUN', 'j1', { logDrainTimeoutMs: 1_000 });
       b.ex.logFiles = { outDir: join(dir, 'nax-out'), feature: 'f', stdoutPath: join(dir, 'nax.stdout'), stderrPath: join(dir, 'nax.stderr'), runLog: false };
       b.ex.dieAfterTicks(5);
       await new JobRun({ ...b.deps, logs: shipper }, 'j1', 1).start('prepare');
       expect(b.ex.ticks).toBe(6);
       await waitFor(() => server.inFlight === 0);
-      expect(lifecycles(b)).toContainEqual({ level: 'warn', message: 'log upload did not finish within 0 s; the bundle fills the rest' });
+      expect(lifecycles(b)).toContainEqual({ level: 'warn', message: 'log upload did not finish within 1 s; the bundle fills the rest' });
       expect(stateNames(b)).toEqual(['RUNNING', 'UPLOADING', 'COMPLETED']);
     } finally {
       await shipper.close();
@@ -1908,9 +2058,15 @@ Update the deps literals in `apps/runner/src/supervisor/supervisor.spec.ts` and
 `'../../test/helpers/fake-log-shipping'`, add `logs: NO_LOG_SHIPPING` to the `new Supervisor({...})` object and
 `logDrainTimeoutMs: 120_000` to its `tuning` literal.
 
+`apps/runner/src/daemon/tuning.spec.ts` — the expected object gains, after `jobCheckTimeoutMs: 10_000,`:
+
+```ts
+      logChunkBytes: 1_048_576, logMaxInFlight: 2, logPutTimeoutMs: 30_000, logBackoffMaxMs: 30_000, logDrainTimeoutMs: 120_000,
+```
+
 - [ ] **Step 3: Run them to verify they fail**
 
-Run: `cd apps/runner && bun run test src/supervisor/job-run.spec.ts`
+Run: `cd apps/runner && bun run test src/supervisor/job-run.spec.ts src/daemon/tuning.spec.ts`
 Expected: FAIL — no `logs.register:j1` in `calls`, `b.logs.wakes` is 0, and the type-check reports the unknown `logs`
 dep (run `bun run type-check` to see it).
 
@@ -1951,9 +2107,14 @@ import type { DrainResult, LogShipping } from '../logs/types';
     await this.finish();
   }
 
-  /** Plan D327: R3 resume — the shipper starts at offset 0 and jumps to the server's size on its first answer. */
+  /**
+   * Plan D327: R3 resume — the shipper starts at offset 0 and jumps to the server's size on its first answer.
+   * Not after a halt that landed during spawn (halt() already stopped the key), and not for a re-adopted row that is
+   * already terminal (its uploads would only collect 409s).
+   */
   private registerLogs(): void {
     const row = this.mustRow();
+    if (this.halted || isTerminalState(row.state)) return;
     this.deps.logs.register({
       jobId: this.jobId, leaseEpoch: this.leaseEpoch, sources: this.deps.executor.logSources(row),
       lifecycle: (level, message) => this.events.lifecycle(level, message),
@@ -2015,10 +2176,47 @@ New method:
   /** Plan D327: a timed-out drain is reported; the bundle fallback (slice 1a) fills the incomplete streams. */
   private async awaitLogs(drained: Promise<DrainResult>): Promise<void> {
     if ((await drained) !== 'timeout') return;
-    const seconds = Math.floor(this.deps.tuning.logDrainTimeoutMs / 1000);
+    const seconds = Math.max(1, Math.round(this.deps.tuning.logDrainTimeoutMs / 1000));
     this.events.lifecycle('warn', `log upload did not finish within ${seconds} s; the bundle fills the rest`);
   }
 ```
+
+`start()` becomes a wrapper: rename the existing `start(from)` body to `private async run(from: RunStart)` and add
+the `start()` shown here (the only change to the old body is its name). Place this edit before the `lifecycle()`
+edit above.
+
+```ts
+  async start(from: RunStart): Promise<void> {
+    try {
+      await this.run(from);
+    } finally {
+      // Plan D327: every exit releases the job's log streams, including `stale`, a halt and a failSafe whose own
+      // recording failed. Idempotent: cleanup() has normally stopped the key already, before markDone.
+      this.deps.logs.stopJob(this.jobId, this.leaseEpoch);
+    }
+  }
+```
+
+`failSafe()` drains before its UPLOADING transition (it uploads no bundle, so the fallback cannot fill the streams):
+
+```ts
+      if (row) {
+        await killIfOurs(this.deps.executor, row, this.deps.log);
+        // BUG-4: when the run never spawned (pid is null), a stale `.nax-pids` from a previous attempt at this
+        // jobDir would still be inside `since = createdAt`, so reap could SIGKILL someone else's pid. Skip it.
+        if (row.pid !== null) await this.reapQuietly(row);
+      }
+      // Plan D327: no bundle follows a runner error, so whatever nax wrote must reach the server now.
+      if (this.events.currentState() === 'RUNNING') {
+        await this.awaitLogs(this.deps.logs.drain(this.jobId, this.leaseEpoch, this.deps.tuning.logDrainTimeoutMs));
+        if (this.halted) return;
+        this.events.transition('UPLOADING');
+      }
+      this.events.transition('FAILED', `runner error: ${errorMessage(error)}`);
+```
+
+(replacing the existing `if (this.events.currentState() === 'RUNNING') this.events.transition('UPLOADING');` line
+and the `FAILED` transition after it; the reap block above is unchanged context).
 
 `cleanup()` releases the job's streams before `markDone`:
 
@@ -2029,43 +2227,82 @@ New method:
     if (!row) return;
 ```
 
+Final review: the daemon must supply the new required deps in this same task, or `type-check` fails at
+`daemon.ts` (`new Supervisor({...})`). Wire the shipper now; Task 6 adds the protocol bump and the daemon test.
+
+`apps/runner/src/daemon/tuning.ts` — the interface gains:
+
+```ts
+  /** S2a §7: the largest log window one PUT carries. */
+  readonly logChunkBytes: number;
+  /** S2a R4: log PUTs in flight at once, across every job of the runner. */
+  readonly logMaxInFlight: number;
+  /** S2a R4: a log PUT is aborted after this long. */
+  readonly logPutTimeoutMs: number;
+  /** S2a §2.4: the ceiling of the log upload backoff. */
+  readonly logBackoffMaxMs: number;
+  /** S2a R5: how long a finished job waits for its logs before UPLOADING. */
+  readonly logDrainTimeoutMs: number;
+```
+
+and `TUNING` gains, after `jobCheckTimeoutMs: 10_000,`:
+
+```ts
+  logChunkBytes: 1_048_576,
+  logMaxInFlight: 2,
+  logPutTimeoutMs: 30_000,
+  logBackoffMaxMs: 30_000,
+  logDrainTimeoutMs: 120_000,
+```
+
+`apps/runner/src/daemon/daemon.ts`:
+- import `import { LogShipper } from '../logs/log-shipper';`
+- after the `uploader` is built:
+
+```ts
+  // S2a §2.4 (plan D321, D328): one shipper for every job; only this transport talks to the server.
+  const shipper = new LogShipper({
+    transport: { putLog: (args) => client.putLog(args) },
+    log, nowMs: () => now().getTime(), sleep, random: Math.random,
+    tuning: { chunkBytes: tuning.logChunkBytes, maxInFlight: tuning.logMaxInFlight, putTimeoutMs: tuning.logPutTimeoutMs, backoffMaxMs: tuning.logBackoffMaxMs },
+  });
+```
+
+- the `Supervisor` deps gain `logs: shipper,` and its `tuning` literal gains `logDrainTimeoutMs: tuning.logDrainTimeoutMs`.
+- in `stop()`, right after `supervisor.shutdown();`, add `await shipper.close();`
+- in `crash()`, right after `supervisor.shutdown();`, add
+  `void shipper.close();   // a killed daemon's uploads die with it; the next daemon resumes at the server's size (R3)`.
+
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `cd apps/runner && bun run type-check && bun run test src/supervisor/`
-Expected: PASS, including every pre-existing JobRun, Supervisor and CommandHandler test.
+Run: `cd apps/runner && bun run type-check && bun run test src/supervisor/ src/daemon/ test/unit/daemon.spec.ts`
+Expected: PASS, including every pre-existing JobRun, Supervisor, CommandHandler and daemon test (every daemon spec uses
+`FakeExecutor`, whose default `logFiles` point nowhere, so no log PUT is made).
 
 - [ ] **Step 6: Commit**
 
 ```bash
 cd apps/runner && bun run lint
-git add apps/runner/src/supervisor apps/runner/test/helpers/fake-log-shipping.ts
-git commit -m "feat(runner): job runs register, wake, drain and stop their log streams (S2a 1b D327, R5)"
+git add apps/runner/src/supervisor apps/runner/src/daemon apps/runner/test/helpers/fake-log-shipping.ts
+git commit -m "feat(runner): job runs register, wake, drain and stop their log streams; the daemon owns one shipper (S2a 1b D327, R5)"
 ```
 
 ---
 
-### Task 6: Daemon wiring, tuning, protocol v3, runner context
+### Task 6: Protocol v3, end-to-end daemon test, runner context
 
 **Files:**
-- Modify: `apps/runner/src/daemon/tuning.ts`, test `apps/runner/src/daemon/tuning.spec.ts`
-- Modify: `apps/runner/src/daemon/daemon.ts`, test `apps/runner/test/unit/daemon.spec.ts`
+- Test: `apps/runner/test/unit/daemon.spec.ts` (the shipper is already wired in Task 5)
 - Modify: `packages/fleet-protocol/src/index.ts:1-6`, test `apps/runner/src/sync/batch.spec.ts`
 - Modify: `.nax/mono/apps/runner/context.md`; regenerate `apps/runner/{AGENTS,CLAUDE,GEMINI,codex}.md`
 
 **Interfaces:**
-- Consumes: `LogShipper` (Task 3), `ServerClient.putLog` (Task 1), `JobRunDeps.logs`, `JobRunTuning.logDrainTimeoutMs` (Task 5).
-- Produces: `Tuning.logChunkBytes`, `logMaxInFlight`, `logPutTimeoutMs`, `logBackoffMaxMs`, `logDrainTimeoutMs`;
-  `FLEET_PROTOCOL_VERSION = 3`.
+- Consumes: the daemon's `LogShipper` wiring (Task 5), `FakeExecutor.logFiles` (Task 4).
+- Produces: `FLEET_PROTOCOL_VERSION = 3`.
 
 - [ ] **Step 1: Write the failing tests**
 
-`apps/runner/src/daemon/tuning.spec.ts` — the expected object gains, after `jobCheckTimeoutMs: 10_000,`:
-
-```ts
-      logChunkBytes: 1_048_576, logMaxInFlight: 2, logPutTimeoutMs: 30_000, logBackoffMaxMs: 30_000, logDrainTimeoutMs: 120_000,
-```
-
-`apps/runner/src/sync/batch.spec.ts` — add inside its top-level `describe`:
+`apps/runner/src/sync/batch.spec.ts` — add inside `describe('buildSyncRequest', ...)`:
 
 ```ts
   test('a runner from S2a 1b on speaks protocol v3: it streams logs and sends no log sync events (spec R1, plan D328)', () => {
@@ -2117,6 +2354,8 @@ git commit -m "feat(runner): job runs register, wake, drain and stop their log s
       await waitFor(() => server.order.includes('state:COMPLETED'), { timeoutMs: 8_000 });
       expect(server.logs.get('j1:stdout')).toBe('hello\nworld\n');
       expect(server.logs.get('j1:stderr')).toBe('tail without newline');
+      expect(server.order).toContain('log-final:stdout');
+      expect(server.order).toContain('log-final:stderr');
       const uploading = server.order.indexOf('state:UPLOADING');
       expect(server.order.indexOf('log-final:stdout')).toBeLessThan(uploading);
       expect(server.order.indexOf('log-final:stderr')).toBeLessThan(uploading);
@@ -2130,9 +2369,9 @@ git commit -m "feat(runner): job runs register, wake, drain and stop their log s
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `cd apps/runner && bun run test src/daemon/tuning.spec.ts src/sync/batch.spec.ts test/unit/daemon.spec.ts`
-Expected: FAIL — tuning lacks the log keys, the protocol is 2, and no log PUT arrives (the daemon builds no shipper;
-the type-check also reports the missing `logs` dep on `new Supervisor`).
+Run: `cd apps/runner && bun run test src/sync/batch.spec.ts test/unit/daemon.spec.ts`
+Expected: FAIL — the protocol is 2 (the new daemon test fails on `protocolVersion`; its log assertions already pass
+because Task 5 wired the shipper).
 
 - [ ] **Step 3: Implement**
 
@@ -2147,49 +2386,6 @@ the type-check also reports the missing `logs` dep on `new Supervisor`).
  */
 export const FLEET_PROTOCOL_VERSION = 3 as const;
 ```
-
-`apps/runner/src/daemon/tuning.ts` — the interface gains:
-
-```ts
-  /** S2a §7: the largest log window one PUT carries. */
-  readonly logChunkBytes: number;
-  /** S2a R4: log PUTs in flight at once, across every job of the runner. */
-  readonly logMaxInFlight: number;
-  /** S2a R4: a log PUT is aborted after this long. */
-  readonly logPutTimeoutMs: number;
-  /** S2a §2.4: the ceiling of the log upload backoff. */
-  readonly logBackoffMaxMs: number;
-  /** S2a R5: how long a finished job waits for its logs before UPLOADING. */
-  readonly logDrainTimeoutMs: number;
-```
-
-and `TUNING` gains, after `jobCheckTimeoutMs: 10_000,`:
-
-```ts
-  logChunkBytes: 1_048_576,
-  logMaxInFlight: 2,
-  logPutTimeoutMs: 30_000,
-  logBackoffMaxMs: 30_000,
-  logDrainTimeoutMs: 120_000,
-```
-
-`apps/runner/src/daemon/daemon.ts`:
-- import `import { LogShipper } from '../logs/log-shipper';`
-- after the `uploader` is built:
-
-```ts
-  // S2a §2.4 (plan D321, D328): one shipper for every job; only this transport talks to the server.
-  const shipper = new LogShipper({
-    transport: { putLog: (args) => client.putLog(args) },
-    log, nowMs: () => now().getTime(), sleep, random: Math.random,
-    tuning: { chunkBytes: tuning.logChunkBytes, maxInFlight: tuning.logMaxInFlight, putTimeoutMs: tuning.logPutTimeoutMs, backoffMaxMs: tuning.logBackoffMaxMs },
-  });
-```
-
-- the `Supervisor` deps gain `logs: shipper,` and its `tuning` literal gains `logDrainTimeoutMs: tuning.logDrainTimeoutMs`.
-- in `stop()`, right after `supervisor.shutdown();`, add `await shipper.close();`
-- in `crash()`, right after `supervisor.shutdown();`, add
-  `void shipper.close();   // a killed daemon's uploads die with it; the next daemon resumes at the server's size (R3)`.
 
 `.nax/mono/apps/runner/context.md`:
 - In "Role In The Monorepo", change "reports progress and a verdict, uploads the run bundle" to
@@ -2208,7 +2404,7 @@ Regenerate the agent files from the repo root and check that only the four runne
 
 ```bash
 nax generate
-git status --short apps/runner/*.md
+git status --short
 ```
 
 Expected: `apps/runner/AGENTS.md`, `CLAUDE.md`, `GEMINI.md` and `codex.md` modified. If `nax generate` also rewrites
@@ -2225,8 +2421,8 @@ Expected: PASS (`[1, 2, 3]` contains 3).
 
 ```bash
 cd apps/runner && bun run lint
-git add packages/fleet-protocol/src/index.ts apps/runner/src/daemon apps/runner/src/sync/batch.spec.ts apps/runner/test/unit/daemon.spec.ts .nax/mono/apps/runner/context.md apps/runner/AGENTS.md apps/runner/CLAUDE.md apps/runner/GEMINI.md apps/runner/codex.md
-git commit -m "feat(runner): wire the log shipper into the daemon and speak protocol v3 (S2a 1b D328)"
+git add packages/fleet-protocol/src/index.ts apps/runner/src/sync/batch.spec.ts apps/runner/test/unit/daemon.spec.ts .nax/mono/apps/runner/context.md apps/runner/AGENTS.md apps/runner/CLAUDE.md apps/runner/GEMINI.md apps/runner/codex.md
+git commit -m "feat(runner): speak protocol v3; logs reach the server before UPLOADING end to end (S2a 1b D328)"
 ```
 
 ---
@@ -2235,6 +2431,7 @@ git commit -m "feat(runner): wire the log shipper into the daemon and speak prot
 
 **Files:**
 - Modify: `apps/runner/test/fixtures/fake-nax.ts` (in `run()`, before the `for` loop over steps), test `apps/runner/test/unit/fake-nax.spec.ts`
+- Modify: `apps/runner/test/integration/harness/world.ts:27` (`FEATURES` gains `la`, `lb`, `lc`: only listed features get a PRD in the origin; any other feature fails at checkout with `checkout: no prd.json at ref`)
 - Modify: `apps/runner/test/integration/run-plan.integration.spec.ts:56`
 - Create: `apps/runner/test/integration/log-shipping.integration.spec.ts`
 
@@ -2280,16 +2477,24 @@ In `apps/runner/test/fixtures/fake-nax.ts`, inside `run()`, immediately before `
   }
   const padTo = Number(process.env['FAKE_NAX_LOG_BYTES'] ?? 0);
   const padLine = `${JSON.stringify({ level: 'debug', msg: 'pad', data: 'p'.repeat(980) })}\n`;
-  for (let written = Math.max(longLine, 0); written < padTo;) {
+  for (let written = existsSync(join(runsDir, logName)) ? statSync(join(runsDir, logName)).size : 0; written < padTo;) {
     const batch = padLine.repeat(64);
     appendFileSync(join(runsDir, logName), batch);
     written += batch.length;
   }
 ```
 
+Add `statSync` to the existing `node:fs` import at the top of `fake-nax.ts` (`existsSync` is already imported).
+
 Run: `cd apps/runner && bun run test test/unit/fake-nax.spec.ts` — Expected: PASS.
 
 - [ ] **Step 4: Write the integration tests**
+
+`apps/runner/test/integration/harness/world.ts:27`:
+
+```ts
+export const FEATURES: readonly string[] = ['fa', 'fb', 'fc', 'fd', 'fe', 'ff', 'fg', 'fh', 'la', 'lb', 'lc'];
+```
 
 `apps/runner/test/integration/run-plan.integration.spec.ts:56` — replace
 `expect(events.some((e) => e.type === 'log' && (e.payload as { stream: string }).stream === 'run')).toBe(true);` with:
@@ -2363,10 +2568,15 @@ describe.skipIf(!enabled)('S2a 1b: the runner streams complete logs to the real 
     const runner = await world.addRunner('logs-2');
     await runner.start();
     const gate = join(world.base, 'gate-lb');
-    const { id, pid } = await startHeld(runner, 'lb', gate, { FAKE_NAX_LOG_BYTES: '500000' });
-    await waitFor(async () => Number((await world.prisma.fleetJobLog.findUnique({ where: { jobId_leaseEpoch_stream: { jobId: id, leaseEpoch: 1, stream: 'run' } } }))?.sizeBytes ?? 0) > 0, { timeoutMs: 30_000, message: 'no run log bytes reached the API before the crash' });
+    const { id, pid } = await startHeld(runner, 'lb', gate, { FAKE_NAX_LOG_BYTES: '20000000' });
+    const storedRun = async () => Number((await world.prisma.fleetJobLog.findUnique({ where: { jobId_leaseEpoch_stream: { jobId: id, leaseEpoch: 1, stream: 'run' } } }))?.sizeBytes ?? 0);
+    await waitFor(async () => (await storedRun()) > 0, { timeoutMs: 30_000, message: 'no run log bytes reached the API before the crash' });
+    runner.net.down = true;                                         // freeze the upload mid-stream (20 MB at 4 MiB/s takes ~5 s)
+    const runPath = await findRunLog(join(runner.jobDir(id), 'nax-out'), 'lb');
+    expect(await storedRun()).toBeLessThan((await readFile(runPath as string)).length);   // a real resume, not a no-op
     runner.crash();
     expect(isProcessAlive(pid)).toBe(true);
+    runner.net.down = false;
     await runner.start();
     await writeFile(gate, '');
     await world.waitForJob(id, (j) => j.state === 'COMPLETED', 90_000);
@@ -2402,7 +2612,9 @@ KODA_DB_TESTS=1 bun run test:integration
 ```
 
 Expected: PASS for `log-shipping.integration.spec.ts`, `run-plan.integration.spec.ts` and every other integration
-spec. If `world.prisma.fleetJobLog` is undefined, the Prisma client predates slice 1a: run `bunx turbo run db:generate`
+spec. `recovery.integration.spec.ts`'s network-cut test waits for more than 3 unacked journal events; `log` events no
+longer inflate that count. If it fails on "events did not stay unacknowledged", raise `FAKE_NAX_STEPS` in that test
+and say so in the commit body. If `world.prisma.fleetJobLog` is undefined, the Prisma client predates slice 1a: run `bunx turbo run db:generate`
 and rerun.
 
 - [ ] **Step 6: Commit**
@@ -2424,6 +2636,17 @@ git commit -m "test(runner): big logs and daemon restarts end byte-identical on 
   concurrent with judge/push, awaited before UPLOADING, timeout, halt, `finish` re-adopt (T5, T6, T7); tuning (T6);
   protocol 3 (T6); context.md (T6); fake nax large JSONL and long lines (T7). The unbilled live check with a real
   binary is slice 2 (spec §9).
-- **Deviation recorded:** D320 removes the v2 watcher mode the spec's test list names; D322 uses an args object.
+- **Deviations recorded:** D320 removes the v2 watcher mode the spec's test list names (with a release gate until 1c
+  and 2 ship); D321 adds `JobExecutor.logSources`, so `FakeExecutor` gains a field and a method (spec §2.4 said it
+  is unaffected); D322 uses an args object.
+- **Final review 2026-10-04** (three read-only reviewers: codebase fidelity, shipper concurrency, integration and spec):
+  fixes folded into this plan — integration features `la`/`lb`/`lc` added to the harness; daemon wiring moved into
+  Task 5 so its type-check passes; `work()` captures the wake signal before awaiting, never sleeps while closed or
+  while a run-log search is pending, and reads the clock once; `ship()` turns errors into a backoff; lifecycle calls
+  are guarded; negative sizes, no-progress acks and huge `retryAfterMs` cannot spin or freeze; JobRun registers only
+  when not halted and not terminal, stops the key in `start()`'s `finally`, and drains in `failSafe`; tests added for
+  404, no-progress ack, round-robin fairness, backoff bounded by the drain deadline, a throwing lifecycle, PLAN drain,
+  failSafe drain, terminal re-adopt and never-started abandon; the restart integration test now cuts the network
+  mid-stream so the resume is real.
 - **Types:** `LogShipping` methods (`register`, `wake`, `drain`, `stopJob`) and `JobLogSources` fields are used with
   the same names in T3, T4, T5 and T6; `logDrainTimeoutMs` is the same key in `Tuning`, `JobRunTuning` and the specs.
