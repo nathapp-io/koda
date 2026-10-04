@@ -232,3 +232,6 @@ Rules:
 - Git tokens exist only in `GitTokenBroker`'s memory cache and the sync response: never logged, stored, or put in a command or activity payload.
 - Fleet logs (S2a): `src/fleet/logs/`. `LogStore.append`/`replace` assume the caller holds `withLock(key)`; every
   `FleetJobLog` write for that key happens inside the same lock. Upload outcomes are HTTP 200 bodies, not errors.
+  Reads are lock-free and bounded: one entries request scans at most `FLEET_LOG_SCAN_BYTES` and always moves its
+  cursor (`log-lines.ts` is the cursor contract). Retention (`FleetLogRetentionProcessor`) deletes files first, then
+  marks rows expired under the job row lock, and never touches attempts newer than the epoch it selected.
