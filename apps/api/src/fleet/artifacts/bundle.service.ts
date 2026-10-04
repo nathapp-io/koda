@@ -9,6 +9,8 @@ import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { LogFallbackService } from '../logs/log-fallback.service';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
+import { BundleIngestService } from '../ingest/bundle-ingest.service';
+import { BUNDLE_INGEST_REPOSITORY, IBundleIngestRepository, INGEST_PARSER_VERSION } from '../ingest/domain/bundle-ingest.domain';
 import { FenceService } from '../sync/fence.service';
 import { ARTIFACT_STORE, ArtifactHashMismatchError, ArtifactStore, ArtifactTooLargeError } from './artifact-store';
 import { FleetBundleException, FleetFenceException } from './bundle.exceptions';
@@ -38,6 +40,8 @@ export class BundleService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'bundleMaxBytes'>,
     private readonly fallback: LogFallbackService,
+    @Inject(BUNDLE_INGEST_REPOSITORY) private readonly ingestRepo: Pick<IBundleIngestRepository, 'enqueue'>,
+    @Inject(BundleIngestService) private readonly ingest: Pick<BundleIngestService, 'kick'>,
   ) {}
 
   /** Spec §3.3: fenced, RUNNING (partial bundle on cancel) or UPLOADING only, streamed, hash-checked. */
@@ -72,7 +76,8 @@ export class BundleService {
         return { ok: false as const, error: new ConflictAppException({ state: job.state }, 'fleet.jobState') };
       }
       const previous = await this.repo.findArtifact(job.id, 'bundle', leaseEpoch);
-      await this.repo.upsertArtifact({ jobId: job.id, leaseEpoch, kind: 'bundle', storageKey: key, sizeBytes: BigInt(stored.sizeBytes), sha256: stored.sha256 });
+      const artifact = await this.repo.upsertArtifact({ jobId: job.id, leaseEpoch, kind: 'bundle', storageKey: key, sizeBytes: BigInt(stored.sizeBytes), sha256: stored.sha256 });
+      await this.ingestRepo.enqueue(artifact.id, job.id, leaseEpoch, INGEST_PARSER_VERSION); // S2b §2.1: same transaction
       await this.activity.record({
         actorType: 'RUNNER', actorId: u.runnerId, action: 'job.bundle_uploaded', entityType: 'job', entityId: job.id, jobId: job.id,
         projectId: job.projectId, responsibleUserId: job.requestedById, payload: { leaseEpoch, sizeBytes: stored.sizeBytes, sha256: stored.sha256 },
@@ -86,6 +91,8 @@ export class BundleService {
     }
     // S2a §2.5: fill unfinished log streams from this bundle, off the request path.
     this.fallback.schedule({ jobId: u.jobId, leaseEpoch, storageKey: key });
+    // S2b §2.1: ingest waits for a terminal job (§2.2); the kick covers the common case where the verdict lands first.
+    this.ingest.kick();
     if (recorded.replacedKey) {
       try {
         await this.store.delete(recorded.replacedKey);
