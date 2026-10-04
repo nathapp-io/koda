@@ -20,6 +20,12 @@ export interface IFleetConfig {
   /** In-process silence sweep (plan D11). */
   sweepEnabled: boolean;
   bundleMaxBytes: number;
+  /** S2a §7: per stream per attempt cap. */
+  logMaxBytes: number;
+  /** S2a §7: max body per log upload. */
+  logChunkMaxBytes: number;
+  /** S2a §2.2.1: per-runner upload rate. */
+  logRunnerBytesPerSec: number;
   /** Absolute root of LocalDiskArtifactStore (spec §8). */
   artifactDir: string;
   gitlabBotName: string;
@@ -45,6 +51,9 @@ export class FleetConfigSchema {
   @IsOptional() @IsString() FLEET_SYNC_WAIT_MS: string;
   @IsOptional() @IsString() FLEET_SWEEP_ENABLED: string;
   @IsOptional() @IsString() FLEET_BUNDLE_MAX_BYTES: string;
+  @IsOptional() @IsString() FLEET_LOG_MAX_BYTES: string;
+  @IsOptional() @IsString() FLEET_LOG_CHUNK_MAX_BYTES: string;
+  @IsOptional() @IsString() FLEET_LOG_RUNNER_BYTES_PER_SEC: string;
   @IsOptional() @IsString() FLEET_ARTIFACT_DIR: string;
   @IsOptional() @IsString() FLEET_GITLAB_BOT_NAME: string;
   @IsOptional() @IsString() FLEET_GITLAB_BOT_EMAIL: string;
@@ -79,6 +88,9 @@ export const fleetConfig = registerAs(FLEET_CFG, (): IFleetConfig => {
     syncWaitMs: int('FLEET_SYNC_WAIT_MS', 25_000),
     sweepEnabled: sweep !== undefined ? sweep.toLowerCase() === 'true' : !isTest(),
     bundleMaxBytes: int('FLEET_BUNDLE_MAX_BYTES', 200 * 1024 * 1024),
+    logMaxBytes: int('FLEET_LOG_MAX_BYTES', 256 * 1024 * 1024),
+    logChunkMaxBytes: int('FLEET_LOG_CHUNK_MAX_BYTES', 1024 * 1024),
+    logRunnerBytesPerSec: int('FLEET_LOG_RUNNER_BYTES_PER_SEC', 4 * 1024 * 1024),
     artifactDir: resolve(process.env['FLEET_ARTIFACT_DIR'] || './data/fleet-artifacts'),
     gitlabBotName: process.env['FLEET_GITLAB_BOT_NAME'] || 'koda-fleet',
     gitlabBotEmail: process.env['FLEET_GITLAB_BOT_EMAIL'] || 'koda-fleet@users.noreply.invalid',
