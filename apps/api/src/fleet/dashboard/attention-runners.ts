@@ -36,7 +36,7 @@ function staleCondition(caps: RunnerCapabilities, latest: CoreVersion | null): R
   return { type: 'stale_nax', version: caps.nax.version, latest: formatCore(latest) };
 }
 
-/** Spec §2.4: one item per enabled runner with at least one condition; full (admin) detail. */
+/** Spec §2.4: one item per enabled runner with at least one condition (plus a disabled one that went offline holding jobs); full (admin) detail. */
 export function runnerUnhealthyItems(
   runners: readonly DashboardRunnerRow[],
   heldByRunner: ReadonlyMap<string, number>,
@@ -46,12 +46,15 @@ export function runnerUnhealthyItems(
 ): AttentionItem[] {
   const latest = latestOnlineCore(runners, now, t.runnerOfflineSec);
   return runners.flatMap((r): AttentionItem[] => {
-    if (!r.enabled) return [];
     const online = isRunnerOnline(r.lastSeenAt, now, t.runnerOfflineSec);
     const jobsHeld = heldByRunner.get(r.id) ?? 0;
+    // A disabled runner is a deliberate admin choice, except when it went offline still holding jobs: nothing else
+    // reports those jobs (job_silent skips offline runners), so it keeps its offline condition only.
+    if (!r.enabled && (online || jobsHeld === 0)) return [];
     const offline: RunnerCondition[] = online ? [] : [{ type: 'offline', jobsHeld }];
-    const credentials = r.capabilities ? credentialConditions(r.capabilities) : [];
-    const stale = r.capabilities ? staleCondition(r.capabilities, latest) : null;
+    const caps = r.enabled ? r.capabilities : null;
+    const credentials = caps ? credentialConditions(caps) : [];
+    const stale = caps ? staleCondition(caps, latest) : null;
     const conditions = [...offline, ...credentials, ...(stale ? [stale] : [])];
     if (conditions.length === 0) return [];
     const error = (!online && jobsHeld > 0) || (credentials.length > 0 && providerBlocked.has(r.id));

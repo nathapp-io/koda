@@ -11,6 +11,14 @@ describe('runner_unhealthy (S2b (c) §2.4)', () => {
     expect(run([dashRunner(), dashRunner({ id: 'r2', enabled: false, lastSeenAt: secAgo(5000) })])).toEqual([]);
   });
 
+  it('still reports a disabled runner that went offline holding jobs (nothing else would surface them)', () => {
+    const disabled = dashRunner({ enabled: false, lastSeenAt: secAgo(91), capabilities: dashCaps({ nax: { version: '0.1.0', protocols: ['native'] } }) });
+    expect(run([disabled, dashRunner({ id: 'r9', capabilities: nax('0.83.3') })], new Map([['r1', 2]]))).toEqual([
+      expect.objectContaining({ subjectId: 'r1', severity: 'error', conditions: [{ type: 'offline', jobsHeld: 2 }] }),
+    ]);
+    expect(run([disabled], new Map())).toEqual([]);
+  });
+
   it('warns on an offline runner and errors when it still holds jobs', () => {
     const offline = dashRunner({ lastSeenAt: secAgo(91) });
     expect(run([offline])).toEqual([{
