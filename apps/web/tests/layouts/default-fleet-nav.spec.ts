@@ -79,6 +79,9 @@ describe('Fleet admin nav links', () => {
     expect(html.match(/<a href="\/admin\/fleet\/budgets"[^>]*>[\s\S]*?<\/a>/)?.[0]).toContain('nav.fleetBudgets')
     expect(html.match(/<a href="\/admin\/fleet\/approvals"[^>]*>[\s\S]*?<\/a>/)?.[0]).toContain('nav.fleetApprovals')
     expect(html.match(/<a href="\/admin\/fleet\/analytics"[^>]*>[\s\S]*?<\/a>/)?.[0]).toContain('nav.fleetAnalytics')
+    expect(html.match(/<a href="\/admin\/fleet"[^>]*>[\s\S]*?<\/a>/)?.[0]).toContain('nav.fleetOverview')
+    // D425: the overview is the first admin fleet link.
+    expect(html.indexOf('href="/admin/fleet"')).toBeLessThan(html.indexOf('href="/admin/fleet/runners"'))
   })
 
   test('a non-admin does not see them', async () => {
@@ -89,6 +92,6 @@ describe('Fleet admin nav links', () => {
   // Guards the drift that caused the harness duplication: an unresolved component renders as a bare
   // tag and this spec would still pass, so the fleet links' icons must actually resolve.
   test('every icon the layout renders is registered, including the two fleet ones', async () => {
-    expect(layoutIconNames(layoutSource)).toEqual(expect.arrayContaining(['Server', 'FolderGit2', 'Wallet', 'Inbox']))
+    expect(layoutIconNames(layoutSource)).toEqual(expect.arrayContaining(['Server', 'FolderGit2', 'Wallet', 'Inbox', 'Gauge']))
   })
 })
