@@ -1,8 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
 import type {
-  CostSliceView, DeletedView, FinishOutcomesView, FirstPassPointView, JobAnalyticsView, JobIngestView, JobReviewView, JobRowView, JobsView,
-  JobStoryView, QualityView, ReasonView, ReviewerView, SpendPointView, SpendSeriesView, SpendTotalsView, SpendView, StoriesView,
-  StoryRowView, WindowView,
+  CostSliceView, DeletedView, FinishOutcomesView, FirstPassPointView, IngestHealthView, JobAnalyticsView, JobIngestView, JobReviewView,
+  JobRowView, JobsView, JobStoryView, QualityView, ReasonView, ReviewerView, SpendPointView, SpendSeriesView, SpendTotalsView, SpendView,
+  StoriesView, StoryRowView, WindowView,
 } from '../analytics.types';
 import { ADMIN_GROUPS, Bucket, BUCKETS, GroupBy } from '../domain/analytics.domain';
 
@@ -23,7 +23,7 @@ export class SpendPointDto implements SpendPointView {
 export class SpendSeriesDto implements SpendSeriesView {
   @ApiProperty({ description: 'Group key; `(none)` for an empty dimension; `other` when folded' }) key: string;
   @ApiProperty({ description: 'repo owner/name, runner name, project slug, else the key' }) label: string;
-  @ApiProperty({ description: 'True only for the series that folds every key beyond the top 12' }) folded: boolean;
+  @ApiProperty({ description: 'True only for the series that folds every key beyond the top `top` (default 12)' }) folded: boolean;
   @ApiProperty(USD) costUsd: string;
   @ApiProperty() tokens: number;
   @ApiProperty({ type: [SpendPointDto] }) points: SpendPointDto[];
@@ -34,6 +34,8 @@ export class SpendTotalsDto implements SpendTotalsView {
   @ApiProperty() tokens: number;
   @ApiProperty({ type: Number, nullable: true, description: 'cacheRead / (input + cacheRead), 4 places' }) cacheShare: number | null;
   @ApiProperty() jobs: number;
+  @ApiProperty({ type: String, nullable: true, example: '0.1234', description: 'Median per-job spend in the window (each job counts only its spend inside the window), 4 places; null with no jobs (D388)' })
+  medianJobCostUsd: string | null;
 }
 
 export class SpendAnalyticsDto implements SpendView {
@@ -112,6 +114,12 @@ export class JobAnalyticsRowDto implements JobRowView {
 export class JobsAnalyticsDto implements JobsView {
   @ApiProperty({ type: AnalyticsWindowDto }) window: AnalyticsWindowDto;
   @ApiProperty({ type: [JobAnalyticsRowDto] }) rows: JobAnalyticsRowDto[];
+}
+
+export class IngestHealthDto implements IngestHealthView {
+  @ApiProperty({ type: AnalyticsWindowDto }) window: AnalyticsWindowDto;
+  @ApiProperty({ description: 'Ingest rows pending or running, of jobs finished in the window' }) pending: number;
+  @ApiProperty({ description: 'Ingest rows that failed after their retries' }) failed: number;
 }
 
 export class CostSliceDto implements CostSliceView {

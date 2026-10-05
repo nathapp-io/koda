@@ -13,7 +13,7 @@ DO NOT EDIT MANUALLY — run `nax generate` to regenerate.
 
 **Language:** TypeScript
 
-**Key dependencies:** @nuxtjs/color-mode, @nuxtjs/i18n, @nuxtjs/tailwindcss, @vee-validate/zod, lucide-vue-next, nuxt, radix-vue, shadcn-nuxt, vue, vue-router
+**Key dependencies:** @nuxtjs/color-mode, @nuxtjs/i18n, @nuxtjs/tailwindcss, @unovis/vue, @vee-validate/zod, lucide-vue-next, nuxt, radix-vue, shadcn-nuxt, vue
 
 **Commands:** test: `npx turbo test` | lint: `bunx turbo lint` | typecheck: `bunx turbo type-check`
 
@@ -67,6 +67,7 @@ Current route areas:
 - `/:project/labels`
 - `/:project/tickets/:ref`
 - `/:project/fleet/jobs/:id/logs` (fleet run-log viewer, S2a: entries pages, live `fleet_log` events, filters in the URL)
+- `/:project/fleet/analytics` and `/admin/fleet/analytics` (fleet cost and quality analytics, S2b: window and group in the URL, one panel per query, no polling)
 
 ## API Access Pattern
 
@@ -113,3 +114,14 @@ Useful scripts:
 - `bun run test:e2e`
 - `bun run type-check`
 - `bun run build`
+
+## Fleet analytics (S2b)
+
+- Pure logic lives in `lib/fleet-analytics-{types,format,range,chart}.ts`; composables `useFleetAnalytics`,
+  `useAnalyticsPanel`, `useRefetchOnVisible`; components in `components/fleet/analytics/` plus
+  `components/fleet/JobAnalytics.vue` (the job page section).
+- Money arrives as 4-place strings: show it with `usd()` and never sum or re-round it in the browser (A7).
+- Charts are `@unovis/vue` in `*.client.vue` wrappers only; Jest cannot mount them, so pages are tested with chart
+  stubs. Tooltip HTML goes through `crosshairHtml`/`rateHtml`, which escape every label (keys come from bundles).
+- Colors are `--chart-1`..`--chart-8` and `--chart-other` (globals.css, light and dark); `assignSlots` keeps a key's
+  color across refetches.

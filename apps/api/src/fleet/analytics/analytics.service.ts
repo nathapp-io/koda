@@ -6,10 +6,10 @@ import { ESCALATED_FROM_AUDIT } from '../ingest/ingest-corrections';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { foldSeries } from './analytics-fold';
 import { finishOutcomes, firstPassSeries, reviewerViews, topReasons } from './analytics-quality';
-import { bucketStarts, invalidAnalytics, rate4, resolveWindow, usd4, usd4OrNull } from './analytics-window';
+import { bucketStarts, invalidAnalytics, medianMoney, rate4, resolveWindow, usd4, usd4OrNull } from './analytics-window';
 import type {
-  CostSliceView, DeleteInput, DeletedView, JobAnalyticsView, JobsView, ListInput, QualityView, SpendInput, SpendView, StoriesInput,
-  StoriesView, WindowInput, WindowView,
+  CostSliceView, DeleteInput, DeletedView, IngestHealthView, JobAnalyticsView, JobsView, ListInput, QualityView, SpendInput, SpendView,
+  StoriesInput, StoriesView, WindowInput, WindowView,
 } from './analytics.types';
 import { ANALYTICS_LIMITS, ANALYTICS_REPOSITORY, AnalyticsWindow, CostSliceRow, IAnalyticsRepository } from './domain/analytics.domain';
 
@@ -32,7 +32,11 @@ export class AnalyticsService {
     const w = resolveWindow(q, now);
     const groupBy = q.groupBy ?? 'model';
     const scope = { projectId };
-    const [cells, totals] = await Promise.all([this.repo.spendCells(scope, w, groupBy), this.repo.spendTotals(scope, w.from, w.to)]);
+    const [cells, totals, jobSums] = await Promise.all([
+      this.repo.spendCells(scope, w, groupBy),
+      this.repo.spendTotals(scope, w.from, w.to),
+      this.repo.jobCostSums(scope, w.from, w.to),
+    ]);
     const labels = await this.repo.labels(groupBy, [...new Set(cells.map((c) => c.key))]);
     return {
       window: windowView(w),
@@ -43,8 +47,9 @@ export class AnalyticsService {
         tokens: totals.inputTokens + totals.outputTokens + totals.cacheReadTokens + totals.cacheWriteTokens,
         cacheShare: rate4(totals.cacheReadTokens, totals.inputTokens + totals.cacheReadTokens),
         jobs: totals.jobs,
+        medianJobCostUsd: usd4OrNull(medianMoney(jobSums)),
       },
-      series: foldSeries(cells, bucketStarts(w), labels),
+      series: foldSeries(cells, bucketStarts(w), labels, q.top ?? ANALYTICS_LIMITS.seriesKeep),
     };
   }
 
@@ -90,6 +95,13 @@ export class AnalyticsService {
         finishedAt: iso(r.finishedAt),
       })),
     };
+  }
+
+  /** D388: the project page's "not yet analysed" notice. */
+  async ingestHealth(projectId: string, q: WindowInput, now: Date): Promise<IngestHealthView> {
+    const w = resolveWindow({ from: q.from, to: q.to }, now);
+    const counts = await this.repo.ingestHealth(projectId, w.from, w.to);
+    return { window: windowView(w), ...counts };
   }
 
   /** Spec §4.2 job breakdown, D383. */

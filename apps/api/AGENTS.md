@@ -244,4 +244,6 @@ Rules:
   unrounded `Prisma.Decimal` sums; money becomes a 4-place string only in `AnalyticsService` (`usd4`, A7), never
   summed after rounding. SQL fragments for `groupBy`/`bucket` come from fixed maps keyed by validated enums. Project
   routes `projects/:slug/fleet/analytics/*` and `jobs/:id/analytics` (any member, agents 403); admin routes
-  `fleet/analytics/spend` and `DELETE fleet/analytics` (confirmation required, ingest rows kept and marked).
+  `fleet/analytics/spend` and `DELETE fleet/analytics` (confirmation required, ingest rows kept and marked). Spend takes
+  `top` (1..12) and reports `medianJobCostUsd`; `analytics/ingest` counts pending and failed ingests for the project
+  page notice.

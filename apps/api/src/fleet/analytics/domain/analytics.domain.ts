@@ -158,10 +158,19 @@ export interface JobReviewRow {
   at: Date;
 }
 
+/** D388: ingest rows by status group. */
+export interface IngestHealthRow {
+  /** pending + running */
+  pending: number;
+  failed: number;
+}
+
 /** Spec §4.1-4.2: SQL GROUP BY over indexed columns; money unrounded. */
 export interface IAnalyticsReadRepository {
   spendCells(scope: AnalyticsScope, w: AnalyticsWindow, groupBy: GroupBy): Promise<SpendCell[]>;
   spendTotals(scope: AnalyticsScope, from: Date, to: Date): Promise<SpendTotalsRow>;
+  /** D388: one unrounded spend sum per job with a cost event in the window (the median's input). */
+  jobCostSums(scope: AnalyticsScope, from: Date, to: Date): Promise<Prisma.Decimal[]>;
   /** D377: display names for repo, runner and project keys; other dimensions get an empty map. */
   labels(groupBy: GroupBy, keys: readonly string[]): Promise<ReadonlyMap<string, string>>;
   storyStats(projectId: string, from: Date, to: Date): Promise<StoryStatsRow>;
@@ -178,6 +187,8 @@ export interface IAnalyticsReadRepository {
   latestIngest(jobId: string): Promise<JobIngestRow | null>;
   jobStories(jobId: string, limit: number): Promise<JobStoryRow[]>;
   jobReviews(jobId: string, limit: number): Promise<JobReviewRow[]>;
+  /** D388: ingest rows of the project's jobs finished in [from, to). */
+  ingestHealth(projectId: string, from: Date, to: Date): Promise<IngestHealthRow>;
 }
 
 export interface DeleteAnalyticsInput {

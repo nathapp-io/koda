@@ -59,9 +59,16 @@ describeIntegration('fleet analytics project API (PG)', () => {
       await get(`analytics/spend?${WINDOW}`).expect(200),
     );
     expect(s.bucket).toBe('day');
-    expect(s.totals).toEqual({ costUsd: '0.0001', tokens: 330, cacheShare: 0, jobs: 1 });
+    expect(s.totals).toEqual({ costUsd: '0.0001', tokens: 330, cacheShare: 0, jobs: 1, medianJobCostUsd: '0.0001' });
     expect(s.series.map((x) => [x.key, x.costUsd])).toEqual([['m1', '0.0001'], ['m2', '0.0000']]);
     expect(s.series[0].points).toHaveLength(7);
+  });
+
+  it('folds after `top` series and rejects a top outside 1..12 (D388)', async () => {
+    const s = data<{ series: Array<{ key: string; folded: boolean; costUsd: string }> }>(await get(`analytics/spend?${WINDOW}&top=1`).expect(200));
+    expect(s.series.map((x) => [x.key, x.folded])).toEqual([['m1', false], ['other', true]]);
+    await get(`analytics/spend?${WINDOW}&top=0`).expect(400);
+    await get(`analytics/spend?${WINDOW}&top=13`).expect(400);
   });
 
   it('refuses outsiders and agent keys', async () => {
@@ -116,5 +123,13 @@ describeIntegration('fleet analytics project API (PG)', () => {
     });
     await get(`jobs/${foreignJobId}/analytics`).expect(404);
     await get('jobs/nope/analytics').expect(404);
+  });
+
+  it('answers the ingest counts to members and refuses agent keys (D388)', async () => {
+    const r = data<{ window: unknown; pending: number; failed: number }>(await get(`analytics/ingest?${WINDOW}`).expect(200));
+    expect(r).toEqual({ window: { from: '2026-09-28T00:00:00.000Z', to: '2026-10-05T00:00:00.000Z' }, pending: 0, failed: 0 });
+    await get(`analytics/ingest?${WINDOW}`, 'outsider').expect(403);
+    await request(server).get(`${BASE}/analytics/ingest`).set({ Authorization: `Bearer ${agentKey}` }).expect(403);
+    await get('analytics/ingest?from=2026-10-05T00:00:00Z&to=2026-10-01T00:00:00Z').expect(400);
   });
 });

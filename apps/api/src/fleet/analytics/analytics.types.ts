@@ -8,6 +8,7 @@ export interface WindowInput {
 }
 export interface SpendInput extends WindowInput {
   groupBy?: GroupBy;
+  top?: number;
 }
 export interface ListInput {
   from?: string;
@@ -46,6 +47,8 @@ export interface SpendTotalsView {
   tokens: number;
   cacheShare: number | null;
   jobs: number;
+  /** D388: median per-job spend in the window, 4 places; null with no jobs. */
+  medianJobCostUsd: string | null;
 }
 export interface SpendView {
   window: WindowView;
@@ -114,6 +117,11 @@ export interface JobRowView {
 export interface JobsView {
   window: WindowView;
   rows: JobRowView[];
+}
+export interface IngestHealthView {
+  window: WindowView;
+  pending: number;
+  failed: number;
 }
 export interface CostSliceView {
   key: string;

@@ -51,6 +51,9 @@ const ENUMS: Record<string, string[]> = {
   'fleet.approvals.toast': ['raise_budget_and_resume', 'keep_paused', 'requeueFailed', 'allow', 'allow_for_job', 'deny'],
   'fleet.approvals.delivery': ['delivered', 'failed', 'waiting'],
   'fleet.bash.mode': ['raw', 'gated', 'escalate'],
+  'fleet.analytics.groupBy': ['model', 'stage', 'role', 'repo', 'runner', 'feature', 'story', 'project'],
+  'fleet.analytics.outcome': ['opened', 'promoted', 'escalated', 'skipped', 'other'],
+  'fleet.analytics.ingestStatus': ['pending', 'running', 'done', 'partial', 'failed'],
 }
 
 describe('Fleet locale parity (en and zh)', () => {

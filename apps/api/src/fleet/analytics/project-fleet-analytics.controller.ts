@@ -8,8 +8,8 @@ import { CurrentProject } from '../../projects/current-project.decorator';
 import type { ProjectContext } from '../../projects/project-context';
 import { ProjectMembershipGuard } from '../../projects/project-membership.guard';
 import { AnalyticsService } from './analytics.service';
-import { AnalyticsBucketQuery, JobsQuery, SpendQuery, StoriesQuery } from './dto/analytics-query.dto';
-import { JobAnalyticsDto, JobsAnalyticsDto, QualityAnalyticsDto, SpendAnalyticsDto, StoriesAnalyticsDto } from './dto/analytics-response.dto';
+import { AnalyticsBucketQuery, AnalyticsRangeQuery, JobsQuery, SpendQuery, StoriesQuery } from './dto/analytics-query.dto';
+import { IngestHealthDto, JobAnalyticsDto, JobsAnalyticsDto, QualityAnalyticsDto, SpendAnalyticsDto, StoriesAnalyticsDto } from './dto/analytics-response.dto';
 
 /** Analytics are for people; agent keys get 403, like the jobs and logs controllers. */
 function assertUser(principal: KodaPrincipal): void {
@@ -59,6 +59,15 @@ export class ProjectFleetAnalyticsController {
   async jobs(@Query() raw: JobsQuery, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
     assertUser(principal);
     return JsonResponse.Ok(await this.analytics.jobs(ctx.project.id, parseQuery(JobsQuery, raw), new Date()));
+  }
+
+  @Get('analytics/ingest')
+  @ApiOperation({ summary: 'Ingest rows not yet analysed or failed, for jobs finished in a window (project member, D388)' })
+  @ApiResponse({ status: 200, type: IngestHealthDto })
+  @ApiResponse({ status: 400, description: 'Invalid window' })
+  async ingest(@Query() raw: AnalyticsRangeQuery, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    assertUser(principal);
+    return JsonResponse.Ok(await this.analytics.ingestHealth(ctx.project.id, parseQuery(AnalyticsRangeQuery, raw), new Date()));
   }
 
   @Get('jobs/:id/analytics')

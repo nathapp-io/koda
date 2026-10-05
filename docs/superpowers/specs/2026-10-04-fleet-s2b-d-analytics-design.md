@@ -267,7 +267,9 @@ membership (any role); admin routes need global ADMIN.
   -> `{ window, bucket, totals: {costUsd, tokens, cacheShare, jobs}, series: [{key, points: [{t, costUsd, tokens}]}] }`.
   Each series also carries `label` (repo owner/name, runner name, project slug, else the key), `folded` and its own
   `costUsd`/`tokens`; null dimensions use the key `(none)`; points are zero-filled for every bucket (plan D377, D378).
-  Series beyond the top 12 keys by cost are folded into `key: "other"`.
+  Series beyond the top 12 keys by cost are folded into `key: "other"`. Both spend routes also take `top` (1..12,
+  default 12: series kept before the fold), and `totals` carries `medianJobCostUsd`, the median of per-job unrounded
+  spend in the window (plan D388).
 - `GET /projects/:slug/fleet/analytics/quality?from&to&bucket`
   -> `{ firstPassRate, avgAttempts, stories, reviewByReviewer: [{reviewer, runs, passRate, findingsBySeverity}],
   finishOutcomes: {opened, promoted, escalated, skipped, other}, topEscalationReasons: [{reason, count}] (top 10,
@@ -280,6 +282,8 @@ membership (any role); admin routes need global ADMIN.
   -> `{ window, rows }` with rows `{jobId, command, featureName, state, costUsd, ledgerCostUsd, driftUsd, finishedAt}`.
   `costUsd` = spent + carried; `ledgerCostUsd` sums the job's done/partial ingest rows (null before ingest);
   `driftUsd` = ledger - cost (plan D382).
+- `GET /projects/:slug/fleet/analytics/ingest?from&to` -> `{ window, pending, failed }`: ingest rows of the
+  project's jobs finished in the window; `pending` counts pending and running (plan D388).
 - `GET /projects/:slug/fleet/jobs/:id/analytics`
   -> `{ ingest: {status, files, ingestedAt, error}, byStage, byRole, byModel: [{key, costUsd, tokens}], stories:
   [...], reviews: [...], liveCostUsd, ledgerCostUsd, corrected: boolean }`. 404 when the job is not in the project.
@@ -313,9 +317,10 @@ membership (any role); admin routes need global ADMIN.
 
 ### 5.1 Charts
 
-`@unovis/vue` + `@unovis/ts` through shadcn-vue's chart components (the library shadcn-vue's charts are built on),
-themed from the existing CSS tokens, rendered inside `<ClientOnly>`. A categorical palette of at most 12 series plus
-"other" (matches 4.2's top-12 fold); light and dark verified.
+`@unovis/vue` + `@unovis/ts` in two thin client-only wrappers (stacked area, line); bar lists, tiles and tables are
+plain HTML (plan D389), themed from the existing CSS tokens, rendered client-only (`*.client.vue`). The 8-slot
+categorical palette: the spend chart asks for `top=7`, so at most 7 named series plus "other" (plan D390); light
+and dark verified.
 
 ### 5.2 Project Analytics page `/<project>/fleet/analytics`
 
@@ -335,7 +340,9 @@ Sidebar: Fleet -> Analytics (all project members).
 ### 5.3 Admin page `/admin/fleet/analytics`
 
 The same views across projects (`groupBy=project` available), plus the ingest health table (status, job, project,
-error, attempts) with **Re-run** per row and **Backfill** / **Re-run all (parser upgrade)** actions.
+error, attempts) with **Re-run** per row and **Backfill** / **Re-run all (parser upgrade)** actions. The admin page
+shows spend only (tiles, spend over time, where it goes); quality and the top tables are project-only, and
+delete-on-demand stays API-only (plan D395).
 
 ### 5.4 Job page section "Cost & quality"
 

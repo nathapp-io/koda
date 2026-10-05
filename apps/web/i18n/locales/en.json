@@ -75,7 +75,8 @@
     "fleetRepos": "Repos",
     "fleetJobs": "Fleet jobs",
     "fleetBudgets": "Budgets",
-    "fleetApprovals": "Approvals"
+    "fleetApprovals": "Approvals",
+    "fleetAnalytics": "Fleet analytics"
   },
   "admin": {
     "users": {
@@ -1395,6 +1396,143 @@
         "labelsMax": "At most 16 labels",
         "label": "Labels use lowercase letters, digits, dot, dash or underscore",
         "labelsOrPin": "Choose labels or a runner, not both"
+      }
+    },
+    "analytics": {
+      "title": "Fleet analytics",
+      "subtitle": "Where fleet money goes and what it buys.",
+      "subtitleAdmin": "Spend across every project, and bundle ingest health.",
+      "other": "Other",
+      "panelEmpty": "Nothing in this window.",
+      "panelError": "Could not load this panel.",
+      "empty": "No fleet spend in this window.",
+      "range": {
+        "label": "Window",
+        "d7": "7 days",
+        "d30": "30 days",
+        "d90": "90 days",
+        "custom": "Custom",
+        "from": "From",
+        "to": "To (inclusive)",
+        "apply": "Apply",
+        "invalid": "Pick a start date on or before the end date, at most 366 days apart."
+      },
+      "groupLabel": "Group by",
+      "groupBy": {
+        "model": "Model",
+        "stage": "Stage",
+        "role": "Session role",
+        "repo": "Repo",
+        "runner": "Runner",
+        "feature": "Feature",
+        "story": "Story",
+        "project": "Project"
+      },
+      "tiles": {
+        "spend": "Total spend",
+        "jobs": "Jobs",
+        "median": "Median cost per job",
+        "firstPass": "First-pass rate",
+        "escalations": "Finish escalations",
+        "cacheShare": "Cache share"
+      },
+      "panels": {
+        "spend": "Spend over time",
+        "byStage": "Where it goes: by stage",
+        "byRole": "Where it goes: by session role",
+        "quality": "Quality",
+        "firstPass": "First-pass rate",
+        "reviewers": "Review pass rate by reviewer",
+        "outcomes": "Finish outcomes",
+        "reasons": "Top escalation reasons",
+        "expensiveStories": "Most expensive stories",
+        "loopingStories": "Most-looping stories",
+        "expensiveJobs": "Most expensive jobs"
+      },
+      "chart": {
+        "spendSummary": "Spend over time: {total} in total across {count} groups.",
+        "rateSummary": "First-pass rate per bucket: {rate} over the window.",
+        "showData": "Show data",
+        "bucket": "Bucket",
+        "rate": "First-pass rate"
+      },
+      "legend": {
+        "group": "Group",
+        "cost": "Cost",
+        "tokens": "Tokens"
+      },
+      "outcome": {
+        "opened": "Opened",
+        "promoted": "Promoted",
+        "escalated": "Escalated",
+        "skipped": "Skipped",
+        "other": "Other"
+      },
+      "reviewerDetail": "{rate} of {runs} runs",
+      "reasonCount": "{count} jobs",
+      "table": {
+        "story": "Story",
+        "feature": "Feature",
+        "attempts": "Attempts",
+        "firstPass": "First pass",
+        "success": "Success",
+        "cost": "Cost",
+        "completed": "Completed",
+        "job": "Job",
+        "command": "Command",
+        "state": "State",
+        "ledger": "Ledger",
+        "drift": "Drift",
+        "finished": "Finished",
+        "yes": "Yes",
+        "no": "No"
+      },
+      "ingestNotice": "{pending} runs not yet analysed, {failed} failed.",
+      "ingestNoticeLink": "Review ingest health",
+      "ingestStatus": {
+        "pending": "Pending",
+        "running": "Running",
+        "done": "Done",
+        "partial": "Partial",
+        "failed": "Failed"
+      },
+      "ingest": {
+        "title": "Bundle ingest",
+        "statusFilter": "Status",
+        "all": "All statuses",
+        "status": "Status",
+        "job": "Job",
+        "project": "Project",
+        "attempts": "Attempts",
+        "error": "Error",
+        "updated": "Updated",
+        "rerun": "Re-run",
+        "backfill": "Backfill",
+        "rerunOutdated": "Re-run all (parser upgrade)",
+        "confirmRerunOutdated": "Re-ingest every bundle read by an older parser?",
+        "queued": "Queued {n} bundles.",
+        "empty": "No ingest rows.",
+        "previous": "Previous",
+        "next": "Next",
+        "total": "{total} rows"
+      },
+      "job": {
+        "title": "Cost & quality",
+        "analysis": "Analysis",
+        "files": "Skipped files: {files}",
+        "corrected": "Outcome corrected from finish-audit.",
+        "liveLedger": "Live {live} / ledger {ledger}",
+        "byStage": "By stage",
+        "byRole": "By session role",
+        "byModel": "By model",
+        "stories": "Stories",
+        "reviews": "Reviews",
+        "reviewer": "Reviewer",
+        "passed": "Passed",
+        "findings": "Findings",
+        "noFindings": "None",
+        "refresh": "Refresh",
+        "loadFailed": "Could not load the cost breakdown."
       }
     }
   }

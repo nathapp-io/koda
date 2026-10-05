@@ -58,6 +58,14 @@ export const usd4 = (v: Money | null): string =>
 
 export const usd4OrNull = (v: Money | null): string | null => (v === null ? null : usd4(v));
 
+/** D388: the median of unrounded values (the mean of the middle two for an even count); null with none. */
+export function medianMoney(values: readonly Prisma.Decimal[]): Prisma.Decimal | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a.cmp(b));
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid] : sorted[mid - 1].add(sorted[mid]).div(2);
+}
+
 /** D380: a four-place ratio, null when there is nothing to divide by. */
 export const rate4 = (part: number, whole: number): number | null =>
   whole === 0 ? null : Math.round((part / whole) * 10_000) / 10_000;

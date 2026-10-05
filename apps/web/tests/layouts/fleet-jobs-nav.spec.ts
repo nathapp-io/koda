@@ -33,4 +33,10 @@ describe('fleet jobs navigation', () => {
   test('the approvals inbox has its own breadcrumb leaf (S1.5 1b D239)', () => {
     expect(layout).toContain('if (path === `/${project}/fleet/approvals`) return t(\'fleet.approvals.title\')')
   })
+
+  test('a project link to /:project/fleet/analytics with BarChart3 for every member, and its breadcrumb leaf (S2b D399)', () => {
+    expect(projectLinks).toContain(':to="`/${projectSlug}/fleet/analytics`"')
+    expect(projectLinks).toMatch(/<BarChart3 class="h-4 w-4 shrink-0" \/>\s*\{\{ t\('nav\.fleetAnalytics'\) \}\}/)
+    expect(layout).toContain("if (path === `/${project}/fleet/analytics`) return t('fleet.analytics.title')")
+  })
 })
