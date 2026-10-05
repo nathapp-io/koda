@@ -118,7 +118,7 @@ function extractCommitSha(url: string): string {
 }
 
 function prStateClass(state: string | null | undefined): string {
-  return [chipClass, PR_STATE_CLASS[state ?? ''] ?? 'text-muted-foreground']
+  return [chipClass, PR_STATE_CLASS[state ?? ''] ?? 'text-muted-foreground'].join(' ')
 }
 
 const vcsPullRequestLinks = computed(() => {

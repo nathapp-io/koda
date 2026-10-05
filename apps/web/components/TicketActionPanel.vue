@@ -37,7 +37,9 @@ const canSubmit = computed(() => comment.value.trim().length > 0)
 
 type PanelAction = DialogAction | 'start'
 
-const PRIMARY_ORDER: PanelAction[] = ['verify', 'start', 'fix', 'verify-fix-approve']
+type PrimaryCandidate = 'verify' | 'start' | 'fix' | 'verify-fix-approve'
+
+const PRIMARY_ORDER: PrimaryCandidate[] = ['verify', 'start', 'fix', 'verify-fix-approve']
 
 function actionLabel(action: PanelAction): string {
   switch (action) {
@@ -59,7 +61,7 @@ function openApproveFixDialog() {
   openDialog('verify-fix-approve')
 }
 
-const primaryAction = computed<PanelAction | null>(() => {
+const primaryAction = computed<PrimaryCandidate | null>(() => {
   for (const action of PRIMARY_ORDER) {
     if (action === 'verify-fix-approve') {
       if (actions.value.has('verify-fix')) return action
@@ -74,7 +76,8 @@ const primaryRun = computed<() => void>(() => {
   const action = primaryAction.value
   if (action === 'start') return handleStart
   if (action === 'verify-fix-approve') return openApproveFixDialog
-  return () => openDialog((action ?? 'verify') as DialogAction)
+  if (action === 'verify' || action === 'fix') return () => openDialog(action)
+  return () => {}
 })
 
 const secondaryActions = computed<Array<{ key: DialogAction; label: string; run: () => void }>>(() => {
