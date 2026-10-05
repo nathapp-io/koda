@@ -26,7 +26,8 @@ the project routes (`projects/:slug/fleet/...`, membership guard) and the admin 
 
 - New API code lives under `apps/api/src/fleet/analytics/`; unit specs next to the source (`*.spec.ts`), integration
   specs under `apps/api/test/integration/fleet/` (`*.integration.spec.ts`).
-- Window: `from`, `to` (ISO 8601, UTC), half-open `[from, to)`; default `to` = now, `from` = `to` minus 30 days; a
+- Window: `from`, `to` (ISO 8601, UTC: a date, or an instant ending in `Z`; an offset-less datetime would parse in
+  the server's local zone, so the DTOs reject it), half-open `[from, to)`; default `to` = now, `from` = `to` minus 30 days; a
   window longer than 366 days -> 400; `from >= to` -> 400.
 - `bucket`: `day | week | month` (UTC; weeks start Monday, the same as Postgres `date_trunc('week', ...)`). Default
   from the window length: `<= 31` days day, `<= 182` days week, else month.
@@ -69,12 +70,12 @@ Numbered from D376 (slice 1a ended at D375).
 | D379 | `tokens` = input + output + cacheRead + cacheWrite. `totals.jobs` = distinct jobs with a cost event in the window. | One token measure everywhere; job count follows the money's time attribution. |
 | D380 | Rates (`firstPassRate`, `passRate`, `cacheShare`, `firstPassSeries[].rate`) and `avgAttempts` are numbers rounded to 4 places, `null` with a zero denominator. | A7 covers money only. A rate needs no string precision, and `null` is honest when there is no data. |
 | D381 | `finishOutcomes` counts jobs with a non-null `finishResult`: `opened`; `promoted` <- `promoted`, `already-ready`; `escalated`; `skipped` <- `skipped`, `nothing-to-finish`; anything else -> `other`. The mapping uses a `Map` (untrusted strings such as `constructor` cannot hit the prototype). | nax `FinishResult.status` is `opened \| promoted \| already-ready \| escalated \| nothing-to-finish` (`packages/nax/src/execution/status-file.ts:60`); koda also stores `skipped`. |
-| D382 | **Spec addition (§4.2):** the stories and jobs routes answer `{window, rows}`. A job row's `costUsd` = `costSpentUsd + costCarriedUsd` (what budgets count); `ledgerCostUsd` = the sum of the job's `done`/`partial` ingest rows' `ledgerCostUsd`, `null` when there are none; `driftUsd` = ledger - cost, `null` with no ledger. | The window travels with the rows, as for spend. Drift compares the same span (all attempts) on both sides. |
-| D383 | Job analytics: cost slices, stories and reviews span **all attempts** (story and review rows carry `leaseEpoch`); `ingest`, `liveCostUsd`, `ledgerCostUsd` come from the **latest-attempt** ingest row; `corrected` = `stateReason === ESCALATED_FROM_AUDIT`; stories and reviews are capped at 500 rows each. | The job page shows the job's total money; the ingest badge and live/ledger note describe the attempt the job row describes (D367). |
+| D382 | **Spec addition (§4.2):** the stories and jobs routes answer `{window, rows}`; quality also returns `window` and `bucket`; story rows carry `leaseEpoch`. A job row's `costUsd` = `costSpentUsd + costCarriedUsd` (what budgets count); `ledgerCostUsd` = the sum of the job's `done`/`partial` ingest rows' `ledgerCostUsd`, `null` when there are none; `driftUsd` = ledger - cost, `null` with no ledger. | The window travels with the rows, as for spend. Drift compares the same span (all attempts) on both sides. |
+| D383 | Job analytics also returns `jobId`, and `ingest` carries its `leaseEpoch`. Cost slices, stories and reviews span **all attempts** (story and review rows carry `leaseEpoch`); `ingest`, `liveCostUsd`, `ledgerCostUsd` come from the **latest-attempt** ingest row; `corrected` = `stateReason === ESCALATED_FROM_AUDIT`; stories and reviews are capped at 500 rows each. | The job page shows the job's total money; the ingest badge and live/ledger note describe the attempt the job row describes (D367). |
 | D384 | **Spec detail (§4.3 delete):** `projectId` is optional; omitted = all projects, `confirm` must be `ALL`; given = `confirm` must be that project's slug, unknown project -> 404. Story rows with a null `completedAt` match through their job's `finishedAt`. Every ingest row of an affected job gets `files.deleted = "<before ISO>"` (the files map is string-valued). Activity: `analytics.deleted`, `entityType: 'analytics'` (new), `entityId: projectId ?? 'all'`, payload `{before, costEvents, stories, reviews, ingestRowsMarked}`. A later admin re-run of that job re-creates its rows while the bundle is unexpired. | Spec says "by `at`/`completedAt` < `before`"; an incomplete story would otherwise never be deletable. A string marker keeps `IngestRowDto.files` honest. |
 | D385 | Cross-field query errors raise `ValidationAppException({reason}, 'fleet.analyticsQuery')` (400); a wrong delete confirmation raises `ValidationAppException({expected}, 'fleet.analyticsDelete')` (400). Single-field errors stay with the class-validator DTOs (400 from the global pipe). | Matches `fleet.logQuery` and friends; the translation guard covers the new keys. |
-| D386 | **Spec addition (§4.4):** `koda fleet analytics spend --all-projects` switches to the admin route (and allows `--group-by project`); the other analytics commands are project-only. No CLI command for delete: the destructive admin action stays API-only until the slice 2 admin page. `ingest status` uses a local `IngestRow` interface: paged routes are untyped in OpenAPI (house style, e.g. `FleetPage<FleetJobDto>`). | Spec §4.4 lists no delete command; members never need cross-project spend. |
-| D387 | No throttle on analytics reads. | Each query is an indexed `GROUP BY` bounded by the 366-day window; the logs throttle exists for byte scans. |
+| D386 | **Spec addition (§4.4):** `koda fleet analytics spend --all-projects` switches to the admin route (and allows `--group-by project`); the other analytics commands are project-only. `jobs` has a single sort value (`cost`), so the CLI offers `--sort` on `stories` only. No CLI command for delete: the destructive admin action stays API-only until the slice 2 admin page. `ingest status` uses a local `IngestRow` interface: paged routes are untyped in OpenAPI (house style, e.g. `FleetPage<FleetJobDto>`). | Spec §4.4 lists no delete command; members never need cross-project spend. |
+| D387 | No analytics-specific throttle; the global default (100/min per client, `app.module.ts`) applies. The escalation-reason read returns every distinct raw reason in the window (merged by first line in JS); accepted as bounded by the 366-day window. | Each query is an indexed `GROUP BY` bounded by the 366-day window; the logs throttle exists for byte scans. |
 
 ## Review Focus
 
@@ -541,8 +542,8 @@ describe('fleet analytics translation keys', () => {
 - [ ] **Step 3: Run them to verify they fail**
 
 Run: `cd apps/api && bun run test:scoped src/fleet/analytics/analytics-window.spec.ts src/fleet/analytics/analytics-fold.spec.ts test/unit/i18n/fleet-analytics-translation-keys.spec.ts`
-Expected: FAIL — `Cannot find module './analytics-window'` / `'./analytics-fold'`; the translation spec fails with
-`expected "undefined" to be "string"`.
+Expected: FAIL — `Cannot find module './analytics-window'` / `'./analytics-fold'`; the translation spec fails on
+`expect(typeof enText).toBe('string')` (Expected `"string"`, Received `"undefined"`).
 
 - [ ] **Step 4: Implement the helpers**
 
@@ -1442,6 +1443,7 @@ describeIntegration('analytics delete-on-demand (PG)', () => {
     await prisma.$disconnect();
   });
 
+  // These tests share state and run in order: run the file whole, never with `-t`.
   it('finds a project slug, null for an unknown id', async () => {
     expect(await repo.findProjectSlug(a.projectId)).toBe(a.projectSlug);
     expect(await repo.findProjectSlug('nope')).toBeNull();
@@ -2108,6 +2110,7 @@ describeIntegration('fleet analytics project API (PG)', () => {
     await get('analytics/spend?groupBy=bogus').expect(400);
     await get('analytics/spend?bucket=hour').expect(400);
     await get('analytics/spend?from=yesterday').expect(400);
+    await get('analytics/spend?from=2026-10-01T00:00:00').expect(400); // no Z: would parse in the server's zone
     await get('analytics/spend?from=2026-10-05T00:00:00Z&to=2026-10-01T00:00:00Z').expect(400);
     await get('analytics/spend?from=2025-01-01T00:00:00Z&to=2026-01-03T00:00:00Z').expect(400);
     await get('analytics/stories?limit=51').expect(400);
@@ -2164,18 +2167,25 @@ Expected: FAIL — 404 on `/api/projects/web/fleet/analytics/spend`.
 ```ts
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsISO8601, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsIn, IsInt, IsISO8601, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import {
   ADMIN_GROUPS, ANALYTICS_LIMITS, Bucket, BUCKETS, GroupBy, JOB_SORTS, JobSort, PROJECT_GROUPS, ProjectGroupBy, STORY_SORTS, StorySort,
 } from '../domain/analytics.domain';
 
+/**
+ * A date (UTC midnight) or an instant ending in Z. An offset-less datetime would parse in the server's local zone,
+ * and `+hh:mm` loses its `+` in a query string, so only these two forms are accepted.
+ */
+const UTC_INSTANT = /^\d{4}-\d{2}-\d{2}(T[0-9:.]+Z)?$/;
+const UTC_MESSAGE = { message: 'use a date (YYYY-MM-DD) or a UTC instant ending in Z' };
+
 /** Spec §4.1. Pass through `parseQuery` (the global pipe validates but does not transform). */
 export class AnalyticsRangeQuery {
-  @ApiPropertyOptional({ format: 'date-time', description: 'Window start, inclusive (UTC); default `to` minus 30 days' })
-  @IsOptional() @IsISO8601({ strict: true }) from?: string;
+  @ApiPropertyOptional({ format: 'date-time', description: 'Window start, inclusive (UTC date or instant ending in Z); default `to` minus 30 days' })
+  @IsOptional() @IsISO8601({ strict: true }) @Matches(UTC_INSTANT, UTC_MESSAGE) from?: string;
 
-  @ApiPropertyOptional({ format: 'date-time', description: 'Window end, exclusive (UTC); default now. At most 366 days after `from`' })
-  @IsOptional() @IsISO8601({ strict: true }) to?: string;
+  @ApiPropertyOptional({ format: 'date-time', description: 'Window end, exclusive (UTC date or instant ending in Z); default now. At most 366 days after `from`' })
+  @IsOptional() @IsISO8601({ strict: true }) @Matches(UTC_INSTANT, UTC_MESSAGE) to?: string;
 }
 
 export class AnalyticsBucketQuery extends AnalyticsRangeQuery {
@@ -2211,8 +2221,8 @@ export class JobsQuery extends AnalyticsRangeQuery {
 
 /** Spec §4.3, D384. */
 export class DeleteAnalyticsQuery {
-  @ApiProperty({ format: 'date-time', description: 'Delete rows dated before this instant' })
-  @IsISO8601({ strict: true }) before: string;
+  @ApiProperty({ format: 'date-time', description: 'Delete rows dated before this instant (UTC date or instant ending in Z)' })
+  @IsISO8601({ strict: true }) @Matches(UTC_INSTANT, UTC_MESSAGE) before: string;
 
   @ApiPropertyOptional({ description: 'Only this project; omit for every project' })
   @IsOptional() @IsString() @MaxLength(64) projectId?: string;
@@ -2613,6 +2623,7 @@ describeIntegration('fleet analytics admin API (PG)', () => {
     await del('', 'ALL').expect(400);
     await del('?before=2026-10-05T00:00:00Z', undefined).expect(400);
     await del('?before=2026-10-05T00:00:00Z', 'web').expect(400);
+    await del('?before=2026-10-05T00:00:00', 'ALL').expect(400); // no Z
     await del(`?before=2026-10-05T00:00:00Z&projectId=${world.projectId}`, 'ALL').expect(400);
     await del('?before=2026-10-05T00:00:00Z&projectId=nope', 'nope').expect(404);
     expect(await prisma.fleetCostEvent.count()).toBe(3);
@@ -2692,7 +2703,7 @@ In `apps/api/src/fleet/analytics/analytics.module.ts`, add
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cd apps/api && bun run test:scoped test/integration/fleet/fleet-analytics-admin-api.integration.spec.ts test/integration/fleet/fleet-analytics-api.integration.spec.ts`
-Expected: PASS (both suites; wait a minute between them if the login throttle trips).
+Expected: PASS (both suites).
 
 - [ ] **Step 5: Commit**
 
@@ -2923,7 +2934,9 @@ describe('koda fleet analytics', () => {
     (projectFleetAnalyticsControllerJob as jest.Mock).mockResolvedValue(ok({
       jobId: 'j1', ingest: { leaseEpoch: 2, status: 'partial', files: { review: 'skipped:v3' }, ingestedAt: null, error: null },
       byStage: [{ key: 'run', costUsd: '0.4000', tokens: 10 }], byRole: [], byModel: [{ key: 'm1', costUsd: '0.4000', tokens: 10 }],
-      stories: [], reviews: [], liveCostUsd: '0.3500', ledgerCostUsd: '0.4000', corrected: true,
+      stories: [{ leaseEpoch: 2, featureName: 'f', storyId: 'US-1', attempts: 1, firstPassSuccess: true, success: true, costUsd: '0.4000', durationMs: null, completedAt: null }],
+      reviews: [{ leaseEpoch: 2, storyId: null, reviewer: 'semantic', passed: false, failOpen: false, findingCount: 1, findingsBySeverity: { error: 1 }, advisoryCount: 0, at: '2026-10-04T00:00:00.000Z' }],
+      liveCostUsd: '0.3500', ledgerCostUsd: '0.4000', corrected: true,
     }));
     await run('job', 'analytics', 'j1');
     expect(projectFleetAnalyticsControllerJob).toHaveBeenCalledWith({ path: { slug: 'web', id: 'j1' } });
@@ -2932,6 +2945,9 @@ describe('koda fleet analytics', () => {
     expect(out()).toContain('Outcome corrected from finish-audit');
     expect(out()).toContain('Live 0.3500 USD / ledger 0.4000 USD');
     expect(out()).toContain('run');
+    expect(out()).toContain('US-1');
+    expect(out()).toContain('semantic');
+    expect(out()).toContain('error:1');
   });
 
   it('job analytics says when nothing is analysed yet', async () => {
@@ -3486,7 +3502,8 @@ git commit -m "feat(cli): koda fleet ingest status, backfill and rerun (S2b §4.
 ### Task 10: Docs, full verification, PR
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-10-04-fleet-s2b-d-analytics-design.md` (D377, D382, D384, D386)
+- Modify: `docs/superpowers/specs/2026-10-04-fleet-s2b-d-analytics-design.md` (D377, D382-D384, D386)
+- Modify: `docs/deployment/runner.md` (CLI cheat sheet)
 - Modify: `.nax/mono/apps/api/context.md`, `.nax/mono/apps/cli/context.md`, then regenerate agent files
 
 - [ ] **Step 1: Apply the spec additions**
@@ -3496,17 +3513,22 @@ In the spec:
 - §4.2 spend bullet: after `series: [{key, points: [{t, costUsd, tokens}]}] }`, add "Each series also carries
   `label` (repo owner/name, runner name, project slug, else the key), `folded` and its own `costUsd`/`tokens`; null
   dimensions use the key `(none)`; points are zero-filled for every bucket (plan D377, D378)."
-- §4.2 stories and jobs bullets: replace `-> rows` with `-> { window, rows }`, and add to the jobs bullet:
-  "`costUsd` = spent + carried; `ledgerCostUsd` sums the job's done/partial ingest rows (null before ingest);
-  `driftUsd` = ledger - cost (plan D382)."
-- §4.3 delete bullet: append "`projectId` optional (omitted = every project, confirm `ALL`); stories with a null
-  `completedAt` match through the job's `finishedAt`; `files.deleted` holds the `before` instant as a string (plan
-  D384)."
-- §4.4: append "`analytics spend --all-projects` uses the admin route; there is no CLI delete (plan D386)."
+- §4.2 stories and jobs bullets: replace `-> rows` with `-> { window, rows }` (story rows also carry `leaseEpoch`),
+  and add to the jobs bullet: "`costUsd` = spent + carried; `ledgerCostUsd` sums the job's done/partial ingest rows
+  (null before ingest); `driftUsd` = ledger - cost (plan D382)."
+- §4.2 quality bullet: append "The response also carries `window` and `bucket` (plan D382)."
+- §4.2 job analytics bullet: append "Also `jobId`; `ingest` carries its `leaseEpoch`; slices, stories and reviews span
+  every attempt, ingest and live/ledger describe the latest attempt (plan D383)."
+- §4.3 delete bullet: change the code span `files.deleted = true` to `files.deleted = "<before ISO>"`, and
+  append "`projectId` optional (omitted = every project, confirm `ALL`); stories with a null `completedAt` match
+  through the job's `finishedAt` (plan D384)."
+- §4.4: append "`analytics spend --all-projects` uses the admin route; `--sort` exists on `stories` only; there is no
+  CLI delete (plan D386)."
 
 - [ ] **Step 2: Document the modules in the agent context**
 
-Append to `.nax/mono/apps/api/context.md`, right after the `src/fleet/ingest/` bullet:
+In `.nax/mono/apps/api/context.md`, insert after the `src/fleet/ingest/` bullet (it ends with the line
+``untrusted: only allowlisted paths, capped sizes, typed field readers. Admin routes: `fleet/ingest`.``):
 
 ```markdown
 - `src/fleet/analytics/` (S2b): read-only cost and quality analytics over the ingest tables. The repository returns
@@ -3516,35 +3538,64 @@ Append to `.nax/mono/apps/api/context.md`, right after the `src/fleet/ingest/` b
   `fleet/analytics/spend` and `DELETE fleet/analytics` (confirmation required, ingest rows kept and marked).
 ```
 
-In `.nax/mono/apps/cli/context.md`, under its architecture/key files list, add:
+In `.nax/mono/apps/cli/context.md`, add as the last bullet of the "Entry points and key files:" list, right after
+the `` `src/generated/`: generated API client, source controlled but not hand-edited`` line:
 
 ```markdown
 - `apps/cli/src/commands/fleet-analytics.ts`, `fleet-ingest.ts`: `koda fleet analytics …`, `koda fleet job analytics`,
   `koda fleet ingest …`. Money arrives as 4-place strings from the API: print it as-is, never re-round or sum it.
 ```
 
-Run: `nax generate` (repo root), then `git status` and confirm only the two context files and generated agent files
-(`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `codex.md` at the root and under `apps/*`) changed.
+In `docs/deployment/runner.md`, section "Operate from the CLI": add to the intro paragraph "Analytics commands need
+project membership; `koda fleet ingest …` and `koda fleet analytics spend --all-projects` need the global-admin
+token." and add these lines to the command block, after the `koda fleet schedule disable` line:
+
+```bash
+koda fleet analytics spend --group-by stage         # where the money goes; --bucket, --from/--to, --all-projects (admin)
+koda fleet analytics quality                        # first pass, attempts, reviews, finish outcomes, escalation reasons
+koda fleet analytics stories --sort attempts        # most looping stories; jobs = most expensive jobs with ledger drift
+koda fleet job analytics <jobId>                    # cost by stage/role/model, stories, reviews, live vs ledger
+koda fleet ingest status --status failed            # bundle ingest health (admin); backfill; rerun <jobId> | --all
+```
+
+Run (repo root): `nax generate` and then `nax generate --all-packages` (never one scope alone). Then `git status`
+must show only the two context files, `docs/deployment/runner.md`, the spec, and generated agent files (`AGENTS.md`,
+`CLAUDE.md`, `GEMINI.md`, `codex.md`, `.cursorrules`, `.windsurfrules`, `.aider.conf.yml`, at the root and under
+`apps/*`). Never hand-edit a generated file.
 
 - [ ] **Step 3: Full verification**
 
 Run, from the repo root:
 
 ```bash
-bun run lint
-bun run type-check
+bun run lint -- --force
+bun run type-check -- --force
 cd apps/api && bun run test:unit && bun run test:db:up && bun run test:scoped test/integration/fleet
 cd ../cli && bun run test
 ```
 
-Expected: all green. Fix any failure before continuing (login-throttle failures: rerun that file alone after a
-minute).
+Expected: all green (`--force` bypasses the turbo cache, which can replay a stale green). Fix any failure before
+continuing (login-throttle failures: rerun that file alone after a minute).
 
-- [ ] **Step 4: Commit and open the PR**
+- [ ] **Step 4: Commit the docs**
 
 ```bash
-git add docs/superpowers/specs/2026-10-04-fleet-s2b-d-analytics-design.md .nax AGENTS.md CLAUDE.md GEMINI.md codex.md apps/*/AGENTS.md apps/*/CLAUDE.md apps/*/GEMINI.md apps/*/codex.md
-git commit -m "docs(fleet): S2b analytics spec additions (D377, D382, D384, D386) and agent context"
+git add docs/superpowers/specs/2026-10-04-fleet-s2b-d-analytics-design.md docs/deployment/runner.md .nax/mono/apps/api/context.md .nax/mono/apps/cli/context.md
+git add -u -- AGENTS.md CLAUDE.md GEMINI.md codex.md .cursorrules .windsurfrules .aider.conf.yml 'apps/*/AGENTS.md' 'apps/*/CLAUDE.md' 'apps/*/GEMINI.md' 'apps/*/codex.md' 'apps/*/.cursorrules' 'apps/*/.windsurfrules' 'apps/*/.aider.conf.yml'
+git status --short   # must be empty except files unrelated to this branch
+git commit -m "docs(fleet): S2b analytics spec additions (D377, D382-D384, D386), runner CLI docs and agent context"
+```
+
+- [ ] **Step 5: Review before push (required)**
+
+Run the `nax-toolkit:post-impl-review` skill with `--phase full` against this spec
+(`docs/superpowers/specs/2026-10-04-fleet-s2b-d-analytics-design.md`, §4 and §6 slice 1b rows), then a code review
+of `git diff main...HEAD` (`code-review` skill or the `code-reviewer` agent). Fix CRITICAL and HIGH findings, at
+most 2 fix rounds; list anything left in the PR body. Then **stop and ask the user for approval** before pushing.
+
+- [ ] **Step 6: Push and open the PR (after approval)**
+
+```bash
 git push -u origin feat/fleet-s2b-analytics-api
 gh pr create --title "feat(fleet): S2b slice 1b — analytics query API and CLI (D376-D387)" --body "$(cat <<'EOF'
 ## Summary
@@ -3572,5 +3623,8 @@ EOF
   shipped in 1a (D370); admin spend + delete -> Tasks 3, 4, 6. §4.4 CLI -> Tasks 8-9; regenerated client -> Task 7.
   §6 API + CLI test rows -> Tasks 5-9. §5 web is slice 2 by design.
 - Review Focus: 1 -> Tasks 4, 5; 2 -> Tasks 1, 2, 5; 3 -> Task 2; 4 -> Tasks 5, 6; 5 -> Tasks 3, 6.
+- Final review 2026-10-05 (three read-only reviewers: Tasks 1-4, 5-7, 8-10 + spec coverage): no BLOCKER; applied
+  the review gate before push, `nax generate --all-packages`, UTC-only `from`/`to`/`before`, spec-edit and doc
+  fixes, D382/D383/D386/D387 wording, and a CLI test that exercises the job stories/reviews tables.
 - Generated CLI names in Tasks 8-9 follow the existing `<controllerClass><Method>` pattern (`fleetIngestControllerList`
   in slice 1a); Task 7 Step 3 is where a mismatch would show.
