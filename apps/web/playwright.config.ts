@@ -68,6 +68,9 @@ export default defineConfig({
         FLEET_TEST_HOOKS: 'true',
         // S1.5 2b: the bash e2e waits for the 15 s approval expiry sweep; do not depend on NODE_ENV defaults.
         FLEET_SWEEP_ENABLED: 'true',
+        // S2b (c) D426: the dashboard reports a queued job no runner fits after 10 s (the env schema minimum) instead
+        // of 60 s. Only the dashboard reads this threshold.
+        FLEET_JOB_QUEUED_WARN_SEC: '10',
       },
     },
     {
