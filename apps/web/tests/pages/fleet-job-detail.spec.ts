@@ -112,4 +112,10 @@ describe('job detail', () => {
     expect(detail).toMatch(/async function reloadSilently\(\)[\s\S]*?await loadLogList\(\)/)
     expect(liveHandlers(detail)).toContain('if (event.jobId === jobId && !logAttempts.value.includes(event.leaseEpoch)) liveReload.trigger()')
   })
+
+  test('S2b: the cost and quality section reloads with every live reload (D396)', () => {
+    expect(detail).toContain("import FleetJobAnalytics from '~/components/fleet/JobAnalytics.vue'")
+    expect(detail).toContain('<FleetJobAnalytics :slug="slug" :job-id="jobId" :reload-key="analyticsReload" />')
+    expect(detail).toMatch(/async function reloadSilently\(\): Promise<void> \{\s*analyticsReload\.value \+= 1/)
+  })
 })

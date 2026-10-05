@@ -16,6 +16,7 @@ import { useFleetApprovals } from '~/composables/useFleetApprovals'
 import { firstPending, inboxPath } from '~/lib/fleet-approvals'
 import { bashSummary } from '~/lib/fleet-bash-mode'
 import FleetJobApprovals from '~/components/fleet/JobApprovals.vue'
+import FleetJobAnalytics from '~/components/fleet/JobAnalytics.vue'
 import { bundleExpiredByLogs, logAttemptEpochs } from '~/lib/fleet-job-logs-link'
 import type { FleetJobLogListDto } from '~/lib/fleet-log-types'
 
@@ -138,8 +139,12 @@ async function catchUpEvents(): Promise<void> {
   }
 }
 
+/** D396: bumped on every live reload; the Cost & quality section refetches on it (ingest completion publishes one). */
+const analyticsReload = ref(0)
+
 /** Live: never flip `pending` (it would swap the page for LoadingState); a failure waits for the next event. */
 async function reloadSilently(): Promise<void> {
+  analyticsReload.value += 1
   try {
     job.value = await jobsApi.get(jobId)
     await catchUpEvents()
@@ -289,6 +294,8 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
         <p class="font-medium">{{ t('fleet.jobs.detail.escalation') }}</p>
         <p class="whitespace-pre-wrap text-muted-foreground">{{ job.escalationReason }}</p>
       </div>
+
+      <FleetJobAnalytics :slug="slug" :job-id="jobId" :reload-key="analyticsReload" />
 
       <FleetJobApprovals v-if="showApprovals" :slug="slug" :approvals="jobApprovals" :now="now" />
 
