@@ -46,8 +46,8 @@ Principles:
 | # | Slice | Status |
 |:--|:------|:-------|
 | 0 | Shell, tokens, command palette, board filters | **Done** (PR #215 merged 2026-10-05) |
-| 1 | Ticket detail page | Implemented on `feat/web-ux-ticket-detail` (uncommitted — commit/PR on request). Jest 3,110 green, ESLint clean, ticket e2e (lifecycle, operations, roles, git-ref) green |
-| 2 | Dashboard / home | Not started |
+| 1 | Ticket detail page | **Done** (PR #222 merged 2026-10-06) |
+| 2 | Dashboard / home | **Done** on `feat/web-ux-slices-2-3-4` — new `GET /home` aggregate API + needs-you/projects/activity dashboard |
 | 3 | Shared patterns + docs refresh | Not started |
 | 4 | Fleet pages | Not started |
 | 5 | Settings, KB, Agents, Labels, auth pages | Not started |
@@ -160,3 +160,7 @@ Update these in Slice 3 (or sooner if you touch the area):
 | 2026-10-05 | Slice 1: rail mutations (assign/label/link/delete/transition) reload via silent GETs (`Promise.all`), never `refresh()` | `refresh()` flips `pending`, swaps the page for `LoadingState` and unmounts the rail mid-interaction — caught by the add-link e2e (input wiped between fill and click) |
 | 2026-10-05 | Slice 1: chip markup keeps the label on the same line as the dot span | Playwright `getByText(/^X$/)` does not whitespace-normalize; a mustache on its own line renders `" X"` and broke `ticket-lifecycle`. `{ exact: true }` normalizes, regex does not |
 | 2026-10-05 | Slice 1: activity timeline of system events (transitions, PR links) is not built — `CommentThread` stays the only activity source | Needs timeline/aggregate API data (same gap as the dashboard slice); revisit in slice 2 or 3 |
+| 2026-10-06 | Slice 2: the dashboard's data comes from a new aggregate endpoint `GET /home` (`apps/api/src/home`), not browser-side fan-out | The plan's rule: API-owned aggregation, one request per dashboard. Member projects for users (all live projects for a global admin), pending approvals incl. no-project ones for admins, 7-day failed-job window, blocked jobs derived from pending approvals. openapi.json + CLI client regenerated |
+| 2026-10-06 | Slice 2: "attention jobs" = FAILED/ESCALATED/CRASHED finished within 7 days plus QUEUED/ASSIGNED jobs holding a pending approval; per-project "attention" counts use the same set | "Needs you" should be finite and recent; everything older is history the fleet pages already cover |
+| 2026-10-06 | Slice 2: caps at 8/8/8/10 (tickets/approvals/jobs/activity) with exact totals next to each list | Totals stay true behind the caps so "n of m" is honest without pagination on the dashboard |
+| 2026-10-06 | Slice 2: `tests/pages/projects-index.spec.ts` deleted; `loading-states.spec.ts` grid pin now reads `data-testid="home-needs-you"` behind the v-else chain; harness `mount-sfc.ts` gained `useAsyncData` as an injectable auto-import | The card grid the old spec pinned no longer exists; the behavioral replacement is `tests/pages/home-dashboard.spec.ts` + three component specs |

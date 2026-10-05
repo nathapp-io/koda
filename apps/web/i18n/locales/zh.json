@@ -665,6 +665,20 @@
       "memoryGrowthRate": "内存增长率"
     }
   },
+  "home": {
+    "subtitle": "跨项目的待办一览",
+    "needsYou": "需要你处理",
+    "needsYouEmpty": "暂无需要处理的事项",
+    "tickets": { "title": "我的工单", "empty": "没有分配给你的未完成工单" },
+    "approvals": { "title": "审批", "empty": "没有待审批项" },
+    "jobs": { "title": "异常任务", "empty": "近 7 天没有失败或受阻的任务" },
+    "projects": { "title": "项目", "open": "{n} 个进行中", "attention": "{n} 个需要关注" },
+    "activity": {
+      "title": "最近动态",
+      "empty": "暂无最近动态",
+      "eventType": { "ticket_event": "工单", "agent_event": "代理", "decision_event": "决策" }
+    }
+  },
   "fleet": {
     "common": {
       "online": "在线",

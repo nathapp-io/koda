@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-8">
-    <PageHeader :title="t('projects.title')" :subtitle="t('projects.subtitle')">
+    <PageHeader :title="t('nav.dashboard')" :subtitle="t('home.subtitle')">
       <template #actions>
         <Button @click="showCreateDialog = true">
           {{ t('projects.newProject') }}
@@ -10,27 +10,32 @@
 
     <LoadingState v-if="pending" />
     <ErrorState v-else-if="error" @retry="refresh()" />
-    <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      <template v-if="projects.length > 0">
-        <Card v-for="project in projects" :key="project.id">
-          <CardHeader>
-            <div class="flex items-center justify-between">
-              <CardTitle class="text-lg">{{ project.name }}</CardTitle>
-              <Badge variant="outline">{{ project.key }}</Badge>
-            </div>
-            <CardDescription class="line-clamp-2 overflow-hidden">
-              {{ project.description }}
-            </CardDescription>
-          </CardHeader>
-          <CardFooter>
-            <NuxtLink :to="`/${project.slug}`" class="w-full">
-              <Button variant="outline" class="w-full">{{ t('common.viewBoard') }}</Button>
-            </NuxtLink>
-          </CardFooter>
-        </Card>
+    <template v-else>
+      <EmptyState
+        v-if="!home || home.projects.length === 0"
+        :message="t('projects.noProjectsHint')"
+        :icon="FolderPlus"
+      >
+        <Button class="mt-4" @click="showCreateDialog = true">{{ t('projects.newProject') }}</Button>
+      </EmptyState>
+
+      <template v-else>
+        <section class="space-y-3" data-testid="home-needs-you">
+          <h2 class="text-lg font-semibold">{{ t('home.needsYou') }}</h2>
+          <HomeNeedsYou :needs-you="home.needsYou" :now="now" />
+        </section>
+
+        <section class="space-y-3" data-testid="home-projects">
+          <h2 class="text-lg font-semibold">{{ t('home.projects.title') }}</h2>
+          <HomeProjectList :projects="home.projects" />
+        </section>
+
+        <section class="space-y-3" data-testid="home-activity">
+          <h2 class="text-lg font-semibold">{{ t('home.activity.title') }}</h2>
+          <HomeActivityList :activity="home.activity" :now="now" />
+        </section>
       </template>
-      <EmptyState v-else :message="t('projects.noProjects')" />
-    </div>
+    </template>
 
     <CreateProjectDialog
       v-if="showCreateDialog"
@@ -42,27 +47,32 @@
 </template>
 
 <script setup lang="ts">
+import { FolderPlus } from 'lucide-vue-next'
+import type { HomeSnapshot } from '~/lib/home-types'
+
 definePageMeta({ layout: 'default' })
 
 const { t } = useI18n()
-
-interface Project {
-  id: number
-  name: string
-  key: string
-  slug: string
-  description?: string
-}
 
 const showCreateDialog = ref(false)
 
 const { $api } = useApi()
 
-const { data: projectsData, pending, error, refresh } = useAsyncData('projects', () =>
-  $api.get('/projects') as Promise<Project[]>
+const { data: home, pending, error, refresh } = useAsyncData('home', () =>
+  $api.get('/home') as Promise<HomeSnapshot>,
 )
 
-const projects = computed(() => projectsData.value ?? [])
+// Coarse clock for the relative ages; ages read "2m ago", so a 30 s tick is plenty.
+const now = ref(new Date())
+let clock: ReturnType<typeof setInterval> | undefined
+onMounted(() => {
+  clock = setInterval(() => {
+    now.value = new Date()
+  }, 30_000)
+})
+onBeforeUnmount(() => {
+  if (clock) clearInterval(clock)
+})
 
 function onProjectCreated() {
   showCreateDialog.value = false
