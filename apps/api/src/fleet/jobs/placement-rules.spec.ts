@@ -1,5 +1,8 @@
 import type { RunnerCapabilities } from '../common/protocol';
-import { EMPTY_LOAD, firstMisfit, orderCandidates, PERMANENT_MISFITS, PlacementJob, PlacementRunner } from './placement-rules';
+import {
+  EMPTY_LOAD, evaluateRunners, firstMisfit, orderCandidates, PERMANENT_MISFITS, PlacementJob, PlacementRunner, QUEUED_SCAN_LIMIT,
+  toLoads, toPlacementJob,
+} from './placement-rules';
 
 const NOW = new Date('2026-10-01T12:00:00.000Z');
 const cred = (over: Record<string, unknown> = {}) => ({ providerId: 'deepseek', available: true, stored: null, ambient: false, ...over });
@@ -114,5 +117,45 @@ describe('placement rules (spec §4)', () => {
     const c = { runner: runner({ id: 'c', lastSeenAt: new Date(1) }), load: { active: 0, repoIds: new Set<string>() } };
     const d = { runner: runner({ id: 'd', lastSeenAt: new Date(1) }), load: { active: 0, repoIds: new Set<string>() } };
     expect(orderCandidates([a, b, d, c]).map((x) => x.runner.id)).toEqual(['c', 'd', 'b', 'a']);
+  });
+});
+
+describe('evaluateRunners (S2b (c) §2.3)', () => {
+  it('returns one verdict per runner, applying each runner pause and load', () => {
+    const loads = new Map([['r2', { active: 1, repoIds: new Set(['other-repo']) }]]);
+    const out = evaluateRunners(job(), [runner({ id: 'r1' }), runner({ id: 'r2' }), runner({ id: 'r3' })], loads, (id) => id === 'r3', NOW, 90);
+    expect(out.map((v) => [v.runner.id, v.reason])).toEqual([['r1', null], ['r2', 'capacity'], ['r3', 'budget_paused']]);
+    expect(out[2].runner.budgetPaused).toBe(true);
+    expect(out[0].runner.budgetPaused).toBe(false);
+    expect(out[0].load).toBe(EMPTY_LOAD);
+  });
+
+  it("keeps the caller's runner type (placeJob needs bootId back)", () => {
+    const [v] = evaluateRunners(job(), [{ ...runner(), bootId: 'boot-9' }], new Map(), () => false, NOW, 90);
+    expect(v.runner.bootId).toBe('boot-9');
+  });
+
+  it('agrees with firstMisfit for a pinned job: labels are ignored', () => {
+    const pinned = job({ pinnedRunnerId: 'r1', selectorLabels: ['nope'] });
+    const [v] = evaluateRunners(pinned, [runner()], new Map(), () => false, NOW, 90);
+    expect(v.reason).toBe(misfit(pinned, runner()));
+  });
+});
+
+describe('placement helpers moved from PlacementService (D413)', () => {
+  it('toLoads counts held jobs and their repos per runner', () => {
+    const loads = toLoads([{ runnerId: 'r1', repoId: 'a' }, { runnerId: 'r1', repoId: 'b' }, { runnerId: 'r2', repoId: 'a' }]);
+    expect(loads.get('r1')).toEqual({ active: 2, repoIds: new Set(['a', 'b']) });
+    expect(loads.get('r2')).toEqual({ active: 1, repoIds: new Set(['a']) });
+    expect(loads.get('r3')).toBeUndefined();
+  });
+
+  it('toPlacementJob copies the placement fields and the repo provider', () => {
+    expect(toPlacementJob({ repoId: 'x', profiles: ['p'], selectorLabels: ['l'], pinnedRunnerId: null, bashMode: 'gated' }, { provider: 'gitlab' }))
+      .toEqual({ repoId: 'x', provider: 'gitlab', profiles: ['p'], selectorLabels: ['l'], pinnedRunnerId: null, bashMode: 'gated' });
+  });
+
+  it('keeps the placement scan window at 50', () => {
+    expect(QUEUED_SCAN_LIMIT).toBe(50);
   });
 });
