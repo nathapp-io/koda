@@ -3,6 +3,7 @@ import { registerFleetAnalytics } from './fleet-analytics';
 import { registerFleetApproval } from './fleet-approval';
 import { registerFleetBudget } from './fleet-budget';
 import { registerFleetDispatch } from './fleet-dispatch';
+import { registerFleetIngest } from './fleet-ingest';
 import { registerFleetJob } from './fleet-job';
 import { registerFleetRepo } from './fleet-repo';
 import { registerFleetRunner } from './fleet-runner';
@@ -20,5 +21,6 @@ export function fleetCommand(program: Command): Command {
   registerFleetApproval(fleet);
   registerFleetSchedule(fleet);
   registerFleetAnalytics(fleet);
+  registerFleetIngest(fleet);
   return fleet;
 }
