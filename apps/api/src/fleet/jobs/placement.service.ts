@@ -10,10 +10,10 @@ import { budgetReason, jobGateKeys } from '../budgets/budget-rules';
 import { buildAssignPayload, gitIdentityFor } from './assign-payload';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import { JobTransitionsService, SYSTEM_ACTOR } from './job-transitions.service';
-import { EMPTY_LOAD, firstMisfit, MisfitReason, orderCandidates, PlacementJob, RunnerLoad } from './placement-rules';
+import { EMPTY_LOAD, evaluateRunners, firstMisfit, MisfitReason, orderCandidates, PlacementJob, QUEUED_SCAN_LIMIT, toLoads, toPlacementJob } from './placement-rules';
 import { RunnerNotifier } from './runner-notifier';
 import {
-  ActiveJobRef, FLEET_JOB_REPOSITORY, FleetJobRecord, FleetRepoRef, IFleetJobRepository, PlacementRunnerRow,
+  FLEET_JOB_REPOSITORY, FleetJobRecord, FleetRepoRef, IFleetJobRepository, PlacementRunnerRow,
 } from './domain/fleet-job.domain';
 
 export interface PlacementOutcome {
@@ -22,19 +22,6 @@ export interface PlacementOutcome {
   leaseEpoch: number | null;
   misfits: Array<{ runnerId: string; name: string; reason: MisfitReason }>;
 }
-
-/** Oldest-first scan window per fill. 50 unplaceable old jobs can hide newer ones from a runner; fine at S1 scale (home fleet). */
-const QUEUED_SCAN_LIMIT = 50;
-
-const toLoads = (refs: readonly ActiveJobRef[]): ReadonlyMap<string, RunnerLoad> =>
-  refs.reduce((acc, { runnerId, repoId }) => {
-    const prev = acc.get(runnerId) ?? EMPTY_LOAD;
-    return new Map([...acc, [runnerId, { active: prev.active + 1, repoIds: new Set([...prev.repoIds, repoId]) }]]);
-  }, new Map<string, RunnerLoad>());
-
-export const toPlacementJob = (job: Pick<FleetJobRecord, 'repoId' | 'profiles' | 'selectorLabels' | 'pinnedRunnerId' | 'bashMode'>, repo: Pick<FleetRepoRef, 'provider'>): PlacementJob => ({
-  repoId: job.repoId, provider: repo.provider, profiles: job.profiles, selectorLabels: job.selectorLabels, pinnedRunnerId: job.pinnedRunnerId, bashMode: job.bashMode,
-});
 
 /**
  * Spec §4 + §6.1. placeJob runs at dispatch and requeue; fillRunner when a runner syncs
@@ -95,11 +82,7 @@ export class PlacementService {
       const runners = await this.repo.findPlacementRunners(ids);
       const loads = toLoads(await this.repo.findActiveLoads(ids));
       const placementJob = toPlacementJob(job, repo);
-      const evaluated = runners.map((row) => {
-        const runner = { ...row, budgetPaused: pauses.runnerPaused(row.id) };
-        const load = loads.get(runner.id) ?? EMPTY_LOAD;
-        return { runner, load, reason: firstMisfit(placementJob, runner, load, now, this.fleetConfig.runnerOfflineSec) };
-      });
+      const evaluated = evaluateRunners(placementJob, runners, loads, (id) => pauses.runnerPaused(id), now, this.fleetConfig.runnerOfflineSec);
       const misfits = evaluated
         .filter((e) => e.reason !== null)
         .map((e) => ({ runnerId: e.runner.id, name: e.runner.name, reason: e.reason as MisfitReason }));

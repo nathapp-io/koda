@@ -7968,6 +7968,69 @@
           "fleet"
         ]
       }
+    },
+    "/api/projects/{slug}/fleet/dashboard": {
+      "get": {
+        "operationId": "ProjectFleetDashboardController_get",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetDashboardDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The project's fleet health: its jobs, runner health, attention items (project member)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/dashboard": {
+      "get": {
+        "operationId": "FleetDashboardController_get",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetDashboardDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Fleet health across every project: runners, active and recent jobs, attention items (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      }
     }
   },
   "info": {
@@ -12464,6 +12527,568 @@
           "stories",
           "reviews",
           "ingestRowsMarked"
+        ]
+      },
+      "AttentionReasonDto": {
+        "type": "object",
+        "properties": {
+          "runnerName": {
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "disabled",
+              "offline",
+              "budget_paused",
+              "labels",
+              "executor",
+              "protocol",
+              "provider_missing",
+              "provider_unavailable",
+              "sandbox",
+              "tools",
+              "approvals_relay",
+              "busy_repo",
+              "capacity"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "runnerName",
+          "reason"
+        ]
+      },
+      "RunnerConditionDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "enum": [
+              "offline",
+              "credential",
+              "stale_nax",
+              "configuration"
+            ],
+            "type": "string",
+            "description": "Project scope sees only offline and configuration"
+          },
+          "jobsHeld": {
+            "type": "number",
+            "description": "offline: runner-held jobs of every project"
+          },
+          "providerId": {
+            "type": "string",
+            "description": "credential (global admin scope only)"
+          },
+          "why": {
+            "enum": [
+              "missing",
+              "unavailable",
+              "expired"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "type": "string",
+            "description": "stale_nax: this runner (global admin scope only)"
+          },
+          "latest": {
+            "type": "string",
+            "description": "stale_nax: newest online core version (global admin scope only)"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "DashboardCountsDto": {
+        "type": "object",
+        "properties": {
+          "runnersOnline": {
+            "type": "number"
+          },
+          "runnersTotal": {
+            "type": "number"
+          },
+          "queued": {
+            "type": "number",
+            "description": "QUEUED jobs in scope (not capped)"
+          },
+          "running": {
+            "type": "number",
+            "description": "ASSIGNED + RUNNING + UPLOADING jobs in scope (not capped)"
+          },
+          "attention": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "runnersOnline",
+          "runnersTotal",
+          "queued",
+          "running",
+          "attention"
+        ]
+      },
+      "DashboardCredentialDto": {
+        "type": "object",
+        "properties": {
+          "providerId": {
+            "type": "string"
+          },
+          "available": {
+            "type": "boolean",
+            "description": "nax's verdict (ignores OAuth access-token expiry)"
+          },
+          "kind": {
+            "enum": [
+              "api-key",
+              "oauth"
+            ],
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "expired": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "providerId",
+          "available",
+          "kind",
+          "expiresAt",
+          "expired"
+        ]
+      },
+      "DashboardRunnerDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "os": {
+            "type": "string",
+            "enum": [
+              "darwin",
+              "linux"
+            ]
+          },
+          "arch": {
+            "type": "string",
+            "enum": [
+              "arm64",
+              "x64"
+            ]
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "online": {
+            "type": "boolean",
+            "description": "Synced within FLEET_RUNNER_OFFLINE_SEC"
+          },
+          "lastSeenAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "capacity": {
+            "type": "number"
+          },
+          "activeJobs": {
+            "type": "number",
+            "description": "Runner-held jobs of every project"
+          },
+          "naxVersion": {
+            "type": "string",
+            "nullable": true,
+            "description": "Global admin scope only; null in project scope or when capabilities are unreadable"
+          },
+          "daemonVersion": {
+            "type": "string",
+            "nullable": true,
+            "description": "Global admin scope only"
+          },
+          "credentials": {
+            "description": "Global admin scope only; empty in project scope",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DashboardCredentialDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "os",
+          "arch",
+          "labels",
+          "enabled",
+          "online",
+          "lastSeenAt",
+          "capacity",
+          "activeJobs",
+          "naxVersion",
+          "daemonVersion",
+          "credentials"
+        ]
+      },
+      "DashboardActiveJobDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectSlug": {
+            "type": "string"
+          },
+          "repo": {
+            "type": "string",
+            "example": "acme/app"
+          },
+          "feature": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string",
+            "enum": [
+              "RUN",
+              "PLAN"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "ASSIGNED",
+              "RUNNING",
+              "UPLOADING"
+            ]
+          },
+          "runnerId": {
+            "type": "string",
+            "nullable": true
+          },
+          "runnerName": {
+            "type": "string",
+            "nullable": true
+          },
+          "currentStoryId": {
+            "type": "string",
+            "nullable": true
+          },
+          "currentPhase": {
+            "type": "string",
+            "nullable": true
+          },
+          "storiesDone": {
+            "type": "number",
+            "nullable": true,
+            "description": "Stories with status passed; null when unknown or truncated"
+          },
+          "storiesTotal": {
+            "type": "number",
+            "nullable": true
+          },
+          "costSpentUsd": {
+            "type": "string",
+            "example": "0.42",
+            "description": "Decimal as string"
+          },
+          "maxCostUsd": {
+            "type": "string",
+            "example": "0.42",
+            "description": "Decimal as string"
+          },
+          "queuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "lastHeartbeatAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "pendingApprovals": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "projectSlug",
+          "repo",
+          "feature",
+          "command",
+          "state",
+          "runnerId",
+          "runnerName",
+          "currentStoryId",
+          "currentPhase",
+          "storiesDone",
+          "storiesTotal",
+          "costSpentUsd",
+          "maxCostUsd",
+          "queuedAt",
+          "startedAt",
+          "lastHeartbeatAt",
+          "pendingApprovals"
+        ]
+      },
+      "DashboardRecentJobDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectSlug": {
+            "type": "string"
+          },
+          "repo": {
+            "type": "string",
+            "example": "acme/app"
+          },
+          "feature": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string",
+            "enum": [
+              "RUN",
+              "PLAN"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "COMPLETED",
+              "FAILED",
+              "ESCALATED",
+              "CRASHED",
+              "CANCELLED"
+            ]
+          },
+          "stateReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "runnerName": {
+            "type": "string",
+            "nullable": true
+          },
+          "costSpentUsd": {
+            "type": "string",
+            "example": "0.42",
+            "description": "Decimal as string"
+          },
+          "startedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resultPrUrl": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "projectSlug",
+          "repo",
+          "feature",
+          "command",
+          "state",
+          "stateReason",
+          "runnerName",
+          "costSpentUsd",
+          "startedAt",
+          "finishedAt",
+          "resultPrUrl"
+        ]
+      },
+      "AttentionItemDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "`${kind}:${subjectId}`, stable across polls"
+          },
+          "kind": {
+            "enum": [
+              "job_silent",
+              "job_waiting_approval",
+              "job_unplaceable",
+              "runner_unhealthy"
+            ],
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "error",
+              "warning"
+            ],
+            "type": "string"
+          },
+          "subjectType": {
+            "enum": [
+              "job",
+              "runner"
+            ],
+            "type": "string"
+          },
+          "subjectId": {
+            "type": "string"
+          },
+          "subjectName": {
+            "type": "string",
+            "description": "Job feature or runner name"
+          },
+          "projectSlug": {
+            "type": "string",
+            "nullable": true,
+            "description": "null for runner items"
+          },
+          "since": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "When the condition started; null when unknown"
+          },
+          "stage": {
+            "enum": [
+              "starting",
+              "running"
+            ],
+            "type": "string"
+          },
+          "silentSec": {
+            "type": "number"
+          },
+          "runnerName": {
+            "type": "string",
+            "nullable": true
+          },
+          "pending": {
+            "type": "number"
+          },
+          "oldestSec": {
+            "type": "number"
+          },
+          "verdict": {
+            "enum": [
+              "never",
+              "budget_paused",
+              "runners_paused",
+              "waiting_capacity",
+              "no_fit",
+              "no_runners",
+              "fits_not_placed"
+            ],
+            "type": "string"
+          },
+          "reasons": {
+            "description": "At most 20, by runner name",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttentionReasonDto"
+            }
+          },
+          "reasonsTotal": {
+            "type": "number"
+          },
+          "conditions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunnerConditionDto"
+            }
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "severity",
+          "subjectType",
+          "subjectId",
+          "subjectName",
+          "projectSlug",
+          "since"
+        ]
+      },
+      "FleetDashboardDto": {
+        "type": "object",
+        "properties": {
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Server time every age is measured against"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/DashboardCountsDto"
+          },
+          "runners": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DashboardRunnerDto"
+            }
+          },
+          "activeJobs": {
+            "description": "Oldest first, at most 200",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DashboardActiveJobDto"
+            }
+          },
+          "activeTruncated": {
+            "type": "boolean"
+          },
+          "recentJobs": {
+            "description": "Finished in the last 24 h, newest first, at most 20",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DashboardRecentJobDto"
+            }
+          },
+          "recentTruncated": {
+            "type": "boolean"
+          },
+          "attention": {
+            "description": "Errors first, then oldest since",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttentionItemDto"
+            }
+          }
+        },
+        "required": [
+          "generatedAt",
+          "counts",
+          "runners",
+          "activeJobs",
+          "activeTruncated",
+          "recentJobs",
+          "recentTruncated",
+          "attention"
         ]
       }
     }

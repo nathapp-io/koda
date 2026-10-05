@@ -71,6 +71,10 @@ const envSchema = Joi.object({
   FLEET_ENROLLMENT_RETENTION_DAYS: Joi.number().integer().min(0).max(3_650).optional(),
   FLEET_GIT_TOKEN_REUSE_MARGIN_SEC: Joi.number().integer().min(1).max(3_600).optional(),
   FLEET_GITLAB_TOKEN_TTL_SEC: Joi.number().integer().min(60).max(86_400).optional(),
+  FLEET_JOB_SILENT_SEC: Joi.number().integer().min(30).max(86_400).optional(),
+  FLEET_JOB_SILENT_ERROR_SEC: Joi.number().integer().min(30).max(86_400).optional(),
+  FLEET_JOB_START_SEC: Joi.number().integer().min(30).max(86_400).optional(),
+  FLEET_JOB_QUEUED_WARN_SEC: Joi.number().integer().min(10).max(86_400).optional(),
 }).unknown(true);
 
 export function validate(config: Record<string, unknown>): Record<string, unknown> {

@@ -9,10 +9,10 @@ import { Command } from 'commander';
 import { fleetCommand } from './fleet';
 
 describe('fleetCommand', () => {
-  it('registers the fleet group with runner, repo, dispatch, ingest, job, budget, schedule, approval and analytics', () => {
+  it('registers the fleet group with runner, repo, dispatch, ingest, job, budget, schedule, approval, analytics and status', () => {
     const program = new Command();
     fleetCommand(program);
     const fleet = program.commands.find((c) => c.name() === 'fleet');
-    expect(fleet?.commands.map((c) => c.name()).sort()).toEqual(['analytics', 'approval', 'budget', 'dispatch', 'ingest', 'job', 'repo', 'runner', 'schedule']);
+    expect(fleet?.commands.map((c) => c.name()).sort()).toEqual(['analytics', 'approval', 'budget', 'dispatch', 'ingest', 'job', 'repo', 'runner', 'schedule', 'status']);
   });
 });

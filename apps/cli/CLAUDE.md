@@ -51,8 +51,9 @@ Entry points and key files:
 - `src/commands/`: command modules
 - `src/utils/`: output/error/auth helpers
 - `src/generated/`: generated API client, source controlled but not hand-edited
-- `apps/cli/src/commands/fleet-analytics.ts`, `fleet-ingest.ts`: `koda fleet analytics …`, `koda fleet job analytics`,
-  `koda fleet ingest …`. Money arrives as 4-place strings from the API: print it as-is, never re-round or sum it.
+- `apps/cli/src/commands/fleet-analytics.ts`, `fleet-ingest.ts`, `fleet-status.ts`: `koda fleet analytics …`, `koda fleet job analytics`,
+  `koda fleet ingest …`, `koda fleet status`. Money arrives as 4-place strings from the API: print it as-is, never re-round or sum it.
+  `fleet status` words attention items from their structured fields (`describeAttention`); the API sends no prose.
 
 Command surface currently includes:
 - login

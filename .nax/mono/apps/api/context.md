@@ -225,3 +225,8 @@ Rules:
   `fleet/analytics/spend` and `DELETE fleet/analytics` (confirmation required, ingest rows kept and marked). Spend takes
   `top` (1..12) and reports `medianJobCostUsd`; `analytics/ingest` counts pending and failed ingests for the project
   page notice.
+- `src/fleet/dashboard/` (S2b (c)): read-only fleet health snapshot for `GET /fleet/dashboard` (global admin) and
+  `GET /projects/:slug/fleet/dashboard` (member, agents 403). Attention rules are pure functions in `attention-*.ts`;
+  the "queued but not placed" dry-run calls `evaluateRunners` from `jobs/placement-rules.ts`, never a copy of the
+  placement logic. The API sends structured attention fields, no prose (clients word them). Project scope must not
+  carry another project's job ids, features, repos or slugs, nor any credential provider, expiry or version.

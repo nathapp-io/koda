@@ -1,5 +1,6 @@
 import type { RunnerCapabilities, BashMode } from '../common/protocol';
 import { isRunnerOnline } from '../common/runner-online';
+import type { FleetJobRecord, FleetRepoRef } from './domain/fleet-job.domain';
 
 /** The first placement rule a runner fails (spec §4), reported per runner at dispatch. */
 export type MisfitReason =
@@ -88,4 +89,46 @@ export function orderCandidates<T extends { runner: PlacementRunner; load: Runne
       a.runner.lastSeenAt.getTime() - b.runner.lastSeenAt.getTime() ||
       a.runner.id.localeCompare(b.runner.id),
   );
+}
+
+/** Oldest-first scan window per fill (moved from placement.service.ts, D413). The dashboard dry-run reads the same window (S2b (c) §2.3). */
+export const QUEUED_SCAN_LIMIT = 50;
+
+/** Runner-held job refs -> per-runner load (moved from placement.service.ts, D413). */
+export const toLoads = (refs: readonly { runnerId: string; repoId: string }[]): ReadonlyMap<string, RunnerLoad> =>
+  refs.reduce((acc, { runnerId, repoId }) => {
+    const prev = acc.get(runnerId) ?? EMPTY_LOAD;
+    return new Map([...acc, [runnerId, { active: prev.active + 1, repoIds: new Set([...prev.repoIds, repoId]) }]]);
+  }, new Map<string, RunnerLoad>());
+
+export const toPlacementJob = (
+  job: Pick<FleetJobRecord, 'repoId' | 'profiles' | 'selectorLabels' | 'pinnedRunnerId' | 'bashMode'>,
+  repo: Pick<FleetRepoRef, 'provider'>,
+): PlacementJob => ({
+  repoId: job.repoId, provider: repo.provider, profiles: job.profiles, selectorLabels: job.selectorLabels, pinnedRunnerId: job.pinnedRunnerId, bashMode: job.bashMode,
+});
+
+export interface RunnerVerdict<R extends PlacementRunner = PlacementRunner> {
+  runner: R;
+  load: RunnerLoad;
+  reason: MisfitReason | null;
+}
+
+/**
+ * Spec §4 steps 1-3 for every candidate, with the runner's own budget pause applied. Shared by
+ * PlacementService.placeJob and the dashboard dry-run (S2b (c) §2.3) so the two cannot drift.
+ */
+export function evaluateRunners<R extends PlacementRunner>(
+  job: PlacementJob,
+  runners: readonly R[],
+  loads: ReadonlyMap<string, RunnerLoad>,
+  runnerPaused: (runnerId: string) => boolean,
+  now: Date,
+  offlineSec: number,
+): Array<RunnerVerdict<R>> {
+  return runners.map((row) => {
+    const runner = { ...row, budgetPaused: runnerPaused(row.id) };
+    const load = loads.get(row.id) ?? EMPTY_LOAD;
+    return { runner, load, reason: firstMisfit(job, runner, load, now, offlineSec) };
+  });
 }
