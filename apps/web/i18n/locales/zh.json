@@ -76,7 +76,23 @@
     "fleetJobs": "Fleet 任务",
     "fleetBudgets": "预算",
     "fleetApprovals": "审批",
-    "fleetAnalytics": "集群分析"
+    "fleetAnalytics": "集群分析",
+    "skipToContent": "跳到主要内容",
+    "primary": "主导航",
+    "sectionWorkspace": "工作区",
+    "sectionAdmin": "管理",
+    "sectionWork": "工作",
+    "sectionKnowledge": "知识",
+    "sectionFleet": "机群"
+  },
+  "palette": {
+    "trigger": "搜索或跳转…",
+    "title": "命令面板",
+    "description": "搜索页面和项目，按回车打开。",
+    "placeholder": "输入页面或项目名称…",
+    "empty": "没有匹配项。",
+    "project": "项目",
+    "toggleTheme": "切换浅色/深色主题"
   },
   "admin": {
     "users": {
@@ -173,6 +189,7 @@
     }
   },
   "tickets": {
+    "filter": { "search": "按编号或标题筛选…", "priority": "优先级", "clear": "清除筛选", "showing": "显示 {n} / {total}" },
     "newTicket": "新建工单",
     "loadMore": "加载更多",
     "live": { "deleted": "此工单已被删除。" },

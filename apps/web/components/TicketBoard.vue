@@ -35,6 +35,15 @@ const COLUMNS: Ticket['status'][] = [
   'REJECTED',
 ]
 
+const STATUS_DOT: Record<Ticket['status'], string> = {
+  CREATED: 'bg-status-todo',
+  VERIFIED: 'bg-status-todo',
+  IN_PROGRESS: 'bg-status-active',
+  VERIFY_FIX: 'bg-status-review',
+  CLOSED: 'bg-status-done',
+  REJECTED: 'bg-status-rejected',
+}
+
 function ticketsForStatus(status: string): Ticket[] {
   return props.tickets.filter((t) => t.status === status)
 }
@@ -42,15 +51,16 @@ function ticketsForStatus(status: string): Ticket[] {
 
 <template>
   <div class="overflow-x-auto">
-    <div class="flex gap-4 min-w-max p-4">
+    <div class="flex gap-3 min-w-max pb-4">
       <div
         v-for="status in COLUMNS"
         :key="status"
         :data-testid="`board-column-${status}`"
-        class="w-64 flex flex-col gap-2 rounded-lg bg-muted/30 border border-border/50 p-3"
+        class="w-72 flex flex-col gap-2 rounded-lg bg-muted/50 border border-border/60 p-2.5"
       >
         <div class="flex items-center justify-between mb-1">
           <div class="flex items-center gap-2">
+            <span :class="['h-2 w-2 rounded-full', STATUS_DOT[status]]" aria-hidden="true" />
             <span class="text-sm font-semibold">{{ t(`tickets.status.${status}`) }}</span>
             <Badge variant="secondary">{{ ticketsForStatus(status).length }}</Badge>
           </div>

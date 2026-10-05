@@ -50,6 +50,13 @@ function priorityClass(priority: string): string {
   return ''
 }
 
+function priorityStripe(priority: string): string {
+  if (priority === 'CRITICAL') return 'border-l-priority-critical'
+  if (priority === 'HIGH') return 'border-l-priority-high'
+  if (priority === 'MEDIUM') return 'border-l-priority-medium'
+  return 'border-l-priority-low'
+}
+
 function assigneeInitials(assignee: Assignee): string {
   return assignee.name
     .split(' ')
@@ -79,12 +86,19 @@ function prStateVariant(state: string): string {
 </script>
 
 <template>
-  <Card class="cursor-pointer hover:shadow-md transition-shadow" @click="emit('open')">
-    <CardContent class="p-4">
+  <Card
+    role="button"
+    tabindex="0"
+    :class="['cursor-pointer border-l-4 shadow-none transition-colors hover:border-ring/60 hover:bg-accent/40', priorityStripe(ticket.priority)]"
+    @click="emit('open')"
+    @keydown.enter.self="emit('open')"
+    @keydown.space.self.prevent="emit('open')"
+  >
+    <CardContent class="p-3">
       <div class="flex items-start justify-between gap-2">
         <div class="flex-1 min-w-0">
           <span class="font-mono text-xs text-muted-foreground">{{ ticket.ref }}</span>
-          <p class="mt-1 text-sm font-medium leading-snug truncate">{{ ticket.title }}</p>
+          <p class="mt-1 line-clamp-2 text-sm font-medium leading-snug" :title="ticket.title">{{ ticket.title }}</p>
           <div class="mt-2 flex flex-wrap gap-1">
             <Badge
               variant="outline"
