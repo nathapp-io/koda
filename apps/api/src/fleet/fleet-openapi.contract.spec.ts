@@ -117,4 +117,17 @@ describe('fleet OpenAPI contract', () => {
     expect(spendParams('/api/projects/{slug}/fleet/analytics/spend')).toContain('top');
     expect(spendParams('/api/fleet/analytics/spend')).toContain('top');
   });
+
+  it('exposes the dashboard routes and schemas (S2b (c) §1-§2)', () => {
+    expect(spec.paths['/api/fleet/dashboard']?.['get']).toBeDefined();
+    expect(spec.paths['/api/projects/{slug}/fleet/dashboard']?.['get']).toBeDefined();
+    expect(Object.keys(spec.components.schemas['FleetDashboardDto']?.properties ?? {}).sort())
+      .toEqual(['activeJobs', 'activeTruncated', 'attention', 'counts', 'generatedAt', 'recentJobs', 'recentTruncated', 'runners']);
+    expect(Object.keys(spec.components.schemas['AttentionItemDto']?.properties ?? {}))
+      .toEqual(expect.arrayContaining(['key', 'kind', 'severity', 'subjectType', 'since', 'stage', 'verdict', 'reasons', 'reasonsTotal', 'conditions']));
+    expect(JSON.stringify(spec.components.schemas['AttentionItemDto'])).toContain('fits_not_placed');
+    expect(Object.keys(spec.components.schemas['RunnerConditionDto']?.properties ?? {}))
+      .toEqual(expect.arrayContaining(['type', 'jobsHeld', 'providerId', 'why', 'version', 'latest']));
+    expect(spec.components.schemas['AttentionReasonDto']).toBeDefined();
+  });
 });
