@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users, Server, FolderGit2, Rocket, Wallet, Inbox, BarChart3, Settings, Search, Menu } from 'lucide-vue-next'
+import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users, Server, FolderGit2, Rocket, Wallet, Inbox, BarChart3, Gauge, Settings, Search, Menu } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const auth = useAuth()
@@ -35,8 +35,9 @@ const navLinkClass =
 const activeClass = 'bg-accent text-accent-foreground'
 const sectionLabelClass = 'px-2.5 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/80'
 
-/** The last crumb under `/:project/fleet/*`: dispatch, budgets, approvals, or (anything else) a job. */
+/** The last crumb under `/:project/fleet/*`: overview, dispatch, budgets, approvals, analytics, or (anything else) a job. */
 function fleetLeaf(project: string, path: string): string {
+  if (path === `/${project}/fleet/overview`) return t('fleet.dashboard.title')
   if (path === `/${project}/fleet/dispatch`) return t('fleet.jobs.dispatch')
   if (path === `/${project}/fleet/budgets`) return t('fleet.budgets.title')
   if (path === `/${project}/fleet/approvals`) return t('fleet.approvals.title')
@@ -150,6 +151,8 @@ const backTo = computed(() => {
         <p v-if="isGlobalAdmin" :class="sectionLabelClass">{{ t('nav.sectionAdmin') }}</p>
         <NuxtLink v-if="isGlobalAdmin" to="/admin/users" :class="navLinkClass" :active-class="activeClass"><Users class="h-4 w-4 shrink-0" />{{ t('nav.users') }}</NuxtLink>
 
+        <NuxtLink v-if="isGlobalAdmin" to="/admin/fleet" :class="navLinkClass" :active-class="activeClass"><Gauge class="h-4 w-4 shrink-0" />{{ t('nav.fleetOverview') }}</NuxtLink>
+
         <NuxtLink v-if="isGlobalAdmin" to="/admin/fleet/runners" :class="navLinkClass" :active-class="activeClass"><Server class="h-4 w-4 shrink-0" />{{ t('nav.fleetRunners') }}</NuxtLink>
 
         <NuxtLink v-if="isGlobalAdmin" to="/admin/fleet/repos" :class="navLinkClass" :active-class="activeClass"><FolderGit2 class="h-4 w-4 shrink-0" />{{ t('nav.fleetRepos') }}</NuxtLink>
@@ -216,6 +219,14 @@ const backTo = computed(() => {
               {{ t('nav.codeIntel') }}
             </NuxtLink>
             <p :class="sectionLabelClass">{{ t('nav.sectionFleet') }}</p>
+            <NuxtLink
+              :to="`/${projectSlug}/fleet/overview`"
+              :class="navLinkClass"
+              :active-class="activeClass"
+            >
+              <Gauge class="h-4 w-4 shrink-0" />
+              {{ t('nav.fleetOverview') }}
+            </NuxtLink>
             <NuxtLink
               :to="`/${projectSlug}/fleet`"
               :class="navLinkClass"

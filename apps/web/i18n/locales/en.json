@@ -77,6 +77,7 @@
     "fleetBudgets": "Budgets",
     "fleetApprovals": "Approvals",
     "fleetAnalytics": "Fleet analytics",
+    "fleetOverview": "Fleet overview",
     "skipToContent": "Skip to content",
     "primary": "Primary",
     "sectionWorkspace": "Workspace",
@@ -1550,6 +1551,105 @@
         "noFindings": "None",
         "refresh": "Refresh",
         "loadFailed": "Could not load the cost breakdown."
+      }
+    },
+    "dashboard": {
+      "title": "Fleet overview",
+      "adminSubtitle": "Every runner and the active jobs of every project. Refreshes every 10 seconds.",
+      "projectSubtitle": "This project's jobs and the health of every runner. Refreshes every 10 seconds.",
+      "forbidden": "You do not have access to this project.",
+      "updated": "Updated",
+      "staleSince": "Could not refresh. Showing data from {time}.",
+      "severity": {
+        "error": "Error",
+        "warning": "Warning"
+      },
+      "tiles": {
+        "runners": "Runners online",
+        "queued": "Queued",
+        "running": "Running",
+        "attention": "Needs attention"
+      },
+      "sections": {
+        "attention": "Needs attention",
+        "active": "Active jobs",
+        "runners": "Runners",
+        "recent": "Finished in the last 24 hours"
+      },
+      "attention": {
+        "allClear": "All clear",
+        "silent": "No heartbeat for {age} on {runner}",
+        "notStarted": "Assigned to {runner} {age} ago, not started",
+        "approvals": "{n} approval(s) pending, oldest {age}",
+        "misfitOn": "{runner}: {reason}",
+        "more": "and {n} more runner(s)",
+        "unknown": "Needs attention",
+        "verdict": {
+          "never": "No runner can ever run this",
+          "budget_paused": "Budget paused; this job will be cancelled",
+          "runners_paused": "Every runner is budget-paused",
+          "waiting_capacity": "Waiting for a free runner",
+          "no_fit": "No runner fits right now",
+          "no_runners": "No runner can take this job",
+          "fits_not_placed": "A runner fits but the job has not been placed",
+          "unknown": "Not placed"
+        },
+        "condition": {
+          "offline": "Offline",
+          "offlineHolding": "Offline, holding {n} job(s)",
+          "staleNax": "nax {version} is behind {latest}",
+          "configuration": "Configuration problem (ask a fleet admin)",
+          "unknown": "Problem: {code}",
+          "credential": {
+            "missing": "No credential for {provider}",
+            "unavailable": "Credential for {provider} is unavailable",
+            "expired": "API key for {provider} has expired"
+          }
+        }
+      },
+      "active": {
+        "empty": "No active jobs",
+        "truncated": "Showing the oldest 200 active jobs.",
+        "unassigned": "Not assigned",
+        "approvals": "{n} approval(s) pending",
+        "columns": {
+          "feature": "Feature",
+          "project": "Project",
+          "repo": "Repo",
+          "state": "State",
+          "runner": "Runner",
+          "story": "Story",
+          "phase": "Phase",
+          "stories": "Stories",
+          "cost": "Cost / max",
+          "heartbeat": "Heartbeat"
+        }
+      },
+      "runners": {
+        "empty": "No runners enrolled",
+        "busy": "{active} of {capacity} busy",
+        "lastSeen": "Last seen",
+        "nax": "nax {version}",
+        "naxUnknown": "nax version unknown",
+        "daemon": "daemon {version}",
+        "credentialUnavailable": "{provider}: unavailable",
+        "credentialServed": "{provider}",
+        "credentialExpiredUndated": "{provider}: {kind}, expired"
+      },
+      "recent": {
+        "empty": "No runs in the last 24 hours",
+        "truncated": "Showing the latest 20.",
+        "pr": "Pull request",
+        "analyticsLink": "Spend and quality over time",
+        "columns": {
+          "feature": "Feature",
+          "project": "Project",
+          "state": "State",
+          "runner": "Runner",
+          "duration": "Duration",
+          "cost": "Cost",
+          "finished": "Finished"
+        }
       }
     }
   }

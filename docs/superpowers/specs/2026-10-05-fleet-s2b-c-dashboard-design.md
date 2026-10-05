@@ -311,14 +311,19 @@ not a gate). Names in the output pass through `escapeControls`.
 - `pages/admin/fleet/index.vue` — admin overview; first link in the admin fleet nav (`layouts/default.vue`).
 - `pages/[project]/fleet/overview.vue` — project overview; a sidebar link above Jobs; `fleetLeaf()` gains an
   `overview` case.
-- `composables/useFleetDashboard.ts(scope)` returns `{data, error, pending, lastSuccessAt, refresh}`; polls every
-  10 s with `useVisiblePolling` (`start` in `onMounted`, `stop` in `onBeforeUnmount`; it refetches on becoming
-  visible).
+- `composables/useFleetDashboard.ts(scope)` returns `{data, error, pending, forbidden, lastSuccessAt, now, failed,
+  staleSince, refresh, start, stop}`; the page calls `start` in `onMounted` and `stop` in `onBeforeUnmount` (slice 2
+  D421). `start` loads at once, polls every 10 s with `useVisiblePolling` and ticks a 1 s clock; it refetches on
+  becoming visible.
 - Pure logic in `lib/fleet-dashboard.ts`: attention wording keys and params from item fields, ages from
   `generatedAt` plus a ticking client clock (clamped at 0, formatted with `lib/fleet-age.ts`), stories fraction, cost
   vs max, link targets per scope and kind, row keys (job id / item key).
 
 ### 4.2 Components (`components/fleet/dashboard/`, presentational, props only)
+
+File names drop the `Dashboard` prefix (slice 2 D422): `Tiles.vue`, `AttentionList.vue`, `ActiveRunsTable.vue`,
+`RunnerHealthList.vue`, `RecentRunsList.vue`, `CredentialDigestChips.vue`, plus `Overview.vue`, which composes them
+for both pages. Nuxt names them `FleetDashboard<File>`.
 
 - `DashboardTiles` — the counts; each tile scrolls to its section.
 - `AttentionList` — server order; links: job items → job page; approval items → project approvals inbox; runner

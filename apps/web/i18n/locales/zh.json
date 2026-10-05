@@ -77,6 +77,7 @@
     "fleetBudgets": "预算",
     "fleetApprovals": "审批",
     "fleetAnalytics": "集群分析",
+    "fleetOverview": "集群概览",
     "skipToContent": "跳到主要内容",
     "primary": "主导航",
     "sectionWorkspace": "工作区",
@@ -1550,6 +1551,105 @@
         "noFindings": "无",
         "refresh": "刷新",
         "loadFailed": "无法加载花费明细。"
+      }
+    },
+    "dashboard": {
+      "title": "集群概览",
+      "adminSubtitle": "所有执行机及所有项目的活动任务，每 10 秒刷新一次。",
+      "projectSubtitle": "本项目的任务及所有执行机的健康状况，每 10 秒刷新一次。",
+      "forbidden": "你没有此项目的访问权限。",
+      "updated": "更新于",
+      "staleSince": "刷新失败，显示的是 {time} 的数据。",
+      "severity": {
+        "error": "错误",
+        "warning": "警告"
+      },
+      "tiles": {
+        "runners": "在线执行机",
+        "queued": "排队中",
+        "running": "运行中",
+        "attention": "需要关注"
+      },
+      "sections": {
+        "attention": "需要关注",
+        "active": "活动任务",
+        "runners": "执行机",
+        "recent": "最近 24 小时内完成"
+      },
+      "attention": {
+        "allClear": "一切正常",
+        "silent": "{runner} 上已 {age} 没有心跳",
+        "notStarted": "{age}前已分配给 {runner}，尚未开始",
+        "approvals": "{n} 个审批待处理，最早的已等待 {age}",
+        "misfitOn": "{runner}：{reason}",
+        "more": "还有 {n} 台执行机",
+        "unknown": "需要关注",
+        "verdict": {
+          "never": "没有任何执行机能运行此任务",
+          "budget_paused": "预算已暂停，此任务将被取消",
+          "runners_paused": "所有执行机的预算都已暂停",
+          "waiting_capacity": "正在等待空闲的执行机",
+          "no_fit": "目前没有合适的执行机",
+          "no_runners": "没有执行机可以接收此任务",
+          "fits_not_placed": "有合适的执行机，但任务尚未分配",
+          "unknown": "未分配"
+        },
+        "condition": {
+          "offline": "离线",
+          "offlineHolding": "离线，持有 {n} 个任务",
+          "staleNax": "nax {version} 落后于 {latest}",
+          "configuration": "配置有问题（请联系集群管理员）",
+          "unknown": "问题：{code}",
+          "credential": {
+            "missing": "缺少 {provider} 的凭据",
+            "unavailable": "{provider} 的凭据当前不可用",
+            "expired": "{provider} 的 API 密钥已过期"
+          }
+        }
+      },
+      "active": {
+        "empty": "没有活动任务",
+        "truncated": "仅显示最早的 200 个活动任务。",
+        "unassigned": "未分配",
+        "approvals": "{n} 个审批待处理",
+        "columns": {
+          "feature": "功能",
+          "project": "项目",
+          "repo": "仓库",
+          "state": "状态",
+          "runner": "执行机",
+          "story": "故事",
+          "phase": "阶段",
+          "stories": "故事进度",
+          "cost": "费用 / 上限",
+          "heartbeat": "心跳"
+        }
+      },
+      "runners": {
+        "empty": "尚未注册执行机",
+        "busy": "{capacity} 个槽位中 {active} 个忙碌",
+        "lastSeen": "最后在线",
+        "nax": "nax {version}",
+        "naxUnknown": "nax 版本未知",
+        "daemon": "守护进程 {version}",
+        "credentialUnavailable": "{provider}：不可用",
+        "credentialServed": "{provider}",
+        "credentialExpiredUndated": "{provider}：{kind}，已过期"
+      },
+      "recent": {
+        "empty": "最近 24 小时内没有运行",
+        "truncated": "仅显示最近的 20 个。",
+        "pr": "拉取请求",
+        "analyticsLink": "查看费用和质量趋势",
+        "columns": {
+          "feature": "功能",
+          "project": "项目",
+          "state": "状态",
+          "runner": "执行机",
+          "duration": "耗时",
+          "cost": "费用",
+          "finished": "完成时间"
+        }
       }
     }
   }

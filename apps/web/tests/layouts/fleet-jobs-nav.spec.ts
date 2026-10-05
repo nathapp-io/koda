@@ -39,4 +39,11 @@ describe('fleet jobs navigation', () => {
     expect(projectLinks).toMatch(/<BarChart3 class="h-4 w-4 shrink-0" \/>\s*\{\{ t\('nav\.fleetAnalytics'\) \}\}/)
     expect(layout).toContain("if (path === `/${project}/fleet/analytics`) return t('fleet.analytics.title')")
   })
+
+  test('a project link to /:project/fleet/overview with Gauge above Fleet jobs, and its breadcrumb leaf (S2b (c) D425)', () => {
+    expect(projectLinks).toContain(':to="`/${projectSlug}/fleet/overview`"')
+    expect(projectLinks).toMatch(/<Gauge class="h-4 w-4 shrink-0" \/>\s*\{\{ t\('nav\.fleetOverview'\) \}\}/)
+    expect(projectLinks.indexOf('/fleet/overview`')).toBeLessThan(projectLinks.indexOf(':to="`/${projectSlug}/fleet`"'))
+    expect(layout).toContain("if (path === `/${project}/fleet/overview`) return t('fleet.dashboard.title')")
+  })
 })

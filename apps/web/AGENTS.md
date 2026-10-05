@@ -128,6 +128,18 @@ Useful scripts:
 - Colors are `--chart-1`..`--chart-8` and `--chart-other` (globals.css, light and dark); `assignSlots` keeps a key's
   color across refetches.
 
+## Fleet overview (S2b (c))
+
+- `/admin/fleet` (global admin) and `/:project/fleet/overview` (members) both render `FleetDashboardOverview` from
+  `components/fleet/dashboard/`; data comes from `useFleetDashboard(scope)` (10 s poll while visible, 1 s clock, a
+  failed poll keeps the last snapshot, a 403 stops polling). No SSE.
+- The API sends attention items as structured fields, never prose: word them in `lib/fleet-dashboard.ts`
+  (`attentionMessage` -> i18n keys + params, `renderText`). A new API enum value needs its key under
+  `fleet.dashboard` and its pin in `tests/i18n/fleet-locale-parity.spec.ts`.
+- Ages are measured on the server clock (`serverNow`: `generatedAt` + client time since arrival), never by comparing
+  the browser clock with server time.
+- The project scope never shows credential chips, versions or runner links (B5); the API already nulls them.
+
 ## UX redesign (in progress)
 
 A multi-slice UX redesign of this app is planned and tracked in `docs/ux/redesign/MASTER-PLAN.md`. Read it before

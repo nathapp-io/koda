@@ -1,4 +1,5 @@
 import { describe, test, expect } from '@jest/globals'
+import { CREDENTIAL_WHY, SEVERITIES, TILE_IDS, UNPLACEABLE_VERDICTS } from '~/lib/fleet-dashboard-types'
 
 const en = require('../../i18n/locales/en.json') as Record<string, unknown>
 const zh = require('../../i18n/locales/zh.json') as Record<string, unknown>
@@ -54,6 +55,10 @@ const ENUMS: Record<string, string[]> = {
   'fleet.analytics.groupBy': ['model', 'stage', 'role', 'repo', 'runner', 'feature', 'story', 'project'],
   'fleet.analytics.outcome': ['opened', 'promoted', 'escalated', 'skipped', 'other'],
   'fleet.analytics.ingestStatus': ['pending', 'running', 'done', 'partial', 'failed'],
+  'fleet.dashboard.severity': ['error', 'warning'],
+  'fleet.dashboard.tiles': ['runners', 'queued', 'running', 'attention'],
+  'fleet.dashboard.attention.verdict': ['never', 'budget_paused', 'runners_paused', 'waiting_capacity', 'no_fit', 'no_runners', 'fits_not_placed', 'unknown'],
+  'fleet.dashboard.attention.condition.credential': ['missing', 'unavailable', 'expired'],
 }
 
 describe('Fleet locale parity (en and zh)', () => {
@@ -73,7 +78,7 @@ describe('Fleet locale parity (en and zh)', () => {
   })
 
   // Parity, not copy: rewording an English label must not fail a green test.
-  test.each(['nav.fleetRunners', 'nav.fleetRepos', 'nav.fleetBudgets', 'nav.fleetApprovals'])('%s is translated in both locales', (key) => {
+  test.each(['nav.fleetRunners', 'nav.fleetRepos', 'nav.fleetBudgets', 'nav.fleetApprovals', 'nav.fleetOverview'])('%s is translated in both locales', (key) => {
     expect(String(at(en, key) ?? '').trim()).not.toBe('')
     expect(String(at(zh, key) ?? '').trim()).not.toBe('')
   })
@@ -108,5 +113,12 @@ describe('Fleet locale parity (en and zh)', () => {
       const value = String(at(en, `fleet.${leaf}`))
       expect(value).not.toMatch(/[|@]/)
     }
+  })
+
+  test('the dashboard pins match the wire value lists (D415)', () => {
+    expect([...ENUMS['fleet.dashboard.severity']].sort()).toEqual([...SEVERITIES].sort())
+    expect([...ENUMS['fleet.dashboard.tiles']].sort()).toEqual([...TILE_IDS].sort())
+    expect(ENUMS['fleet.dashboard.attention.verdict'].filter((v) => v !== 'unknown').sort()).toEqual([...UNPLACEABLE_VERDICTS].sort())
+    expect([...ENUMS['fleet.dashboard.attention.condition.credential']].sort()).toEqual([...CREDENTIAL_WHY].sort())
   })
 })
