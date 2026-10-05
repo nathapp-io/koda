@@ -9,7 +9,7 @@ import type { RunnerCapabilities, BashMode } from '../common/protocol';
 import { ACTIVE_STATES, RUNNER_HELD_STATES } from './job-state';
 import {
   ActiveJobRef, DuplicateActiveJobError, FleetArtifactRecord, FleetCommandRecord, FleetJobEventRecord, FleetJobFilters,
-  FleetJobPatch, FleetJobRecord, FleetJobStory, FleetRepoRef, IFleetJobRepository, NewFleetJob, PlacementRunnerRow,
+  FleetJobPatch, FleetJobPostRun, FleetJobRecord, FleetJobStory, FleetRepoRef, IFleetJobRepository, NewFleetJob, PlacementRunnerRow,
 } from './domain/fleet-job.domain';
 
 const toJob = (r: JobRow): FleetJobRecord => ({
@@ -21,6 +21,7 @@ const toJob = (r: JobRow): FleetJobRecord => ({
   costSpentUsd: r.costSpentUsd.toString(),
   costCarriedUsd: r.costCarriedUsd.toString(),
   stories: r.stories as unknown as FleetJobStory[] | null,
+  postRun: r.postRun as unknown as FleetJobPostRun | null,
 });
 
 const toCommand = (r: FleetCommandRow): FleetCommandRecord => ({ ...r, type: r.type as FleetCommandType });
@@ -104,13 +105,14 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
   }
 
   async update(id: string, patch: FleetJobPatch): Promise<FleetJobRecord> {
-    const { bumpEpoch, costSpentUsd, costCarriedUsd, progress, stories, ...rest } = patch;
+    const { bumpEpoch, costSpentUsd, costCarriedUsd, progress, stories, postRun, ...rest } = patch;
     const data: Prisma.FleetJobUpdateInput = {
       ...rest,
       ...(costSpentUsd !== undefined ? { costSpentUsd: new Prisma.Decimal(costSpentUsd) } : {}),
       ...(costCarriedUsd !== undefined ? { costCarriedUsd: new Prisma.Decimal(costCarriedUsd) } : {}),
       ...(progress !== undefined ? { progress: progress === null ? Prisma.DbNull : (progress as Prisma.InputJsonValue) } : {}),
       ...(stories !== undefined ? { stories: stories === null ? Prisma.DbNull : (stories as unknown as Prisma.InputJsonValue) } : {}),
+      ...(postRun !== undefined ? { postRun: postRun === null ? Prisma.DbNull : (postRun as unknown as Prisma.InputJsonValue) } : {}),
       ...(bumpEpoch ? { leaseEpoch: { increment: 1 } } : {}),
     };
     try {

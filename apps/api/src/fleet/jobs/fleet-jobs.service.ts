@@ -212,7 +212,7 @@ export class FleetJobsService {
             // S1b §2.1: requeue keeps spend; the attempt's cost moves into costCarriedUsd.
             costSpentUsd: '0', costCarriedUsd: addUsd(current.costCarriedUsd, current.costSpentUsd), cancelReason: null,
             lastHeartbeatAt: null, finishResult: null, escalationReason: null, exitCode: null,
-            resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null, stories: null, storiesTruncated: false,
+            resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null, stories: null, storiesTruncated: false, postRun: null,
             ackedRunnerSeq: 0, bumpEpoch: true,
           },
         });

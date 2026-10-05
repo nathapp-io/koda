@@ -1,4 +1,4 @@
-import { interpretEvent } from './event-payloads';
+import { interpretEvent, postRunStages } from './event-payloads';
 
 const VALID_ASK = {
   naxAskId: 'ask-1f2e3d4c', deadlineAt: '2026-10-04T10:10:00.000Z', command: 'bun run test', commandTruncated: false,
@@ -86,5 +86,37 @@ describe('interpretEvent', () => {
   it('interprets approval_request as an approval effect, or invalid', () => {
     expect(interpretEvent('approval_request', VALID_ASK)).toEqual(expect.objectContaining({ kind: 'approval' }));
     expect(interpretEvent('approval_request', { ...VALID_ASK, options: [] })).toEqual({ kind: 'invalid', reason: 'approval_request.options' });
+  });
+});
+
+describe('postRunStages (S2b (j) §1.3, D429)', () => {
+  it.each([
+    ['all three stages', { acceptance: 'passed', regression: 'running', finish: 'not-run' }, { acceptance: 'passed', regression: 'running', finish: 'not-run' }],
+    ['unknown keys dropped', { acceptance: 'passed', gates: 'x', __proto__x: 'y' }, { acceptance: 'passed' }],
+    ['a 33-char value drops only that key', { acceptance: 'x'.repeat(33), regression: 'passed' }, { regression: 'passed' }],
+    ['32 chars kept', { finish: 'y'.repeat(32) }, { finish: 'y'.repeat(32) }],
+    ['control character dropped', { acceptance: 'pass\ned', finish: 'passed' }, { finish: 'passed' }],
+    ['non-ASCII dropped', { acceptance: 'pass\u00e9' }, undefined],
+    ['empty string dropped', { acceptance: '' }, undefined],
+    ['non-string dropped', { acceptance: 7, regression: null, finish: { status: 'x' } }, undefined],
+    ['empty object', {}, undefined],
+  ])('%s', (_name, input, expected) => {
+    expect(postRunStages(input)).toEqual(expected);
+  });
+  it.each([[null], [undefined], ['passed'], [['passed']], [42]])('%p is not a stage object', (input) => {
+    expect(postRunStages(input)).toBeUndefined();
+  });
+});
+
+describe('snapshot postRun mirror', () => {
+  it('mirrors valid stages next to the other fields', () => {
+    expect(interpretEvent('snapshot', { currentPhase: 'review', postRun: { acceptance: 'running' } }))
+      .toEqual({ kind: 'mirror', patch: { currentPhase: 'review', postRun: { acceptance: 'running' } } });
+  });
+  it('an all-invalid postRun is absent, and the rest of the snapshot still applies', () => {
+    expect(interpretEvent('snapshot', { costSpentUsd: '0.5', postRun: { acceptance: 'x'.repeat(40) } }))
+      .toEqual({ kind: 'mirror', patch: { costSpentUsd: '0.5' } });
+    expect(interpretEvent('snapshot', { costSpentUsd: '0.5', postRun: null }))
+      .toEqual({ kind: 'mirror', patch: { costSpentUsd: '0.5' } });
   });
 });

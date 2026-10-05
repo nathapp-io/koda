@@ -144,4 +144,34 @@ describeIntegration('runner sync (PG)', () => {
     await prisma.fleetJob.updateMany({ where: { runnerId: runner.runnerId, state: { in: ['ASSIGNED', 'RUNNING', 'UPLOADING'] } }, data: { state: 'FAILED' } });
     expect((await sync({ freeSlots: 1 })).commands.filter((c) => c.jobId === j.id && c.type === 'ASSIGN')).toHaveLength(1);
   });
+
+  it('mirrors postRun from snapshots: present replaces, absent and all-invalid leave it (S2b (j) D428)', async () => {
+    await prisma.fleetJob.updateMany({ where: { runnerId: runner.runnerId, state: { in: ['ASSIGNED', 'RUNNING', 'UPLOADING'] } }, data: { state: 'FAILED' } });
+    const j = await dispatch('post-run');
+    expect(j.state).toBe('ASSIGNED');
+    const first = await sync();
+    const assign = first.commands.find((c) => c.jobId === j.id && c.type === 'ASSIGN');
+    expect(assign).toBeDefined();
+    const e = { jobId: j.id, leaseEpoch: j.leaseEpoch };
+    await sync({
+      commandAcks: [{ commandId: assign!.commandId, leaseEpoch: j.leaseEpoch, result: 'ok' }],
+      jobs: [{ ...e, events: [ev(1, 'state', { to: 'RUNNING' }), ev(2, 'snapshot', { postRun: { acceptance: 'running', regression: 'not-run' } })] }],
+    });
+    expect((await job(j.id)).postRun).toEqual({ acceptance: 'running', regression: 'not-run' });
+
+    // absent: unchanged
+    await sync({ jobs: [{ ...e, events: [ev(3, 'snapshot', { currentPhase: 'review' })] }] });
+    expect(await job(j.id)).toEqual(expect.objectContaining({ currentPhase: 'review', postRun: { acceptance: 'running', regression: 'not-run' } }));
+
+    // all-invalid: unchanged, the rest of the snapshot still applies
+    const res = await sync({ jobs: [{ ...e, events: [ev(4, 'snapshot', { costSpentUsd: '0.25', postRun: { acceptance: 'x'.repeat(40) } })] }] });
+    expect(res.jobAcks).toEqual([{ jobId: j.id, ackedSeq: 4 }]);
+    const after = await job(j.id);
+    expect(after.postRun).toEqual({ acceptance: 'running', regression: 'not-run' });
+    expect(after.costSpentUsd.toString()).toBe('0.25');
+
+    // present: replaces (no merge)
+    await sync({ jobs: [{ ...e, events: [ev(5, 'snapshot', { postRun: { finish: 'passed' } })] }] });
+    expect((await job(j.id)).postRun).toEqual({ finish: 'passed' });
+  });
 });

@@ -14,6 +14,13 @@ export class FleetJobStoryDto {
   @ApiProperty({ type: [String] }) declare dependsOn: string[];
 }
 
+/** S2b (j) §1.3: nax post-run stage statuses, passed through (pending/running/passed/failed/skipped/not-run, ...). */
+export class FleetJobPostRunDto {
+  @ApiPropertyOptional({ maxLength: 32 }) declare acceptance?: string;
+  @ApiPropertyOptional({ maxLength: 32 }) declare regression?: string;
+  @ApiPropertyOptional({ maxLength: 32 }) declare finish?: string;
+}
+
 export class FleetJobDto {
   @ApiProperty() declare id: string;
   @ApiProperty() declare projectId: string;
@@ -58,6 +65,8 @@ export class FleetJobDto {
   @ApiPropertyOptional({ type: String, nullable: true, description: 'pushed | none | failed:<reason> (S1b §1.1)' }) declare wipPush: string | null;
   @ApiPropertyOptional({ type: [FleetJobStoryDto], nullable: true, description: 'PRD stories in PRD order (S1b §1.2). Null on list pages (D149).' }) declare stories: FleetJobStoryDto[] | null;
   @ApiProperty({ description: 'True when the runner cut the story list to fit (S1b §1.2)' }) declare storiesTruncated: boolean;
+  @ApiPropertyOptional({ type: FleetJobPostRunDto, nullable: true, description: 'nax post-run stage statuses (S2b (j)). Null when unknown and on list pages (D433).' })
+  declare postRun: FleetJobPostRunDto | null;
   @ApiPropertyOptional({ type: String, nullable: true, description: 'The schedule that dispatched the job (S1b §3.1)' }) declare scheduleId: string | null;
   @ApiProperty({ description: 'Schedule ticks absorbed into this job while it sat queued (S1b §3.2)' }) declare coalescedCount: number;
 
@@ -75,14 +84,14 @@ export class FleetJobDto {
       currentPhase: r.currentPhase, costSpentUsd: r.costSpentUsd, lastHeartbeatAt: iso(r.lastHeartbeatAt),
       finishResult: r.finishResult, escalationReason: r.escalationReason, exitCode: r.exitCode,
       resultBranch: r.resultBranch, resultSha: r.resultSha, resultPrUrl: r.resultPrUrl, wipPush: r.wipPush,
-      stories: r.stories, storiesTruncated: r.storiesTruncated,
+      stories: r.stories, storiesTruncated: r.storiesTruncated, postRun: r.postRun,
       scheduleId: r.scheduleId, coalescedCount: r.coalescedCount,
     });
   }
 
-  /** D149: a list page leaves the story list out (100 rows of up to 8 KiB each); `GET :id` carries it. */
+  /** D149, D433: a list page leaves the story list and post-run stages out; `GET :id` carries them. */
   static summary(r: FleetJobRecord, pendingApprovals = 0): FleetJobDto {
-    return Object.assign(FleetJobDto.from(r, pendingApprovals), { stories: null, storiesTruncated: false });
+    return Object.assign(FleetJobDto.from(r, pendingApprovals), { stories: null, storiesTruncated: false, postRun: null });
   }
 }
 

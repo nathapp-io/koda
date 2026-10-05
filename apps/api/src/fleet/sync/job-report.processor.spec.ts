@@ -21,7 +21,7 @@ const runningJob: FleetJobRecord = {
   naxLogRunId: null, naxCostRunId: null, progress: null, currentStoryId: null, currentPhase: null, costSpentUsd: '0',
   costCarriedUsd: '0', firstStartedAt: NOW, cancelReason: null, scheduleId: null, coalescedCount: 0, scheduleCountedAt: null,
   lastHeartbeatAt: null, finishResult: null, escalationReason: null, exitCode: null, resultBranch: null, resultSha: null,
-  resultPrUrl: null, wipPush: null, stories: null, storiesTruncated: false, eventSeq: 0, ackedRunnerSeq: 0, attributedAt: null,
+  resultPrUrl: null, wipPush: null, stories: null, storiesTruncated: false, postRun: null, eventSeq: 0, ackedRunnerSeq: 0, attributedAt: null,
   updatedAt: NOW,
 };
 

@@ -5,6 +5,11 @@ export interface FinishView {
   readonly escalationReason?: string;
 }
 
+/** S2b (j): one nax post-run stage (acceptance, regression); only `status` is read. */
+export interface StageView {
+  readonly status?: string;
+}
+
 export interface StatusView {
   readonly run: { readonly id: string; readonly status: string; readonly pid?: number };
   readonly progress?: Readonly<Record<string, number>>;
@@ -12,7 +17,7 @@ export interface StatusView {
   readonly current?: { readonly storyId?: string; readonly phase?: string } | null;
   readonly lastHeartbeat?: string;
   readonly updatedAt?: string;
-  readonly postRun?: { readonly finish?: FinishView };
+  readonly postRun?: { readonly acceptance?: StageView; readonly regression?: StageView; readonly finish?: FinishView };
 }
 
 type Obj = Record<string, unknown>;
@@ -29,11 +34,15 @@ export function parseStatusView(raw: unknown): StatusView | null {
     : undefined;
   const cost = isObj(raw['cost']) && typeof raw['cost']['spent'] === 'number' ? { spent: raw['cost']['spent'] } : undefined;
   const current = raw['current'] === null ? null : isObj(raw['current']) ? defined({ storyId: str(raw['current']['storyId']), phase: str(raw['current']['phase']) }) : undefined;
-  const finishRaw = isObj(raw['postRun']) && isObj(raw['postRun']['finish']) ? raw['postRun']['finish'] : undefined;
+  const postRunRaw = isObj(raw['postRun']) ? raw['postRun'] : undefined;
+  const stage = (key: 'acceptance' | 'regression'): StageView | undefined =>
+    postRunRaw && isObj(postRunRaw[key]) ? defined({ status: str(postRunRaw[key]['status']) }) : undefined;
+  const finishRaw = postRunRaw && isObj(postRunRaw['finish']) ? postRunRaw['finish'] : undefined;
   const finish = finishRaw ? defined({ status: str(finishRaw['status']), result: str(finishRaw['result']), url: str(finishRaw['url']), escalationReason: str(finishRaw['escalationReason']) }) : undefined;
+  const postRunView = defined({ acceptance: stage('acceptance'), regression: stage('regression'), finish });
   return defined({
     run: defined({ id: run['id'] as string, status: run['status'] as string, pid: typeof run['pid'] === 'number' ? run['pid'] : undefined }),
-    progress, cost, current, lastHeartbeat: str(raw['lastHeartbeat']), updatedAt: str(raw['updatedAt']), postRun: finish ? { finish } : undefined,
+    progress, cost, current, lastHeartbeat: str(raw['lastHeartbeat']), updatedAt: str(raw['updatedAt']), postRun: Object.keys(postRunView).length > 0 ? postRunView : undefined,
   }) as StatusView;
 }
 

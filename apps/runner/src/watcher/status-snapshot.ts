@@ -24,6 +24,21 @@ export function clip(text: string | undefined, max: number): string | undefined 
   return text.slice(0, last >= 0xd800 && last <= 0xdbff ? max - 1 : max); // never leave half a surrogate pair
 }
 
+/** S2b (j) spec §1.2: the server's per-stage bound. */
+const STAGE_STATUS_MAX = 32;
+
+/** D434: only stages nax wrote a status for; undefined when none. */
+function postRunStages(status: StatusView): SnapshotEventPayload['postRun'] {
+  const post = status.postRun;
+  const entries: Array<[string, string | undefined]> = [
+    ['acceptance', clip(post?.acceptance?.status, STAGE_STATUS_MAX)],
+    ['regression', clip(post?.regression?.status, STAGE_STATUS_MAX)],
+    ['finish', clip(post?.finish?.status, STAGE_STATUS_MAX)],
+  ];
+  const stages = Object.fromEntries(entries.filter(([, v]) => v !== undefined));
+  return Object.keys(stages).length > 0 ? stages : undefined;
+}
+
 export function mapStatusToSnapshot(status: StatusView, extras: SnapshotExtras = {}): SnapshotEventPayload {
   const finish = status.postRun?.finish;
   const heartbeat = status.lastHeartbeat !== undefined && !Number.isNaN(Date.parse(status.lastHeartbeat)) ? status.lastHeartbeat : undefined;
@@ -42,6 +57,7 @@ export function mapStatusToSnapshot(status: StatusView, extras: SnapshotExtras =
     ['escalationReason', clip(finish?.escalationReason, ESCALATION_REASON_MAX)],
     ['resultBranch', extras.resultBranch],
     ['resultSha', extras.resultSha],
+    ['postRun', postRunStages(status)],
   ];
   return Object.fromEntries(entries.filter(([, v]) => v !== undefined)) as SnapshotEventPayload;
 }

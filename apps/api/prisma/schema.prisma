@@ -790,6 +790,7 @@ model FleetJob {
   wipPush            String? // S1b §1.1: pushed | none | failed:<reason>
   stories            Json? // S1b §1.2: PRD stories, at most 100 and 8 KiB
   storiesTruncated   Boolean   @default(false)
+  postRun            Json? // S2b (j) §1.3: nax post-run stage statuses {acceptance?, regression?, finish?}; null = unknown
   costCarriedUsd     Decimal   @default(0) @db.Decimal(12, 4) // S1b §2.1: spend of earlier attempts, kept across requeue
   firstStartedAt     DateTime? // S1b §2.1: first RUNNING; set once, never cleared; the job's budget window
   cancelReason       String? // S1b §2.2: why the server asked for the cancel, e.g. budget:<policyId>

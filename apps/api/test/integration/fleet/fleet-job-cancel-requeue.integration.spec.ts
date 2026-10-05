@@ -83,12 +83,13 @@ describeIntegration('fleet job cancel and requeue (PG)', () => {
     const job = await insertJob('rq', {
       state: 'CRASHED', runnerId: runner.id, leaseEpoch: 3, naxRunId: 'run-1', costSpentUsd: 1.5, stateReason: 'runner silent', finishedAt: new Date(),
       wipPush: 'pushed', stories: [{ id: 'US-001', title: 't', status: 'failed', attempts: 2, dependsOn: [] }], storiesTruncated: true,
+      postRun: { acceptance: 'failed', finish: 'skipped' },
     });
     const res = data<{ job: { state: string; leaseEpoch: number } }>(await post('dev', job.id, 'requeue').expect(200));
     // 3 -> 4 on requeue, 4 -> 5 on the compare-and-set assignment.
     expect(res.job).toEqual(expect.objectContaining({ state: 'ASSIGNED', leaseEpoch: 5 }));
     const after = await reload(job.id);
-    expect(after).toEqual(expect.objectContaining({ naxRunId: null, finishedAt: null, ackedRunnerSeq: 0, wipPush: null, stories: null, storiesTruncated: false }));
+    expect(after).toEqual(expect.objectContaining({ naxRunId: null, finishedAt: null, ackedRunnerSeq: 0, wipPush: null, stories: null, storiesTruncated: false, postRun: null }));
     expect(after.costSpentUsd.toString()).toBe('0');
   });
 
