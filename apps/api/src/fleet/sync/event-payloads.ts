@@ -1,6 +1,6 @@
 import { FleetJobState } from '../../common/enums';
 import type { BashAsk } from '../approvals/approval-closer';
-import type { FleetJobPatch, FleetJobStory } from '../jobs/domain/fleet-job.domain';
+import type { FleetJobPatch, FleetJobPostRun, FleetJobStory } from '../jobs/domain/fleet-job.domain';
 import { parseApprovalRequest } from './approval-request-payload';
 
 export type EventEffect =
@@ -27,6 +27,9 @@ const STORY_TITLE_MAX = 80;
 const STORY_DEPENDS_MAX = 10;
 const STORY_ATTEMPTS_MAX = 1_000_000;
 const STORY_STATUS_RE = /^[a-z][a-z-]{0,31}$/;
+/** S2b (j) §1.3 bounds: nax stage status strings, passed through (D429). */
+const POST_RUN_STAGES = ['acceptance', 'regression', 'finish'] as const;
+const STAGE_STATUS_RE = /^[\x20-\x7e]{1,32}$/;
 
 const isStoryId = (v: unknown): boolean => typeof v === 'string' && v.trim() !== '' && v.length <= STORY_ID_MAX;
 
@@ -45,6 +48,17 @@ function storyList(v: unknown): FleetJobStory[] | undefined {
   if (!Array.isArray(v) || v.length > STORIES_MAX || Buffer.byteLength(JSON.stringify(v), 'utf8') > STORIES_MAX_BYTES) return undefined;
   const stories = v.map(story);
   return stories.every((s) => s !== null) ? stories : undefined;
+}
+
+/** Known stages with a valid status; undefined (field absent, stored value kept) when none survive (D428). */
+export function postRunStages(v: unknown): FleetJobPostRun | undefined {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined;
+  const o = v as Obj;
+  const kept = POST_RUN_STAGES.flatMap((key): Array<[string, string]> => {
+    const value = o[key];
+    return typeof value === 'string' && STAGE_STATUS_RE.test(value) ? [[key, value]] : [];
+  });
+  return kept.length > 0 ? (Object.fromEntries(kept) as FleetJobPostRun) : undefined;
 }
 
 const str = (v: unknown, max: number): string | undefined => (typeof v === 'string' && v.length > 0 && v.length <= max ? v : undefined);
@@ -84,6 +98,7 @@ function mirror(p: Obj): FleetJobPatch {
     ['wipPush', typeof p.wipPush === 'string' && WIP_PUSH_RE.test(p.wipPush) ? p.wipPush : undefined],
     ['stories', stories],
     ['storiesTruncated', stories === undefined ? undefined : p.storiesTruncated === true],   // D150
+    ['postRun', postRunStages(p.postRun)],
   ];
   return Object.fromEntries(entries.filter(([, v]) => v !== undefined)) as FleetJobPatch;
 }
