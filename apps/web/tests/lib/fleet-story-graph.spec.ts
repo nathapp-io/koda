@@ -1,6 +1,7 @@
 import { describe, test, expect } from '@jest/globals'
-import { edgePath, edgePaths, layoutStoryGraph, neighbourhood } from '~/lib/fleet-story-graph'
+import { edgePath, edgePaths, layoutStoryGraph, neighbourhood, pipelineStages } from '~/lib/fleet-story-graph'
 import type { StoryRow } from '~/lib/fleet-jobs'
+import type { FleetJobDto } from '~/lib/fleet-types'
 
 const row = (id: string, dependsOn: string[] = []): StoryRow => ({
   id, title: id, status: 'pending', attempts: 0, current: false, phase: null, variant: 'outline', dependsOn,
@@ -126,5 +127,64 @@ describe('neighbourhood', () => {
 
   test('the active story plus its direct dependencies and dependents', () => {
     expect([...(neighbourhood(edges, 'B') ?? [])].sort()).toEqual(['A', 'B', 'C'])
+  })
+})
+
+describe('pipelineStages (spec §2.1, D442)', () => {
+  type StageJob = Parameters<typeof pipelineStages>[0]
+  const story = (id: string, status: string) => ({ id, title: id, status, attempts: 1, dependsOn: [] })
+  const run = (over: Partial<StageJob> = {}): StageJob => ({
+    command: 'RUN', state: 'RUNNING', postRun: null, currentStoryId: null, currentPhase: null,
+    stories: [story('US-001', 'passed'), story('US-002', 'in-progress')], ...over,
+  })
+  const states = (job: StageJob): string[][] => pipelineStages(job).map(s => [s.key, s.state])
+
+  test('PLAN jobs have no strip', () => {
+    expect(pipelineStages(run({ command: 'PLAN' }))).toEqual([])
+  })
+
+  test('an active RUN with a story in progress and no postRun yet', () => {
+    expect(states(run())).toEqual([['stories', 'running'], ['acceptance', 'pending'], ['regression', 'pending'], ['finish', 'pending']])
+  })
+
+  test('postRun values map: not-run -> pending, known values kept', () => {
+    const job = run({ postRun: { acceptance: 'passed', regression: 'running', finish: 'not-run' } })
+    expect(states(job).slice(1)).toEqual([['acceptance', 'passed'], ['regression', 'running'], ['finish', 'pending']])
+    expect(pipelineStages(job).map(s => s.variant)).toEqual(['secondary', 'default', 'secondary', 'outline'])
+  })
+
+  test('an unknown nax value is kept raw and marked unknown to the copy', () => {
+    const stage = pipelineStages(run({ postRun: { finish: 'escalated' } }))[3]
+    expect(stage).toEqual({ key: 'finish', state: 'escalated', known: false, variant: 'outline' })
+  })
+
+  test('a terminal job without postRun reads unknown, not pending', () => {
+    expect(states(run({ state: 'COMPLETED' })).slice(1).map(([, s]) => s)).toEqual(['unknown', 'unknown', 'unknown'])
+  })
+
+  test('Stories: any failed story fails the stage', () => {
+    expect(states(run({ stories: [story('US-001', 'passed'), story('US-002', 'failed')] }))[0]).toEqual(['stories', 'failed'])
+  })
+
+  test('Stories: passed, skipped, decomposed and regression-failed all count as done (D442)', () => {
+    const done = [story('A', 'passed'), story('B', 'skipped'), story('C', 'decomposed'), story('D', 'regression-failed')]
+    expect(states(run({ stories: done }))[0]).toEqual(['stories', 'passed'])
+  })
+
+  test('Stories: an unknown story status is not done', () => {
+    expect(states(run({ state: 'COMPLETED', stories: [story('A', 'passed'), story('B', 'mystery')] }))[0]).toEqual(['stories', 'pending'])
+  })
+
+  test('Stories: in-progress on a terminal job is not running', () => {
+    expect(states(run({ state: 'CANCELLED' }))[0]).toEqual(['stories', 'pending'])
+  })
+
+  test('no story list keeps the Stories chip pending', () => {
+    expect(states(run({ stories: null }))[0]).toEqual(['stories', 'pending'])
+  })
+
+  test('typed on the real DTO', () => {
+    const dto = { command: 'RUN', state: 'QUEUED', postRun: null, stories: null, currentStoryId: null, currentPhase: null } as unknown as FleetJobDto
+    expect(pipelineStages(dto)).toHaveLength(4)
   })
 })

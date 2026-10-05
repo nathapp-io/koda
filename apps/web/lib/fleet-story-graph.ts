@@ -1,4 +1,6 @@
+import { isActiveJobState, storyRows } from '~/lib/fleet-jobs'
 import type { StoryRow } from '~/lib/fleet-jobs'
+import type { FleetJobDto } from '~/lib/fleet-types'
 
 /** `from` is the dependency, `to` the story that waits on it. */
 export interface StoryEdge {
@@ -141,4 +143,61 @@ export function neighbourhood(edges: readonly StoryEdge[], activeId: string | nu
     return []
   })
   return new Set([activeId, ...linked])
+}
+
+export type StageKey = 'stories' | 'acceptance' | 'regression' | 'finish'
+export const STAGE_KEYS: readonly StageKey[] = ['stories', 'acceptance', 'regression', 'finish']
+/** Translated under fleet.jobs.detail.pipeline.state; any other value is nax text shown raw (D429). */
+export const KNOWN_STAGE_STATES = ['pending', 'running', 'passed', 'failed', 'skipped', 'unknown'] as const
+
+export interface PipelineStage {
+  key: StageKey
+  state: string
+  known: boolean
+  variant: StoryRow['variant']
+}
+
+const STAGE_VARIANTS: Readonly<Record<string, StoryRow['variant']>> = {
+  passed: 'default',
+  running: 'secondary',
+  failed: 'destructive',
+}
+
+/** D442: statuses whose story work is finished as far as the Stories stage is concerned. */
+const STORY_DONE: ReadonlySet<string> = new Set(['passed', 'skipped', 'decomposed', 'regression-failed'])
+
+function storiesState(rows: readonly StoryRow[], active: boolean): string {
+  if (rows.some(row => row.status === 'failed')) return 'failed'
+  if (rows.length > 0 && rows.every(row => STORY_DONE.has(row.status))) return 'passed'
+  if (active && rows.some(row => row.status === 'in-progress')) return 'running'
+  return 'pending'
+}
+
+function postRunState(value: unknown, active: boolean): string {
+  if (typeof value !== 'string' || value.length === 0) return active ? 'pending' : 'unknown'
+  return value === 'not-run' ? 'pending' : value
+}
+
+type StageJob = Pick<FleetJobDto, 'command' | 'state' | 'postRun' | 'stories' | 'currentStoryId' | 'currentPhase'>
+
+/** Spec §2.1: the RUN strip; PLAN jobs have none. Stale nax values are shown as stored, never inferred. */
+export function pipelineStages(job: StageJob): PipelineStage[] {
+  if (job.command !== 'RUN') return []
+  const active = isActiveJobState(job.state)
+  const post = job.postRun ?? {}
+  const states: Record<StageKey, string> = {
+    stories: storiesState(storyRows(job), active),
+    acceptance: postRunState(post.acceptance, active),
+    regression: postRunState(post.regression, active),
+    finish: postRunState(post.finish, active),
+  }
+  return STAGE_KEYS.map((key) => {
+    const state = states[key]
+    return {
+      key,
+      state,
+      known: (KNOWN_STAGE_STATES as readonly string[]).includes(state),
+      variant: STAGE_VARIANTS[state] ?? 'outline',
+    }
+  })
 }
