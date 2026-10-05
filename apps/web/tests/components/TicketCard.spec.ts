@@ -57,34 +57,23 @@ describe('US-004-1 AC2: ticket ref is rendered in monospace font', () => {
 // AC3 — type Badge with correct border colors
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('US-004-1 AC3: type Badge uses red border for BUG', () => {
+describe('US-004-1 AC3: type chip uses the shared token classes (slice 3)', () => {
   test('source references BUG type', () => {
     const source = readFileSync(cardPath, 'utf-8')
     expect(source).toContain('BUG')
   })
 
-  test('source applies red border class for BUG type', () => {
-    const source = readFileSync(cardPath, 'utf-8')
-    // border-red-300 or text-red-700 as per CLAUDE.md badge pattern
-    const hasBugRedBorder =
-      source.includes('border-red') ||
-      source.includes('text-red')
-    expect(hasBugRedBorder).toBe(true)
-  })
-})
-
-describe('US-004-1 AC3: type Badge uses blue border for ENHANCEMENT', () => {
   test('source references ENHANCEMENT type', () => {
     const source = readFileSync(cardPath, 'utf-8')
     expect(source).toContain('ENHANCEMENT')
   })
 
-  test('source applies blue border class for ENHANCEMENT type', () => {
+  test('type chip styling comes from lib/ticket-chips typeChipClass', () => {
     const source = readFileSync(cardPath, 'utf-8')
-    const hasEnhancementBlueBorder =
-      source.includes('border-blue') ||
-      source.includes('text-blue')
-    expect(hasEnhancementBlueBorder).toBe(true)
+    // Slice 3 replaced the hardcoded red/blue palette classes with the token-based shared
+    // helper; the per-type colors themselves are pinned in tests/lib/ticket-chips.spec.ts.
+    expect(source).toContain('typeChipClass(ticket.type)')
+    expect(source).toContain('lib/ticket-chips')
   })
 })
 
@@ -104,64 +93,13 @@ describe('US-004-1 AC3: type Badge uses Badge component', () => {
 // AC4 — priority Badge with correct variants
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('US-004-1 AC4: priority Badge uses CRITICAL=red', () => {
-  test('source references CRITICAL priority', () => {
+describe('US-004-1 AC4: priority chip uses the shared token dots (slice 3)', () => {
+  test('source renders ticket.priority through the shared priority chip', () => {
     const source = readFileSync(cardPath, 'utf-8')
-    expect(source).toContain('CRITICAL')
-  })
-
-  test('source applies destructive or red variant for CRITICAL', () => {
-    const source = readFileSync(cardPath, 'utf-8')
-    const hasCriticalRed =
-      source.includes('destructive') ||
-      source.includes('bg-red') ||
-      source.includes('text-red')
-    expect(hasCriticalRed).toBe(true)
-  })
-})
-
-describe('US-004-1 AC4: priority Badge uses HIGH=orange', () => {
-  test('source references HIGH priority', () => {
-    const source = readFileSync(cardPath, 'utf-8')
-    expect(source).toContain('HIGH')
-  })
-
-  test('source applies orange class for HIGH priority', () => {
-    const source = readFileSync(cardPath, 'utf-8')
-    const hasHighOrange =
-      source.includes('bg-orange') ||
-      source.includes('text-orange')
-    expect(hasHighOrange).toBe(true)
-  })
-})
-
-describe('US-004-1 AC4: priority Badge uses MEDIUM=secondary', () => {
-  test('source references MEDIUM priority', () => {
-    const source = readFileSync(cardPath, 'utf-8')
-    expect(source).toContain('MEDIUM')
-  })
-
-  test('source applies secondary variant for MEDIUM priority', () => {
-    const source = readFileSync(cardPath, 'utf-8')
-    expect(source).toContain('secondary')
-  })
-})
-
-describe('US-004-1 AC4: priority Badge uses LOW=outline', () => {
-  test('source references LOW priority', () => {
-    const source = readFileSync(cardPath, 'utf-8')
-    expect(source).toContain('LOW')
-  })
-
-  test('source applies outline variant for LOW priority', () => {
-    const source = readFileSync(cardPath, 'utf-8')
-    expect(source).toContain('outline')
-  })
-})
-
-describe('US-004-1 AC4: priority Badge renders ticket.priority', () => {
-  test('source renders ticket.priority', () => {
-    const source = readFileSync(cardPath, 'utf-8')
+    // Slice 3: the variant/class ladder (destructive/secondary/outline + orange fill) became the
+    // token dot+label chip; per-level classes are pinned in tests/lib/ticket-chips.spec.ts.
+    expect(source).toContain('priorityDotClass(ticket.priority)')
+    expect(source).toContain('priorityStripeClass(ticket.priority)')
     expect(source).toContain('ticket.priority')
   })
 })

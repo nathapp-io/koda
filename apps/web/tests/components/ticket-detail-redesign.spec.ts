@@ -8,6 +8,9 @@ const headerPath = join(webDir, 'components', 'TicketHeader.vue')
 const activityPath = join(webDir, 'components', 'TicketActivity.vue')
 const propertiesPath = join(webDir, 'components', 'TicketProperties.vue')
 const panelPath = join(webDir, 'components', 'TicketActionPanel.vue')
+// Slice 3 moved the chip token maps into the shared lib; the surface follows them (same
+// reasoning as slice 1 reading page + components as one surface).
+const chipsPath = join(webDir, 'lib', 'ticket-chips.ts')
 
 function src(path: string): string {
   return readFileSync(path, 'utf-8')
@@ -25,7 +28,7 @@ describe('UX redesign slice 1: ticket detail components exist', () => {
 })
 
 describe('UX redesign slice 1: state colors come from tokens, never raw hex', () => {
-  const surface = () => [src(headerPath), src(propertiesPath)].join('\n')
+  const surface = () => [src(headerPath), src(propertiesPath), src(chipsPath)].join('\n')
 
   test('status dots use the status-* token classes', () => {
     expect(surface()).toContain('bg-status-todo')

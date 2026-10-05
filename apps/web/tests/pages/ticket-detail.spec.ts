@@ -185,7 +185,8 @@ describe('US-005-1 AC5: status, priority, and type render as labeled chips', () 
   test('source renders ticket type as a labeled chip', () => {
     const source = surfaceSource()
     const hasTypeChip =
-      source.includes('TYPE_CLASS') &&
+      // slice 3: the TYPE_CLASS map moved into lib/ticket-chips; the surface uses the helper
+      source.includes('typeChipClass') &&
       source.includes('ticket.type') &&
       source.includes('tickets.type.')
     expect(hasTypeChip).toBe(true)

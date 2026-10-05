@@ -48,7 +48,7 @@ Principles:
 | 0 | Shell, tokens, command palette, board filters | **Done** (PR #215 merged 2026-10-05) |
 | 1 | Ticket detail page | **Done** (PR #222 merged 2026-10-06) |
 | 2 | Dashboard / home | **Done** on `feat/web-ux-slices-2-3-4` — new `GET /home` aggregate API + needs-you/projects/activity dashboard |
-| 3 | Shared patterns + docs refresh | Not started |
+| 3 | Shared patterns + docs refresh | **Done** on `feat/web-ux-slices-2-3-4` — `lib/ticket-chips.ts` + `FilterBar.vue` extracted; docs/ux refreshed |
 | 4 | Fleet pages | Not started |
 | 5 | Settings, KB, Agents, Labels, auth pages | Not started |
 | 6 | Polish: a11y audit, e2e, responsive sweep | Not started |
@@ -164,3 +164,7 @@ Update these in Slice 3 (or sooner if you touch the area):
 | 2026-10-06 | Slice 2: "attention jobs" = FAILED/ESCALATED/CRASHED finished within 7 days plus QUEUED/ASSIGNED jobs holding a pending approval; per-project "attention" counts use the same set | "Needs you" should be finite and recent; everything older is history the fleet pages already cover |
 | 2026-10-06 | Slice 2: caps at 8/8/8/10 (tickets/approvals/jobs/activity) with exact totals next to each list | Totals stay true behind the caps so "n of m" is honest without pagination on the dashboard |
 | 2026-10-06 | Slice 2: `tests/pages/projects-index.spec.ts` deleted; `loading-states.spec.ts` grid pin now reads `data-testid="home-needs-you"` behind the v-else chain; harness `mount-sfc.ts` gained `useAsyncData` as an injectable auto-import | The card grid the old spec pinned no longer exists; the behavioral replacement is `tests/pages/home-dashboard.spec.ts` + three component specs |
+| 2026-10-06 | Slice 3: one chip source — `lib/ticket-chips.ts` (dot/chip/stripe/type classes + safe fallbacks); TicketHeader, TicketBoard, TicketCard, HomeNeedsYou import it | Four copies of the same maps had already drifted (TicketCard used raw palette colors that break in dark mode); the per-level classes are pinned once in `tests/lib/ticket-chips.spec.ts` |
+| 2026-10-06 | Slice 3: TicketCard's type/priority badges became the shared dot+label chips; `TicketCard.spec.ts` color pins moved to the token classes; `prStateVariant` (PR dots) kept as-is | The spec pinned the old red/blue/orange palette classes; token chips are the same hues via tokens and survive theme switches. No PR-state tokens exist yet, so that dot stays palette-colored |
+| 2026-10-06 | Slice 3: `FilterBar.vue` extracted (literal `grid gap-3 sm:grid-cols-4`, slot-only) and adopted by the fleet jobs list; the stat row was NOT extracted — `fleet/dashboard/Tiles.vue` stays the pattern and is documented in component-patterns.md | Filter rows repeat; the stat row exists once, and promoting it would be speculative until a third page needs it |
+| 2026-10-06 | Slice 3: docs refresh — navigation-map.md (real sitemap + grouped sidebar/drawer/palette rules), design-tokens.md (token tables replace palette badges), component-patterns.md (chips + shared patterns); `.nax/mono/apps/web/context.md` updated and agent files regenerated with `nax generate` | §8 listed all four as stale after slice 0 |

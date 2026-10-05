@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { AlertTriangle, ClipboardList, ShieldCheck } from 'lucide-vue-next'
 import { formatUsd } from '~/lib/fleet-jobs'
+import { TICKET_CHIP_CLASS, TICKET_DOT_CLASS, priorityDotClass, statusDotClass } from '~/lib/ticket-chips'
 import type { HomeNeedsYou } from '~/lib/home-types'
 
 /**
@@ -11,23 +12,7 @@ const props = defineProps<{ needsYou: HomeNeedsYou; now: Date }>()
 
 const { t } = useI18n()
 
-const STATUS_DOT: Record<string, string> = {
-  CREATED: 'bg-status-todo',
-  VERIFIED: 'bg-status-todo',
-  IN_PROGRESS: 'bg-status-active',
-  VERIFY_FIX: 'bg-status-review',
-  CLOSED: 'bg-status-done',
-  REJECTED: 'bg-status-rejected',
-}
-
-const PRIORITY_DOT: Record<string, string> = {
-  CRITICAL: 'bg-priority-critical',
-  HIGH: 'bg-priority-high',
-  MEDIUM: 'bg-priority-medium',
-  LOW: 'bg-priority-low',
-}
-
-const chipClass = 'inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2 text-xs font-medium'
+const chipClass = TICKET_CHIP_CLASS
 
 const anythingTodo = computed(
   () => props.needsYou.ticketsTotal > 0 || props.needsYou.approvalsTotal > 0 || props.needsYou.jobsTotal > 0,
@@ -56,10 +41,10 @@ function approvalTarget(a: HomeNeedsYou['approvals'][number]): string {
               <span class="font-mono text-xs text-muted-foreground">{{ ticket.ref }}</span>
               <span class="min-w-0 flex-1 truncate">{{ ticket.title }}</span>
               <span :class="chipClass">
-                <span :class="['h-2 w-2 rounded-full', STATUS_DOT[ticket.status]]" aria-hidden="true" />{{ t(`tickets.status.${ticket.status}`) }}
+                <span :class="[TICKET_DOT_CLASS, statusDotClass(ticket.status)]" aria-hidden="true" />{{ t(`tickets.status.${ticket.status}`) }}
               </span>
               <span :class="chipClass">
-                <span :class="['h-2 w-2 rounded-full', PRIORITY_DOT[ticket.priority]]" aria-hidden="true" />{{ t(`tickets.priority.${ticket.priority}`) }}
+                <span :class="[TICKET_DOT_CLASS, priorityDotClass(ticket.priority)]" aria-hidden="true" />{{ t(`tickets.priority.${ticket.priority}`) }}
               </span>
             </NuxtLink>
           </li>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { TICKET_CHIP_CLASS, TICKET_DOT_CLASS, priorityDotClass, priorityStripeClass, typeChipClass } from '~/lib/ticket-chips'
 
 interface Assignee {
   kind: 'user' | 'agent'
@@ -32,31 +33,6 @@ const emit = defineEmits<{ (e: 'open'): void }>()
 
 const { t } = useI18n()
 
-function typeBadgeClass(type: string): string {
-  if (type === 'BUG') return 'border-red-300 text-red-700'
-  if (type === 'ENHANCEMENT') return 'border-blue-300 text-blue-700'
-  return ''
-}
-
-function priorityVariant(priority: string): string {
-  if (priority === 'CRITICAL') return 'destructive'
-  if (priority === 'HIGH') return 'outline'
-  if (priority === 'MEDIUM') return 'secondary'
-  return 'outline'
-}
-
-function priorityClass(priority: string): string {
-  if (priority === 'HIGH') return 'bg-orange-100 text-orange-800 border-orange-300'
-  return ''
-}
-
-function priorityStripe(priority: string): string {
-  if (priority === 'CRITICAL') return 'border-l-priority-critical'
-  if (priority === 'HIGH') return 'border-l-priority-high'
-  if (priority === 'MEDIUM') return 'border-l-priority-medium'
-  return 'border-l-priority-low'
-}
-
 function assigneeInitials(assignee: Assignee): string {
   return assignee.name
     .split(' ')
@@ -89,7 +65,7 @@ function prStateVariant(state: string): string {
   <Card
     role="button"
     tabindex="0"
-    :class="['cursor-pointer border-l-4 shadow-none transition-colors hover:border-ring/60 hover:bg-accent/40', priorityStripe(ticket.priority)]"
+    :class="['cursor-pointer border-l-4 shadow-none transition-colors hover:border-ring/60 hover:bg-accent/40', priorityStripeClass(ticket.priority)]"
     @click="emit('open')"
     @keydown.enter.self="emit('open')"
     @keydown.space.self.prevent="emit('open')"
@@ -100,18 +76,12 @@ function prStateVariant(state: string): string {
           <span class="font-mono text-xs text-muted-foreground">{{ ticket.ref }}</span>
           <p class="mt-1 line-clamp-2 text-sm font-medium leading-snug" :title="ticket.title">{{ ticket.title }}</p>
           <div class="mt-2 flex flex-wrap gap-1">
-            <Badge
-              variant="outline"
-              :class="typeBadgeClass(ticket.type)"
-            >
+            <span :class="typeChipClass(ticket.type)">
               {{ t(`tickets.type.${ticket.type}`) }}
-            </Badge>
-            <Badge
-              :variant="priorityVariant(ticket.priority) as 'destructive' | 'secondary' | 'outline' | 'default'"
-              :class="priorityClass(ticket.priority)"
-            >
-              {{ t(`tickets.priority.${ticket.priority}`) }}
-            </Badge>
+            </span>
+            <span :class="TICKET_CHIP_CLASS">
+              <span :class="[TICKET_DOT_CLASS, priorityDotClass(ticket.priority)]" aria-hidden="true" />{{ t(`tickets.priority.${ticket.priority}`) }}
+            </span>
             <Badge v-if="ticket.externalVcsUrl" variant="outline">
               {{ t('tickets.vcs.github') }} #{{ extractIssueNumber(ticket.externalVcsUrl) }}
             </Badge>

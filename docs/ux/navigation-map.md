@@ -11,7 +11,7 @@
 /login                          ← Auth layout (no sidebar)
 /register                       ← Auth layout (no sidebar)
 
-/                               ← Dashboard: project list + summary stats
+/                               ← Dashboard: needs-you, projects, recent activity
 /projects                       ← Alias → redirects to /
 
 /:project                       ← Project board (kanban)
@@ -19,7 +19,29 @@
 /:project/agents                ← Agent registry
 /:project/labels                ← Label management
 /:project/kb                    ← Knowledge base (search + documents)
-/:project/settings              ← (future) Project settings
+/:project/timeline              ← Project timeline
+/:project/memory                ← Agent memory
+/:project/code-intel            ← Code intelligence
+/:project/settings              ← Project settings
+/:project/fleet                 ← Fleet jobs list
+/:project/fleet/overview        ← Fleet overview (project scope)
+/:project/fleet/jobs/:id        ← Fleet job detail
+/:project/fleet/jobs/:id/logs   ← Fleet job log viewer
+/:project/fleet/approvals       ← Fleet approvals inbox (project scope)
+/:project/fleet/budgets         ← Fleet budget policies
+/:project/fleet/schedules       ← Fleet schedules (+ detail)
+/:project/fleet/dispatch        ← Fleet dispatch form
+/:project/fleet/analytics       ← Fleet analytics (project scope)
+
+/agents                         ← Global agent registry
+/admin/users                    ← Admin: users (global admin)
+/admin/slos                     ← Admin: SLOs (global admin)
+/admin/fleet                    ← Fleet overview (global scope)
+/admin/fleet/runners            ← Admin: runner registry
+/admin/fleet/repos              ← Admin: repo registry
+/admin/fleet/budgets            ← Admin: budget policies
+/admin/fleet/approvals          ← Admin: approvals inbox
+/admin/fleet/analytics          ← Admin: fleet analytics
 ```
 
 ---
@@ -28,13 +50,13 @@
 
 ```
 Root
-├── / (Dashboard / Projects)
+├── / (Dashboard)
 │   └── /:project (Project Board)
 │       ├── /:project/tickets/:ref (Ticket Detail)
-│       ├── /:project/agents (Agents)
-│       ├── /:project/labels (Labels)
-│       ├── /:project/kb (Knowledge Base)
-│       └── /:project/settings (Future)
+│       ├── /:project/agents, /labels, /kb, /timeline, /memory, /code-intel, /settings
+│       └── /:project/fleet/** (overview, jobs, approvals, budgets, schedules, dispatch, analytics)
+├── /agents (Agents)
+├── /admin/** (global admin only: users, slos, fleet)
 ├── /login (Auth)
 └── /register (Auth)
 ```
@@ -43,30 +65,27 @@ Root
 
 ## Sidebar Rules
 
-The sidebar uses a **two-level** model: global links + project-scoped links.
+The sidebar (`layouts/default.vue`) is a **fixed 224px (`w-56`) column with labelled, grouped
+sections**. It is pinned by `tests/layouts/*` — keep nav links inline in the template (not
+data-driven) and keep the source order below.
 
-### Always Visible (Global)
-| Label | Route | Icon |
-|:------|:------|:-----|
-| Dashboard | `/` | `LayoutDashboard` |
+### Groups (in DOM order)
+1. **Workspace** (`nav.sectionWorkspace`): Dashboard (`/`), Agents (`/agents`), SLOs (`/admin/slos`).
+2. **Admin** (`nav.sectionAdmin`, rendered only for global admins): Users, Fleet overview
+   (`/admin/fleet`), Runners, Repos, Budgets, Approvals, Fleet analytics.
+3. **Project block** (rendered when inside `/:project/*`, shown **first** via CSS `order-first`;
+   DOM order is unchanged): project name, then Work (Board, Labels), Knowledge (KB, Timeline,
+   Memory, Code Intel), Fleet (Overview above Fleet jobs, then Fleet analytics), and Settings.
 
-### Project-Scoped (visible when inside `/:project/*`)
-| Label | Route | Icon |
-|:------|:------|:-----|
-| Board | `/:project` | `Kanban` |
-| Agents | `/:project/agents` | `Bot` |
-| Labels | `/:project/labels` | `Tag` |
-| Knowledge Base | `/:project/kb` | `BookOpen` |
-
-### Active State
-- Use `NuxtLink` with `activeClass` / `exactActiveClass` for highlighting.
-- The active link gets `bg-accent text-accent-foreground` styling.
-- Board link uses **exact** match; others use **prefix** match.
-
-### Sidebar Footer
-- Language switcher (compact icon)
-- Theme switcher (compact icon)
-- No user info in sidebar — that stays in the header.
+### Behavior
+- **Active state**: `NuxtLink` with `activeClass` → `bg-accent text-accent-foreground`; the
+  Dashboard and Board links use exact match.
+- **Drawer below 1024px**: the sidebar starts closed, overlays the content with a backdrop, and
+  auto-closes on route change. The header hamburger toggles it at every width.
+- **Skip link**: `nav.skipToContent` targets `#main`, first element in the layout.
+- **Command palette**: the header search button opens `CommandPalette`; global `Cmd/Ctrl+K`
+  toggles it. New top-level destinations must be added there too.
+- **Footer**: language + theme switchers. User identity stays in the header.
 
 ---
 
@@ -135,9 +154,7 @@ These are anticipated but not yet built. Add to sidebar when implemented.
 
 | Page | Route | Notes |
 |:-----|:------|:------|
-| Project Settings | `/:project/settings` | Project config, danger zone (delete) |
 | User Profile | `/profile` | User settings, API keys |
-| Admin | `/admin` | User management, system config |
 
 ---
 

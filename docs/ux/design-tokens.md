@@ -57,25 +57,45 @@ Based on Tailwind defaults + shadcn conventions.
 
 ## Colors & Status
 
-Use shadcn semantic colors. Never hardcode hex values outside of user-defined label colors.
+Tokens are HSL CSS variables in `assets/css/globals.css` (light **and** dark), exposed as Tailwind
+classes through `tailwind.config.ts`. Never hardcode hex or palette classes (`bg-red-100`,
+`text-blue-700`, …) in components — the slice-1 ticket specs grep for raw hex and fail.
 
-### Ticket Status Colors
-| Status | Badge style | Rationale |
-|:-------|:-----------|:----------|
-| CREATED | `bg-gray-100 text-gray-800` / dark: `bg-gray-800 text-gray-200` | Neutral — new, unprocessed |
-| VERIFIED | `bg-blue-100 text-blue-800` / dark: `bg-blue-900 text-blue-200` | Confirmed, ready for work |
-| IN_PROGRESS | `bg-yellow-100 text-yellow-800` / dark: `bg-yellow-900 text-yellow-200` | Active work |
-| VERIFY_FIX | `bg-purple-100 text-purple-800` / dark: `bg-purple-900 text-purple-200` | Awaiting review |
-| CLOSED | `bg-green-100 text-green-800` / dark: `bg-green-900 text-green-200` | Done |
-| REJECTED | `bg-red-100 text-red-800` / dark: `bg-red-900 text-red-200` | Won't fix / invalid |
+### Core tokens
+`background foreground card muted accent primary destructive border input ring` — one indigo
+accent (`--primary: 243 75% 55%` light / `243 80% 64%` dark); semantic colors only for state.
 
-### Priority Badge Variants
-| Priority | shadcn variant |
-|:---------|:--------------|
-| CRITICAL | `destructive` |
-| HIGH | `default` |
-| MEDIUM | `secondary` |
-| LOW | `outline` |
+### Ticket status tokens (`--status-*`)
+| Token | Light | Dark | Meaning |
+|:------|:------|:-----|:--------|
+| `status-todo` | slate 46% | slate 62% | CREATED, VERIFIED — not started |
+| `status-active` | indigo (primary) | indigo 74% | IN_PROGRESS |
+| `status-review` | amber | amber | VERIFY_FIX — awaiting review |
+| `status-done` | green | green | CLOSED |
+| `status-rejected` | red | red | REJECTED |
+
+### Priority tokens (`--priority-*`)
+| Token | Light | Dark | Meaning |
+|:------|:------|:-----|:--------|
+| `priority-critical` | red | red | CRITICAL |
+| `priority-high` | orange | orange | HIGH |
+| `priority-medium` | amber | amber | MEDIUM |
+| `priority-low` | slate | slate | LOW |
+
+### Chart tokens
+`--chart-1`..`--chart-8` (+ `--chart-other`) — used only by the unovis fleet charts
+(`components/fleet/analytics/*.client.vue`); do not reuse them for UI state.
+
+### Chip markup (shared)
+State is never color alone: every dot/chip renders its i18n label next to the colored dot. The
+classes come from `lib/ticket-chips.ts` (`TICKET_CHIP_CLASS`, `TICKET_DOT_CLASS`, `statusDotClass`,
+`priorityDotClass`, `typeChipClass`, `priorityStripeClass`) — import them, don't copy maps.
+```vue
+<span :class="TICKET_CHIP_CLASS">
+  <span :class="[TICKET_DOT_CLASS, statusDotClass(ticket.status)]" aria-hidden="true" />{{ t(`tickets.status.${ticket.status}`) }}
+</span>
+```
+Ticket cards additionally carry a left priority stripe (`priorityStripeClass`).
 
 ---
 

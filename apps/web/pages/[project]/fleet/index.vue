@@ -103,7 +103,7 @@ const stateLabel = (state: string): string => codeLabel(t, te, 'fleet.state', st
 
     <FleetBudgetBanner ref="banner" :slug="slug" :repo-name="options.repoName" />
 
-    <div class="grid gap-3 sm:grid-cols-4">
+    <FilterBar>
       <Select v-model="filters.state">
         <SelectTrigger data-testid="fleet-filter-state"><SelectValue :placeholder="t('fleet.jobs.filters.state')" /></SelectTrigger>
         <SelectContent>
@@ -132,7 +132,7 @@ const stateLabel = (state: string): string => codeLabel(t, te, 'fleet.state', st
           <SelectItem v-for="member in people.members.value" :key="member.userId" :value="member.userId">{{ member.name || member.email }}</SelectItem>
         </SelectContent>
       </Select>
-    </div>
+    </FilterBar>
 
     <LoadingState v-if="pending" />
     <ErrorState v-else-if="loadFailed" @retry="reload()" />
