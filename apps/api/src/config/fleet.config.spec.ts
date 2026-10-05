@@ -106,4 +106,23 @@ describe('fleet config', () => {
   ])('refuses boot on a bad slice 2 value %s=%s', (key, value) => {
     expect(() => validate({ ...BASE, [key]: value })).toThrow();
   });
+
+  it('defaults the dashboard thresholds (S2b (c) §2, D404) and reads overrides', () => {
+    delete process.env.FLEET_JOB_SILENT_SEC;
+    delete process.env.FLEET_JOB_SILENT_ERROR_SEC;
+    delete process.env.FLEET_JOB_START_SEC;
+    delete process.env.FLEET_JOB_QUEUED_WARN_SEC;
+    expect(fleetConfig()).toEqual(expect.objectContaining({ jobSilentSec: 180, jobSilentErrorSec: 600, jobStartSec: 300, jobQueuedWarnSec: 60 }));
+    process.env.FLEET_JOB_SILENT_SEC = '240';
+    expect(fleetConfig().jobSilentSec).toBe(240);
+  });
+
+  it.each([
+    ['FLEET_JOB_SILENT_SEC', 'abc'],
+    ['FLEET_JOB_SILENT_ERROR_SEC', '5'],
+    ['FLEET_JOB_START_SEC', '-1'],
+    ['FLEET_JOB_QUEUED_WARN_SEC', '1.5'],
+  ])('refuses boot on a bad dashboard threshold %s', (key, value) => {
+    expect(() => validate({ ...BASE, [key]: value })).toThrow();
+  });
 });
