@@ -61,11 +61,11 @@ Numbered from D388 (slice 1b ended at D387).
 
 | # | Decision | Why |
 |:--|:--|:--|
-| D388 | **Spec addition (§4.2):** three API additions ship in this slice. (a) `top` (1..12, default 12) on both spend routes: how many series to keep before the `other` fold. (b) `totals.medianJobCostUsd`: the median of per-job unrounded spend in the window (mean of the middle two for an even count), 4 places, `null` with no jobs. (c) `GET /projects/:slug/fleet/analytics/ingest?from&to` -> `{window, pending, failed}`: ingest rows of the project's jobs finished in the window, `pending` = status `pending` or `running`, `failed` = `failed`. | §5.2 asks for a median tile and an ingest notice that no slice 1b route can answer for a member; an 8-color palette needs at most 7 named series plus `other`, and folding in the browser would sum rounded strings (A7). |
+| D388 | **Spec addition (§4.2):** three API additions ship in this slice. (a) `top` (1..12, default 12) on both spend routes: how many series to keep before the `other` fold. (b) `totals.medianJobCostUsd`: the median of per-job unrounded spend in the window (mean of the middle two for an even count), 4 places, `null` with no jobs. (c) `GET /projects/:slug/fleet/analytics/ingest?from&to` -> `{window, pending, failed}`: ingest rows of the project's jobs finished in the window, `pending` = status `pending` or `running`, `failed` = `failed`. | §5.2 asks for a median tile and an ingest notice that no slice 1b route can answer for a member; an 8-color palette needs at most 7 named series plus `other`, and folding in the browser would sum rounded strings (A7). The CLI is intentionally not extended (no `--top`, no median line): it already prints series totals. |
 | D389 | **Spec correction (§5.1):** charts use `@unovis/vue` + `@unovis/ts` directly in two thin wrappers (`SpendAreaChart.client.vue`, `RateLineChart.client.vue`), not shadcn-vue's generated chart components. Bar lists, tiles and tables are plain HTML. | The repo is on `shadcn-nuxt` 0.10 / `radix-vue` with no `components.json`; the current shadcn-vue chart registry targets `reka-ui`. The spec's intent (unovis, themed from the CSS tokens) holds. Plain HTML bars are testable under Jest's node environment and need no client-only guard. |
 | D390 | Palette: the dataviz reference palette's 8 categorical hues as `--chart-1`..`--chart-8` under `:root` and `.dark` (dark steps from the same palette), plus `--chart-other` (`#898781`, both modes). The spend chart asks for `top=7`, so it shows at most 7 named series plus `other`. Slots follow the entity, not the rank: `assignSlots` keeps a surviving key's slot across refetches for the page's lifetime. Single-measure bars use `--chart-1`. | Fixed order, never cycled; "color follows the entity, never its rank". |
 | D391 | Money text is `usd(s) = "$" + s` for the API's 4-place strings, `"-"` for `null`. Rates show as percentages with one decimal (`pct`), `"-"` for `null`. Token counts use `en-US` grouping. | A7: money is rounded once, by the server. |
-| D392 | Window state lives in the URL: `?range=7|30|90` (default 30), or `?from=YYYY-MM-DD&to=YYYY-MM-DD` (custom; `to` is inclusive in the UI and sent as the next day, exclusive); `?group=` holds the spend grouping. A malformed value falls back to the default silently; a custom range with `from` after `to` or longer than 366 days shows an inline message and fetches nothing. The web never sends `bucket` (the server's default applies). | Shareable links; a hand-edited URL never turns into a 400 toast. |
+| D392 | Window state lives in the URL: `?range=7|30|90` (default 30), or `?from=YYYY-MM-DD&to=YYYY-MM-DD` (custom; `to` is inclusive in the UI and sent as the next day, exclusive); `?group=` holds the spend grouping. A malformed value falls back to the default silently; a custom range with `from` after `to` or longer than 366 days shows an inline message, hides the panels and fetches nothing. The web never sends `bucket` (the server's default applies). The group selector offers every API grouping, `story` included (spec §5.2 lists six; `story` is a valid one). | Shareable links; a hand-edited URL never turns into a 400 toast. |
 | D393 | Summary tiles: total spend (`totals.costUsd`), jobs (`totals.jobs`), median cost per job (`totals.medianJobCostUsd`), first-pass rate (`quality.firstPassRate`), finish escalations (`quality.finishOutcomes.escalated`). Each tile shows `-` while its source panel is not ready. | Every tile is one API value; nothing is computed in the browser. "Escalations" is the finish outcome count, the only exact count the API has. |
 | D394 | "Where it goes" = two more spend calls (`groupBy=stage`, `groupBy=role`, default `top`) shown as bar lists of the series totals, `other` last. | Spec §5.2 lists stage and role; the spend route already returns server-summed series totals. |
 | D395 | **Spec correction (§5.3):** the admin page shows cross-project spend only (tiles: spend, jobs, median, cache share; spend over time with `groupBy` defaulting to `project`; where it goes by stage and role) and the ingest health table (status filter, paging, Re-run per row, Backfill, Re-run all with a confirm). Quality and the top tables stay project-only. Delete-on-demand stays API-only (D386 carried; §5.3 lists no delete). | §4.3 ships no admin quality, stories or jobs route. |
@@ -73,7 +73,7 @@ Numbered from D388 (slice 1b ended at D387).
 | D397 | Ingest table rows show the job id and project id as text (the ingest list has no slug, D370), the status badge, attempts, error and updated time. No link to the job. | No API change for a link; admins can paste the id into `koda fleet job analytics`. |
 | D398 | Crosshair tooltips are built by `crosshairHtml` in `lib/fleet-analytics-chart.ts`, which escapes every label and value: unovis inserts the template as HTML, and group keys (model, feature, story names) come from uploaded bundles. | Untrusted text must never reach `innerHTML` unescaped. |
 | D399 | Navigation: one key `nav.fleetAnalytics`. A project link to `/<project>/fleet/analytics` (all members, `BarChart3` icon) after Fleet jobs, an admin link to `/admin/fleet/analytics`, and a breadcrumb leaf `fleet.analytics.title`. | Matches the existing fleet links (`layouts/default.vue`). |
-| D400 | E2E: one spec, `apps/web/tests/e2e/fleet-analytics.e2e.spec.ts`. A scripted runner uploads a tar bundle (cost ledger, metrics, review audit, finish escalated) while RUNNING, reports COMPLETED, and the test kicks ingest with `POST /fleet/ingest/jobs/:id/rerun` (otherwise the 30 s sweeper picks it up). Assertions use the job's unique feature name, so retries and other specs cannot change them. | Deterministic, and independent of other specs' data. |
+| D400 | E2E: one spec, `apps/web/tests/e2e/fleet-analytics.e2e.spec.ts`. A scripted runner uploads a tar bundle (cost ledger, metrics, review audit, finish escalated) while RUNNING, reports COMPLETED, and the test kicks ingest with `POST /fleet/ingest/jobs/:id/rerun` (otherwise the 30 s sweeper picks it up). Assertions use the job's unique feature name, so retries and other specs cannot change them. Spec §6's "Analytics page shows the expected totals" is checked on the feature's legend row and the stories table, not the total tile: CI retries share one database and would double a window total. | Deterministic, and independent of other specs' data. |
 | D401 | The ingest notice on the project page counts the same window as the page; admins get a link to `/admin/fleet/analytics`. | Spec §5.2. |
 
 ## Review Focus
@@ -140,7 +140,6 @@ Modify (web):
 - `apps/web/i18n/locales/en.json`, `zh.json` — `nav.fleetAnalytics`, `fleet.analytics.*`.
 - `apps/web/tests/i18n/fleet-locale-parity.spec.ts` — `ENUMS` pins.
 - `apps/web/tests/helpers/mount-sfc.ts` — `FLEET_COMPONENT_FILES` entries.
-- `apps/web/tests/helpers/fleet-harness.ts` — stubs for the new component names.
 - `apps/web/layouts/default.vue` (+ `tests/layouts/default-fleet-nav.spec.ts`, `tests/layouts/fleet-jobs-nav.spec.ts`).
 - `apps/web/pages/[project]/fleet/jobs/[id]/index.vue` (+ `tests/pages/fleet-job-detail.spec.ts`).
 
@@ -159,6 +158,8 @@ Modify (docs): the spec (D388, D389, D395), `.nax/mono/apps/web/context.md`, `.n
 - Modify: `apps/api/src/fleet/analytics/analytics.service.ts`, `analytics.service.spec.ts`
 - Modify: `apps/api/src/fleet/analytics/dto/analytics-query.dto.ts`, `dto/analytics-response.dto.ts`
 - Test: `apps/api/test/integration/fleet/fleet-analytics-repository.integration.spec.ts`, `fleet-analytics-api.integration.spec.ts`
+
+`openapi.json` and the CLI client are regenerated once, in Task 2 Step 7, after both API tasks.
 
 **Interfaces:**
 - Consumes: slice 1b `foldSeries(cells, starts, labels, keep)`, `usd4OrNull`, `inScope`, `dec`.
@@ -351,7 +352,7 @@ In `apps/api/src/fleet/analytics/dto/analytics-response.dto.ts`, in `class Spend
 line:
 
 ```ts
-  @ApiProperty({ type: String, nullable: true, example: '0.1234', description: 'Median per-job spend in the window, 4 places; null with no jobs (D388)' })
+  @ApiProperty({ type: String, nullable: true, example: '0.1234', description: 'Median per-job spend in the window (each job counts only its spend inside the window), 4 places; null with no jobs (D388)' })
   medianJobCostUsd: string | null;
 ```
 
@@ -596,7 +597,7 @@ In `apps/api/src/fleet/fleet-openapi.contract.spec.ts`, in the test
     expect(spendParams('/api/fleet/analytics/spend')).toContain('top');
 ```
 
-Run (repo root; needs `apps/api/.env`): `bun run generate`
+Run (repo root; needs `apps/api/.env`; it runs a full API build first, so it takes a few minutes): `bun run generate`
 Then: `cd apps/api && bun run test:scoped src/fleet/fleet-openapi.contract.spec.ts` — Expected: PASS.
 Then: `cd apps/cli && bun run test -- src/commands/fleet-analytics.spec.ts src/commands/fleet-ingest.spec.ts` — Expected: PASS
 (the CLI does not use the new fields; the regenerated types must still compile).
@@ -1348,7 +1349,8 @@ export function slotColor(slot: number): string {
 
 /**
  * D390: color follows the entity. Keys still present keep their slot; keys that left free theirs; new keys take
- * the lowest free slot. More keys than slots leave the extra keys unassigned (the spend chart asks for top=7).
+ * the lowest free slot. More keys than slots leave the extra keys unassigned, and `chartSeries` would then reuse
+ * the last slot for them: callers must keep at most 8 keys (the spend chart asks for top=7).
  */
 export function assignSlots(prev: ReadonlyMap<string, number>, keys: readonly string[]): Map<string, number> {
   const present = new Set(keys)
@@ -2166,6 +2168,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { nextTick } from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { enI18n, uiStubs } from '../helpers/fleet-harness'
+import { RANGE_PRESETS } from '~/lib/fleet-analytics-range'
 
 const dir = webFile('components', 'fleet', 'analytics')
 const file = (name: string): string => webFile('components', 'fleet', 'analytics', name)
@@ -2177,6 +2180,17 @@ describe('analytics components never render HTML from data (D398)', () => {
   it('no component in components/fleet/analytics uses v-html', () => {
     for (const name of readdirSync(dir).filter((f) => f.endsWith('.vue'))) {
       expect({ name, vHtml: readFileSync(file(name), 'utf-8').includes('v-html') }).toEqual({ name, vHtml: false })
+    }
+  })
+})
+
+describe('range preset labels (dynamic keys the used-keys guard cannot see)', () => {
+  it('exist in en and zh for every preset', () => {
+    const en = require('../../i18n/locales/en.json') as { fleet: { analytics: { range: Record<string, string> } } }
+    const zh = require('../../i18n/locales/zh.json') as { fleet: { analytics: { range: Record<string, string> } } }
+    for (const days of RANGE_PRESETS) {
+      expect(en.fleet.analytics.range[`d${days}`]).toBeTruthy()
+      expect(zh.fleet.analytics.range[`d${days}`]).toBeTruthy()
     }
   })
 })
@@ -2242,7 +2256,7 @@ describe('FleetAnalyticsSummaryTiles', () => {
   it('shows each tile value as given', () => {
     const app = mount('SummaryTiles.vue', { tiles: [{ id: 'spend', label: 'Total spend', value: '$0.1334' }, { id: 'median', label: 'Median', value: '-' }] })
     expect(app.textOf(byId(app, 'fleet-analytics-tile-spend')[0])).toContain('$0.1334')
-    expect(app.textOf(byId(app, 'fleet-analytics-tile-median')[0])).toContain('-')
+    expect(app.textOf(byId(app, 'fleet-analytics-tile-median-value')[0])).toBe('-')
   })
 })
 
@@ -2427,7 +2441,7 @@ defineProps<{ tiles: ReadonlyArray<{ id: string; label: string; value: string }>
   <dl class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5" data-testid="fleet-analytics-tiles">
     <div v-for="tile in tiles" :key="tile.id" class="rounded-md border border-border p-3" :data-testid="`fleet-analytics-tile-${tile.id}`">
       <dt class="text-xs text-muted-foreground">{{ tile.label }}</dt>
-      <dd class="mt-1 text-xl font-semibold">{{ tile.value }}</dd>
+      <dd class="mt-1 text-xl font-semibold" :data-testid="`fleet-analytics-tile-${tile.id}-value`">{{ tile.value }}</dd>
     </div>
   </dl>
 </template>
@@ -2612,8 +2626,9 @@ const data = computed(() => [...props.rows])
 const x = (d: AreaRow): number => d.t
 const y = computed(() => props.series.map((_, i) => (d: AreaRow): number => d.values[i] ?? 0))
 const color = (_d: unknown, i: number): string => props.series[i]?.color ?? 'var(--chart-other)'
-const xTick = (v: number): string => bucketLabel(v, props.bucket)
-const yTick = (v: number): string => axisUsd(v)
+const ms = (v: number | Date): number => (v instanceof Date ? v.getTime() : v)
+const xTick = (v: number | Date): string => bucketLabel(ms(v), props.bucket)
+const yTick = (v: number | Date): string => axisUsd(ms(v))
 const template = (d: AreaRow): string => crosshairHtml(d, props.series, props.bucket)
 </script>
 
@@ -2647,8 +2662,9 @@ const props = defineProps<{ rows: readonly RateRow[]; bucket: AnalyticsBucket; l
 const data = computed(() => [...props.rows])
 const x = (d: RateRow): number => d.t
 const y = (d: RateRow): number | undefined => d.rate
-const xTick = (v: number): string => bucketLabel(v, props.bucket)
-const yTick = (v: number): string => `${Math.round(v * 100)}%`
+const ms = (v: number | Date): number => (v instanceof Date ? v.getTime() : v)
+const xTick = (v: number | Date): string => bucketLabel(ms(v), props.bucket)
+const yTick = (v: number | Date): string => `${Math.round(ms(v) * 100)}%`
 const template = (d: RateRow): string => rateHtml(d, props.bucket, props.seriesLabel)
 </script>
 
@@ -2673,7 +2689,9 @@ Expected: PASS.
 Run: `cd apps/web && bun run type-check`
 Expected: no errors. If unovis rejects an accessor type (for example `y` returning `number | undefined`), fix the
 accessor's declared type to what the unovis `.d.ts` asks for, without changing behavior (a missing value must
-stay a gap).
+stay a gap). Also read `VisCrosshair`'s props in `node_modules/@unovis/ts/components/crosshair/config.d.ts`: if it has
+a `yStacked` accessor and does not take it from the area by itself, pass `:y-stacked="y"` on the spend chart's
+crosshair so its circles sit on the stacked areas (behavior is checked by eye in Task 12's E2E screenshot if needed).
 
 Run (repo root): `bunx turbo run build --filter=@nathapp/koda-web --force`
 Expected: the Nuxt build succeeds. It proves the `.client.vue` charts compile and stay out of the server
@@ -2739,7 +2757,7 @@ describe('FleetAnalyticsJobTable', () => {
       slug: 'koda', testid: 'jobs',
       rows: [
         { jobId: 'j1', command: 'RUN', featureName: 'substract', state: 'ESCALATED', costUsd: '0.1573', ledgerCostUsd: '0.1573', driftUsd: '0.0000', finishedAt: null },
-        { jobId: 'j2', command: 'PLAN', featureName: 'subtract', state: 'COMPLETED', costUsd: '0.0044', ledgerCostUsd: null, driftUsd: null, finishedAt: null },
+        { jobId: 'j2', command: 'PLAN', featureName: 'subtract', state: 'COMPLETED', costUsd: '0.0044', ledgerCostUsd: null, driftUsd: null, finishedAt: '2026-10-05T12:00:00.000Z' },
       ],
     })
     const [first, second] = byId(app, 'jobs-row')
@@ -2747,7 +2765,8 @@ describe('FleetAnalyticsJobTable', () => {
     expect(app.textOf(first)).toContain('Escalated')
     expect(app.textOf(first)).toContain('$0.1573')
     expect(app.textOf(first)).toContain('$0.0000')
-    expect(app.textOf(second)).toContain('-')
+    expect(app.textOf(second)).toContain('$0.0044')
+    expect(app.textOf(second)).toMatch(/\$0\.0044\s*-\s*-/)
   })
 })
 
@@ -2989,12 +3008,15 @@ const REAL: FleetComponentName[] = [
   'FleetAnalyticsRangePicker', 'FleetAnalyticsStoryTable', 'FleetAnalyticsJobTable', 'FleetAnalyticsIngestNotice', 'FleetNativeSelect',
 ]
 
+/** The real FleetNativeSelect is mounted (fleetComponents), so drop its stub. */
+const { FleetNativeSelect: _nativeSelectStub, ...stubs } = uiStubs
+
 function mountPage(get: Get, query: Record<string, unknown> = {}, role = 'MEMBER') {
   const route = reactive({ params: { project: 'koda' }, query: { ...query } })
   const replace = jest.fn(async (to: { query: Query }) => { route.query = { ...to.query } })
   const hook: { visible?: () => void } = {}
   const app = mountSfc(page, {
-    components: { ...uiStubs, FleetAnalyticsSpendAreaChart: chartStub('spend-chart'), FleetAnalyticsRateLineChart: chartStub('rate-chart') },
+    components: { ...stubs, FleetAnalyticsSpendAreaChart: chartStub('spend-chart'), FleetAnalyticsRateLineChart: chartStub('rate-chart') },
     fleetComponents: REAL,
     alias: {
       '~/composables/useRefetchOnVisible': { useRefetchOnVisible: (fn: () => void) => { hook.visible = fn }, watchVisible: () => () => undefined },
@@ -3075,8 +3097,9 @@ describe('project Analytics page (spec §5.2)', () => {
     expect(p.status('fleet-analytics-costly-jobs')).toBe('empty')
     expect(p.app.find('[data-stub="spend-chart"]')).toHaveLength(0)
     expect(p.text('fleet-analytics-tile-spend')).toContain('$0.0000')
-    expect(p.text('fleet-analytics-tile-median')).toContain('-')
-    expect(p.text('fleet-analytics-tile-firstPass')).toContain('-')
+    expect(p.text('fleet-analytics-tile-median-value')).toBe('-')
+    expect(p.text('fleet-analytics-tile-firstPass-value')).toBe('-')
+    expect(p.text('fleet-analytics-tile-escalations-value')).toBe('0')
     expect(p.byId('fleet-analytics-ingest-notice')).toHaveLength(0)
     p.app.unmount()
   })
@@ -3089,8 +3112,8 @@ describe('project Analytics page (spec §5.2)', () => {
     expect(p.status('fleet-analytics-quality')).toBe('error')
     expect(p.status('fleet-analytics-spend')).toBe('ready')
     expect(p.text('fleet-analytics-tile-spend')).toContain('$0.1334')
-    expect(p.text('fleet-analytics-tile-firstPass')).toContain('-')
-    expect(p.text('fleet-analytics-tile-escalations')).toContain('-')
+    expect(p.text('fleet-analytics-tile-firstPass-value')).toBe('-')
+    expect(p.text('fleet-analytics-tile-escalations-value')).toBe('-')
     const spendCalls = p.calls('/analytics/spend').length
     state.failQuality = false
     p.byId('fleet-analytics-quality-retry')[0].props.onClick()
@@ -3106,6 +3129,7 @@ describe('project Analytics page (spec §5.2)', () => {
     const reversed = mountPage(reversedGet, { from: '2026-10-02', to: '2026-10-01' })
     await reversed.settle()
     expect(reversed.byId('fleet-analytics-range-invalid')).toHaveLength(1)
+    expect(reversed.byId('fleet-analytics-tiles')).toHaveLength(0)
     expect(reversedGet).not.toHaveBeenCalled()
     reversed.app.unmount()
 
@@ -3320,6 +3344,7 @@ const tiles = computed(() => {
       </label>
     </div>
 
+    <template v-if="!invalidRange">
     <FleetAnalyticsIngestNotice v-if="ingest.data.value" :pending="ingest.data.value.pending" :failed="ingest.data.value.failed" :admin="isAdmin" />
     <FleetAnalyticsSummaryTiles :tiles="tiles" />
 
@@ -3376,6 +3401,7 @@ const tiles = computed(() => {
     <FleetAnalyticsPanel :title="t('fleet.analytics.panels.expensiveJobs')" :status="costlyJobs.status.value" testid="fleet-analytics-costly-jobs" @retry="costlyJobs.run()">
       <FleetAnalyticsJobTable :slug="slug" :rows="costlyJobs.data.value?.rows ?? []" testid="fleet-analytics-costly-jobs-table" />
     </FleetAnalyticsPanel>
+    </template>
   </div>
 </template>
 ```
@@ -3679,10 +3705,12 @@ function severityText(counts: Readonly<Record<string, number>>): string {
     <p v-if="showLedger" class="text-sm text-muted-foreground" data-testid="fleet-job-analytics-ledger">{{ t('fleet.analytics.job.liveLedger', { live: usd(data?.liveCostUsd), ledger: usd(data?.ledgerCostUsd) }) }}</p>
 
     <div class="grid gap-4 md:grid-cols-3">
-      <div v-for="block in blocks" :key="block.id" class="space-y-2">
-        <h3 class="text-xs font-medium text-muted-foreground">{{ block.title }}</h3>
-        <FleetAnalyticsBarList :rows="block.rows" :label="block.title" :testid="`fleet-job-analytics-${block.id}`" />
-      </div>
+      <template v-for="block in blocks" :key="block.id">
+        <div v-if="block.rows.length > 0" class="space-y-2">
+          <h3 class="text-xs font-medium text-muted-foreground">{{ block.title }}</h3>
+          <FleetAnalyticsBarList :rows="block.rows" :label="block.title" :testid="`fleet-job-analytics-${block.id}`" />
+        </div>
+      </template>
     </div>
 
     <div v-if="data && data.stories.length > 0" class="space-y-2">
@@ -3748,7 +3776,7 @@ In `apps/web/pages/[project]/fleet/jobs/[id]/index.vue`:
 import FleetJobAnalytics from '~/components/fleet/JobAnalytics.vue'
 ```
 
-2. Just above `async function reloadSilently(): Promise<void> {`, add:
+2. Just above the doc comment of `reloadSilently` (the comment line that starts `/** Live: never flip`), add:
 
 ```ts
 /** D396: bumped on every live reload; the Cost & quality section refetches on it (ingest completion publishes one). */
@@ -3875,6 +3903,9 @@ function makeGet(ingest: () => unknown): Get {
   }) as Get
 }
 
+/** The real FleetNativeSelect is mounted (fleetComponents), so drop its stub. */
+const { FleetNativeSelect: _nativeSelectStub, ...stubs } = uiStubs
+
 function mountAdmin(get: Get, confirmAnswer = true) {
   const route = reactive({ params: {}, query: {} as Query })
   const replace = jest.fn(async (to: { query: Query }) => { route.query = { ...to.query } })
@@ -3882,7 +3913,7 @@ function mountAdmin(get: Get, confirmAnswer = true) {
   const toasts = toastRecorder()
   globalThis.window = { confirm: () => confirmAnswer } as never
   const app = mountSfc(page, {
-    components: { ...uiStubs, FleetAnalyticsSpendAreaChart: chartStub },
+    components: { ...stubs, FleetAnalyticsSpendAreaChart: chartStub },
     fleetComponents: REAL,
     alias: {
       '~/composables/useApi': apiModule,
@@ -4217,6 +4248,7 @@ const tiles = computed(() => {
         </label>
       </div>
 
+      <template v-if="!invalidRange">
       <FleetAnalyticsSummaryTiles :tiles="tiles" />
 
       <FleetAnalyticsPanel :title="t('fleet.analytics.panels.spend')" :status="spend.status.value" :empty-text="t('fleet.analytics.empty')" testid="fleet-analytics-spend" @retry="spend.run()">
@@ -4233,6 +4265,7 @@ const tiles = computed(() => {
           <FleetAnalyticsBarList :rows="roleBars" :label="t('fleet.analytics.panels.byRole')" testid="fleet-analytics-role-bars" />
         </FleetAnalyticsPanel>
       </div>
+      </template>
 
       <section class="space-y-3 rounded-md border border-border p-4" data-testid="fleet-ingest">
         <div class="flex flex-wrap items-end justify-between gap-3">
@@ -4450,10 +4483,12 @@ In the spec:
   `totals` carries `medianJobCostUsd`, the median of per-job unrounded spend in the window (plan D388)."
 - §4.2: add a bullet after the jobs bullet: "`GET /projects/:slug/fleet/analytics/ingest?from&to` -> `{ window, pending, failed }`:
   ingest rows of the project's jobs finished in the window; `pending` counts pending and running (plan D388)."
-- §5.1: replace "through shadcn-vue's chart components (the library shadcn-vue's charts are built on)" with "in two
-  thin client-only wrappers (stacked area, line); bar lists, tiles and tables are plain HTML (plan D389)", and
-  replace "A categorical palette of at most 12 series plus \"other\" (matches 4.2's top-12 fold)" with "The 8-slot
-  categorical palette: the spend chart asks for `top=7`, so at most 7 named series plus \"other\" (plan D390)".
+- §5.1 (the paragraph wraps over several lines; match the phrases, not whole lines): replace "through shadcn-vue's
+  chart components (the library shadcn-vue's charts are built on)" with "in two thin client-only wrappers (stacked
+  area, line); bar lists, tiles and tables are plain HTML (plan D389)"; replace "rendered inside `<ClientOnly>`"
+  with "rendered client-only (`*.client.vue`)"; and replace the sentence starting "A categorical palette of at most
+  12 series plus" (it ends "(matches 4.2's top-12 fold)") with "The 8-slot categorical palette: the spend chart asks
+  for `top=7`, so at most 7 named series plus \"other\" (plan D390)".
 - §5.3: append "The admin page shows spend only (tiles, spend over time, where it goes); quality and the top tables
   are project-only, and delete-on-demand stays API-only (plan D395)."
 
@@ -4486,7 +4521,8 @@ page notice."
 
 Run (repo root): `nax generate` and then `nax generate --all-packages`. `git status` must show only the two context
 files, the spec, and generated agent files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `codex.md`, `.cursorrules`,
-`.windsurfrules`, `.aider.conf.yml`, at the root and under `apps/*`). Never hand-edit a generated file.
+`.windsurfrules`, `.aider.conf.yml` at the root; only the four `.md` files under `apps/*`). Never hand-edit a
+generated file.
 
 - [ ] **Step 3: Full verification**
 
@@ -4509,7 +4545,7 @@ rerun it only if anything after Task 12 touched `apps/web` or `apps/api`. Fix an
 
 ```bash
 git add docs/superpowers/specs/2026-10-04-fleet-s2b-d-analytics-design.md .nax/mono/apps/web/context.md .nax/mono/apps/api/context.md
-git add -u -- AGENTS.md CLAUDE.md GEMINI.md codex.md .cursorrules .windsurfrules .aider.conf.yml 'apps/*/AGENTS.md' 'apps/*/CLAUDE.md' 'apps/*/GEMINI.md' 'apps/*/codex.md' 'apps/*/.cursorrules' 'apps/*/.windsurfrules' 'apps/*/.aider.conf.yml'
+git add -u -- AGENTS.md CLAUDE.md GEMINI.md codex.md .cursorrules .windsurfrules .aider.conf.yml 'apps/*/AGENTS.md' 'apps/*/CLAUDE.md' 'apps/*/GEMINI.md' 'apps/*/codex.md'
 git status --short   # must be empty except files unrelated to this branch
 git commit -m "docs(fleet): S2b slice 2 spec changes (D388, D389, D390, D395) and agent context"
 ```
