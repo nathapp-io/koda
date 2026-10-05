@@ -6,6 +6,7 @@ import { FleetActivityService } from './activity/fleet-activity.service';
 import { FleetReposService } from './repos/fleet-repos.service';
 import { LogReadService } from './logs/log-read.service';
 import { FleetLogRetentionProcessor } from './logs/fleet-log-retention.processor';
+import { AnalyticsService } from './analytics/analytics.service';
 import { GlobalStubsModule } from '../common/test-helpers/global-stubs.module';
 
 // GlobalStubsModule stands in for the global PrismaModule/CacheModule plus the
@@ -33,5 +34,6 @@ describe('FleetModule', () => {
     expect(module.get(FleetReposService)).toBeDefined();
     expect(module.get(LogReadService)).toBeDefined();
     expect(module.get(FleetLogRetentionProcessor)).toBeDefined();
+    expect(module.get(AnalyticsService)).toBeDefined();
   });
 });
