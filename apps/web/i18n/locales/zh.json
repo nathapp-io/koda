@@ -1137,7 +1137,15 @@
         "failed": "runner 未能将答复送达 nax（{detail}）。nax 会拒绝未获答复的命令。",
         "waiting": "runner 尚未确认。"
       },
-      "badge": { "label": "{count} 个审批等待处理" }
+      "badge": { "label": "{count} 个审批等待处理", "waiting": "{count} 个待处理" },
+      "notifications": {
+        "title": "审批待处理",
+        "job": "任务 {job}",
+        "remaining": "剩余 {time}",
+        "review": "查看",
+        "enable": "启用浏览器审批通知",
+        "disable": "关闭浏览器审批通知"
+      }
     },
     "bash": {
       "mode": {

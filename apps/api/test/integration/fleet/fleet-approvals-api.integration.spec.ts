@@ -8,7 +8,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
-import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { FleetHttpWorld, insertRunner, seedFleetHttpAgent, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { ApprovalsService } from '../../../src/fleet/approvals/approvals.service';
 import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
 import enFleet from '../../../src/i18n/en/fleet.json';
@@ -28,6 +28,8 @@ describeIntegration('fleet approvals API (PG)', () => {
   let server: ReturnType<NathApplication['getHttpServer']>;
   let prisma: PrismaClient;
   let world: FleetHttpWorld;
+  let agent: Awaited<ReturnType<typeof seedFleetHttpAgent>>;
+  let runner: { id: string };
   let evaluator: BudgetEvaluator;
   let approvals: ApprovalsService;
   let padmin: string;
@@ -63,6 +65,18 @@ describeIntegration('fleet approvals API (PG)', () => {
     server = app.getHttpServer();
     prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
     world = await seedFleetHttpWorld(server, prisma);
+    agent = await seedFleetHttpAgent(server, world.tokens.root);
+    // Only anchors an already-running bash ask; keep it out of placement for the budget requeue cases.
+    runner = await insertRunner(prisma, { createdById: world.ids.root, enabled: false });
+    // Agents currently have no ProjectMember row: a ticket assignment is their project association.
+    await prisma.ticket.create({ data: {
+      projectId: world.projectId, number: 1, type: 'TASK', title: 'Fleet agent work', status: 'IN_PROGRESS',
+      assignedToAgentId: agent.id, createdByUserId: world.ids.root,
+    } });
+    // Prove the key authenticates as this agent and has access through the real project membership guard.
+    expect(data<{ id: string }>(await request(server).get('/api/agents/me').set(as(agent.apiKey)).expect(200)).id).toBe(agent.id);
+    expect(data<Array<{ id: string }>>(await request(server).get('/api/projects/web/agents').set(as(agent.apiKey)).expect(200))
+      .map((a) => a.id)).toContain(agent.id);
     evaluator = app.get(BudgetEvaluator);
     approvals = app.get(ApprovalsService);
     await request(server).post('/api/admin/users').set(tok('root')).send({ email: 'padmin@koda.test', name: 'padmin', password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
@@ -92,6 +106,58 @@ describeIntegration('fleet approvals API (PG)', () => {
     expect(one.requeueCandidatesTruncated).toBe(false);
     await request(server).get(PROJECT).set(tok('outsider')).expect(403);
     await request(server).get(`/api/projects/ops/fleet/approvals/${approvalId}`).set(tok('root')).expect(404);
+  });
+
+  it.each(['list', 'get'] as const)('an authenticated project agent cannot %s approvals', async (endpoint) => {
+    const { approvalId } = await stopped();
+    const url = endpoint === 'list' ? PROJECT : `${PROJECT}/${approvalId}`;
+    await request(server).get(url).set(tok('viewer')).expect(200);
+    await request(server).get(url).set(as(agent.apiKey)).expect(403);
+  });
+
+  it('an authenticated project agent cannot decide a budget override', async () => {
+    const { approvalId, policy, queued } = await stopped();
+    const decision = { decision: 'raise_budget_and_resume', amountUsd: 25, requeueJobIds: [queued.id] };
+    // Agents have a null project role, so the service also returns 403. Check that the controller's
+    // user-only gate rejects before delegation; otherwise deleting that gate could leave this test green.
+    const decide = jest.spyOn(approvals, 'decide');
+    try {
+      await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(agent.apiKey)).send(decision).expect(403);
+      expect(decide).not.toHaveBeenCalled();
+    } finally {
+      decide.mockRestore();
+    }
+    expect(await prisma.fleetApproval.findUniqueOrThrow({ where: { id: approvalId } }))
+      .toEqual(expect.objectContaining({ status: 'pending', decision: null, decidedById: null }));
+    expect((await prisma.budgetPolicy.findUniqueOrThrow({ where: { id: policy.id } })).pausedAt).not.toBeNull();
+    expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: queued.id } })).state).toBe('CANCELLED');
+    await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin)).send(decision).expect(200);
+  });
+
+  it('an authenticated project agent cannot decide a bash approval', async () => {
+    const running = await job({ state: 'RUNNING', runnerId: runner.id, leaseEpoch: 1, bashMode: 'escalate' });
+    const approval = await prisma.fleetApproval.create({ data: {
+      type: 'nax_bash_escalate', projectId: world.projectId, jobId: running.id, leaseEpoch: running.leaseEpoch,
+      naxAskId: 'agent-guard-ask', requestedAt: new Date(), expiresAt: new Date(Date.now() + 300_000),
+      payload: { command: 'bun run test', commandTruncated: false, options: ['allow', 'deny'] },
+    } });
+    const decide = jest.spyOn(approvals, 'decide');
+    try {
+      await request(server).post(`${PROJECT}/${approval.id}/decide`).set(as(agent.apiKey)).send({ decision: 'allow' }).expect(403);
+      expect(decide).not.toHaveBeenCalled();
+    } finally {
+      decide.mockRestore();
+    }
+    expect(await prisma.fleetApproval.findUniqueOrThrow({ where: { id: approval.id } }))
+      .toEqual(expect.objectContaining({ status: 'pending', decision: null, decidedById: null }));
+    expect(await prisma.fleetCommand.count({ where: { jobId: running.id, type: 'APPROVAL_ANSWER' } })).toBe(0);
+    await request(server).post(`${PROJECT}/${approval.id}/decide`).set(tok('dev')).send({ decision: 'allow' }).expect(200);
+  });
+
+  it('an authenticated project agent cannot read approval counts', async () => {
+    await stopped();
+    expect(data<{ total: number }>(await request(server).get('/api/fleet/approval-counts').set(tok('dev')).expect(200)).total).toBe(1);
+    await request(server).get('/api/fleet/approval-counts').set(as(agent.apiKey)).expect(403);
   });
 
   it('a global policy approval is on the admin routes only', async () => {

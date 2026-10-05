@@ -1,22 +1,38 @@
 <template>
-  <NuxtLink
-    v-if="target"
-    :to="target"
-    class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-foreground hover:bg-accent"
-    :aria-label="t('fleet.approvals.badge.label', { count })"
-    :title="t('fleet.approvals.badge.label', { count })"
-    data-testid="fleet-approval-badge"
-    :data-count="count"
-  >
-    <Inbox class="h-4 w-4" />
-    <span class="rounded-full bg-destructive px-1.5 text-xs text-destructive-foreground">{{ badgeText(count) }}</span>
-  </NuxtLink>
+  <div class="inline-flex items-center gap-2">
+    <NuxtLink
+      v-if="target"
+      :to="target"
+      class="inline-flex items-center gap-1 rounded-md border border-amber-500/50 bg-amber-500/15 px-2 py-1 text-sm font-semibold text-foreground hover:bg-amber-500/25"
+      :aria-label="t('fleet.approvals.badge.label', { count })"
+      :title="t('fleet.approvals.badge.label', { count })"
+      data-testid="fleet-approval-badge"
+      :data-count="count"
+    >
+      <Inbox class="h-4 w-4" />
+      <span class="rounded-full bg-destructive px-1.5 text-xs text-destructive-foreground">{{ t('fleet.approvals.badge.waiting', { count: badgeText(count) }) }}</span>
+    </NuxtLink>
+    <button
+      v-if="notifications.supported.value"
+      type="button"
+      class="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+      :aria-label="t(notifications.enabled.value ? 'fleet.approvals.notifications.disable' : 'fleet.approvals.notifications.enable')"
+      :title="t(notifications.enabled.value ? 'fleet.approvals.notifications.disable' : 'fleet.approvals.notifications.enable')"
+      :aria-pressed="notifications.enabled.value"
+      data-testid="fleet-approval-notifications"
+      @click="notifications.toggleBrowserNotifications"
+    >
+      <Bell class="h-4 w-4" />
+    </button>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
-import { Inbox } from 'lucide-vue-next'
+import { Bell, Inbox } from 'lucide-vue-next'
 import { approvalsVersion, useFleetApprovalCounts } from '~/composables/useFleetApprovals'
+import { useApprovalNotifications } from '~/composables/useApprovalNotifications'
+import { browserPollingDeps } from '~/composables/useVisiblePolling'
 import { createDebouncer } from '~/lib/debounce'
 import { badgeTarget, badgeText } from '~/lib/fleet-approvals'
 
@@ -29,6 +45,7 @@ const props = defineProps<{ slug: string | null }>()
 const { t } = useI18n()
 const auth = useAuth()
 const { counts, load } = useFleetApprovalCounts()
+const notifications = useApprovalNotifications(counts)
 
 const count = computed(() => counts.value?.total ?? 0)
 const target = computed(() => {
@@ -36,15 +53,22 @@ const target = computed(() => {
   return badgeTarget(counts.value, { slug: props.slug, globalAdmin: auth.user.value?.role === 'ADMIN' })
 })
 
+useHead(() => {
+  const prefix = count.value > 0 ? `(${count.value}) ` : ''
+  return { titleTemplate: (title: string | undefined) => `${prefix}${title || 'Koda'}` }
+})
+
 async function refresh(): Promise<void> {
   try {
     await load()
+    await notifications.refresh()
   } catch {
     // Cosmetic: keep the last count and try again at the next poll or notice.
   }
 }
 
-const polling = useVisiblePolling(refresh, POLL_MS)
+// Notification delivery must continue in hidden tabs, including admin pages with no live stream.
+const polling = useVisiblePolling(refresh, POLL_MS, { ...browserPollingDeps(), isHidden: () => false })
 const liveReload = createDebouncer(() => { void refresh() }, 300)
 
 onMounted(() => {
@@ -58,7 +82,10 @@ onBeforeUnmount(() => {
 watch(approvalsVersion, () => liveReload.trigger())
 if (props.slug) {
   useProjectEvents(props.slug, {
-    onFleetApproval: () => liveReload.trigger(),
+    onFleetApproval: (event) => {
+      if (event && event.status !== 'pending') notifications.decided(event.approvalId)
+      liveReload.trigger()
+    },
     onResync: () => liveReload.trigger(),
   })
 }

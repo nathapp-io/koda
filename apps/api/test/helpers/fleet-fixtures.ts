@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import type { RunnerCapabilities, SyncRequest } from '../../src/fleet/common/protocol';
+import { AGENT_ROLES } from '../../src/common/enums';
 import { data, loginToken, TEST_PASSWORD } from './http-app';
 
 export const FLEET_CAPS: RunnerCapabilities = {
@@ -84,6 +85,19 @@ export async function seedFleetHttpWorld(server: Parameters<typeof request>[0], 
     repoId: (await repo(web.id, 'app', 'trunk')).id,
     foreignRepoId: (await repo(ops.id, 'ops', 'main')).id,
   };
+}
+
+/** Creates an active agent with all permitted roles and a real API key, without changing the user-only world seed. */
+export async function seedFleetHttpAgent(
+  server: Parameters<typeof request>[0],
+  adminToken: string,
+): Promise<{ id: string; slug: string; apiKey: string }> {
+  const slug = `fleet-agent-${++seq}`;
+  const created = data<{ apiKey: string; agent: { id: string; slug: string } }>(
+    await request(server).post('/api/agents').set({ Authorization: `Bearer ${adminToken}` })
+      .send({ name: slug, slug, roles: [...AGENT_ROLES], capabilities: ['typescript', 'nestjs'] }).expect(201),
+  );
+  return { id: created.agent.id, slug: created.agent.slug, apiKey: created.apiKey };
 }
 
 /** Issues an enrollment token as admin and enrolls a runner over HTTP (enroll is throttled 10/min). */

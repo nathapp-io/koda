@@ -11,6 +11,7 @@ import type { JobLogSources } from '../logs/types';
 import type { Logger } from '../logger';
 import { assertInside, featureDirFor, repoDirFor } from '../paths/safe-segment';
 import { checkPlanPrd, type PlanCheck } from '../verdict/plan-verdict';
+import { readPlanCost } from '../verdict/plan-cost';
 import type { StatusView } from '../verdict/status-view';
 import { Watcher, type WatcherSink } from '../watcher/watcher';
 import { readStatusFile } from '../watcher/status-snapshot';
@@ -169,6 +170,15 @@ export class HostExecutor implements JobExecutor {
     const stashed = join(jobDir, 'plan-out', 'prd.json');
     const path = (await exists(stashed)) ? stashed : join(featureDirFor(repoDir, job.assign.feature), 'prd.json');
     return checkPlanPrd(await readFile(path, 'utf8').catch(() => null));
+  }
+
+  async readPlanCost(job: JobRow): Promise<string | undefined> {
+    try {
+      return await readPlanCost(this.dirs(job).outDir);
+    } catch {
+      this.deps.log.warn('PLAN cost ledger unreadable', { jobId: job.jobId });
+      return undefined;
+    }
   }
 
   async finishPlan(job: JobRow, options: FinishPlanOptions = {}): Promise<PlanPushOutcome> {
