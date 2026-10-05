@@ -24,6 +24,11 @@ function repoName(repo: FleetRepo): string {
   return `${repo.owner}/${repo.name}`
 }
 
+function dispatchHref(repo: FleetRepo): string | null {
+  const slug = projectLabel.value.get(repo.projectId)
+  return slug ? `/${slug}/fleet/dispatch?repoId=${encodeURIComponent(repo.id)}` : null
+}
+
 /** Loads the rows; false (after a toast or the admin-only note) when that failed. */
 async function loadRows(): Promise<boolean> {
   try {
@@ -116,6 +121,9 @@ onMounted(() => reload())
             <TableCell>{{ repo.defaultBranch }}</TableCell>
             <TableCell><FleetRepoReachabilityBadge :state="checks[repo.id]" /></TableCell>
             <TableCell class="space-x-1 whitespace-nowrap text-right">
+              <NuxtLink v-if="dispatchHref(repo)" :to="dispatchHref(repo)!" class="inline-flex h-8 items-center rounded-md border border-input px-3 text-xs hover:bg-muted" :data-testid="`fleet-repo-dispatch-${repo.owner}-${repo.name}`">
+                {{ t('fleet.repos.actions.dispatch') }}
+              </NuxtLink>
               <Button size="sm" variant="outline" :disabled="checks[repo.id]?.status === 'checking'" @click="check(repo.id)">
                 {{ t('fleet.repos.actions.recheck') }}
               </Button>

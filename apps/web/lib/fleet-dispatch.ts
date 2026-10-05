@@ -88,6 +88,31 @@ export function toDispatchBody(v: DispatchFormValues): DispatchBody {
   }
 }
 
+/** Query prefill for the dispatch form (PLAN -> RUN handoff, Admin Repos link). Only known-good values pass. */
+export interface DispatchQuery {
+  readonly command?: unknown
+  readonly repoId?: unknown
+  readonly feature?: unknown
+  readonly ref?: unknown
+}
+
+const singleText = (value: unknown): string | null =>
+  typeof value === 'string' && value.length > 0 ? value : Array.isArray(value) && typeof value[0] === 'string' ? value[0] : null
+
+export function dispatchPrefillFromQuery(query?: DispatchQuery | null): Partial<DispatchFormValues> {
+  const prefill: Partial<DispatchFormValues> = {}
+  if (!query) return prefill
+  const command = singleText(query.command)
+  if (command === 'RUN' || command === 'PLAN') prefill.command = command
+  const repoId = singleText(query.repoId)?.trim()
+  if (repoId) prefill.repoId = repoId
+  const feature = singleText(query.feature)?.trim()
+  if (feature && FEATURE_RE.test(feature) && !feature.includes('..')) prefill.feature = feature
+  const ref = singleText(query.ref)
+  if (ref && ref.trim() && ref.length <= 255) prefill.ref = ref.trim()
+  return prefill
+}
+
 /** Adds a token to a chain once, trimmed; the list is never mutated. */
 export function addToken(list: readonly string[], token: string): string[] {
   const value = token.trim()

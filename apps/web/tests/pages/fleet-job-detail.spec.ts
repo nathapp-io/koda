@@ -120,6 +120,15 @@ describe('job detail', () => {
     expect(liveHandlers(detail)).toContain('if (event.jobId === jobId && !logAttempts.value.includes(event.leaseEpoch)) liveReload.trigger()')
   })
 
+  test('a COMPLETED PLAN offers Dispatch run pre-filled with repo, feature and resultBranch (#205)', () => {
+    expect(detail).toContain('showDispatchRun')
+    expect(detail).toContain("job.value.command === 'PLAN' && job.value.state === 'COMPLETED'")
+    expect(detail).toContain('job.value.resultBranch !== null')
+    expect(detail).toContain('data-testid="fleet-job-dispatch-run"')
+    expect(detail).toContain("t('fleet.jobs.actions.dispatchRun')")
+    expect(detail).toContain("query: { command: 'RUN', repoId: current.repoId, feature: current.feature, ref: current.resultBranch }")
+  })
+
   test('S2b: the cost and quality section reloads with every live reload (D396)', () => {
     expect(detail).toContain("import FleetJobAnalytics from '~/components/fleet/JobAnalytics.vue'")
     expect(detail).toContain('<FleetJobAnalytics :slug="slug" :job-id="jobId" :reload-key="analyticsReload" />')

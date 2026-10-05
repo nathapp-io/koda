@@ -1205,7 +1205,8 @@
         "checkAll": "Check all",
         "add": "Add repo",
         "recheck": "Check again",
-        "delete": "Delete"
+        "delete": "Delete",
+        "dispatch": "Dispatch"
       },
       "provider": {
         "github": "GitHub",
@@ -1231,6 +1232,7 @@
       "title": "Fleet jobs",
       "subtitle": "nax runs and plans dispatched to fleet runners",
       "dispatch": "Dispatch",
+      "dispatchNoPermission": "Only project developers and admins can dispatch jobs.",
       "budgets": "Budgets",
       "schedules": "Schedules",
       "approvals": "Approvals",
@@ -1337,7 +1339,8 @@
         "requeue": "Requeue",
         "bundle": "Download bundle",
         "bundleExpired": "Bundle expired",
-        "logs": "Logs"
+        "logs": "Logs",
+        "dispatchRun": "Dispatch run"
       },
       "confirmCancel": {
         "title": "Cancel this job?",
@@ -1411,6 +1414,8 @@
       "add": "Add",
       "remove": "Remove {item}",
       "maxCost": "Max cost (USD)",
+      "maxCostHint": "Billed up to this amount. Test runs typically cost $1-2.",
+      "prefilled": "Pre-filled from the PLAN job. Check the ref before dispatching.",
       "placement": "Placement",
       "placementAuto": "Any runner that fits",
       "placementLabels": "Runners with these labels",

@@ -95,7 +95,7 @@ const stateLabel = (state: string): string => codeLabel(t, te, 'fleet.state', st
         <Button variant="outline" data-testid="fleet-budgets-link" @click="navigateTo(`/${slug}/fleet/budgets`)">
           {{ t('fleet.jobs.budgets') }}
         </Button>
-        <Button v-if="canWork" data-testid="fleet-dispatch-button" @click="navigateTo(`/${slug}/fleet/dispatch`)">
+        <Button :disabled="!canWork" :title="canWork ? undefined : t('fleet.jobs.dispatchNoPermission')" data-testid="fleet-dispatch-button" @click="navigateTo(`/${slug}/fleet/dispatch`)">
           {{ t('fleet.jobs.dispatch') }}
         </Button>
       </template>
