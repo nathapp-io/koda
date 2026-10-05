@@ -47,3 +47,135 @@ export interface SpendCell {
   costUsd: Prisma.Decimal;
   tokens: number;
 }
+
+export const ANALYTICS_REPOSITORY = Symbol('ANALYTICS_REPOSITORY');
+
+/** `projectId: null` = every project (global admin). */
+export interface AnalyticsScope {
+  projectId: string | null;
+}
+
+export interface SpendTotalsRow {
+  costUsd: Prisma.Decimal;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  jobs: number;
+}
+
+export interface StoryStatsRow {
+  stories: number;
+  firstPass: number;
+  attempts: number;
+}
+
+export interface FirstPassCell {
+  t: Date;
+  stories: number;
+  firstPass: number;
+}
+
+export interface ReviewerRow {
+  reviewer: string;
+  runs: number;
+  passed: number;
+}
+
+export interface ReviewerSeverityRow {
+  reviewer: string;
+  severity: string;
+  count: number;
+}
+
+/** A grouped count of one text column (finish result, escalation reason). */
+export interface CountRow {
+  value: string;
+  count: number;
+}
+
+export interface StoryListRow {
+  jobId: string;
+  leaseEpoch: number;
+  featureName: string;
+  storyId: string;
+  attempts: number;
+  firstPassSuccess: boolean;
+  success: boolean;
+  costUsd: Prisma.Decimal;
+  completedAt: Date | null;
+}
+
+export interface JobListRow {
+  jobId: string;
+  command: string;
+  featureName: string;
+  state: string;
+  /** costSpentUsd + costCarriedUsd (D382). */
+  costUsd: Prisma.Decimal;
+  /** Sum over the job's done/partial ingest rows; null when none (D382). */
+  ledgerCostUsd: Prisma.Decimal | null;
+  finishedAt: Date | null;
+}
+
+export interface CostSliceRow {
+  key: string;
+  costUsd: Prisma.Decimal;
+  tokens: number;
+}
+
+export interface JobIngestRow {
+  leaseEpoch: number;
+  status: string;
+  files: Record<string, string>;
+  ingestedAt: Date | null;
+  error: string | null;
+  liveCostUsd: Prisma.Decimal | null;
+  ledgerCostUsd: Prisma.Decimal | null;
+}
+
+export interface JobStoryRow {
+  leaseEpoch: number;
+  featureName: string;
+  storyId: string;
+  attempts: number;
+  firstPassSuccess: boolean;
+  success: boolean;
+  costUsd: Prisma.Decimal;
+  durationMs: number | null;
+  completedAt: Date | null;
+}
+
+export interface JobReviewRow {
+  leaseEpoch: number;
+  storyId: string | null;
+  reviewer: string;
+  passed: boolean;
+  failOpen: boolean;
+  findingCount: number;
+  findingsBySeverity: Record<string, number>;
+  advisoryCount: number;
+  at: Date;
+}
+
+/** Spec §4.1-4.2: SQL GROUP BY over indexed columns; money unrounded. */
+export interface IAnalyticsReadRepository {
+  spendCells(scope: AnalyticsScope, w: AnalyticsWindow, groupBy: GroupBy): Promise<SpendCell[]>;
+  spendTotals(scope: AnalyticsScope, from: Date, to: Date): Promise<SpendTotalsRow>;
+  /** D377: display names for repo, runner and project keys; other dimensions get an empty map. */
+  labels(groupBy: GroupBy, keys: readonly string[]): Promise<ReadonlyMap<string, string>>;
+  storyStats(projectId: string, from: Date, to: Date): Promise<StoryStatsRow>;
+  firstPassCells(projectId: string, w: AnalyticsWindow): Promise<FirstPassCell[]>;
+  reviewers(projectId: string, from: Date, to: Date): Promise<ReviewerRow[]>;
+  reviewerSeverities(projectId: string, from: Date, to: Date): Promise<ReviewerSeverityRow[]>;
+  finishResults(projectId: string, from: Date, to: Date): Promise<CountRow[]>;
+  escalationReasons(projectId: string, from: Date, to: Date): Promise<CountRow[]>;
+  topStories(projectId: string, from: Date, to: Date, sort: StorySort, limit: number): Promise<StoryListRow[]>;
+  topJobs(projectId: string, from: Date, to: Date, limit: number): Promise<JobListRow[]>;
+  /** All attempts of the job, cost descending (D383). */
+  jobSlices(jobId: string, by: JobSliceBy): Promise<CostSliceRow[]>;
+  /** The ingest row of the job's highest leaseEpoch (D383). */
+  latestIngest(jobId: string): Promise<JobIngestRow | null>;
+  jobStories(jobId: string, limit: number): Promise<JobStoryRow[]>;
+  jobReviews(jobId: string, limit: number): Promise<JobReviewRow[]>;
+}
