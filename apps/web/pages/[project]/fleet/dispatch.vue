@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { ApiError, extractApiError } from '~/composables/useApi'
-import { buildDispatchSchema, DISPATCH_DEFAULTS, toDispatchBody } from '~/lib/fleet-dispatch'
+import { buildDispatchSchema, DISPATCH_DEFAULTS, dispatchPrefillFromQuery, toDispatchBody } from '~/lib/fleet-dispatch'
 import { BASH_MODES } from '~/lib/fleet-bash-mode'
 import { canWorkOnFleet } from '~/lib/fleet-jobs'
 import type { DispatchResultDto, FleetJobDto, FleetRunnerSummary } from '~/lib/fleet-types'
@@ -22,6 +22,7 @@ const { data: viewer } = useProjectViewerRole(slug)
 const canWork = computed(() => canWorkOnFleet(viewer.value))
 
 const loadFailed = ref(false)
+const prefilled = ref(false)
 onMounted(async () => {
   try {
     await options.load()
@@ -30,6 +31,13 @@ onMounted(async () => {
     loadFailed.value = true
     toast.error(extractApiError(err))
   }
+  const prefill = dispatchPrefillFromQuery((route.query ?? {}) as Record<string, unknown>)
+  let applied = false
+  if (prefill.command !== undefined) { setFieldValue('command', prefill.command); applied = true }
+  if (prefill.repoId !== undefined && options.repos.value.some((r) => r.id === prefill.repoId)) { setFieldValue('repoId', prefill.repoId); applied = true }
+  if (prefill.feature !== undefined) { setFieldValue('feature', prefill.feature); applied = true }
+  if (prefill.ref !== undefined) { setFieldValue('ref', prefill.ref); applied = true }
+  prefilled.value = applied
 })
 
 async function retry(): Promise<void> {
@@ -101,6 +109,7 @@ const onSubmit = handleSubmit(async (formValues) => {
     <p v-else-if="options.repos.value.length === 0" class="text-sm text-muted-foreground" data-testid="dispatch-no-repos">{{ t('fleet.dispatch.noRepos') }}</p>
 
     <form v-else class="space-y-5" data-testid="dispatch-form" @submit="onSubmit">
+      <p v-if="prefilled" class="rounded-md border border-primary/40 bg-primary/5 p-3 text-sm" data-testid="dispatch-prefilled">{{ t('fleet.dispatch.prefilled') }}</p>
       <FormField v-slot="{ componentField }" name="repoId">
         <FormItem>
           <FormLabel>{{ t('fleet.dispatch.repo') }}</FormLabel>
@@ -176,6 +185,7 @@ const onSubmit = handleSubmit(async (formValues) => {
           <FormControl>
             <Input v-bind="componentField" type="number" min="0.0001" step="0.0001" data-testid="dispatch-max-cost" />
           </FormControl>
+          <p class="text-xs text-muted-foreground">{{ t('fleet.dispatch.maxCostHint') }}</p>
           <FormMessage />
         </FormItem>
       </FormField>

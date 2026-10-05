@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals'
-import { addToken, buildDispatchSchema, DISPATCH_DEFAULTS, removeToken, toDispatchBody, type DispatchFormValues } from '~/lib/fleet-dispatch'
+import { addToken, buildDispatchSchema, DISPATCH_DEFAULTS, dispatchPrefillFromQuery, removeToken, toDispatchBody, type DispatchFormValues } from '~/lib/fleet-dispatch'
 
 const t = (key: string): string => key
 const schema = buildDispatchSchema(t)
@@ -103,6 +103,31 @@ describe('bash fields (D299)', () => {
     const plan = toDispatchBody(valid({ command: 'PLAN', planFrom: 'docs/s.md', bashMode: 'escalate', approvalTimeoutMinutes: '2' }))
     expect(plan).not.toHaveProperty('bashMode')
     expect(plan).not.toHaveProperty('approvalTimeoutSec')
+  })
+})
+
+describe('dispatchPrefillFromQuery (#205)', () => {
+  test('accepts a full PLAN -> RUN handoff', () => {
+    expect(dispatchPrefillFromQuery({ command: 'RUN', repoId: 'r1', feature: 'login', ref: 'feat/login' }))
+      .toEqual({ command: 'RUN', repoId: 'r1', feature: 'login', ref: 'feat/login' })
+  })
+
+  test('drops unknown commands, bad features and overlong refs', () => {
+    expect(dispatchPrefillFromQuery({ command: 'DELETE' })).toEqual({})
+    expect(dispatchPrefillFromQuery({ feature: 'a/b' })).toEqual({})
+    expect(dispatchPrefillFromQuery({ feature: 'a..b' })).toEqual({})
+    expect(dispatchPrefillFromQuery({ ref: 'x'.repeat(256) })).toEqual({})
+    expect(dispatchPrefillFromQuery({ repoId: '  ' })).toEqual({})
+  })
+
+  test('trims values and takes the first of an array query', () => {
+    expect(dispatchPrefillFromQuery({ repoId: ['r1', 'r2'], feature: ' f1 ', ref: ' dev ' }))
+      .toEqual({ repoId: 'r1', feature: 'f1', ref: 'dev' })
+  })
+
+  test('tolerates a missing query (route without query in tests)', () => {
+    expect(dispatchPrefillFromQuery(undefined)).toEqual({})
+    expect(dispatchPrefillFromQuery(null)).toEqual({})
   })
 })
 

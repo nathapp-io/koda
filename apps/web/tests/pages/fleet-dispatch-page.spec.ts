@@ -41,6 +41,22 @@ describe('dispatch page', () => {
     expect(dispatch).toContain('const canWork = computed(() => canWorkOnFleet(viewer.value))')
   })
 
+  test('prefills command/repo/feature/ref from the query for PLAN -> RUN and Admin links (#205)', () => {
+    expect(dispatch).toContain('dispatchPrefillFromQuery(')
+    expect(dispatch).toContain('route.query')
+    expect(dispatch).toContain("setFieldValue('command', prefill.command)")
+    expect(dispatch).toContain("setFieldValue('repoId', prefill.repoId)")
+    expect(dispatch).toContain("setFieldValue('feature', prefill.feature)")
+    expect(dispatch).toContain("setFieldValue('ref', prefill.ref)")
+    expect(dispatch).toContain('data-testid="dispatch-prefilled"')
+    expect(dispatch).toContain("t('fleet.dispatch.prefilled')")
+  })
+
+  test('max cost carries a visible hint instead of a silent prefill (#205)', () => {
+    expect(dispatch).toContain("t('fleet.dispatch.maxCostHint')")
+    expect(dispatch).toContain('data-testid="dispatch-max-cost"')
+  })
+
   test('bash mode select and timeout only for RUN; the timeout only for gated/escalate (D299)', () => {
     expect(dispatch).toMatch(/<template v-if="values\.command === 'RUN'">[\s\S]*?name="bashMode"[\s\S]*?testid="dispatch-bash-mode"/)
     expect(dispatch).toMatch(/<FormField v-if="values\.bashMode !== 'raw'" v-slot="\{ componentField \}" name="approvalTimeoutMinutes">/)

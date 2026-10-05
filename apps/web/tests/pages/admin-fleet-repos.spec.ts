@@ -1,5 +1,7 @@
 import { describe, test, expect, afterEach, jest } from '@jest/globals'
 import * as Vue from 'vue'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { ref, computed, watch, nextTick } from 'vue'
 import { mountSfc } from '../helpers/mount-sfc'
 import {
@@ -365,5 +367,17 @@ describe('Fleet AddRepoDialog (behaviour)', () => {
 
     expect(app.emitted('update:open')).toEqual([[false]])
     app.unmount()
+  })
+})
+
+describe('Fleet admin Repos dispatch link (#205)', () => {
+  const webDir = path.join(__dirname, '../..')
+  const source = readFileSync(path.join(webDir, 'pages', 'admin', 'fleet', 'repos.vue'), 'utf-8')
+
+  test('each row links to the project dispatch form with the repo preselected', () => {
+    expect(source).toContain('dispatchHref(repo)')
+    expect(source).toContain('`fleet-repo-dispatch-${repo.owner}-${repo.name}`')
+    expect(source).toContain("t('fleet.repos.actions.dispatch')")
+    expect(source).toContain('/fleet/dispatch?repoId=')
   })
 })

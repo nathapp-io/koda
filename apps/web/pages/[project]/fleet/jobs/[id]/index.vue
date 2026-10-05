@@ -62,6 +62,12 @@ const viewer = computed(() => ({
 }))
 const canCancel = computed(() => job.value !== null && canCancelJob(job.value, viewer.value))
 const canRequeue = computed(() => job.value !== null && canRequeueJob(job.value, viewer.value))
+const showDispatchRun = computed(() => job.value !== null && job.value.command === 'PLAN' && job.value.state === 'COMPLETED' && job.value.resultBranch !== null && viewer.value.canWork)
+const dispatchRunHref = computed(() => {
+  const current = job.value
+  if (!current || !current.resultBranch) return `/${slug}/fleet/dispatch`
+  return { path: `/${slug}/fleet/dispatch`, query: { command: 'RUN', repoId: current.repoId, feature: current.feature, ref: current.resultBranch } }
+})
 const showBundle = computed(() => job.value !== null && mayHaveBundle(job.value.state))
 const bundleExpired = computed(() => bundleGone.value || bundleExpiredByLogs(logList.value))
 const logAttempts = computed(() => logAttemptEpochs(logList.value))
@@ -227,6 +233,9 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
           <Button v-if="canRequeue" variant="outline" :disabled="busy" data-testid="fleet-job-requeue" @click="requeueJob()">
             {{ t('fleet.jobs.actions.requeue') }}
           </Button>
+          <NuxtLink v-if="showDispatchRun" :to="dispatchRunHref" class="inline-flex h-10 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90" data-testid="fleet-job-dispatch-run">
+            {{ t('fleet.jobs.actions.dispatchRun') }}
+          </NuxtLink>
           <Button v-if="canCancel" variant="destructive" :disabled="busy" data-testid="fleet-job-cancel" @click="confirmCancel = true">
             {{ t('fleet.jobs.actions.cancel') }}
           </Button>

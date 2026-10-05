@@ -34,9 +34,10 @@ describe('fleet jobs list', () => {
     expect(list).toMatch(/onBeforeUnmount\(\(\) => liveReload\.cancel\(\)\)/)
   })
 
-  test('the dispatch button is shown to project ADMIN and DEVELOPER only, through the shared rule', () => {
+  test('the dispatch button stays visible but disabled without DEVELOPER+, with a tooltip (#205)', () => {
     expect(list).toContain('const canWork = computed(() => canWorkOnFleet(viewer.value))')
-    expect(list).toMatch(/<Button v-if="canWork"[^>]*data-testid="fleet-dispatch-button"/)
+    expect(list).toMatch(/<Button :disabled="!canWork"[^>]*data-testid="fleet-dispatch-button"/)
+    expect(list).toContain("t('fleet.jobs.dispatchNoPermission')")
   })
 
   test('the table scrolls sideways on narrow screens and names a requester who left', () => {

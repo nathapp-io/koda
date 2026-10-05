@@ -1205,7 +1205,8 @@
         "checkAll": "检查全部",
         "add": "添加仓库",
         "recheck": "重新检查",
-        "delete": "删除"
+        "delete": "删除",
+        "dispatch": "派发"
       },
       "provider": {
         "github": "GitHub",
@@ -1231,6 +1232,7 @@
       "title": "Fleet 任务",
       "subtitle": "派发到 fleet 执行机的 nax run 与 nax plan",
       "dispatch": "派发",
+      "dispatchNoPermission": "只有项目开发者和管理员可以派发任务。",
       "budgets": "预算",
       "schedules": "定时计划",
       "approvals": "审批",
@@ -1337,7 +1339,8 @@
         "requeue": "重新排队",
         "bundle": "下载产物包",
         "bundleExpired": "产物包已过期",
-        "logs": "日志"
+        "logs": "日志",
+        "dispatchRun": "派发运行"
       },
       "confirmCancel": {
         "title": "取消这个任务？",
@@ -1411,6 +1414,8 @@
       "add": "添加",
       "remove": "移除 {item}",
       "maxCost": "费用上限（美元）",
+      "maxCostHint": "最多计费到该金额。测试运行通常花费 $1-2。",
+      "prefilled": "已从 PLAN 任务预填。派发前请检查引用分支。",
       "placement": "调度",
       "placementAuto": "任意合适的执行机",
       "placementLabels": "带这些标签的执行机",
