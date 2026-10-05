@@ -76,7 +76,23 @@
     "fleetJobs": "Fleet jobs",
     "fleetBudgets": "Budgets",
     "fleetApprovals": "Approvals",
-    "fleetAnalytics": "Fleet analytics"
+    "fleetAnalytics": "Fleet analytics",
+    "skipToContent": "Skip to content",
+    "primary": "Primary",
+    "sectionWorkspace": "Workspace",
+    "sectionAdmin": "Admin",
+    "sectionWork": "Work",
+    "sectionKnowledge": "Knowledge",
+    "sectionFleet": "Fleet"
+  },
+  "palette": {
+    "trigger": "Search or jump to…",
+    "title": "Command palette",
+    "description": "Search pages and projects, then press Enter to open.",
+    "placeholder": "Type a page or project name…",
+    "empty": "No matches.",
+    "project": "Project",
+    "toggleTheme": "Toggle light/dark theme"
   },
   "admin": {
     "users": {
@@ -173,6 +189,7 @@
     }
   },
   "tickets": {
+    "filter": { "search": "Filter by ref or title…", "priority": "Priority", "clear": "Clear filters", "showing": "Showing {n} of {total}" },
     "newTicket": "New Ticket",
     "loadMore": "Load more",
     "live": { "deleted": "This ticket was deleted." },

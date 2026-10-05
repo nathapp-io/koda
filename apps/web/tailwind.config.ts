@@ -41,6 +41,19 @@ export default {
           DEFAULT: 'hsl(var(--popover))',
           foreground: 'hsl(var(--popover-foreground))',
         },
+        status: {
+          todo: 'hsl(var(--status-todo))',
+          active: 'hsl(var(--status-active))',
+          review: 'hsl(var(--status-review))',
+          done: 'hsl(var(--status-done))',
+          rejected: 'hsl(var(--status-rejected))',
+        },
+        priority: {
+          critical: 'hsl(var(--priority-critical))',
+          high: 'hsl(var(--priority-high))',
+          medium: 'hsl(var(--priority-medium))',
+          low: 'hsl(var(--priority-low))',
+        },
         card: {
           DEFAULT: 'hsl(var(--card))',
           foreground: 'hsl(var(--card-foreground))',

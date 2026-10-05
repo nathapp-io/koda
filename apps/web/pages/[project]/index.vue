@@ -58,6 +58,22 @@ useProjectEvents(slug, {
   onResync: () => liveReload.trigger(),
 })
 
+const search = ref('')
+const priorityFilter = ref<Ticket['priority'] | null>(null)
+const PRIORITIES: Ticket['priority'][] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']
+
+const filteredTickets = computed(() => {
+  const q = search.value.trim().toLowerCase()
+  return tickets.value.filter((tk) =>
+    (!priorityFilter.value || tk.priority === priorityFilter.value)
+    && (!q || `${tk.ref} ${tk.title}`.toLowerCase().includes(q)))
+})
+const isFiltering = computed(() => search.value.trim() !== '' || priorityFilter.value !== null)
+function clearFilters() {
+  search.value = ''
+  priorityFilter.value = null
+}
+
 const showCreateDialog = ref(false)
 const showImportDialog = ref(false)
 
@@ -86,11 +102,42 @@ function handleCreated() {
 
     <LoadingState v-if="pending" />
     <ErrorState v-else-if="error" @retry="refresh()" />
-    <TicketBoard v-else
-      :tickets="tickets"
+    <template v-else>
+      <div class="flex flex-wrap items-center gap-2" role="search">
+        <label class="sr-only" for="board-search">{{ t('tickets.filter.search') }}</label>
+        <input
+          id="board-search"
+          v-model="search"
+          type="search"
+          :placeholder="t('tickets.filter.search')"
+          class="h-9 w-full rounded-md border border-input bg-card px-3 text-sm placeholder:text-muted-foreground sm:w-64"
+        >
+        <div class="flex flex-wrap gap-1" role="group" :aria-label="t('tickets.filter.priority')">
+          <button
+            v-for="p in PRIORITIES"
+            :key="p"
+            type="button"
+            :aria-pressed="priorityFilter === p"
+            :class="[
+              'h-9 cursor-pointer rounded-md border px-3 text-xs font-medium transition-colors',
+              priorityFilter === p ? 'border-primary bg-primary text-primary-foreground' : 'border-input bg-card text-muted-foreground hover:text-foreground',
+            ]"
+            @click="priorityFilter = priorityFilter === p ? null : p"
+          >
+            {{ t(`tickets.priority.${p}`) }}
+          </button>
+        </div>
+        <Button v-if="isFiltering" variant="ghost" size="sm" @click="clearFilters">{{ t('tickets.filter.clear') }}</Button>
+        <p v-if="isFiltering" class="text-xs text-muted-foreground" aria-live="polite">
+          {{ t('tickets.filter.showing', { n: filteredTickets.length, total: tickets.length }) }}
+        </p>
+      </div>
+    <TicketBoard
+      :tickets="filteredTickets"
       @open-ticket="handleOpenTicket"
       @create="showCreateDialog = true"
     />
+    </template>
     <div v-if="hasNext" class="flex justify-center">
       <Button variant="outline" :disabled="loadingMore" @click="loadMoreTickets">
         {{ loadingMore ? t('common.loading') : t('tickets.loadMore') }}
