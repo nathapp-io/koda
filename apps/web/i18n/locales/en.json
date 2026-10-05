@@ -1074,6 +1074,7 @@
       }
     },
     "approvals": {
+      "keys": "j / ↑ ↓ move · Enter open · A approve · D deny · Esc close",
       "title": "Approvals",
       "subtitleProject": "Decisions this project's fleet is waiting on.",
       "subtitleAdmin": "Every fleet decision, including fleet-wide and runner budgets.",

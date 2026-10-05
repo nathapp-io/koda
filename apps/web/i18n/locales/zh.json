@@ -1074,6 +1074,7 @@
       }
     },
     "approvals": {
+      "keys": "j / ↑ ↓ 移动 · Enter 展开 · A 批准 · D 拒绝 · Esc 关闭",
       "title": "审批",
       "subtitleProject": "本项目的集群正在等待的决定。",
       "subtitleAdmin": "集群中的所有决定，包括全局和运行器预算。",

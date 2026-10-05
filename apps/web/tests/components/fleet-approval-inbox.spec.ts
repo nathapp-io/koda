@@ -404,3 +404,129 @@ describe('FleetApprovalInbox', () => {
     admin.app.unmount()
   })
 })
+
+describe('FleetApprovalInbox keyboard (slice 4)', () => {
+  const bashRow = (id: string, over: Partial<FleetApprovalDto> = {}): FleetApprovalDto =>
+    row(id, { type: 'nax_bash_escalate', policyId: null, payload: { command: 'rm -rf node_modules', options: ['allow', 'deny'], commandTruncated: false }, ...over })
+
+  /** The inbox registers its keydown handler on `document`; the node harness has none, so tests install a fake. */
+  function withFakeDocument() {
+    const listeners: Array<(e: unknown) => void> = []
+    ;(globalThis as Record<string, unknown>).document = {
+      addEventListener: (_kind: string, fn: (e: unknown) => void) => { listeners.push(fn) },
+      removeEventListener: (_kind: string, fn: (e: unknown) => void) => {
+        const at = listeners.indexOf(fn)
+        if (at >= 0) listeners.splice(at, 1)
+      },
+    }
+    const press = (key: string, over: Record<string, unknown> = {}) => {
+      for (const fn of [...listeners]) {
+        fn({ key, isComposing: false, metaKey: false, ctrlKey: false, altKey: false, target: null, preventDefault: jest.fn(), ...over })
+      }
+    }
+    return { press, count: () => listeners.length }
+  }
+
+  async function mountKeyboard(rows: FleetApprovalDto[], opts: { viewer?: Record<string, unknown>; post?: jest.Mock } = {}) {
+    const fake = withFakeDocument()
+    const detailIds = new Set(rows.map((r) => r.id))
+    const get = jest.fn(async (path: string) => {
+      // Detail reads are `/projects/koda/fleet/approvals/:id`; the list is the collection path.
+      const id = path.split('/').pop()
+      return id && detailIds.has(id) ? rows.find((r) => r.id === id) : page(rows)
+    })
+    const post = opts.post ?? jest.fn(async () => bashRow(rows[0]?.id ?? 'a1', { status: 'approved' }))
+    const m = mount({
+      get: get as unknown as jest.Mock,
+      post,
+      props: { viewer: opts.viewer ?? { kind: 'project', canManage: true, canWork: true } },
+    })
+    await m.settle()
+    return { ...m, post, press: fake.press, listenerCount: fake.count }
+  }
+
+  const cursorOn = (m: ReturnType<typeof mount>, id: string) => m.rowEl(id)?.props['data-cursor'] === 'true'
+  const expandedOn = (m: ReturnType<typeof mount>, id: string) => {
+    const button = m.app.find('[data-testid="fleet-approval-toggle"]', m.rowEl(id))[0]
+    return button?.props['aria-expanded'] === true
+  }
+
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).document
+  })
+
+  test('j/k and arrows move the cursor; it starts on the first row and never leaves the list', async () => {
+    const m = await mountKeyboard([bashRow('b1'), bashRow('b2')])
+    expect(cursorOn(m, 'b1')).toBe(true)
+    m.press('j')
+    await m.settle()
+    expect(cursorOn(m, 'b2')).toBe(true)
+    m.press('j')
+    await m.settle()
+    expect(cursorOn(m, 'b2')).toBe(true)
+    m.press('ArrowUp')
+    await m.settle()
+    expect(cursorOn(m, 'b1')).toBe(true)
+    m.press('k')
+    await m.settle()
+    expect(cursorOn(m, 'b1')).toBe(true)
+    m.app.unmount()
+  })
+
+  test('Enter opens the cursor row without a mouse', async () => {
+    const m = await mountKeyboard([bashRow('b1'), bashRow('b2')])
+    m.press('j')
+    await m.settle()
+    m.press('Enter')
+    await m.settle()
+    expect(expandedOn(m, 'b2')).toBe(true)
+    m.app.unmount()
+  })
+
+  test('A approves the expanded bash ask, D denies it — through the same decide path', async () => {
+    const post = jest.fn(async () => bashRow('b1', { status: 'approved' }))
+    const m = await mountKeyboard([bashRow('b1')], { post })
+    m.press('Enter')
+    await m.settle()
+    m.press('a')
+    await m.settle()
+    expect(post).toHaveBeenCalledWith('/projects/koda/fleet/approvals/b1/decide', expect.objectContaining({ decision: 'allow' }))
+    m.press('Escape')
+    m.press('Enter')
+    await m.settle()
+    m.press('d')
+    await m.settle()
+    expect(post).toHaveBeenLastCalledWith('/projects/koda/fleet/approvals/b1/decide', expect.objectContaining({ decision: 'deny' }))
+    m.app.unmount()
+  })
+
+  test('a budget ask: A does nothing (needs a typed amount), D keeps the policy paused', async () => {
+    const post = jest.fn(async () => row('a1', { status: 'rejected', decision: 'keep_paused' }))
+    const m = await mountKeyboard([row('a1')], { post })
+    m.press('Enter')
+    await m.settle()
+    m.press('a')
+    await m.settle()
+    expect(post).not.toHaveBeenCalled()
+    m.press('d')
+    await m.settle()
+    expect(post).toHaveBeenCalledWith('/projects/koda/fleet/approvals/a1/decide', expect.objectContaining({ decision: 'keep_paused' }))
+    m.app.unmount()
+  })
+
+  test('keys ignore typing targets and a viewer without rights; A/D do nothing without an open ask', async () => {
+    const post = jest.fn(async () => bashRow('b1', { status: 'approved' }))
+    const m = await mountKeyboard([bashRow('b1')], { post, viewer: { kind: 'project', canManage: false, canWork: false } })
+    m.press('Enter')
+    await m.settle()
+    m.press('a', { target: { tagName: 'INPUT' } })
+    m.press('a')
+    expect(post).not.toHaveBeenCalled()
+    m.app.unmount()
+
+    const closed = await mountKeyboard([bashRow('b1')], { post: jest.fn(async () => bashRow('b1', { status: 'approved' })) })
+    closed.press('d')
+    expect(closed.post).not.toHaveBeenCalled()
+    closed.app.unmount()
+  })
+})

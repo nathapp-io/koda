@@ -49,7 +49,7 @@ Principles:
 | 1 | Ticket detail page | **Done** (PR #222 merged 2026-10-06) |
 | 2 | Dashboard / home | **Done** on `feat/web-ux-slices-2-3-4` — new `GET /home` aggregate API + needs-you/projects/activity dashboard |
 | 3 | Shared patterns + docs refresh | **Done** on `feat/web-ux-slices-2-3-4` — `lib/ticket-chips.ts` + `FilterBar.vue` extracted; docs/ux refreshed |
-| 4 | Fleet pages | Not started |
+| 4 | Fleet pages | **Done** on `feat/web-ux-slices-2-3-4` — jobs list state chips + running-first, approvals keyboard inbox |
 | 5 | Settings, KB, Agents, Labels, auth pages | Not started |
 | 6 | Polish: a11y audit, e2e, responsive sweep | Not started |
 
@@ -168,3 +168,7 @@ Update these in Slice 3 (or sooner if you touch the area):
 | 2026-10-06 | Slice 3: TicketCard's type/priority badges became the shared dot+label chips; `TicketCard.spec.ts` color pins moved to the token classes; `prStateVariant` (PR dots) kept as-is | The spec pinned the old red/blue/orange palette classes; token chips are the same hues via tokens and survive theme switches. No PR-state tokens exist yet, so that dot stays palette-colored |
 | 2026-10-06 | Slice 3: `FilterBar.vue` extracted (literal `grid gap-3 sm:grid-cols-4`, slot-only) and adopted by the fleet jobs list; the stat row was NOT extracted — `fleet/dashboard/Tiles.vue` stays the pattern and is documented in component-patterns.md | Filter rows repeat; the stat row exists once, and promoting it would be speculative until a third page needs it |
 | 2026-10-06 | Slice 3: docs refresh — navigation-map.md (real sitemap + grouped sidebar/drawer/palette rules), design-tokens.md (token tables replace palette badges), component-patterns.md (chips + shared patterns); `.nax/mono/apps/web/context.md` updated and agent files regenerated with `nax generate` | §8 listed all four as stale after slice 0 |
+| 2026-10-06 | Slice 4: the jobs-list state filter became a single-select chip row (All + the nine API states) driving the same `filters.state`; the three name filters keep the shared `FilterBar columns="3"` | The API takes exactly one `state`, so chips are honest one-to-one; the pinned `fleet-filter-state` testid moved to the chip group |
+| 2026-10-06 | Slice 4: running-first ordering is a client-side sort of the loaded page (`runningFirstJobs` in lib/fleet-jobs.ts): RUNNING/UPLOADING first (longest-running on top), then newest-queued | The API owns cross-page order and takes one state filter; a true cross-page running-first would be an API sort param — noted as a follow-up, not a UI lie |
+| 2026-10-06 | Slice 4: approvals inbox gained a keyboard layer — j/k or arrows move a cursor, Enter opens, A approves, D denies, Esc closes; decisions go through the same `onDecide` path and `keyboardDecision` in lib/fleet-approvals.ts | Budget asks are D-only from the keyboard (approve needs a typed amount); a cut bash ask is deny-only, mirroring `bashChoices`. Keys ignore typing targets; the whole flow is covered by inbox component tests + the existing decide e2e |
+| 2026-10-06 | Slice 4: chart wrappers untouched, cost column already existed (fleet S1) | MASTER-PLAN §6 slice 4 constraints |

@@ -5,6 +5,7 @@ import { createDebouncer } from '~/lib/debounce'
 import { codeLabel } from '~/lib/fleet-i18n'
 import { canWorkOnFleet, formatUsd } from '~/lib/fleet-jobs'
 import { FLEET_JOB_STATES } from '~/lib/project-event-stream'
+import { runningFirstJobs } from '~/lib/fleet-jobs'
 import FleetJobStateBadge from '~/components/fleet/FleetJobStateBadge.vue'
 
 definePageMeta({ layout: 'default' })
@@ -80,6 +81,12 @@ useProjectEvents(slug, {
 })
 
 const stateLabel = (state: string): string => codeLabel(t, te, 'fleet.state', state)
+
+// Slice 4: the state filter is a single-select chip row (the API takes exactly one state); the
+// name filters stay selects. Sorting keeps running jobs on top within the loaded page.
+const stateChips = [{ value: ALL, label: t('fleet.jobs.filters.allStates') }, ...FLEET_JOB_STATES.map((state) => ({ value: state, label: stateLabel(state) }))]
+
+const sortedJobs = computed(() => runningFirstJobs(jobsApi.jobs.value))
 </script>
 
 <template>
@@ -103,14 +110,7 @@ const stateLabel = (state: string): string => codeLabel(t, te, 'fleet.state', st
 
     <FleetBudgetBanner ref="banner" :slug="slug" :repo-name="options.repoName" />
 
-    <FilterBar>
-      <Select v-model="filters.state">
-        <SelectTrigger data-testid="fleet-filter-state"><SelectValue :placeholder="t('fleet.jobs.filters.state')" /></SelectTrigger>
-        <SelectContent>
-          <SelectItem :value="ALL">{{ t('fleet.jobs.filters.allStates') }}</SelectItem>
-          <SelectItem v-for="state in FLEET_JOB_STATES" :key="state" :value="state">{{ stateLabel(state) }}</SelectItem>
-        </SelectContent>
-      </Select>
+    <FilterBar columns="3">
       <Select v-model="filters.repoId">
         <SelectTrigger data-testid="fleet-filter-repo"><SelectValue :placeholder="t('fleet.jobs.filters.repo')" /></SelectTrigger>
         <SelectContent>
@@ -134,6 +134,20 @@ const stateLabel = (state: string): string => codeLabel(t, te, 'fleet.state', st
       </Select>
     </FilterBar>
 
+    <div class="flex flex-wrap items-center gap-1.5" role="group" :aria-label="t('fleet.jobs.filters.state')" data-testid="fleet-filter-state">
+      <button
+        v-for="chip in stateChips"
+        :key="chip.value"
+        type="button"
+        :aria-pressed="filters.state === chip.value"
+        :data-testid="`fleet-filter-chip-${chip.value}`"
+        :class="['rounded-full border px-2.5 py-1 text-xs font-medium transition-colors', filters.state === chip.value ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground']"
+        @click="filters.state = chip.value"
+      >
+        {{ chip.label }}
+      </button>
+    </div>
+
     <LoadingState v-if="pending" />
     <ErrorState v-else-if="loadFailed" @retry="reload()" />
     <EmptyState v-else-if="jobsApi.jobs.value.length === 0" :message="t('fleet.jobs.empty')" />
@@ -153,7 +167,7 @@ const stateLabel = (state: string): string => codeLabel(t, te, 'fleet.state', st
             </TableRow>
           </TableHeader>
           <TableBody>
-            <TableRow v-for="job in jobsApi.jobs.value" :key="job.id" :data-testid="`fleet-job-row-${job.id}`">
+            <TableRow v-for="job in sortedJobs" :key="job.id" :data-testid="`fleet-job-row-${job.id}`">
               <TableCell>
                 <NuxtLink :to="`/${slug}/fleet/jobs/${job.id}`" class="font-medium text-primary underline-offset-4 hover:underline">{{ job.feature }}</NuxtLink>
               </TableCell>

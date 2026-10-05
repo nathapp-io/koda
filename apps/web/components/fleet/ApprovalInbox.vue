@@ -18,6 +18,7 @@
       <div class="w-56">
         <FleetNativeSelect id="fleet-approvals-type" v-model="type" :options="typeOptions" testid="fleet-approvals-type" />
       </div>
+      <p class="ml-auto hidden text-xs text-muted-foreground sm:block" data-testid="fleet-approvals-keys">{{ t('fleet.approvals.keys') }}</p>
     </div>
 
     <p v-if="stale" class="text-sm text-muted-foreground">{{ t('fleet.common.stale') }}</p>
@@ -27,12 +28,14 @@
       <EmptyState v-if="displayRows.length === 0" :message="t(`fleet.approvals.empty.${tab}`)" />
       <ul v-else class="divide-y divide-border rounded-md border border-border" data-testid="fleet-approvals-list">
         <li
-          v-for="entry in displayRows"
+          v-for="(entry, index) in displayRows"
           :key="entry.row.id"
           :data-testid="`fleet-approval-row-${entry.row.id}`"
           :data-status="entry.row.status"
           :data-type="entry.row.type"
           :data-linked="String(entry.linked)"
+          :data-cursor="String(cursor === index)"
+          :class="cursor === index ? 'bg-accent/40' : ''"
         >
           <p v-if="entry.linked" class="px-3 pt-2 text-xs font-medium text-muted-foreground">{{ t('fleet.approvals.linked') }}</p>
           <button
@@ -103,7 +106,7 @@ import { useFleetApprovals } from '~/composables/useFleetApprovals'
 import { isForbidden } from '~/composables/useFleetBudgetPage'
 import { createDebouncer } from '~/lib/debounce'
 import {
-  approvalSummary, canDecide, countdownText, deliveryView, INBOX_PENDING_SIZE, INBOX_TABS, requeueResults, secondsLeft,
+  approvalSummary, canDecide, countdownText, deliveryView, INBOX_PENDING_SIZE, INBOX_TABS, keyboardDecision, requeueResults, secondsLeft,
 } from '~/lib/fleet-approvals'
 import type { ApprovalBase, ApprovalViewer, BudgetApprovalPayload, InboxTab } from '~/lib/fleet-approvals'
 import { codeLabel } from '~/lib/fleet-i18n'
@@ -156,6 +159,9 @@ const expandedId = ref<string | null>(initialId)
 const detail = ref<FleetApprovalDto | null>(null)
 /** Bumped on every fetch of the open approval: part of the panel key, so fresh candidates remount the form (D250). */
 const detailVersion = ref(0)
+
+/** Slice 4: keyboard cursor over the visible rows (j/k, arrows); Enter opens it, A/D decide. */
+const cursor = ref(0)
 
 /** D241: the expanded approval first when it is not on the loaded page. `left` drives the row countdown (D296). */
 const displayRows = computed(() => {
@@ -244,6 +250,8 @@ async function toggle(id: string): Promise<void> {
     writeQuery(null)
     return
   }
+  const index = displayRows.value.findIndex((entry) => entry.row.id === id)
+  if (index >= 0) cursor.value = index
   expandedId.value = id
   detail.value = null
   writeQuery(id)
@@ -278,8 +286,66 @@ function goTo(next: number): void {
 
 watch([tab, type], () => {
   page.value = 1
+  cursor.value = 0
   void reload()
 })
+
+// Keep the cursor inside the list as rows come and go (a decision empties the pending tab).
+watch(() => displayRows.value.length, (length) => {
+  if (cursor.value >= length) cursor.value = Math.max(0, length - 1)
+})
+
+function isTypingTarget(target: EventTarget | null): boolean {
+  // Structural check (no HTMLElement reference): the Jest harness runs without a DOM.
+  const el = target as { tagName?: unknown; isContentEditable?: unknown } | null
+  if (el === null || typeof el !== 'object') return false
+  const tag = el.tagName
+  if (el.isContentEditable === true) return true
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+}
+
+/** Slice 4: inbox keyboard — j/k or arrows move, Enter opens the cursor row, A/D answer it, Esc closes. */
+function onInboxKeydown(e: KeyboardEvent): void {
+  if (e.isComposing || e.metaKey || e.ctrlKey || e.altKey) return
+  if (isTypingTarget(e.target)) return
+  const rows = displayRows.value
+  if (forbidden.value || pending.value || rows.length === 0) return
+
+  if (e.key === 'ArrowDown' || e.key === 'j') {
+    e.preventDefault()
+    cursor.value = Math.min(cursor.value + 1, rows.length - 1)
+    return
+  }
+  if (e.key === 'ArrowUp' || e.key === 'k') {
+    e.preventDefault()
+    cursor.value = Math.max(cursor.value - 1, 0)
+    return
+  }
+  if (e.key === 'Enter') {
+    // A focused row button toggles natively; only answer for the cursor when nothing row-focused.
+    const el = e.target as { closest?: (selector: string) => unknown } | null
+    if (el !== null && typeof el === 'object' && typeof el.closest === 'function' && el.closest('[data-testid="fleet-approval-toggle"]')) return
+    const entry = rows[cursor.value]
+    if (entry) void toggle(entry.row.id)
+    return
+  }
+  if (e.key === 'Escape' && expandedId.value !== null) {
+    expandedId.value = null
+    detail.value = null
+    writeQuery(null)
+    return
+  }
+
+  const key = e.key.toLowerCase()
+  if (key !== 'a' && key !== 'd') return
+  const open = detail.value
+  if (open === null || deciding.value) return
+  const decision = keyboardDecision(open, props.viewer)
+  const body = key === 'a' ? decision.approve : decision.deny
+  if (body === null) return
+  e.preventDefault()
+  void onDecide(body)
+}
 
 // Declared after reload, which it runs; reload only reaches `polling` when it is called.
 const polling = useVisiblePolling(reload, POLL_MS)
@@ -289,10 +355,13 @@ onMounted(() => {
   void polling.runNow()
   polling.start()
   if (initialId !== null) void loadDetail(initialId)
+  // The Jest harness runs without a DOM; the keydown tests install their own document global.
+  if (typeof document !== 'undefined') document.addEventListener('keydown', onInboxKeydown)
 })
 onBeforeUnmount(() => {
   polling.stop()
   liveReload.cancel()
+  if (typeof document !== 'undefined') document.removeEventListener('keydown', onInboxKeydown)
 })
 if (props.base.kind === 'project') {
   useProjectEvents(props.base.slug, {

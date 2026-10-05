@@ -10,6 +10,7 @@ import {
   isTerminalJobState,
   mayHaveBundle,
   mergeEvents,
+  runningFirstJobs,
   pickActiveJob,
   safePrUrl,
   storyRows,
@@ -256,5 +257,25 @@ describe('mergeEvents', () => {
     const merged = mergeEvents(loaded, [ev('b', 2, 'state'), ev('c', 3)])
     expect(merged.map(e => [e.id, e.type])).toEqual([['a', 'log'], ['b', 'state'], ['c', 'log']])
     expect(loaded.map(e => e.type)).toEqual(['log', 'log'])
+  })
+})
+
+describe('runningFirstJobs (slice 4)', () => {
+  test('puts running jobs first, longest-running first, then the rest newest-queued first', () => {
+    const sorted = runningFirstJobs([
+      job({ id: 'queued-new', queuedAt: '2026-10-06T10:00:00Z' }),
+      job({ id: 'run-long', state: 'RUNNING', startedAt: '2026-10-06T08:00:00Z' }),
+      job({ id: 'queued-old', queuedAt: '2026-10-06T07:00:00Z' }),
+      job({ id: 'upload', state: 'UPLOADING', startedAt: '2026-10-06T09:00:00Z' }),
+      job({ id: 'run-recent', state: 'RUNNING', startedAt: '2026-10-06T09:30:00Z' }),
+    ])
+    expect(sorted.map((j) => j.id)).toEqual(['run-long', 'upload', 'run-recent', 'queued-new', 'queued-old'])
+  })
+
+  test('does not mutate the input and treats a missing startedAt as newest', () => {
+    const input = [job({ id: 'a', state: 'RUNNING' }), job({ id: 'b', state: 'RUNNING', startedAt: '2026-10-06T06:00:00Z' })]
+    const sorted = runningFirstJobs(input)
+    expect(sorted.map((j) => j.id)).toEqual(['a', 'b'])
+    expect(input.map((j) => j.id)).toEqual(['a', 'b'])
   })
 })
