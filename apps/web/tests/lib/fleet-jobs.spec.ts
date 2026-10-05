@@ -25,7 +25,7 @@ const job = (over: Partial<FleetJobDto> = {}): FleetJobDto => ({
   state: 'QUEUED', stateReason: null, requestedById: 'u1', queuedAt: '2026-10-01T00:00:00.000Z', assignedAt: null,
   startedAt: null, finishedAt: null, cancelRequestedAt: null, naxRunId: null, naxLogRunId: null, naxCostRunId: null,
   progress: null, currentStoryId: null, currentPhase: null, costSpentUsd: '0', lastHeartbeatAt: null,
-  finishResult: null, escalationReason: null, exitCode: null, resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null, stories: null, storiesTruncated: false,
+  finishResult: null, escalationReason: null, exitCode: null, resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null, stories: null, storiesTruncated: false, postRun: null,
   ...over,
 })
 
@@ -149,7 +149,22 @@ describe('storyRows', () => {
     expect(storyRows(job({ stories: null }))).toEqual([])
     const junk = [null, 'x', { title: 'no id' }, { id: '' }, { id: 'US-9', attempts: 'many' }] as unknown as FleetJobDto['stories']
     expect(storyRows(job({ stories: junk }))).toEqual([
-      { id: 'US-9', title: '', status: 'pending', attempts: 0, current: false, phase: null, variant: 'outline' },
+      { id: 'US-9', title: '', status: 'pending', attempts: 0, current: false, phase: null, variant: 'outline', dependsOn: [] },
+    ])
+  })
+
+  test('dependsOn keeps non-empty string ids once each, in order, never the story itself (D439)', () => {
+    const odd = [
+      { id: 'US-001', title: 'a', status: 'passed', attempts: 1, dependsOn: [] },
+      { id: 'US-002', title: 'b', status: 'pending', attempts: 0, dependsOn: ['US-001', 'US-001', '', 7, null, 'US-002', 'US-404'] },
+      { id: 'US-003', title: 'c', status: 'pending', attempts: 0, dependsOn: 'US-001' },
+      { id: 'US-004', title: 'd', status: 'pending', attempts: 0 },
+    ] as unknown as FleetJobDto['stories']
+    expect(storyRows(job({ stories: odd })).map(r => [r.id, r.dependsOn])).toEqual([
+      ['US-001', []],
+      ['US-002', ['US-001', 'US-404']],
+      ['US-003', []],
+      ['US-004', []],
     ])
   })
 })
