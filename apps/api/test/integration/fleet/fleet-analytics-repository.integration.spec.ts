@@ -148,4 +148,12 @@ describeIntegration('analytics read repository (PG)', () => {
     expect((await repo.jobStories(job1, 2))).toHaveLength(2);
     expect((await repo.jobReviews(job1, 500)).map((r) => r.reviewer).sort()).toEqual(['adversarial', 'semantic', 'semantic']);
   });
+
+  it('sums spend per job for the median, scoped like the totals (D388)', async () => {
+    const own = await repo.jobCostSums({ projectId: a.projectId }, w.from, w.to);
+    expect(own.map((d) => d.toFixed(8))).toEqual(['0.00012000']);
+    const all = (await repo.jobCostSums({ projectId: null }, w.from, w.to)).map((d) => d.toFixed(2)).sort();
+    expect(all).toEqual(['0.00', '5.00']);
+    expect(await repo.jobCostSums({ projectId: a.projectId }, new Date('2020-01-01T00:00:00Z'), new Date('2020-01-02T00:00:00Z'))).toEqual([]);
+  });
 });

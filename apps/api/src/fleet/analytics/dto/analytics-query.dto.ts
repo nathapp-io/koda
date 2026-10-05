@@ -26,12 +26,18 @@ export class AnalyticsBucketQuery extends AnalyticsRangeQuery {
   @IsOptional() @IsIn([...BUCKETS]) bucket?: Bucket;
 }
 
-export class SpendQuery extends AnalyticsBucketQuery {
+/** D388: series kept before the rest fold into `other` (the web asks for 7: an 8-color palette). */
+export class SpendRangeQuery extends AnalyticsBucketQuery {
+  @ApiPropertyOptional({ minimum: 1, maximum: ANALYTICS_LIMITS.seriesKeep, default: ANALYTICS_LIMITS.seriesKeep })
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(ANALYTICS_LIMITS.seriesKeep) top?: number;
+}
+
+export class SpendQuery extends SpendRangeQuery {
   @ApiPropertyOptional({ enum: PROJECT_GROUPS, default: 'model' })
   @IsOptional() @IsIn([...PROJECT_GROUPS]) groupBy?: ProjectGroupBy;
 }
 
-export class AdminSpendQuery extends AnalyticsBucketQuery {
+export class AdminSpendQuery extends SpendRangeQuery {
   @ApiPropertyOptional({ enum: ADMIN_GROUPS, default: 'model' })
   @IsOptional() @IsIn([...ADMIN_GROUPS]) groupBy?: GroupBy;
 }

@@ -64,6 +64,15 @@ export class PrismaAnalyticsRepository implements IAnalyticsRepository {
     };
   }
 
+  async jobCostSums(scope: AnalyticsScope, from: Date, to: Date): Promise<Prisma.Decimal[]> {
+    const rows = await this.db.$queryRaw<Raw[]>(Prisma.sql`
+      SELECT SUM(e."costUsd") AS "cost"
+      FROM "FleetCostEvent" e
+      WHERE e."at" >= ${from} AND e."at" < ${to} ${inScope(scope)}
+      GROUP BY e."jobId"`);
+    return rows.map((r) => dec(r.cost));
+  }
+
   async labels(groupBy: GroupBy, keys: readonly string[]): Promise<ReadonlyMap<string, string>> {
     const ids = keys.filter((k) => k !== NONE_KEY);
     if (ids.length === 0) return new Map<string, string>();

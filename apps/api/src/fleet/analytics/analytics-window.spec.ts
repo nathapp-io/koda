@@ -1,6 +1,6 @@
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { Prisma } from '@prisma/client';
-import { bucketStart, bucketStarts, defaultBucket, normaliseReason, rate4, resolveWindow, usd4, usd4OrNull } from './analytics-window';
+import { bucketStart, bucketStarts, defaultBucket, medianMoney, normaliseReason, rate4, resolveWindow, usd4, usd4OrNull } from './analytics-window';
 
 const DAY = 86_400_000;
 const now = new Date('2026-10-05T12:00:00.000Z');
@@ -67,5 +67,27 @@ describe('money, rates and reasons', () => {
     expect(normaliseReason('\n  quality review omitted ## WALK  \nmore detail')).toBe('quality review omitted ## WALK');
     expect(normaliseReason('x'.repeat(300))).toHaveLength(200);
     expect(normaliseReason('   ')).toBe('');
+  });
+});
+
+describe('medianMoney', () => {
+  const D = (v: string) => new Prisma.Decimal(v);
+
+  it('is null without values', () => {
+    expect(medianMoney([])).toBeNull();
+  });
+
+  it('takes the middle value of an odd count, whatever the input order', () => {
+    expect(medianMoney([D('3'), D('0.00001'), D('2')])?.toFixed(8)).toBe('2.00000000');
+  });
+
+  it('averages the middle two of an even count without rounding', () => {
+    expect(medianMoney([D('0.00001'), D('0.00002')])?.toFixed(8)).toBe('0.00001500');
+  });
+
+  it('does not reorder its input', () => {
+    const input = [D('2'), D('1')];
+    medianMoney(input);
+    expect(input.map((d) => d.toFixed(0))).toEqual(['2', '1']);
   });
 });

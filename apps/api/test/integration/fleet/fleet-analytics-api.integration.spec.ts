@@ -59,9 +59,16 @@ describeIntegration('fleet analytics project API (PG)', () => {
       await get(`analytics/spend?${WINDOW}`).expect(200),
     );
     expect(s.bucket).toBe('day');
-    expect(s.totals).toEqual({ costUsd: '0.0001', tokens: 330, cacheShare: 0, jobs: 1 });
+    expect(s.totals).toEqual({ costUsd: '0.0001', tokens: 330, cacheShare: 0, jobs: 1, medianJobCostUsd: '0.0001' });
     expect(s.series.map((x) => [x.key, x.costUsd])).toEqual([['m1', '0.0001'], ['m2', '0.0000']]);
     expect(s.series[0].points).toHaveLength(7);
+  });
+
+  it('folds after `top` series and rejects a top outside 1..12 (D388)', async () => {
+    const s = data<{ series: Array<{ key: string; folded: boolean; costUsd: string }> }>(await get(`analytics/spend?${WINDOW}&top=1`).expect(200));
+    expect(s.series.map((x) => [x.key, x.folded])).toEqual([['m1', false], ['other', true]]);
+    await get(`analytics/spend?${WINDOW}&top=0`).expect(400);
+    await get(`analytics/spend?${WINDOW}&top=13`).expect(400);
   });
 
   it('refuses outsiders and agent keys', async () => {

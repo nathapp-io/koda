@@ -12,6 +12,7 @@ function fakeRepo(over: Partial<Record<keyof IAnalyticsRepository, jest.Mock>> =
   return {
     spendCells: jest.fn().mockResolvedValue([]),
     spendTotals: jest.fn().mockResolvedValue(EMPTY_TOTALS),
+    jobCostSums: jest.fn().mockResolvedValue([]),
     labels: jest.fn().mockResolvedValue(new Map()),
     storyStats: jest.fn().mockResolvedValue({ stories: 0, firstPass: 0, attempts: 0 }),
     firstPassCells: jest.fn().mockResolvedValue([]),
@@ -43,7 +44,7 @@ describe('AnalyticsService', () => {
     const s = await make(fakeRepo()).spend('p1', {}, now);
     expect(s).toEqual({
       window: { from: '2026-09-05T12:00:00.000Z', to: '2026-10-05T12:00:00.000Z' }, bucket: 'day', groupBy: 'model',
-      totals: { costUsd: '0.0000', tokens: 0, cacheShare: null, jobs: 0 }, series: [],
+      totals: { costUsd: '0.0000', tokens: 0, cacheShare: null, jobs: 0, medianJobCostUsd: null }, series: [],
     });
   });
 
@@ -56,9 +57,33 @@ describe('AnalyticsService', () => {
     const s = await make(repo).spend(null, { from: '2026-10-01', to: '2026-10-03', groupBy: 'repo' }, now);
     expect(repo.spendCells).toHaveBeenCalledWith({ projectId: null }, expect.objectContaining({ bucket: 'day' }), 'repo');
     expect(repo.labels).toHaveBeenCalledWith('repo', ['r1']);
-    expect(s.totals).toEqual({ costUsd: '1.2346', tokens: 495, cacheShare: 0.3333, jobs: 2 });
+    expect(s.totals).toEqual({ costUsd: '1.2346', tokens: 495, cacheShare: 0.3333, jobs: 2, medianJobCostUsd: null });
     expect(s.series).toEqual([expect.objectContaining({ key: 'r1', label: 'acme/app', costUsd: '1.2346', points: expect.any(Array) })]);
     expect(s.series[0].points).toHaveLength(2);
+  });
+
+  it('reports the median per-job spend rounded once, and folds after `top` series (D388)', async () => {
+    const t = new Date('2026-10-01T00:00:00Z');
+    const repo = fakeRepo({
+      spendCells: jest.fn().mockResolvedValue([
+        { key: 'a', t, costUsd: D('3'), tokens: 1 },
+        { key: 'b', t, costUsd: D('2'), tokens: 1 },
+        { key: 'c', t, costUsd: D('1'), tokens: 1 },
+      ]),
+      jobCostSums: jest.fn().mockResolvedValue([D('0.00001'), D('0.00002')]),
+    });
+    const s = await make(repo).spend('p1', { from: '2026-10-01', to: '2026-10-02', top: 2 }, now);
+    expect(repo.jobCostSums).toHaveBeenCalledWith({ projectId: 'p1' }, new Date('2026-10-01T00:00:00Z'), new Date('2026-10-02T00:00:00Z'));
+    expect(s.totals.medianJobCostUsd).toBe('0.0000');
+    expect(s.series.map((x) => [x.key, x.folded, x.costUsd])).toEqual([['a', false, '3.0000'], ['b', false, '2.0000'], ['other', true, '1.0000']]);
+  });
+
+  it('keeps 12 series when top is absent', async () => {
+    const t = new Date('2026-10-01T00:00:00Z');
+    const cells = Array.from({ length: 13 }, (_, i) => ({ key: `k${String(i).padStart(2, '0')}`, t, costUsd: D(String(13 - i)), tokens: 1 }));
+    const s = await make(fakeRepo({ spendCells: jest.fn().mockResolvedValue(cells) })).spend('p1', { from: '2026-10-01', to: '2026-10-02' }, now);
+    expect(s.series).toHaveLength(13);
+    expect(s.series[12]).toMatchObject({ key: 'other', folded: true });
   });
 
   it('rejects an invalid window before touching the repository', async () => {

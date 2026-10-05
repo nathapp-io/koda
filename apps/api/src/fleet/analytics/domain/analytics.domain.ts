@@ -162,6 +162,8 @@ export interface JobReviewRow {
 export interface IAnalyticsReadRepository {
   spendCells(scope: AnalyticsScope, w: AnalyticsWindow, groupBy: GroupBy): Promise<SpendCell[]>;
   spendTotals(scope: AnalyticsScope, from: Date, to: Date): Promise<SpendTotalsRow>;
+  /** D388: one unrounded spend sum per job with a cost event in the window (the median's input). */
+  jobCostSums(scope: AnalyticsScope, from: Date, to: Date): Promise<Prisma.Decimal[]>;
   /** D377: display names for repo, runner and project keys; other dimensions get an empty map. */
   labels(groupBy: GroupBy, keys: readonly string[]): Promise<ReadonlyMap<string, string>>;
   storyStats(projectId: string, from: Date, to: Date): Promise<StoryStatsRow>;
