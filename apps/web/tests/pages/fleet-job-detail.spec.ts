@@ -76,8 +76,15 @@ describe('job detail', () => {
     expect(detail).toMatch(/<a v-if="prUrl" :href="prUrl" target="_blank" rel="noopener noreferrer"/)
   })
 
-  test('renders the story checklist under the progress block', () => {
-    expect(detail).toMatch(/<FleetJobProgress :job="job" \/>\s*<FleetJobStories :job="job" \/>/)
+  test('renders the story pipeline (graph/list) under the progress block (S2b j, spec J3)', () => {
+    expect(detail).toContain("import FleetJobPipeline from '~/components/fleet/story-graph/FleetJobPipeline.vue'")
+    expect(detail).toMatch(/<FleetJobProgress :job="job" \/>\s*<FleetJobPipeline :job="job" \/>/)
+    expect(detail).not.toContain('FleetJobStories')
+  })
+
+  test('the pipeline follows live updates through the existing job reload only', () => {
+    expect(liveHandlers(detail)).toContain('if (event.jobId === jobId) liveReload.trigger()')
+    expect(detail).toMatch(/async function reloadSilently\(\)[\s\S]*?job\.value = await jobsApi\.get\(jobId\)/)
   })
 
   test('a scheduled job links back to its schedule and shows merged fires (3b D216)', () => {
