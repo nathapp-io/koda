@@ -24,6 +24,28 @@
     --input: 214.3 31.8% 91.4%;
     --ring: 222.2 84% 4.9%;
     --radius: 0.5rem;
+    /* S2b D390: dataviz reference categorical palette (fixed order), light steps. */
+    --chart-1: #2a78d6;
+    --chart-2: #eb6834;
+    --chart-3: #1baf7a;
+    --chart-4: #eda100;
+    --chart-5: #e87ba4;
+    --chart-6: #008300;
+    --chart-7: #4a3aa7;
+    --chart-8: #e34948;
+    --chart-other: #898781;
+    /* unovis reads these; built on the app tokens so .dark follows. */
+    --vis-font-family: inherit;
+    --vis-axis-font-family: inherit;
+    --vis-axis-tick-label-color: hsl(var(--muted-foreground));
+    --vis-axis-label-color: hsl(var(--muted-foreground));
+    --vis-axis-tick-color: hsl(var(--border));
+    --vis-axis-domain-color: hsl(var(--border));
+    --vis-axis-grid-color: hsl(var(--border));
+    --vis-tooltip-background-color: hsl(var(--popover));
+    --vis-tooltip-text-color: hsl(var(--popover-foreground));
+    --vis-tooltip-border-color: hsl(var(--border));
+    --vis-crosshair-line-stroke-color: hsl(var(--muted-foreground));
   }
 
   .dark {
@@ -46,6 +68,16 @@
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
     --ring: 212.7 26.8% 83.9%;
+    /* S2b D390: the same hues stepped for the dark surface. */
+    --chart-1: #3987e5;
+    --chart-2: #d95926;
+    --chart-3: #199e70;
+    --chart-4: #c98500;
+    --chart-5: #d55181;
+    --chart-6: #008300;
+    --chart-7: #9085e9;
+    --chart-8: #e66767;
+    --chart-other: #898781;
   }
 }
 
