@@ -7,11 +7,12 @@ import { AnalyticsService } from './analytics.service';
 import { ANALYTICS_REPOSITORY } from './domain/analytics.domain';
 import { PrismaAnalyticsRepository } from './prisma-analytics.repository';
 import { ProjectFleetAnalyticsController } from './project-fleet-analytics.controller';
+import { FleetAnalyticsController } from './fleet-analytics.controller';
 
 /** Fleet S2b (d) §4 read side (D376); spec docs/superpowers/specs/2026-10-04-fleet-s2b-d-analytics-design.md. */
 @Module({
   imports: [PrismaModule, ProjectAccessModule, FleetJobsModule, FleetActivityModule],
-  controllers: [ProjectFleetAnalyticsController],
+  controllers: [ProjectFleetAnalyticsController, FleetAnalyticsController],
   providers: [
     PrismaAnalyticsRepository, { provide: ANALYTICS_REPOSITORY, useExisting: PrismaAnalyticsRepository },
     AnalyticsService,
