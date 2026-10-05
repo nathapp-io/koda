@@ -185,7 +185,7 @@ AttentionItem = {
   pending?: number
   oldestSec?: number
   // job_unplaceable
-  verdict?: 'never' | 'budget_paused' | 'waiting_capacity' | 'no_fit' | 'no_runners' | 'fits_not_placed'
+  verdict?: 'never' | 'budget_paused' | 'runners_paused' | 'waiting_capacity' | 'no_fit' | 'no_runners' | 'fits_not_placed'
   reasons?: Array<{ runnerName: string, reason: MisfitReason }>   // at most 20
   reasonsTotal?: number
   // runner_unhealthy
@@ -252,7 +252,7 @@ then filtered to the scope. Jobs younger than `jobQueuedWarnSec` produce nothing
 4. Otherwise, from the misfit reasons:
    - all in `PERMANENT_MISFITS` → `never`, `error`: `No runner can ever run this: ...`;
    - all `capacity` or `busy_repo` → `waiting_capacity`, `warning`: `Waiting for a free runner` (normal queuing);
-   - all `budget_paused` → `budget_paused`, `warning`: `All fitting runners are budget-paused`;
+   - all `budget_paused` → `runners_paused`, `warning`: `Every runner is budget-paused`;
    - otherwise → `no_fit`, `warning`: `No runner fits: wk-mac offline, linux-1 lacks a provider credential`
      (any mix, e.g. disabled + offline).
 
