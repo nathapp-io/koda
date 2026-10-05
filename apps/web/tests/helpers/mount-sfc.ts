@@ -255,6 +255,16 @@ const FLEET_COMPONENT_FILES: Record<FleetComponentName, string> = {
   FleetApprovalInbox: 'ApprovalInbox.vue',
   FleetApprovalBashPanel: 'ApprovalBashPanel.vue',
   FleetJobApprovals: 'JobApprovals.vue',
+  FleetAnalyticsPanel: 'analytics/Panel.vue',
+  FleetAnalyticsBarList: 'analytics/BarList.vue',
+  FleetAnalyticsSeriesLegend: 'analytics/SeriesLegend.vue',
+  FleetAnalyticsChartDataTable: 'analytics/ChartDataTable.vue',
+  FleetAnalyticsSummaryTiles: 'analytics/SummaryTiles.vue',
+  FleetAnalyticsRangePicker: 'analytics/RangePicker.vue',
+  FleetAnalyticsStoryTable: 'analytics/StoryTable.vue',
+  FleetAnalyticsJobTable: 'analytics/JobTable.vue',
+  FleetAnalyticsIngestNotice: 'analytics/IngestNotice.vue',
+  FleetAnalyticsIngestTable: 'analytics/IngestTable.vue',
 }
 
 export function mountSfc(file: string, options: MountOptions = {}): Mounted {
@@ -328,3 +338,6 @@ export type FleetComponentName =
   | 'FleetScheduleTable' | 'FleetScheduleHistory'
   | 'FleetApprovalBudgetPanel' | 'FleetApprovalOutcome' | 'FleetApprovalInbox' | 'FleetApprovalBashPanel'
   | 'FleetJobApprovals'
+  | 'FleetAnalyticsPanel' | 'FleetAnalyticsBarList' | 'FleetAnalyticsSeriesLegend' | 'FleetAnalyticsChartDataTable'
+  | 'FleetAnalyticsSummaryTiles' | 'FleetAnalyticsRangePicker' | 'FleetAnalyticsStoryTable' | 'FleetAnalyticsJobTable'
+  | 'FleetAnalyticsIngestNotice' | 'FleetAnalyticsIngestTable'
