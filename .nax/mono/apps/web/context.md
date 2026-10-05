@@ -105,3 +105,13 @@ Useful scripts:
   stubs. Tooltip HTML goes through `crosshairHtml`/`rateHtml`, which escape every label (keys come from bundles).
 - Colors are `--chart-1`..`--chart-8` and `--chart-other` (globals.css, light and dark); `assignSlots` keeps a key's
   color across refetches.
+
+## UX redesign (in progress)
+
+A multi-slice UX redesign of this app is planned and tracked in `docs/ux/redesign/MASTER-PLAN.md`. Read it before
+changing layout, navigation, tokens or the ticket board, and update its Status table and Decisions log in the same PR.
+
+- `layouts/default.vue` is pinned by `tests/layouts/*`: keep nav links inline in the template and keep the source order
+  (SLOs before the project block; Timeline and Settings after KB). Project links are shown first with CSS `order-first`.
+- `components/CommandPalette.vue` is the Cmd/Ctrl+K palette; new top-level destinations should be added there too.
+- Colors come from the HSL tokens in `assets/css/globals.css` (including `status-*` and `priority-*`), never raw hex in components.

@@ -4,7 +4,9 @@
 > A fresh session should read this file first, then the slice it is about to work on.
 > Update the **Status** table and **Decisions log** at the end of every slice.
 
-Branch for slice 0: `feat/web-ux-redesign-shell`. Later slices branch from `main` after the previous one merges.
+Slice 0: branch `feat/web-ux-redesign-shell`, PR #215 (nathapp-io/koda). Later slices branch from `main` after the previous one merges.
+
+User intent (2026-10-05): redesign the whole Koda UI/UX, **especially the UX**, using the ui-ux-pro-max skills. The user approved the look of `shell-preview.html`. Never commit, push or open PRs without being asked.
 
 ---
 
@@ -37,19 +39,34 @@ Principles:
 - **Layout tests pin the template** (`apps/web/tests/layouts/*`). They SSR-render `layouts/default.vue` with a fixed set of setup bindings (`t, auth, route, sidebarOpen, projectSlug, breadcrumbItems, backTo, navLinkClass, activeClass, isGlobalAdmin`) and assert source order: SLO link before the project block; Timeline and Settings after KB; `py-4`/`px-6`/`w-56`/`fixed` present; label text immediately before `</a>`. Keep nav links inline in the template (not data-driven) and keep new template-only bindings optional. If a test must change, change it deliberately and say why in the PR.
 - `TicketCard`/`TicketBoard` specs are source-pattern tests (they grep for `BUG`, `CRITICAL`, `font-mono`, `Avatar`, etc.). Additive edits only.
 - Do not edit `apps/cli/src/generated/` or generated `AGENTS.md`.
-- Verification before claiming done: `cd apps/web && bunx jest` (all pass), `bunx eslint <changed files>`. `vue-tsc` in this repo currently reports missing Nuxt auto-import types in `server/utils/api.ts` (pre-existing); run `bunx nuxt prepare` first if you need a clean type-check.
+- Verification before claiming done: `cd apps/web && bunx jest` (all pass), `bunx eslint <changed files>`. `vue-tsc` currently reports missing Nuxt auto-import types in `server/utils/api.ts` (pre-existing). `bunx nuxt prepare` is the likely fix but needs Node 22+ (the repo requirement); it fails on Node 18, so switch Node first. This is untested beyond that failure.
 
 ## 4. Status
 
 | # | Slice | Status |
 |:--|:------|:-------|
-| 0 | Shell, tokens, command palette, board filters | **Done on branch `feat/web-ux-redesign-shell`** (see §5) |
+| 0 | Shell, tokens, command palette, board filters | **In PR #215** (see §5). When merged, mark Done. If the PR is closed, rebase the branch. |
 | 1 | Ticket detail page | Not started |
 | 2 | Dashboard / home | Not started |
 | 3 | Shared patterns + docs refresh | Not started |
 | 4 | Fleet pages | Not started |
 | 5 | Settings, KB, Agents, Labels, auth pages | Not started |
 | 6 | Polish: a11y audit, e2e, responsive sweep | Not started |
+
+## 4b. Effort estimate (2026-10-05, a guess from file sizes, not measured)
+
+About 6 more PRs, 8 to 12 focused sessions (2 to 3 weeks with review; up to 4 if the dashboard needs new API endpoints).
+
+| Slice | Effort | Main risk |
+|:--|:--|:--|
+| 1 Ticket detail | 1.5 to 2 sessions | Splitting a 721-line page while ticket tests stay green |
+| 2 Dashboard | 1 to 3 sessions | Possible new aggregate API endpoint |
+| 3 Shared patterns + docs | 1 session | Keep it small |
+| 4 Fleet pages (~20 files) | 2 to 3 sessions | Many pinned tests; charts and log viewers stay untouched |
+| 5 Remaining pages | 2 to 3 sessions | Settings (502 lines) is the largest |
+| 6 Polish + e2e | 1 to 2 sessions | Needs running app and test Postgres |
+
+Recommended order: do slices 1 and 2 (most daily UX value), then decide whether 4 and 5 are worth the cost. They can be cut to the highest-traffic pages (fleet jobs and approvals, Settings), saving 3 to 4 sessions.
 
 ## 5. Slice 0 — shipped (reference)
 
@@ -62,7 +79,7 @@ Files changed:
 - `i18n`: `nav.{skipToContent,primary,section*}`, `palette.*`, `tickets.filter.*` (en + zh).
 
 Known limits (deliberate, track in later slices):
-- Board filter is client-side over loaded pages only (page size 100). If tickets exceed one page, filtering will not see unloaded ones. Fix: server-side query params once the API supports them (API-owned).
+- Board filter is client-side over loaded pages only (page size 100). If tickets exceed one page, filtering will not see unloaded ones. The API already supports server-side filters on `GET /projects/:slug/tickets`: `status`, `type`, `priority`, `assignedTo` (user id or `self`) and `unassigned` (see `apps/api/src/tickets/dto/list-tickets.query.ts`). It has **no text search** param. Follow-up: send the priority chip as `priority=` to the API and keep ref/title search client-side, or add a `q` param in `apps/api` (API-owned, then `bun run generate`).
 - Timeline sits in the Knowledge group only because tests pin it after KB.
 - No drag-and-drop on the board; status changes happen on the ticket page.
 - Palette searches nav + projects only, not tickets.
@@ -81,7 +98,7 @@ Why first: most-used screen; humans and agents both act here.
 
 ### Slice 2 — Dashboard (`pages/index.vue`)
 - Replace the plain project-card grid with: **Needs you** (assigned tickets, pending approvals, failed/blocked fleet jobs), **Projects** (compact rows with open/blocked counts), **Recent activity**.
-- Requires API data. Check existing endpoints first (`/projects`, approvals, fleet jobs, project events/timeline). If an aggregate endpoint is missing, add it in `apps/api` (API-owned), then `bun run generate` for the CLI client. Do not aggregate heavy data in the browser.
+- Requires API data. Already available: ticket list filters incl. `assignedTo=self` and `status`/`priority` (see §5), `memory/timeline.controller.ts`, fleet approvals and jobs endpoints under `/fleet/*`. Not yet checked: a cross-project "my tickets" call (the ticket list is per project) and failed-job listing. If an aggregate endpoint is missing, add it in `apps/api` (API-owned), then `bun run generate` for the CLI client. Do not aggregate heavy data in the browser.
 - Empty state for a new workspace: one primary "Create project" action.
 
 ### Slice 3 — Shared patterns + docs refresh
@@ -131,6 +148,6 @@ Update these in Slice 3 (or sooner if you touch the area):
 |:-----|:---------|:----|
 | 2026-10-05 | Linear-style dense dev-tool look, indigo accent, system fonts | Fits a ticket + agent-fleet tool; no new font dependency or network load |
 | 2026-10-05 | Project nav first via CSS `order-first`, DOM order unchanged | Layout tests pin source order; UX wants project links on top |
-| 2026-10-05 | Client-side board filter for now | API has no board filter params; avoid inventing backend scope in a UI slice |
+| 2026-10-05 | Client-side board filter for now | Simplest for a UI-only slice. Correction: the API does support `priority`/`status`/`type`/`assignedTo` filters (not text search); server-side priority filtering is a cheap follow-up |
 | 2026-10-05 | Discard the ui-ux-pro-max auto-generated design system | It returned a wedding-style pink palette and landing-page pattern; not a fit for a dev tool |
 | 2026-10-05 | Keep nav links inline in the layout template | Layout tests render the template with a fixed binding set; data-driven nav would render empty there |
