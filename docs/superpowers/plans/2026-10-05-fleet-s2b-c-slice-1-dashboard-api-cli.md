@@ -19,7 +19,7 @@
 - Project scope never reveals another project's job ids, features, repos or slugs, nor any credential provider name, `expiresAt` or nax/daemon version (spec §1.5).
 - Agent principals get 403 on the project route (`assertUser`, like `project-fleet-analytics.controller.ts`).
 - Caps: active jobs 200 (`activeTruncated`), recent jobs 20 within 24 h (`recentTruncated`), dry-run window = the globally oldest 50 QUEUED jobs (`QUEUED_SCAN_LIMIT`), reasons per item 20 (`reasonsTotal`).
-- New config keys and defaults: `FLEET_JOB_SILENT_SEC` 180, `FLEET_JOB_SILENT_ERROR_SEC` 600, `FLEET_JOB_START_SEC` 300, `FLEET_JOB_QUEUED_WARN_SEC` 60. No cross-field validation; the silent rule reads the error threshold as `max(error, silent)`.
+- New config keys and defaults: `FLEET_JOB_SILENT_SEC` 180, `FLEET_JOB_SILENT_ERROR_SEC` 600, `FLEET_JOB_START_SEC` 300, `FLEET_JOB_QUEUED_WARN_SEC` 60, each bounded in `env.validation.ts` like the other numeric `FLEET_*` keys. No cross-field validation; the silent rule reads the error threshold as `max(error, silent)` (an inverted pair goes straight to error).
 - OAuth `stored.expires` / `expired` never raise anything (placement ignores access-token expiry).
 - Never edit `apps/cli/src/generated/**` or generated `AGENTS.md`/`CLAUDE.md` by hand; regenerate (`bun run generate`, `nax generate`).
 - No emojis in code, comments or docs. Immutable style (no in-place mutation of inputs; local accumulators inside a function are fine where the surrounding code does the same).
@@ -226,7 +226,7 @@ In `apps/api/src/fleet/jobs/placement.service.ts`:
 1. Replace the `./placement-rules` import line with:
 
 ```ts
-import { EMPTY_LOAD, evaluateRunners, firstMisfit, MisfitReason, orderCandidates, QUEUED_SCAN_LIMIT, toLoads, toPlacementJob } from './placement-rules';
+import { EMPTY_LOAD, evaluateRunners, firstMisfit, MisfitReason, orderCandidates, PlacementJob, QUEUED_SCAN_LIMIT, toLoads, toPlacementJob } from './placement-rules';
 ```
 
 2. In the `./domain/fleet-job.domain` import, drop `ActiveJobRef` (no longer used):
@@ -255,25 +255,41 @@ with
       const evaluated = evaluateRunners(placementJob, runners, loads, (id) => pauses.runnerPaused(id), now, this.fleetConfig.runnerOfflineSec);
 ```
 
-`EMPTY_LOAD` and `firstMisfit` stay imported: `evaluatePinned` and `fillRunner` still use them.
+`EMPTY_LOAD`, `firstMisfit` and `PlacementJob` stay imported: `evaluatePinned` (its `job: PlacementJob` parameter) and `fillRunner` still use them. `RunnerLoad` is dropped (only the removed `toLoads` used it).
 
 - [ ] **Step 5: Update the two `toPlacementJob` importers**
 
-`apps/api/src/fleet/jobs/fleet-jobs.service.ts:21`: replace `import { PlacementService, toPlacementJob } from './placement.service';` with
+Both files already import `PERMANENT_MISFITS` from `placement-rules` on the line above; merge into that import (no second import of the same module).
+
+`apps/api/src/fleet/jobs/fleet-jobs.service.ts:20-21`: replace
 
 ```ts
+import { PERMANENT_MISFITS } from './placement-rules';
+import { PlacementService, toPlacementJob } from './placement.service';
+```
+
+with
+
+```ts
+import { PERMANENT_MISFITS, toPlacementJob } from './placement-rules';
 import { PlacementService } from './placement.service';
-import { toPlacementJob } from './placement-rules';
 ```
 
-`apps/api/src/fleet/schedules/schedules.service.ts:10`: replace `import { PlacementService, toPlacementJob } from '../jobs/placement.service';` with
+`apps/api/src/fleet/schedules/schedules.service.ts:9-10`: replace
 
 ```ts
-import { PlacementService } from '../jobs/placement.service';
-import { toPlacementJob } from '../jobs/placement-rules';
+import { PERMANENT_MISFITS } from '../jobs/placement-rules';
+import { PlacementService, toPlacementJob } from '../jobs/placement.service';
 ```
 
-If `fleet-jobs.service.ts` already imports from `./placement-rules`, merge `toPlacementJob` into that import instead of adding a second line (check with `grep -n "placement-rules" apps/api/src/fleet/jobs/fleet-jobs.service.ts`).
+with
+
+```ts
+import { PERMANENT_MISFITS, toPlacementJob } from '../jobs/placement-rules';
+import { PlacementService } from '../jobs/placement.service';
+```
+
+(Verify the exact current lines first with `grep -n "placement" <file>`; keep any other names already on those lines.)
 
 - [ ] **Step 6: Run unit tests, type-check and lint**
 
@@ -563,10 +579,11 @@ describe('job_silent (S2b (c) §2.1)', () => {
     expect(item.severity).toBe('error');
   });
 
-  it('reads the error threshold as max(error, silent)', () => {
+  it('reads the error threshold as max(error, silent): an inverted config goes straight to error', () => {
     const t = { ...DASH_THRESHOLDS, jobSilentSec: 180, jobSilentErrorSec: 60 };
-    const [item] = jobSilentItems([dashJob({ lastHeartbeatAt: secAgo(200) })], ONLINE, DASH_NOW, t);
-    expect(item.severity).toBe('warning');
+    expect(jobSilentItems([dashJob({ lastHeartbeatAt: secAgo(179) })], ONLINE, DASH_NOW, t)).toEqual([]);
+    const [item] = jobSilentItems([dashJob({ lastHeartbeatAt: secAgo(181) })], ONLINE, DASH_NOW, t);
+    expect(item.severity).toBe('error');
   });
 
   it('measures from startedAt before the first heartbeat', () => {
@@ -1577,6 +1594,7 @@ git commit -m "feat(fleet): dashboard repository reads (S2b (c) §1.3)"
 **Files:**
 - Modify: `apps/api/src/config/fleet.config.ts`
 - Modify: `apps/api/src/config/fleet.config.spec.ts`
+- Modify: `apps/api/src/config/env.validation.ts`
 - Modify: `apps/api/src/common/test-helpers/fleet-config.ts`
 - Create: `apps/api/src/fleet/dashboard/dashboard-view.ts`
 - Create: `apps/api/src/fleet/dashboard/dashboard.service.ts`
@@ -1591,7 +1609,7 @@ git commit -m "feat(fleet): dashboard repository reads (S2b (c) §1.3)"
   - `dashboard-view.ts`: `readCapabilities(raw: unknown): RunnerCapabilities | null`; view interfaces `DashboardCredentialView`, `DashboardRunnerView`, `DashboardActiveJobView`, `DashboardRecentJobView`, `DashboardCountsView`, `DashboardView`; `buildDashboardView(input: ViewInput): DashboardView`
   - `FleetDashboardService.snapshot(scope: DashboardScope, now: Date): Promise<DashboardView>`
 
-- [ ] **Step 1: Write the failing config test**
+- [ ] **Step 1: Write the failing config tests**
 
 Append to `apps/api/src/config/fleet.config.spec.ts` inside `describe('fleet config', ...)`:
 
@@ -1604,6 +1622,15 @@ Append to `apps/api/src/config/fleet.config.spec.ts` inside `describe('fleet con
     expect(fleetConfig()).toEqual(expect.objectContaining({ jobSilentSec: 180, jobSilentErrorSec: 600, jobStartSec: 300, jobQueuedWarnSec: 60 }));
     process.env.FLEET_JOB_SILENT_SEC = '240';
     expect(fleetConfig().jobSilentSec).toBe(240);
+  });
+
+  it.each([
+    ['FLEET_JOB_SILENT_SEC', 'abc'],
+    ['FLEET_JOB_SILENT_ERROR_SEC', '5'],
+    ['FLEET_JOB_START_SEC', '-1'],
+    ['FLEET_JOB_QUEUED_WARN_SEC', '1.5'],
+  ])('refuses boot on a bad dashboard threshold %s', (key, value) => {
+    expect(() => validate({ ...BASE, [key]: value })).toThrow();
   });
 ```
 
@@ -1729,8 +1756,11 @@ describe('FleetDashboardService (S2b (c) §1)', () => {
     expect(repo.findQueuedWindow).toHaveBeenCalledWith(50);
     expect(repo.findRecentJobs).toHaveBeenCalledWith({ kind: 'project', projectId: 'p1' }, new Date(DASH_NOW.getTime() - 86_400_000), 21);
     expect(repo.pendingSummaryByJob).toHaveBeenCalledWith(['j1']);
-    expect(v.runners.find((r) => r.id === 'r2')).toEqual(expect.objectContaining({ naxVersion: null, credentials: [] }));
     expect(v.attention.map((a) => [a.kind, a.severity])).toEqual([['job_silent', 'error']]);
+    // Global scope shows versions, so a wrong readCapabilities would show here (project scope nulls them anyway).
+    const g = await new FleetDashboardService(fakeRepo(), budgets, testFleetConfig()).snapshot({ kind: 'global' }, DASH_NOW);
+    expect(g.runners.find((r) => r.id === 'r2')).toEqual(expect.objectContaining({ naxVersion: null, credentials: [], online: true }));
+    expect(g.runners.find((r) => r.id === 'r1')?.naxVersion).toBe('0.83.3');
   });
 
   it('asks pending approvals only for the listed (capped) jobs', async () => {
@@ -1780,6 +1810,15 @@ In `apps/api/src/config/fleet.config.ts`:
     jobSilentErrorSec: int('FLEET_JOB_SILENT_ERROR_SEC', 600),
     jobStartSec: int('FLEET_JOB_START_SEC', 300),
     jobQueuedWarnSec: int('FLEET_JOB_QUEUED_WARN_SEC', 60),
+```
+
+In `apps/api/src/config/env.validation.ts`, after the `FLEET_GITLAB_TOKEN_TTL_SEC` entry (boot-time bounds like every other numeric `FLEET_*` key, so a typo cannot silently turn the rules off with `NaN`), add:
+
+```ts
+  FLEET_JOB_SILENT_SEC: Joi.number().integer().min(30).max(86_400).optional(),
+  FLEET_JOB_SILENT_ERROR_SEC: Joi.number().integer().min(30).max(86_400).optional(),
+  FLEET_JOB_START_SEC: Joi.number().integer().min(30).max(86_400).optional(),
+  FLEET_JOB_QUEUED_WARN_SEC: Joi.number().integer().min(10).max(86_400).optional(),
 ```
 
 In `apps/api/src/common/test-helpers/fleet-config.ts`, after `testHooksEnabled: false,` add:
@@ -2045,7 +2084,7 @@ Expected: PASS.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add apps/api/src/config/fleet.config.ts apps/api/src/config/fleet.config.spec.ts apps/api/src/common/test-helpers/fleet-config.ts apps/api/src/fleet/dashboard apps/api/src/fleet/fleet.module.spec.ts
+git add apps/api/src/config/fleet.config.ts apps/api/src/config/fleet.config.spec.ts apps/api/src/config/env.validation.ts apps/api/src/common/test-helpers/fleet-config.ts apps/api/src/fleet/dashboard apps/api/src/fleet/fleet.module.spec.ts
 git commit -m "feat(fleet): dashboard snapshot view and service with threshold config (S2b (c) §1.2, §2)"
 ```
 
@@ -2146,6 +2185,7 @@ describeIntegration('fleet dashboard API (PG)', () => {
       queuedAt: minutesAgo(17), assignedAt: minutesAgo(16), startedAt: minutesAgo(15), lastHeartbeatAt: minutesAgo(12),
     })).id;
     ids.needsGpu = (await job(web, { feature: 'needs-gpu', selectorLabels: ['gpu'], queuedAt: minutesAgo(5) })).id;
+    ids.opsQueued = (await job(ops, { feature: 'ops-queued', selectorLabels: ['gpu'], queuedAt: minutesAgo(4) })).id;
     ids.doneRecent = (await job(web, { feature: 'done-recent', state: 'COMPLETED', finishedAt: minutesAgo(60) })).id;
     await job(web, { feature: 'done-old', state: 'COMPLETED', finishedAt: minutesAgo(60 * 25) });
     await prisma.fleetApproval.create({
@@ -2171,8 +2211,8 @@ describeIntegration('fleet dashboard API (PG)', () => {
 
   it('admin scope: counts, lists and digest across projects, soft-deleted project left out', async () => {
     const s = await admin();
-    expect(s.counts).toEqual({ runnersOnline: 1, runnersTotal: 2, queued: 1, running: 2, attention: s.attention.length });
-    expect(s.activeJobs.map((j) => j.id)).toEqual([ids.silent, ids.secret, ids.needsGpu]);
+    expect(s.counts).toEqual({ runnersOnline: 1, runnersTotal: 2, queued: 2, running: 2, attention: s.attention.length });
+    expect(s.activeJobs.map((j) => j.id)).toEqual([ids.silent, ids.secret, ids.needsGpu, ids.opsQueued]);
     expect(s.activeJobs[0].pendingApprovals).toBe(1);
     expect(s.recentJobs.map((j) => j.id)).toEqual([ids.doneRecent]);
     expect([s.activeTruncated, s.recentTruncated]).toEqual([false, false]);
@@ -2193,6 +2233,7 @@ describeIntegration('fleet dashboard API (PG)', () => {
     expect(item(s, `job_unplaceable:${ids.needsGpu}`)).toMatchObject({
       severity: 'warning', verdict: 'no_fit', reasons: [{ runnerName: 'old-box', reason: 'offline' }, { runnerName: 'wk-mac', reason: 'labels' }],
     });
+    expect(item(s, `job_unplaceable:${ids.opsQueued}`)).toMatchObject({ verdict: 'no_fit' });
     const severities = s.attention.map((a) => a.severity);
     expect(severities).toEqual([...severities].sort((a, b) => (a === b ? 0 : a === 'error' ? -1 : 1)));
   });
@@ -2214,7 +2255,8 @@ describeIntegration('fleet dashboard API (PG)', () => {
     expect(s.runners.map((r) => r.activeJobs)).toEqual([1, 1]);
     expect(item(s, `runner_unhealthy:${ids.oldBox}`)).toMatchObject({ severity: 'error', conditions: [{ type: 'offline', jobsHeld: 1 }, { type: 'configuration' }] });
     const json = JSON.stringify(res.body);
-    for (const leak of [ids.secret, 'secret-feature', world.opsProjectId, 'acme/ops', '"projectSlug":"ops"', 'deepseek', '0.82.0', '0.83.0', ids.ghost]) {
+    expect(item(s, `job_unplaceable:${ids.needsGpu}`)).toBeDefined();
+    for (const leak of [ids.secret, 'secret-feature', ids.opsQueued, 'ops-queued', world.opsProjectId, 'acme/ops', '"projectSlug":"ops"', 'deepseek', '0.82.0', '0.83.0', ids.ghost]) {
       expect(json).not.toContain(leak);
     }
   });
@@ -2234,7 +2276,7 @@ describeIntegration('fleet dashboard API (PG)', () => {
     });
     const s = await admin();
     expect([s.activeJobs.length, s.activeTruncated, s.recentJobs.length, s.recentTruncated]).toEqual([200, true, 20, true]);
-    expect(s.counts.queued).toBe(206);
+    expect(s.counts.queued).toBe(207);
   });
 });
 ```
@@ -2275,7 +2317,7 @@ export class DashboardCountsDto implements DashboardCountsView {
 export class DashboardCredentialDto implements DashboardCredentialView {
   @ApiProperty() providerId: string;
   @ApiProperty({ description: "nax's verdict (ignores OAuth access-token expiry)" }) available: boolean;
-  @ApiProperty({ enum: ['api-key', 'oauth'], nullable: true }) kind: 'api-key' | 'oauth' | null;
+  @ApiProperty({ type: String, enum: ['api-key', 'oauth'], nullable: true }) kind: 'api-key' | 'oauth' | null;
   @ApiProperty(NULLABLE_DATE) expiresAt: string | null;
   @ApiProperty() expired: boolean;
 }
@@ -2475,14 +2517,14 @@ export class DashboardModule {}
 - [ ] **Step 5: Run the integration test to verify it passes**
 
 Run: `cd apps/api && bun run test:scoped test/integration/fleet/fleet-dashboard-api.integration.spec.ts`
-Expected: PASS (6 tests).
+Expected: PASS (6 tests). `wk-mac`'s `lastSeenAt` is seed time and the online threshold is 90 s; the file runs well inside that, so a timeout-slow run flipping it offline would show as several failures at once (rerun before debugging).
 
 If the `runner_unhealthy:old-box` conditions miss `stale_nax`: `latest` is the newest version among online runners, which is `wk-mac` at `0.83.0` (`FLEET_CAPS`), so `old-box` at `0.82.0` is stale. Check `insertRunner` passed the override capabilities.
 
 - [ ] **Step 6: Regenerate the contract and the CLI client, then add the contract test**
 
 Run from the repo root: `bun run generate`
-Expected: `openapi.json` gains `/api/fleet/dashboard` and `/api/projects/{slug}/fleet/dashboard`, and `apps/cli/src/generated/sdk.gen.ts` gains `fleetDashboardControllerGet` and `projectFleetDashboardControllerGet`. Check with `grep -c "DashboardControllerGet" apps/cli/src/generated/sdk.gen.ts` (expect at least 2).
+Expected: `openapi.json` gains `/api/fleet/dashboard` and `/api/projects/{slug}/fleet/dashboard`, and `apps/cli/src/generated/sdk.gen.ts` gains `fleetDashboardControllerGet` and `projectFleetDashboardControllerGet`. Check with `grep -c "DashboardControllerGet" apps/cli/src/generated/sdk.gen.ts` (expect at least 2). Also check `grep -n -A1 "kind" apps/cli/src/generated/types.gen.ts | grep -n "api-key"`: `DashboardCredentialDto.kind` should come out as `'api-key' | 'oauth' | null`; if `| null` is missing, keep `type: String` and say so in the PR body (slice 2's web reads it).
 
 Append to `apps/api/src/fleet/fleet-openapi.contract.spec.ts`, inside `describe('fleet OpenAPI contract', ...)`:
 
@@ -2602,6 +2644,13 @@ describe('koda fleet status', () => {
     expect(fleetDashboardControllerGet).not.toHaveBeenCalled();
     expect(projectFleetDashboardControllerGet).not.toHaveBeenCalled();
     expect(exitSpy).toHaveBeenCalledWith(3);
+  });
+
+  it('prints the admin-token hint and exits 2 when --all-projects is refused', async () => {
+    (fleetDashboardControllerGet as jest.Mock).mockRejectedValue({ statusCode: 403, message: 'Forbidden' });
+    await run('--all-projects');
+    expect(exitSpy).toHaveBeenCalledWith(2);
+    expect((console.error as jest.Mock).mock.calls.flat().join('\n')).toContain('global-admin');
   });
 
   it('prints the DTO unchanged with --json', async () => {
@@ -2785,7 +2834,7 @@ git commit -m "feat(cli): koda fleet status (S2b (c) §3)"
 
 - [ ] **Step 1: Add the guidance**
 
-In `.nax/mono/apps/api/context.md`, after the `src/fleet/analytics/` bullet (ends near line 222), add:
+In `.nax/mono/apps/api/context.md`, after the `src/fleet/analytics/` bullet (it starts at line 221 and ends at line 227, `  page notice.`), add a new top-level bullet (not indented, not inside the analytics bullet):
 
 ```markdown
 - `src/fleet/dashboard/` (S2b (c)): read-only fleet health snapshot for `GET /fleet/dashboard` (global admin) and

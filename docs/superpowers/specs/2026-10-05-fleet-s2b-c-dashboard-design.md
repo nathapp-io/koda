@@ -144,7 +144,7 @@ New non-locking repository reads in the dashboard module (Prisma, `select` only 
 5. grouped counts per state in scope;
 6. pending approvals per job: new `pendingSummaryByJob(jobIds)` → `{jobId, count, oldestRequestedAt}` (`status =
    'pending'`, `jobId IN (...)`);
-7. the dry-run inputs (§2.3): the globally oldest 50 QUEUED jobs as full rows (new `findQueuedForDryRun(limit)`,
+7. the dry-run inputs (§2.3): the globally oldest 50 QUEUED jobs as full rows (new `findQueuedWindow(limit)`,
    same order as `findQueuedIds`), their repos, and `BudgetGate.snapshot(now)`.
 
 ### 1.4 Degradation
@@ -256,7 +256,7 @@ then filtered to the scope. Jobs younger than `jobQueuedWarnSec` produce nothing
    - otherwise → `no_fit`, `warning`: `No runner fits: wk-mac offline, linux-1 lacks a provider credential`
      (any mix, e.g. disabled + offline).
 
-`reasons` = the first 20 candidates by name, `reasonsTotal` = all candidates. `since` = `queuedAt`. QUEUED jobs
+`reasons` = the first 20 misfit runners by name, `reasonsTotal` = all misfit runners (for `fits_not_placed`, only the runners that do not fit are listed). `since` = `queuedAt`. QUEUED jobs
 beyond the 50 window are not evaluated: placement itself does not reach them either, so this matches placement
 exactly (a documented limit at home-fleet scale; `counts.queued` still counts them).
 
