@@ -105,6 +105,15 @@ describe('attentionMessage (D418)', () => {
   })
 })
 
+describe('a runner item with no conditions (final review)', () => {
+  test('still says it needs attention instead of rendering nothing', () => {
+    for (const conditions of [[], undefined]) {
+      const m = attentionMessage(item({ kind: 'runner_unhealthy', subjectType: 'runner', projectSlug: null, conditions }), GEN, NOW)
+      expect(words(m)).toEqual(['Needs attention'])
+    }
+  })
+})
+
 describe('severityOf and attentionLink (D419)', () => {
   test('anything but error reads as a warning', () => {
     expect(severityOf(item({ severity: 'error' }))).toBe('error')

@@ -176,8 +176,11 @@ export function attentionMessage(item: AttentionItem, generatedAt: string, now: 
       return one({ key: `${A}.approvals`, params: { n: item.pending ?? 0 }, ages: { age: secParts(liveSec(item.oldestSec, generatedAt, now)) } })
     case 'job_unplaceable':
       return unplaceable(item)
-    case 'runner_unhealthy':
-      return { summary: null, details: (item.conditions ?? []).map(conditionText), more: 0 }
+    case 'runner_unhealthy': {
+      // A runner item without conditions (a newer API) must still say something.
+      const details = (item.conditions ?? []).map(conditionText)
+      return details.length > 0 ? { summary: null, details, more: 0 } : one({ key: `${A}.unknown` })
+    }
     default:
       return one({ key: `${A}.unknown` })
   }
