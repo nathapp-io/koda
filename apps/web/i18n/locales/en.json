@@ -237,7 +237,14 @@
       "assignee": "Assignee",
       "created": "Created",
       "gitRef": "Source Reference",
-      "syncedFromGithub": "Synced from GitHub #{issue}"
+      "syncedFromGithub": "Synced from GitHub #{issue}",
+      "activity": "Activity",
+      "properties": "Properties",
+      "nextStep": "Next step",
+      "nextHint": "Based on the current status",
+      "linked": "Linked",
+      "opened": "Opened {date}",
+      "copyRef": "Copy ticket ref"
     },
     "vcs": {
       "github": "GitHub",

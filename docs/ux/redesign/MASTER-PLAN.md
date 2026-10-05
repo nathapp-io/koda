@@ -45,8 +45,8 @@ Principles:
 
 | # | Slice | Status |
 |:--|:------|:-------|
-| 0 | Shell, tokens, command palette, board filters | **In PR #215** (see §5). When merged, mark Done. If the PR is closed, rebase the branch. |
-| 1 | Ticket detail page | Not started |
+| 0 | Shell, tokens, command palette, board filters | **Done** (PR #215 merged 2026-10-05) |
+| 1 | Ticket detail page | Implemented on `feat/web-ux-ticket-detail` (uncommitted — commit/PR on request). Jest 3,110 green, ESLint clean, ticket e2e (lifecycle, operations, roles, git-ref) green |
 | 2 | Dashboard / home | Not started |
 | 3 | Shared patterns + docs refresh | Not started |
 | 4 | Fleet pages | Not started |
@@ -140,6 +140,7 @@ Update these in Slice 3 (or sooner if you touch the area):
 1. Read this file, then `docs/ux/redesign/shell-preview.html` (open it in a browser).
 2. `git log --oneline -5` and `git status` to see which slice is current.
 3. If Slice 0 has not been checked visually: `cd apps/web && bun run dev`, click through `/`, a project board, a ticket, in light and dark and at <1024px. Fix anything off before starting Slice 1.
+   - Known issue (2026-10-05): plain `bun run dev` 500s every page — `@nuxt/devtools@4.0.0-alpha.17` breaks `nuxt dev` (`#app-manifest` resolve failure → "Cannot access 'renderer' before initialization"). Workaround until fixed: `E2E_RUN=1 bunx nuxt dev --port 3101` (devtools off — this is how Playwright e2e boots the app, so it works). Verified this way: API on test Postgres (`bun run test:db:up` + `prisma db push` + `seed.ts`, `DATABASE_URL=postgresql://koda:koda@localhost:5433/koda_test`), then SSR 200s for `/login`, `/register`, `/`, `/projects`, a board, and a ticket page.
 4. Pick the next "Not started" row in §4.
 
 ## 10. Decisions log
@@ -153,3 +154,9 @@ Update these in Slice 3 (or sooner if you touch the area):
 | 2026-10-05 | Keep nav links inline in the layout template | Layout tests render the template with a fixed binding set; data-driven nav would render empty there |
 | 2026-10-05 | Fleet overview links: `/admin/fleet` first in the admin fleet group, `/<project>/fleet/overview` above Fleet jobs (icon `Gauge`, label `nav.fleetOverview`), plus a command palette entry | Fleet S2b (c) dashboard (spec `docs/superpowers/specs/2026-10-05-fleet-s2b-c-dashboard-design.md` §4.1); slice 4 (fleet pages) restyles it with the rest |
 | 2026-10-05 | Fleet job page: the flat story list becomes a Graph \| List toggle (Graph default at `md`+, choice kept in `localStorage` `koda.fleet.storyView`) with a RUN stage strip above it | Fleet S2b (j) (spec `docs/superpowers/specs/2026-10-05-fleet-s2b-j-story-graph-design.md` J3); slice 4 (fleet pages) restyles it with the rest |
+| 2026-10-05 | Slice 1: page split into `TicketHeader` / `TicketActivity` / `TicketProperties`; the source-grep specs (`ticket-detail`, `ticket-detail-priority`, `ticket-edit-markdown`, `ticket-role-visibility`, `web-gap-ops`) now read the page + relevant components as one surface | The old specs grepped the 721-line page file; the split moves those strings into components. Assertions unchanged in intent, updated only in what they read |
+| 2026-10-05 | Slice 1: action hierarchy in `TicketActionPanel` = exactly one filled primary (first of verify → start → fix → approveFix present), others outline, reject destructive. The mock's "More actions" dropdown is deferred to slice 6 | Ticket e2e journeys (`ticket-lifecycle`, `ticket-project-roles`, `ticket-detail-operations`) require each action to be a visible button by name; collapsing them into a menu means rewriting those journeys (do it together in slice 6) |
+| 2026-10-05 | Slice 1: properties rail omits the status/priority/type chips the mock showed — the header chips row carries them | Same facts twice in one viewport read as noise; rail keeps assignee, created, git ref, synced-from, labels, links, danger zone |
+| 2026-10-05 | Slice 1: rail mutations (assign/label/link/delete/transition) reload via silent GETs (`Promise.all`), never `refresh()` | `refresh()` flips `pending`, swaps the page for `LoadingState` and unmounts the rail mid-interaction — caught by the add-link e2e (input wiped between fill and click) |
+| 2026-10-05 | Slice 1: chip markup keeps the label on the same line as the dot span | Playwright `getByText(/^X$/)` does not whitespace-normalize; a mustache on its own line renders `" X"` and broke `ticket-lifecycle`. `{ exact: true }` normalizes, regex does not |
+| 2026-10-05 | Slice 1: activity timeline of system events (transitions, PR links) is not built — `CommentThread` stays the only activity source | Needs timeline/aggregate API data (same gap as the dashboard slice); revisit in slice 2 or 3 |

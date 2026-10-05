@@ -34,6 +34,65 @@ const pendingAction = ref<DialogAction | null>(null)
 
 const actions = computed(() => new Set(props.ticket.allowedActions ?? []))
 const canSubmit = computed(() => comment.value.trim().length > 0)
+
+type PanelAction = DialogAction | 'start'
+
+type PrimaryCandidate = 'verify' | 'start' | 'fix' | 'verify-fix-approve'
+
+const PRIMARY_ORDER: PrimaryCandidate[] = ['verify', 'start', 'fix', 'verify-fix-approve']
+
+function actionLabel(action: PanelAction): string {
+  switch (action) {
+    case 'verify': return t('tickets.actions.verify')
+    case 'start': return t('tickets.actions.start')
+    case 'fix': return t('tickets.actions.submitFix')
+    case 'verify-fix-approve': return t('tickets.actions.approveFix')
+    case 'verify-fix-fail': return t('tickets.actions.failFix')
+    case 'close': return t('tickets.actions.close')
+    default: return action
+  }
+}
+
+function openCloseDialog() {
+  openDialog('close')
+}
+
+function openApproveFixDialog() {
+  openDialog('verify-fix-approve')
+}
+
+const primaryAction = computed<PrimaryCandidate | null>(() => {
+  for (const action of PRIMARY_ORDER) {
+    if (action === 'verify-fix-approve') {
+      if (actions.value.has('verify-fix')) return action
+    } else if (actions.value.has(action)) {
+      return action
+    }
+  }
+  return null
+})
+
+const primaryRun = computed<() => void>(() => {
+  const action = primaryAction.value
+  if (action === 'start') return handleStart
+  if (action === 'verify-fix-approve') return openApproveFixDialog
+  if (action === 'verify' || action === 'fix') return () => openDialog(action)
+  return () => {}
+})
+
+const secondaryActions = computed<Array<{ key: DialogAction; label: string; run: () => void }>>(() => {
+  const items: Array<{ key: DialogAction; label: string; run: () => void }> = []
+  if (actions.value.has('verify-fix') && primaryAction.value !== 'verify-fix-approve') {
+    items.push({ key: 'verify-fix-approve', label: actionLabel('verify-fix-approve'), run: openApproveFixDialog })
+  }
+  if (actions.value.has('verify-fix')) {
+    items.push({ key: 'verify-fix-fail', label: actionLabel('verify-fix-fail'), run: () => openDialog('verify-fix-fail') })
+  }
+  if (actions.value.has('close')) {
+    items.push({ key: 'close', label: actionLabel('close'), run: openCloseDialog })
+  }
+  return items
+})
 const dialogTitle = computed(() =>
   pendingAction.value === 'close' ? t('tickets.actions.closeReasonTitle') : t('common.addComment'),
 )
@@ -82,14 +141,18 @@ async function handleDialogSubmit() {
 
 <template>
   <div class="space-y-2">
-    <Button v-if="actions.has('verify')" class="w-full" @click="openDialog('verify')">{{ t('tickets.actions.verify') }}</Button>
-    <Button v-if="actions.has('start')" class="w-full" @click="handleStart">{{ t('tickets.actions.start') }}</Button>
-    <Button v-if="actions.has('fix')" class="w-full" @click="openDialog('fix')">{{ t('tickets.actions.submitFix') }}</Button>
-    <template v-if="actions.has('verify-fix')">
-      <Button class="w-full" @click="openDialog('verify-fix-approve')">{{ t('tickets.actions.approveFix') }}</Button>
-      <Button class="w-full" variant="outline" @click="openDialog('verify-fix-fail')">{{ t('tickets.actions.failFix') }}</Button>
-    </template>
-    <Button v-if="actions.has('close')" class="w-full" variant="outline" @click="openDialog('close')">{{ t('tickets.actions.close') }}</Button>
+    <Button v-if="primaryAction" class="w-full" @click="primaryRun()">
+      {{ actionLabel(primaryAction) }}
+    </Button>
+    <Button
+      v-for="item in secondaryActions"
+      :key="item.key"
+      class="w-full"
+      variant="outline"
+      @click="item.run()"
+    >
+      {{ item.label }}
+    </Button>
     <Button v-if="actions.has('reject')" class="w-full" variant="destructive" @click="openDialog('reject')">{{ t('tickets.actions.reject') }}</Button>
 
     <Dialog :open="isOpen" @update:open="isOpen = $event">
