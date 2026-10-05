@@ -20,9 +20,9 @@ admin Runners page.
 3. Four attention signals are raised (§2): a job whose nax heartbeat stalled (or that never started), a job waiting
    on an approval, a queued job that is not being placed (with the reasons), and an unhealthy runner (offline,
    credential unavailable, stale nax version).
-4. A job whose nax heartbeat stalls on a healthy runner is flagged within `FLEET_JOB_SILENT_SEC` (120 s). The
+4. A job whose nax heartbeat stalls on a healthy runner is flagged within `FLEET_JOB_SILENT_SEC` (180 s). The
    sweeper never crashes such a job (it only reacts to runner silence), so the dashboard is the only place it shows.
-5. `koda fleet status [--project <slug>] [--json]` prints the same counts and attention list in a terminal.
+5. `koda fleet status [--project <slug> | --all-projects] [--json]` prints the same counts and attention list in a terminal.
 6. No change to the runner, the runner protocol, the sync path or the database schema.
 
 ## Rulings (user, 2026-10-05)
@@ -185,14 +185,14 @@ AttentionItem = {
   pending?: number
   oldestSec?: number
   // job_unplaceable
-  verdict?: 'never' | 'pinned_missing' | 'budget_paused' | 'waiting_capacity' | 'no_fit' | 'no_runners' | 'fits_not_placed'
+  verdict?: 'never' | 'budget_paused' | 'waiting_capacity' | 'no_fit' | 'no_runners' | 'fits_not_placed'
   reasons?: Array<{ runnerName: string, reason: MisfitReason }>   // at most 20
   reasonsTotal?: number
   // runner_unhealthy
   conditions?: Array<{
     type: 'offline' | 'credential' | 'stale_nax' | 'configuration',
     jobsHeld?: number,                                      // offline
-    providerId?: string, why?: 'unavailable' | 'expired',   // credential (admin scope only)
+    providerId?: string, why?: 'missing' | 'unavailable' | 'expired',   // credential (admin scope only)
     version?: string, latest?: string                       // stale_nax (admin scope only)
   }>
 }
@@ -207,7 +207,7 @@ New config keys in `fleet.config.ts` (fields in `IFleetConfig`, `@IsOptional() @
 
 | Key | Default | Meaning |
 |---|---|---|
-| `FLEET_JOB_SILENT_SEC` | 120 | RUNNING job heartbeat age before a warning |
+| `FLEET_JOB_SILENT_SEC` | 180 | RUNNING job heartbeat age before a warning (nax writes `lastHeartbeat` every 60 s, `packages/nax/src/execution/crash-heartbeat.ts`; 180 s = three missed beats plus runner/sync latency) |
 | `FLEET_JOB_SILENT_ERROR_SEC` | 600 | heartbeat age before the warning becomes an error (read as `max(error, silent)`) |
 | `FLEET_JOB_START_SEC` | 300 | ASSIGNED job age (since `assignedAt`) before a "not started" warning |
 | `FLEET_JOB_QUEUED_WARN_SEC` | 60 | QUEUED job age before the dry-run reports it |
@@ -225,9 +225,9 @@ runner item, via `jobsHeld` — no double reporting):
   wk-mac 6m ago, not started`.
 - `UPLOADING`: not evaluated (nax has exited; a stuck upload on a silent runner is the runner item and the sweeper).
 
-`since` = the timestamp the age is measured from. The plan must measure nax's actual `status.json` heartbeat cadence
-(including during long phases, see #206) and confirm `jobSilentSec` sits well above it; if not, it changes the
-default and records why.
+`since` = the timestamp the age is measured from. Measured cadence: nax's heartbeat loop writes `lastHeartbeat`
+every 60 s from run start until completion (post-run phases included); before the first beat the field is absent, so
+the `startedAt` fallback applies. Hence the 180 s default.
 
 ### 2.2 `job_waiting_approval`
 
@@ -242,9 +242,10 @@ then filtered to the scope. Jobs younger than `jobQueuedWarnSec` produce nothing
 
 1. The job's own scope is budget-paused (`pauses.match(jobGateKeys(job))`) → verdict `budget_paused`, `warning`
    (placement will cancel it). Wording: `Budget paused; this job will be cancelled`.
-2. Candidate runners: the pinned runner only when `pinnedRunnerId` is set (missing → verdict `pinned_missing`,
-   `error`, wording `Pinned runner no longer exists`); otherwise every runner with readable capabilities. Zero
-   candidates → verdict `no_runners`, `error`, wording `No runners enrolled`.
+2. Candidate runners: the pinned runner only when `pinnedRunnerId` is set; otherwise every runner. Runners with
+   unreadable capabilities are never candidates. Zero candidates → verdict `no_runners`, `error`, wording `No runner
+   can take this job`. (No "pinned runner missing" verdict: `FleetJob.pinnedRunner` is `onDelete: SetNull`, so
+   deleting a runner un-pins its jobs.)
 3. Evaluate the candidates with the shared `evaluateRunners` (below). If any runner fits → verdict
    `fits_not_placed`, `warning`, wording `A runner fits but the job has not been placed` (placement runs on every
    runner sync, so this means placement is not reaching it, e.g. a stuck runner sync).
@@ -278,7 +279,7 @@ One item per runner with at least one condition; `severity` = the worst conditio
 | Condition | Severity | Scope |
 |---|---|---|
 | `offline`: enabled and not online; `jobsHeld` = its ASSIGNED/RUNNING/UPLOADING jobs (all projects) | `warning`; `error` if `jobsHeld > 0` | both |
-| `credential`: a provider listed in the runner's own `capabilities.profiles[*].providers` has `available: false` (`why: 'unavailable'`), or any `api-key` credential has `stored.expired` (`why: 'expired'`) | `warning`; `error` if a global dry-run reason on this runner is `provider_unavailable` or `provider_missing` | admin |
+| `credential`: a provider listed in the runner's own `capabilities.profiles[*].providers` has no credential (`why: 'missing'`) or `available: false` (`why: 'unavailable'`), or any `api-key` credential has `stored.expired` (`why: 'expired'`) | `warning`; `error` if a global dry-run reason on this runner is `provider_unavailable` or `provider_missing` | admin |
 | `stale_nax`: nax version below the highest version among **online** runners with parsable versions | `warning` | admin |
 
 - Only the runner's reported `profiles` are checked (repo-provided profiles are unknowable before clone, matching
@@ -294,10 +295,11 @@ One item per runner with at least one condition; `severity` = the worst conditio
 
 ## 3. CLI (slice 1)
 
-`koda fleet status [--project <slug>] [--json]` in `apps/cli/src/commands/fleet-status.ts`, registered via
-`registerFleetStatus(fleet)` in `fleet.ts`. Without `--project`: the admin route, with
-`handleApiError(err, {forbiddenHint: ADMIN_TOKEN_HINT})`. With `--project`: the project route through
-`withContext({projectSlug})`. Human output: one counts line (`runners 2/3 online · queued 1 · running 2 · attention
+`koda fleet status [--project <slug> | --all-projects] [--json]` in `apps/cli/src/commands/fleet-status.ts`,
+registered via `registerFleetStatus(fleet)` in `fleet.ts`. Like `koda fleet analytics spend`: by default the project
+route for `--project` or the configured project (`withContext({projectSlug})`); `--all-projects` uses the admin
+route (`withContext({}, {requireProject: false})`, `handleApiError(err, {forbiddenHint: ADMIN_TOKEN_HINT})`); both
+flags together is a validation error. Human output: one counts line (`runners 2/3 online · queued 1 · running 2 · attention
 3`), then one line per attention item (severity, age via `ago()`, English wording built from the item fields,
 project slug), or `All clear`. `--json` prints the DTO unchanged. Exit code 0 regardless of attention (a report,
 not a gate). Names in the output pass through `escapeControls`.
@@ -341,7 +343,7 @@ and keeps polling. 403 on the project route shows the standard no-access state. 
 
 - **Unit (API):** every rule in §2: thresholds and the `max(error, silent)` ordering; RUNNING vs ASSIGNED stages;
   UPLOADING never flagged; an offline runner suppresses `job_silent` and carries `jobsHeld`; approval grouping; every
-  `job_unplaceable` verdict, including pinned (only the pinned runner evaluated; missing pin), job-scope budget
+  `job_unplaceable` verdict, including pinned (only the pinned runner evaluated), job-scope budget
   pause, `fits_not_placed`, the reasons cap; OAuth expiry ignored, api-key `expired` flagged, credentials checked
   only for the runner's own profiles; version compare (`0.83.10 > 0.83.9`, canary not stale, unparsable ignored,
   single online runner); project-scope collapse to `configuration`; capability degradation; `evaluateRunners`
