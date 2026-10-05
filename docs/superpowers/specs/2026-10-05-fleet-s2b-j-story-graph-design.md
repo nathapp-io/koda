@@ -206,3 +206,5 @@ pattern for raw nax values.
 | D431 | Edges are drawn client-side from measured node boxes; SSR shows nodes without edges. |
 | D432 | View choice persisted per browser in `localStorage` (`koda.fleet.storyView`), best-effort. |
 | D433 | `FleetJobDto.postRun` is `null` on list endpoints, like `stories` (D149). |
+| D440 | (slice 2 correction of §2.2) The view toggle is two `Button`s with `aria-pressed` in a `role="group"`, like `RangePicker.vue`; the repo has no toggle-group primitive. |
+| D442 | (slice 2 refinement of §2.1) The Stories stage counts `passed`, `skipped`, `decomposed` and `regression-failed` as done. |
