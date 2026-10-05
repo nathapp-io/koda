@@ -10390,6 +10390,23 @@
           "dependsOn"
         ]
       },
+      "FleetJobPostRunDto": {
+        "type": "object",
+        "properties": {
+          "acceptance": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "regression": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "finish": {
+            "type": "string",
+            "maxLength": 32
+          }
+        }
+      },
       "FleetJobDto": {
         "type": "object",
         "properties": {
@@ -10576,6 +10593,16 @@
           "storiesTruncated": {
             "type": "boolean",
             "description": "True when the runner cut the story list to fit (S1b §1.2)"
+          },
+          "postRun": {
+            "nullable": true,
+            "description": "nax post-run stage statuses (S2b (j)). Null when unknown and on list pages (D433).",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FleetJobPostRunDto"
+              }
+            ]
           },
           "scheduleId": {
             "type": "string",

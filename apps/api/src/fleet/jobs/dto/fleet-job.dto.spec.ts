@@ -31,13 +31,15 @@ describe('fleet job DTOs', () => {
       startedAt: null, finishedAt: null, cancelRequestedAt: null, naxRunId: null, naxLogRunId: null, naxCostRunId: null,
       progress: null, currentStoryId: 'US-001', currentPhase: 'implement', costSpentUsd: '0', costCarriedUsd: '0', firstStartedAt: null, cancelReason: null, scheduleId: null, coalescedCount: 0, scheduleCountedAt: null, lastHeartbeatAt: null,
       finishResult: null, escalationReason: null, exitCode: null, resultBranch: null, resultSha: null, resultPrUrl: null,
-      wipPush: null, stories: [{ id: 'US-001', title: 't', status: 'in-progress', attempts: 0, dependsOn: [] }], storiesTruncated: true, postRun: null,
+      wipPush: null, stories: [{ id: 'US-001', title: 't', status: 'in-progress', attempts: 0, dependsOn: [] }], storiesTruncated: true, postRun: { acceptance: 'passed', finish: 'running' },
       eventSeq: 0, ackedRunnerSeq: 0, attributedAt: null, updatedAt: now,
     } as const;
     const full = JSON.parse(JSON.stringify(FleetJobDto.from({ ...record, stories: [...record.stories] } as never)));
     expect(full).toEqual(expect.objectContaining({ stories: [record.stories[0]], storiesTruncated: true }));
     const summary = JSON.parse(JSON.stringify(FleetJobDto.summary({ ...record, stories: [...record.stories] } as never)));
     expect(summary).toEqual(expect.objectContaining({ id: 'j', currentStoryId: 'US-001', stories: null, storiesTruncated: false }));
+    expect(full.postRun).toEqual({ acceptance: 'passed', finish: 'running' });
+    expect(summary.postRun).toBeNull();
   });
 
   it('maps bashMode, approvalTimeoutSec and pendingApprovals (S1.5 §1.6)', () => {
