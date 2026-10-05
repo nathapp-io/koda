@@ -9,8 +9,23 @@ const pagePath = join(webDir, 'pages', '[project]', 'tickets', '[ref].vue')
 // Helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-function source(): string {
+function pageSource(): string {
   return readFileSync(pagePath, 'utf-8')
+}
+
+function componentSource(name: string): string {
+  return readFileSync(join(webDir, 'components', name), 'utf-8')
+}
+
+function source(): string {
+  // 2026-10-05 UX redesign slice 1: the page delegates to TicketHeader /
+  // TicketActivity / TicketProperties, so read the whole ticket detail surface.
+  return [
+    pageSource(),
+    componentSource('TicketHeader.vue'),
+    componentSource('TicketActivity.vue'),
+    componentSource('TicketProperties.vue'),
+  ].join('\n')
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

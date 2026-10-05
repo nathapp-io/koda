@@ -6,7 +6,13 @@ const webDir = join(__dirname, '../..')
 const read = (...p: string[]) => readFileSync(join(webDir, ...p), 'utf-8')
 
 describe('#144 ticket page visibility follows the project role', () => {
-  const page = () => read('pages', '[project]', 'tickets', '[ref].vue')
+  // 2026-10-05 UX redesign slice 1: role-gated mutations (assign, labels,
+  // links, delete) moved into components/TicketProperties.vue, so the
+  // role assertions read the page plus that component.
+  const page = () => [
+    read('pages', '[project]', 'tickets', '[ref].vue'),
+    read('components', 'TicketProperties.vue'),
+  ].join('\n')
 
   test('loads the caller project role via the SSR-friendly useProjectViewerRole composable', () => {
     // #144 + BUG-4: viewerRole must be populated on SSR (useAsyncData) so

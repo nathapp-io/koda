@@ -237,7 +237,14 @@
       "assignee": "负责人",
       "created": "创建于",
       "gitRef": "源引用",
-      "syncedFromGithub": "同步自 GitHub #{issue}"
+      "syncedFromGithub": "同步自 GitHub #{issue}",
+      "activity": "动态",
+      "properties": "属性",
+      "nextStep": "下一步",
+      "nextHint": "基于当前状态",
+      "linked": "关联",
+      "opened": "创建于 {date}",
+      "copyRef": "复制工单编号"
     },
     "vcs": {
       "github": "GitHub",

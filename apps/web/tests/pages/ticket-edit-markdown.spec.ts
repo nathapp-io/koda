@@ -15,7 +15,13 @@ function dialogSource(): string {
 }
 
 function pageSource(): string {
-  return readFileSync(pagePath, 'utf-8')
+  // 2026-10-05 UX redesign slice 1: edit state lives in the page; the title and
+  // description fields render in TicketHeader / TicketActivity.
+  return [
+    readFileSync(pagePath, 'utf-8'),
+    readFileSync(join(webDir, 'components', 'TicketHeader.vue'), 'utf-8'),
+    readFileSync(join(webDir, 'components', 'TicketActivity.vue'), 'utf-8'),
+  ].join('\n')
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed, reactive, ref as vueRef } from 'vue'
-import MarkdownEditor from '~/components/MarkdownEditor.vue'
-import { extractApiError } from '~/composables/useApi'
+import { computed, reactive, ref as vueRef, onMounted, onBeforeUnmount } from 'vue'
+import TicketHeader from '~/components/TicketHeader.vue'
+import TicketActivity from '~/components/TicketActivity.vue'
+import TicketProperties from '~/components/TicketProperties.vue'
 import { createDebouncer } from '~/lib/debounce'
-import { renderMarkdownOrEscape } from '~/lib/markdown'
-import { safeHref } from '~/lib/safe-url'
 import { apiPath } from '~/lib/api-path'
 
 definePageMeta({ layout: 'default' })
@@ -50,7 +49,7 @@ interface Ticket {
 }
 
 const route = useRoute()
-const { t, locale } = useI18n()
+const { t } = useI18n()
 
 const slug = route.params.project as string
 const ref = route.params.ref as string
@@ -63,7 +62,7 @@ const { data: ticketData, pending, error, refresh } = useAsyncData(
   () => $api.get(apiPath`/projects/${slug}/tickets/${ref}`) as Promise<Ticket>,
 )
 
-const { data: ticketLinksData, refresh: refreshTicketLinks } = useAsyncData(
+const { data: ticketLinksData } = useAsyncData(
   `ticket-links-${slug}-${ref}`,
   () => $api.get(apiPath`/projects/${slug}/tickets/${ref}/links`) as Promise<TicketLink[]>,
 )
@@ -74,7 +73,7 @@ interface Label {
   color: string
 }
 
-const { data: allLabelsData, refresh: refreshAllLabels } = useAsyncData(
+const { data: allLabelsData } = useAsyncData(
   `labels-for-ticket-${slug}`,
   () => $api.get(apiPath`/projects/${slug}/labels`) as Promise<Label[]>,
 )
@@ -105,6 +104,24 @@ async function reloadCommentsSilently() {
   }
 }
 
+async function reloadLinksSilently() {
+  try {
+    ticketLinksData.value = await ($api.get(apiPath`/projects/${slug}/tickets/${ref}/links`) as Promise<TicketLink[]>)
+  }
+  catch {
+    // The next live event or a resync retries.
+  }
+}
+
+async function reloadLabelsSilently() {
+  try {
+    allLabelsData.value = await ($api.get(apiPath`/projects/${slug}/labels`) as Promise<Label[]>)
+  }
+  catch {
+    // The next live event or a resync retries.
+  }
+}
+
 const liveTicketReload = createDebouncer(() => { void reloadTicketSilently() }, LIVE_RELOAD_DEBOUNCE_MS)
 onBeforeUnmount(() => liveTicketReload.cancel())
 
@@ -126,8 +143,8 @@ useProjectEvents(slug, {
     void reloadCommentsSilently()
   },
 })
+
 const ticketLinks = computed(() => ticketLinksData.value ?? [])
-const ticketLabels = computed(() => ticket.value?.labels ?? [])
 const allLabels = computed(() => allLabelsData.value ?? [])
 
 const editState = reactive({
@@ -165,122 +182,7 @@ async function saveEdit() {
   }
 }
 
-const renderedDescription = computed(() =>
-  ticket.value?.description ? renderMarkdownOrEscape(ticket.value.description) : '',
-)
-
-function statusClass(status: string) {
-  switch (status) {
-    case 'VERIFIED': return 'bg-blue-100 text-blue-800'
-    case 'IN_PROGRESS': return 'bg-yellow-100 text-yellow-800'
-    case 'VERIFY_FIX': return 'bg-purple-100 text-purple-800'
-    case 'CLOSED': return 'bg-green-100 text-green-800'
-    case 'REJECTED': return ''
-    default: return ''
-  }
-}
-
-function priorityVariant(priority: string): 'destructive' | 'secondary' | 'outline' | 'default' {
-  switch (priority) {
-    case 'CRITICAL': return 'destructive'
-    case 'MEDIUM': return 'secondary'
-    case 'LOW': return 'outline'
-    default: return 'default'
-  }
-}
-
-function priorityClass(priority: string) {
-  if (priority === 'HIGH') return 'bg-orange-100 text-orange-800'
-  return ''
-}
-
-function typeClass(type: string) {
-  if (type === 'BUG') return 'border-red-300 text-red-700'
-  if (type === 'ENHANCEMENT') return 'border-blue-300 text-blue-700'
-  return ''
-}
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString(locale.value, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
-}
-
-async function onTransition() {
-  toast.success(t('tickets.toast.updated'))
-  await refresh()
-}
-
-function extractIssueNumber(url: string): string | null {
-  const parts = url.split('/')
-  return parts[parts.length - 1] || null
-}
-
-const githubPrLinks = computed(() => {
-  if (!ticketLinks.value) return []
-  return ticketLinks.value.filter(link => link.linkType === 'pr' || (!link.linkType && link.provider === 'github' && link.prNumber))
-})
-
-function extractPrNumber(externalRef: string | null): string | null {
-  if (!externalRef) return null
-  const parts = externalRef.split('#')
-  return parts[parts.length - 1] || null
-}
-
-function extractRepoRef(externalRef: string | null): string {
-  if (!externalRef) return ''
-  const parts = externalRef.split('#')
-  return parts[0] || ''
-}
-
-const githubPrLinksWithState = computed(() => {
-  if (!ticketLinks.value) return []
-  return ticketLinks.value.filter(link => (link.linkType === 'pr' || (!link.linkType && link.provider === 'github' && link.prNumber)) && link.prState)
-})
-
-function prStateClass(state: string | null | undefined): string {
-  if (state === 'merged') return 'bg-green-100 text-green-800'
-  if (state === 'open') return 'bg-blue-100 text-blue-800'
-  if (state === 'draft') return 'bg-gray-100 text-gray-800'
-  if (state === 'closed') return 'bg-red-100 text-red-800'
-  return 'bg-gray-100 text-gray-800'
-}
-
-// VCS Link filtering by linkType
-const vcsPullRequestLinks = computed(() => {
-  if (!ticketLinks.value) return []
-  return ticketLinks.value.filter(link => link.linkType === 'pr' || (!link.linkType && link.provider === 'github' && link.prNumber))
-})
-
-const vcsBranchLinks = computed(() => {
-  if (!ticketLinks.value) return []
-  return ticketLinks.value.filter(link => link.linkType === 'branch')
-})
-
-const vcsCommitLinks = computed(() => {
-  if (!ticketLinks.value) return []
-  return ticketLinks.value
-    .filter(link => link.linkType === 'commit')
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-})
-
-function extractBranchName(url: string): string {
-  const parts = url.split('/')
-  return parts[parts.length - 1] || ''
-}
-
-function extractCommitSha(url: string): string {
-  // Extract SHA from commit URL like https://github.com/owner/repo/commit/abc123
-  const parts = url.split('/')
-  return parts[parts.length - 1]?.substring(0, 7) || ''
-}
-
-const assigneeUserId = vueRef('')
-const assigning = vueRef(false)
-
-// #144: controls follow the caller's role in THIS project (the API decides;
+// Controls follow the caller's role in THIS project (the API decides;
 // this only avoids offering actions that would 403). useProjectViewerRole
 // is SSR-friendly so canManage/viewerRole are populated before hydration —
 // no flash of "no controls" → "controls appear" on first paint.
@@ -289,118 +191,40 @@ const canManage = computed(() => viewerRoleData.value?.canManage === true)
 const viewerRole = computed(() => viewerRoleData.value?.viewerRole ?? null)
 const canWork = computed(() => canManage.value || viewerRole.value === 'DEVELOPER')
 
-async function assignTicket() {
-  if (!assigneeUserId.value.trim()) return
-  assigning.value = true
-  try {
-    await $api.post(apiPath`/projects/${slug}/tickets/${ref}/assign`, { userId: assigneeUserId.value.trim() })
-    toast.success(t('tickets.toast.assigned'))
-    await refresh()
-  } catch (err: unknown) {
-    toast.error(extractApiError(err))
-  } finally {
-    assigning.value = false
+async function refetchAll() {
+  // Silent reloads: refresh() would flip `pending` and swap the page for
+  // LoadingState, unmounting the properties rail mid-interaction.
+  await Promise.all([reloadTicketSilently(), reloadLinksSilently(), reloadLabelsSilently()])
+}
+
+async function onTransition() {
+  toast.success(t('tickets.toast.updated'))
+  await refetchAll()
+}
+
+function onPageKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && editState.isEditing) {
+    cancelEdit()
+    return
+  }
+  const target = event.target as HTMLElement | null
+  if (target && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)) return
+  if ((event.key === 'e' || event.key === 'E') && !editState.isEditing && ticket.value) {
+    event.preventDefault()
+    startEdit()
   }
 }
 
-async function unassignTicket() {
-  assigning.value = true
-  try {
-    await $api.post(apiPath`/projects/${slug}/tickets/${ref}/assign`, {})
-    toast.success(t('tickets.toast.unassigned'))
-    await refresh()
-  } catch (err: unknown) {
-    toast.error(extractApiError(err))
-  } finally {
-    assigning.value = false
-  }
-}
-
-const deletingTicket = vueRef(false)
-async function deleteTicket() {
-  if (!window.confirm(t('tickets.delete.confirm'))) return
-  deletingTicket.value = true
-  try {
-    await $api.delete(apiPath`/projects/${slug}/tickets/${ref}`)
-    toast.success(t('tickets.delete.success'))
-    await navigateTo(`/${slug}`)
-  } catch (err: unknown) {
-    toast.error(extractApiError(err))
-  } finally {
-    deletingTicket.value = false
-  }
-}
-
-const selectedLabelId = vueRef('')
-const assigningLabel = vueRef(false)
-
-async function assignLabel() {
-  if (!selectedLabelId.value) return
-  assigningLabel.value = true
-  try {
-    await $api.post(apiPath`/projects/${slug}/tickets/${ref}/labels`, { labelId: selectedLabelId.value })
-    selectedLabelId.value = ''
-    toast.success(t('labels.toast.assigned'))
-    await refresh()
-    await refreshAllLabels()
-  } catch (err: unknown) {
-    toast.error(extractApiError(err))
-  } finally {
-    assigningLabel.value = false
-  }
-}
-
-async function removeLabel(labelId: string) {
-  try {
-    await $api.delete(apiPath`/projects/${slug}/tickets/${ref}/labels/${labelId}`)
-    toast.success(t('labels.toast.unassigned'))
-    await refresh()
-    await refreshAllLabels()
-  } catch (err: unknown) {
-    toast.error(extractApiError(err))
-  }
-}
-
-const newLinkUrl = vueRef('')
-const newLinkType = vueRef('pr')
-const addingLink = vueRef(false)
-
-async function addLink() {
-  if (!newLinkUrl.value.trim()) return
-  addingLink.value = true
-  try {
-    await $api.post(apiPath`/projects/${slug}/tickets/${ref}/links`, {
-      url: newLinkUrl.value.trim(),
-      linkType: newLinkType.value,
-    })
-    newLinkUrl.value = ''
-    toast.success(t('tickets.links.toast.added'))
-    await refreshTicketLinks()
-  } catch (err: unknown) {
-    toast.error(extractApiError(err))
-  } finally {
-    addingLink.value = false
-  }
-}
-
-async function removeLink(linkId: string) {
-  try {
-    await $api.delete(apiPath`/projects/${slug}/tickets/${ref}/links/${linkId}`)
-    toast.success(t('tickets.links.toast.deleted'))
-    await refreshTicketLinks()
-  } catch (err: unknown) {
-    toast.error(extractApiError(err))
-  }
-}
+onMounted(() => window.addEventListener('keydown', onPageKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onPageKeydown))
 </script>
 
 <template>
   <div>
     <LoadingState v-if="pending" />
     <ErrorState v-else-if="error" @retry="refresh()" />
-    <div v-else-if="ticket" class="grid grid-cols-1 md:grid-cols-3 gap-6">
-      <!-- Main content: 2/3 width on desktop, full width on mobile -->
-      <div class="md:col-span-2 space-y-6">
+    <div v-else-if="ticket" class="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
+      <div class="min-w-0 space-y-4 lg:col-span-2 lg:col-start-1 lg:row-start-1">
         <div
           v-if="ticketDeleted"
           role="status"
@@ -409,312 +233,42 @@ async function removeLink(linkId: string) {
         >
           {{ t('tickets.live.deleted') }}
         </div>
-        <div class="flex items-center justify-between">
-          <div v-if="!editState.isEditing" class="flex-1">
-            <h1 class="text-2xl font-bold">{{ ticket.title }}</h1>
-          </div>
-          <Input
-            v-else
-            v-model="editState.title"
-            class="text-2xl font-bold"
-            :placeholder="t('tickets.form.titlePlaceholder')"
-          />
-          <div class="flex gap-2 ml-4">
-            <Button v-if="!editState.isEditing" variant="outline" size="sm" @click="startEdit">
-              {{ t('common.edit') }}
-            </Button>
-            <template v-else>
-              <Button variant="outline" size="sm" @click="cancelEdit">
-                {{ t('common.cancel') }}
-              </Button>
-              <Button size="sm" @click="saveEdit">
-                {{ t('common.save') }}
-              </Button>
-            </template>
-          </div>
-        </div>
-
-        <div class="flex gap-2">
-          <Badge
-            :variant="ticket.status === 'REJECTED' ? 'destructive' : 'outline'"
-            :class="statusClass(ticket.status)"
-          >
-            {{ t(`tickets.status.${ticket.status}`) }}
-          </Badge>
-          <Badge
-            v-if="!editState.isEditing"
-            :variant="priorityVariant(ticket.priority)"
-            :class="priorityClass(ticket.priority)"
-          >
-            {{ t(`tickets.priority.${ticket.priority}`) }}
-          </Badge>
-          <Select v-else v-model="editState.priority">
-            <SelectTrigger class="w-[140px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="CRITICAL">{{ t('tickets.priority.CRITICAL') }}</SelectItem>
-              <SelectItem value="HIGH">{{ t('tickets.priority.HIGH') }}</SelectItem>
-              <SelectItem value="MEDIUM">{{ t('tickets.priority.MEDIUM') }}</SelectItem>
-              <SelectItem value="LOW">{{ t('tickets.priority.LOW') }}</SelectItem>
-            </SelectContent>
-          </Select>
-          <Badge variant="outline" :class="typeClass(ticket.type)">
-            {{ t(`tickets.type.${ticket.type}`) }}
-          </Badge>
-          <template v-for="link in githubPrLinks" :key="link.id">
-            <a
-              :href="safeHref(link.url)"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md bg-github-link-bg text-gitHub-link-text hover:bg-gitHub-link-bg/80 border border-gitHub-link-border"
-            >
-              <span>{{ t('tickets.pr.badge', { number: extractPrNumber(link.externalRef) ?? 'unknown' }) }}</span>
-            </a>
-            <Badge v-if="link.prState" variant="outline" :class="prStateClass(link.prState)">
-              {{ t(`tickets.pr.status.${link.prState}`) }}
-            </Badge>
-          </template>
-        </div>
-
-        <!-- PR Status Section -->
-        <div v-for="link in githubPrLinksWithState" :key="link.id">
-          <div v-if="link.prState === 'merged'" class="mt-4 p-4 border rounded-md bg-green-50">
-            <div class="flex items-center gap-2 mb-2">
-              <span class="w-2 h-2 rounded-full bg-green-500"></span>
-              <span class="text-sm font-medium">{{ t('tickets.pr.status.merged') }}</span>
-            </div>
-            <p class="text-sm text-muted-foreground">
-              {{ t('tickets.pr.mergedActivity', { repo: link.externalRef?.split('#')[0] || '', number: (link.prNumber || extractPrNumber(link.externalRef)) ?? 'unknown', author: 'system' }) }}
-            </p>
-          </div>
-        </div>
-
-        <div v-if="ticket.description || editState.isEditing">
-          <p class="text-sm text-muted-foreground mb-1">{{ t('tickets.detail.description') }}</p>
-          <MarkdownEditor v-if="editState.isEditing" v-model="editState.description" />
-          <p
-            v-else
-            class="whitespace-pre-wrap text-sm"
-            v-html="renderedDescription"
-          />
-        </div>
-
-        <div v-if="githubPrLinks.length > 0" class="space-y-1">
-          <p
-            v-for="link in githubPrLinks"
-            :key="`pr-created-${link.id}`"
-            class="text-sm text-muted-foreground"
-          >
-            {{ t('tickets.pr.created', { repo: extractRepoRef(link.externalRef), number: extractPrNumber(link.externalRef) ?? 'unknown' }) }}
-          </p>
-        </div>
-
-        <CommentThread
-          :project-slug="slug"
-          :ticket-ref="ref"
+        <TicketHeader
+          :ticket="ticket"
+          :editing="editState.isEditing"
+          :edit-title="editState.title"
+          :edit-priority="editState.priority"
+          @start-edit="startEdit"
+          @cancel-edit="cancelEdit"
+          @save="saveEdit"
+          @update:edit-title="editState.title = $event"
+          @update:edit-priority="editState.priority = $event"
         />
-
-        <!-- VCS Links Section grouped by linkType -->
-        <div v-if="vcsPullRequestLinks.length > 0 || vcsBranchLinks.length > 0 || vcsCommitLinks.length > 0" class="mt-6">
-          <h3 class="text-lg font-semibold mb-3">{{ t('tickets.vcs.title') }}</h3>
-
-          <!-- Pull Requests Subsection -->
-          <div v-if="vcsPullRequestLinks.length > 0" class="mb-4" data-link-type="pr">
-            <h4 class="text-sm font-medium text-muted-foreground mb-2">{{ t('tickets.vcs.pullRequests') }}</h4>
-            <div v-for="link in vcsPullRequestLinks" :key="link.id" class="flex items-center gap-2 mb-2">
-              <a
-                :href="safeHref(link.url)"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-blue-500 hover:underline"
-              >
-                {{ t('tickets.pr.badge', { number: (link.prNumber || extractPrNumber(link.externalRef)) ?? 'unknown' }) }}
-              </a>
-              <Badge v-if="link.prState" variant="outline" :class="prStateClass(link.prState)">
-                {{ t(`tickets.pr.status.${link.prState}`) }}
-              </Badge>
-            </div>
-          </div>
-
-          <!-- Branches Subsection -->
-          <div v-if="vcsBranchLinks.length > 0" class="mb-4" data-link-type="branch">
-            <h4 class="text-sm font-medium text-muted-foreground mb-2">{{ t('tickets.vcs.branches') }}</h4>
-            <div v-for="link in vcsBranchLinks" :key="link.id" class="mb-2">
-              <a
-                :href="safeHref(link.url)"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-blue-500 hover:underline"
-              >
-                {{ extractBranchName(link.url) }}
-              </a>
-            </div>
-          </div>
-
-          <!-- Commits Subsection -->
-          <div v-if="vcsCommitLinks.length > 0" data-link-type="commit">
-            <h4 class="text-sm font-medium text-muted-foreground mb-2">{{ t('tickets.vcs.commits') }}</h4>
-            <div v-for="link in vcsCommitLinks" :key="link.id" class="mb-2">
-              <a
-                :href="safeHref(link.url)"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-blue-500 hover:underline font-mono text-sm"
-              >
-                {{ extractCommitSha(link.url) }}
-              </a>
-              <span v-if="link.title" class="text-sm text-muted-foreground ml-2">{{ link.title }}</span>
-            </div>
-          </div>
-        </div>
       </div>
 
-      <!-- Sidebar: 1/3 width on desktop, stacks below on mobile -->
-      <div class="space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle class="text-sm font-medium">{{ t('common.details') }}</CardTitle>
-          </CardHeader>
-          <CardContent class="space-y-3">
-            <div>
-              <p class="text-xs text-muted-foreground mb-1">{{ t('tickets.detail.assignee') }}</p>
-              <div v-if="ticket.assignee" class="flex items-center gap-2">
-                <Avatar class="h-6 w-6">
-                  <AvatarFallback class="text-xs">
-                    {{ ticket.assignee.name.charAt(0).toUpperCase() }}
-                  </AvatarFallback>
-                </Avatar>
-                <span class="text-sm">{{ ticket.assignee.name }}</span>
-              </div>
-              <p v-else class="text-sm text-muted-foreground">{{ t('common.unassigned') }}</p>
-              <div v-if="canWork" class="mt-2 space-y-2">
-                <Input v-model="assigneeUserId" :placeholder="t('tickets.assign.userIdPlaceholder')" />
-                <div class="flex items-center gap-2">
-                  <Button size="sm" :disabled="assigning || !assigneeUserId.trim()" @click="assignTicket">
-                    {{ t('tickets.assign.assign') }}
-                  </Button>
-                  <Button size="sm" variant="outline" :disabled="assigning" @click="unassignTicket">
-                    {{ t('tickets.assign.unassign') }}
-                  </Button>
-                </div>
-              </div>
-            </div>
-
-            <Separator />
-
-            <div>
-              <p class="text-xs text-muted-foreground mb-1">{{ t('tickets.detail.created') }}</p>
-              <p class="text-sm">{{ formatDate(ticket.createdAt) }}</p>
-            </div>
-
-            <Separator />
-
-            <div v-if="ticket.gitRefFile">
-              <p class="text-xs text-muted-foreground mb-1">{{ t('tickets.detail.gitRef') }}</p>
-              <a
-                v-if="ticket.gitRefUrl"
-                :href="safeHref(ticket.gitRefUrl)"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-blue-500 hover:underline font-mono text-sm"
-              >
-                {{ ticket.gitRefFile }}<span v-if="ticket.gitRefLine">:{{ ticket.gitRefLine }}</span>
-              </a>
-              <span v-else class="font-mono text-sm text-muted-foreground">
-                {{ ticket.gitRefFile }}<span v-if="ticket.gitRefLine">:{{ ticket.gitRefLine }}</span>
-              </span>
-            </div>
-
-            <Separator v-if="ticket.externalVcsUrl" />
-
-            <div v-if="ticket.externalVcsUrl">
-              <p class="text-xs text-muted-foreground mb-1">{{ t('common.details') }}</p>
-              <a
-                :href="safeHref(ticket.externalVcsUrl)"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-blue-500 hover:underline text-sm"
-              >
-                {{ t('tickets.detail.syncedFromGithub', { issue: extractIssueNumber(ticket.externalVcsUrl) ?? 'unknown' }) }}
-              </a>
-            </div>
-
-            <Separator />
-
-            <div class="space-y-2">
-              <p class="text-xs text-muted-foreground">{{ t('labels.title') }}</p>
-              <div class="flex flex-wrap gap-2">
-                <Badge
-                  v-for="label in ticketLabels"
-                  :key="label.id"
-                  variant="outline"
-                  :class="canWork ? 'cursor-pointer' : ''"
-                  :style="{ borderColor: label.color, color: label.color }"
-                  @click="canWork && removeLabel(label.id)"
-                >
-                  {{ label.name }}
-                </Badge>
-                <span v-if="ticketLabels.length === 0" class="text-xs text-muted-foreground">{{ t('labels.empty') }}</span>
-              </div>
-              <div v-if="canWork" class="flex items-center gap-2">
-                <Select v-model="selectedLabelId">
-                  <SelectTrigger class="w-[180px]">
-                    <SelectValue :placeholder="t('tickets.labels.select')" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem v-for="label in allLabels" :key="label.id" :value="label.id">{{ label.name }}</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button size="sm" :disabled="assigningLabel || !selectedLabelId" @click="assignLabel">
-                  {{ t('tickets.labels.add') }}
-                </Button>
-              </div>
-            </div>
-
-            <Separator />
-
-            <div class="space-y-2">
-              <p class="text-xs text-muted-foreground">{{ t('tickets.links.title') }}</p>
-              <div class="space-y-1">
-                <div v-for="link in ticketLinks" :key="link.id" class="flex items-center justify-between gap-2 text-sm">
-                  <a :href="safeHref(link.url)" target="_blank" rel="noopener noreferrer" class="truncate text-blue-500 hover:underline">
-                    {{ link.url }}
-                  </a>
-                  <Button size="sm" variant="ghost" class="text-destructive" @click="removeLink(link.id)">
-                    {{ t('common.delete') }}
-                  </Button>
-                </div>
-              </div>
-              <div class="flex items-center gap-2">
-                <Input v-model="newLinkUrl" :placeholder="t('tickets.links.placeholder')" />
-                <Select v-model="newLinkType">
-                  <SelectTrigger class="w-[120px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="pr">pr</SelectItem>
-                    <SelectItem value="branch">branch</SelectItem>
-                    <SelectItem value="commit">commit</SelectItem>
-                    <SelectItem value="url">url</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button size="sm" :disabled="addingLink || !newLinkUrl.trim()" @click="addLink">
-                  {{ t('tickets.links.add') }}
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <TicketActionPanel
+      <div class="min-w-0 lg:col-span-1 lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-[72px] lg:self-start">
+        <TicketProperties
           :ticket="ticket"
           :project-slug="slug"
+          :ticket-ref="ref"
+          :ticket-links="ticketLinks"
+          :all-labels="allLabels"
+          :can-work="canWork"
+          :can-manage="canManage"
           @transition="onTransition"
+          @changed="refetchAll()"
         />
-        <Button v-if="canManage" variant="destructive" class="w-full" :disabled="deletingTicket" @click="deleteTicket">
-          {{ deletingTicket ? t('common.loading') : t('tickets.delete.button') }}
-        </Button>
+      </div>
+
+      <div class="min-w-0 lg:col-span-2 lg:col-start-1 lg:row-start-2">
+        <TicketActivity
+          :ticket="ticket"
+          :project-slug="slug"
+          :ticket-ref="ref"
+          :editing="editState.isEditing"
+          :edit-description="editState.description"
+          @update:edit-description="editState.description = $event"
+        />
       </div>
     </div>
   </div>

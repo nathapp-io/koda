@@ -1,0 +1,357 @@
+<title>Koda Ticket Detail Preview — Slice 1</title>
+<style>
+/* Ticket detail layout: two-column ≥1024px (activity left, sticky properties right),
+   single column below with properties collapsed under the title.
+   Tokens and shell mirror shell-preview.html (approved 2026-10-05). */
+:root{
+  --background:hsl(220 23% 97%); --foreground:hsl(224 32% 11%);
+  --card:hsl(0 0% 100%); --muted:hsl(220 20% 94%); --muted-fg:hsl(220 13% 38%);
+  --primary:hsl(243 75% 55%); --primary-fg:hsl(0 0% 100%);
+  --accent:hsl(238 70% 96%); --accent-fg:hsl(243 60% 38%);
+  --border:hsl(220 16% 89%); --input:hsl(220 16% 86%); --ring:hsl(243 75% 55%);
+  --destructive:hsl(0 72% 51%);
+  --st-todo:hsl(220 9% 46%); --st-active:hsl(243 75% 55%); --st-review:hsl(38 92% 40%); --st-done:hsl(152 60% 32%); --st-rej:hsl(0 72% 51%);
+  --p-critical:hsl(0 72% 51%); --p-high:hsl(24 90% 48%); --p-medium:hsl(38 92% 45%); --p-low:hsl(220 9% 56%);
+  --shadow:0 12px 40px hsl(224 32% 11% / .18);
+  --font:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --background:hsl(224 26% 7%); --foreground:hsl(220 20% 94%); --card:hsl(224 24% 10%); --muted:hsl(224 20% 14%); --muted-fg:hsl(220 14% 68%);
+  --primary:hsl(243 80% 64%); --accent:hsl(243 40% 20%); --accent-fg:hsl(238 90% 88%); --border:hsl(224 18% 18%); --input:hsl(224 18% 22%); --ring:hsl(243 80% 70%);
+  --st-todo:hsl(220 12% 62%); --st-active:hsl(238 90% 74%); --st-review:hsl(40 92% 58%); --st-done:hsl(152 55% 52%); --st-rej:hsl(0 80% 68%);
+  --p-critical:hsl(0 80% 66%); --p-high:hsl(24 92% 60%); --p-medium:hsl(40 92% 58%); --p-low:hsl(220 12% 62%);
+  --shadow:0 12px 40px hsl(0 0% 0% / .55); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --background:hsl(224 26% 7%); --foreground:hsl(220 20% 94%); --card:hsl(224 24% 10%); --muted:hsl(224 20% 14%); --muted-fg:hsl(220 14% 68%);
+  --primary:hsl(243 80% 64%); --accent:hsl(243 40% 20%); --accent-fg:hsl(238 90% 88%); --border:hsl(224 18% 18%); --input:hsl(224 18% 22%); --ring:hsl(243 80% 70%);
+  --st-todo:hsl(220 12% 62%); --st-active:hsl(238 90% 74%); --st-review:hsl(40 92% 58%); --st-done:hsl(152 55% 52%); --st-rej:hsl(0 80% 68%);
+  --p-critical:hsl(0 80% 66%); --p-high:hsl(24 92% 60%); --p-medium:hsl(40 92% 58%); --p-low:hsl(220 12% 62%);
+  --shadow:0 12px 40px hsl(0 0% 0% / .55); color-scheme:dark}
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--background);color:var(--foreground);font-family:var(--font);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+svg.i{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.mono{font-family:var(--mono)}
+kbd{font:11px var(--mono);border:1px solid var(--border);background:var(--muted);border-radius:4px;padding:0 6px}
+
+/* shell (trimmed from shell-preview) */
+.shell{display:flex;min-height:100vh}
+.side{width:224px;flex:none;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;background:var(--card);border-right:1px solid var(--border);z-index:50}
+.logo{height:56px;display:flex;align-items:center;gap:8px;padding:0 16px;border-bottom:1px solid var(--border);font-weight:600;font-size:16px}
+.logo b{width:24px;height:24px;border-radius:6px;background:var(--primary);color:var(--primary-fg);display:grid;place-items:center;font-size:12px}
+.nav{flex:1;padding:8px 12px;display:flex;flex-direction:column}
+.lbl{padding:14px 10px 4px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted-fg)}
+.link{display:flex;align-items:center;gap:10px;padding:6px 10px;border-radius:6px;color:var(--muted-fg);font-weight:500;text-decoration:none}
+.link:hover{background:var(--accent);color:var(--accent-fg)}
+.backdrop{display:none}
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.top{position:sticky;top:0;z-index:30;height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 24px;border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--background) 90%,transparent);backdrop-filter:blur(8px)}
+.top-l,.top-r{display:flex;align-items:center;gap:12px}
+.ibtn{height:36px;width:36px;display:grid;place-items:center;border:0;background:none;border-radius:6px}
+.ibtn:hover{background:var(--muted)}
+.email{color:var(--muted-fg)}
+.crumbs{display:flex;align-items:center;gap:8px;padding:8px 24px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted-fg)}
+.crumbs a{color:inherit;text-decoration:none}
+.crumbs a:hover{color:var(--foreground)}
+.crumbs b{color:var(--foreground);font-weight:500}
+.content{padding:16px 24px 40px;min-width:0}
+
+/* two-column ticket layout */
+.ticket{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:24px;align-items:start}
+.tmain{min-width:0;display:flex;flex-direction:column;gap:20px}
+
+/* header block */
+.th-ref{display:flex;align-items:center;gap:8px;font:12px var(--mono);color:var(--muted-fg)}
+.copy{border:0;background:none;color:var(--muted-fg);display:grid;place-items:center;padding:2px;border-radius:4px}
+.copy:hover{background:var(--muted);color:var(--foreground)}
+.th-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+h1.title{margin:2px 0 0;font-size:22px;letter-spacing:-.02em;line-height:1.25}
+.chips{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px}
+.chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:99px;border:1px solid var(--border);background:var(--card);font-size:12px;font-weight:500;color:var(--muted-fg)}
+.chip i{width:8px;height:8px;border-radius:50%;display:block}
+.chip[data-status="IN_PROGRESS"]{color:var(--st-active);border-color:color-mix(in srgb,var(--st-active) 40%,var(--border))}
+.chip[data-p="CRITICAL"]{color:var(--p-critical);border-color:color-mix(in srgb,var(--p-critical) 40%,var(--border))}
+.chip[data-p="HIGH"]{color:var(--p-high);border-color:color-mix(in srgb,var(--p-high) 40%,var(--border))}
+.chip[data-p="MEDIUM"]{color:var(--p-medium);border-color:color-mix(in srgb,var(--p-medium) 40%,var(--border))}
+.chip[data-p="LOW"]{color:var(--p-low);border-color:var(--border)}
+.chip.bug{color:var(--st-rej);border-color:color-mix(in srgb,var(--st-rej) 40%,var(--border))}
+.chip.enh{color:var(--st-active);border-color:color-mix(in srgb,var(--st-active) 40%,var(--border))}
+.hbtns{display:flex;gap:8px;flex:none}
+.btn{height:34px;padding:0 12px;border-radius:6px;border:1px solid var(--input);background:var(--card);font-weight:500;display:inline-flex;align-items:center;gap:8px}
+.btn:hover{background:var(--muted)}
+.btn.pri{background:var(--primary);border-color:var(--primary);color:var(--primary-fg)}
+.btn.pri:hover{filter:brightness(1.08)}
+.btn.danger{color:var(--destructive);border-color:color-mix(in srgb,var(--destructive) 40%,var(--border))}
+.btn.danger:hover{background:color-mix(in srgb,var(--destructive) 8%,var(--card))}
+
+/* description */
+.section-h{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted-fg);margin:0 0 8px}
+.desc{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px 16px}
+.desc p{margin:0 0 10px}
+.desc code{font:12.5px var(--mono);background:var(--muted);border-radius:4px;padding:1px 5px}
+.desc pre{margin:0;background:var(--muted);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font:12.5px var(--mono);overflow-x:auto}
+
+/* activity */
+.act{display:flex;flex-direction:column;gap:0}
+.evt{position:relative;display:flex;gap:12px;padding:0 0 20px 0}
+.evt::before{content:"";position:absolute;left:13px;top:30px;bottom:-2px;width:2px;background:var(--border)}
+.evt:last-child::before{display:none}
+.av{width:28px;height:28px;flex:none;border-radius:50%;background:var(--muted);display:grid;place-items:center;font-size:11px;font-weight:600}
+.av.agent{background:var(--accent);color:var(--accent-fg)}
+.av.sys{background:none;border:1px dashed var(--border);color:var(--muted-fg)}
+.evt-body{min-width:0;flex:1}
+.evt-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:13px}
+.evt-h b{font-weight:600}
+.evt-h time{font-size:12px;color:var(--muted-fg)}
+.evt-sys{font-size:13px;color:var(--muted-fg)}
+.evt-sys .mono{font-size:12px}
+.bubble{margin-top:6px;background:var(--card);border:1px solid var(--border);border-radius:0 8px 8px 8px;padding:10px 12px}
+.bubble p{margin:0 0 8px}
+.composer{display:flex;flex-direction:column;gap:8px;margin-top:4px}
+.composer textarea{width:100%;min-height:72px;border:1px solid var(--input);background:var(--card);border-radius:8px;padding:10px 12px;resize:vertical}
+.composer textarea::placeholder{color:var(--muted-fg)}
+.composer .row{display:flex;justify-content:flex-end;gap:8px}
+
+/* properties panel */
+.tprops{position:sticky;top:72px;display:flex;flex-direction:column;gap:12px}
+.panel{background:var(--card);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.panel-h{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted-fg)}
+.panel-h .n{font-size:11px;background:var(--muted);color:var(--muted-fg);border-radius:99px;padding:0 7px;font-variant-numeric:tabular-nums}
+.panel-b{padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+.next-hint{font-size:12px;color:var(--muted-fg);margin:0}
+.next-hint b{color:var(--foreground);font-weight:600}
+.next-actions{display:flex;flex-direction:column;gap:6px}
+.next-actions .btn{width:100%;justify-content:space-between}
+.next-actions .btn kbd{margin-left:auto}
+.menu{border:0;background:none;width:100%;display:flex;align-items:center;justify-content:center;gap:6px;height:30px;border-radius:6px;color:var(--muted-fg);font-size:12px;font-weight:500}
+.menu:hover{background:var(--muted);color:var(--foreground)}
+.prop{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.prop dt{margin:0;font-size:12px;color:var(--muted-fg)}
+.prop dd{margin:0;font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px;min-width:0}
+.prop dd .mono{font-weight:400}
+.assignee{display:flex;align-items:center;gap:8px}
+.assignee .av{width:22px;height:22px;font-size:9px}
+.taglbl{font-size:11px;font-weight:500;border:1px solid var(--border);border-radius:99px;padding:0 8px;display:inline-flex;align-items:center;gap:5px}
+.taglbl i{width:7px;height:7px;border-radius:50%;display:block}
+.prcell{display:flex;align-items:center;gap:6px}
+.prstate{font-size:11px;border-radius:99px;padding:0 7px;border:1px solid var(--border)}
+.prstate.merged{color:var(--st-done);border-color:color-mix(in srgb,var(--st-done) 40%,var(--border))}
+.linkline{display:flex;align-items:center;gap:6px;font-size:13px}
+.linkline a{color:var(--accent-fg);text-decoration:none}
+.linkline a:hover{text-decoration:underline}
+.linkline .mono{color:var(--muted-fg)}
+.danger-zone{padding:10px 14px}
+
+/* single column below 1024px; properties collapse under the title */
+.mobile-props{display:none}
+@media (max-width:1023px){
+  .ticket{grid-template-columns:1fr;gap:16px}
+  .tprops{display:none}
+  .mobile-props{display:block}
+  .mobile-props details{background:var(--card);border:1px solid var(--border);border-radius:8px;margin-bottom:12px}
+  .mobile-props summary{list-style:none;display:flex;align-items:center;justify-content:space-between;padding:10px 14px;font-size:13px;font-weight:500;cursor:pointer}
+  .mobile-props summary::-webkit-details-marker{display:none}
+  .mobile-props summary svg{transition:transform .15s}
+  .mobile-props details[open] summary svg{transform:rotate(180deg)}
+  .mobile-props .panel{border:0;border-top:1px solid var(--border);border-radius:0}
+}
+@media (max-width:640px){
+  .top,.crumbs,.content{padding-left:16px;padding-right:16px}
+  .th-row{flex-wrap:wrap}
+  .email{display:none}
+}
+@media (max-width:1023px){.side{position:fixed;left:0;top:0;transform:translateX(-100%);transition:transform .2s}.shell.open .side{transform:none}.shell.open .backdrop{display:block;position:fixed;inset:0;z-index:40;background:hsl(224 30% 5% / .5)}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+.note{margin-top:20px;font-size:12px;color:var(--muted-fg)}
+</style>
+
+<div class="shell" id="shell">
+  <div class="backdrop" id="backdrop"></div>
+  <aside class="side" aria-label="Primary">
+    <div class="logo"><b aria-hidden="true">K</b>Koda</div>
+    <nav class="nav" aria-label="Project">
+      <div class="proj-name" style="padding:12px 10px 4px;font-weight:600">payments-api</div>
+      <p class="lbl">Work</p><a class="link" href="#">Board</a><a class="link" href="#">Labels</a>
+      <p class="lbl">Knowledge</p><a class="link" href="#">Knowledge Base</a><a class="link" href="#">Timeline</a>
+    </nav>
+  </aside>
+
+  <div class="main">
+    <header class="top">
+      <div class="top-l">
+        <button class="ibtn" id="menu" aria-label="Toggle sidebar" aria-expanded="false"><svg class="i" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+      </div>
+      <div class="top-r"><span class="email">maya@nathapp.dev</span></div>
+    </header>
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="#">Koda</a><span>/</span><a href="#">payments-api</a><span>/</span><b class="mono">PAY-142</b></nav>
+
+    <main class="content">
+      <div class="ticket">
+        <!-- ══ Left: header + description + activity (TicketHeader + TicketActivity) ══ -->
+        <div class="tmain">
+          <header>
+            <div class="th-ref">
+              <span>PAY-142</span>
+              <button class="copy" aria-label="Copy ticket ref"><svg class="i" viewBox="0 0 24 24" style="width:13px;height:13px"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+              <span aria-hidden="true">·</span>
+              <span>opened Oct 3 by Omar Haddad</span>
+            </div>
+            <div class="th-row">
+              <h1 class="title">Refund webhook retries forever when the provider returns 429</h1>
+              <div class="hbtns">
+                <button class="btn"><svg class="i" viewBox="0 0 24 24" style="width:14px;height:14px"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>Edit<kbd>E</kbd></button>
+              </div>
+            </div>
+            <div class="chips">
+              <span class="chip" data-status="IN_PROGRESS"><i style="background:var(--st-active)"></i>In progress</span>
+              <span class="chip" data-p="CRITICAL"><i style="background:var(--p-critical)"></i>Critical</span>
+              <span class="chip bug">Bug</span>
+              <span class="taglbl" style="color:var(--p-high);border-color:color-mix(in srgb,var(--p-high) 40%,var(--border))"><i style="background:var(--p-high)"></i>payments-core</span>
+            </div>
+          </header>
+
+          <!-- description -->
+          <section aria-label="Description">
+            <h2 class="section-h">Description</h2>
+            <div class="desc">
+              <p>When the refund provider responds <code>429</code>, our webhook handler re-queues the event without a backoff, so one bad refund can retry forever and flood the provider.</p>
+              <p>Repro: issue a refund for a <em>declined</em> charge and watch <code>refund-webhook</code> logs.</p>
+              <pre>retryRefund(event)   // no backoff, no max attempts
+  → POST /refunds/:id/retry</pre>
+            </div>
+          </section>
+
+          <!-- activity -->
+          <section class="act" aria-label="Activity">
+            <h2 class="section-h">Activity</h2>
+
+            <div class="evt">
+              <span class="av">OH</span>
+              <div class="evt-body">
+                <div class="evt-h"><b>Omar Haddad</b><time>Oct 3, 14:02</time></div>
+                <div class="bubble"><p>Provider docs say 429 means "slow down", not "failed". We should back off and cap retries instead of looping.</p></div>
+              </div>
+            </div>
+
+            <div class="evt">
+              <span class="av sys" aria-hidden="true"><svg class="i" viewBox="0 0 24 24" style="width:13px;height:13px"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
+              <div class="evt-body">
+                <div class="evt-h evt-sys"><b>Maya Chen</b> verified this ticket <time>Oct 3, 16:40</time></div>
+              </div>
+            </div>
+
+            <div class="evt">
+              <span class="av agent" title="nax-agent">NA</span>
+              <div class="evt-body">
+                <div class="evt-h"><b>nax-agent</b> <span class="evt-sys">started work</span><time>Oct 4, 09:15</time></div>
+                <div class="bubble"><p>Reproduced on <span class="mono">main</span>. Root cause: the retry queue uses a fixed 1s delay and never increments an attempt counter. Fix incoming with exponential backoff (max 5 attempts) + dead-letter after that.</p></div>
+              </div>
+            </div>
+
+            <div class="evt">
+              <span class="av sys" aria-hidden="true"><svg class="i" viewBox="0 0 24 24" style="width:13px;height:13px"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M6 9v6M18 6a9 9 0 0 1-9 9"/></svg></span>
+              <div class="evt-body">
+                <div class="evt-h evt-sys"><b>nax-agent</b> linked pull request <span class="mono">nathapp-io/payments-api#218</span> <time>Oct 4, 11:02</time></div>
+              </div>
+            </div>
+
+            <!-- composer -->
+            <form class="composer" aria-label="Add a comment">
+              <label class="section-h" for="c" style="margin:0">Add a comment</label>
+              <textarea id="c" placeholder="Write a comment… use @ to mention"></textarea>
+              <div class="row"><button class="btn pri" type="button">Comment <kbd>⌘↵</kbd></button></div>
+            </form>
+          </section>
+        </div>
+
+        <!-- ══ Right: sticky properties panel (TicketProperties) ══ -->
+        <aside class="tprops" aria-label="Properties">
+          <!-- primary next action -->
+          <section class="panel">
+            <div class="panel-h">Next step</div>
+            <div class="panel-b">
+              <p class="next-hint">This ticket is <b>in progress</b>. When the fix is ready:</p>
+              <div class="next-actions">
+                <button class="btn pri">Submit fix<kbd>F</kbd></button>
+                <button class="menu"><svg class="i" viewBox="0 0 24 24" style="width:13px;height:13px"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>More actions</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- properties -->
+          <section class="panel">
+            <div class="panel-h">Properties</div>
+            <div class="panel-b">
+              <dl style="margin:0;display:flex;flex-direction:column;gap:10px">
+                <div class="prop"><dt>Status</dt><dd><span class="chip" data-status="IN_PROGRESS" style="height:22px"><i style="background:var(--st-active)"></i>In progress</span></dd></div>
+                <div class="prop"><dt>Priority</dt><dd><span class="chip" data-p="CRITICAL" style="height:22px"><i style="background:var(--p-critical)"></i>Critical</span></dd></div>
+                <div class="prop"><dt>Type</dt><dd><span class="chip bug" style="height:22px">Bug</span></dd></div>
+                <div class="prop"><dt>Assignee</dt><dd><span class="assignee"><span class="av agent" title="nax-agent">NA</span>nax-agent</span></dd></div>
+                <div class="prop"><dt>Created</dt><dd>Oct 3, 2026</dd></div>
+                <div class="prop"><dt>Git ref</dt><dd><span class="mono">webhooks/refund.ts:88</span></dd></div>
+              </dl>
+            </div>
+          </section>
+
+          <!-- linked PRs / issues -->
+          <section class="panel">
+            <div class="panel-h">Linked <span class="n">2</span></div>
+            <div class="panel-b">
+              <div class="linkline">
+                <svg class="i" viewBox="0 0 24 24" style="width:14px;height:14px;color:var(--muted-fg)"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M6 9v6M18 6a9 9 0 0 1-9 9"/></svg>
+                <a href="#">nathapp-io/payments-api#218</a>
+                <span class="prstate merged">merged</span>
+              </div>
+              <div class="linkline">
+                <svg class="i" viewBox="0 0 24 24" style="width:14px;height:14px;color:var(--muted-fg)"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 0-9 9M6 18a3 3 0 1 0 0 .01"/></svg>
+                <a href="#" class="mono">fix/refund-429-backoff</a>
+              </div>
+            </div>
+          </section>
+
+          <!-- danger zone -->
+          <section class="panel danger-zone">
+            <button class="btn danger" style="width:100%;justify-content:center">Delete ticket</button>
+          </section>
+        </aside>
+
+        <!-- ══ Mobile: properties collapse under the title ══ -->
+        <div class="mobile-props">
+          <details open>
+            <summary>Next step<svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></summary>
+            <section class="panel">
+              <div class="panel-b">
+                <div class="next-actions">
+                  <button class="btn pri">Submit fix</button>
+                  <button class="menu">More actions</button>
+                </div>
+              </div>
+            </section>
+          </details>
+          <details>
+            <summary>Properties<svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></summary>
+            <section class="panel">
+              <div class="panel-b">
+                <div class="prop"><dt>Status</dt><dd><span class="chip" data-status="IN_PROGRESS" style="height:22px"><i style="background:var(--st-active)"></i>In progress</span></dd></div>
+                <div class="prop"><dt>Priority</dt><dd><span class="chip" data-p="CRITICAL" style="height:22px"><i style="background:var(--p-critical)"></i>Critical</span></dd></div>
+                <div class="prop"><dt>Assignee</dt><dd><span class="assignee"><span class="av agent">NA</span>nax-agent</span></dd></div>
+                <div class="prop"><dt>Created</dt><dd>Oct 3, 2026</dd></div>
+              </div>
+            </section>
+          </details>
+        </div>
+      </div>
+      <p class="note">Static mock with example data — ported to <code class="mono">pages/[project]/tickets/[ref].vue</code> after sign-off. Breakpoints: two columns ≥1024px, collapsed properties below. Keyboard: <kbd>E</kbd> edit, <kbd>F</kbd> submit fix (palette documents these later).</p>
+    </main>
+  </div>
+</div>
+
+<script>
+const shell=document.getElementById('shell');
+document.getElementById('menu').addEventListener('click',()=>{const o=shell.classList.toggle('open');document.getElementById('menu').setAttribute('aria-expanded',o)});
+document.getElementById('backdrop').addEventListener('click',()=>shell.classList.remove('open'));
+</script>

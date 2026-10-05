@@ -4,6 +4,21 @@ import { join } from 'path'
 
 const webDir = join(__dirname, '../..')
 const pagePath = join(webDir, 'pages', '[project]', 'tickets', '[ref].vue')
+const headerPath = join(webDir, 'components', 'TicketHeader.vue')
+const activityPath = join(webDir, 'components', 'TicketActivity.vue')
+const propertiesPath = join(webDir, 'components', 'TicketProperties.vue')
+
+// 2026-10-05 UX redesign slice 1: the page was split into TicketHeader /
+// TicketActivity / TicketProperties, so every source assertion below reads the
+// page plus those components (the ticket detail surface as a whole).
+function surfaceSource(): string {
+  return [
+    readFileSync(pagePath, 'utf-8'),
+    readFileSync(headerPath, 'utf-8'),
+    readFileSync(activityPath, 'utf-8'),
+    readFileSync(propertiesPath, 'utf-8'),
+  ].join('\n')
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // File existence
@@ -21,12 +36,12 @@ describe('US-005-1: pages/[project]/tickets/[ref].vue exists', () => {
 
 describe('US-005-1 AC1: page reads slug and ref from useRoute() params', () => {
   test('source uses useRoute composable', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     expect(source).toContain('useRoute')
   })
 
   test('source reads project slug from route params', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasSlug =
       source.includes('params.project') ||
       source.includes("params['project']")
@@ -34,7 +49,7 @@ describe('US-005-1 AC1: page reads slug and ref from useRoute() params', () => {
   })
 
   test('source reads ref from route params', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasRef =
       source.includes('params.ref') ||
       source.includes("params['ref']")
@@ -48,22 +63,22 @@ describe('US-005-1 AC1: page reads slug and ref from useRoute() params', () => {
 
 describe('US-005-1 AC2: fetches ticket detail via useApi wrapped in useAsyncData', () => {
   test('source uses useAsyncData for data fetching', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     expect(source).toContain('useAsyncData')
   })
 
   test('source uses useApi composable', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     expect(source).toContain('useApi')
   })
 
   test('source calls $api.get for fetching ticket detail', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     expect(source).toContain('$api.get')
   })
 
   test('source fetches from /projects/${slug}/tickets/${ref} endpoint', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasFetchEndpoint =
       (source.includes('/projects/') || source.includes('projects/${') || source.includes('projects/`')) &&
       source.includes('/tickets/')
@@ -77,7 +92,7 @@ describe('US-005-1 AC2: fetches ticket detail via useApi wrapped in useAsyncData
 
 describe('US-005-1 AC3: two-column layout with left 2/3 and right 1/3 widths', () => {
   test('source uses a grid or flex two-column layout', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasTwoCol =
       source.includes('grid-cols') ||
       source.includes('col-span') ||
@@ -87,7 +102,7 @@ describe('US-005-1 AC3: two-column layout with left 2/3 and right 1/3 widths', (
   })
 
   test('source applies 2/3 width class to the left column', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasLeftCol =
       source.includes('col-span-2') ||
       source.includes('w-2/3') ||
@@ -96,7 +111,7 @@ describe('US-005-1 AC3: two-column layout with left 2/3 and right 1/3 widths', (
   })
 
   test('source applies 1/3 width class to the right column', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasRightCol =
       source.includes('col-span-1') ||
       source.includes('w-1/3') ||
@@ -111,7 +126,7 @@ describe('US-005-1 AC3: two-column layout with left 2/3 and right 1/3 widths', (
 
 describe('US-005-1 AC4: title and description render from API response', () => {
   test('source renders the ticket title', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasTitle =
       source.includes('ticket.title') ||
       source.includes('.title')
@@ -119,7 +134,7 @@ describe('US-005-1 AC4: title and description render from API response', () => {
   })
 
   test('source renders the ticket description', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasDescription =
       source.includes('ticket.description') ||
       source.includes('.description')
@@ -127,7 +142,7 @@ describe('US-005-1 AC4: title and description render from API response', () => {
   })
 
   test('source applies white-space pre-wrap to description', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasPreWrap =
       source.includes('whitespace-pre-wrap') ||
       source.includes('white-space: pre-wrap') ||
@@ -138,37 +153,42 @@ describe('US-005-1 AC4: title and description render from API response', () => {
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC5 — Status, priority, and type display as styled Badge components
+// AC5 — Status, priority, and type display as labeled chips with state dots
+// (2026-10-05 UX redesign slice 1: Badge components were replaced by
+// token-based chips — a colored dot plus the i18n label, never color alone)
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('US-005-1 AC5: status, priority, and type render as Badge components', () => {
-  test('source uses Badge component', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('Badge')
+describe('US-005-1 AC5: status, priority, and type render as labeled chips', () => {
+  test('source renders chips (rounded-full pills with state dots)', () => {
+    const source = surfaceSource()
+    expect(source).toContain('rounded-full')
   })
 
-  test('source renders ticket status as a Badge', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    const hasStatusBadge =
-      source.includes('ticket.status') ||
-      (source.includes('status') && source.includes('Badge'))
-    expect(hasStatusBadge).toBe(true)
+  test('source pairs status colors with a dot map and i18n label', () => {
+    const source = surfaceSource()
+    const hasStatusChip =
+      source.includes('STATUS_DOT') &&
+      source.includes('ticket.status') &&
+      source.includes('tickets.status.')
+    expect(hasStatusChip).toBe(true)
   })
 
-  test('source renders ticket priority as a Badge', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    const hasPriorityBadge =
-      source.includes('ticket.priority') ||
-      (source.includes('priority') && source.includes('Badge'))
-    expect(hasPriorityBadge).toBe(true)
+  test('source pairs priority colors with a dot map and i18n label', () => {
+    const source = surfaceSource()
+    const hasPriorityChip =
+      source.includes('PRIORITY_DOT') &&
+      source.includes('ticket.priority') &&
+      source.includes('tickets.priority.')
+    expect(hasPriorityChip).toBe(true)
   })
 
-  test('source renders ticket type as a Badge', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    const hasTypeBadge =
-      source.includes('ticket.type') ||
-      (source.includes('.type') && source.includes('Badge'))
-    expect(hasTypeBadge).toBe(true)
+  test('source renders ticket type as a labeled chip', () => {
+    const source = surfaceSource()
+    const hasTypeChip =
+      source.includes('TYPE_CLASS') &&
+      source.includes('ticket.type') &&
+      source.includes('tickets.type.')
+    expect(hasTypeChip).toBe(true)
   })
 })
 
@@ -178,7 +198,7 @@ describe('US-005-1 AC5: status, priority, and type render as Badge components', 
 
 describe('US-005-1 AC6: right column shows assignee and created date metadata', () => {
   test('source renders assignee information', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasAssignee =
       source.includes('assignee') ||
       source.includes('Assignee')
@@ -186,7 +206,7 @@ describe('US-005-1 AC6: right column shows assignee and created date metadata', 
   })
 
   test('source renders created date', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasCreatedAt =
       source.includes('createdAt') ||
       source.includes('created_at') ||
@@ -202,7 +222,7 @@ describe('US-005-1 AC6: right column shows assignee and created date metadata', 
 
 describe('US-005-1 AC7: placeholder slots exist for TicketActionPanel and CommentThread', () => {
   test('source contains a placeholder for TicketActionPanel', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasActionPanelSlot =
       source.includes('TicketActionPanel') ||
       source.includes('ticket-action-panel') ||
@@ -212,7 +232,7 @@ describe('US-005-1 AC7: placeholder slots exist for TicketActionPanel and Commen
   })
 
   test('source contains a placeholder for CommentThread', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasCommentThreadSlot =
       source.includes('CommentThread') ||
       source.includes('comment-thread') ||
@@ -228,12 +248,12 @@ describe('US-005-1 AC7: placeholder slots exist for TicketActionPanel and Commen
 
 describe('VCS-P1-005-D AC3: Ticket detail page renders sync link when externalVcsUrl is present', () => {
   test('source includes externalVcsUrl in Ticket interface', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     expect(source).toContain('externalVcsUrl')
   })
 
   test('source renders a link element for the sync link', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasLinkElement =
       source.includes('<a') ||
       source.includes('href=')
@@ -241,7 +261,7 @@ describe('VCS-P1-005-D AC3: Ticket detail page renders sync link when externalVc
   })
 
   test('source conditionally renders the sync link based on externalVcsUrl', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasConditionalLink =
       source.includes('v-if') &&
       source.includes('externalVcsUrl')
@@ -249,7 +269,7 @@ describe('VCS-P1-005-D AC3: Ticket detail page renders sync link when externalVc
   })
 
   test('source references GitHub or Synced text for the link', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasSyncedRef =
       source.includes('Synced') ||
       source.includes('synced') ||
@@ -265,7 +285,7 @@ describe('VCS-P1-005-D AC3: Ticket detail page renders sync link when externalVc
 
 describe('VCS-P1-005-D AC4: Ticket detail page does not render sync link when externalVcsUrl is absent', () => {
   test('source uses v-if conditional with externalVcsUrl for sync link', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasExplicitCondition =
       source.includes('v-if') &&
       source.includes('externalVcsUrl')
@@ -279,7 +299,7 @@ describe('VCS-P1-005-D AC4: Ticket detail page does not render sync link when ex
 
 describe('VCS-P1-005-D AC5: Ticket detail page parses issue number from externalVcsUrl', () => {
   test('source contains logic to extract issue number from URL', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasIssueExtractor =
       source.includes('split') ||
       source.includes('match') ||
@@ -291,7 +311,7 @@ describe('VCS-P1-005-D AC5: Ticket detail page parses issue number from external
   })
 
   test('source displays issue number with # symbol in sync link text', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasIssueDisplay =
       source.includes('#') ||
       source.includes('issue') ||
@@ -300,7 +320,7 @@ describe('VCS-P1-005-D AC5: Ticket detail page parses issue number from external
   })
 
   test('source passes externalVcsUrl as href attribute', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasHrefBinding =
       source.includes(':href') ||
       source.includes('href=')
@@ -314,12 +334,12 @@ describe('VCS-P1-005-D AC5: Ticket detail page parses issue number from external
 
 describe('VCS-P1-005-D AC6: Ticket detail page uses i18n keys for sync link text', () => {
   test('source uses useI18n composable', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     expect(source).toContain('useI18n')
   })
 
   test('source references t() for sync link text', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasI18nUsage =
       source.includes("t('") ||
       source.includes('t("')
@@ -333,7 +353,7 @@ describe('VCS-P1-005-D AC6: Ticket detail page uses i18n keys for sync link text
 
 describe('US-005-1: pages/[project]/tickets/[ref].vue has no console.log statements', () => {
   test('source does not contain console.log', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     expect(source).not.toContain('console.log')
   })
 })
@@ -344,12 +364,12 @@ describe('US-005-1: pages/[project]/tickets/[ref].vue has no console.log stateme
 
 describe('VCS-P2-003 AC1: Ticket detail page shows PR as clickable badge when TicketLink with github provider exists', () => {
   test('source includes links array in Ticket interface', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     expect(source).toContain('links')
   })
 
   test('source renders a clickable badge for GitHub PR links', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasPrBadge =
       (source.includes('Badge') || source.includes('badge')) &&
       (source.includes('github') || source.includes('GitHub') || source.includes('pr') || source.includes('PR'))
@@ -357,7 +377,7 @@ describe('VCS-P2-003 AC1: Ticket detail page shows PR as clickable badge when Ti
   })
 
   test('source uses v-for to iterate over links for display', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasLinksLoop =
       source.includes('v-for') &&
       source.includes('links')
@@ -365,7 +385,7 @@ describe('VCS-P2-003 AC1: Ticket detail page shows PR as clickable badge when Ti
   })
 
   test('source filters or displays only github provider links', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasGithubFilter =
       source.includes("'github'") ||
       source.includes('"github"') ||
@@ -374,7 +394,7 @@ describe('VCS-P2-003 AC1: Ticket detail page shows PR as clickable badge when Ti
   })
 
   test('source renders an anchor tag with href bound to link.url', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasLinkHref =
       (source.includes(':href') || source.includes('href=')) &&
       source.includes('url')
@@ -382,7 +402,7 @@ describe('VCS-P2-003 AC1: Ticket detail page shows PR as clickable badge when Ti
   })
 
   test('source displays PR number from externalRef in badge text', () => {
-    const source = readFileSync(pagePath, 'utf-8')
+    const source = surfaceSource()
     const hasExternalRef =
       source.includes('externalRef') ||
       source.includes('externalRef')
