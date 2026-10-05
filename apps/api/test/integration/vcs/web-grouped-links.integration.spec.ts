@@ -11,19 +11,27 @@
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 
-const ticketDetailPagePath = join(__dirname, '../../../../web/pages/[project]/tickets/[ref].vue');
+const webDir = join(__dirname, '../../../../web');
+const ticketDetailPagePath = join(webDir, 'pages/[project]/tickets/[ref].vue');
+const ticketPropertiesPath = join(webDir, 'components/TicketProperties.vue');
+
+// 2026-10-05 UX redesign slice 1: the VCS links section moved from the page
+// into components/TicketProperties.vue, so source assertions read both.
+function ticketDetailSurface(): string {
+  return `${readFileSync(ticketDetailPagePath, 'utf-8')}\n${readFileSync(ticketPropertiesPath, 'utf-8')}`;
+}
 
 describe('VCS-P4-003 AC1-5: Web grouped VCS links display', () => {
   beforeAll(() => {
-    // Skip all tests if file doesn't exist
-    if (!existsSync(ticketDetailPagePath)) {
-      console.warn('Ticket detail page not found at:', ticketDetailPagePath);
+    // Skip all tests if files don't exist
+    if (!existsSync(ticketDetailPagePath) || !existsSync(ticketPropertiesPath)) {
+      console.warn('Ticket detail page or TicketProperties component not found under:', webDir);
     }
   });
 
   describe('AC1: VCS section groups links by linkType', () => {
     test('ticket detail page has linkType field in TicketLink interface', () => {
-      const source = readFileSync(ticketDetailPagePath, 'utf-8');
+      const source = ticketDetailSurface();
 
       // TicketLink interface should include linkType
       const hasLinkTypeInInterface =
@@ -33,7 +41,7 @@ describe('VCS-P4-003 AC1-5: Web grouped VCS links display', () => {
     });
 
     test('page has computed properties that filter links by type', () => {
-      const source = readFileSync(ticketDetailPagePath, 'utf-8');
+      const source = ticketDetailSurface();
 
       // Should have computed properties that separate links by linkType
       const hasTypeFiltering =
@@ -50,7 +58,7 @@ describe('VCS-P4-003 AC1-5: Web grouped VCS links display', () => {
 
   describe('AC2: PR subsection displays PR number, status badge, and link', () => {
     test('PR subsection shows PR number', () => {
-      const source = readFileSync(ticketDetailPagePath, 'utf-8');
+      const source = ticketDetailSurface();
 
       // Should display PR number in the template
       const hasPrNumberDisplay =
@@ -60,17 +68,18 @@ describe('VCS-P4-003 AC1-5: Web grouped VCS links display', () => {
     });
 
     test('PR subsection shows status badge', () => {
-      const source = readFileSync(ticketDetailPagePath, 'utf-8');
+      const source = ticketDetailSurface();
 
-      // Should have Badge component for PR status
+      // Should render the PR status (badge or token chip with i18n label)
       const hasPrStatusBadge =
         source.includes('prState') &&
-        source.includes('Badge');
+        (source.includes('Badge') ||
+         (source.includes('prStateClass') && source.includes('tickets.pr.status.')));
       expect(hasPrStatusBadge).toBeTruthy();
     });
 
     test('PR subsection has clickable link', () => {
-      const source = readFileSync(ticketDetailPagePath, 'utf-8');
+      const source = ticketDetailSurface();
 
       // Should have anchor tag linking to PR URL
       const hasClickableLink =
@@ -83,7 +92,7 @@ describe('VCS-P4-003 AC1-5: Web grouped VCS links display', () => {
 
   describe('AC3: Branch subsection shows branch name as clickable link', () => {
     test('branch links are filtered by linkType === branch', () => {
-      const source = readFileSync(ticketDetailPagePath, 'utf-8');
+      const source = ticketDetailSurface();
 
       // Should filter for branch type links
       const hasBranchFilter =
@@ -94,7 +103,7 @@ describe('VCS-P4-003 AC1-5: Web grouped VCS links display', () => {
     });
 
     test('branch link displays as clickable link to GitHub', () => {
-      const source = readFileSync(ticketDetailPagePath, 'utf-8');
+      const source = ticketDetailSurface();
 
       // Branch links should be displayed as <a> tags with href
       const hasBranchLinkDisplay =
@@ -106,7 +115,7 @@ describe('VCS-P4-003 AC1-5: Web grouped VCS links display', () => {
 
   describe('AC4: Commit subsection shows SHA and message as clickable link', () => {
     test('commit links are filtered by linkType === commit', () => {
-      const source = readFileSync(ticketDetailPagePath, 'utf-8');
+      const source = ticketDetailSurface();
 
       // Should filter for commit type links
       const hasCommitFilter =
@@ -117,7 +126,7 @@ describe('VCS-P4-003 AC1-5: Web grouped VCS links display', () => {
     });
 
     test('commit link shows abbreviated SHA (7 chars)', () => {
-      const source = readFileSync(ticketDetailPagePath, 'utf-8');
+      const source = ticketDetailSurface();
 
       // Should have utility to abbreviate SHA to 7 characters
       // Look for substring(0, 7) or similar
@@ -131,7 +140,7 @@ describe('VCS-P4-003 AC1-5: Web grouped VCS links display', () => {
     });
 
     test('commit link shows commit message', () => {
-      const source = readFileSync(ticketDetailPagePath, 'utf-8');
+      const source = ticketDetailSurface();
 
       // Should display commit message or title
       const hasCommitMessageDisplay =
@@ -141,7 +150,7 @@ describe('VCS-P4-003 AC1-5: Web grouped VCS links display', () => {
     });
 
     test('commit link is clickable to GitHub', () => {
-      const source = readFileSync(ticketDetailPagePath, 'utf-8');
+      const source = ticketDetailSurface();
 
       // Commit links should be <a> tags linking to commit URL
       const hasCommitClickableLink =
@@ -153,7 +162,7 @@ describe('VCS-P4-003 AC1-5: Web grouped VCS links display', () => {
 
   describe('AC5: Commits displayed in reverse chronological order', () => {
     test('commits are sorted by date descending', () => {
-      const source = readFileSync(ticketDetailPagePath, 'utf-8');
+      const source = ticketDetailSurface();
 
       // Should sort commits by date
       const hasDateSorting =
