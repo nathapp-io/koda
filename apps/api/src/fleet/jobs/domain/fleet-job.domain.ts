@@ -22,6 +22,13 @@ export interface FleetJobStory {
   dependsOn: string[];
 }
 
+/** S2b (j) §1.3: nax post-run stage statuses, as nax wrote them (at most 32 printable ASCII each). */
+export interface FleetJobPostRun {
+  acceptance?: string;
+  regression?: string;
+  finish?: string;
+}
+
 export interface FleetJobRecord {
   id: string;
   projectId: string;
@@ -78,6 +85,8 @@ export interface FleetJobRecord {
   wipPush: string | null;
   stories: FleetJobStory[] | null;
   storiesTruncated: boolean;
+  /** S2b (j): replaced by each snapshot that carries it; cleared on requeue (D427). */
+  postRun: FleetJobPostRun | null;
   eventSeq: number;
   ackedRunnerSeq: number;
   attributedAt: Date | null;
@@ -106,7 +115,7 @@ type Mutable =
   | 'cancelRequestedAt' | 'naxRunId' | 'naxLogRunId' | 'naxCostRunId' | 'progress' | 'currentStoryId'
   | 'currentPhase' | 'costSpentUsd' | 'costCarriedUsd' | 'firstStartedAt' | 'cancelReason' | 'lastHeartbeatAt'
   | 'finishResult' | 'escalationReason' | 'exitCode'
-  | 'resultBranch' | 'resultSha' | 'resultPrUrl' | 'wipPush' | 'stories' | 'storiesTruncated' | 'ackedRunnerSeq';
+  | 'resultBranch' | 'resultSha' | 'resultPrUrl' | 'wipPush' | 'stories' | 'storiesTruncated' | 'postRun' | 'ackedRunnerSeq';
 
 /** Columns a transition, snapshot or requeue may change. `bumpEpoch` adds one to leaseEpoch (plan D4). */
 export type FleetJobPatch = Partial<Pick<FleetJobRecord, Mutable>> & { bumpEpoch?: boolean };

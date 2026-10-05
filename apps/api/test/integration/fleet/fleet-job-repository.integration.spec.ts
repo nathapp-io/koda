@@ -48,6 +48,19 @@ describeIntegration('PrismaFleetJobRepository (PG)', () => {
     await expect(repo.findActiveJobId(base.repoId, 'dup')).resolves.toBe(job.id);
   });
 
+  it('stores, replaces and clears postRun (S2b (j) D428, D436)', async () => {
+    const job = await repo.createJob({ ...base, feature: 'post-run' });
+    expect(job.postRun).toBeNull();
+    const first = await repo.update(job.id, { postRun: { acceptance: 'running' } });
+    expect(first.postRun).toEqual({ acceptance: 'running' });
+    const second = await repo.update(job.id, { postRun: { acceptance: 'passed', regression: 'running' } });
+    expect(second.postRun).toEqual({ acceptance: 'passed', regression: 'running' });
+    const untouched = await repo.update(job.id, { currentPhase: 'x' });
+    expect(untouched.postRun).toEqual({ acceptance: 'passed', regression: 'running' });
+    const cleared = await repo.update(job.id, { postRun: null });
+    expect(cleared.postRun).toBeNull();
+  });
+
   it('assigns with compare-and-set: two racing assignments, one winner, epoch moves once', async () => {
     const job = await repo.createJob({ ...base, feature: 'race' });
     const now = new Date('2026-10-01T12:34:56.789Z');
