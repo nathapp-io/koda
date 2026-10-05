@@ -7363,6 +7363,530 @@
           "fleet"
         ]
       }
+    },
+    "/api/projects/{slug}/fleet/analytics/spend": {
+      "get": {
+        "operationId": "ProjectFleetAnalyticsController_spend",
+        "parameters": [
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "Window start, inclusive (UTC date or instant ending in Z); default `to` minus 30 days",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "description": "Window end, exclusive (UTC date or instant ending in Z); default now. At most 366 days after `from`",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "name": "bucket",
+            "required": false,
+            "in": "query",
+            "description": "Default from the window: <= 31 days day, <= 182 days week, else month",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "day",
+                "week",
+                "month"
+              ]
+            }
+          },
+          {
+            "name": "groupBy",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "model",
+              "type": "string",
+              "enum": [
+                "model",
+                "stage",
+                "role",
+                "repo",
+                "runner",
+                "feature",
+                "story"
+              ]
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpendAnalyticsDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid window, bucket or groupBy"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Fleet spend over a window, bucketed and grouped (project member, S2b §4.2)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/analytics/quality": {
+      "get": {
+        "operationId": "ProjectFleetAnalyticsController_quality",
+        "parameters": [
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "Window start, inclusive (UTC date or instant ending in Z); default `to` minus 30 days",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "description": "Window end, exclusive (UTC date or instant ending in Z); default now. At most 366 days after `from`",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "name": "bucket",
+            "required": false,
+            "in": "query",
+            "description": "Default from the window: <= 31 days day, <= 182 days week, else month",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "day",
+                "week",
+                "month"
+              ]
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityAnalyticsDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid window or bucket"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Run quality over a window: first pass, attempts, reviews, finish outcomes (project member)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/analytics/stories": {
+      "get": {
+        "operationId": "ProjectFleetAnalyticsController_stories",
+        "parameters": [
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "Window start, inclusive (UTC date or instant ending in Z); default `to` minus 30 days",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "description": "Window end, exclusive (UTC date or instant ending in Z); default now. At most 366 days after `from`",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "cost",
+              "type": "string",
+              "enum": [
+                "cost",
+                "attempts"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoriesAnalyticsDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid window, sort or limit"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The most expensive or most looping stories in a window (project member)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/analytics/jobs": {
+      "get": {
+        "operationId": "ProjectFleetAnalyticsController_jobs",
+        "parameters": [
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "Window start, inclusive (UTC date or instant ending in Z); default `to` minus 30 days",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "description": "Window end, exclusive (UTC date or instant ending in Z); default now. At most 366 days after `from`",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "cost",
+              "type": "string",
+              "enum": [
+                "cost"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobsAnalyticsDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid window, sort or limit"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The most expensive jobs finished in a window, with ledger drift (project member)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/jobs/{id}/analytics": {
+      "get": {
+        "operationId": "ProjectFleetAnalyticsController_job",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAnalyticsDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job in this project"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One job's cost and quality breakdown across its attempts (project member)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/analytics/spend": {
+      "get": {
+        "operationId": "FleetAnalyticsController_spend",
+        "parameters": [
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "Window start, inclusive (UTC date or instant ending in Z); default `to` minus 30 days",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "description": "Window end, exclusive (UTC date or instant ending in Z); default now. At most 366 days after `from`",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "name": "bucket",
+            "required": false,
+            "in": "query",
+            "description": "Default from the window: <= 31 days day, <= 182 days week, else month",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "day",
+                "week",
+                "month"
+              ]
+            }
+          },
+          {
+            "name": "groupBy",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "model",
+              "type": "string",
+              "enum": [
+                "model",
+                "stage",
+                "role",
+                "repo",
+                "runner",
+                "feature",
+                "story",
+                "project"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpendAnalyticsDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid window, bucket or groupBy"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Fleet spend across projects; groupBy also accepts project (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/analytics": {
+      "delete": {
+        "operationId": "FleetAnalyticsController_remove",
+        "parameters": [
+          {
+            "name": "before",
+            "required": true,
+            "in": "query",
+            "description": "Delete rows dated before this instant (UTC date or instant ending in Z)",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "required": false,
+            "in": "query",
+            "description": "Only this project; omit for every project",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteAnalyticsBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyticsDeletedDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing before, or confirm is not the project slug / ALL"
+          },
+          "404": {
+            "description": "No such project"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete analytics rows dated before an instant; ingest rows are kept and marked (global admin, D384)",
+        "tags": [
+          "fleet"
+        ]
+      }
     }
   },
   "info": {
@@ -11130,6 +11654,707 @@
         },
         "required": [
           "queued"
+        ]
+      },
+      "AnalyticsWindowDto": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ]
+      },
+      "SpendTotalsDto": {
+        "type": "object",
+        "properties": {
+          "costUsd": {
+            "type": "string",
+            "example": "0.1234",
+            "description": "USD, exactly 4 places (A7)"
+          },
+          "tokens": {
+            "type": "number"
+          },
+          "cacheShare": {
+            "type": "number",
+            "nullable": true,
+            "description": "cacheRead / (input + cacheRead), 4 places"
+          },
+          "jobs": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "costUsd",
+          "tokens",
+          "cacheShare",
+          "jobs"
+        ]
+      },
+      "SpendPointDto": {
+        "type": "object",
+        "properties": {
+          "t": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Bucket start (UTC)"
+          },
+          "costUsd": {
+            "type": "string",
+            "example": "0.1234",
+            "description": "USD, exactly 4 places (A7)"
+          },
+          "tokens": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "t",
+          "costUsd",
+          "tokens"
+        ]
+      },
+      "SpendSeriesDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Group key; `(none)` for an empty dimension; `other` when folded"
+          },
+          "label": {
+            "type": "string",
+            "description": "repo owner/name, runner name, project slug, else the key"
+          },
+          "folded": {
+            "type": "boolean",
+            "description": "True only for the series that folds every key beyond the top 12"
+          },
+          "costUsd": {
+            "type": "string",
+            "example": "0.1234",
+            "description": "USD, exactly 4 places (A7)"
+          },
+          "tokens": {
+            "type": "number"
+          },
+          "points": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpendPointDto"
+            }
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "folded",
+          "costUsd",
+          "tokens",
+          "points"
+        ]
+      },
+      "SpendAnalyticsDto": {
+        "type": "object",
+        "properties": {
+          "window": {
+            "$ref": "#/components/schemas/AnalyticsWindowDto"
+          },
+          "bucket": {
+            "enum": [
+              "day",
+              "week",
+              "month"
+            ],
+            "type": "string"
+          },
+          "groupBy": {
+            "enum": [
+              "model",
+              "stage",
+              "role",
+              "repo",
+              "runner",
+              "feature",
+              "story",
+              "project"
+            ],
+            "type": "string"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/SpendTotalsDto"
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpendSeriesDto"
+            }
+          }
+        },
+        "required": [
+          "window",
+          "bucket",
+          "groupBy",
+          "totals",
+          "series"
+        ]
+      },
+      "ReviewerQualityDto": {
+        "type": "object",
+        "properties": {
+          "reviewer": {
+            "type": "string"
+          },
+          "runs": {
+            "type": "number"
+          },
+          "passRate": {
+            "type": "number",
+            "nullable": true
+          },
+          "findingsBySeverity": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          }
+        },
+        "required": [
+          "reviewer",
+          "runs",
+          "passRate",
+          "findingsBySeverity"
+        ]
+      },
+      "FinishOutcomesDto": {
+        "type": "object",
+        "properties": {
+          "opened": {
+            "type": "number"
+          },
+          "promoted": {
+            "type": "number"
+          },
+          "escalated": {
+            "type": "number"
+          },
+          "skipped": {
+            "type": "number"
+          },
+          "other": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "opened",
+          "promoted",
+          "escalated",
+          "skipped",
+          "other"
+        ]
+      },
+      "EscalationReasonDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "count": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "reason",
+          "count"
+        ]
+      },
+      "FirstPassPointDto": {
+        "type": "object",
+        "properties": {
+          "t": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "rate": {
+            "type": "number",
+            "nullable": true
+          }
+        },
+        "required": [
+          "t",
+          "rate"
+        ]
+      },
+      "QualityAnalyticsDto": {
+        "type": "object",
+        "properties": {
+          "window": {
+            "$ref": "#/components/schemas/AnalyticsWindowDto"
+          },
+          "bucket": {
+            "enum": [
+              "day",
+              "week",
+              "month"
+            ],
+            "type": "string"
+          },
+          "stories": {
+            "type": "number"
+          },
+          "firstPassRate": {
+            "type": "number",
+            "nullable": true
+          },
+          "avgAttempts": {
+            "type": "number",
+            "nullable": true
+          },
+          "reviewByReviewer": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewerQualityDto"
+            }
+          },
+          "finishOutcomes": {
+            "$ref": "#/components/schemas/FinishOutcomesDto"
+          },
+          "topEscalationReasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EscalationReasonDto"
+            }
+          },
+          "firstPassSeries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FirstPassPointDto"
+            }
+          }
+        },
+        "required": [
+          "window",
+          "bucket",
+          "stories",
+          "firstPassRate",
+          "avgAttempts",
+          "reviewByReviewer",
+          "finishOutcomes",
+          "topEscalationReasons",
+          "firstPassSeries"
+        ]
+      },
+      "StoryAnalyticsRowDto": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "leaseEpoch": {
+            "type": "number"
+          },
+          "featureName": {
+            "type": "string"
+          },
+          "storyId": {
+            "type": "string"
+          },
+          "attempts": {
+            "type": "number"
+          },
+          "firstPassSuccess": {
+            "type": "boolean"
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "costUsd": {
+            "type": "string",
+            "example": "0.1234",
+            "description": "USD, exactly 4 places (A7)"
+          },
+          "completedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "jobId",
+          "leaseEpoch",
+          "featureName",
+          "storyId",
+          "attempts",
+          "firstPassSuccess",
+          "success",
+          "costUsd",
+          "completedAt"
+        ]
+      },
+      "StoriesAnalyticsDto": {
+        "type": "object",
+        "properties": {
+          "window": {
+            "$ref": "#/components/schemas/AnalyticsWindowDto"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StoryAnalyticsRowDto"
+            }
+          }
+        },
+        "required": [
+          "window",
+          "rows"
+        ]
+      },
+      "JobAnalyticsRowDto": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "featureName": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "costUsd": {
+            "type": "string",
+            "example": "0.1234",
+            "description": "costSpentUsd + costCarriedUsd"
+          },
+          "ledgerCostUsd": {
+            "type": "string",
+            "nullable": true,
+            "description": "Sum of ingested cost ledgers; null before ingest"
+          },
+          "driftUsd": {
+            "type": "string",
+            "nullable": true,
+            "description": "ledger - cost"
+          },
+          "finishedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "jobId",
+          "command",
+          "featureName",
+          "state",
+          "costUsd",
+          "ledgerCostUsd",
+          "driftUsd",
+          "finishedAt"
+        ]
+      },
+      "JobsAnalyticsDto": {
+        "type": "object",
+        "properties": {
+          "window": {
+            "$ref": "#/components/schemas/AnalyticsWindowDto"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobAnalyticsRowDto"
+            }
+          }
+        },
+        "required": [
+          "window",
+          "rows"
+        ]
+      },
+      "JobIngestSummaryDto": {
+        "type": "object",
+        "properties": {
+          "leaseEpoch": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "partial",
+              "failed"
+            ]
+          },
+          "files": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "ingestedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "error": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "leaseEpoch",
+          "status",
+          "files",
+          "ingestedAt",
+          "error"
+        ]
+      },
+      "CostSliceDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "costUsd": {
+            "type": "string",
+            "example": "0.1234",
+            "description": "USD, exactly 4 places (A7)"
+          },
+          "tokens": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "key",
+          "costUsd",
+          "tokens"
+        ]
+      },
+      "JobStoryResultDto": {
+        "type": "object",
+        "properties": {
+          "leaseEpoch": {
+            "type": "number"
+          },
+          "featureName": {
+            "type": "string"
+          },
+          "storyId": {
+            "type": "string"
+          },
+          "attempts": {
+            "type": "number"
+          },
+          "firstPassSuccess": {
+            "type": "boolean"
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "costUsd": {
+            "type": "string",
+            "example": "0.1234",
+            "description": "USD, exactly 4 places (A7)"
+          },
+          "durationMs": {
+            "type": "number",
+            "nullable": true
+          },
+          "completedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "leaseEpoch",
+          "featureName",
+          "storyId",
+          "attempts",
+          "firstPassSuccess",
+          "success",
+          "costUsd",
+          "durationMs",
+          "completedAt"
+        ]
+      },
+      "JobReviewResultDto": {
+        "type": "object",
+        "properties": {
+          "leaseEpoch": {
+            "type": "number"
+          },
+          "storyId": {
+            "type": "string",
+            "nullable": true
+          },
+          "reviewer": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "failOpen": {
+            "type": "boolean"
+          },
+          "findingCount": {
+            "type": "number"
+          },
+          "findingsBySeverity": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "advisoryCount": {
+            "type": "number"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "leaseEpoch",
+          "storyId",
+          "reviewer",
+          "passed",
+          "failOpen",
+          "findingCount",
+          "findingsBySeverity",
+          "advisoryCount",
+          "at"
+        ]
+      },
+      "JobAnalyticsDto": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "ingest": {
+            "nullable": true,
+            "description": "The latest attempt with an ingest row",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/JobIngestSummaryDto"
+              }
+            ]
+          },
+          "byStage": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CostSliceDto"
+            }
+          },
+          "byRole": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CostSliceDto"
+            }
+          },
+          "byModel": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CostSliceDto"
+            }
+          },
+          "stories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobStoryResultDto"
+            }
+          },
+          "reviews": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobReviewResultDto"
+            }
+          },
+          "liveCostUsd": {
+            "type": "string",
+            "nullable": true
+          },
+          "ledgerCostUsd": {
+            "type": "string",
+            "nullable": true
+          },
+          "corrected": {
+            "type": "boolean",
+            "description": "The state was corrected from finish-audit (spec §3.2)"
+          }
+        },
+        "required": [
+          "jobId",
+          "ingest",
+          "byStage",
+          "byRole",
+          "byModel",
+          "stories",
+          "reviews",
+          "liveCostUsd",
+          "ledgerCostUsd",
+          "corrected"
+        ]
+      },
+      "DeleteAnalyticsBody": {
+        "type": "object",
+        "properties": {
+          "confirm": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "The project's slug, or ALL when no projectId is given"
+          }
+        },
+        "required": [
+          "confirm"
+        ]
+      },
+      "AnalyticsDeletedDto": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "nullable": true
+          },
+          "before": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "costEvents": {
+            "type": "number"
+          },
+          "stories": {
+            "type": "number"
+          },
+          "reviews": {
+            "type": "number"
+          },
+          "ingestRowsMarked": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "projectId",
+          "before",
+          "costEvents",
+          "stories",
+          "reviews",
+          "ingestRowsMarked"
         ]
       }
     }

@@ -97,4 +97,19 @@ describe('fleet OpenAPI contract', () => {
     expect(Object.keys(spec.components.schemas['FleetJobLogStreamDto']?.properties ?? {}))
       .toEqual(expect.arrayContaining(['stream', 'sizeBytes', 'complete', 'truncated', 'source', 'expired', 'updatedAt']));
   });
+
+  it('exposes the analytics routes and their response shapes (S2b §4, D377, D382, D383)', () => {
+    for (const route of ['spend', 'quality', 'stories', 'jobs']) {
+      expect(spec.paths[`/api/projects/{slug}/fleet/analytics/${route}`]?.['get']).toBeDefined();
+    }
+    expect(spec.paths['/api/projects/{slug}/fleet/jobs/{id}/analytics']?.['get']).toBeDefined();
+    expect(spec.paths['/api/fleet/analytics/spend']?.['get']).toBeDefined();
+    expect(spec.paths['/api/fleet/analytics']?.['delete']).toBeDefined();
+    const props = (name: string) => Object.keys(spec.components.schemas[name]?.properties ?? {}).sort();
+    expect(props('SpendAnalyticsDto')).toEqual(['bucket', 'groupBy', 'series', 'totals', 'window']);
+    expect(props('SpendSeriesDto')).toEqual(['costUsd', 'folded', 'key', 'label', 'points', 'tokens']);
+    expect(props('StoriesAnalyticsDto')).toEqual(['rows', 'window']);
+    expect(props('JobAnalyticsRowDto')).toEqual(['command', 'costUsd', 'driftUsd', 'featureName', 'finishedAt', 'jobId', 'ledgerCostUsd', 'state']);
+    expect(props('JobAnalyticsDto')).toEqual(['byModel', 'byRole', 'byStage', 'corrected', 'ingest', 'jobId', 'ledgerCostUsd', 'liveCostUsd', 'reviews', 'stories']);
+  });
 });
