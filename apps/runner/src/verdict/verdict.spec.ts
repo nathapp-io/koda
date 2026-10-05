@@ -72,6 +72,22 @@ describe('parseStatusView', () => {
       postRun: { finish: { status: 'passed', result: 'opened', url: 'https://x/pr/1' } },
     });
   });
+  test('reads acceptance and regression status and drops everything else in those stages (S2b (j) §1.1)', () => {
+    const view = parseStatusView({
+      run: { id: 'r', status: 'running' },
+      postRun: {
+        acceptance: { status: 'running', lastRunAt: 'x', failedACs: ['AC-1'] },
+        regression: { status: 7 },
+        finish: { status: 'not-run' },
+        gates: { acceptance: 'passed' },
+      },
+    });
+    expect(view?.postRun).toEqual({ acceptance: { status: 'running' }, regression: {}, finish: { status: 'not-run' } });
+  });
+  test('a postRun that is not an object, or has no stage objects, leaves postRun undefined', () => {
+    expect(parseStatusView({ run: { id: 'r', status: 'running' }, postRun: 'x' })?.postRun).toBeUndefined();
+    expect(parseStatusView({ run: { id: 'r', status: 'running' }, postRun: { acceptance: 'passed' } })?.postRun).toBeUndefined();
+  });
   test('current null is preserved; missing run.id or run.status is not a status file', () => {
     expect(parseStatusView({ run: { id: 'r', status: 'completed' }, current: null })?.current).toBeNull();
     for (const raw of [null, [], {}, { run: {} }, { run: { id: 'r' } }, { run: { id: 1, status: 's' } }]) expect(parseStatusView(raw)).toBeNull();

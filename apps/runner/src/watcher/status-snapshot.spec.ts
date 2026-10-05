@@ -36,6 +36,24 @@ describe('mapStatusToSnapshot (slice 3 design §1.3)', () => {
     expect(esc).toMatchObject({ finishResult: 'escalated', escalationReason: 'blocked' });
     expect(esc).not.toHaveProperty('resultPrUrl');
   });
+  test('maps post-run stage statuses, skipping stages without a status (S2b (j) D434)', () => {
+    const snap = mapStatusToSnapshot({
+      run: { id: 'r', status: 'running' },
+      postRun: { acceptance: { status: 'passed' }, regression: {}, finish: { status: 'running' } },
+    });
+    expect(snap.postRun).toEqual({ acceptance: 'passed', finish: 'running' });
+  });
+  test('omits postRun when no stage has a status, and keeps the finish mapping unchanged', () => {
+    expect(mapStatusToSnapshot({ run: { id: 'r', status: 'running' }, postRun: { regression: {} } })).not.toHaveProperty('postRun');
+    expect(mapStatusToSnapshot({ run: { id: 'r', status: 'running' } })).not.toHaveProperty('postRun');
+    const snap = mapStatusToSnapshot({ run: { id: 'r', status: 'completed' }, postRun: { finish: { result: 'opened', url: 'https://github.com/a/b/pull/1' } } });
+    expect(snap).toMatchObject({ finishResult: 'opened', resultPrUrl: 'https://github.com/a/b/pull/1' });
+    expect(snap).not.toHaveProperty('postRun');
+  });
+  test('clips each stage status to 32 characters', () => {
+    const snap = mapStatusToSnapshot({ run: { id: 'r', status: 'running' }, postRun: { acceptance: { status: 'x'.repeat(50) } } });
+    expect(snap.postRun?.acceptance).toBe('x'.repeat(32));
+  });
   test('escalationReason is cut to the server limit of 2,000 characters, never inside a surrogate pair (D59)', () => {
     const long = mapStatusToSnapshot({ run: { id: 'r', status: 'completed' }, postRun: { finish: { result: 'escalated', escalationReason: 'x'.repeat(5_000) } } });
     expect(long.escalationReason).toHaveLength(2_000);
