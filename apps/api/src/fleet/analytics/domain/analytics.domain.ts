@@ -179,3 +179,27 @@ export interface IAnalyticsReadRepository {
   jobStories(jobId: string, limit: number): Promise<JobStoryRow[]>;
   jobReviews(jobId: string, limit: number): Promise<JobReviewRow[]>;
 }
+
+export interface DeleteAnalyticsInput {
+  /** null = every project (D384). */
+  projectId: string | null;
+  before: Date;
+  now: Date;
+}
+
+export interface DeletedCounts {
+  costEvents: number;
+  stories: number;
+  reviews: number;
+  ingestRowsMarked: number;
+}
+
+export interface IAnalyticsRepository extends IAnalyticsReadRepository {
+  findProjectSlug(projectId: string): Promise<string | null>;
+  /**
+   * Spec §4.3, D384: marks the ingest rows of every job that loses rows, then deletes cost events and reviews by
+   * `at`, stories by `completedAt` (or the job's `finishedAt` when null), all older than `before`. Call inside a
+   * transaction.
+   */
+  deleteRows(input: DeleteAnalyticsInput): Promise<DeletedCounts>;
+}

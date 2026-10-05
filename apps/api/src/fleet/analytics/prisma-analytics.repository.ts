@@ -2,9 +2,9 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import {
-  AnalyticsScope, AnalyticsWindow, Bucket, CostSliceRow, CountRow, FirstPassCell, GroupBy, IAnalyticsReadRepository, JobIngestRow,
-  JobListRow, JobReviewRow, JobSliceBy, JobStoryRow, NONE_KEY, ReviewerRow, ReviewerSeverityRow, SpendCell, SpendTotalsRow,
-  StoryListRow, StorySort, StoryStatsRow,
+  AnalyticsScope, AnalyticsWindow, Bucket, CostSliceRow, CountRow, DeleteAnalyticsInput, DeletedCounts, FirstPassCell, GroupBy,
+  IAnalyticsRepository, JobIngestRow, JobListRow, JobReviewRow, JobSliceBy, JobStoryRow, NONE_KEY, ReviewerRow, ReviewerSeverityRow,
+  SpendCell, SpendTotalsRow, StoryListRow, StorySort, StoryStatsRow,
 } from './domain/analytics.domain';
 
 /** Fixed SQL fragments keyed by validated enums: request text never reaches the SQL. */
@@ -34,7 +34,7 @@ const inScope = (scope: AnalyticsScope): Prisma.Sql =>
 type Raw = Record<string, unknown>;
 
 @Injectable()
-export class PrismaAnalyticsRepository implements IAnalyticsReadRepository {
+export class PrismaAnalyticsRepository implements IAnalyticsRepository {
   constructor(private readonly prisma: PrismaService<PrismaClient>) {}
 
   /** Transaction-scoped inside txManager.run (nestjs-prisma ALS proxy). */
@@ -209,5 +209,31 @@ export class PrismaAnalyticsRepository implements IAnalyticsReadRepository {
       },
     });
     return rows.map((r) => ({ ...r, findingsBySeverity: (r.findingsBySeverity ?? {}) as Record<string, number> }));
+  }
+
+  async findProjectSlug(projectId: string): Promise<string | null> {
+    const project = await this.db.project.findUnique({ where: { id: projectId }, select: { slug: true } });
+    return project ? project.slug : null;
+  }
+
+  async deleteRows({ projectId, before, now }: DeleteAnalyticsInput): Promise<DeletedCounts> {
+    const scoped = (alias: 'c' | 's' | 'r'): Prisma.Sql =>
+      (projectId === null ? Prisma.empty : Prisma.sql`AND ${Prisma.raw(alias)}."projectId" = ${projectId}`);
+    const ingestRowsMarked = await this.db.$executeRaw(Prisma.sql`
+      UPDATE "FleetBundleIngest"
+      SET "files" = "files" || jsonb_build_object('deleted', ${before.toISOString()}::text), "updatedAt" = ${now}
+      WHERE "jobId" IN (
+        SELECT c."jobId" FROM "FleetCostEvent" c WHERE c."at" < ${before} ${scoped('c')}
+        UNION SELECT s."jobId" FROM "FleetStoryResult" s JOIN "FleetJob" j ON j."id" = s."jobId"
+          WHERE (s."completedAt" < ${before} OR (s."completedAt" IS NULL AND j."finishedAt" < ${before})) ${scoped('s')}
+        UNION SELECT r."jobId" FROM "FleetReviewResult" r WHERE r."at" < ${before} ${scoped('r')}
+      )`);
+    const project = projectId === null ? {} : { projectId };
+    const costEvents = await this.db.fleetCostEvent.deleteMany({ where: { ...project, at: { lt: before } } });
+    const stories = await this.db.fleetStoryResult.deleteMany({
+      where: { ...project, OR: [{ completedAt: { lt: before } }, { completedAt: null, job: { finishedAt: { lt: before } } }] },
+    });
+    const reviews = await this.db.fleetReviewResult.deleteMany({ where: { ...project, at: { lt: before } } });
+    return { costEvents: costEvents.count, stories: stories.count, reviews: reviews.count, ingestRowsMarked };
   }
 }
