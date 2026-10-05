@@ -141,6 +141,13 @@ export interface FleetJobStoryDto {
   dependsOn: string[]
 }
 
+/** S2b (j): nax post-run stage statuses (`postRun.<stage>.status`), each at most 32 printable ASCII; null when unknown. */
+export interface FleetJobPostRunDto {
+  acceptance?: string
+  regression?: string
+  finish?: string
+}
+
 /** S1.5 §1.6: gated/escalate relay nax's bash asks to the approvals inbox; RUN jobs only. */
 export type BashMode = 'raw' | 'gated' | 'escalate'
 
@@ -188,6 +195,8 @@ export interface FleetJobDto {
   wipPush: string | null
   stories: FleetJobStoryDto[] | null
   storiesTruncated: boolean
+  /** S2b (j) D433: null when unknown and on list pages. */
+  postRun: FleetJobPostRunDto | null
   /** S1b 3a D205: the schedule that dispatched the job, and fires merged into it while it was QUEUED. */
   scheduleId: string | null
   coalescedCount: number

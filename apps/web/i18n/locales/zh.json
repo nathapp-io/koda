@@ -1293,6 +1293,35 @@
           "phase": "当前阶段：{phase}",
           "truncated": "列表已截断：仅显示前 {count} 个故事。"
         },
+        "pipeline": {
+          "title": "运行流水线",
+          "graphLabel": "故事依赖图",
+          "column": "第 {n} 步",
+          "view": {
+            "label": "故事视图",
+            "graph": "图",
+            "list": "列表"
+          },
+          "stage": {
+            "stories": "故事",
+            "acceptance": "验收",
+            "regression": "回归",
+            "finish": "收尾"
+          },
+          "state": {
+            "pending": "待处理",
+            "running": "运行中",
+            "passed": "已通过",
+            "failed": "失败",
+            "skipped": "已跳过",
+            "unknown": "未知"
+          },
+          "dependsOn": "依赖：{ids}",
+          "notShown": "依赖 {id}（未显示）",
+          "cycle": "依赖 {id}（循环依赖，未绘制）",
+          "nodeLabel": "{id} {title}。{status}。依赖：{deps}。",
+          "nodeLabelRoot": "{id} {title}。{status}。无依赖。"
+        },
         "cancelRequested": "已于 {at} 请求取消",
         "budgetStop": "因 Fleet 预算而停止",
         "budgetStopLink": "查看预算",

@@ -93,6 +93,8 @@ export interface StoryRow {
   current: boolean
   phase: string | null
   variant: 'default' | 'secondary' | 'destructive' | 'outline'
+  /** S2b (j) D439: ids this story waits on; strings only, de-duplicated, never itself. */
+  dependsOn: string[]
 }
 
 const STORY_VARIANTS: Readonly<Record<string, StoryRow['variant']>> = {
@@ -101,6 +103,12 @@ const STORY_VARIANTS: Readonly<Record<string, StoryRow['variant']>> = {
   'failed': 'destructive',
   'regression-failed': 'destructive',
 }
+
+/** D439: the PRD's dependsOn as clean ids; anything that is not a non-empty string is dropped. */
+const dependsOnOf = (value: unknown, self: string): string[] =>
+  Array.isArray(value)
+    ? [...new Set(value.filter((dep): dep is string => typeof dep === 'string' && dep.length > 0 && dep !== self))]
+    : []
 
 /** S1b §1.4: the job page's story checklist. The server validated the list; each row is still checked. */
 export function storyRows(job: Pick<FleetJobDto, 'stories' | 'state' | 'currentStoryId' | 'currentPhase'>): StoryRow[] {
@@ -121,6 +129,7 @@ export function storyRows(job: Pick<FleetJobDto, 'stories' | 'state' | 'currentS
       current,
       phase: current ? job.currentPhase : null,
       variant: STORY_VARIANTS[status] ?? 'outline',
+      dependsOn: dependsOnOf(s.dependsOn, id),
     }]
   })
 }

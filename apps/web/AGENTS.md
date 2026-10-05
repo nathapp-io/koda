@@ -140,6 +140,20 @@ Useful scripts:
   the browser clock with server time.
 - The project scope never shows credential chips, versions or runner links (B5); the API already nulls them.
 
+## Fleet story graph (S2b (j))
+
+- The job page renders `components/fleet/story-graph/FleetJobPipeline.vue`: heading, Graph | List toggle, the RUN
+  stage strip (`PipelineStrip`), and either `StoryGraph` or the list (`FleetJobStories`). It re-renders from the
+  job DTO the page reloads on `fleet_job` live events; it has no stream or timer of its own.
+- All logic is pure in `lib/fleet-story-graph.ts` (`layoutStoryGraph`, `edgePaths`, `neighbourhood`,
+  `pipelineStages`) and `lib/fleet-story-view.ts` (view persistence, `koda.fleet.storyView`). Keep class names in
+  the `.vue` files: Tailwind does not scan `lib/`.
+- Edges are measured from DOM boxes after mount (`ResizeObserver`), so Jest mount tests and SSR see nodes only;
+  assert edges in E2E (`tests/e2e/fleet-story-graph.e2e.spec.ts`).
+- Raw nax values (story statuses, `postRun` stage strings) show through `codeLabel` or as raw text; a new known
+  stage state needs its key under `fleet.jobs.detail.pipeline.state` and its pin in
+  `tests/i18n/fleet-locale-parity.spec.ts`.
+
 ## UX redesign (in progress)
 
 A multi-slice UX redesign of this app is planned and tracked in `docs/ux/redesign/MASTER-PLAN.md`. Read it before

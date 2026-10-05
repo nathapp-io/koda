@@ -1,6 +1,7 @@
 import { describe, test, expect } from '@jest/globals'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { enI18n, uiStubs } from '../helpers/fleet-harness'
+import { storyRows } from '~/lib/fleet-jobs'
 import type { FleetJobDto } from '../../lib/fleet-types'
 
 const file = webFile('components', 'fleet', 'FleetJobStories.vue')
@@ -12,9 +13,9 @@ const base = {
   ],
 } as unknown as FleetJobDto
 const mount = (over: Partial<FleetJobDto> = {}) =>
-  mountSfc(file, { props: { job: { ...base, ...over } }, globals: { useI18n: enI18n }, components: uiStubs })
+  mountSfc(file, { props: { rows: storyRows({ ...base, ...over }) }, globals: { useI18n: enI18n }, components: uiStubs })
 
-describe('FleetJobStories (S1b §1.4)', () => {
+describe('FleetJobStories, the List view (S1b §1.4, D443)', () => {
   test('one row per story with title, translated status and attempts', () => {
     const { find, textOf, unmount } = mount()
     const rows = find('[data-testid="fleet-job-story"]')
@@ -42,20 +43,11 @@ describe('FleetJobStories (S1b §1.4)', () => {
     unmount()
   })
 
-  test('the truncation note shows only when the list was cut', () => {
-    const plain = mount()
-    expect(plain.find('[data-testid="fleet-job-stories-truncated"]')).toHaveLength(0)
-    plain.unmount()
-    const cut = mount({ storiesTruncated: true })
-    const note = cut.find('[data-testid="fleet-job-stories-truncated"]')
-    expect(note).toHaveLength(1)
-    expect(cut.textOf(note[0])).toContain('first 2 stories')
-    cut.unmount()
-  })
-
-  test('without a list it renders nothing (the page keeps the counts only)', () => {
-    const { find, unmount } = mount({ stories: null })
-    expect(find('[data-testid="fleet-job-stories"]')).toHaveLength(0)
+  test('a muted "depends on" line only for stories that have dependencies', () => {
+    const { find, textOf, unmount } = mount()
+    const deps = find('[data-testid="fleet-job-story-deps"]')
+    expect(deps).toHaveLength(1)
+    expect(textOf(deps[0])).toBe('Depends on US-001')
     unmount()
   })
 })

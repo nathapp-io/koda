@@ -59,6 +59,9 @@ const ENUMS: Record<string, string[]> = {
   'fleet.dashboard.tiles': ['runners', 'queued', 'running', 'attention'],
   'fleet.dashboard.attention.verdict': ['never', 'budget_paused', 'runners_paused', 'waiting_capacity', 'no_fit', 'no_runners', 'fits_not_placed', 'unknown'],
   'fleet.dashboard.attention.condition.credential': ['missing', 'unavailable', 'expired'],
+  'fleet.jobs.detail.pipeline.stage': ['stories', 'acceptance', 'regression', 'finish'],
+  'fleet.jobs.detail.pipeline.state': ['pending', 'running', 'passed', 'failed', 'skipped', 'unknown'],
+  'fleet.jobs.detail.pipeline.view': ['label', 'graph', 'list'],
 }
 
 describe('Fleet locale parity (en and zh)', () => {
