@@ -1293,6 +1293,35 @@
           "phase": "Now: {phase}",
           "truncated": "List truncated: showing the first {count} stories."
         },
+        "pipeline": {
+          "title": "Run pipeline",
+          "graphLabel": "Story dependency graph",
+          "column": "Step {n}",
+          "view": {
+            "label": "Story view",
+            "graph": "Graph",
+            "list": "List"
+          },
+          "stage": {
+            "stories": "Stories",
+            "acceptance": "Acceptance",
+            "regression": "Regression",
+            "finish": "Finish"
+          },
+          "state": {
+            "pending": "Pending",
+            "running": "Running",
+            "passed": "Passed",
+            "failed": "Failed",
+            "skipped": "Skipped",
+            "unknown": "Unknown"
+          },
+          "dependsOn": "Depends on {ids}",
+          "notShown": "Depends on {id} (not shown)",
+          "cycle": "Depends on {id} (cycle, not drawn)",
+          "nodeLabel": "{id} {title}. {status}. Depends on {deps}.",
+          "nodeLabelRoot": "{id} {title}. {status}. No dependencies."
+        },
         "cancelRequested": "Cancel requested at {at}",
         "budgetStop": "Stopped by a fleet budget",
         "budgetStopLink": "View budgets",
