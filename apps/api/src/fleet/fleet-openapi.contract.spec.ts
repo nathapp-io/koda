@@ -99,7 +99,7 @@ describe('fleet OpenAPI contract', () => {
   });
 
   it('exposes the analytics routes and their response shapes (S2b §4, D377, D382, D383)', () => {
-    for (const route of ['spend', 'quality', 'stories', 'jobs']) {
+    for (const route of ['spend', 'quality', 'stories', 'jobs', 'ingest']) {
       expect(spec.paths[`/api/projects/{slug}/fleet/analytics/${route}`]?.['get']).toBeDefined();
     }
     expect(spec.paths['/api/projects/{slug}/fleet/jobs/{id}/analytics']?.['get']).toBeDefined();
@@ -111,5 +111,10 @@ describe('fleet OpenAPI contract', () => {
     expect(props('StoriesAnalyticsDto')).toEqual(['rows', 'window']);
     expect(props('JobAnalyticsRowDto')).toEqual(['command', 'costUsd', 'driftUsd', 'featureName', 'finishedAt', 'jobId', 'ledgerCostUsd', 'state']);
     expect(props('JobAnalyticsDto')).toEqual(['byModel', 'byRole', 'byStage', 'corrected', 'ingest', 'jobId', 'ledgerCostUsd', 'liveCostUsd', 'reviews', 'stories']);
+    expect(props('SpendTotalsDto')).toEqual(['cacheShare', 'costUsd', 'jobs', 'medianJobCostUsd', 'tokens']);
+    expect(props('IngestHealthDto')).toEqual(['failed', 'pending', 'window']);
+    const spendParams = (path: string) => (spec.paths[path]?.['get']?.parameters ?? []).map((p) => p.name);
+    expect(spendParams('/api/projects/{slug}/fleet/analytics/spend')).toContain('top');
+    expect(spendParams('/api/fleet/analytics/spend')).toContain('top');
   });
 });

@@ -7403,6 +7403,17 @@
             }
           },
           {
+            "name": "top",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 12,
+              "default": 12,
+              "type": "number"
+            }
+          },
+          {
             "name": "groupBy",
             "required": false,
             "in": "query",
@@ -7693,6 +7704,65 @@
         ]
       }
     },
+    "/api/projects/{slug}/fleet/analytics/ingest": {
+      "get": {
+        "operationId": "ProjectFleetAnalyticsController_ingest",
+        "parameters": [
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "Window start, inclusive (UTC date or instant ending in Z); default `to` minus 30 days",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "description": "Window end, exclusive (UTC date or instant ending in Z); default now. At most 366 days after `from`",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestHealthDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid window"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Ingest rows not yet analysed or failed, for jobs finished in a window (project member, D388)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/projects/{slug}/fleet/jobs/{id}/analytics": {
       "get": {
         "operationId": "ProjectFleetAnalyticsController_job",
@@ -7776,6 +7846,17 @@
                 "week",
                 "month"
               ]
+            }
+          },
+          {
+            "name": "top",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 12,
+              "default": 12,
+              "type": "number"
             }
           },
           {
@@ -11691,13 +11772,20 @@
           },
           "jobs": {
             "type": "number"
+          },
+          "medianJobCostUsd": {
+            "type": "string",
+            "nullable": true,
+            "example": "0.1234",
+            "description": "Median per-job spend in the window (each job counts only its spend inside the window), 4 places; null with no jobs (D388)"
           }
         },
         "required": [
           "costUsd",
           "tokens",
           "cacheShare",
-          "jobs"
+          "jobs",
+          "medianJobCostUsd"
         ]
       },
       "SpendPointDto": {
@@ -11736,7 +11824,7 @@
           },
           "folded": {
             "type": "boolean",
-            "description": "True only for the series that folds every key beyond the top 12"
+            "description": "True only for the series that folds every key beyond the top `top` (default 12)"
           },
           "costUsd": {
             "type": "string",
@@ -12080,6 +12168,27 @@
         "required": [
           "window",
           "rows"
+        ]
+      },
+      "IngestHealthDto": {
+        "type": "object",
+        "properties": {
+          "window": {
+            "$ref": "#/components/schemas/AnalyticsWindowDto"
+          },
+          "pending": {
+            "type": "number",
+            "description": "Ingest rows pending or running, of jobs finished in the window"
+          },
+          "failed": {
+            "type": "number",
+            "description": "Ingest rows that failed after their retries"
+          }
+        },
+        "required": [
+          "window",
+          "pending",
+          "failed"
         ]
       },
       "JobIngestSummaryDto": {

@@ -158,6 +158,13 @@ export interface JobReviewRow {
   at: Date;
 }
 
+/** D388: ingest rows by status group. */
+export interface IngestHealthRow {
+  /** pending + running */
+  pending: number;
+  failed: number;
+}
+
 /** Spec §4.1-4.2: SQL GROUP BY over indexed columns; money unrounded. */
 export interface IAnalyticsReadRepository {
   spendCells(scope: AnalyticsScope, w: AnalyticsWindow, groupBy: GroupBy): Promise<SpendCell[]>;
@@ -180,6 +187,8 @@ export interface IAnalyticsReadRepository {
   latestIngest(jobId: string): Promise<JobIngestRow | null>;
   jobStories(jobId: string, limit: number): Promise<JobStoryRow[]>;
   jobReviews(jobId: string, limit: number): Promise<JobReviewRow[]>;
+  /** D388: ingest rows of the project's jobs finished in [from, to). */
+  ingestHealth(projectId: string, from: Date, to: Date): Promise<IngestHealthRow>;
 }
 
 export interface DeleteAnalyticsInput {

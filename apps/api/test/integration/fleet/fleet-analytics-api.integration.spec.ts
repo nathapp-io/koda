@@ -124,4 +124,12 @@ describeIntegration('fleet analytics project API (PG)', () => {
     await get(`jobs/${foreignJobId}/analytics`).expect(404);
     await get('jobs/nope/analytics').expect(404);
   });
+
+  it('answers the ingest counts to members and refuses agent keys (D388)', async () => {
+    const r = data<{ window: unknown; pending: number; failed: number }>(await get(`analytics/ingest?${WINDOW}`).expect(200));
+    expect(r).toEqual({ window: { from: '2026-09-28T00:00:00.000Z', to: '2026-10-05T00:00:00.000Z' }, pending: 0, failed: 0 });
+    await get(`analytics/ingest?${WINDOW}`, 'outsider').expect(403);
+    await request(server).get(`${BASE}/analytics/ingest`).set({ Authorization: `Bearer ${agentKey}` }).expect(403);
+    await get('analytics/ingest?from=2026-10-05T00:00:00Z&to=2026-10-01T00:00:00Z').expect(400);
+  });
 });

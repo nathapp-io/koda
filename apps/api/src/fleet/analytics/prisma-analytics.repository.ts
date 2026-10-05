@@ -3,7 +3,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import {
   AnalyticsScope, AnalyticsWindow, Bucket, CostSliceRow, CountRow, DeleteAnalyticsInput, DeletedCounts, FirstPassCell, GroupBy,
-  IAnalyticsRepository, JobIngestRow, JobListRow, JobReviewRow, JobSliceBy, JobStoryRow, NONE_KEY, ReviewerRow, ReviewerSeverityRow,
+  IAnalyticsRepository, IngestHealthRow, JobIngestRow, JobListRow, JobReviewRow, JobSliceBy, JobStoryRow, NONE_KEY, ReviewerRow, ReviewerSeverityRow,
   SpendCell, SpendTotalsRow, StoryListRow, StorySort, StoryStatsRow,
 } from './domain/analytics.domain';
 
@@ -218,6 +218,15 @@ export class PrismaAnalyticsRepository implements IAnalyticsRepository {
       },
     });
     return rows.map((r) => ({ ...r, findingsBySeverity: (r.findingsBySeverity ?? {}) as Record<string, number> }));
+  }
+
+  async ingestHealth(projectId: string, from: Date, to: Date): Promise<IngestHealthRow> {
+    const [r] = await this.db.$queryRaw<Raw[]>(Prisma.sql`
+      SELECT COUNT(*) FILTER (WHERE i."status" IN ('pending', 'running')) AS "pending",
+        COUNT(*) FILTER (WHERE i."status" = 'failed') AS "failed"
+      FROM "FleetBundleIngest" i JOIN "FleetJob" j ON j."id" = i."jobId"
+      WHERE j."projectId" = ${projectId} AND j."finishedAt" >= ${from} AND j."finishedAt" < ${to}`);
+    return { pending: num(r.pending), failed: num(r.failed) };
   }
 
   async findProjectSlug(projectId: string): Promise<string | null> {

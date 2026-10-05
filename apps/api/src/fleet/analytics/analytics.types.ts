@@ -118,6 +118,11 @@ export interface JobsView {
   window: WindowView;
   rows: JobRowView[];
 }
+export interface IngestHealthView {
+  window: WindowView;
+  pending: number;
+  failed: number;
+}
 export interface CostSliceView {
   key: string;
   costUsd: string;

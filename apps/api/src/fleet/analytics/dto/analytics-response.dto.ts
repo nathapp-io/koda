@@ -1,8 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
 import type {
-  CostSliceView, DeletedView, FinishOutcomesView, FirstPassPointView, JobAnalyticsView, JobIngestView, JobReviewView, JobRowView, JobsView,
-  JobStoryView, QualityView, ReasonView, ReviewerView, SpendPointView, SpendSeriesView, SpendTotalsView, SpendView, StoriesView,
-  StoryRowView, WindowView,
+  CostSliceView, DeletedView, FinishOutcomesView, FirstPassPointView, IngestHealthView, JobAnalyticsView, JobIngestView, JobReviewView,
+  JobRowView, JobsView, JobStoryView, QualityView, ReasonView, ReviewerView, SpendPointView, SpendSeriesView, SpendTotalsView, SpendView,
+  StoriesView, StoryRowView, WindowView,
 } from '../analytics.types';
 import { ADMIN_GROUPS, Bucket, BUCKETS, GroupBy } from '../domain/analytics.domain';
 
@@ -114,6 +114,12 @@ export class JobAnalyticsRowDto implements JobRowView {
 export class JobsAnalyticsDto implements JobsView {
   @ApiProperty({ type: AnalyticsWindowDto }) window: AnalyticsWindowDto;
   @ApiProperty({ type: [JobAnalyticsRowDto] }) rows: JobAnalyticsRowDto[];
+}
+
+export class IngestHealthDto implements IngestHealthView {
+  @ApiProperty({ type: AnalyticsWindowDto }) window: AnalyticsWindowDto;
+  @ApiProperty({ description: 'Ingest rows pending or running, of jobs finished in the window' }) pending: number;
+  @ApiProperty({ description: 'Ingest rows that failed after their retries' }) failed: number;
 }
 
 export class CostSliceDto implements CostSliceView {

@@ -13,6 +13,7 @@ function fakeRepo(over: Partial<Record<keyof IAnalyticsRepository, jest.Mock>> =
     spendCells: jest.fn().mockResolvedValue([]),
     spendTotals: jest.fn().mockResolvedValue(EMPTY_TOTALS),
     jobCostSums: jest.fn().mockResolvedValue([]),
+    ingestHealth: jest.fn().mockResolvedValue({ pending: 0, failed: 0 }),
     labels: jest.fn().mockResolvedValue(new Map()),
     storyStats: jest.fn().mockResolvedValue({ stories: 0, firstPass: 0, attempts: 0 }),
     firstPassCells: jest.fn().mockResolvedValue([]),
@@ -179,5 +180,12 @@ describe('AnalyticsService', () => {
 
     await svc.deleteRows('u1', { before: '2026-10-01T00:00:00Z', confirm: 'ALL' }, now);
     expect(activity.record).toHaveBeenLastCalledWith(expect.objectContaining({ entityId: 'all', projectId: null }));
+  });
+
+  it('counts unfinished and failed ingests of jobs finished in the window (D388)', async () => {
+    const repo = fakeRepo({ ingestHealth: jest.fn().mockResolvedValue({ pending: 2, failed: 1 }) });
+    const r = await make(repo).ingestHealth('p1', { from: '2026-10-01', to: '2026-10-08' }, now);
+    expect(repo.ingestHealth).toHaveBeenCalledWith('p1', new Date('2026-10-01T00:00:00Z'), new Date('2026-10-08T00:00:00Z'));
+    expect(r).toEqual({ window: { from: '2026-10-01T00:00:00.000Z', to: '2026-10-08T00:00:00.000Z' }, pending: 2, failed: 1 });
   });
 });

@@ -8,8 +8,8 @@ import { foldSeries } from './analytics-fold';
 import { finishOutcomes, firstPassSeries, reviewerViews, topReasons } from './analytics-quality';
 import { bucketStarts, invalidAnalytics, medianMoney, rate4, resolveWindow, usd4, usd4OrNull } from './analytics-window';
 import type {
-  CostSliceView, DeleteInput, DeletedView, JobAnalyticsView, JobsView, ListInput, QualityView, SpendInput, SpendView, StoriesInput,
-  StoriesView, WindowInput, WindowView,
+  CostSliceView, DeleteInput, DeletedView, IngestHealthView, JobAnalyticsView, JobsView, ListInput, QualityView, SpendInput, SpendView,
+  StoriesInput, StoriesView, WindowInput, WindowView,
 } from './analytics.types';
 import { ANALYTICS_LIMITS, ANALYTICS_REPOSITORY, AnalyticsWindow, CostSliceRow, IAnalyticsRepository } from './domain/analytics.domain';
 
@@ -95,6 +95,13 @@ export class AnalyticsService {
         finishedAt: iso(r.finishedAt),
       })),
     };
+  }
+
+  /** D388: the project page's "not yet analysed" notice. */
+  async ingestHealth(projectId: string, q: WindowInput, now: Date): Promise<IngestHealthView> {
+    const w = resolveWindow({ from: q.from, to: q.to }, now);
+    const counts = await this.repo.ingestHealth(projectId, w.from, w.to);
+    return { window: windowView(w), ...counts };
   }
 
   /** Spec §4.2 job breakdown, D383. */

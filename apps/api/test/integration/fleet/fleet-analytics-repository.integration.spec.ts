@@ -156,4 +156,17 @@ describeIntegration('analytics read repository (PG)', () => {
     expect(all).toEqual(['0.00', '5.00']);
     expect(await repo.jobCostSums({ projectId: a.projectId }, new Date('2020-01-01T00:00:00Z'), new Date('2020-01-02T00:00:00Z'))).toEqual([]);
   });
+
+  it('counts pending and running as pending, failed apart, by the job finishedAt (D388)', async () => {
+    const ownerA = { projectId: a.projectId, repoId: a.repoId, requestedById: a.adminId };
+    const inWindow = await insertAnalyticsJob(prisma, ownerA, { finishedAt: new Date('2026-10-03T00:00:00Z') });
+    await insertIngestRow(prisma, inWindow, 1, { status: 'pending' });
+    await insertIngestRow(prisma, inWindow, 2, { status: 'running' });
+    await insertIngestRow(prisma, inWindow, 3, { status: 'failed', error: 'corrupt gzip' });
+    const before = await insertAnalyticsJob(prisma, ownerA, { finishedAt: new Date('2026-08-01T00:00:00Z') });
+    await insertIngestRow(prisma, before, 1, { status: 'failed' });
+    const other = await insertAnalyticsJob(prisma, { projectId: b.projectId, repoId: b.repoId, requestedById: b.adminId });
+    await insertIngestRow(prisma, other, 1, { status: 'pending' });
+    expect(await repo.ingestHealth(a.projectId, w.from, w.to)).toEqual({ pending: 2, failed: 1 });
+  });
 });
