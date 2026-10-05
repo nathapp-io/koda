@@ -265,6 +265,13 @@ const FLEET_COMPONENT_FILES: Record<FleetComponentName, string> = {
   FleetAnalyticsJobTable: 'analytics/JobTable.vue',
   FleetAnalyticsIngestNotice: 'analytics/IngestNotice.vue',
   FleetAnalyticsIngestTable: 'analytics/IngestTable.vue',
+  FleetDashboardTiles: 'dashboard/Tiles.vue',
+  FleetDashboardAttentionList: 'dashboard/AttentionList.vue',
+  FleetDashboardActiveRunsTable: 'dashboard/ActiveRunsTable.vue',
+  FleetDashboardRecentRunsList: 'dashboard/RecentRunsList.vue',
+  FleetDashboardRunnerHealthList: 'dashboard/RunnerHealthList.vue',
+  FleetDashboardCredentialDigestChips: 'dashboard/CredentialDigestChips.vue',
+  FleetDashboardOverview: 'dashboard/Overview.vue',
 }
 
 export function mountSfc(file: string, options: MountOptions = {}): Mounted {
@@ -341,3 +348,5 @@ export type FleetComponentName =
   | 'FleetAnalyticsPanel' | 'FleetAnalyticsBarList' | 'FleetAnalyticsSeriesLegend' | 'FleetAnalyticsChartDataTable'
   | 'FleetAnalyticsSummaryTiles' | 'FleetAnalyticsRangePicker' | 'FleetAnalyticsStoryTable' | 'FleetAnalyticsJobTable'
   | 'FleetAnalyticsIngestNotice' | 'FleetAnalyticsIngestTable'
+  | 'FleetDashboardTiles' | 'FleetDashboardAttentionList' | 'FleetDashboardActiveRunsTable' | 'FleetDashboardRecentRunsList'
+  | 'FleetDashboardRunnerHealthList' | 'FleetDashboardCredentialDigestChips' | 'FleetDashboardOverview'
