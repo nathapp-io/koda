@@ -78,6 +78,7 @@ describe('Fleet admin nav links', () => {
     expect(html.match(/<a href="\/admin\/fleet\/repos"[^>]*>[\s\S]*?<\/a>/)?.[0]).toContain('nav.fleetRepos')
     expect(html.match(/<a href="\/admin\/fleet\/budgets"[^>]*>[\s\S]*?<\/a>/)?.[0]).toContain('nav.fleetBudgets')
     expect(html.match(/<a href="\/admin\/fleet\/approvals"[^>]*>[\s\S]*?<\/a>/)?.[0]).toContain('nav.fleetApprovals')
+    expect(html.match(/<a href="\/admin\/fleet\/analytics"[^>]*>[\s\S]*?<\/a>/)?.[0]).toContain('nav.fleetAnalytics')
   })
 
   test('a non-admin does not see them', async () => {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users, Server, FolderGit2, Rocket, Wallet, Inbox } from 'lucide-vue-next'
+import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users, Server, FolderGit2, Rocket, Wallet, Inbox, BarChart3 } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const auth = useAuth()
@@ -19,6 +19,7 @@ function fleetLeaf(project: string, path: string): string {
   if (path === `/${project}/fleet/dispatch`) return t('fleet.jobs.dispatch')
   if (path === `/${project}/fleet/budgets`) return t('fleet.budgets.title')
   if (path === `/${project}/fleet/approvals`) return t('fleet.approvals.title')
+  if (path === `/${project}/fleet/analytics`) return t('fleet.analytics.title')
   return t('fleet.jobs.detail.title')
 }
 
@@ -120,6 +121,8 @@ const backTo = computed(() => {
 
         <NuxtLink v-if="isGlobalAdmin" to="/admin/fleet/approvals" :class="navLinkClass" :active-class="activeClass"><Inbox class="h-4 w-4 shrink-0" />{{ t('nav.fleetApprovals') }}</NuxtLink>
 
+        <NuxtLink v-if="isGlobalAdmin" to="/admin/fleet/analytics" :class="navLinkClass" :active-class="activeClass"><BarChart3 class="h-4 w-4 shrink-0" />{{ t('nav.fleetAnalytics') }}</NuxtLink>
+
         <!-- Project-scoped links -->
         <template v-if="projectSlug">
           <NuxtLink
@@ -178,6 +181,14 @@ const backTo = computed(() => {
           >
             <Rocket class="h-4 w-4 shrink-0" />
             {{ t('nav.fleetJobs') }}
+          </NuxtLink>
+          <NuxtLink
+            :to="`/${projectSlug}/fleet/analytics`"
+            :class="navLinkClass"
+            :active-class="activeClass"
+          >
+            <BarChart3 class="h-4 w-4 shrink-0" />
+            {{ t('nav.fleetAnalytics') }}
           </NuxtLink>
           <NuxtLink
             :to="`/${projectSlug}/settings`"
