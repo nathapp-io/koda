@@ -35,5 +35,7 @@
   "logStorage": { "507": "The server could not store the log chunk" },
   "logQuery": { "-2": "Invalid log request: {reason}" },
   "logs": { "404": "No log is stored for this stream or attempt" },
-  "logExpired": { "410": "This log was deleted after the retention window" }
+  "logExpired": { "410": "This log was deleted after the retention window" },
+  "analyticsQuery": { "-2": "Invalid analytics request: {reason}" },
+  "analyticsDelete": { "-2": "Type {expected} to confirm the deletion" }
 }

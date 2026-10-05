@@ -265,18 +265,26 @@ membership (any role); admin routes need global ADMIN.
 
 - `GET /projects/:slug/fleet/analytics/spend?from&to&bucket&groupBy=model|stage|role|repo|runner|feature|story`
   -> `{ window, bucket, totals: {costUsd, tokens, cacheShare, jobs}, series: [{key, points: [{t, costUsd, tokens}]}] }`.
+  Each series also carries `label` (repo owner/name, runner name, project slug, else the key), `folded` and its own
+  `costUsd`/`tokens`; null dimensions use the key `(none)`; points are zero-filled for every bucket (plan D377, D378).
   Series beyond the top 12 keys by cost are folded into `key: "other"`.
 - `GET /projects/:slug/fleet/analytics/quality?from&to&bucket`
   -> `{ firstPassRate, avgAttempts, stories, reviewByReviewer: [{reviewer, runs, passRate, findingsBySeverity}],
   finishOutcomes: {opened, promoted, escalated, skipped, other}, topEscalationReasons: [{reason, count}] (top 10,
-  reasons normalised to their first line, 200 chars), firstPassSeries: [{t, rate}] }`.
+  reasons normalised to their first line, 200 chars), firstPassSeries: [{t, rate}] }`. The response also carries
+  `window` and `bucket` (plan D382).
 - `GET /projects/:slug/fleet/analytics/stories?from&to&sort=cost|attempts&limit<=50`
-  -> rows `{jobId, featureName, storyId, attempts, firstPassSuccess, success, costUsd, completedAt}`.
+  -> `{ window, rows }` with rows `{jobId, featureName, storyId, attempts, firstPassSuccess, success, costUsd,
+  completedAt, leaseEpoch}`.
 - `GET /projects/:slug/fleet/analytics/jobs?from&to&sort=cost&limit<=50`
-  -> rows `{jobId, command, featureName, state, costUsd, ledgerCostUsd, driftUsd, finishedAt}`.
+  -> `{ window, rows }` with rows `{jobId, command, featureName, state, costUsd, ledgerCostUsd, driftUsd, finishedAt}`.
+  `costUsd` = spent + carried; `ledgerCostUsd` sums the job's done/partial ingest rows (null before ingest);
+  `driftUsd` = ledger - cost (plan D382).
 - `GET /projects/:slug/fleet/jobs/:id/analytics`
   -> `{ ingest: {status, files, ingestedAt, error}, byStage, byRole, byModel: [{key, costUsd, tokens}], stories:
   [...], reviews: [...], liveCostUsd, ledgerCostUsd, corrected: boolean }`. 404 when the job is not in the project.
+  Also `jobId`; `ingest` carries its `leaseEpoch`; slices, stories and reviews span every attempt, ingest and
+  live/ledger describe the latest attempt (plan D383).
 
 ### 4.3 Admin routes
 
@@ -287,7 +295,9 @@ membership (any role); admin routes need global ADMIN.
   /fleet/analytics/spend` — as 4.2 spend, across projects, `groupBy` also accepts `project` — and `DELETE
   /fleet/analytics?projectId&before` with body `{ confirm: "<projectSlug or 'ALL'>" }`, which deletes
   `FleetCostEvent`, `FleetStoryResult`, `FleetReviewResult` rows (by `at`/`completedAt` < `before`); ingest rows are
-  kept and marked `files.deleted = true`. Recorded in `FleetActivity` (`analytics.deleted`, with counts).
+  kept and marked `files.deleted = "<before ISO>"`. `projectId` optional (omitted = every project, confirm `ALL`);
+  stories with a null `completedAt` match through the job's `finishedAt` (plan D384). Recorded in `FleetActivity`
+  (`analytics.deleted`, with counts).
 
 ### 4.4 CLI
 
@@ -296,6 +306,8 @@ membership (any role); admin routes need global ADMIN.
 - `koda fleet job analytics <jobId> [--json]`.
 - `koda fleet ingest status [--status failed]`, `koda fleet ingest backfill`, `koda fleet ingest rerun <jobId> | --all`.
 - The OpenAPI client is regenerated (`bun run generate`), as for every API change.
+- `analytics spend --all-projects` uses the admin route; `--sort` exists on `stories` only; there is no CLI delete
+  (plan D386).
 
 ## 5. Web (slice 2)
 

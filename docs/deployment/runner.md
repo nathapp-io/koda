@@ -212,7 +212,8 @@ providers each, 64 credentials, and 64 KiB for the whole report. Anything that d
 Runner and repo-registry commands need a global-admin user's access token (`KODA_API_KEY=<token>`); dispatch and
 job commands need project membership (dispatch, cancel others' jobs and requeue need DEVELOPER or higher). Budget
 commands without `--project` (global and runner policies) need the same admin token; project and repo budgets need
-project ADMIN.
+project ADMIN. Analytics commands need project membership; `koda fleet ingest …` and `koda fleet analytics spend
+--all-projects` need the global-admin token.
 
 ```bash
 koda fleet runner enroll-token --label linux       # prints the token once and the koda-runner enroll line
@@ -238,6 +239,11 @@ koda fleet schedule add --repo acme/app --feature login --cron "0 9 * * 1-5" --t
 koda fleet schedule list                            # next fire, or disabled (completed / no_progress / ...)
 koda fleet schedule show <scheduleId>               # the template and the last 10 jobs it dispatched
 koda fleet schedule disable <scheduleId>
+koda fleet analytics spend --group-by stage         # where the money goes; --bucket, --from/--to, --all-projects (admin)
+koda fleet analytics quality                        # first pass, attempts, reviews, finish outcomes, escalation reasons
+koda fleet analytics stories --sort attempts        # most looping stories; jobs = most expensive jobs with ledger drift
+koda fleet job analytics <jobId>                    # cost by stage/role/model, stories, reviews, live vs ledger
+koda fleet ingest status --status failed            # bundle ingest health (admin); backfill; rerun <jobId> | --all
 ```
 
 `--label` and `--pin` are exclusive. A dispatch for a feature that already has an active job on the repo prints

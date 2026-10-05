@@ -238,3 +238,8 @@ Rules:
   ESCALATED from finish-audit, "nothing pushed" reason. The queue is `FleetBundleIngest` (enqueued in the bundle
   upload transaction, drained by a kick plus a 30 s sweeper gated by `FLEET_SWEEP_ENABLED`). Bundle contents are
   untrusted: only allowlisted paths, capped sizes, typed field readers. Admin routes: `fleet/ingest`.
+- `src/fleet/analytics/` (S2b): read-only cost and quality analytics over the ingest tables. The repository returns
+  unrounded `Prisma.Decimal` sums; money becomes a 4-place string only in `AnalyticsService` (`usd4`, A7), never
+  summed after rounding. SQL fragments for `groupBy`/`bucket` come from fixed maps keyed by validated enums. Project
+  routes `projects/:slug/fleet/analytics/*` and `jobs/:id/analytics` (any member, agents 403); admin routes
+  `fleet/analytics/spend` and `DELETE fleet/analytics` (confirmation required, ingest rows kept and marked).

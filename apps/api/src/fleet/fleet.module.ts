@@ -10,9 +10,10 @@ import { SchedulesModule } from './schedules/schedules.module';
 import { SyncModule } from './sync/sync.module';
 import { LogsModule } from './logs/logs.module';
 import { IngestModule } from './ingest/ingest.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 
 /** Fleet S1 (spec docs/superpowers/specs/2026-09-29-fleet-s1-dispatch-design.md). */
 @Module({
-  imports: [FleetActivityModule, BudgetsModule, ApprovalsModule, SchedulesModule, FleetReposModule, FleetJobsModule, RunnersModule, SyncModule, ArtifactsModule, LogsModule, IngestModule],
+  imports: [FleetActivityModule, BudgetsModule, ApprovalsModule, SchedulesModule, FleetReposModule, FleetJobsModule, RunnersModule, SyncModule, ArtifactsModule, LogsModule, IngestModule, AnalyticsModule],
 })
 export class FleetModule {}
