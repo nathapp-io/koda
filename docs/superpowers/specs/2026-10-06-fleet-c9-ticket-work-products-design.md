@@ -119,8 +119,9 @@ every read and from every effect.
 `POST /projects/:slug/fleet/jobs` (`DispatchFleetJobDto`) gains `ticketRefs?: string[]`:
 
 - At most 20, deduplicated, each a ticket ref (`KEY-N`, parsed by `parseTicketRef`).
-- Each must resolve to a ticket of this project, not deleted, status not CLOSED or REJECTED. Otherwise 422 naming the
-  first bad ref (i18n key `fleet.dispatch.ticketInvalid`, en + zh).
+- Each must resolve to a ticket of this project, not deleted, status not CLOSED or REJECTED. Otherwise 400 naming the
+  first bad ref, through the existing `fleet.dispatchInput` message (`Invalid dispatch: ticket <REF>`). Refs are
+  upper-cased before parsing (`web-1` = `WEB-1`).
 - Rows are inserted in the dispatch transaction; a failed dispatch (409 duplicate feature, budget paused, 404, 422)
   leaves none.
 - Permission unchanged: `CREATE FleetJob` (DEVELOPER+).
@@ -156,8 +157,9 @@ effect is skipped (the transition validator rejects it; logged at debug).
 
 ### 3.2 Terminal -> failure comment
 
-`onTerminal(jobId)` is called after commit from every terminal site listed in Ground truth (sync `afterTerminal`,
-sweeper, re-adopt reject, cancel). For FAILED, ESCALATED and CRASHED:
+`onTerminal(jobId)` is called after commit from the two places that can end a job FAILED, ESCALATED or CRASHED: sync
+`afterTerminal` (runner reports, re-adopt reject, assign reject) and the silence sweeper. Server-side cancels end
+CANCELLED before a runner ran anything, so they produce neither a comment nor a PR. For FAILED, ESCALATED and CRASHED:
 
 1. Claim per ticket: `UPDATE "FleetJobTicket" SET "notifiedEpoch" = :epoch WHERE "jobId" = :job AND "ticketId" = :t
    AND ("notifiedEpoch" IS NULL OR "notifiedEpoch" < :epoch)`. Only the claimant (count 1) continues, so a retried hook
@@ -274,11 +276,11 @@ Sequential PRs, each cut from `main` after the previous merges.
 |---|---|
 | D448 | Many-to-many `FleetJobTicket(jobId, ticketId)` with composite key; supersedes `FleetJob.ticketId?` (S1 spec §9.4). |
 | D449 | No `TicketWorkProduct` table: job results are read live from `FleetJob`; only PRs become `TicketLink` rows (`source=fleet`, `jobId`). Branch/commit/artifact are shown from the job, not stored on the ticket. |
-| D450 | `ticketRefs` validated in the dispatch transaction: same project, not deleted, not CLOSED/REJECTED, max 20; 422 names the bad ref. |
+| D450 | `ticketRefs` validated before the dispatch transaction and linked inside it: same project, not deleted, not CLOSED/REJECTED, max 20, upper-cased; 400 `fleet.dispatchInput` names the bad ref. |
 | D451 | Ticket effects run after commit, best-effort per ticket, never fail dispatch or sync. |
 | D452 | RUN dispatch: CREATED/VERIFIED -> IN_PROGRESS via `TicketTransitionsService` as the requester. PLAN: none. No backward moves. |
 | D453 | Failure comment for FAILED/ESCALATED/CRASHED, once per attempt, claimed by `FleetJobTicket.notifiedEpoch < leaseEpoch`. Null author, GENERAL type, reason truncated to 500. |
-| D454 | `onTerminal` called from all four terminal sites (sync, sweeper, re-adopt reject, cancel), not from inside `JobTransitionsService.apply` (which runs in the transaction). |
+| D454 | `onTerminal` called after commit from sync `afterTerminal` and the sweeper (the only paths to FAILED/ESCALATED/CRASHED), not from inside `JobTransitionsService.apply` (which runs in the transaction). |
 | D455 | PR link upsert on `(ticketId, url)`; an existing `vcs` link only gains `jobId`; URL must belong to the job's `FleetRepo`; also called after ingest corrections. |
 | D456 | Fleet PR state refreshed by a fleet-side poller through the GitHub App / GitLab token, `FLEET_PR_REFRESH_MS` default 10 min, min 1 min; independent of `VcsConnection`. |
 | D457 | Shared `applyMergedPr`: conditional `merged` update first, transition only for the writer that won; fixes double transition when two paths see one merge. |
