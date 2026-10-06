@@ -85,6 +85,25 @@ describe('NaxJobCheck (D104)', () => {
     expect(settled).toBeNull();
     expect(started).toEqual(['trust', 'config']);
   });
+  test('#207: a chain whose interaction plugin cannot start is refused, before credentials are listed', async () => {
+    const tg = { ...NONE, providers: ['deepseek'], interaction: { plugin: 'telegram', status: 'failed', code: 'TELEGRAM_NOT_CONFIGURED' } };
+    const c = checker({ config: { fast: tg }, auth: [DEEPSEEK] });
+    expect(await c.check(['fast'])).toBe('capability mismatch: interaction telegram (TELEGRAM_NOT_CONFIGURED)');
+    expect(c.nax.calls.map((call) => call.args[0])).not.toContain('auth');
+  });
+  test('#207: the base config (no profiles) is checked the same way', async () => {
+    const c = checker({ config: { default: { ...NONE, interaction: { plugin: null, status: 'failed' } } } });
+    expect(await c.check()).toBe('capability mismatch: interaction unknown (INTERACTION_INIT_FAILED)');
+  });
+  test('#207: ok, skipped and absent results pass', async () => {
+    expect(await checker({ config: { default: { ...NONE, interaction: { plugin: 'telegram', status: 'ok' } } } }).check()).toBeNull();
+    expect(await checker({ config: { default: { ...NONE, interaction: { plugin: null, status: 'skipped' } } } }).check()).toBeNull();
+    expect(await checker({ config: { default: NONE } }).check()).toBeNull();
+  });
+  test('#207: trust still comes first', async () => {
+    const c = checker({ trusted: false, config: { default: { ...NONE, interaction: { plugin: 'telegram', status: 'failed', code: 'X' } } } });
+    expect(await c.check()).toBe('project untrusted');
+  });
   test('every call carries the job check timeout, not the probe 30s one', async () => {
     const nax = new FakeNaxCli({ config: { fast: { transport: 'native', providers: ['deepseek'], sandbox: false } }, auth: [DEEPSEEK] });
     await new NaxJobCheck({ nax, capabilities: () => CAPS, timeoutMs: 1_234 }).check({ profiles: ['fast'] }, REPO);

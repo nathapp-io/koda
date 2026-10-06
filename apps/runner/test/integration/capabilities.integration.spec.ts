@@ -43,4 +43,11 @@ describe.skipIf(!enabled)('runner 3b-2 against the real API: capabilities from n
     const job = await world.waitForJob(id, (j) => j.state === 'FAILED');
     expect(job.stateReason).toBe('capability mismatch: profile resolve failed (PROFILE_NOT_FOUND)');
   });
+
+  test('#207: a repo-provided profile whose interaction plugin cannot start fails before nax spawns', async () => {
+    const id = await world.dispatch({ feature: 'fe', profiles: ['broken-tg'] });
+    const job = await world.waitForJob(id, (j) => j.state === 'FAILED');
+    expect(job.stateReason).toBe('capability mismatch: interaction telegram (TELEGRAM_NOT_CONFIGURED)');
+    expect(runnerStates(await world.events(id))).not.toContain('RUNNING');
+  });
 });

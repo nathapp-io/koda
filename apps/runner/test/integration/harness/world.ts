@@ -151,6 +151,8 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
   for (const f of FEATURES) files[`.nax/features/${f}/prd.json`] = prd(f, f === 'fb' ? 'OLD-1' : 'US-001');
   // D104: a profile the repo provides (the fake nax reads <clone>/.nax/fake-profiles); the runners have no zai credential.
   files['.nax/fake-profiles/needs-zai.json'] = JSON.stringify({ fakeRequirements: { transport: 'native', providers: ['zai'], sandbox: false } });
+  // #207: a profile the repo provides whose interaction plugin cannot start in the runner's environment.
+  files['.nax/fake-profiles/broken-tg.json'] = JSON.stringify({ fakeInteraction: { plugin: 'telegram', status: 'failed', code: 'TELEGRAM_NOT_CONFIGURED' } });
   const origin = await makeOrigin(join(remotes, 'acme'), 'app', { files });
   const forgeCloneUrl = `${front.url}/acme/app.git`;
   process.env['FAKE_NAX_STEP_MS'] = '40';
