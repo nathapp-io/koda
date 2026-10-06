@@ -7,10 +7,10 @@ describe('FleetSweeper scheduling', () => {
 
   it('starts a 30s interval only when enabled, and stops it on shutdown', () => {
     jest.useFakeTimers();
-    const off = new FleetSweeper({} as never, {} as never, {} as never, {} as never, testFleetConfig({ sweepEnabled: false }), {} as never, {} as never);
+    const off = new FleetSweeper({} as never, {} as never, {} as never, {} as never, testFleetConfig({ sweepEnabled: false }), {} as never, {} as never, {} as never);
     off.onModuleInit();
     expect(jest.getTimerCount()).toBe(0);
-    const on = new FleetSweeper({} as never, {} as never, {} as never, {} as never, testFleetConfig({ sweepEnabled: true }), {} as never, {} as never);
+    const on = new FleetSweeper({} as never, {} as never, {} as never, {} as never, testFleetConfig({ sweepEnabled: true }), {} as never, {} as never, {} as never);
     on.onModuleInit();
     expect(jest.getTimerCount()).toBe(1);
     on.onModuleDestroy();
@@ -32,13 +32,15 @@ describe('FleetSweeper tick (S1.5 2a: job leaves RUNNING)', () => {
     const transitions = { apply: jest.fn(async () => ({ job, live: JOB_LIVE, approvalLive: [APPROVAL_LIVE] })) };
     const live = { publish: jest.fn() };
     const approvalLive = { publish: jest.fn() };
+    const ticketEffects = { onTerminal: jest.fn() };
     const sweeper = new FleetSweeper(
       repo as never, transitions as never, live as never, { run: (fn: () => unknown) => fn() } as never,
-      testFleetConfig({ sweepEnabled: true, jobCrashSec: 60 }), { attribute: jest.fn() } as never, approvalLive as never,
+      testFleetConfig({ sweepEnabled: true, jobCrashSec: 60 }), { attribute: jest.fn() } as never, approvalLive as never, ticketEffects as never,
     );
     await expect(sweeper.sweep(NOW)).resolves.toBe(1);
     expect(transitions.apply).toHaveBeenCalledWith(expect.objectContaining({ job, to: 'CRASHED', by: 'server', reason: 'runner silent' }));
     expect(live.publish).toHaveBeenCalledWith([JOB_LIVE]);
     expect(approvalLive.publish).toHaveBeenCalledWith([APPROVAL_LIVE]);
+    expect(ticketEffects.onTerminal).toHaveBeenCalledWith([job.id]);
   });
 });

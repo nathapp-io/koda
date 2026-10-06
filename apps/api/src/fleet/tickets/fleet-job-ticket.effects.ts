@@ -4,7 +4,9 @@ import { TicketStatus } from '../../common/enums';
 import { TicketTransitionsService } from '../../tickets/state-machine/ticket-transitions.service';
 import type { DispatchTicket, TicketActor } from './fleet-tickets.service';
 import { FleetTicketEventRecorder } from './fleet-ticket-event.recorder';
+import { FAILURE_STATES, failureCommentBody } from './failure-comment';
 import { PrismaFleetTicketsRepository } from './prisma-fleet-tickets.repository';
+import type { EffectJob, LinkedTicket } from './prisma-fleet-tickets.repository';
 
 export type { TicketActor } from './fleet-tickets.service';
 
@@ -30,6 +32,34 @@ export class FleetJobTicketEffects {
       } catch (error) {
         this.logger.warn(`Fleet ticket ${ticket.ref}: start failed: ${error instanceof Error ? error.message : String(error)}`);
       }
+    }
+  }
+
+  /** D453/D454: after commit, from sync afterTerminal and the sweeper. One comment per (ticket, attempt). */
+  async onTerminal(jobIds: readonly string[]): Promise<void> {
+    for (const jobId of new Set(jobIds)) {
+      try {
+        const job = await this.repo.findJobForEffects(jobId);
+        if (!job || !FAILURE_STATES.has(job.state)) continue;
+        const body = failureCommentBody(job);
+        for (const ticket of await this.repo.findTicketsForJob(jobId)) {
+          await this.commentOnce(job, ticket, body);
+        }
+      } catch (error) {
+        this.logger.warn(`Fleet job ${jobId}: ticket effects failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  private async commentOnce(job: EffectJob, ticket: LinkedTicket, body: string): Promise<void> {
+    try {
+      await this.txManager.run(async () => {
+        if (!(await this.repo.claimNotified(job.id, ticket.ticketId, job.leaseEpoch))) return;
+        const comment = await this.repo.createSystemComment(ticket.ticketId, body);
+        await this.events.record({ projectId: job.projectId, ticketId: ticket.ticketId, action: 'COMMENT_ADDED', actorId: job.requestedById, data: { commentId: comment.id } });
+      });
+    } catch (error) {
+      this.logger.warn(`Fleet job ${job.id}: comment on ticket ${ticket.ref} failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }
