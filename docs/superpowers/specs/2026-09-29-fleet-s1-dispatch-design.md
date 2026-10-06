@@ -666,6 +666,10 @@ Unlocks `bashMode: gated|escalate`.
 plus `FleetJob.ticketId?`. A linked job's result fields become work products at terminal state; an escalation
 adds a ticket comment with the reason.
 
+> **Superseded 2026-10-06** by `2026-10-06-fleet-c9-ticket-work-products-design.md`: many-to-many `FleetJobTicket`
+> instead of `FleetJob.ticketId?`, no `TicketWorkProduct` table (results read live from `FleetJob`, PRs become
+> `TicketLink` rows with `source=fleet`).
+
 ### 9.5 C6 remainder (S2a)
 
 `ArtifactStore.putLogChunk(jobId, seqRange, stream)` for full JSONL streaming; `FleetJobEvent` stays the small
