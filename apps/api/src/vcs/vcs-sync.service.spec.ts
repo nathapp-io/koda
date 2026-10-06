@@ -60,7 +60,7 @@ function createMockRepo(): jest.Mocked<IVcsRepository> {
     findExistingTicketByExternalId: jest.fn().mockResolvedValue(null),
     createTicketFromIssue: jest.fn().mockResolvedValue({ id: 't-1', number: 1, title: 'Test issue' }),
     findActiveTicketLinksWithPrs: jest.fn().mockResolvedValue([]),
-    findTicketLinkByPrNumber: jest.fn().mockResolvedValue(null),
+    findTicketLinkForConnectionPr: jest.fn().mockResolvedValue(null),
     updateTicketLinkWithPrState: jest.fn().mockResolvedValue('updated'),
     applyMergedPrTransition: jest.fn().mockResolvedValue(undefined),
     findTicketWithProject: jest.fn().mockResolvedValue(null),

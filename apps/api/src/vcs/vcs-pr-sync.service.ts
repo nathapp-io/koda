@@ -66,7 +66,7 @@ export class VcsPrSyncService {
     const provider = providerForConnection(connection, decryptedToken, this.vcsConfig);
 
     // Query TicketLink entries with active PRs and their linked tickets
-    const ticketLinks = (await this.vcsRepo.findActiveTicketLinksWithPrs(project.id)) as TicketLinkData[];
+    const ticketLinks = await this.vcsRepo.findActiveTicketLinksWithPrs(project.id, connection);
 
     let updated = 0;
     let skipped = 0;

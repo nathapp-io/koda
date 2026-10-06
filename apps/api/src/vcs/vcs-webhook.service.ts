@@ -302,8 +302,8 @@ export class VcsWebhookService implements OnModuleDestroy {
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
 
-    // Find TicketLink by prNumber
-    const ticketLink = await this.vcsRepo.findTicketLinkByPrNumber(connection.project.id, prNumber);
+    // Find this repo's TicketLink for the PR
+    const ticketLink = await this.vcsRepo.findTicketLinkForConnectionPr(connection.project.id, connection, prNumber);
 
     if (!ticketLink) {
       // AC7: If no TicketLink matches prNumber, silently ignore
@@ -339,8 +339,8 @@ export class VcsWebhookService implements OnModuleDestroy {
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
 
-    // Find TicketLink by prNumber
-    const ticketLink = await this.vcsRepo.findTicketLinkByPrNumber(connection.project.id, prNumber);
+    // Find this repo's TicketLink for the PR
+    const ticketLink = await this.vcsRepo.findTicketLinkForConnectionPr(connection.project.id, connection, prNumber);
 
     if (!ticketLink) {
       // AC7: If no TicketLink matches prNumber, silently ignore
@@ -393,8 +393,8 @@ export class VcsWebhookService implements OnModuleDestroy {
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
 
-    // Find TicketLink by prNumber
-    const ticketLink = await this.vcsRepo.findTicketLinkByPrNumber(connection.project.id, prNumber);
+    // Find this repo's TicketLink for the PR
+    const ticketLink = await this.vcsRepo.findTicketLinkForConnectionPr(connection.project.id, connection, prNumber);
 
     if (!ticketLink) {
       // AC7: If no TicketLink matches prNumber, silently ignore
@@ -428,8 +428,8 @@ export class VcsWebhookService implements OnModuleDestroy {
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
 
-    // Find TicketLink by prNumber
-    const ticketLink = await this.vcsRepo.findTicketLinkByPrNumber(connection.project.id, prNumber);
+    // Find this repo's TicketLink for the PR
+    const ticketLink = await this.vcsRepo.findTicketLinkForConnectionPr(connection.project.id, connection, prNumber);
 
     if (!ticketLink) {
       // AC7: If no TicketLink matches prNumber, silently ignore
@@ -462,7 +462,7 @@ export class VcsWebhookService implements OnModuleDestroy {
     pr: NonNullable<GitHubWebhookPayload['pull_request']>,
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
-    const ticketLink = await this.vcsRepo.findTicketLinkByPrNumber(connection.project.id, prNumber);
+    const ticketLink = await this.vcsRepo.findTicketLinkForConnectionPr(connection.project.id, connection, prNumber);
 
     if (!ticketLink) {
       return {
@@ -491,7 +491,7 @@ export class VcsWebhookService implements OnModuleDestroy {
     pr: NonNullable<GitHubWebhookPayload['pull_request']>,
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
-    const ticketLink = await this.vcsRepo.findTicketLinkByPrNumber(connection.project.id, prNumber);
+    const ticketLink = await this.vcsRepo.findTicketLinkForConnectionPr(connection.project.id, connection, prNumber);
 
     if (!ticketLink) {
       return {
@@ -522,8 +522,8 @@ export class VcsWebhookService implements OnModuleDestroy {
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
 
-    // Find TicketLink by prNumber to get the associated ticket
-    const ticketLink = await this.vcsRepo.findTicketLinkByPrNumber(connection.project.id, prNumber);
+    // Find this repo's TicketLink for the PR to get the associated ticket
+    const ticketLink = await this.vcsRepo.findTicketLinkForConnectionPr(connection.project.id, connection, prNumber);
 
     if (!ticketLink) {
       return {

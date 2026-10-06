@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import type { Ticket, VcsSyncLog } from '@prisma/client';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { VcsConnectionDomain, VcsConnectionWithProjectDomain, VcsSyncLogDomain, VcsProjectDomain, VcsTicketDomain } from './domain/vcs.domain';
+import { ConnectionRepo, linkMatchesConnection } from './connection-pr-match';
 import { runWithTicketNumberRetry } from '../common/utils/ticket-number-retry';
 import { VcsIssue } from './types';
 import { TicketStatus, CommentType, ActivityType } from '../common/enums';
@@ -225,10 +226,11 @@ export class PrismaVcsRepository implements IVcsRepository {
   // ---------------------------------------------------------------------------
 
   /**
-   * Query TicketLink entries with active PRs for a project.
+   * Active PR links of the project that belong to the connection's repo (C9 §3.6, D458).
+   * The DB narrows by project and state; the repo match runs here (plan P2: no LIKE wildcards).
    */
-  async findActiveTicketLinksWithPrs(projectId: string): Promise<TicketLinkData[]> {
-    return this.db.ticketLink.findMany({
+  async findActiveTicketLinksWithPrs(projectId: string, repo: ConnectionRepo): Promise<TicketLinkData[]> {
+    const rows = (await this.db.ticketLink.findMany({
       include: {
         ticket: {
           select: {
@@ -245,22 +247,17 @@ export class PrismaVcsRepository implements IVcsRepository {
         prState: { notIn: ['merged', 'closed'] },
         ticket: { projectId, deletedAt: null },
       },
-    }) as Promise<TicketLinkData[]>;
+    })) as TicketLinkData[];
+    return rows.filter((link) => linkMatchesConnection(link, repo));
   }
 
   /**
-   * Find a TicketLink by project ID and PR number.
-   * Used by webhook handlers.
+   * The project's link for PR `prNumber` of the connection's repo; webhook lookups (C9 §3.6, D458).
+   * Oldest first, so the result is stable when a ticket pair links the same PR.
    */
-  async findTicketLinkByPrNumber(
-    projectId: string,
-    prNumber: number,
-  ): Promise<TicketLinkData | null> {
-    return this.db.ticketLink.findFirst({
-      where: {
-        prNumber,
-        ticket: { projectId },
-      },
+  async findTicketLinkForConnectionPr(projectId: string, repo: ConnectionRepo, prNumber: number): Promise<TicketLinkData | null> {
+    const rows = (await this.db.ticketLink.findMany({
+      where: { prNumber, ticket: { projectId } },
       include: {
         ticket: {
           select: {
@@ -272,7 +269,9 @@ export class PrismaVcsRepository implements IVcsRepository {
           },
         },
       },
-    }) as Promise<TicketLinkData | null>;
+      orderBy: { createdAt: 'asc' },
+    })) as TicketLinkData[];
+    return rows.find((link) => linkMatchesConnection(link, repo)) ?? null;
   }
 
   /**

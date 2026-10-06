@@ -170,7 +170,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
-      expect(vcsRepo.findActiveTicketLinksWithPrs).toHaveBeenCalledWith(projectId);
+      expect(vcsRepo.findActiveTicketLinksWithPrs).toHaveBeenCalledWith(projectId, mockVcsConnection);
     });
 
     it('should return empty array when no active PRs found', async () => {
