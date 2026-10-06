@@ -23,6 +23,8 @@ const job = (over: Partial<PlacementJob> = {}): PlacementJob => ({
   repoId: 'repo-1', provider: 'github', profiles: ['fast'], selectorLabels: ['linux'], pinnedRunnerId: null, bashMode: 'raw', ...over,
 });
 const misfit = (j: PlacementJob, r: PlacementRunner, load = EMPTY_LOAD) => firstMisfit(j, r, load, NOW, 90);
+const TG_FAILED = { ok: false, plugin: 'telegram', code: 'TELEGRAM_NOT_CONFIGURED' };
+const brokenFast = { fast: { protocol: 'native' as const, providers: ['deepseek'], sandbox: true, interaction: TG_FAILED } };
 
 describe('placement rules (spec §4)', () => {
   it('fits a matching runner', () => {
@@ -38,6 +40,8 @@ describe('placement rules (spec §4)', () => {
     ['provider_missing', job(), runner({ capabilities: caps({ credentials: [] }) })],
     ['provider_unavailable', job(), runner({ capabilities: caps({ credentials: [cred({ available: false })] }) })],
     ['sandbox', job(), runner({ capabilities: caps({ sandbox: { available: false, probedAt: 'x' } }) })],
+    ['interaction', job(), runner({ capabilities: caps({ profiles: brokenFast }) })],
+    ['interaction', job({ profiles: [] }), runner({ capabilities: caps({ interaction: TG_FAILED }) })],
     ['tools', job({ provider: 'gitlab' }), runner()],
     ['tools', job(), runner({ capabilities: caps({ tools: { git: false, gh: true, glab: true } }) })],
   ])('reports %s', (reason, j, r) => {
@@ -157,5 +161,34 @@ describe('placement helpers moved from PlacementService (D413)', () => {
 
   it('keeps the placement scan window at 50', () => {
     expect(QUEUED_SCAN_LIMIT).toBe(50);
+  });
+});
+
+describe('#207: interaction plugin checks', () => {
+  it('judges a job that names profiles on those profiles only, not on the base config', () => {
+    const r = runner({ capabilities: caps({ interaction: TG_FAILED }) });
+    expect(misfit(job(), r)).toBeNull();
+  });
+
+  it('treats a profile the runner does not report as unknowable, even when the base config is broken', () => {
+    const r = runner({ capabilities: caps({ interaction: TG_FAILED }) });
+    expect(misfit(job({ profiles: ['repo-provided'] }), r)).toBeNull();
+  });
+
+  it('treats absent results (older nax) and ok results as fits', () => {
+    expect(misfit(job({ profiles: [] }), runner())).toBeNull();
+    const ok = { ok: true, plugin: null };
+    const r = runner({ capabilities: caps({ interaction: ok, profiles: { fast: { ...brokenFast.fast, interaction: ok } } }) });
+    expect(misfit(job(), r)).toBeNull();
+    expect(misfit(job({ profiles: [] }), r)).toBeNull();
+  });
+
+  it('is a waiting reason, not a permanent one: an env fix and a re-probe clear it', () => {
+    expect(PERMANENT_MISFITS.has('interaction')).toBe(false);
+  });
+
+  it('reports sandbox before interaction on the same profile (placement order)', () => {
+    const r = runner({ capabilities: caps({ profiles: brokenFast, sandbox: { available: false, probedAt: 'x' } }) });
+    expect(misfit(job(), r)).toBe('sandbox');
   });
 });

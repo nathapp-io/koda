@@ -105,8 +105,8 @@ export const CREDENTIAL_WHY = ['missing', 'unavailable', 'expired'] as const;
 export type CredentialWhy = (typeof CREDENTIAL_WHY)[number];
 /** Every MisfitReason, for the DTO enum (same list as PlacementMisfitDto). */
 export const MISFIT_REASONS: readonly MisfitReason[] = [
-  'disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox', 'tools',
-  'approvals_relay', 'busy_repo', 'capacity',
+  'disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox',
+  'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity',
 ];
 
 export interface AttentionReason {
