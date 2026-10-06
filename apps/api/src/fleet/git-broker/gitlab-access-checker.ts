@@ -38,7 +38,7 @@ export class GitLabAccessChecker {
     const sha = typeof b.merge_commit_sha === 'string' ? b.merge_commit_sha : typeof b.squash_commit_sha === 'string' ? b.squash_commit_sha : null;
     return {
       number: iid,
-      state: b.state === 'opened' ? 'open' : 'closed',
+      state: b.state === 'opened' || b.state === 'locked' ? 'open' : 'closed',
       draft: b.draft === true || b.work_in_progress === true,
       merged: b.state === 'merged',
       mergedAt: typeof b.merged_at === 'string' ? new Date(b.merged_at) : null,

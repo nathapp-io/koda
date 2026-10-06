@@ -68,7 +68,7 @@ describe('GitLabAccessChecker', () => {
       [{ state: 'opened', draft: true }, { state: 'open', draft: true, merged: false }],
       [{ state: 'opened', work_in_progress: true }, { state: 'open', draft: true, merged: false }],
       [{ state: 'closed' }, { state: 'closed', draft: false, merged: false }],
-      [{ state: 'locked' }, { state: 'closed', draft: false, merged: false }],
+      [{ state: 'locked' }, { state: 'open', draft: false, merged: false }],
     ])('maps %j', async (body, expected) => {
       forge.routes.set(MR, () => ({ status: 200, body: { web_url: 'u', title: 't', ...body } }));
       await expect(checker.getMergeRequest('t', 'grp/sub', 'app', 4)).resolves.toEqual(expect.objectContaining(expected));
