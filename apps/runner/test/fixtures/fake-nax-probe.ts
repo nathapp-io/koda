@@ -3,6 +3,8 @@
  * `trust check --json`. State lives in the nax home, so two in-process runners never share it:
  * - `<naxHome>/profiles/<name>.json` may carry `fakeRequirements` or `fakeError`; a name not there is looked up in
  *   `<dir>/.nax/fake-profiles/<name>.json` (a profile the repo provides; `dir` is `config -d`)
+ * - a profile file may carry `fakeInteraction` (nax's `interaction` document; the last profile in the chain that has
+ *   one wins); `<naxHome>/fake-interaction.json` is the base value (#207)
  * - `<naxHome>/fake-auth.json` is `{ "providers": [...] }` in nax's AuthListReport row shape
  * - `<naxHome>/fake-sandbox.json` is the whole probe document (default: available)
  * - `<naxHome>/fake-untrusted` makes every folder untrusted
@@ -46,16 +48,19 @@ function config(args: readonly string[], naxHome: string, cwd: string): ProbeAns
   const dir = flagValue(args, '-d') ?? cwd;
   const chain = (flagValue(args, '--profile') ?? '').split(',').filter(Boolean);
   let requirements = DEFAULT_REQUIREMENTS;
+  let interaction: unknown = readJson(join(naxHome, 'fake-interaction.json')) ?? undefined;
   for (const name of chain) {
     const file = readJson(join(naxHome, 'profiles', `${name}.json`)) ?? readJson(join(dir, '.nax', 'fake-profiles', `${name}.json`));
     if (!file) return failure('PROFILE_NOT_FOUND');
     if (typeof file['fakeError'] === 'string') return failure(file['fakeError']);
     if (file['fakeRequirements']) requirements = file['fakeRequirements'] as Requirements;
+    if (file['fakeInteraction'] !== undefined) interaction = file['fakeInteraction'];
   }
   return answer({
     profile: chain.length > 0 ? chain.join('+') : 'default', profileChain: chain, sources: { global: null, project: null },
     requirements: { agent: requirements.transport === 'native' ? 'native' : 'opencode', protocol: 'hybrid', ...requirements },
     config: {},
+    ...(interaction !== undefined ? { interaction } : {}),
   });
 }
 

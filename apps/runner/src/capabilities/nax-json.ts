@@ -1,4 +1,4 @@
-import type { ProfileNeeds, RunnerCredential, RunnerCredentialExec } from '@nathapp/fleet-protocol';
+import type { InteractionCheck, ProfileNeeds, RunnerCredential, RunnerCredentialExec } from '@nathapp/fleet-protocol';
 
 type Obj = Readonly<Record<string, unknown>>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -23,8 +23,44 @@ export function parseRequirements(report: Obj): Requirements | null {
   return { transport, providers: [...new Set(providers as string[])].sort(), sandbox };
 }
 
-/** Design §3.2: `ProfileNeeds.protocol` is nax's `requirements.transport`. */
-export const toProfileNeeds = (r: Requirements): ProfileNeeds => ({ protocol: r.transport, providers: [...r.providers], sandbox: r.sandbox });
+/** Design §3.2: `ProfileNeeds.protocol` is nax's `requirements.transport`. #207: a known interaction check rides along. */
+export const toProfileNeeds = (r: Requirements, interaction?: InteractionCheck): ProfileNeeds => ({
+  protocol: r.transport, providers: [...r.providers], sandbox: r.sandbox, ...(interaction ? { interaction } : {}),
+});
+
+const INTERACTION_STATUS: ReadonlySet<string> = new Set(['ok', 'failed', 'skipped']);
+/** The server validator's bounds (apps/api/src/fleet/common/capabilities-core.ts `parseInteraction`). */
+const INTERACTION_CODE = /^[A-Z0-9_]{1,64}$/;
+const MAX_PLUGIN_NAME = 64;
+const MAX_INTERACTION_MESSAGE = 300;
+const INIT_FAILED = 'INTERACTION_INIT_FAILED';
+
+export interface Interaction {
+  readonly check: InteractionCheck;
+  /** nax's redacted message for a failure: logged locally, never sent to the server (#207 spec §2). */
+  readonly message: string | null;
+}
+
+/**
+ * `ConfigJsonReport.interaction` (#207 spec §1). undefined: absent or not the documented shape, i.e. unknown — a
+ * future nax must not make every profile look broken. A failure always carries a code the server accepts.
+ */
+export function parseInteraction(report: Obj): Interaction | undefined {
+  const v = report['interaction'];
+  if (!isObj(v)) return undefined;
+  const { plugin, status, code, message } = v;
+  if (typeof status !== 'string' || !INTERACTION_STATUS.has(status)) return undefined;
+  const name = plugin === null ? null : typeof plugin === 'string' && plugin.length > 0 && plugin.length <= MAX_PLUGIN_NAME ? plugin : undefined;
+  if (name === undefined) return undefined;
+  if (status !== 'failed') return { check: { ok: true, plugin: name }, message: null };
+  return {
+    check: { ok: false, plugin: name, code: typeof code === 'string' && INTERACTION_CODE.test(code) ? code : INIT_FAILED },
+    message: typeof message === 'string' && message !== '' ? message.slice(0, MAX_INTERACTION_MESSAGE) : null,
+  };
+}
+
+/** #207 spec §3.3: the job check's refusal, after `capability mismatch: `. */
+export const interactionReason = (check: InteractionCheck): string => `interaction ${check.plugin ?? 'unknown'} (${check.code ?? INIT_FAILED})`;
 
 const EXEC_STATUS: ReadonlySet<string> = new Set(['served', 'declined', 'error']);
 

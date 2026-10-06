@@ -108,6 +108,9 @@ describe('describeAttention', () => {
       { type: 'offline', jobsHeld: 1 }, { type: 'credential', providerId: 'deepseek', why: 'unavailable' }, { type: 'stale_nax', version: '0.82.0', latest: '0.83.0' },
     ] }), 'offline, holding 1 job(s); credential deepseek unavailable; nax 0.82.0 behind 0.83.0'],
     [item({ kind: 'runner_unhealthy', subjectType: 'runner', conditions: [{ type: 'offline', jobsHeld: 0 }, { type: 'configuration' }] }), 'offline; configuration problem'],
+    [item({ kind: 'runner_unhealthy', subjectType: 'runner', conditions: [
+      { type: 'interaction', plugin: 'telegram', code: 'TELEGRAM_NOT_CONFIGURED' }, { type: 'interaction', code: 'WEBHOOK_URL_MISSING', profile: 'fast' },
+    ] }), 'interaction telegram TELEGRAM_NOT_CONFIGURED (base config); interaction ? WEBHOOK_URL_MISSING (profile fast)'],
   ])('words %#', (a, text) => {
     expect(describeAttention(a)).toBe(text);
   });

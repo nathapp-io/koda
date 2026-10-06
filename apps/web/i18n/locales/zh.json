@@ -748,6 +748,7 @@
       "provider_missing": "某个配置需要执行机没有凭据的提供方",
       "provider_unavailable": "某个提供方凭据当前不可用",
       "sandbox": "某个配置需要沙箱，但沙箱不可用",
+      "interaction": "执行机的 nax 交互插件无法启动（请检查服务环境变量）",
       "tools": "执行机缺少此仓库所需的 git、gh 或 glab",
       "approvals_relay": "该运行器无法转发 bash 审批（需要协议 v2 和 nax 0.83 或更高版本）",
       "busy_repo": "执行机已在运行此仓库的任务",
@@ -1658,6 +1659,10 @@
           "staleNax": "nax {version} 落后于 {latest}",
           "configuration": "配置有问题（请联系集群管理员）",
           "unknown": "问题：{code}",
+          "interaction": {
+            "base": "nax 交互插件 {plugin} 无法启动（{code}）",
+            "profile": "配置 {profile}：nax 交互插件 {plugin} 无法启动（{code}）"
+          },
           "credential": {
             "missing": "缺少 {provider} 的凭据",
             "unavailable": "{provider} 的凭据当前不可用",

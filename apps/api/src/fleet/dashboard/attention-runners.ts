@@ -1,4 +1,4 @@
-import type { RunnerCapabilities } from '../common/protocol';
+import type { InteractionCheck, RunnerCapabilities } from '../common/protocol';
 import { isRunnerOnline } from '../common/runner-online';
 import { AttentionItem, AttentionThresholds, DashboardRunnerRow, RunnerCondition, Severity } from './dashboard.types';
 import { compareCore, CoreVersion, formatCore, parseCoreVersion } from './nax-version';
@@ -30,6 +30,27 @@ function credentialConditions(caps: RunnerCapabilities): RunnerCondition[] {
   return [...fromProfiles, ...expired];
 }
 
+/** #207 spec §4.3: base config first, then profiles by code unit; a runner with many broken profiles almost always has one broken base. */
+export const MAX_INTERACTION_CONDITIONS = 5;
+
+const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+const interactionCondition = (check: InteractionCheck, profile?: string): RunnerCondition => ({
+  type: 'interaction',
+  ...(check.plugin !== null ? { plugin: check.plugin } : {}),
+  ...(check.code !== undefined ? { code: check.code } : {}),
+  ...(profile !== undefined ? { profile } : {}),
+});
+
+function interactionConditions(caps: RunnerCapabilities): RunnerCondition[] {
+  const base = caps.interaction?.ok === false ? [interactionCondition(caps.interaction)] : [];
+  const profiles = Object.entries(caps.profiles)
+    .flatMap(([name, needs]) => (needs.interaction?.ok === false ? [{ name, check: needs.interaction }] : []))
+    .sort((a, b) => byCodeUnit(a.name, b.name))
+    .map(({ name, check }) => interactionCondition(check, name));
+  return [...base, ...profiles].slice(0, MAX_INTERACTION_CONDITIONS);
+}
+
 function staleCondition(caps: RunnerCapabilities, latest: CoreVersion | null): RunnerCondition | null {
   const core = parseCoreVersion(caps.nax.version);
   if (!core || !latest || compareCore(core, latest) >= 0) return null;
@@ -40,7 +61,7 @@ function staleCondition(caps: RunnerCapabilities, latest: CoreVersion | null): R
 export function runnerUnhealthyItems(
   runners: readonly DashboardRunnerRow[],
   heldByRunner: ReadonlyMap<string, number>,
-  providerBlocked: ReadonlySet<string>,
+  fixableBlocked: ReadonlySet<string>,
   now: Date,
   t: AttentionThresholds,
 ): AttentionItem[] {
@@ -54,10 +75,13 @@ export function runnerUnhealthyItems(
     const offline: RunnerCondition[] = online ? [] : [{ type: 'offline', jobsHeld }];
     const caps = r.enabled ? r.capabilities : null;
     const credentials = caps ? credentialConditions(caps) : [];
+    const interaction = caps ? interactionConditions(caps) : [];
     const stale = caps ? staleCondition(caps, latest) : null;
-    const conditions = [...offline, ...credentials, ...(stale ? [stale] : [])];
+    const conditions = [...offline, ...credentials, ...interaction, ...(stale ? [stale] : [])];
     if (conditions.length === 0) return [];
-    const error = (!online && jobsHeld > 0) || (credentials.length > 0 && providerBlocked.has(r.id));
+    // A runner-fixable condition is an error once it keeps a queued job unplaced (spec §2.4; #207 adds interaction).
+    const fixable = credentials.length + interaction.length > 0;
+    const error = (!online && jobsHeld > 0) || (fixable && fixableBlocked.has(r.id));
     const severity: Severity = error ? 'error' : 'warning';
     return [{
       key: `runner_unhealthy:${r.id}`, kind: 'runner_unhealthy', severity, subjectType: 'runner', subjectId: r.id, subjectName: r.name,

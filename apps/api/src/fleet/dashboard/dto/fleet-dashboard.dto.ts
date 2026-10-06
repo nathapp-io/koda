@@ -93,6 +93,9 @@ export class RunnerConditionDto implements RunnerCondition {
   @ApiPropertyOptional({ enum: CREDENTIAL_WHY }) why?: CredentialWhy;
   @ApiPropertyOptional({ description: 'stale_nax: this runner (global admin scope only)' }) version?: string;
   @ApiPropertyOptional({ description: 'stale_nax: newest online core version (global admin scope only)' }) latest?: string;
+  @ApiPropertyOptional({ description: 'interaction: the plugin nax could not start (global admin scope only)' }) plugin?: string;
+  @ApiPropertyOptional({ description: 'interaction: nax error code (global admin scope only)' }) code?: string;
+  @ApiPropertyOptional({ description: 'interaction: the profile; absent means the base config (global admin scope only)' }) profile?: string;
 }
 
 /** Spec §2: flat; fields beyond `since` belong to one kind each. Clients word it; the API sends no prose. */

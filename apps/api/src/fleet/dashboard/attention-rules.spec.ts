@@ -62,6 +62,12 @@ describe('forProjectScope', () => {
     const job: AttentionItem = { ...runnerItem(undefined), key: 'job_silent:j1', kind: 'job_silent', subjectType: 'job' };
     expect(forProjectScope(job)).toBe(job);
   });
+
+  it('#207: collapses an interaction condition to configuration, hiding plugin and code', () => {
+    const item = forProjectScope(runnerItem([{ type: 'interaction', plugin: 'telegram', code: 'TELEGRAM_NOT_CONFIGURED', profile: 'fast' }]));
+    expect(item.conditions).toEqual([{ type: 'configuration' }]);
+    expect(item.severity).toBe('warning');
+  });
 });
 
 describe('sortAttention', () => {

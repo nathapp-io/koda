@@ -10683,6 +10683,7 @@
               "provider_missing",
               "provider_unavailable",
               "sandbox",
+              "interaction",
               "tools",
               "approvals_relay",
               "busy_repo",
@@ -12600,6 +12601,7 @@
               "provider_missing",
               "provider_unavailable",
               "sandbox",
+              "interaction",
               "tools",
               "approvals_relay",
               "busy_repo",
@@ -12620,6 +12622,7 @@
             "enum": [
               "offline",
               "credential",
+              "interaction",
               "stale_nax",
               "configuration"
             ],
@@ -12649,6 +12652,18 @@
           "latest": {
             "type": "string",
             "description": "stale_nax: newest online core version (global admin scope only)"
+          },
+          "plugin": {
+            "type": "string",
+            "description": "interaction: the plugin nax could not start (global admin scope only)"
+          },
+          "code": {
+            "type": "string",
+            "description": "interaction: nax error code (global admin scope only)"
+          },
+          "profile": {
+            "type": "string",
+            "description": "interaction: the profile; absent means the base config (global admin scope only)"
           }
         },
         "required": [

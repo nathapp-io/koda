@@ -1,7 +1,7 @@
 import type { AssignPayload, RunnerCapabilities, RunnerCredential } from '@nathapp/fleet-protocol';
 import { parseNaxJson, type NaxCli } from '../nax/nax-cli';
 import { checkTrust } from '../nax/trust';
-import { parseAuthList, parseRequirements, unavailableCredential, type Requirements } from './nax-json';
+import { interactionReason, parseAuthList, parseInteraction, parseRequirements, unavailableCredential, type Requirements } from './nax-json';
 
 /** D104: can this machine run the job? Asked in the clone, after checkout, before nax spawns. */
 export interface JobCheck {
@@ -39,7 +39,7 @@ export interface NaxJobCheckDeps {
   readonly timeoutMs?: number;
 }
 
-/** D104, S1 spec §2.1: trust, the job's chain resolved in the clone, then the machine's report and a fresh auth listing. */
+/** D104, S1 spec §2.1: trust, the job's chain resolved in the clone, its interaction plugin (#207), then the machine's report and a fresh auth listing. */
 export class NaxJobCheck implements JobCheck {
   constructor(private readonly deps: NaxJobCheckDeps) {}
 
@@ -55,6 +55,10 @@ export class NaxJobCheck implements JobCheck {
     if (!json.ok) return `capability mismatch: profile resolve failed (${json.code})`;
     const requirements = parseRequirements(json.value);
     if (!requirements) return 'capability mismatch: profile resolve failed (NAX_OUTPUT_UNPARSEABLE)';
+    // #207 spec §3.3: nax merged the job's real chain (repo config included), so this is the exact check; placement's
+    // per-profile check is an approximation. An absent or unknown result (older nax) passes.
+    const interaction = parseInteraction(json.value);
+    if (interaction && !interaction.check.ok) return `capability mismatch: ${interactionReason(interaction.check)}`;
     const caps = this.deps.capabilities();
     if (!caps) return null;   // the daemon does not start in nax mode without a first report
     const credentials = await this.credentials(repoDir, requirements.providers);

@@ -1,4 +1,5 @@
 import { DASH_NOW, DASH_THRESHOLDS, dashCaps, dashRunner, secAgo } from '../../common/test-helpers/fleet-dashboard';
+import type { InteractionCheck } from '../common/protocol';
 import { latestOnlineCore, runnerUnhealthyItems } from './attention-runners';
 import type { DashboardRunnerRow } from './dashboard.types';
 
@@ -78,5 +79,40 @@ describe('runner_unhealthy (S2b (c) §2.4)', () => {
   it('gives a runner with unreadable capabilities only the offline condition', () => {
     expect(run([dashRunner({ capabilities: null })])).toEqual([]);
     expect(run([dashRunner({ capabilities: null, lastSeenAt: secAgo(91) })])[0].conditions).toEqual([{ type: 'offline', jobsHeld: 0 }]);
+  });
+
+  describe('#207: interaction', () => {
+    const broken: InteractionCheck = { ok: false, plugin: 'telegram', code: 'TELEGRAM_NOT_CONFIGURED' };
+    const profile = (interaction?: InteractionCheck) => ({ protocol: 'native' as const, providers: [], sandbox: false, ...(interaction ? { interaction } : {}) });
+
+    it('reports the base config first, then failing profiles by name; ok and absent results are silent', () => {
+      const caps = dashCaps({
+        interaction: broken, credentials: [],
+        profiles: { zeta: profile(broken), alpha: profile({ ok: false, plugin: null }), fine: profile({ ok: true, plugin: 'telegram' }), old: profile() },
+      });
+      expect(run([dashRunner({ capabilities: caps })])[0]?.conditions).toEqual([
+        { type: 'interaction', plugin: 'telegram', code: 'TELEGRAM_NOT_CONFIGURED' },
+        { type: 'interaction', profile: 'alpha' },
+        { type: 'interaction', plugin: 'telegram', code: 'TELEGRAM_NOT_CONFIGURED', profile: 'zeta' },
+      ]);
+    });
+
+    it('caps interaction conditions at 5, base config first', () => {
+      const profiles = Object.fromEntries(Array.from({ length: 7 }, (_, i) => [`p${i}`, profile(broken)]));
+      const conditions = run([dashRunner({ capabilities: dashCaps({ interaction: broken, credentials: [], profiles }) })])[0]?.conditions ?? [];
+      expect(conditions).toHaveLength(5);
+      expect(conditions[0]).toEqual({ type: 'interaction', plugin: 'telegram', code: 'TELEGRAM_NOT_CONFIGURED' });
+      expect(conditions[4]).toMatchObject({ profile: 'p3' });
+    });
+
+    it('is a warning, and an error when the runner blocks a queued job', () => {
+      const caps = dashCaps({ interaction: broken });
+      expect(run([dashRunner({ capabilities: caps })])[0]?.severity).toBe('warning');
+      expect(run([dashRunner({ capabilities: caps })], new Map(), new Set(['r1']))[0]?.severity).toBe('error');
+    });
+
+    it('reports nothing for a runner whose nax does not report interaction (older nax)', () => {
+      expect(run([dashRunner()])).toEqual([]);
+    });
   });
 });

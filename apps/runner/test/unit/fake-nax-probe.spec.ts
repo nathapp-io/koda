@@ -35,6 +35,16 @@ describe('answerProbe (D108)', () => {
     expect(answerProbe(['config', '--profile', 'nope', '--json'], h.env, h.repo)).toEqual({ stdout: JSON.stringify({ error: { code: 'PROFILE_NOT_FOUND', message: 'fake-nax: PROFILE_NOT_FOUND' } }), code: 1 });
     expect(parsed(answerProbe(['config', '--profile', 'broken', '--json'], h.env, h.repo)).error.code).toBe('PROFILE_ENV_VAR_UNRESOLVED');
   });
+  test('#207: fakeInteraction in a profile (last in the chain wins) or <naxHome>/fake-interaction.json becomes `interaction`', async () => {
+    const h = await home();
+    const failed = { plugin: 'telegram', status: 'failed', code: 'TELEGRAM_NOT_CONFIGURED' };
+    await writeFile(join(h.repo, '.nax', 'fake-profiles', 'broken-tg.json'), JSON.stringify({ fakeInteraction: failed }));
+    expect(parsed(answerProbe(['config', '-d', h.repo, '--json'], h.env, h.repo)).interaction).toBeUndefined();
+    expect(parsed(answerProbe(['config', '-d', h.repo, '--profile', 'fast,broken-tg', '--json'], h.env, h.repo)).interaction).toEqual(failed);
+    await writeFile(join(h.naxHome, 'fake-interaction.json'), JSON.stringify({ plugin: null, status: 'skipped' }));
+    expect(parsed(answerProbe(['config', '-d', h.repo, '--json'], h.env, h.repo)).interaction).toEqual({ plugin: null, status: 'skipped' });
+  });
+
   test('auth list: the stored rows, plus every asked provider without one listed unavailable', async () => {
     const h = await home();
     expect(parsed(answerProbe(['auth', 'list', '--json', 'deepseek', 'zai'], h.env, h.repo))).toEqual({

@@ -33,8 +33,8 @@ export function sortAttention(items: readonly AttentionItem[]): AttentionItem[] 
 }
 
 /**
- * Spec §2.4 / §1.5 (B5): in project scope a runner item keeps only `offline`; credential and stale_nax
- * collapse into one `configuration`; the credential error escalation is admin-only.
+ * Spec §2.4 / §1.5 (B5): in project scope a runner item keeps only `offline`; credential, interaction and stale_nax
+ * collapse into one `configuration`; the credential and interaction error escalation is admin-only.
  */
 export function forProjectScope(item: AttentionItem): AttentionItem {
   if (item.kind !== 'runner_unhealthy' || !item.conditions) return item;
@@ -49,7 +49,7 @@ export function buildAttention(input: AttentionInput, now: Date, t: AttentionThr
   const dry = jobUnplaceableItems({ ...input.dryRun, runners: input.runners }, now, t);
   const projectId = input.scope.kind === 'project' ? input.scope.projectId : null;
   const unplaceable = dry.items.filter((s) => projectId === null || s.projectId === projectId).map((s) => s.item);
-  const runnerItems = runnerUnhealthyItems(input.runners, input.heldByRunner, dry.providerBlockedRunnerIds, now, t);
+  const runnerItems = runnerUnhealthyItems(input.runners, input.heldByRunner, dry.fixableBlockedRunnerIds, now, t);
   return sortAttention([
     ...jobSilentItems(input.activeJobs, runnersById, now, t),
     ...jobApprovalItems(input.activeJobs, input.pending, now),

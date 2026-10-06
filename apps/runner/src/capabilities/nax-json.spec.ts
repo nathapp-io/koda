@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseAuthList, parseRequirements, parseSandboxProbe, parseTrustCheck, toProfileNeeds, unavailableCredential } from './nax-json';
+import { interactionReason, parseAuthList, parseInteraction, parseRequirements, parseSandboxProbe, parseTrustCheck, toProfileNeeds, unavailableCredential } from './nax-json';
 
 // nax 0.83.1 `config --profile native-ds --json`, this machine, 2026-09-30 (`config` block elided).
 const CONFIG_NATIVE = {
@@ -96,6 +96,46 @@ describe('parseSandboxProbe (D100)', () => {
   });
   test('no boolean available is null', () => {
     expect(parseSandboxProbe({ backend: 'srt' })).toBeNull();
+  });
+});
+
+describe('parseInteraction (#207 spec §1, §3.1)', () => {
+  test.each([
+    ['absent', {}, undefined],
+    ['not an object', { interaction: 'ok' }, undefined],
+    ['an unknown status', { interaction: { plugin: 'telegram', status: 'degraded' } }, undefined],
+    ['a numeric plugin', { interaction: { plugin: 7, status: 'ok' } }, undefined],
+    ['an empty plugin', { interaction: { plugin: '', status: 'ok' } }, undefined],
+    ['a 65-character plugin', { interaction: { plugin: 'p'.repeat(65), status: 'ok' } }, undefined],
+  ])('%s is unknown, never a failure', (_label, report, expected) => {
+    expect(parseInteraction(report)).toBe(expected);
+  });
+
+  test('ok and skipped are ok; the plugin may be null', () => {
+    expect(parseInteraction({ interaction: { plugin: 'telegram', status: 'ok' } })).toEqual({ check: { ok: true, plugin: 'telegram' }, message: null });
+    expect(parseInteraction({ interaction: { plugin: null, status: 'skipped' } })).toEqual({ check: { ok: true, plugin: null }, message: null });
+  });
+
+  test('failed carries the code and keeps the message local, truncated to 300 chars', () => {
+    const report = { interaction: { plugin: 'telegram', status: 'failed', code: 'TELEGRAM_NOT_CONFIGURED', message: 'm'.repeat(400) } };
+    expect(parseInteraction(report)).toEqual({ check: { ok: false, plugin: 'telegram', code: 'TELEGRAM_NOT_CONFIGURED' }, message: 'm'.repeat(300) });
+  });
+
+  test('Review focus 2: a failed status with no code or a code the server would reject becomes INTERACTION_INIT_FAILED', () => {
+    expect(parseInteraction({ interaction: { plugin: 'x', status: 'failed' } })?.check).toEqual({ ok: false, plugin: 'x', code: 'INTERACTION_INIT_FAILED' });
+    expect(parseInteraction({ interaction: { plugin: 'x', status: 'failed', code: 'lower case' } })?.check.code).toBe('INTERACTION_INIT_FAILED');
+    expect(parseInteraction({ interaction: { plugin: 'x', status: 'failed', code: 'C'.repeat(65) } })?.check.code).toBe('INTERACTION_INIT_FAILED');
+  });
+
+  test('interactionReason names the plugin and the code', () => {
+    expect(interactionReason({ ok: false, plugin: 'telegram', code: 'TELEGRAM_NOT_CONFIGURED' })).toBe('interaction telegram (TELEGRAM_NOT_CONFIGURED)');
+    expect(interactionReason({ ok: false, plugin: null })).toBe('interaction unknown (INTERACTION_INIT_FAILED)');
+  });
+
+  test('toProfileNeeds carries a known check and omits an unknown one', () => {
+    const r = { transport: 'native' as const, providers: [], sandbox: false };
+    expect(toProfileNeeds(r, { ok: false, plugin: 'telegram', code: 'X' })).toEqual({ protocol: 'native', providers: [], sandbox: false, interaction: { ok: false, plugin: 'telegram', code: 'X' } });
+    expect('interaction' in toProfileNeeds(r)).toBe(false);
   });
 });
 

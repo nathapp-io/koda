@@ -99,14 +99,14 @@ export const SEVERITIES = ['error', 'warning'] as const;
 export type Severity = (typeof SEVERITIES)[number];
 export const UNPLACEABLE_VERDICTS = ['never', 'budget_paused', 'runners_paused', 'waiting_capacity', 'no_fit', 'no_runners', 'fits_not_placed'] as const;
 export type UnplaceableVerdict = (typeof UNPLACEABLE_VERDICTS)[number];
-export const CONDITION_TYPES = ['offline', 'credential', 'stale_nax', 'configuration'] as const;
+export const CONDITION_TYPES = ['offline', 'credential', 'interaction', 'stale_nax', 'configuration'] as const;
 export type ConditionType = (typeof CONDITION_TYPES)[number];
 export const CREDENTIAL_WHY = ['missing', 'unavailable', 'expired'] as const;
 export type CredentialWhy = (typeof CREDENTIAL_WHY)[number];
 /** Every MisfitReason, for the DTO enum (same list as PlacementMisfitDto). */
 export const MISFIT_REASONS: readonly MisfitReason[] = [
-  'disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox', 'tools',
-  'approvals_relay', 'busy_repo', 'capacity',
+  'disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox',
+  'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity',
 ];
 
 export interface AttentionReason {
@@ -121,6 +121,12 @@ export interface RunnerCondition {
   why?: CredentialWhy;
   version?: string;
   latest?: string;
+  /** #207 interaction: the plugin nax could not start. */
+  plugin?: string;
+  /** #207 interaction: nax's error code. */
+  code?: string;
+  /** #207 interaction: the profile; absent means the base config. */
+  profile?: string;
 }
 
 /** Spec §2: one flat shape; the per-kind fields are optional. No prose (repo i18n rule). */

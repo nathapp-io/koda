@@ -42,6 +42,8 @@ function conditionText(c: RunnerConditionDto): string {
     case 'offline': return c.jobsHeld ? `offline, holding ${c.jobsHeld} job(s)` : 'offline';
     case 'credential': return `credential ${c.providerId ?? '?'} ${c.why ?? ''}`.trim();
     case 'stale_nax': return `nax ${c.version ?? '?'} behind ${c.latest ?? '?'}`;
+    case 'interaction':
+      return `interaction ${c.plugin ?? '?'} ${c.code ?? 'failed'} (${c.profile ? `profile ${c.profile}` : 'base config'})`;
     default: return 'configuration problem';
   }
 }

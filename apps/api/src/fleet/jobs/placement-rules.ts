@@ -5,11 +5,12 @@ import type { FleetJobRecord, FleetRepoRef } from './domain/fleet-job.domain';
 /** The first placement rule a runner fails (spec §4), reported per runner at dispatch. */
 export type MisfitReason =
   | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
-  | 'provider_unavailable' | 'sandbox' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity';
+  | 'provider_unavailable' | 'sandbox' | 'interaction' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity';
 
 // budget_paused is not permanent either: it clears on resume or month rollover (S1b §2.3).
 // provider_unavailable is not permanent: a later probe may fix it, so the job queues and a
 // pinned dispatch answers 201 (spec §4).
+// interaction is not permanent either: the runner's env is fixed and a re-probe clears it (#207).
 /** A pinned job whose runner fails one of these can never run there: 422 at dispatch (spec §4). */
 export const PERMANENT_MISFITS: ReadonlySet<MisfitReason> = new Set<MisfitReason>([
   'disabled', 'executor', 'protocol', 'provider_missing', 'sandbox', 'tools', 'approvals_relay',
@@ -61,7 +62,12 @@ function capabilityMisfit(job: PlacementJob, caps: RunnerCapabilities): MisfitRe
       if (!credential.available) return 'provider_unavailable';
     }
     if (needs.sandbox && !caps.sandbox.available) return 'sandbox';
+    // #207: nax could not start this profile's interaction plugin in the runner's environment.
+    if (needs.interaction?.ok === false) return 'interaction';
   }
+  // #207: a job with no profiles runs on the machine's base config. A job naming profiles is judged on them only:
+  // each reported profile's result already includes the base config it overlays.
+  if (job.profiles.length === 0 && caps.interaction?.ok === false) return 'interaction';
   const forgeTool = job.provider === 'github' ? caps.tools.gh : caps.tools.glab;
   if (!caps.tools.git || !forgeTool) return 'tools';
   return null;
