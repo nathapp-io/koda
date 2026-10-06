@@ -67,7 +67,7 @@ function createMockSyncService() {
 
 function createMockPrSyncService() {
   return {
-    handleMergedPrAutoTransition: jest.fn(),
+    applyMergedPr: jest.fn().mockResolvedValue('updated'),
   };
 }
 
