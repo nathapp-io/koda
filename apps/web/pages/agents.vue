@@ -5,7 +5,7 @@ import EditAgentCapabilitiesDialog from '~/components/EditAgentCapabilitiesDialo
 import RotateKeyDialog from '~/components/RotateKeyDialog.vue'
 import DeleteAgentDialog from '~/components/DeleteAgentDialog.vue'
 import { apiPath } from '~/lib/api-path'
-import { TICKET_CHIP_CLASS, TICKET_DOT_CLASS, statusDotClass } from '~/lib/ticket-chips'
+import { TICKET_CHIP_CLASS, TICKET_DOT_CLASS } from '~/lib/ticket-chips'
 
 definePageMeta({ layout: 'default' })
 
@@ -97,17 +97,17 @@ function handleDeleted() {
   isDeleteDialogOpen.value = false
 }
 
-// Agent states reuse the ticket status dot tokens: ACTIVE is green (done),
-// PAUSED is amber (review), OFFLINE is muted (todo). The i18n label always
+// Agent status dots use the status tokens directly (the lib's STATUS_DOT is
+// keyed by ticket status names, not token names). The i18n label always
 // travels with the dot — state is never color alone.
-const AGENT_STATUS_TOKEN: Record<string, string> = {
-  ACTIVE: 'done',
-  PAUSED: 'review',
-  OFFLINE: 'todo',
+const AGENT_STATUS_DOT: Record<string, string> = {
+  ACTIVE: 'bg-status-done',
+  PAUSED: 'bg-status-review',
+  OFFLINE: 'bg-status-todo',
 }
 
 function agentStatusDot(status: string) {
-  return statusDotClass(AGENT_STATUS_TOKEN[status] ?? '')
+  return AGENT_STATUS_DOT[status] ?? 'bg-muted-foreground'
 }
 
 async function changeStatus(agent: Agent, newStatus: 'ACTIVE' | 'PAUSED' | 'OFFLINE') {

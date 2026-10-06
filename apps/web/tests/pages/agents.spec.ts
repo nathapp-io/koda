@@ -137,22 +137,22 @@ describe('US-006 AC3-AC5: status styling is token-based', () => {
   ].join('\n')
 
   test('source maps ACTIVE to the done (green) status token', () => {
-    expect(source).toContain("ACTIVE: 'done'")
+    expect(source).toContain("ACTIVE: 'bg-status-done'")
   })
 
   test('source maps PAUSED to the review (amber) status token', () => {
-    expect(source).toContain("PAUSED: 'review'")
+    expect(source).toContain("PAUSED: 'bg-status-review'")
   })
 
   test('source maps OFFLINE to the todo (muted) status token', () => {
-    expect(source).toContain("OFFLINE: 'todo'")
+    expect(source).toContain("OFFLINE: 'bg-status-todo'")
   })
 
   test('source renders dot+label chips via the shared chip classes', () => {
     expect(source).toContain('~/lib/ticket-chips')
     expect(source).toContain('TICKET_CHIP_CLASS')
     expect(source).toContain('TICKET_DOT_CLASS')
-    expect(source).toContain('statusDotClass')
+    expect(source).toContain('agentStatusDot')
   })
 
   test('source no longer hardcodes palette status colors', () => {
