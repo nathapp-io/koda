@@ -86,7 +86,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="mt-1 flex items-start justify-between gap-3">
-      <h1 v-if="!editing" class="min-w-0 text-2xl font-semibold leading-tight tracking-tight">
+      <h1 v-if="!editing" class="min-w-0 break-words text-2xl font-semibold leading-tight tracking-tight">
         {{ ticket.title }}
       </h1>
       <Input
