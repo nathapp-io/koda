@@ -121,20 +121,20 @@ const { data: projectData, pending: loadingProject, error: projectError, refresh
               @changed="refreshConnection()"
               @revealed="revealedSecret = $event"
             />
+          </div>
 
-            <div
-              v-if="revealedSecret"
-              data-testid="webhook-secret"
-              class="rounded-md border border-amber-500/50 bg-amber-500/10 p-4 space-y-2"
-            >
-              <p class="text-sm font-medium">{{ t('vcs.secret.title') }}</p>
-              <p class="text-xs text-muted-foreground">{{ t('vcs.secret.onceNotice') }}</p>
-              <div class="flex items-center gap-2">
-                <code class="flex-1 break-all rounded bg-muted px-2 py-1 text-sm">{{ revealedSecret }}</code>
-                <Button type="button" variant="outline" size="sm" @click="copySecret">
-                  {{ t('vcs.secret.copy') }}
-                </Button>
-              </div>
+          <div
+            v-if="revealedSecret"
+            data-testid="webhook-secret"
+            class="rounded-md border border-amber-500/50 bg-amber-500/10 p-4 space-y-2"
+          >
+            <p class="text-sm font-medium">{{ t('vcs.secret.title') }}</p>
+            <p class="text-xs text-muted-foreground">{{ t('vcs.secret.onceNotice') }}</p>
+            <div class="flex items-center gap-2">
+              <code class="flex-1 break-all rounded bg-muted px-2 py-1 text-sm">{{ revealedSecret }}</code>
+              <Button type="button" variant="outline" size="sm" @click="copySecret">
+                {{ t('vcs.secret.copy') }}
+              </Button>
             </div>
           </div>
         </div>

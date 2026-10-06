@@ -6,6 +6,7 @@ export default {
     './components/**/*.{js,vue,ts}',
     './layouts/**/*.vue',
     './pages/**/*.vue',
+    './lib/**/*.ts',
     './plugins/**/*.{js,ts}',
     './app.vue',
   ],

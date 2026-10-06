@@ -13,9 +13,19 @@ interface Agent {
   id: string
   name: string
   slug: string
-  roles: string[]
-  capabilities: string[]
+  roles: (string | { role: string })[]
+  capabilities: (string | { capability: string })[]
   status: 'ACTIVE' | 'PAUSED' | 'OFFLINE'
+}
+
+// The API returns roles/capabilities as entry objects ({ role }, { capability });
+// older mocks/tests may still use plain strings. Normalize for display only.
+function roleLabel(role: string | { role: string }) {
+  return typeof role === 'string' ? role : role.role
+}
+
+function capabilityLabel(capability: string | { capability: string }) {
+  return typeof capability === 'string' ? capability : capability.capability
 }
 
 const { $api } = useApi()
@@ -151,11 +161,11 @@ function handleAgentCreated() {
             <div class="flex flex-wrap gap-1">
               <Badge
                 v-for="role in agent.roles"
-                :key="role"
+                :key="roleLabel(role)"
                 variant="outline"
                 class="text-xs"
               >
-                {{ role }}
+                {{ roleLabel(role) }}
               </Badge>
             </div>
           </TableCell>
@@ -163,11 +173,11 @@ function handleAgentCreated() {
             <div class="flex flex-wrap gap-1">
               <Badge
                 v-for="cap in agent.capabilities"
-                :key="cap"
+                :key="capabilityLabel(cap)"
                 variant="outline"
                 class="text-xs"
               >
-                {{ cap }}
+                {{ capabilityLabel(cap) }}
               </Badge>
             </div>
           </TableCell>
