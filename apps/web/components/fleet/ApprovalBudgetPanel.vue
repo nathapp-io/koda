@@ -8,7 +8,7 @@
       <div class="max-w-xs space-y-1">
         <Label for="fleet-approval-amount">{{ t('fleet.approvals.budget.amount') }}</Label>
         <Input id="fleet-approval-amount" v-model="amount" inputmode="decimal" data-testid="fleet-approval-amount" />
-        <p v-if="amountMessage" class="text-xs text-destructive" data-testid="fleet-approval-amount-error">{{ amountMessage }}</p>
+        <p v-if="amountMessage" class="text-xs text-status-rejected" data-testid="fleet-approval-amount-error">{{ amountMessage }}</p>
         <p v-else class="text-xs text-muted-foreground">{{ t('fleet.approvals.budget.amountHint', { spent: formatUsd(spent) }) }}</p>
       </div>
 
@@ -34,7 +34,7 @@
       <div class="space-y-1">
         <Label for="fleet-approval-comment">{{ t('fleet.approvals.budget.comment') }}</Label>
         <Textarea id="fleet-approval-comment" v-model="comment" rows="2" data-testid="fleet-approval-comment" />
-        <p v-if="commentInvalid" class="text-xs text-destructive" data-testid="fleet-approval-comment-error">{{ fieldErrors.comment?.[0] }}</p>
+        <p v-if="commentInvalid" class="text-xs text-status-rejected" data-testid="fleet-approval-comment-error">{{ fieldErrors.comment?.[0] }}</p>
       </div>
 
       <div class="flex flex-wrap gap-2">

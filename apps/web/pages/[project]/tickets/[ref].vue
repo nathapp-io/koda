@@ -229,7 +229,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onPageKeydown))
           v-if="ticketDeleted"
           role="status"
           data-testid="ticket-deleted-notice"
-          class="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive"
+          class="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-status-rejected"
         >
           {{ t('tickets.live.deleted') }}
         </div>

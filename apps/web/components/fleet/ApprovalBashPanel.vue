@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-3 text-sm" data-testid="fleet-approval-bash-panel">
     <NuxtLink v-if="jobHref" :to="jobHref" class="text-primary underline-offset-4 hover:underline" data-testid="fleet-approval-bash-job">{{ t('fleet.approvals.bash.openJob') }}</NuxtLink>
-    <p v-if="payload === null" class="text-destructive" data-testid="fleet-approval-bash-unreadable">{{ t('fleet.approvals.bash.unreadable') }}</p>
+    <p v-if="payload === null" class="text-status-rejected" data-testid="fleet-approval-bash-unreadable">{{ t('fleet.approvals.bash.unreadable') }}</p>
     <template v-else>
       <div v-if="payload.command !== ''" class="space-y-1">
         <p class="font-medium">{{ t('fleet.approvals.bash.command') }}</p>
@@ -15,7 +15,7 @@
       <p v-if="payload.maskedCount > 0" class="text-muted-foreground" data-testid="fleet-approval-bash-masked">
         {{ t('fleet.approvals.bash.masked', { count: payload.maskedCount }) }}
       </p>
-      <p v-if="payload.commandTruncated" class="text-destructive" data-testid="fleet-approval-bash-truncated">{{ t('fleet.approvals.bash.truncated') }}</p>
+      <p v-if="payload.commandTruncated" class="text-status-rejected" data-testid="fleet-approval-bash-truncated">{{ t('fleet.approvals.bash.truncated') }}</p>
       <dl class="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
         <div><dt class="text-muted-foreground">{{ t('fleet.approvals.bash.root') }}</dt><dd class="break-all font-mono text-xs">{{ payload.root }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.approvals.bash.stage') }}</dt><dd>{{ payload.stage }}</dd></div>
@@ -25,7 +25,7 @@
       </dl>
     </template>
 
-    <p v-if="left !== null" :class="left === 0 ? 'text-destructive' : 'text-muted-foreground'" data-testid="fleet-approval-bash-countdown">
+    <p v-if="left !== null" :class="left === 0 ? 'text-status-rejected' : 'text-muted-foreground'" data-testid="fleet-approval-bash-countdown">
       {{ left === 0 ? t('fleet.approvals.bash.timedOut') : t('fleet.approvals.bash.expiresIn', { time: countdownText(left) }) }}
     </p>
 
@@ -33,7 +33,7 @@
       <div class="space-y-1">
         <Label :for="commentId">{{ t('fleet.approvals.budget.comment') }}</Label>
         <Textarea :id="commentId" v-model="comment" rows="2" data-testid="fleet-approval-comment" />
-        <p v-if="commentInvalid" class="text-xs text-destructive" data-testid="fleet-approval-comment-error">{{ t('fleet.approvals.validation.commentTooLong') }}</p>
+        <p v-if="commentInvalid" class="text-xs text-status-rejected" data-testid="fleet-approval-comment-error">{{ t('fleet.approvals.validation.commentTooLong') }}</p>
       </div>
       <div class="flex flex-wrap gap-2">
         <Button

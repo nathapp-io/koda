@@ -1,5 +1,5 @@
 <template>
-  <p v-if="errorMessage" :class="cn('text-sm font-medium text-destructive', $attrs.class)">
+  <p v-if="errorMessage" :class="cn('text-sm font-medium text-status-rejected', $attrs.class)">
     {{ errorMessage }}
   </p>
 </template>

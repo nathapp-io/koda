@@ -63,11 +63,11 @@ function severityText(counts: Readonly<Record<string, number>>): string {
     </div>
 
     <div v-if="failed" class="flex flex-wrap items-center gap-2 text-sm" role="alert" data-testid="fleet-job-analytics-error">
-      <span class="text-destructive">{{ t('fleet.analytics.job.loadFailed') }}</span>
+      <span class="text-status-rejected">{{ t('fleet.analytics.job.loadFailed') }}</span>
       <Button variant="outline" size="sm" data-testid="fleet-job-analytics-retry" @click="load()">{{ t('common.retry') }}</Button>
     </div>
     <p v-if="ingest.status === 'partial' && skipped" class="text-sm text-muted-foreground" data-testid="fleet-job-analytics-files">{{ t('fleet.analytics.job.files', { files: skipped }) }}</p>
-    <p v-if="ingest.status === 'failed' && ingest.error" class="whitespace-pre-wrap text-sm text-destructive" data-testid="fleet-job-analytics-ingest-error">{{ ingest.error }}</p>
+    <p v-if="ingest.status === 'failed' && ingest.error" class="whitespace-pre-wrap text-sm text-status-rejected" data-testid="fleet-job-analytics-ingest-error">{{ ingest.error }}</p>
     <p v-if="data?.corrected" class="text-sm" data-testid="fleet-job-analytics-corrected">{{ t('fleet.analytics.job.corrected') }}</p>
     <p v-if="showLedger" class="text-sm text-muted-foreground" data-testid="fleet-job-analytics-ledger">{{ t('fleet.analytics.job.liveLedger', { live: usd(data?.liveCostUsd), ledger: usd(data?.ledgerCostUsd) }) }}</p>
 

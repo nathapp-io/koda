@@ -18,7 +18,7 @@ const { t } = useI18n()
         <span class="block text-xs text-muted-foreground">{{ t(`fleet.dashboard.tiles.${tile.id}`) }}</span>
         <span
           class="mt-1 block text-xl font-semibold"
-          :class="{ 'text-status-review': tile.tone === 'warn', 'text-destructive': tile.tone === 'bad' }"
+          :class="{ 'text-status-review': tile.tone === 'warn', 'text-status-rejected': tile.tone === 'bad' }"
           :data-testid="`fleet-dashboard-tile-${tile.id}-value`"
         >{{ tile.value }}</span>
       </a>

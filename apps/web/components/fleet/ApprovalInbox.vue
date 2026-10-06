@@ -54,7 +54,7 @@
             <span
               v-if="entry.left !== null"
               class="font-mono text-xs"
-              :class="entry.left === 0 ? 'text-destructive' : 'text-muted-foreground'"
+              :class="entry.left === 0 ? 'text-status-rejected' : 'text-muted-foreground'"
               data-testid="fleet-approval-countdown"
             >{{ countdownText(entry.left) }}</span>
             <span class="text-xs text-muted-foreground"><FleetAge :iso="entry.row.requestedAt" :now="now" mode="ago" /></span>

@@ -4,7 +4,7 @@
       v-for="line in view.lines"
       :key="line.policy.id"
       class="rounded-md border px-3 py-2 text-sm"
-      :class="line.status === 'paused' ? 'border-destructive text-destructive' : 'border-border bg-muted'"
+      :class="line.status === 'paused' ? 'border-destructive text-status-rejected' : 'border-border bg-muted'"
       :role="line.status === 'paused' ? 'alert' : 'status'"
       data-testid="fleet-budget-banner-line"
       :data-status="line.status"

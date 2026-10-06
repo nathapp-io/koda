@@ -29,7 +29,8 @@
     --status-active: 243 75% 55%;
     --status-review: 38 92% 40%;
     --status-done: 152 60% 32%;
-    --status-rejected: 0 72% 51%;
+    /* Light step sits 1% darker than --destructive so text on --background clears WCAG AA (4.56:1). */
+    --status-rejected: 0 72% 50%;
     --priority-critical: 0 72% 51%;
     --priority-high: 24 90% 48%;
     --priority-medium: 38 92% 45%;

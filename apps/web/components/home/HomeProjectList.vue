@@ -19,7 +19,7 @@ const { t } = useI18n()
             <span class="shrink-0 text-xs text-muted-foreground">{{ t('home.projects.open', { n: project.openTickets }) }}</span>
             <span
               v-if="project.attentionJobs > 0"
-              class="shrink-0 rounded-md border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-xs font-medium text-destructive"
+              class="shrink-0 rounded-md border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-xs font-medium text-status-rejected"
             >{{ t('home.projects.attention', { n: project.attentionJobs }) }}</span>
           </NuxtLink>
         </li>

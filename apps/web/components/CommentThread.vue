@@ -118,7 +118,7 @@ async function deleteComment(comment: Comment) {
 <template>
   <div class="space-y-6">
     <div v-if="pending" class="text-muted-foreground text-sm">{{ t('common.loadingComments') }}</div>
-    <div v-else-if="error" class="text-destructive text-sm">{{ t('common.failedLoadComments') }}</div>
+    <div v-else-if="error" class="text-status-rejected text-sm">{{ t('common.failedLoadComments') }}</div>
     <div v-else class="space-y-4">
       <div
         v-for="comment in comments"
@@ -151,7 +151,7 @@ async function deleteComment(comment: Comment) {
           <Button size="sm" variant="ghost" @click="startEdit(comment)">
             {{ t('common.edit') }}
           </Button>
-          <Button size="sm" variant="ghost" class="text-destructive" @click="deleteComment(comment)">
+          <Button size="sm" variant="ghost" class="text-status-rejected" @click="deleteComment(comment)">
             {{ t('common.delete') }}
           </Button>
         </template>
