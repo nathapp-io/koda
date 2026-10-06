@@ -4,10 +4,14 @@ import { join } from 'path'
 
 const webDir = join(__dirname, '../..')
 const settingsPath = join(webDir, 'pages', '[project]', 'settings.vue')
+const vcsCardPath = join(webDir, 'components', 'SettingsVcsCard.vue')
 
-function getSource(): string {
-  return readFileSync(settingsPath, 'utf-8')
-}
+const pageSource = readFileSync(settingsPath, 'utf-8')
+const cardSource = readFileSync(vcsCardPath, 'utf-8')
+// Slice 5 split the settings page into form components; the VCS assertions now
+// read the page + VCS card as one surface (slice-1 precedent — assertions
+// unchanged in intent, only in what they read).
+const source = `${pageSource}\n${cardSource}`
 
 // ──────────────────────────────────────────────────────────────────────────────
 // AC1 — Page exists at /[project]/settings
@@ -19,7 +23,6 @@ describe('VCS-P1-005-C AC1: Navigating to /[project]/settings renders a page wit
   })
 
   test('source contains a tab component or Tabs component', () => {
-    const source = getSource()
     const hasTabs =
       source.includes('Tabs') ||
       source.includes('Tablist') ||
@@ -28,7 +31,6 @@ describe('VCS-P1-005-C AC1: Navigating to /[project]/settings renders a page wit
   })
 
   test('source contains VCS Integration tab', () => {
-    const source = getSource()
     const hasVcsTab =
       source.includes('VCS') ||
       source.includes("t('vcs") ||
@@ -43,7 +45,6 @@ describe('VCS-P1-005-C AC1: Navigating to /[project]/settings renders a page wit
 
 describe('VCS-P1-005-C AC2: VCS Integration tab renders all required fields', () => {
   test('source includes a provider selector/dropdown field', () => {
-    const source = getSource()
     const hasProviderField =
       source.includes('provider') &&
       (source.includes('Select') || source.includes('select'))
@@ -51,7 +52,6 @@ describe('VCS-P1-005-C AC2: VCS Integration tab renders all required fields', ()
   })
 
   test('source includes repo owner text input field', () => {
-    const source = getSource()
     const hasOwnerField =
       source.includes('owner') &&
       source.includes('Input')
@@ -59,7 +59,6 @@ describe('VCS-P1-005-C AC2: VCS Integration tab renders all required fields', ()
   })
 
   test('source includes repo name text input field', () => {
-    const source = getSource()
     const hasRepoField =
       (source.includes('repo') || source.includes('repository')) &&
       source.includes('Input')
@@ -67,7 +66,6 @@ describe('VCS-P1-005-C AC2: VCS Integration tab renders all required fields', ()
   })
 
   test('source includes masked token input field', () => {
-    const source = getSource()
     const hasTokenField =
       source.includes('token') &&
       source.includes('Input') &&
@@ -76,7 +74,6 @@ describe('VCS-P1-005-C AC2: VCS Integration tab renders all required fields', ()
   })
 
   test('source includes sync mode radio group (polling/webhook)', () => {
-    const source = getSource()
     const hasSyncModeField =
       source.includes('syncMode') &&
       (source.includes('RadioGroup') || source.includes('radiogroup'))
@@ -84,7 +81,6 @@ describe('VCS-P1-005-C AC2: VCS Integration tab renders all required fields', ()
   })
 
   test('source includes polling interval number input', () => {
-    const source = getSource()
     const hasPollingField =
       source.includes('pollingInterval') &&
       (source.includes('Input') || source.includes('input'))
@@ -92,7 +88,6 @@ describe('VCS-P1-005-C AC2: VCS Integration tab renders all required fields', ()
   })
 
   test('source includes authors tag input', () => {
-    const source = getSource()
     const hasAuthorsField =
       source.includes('authors') &&
       (source.includes('Input') || source.includes('tag'))
@@ -106,12 +101,10 @@ describe('VCS-P1-005-C AC2: VCS Integration tab renders all required fields', ()
 
 describe('VCS-P1-005-C AC3: Submitting form with no existing connection calls POST /projects/:slug/vcs', () => {
   test('source uses useApi() composable', () => {
-    const source = getSource()
     expect(source).toContain('useApi()')
   })
 
   test('source calls $api.post() for VCS connection', () => {
-    const source = getSource()
     const hasPostCall =
       source.includes('$api.post(') &&
       (source.includes('/vcs') || source.includes('vcs'))
@@ -119,7 +112,6 @@ describe('VCS-P1-005-C AC3: Submitting form with no existing connection calls PO
   })
 
   test('source includes form submission handler', () => {
-    const source = getSource()
     const hasSubmitHandler =
       source.includes('handleSubmit') ||
       source.includes('onSubmit') ||
@@ -134,7 +126,6 @@ describe('VCS-P1-005-C AC3: Submitting form with no existing connection calls PO
 
 describe('VCS-P1-005-C AC4: Submitting form with existing connection calls PATCH /projects/:slug/vcs', () => {
   test('source calls $api.patch() for VCS connection update', () => {
-    const source = getSource()
     const hasPatchCall =
       source.includes('$api.patch(') &&
       (source.includes('/vcs') || source.includes('vcs'))
@@ -142,7 +133,6 @@ describe('VCS-P1-005-C AC4: Submitting form with existing connection calls PATCH
   })
 
   test('source checks if connection exists before determining POST vs PATCH', () => {
-    const source = getSource()
     const hasConditionalLogic =
       (source.includes('if (') && source.includes('connection')) ||
       source.includes('existingConnection') ||
@@ -159,7 +149,6 @@ describe('VCS-P1-005-C AC4: Submitting form with existing connection calls PATCH
 
 describe('VCS-P1-005-C AC5: Test Connection button calls POST /projects/:slug/vcs/test', () => {
   test('source includes Test Connection button', () => {
-    const source = getSource()
     const hasTestButton =
       source.includes('Test') &&
       (source.includes("t('") || source.includes('test'))
@@ -167,7 +156,6 @@ describe('VCS-P1-005-C AC5: Test Connection button calls POST /projects/:slug/vc
   })
 
   test('source calls $api.post() with /vcs/test endpoint', () => {
-    const source = getSource()
     const hasTestEndpoint =
       source.includes('$api.post(') &&
       source.includes('vcs/test')
@@ -175,7 +163,6 @@ describe('VCS-P1-005-C AC5: Test Connection button calls POST /projects/:slug/vc
   })
 
   test('source uses useAppToast() for success toast', () => {
-    const source = getSource()
     const hasToast =
       source.includes('useAppToast()') &&
       source.includes('toast.success(')
@@ -183,7 +170,6 @@ describe('VCS-P1-005-C AC5: Test Connection button calls POST /projects/:slug/vc
   })
 
   test('source shows error toast on failed connection test', () => {
-    const source = getSource()
     const hasErrorToast =
       source.includes('toast.error(')
     expect(hasErrorToast).toBe(true)
@@ -196,7 +182,6 @@ describe('VCS-P1-005-C AC5: Test Connection button calls POST /projects/:slug/vc
 
 describe('VCS-P1-005-C AC6: Sync Now button calls POST /projects/:slug/vcs/sync', () => {
   test('source includes Sync Now button', () => {
-    const source = getSource()
     const hasSyncButton =
       source.includes('Sync') &&
       (source.includes("t('") || source.includes('sync'))
@@ -204,7 +189,6 @@ describe('VCS-P1-005-C AC6: Sync Now button calls POST /projects/:slug/vcs/sync'
   })
 
   test('source calls $api.post() with /vcs/sync endpoint', () => {
-    const source = getSource()
     const hasSyncEndpoint =
       source.includes('$api.post(') &&
       source.includes('vcs/sync')
@@ -212,7 +196,6 @@ describe('VCS-P1-005-C AC6: Sync Now button calls POST /projects/:slug/vcs/sync'
   })
 
   test('source shows toast with sync result counts (created, updated, skipped)', () => {
-    const source = getSource()
     const hasResultToast =
       source.includes('created') &&
       source.includes('updated') &&
@@ -228,7 +211,6 @@ describe('VCS-P1-005-C AC6: Sync Now button calls POST /projects/:slug/vcs/sync'
 
 describe('VCS-P1-005-C AC7: Form pre-fills from GET /projects/:slug/vcs when connection exists', () => {
   test('source calls $api.get() to fetch VCS connection data', () => {
-    const source = getSource()
     const hasGetCall =
       source.includes('$api.get(') &&
       (source.includes('/vcs') || source.includes('vcs'))
@@ -236,7 +218,6 @@ describe('VCS-P1-005-C AC7: Form pre-fills from GET /projects/:slug/vcs when con
   })
 
   test('source uses useAsyncData or equivalent to fetch data on mount', () => {
-    const source = getSource()
     const hasAsyncData =
       source.includes('useAsyncData') ||
       source.includes('useFetch') ||
@@ -245,7 +226,6 @@ describe('VCS-P1-005-C AC7: Form pre-fills from GET /projects/:slug/vcs when con
   })
 
   test('source pre-populates form fields from fetched data', () => {
-    const source = getSource()
     const hasFormPopulation =
       source.includes('provider') &&
       source.includes('owner') &&
@@ -261,12 +241,10 @@ describe('VCS-P1-005-C AC7: Form pre-fills from GET /projects/:slug/vcs when con
 
 describe('VCS-P1-005-C AC8: All form labels and toast messages use web i18n keys', () => {
   test('source imports useI18n()', () => {
-    const source = getSource()
     expect(source).toContain('useI18n()')
   })
 
   test('source uses t() function for all labels', () => {
-    const source = getSource()
     const hasI18nLabels =
       source.includes("t('vcs.") ||
       source.includes("t('common.") ||
@@ -275,7 +253,6 @@ describe('VCS-P1-005-C AC8: All form labels and toast messages use web i18n keys
   })
 
   test('source does not contain hardcoded field labels like "Provider", "Token", etc', () => {
-    const source = getSource()
     // Check that common field names are not hardcoded
     const hasHardcodedProvider = source.includes('"Provider"') || source.includes("'Provider'")
     const hasHardcodedToken = source.includes('"Token"') || source.includes("'Token'")
@@ -285,7 +262,6 @@ describe('VCS-P1-005-C AC8: All form labels and toast messages use web i18n keys
   })
 
   test('source uses i18n keys for button labels (Test Connection, Sync Now, Save)', () => {
-    const source = getSource()
     const hasI18nButtons =
       source.includes("t('") && (
         source.includes('test') ||
@@ -296,7 +272,6 @@ describe('VCS-P1-005-C AC8: All form labels and toast messages use web i18n keys
   })
 
   test('source uses i18n keys for toast messages', () => {
-    const source = getSource()
     const hasI18nToasts =
       source.includes('toast.success(t(') ||
       source.includes('toast.error(t(') ||
@@ -311,12 +286,10 @@ describe('VCS-P1-005-C AC8: All form labels and toast messages use web i18n keys
 
 describe('VCS-P1-005-C: Code quality checks', () => {
   test('source does not contain console.log statements', () => {
-    const source = getSource()
     expect(source).not.toContain('console.log')
   })
 
   test('source uses form validation with vee-validate', () => {
-    const source = getSource()
     const hasValidation =
       source.includes('useForm') ||
       source.includes('vee-validate') ||
@@ -325,7 +298,6 @@ describe('VCS-P1-005-C: Code quality checks', () => {
   })
 
   test('source includes error handling for API calls', () => {
-    const source = getSource()
     const hasErrorHandling =
       source.includes('try {') ||
       source.includes('.catch(') ||

@@ -4,6 +4,7 @@ import { join } from 'path'
 
 const webDir = join(__dirname, '../..')
 const pagePath = join(webDir, 'pages', '[project]', 'agents.vue')
+const globalAgentsPagePath = join(webDir, 'pages', 'agents.vue')
 
 // ──────────────────────────────────────────────────────────────────────────────
 // File existence
@@ -121,64 +122,44 @@ describe('US-006 AC2: table columns — Name, Slug, Roles, Capabilities, Status,
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC3 — ACTIVE status badge has green styling (bg-green-100 text-green-800)
+// AC3–AC5 — status styling is token-based (UX redesign slice 5): the page maps
+// each agent state to a ticket status token via lib/ticket-chips.ts and renders
+// a dot+label chip. The palette classes (bg-green-100 etc.) were removed on
+// purpose; state is never color alone — the i18n label always accompanies the dot.
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('US-006 AC3: ACTIVE status badge has green styling', () => {
-  test('source contains ACTIVE status value', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('ACTIVE')
+describe('US-006 AC3-AC5: status styling is token-based', () => {
+  // Both agents pages (project-scoped and global) share the token-based chip
+  // styling, so the assertions below cover the union of both sources.
+  const source = [
+    readFileSync(pagePath, 'utf-8'),
+    readFileSync(globalAgentsPagePath, 'utf-8'),
+  ].join('\n')
+
+  test('source maps ACTIVE to the done (green) status token', () => {
+    expect(source).toContain("ACTIVE: 'bg-status-done'")
   })
 
-  test('source applies bg-green-100 class for ACTIVE status', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('bg-green-100')
+  test('source maps PAUSED to the review (amber) status token', () => {
+    expect(source).toContain("PAUSED: 'bg-status-review'")
   })
 
-  test('source applies text-green-800 class for ACTIVE status', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('text-green-800')
-  })
-})
-
-// ──────────────────────────────────────────────────────────────────────────────
-// AC4 — PAUSED status badge has yellow styling (bg-yellow-100 text-yellow-800)
-// ──────────────────────────────────────────────────────────────────────────────
-
-describe('US-006 AC4: PAUSED status badge has yellow styling', () => {
-  test('source contains PAUSED status value', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('PAUSED')
+  test('source maps OFFLINE to the todo (muted) status token', () => {
+    expect(source).toContain("OFFLINE: 'bg-status-todo'")
   })
 
-  test('source applies bg-yellow-100 class for PAUSED status', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('bg-yellow-100')
+  test('source renders dot+label chips via the shared chip classes', () => {
+    expect(source).toContain('~/lib/ticket-chips')
+    expect(source).toContain('TICKET_CHIP_CLASS')
+    expect(source).toContain('TICKET_DOT_CLASS')
+    expect(source).toContain('agentStatusDot')
   })
 
-  test('source applies text-yellow-800 class for PAUSED status', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('text-yellow-800')
-  })
-})
-
-// ──────────────────────────────────────────────────────────────────────────────
-// AC5 — OFFLINE status badge has gray/secondary styling
-// ──────────────────────────────────────────────────────────────────────────────
-
-describe('US-006 AC5: OFFLINE status badge has gray/secondary styling', () => {
-  test('source contains OFFLINE status value', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('OFFLINE')
-  })
-
-  test('source applies secondary variant or gray styling for OFFLINE status', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    const hasOfflineStyling =
-      source.includes('secondary') ||
-      source.includes('bg-gray') ||
-      source.includes('text-gray')
-    expect(hasOfflineStyling).toBe(true)
+  test('source no longer hardcodes palette status colors', () => {
+    expect(source).not.toContain('bg-green-100')
+    expect(source).not.toContain('text-green-800')
+    expect(source).not.toContain('bg-yellow-100')
+    expect(source).not.toContain('text-yellow-800')
   })
 })
 

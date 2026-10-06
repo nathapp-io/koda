@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { apiPath } from '~/lib/api-path'
+import { TICKET_CHIP_CLASS, TICKET_DOT_CLASS } from '~/lib/ticket-chips'
 
 definePageMeta({ layout: 'default' })
 
@@ -7,9 +8,19 @@ interface Agent {
   id: string
   name: string
   slug: string
-  roles: string[]
-  capabilities: string[]
+  roles: (string | { role: string })[]
+  capabilities: (string | { capability: string })[]
   status: 'ACTIVE' | 'PAUSED' | 'OFFLINE'
+}
+
+// The API returns roles/capabilities as entry objects ({ role }, { capability });
+// older mocks/tests may still use plain strings. Normalize for display only.
+function roleLabel(role: string | { role: string }) {
+  return typeof role === 'string' ? role : role.role
+}
+
+function capabilityLabel(capability: string | { capability: string }) {
+  return typeof capability === 'string' ? capability : capability.capability
 }
 
 const route = useRoute()
@@ -25,10 +36,17 @@ const { data: agentsData, pending, error, refresh } = useAsyncData(
 
 const agents = computed(() => agentsData.value ?? [])
 
-function statusClass(status: string) {
-  if (status === 'ACTIVE') return 'bg-green-100 text-green-800'
-  if (status === 'PAUSED') return 'bg-yellow-100 text-yellow-800'
-  return ''
+// Agent status dots use the status tokens directly (the lib's STATUS_DOT is
+// keyed by ticket status names, not token names). The i18n label always
+// travels with the dot — state is never color alone.
+const AGENT_STATUS_DOT: Record<string, string> = {
+  ACTIVE: 'bg-status-done',
+  PAUSED: 'bg-status-review',
+  OFFLINE: 'bg-status-todo',
+}
+
+function agentStatusDot(status: string) {
+  return AGENT_STATUS_DOT[status] ?? 'bg-muted-foreground'
 }
 
 async function changeStatus(agent: Agent, newStatus: 'ACTIVE' | 'PAUSED' | 'OFFLINE') {
@@ -68,11 +86,11 @@ async function changeStatus(agent: Agent, newStatus: 'ACTIVE' | 'PAUSED' | 'OFFL
             <div class="flex flex-wrap gap-1">
               <Badge
                 v-for="role in agent.roles"
-                :key="role"
+                :key="roleLabel(role)"
                 variant="outline"
                 class="text-xs"
               >
-                {{ role }}
+                {{ roleLabel(role) }}
               </Badge>
             </div>
           </TableCell>
@@ -80,21 +98,19 @@ async function changeStatus(agent: Agent, newStatus: 'ACTIVE' | 'PAUSED' | 'OFFL
             <div class="flex flex-wrap gap-1">
               <Badge
                 v-for="cap in agent.capabilities"
-                :key="cap"
+                :key="capabilityLabel(cap)"
                 variant="outline"
                 class="text-xs"
               >
-                {{ cap }}
+                {{ capabilityLabel(cap) }}
               </Badge>
             </div>
           </TableCell>
           <TableCell>
-            <Badge
-              :variant="agent.status === 'OFFLINE' ? 'secondary' : 'outline'"
-              :class="statusClass(agent.status)"
-            >
+            <span :class="TICKET_CHIP_CLASS">
+              <span :class="[TICKET_DOT_CLASS, agentStatusDot(agent.status)]" aria-hidden="true"></span>
               {{ t(`agents.status.${agent.status}`) }}
-            </Badge>
+            </span>
           </TableCell>
           <TableCell>
             <DropdownMenu>

@@ -10,6 +10,8 @@ const propertiesPath = join(webDir, 'components', 'TicketProperties.vue')
 const actionPanelPath = join(webDir, 'components', 'TicketActionPanel.vue')
 const commentThreadPath = join(webDir, 'components', 'CommentThread.vue')
 const kbPath = join(webDir, 'pages', '[project]', 'kb.vue')
+const settingsProjectCardPath = join(webDir, 'components', 'SettingsProjectCard.vue')
+const settingsVcsCardPath = join(webDir, 'components', 'SettingsVcsCard.vue')
 
 function src(path: string): string {
   return readFileSync(path, 'utf-8')
@@ -17,10 +19,13 @@ function src(path: string): string {
 
 describe('Web OpenAPI gap operations are wired in source', () => {
   test('project settings uses GET/PATCH/DELETE /projects/:slug', () => {
+    // 2026-10-06 UX redesign slice 5: project save/delete moved from the page
+    // into components/SettingsProjectCard.vue.
     const source = src(settingsPath)
+    const cardSource = src(settingsProjectCardPath)
     expect(source).toContain('$api.get(apiPath`/projects/${slug}`)')
-    expect(source).toContain('$api.patch(apiPath`/projects/${slug}`')
-    expect(source).toContain('$api.delete(apiPath`/projects/${slug}`)')
+    expect(cardSource).toContain('$api.patch(apiPath`/projects/${props.project.slug}`')
+    expect(cardSource).toContain('$api.delete(apiPath`/projects/${props.project.slug}`)')
   })
 
   test('comment thread uses DELETE /comments/:id', () => {
@@ -63,7 +68,10 @@ describe('Web OpenAPI gap operations are wired in source', () => {
   })
 
   test('settings page uses VCS sync-pr endpoint', () => {
+    // 2026-10-06 UX redesign slice 5: the VCS form moved from the page
+    // into components/SettingsVcsCard.vue.
     const source = src(settingsPath)
-    expect(source).toContain('/vcs/sync-pr')
+    const cardSource = src(settingsVcsCardPath)
+    expect(`${source}\n${cardSource}`).toContain('/vcs/sync-pr')
   })
 })

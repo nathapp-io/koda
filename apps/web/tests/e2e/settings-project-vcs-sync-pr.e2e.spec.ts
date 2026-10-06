@@ -31,6 +31,10 @@ test.describe('Settings Project + VCS Sync PR', () => {
 
   test('settings save sends PATCH /projects/:slug', async ({ page }) => {
     await page.goto(`/${projectSlug}/settings`);
+    // The save payload is a diff against server state; filling before hydration
+    // gets wiped when Vue re-renders, so wait for hydration first (same as the
+    // VCS test below).
+    await waitForHydration(page);
     const projectForm = page.locator('form').first();
     const nameInput = projectForm.locator('input').first();
     await expect(nameInput).toBeVisible();
