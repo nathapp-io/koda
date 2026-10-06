@@ -8,12 +8,14 @@ export interface FakeRequirements {
   readonly transport: 'native' | 'acp';
   readonly providers: readonly string[];
   readonly sandbox: boolean;
+  /** #207: emitted as the document's top-level `interaction` (nax's `{ plugin, status, code?, message? }`). */
+  readonly interaction?: Readonly<Record<string, unknown>>;
 }
 
 export interface NaxAnswers {
   /** `--version` output (default 0.83.1), or a raw result. */
   version?: string | NaxResult;
-  /** Keyed by the `--profile` value as passed (a chain keeps its commas; no flag is `default`). */
+  /** Keyed by the `--profile` value as passed (a chain keeps its commas; no flag is `default`, which answers DEFAULT_CONFIG unless set). */
   config?: Readonly<Record<string, FakeRequirements | NaxResult>>;
   /** AuthListReport rows; a requested provider without a row is listed unavailable, as nax does. */
   auth?: readonly unknown[] | NaxResult;
@@ -24,6 +26,10 @@ export interface NaxAnswers {
 }
 
 const isResult = (v: unknown): v is NaxResult => typeof v === 'object' && v !== null && 'timedOut' in v;
+
+/** #207: the probe resolves the base config (no --profile) on every run; a test may override `default`. */
+const DEFAULT_CONFIG: FakeRequirements = { transport: 'native', providers: [], sandbox: false };
+
 const flag = (args: readonly string[], name: string): string | undefined => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
@@ -46,10 +52,15 @@ export class FakeNaxCli implements NaxCli {
     if (command === '--version') return isResult(a.version) ? a.version : { code: 0, stdout: `${a.version ?? '0.83.1'}\n`, stderr: '', timedOut: false };
     if (command === 'config') {
       const chain = flag(args, '--profile') ?? 'default';
-      const entry = a.config?.[chain];
+      const entry = a.config?.[chain] ?? (chain === 'default' ? DEFAULT_CONFIG : undefined);
       if (entry === undefined) return naxError('PROFILE_NOT_FOUND');
       if (isResult(entry)) return entry;
-      return json({ profile: chain, profileChain: chain.split(','), sources: { global: null, project: null }, requirements: { agent: 'native', protocol: 'hybrid', ...entry }, config: {} });
+      const { interaction, ...requirements } = entry;
+      return json({
+        profile: chain, profileChain: chain.split(','), sources: { global: null, project: null },
+        requirements: { agent: 'native', protocol: 'hybrid', ...requirements }, config: {},
+        ...(interaction ? { interaction } : {}),
+      });
     }
     if (command === 'auth') {
       if (isResult(a.auth)) return a.auth;
