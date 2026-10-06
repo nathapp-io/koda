@@ -127,9 +127,18 @@ do not add GitHub/GitLab tokens to this file, since git credentials belong to th
 Changing the file affects the next nax invocation. After configuring the wrapper, restart the service so
 the daemon reloads `runner.json`, then request a capability refresh when credentials change. Already running
 jobs keep their original environment. Test the wrapper as the service user with the service PATH before
-dispatching a job; `nax config --json` can resolve config but does **not** initialize interaction plugins.
-The wrapper's explicit checks catch missing required variables without contacting Telegram or billing a model.
-A general plugin-initialization dry probe requires nax support; koda does not duplicate plugin-specific rules.
+dispatching a job. The wrapper's explicit checks catch missing required variables without contacting Telegram
+or billing a model.
+
+With a nax whose `nax config --json` reports `interaction`, the runner also checks this itself: at start and on
+every capability refresh it asks nax to start the configured interaction plugin (offline: no message is sent, no
+model is called) for the machine's base config and for each machine profile. A failure is logged as a probe
+warning such as `interaction telegram failed for the base config: TELEGRAM_NOT_CONFIGURED`, reported to koda, and
+shown on the fleet dashboard; placement then keeps jobs that would use that configuration off this runner
+(misfit `interaction`) until the environment is fixed and capabilities are refreshed. A repository's own nax
+config is checked after checkout: the job fails with `capability mismatch: interaction <plugin> (<code>)` before
+nax starts. With an older nax nothing is reported and placement is unchanged. koda never re-implements
+plugin-specific rules; nax decides what a plugin needs.
 
 If PLAN produces no PRD, or RUN produces no status file, the runner emits an error lifecycle event containing
 the last five non-empty lines of `nax.stderr` (at most 800 characters, secrets masked). The short failure reason
