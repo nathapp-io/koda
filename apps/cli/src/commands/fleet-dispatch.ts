@@ -18,7 +18,8 @@ const collect = (value: string, previous: string[]): string[] => [...previous, v
 
 interface DispatchOptions {
   repo: string; feature: string; maxCost: number; plan?: string; ref?: string;
-  profile: string[]; label: string[]; pin?: string; bashMode?: BashMode; approvalTimeout?: number;
+  profile: string[]; label: string[]; pin?: string; ticket: string[];
+  bashMode?: BashMode; approvalTimeout?: number;
   project?: string; json?: boolean;
 }
 
@@ -50,6 +51,7 @@ async function buildBody(slug: string, o: DispatchOptions): Promise<DispatchFlee
     ...(o.profile.length > 0 ? { profiles: o.profile } : {}),
     ...(o.label.length > 0 ? { selectorLabels: o.label } : {}),
     ...(pinned ? { pinnedRunnerId: pinned.id } : {}),
+    ...(o.ticket.length > 0 ? { ticketRefs: o.ticket } : {}),
     ...(o.ref ? { ref: o.ref } : {}),
     ...(o.bashMode ? { bashMode: o.bashMode } : {}),
     ...(o.approvalTimeout !== undefined ? { approvalTimeoutSec: o.approvalTimeout } : {}),
@@ -81,6 +83,7 @@ export function registerFleetDispatch(fleet: Command): void {
     .option('--profile <name>', 'nax profile, repeatable; later wins', collect, [] as string[])
     .option('--label <label>', 'Only runners with this label, repeatable', collect, [] as string[])
     .option('--pin <runner>', 'Run on this runner (id or name); excludes --label')
+    .option('--ticket <ref>', 'Ticket this job works on (KEY-N), repeatable; a RUN moves CREATED/VERIFIED tickets to IN_PROGRESS', collect, [] as string[])
     .option('--bash-mode <mode>', 'Shell command approvals: raw (default), gated or escalate; gated/escalate send asks to the approvals inbox (RUN only)', parseBashMode)
     .option('--approval-timeout <seconds>', 'Seconds an ask waits for a decision before nax denies it (30-3600, default 600); gated/escalate only', parseApprovalTimeout)
     .option('--project <slug>', 'Project slug (uses config if not provided)')

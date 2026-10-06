@@ -12,6 +12,7 @@ import {
   ticketsControllerVerifyFix,
   ticketsControllerClose,
   ticketsControllerReject,
+  ticketFleetJobsControllerList,
   ticketLinksControllerCreate,
   ticketLinksControllerFindAll,
   ticketLinksControllerRemove,
@@ -19,7 +20,7 @@ import {
   labelsControllerRemoveLabelFromHttp,
   agentsControllerFindBySlug,
 } from '../generated';
-import type { AssignTicketDto } from '../generated';
+import type { AssignTicketDto, TicketFleetJobDto } from '../generated';
 import { table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
@@ -66,6 +67,32 @@ type TicketLink = {
   linkType?: string;
   title?: string | null;
 };
+
+const FAILED_STATES = new Set(['FAILED', 'ESCALATED', 'CRASHED']);
+
+/**
+ * Fleet C9 §5: the ticket's fleet jobs. A courtesy section: any failure (an older API without the
+ * endpoint, a network error) shows the ticket without it rather than failing `ticket show`.
+ */
+async function fleetJobsOf(slug: string, ref: string): Promise<TicketFleetJobDto[]> {
+  try {
+    return unwrap<TicketFleetJobDto[]>(await ticketFleetJobsControllerList({ path: { slug, ref } })) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+function printFleetRuns(jobs: readonly TicketFleetJobDto[]): void {
+  if (jobs.length === 0) return;
+  console.log(`\nFleet runs:`);
+  for (const job of jobs) {
+    console.log(`  - ${job.command} ${job.feature} ${job.state} ${job.id} $${job.costUsd}`);
+    if (job.resultBranch) console.log(`    branch ${job.resultBranch}${job.resultSha ? ` @ ${job.resultSha.slice(0, 7)}` : ''}`);
+    if (job.resultPrUrl) console.log(`    PR ${job.resultPrUrl}`);
+    const reason = job.escalationReason ?? job.stateReason;
+    if (reason && FAILED_STATES.has(job.state)) console.log(`    reason: ${reason}`);
+  }
+}
 
 export function ticketCommand(program: Command): void {
   const ticket = program.command('ticket');
@@ -216,9 +243,10 @@ export function ticketCommand(program: Command): void {
 
         const response = await ticketsControllerFindByRef({ path: { slug: ctx.projectSlug, ref }});
         const ticketData = unwrap<TicketDetail>(response);
+        const fleetJobs = await fleetJobsOf(ctx.projectSlug, ref);
 
         if (options.json) {
-          console.log(JSON.stringify(ticketData, null, 2));
+          console.log(JSON.stringify({ ...ticketData, fleetJobs }, null, 2));
         } else {
           console.log(`\n${'Ticket Details'}:`);
           console.log(`ID: ${ticketData.id}`);
@@ -278,6 +306,8 @@ export function ticketCommand(program: Command): void {
               }
             }
           }
+
+          printFleetRuns(fleetJobs);
         }
 
         process.exit(0);

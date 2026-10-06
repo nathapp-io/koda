@@ -5407,6 +5407,104 @@
         ]
       }
     },
+    "/api/projects/{slug}/tickets/{ref}/fleet-jobs": {
+      "get": {
+        "operationId": "TicketFleetJobsController_list",
+        "parameters": [
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TicketFleetJobDto"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Ticket not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Fleet jobs linked to a ticket, newest first, at most 50 (project member)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/tickets/{ref}/fleet-jobs/{jobId}": {
+      "delete": {
+        "operationId": "TicketFleetJobsController_unlink",
+        "parameters": [
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "jobId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Unlinked"
+          },
+          "404": {
+            "description": "Ticket not found, or the job is not linked to it"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Unlink a fleet job from a ticket (project DEVELOPER+); the PR and history stay",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/projects/{slug}/fleet/approvals": {
       "get": {
         "operationId": "ProjectFleetApprovalsController_list",
@@ -10377,6 +10475,15 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 64
+          },
+          "ticketRefs": {
+            "maxItems": 20,
+            "description": "Tickets this job works on, KEY-N (fleet C9). A RUN moves CREATED/VERIFIED ones to IN_PROGRESS.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 32
+            }
           }
         },
         "required": [
@@ -10433,6 +10540,26 @@
             "maxLength": 32
           }
         }
+      },
+      "FleetJobTicketDto": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "string",
+            "description": "Ticket ref, KEY-N"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "title",
+          "status"
+        ]
       },
       "FleetJobDto": {
         "type": "object",
@@ -10639,6 +10766,14 @@
           "coalescedCount": {
             "type": "number",
             "description": "Schedule ticks absorbed into this job while it sat queued (S1b §3.2)"
+          },
+          "tickets": {
+            "nullable": true,
+            "description": "Linked tickets (fleet C9 §2.2). Null on list pages (D460).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetJobTicketDto"
+            }
           }
         },
         "required": [
@@ -10733,6 +10868,66 @@
         "required": [
           "job",
           "placement"
+        ]
+      },
+      "TicketFleetJobDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string",
+            "enum": [
+              "RUN",
+              "PLAN"
+            ]
+          },
+          "feature": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "stateReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "escalationReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "resultBranch": {
+            "type": "string",
+            "nullable": true
+          },
+          "resultSha": {
+            "type": "string",
+            "nullable": true
+          },
+          "resultPrUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "costUsd": {
+            "type": "string",
+            "description": "USD spent across all attempts (costSpentUsd + costCarriedUsd)"
+          },
+          "queuedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "command",
+          "feature",
+          "state",
+          "costUsd",
+          "queuedAt"
         ]
       },
       "RequeueCandidateDto": {
