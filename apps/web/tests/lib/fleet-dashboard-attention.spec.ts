@@ -88,6 +88,20 @@ describe('attentionMessage (D418)', () => {
     ])
   })
 
+  test('#207: an interaction condition names the plugin, the code, and the profile or the base config', () => {
+    const m = attentionMessage(item({
+      kind: 'runner_unhealthy', key: 'runner_unhealthy:r1', subjectType: 'runner', subjectId: 'r1', subjectName: 'wk-mac', projectSlug: null,
+      conditions: [
+        { type: 'interaction', plugin: 'telegram', code: 'TELEGRAM_NOT_CONFIGURED' },
+        { type: 'interaction', code: 'WEBHOOK_URL_MISSING', profile: 'fast' },
+      ],
+    }), GEN, NOW)
+    expect(words(m)).toEqual([
+      'nax interaction plugin telegram cannot start (TELEGRAM_NOT_CONFIGURED)',
+      'Profile fast: nax interaction plugin - cannot start (WEBHOOK_URL_MISSING)',
+    ])
+  })
+
   test('project scope: offline without held jobs, and the collapsed configuration condition', () => {
     const m = attentionMessage(item({
       kind: 'runner_unhealthy', subjectType: 'runner', projectSlug: null,

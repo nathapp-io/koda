@@ -19,7 +19,7 @@ function leafPaths(node: unknown, prefix = ''): string[] {
 // dynamic key (fleet.state.<STATE> ...), which used-keys-exist.spec cannot see.
 const ENUMS: Record<string, string[]> = {
   'fleet.state': ['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING', 'COMPLETED', 'FAILED', 'ESCALATED', 'CRASHED', 'CANCELLED'],
-  'fleet.misfit': ['disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox', 'tools', 'approvals_relay', 'busy_repo', 'capacity'],
+  'fleet.misfit': ['disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox', 'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity'],
   'fleet.repoReason': [
     'github_app_not_configured', 'github_app_key_unreadable', 'app_not_installed', 'app_permissions_insufficient',
     'repo_not_found', 'provider_unreachable', 'provider_error', 'vcs_connection_missing', 'vcs_connection_mismatch',
@@ -59,6 +59,7 @@ const ENUMS: Record<string, string[]> = {
   'fleet.dashboard.tiles': ['runners', 'queued', 'running', 'attention'],
   'fleet.dashboard.attention.verdict': ['never', 'budget_paused', 'runners_paused', 'waiting_capacity', 'no_fit', 'no_runners', 'fits_not_placed', 'unknown'],
   'fleet.dashboard.attention.condition.credential': ['missing', 'unavailable', 'expired'],
+  'fleet.dashboard.attention.condition.interaction': ['base', 'profile'],
   'fleet.jobs.detail.pipeline.stage': ['stories', 'acceptance', 'regression', 'finish'],
   'fleet.jobs.detail.pipeline.state': ['pending', 'running', 'passed', 'failed', 'skipped', 'unknown'],
   'fleet.jobs.detail.pipeline.view': ['label', 'graph', 'list'],

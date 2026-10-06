@@ -20,10 +20,18 @@ export const FLEET_LIST_SIZE = 100
 
 export type FleetProtocol = 'acp' | 'native'
 
+/** #207: nax's verdict on starting the resolved config's interaction plugin (`InteractionCheck`). */
+export interface FleetInteractionCheck {
+  ok: boolean
+  plugin: string | null
+  code?: string
+}
+
 export interface FleetProfileNeeds {
   protocol: FleetProtocol
   providers: string[]
   sandbox: boolean
+  interaction?: FleetInteractionCheck
 }
 
 export interface FleetCredentialStored {
@@ -48,6 +56,7 @@ export interface FleetCapabilities {
   credentials: FleetCredential[]
   tools: { git: boolean; gh: boolean; glab: boolean }
   executors: string[]
+  interaction?: FleetInteractionCheck
 }
 
 export interface FleetRunner {
@@ -131,7 +140,7 @@ export type { FleetJobState }
 
 export type MisfitReason =
   | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
-  | 'provider_unavailable' | 'sandbox' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity'
+  | 'provider_unavailable' | 'sandbox' | 'interaction' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity'
 
 export interface FleetJobStoryDto {
   id: string

@@ -748,6 +748,7 @@
       "provider_missing": "A profile needs a provider the runner has no credential for",
       "provider_unavailable": "A provider credential is not usable right now",
       "sandbox": "A profile needs the sandbox, which is unavailable",
+      "interaction": "The runner's nax interaction plugin cannot start (check the service environment)",
       "tools": "Runner lacks git, gh or glab for this repo",
       "approvals_relay": "The runner cannot relay bash approvals (needs protocol v2 and nax 0.83 or later)",
       "busy_repo": "Runner already runs a job for this repo",
@@ -1658,6 +1659,10 @@
           "staleNax": "nax {version} is behind {latest}",
           "configuration": "Configuration problem (ask a fleet admin)",
           "unknown": "Problem: {code}",
+          "interaction": {
+            "base": "nax interaction plugin {plugin} cannot start ({code})",
+            "profile": "Profile {profile}: nax interaction plugin {plugin} cannot start ({code})"
+          },
           "credential": {
             "missing": "No credential for {provider}",
             "unavailable": "Credential for {provider} is unavailable",

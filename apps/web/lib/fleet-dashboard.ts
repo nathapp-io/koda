@@ -145,6 +145,12 @@ function conditionText(c: RunnerCondition): I18nText {
       return { key: `${A}.condition.credential.${known(CREDENTIAL_WHY, c.why) ? c.why : 'unavailable'}`, params: { provider: c.providerId ?? '-' } }
     case 'stale_nax':
       return { key: `${A}.condition.staleNax`, params: { version: c.version ?? '-', latest: c.latest ?? '-' } }
+    case 'interaction': {
+      const params = { plugin: c.plugin ?? '-', code: c.code ?? '-' }
+      return c.profile
+        ? { key: `${A}.condition.interaction.profile`, params: { ...params, profile: c.profile } }
+        : { key: `${A}.condition.interaction.base`, params }
+    }
     case 'configuration':
       return { key: `${A}.condition.configuration` }
     default:

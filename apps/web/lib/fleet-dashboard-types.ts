@@ -10,7 +10,7 @@ export const SEVERITIES = ['error', 'warning'] as const
 export const UNPLACEABLE_VERDICTS = [
   'never', 'budget_paused', 'runners_paused', 'waiting_capacity', 'no_fit', 'no_runners', 'fits_not_placed',
 ] as const
-export const CONDITION_TYPES = ['offline', 'credential', 'stale_nax', 'configuration'] as const
+export const CONDITION_TYPES = ['offline', 'credential', 'interaction', 'stale_nax', 'configuration'] as const
 export const CREDENTIAL_WHY = ['missing', 'unavailable', 'expired'] as const
 export const TILE_IDS = ['runners', 'queued', 'running', 'attention'] as const
 
@@ -109,6 +109,10 @@ export interface RunnerCondition {
   why?: string
   version?: string
   latest?: string
+  /** #207 interaction: absent profile means the base config. */
+  plugin?: string
+  code?: string
+  profile?: string
 }
 
 /** Spec §2: one flat shape; fields after `since` belong to one kind each. */
