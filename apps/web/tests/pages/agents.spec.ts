@@ -121,64 +121,42 @@ describe('US-006 AC2: table columns — Name, Slug, Roles, Capabilities, Status,
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC3 — ACTIVE status badge has green styling (bg-green-100 text-green-800)
+// AC3–AC5 — status styling is token-based (UX redesign slice 5): the page maps
+// each agent state to a ticket status token via lib/ticket-chips.ts and renders
+// a dot+label chip. The palette classes (bg-green-100 etc.) were removed on
+// purpose; state is never color alone — the i18n label always accompanies the dot.
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('US-006 AC3: ACTIVE status badge has green styling', () => {
-  test('source contains ACTIVE status value', () => {
+describe('US-006 AC3-AC5: status styling is token-based', () => {
+  test('source maps ACTIVE to the done (green) status token', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('ACTIVE')
+    expect(source).toContain("ACTIVE: 'done'")
   })
 
-  test('source applies bg-green-100 class for ACTIVE status', () => {
+  test('source maps PAUSED to the review (amber) status token', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('bg-green-100')
+    expect(source).toContain("PAUSED: 'review'")
   })
 
-  test('source applies text-green-800 class for ACTIVE status', () => {
+  test('source maps OFFLINE to the todo (muted) status token', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('text-green-800')
-  })
-})
-
-// ──────────────────────────────────────────────────────────────────────────────
-// AC4 — PAUSED status badge has yellow styling (bg-yellow-100 text-yellow-800)
-// ──────────────────────────────────────────────────────────────────────────────
-
-describe('US-006 AC4: PAUSED status badge has yellow styling', () => {
-  test('source contains PAUSED status value', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('PAUSED')
+    expect(source).toContain("OFFLINE: 'todo'")
   })
 
-  test('source applies bg-yellow-100 class for PAUSED status', () => {
+  test('source renders dot+label chips via the shared chip classes', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('bg-yellow-100')
+    expect(source).toContain('~/lib/ticket-chips')
+    expect(source).toContain('TICKET_CHIP_CLASS')
+    expect(source).toContain('TICKET_DOT_CLASS')
+    expect(source).toContain('statusDotClass')
   })
 
-  test('source applies text-yellow-800 class for PAUSED status', () => {
+  test('source no longer hardcodes palette status colors', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('text-yellow-800')
-  })
-})
-
-// ──────────────────────────────────────────────────────────────────────────────
-// AC5 — OFFLINE status badge has gray/secondary styling
-// ──────────────────────────────────────────────────────────────────────────────
-
-describe('US-006 AC5: OFFLINE status badge has gray/secondary styling', () => {
-  test('source contains OFFLINE status value', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('OFFLINE')
-  })
-
-  test('source applies secondary variant or gray styling for OFFLINE status', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    const hasOfflineStyling =
-      source.includes('secondary') ||
-      source.includes('bg-gray') ||
-      source.includes('text-gray')
-    expect(hasOfflineStyling).toBe(true)
+    expect(source).not.toContain('bg-green-100')
+    expect(source).not.toContain('text-green-800')
+    expect(source).not.toContain('bg-yellow-100')
+    expect(source).not.toContain('text-yellow-800')
   })
 })
 

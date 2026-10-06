@@ -5,6 +5,7 @@ import EditAgentCapabilitiesDialog from '~/components/EditAgentCapabilitiesDialo
 import RotateKeyDialog from '~/components/RotateKeyDialog.vue'
 import DeleteAgentDialog from '~/components/DeleteAgentDialog.vue'
 import { apiPath } from '~/lib/api-path'
+import { TICKET_CHIP_CLASS, TICKET_DOT_CLASS, statusDotClass } from '~/lib/ticket-chips'
 
 definePageMeta({ layout: 'default' })
 
@@ -86,10 +87,17 @@ function handleDeleted() {
   isDeleteDialogOpen.value = false
 }
 
-function statusClass(status: string) {
-  if (status === 'ACTIVE') return 'bg-green-100 text-green-800'
-  if (status === 'PAUSED') return 'bg-yellow-100 text-yellow-800'
-  return ''
+// Agent states reuse the ticket status dot tokens: ACTIVE is green (done),
+// PAUSED is amber (review), OFFLINE is muted (todo). The i18n label always
+// travels with the dot — state is never color alone.
+const AGENT_STATUS_TOKEN: Record<string, string> = {
+  ACTIVE: 'done',
+  PAUSED: 'review',
+  OFFLINE: 'todo',
+}
+
+function agentStatusDot(status: string) {
+  return statusDotClass(AGENT_STATUS_TOKEN[status] ?? '')
 }
 
 async function changeStatus(agent: Agent, newStatus: 'ACTIVE' | 'PAUSED' | 'OFFLINE') {
@@ -164,12 +172,10 @@ function handleAgentCreated() {
             </div>
           </TableCell>
           <TableCell>
-            <Badge
-              :variant="agent.status === 'OFFLINE' ? 'secondary' : 'outline'"
-              :class="statusClass(agent.status)"
-            >
+            <span :class="TICKET_CHIP_CLASS">
+              <span :class="[TICKET_DOT_CLASS, agentStatusDot(agent.status)]" aria-hidden="true"></span>
               {{ t(`agents.status.${agent.status}`) }}
-            </Badge>
+            </span>
           </TableCell>
           <TableCell>
             <DropdownMenu>
