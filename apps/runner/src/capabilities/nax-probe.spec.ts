@@ -10,6 +10,7 @@ const tmp = makeTempDirs();
 afterAll(() => tmp.cleanup());
 const clock = () => new Date('2026-10-01T00:00:00.000Z');
 const NATIVE: FakeRequirements = { transport: 'native', providers: [], sandbox: false };
+const TG_FAILED = { plugin: 'telegram', status: 'failed', code: 'TELEGRAM_NOT_CONFIGURED', message: 'Telegram plugin requires botToken and chatId' };
 
 async function naxHome(profiles: readonly string[]): Promise<string> {
   const home = await tmp.make('probe');
@@ -89,10 +90,12 @@ describe('NaxCapabilityProbe (design §3.2, D98-D101)', () => {
       approvals: { relay: true },
     });
     expect(warnings).toEqual([]);
-    expect(nax.calls.filter((c) => c.args[0] === 'config').map((c) => c.args)).toEqual([
+    const configCalls = nax.calls.filter((c) => c.args[0] === 'config');
+    expect(configCalls.filter((c) => c.args.includes('--profile')).map((c) => c.args)).toEqual([
       ['config', '-d', empty, '--profile', 'cross-agent', '--json'],
       ['config', '-d', empty, '--profile', 'native-ds', '--json'],
     ]);
+    expect(configCalls.filter((c) => !c.args.includes('--profile')).map((c) => c.args)).toEqual([['config', '-d', empty, '--json']]);
     expect(nax.calls.every((c) => c.cwd === empty)).toBe(true);
     expect(nax.calls.find((c) => c.args[0] === 'auth')?.args).toEqual(['auth', 'list', '--json', 'minimax', 'openrouter']);
     expect(removed).toEqual([empty]);
@@ -114,7 +117,7 @@ describe('NaxCapabilityProbe (design §3.2, D98-D101)', () => {
       'reported the first 64 of 68 profiles by name',
       'profile otel skipped: PROFILE_ENV_VAR_UNRESOLVED',
     ]);
-    expect(nax.calls.filter((c) => c.args[0] === 'config')).toHaveLength(64);
+    expect(nax.calls.filter((c) => c.args[0] === 'config' && c.args.includes('--profile'))).toHaveLength(64);
   });
 
   test('a profile needing more than 16 providers, or with a document of another shape, is skipped', async () => {
@@ -187,5 +190,56 @@ describe('NaxCapabilityProbe (design §3.2, D98-D101)', () => {
     const kept = Object.keys(capabilities.profiles);
     expect(kept.length).toBeLessThan(64);
     expect(names.slice(0, kept.length)).toEqual(kept);
+  });
+});
+
+describe('NaxCapabilityProbe interaction checks (#207 spec §3.2)', () => {
+  test('a failing base config is reported as capabilities.interaction and warned once, with the message', async () => {
+    const home = await naxHome(['fast']);
+    const nax = new FakeNaxCli({ config: { default: { ...NATIVE, interaction: TG_FAILED }, fast: NATIVE } });
+    const { capabilities, warnings } = await probeWith(home, nax).run();
+    expect(capabilities.interaction).toEqual({ ok: false, plugin: 'telegram', code: 'TELEGRAM_NOT_CONFIGURED' });
+    expect(capabilities.profiles['fast']).toEqual({ protocol: 'native', providers: [], sandbox: false });
+    expect(warnings).toEqual(['interaction telegram failed for the base config: TELEGRAM_NOT_CONFIGURED (Telegram plugin requires botToken and chatId)']);
+  });
+
+  test('a failing profile stays in the report, marked, with a warning; an ok profile carries ok', async () => {
+    const home = await naxHome(['broken', 'fine']);
+    const nax = new FakeNaxCli({
+      config: {
+        default: { ...NATIVE, interaction: { plugin: null, status: 'skipped' } },
+        broken: { ...NATIVE, interaction: { plugin: 'webhook', status: 'failed', code: 'WEBHOOK_URL_MISSING' } },
+        fine: { ...NATIVE, interaction: { plugin: 'telegram', status: 'ok' } },
+      },
+    });
+    const { capabilities, warnings } = await probeWith(home, nax).run();
+    expect(capabilities.interaction).toEqual({ ok: true, plugin: null });
+    expect(capabilities.profiles).toEqual({
+      broken: { protocol: 'native', providers: [], sandbox: false, interaction: { ok: false, plugin: 'webhook', code: 'WEBHOOK_URL_MISSING' } },
+      fine: { protocol: 'native', providers: [], sandbox: false, interaction: { ok: true, plugin: 'telegram' } },
+    });
+    expect(warnings).toEqual(['interaction webhook failed for profile broken: WEBHOOK_URL_MISSING']);
+  });
+
+  test('an older nax (no interaction field) reports nothing and warns nothing', async () => {
+    const home = await naxHome(['fast']);
+    const { capabilities, warnings } = await probeWith(home, new FakeNaxCli({ config: { fast: NATIVE } })).run();
+    expect('interaction' in capabilities).toBe(false);
+    expect('interaction' in (capabilities.profiles['fast'] ?? {})).toBe(false);
+    expect(warnings).toEqual([]);
+  });
+
+  test('a base config nax cannot resolve leaves the field absent and warns', async () => {
+    const home = await naxHome([]);
+    const { capabilities, warnings } = await probeWith(home, new FakeNaxCli({ config: { default: naxError('CONFIG_INVALID') } })).run();
+    expect('interaction' in capabilities).toBe(false);
+    expect(warnings).toEqual(['base config resolve failed (CONFIG_INVALID)']);
+  });
+
+  test('the nax message is sanitized before it reaches a warning', async () => {
+    const home = await naxHome([]);
+    const leaky = { ...TG_FAILED, message: 'bad token=abc123secret' };
+    const { warnings } = await probeWith(home, new FakeNaxCli({ config: { default: { ...NATIVE, interaction: leaky } } })).run();
+    expect(warnings).toEqual(['interaction telegram failed for the base config: TELEGRAM_NOT_CONFIGURED (bad token=[redacted])']);
   });
 });

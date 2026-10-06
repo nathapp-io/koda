@@ -2,14 +2,18 @@ import type { Dirent } from 'node:fs';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { NaxProtocol, ProfileNeeds, RunnerCapabilities, RunnerCredential } from '@nathapp/fleet-protocol';
+import type { InteractionCheck, NaxProtocol, ProfileNeeds, RunnerCapabilities, RunnerCredential } from '@nathapp/fleet-protocol';
 import { withoutCredentialVars } from '../credentials/credential-env';
+import { sanitizeDiagnostic } from '../diagnostics';
 import { PROFILE_NAME, RESERVED_PREFIX } from '../executor/nax-process';
 import { parseNaxJson, readNaxVersion, relaySupported, type NaxCli } from '../nax/nax-cli';
 import type { Now } from '../time';
 import type { CapabilityProbe, ProbeResult } from './capability-probe';
 import { mapLimit } from './map-limit';
-import { MAX_PROVIDERS_PER_PROFILE, parseAuthList, parseRequirements, parseSandboxProbe, toProfileNeeds, unavailableCredential } from './nax-json';
+import {
+  MAX_PROVIDERS_PER_PROFILE, parseAuthList, parseInteraction, parseRequirements, parseSandboxProbe, toProfileNeeds, unavailableCredential,
+  type Interaction,
+} from './nax-json';
 
 /** The server validator's limits (apps/api/src/fleet/common/capabilities.ts). */
 export const MAX_PROFILES = 64;
@@ -18,6 +22,13 @@ export const MAX_CREDENTIALS = 64;
 export const MAX_REPORT_BYTES = 65_536;
 const PROFILE_CONCURRENCY = 4;
 const TOOL_TIMEOUT_MS = 10_000;
+
+/** #207 spec §3.2: one wording for the base config and for a profile. */
+function interactionWarning(subject: string, interaction: Interaction): string {
+  const { plugin, code } = interaction.check;
+  const detail = interaction.message === null ? '' : ` (${sanitizeDiagnostic(interaction.message)})`;
+  return `interaction ${plugin ?? 'unknown'} failed for ${subject}: ${code ?? 'INTERACTION_INIT_FAILED'}${detail}`;
+}
 
 export interface EmptyDir {
   readonly dir: string;
@@ -81,7 +92,9 @@ export async function listProfileNames(naxHome: string): Promise<ProfileListing>
   return { names, warning: null };
 }
 
-type Resolved = { readonly name: string; readonly needs: ProfileNeeds } | { readonly name: string; readonly error: string };
+type Resolved =
+  | { readonly name: string; readonly needs: ProfileNeeds; readonly warning?: string }
+  | { readonly name: string; readonly error: string };
 
 interface ProfileScan {
   readonly profiles: Record<string, ProfileNeeds>;
@@ -135,7 +148,9 @@ export class NaxCapabilityProbe implements CapabilityProbe {
     const empty = await (this.deps.makeEmptyDir ?? makeEmptyDir)();
     try {
       const version = await readNaxVersion(this.deps.nax, empty.dir);
-      const [scan, sandbox, protocols, tools] = await Promise.all([this.scanProfiles(empty.dir), this.sandbox(empty.dir), this.protocols(), this.tools()]);
+      const [scan, base, sandbox, protocols, tools] = await Promise.all([
+        this.scanProfiles(empty.dir), this.baseInteraction(empty.dir), this.sandbox(empty.dir), this.protocols(), this.tools(),
+      ]);
       const credentials = await this.credentials(empty.dir, scan.providers);
       const bounded = boundReport({
         nax: { version, protocols },
@@ -145,8 +160,9 @@ export class NaxCapabilityProbe implements CapabilityProbe {
         tools,
         executors: ['host'],
         ...(relaySupported(version) ? { approvals: { relay: true as const } } : {}),
+        ...(base.check ? { interaction: base.check } : {}),
       });
-      return { capabilities: bounded.capabilities, warnings: [...scan.warnings, ...credentials.warnings, ...bounded.warnings] };
+      return { capabilities: bounded.capabilities, warnings: [...base.warnings, ...scan.warnings, ...credentials.warnings, ...bounded.warnings] };
     } finally {
       await empty.remove();
     }
@@ -168,6 +184,7 @@ export class NaxCapabilityProbe implements CapabilityProbe {
         ...(invalid.length > 0 ? [`skipped ${invalid.length} profile file(s) whose names koda cannot carry: ${quoted}`] : []),
         ...(valid.length > MAX_PROFILES ? [`reported the first ${MAX_PROFILES} of ${valid.length} profiles by name`] : []),
         ...resolved.flatMap((r) => ('error' in r ? [`profile ${r.name} skipped: ${r.error}`] : [])),
+        ...good.flatMap((r) => (r.warning === undefined ? [] : [r.warning])),
       ],
     };
   }
@@ -178,7 +195,18 @@ export class NaxCapabilityProbe implements CapabilityProbe {
     const requirements = parseRequirements(json.value);
     if (!requirements) return { name, error: 'NAX_OUTPUT_UNPARSEABLE' };
     if (requirements.providers.length > MAX_PROVIDERS_PER_PROFILE) return { name, error: 'TOO_MANY_PROVIDERS' };
-    return { name, needs: toProfileNeeds(requirements) };
+    const interaction = parseInteraction(json.value);
+    const needs = toProfileNeeds(requirements, interaction?.check);
+    return interaction && !interaction.check.ok ? { name, needs, warning: interactionWarning(`profile ${name}`, interaction) } : { name, needs };
+  }
+
+  /** #207 spec §3.2: the base config (no profile) is what a job dispatched with no profiles runs on. */
+  private async baseInteraction(cwd: string): Promise<{ readonly check?: InteractionCheck; readonly warnings: readonly string[] }> {
+    const json = parseNaxJson(await this.deps.nax.run(['config', '-d', cwd, '--json'], { cwd }));
+    if (!json.ok) return { warnings: [`base config resolve failed (${json.code})`] };
+    const interaction = parseInteraction(json.value);
+    if (!interaction) return { warnings: [] };
+    return { check: interaction.check, warnings: interaction.check.ok ? [] : [interactionWarning('the base config', interaction)] };
   }
 
   /** D99: needed providers first (one nax did not list is unavailable), then the rest by id; at most 64. */
