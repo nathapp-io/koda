@@ -47,9 +47,9 @@ Principles:
 |:--|:------|:-------|
 | 0 | Shell, tokens, command palette, board filters | **Done** (PR #215 merged 2026-10-05) |
 | 1 | Ticket detail page | **Done** (PR #222 merged 2026-10-06) |
-| 2 | Dashboard / home | **Done** on `feat/web-ux-slices-2-3-4` — new `GET /home` aggregate API + needs-you/projects/activity dashboard |
-| 3 | Shared patterns + docs refresh | **Done** on `feat/web-ux-slices-2-3-4` — `lib/ticket-chips.ts` + `FilterBar.vue` extracted; docs/ux refreshed |
-| 4 | Fleet pages | **Done** on `feat/web-ux-slices-2-3-4` — jobs list state chips + running-first, approvals keyboard inbox |
+| 2 | Dashboard / home | **Done** — PR #223 (`GET /home` aggregate API + needs-you/projects/activity dashboard) |
+| 3 | Shared patterns + docs refresh | **Done** — PR #223 (`lib/ticket-chips.ts` + `FilterBar.vue`; docs/ux refreshed) |
+| 4 | Fleet pages | **Done** — PR #223 (jobs list state chips + running-first, approvals keyboard inbox) |
 | 5 | Settings, KB, Agents, Labels, auth pages | Not started |
 | 6 | Polish: a11y audit, e2e, responsive sweep | Not started |
 
