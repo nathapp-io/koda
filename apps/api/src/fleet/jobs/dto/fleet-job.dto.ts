@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { BashMode } from '../../common/protocol';
+import { FleetJobTicketDto } from '../../tickets/dto/ticket-fleet-job.dto';
 import type { FleetJobRecord } from '../domain/fleet-job.domain';
 import type { MisfitReason } from '../placement-rules';
 
@@ -69,6 +70,8 @@ export class FleetJobDto {
   declare postRun: FleetJobPostRunDto | null;
   @ApiPropertyOptional({ type: String, nullable: true, description: 'The schedule that dispatched the job (S1b §3.1)' }) declare scheduleId: string | null;
   @ApiProperty({ description: 'Schedule ticks absorbed into this job while it sat queued (S1b §3.2)' }) declare coalescedCount: number;
+  @ApiPropertyOptional({ type: [FleetJobTicketDto], nullable: true, description: 'Linked tickets (fleet C9 §2.2). Null on list pages (D460).' })
+  declare tickets: FleetJobTicketDto[] | null;
 
   /** Internal columns (runnerBootId, eventSeq, ackedRunnerSeq, attributedAt) stay server-side. */
   static from(r: FleetJobRecord, pendingApprovals = 0): FleetJobDto {
@@ -85,7 +88,7 @@ export class FleetJobDto {
       finishResult: r.finishResult, escalationReason: r.escalationReason, exitCode: r.exitCode,
       resultBranch: r.resultBranch, resultSha: r.resultSha, resultPrUrl: r.resultPrUrl, wipPush: r.wipPush,
       stories: r.stories, storiesTruncated: r.storiesTruncated, postRun: r.postRun,
-      scheduleId: r.scheduleId, coalescedCount: r.coalescedCount,
+      scheduleId: r.scheduleId, coalescedCount: r.coalescedCount, tickets: null,
     });
   }
 

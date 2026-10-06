@@ -22,4 +22,6 @@ export class DispatchFleetJobDto {
   @ApiPropertyOptional({ type: [String] })
   @IsOptional() @IsArray() @ArrayMaxSize(16) @Matches(LABEL_PATTERN, { each: true }) selectorLabels?: string[];
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(1, 64) pinnedRunnerId?: string;
+  @ApiPropertyOptional({ type: [String], maxItems: 20, description: 'Tickets this job works on, KEY-N (fleet C9). A RUN moves CREATED/VERIFIED ones to IN_PROGRESS.' })
+  @IsOptional() @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) @MaxLength(32, { each: true }) ticketRefs?: string[];
 }

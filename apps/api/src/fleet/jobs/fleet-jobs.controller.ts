@@ -36,7 +36,7 @@ export class FleetJobsController {
   @ApiResponse({ status: 409, description: 'An active job already runs this (repo, feature), or a budget covering the job is paused (fleet.budgetPaused)' })
   @ApiResponse({ status: 422, description: 'Pinned runner can never run this job' })
   async dispatch(@Body() dto: DispatchFleetJobDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    return JsonResponse.Ok(await this.jobs.dispatch(principal.id, ctx.project.id, dto));
+    return JsonResponse.Ok(await this.jobs.dispatch(principal.id, ctx.project.id, dto, { ticketActor: { principal, projectSlug: ctx.project.slug } }));
   }
 
   @Post(':id/cancel')
