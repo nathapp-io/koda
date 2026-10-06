@@ -79,7 +79,9 @@ interaction: {
 ```
 
 - `skipped`: no `interaction` config, or plugin `cli` while headless (the same rule `initInteractionChain` applies;
-  headless = stdin not a TTY, which is always true under the runner).
+  headless = stdin not a TTY, which is always true under the runner). The schema default plugin is `cli`, so most
+  configs report `{ plugin: 'cli', status: 'skipped' }` under the runner.
+- The `cli` plugin is never initialised by the check (its init opens a readline on stdin); on a TTY it reports `ok`.
 - Otherwise nax creates the plugin with the same factory `initInteractionChain` uses (export `createInteractionPlugin`
   from `init.ts` or move it to a shared module), calls `init(config.interaction.config ?? {})`, then always
   `destroy()` when the plugin has one. `ok` on success.
