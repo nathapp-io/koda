@@ -174,9 +174,9 @@ export function keyboardDecision(
 ): { approve: DecideApprovalBody | null; deny: DecideApprovalBody | null } {
   if (!canDecide(a, viewer)) return { approve: null, deny: null }
   if (a.type === 'nax_bash_escalate') {
-    const payload = (a.payload ?? null) as BashApprovalPayload | null
+    // bashPayload validates the shape: a malformed ask reads deny-only, exactly like the panel.
     return {
-      approve: bashChoices(payload).includes('allow') ? toBashBody('allow', '') : null,
+      approve: bashChoices(bashPayload(a)).includes('allow') ? toBashBody('allow', '') : null,
       deny: toBashBody('deny', ''),
     }
   }

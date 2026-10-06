@@ -407,7 +407,15 @@ describe('FleetApprovalInbox', () => {
 
 describe('FleetApprovalInbox keyboard (slice 4)', () => {
   const bashRow = (id: string, over: Partial<FleetApprovalDto> = {}): FleetApprovalDto =>
-    row(id, { type: 'nax_bash_escalate', policyId: null, payload: { command: 'rm -rf node_modules', options: ['allow', 'deny'], commandTruncated: false }, ...over })
+    row(id, {
+      type: 'nax_bash_escalate', policyId: null,
+      // Complete payload: keyboardDecision validates through bashPayload, like the bash panel.
+      payload: {
+        command: 'rm -rf node_modules', commandTruncated: false, maskedCount: 0, root: '/', stage: 'exec',
+        featureName: 'f', reason: 'asked by nax', storyId: null, rawDetail: null, options: ['allow', 'deny'],
+      },
+      ...over,
+    })
 
   /** The inbox registers its keydown handler on `document`; the node harness has none, so tests install a fake. */
   function withFakeDocument() {
