@@ -50,7 +50,7 @@ Principles:
 | 2 | Dashboard / home | **Done** — PR #223 (`GET /home` aggregate API + needs-you/projects/activity dashboard) |
 | 3 | Shared patterns + docs refresh | **Done** — PR #223 (`lib/ticket-chips.ts` + `FilterBar.vue`; docs/ux refreshed) |
 | 4 | Fleet pages | **Done** — PR #223 (jobs list state chips + running-first, approvals keyboard inbox) |
-| 5 | Settings, KB, Agents, Labels, auth pages | Not started |
+| 5 | Settings, KB, Agents, Labels, auth pages | **Done** — feat/web-ux-slice-5 (settings split into SettingsProjectCard/SettingsVcsCard, token agent chips, PageHeader icon slot, FilterBar on memory/timeline, auth brand mark) |
 | 6 | Polish: a11y audit, e2e, responsive sweep | Not started |
 
 ## 4b. Effort estimate (2026-10-05, a guess from file sizes, not measured)
@@ -172,3 +172,8 @@ Update these in Slice 3 (or sooner if you touch the area):
 | 2026-10-06 | Slice 4: running-first ordering is a client-side sort of the loaded page (`runningFirstJobs` in lib/fleet-jobs.ts): RUNNING/UPLOADING first (longest-running on top), then newest-queued | The API owns cross-page order and takes one state filter; a true cross-page running-first would be an API sort param — noted as a follow-up, not a UI lie |
 | 2026-10-06 | Slice 4: approvals inbox gained a keyboard layer — j/k or arrows move a cursor, Enter opens, A approves, D denies, Esc closes; decisions go through the same `onDecide` path and `keyboardDecision` in lib/fleet-approvals.ts | Budget asks are D-only from the keyboard (approve needs a typed amount); a cut bash ask is deny-only, mirroring `bashChoices`. Keys ignore typing targets; the whole flow is covered by inbox component tests + the existing decide e2e |
 | 2026-10-06 | Slice 4: chart wrappers untouched, cost column already existed (fleet S1) | MASTER-PLAN §6 slice 4 constraints |
+| 2026-10-06 | Slice 5: Settings kept its existing two Tabs (project / VCS); the 502-line file was split into `SettingsProjectCard` + `SettingsVcsCard` instead of adding a sticky section nav | With only two sections a sticky nav is chrome, not UX |
+| 2026-10-06 | Slice 5: agent status chips map ACTIVE/PAUSED/OFFLINE to the ticket status tokens done/review/todo; `tests/pages/agents.spec.ts` palette pins replaced with token pins | Deliberate spec change — the old pins held raw palette classes that break in dark mode; tokens are the slice-3 chip source |
+| 2026-10-06 | Slice 5: settings source-grep specs (incl. the web-gap-ops spec, repointed) read page + SettingsVcsCard as one surface; e2e testids unchanged | Slice-1 precedent: splitting a file moves the grepped strings into components; assertions unchanged in intent |
+| 2026-10-06 | Slice 5: no mock previews — every change reuses an established pattern (chips, FilterBar with an SSR-aware `stubFilterBar` helper in the memory/timeline specs, PageHeader icon slot) | Each change is an existing pattern applied to another page, not a new layout worth mocking first |
+| 2026-10-06 | Slice 5: login/register pages untouched (register's root class is pinned; both already conform) — only the auth layout gained a brand mark | Smallest change that satisfies the slice; the pages already match the redesign language |

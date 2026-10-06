@@ -153,6 +153,13 @@ import from it; do not copy maps into components.
 - Approval type/count: `components/fleet/ApprovalBadge.vue` and the inbox rows in
   `components/fleet/ApprovalInbox.vue`.
 
+### Agent status chips
+Agent ACTIVE/PAUSED/OFFLINE map onto the ticket status tokens via `AGENT_STATUS_TOKEN`
+(`done`/`review`/`todo`) + `statusDotClass()`; the chip is the same dot+label chip from
+`lib/ticket-chips.ts` (`TICKET_CHIP_CLASS` / `TICKET_DOT_CLASS`) — never raw palette classes.
+The i18n label always travels with the dot (state is never color alone). Both agents pages
+(`pages/agents.vue`, `pages/[project]/agents.vue`) use this mapping.
+
 ---
 
 ## Shared Page Patterns
@@ -160,6 +167,10 @@ import from it; do not copy maps into components.
 ### Page header
 `components/PageHeader.vue` — `title` + optional `subtitle`, `#actions` slot right-aligned.
 Every page opens with it; page-level actions (create, export) go in the slot.
+
+**Icon**: pages with a natural lucide icon pass it through the `#icon` slot —
+`<template #icon><Icon class="h-5 w-5" /></template>`. PageHeader renders the slot inside a
+`h-10 w-10` bordered muted square to the left of the title.
 
 ### Filter bar
 `components/FilterBar.vue` — responsive grid wrapper for a row of filter controls (selects or
