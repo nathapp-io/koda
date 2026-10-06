@@ -99,6 +99,42 @@ describe('GitHubAppClient', () => {
     const broken = new GitHubAppClient({ ...fleetCfg, githubAppPrivateKeyFile: join(tmpdir(), 'koda-gh-app-missing', 'app.pem') } as never, { githubApiUrl: forge.url } as never, new FleetHttpClient(fleetCfg as never), { mint: jest.fn() } as unknown as GitTokenBroker);
     await expect(broken.verifyRepo('o', 'r')).rejects.toMatchObject({ reason: 'github_app_key_unreadable' });
   });
+
+  describe('getPullRequest (C9 §3.4)', () => {
+    const PR = 'GET /repos/acme/app/pulls/9';
+
+    it('maps a merged PR and sends the given token', async () => {
+      forge.routes.set(PR, () => ({
+        status: 200,
+        body: {
+          state: 'closed', draft: false, merged: true, merged_at: '2026-10-06T01:02:03Z', merged_by: { login: 'dev' },
+          merge_commit_sha: 'abc123', html_url: 'https://github.com/acme/app/pull/9', title: 'Fix it',
+        },
+      }));
+      await expect(client.getPullRequest('ghs_tok', 'acme', 'app', 9)).resolves.toEqual({
+        number: 9, state: 'closed', draft: false, merged: true, mergedAt: new Date('2026-10-06T01:02:03Z'), mergedBy: 'dev',
+        mergeSha: 'abc123', url: 'https://github.com/acme/app/pull/9', title: 'Fix it',
+      });
+      expect(forge.requests[0].headers.authorization).toBe('Bearer ghs_tok');
+    });
+
+    it('maps an open draft PR', async () => {
+      forge.routes.set(PR, () => ({ status: 200, body: { state: 'open', draft: true, merged: false, merged_at: null, merged_by: null, html_url: 'u', title: 't' } }));
+      await expect(client.getPullRequest('t', 'acme', 'app', 9)).resolves.toEqual(expect.objectContaining({ state: 'open', draft: true, merged: false, mergedBy: null, mergeSha: null }));
+    });
+
+    it('returns null for 404', async () => {
+      await expect(client.getPullRequest('t', 'acme', 'app', 9)).resolves.toBeNull();
+    });
+
+    it.each([
+      [{ status: 500, body: {} }],
+      [{ status: 200, body: { draft: false } }],
+    ])('throws provider_error for %j', async (reply) => {
+      forge.routes.set(PR, () => reply);
+      await expect(client.getPullRequest('t', 'acme', 'app', 9)).rejects.toMatchObject({ reason: 'provider_error' });
+    });
+  });
 });
 
 describe('commentOnPullRequest cache hit', () => {
