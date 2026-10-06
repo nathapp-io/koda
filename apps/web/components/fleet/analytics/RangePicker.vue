@@ -73,6 +73,6 @@ function apply(): void {
       </label>
       <Button size="sm" :disabled="!from || !to" data-testid="fleet-analytics-range-apply" @click="apply()">{{ t('fleet.analytics.range.apply') }}</Button>
     </template>
-    <p v-if="invalid" class="w-full text-sm text-destructive" role="alert" data-testid="fleet-analytics-range-invalid">{{ t('fleet.analytics.range.invalid') }}</p>
+    <p v-if="invalid" class="w-full text-sm text-status-rejected" role="alert" data-testid="fleet-analytics-range-invalid">{{ t('fleet.analytics.range.invalid') }}</p>
   </div>
 </template>

@@ -12,7 +12,7 @@ const { t } = useI18n()
     <h2 class="text-sm font-medium">{{ title }}</h2>
     <p v-if="status === 'loading' || status === 'idle'" class="text-sm text-muted-foreground" :data-testid="`${testid}-loading`">{{ t('common.loading') }}</p>
     <div v-else-if="status === 'error'" class="flex flex-wrap items-center gap-3 text-sm" role="alert" :data-testid="`${testid}-error`">
-      <span class="text-destructive">{{ t('fleet.analytics.panelError') }}</span>
+      <span class="text-status-rejected">{{ t('fleet.analytics.panelError') }}</span>
       <Button variant="outline" size="sm" :data-testid="`${testid}-retry`" @click="emit('retry')">{{ t('common.retry') }}</Button>
     </div>
     <p v-else-if="status === 'empty'" class="text-sm text-muted-foreground" :data-testid="`${testid}-empty`">{{ emptyText ?? t('fleet.analytics.panelEmpty') }}</p>

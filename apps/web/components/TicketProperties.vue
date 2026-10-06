@@ -359,7 +359,7 @@ async function removeLink(linkId: string) {
         </div>
         <div v-if="canWork" class="flex items-center gap-2 border-t pt-2.5">
           <Select v-model="selectedLabelId">
-            <SelectTrigger class="w-[150px]">
+            <SelectTrigger class="w-[150px]" :aria-label="t('tickets.labels.select')">
               <SelectValue :placeholder="t('tickets.labels.select')" />
             </SelectTrigger>
             <SelectContent>
@@ -391,7 +391,7 @@ async function removeLink(linkId: string) {
             </a>
             <span v-if="link.prState" :class="prStateClass(link.prState)">{{ t(`tickets.pr.status.${link.prState}`) }}</span>
           </span>
-          <Button size="sm" variant="ghost" class="text-destructive" @click="removeLink(link.id)">
+          <Button size="sm" variant="ghost" class="text-status-rejected" @click="removeLink(link.id)">
             {{ t('common.delete') }}
           </Button>
         </div>
@@ -405,7 +405,7 @@ async function removeLink(linkId: string) {
           >
             {{ extractBranchName(link.url) }}
           </a>
-          <Button size="sm" variant="ghost" class="text-destructive" @click="removeLink(link.id)">
+          <Button size="sm" variant="ghost" class="text-status-rejected" @click="removeLink(link.id)">
             {{ t('common.delete') }}
           </Button>
         </div>
@@ -422,7 +422,7 @@ async function removeLink(linkId: string) {
             </a>
             <span v-if="link.title" class="truncate text-xs text-muted-foreground">{{ link.title }}</span>
           </span>
-          <Button size="sm" variant="ghost" class="text-destructive" @click="removeLink(link.id)">
+          <Button size="sm" variant="ghost" class="text-status-rejected" @click="removeLink(link.id)">
             {{ t('common.delete') }}
           </Button>
         </div>
@@ -431,7 +431,7 @@ async function removeLink(linkId: string) {
           <a :href="safeHref(link.url)" target="_blank" rel="noopener noreferrer" class="truncate text-accent-foreground underline-offset-2 hover:underline">
             {{ link.url }}
           </a>
-          <Button size="sm" variant="ghost" class="text-destructive" @click="removeLink(link.id)">
+          <Button size="sm" variant="ghost" class="text-status-rejected" @click="removeLink(link.id)">
             {{ t('common.delete') }}
           </Button>
         </div>
@@ -439,7 +439,7 @@ async function removeLink(linkId: string) {
         <div v-if="canWork" class="flex items-center gap-2 border-t pt-2.5">
           <Input v-model="newLinkUrl" :placeholder="t('tickets.links.placeholder')" />
           <Select v-model="newLinkType">
-            <SelectTrigger class="w-[110px]">
+            <SelectTrigger class="w-[110px]" :aria-label="t('tickets.links.type')">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

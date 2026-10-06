@@ -14,6 +14,7 @@
     "loadingTicket": "正在加载工单...",
     "changeStatus": "修改状态",
     "addComment": "添加评论",
+    "back": "返回",
     "commentPlaceholder": "输入评论或原因...",
     "loadFailed": "加载失败",
     "retry": "重试",
@@ -286,6 +287,7 @@
     "links": {
       "title": "链接",
       "placeholder": "https://...",
+      "type": "链接类型",
       "add": "添加链接",
       "toast": {
         "added": "已添加链接",

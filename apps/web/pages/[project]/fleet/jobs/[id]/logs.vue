@@ -191,7 +191,7 @@ useProjectEvents(slug, {
       <FleetLogNotices :notices="notices" :timeline-href="timelineHref" :truncated-at="view?.size ?? summary?.sizeBytes ?? 0" />
 
       <p v-if="state?.rateLimited" class="text-sm text-muted-foreground" data-testid="fleet-log-rate-limited">{{ t('fleet.logs.rateLimited') }}</p>
-      <p v-if="state?.error" class="text-sm text-destructive" data-testid="fleet-log-error">{{ state.error }}</p>
+      <p v-if="state?.error" class="text-sm text-status-rejected" data-testid="fleet-log-error">{{ state.error }}</p>
 
       <section v-if="!state?.expired" class="rounded-md border border-border">
         <div class="flex items-center justify-end gap-2 border-b border-border px-2 py-1 text-xs">

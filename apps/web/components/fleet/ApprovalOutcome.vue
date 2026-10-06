@@ -14,7 +14,7 @@
       class="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-3 font-mono text-xs"
       data-testid="fleet-approval-outcome-command"
     >{{ bashText }}</pre>
-    <p v-if="delivery" :data-delivery="delivery.state" :class="delivery.state === 'failed' ? 'text-destructive' : 'text-muted-foreground'" data-testid="fleet-approval-outcome-delivery">
+    <p v-if="delivery" :data-delivery="delivery.state" :class="delivery.state === 'failed' ? 'text-status-rejected' : 'text-muted-foreground'" data-testid="fleet-approval-outcome-delivery">
       {{ deliveryText }}
     </p>
     <p v-if="raised" data-testid="fleet-approval-outcome-raised">{{ t('fleet.approvals.outcome.raisedTo', { amount: formatUsd(raised) }) }}</p>
@@ -35,7 +35,7 @@
         >
           <NuxtLink v-if="r.href" :to="r.href ?? ''" class="font-mono text-xs text-primary underline-offset-4 hover:underline">{{ r.jobId.slice(0, 8) }}</NuxtLink>
           <span v-else class="font-mono text-xs">{{ r.jobId.slice(0, 8) }}</span>
-          <span :class="r.ok ? '' : 'text-destructive'">
+          <span :class="r.ok ? '' : 'text-status-rejected'">
             {{ r.ok ? t('fleet.approvals.outcome.requeueOk') : t(`fleet.approvals.requeueFailure.${r.reason ?? 'unknown'}`) }}
           </span>
         </li>

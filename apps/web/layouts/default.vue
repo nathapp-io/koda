@@ -14,17 +14,39 @@ function onGlobalKeydown(e: KeyboardEvent) {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
     e.preventDefault()
     paletteOpen.value = !paletteOpen.value
+    return
+  }
+  if (e.key === 'Escape' && sidebarOpen.value && isDrawer()) {
+    sidebarOpen.value = false
   }
 }
 
 onMounted(() => {
   if (isDrawer()) sidebarOpen.value = false
   window.addEventListener('keydown', onGlobalKeydown)
+  layoutReady.value = true
 })
 onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
 watch(() => route.path, () => {
   if (isDrawer()) sidebarOpen.value = false
 })
+
+// Drawer focus management: move focus into the drawer when it opens, restore it
+// to the toggle when it closes. layoutReady guards the mount-time
+// `sidebarOpen = false` above so it cannot steal focus on page load. flush:
+// 'sync' is required for that guard to hold: a default (pre) watcher is
+// queued and runs only after onMounted has already set layoutReady, so the
+// mount-time close would still move focus.
+const layoutReady = ref(false)
+
+watch(sidebarOpen, (open) => {
+  if (!layoutReady.value || !import.meta.client || !isDrawer()) return
+  if (open) {
+    nextTick(() => document.querySelector<HTMLElement>('#primary-nav a')?.focus())
+  } else {
+    document.getElementById('sidebar-toggle')?.focus()
+  }
+}, { flush: 'sync' })
 
 const isGlobalAdmin = computed(() => auth.user.value?.role === 'ADMIN')
 
@@ -33,7 +55,9 @@ const projectSlug = computed(() => route.params.project as string | undefined)
 const navLinkClass =
   'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer'
 const activeClass = 'bg-accent text-accent-foreground'
-const sectionLabelClass = 'px-2.5 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/80'
+// Full muted-foreground, not an opacity step: at text-[11px] the /80 blend
+// fails WCAG AA (4.13:1 over the card in light); the solid token clears it.
+const sectionLabelClass = 'px-2.5 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'
 
 /** The last crumb under `/:project/fleet/*`: overview, dispatch, budgets, approvals, analytics, or (anything else) a job. */
 function fleetLeaf(project: string, path: string): string {
@@ -132,7 +156,7 @@ const backTo = computed(() => {
       </div>
 
       <!-- Nav links -->
-      <nav class="flex flex-1 flex-col overflow-y-auto px-3 pb-4 pt-2">
+      <nav id="primary-nav" class="flex flex-1 flex-col overflow-y-auto px-3 pb-4 pt-2">
         <p :class="sectionLabelClass">{{ t('nav.sectionWorkspace') }}</p>
         <NuxtLink
           to="/"
@@ -268,9 +292,11 @@ const backTo = computed(() => {
       <header class="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-border bg-background/90 px-4 backdrop-blur sm:px-6">
         <div class="flex min-w-0 items-center gap-2">
           <Button
+            id="sidebar-toggle"
             variant="ghost"
             size="sm"
             class="h-9 w-9 p-0"
+            aria-controls="primary-nav"
             :aria-expanded="sidebarOpen ? 'true' : 'false'"
             @click="sidebarOpen = !sidebarOpen"
           >
@@ -315,7 +341,7 @@ const backTo = computed(() => {
       </div>
 
       <!-- Page content -->
-      <main id="main" class="px-4 py-4 sm:px-6">
+      <main id="main" tabindex="-1" class="px-4 py-4 sm:px-6">
         <slot />
       </main>
     </div>

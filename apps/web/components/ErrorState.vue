@@ -6,8 +6,8 @@ const emit = defineEmits<{ retry: [] }>()
 
 <template>
   <div class="text-center py-12">
-    <AlertCircle class="mx-auto h-8 w-8 text-destructive" />
-    <p class="mt-2 text-sm text-destructive">{{ t('common.loadFailed') }}</p>
+    <AlertCircle class="mx-auto h-8 w-8 text-status-rejected" />
+    <p class="mt-2 text-sm text-status-rejected">{{ t('common.loadFailed') }}</p>
     <Button variant="outline" class="mt-4" @click="emit('retry')">
       {{ t('common.retry') }}
     </Button>

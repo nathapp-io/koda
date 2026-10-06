@@ -60,6 +60,10 @@ definePageMeta({ layout: 'auth' })
 
 const { t } = useI18n()
 
+// axe document-title: authed pages get their <title> from the default
+// layout's ApprovalBadge titleTemplate; the auth layout renders none.
+useHead({ title: () => `${t('auth.login.signIn')} · Koda` })
+
 const formSchema = toTypedSchema(
   z.object({
     email: z.string().min(1, t('auth.validation.emailRequired')).email(t('auth.validation.emailInvalid')),
