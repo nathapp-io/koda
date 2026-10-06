@@ -181,7 +181,8 @@ koda version
 ```bash
 # API (.env)
 DATABASE_URL="postgresql://koda:koda@localhost:5432/koda"
-# Tests: bun run test:db:up (Postgres on 5433), then bun run test:integration
+# Tests: bun run test:integration (uses the compose Postgres on 5433 from bun run test:db:up when it is up,
+#   else a throwaway Testcontainers Postgres; KODA_TEST_DB_CONTAINER=1 forces the container)
 JWT_SECRET="your-secret"
 API_KEY_SECRET="your-hmac-secret"   # HMAC-SHA256 for API key hashing
 PORT=3100

@@ -142,7 +142,7 @@ Default organization rules:
 Repository rules:
 - do not create `us-XXX` folders under app `test/` directories
 - nax acceptance material belongs under `.nax/features/<feature>/`
-- nax runs that touch `apps/api` need the test Postgres up (`bun run test:db:up` in `apps/api`); integration/e2e specs and PG-backed acceptance tests fail loudly without it instead of skipping
+- nax runs that touch `apps/api` need the compose test Postgres up (`bun run test:db:up` in `apps/api`): the agent shell has no Docker access, so its integration/e2e and PG-backed acceptance runs fail loudly without it instead of skipping. Outside the sandbox, DB-mode jest falls back to a Testcontainers Postgres
 - app-specific test guidance belongs in `.nax/mono/apps/<app>/context.md`
 
 ## i18n
