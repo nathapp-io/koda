@@ -9,7 +9,7 @@ import { TICKET_CHIP_CLASS, TICKET_DOT_CLASS } from '~/lib/ticket-chips'
 
 definePageMeta({ layout: 'default' })
 
-interface Agent {
+interface AgentRow {
   id: string
   name: string
   slug: string
@@ -18,8 +18,18 @@ interface Agent {
   status: 'ACTIVE' | 'PAUSED' | 'OFFLINE'
 }
 
+interface Agent {
+  id: string
+  name: string
+  slug: string
+  roles: string[]
+  capabilities: string[]
+  status: 'ACTIVE' | 'PAUSED' | 'OFFLINE'
+}
+
 // The API returns roles/capabilities as entry objects ({ role }, { capability });
-// older mocks/tests may still use plain strings. Normalize for display only.
+// older mocks/tests may still use plain strings. Normalize once at fetch so the
+// table and the edit dialogs all work with plain strings.
 function roleLabel(role: string | { role: string }) {
   return typeof role === 'string' ? role : role.role
 }
@@ -34,10 +44,16 @@ const toast = useAppToast()
 
 const { data: agentsData, pending, error, refresh } = useAsyncData(
   'agents',
-  () => $api.get('/agents') as Promise<Agent[]>,
+  () => $api.get('/agents') as Promise<AgentRow[]>,
 )
 
-const agents = computed(() => agentsData.value ?? [])
+const agents = computed<Agent[]>(() =>
+  (agentsData.value ?? []).map((agent) => ({
+    ...agent,
+    roles: agent.roles.map(roleLabel),
+    capabilities: agent.capabilities.map(capabilityLabel),
+  })),
+)
 
 const isCreateDialogOpen = ref(false)
 
@@ -161,11 +177,11 @@ function handleAgentCreated() {
             <div class="flex flex-wrap gap-1">
               <Badge
                 v-for="role in agent.roles"
-                :key="roleLabel(role)"
+                :key="role"
                 variant="outline"
                 class="text-xs"
               >
-                {{ roleLabel(role) }}
+                {{ role }}
               </Badge>
             </div>
           </TableCell>
@@ -173,11 +189,11 @@ function handleAgentCreated() {
             <div class="flex flex-wrap gap-1">
               <Badge
                 v-for="cap in agent.capabilities"
-                :key="capabilityLabel(cap)"
+                :key="cap"
                 variant="outline"
                 class="text-xs"
               >
-                {{ capabilityLabel(cap) }}
+                {{ cap }}
               </Badge>
             </div>
           </TableCell>
