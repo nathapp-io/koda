@@ -137,7 +137,7 @@ future nax must not make every profile look broken. `parseRequirements`/`toProfi
 - Per profile: keep the existing behaviour for resolve failures (omitted, `profile <name> skipped: <code>`); a
   resolved profile carries its `interaction`.
 - Warnings for every `ok: false`: `interaction <plugin> failed for the base config: <code>` and
-  `profile <name>: interaction <plugin> failed: <code>`; the nax `message` is appended after
+  `interaction <plugin> failed for profile <name>: <code>`; the nax `message` is appended in parentheses after
   `sanitizeDiagnostic` (it is already redacted by nax; sanitising again is the runner's rule for free text).
 - `boundReport` is unaffected in practice (a few dozen bytes per profile); no new shedding rule.
 
