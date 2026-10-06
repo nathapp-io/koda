@@ -14,17 +14,39 @@ function onGlobalKeydown(e: KeyboardEvent) {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
     e.preventDefault()
     paletteOpen.value = !paletteOpen.value
+    return
+  }
+  if (e.key === 'Escape' && sidebarOpen.value && isDrawer()) {
+    sidebarOpen.value = false
   }
 }
 
 onMounted(() => {
   if (isDrawer()) sidebarOpen.value = false
   window.addEventListener('keydown', onGlobalKeydown)
+  layoutReady.value = true
 })
 onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
 watch(() => route.path, () => {
   if (isDrawer()) sidebarOpen.value = false
 })
+
+// Drawer focus management: move focus into the drawer when it opens, restore it
+// to the toggle when it closes. layoutReady guards the mount-time
+// `sidebarOpen = false` above so it cannot steal focus on page load. flush:
+// 'sync' is required for that guard to hold: a default (pre) watcher is
+// queued and runs only after onMounted has already set layoutReady, so the
+// mount-time close would still move focus.
+const layoutReady = ref(false)
+
+watch(sidebarOpen, (open) => {
+  if (!layoutReady.value || !import.meta.client || !isDrawer()) return
+  if (open) {
+    nextTick(() => document.querySelector<HTMLElement>('#primary-nav a')?.focus())
+  } else {
+    document.getElementById('sidebar-toggle')?.focus()
+  }
+}, { flush: 'sync' })
 
 const isGlobalAdmin = computed(() => auth.user.value?.role === 'ADMIN')
 
@@ -134,7 +156,7 @@ const backTo = computed(() => {
       </div>
 
       <!-- Nav links -->
-      <nav class="flex flex-1 flex-col overflow-y-auto px-3 pb-4 pt-2">
+      <nav id="primary-nav" class="flex flex-1 flex-col overflow-y-auto px-3 pb-4 pt-2">
         <p :class="sectionLabelClass">{{ t('nav.sectionWorkspace') }}</p>
         <NuxtLink
           to="/"
@@ -270,9 +292,11 @@ const backTo = computed(() => {
       <header class="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-border bg-background/90 px-4 backdrop-blur sm:px-6">
         <div class="flex min-w-0 items-center gap-2">
           <Button
+            id="sidebar-toggle"
             variant="ghost"
             size="sm"
             class="h-9 w-9 p-0"
+            aria-controls="primary-nav"
             :aria-expanded="sidebarOpen ? 'true' : 'false'"
             @click="sidebarOpen = !sidebarOpen"
           >
@@ -317,7 +341,7 @@ const backTo = computed(() => {
       </div>
 
       <!-- Page content -->
-      <main id="main" class="px-4 py-4 sm:px-6">
+      <main id="main" tabindex="-1" class="px-4 py-4 sm:px-6">
         <slot />
       </main>
     </div>
