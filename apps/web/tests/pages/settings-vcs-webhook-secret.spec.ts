@@ -3,7 +3,15 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 
 const webDir = join(__dirname, '../..')
-const source = readFileSync(join(webDir, 'pages', '[project]', 'settings.vue'), 'utf-8')
+const settingsPath = join(webDir, 'pages', '[project]', 'settings.vue')
+const vcsCardPath = join(webDir, 'components', 'SettingsVcsCard.vue')
+
+const pageSource = readFileSync(settingsPath, 'utf-8')
+const cardSource = readFileSync(vcsCardPath, 'utf-8')
+// Slice 5 split the settings page into form components; the VCS assertions now
+// read the page + VCS card as one surface (slice-1 precedent — assertions
+// unchanged in intent, only in what they read).
+const source = `${pageSource}\n${cardSource}`
 const en = JSON.parse(readFileSync(join(webDir, 'i18n', 'locales', 'en.json'), 'utf-8'))
 const zh = JSON.parse(readFileSync(join(webDir, 'i18n', 'locales', 'zh.json'), 'utf-8'))
 

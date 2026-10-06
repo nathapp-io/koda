@@ -11,6 +11,7 @@ const actionPanelPath = join(webDir, 'components', 'TicketActionPanel.vue')
 const commentThreadPath = join(webDir, 'components', 'CommentThread.vue')
 const kbPath = join(webDir, 'pages', '[project]', 'kb.vue')
 const settingsProjectCardPath = join(webDir, 'components', 'SettingsProjectCard.vue')
+const settingsVcsCardPath = join(webDir, 'components', 'SettingsVcsCard.vue')
 
 function src(path: string): string {
   return readFileSync(path, 'utf-8')
@@ -67,7 +68,10 @@ describe('Web OpenAPI gap operations are wired in source', () => {
   })
 
   test('settings page uses VCS sync-pr endpoint', () => {
+    // 2026-10-06 UX redesign slice 5: the VCS form moved from the page
+    // into components/SettingsVcsCard.vue.
     const source = src(settingsPath)
-    expect(source).toContain('/vcs/sync-pr')
+    const cardSource = src(settingsVcsCardPath)
+    expect(`${source}\n${cardSource}`).toContain('/vcs/sync-pr')
   })
 })
