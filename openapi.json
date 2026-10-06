@@ -9121,6 +9121,15 @@
           "linkType": {
             "type": "string"
           },
+          "source": {
+            "type": "string",
+            "description": "vcs | fleet: fleet links were written by a fleet job (C9)"
+          },
+          "jobId": {
+            "type": "string",
+            "nullable": true,
+            "description": "The fleet job that produced the link"
+          },
           "title": {
             "type": "string",
             "nullable": true
@@ -9140,6 +9149,8 @@
           "prNumber",
           "prUpdatedAt",
           "linkType",
+          "source",
+          "jobId",
           "title",
           "createdAt"
         ]

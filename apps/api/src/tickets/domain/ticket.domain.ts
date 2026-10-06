@@ -28,6 +28,8 @@ export interface TicketLink {
   provider: string | null;
   externalRef: string | null;
   linkType: string | null;
+  source?: string;
+  jobId?: string | null;
   prNumber: number | null;
   prState: string | null;
   prUpdatedAt: Date | null;

@@ -5,8 +5,9 @@
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '@prisma/client';
+import request from 'supertest';
 import { resetDb } from '../../helpers/reset-db';
-import { bootHttpApp } from '../../helpers/http-app';
+import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { FleetJobTicketEffects } from '../../../src/fleet/tickets/fleet-job-ticket.effects';
 import { PrismaFleetTicketsRepository } from '../../../src/fleet/tickets/prisma-fleet-tickets.repository';
@@ -85,5 +86,15 @@ describeIntegration('fleet PR links (PG)', () => {
     await prisma.ticketLink.create({ data: { ticketId: t.id, url: 'https://example.com/doc', provider: 'other', linkType: 'url' } });
     await expect(app.get(PrismaFleetTicketsRepository).unlink(job.id, t.id)).resolves.toBe(true);
     expect((await links(t.id)).map((l) => l.source)).toEqual(['vcs']);
+  });
+
+  it('the ticket detail response carries source and jobId on the fleet link', async () => {
+    const t = await ticket();
+    const job = await jobFor([t.id], 'https://github.com/acme/app/pull/12');
+    await effects.upsertPrLinks(job.id);
+    const body = data<{ links: Array<{ url: string; source: string; jobId: string | null }> }>(
+      await request(app.getHttpServer()).get(`/api/projects/web/tickets/WEB-${t.number}`).set({ Authorization: `Bearer ${world.tokens.dev}` }).expect(200),
+    );
+    expect(body.links).toEqual([expect.objectContaining({ url: 'https://github.com/acme/app/pull/12', source: 'fleet', jobId: job.id })]);
   });
 });
