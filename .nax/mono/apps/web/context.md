@@ -141,3 +141,6 @@ changing layout, navigation, tokens or the ticket board, and update its Status t
   (SLOs before the project block; Timeline and Settings after KB). Project links are shown first with CSS `order-first`.
 - `components/CommandPalette.vue` is the Cmd/Ctrl+K palette; new top-level destinations should be added there too.
 - Colors come from the HSL tokens in `assets/css/globals.css` (including `status-*` and `priority-*`), never raw hex in components.
+- Ticket chip styling (status/priority dots, type tints, card stripe) lives in `lib/ticket-chips.ts`;
+  import it instead of copying chip class maps. `components/FilterBar.vue` is the shared filter-row
+  grid. Pattern docs: `docs/ux/component-patterns.md`, `docs/ux/design-tokens.md`.

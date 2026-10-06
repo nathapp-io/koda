@@ -8031,6 +8031,33 @@
           "fleet"
         ]
       }
+    },
+    "/api/home": {
+      "get": {
+        "operationId": "HomeController_get",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeDashboardDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The signed-in user's cross-project dashboard: assigned tickets, pending approvals, attention jobs, projects, recent activity",
+        "tags": [
+          "home"
+        ]
+      }
     }
   },
   "info": {
@@ -13116,6 +13143,367 @@
           "recentJobs",
           "recentTruncated",
           "attention"
+        ]
+      },
+      "HomeActivityDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "eventType": {
+            "enum": [
+              "ticket_event",
+              "agent_event",
+              "decision_event"
+            ],
+            "type": "string"
+          },
+          "projectSlug": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "description": "Raw action code (e.g. CREATED, STATUS_CHANGE); the client words it"
+          },
+          "actorId": {
+            "type": "string",
+            "description": "User or agent id of the actor"
+          },
+          "ticketId": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "eventType",
+          "projectSlug",
+          "action",
+          "actorId",
+          "ticketId",
+          "createdAt"
+        ]
+      },
+      "HomeTicketDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "projectSlug": {
+            "type": "string",
+            "example": "acme"
+          },
+          "ref": {
+            "type": "string",
+            "example": "ACME-12",
+            "description": "Project key + number"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "BUG",
+              "ENHANCEMENT",
+              "TASK",
+              "QUESTION"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "CREATED",
+              "VERIFIED",
+              "IN_PROGRESS",
+              "VERIFY_FIX",
+              "CLOSED",
+              "REJECTED"
+            ]
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "LOW",
+              "MEDIUM",
+              "HIGH",
+              "CRITICAL"
+            ]
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "projectSlug",
+          "ref",
+          "title",
+          "type",
+          "status",
+          "priority",
+          "updatedAt"
+        ]
+      },
+      "HomeApprovalDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "budget_override_required",
+              "nax_bash_escalate"
+            ]
+          },
+          "projectId": {
+            "type": "string",
+            "nullable": true,
+            "description": "null for a no-project (requeue-candidate) approval"
+          },
+          "projectSlug": {
+            "type": "string",
+            "nullable": true,
+            "description": "null when the project row is gone"
+          },
+          "jobId": {
+            "type": "string",
+            "nullable": true
+          },
+          "requestedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "projectId",
+          "projectSlug",
+          "jobId",
+          "requestedAt",
+          "expiresAt"
+        ]
+      },
+      "HomeJobDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "projectSlug": {
+            "type": "string"
+          },
+          "feature": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string",
+            "enum": [
+              "RUN",
+              "PLAN"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "ASSIGNED",
+              "RUNNING",
+              "UPLOADING",
+              "COMPLETED",
+              "FAILED",
+              "ESCALATED",
+              "CRASHED",
+              "CANCELLED"
+            ]
+          },
+          "stateReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "pendingApprovals": {
+            "type": "number",
+            "description": "Pending approvals counted across the scanned pending list"
+          },
+          "costSpentUsd": {
+            "type": "string",
+            "example": "0.42",
+            "description": "Decimal as string"
+          },
+          "resultPrUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "queuedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "reason": {
+            "enum": [
+              "failed",
+              "blocked"
+            ],
+            "type": "string",
+            "description": "failed = finished FAILED/ESCALATED/CRASHED within the window; blocked = waiting on a pending approval"
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "projectSlug",
+          "feature",
+          "command",
+          "state",
+          "stateReason",
+          "pendingApprovals",
+          "costSpentUsd",
+          "resultPrUrl",
+          "queuedAt",
+          "finishedAt",
+          "reason"
+        ]
+      },
+      "HomeNeedsYouDto": {
+        "type": "object",
+        "properties": {
+          "tickets": {
+            "description": "Assigned to the caller, open, newest update first, capped",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HomeTicketDto"
+            }
+          },
+          "ticketsTotal": {
+            "type": "number",
+            "description": "Exact count behind the cap"
+          },
+          "approvals": {
+            "description": "Pending in the caller's projects (plus no-project ones for a global admin), newest first, capped",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HomeApprovalDto"
+            }
+          },
+          "approvalsTotal": {
+            "type": "number"
+          },
+          "jobs": {
+            "description": "Blocked first, then failed, both newest first, capped",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HomeJobDto"
+            }
+          },
+          "jobsTotal": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "tickets",
+          "ticketsTotal",
+          "approvals",
+          "approvalsTotal",
+          "jobs",
+          "jobsTotal"
+        ]
+      },
+      "HomeProjectDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string",
+            "example": "ACME"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "openTickets": {
+            "type": "number",
+            "description": "Tickets in CREATED/VERIFIED/IN_PROGRESS/VERIFY_FIX"
+          },
+          "attentionJobs": {
+            "type": "number",
+            "description": "Recent failed jobs plus jobs waiting on a pending approval (7-day window)"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "key",
+          "slug",
+          "description",
+          "openTickets",
+          "attentionJobs"
+        ]
+      },
+      "HomeDashboardDto": {
+        "type": "object",
+        "properties": {
+          "generatedAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Server time every age is measured against"
+          },
+          "needsYou": {
+            "$ref": "#/components/schemas/HomeNeedsYouDto"
+          },
+          "projects": {
+            "description": "Attention first, then open tickets, then name",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HomeProjectDto"
+            }
+          },
+          "activity": {
+            "description": "Merged ticket/agent/decision events, newest first, capped",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HomeActivityDto"
+            }
+          }
+        },
+        "required": [
+          "generatedAt",
+          "needsYou",
+          "projects",
+          "activity"
         ]
       }
     }

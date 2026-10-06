@@ -37,15 +37,16 @@ describe('US-002 AC1: pages/index.vue renders loading state when pending', () =>
     expect(hasLoadingText).toBe(true)
   })
 
-  test('project grid is inside v-else (hidden when pending)', () => {
+  test('dashboard sections render inside v-else (hidden when pending)', () => {
     const source = readFileSync(indexPath, 'utf-8')
-    // Grid div with grid-cols must be inside a v-else block
+    // Slice 2: the project-card grid became the home dashboard (MASTER-PLAN §6); the needs-you /
+    // projects / activity sections play the grid's role here and must sit behind the v-else chain.
     expect(source).toMatch(/v-else[^-]/)
-    expect(source).toContain('grid-cols')
-    // The grid must NOT have v-if="pending" — it must be hidden by v-else
-    const _gridMatch = source.match(/v-else[^>]*class=["'][^"']*grid[^"']*["']|class=["'][^"']*grid[^"']*["'][^>]*v-else/)
+    expect(source).toContain('data-testid="home-needs-you"')
     const hasVElse = source.includes('v-else')
     expect(hasVElse).toBe(true)
+    const vElseIndex = source.indexOf('v-else')
+    expect(source.indexOf('home-needs-you', vElseIndex)).toBeGreaterThan(vElseIndex)
   })
 })
 

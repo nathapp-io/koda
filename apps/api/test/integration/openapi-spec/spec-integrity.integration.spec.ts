@@ -32,6 +32,7 @@ const EXPECTED_ENDPOINTS = [
   { path: '/api/agents/{slug}/update-capabilities', method: 'patch' },
   // Projects
   { path: '/api/projects', method: 'post' },
+  { path: '/api/home', method: 'get' },
   { path: '/api/projects', method: 'get' },
   { path: '/api/projects/{slug}', method: 'get' },
   { path: '/api/projects/{slug}', method: 'patch' },

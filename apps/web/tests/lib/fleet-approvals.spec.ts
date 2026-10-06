@@ -1,6 +1,7 @@
 import { describe, test, expect } from '@jest/globals'
 import {
-  approvalSummary, badgeTarget, badgeText, bashChoices, bashPayload, budgetPayload, buildApprovalQuery,
+  approvalSummary,
+  keyboardDecision, badgeTarget, badgeText, bashChoices, bashPayload, budgetPayload, buildApprovalQuery,
   buildRaiseSchema, canDecide, commandPreview, commentTooLong, countdownText, deliveryView, firstPending,
   inboxPath, pendingByPolicy, raiseAmountError, requeueFailure, requeueResults, resumedAmount, secondsLeft,
   sortPending, toBashBody, toKeepPausedBody, toRaiseBody,
@@ -325,5 +326,43 @@ describe('firstPending (D297)', () => {
     ]
     expect(firstPending(rows)?.id).toBe('soon')
     expect(firstPending([])).toBeNull()
+  })
+})
+
+describe('keyboardDecision (slice 4: inbox A/D keys)', () => {
+  const worker = { kind: 'project' as const, canManage: false, canWork: true }
+  // A complete valid bash payload — keyboardDecision validates through bashPayload like the panel.
+  const bashAsk = (options: string[], over: Record<string, unknown> = {}) => ({
+    type: 'nax_bash_escalate', status: 'pending',
+    payload: {
+      command: 'rm -rf node_modules', commandTruncated: false, maskedCount: 0, root: '/', stage: 'exec',
+      featureName: 'f', reason: 'asked by nax', storyId: null, rawDetail: null, options,
+    },
+    ...over,
+  })
+
+  test('A allows a bash ask nax offered; D always denies', () => {
+    const d = keyboardDecision(bashAsk(['allow', 'deny']) as never, worker)
+    expect(d.approve).toEqual({ decision: 'allow' })
+    expect(d.deny).toEqual({ decision: 'deny' })
+  })
+
+  test('a cut (deny-only) ask has no keyboard approve', () => {
+    const d = keyboardDecision(bashAsk(['allow', 'deny'], { payload: { ...bashAsk(['allow', 'deny']).payload, commandTruncated: true } }) as never, worker)
+    expect(d.approve).toBeNull()
+    expect(d.deny).toEqual({ decision: 'deny' })
+  })
+
+  test('a budget ask denies to keep_paused for a manager; approve needs a typed amount so it is null', () => {
+    const manager = { kind: 'project' as const, canManage: true, canWork: true }
+    const d = keyboardDecision({ type: 'budget_override_required', status: 'pending', payload: {} } as never, manager)
+    expect(d.approve).toBeNull()
+    expect(d.deny).toEqual({ decision: 'keep_paused' })
+  })
+
+  test('a viewer without rights gets no keyboard decisions at all (bash needs canWork, budget canManage)', () => {
+    const viewer = { kind: 'project' as const, canManage: false, canWork: false }
+    expect(keyboardDecision(bashAsk(['allow', 'deny']) as never, viewer)).toEqual({ approve: null, deny: null })
+    expect(keyboardDecision({ type: 'budget_override_required', status: 'pending', payload: {} } as never, worker)).toEqual({ approve: null, deny: null })
   })
 })

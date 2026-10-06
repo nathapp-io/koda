@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref as vueRef, onBeforeUnmount } from 'vue'
 import { Check, Copy } from 'lucide-vue-next'
+import { TICKET_CHIP_CLASS, TICKET_DOT_CLASS, STATUS_DOT, PRIORITY_DOT, typeChipClass } from '~/lib/ticket-chips'
 
 type TicketType = 'BUG' | 'ENHANCEMENT' | 'TASK' | 'QUESTION'
 type TicketPriority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
@@ -34,33 +35,10 @@ const emit = defineEmits<{
 
 const { t, locale } = useI18n()
 
-const STATUS_DOT: Record<TicketStatus, string> = {
-  CREATED: 'bg-status-todo',
-  VERIFIED: 'bg-status-todo',
-  IN_PROGRESS: 'bg-status-active',
-  VERIFY_FIX: 'bg-status-review',
-  CLOSED: 'bg-status-done',
-  REJECTED: 'bg-status-rejected',
-}
+const chipClass = TICKET_CHIP_CLASS
+const dotClass = TICKET_DOT_CLASS
 
-const PRIORITY_DOT: Record<TicketPriority, string> = {
-  CRITICAL: 'bg-priority-critical',
-  HIGH: 'bg-priority-high',
-  MEDIUM: 'bg-priority-medium',
-  LOW: 'bg-priority-low',
-}
-
-const TYPE_CLASS: Record<TicketType, string> = {
-  BUG: 'text-status-rejected border-status-rejected/40',
-  ENHANCEMENT: 'text-status-active border-status-active/40',
-  TASK: 'text-muted-foreground',
-  QUESTION: 'text-muted-foreground',
-}
-
-const chipClass = 'inline-flex items-center gap-1.5 h-[26px] rounded-full border border-border bg-card px-2.5 text-xs font-medium'
-const dotClass = 'h-2 w-2 rounded-full'
-
-const typeClass = computed(() => [chipClass, TYPE_CLASS[props.ticket.type]])
+const typeClass = computed(() => typeChipClass(props.ticket.type))
 
 function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleDateString(locale.value, {

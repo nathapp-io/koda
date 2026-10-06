@@ -125,21 +125,51 @@ const onSubmit = handleSubmit(async (values) => {
 
 ---
 
-## Badges
+## Badges & Chips
 
-### Status Badges
-Use the color mapping from `design-tokens.md`. Always render as:
+*(Rewritten in slice 3 — the old per-component `statusClass()`/`priorityVariant()` helper approach
+is gone.)*
+
+### Ticket status / priority / type chips
+One source of truth: **`lib/ticket-chips.ts`**. Chip = colored token dot + i18n label (state is
+never color alone). TicketHeader, TicketCard, TicketBoard columns and the home dashboard all
+import from it; do not copy maps into components.
+
 ```vue
-<Badge :class="statusClass(ticket.status)">{{ t(`tickets.status.${ticket.status}`) }}</Badge>
+<span :class="TICKET_CHIP_CLASS">
+  <span :class="[TICKET_DOT_CLASS, statusDotClass(ticket.status)]" aria-hidden="true" />{{ t(`tickets.status.${ticket.status}`) }}
+</span>
 ```
 
-### Priority Badges
-```vue
-<Badge :variant="priorityVariant(ticket.priority)">{{ t(`tickets.priority.${ticket.priority}`) }}</Badge>
-```
+- Status dot: `statusDotClass()` → `bg-status-*` tokens.
+- Priority dot: `priorityDotClass()`; board cards add a left stripe via `priorityStripeClass()`.
+- Type tint: `typeChipClass()` → token-tinted border/text (BUG red-ish, ENHANCEMENT indigo-ish).
+- Unknown codes fall back to neutral (`bg-muted-foreground` / muted text) instead of nothing.
+- PR-state dots (`TicketCard`) and fleet job states (`FleetJobStateBadge`) are separate systems —
+  don't mix them with ticket chips.
 
-### Helper Functions
-Extract `statusClass()` and `priorityVariant()` into a shared composable (`composables/useTicketDisplay.ts`) to avoid duplication across TicketCard, TicketBoard, and ticket detail page.
+### Fleet badges
+- Job state pill: `components/fleet/FleetJobStateBadge.vue` (label via `codeLabel`, `fleet.state.*`).
+- Approval type/count: `components/fleet/ApprovalBadge.vue` and the inbox rows in
+  `components/fleet/ApprovalInbox.vue`.
+
+---
+
+## Shared Page Patterns
+
+### Page header
+`components/PageHeader.vue` — `title` + optional `subtitle`, `#actions` slot right-aligned.
+Every page opens with it; page-level actions (create, export) go in the slot.
+
+### Filter bar
+`components/FilterBar.vue` — responsive grid wrapper for a row of filter controls (selects or
+chips). Keep the grid classes literal inside the component; pages put controls in the slot.
+Current user: the fleet jobs list.
+
+### Stat row
+`components/fleet/dashboard/Tiles.vue` is the stat-row pattern (label + value tiles in a
+`grid-cols-2 sm:grid-cols-4` row). Reuse its layout for new count rows; promote it to a shared
+component if a third page needs it.
 
 ---
 

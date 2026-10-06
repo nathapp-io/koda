@@ -163,6 +163,26 @@ export const toKeepPausedBody = (comment: string): DecideApprovalBody => ({ deci
 /** D293: a bash decide never carries budget fields (2a D287 answers 400). */
 export const toBashBody = (decision: BashDecision, comment: string): DecideApprovalBody => ({ decision, ...commentField(comment) })
 
+/**
+ * Slice 4: what the inbox's A / D keys mean for one expanded approval; null = the key does nothing.
+ * Bash: A picks the plain 'allow' (nax must have offered it; a cut ask is deny-only), D denies.
+ * Budget: A needs a raised amount only a human types, so it is null; D keeps the policy paused.
+ */
+export function keyboardDecision(
+  a: Pick<FleetApprovalDto, 'type' | 'status' | 'payload'>,
+  viewer: ApprovalViewer,
+): { approve: DecideApprovalBody | null; deny: DecideApprovalBody | null } {
+  if (!canDecide(a, viewer)) return { approve: null, deny: null }
+  if (a.type === 'nax_bash_escalate') {
+    // bashPayload validates the shape: a malformed ask reads deny-only, exactly like the panel.
+    return {
+      approve: bashChoices(bashPayload(a)).includes('allow') ? toBashBody('allow', '') : null,
+      deny: toBashBody('deny', ''),
+    }
+  }
+  return { approve: null, deny: toKeepPausedBody('') }
+}
+
 /** D292: whole seconds before nax denies the ask, 0 once passed; null without a readable expiry. */
 export function secondsLeft(expiresAt: string | null, now: Date): number | null {
   if (expiresAt === null) return null

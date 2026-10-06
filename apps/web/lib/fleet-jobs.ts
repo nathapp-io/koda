@@ -199,6 +199,24 @@ export function pickActiveJob(records: readonly FleetJobDto[]): FleetJobDto | nu
 /** `koda-job-<id>.tar.gz`, same stem the API's Content-Disposition uses. */
 export const bundleFileName = (jobId: string): string => `koda-job-${jobId}.tar.gz`
 
+/** States that count as "running" for the jobs-list ordering (slice 4). */
+export const RUNNING_JOB_STATES: ReadonlyArray<string> = ['RUNNING', 'UPLOADING']
+
+/**
+ * Slice 4: running jobs first — the longest-running (earliest start) on top, since those are the
+ * ones a supervisor goes to check — then everything else newest-queued first. Sorting is within
+ * the loaded page only: the API owns the cross-page order (one `state` filter, queuedAt desc).
+ */
+export function runningFirstJobs(jobs: readonly FleetJobDto[]): FleetJobDto[] {
+  return [...jobs].sort((a, b) => {
+    const aRunning = RUNNING_JOB_STATES.includes(a.state) ? 0 : 1
+    const bRunning = RUNNING_JOB_STATES.includes(b.state) ? 0 : 1
+    if (aRunning !== bRunning) return aRunning - bRunning
+    if (aRunning === 0) return (a.startedAt ?? '').localeCompare(b.startedAt ?? '')
+    return b.queuedAt.localeCompare(a.queuedAt)
+  })
+}
+
 /** Merges a fetched events page into the loaded timeline: one row per id, ordered by seq. */
 export function mergeEvents(existing: readonly FleetJobEventDto[], incoming: readonly FleetJobEventDto[]): FleetJobEventDto[] {
   const byId = new Map([...existing, ...incoming].map(event => [event.id, event]))

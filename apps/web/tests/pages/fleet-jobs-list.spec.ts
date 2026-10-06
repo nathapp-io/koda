@@ -60,6 +60,22 @@ describe('fleet jobs list', () => {
     expect(list.indexOf('fleet-approvals-link')).toBeLessThan(list.indexOf('fleet-schedules-link'))
   })
 
+  test('slice 4: the state filter is a single-select chip row that drives the same filters.state', () => {
+    expect(list).toContain('data-testid="fleet-filter-state"')
+    expect(list).toMatch(/:aria-pressed="filters\.state === chip\.value"/)
+    expect(list).toMatch(/@click="filters\.state = chip\.value"/)
+    // chips cover All + every API state, labelled through the same codeLabel fallback as the old select
+    expect(list).toMatch(/const stateChips = \[\{ value: ALL, label: t\('fleet\.jobs\.filters\.allStates'\) \}, \.\.\.FLEET_JOB_STATES\.map/)
+    // the three name filters keep the shared filter bar, now three columns wide
+    expect(list).toContain('<FilterBar columns="3">')
+    expect(list).not.toContain('fleet.jobs.filters.allStates\') </SelectItem>') // the state select is gone
+  })
+
+  test('slice 4: the visible page lists running jobs first (lib-owned sort)', () => {
+    expect(list).toContain("runningFirstJobs(jobsApi.jobs.value)")
+    expect(list).toMatch(/<TableRow v-for="job in sortedJobs"/)
+  })
+
   test('a job with pending approvals is marked next to its state, and the list reloads on fleet_approval (spec §5)', () => {
     expect(list).toMatch(/<FleetJobStateBadge :state="job\.state" \/>\s*<Badge v-if="job\.pendingApprovals > 0"[^>]*:data-testid="`fleet-job-needs-approval-\$\{job\.id\}`"/)
     expect(list).toContain("t('fleet.jobs.needsApproval', { count: job.pendingApprovals })")

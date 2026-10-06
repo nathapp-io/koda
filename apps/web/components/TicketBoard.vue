@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import TicketCard from '~/components/TicketCard.vue'
+import { TICKET_DOT_CLASS, statusDotClass } from '~/lib/ticket-chips'
 
 interface Assignee {
   kind: 'user' | 'agent'
@@ -35,15 +36,6 @@ const COLUMNS: Ticket['status'][] = [
   'REJECTED',
 ]
 
-const STATUS_DOT: Record<Ticket['status'], string> = {
-  CREATED: 'bg-status-todo',
-  VERIFIED: 'bg-status-todo',
-  IN_PROGRESS: 'bg-status-active',
-  VERIFY_FIX: 'bg-status-review',
-  CLOSED: 'bg-status-done',
-  REJECTED: 'bg-status-rejected',
-}
-
 function ticketsForStatus(status: string): Ticket[] {
   return props.tickets.filter((t) => t.status === status)
 }
@@ -60,7 +52,7 @@ function ticketsForStatus(status: string): Ticket[] {
       >
         <div class="flex items-center justify-between mb-1">
           <div class="flex items-center gap-2">
-            <span :class="['h-2 w-2 rounded-full', STATUS_DOT[status]]" aria-hidden="true" />
+            <span :class="[TICKET_DOT_CLASS, statusDotClass(status)]" aria-hidden="true" />
             <span class="text-sm font-semibold">{{ t(`tickets.status.${status}`) }}</span>
             <Badge variant="secondary">{{ ticketsForStatus(status).length }}</Badge>
           </div>

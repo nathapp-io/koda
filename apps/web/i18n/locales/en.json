@@ -665,6 +665,20 @@
       "memoryGrowthRate": "Memory growth rate"
     }
   },
+  "home": {
+    "subtitle": "What needs you across your projects",
+    "needsYou": "Needs you",
+    "needsYouEmpty": "Nothing needs you right now",
+    "tickets": { "title": "My tickets", "empty": "No open tickets assigned to you" },
+    "approvals": { "title": "Approvals", "empty": "No pending approvals" },
+    "jobs": { "title": "Attention jobs", "empty": "No failed or blocked jobs in the last 7 days" },
+    "projects": { "title": "Projects", "open": "{n} open", "attention": "{n} need attention" },
+    "activity": {
+      "title": "Recent activity",
+      "empty": "No recent activity",
+      "eventType": { "ticket_event": "Ticket", "agent_event": "Agent", "decision_event": "Decision" }
+    }
+  },
   "fleet": {
     "common": {
       "online": "Online",
@@ -1060,6 +1074,7 @@
       }
     },
     "approvals": {
+      "keys": "j / ↑ ↓ move · Enter open · A approve · D deny · Esc close",
       "title": "Approvals",
       "subtitleProject": "Decisions this project's fleet is waiting on.",
       "subtitleAdmin": "Every fleet decision, including fleet-wide and runner budgets.",
