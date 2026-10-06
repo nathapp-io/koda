@@ -54,7 +54,7 @@ function formatConfidence(value: number) {
       </template>
     </PageHeader>
 
-    <div class="flex flex-wrap items-end gap-3">
+    <FilterBar columns="3">
       <div class="flex flex-col gap-1">
         <label class="text-xs font-medium text-muted-foreground">{{ t('memory.filter.kind') }}</label>
         <select v-model="kindFilter" class="rounded-md border border-border bg-background px-2 py-1 text-sm" @change="applyAndToast">
@@ -72,7 +72,7 @@ function formatConfidence(value: number) {
           </option>
         </select>
       </div>
-    </div>
+    </FilterBar>
 
     <LoadingState v-if="isLoading" />
 

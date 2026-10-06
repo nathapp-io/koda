@@ -428,7 +428,7 @@ describe('Timeline: pages/[project]/timeline.vue has no console.log statements',
 // ──────────────────────────────────────────────────────────────────────────────
 
 const VueFull = require('vue/dist/vue.cjs.js')
-const { renderToString } = require('vue/server-renderer')
+const { renderToString, ssrRenderSlot } = require('vue/server-renderer')
 
 function extractTemplateSfc(sfcSource: string): string {
   const m = sfcSource.match(/<template>([\s\S]*)<\/template>/)
@@ -449,6 +449,26 @@ function stubDiv(tag: string): VueFull.Component {
         if (val !== undefined) attrs[`data-${key}`] = val
       }
       return h('div', { ...attrs, class: 'stub' }, slots)
+    },
+  }
+}
+
+/**
+ * FilterBar pass-through stub. Unlike a client-render stub, it renders the slot
+ * through ssrRenderSlot so slot content goes down the compiler-ssr path — that
+ * is what keeps v-model-on-select emitting `selected` attributes in SSR.
+ */
+function stubFilterBar(): VueFull.Component {
+  return {
+    name: 'StubFilterBar',
+    ssrRender(
+      _ctx: { $slots: Record<string, unknown> },
+      push: (s: string) => void,
+      parent: unknown,
+    ) {
+      push('<div class="stub">')
+      ssrRenderSlot(_ctx.$slots, 'default', {}, null, push, parent)
+      push('</div>')
     },
   }
 }
@@ -523,6 +543,7 @@ describe('Timeline AC1/AC3/AC4/AC5 (Behavioral SSR): page renders correctly with
       setup: () => ctx,
       components: {
         PageHeader: stubDiv('PageHeader'),
+        FilterBar: stubFilterBar(),
         LoadingState: stubDiv('LoadingState'),
         Input: stubDiv('Input'),
         Button: stubDiv('Button'),
@@ -563,6 +584,7 @@ describe('Timeline AC1/AC3/AC4/AC5 (Behavioral SSR): page renders correctly with
       setup: () => ctx,
       components: {
         PageHeader: stubDiv('PageHeader'),
+        FilterBar: stubFilterBar(),
         LoadingState: {
           name: 'MockLoadingState',
           render(this: { title: string }) { return VueFull.h('div', { class: 'loading-indicator' }, this.title || 'Loading...') },
@@ -595,6 +617,7 @@ describe('Timeline AC1/AC3/AC4/AC5 (Behavioral SSR): page renders correctly with
       setup: () => ctx,
       components: {
         PageHeader: stubDiv('PageHeader'),
+        FilterBar: stubFilterBar(),
         LoadingState: stubDiv('LoadingState'),
         Input: stubDiv('Input'),
         Button: stubDiv('Button'),
@@ -624,6 +647,7 @@ describe('Timeline AC1/AC3/AC4/AC5 (Behavioral SSR): page renders correctly with
       setup: () => ctx,
       components: {
         PageHeader: stubDiv('PageHeader'),
+        FilterBar: stubFilterBar(),
         LoadingState: {
           name: 'MockLoadingState',
           render(this: { title: string }) { return VueFull.h('div', { class: 'loading-indicator' }, this.title || 'Loading...') },
@@ -672,6 +696,7 @@ describe('Timeline AC3/AC5 composable contract (SSR-verified reactive transition
       setup: () => ctx,
       components: {
         PageHeader: stubDiv('PageHeader'),
+        FilterBar: stubFilterBar(),
         LoadingState: {
           name: 'MockLoadingState',
           render(this: { title: string }) { return VueFull.h('div', { class: 'loading-indicator' }, this.title || 'Loading...') },
@@ -713,6 +738,7 @@ describe('Timeline AC6/AC7 (Behavioral SSR): filter UI renders with correct bind
       setup: () => ctx,
       components: {
         PageHeader: stubDiv('PageHeader'),
+        FilterBar: stubFilterBar(),
         LoadingState: stubDiv('LoadingState'),
         Input: {
           name: 'MockInput',

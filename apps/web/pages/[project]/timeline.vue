@@ -57,7 +57,7 @@ function formatDate(dateStr: string) {
   <div class="space-y-6">
     <PageHeader :title="t('nav.timeline')" />
 
-    <div class="flex flex-wrap items-end gap-3">
+    <FilterBar columns="3">
       <div class="flex flex-col gap-1">
         <label class="text-xs font-medium text-muted-foreground">{{ t('timeline.filter.eventType') }}</label>
         <select v-model="eventTypeFilter" class="rounded-md border border-border bg-background px-2 py-1 text-sm" @change="applyAndToast">
@@ -76,7 +76,7 @@ function formatDate(dateStr: string) {
         <label class="text-xs font-medium text-muted-foreground">{{ t('timeline.filter.to') }}</label>
         <Input v-model="toFilter" type="date" @change="applyAndToast" />
       </div>
-    </div>
+    </FilterBar>
 
     <LoadingState v-if="isLoading" />
 
