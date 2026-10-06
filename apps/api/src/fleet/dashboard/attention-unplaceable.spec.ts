@@ -76,10 +76,17 @@ describe('job_unplaceable (S2b (c) §2.3)', () => {
     expect(item.reasons?.[0].runnerName).toBe('box-00');
   });
 
-  it('collects runners that block an unplaced job on a provider credential', () => {
+  it('collects runners that block an unplaced job on something the runner can fix (credential or interaction)', () => {
     const broken = dashCaps({ credentials: [{ providerId: 'deepseek', available: false, stored: null, ambient: false }] });
-    const { providerBlockedRunnerIds } = run({ runners: [dashRunner({ capabilities: broken })] });
-    expect([...providerBlockedRunnerIds]).toEqual(['r1']);
-    expect([...run().providerBlockedRunnerIds]).toEqual([]);
+    const { fixableBlockedRunnerIds } = run({ runners: [dashRunner({ capabilities: broken })] });
+    expect([...fixableBlockedRunnerIds]).toEqual(['r1']);
+    expect([...run().fixableBlockedRunnerIds]).toEqual([]);
+  });
+
+  it('#207: a no-profile job on a runner whose base config cannot start its plugin is no_fit on interaction', () => {
+    const tg = dashCaps({ interaction: { ok: false, plugin: 'telegram', code: 'TELEGRAM_NOT_CONFIGURED' } });
+    const result = run({ queued: [{ ...QUEUED, profiles: [] }], runners: [dashRunner({ capabilities: tg })] });
+    expect(result.items[0]?.item).toMatchObject({ verdict: 'no_fit', severity: 'warning', reasons: [{ runnerName: 'wk-mac', reason: 'interaction' }] });
+    expect([...result.fixableBlockedRunnerIds]).toEqual(['r1']);
   });
 });

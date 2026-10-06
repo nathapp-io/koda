@@ -30,11 +30,12 @@ export interface ScopedItem {
 
 export interface DryRunResult {
   items: ScopedItem[];
-  /** Runners whose provider_missing / provider_unavailable misfit holds back an unplaced job (spec §2.4 escalation). */
-  providerBlockedRunnerIds: ReadonlySet<string>;
+  /** Runners whose runner-fixable misfit (credential, interaction) holds back an unplaced job (spec §2.4 escalation). */
+  fixableBlockedRunnerIds: ReadonlySet<string>;
 }
 
-const PROVIDER_REASONS: ReadonlySet<MisfitReason> = new Set<MisfitReason>(['provider_missing', 'provider_unavailable']);
+/** Misfits the runner itself can clear (a credential, the service environment): they raise its runner_unhealthy to error. */
+const RUNNER_FIXABLE_REASONS: ReadonlySet<MisfitReason> = new Set<MisfitReason>(['provider_missing', 'provider_unavailable', 'interaction']);
 const WAITING_REASONS: ReadonlySet<MisfitReason> = new Set<MisfitReason>(['capacity', 'busy_repo']);
 
 /** Runners with unreadable capabilities are never candidates (spec §1.4). */
@@ -72,9 +73,9 @@ export function jobUnplaceableItems(input: DryRunInput, now: Date, t: AttentionT
       .sort((a, b) => a.runnerName.localeCompare(b.runnerName) || a.runnerId.localeCompare(b.runnerId));
     const reasons = misfits.map(({ runnerName, reason }) => ({ runnerName, reason }));
     if (misfits.length < verdicts.length) return emit('fits_not_placed', 'warning', reasons, reasons.length);
-    misfits.filter((m) => PROVIDER_REASONS.has(m.reason)).forEach((m) => blocked.add(m.runnerId));
+    misfits.filter((m) => RUNNER_FIXABLE_REASONS.has(m.reason)).forEach((m) => blocked.add(m.runnerId));
     const { verdict, severity } = classify(misfits.map((m) => m.reason));
     return emit(verdict, severity, reasons, reasons.length);
   });
-  return { items, providerBlockedRunnerIds: blocked };
+  return { items, fixableBlockedRunnerIds: blocked };
 }
