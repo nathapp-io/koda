@@ -10,6 +10,13 @@ export interface EffectJob {
   id: string; projectId: string; projectSlug: string; command: string; state: string; leaseEpoch: number;
   stateReason: string | null; escalationReason: string | null; requestedById: string;
 }
+export interface PrLinkJob {
+  id: string; projectId: string; requestedById: string; resultPrUrl: string | null;
+  repo: { provider: 'github' | 'gitlab'; owner: string; name: string };
+}
+export interface FleetPrLinkInput {
+  ticketId: string; jobId: string; url: string; provider: string; prNumber: number; externalRef: string; now: Date;
+}
 export interface TicketJobRow {
   id: string; command: string; feature: string; state: string; stateReason: string | null; escalationReason: string | null;
   resultBranch: string | null; resultSha: string | null; resultPrUrl: string | null;
@@ -97,6 +104,31 @@ export class PrismaFleetTicketsRepository {
       data: { ticketId, body, type: CommentType.GENERAL, authorUserId: null, authorAgentId: null },
       select: { id: true },
     });
+  }
+
+  async findJobForPrLinks(jobId: string): Promise<PrLinkJob | null> {
+    const r = await this.db.fleetJob.findUnique({
+      where: { id: jobId },
+      select: { id: true, projectId: true, requestedById: true, resultPrUrl: true, repo: { select: { provider: true, owner: true, name: true } } },
+    });
+    return r ? { ...r, repo: { ...r.repo, provider: r.repo.provider as 'github' | 'gitlab' } } : null;
+  }
+
+  /**
+   * D455: insert the fleet PR link, or point the existing (ticketId, url) link at this job
+   * (a vcs link keeps source=vcs; plan P4: latest job wins). True only when a row was created.
+   * Never writes prState on an existing row (M12; see vcs/pr-state-write-sites.spec.ts).
+   * Call inside txManager.run.
+   */
+  async upsertFleetPrLink(input: FleetPrLinkInput): Promise<boolean> {
+    const { ticketId, jobId, url, provider, prNumber, externalRef, now } = input;
+    const { count } = await this.db.ticketLink.createMany({
+      data: [{ ticketId, url, provider, linkType: 'pr', source: TicketLinkSource.FLEET, jobId, prNumber, externalRef, prState: 'open', prUpdatedAt: now }],
+      skipDuplicates: true,
+    });
+    if (count === 1) return true;
+    await this.db.ticketLink.updateMany({ where: { ticketId, url }, data: { jobId } });
+    return false;
   }
 
   async findJobsForTicket(ticketId: string, limit: number): Promise<TicketJobRow[]> {

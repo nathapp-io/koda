@@ -30,7 +30,7 @@ describe('FleetJobTicketEffects.onTerminal (C9 §3.2, D453)', () => {
     stateReason: 'boom', escalationReason: null, requestedById: 'u1',
   });
   const linked = (ticketId: string) => ({ ticketId, ref: ticketId, title: ticketId, status: 'IN_PROGRESS', notifiedEpoch: null });
-  let repo: { findJobForEffects: jest.Mock; findTicketsForJob: jest.Mock; claimNotified: jest.Mock; createSystemComment: jest.Mock };
+  let repo: { findJobForEffects: jest.Mock; findTicketsForJob: jest.Mock; claimNotified: jest.Mock; createSystemComment: jest.Mock; findJobForPrLinks: jest.Mock; upsertFleetPrLink: jest.Mock };
   let events: { record: jest.Mock };
   let effects: FleetJobTicketEffects;
 
@@ -40,6 +40,8 @@ describe('FleetJobTicketEffects.onTerminal (C9 §3.2, D453)', () => {
       findTicketsForJob: jest.fn().mockResolvedValue([linked('t1'), linked('t2')]),
       claimNotified: jest.fn().mockResolvedValue(true),
       createSystemComment: jest.fn().mockImplementation(async (ticketId: string) => ({ id: `c-${ticketId}` })),
+      findJobForPrLinks: jest.fn().mockResolvedValue(null),
+      upsertFleetPrLink: jest.fn().mockResolvedValue(true),
     };
     events = { record: jest.fn() };
     effects = new FleetJobTicketEffects({} as never, repo as never, events as never, { run: (fn: () => unknown) => fn() } as never);
@@ -53,10 +55,10 @@ describe('FleetJobTicketEffects.onTerminal (C9 §3.2, D453)', () => {
     expect(events.record).toHaveBeenCalledWith({ projectId: 'p', ticketId: 't2', action: 'COMMENT_ADDED', actorId: 'u1', data: { commentId: 'c-t2' } });
   });
 
-  it.each(['COMPLETED', 'CANCELLED', 'RUNNING'])('does nothing for %s', async (state) => {
+  it.each(['COMPLETED', 'CANCELLED', 'RUNNING'])('writes no failure comment for %s', async (state) => {
     repo.findJobForEffects.mockResolvedValue(effectJob(state));
     await effects.onTerminal(['j1']);
-    expect(repo.findTicketsForJob).not.toHaveBeenCalled();
+    expect(repo.createSystemComment).not.toHaveBeenCalled();
   });
 
   it('skips a ticket whose claim is lost (already commented this attempt)', async () => {
@@ -77,5 +79,63 @@ describe('FleetJobTicketEffects.onTerminal (C9 §3.2, D453)', () => {
     repo.findJobForEffects.mockResolvedValue(null);
     await effects.onTerminal(['j1', 'j1']);
     expect(repo.findJobForEffects).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('FleetJobTicketEffects.upsertPrLinks (C9 §3.3, D455)', () => {
+  const prJob = (resultPrUrl: string | null) => ({
+    id: 'j1', projectId: 'p', requestedById: 'u1', resultPrUrl, repo: { provider: 'github' as const, owner: 'acme', name: 'app' },
+  });
+  const linked = (ticketId: string) => ({ ticketId, ref: ticketId, title: ticketId, status: 'IN_PROGRESS', notifiedEpoch: null });
+  let repo: Record<string, jest.Mock>;
+  let events: { record: jest.Mock };
+  let effects: FleetJobTicketEffects;
+
+  beforeEach(() => {
+    repo = {
+      findJobForEffects: jest.fn().mockResolvedValue(null),
+      findJobForPrLinks: jest.fn().mockResolvedValue(prJob('https://github.com/acme/app/pull/9')),
+      findTicketsForJob: jest.fn().mockResolvedValue([linked('t1'), linked('t2')]),
+      upsertFleetPrLink: jest.fn().mockResolvedValue(true),
+    };
+    events = { record: jest.fn() };
+    effects = new FleetJobTicketEffects({} as never, repo as never, events as never, { run: (fn: () => unknown) => fn() } as never);
+  });
+
+  it('links the PR on every linked ticket and records TICKET_UPDATED for each created row', async () => {
+    repo.upsertFleetPrLink.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    await effects.upsertPrLinks('j1');
+    expect(repo.upsertFleetPrLink).toHaveBeenCalledWith({
+      ticketId: 't1', jobId: 'j1', url: 'https://github.com/acme/app/pull/9', provider: 'github', prNumber: 9, externalRef: 'acme/app#9', now: expect.any(Date),
+    });
+    expect(events.record.mock.calls).toEqual([[{
+      projectId: 'p', ticketId: 't1', action: 'TICKET_UPDATED', actorId: 'u1', data: { fleetPrLinked: 'https://github.com/acme/app/pull/9', jobId: 'j1' },
+    }]]);
+  });
+
+  it('does nothing without a resultPrUrl', async () => {
+    repo.findJobForPrLinks.mockResolvedValue(prJob(null));
+    await effects.upsertPrLinks('j1');
+    expect(repo.upsertFleetPrLink).not.toHaveBeenCalled();
+  });
+
+  it("ignores a PR URL that does not name the job's repo", async () => {
+    repo.findJobForPrLinks.mockResolvedValue(prJob('https://github.com/evil/fork/pull/9'));
+    await effects.upsertPrLinks('j1');
+    expect(repo.upsertFleetPrLink).not.toHaveBeenCalled();
+  });
+
+  it('keeps going when one ticket fails, and never throws', async () => {
+    repo.upsertFleetPrLink.mockRejectedValueOnce(new Error('fk'));
+    await expect(effects.upsertPrLinks('j1')).resolves.toBeUndefined();
+    expect(repo.upsertFleetPrLink).toHaveBeenCalledTimes(2);
+    repo.findJobForPrLinks.mockRejectedValueOnce(new Error('db down'));
+    await expect(effects.upsertPrLinks('j1')).resolves.toBeUndefined();
+  });
+
+  it('runs from onTerminal for a COMPLETED job (no comment, PR linked)', async () => {
+    repo.findJobForEffects.mockResolvedValue({ id: 'j1', projectId: 'p', projectSlug: 'web', command: 'RUN', state: 'COMPLETED', leaseEpoch: 1, stateReason: null, escalationReason: null, requestedById: 'u1' });
+    await effects.onTerminal(['j1']);
+    expect(repo.upsertFleetPrLink).toHaveBeenCalledTimes(2);
   });
 });

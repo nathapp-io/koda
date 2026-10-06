@@ -6,6 +6,7 @@ import { BudgetEvaluator } from '../budgets/budget-evaluator';
 import { jobSpendKeys } from '../budgets/budget-rules';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { FleetJobLivePublisher } from '../jobs/fleet-job-live.publisher';
+import { FleetJobTicketEffects } from '../tickets/fleet-job-ticket.effects';
 import { readBundleFiles } from './bundle-reader';
 import {
   BUNDLE_INGEST_REPOSITORY, IBundleIngestRepository, INGEST_BACKOFF_MS, INGEST_DRAIN_LIMIT, INGEST_LIMITS, INGEST_MAX_ATTEMPTS, IngestClaim,
@@ -31,6 +32,7 @@ export class BundleIngestService {
     private readonly activity: FleetActivityService,
     private readonly budgets: BudgetEvaluator,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly ticketEffects: FleetJobTicketEffects,
   ) {}
 
   /** D369: off the request path; never throws. */
@@ -90,11 +92,12 @@ export class BundleIngestService {
       await this.repo.markOutcome(claim.id, {
         kind: parsed.partial ? 'partial' : 'done', files: parsed.files, liveCostUsd: correction.liveCostUsd, ledgerCostUsd: parsed.ledgerCostUsd, ingestedAt: now,
       });
-      return { event: this.live.event(updated), spendKeys: correction.costRaised ? jobSpendKeys(updated) : [] };
+      return { event: this.live.event(updated), spendKeys: correction.costRaised ? jobSpendKeys(updated) : [], prFilled: 'resultPrUrl' in correction.patch };
     });
     if (!result) return;
     this.live.publish([result.event]);
     if (result.spendKeys.length > 0) this.budgets.signal(result.spendKeys);
+    if (result.prFilled) void this.ticketEffects.upsertPrLinks(claim.jobId); // C9 §3.3: late PR URL; never throws
   }
 
   private async recordFailure(claim: IngestClaim, error: unknown, now: Date): Promise<void> {

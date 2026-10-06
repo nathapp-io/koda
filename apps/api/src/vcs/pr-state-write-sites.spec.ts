@@ -6,7 +6,8 @@
  *
  * Best-effort tripwire, not a proof: it matches Prisma client method calls. Raw
  * SQL (`$executeRaw`) that writes prState would bypass it, so this complements —
- * never replaces — review of new write paths.
+ * never replaces — review of new write paths. The fleet PR-link `updateMany`
+ * (C9 D455) sets `jobId` only.
  */
 import { readFileSync } from 'fs';
 import { join, relative } from 'path';
@@ -39,6 +40,7 @@ const sites = sourceFiles(SRC_ROOT).flatMap((file) => {
 describe('TicketLink prState write sites (M12)', () => {
   it('has exactly the reviewed ticketLink update/upsert call sites', () => {
     expect(sites.map((s) => s.site).sort()).toEqual([
+      'fleet/tickets/prisma-fleet-tickets.repository.ts:updateMany',
       'vcs/prisma-vcs.repository.ts:updateMany',
       'vcs/prisma-vcs.repository.ts:upsert',
     ]);
@@ -51,7 +53,7 @@ describe('TicketLink prState write sites (M12)', () => {
   });
 
   it('the conditional updateMany skips merged rows but not NULL ones', () => {
-    const update = sites.find((s) => s.site.endsWith(':updateMany'));
+    const update = sites.find((s) => s.site === 'vcs/prisma-vcs.repository.ts:updateMany');
     expect(update?.args).toContain("prState: { not: 'merged' }");
     expect(update?.args).toContain('prState: null');
   });
