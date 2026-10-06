@@ -50,6 +50,8 @@ export interface IFleetConfig {
   jobStartSec: number;
   /** S2b (c) §2.3: QUEUED job age (s) before the dashboard dry-run reports it. */
   jobQueuedWarnSec: number;
+  /** C9 §3.4 (D456): fleet PR-state refresher interval (ms); min 60 000 enforced at boot. */
+  prRefreshMs: number;
 }
 
 export class FleetConfigSchema {
@@ -79,6 +81,7 @@ export class FleetConfigSchema {
   @IsOptional() @IsString() FLEET_JOB_SILENT_ERROR_SEC: string;
   @IsOptional() @IsString() FLEET_JOB_START_SEC: string;
   @IsOptional() @IsString() FLEET_JOB_QUEUED_WARN_SEC: string;
+  @IsOptional() @IsString() FLEET_PR_REFRESH_MS: string;
 }
 
 const int = (key: string, fallback: number): number => Number.parseInt(process.env[key] ?? String(fallback), 10);
@@ -122,6 +125,7 @@ export const fleetConfig = registerAs(FLEET_CFG, (): IFleetConfig => {
     jobSilentErrorSec: int('FLEET_JOB_SILENT_ERROR_SEC', 600),
     jobStartSec: int('FLEET_JOB_START_SEC', 300),
     jobQueuedWarnSec: int('FLEET_JOB_QUEUED_WARN_SEC', 60),
+    prRefreshMs: int('FLEET_PR_REFRESH_MS', 600_000),
   };
 });
 

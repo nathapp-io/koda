@@ -22,6 +22,15 @@ export interface TicketJobRow {
   resultBranch: string | null; resultSha: string | null; resultPrUrl: string | null;
   costSpentUsd: string; costCarriedUsd: string; queuedAt: Date; finishedAt: Date | null;
 }
+export interface RefreshRepo {
+  id: string; projectId: string; provider: 'github' | 'gitlab'; owner: string; name: string; githubInstallationId: bigint | null;
+}
+/** A fleet PR link to refresh; structurally a vcs TicketLinkData plus the job's repo. */
+export interface RefreshableLink {
+  id: string; ticketId: string; url: string; prNumber: number; prState: string | null; externalRef: string | null; source: string;
+  ticket: { id: string; status: string; projectId: string; number: number; externalVcsId: string | null };
+  repo: RefreshRepo;
+}
 
 /** Fleet C9 (spec §1-§3.2): every Prisma access of the fleet tickets module. Joins an open txManager.run. */
 @Injectable()
@@ -151,5 +160,24 @@ export class PrismaFleetTicketsRepository {
     if (count === 0) return false;
     await this.db.ticketLink.deleteMany({ where: { ticketId, jobId, source: TicketLinkSource.FLEET } });
     return true;
+  }
+
+  /** D456: open fleet PR links of live tickets with their job's repo, least recently refreshed first (plan P5). */
+  async findRefreshableFleetLinks(limit: number): Promise<RefreshableLink[]> {
+    const rows = await this.db.ticketLink.findMany({
+      where: {
+        source: TicketLinkSource.FLEET, jobId: { not: null }, prNumber: { not: null },
+        prState: { notIn: ['merged', 'closed'] }, ticket: { deletedAt: null },
+      },
+      select: {
+        id: true, ticketId: true, url: true, prNumber: true, prState: true, externalRef: true, source: true,
+        ticket: { select: { id: true, status: true, projectId: true, number: true, externalVcsId: true } },
+        job: { select: { repo: { select: { id: true, projectId: true, provider: true, owner: true, name: true, githubInstallationId: true } } } },
+      },
+      orderBy: { prUpdatedAt: 'asc' },
+      take: limit,
+    });
+    return rows.flatMap(({ job, prNumber, ...rest }) =>
+      job && prNumber !== null ? [{ ...rest, prNumber, repo: { ...job.repo, provider: job.repo.provider as 'github' | 'gitlab' } }] : []);
   }
 }
