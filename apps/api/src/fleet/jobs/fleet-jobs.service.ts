@@ -24,6 +24,9 @@ import { APPROVAL_REPOSITORY, type IApprovalRepository } from '../approvals/doma
 import { DispatchFleetJobDto } from './dto/dispatch-fleet-job.dto';
 import { DispatchResultDto, FleetJobDto } from './dto/fleet-job.dto';
 import { FleetJobEventDto } from './dto/fleet-job-event.dto';
+import { FleetJobTicketDto } from '../tickets/dto/ticket-fleet-job.dto';
+import { FleetTicketsService, TicketActor } from '../tickets/fleet-tickets.service';
+import { FleetJobTicketEffects } from '../tickets/fleet-job-ticket.effects';
 
 /** What a budget stop did to its jobs (plan D157). Publish `live` and notify `wake` after the transaction commits. */
 export interface BudgetCancelResult {
@@ -47,13 +50,16 @@ export class FleetJobsService {
     private readonly budgets: BudgetGate,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(APPROVAL_REPOSITORY) private readonly approvals: Pick<IApprovalRepository, 'countPendingByJob'>,
+    private readonly fleetTickets: FleetTicketsService,
+    private readonly ticketEffects: FleetJobTicketEffects,
   ) {}
 
   /** Spec §5.1: validate, insert QUEUED (409 on an active duplicate), record, place. */
-  async dispatch(actorId: string, projectId: string, dto: DispatchFleetJobDto, opts: { scheduleId?: string } = {}): Promise<DispatchResultDto> {
+  async dispatch(actorId: string, projectId: string, dto: DispatchFleetJobDto, opts: { scheduleId?: string; ticketActor?: TicketActor } = {}): Promise<DispatchResultDto> {
     const repo = await this.repo.findRepo(dto.repoId);
     if (!repo || repo.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.repos');
     const input = normalizeDispatch(dto, repo.defaultBranch);
+    const tickets = await this.fleetTickets.resolveForDispatch(projectId, dto.ticketRefs); // C9 D450
 
     if (input.pinnedRunnerId) {
       const verdict = await this.placement.evaluatePinned(input.pinnedRunnerId, toPlacementJob(input, repo));
@@ -70,11 +76,16 @@ export class FleetJobsService {
         const created = await this.repo.createJob({
           ...input, projectId, requestedById: actorId, ...(opts.scheduleId ? { scheduleId: opts.scheduleId } : {}),
         });
+        await this.fleetTickets.link(created.id, tickets); // C9 D450: same transaction
         await this.repo.appendEvent(created.id, { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });
         await this.activity.record({
           actorType: 'USER', actorId, action: 'job.dispatched', entityType: 'job', entityId: created.id, jobId: created.id,
           projectId, responsibleUserId: actorId,
-          payload: { repoId: repo.id, feature: created.feature, command: created.command, ref: created.ref, ...(opts.scheduleId ? { scheduleId: opts.scheduleId } : {}) },
+          payload: {
+            repoId: repo.id, feature: created.feature, command: created.command, ref: created.ref,
+            ...(opts.scheduleId ? { scheduleId: opts.scheduleId } : {}),
+            ...(tickets.length > 0 ? { ticketRefs: tickets.map((t) => t.ref) } : {}),
+          },
         });
         return created;
       });
@@ -88,8 +99,13 @@ export class FleetJobsService {
     this.live.publish([this.live.event(job)]);
     const outcome = await this.placement.placeJob(job.id);
     const fresh = (await this.repo.findById(job.id)) ?? job;
+    if (input.command === 'RUN' && tickets.length > 0 && opts.ticketActor) {
+      await this.ticketEffects.onRunDispatched(opts.ticketActor, tickets);   // C9 D452, after commit
+    }
     return Object.assign(new DispatchResultDto(), {
-      job: FleetJobDto.from(fresh),
+      job: Object.assign(FleetJobDto.from(fresh), {
+        tickets: tickets.map((t) => Object.assign(new FleetJobTicketDto(), { ref: t.ref, title: t.title, status: t.status })),
+      }),
       placement: { assigned: outcome.assigned, runnerId: outcome.runnerId, misfits: outcome.misfits },
     });
   }
@@ -234,7 +250,8 @@ export class FleetJobsService {
   }
 
   async get(projectId: string, id: string): Promise<FleetJobDto> {
-    return this.withPending(await this.findInProject(projectId, id));
+    const job = await this.findInProject(projectId, id);
+    return Object.assign(await this.withPending(job), { tickets: await this.fleetTickets.forJob(job.id) });
   }
 
   async events(projectId: string, id: string, page: IPageOption): Promise<IPageResult<FleetJobEventDto>> {

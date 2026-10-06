@@ -164,6 +164,7 @@ model Ticket {
   createdByAgent  Agent?           @relation("TicketCreatedByAgent", fields: [createdByAgentId], references: [id])
   comments        Comment[]
   labels          TicketLabel[]
+  fleetJobs       FleetJobTicket[]
   activities      TicketActivity[]
   links           TicketLink[]
 
@@ -256,12 +257,16 @@ model TicketLink {
   prNumber    Int? // direct PR lookup
   prUpdatedAt DateTime? // tracking last sync time
   linkType    String    @default("url") // url | pr | commit | branch
+  source      String    @default("vcs") // vcs | fleet (fleet C9 §1)
+  jobId       String? // fleet job that produced the link (fleet C9 §1)
   createdAt   DateTime  @default(now())
 
-  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticket Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  job    FleetJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
 
   @@unique([ticketId, url])
   @@index([externalRef])
+  @@index([jobId])
 }
 
 // ---------------------------------------------------------------------------
@@ -814,6 +819,8 @@ model FleetJob {
   logs         FleetJobLog[]
   ingests       FleetBundleIngest[]
   costEvents    FleetCostEvent[]
+  tickets       FleetJobTicket[]
+  ticketLinks   TicketLink[]
   storyResults  FleetStoryResult[]
   reviewResults FleetReviewResult[]
 
@@ -825,6 +832,20 @@ model FleetJob {
   @@index([repoId, firstStartedAt])
   @@index([runnerId, firstStartedAt])
   @@index([scheduleId, queuedAt])
+}
+
+/// Fleet C9 §1 (D448): a job dispatched for one or more tickets.
+model FleetJobTicket {
+  jobId         String
+  ticketId      String
+  notifiedEpoch Int? // last leaseEpoch whose failure comment was written (D453)
+  createdAt     DateTime @default(now())
+
+  job    FleetJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  ticket Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@id([jobId, ticketId])
+  @@index([ticketId])
 }
 
 /// Job timeline. Runner events dedup on (jobId, leaseEpoch, runnerSeq); server events have runnerSeq null (plan D2).

@@ -37,5 +37,6 @@
   "logs": { "404": "No log is stored for this stream or attempt" },
   "logExpired": { "410": "This log was deleted after the retention window" },
   "analyticsQuery": { "-2": "Invalid analytics request: {reason}" },
-  "analyticsDelete": { "-2": "Type {expected} to confirm the deletion" }
+  "analyticsDelete": { "-2": "Type {expected} to confirm the deletion" },
+  "ticketJobs": { "404": "This fleet job is not linked to the ticket" }
 }

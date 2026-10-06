@@ -23,6 +23,13 @@ export const TicketType = {
 } as const;
 export type TicketType = (typeof TicketType)[keyof typeof TicketType];
 
+/** Fleet C9 §1: where a TicketLink came from. */
+export const TicketLinkSource = {
+  VCS: 'vcs',
+  FLEET: 'fleet',
+} as const;
+export type TicketLinkSource = (typeof TicketLinkSource)[keyof typeof TicketLinkSource];
+
 export const Priority = {
   LOW: 'LOW',
   MEDIUM: 'MEDIUM',

@@ -166,4 +166,18 @@ describe('koda fleet dispatch', () => {
     expect(errorSpy.mock.calls.flat().join('\n')).toContain('An active job already runs this feature');
     expect(exitSpy).toHaveBeenLastCalledWith(1);
   });
+
+  it('sends repeated --ticket values as ticketRefs', async () => {
+    (fleetJobsControllerDispatch as jest.Mock).mockResolvedValue({ ret: 0, data: { job: job(), placement: { assigned: false, runnerId: null, misfits: [] } } });
+    await run('--repo', 'acme/app', '--feature', 'login', '--max-cost', '5', '--ticket', 'web-1', '--ticket', 'WEB-2');
+    expect(fleetJobsControllerDispatch).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.objectContaining({ ticketRefs: ['web-1', 'WEB-2'] }),
+    }));
+  });
+
+  it('omits ticketRefs without --ticket', async () => {
+    (fleetJobsControllerDispatch as jest.Mock).mockResolvedValue({ ret: 0, data: { job: job(), placement: { assigned: false, runnerId: null, misfits: [] } } });
+    await run('--repo', 'acme/app', '--feature', 'login', '--max-cost', '5');
+    expect((fleetJobsControllerDispatch as jest.Mock).mock.calls[0][0].body).not.toHaveProperty('ticketRefs');
+  });
 });

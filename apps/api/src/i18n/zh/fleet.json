@@ -37,5 +37,6 @@
   "logs": { "404": "该日志流或尝试没有存储日志" },
   "logExpired": { "410": "该日志已超过保留期限并被删除" },
   "analyticsQuery": { "-2": "无效的分析请求：{reason}" },
-  "analyticsDelete": { "-2": "请输入 {expected} 以确认删除" }
+  "analyticsDelete": { "-2": "请输入 {expected} 以确认删除" },
+  "ticketJobs": { "404": "该任务未关联到此工单" }
 }

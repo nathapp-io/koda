@@ -14,6 +14,7 @@ import { RunnerNotifier } from '../jobs/runner-notifier';
 import type { FleetRepoRef } from '../jobs/domain/fleet-job.domain';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { RUNNER_HELD_STATES, isTerminal } from '../jobs/job-state';
+import { FleetJobTicketEffects } from '../tickets/fleet-job-ticket.effects';
 import { ProtocolVersionException } from '../runners/protocol-version.exception';
 import { FenceService } from './fence.service';
 import { CommandAckProcessor } from './command-ack.processor';
@@ -42,6 +43,7 @@ export class SyncService {
     private readonly broker: GitTokenBroker,
     private readonly fence: FenceService,
     private readonly attribution: PrAttributionService,
+    private readonly ticketEffects: FleetJobTicketEffects,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
 
@@ -132,12 +134,14 @@ export class SyncService {
     return { gitTokens, gitTokenErrors, unknownJobIds };
   }
 
-  /** Evicts cached tokens; posts the attribution comment (spec §7.1). */
+  /** Evicts cached tokens; posts the attribution comment (spec §7.1); ticket effects (C9 §3.2). */
   protected async afterTerminal(jobIds: readonly string[]): Promise<void> {
-    for (const id of new Set(jobIds)) {
+    const ids = [...new Set(jobIds)];
+    for (const id of ids) {
       this.broker.evict(id);
       void this.attribution.attribute(id); // fire-and-forget; never throws
     }
+    if (ids.length > 0) void this.ticketEffects.onTerminal(ids); // fire-and-forget; never throws (D451)
   }
 
   private async deliver(runnerId: string, now: Date): Promise<FleetCommandOut[]> {

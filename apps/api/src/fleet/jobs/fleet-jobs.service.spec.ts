@@ -20,12 +20,14 @@ describe('fleet jobs service approvals count (S1.5 2a D272)', () => {
   const jobB = record('jb');
   let repo: { findPage: jest.Mock; findById: jest.Mock };
   let approvals: { countPendingByJob: jest.Mock };
+  let fleetTickets: { forJob: jest.Mock };
   let service: FleetJobsService;
 
   beforeEach(() => {
     repo = { findPage: jest.fn(), findById: jest.fn() };
     approvals = { countPendingByJob: jest.fn() };
     approvals.countPendingByJob.mockResolvedValue(new Map());
+    fleetTickets = { forJob: jest.fn().mockResolvedValue([]) };
     service = new FleetJobsService(
       repo as never,
       {} as never,
@@ -36,6 +38,8 @@ describe('fleet jobs service approvals count (S1.5 2a D272)', () => {
       {} as never,
       {} as never,
       approvals as never,
+      fleetTickets as never,
+      {} as never,
     );
   });
 
