@@ -141,7 +141,7 @@ async function saveEdit(label: Label) {
             <FormItem>
               <FormLabel>{{ t('labels.form.color') }}</FormLabel>
               <FormControl>
-                <ColorPicker v-bind="componentField" defaultColor="#6366F1" />
+                <ColorPicker v-bind="componentField" defaultColor="#6366F1" :label="t('labels.form.color')" />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -176,7 +176,7 @@ async function saveEdit(label: Label) {
           <TableCell>
             <div v-if="editingId === label.id" class="flex items-center gap-2">
               <Input v-model="editName" class="max-w-[200px]" />
-              <ColorPicker v-model="editColor" defaultColor="#6366F1" />
+              <ColorPicker v-model="editColor" defaultColor="#6366F1" :label="t('labels.form.color')" />
             </div>
             <span v-else>{{ label.name }}</span>
           </TableCell>

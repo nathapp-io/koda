@@ -65,6 +65,14 @@ export default defineNuxtConfig({
     classSuffix: '',
   },
 
+  app: {
+    head: {
+      // axe html-has-lang: the document language must be declared. The UI is
+      // bilingual (en/zh) with no_prefix strategy; `en` is the default locale.
+      htmlAttrs: { lang: 'en' },
+    },
+  },
+
   // Proxy /api/** through Nuxt server → API container is implemented by the
   // Nitro catch-all handler at server/api/[...].ts (M23). It reads
   // NUXT_API_INTERNAL_URL at runtime (a build-time routeRules proxy froze the

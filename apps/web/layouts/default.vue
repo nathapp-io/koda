@@ -33,7 +33,9 @@ const projectSlug = computed(() => route.params.project as string | undefined)
 const navLinkClass =
   'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer'
 const activeClass = 'bg-accent text-accent-foreground'
-const sectionLabelClass = 'px-2.5 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/80'
+// Full muted-foreground, not an opacity step: at text-[11px] the /80 blend
+// fails WCAG AA (4.13:1 over the card in light); the solid token clears it.
+const sectionLabelClass = 'px-2.5 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'
 
 /** The last crumb under `/:project/fleet/*`: overview, dispatch, budgets, approvals, analytics, or (anything else) a job. */
 function fleetLeaf(project: string, path: string): string {

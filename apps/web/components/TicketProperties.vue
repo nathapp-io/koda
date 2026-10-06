@@ -359,7 +359,7 @@ async function removeLink(linkId: string) {
         </div>
         <div v-if="canWork" class="flex items-center gap-2 border-t pt-2.5">
           <Select v-model="selectedLabelId">
-            <SelectTrigger class="w-[150px]">
+            <SelectTrigger class="w-[150px]" :aria-label="t('tickets.labels.select')">
               <SelectValue :placeholder="t('tickets.labels.select')" />
             </SelectTrigger>
             <SelectContent>
@@ -439,7 +439,7 @@ async function removeLink(linkId: string) {
         <div v-if="canWork" class="flex items-center gap-2 border-t pt-2.5">
           <Input v-model="newLinkUrl" :placeholder="t('tickets.links.placeholder')" />
           <Select v-model="newLinkType">
-            <SelectTrigger class="w-[110px]">
+            <SelectTrigger class="w-[110px]" :aria-label="t('tickets.links.type')">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

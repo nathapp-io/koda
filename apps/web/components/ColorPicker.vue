@@ -3,12 +3,14 @@
     <input
       type="color"
       :value="displayColor"
+      :aria-label="props.label"
       class="h-10 w-10 cursor-pointer rounded border border-input p-0.5"
       @input="onColorInput"
     />
     <input
       type="text"
       :value="displayColor"
+      :aria-label="props.label"
       class="flex h-10 w-20 rounded-md border border-input bg-background px-3 py-2 text-sm uppercase ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       @input="onHexInput"
       placeholder="#FFFFFF"
@@ -28,6 +30,8 @@ import { normalizeHexColor } from '~/lib/utils'
 const props = defineProps<{
   modelValue?: string
   defaultColor?: string
+  /** Accessible name for the color swatch and hex inputs (axe `label` rule). */
+  label: string
 }>()
 
 const emit = defineEmits<{

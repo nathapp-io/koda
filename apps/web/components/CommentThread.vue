@@ -136,7 +136,7 @@ async function deleteComment(comment: Comment) {
         </div>
 
         <div v-if="editingId === comment.id" class="space-y-2">
-          <MarkdownEditor v-model="editDraft" />
+          <MarkdownEditor v-model="editDraft" :aria-label="t('comments.label')" />
           <div class="flex gap-2">
             <Button size="sm" @click="saveEdit(comment)">
               {{ t('common.save') }}
@@ -165,7 +165,7 @@ async function deleteComment(comment: Comment) {
         <FormItem>
           <FormLabel>{{ t('comments.label') }}</FormLabel>
           <FormControl>
-            <MarkdownEditor v-bind="componentField" />
+            <MarkdownEditor v-bind="componentField" :aria-label="t('comments.label')" />
           </FormControl>
           <FormMessage />
         </FormItem>
@@ -176,7 +176,7 @@ async function deleteComment(comment: Comment) {
           <FormLabel>{{ t('comments.type') }}</FormLabel>
           <Select v-bind="componentField">
             <FormControl>
-              <SelectTrigger>
+              <SelectTrigger :aria-label="t('comments.type')">
                 <SelectValue :placeholder="t('comments.type')" />
               </SelectTrigger>
             </FormControl>

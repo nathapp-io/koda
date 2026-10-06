@@ -14,6 +14,11 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: string): void
 }>()
 
+// The root is a Tabs component, so fallthrough attributes (e.g. aria-label
+// passed by callers for axe's `label` rule) would land in the void. Forward
+// them explicitly onto the editable Textarea instead.
+defineOptions({ inheritAttrs: false })
+
 const activeTab = ref<'write' | 'preview'>('write')
 
 // M24: renderMarkdownOrEscape catches renderer errors and escapes the raw text,
@@ -36,6 +41,7 @@ function handleInput(event: Event) {
       <Textarea
         :model-value="modelValue"
         class="min-h-[200px] font-mono text-sm"
+        v-bind="$attrs"
         @input="handleInput"
       />
     </TabsContent>
