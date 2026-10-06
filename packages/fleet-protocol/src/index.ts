@@ -14,10 +14,24 @@ export type RunnerArch = 'arm64' | 'x64';
 export type NaxProtocol = 'acp' | 'native';
 export type RunnerExecutor = 'host';
 
+/**
+ * #207: nax's verdict on initialising the resolved config's interaction plugin (`nax config --json` `interaction`).
+ * Absent on a report: the runner's nax is too old to say, which placement treats as unknown, never as a misfit.
+ */
+export interface InteractionCheck {
+  ok: boolean;
+  /** `config.interaction.plugin`; null when the config has no interaction section. */
+  plugin: string | null;
+  /** Set when `ok` is false: nax's error code, e.g. TELEGRAM_NOT_CONFIGURED. */
+  code?: string;
+}
+
 export interface ProfileNeeds {
   protocol: NaxProtocol;
   providers: string[];
   sandbox: boolean;
+  /** #207: this profile's resolved config (base config included). */
+  interaction?: InteractionCheck;
 }
 
 /** nax's verdict on one provider, mirroring `nax auth list --json` without account labels (slice 3 design §1.1). */
@@ -47,6 +61,8 @@ export interface RunnerCapabilities {
   executors: RunnerExecutor[];
   /** S1.5 §3: present only when the runner hosts the nax approval relay (protocol v2, nax >= 0.83.0). */
   approvals?: { relay: true };
+  /** #207: the machine's base nax config (no profile), which a job dispatched with no profiles runs on. */
+  interaction?: InteractionCheck;
 }
 
 export interface EnrollRequest {

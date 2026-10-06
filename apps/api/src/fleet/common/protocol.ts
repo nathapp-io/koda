@@ -16,6 +16,7 @@ export type {
   GitTokenError,
   EnrollRequest,
   EnrollResponse,
+  InteractionCheck,
   JobAck,
   JobReport,
   LifecycleEventPayload,

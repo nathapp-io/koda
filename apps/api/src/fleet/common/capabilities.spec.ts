@@ -13,6 +13,8 @@ const valid = {
   executors: ['host'],
 };
 
+const TG_FAILED = { ok: false, plugin: 'telegram', code: 'TELEGRAM_NOT_CONFIGURED' };
+
 describe('parseCapabilities', () => {
   it('accepts a valid report and returns a clean copy', () => {
     const parsed = parseCapabilities({ ...valid, extra: 'dropped' });
@@ -46,8 +48,28 @@ describe('parseCapabilities', () => {
     ['17 providers in a profile', { ...valid, profiles: { p: { protocol: 'native', providers: Array.from({ length: 17 }, (_, i) => `x${i}`), sandbox: false } } }],
     ['65 credentials', { ...valid, credentials: Array.from({ length: 65 }, (_, i) => cred({ providerId: `x${i}` })) }],
     ['an unparseable expiry', { ...valid, credentials: [cred({ stored: { kind: 'oauth', expires: 'soon', expired: false } })] }],
+    ['#207: interaction with an extra key', { ...valid, interaction: { ...TG_FAILED, message: 'x' } }],
+    ['#207: interaction ok as a string', { ...valid, interaction: { ok: 'no', plugin: null } }],
+    ['#207: interaction null', { ...valid, interaction: null }],
+    ['#207: interaction without plugin', { ...valid, interaction: { ok: true } }],
+    ['#207: an empty plugin name', { ...valid, interaction: { ok: true, plugin: '' } }],
+    ['#207: a 65-character plugin name', { ...valid, interaction: { ok: true, plugin: 'p'.repeat(65) } }],
+    ['#207: a lowercase code', { ...valid, interaction: { ok: false, plugin: 'telegram', code: 'not_configured' } }],
+    ['#207: a profile interaction with an extra key', { ...valid, profiles: { native: { ...valid.profiles.native, interaction: { ...TG_FAILED, extra: 1 } } } }],
   ])('rejects %s', (_label, raw) => {
     expect(() => parseCapabilities(raw)).toThrow(ValidationAppException);
+  });
+
+  it('#207: keeps a valid base and per-profile interaction result, and leaves them absent when absent', () => {
+    const raw = {
+      ...valid,
+      interaction: TG_FAILED,
+      profiles: { native: { ...valid.profiles.native, interaction: { ok: true, plugin: null } } },
+    };
+    expect(parseCapabilities(raw)).toEqual(raw);
+    const plain = parseCapabilities(valid);
+    expect('interaction' in plain).toBe(false);
+    expect('interaction' in plain.profiles['native']).toBe(false);
   });
 
   it('keeps a stored oauth credential with its expiry, an exec verdict and the ambient flag', () => {

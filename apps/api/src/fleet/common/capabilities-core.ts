@@ -1,4 +1,4 @@
-import type { NaxProtocol, ProfileNeeds, RunnerCapabilities, RunnerCredential } from './protocol';
+import type { InteractionCheck, NaxProtocol, ProfileNeeds, RunnerCapabilities, RunnerCredential } from './protocol';
 
 export const MAX_CAPABILITIES_BYTES = 65_536;
 /** #161: bounded names (same rule as dispatch profiles, Task 11) and bounded collections. */
@@ -14,6 +14,10 @@ const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !
 const isStr = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 200;
 const isBool = (v: unknown): v is boolean => typeof v === 'boolean';
 const isStrArray = (v: unknown): v is string[] => Array.isArray(v) && v.every(isStr);
+
+const INTERACTION_KEYS = new Set(['ok', 'plugin', 'code']);
+const INTERACTION_CODE_RE = /^[A-Z0-9_]{1,64}$/;
+const MAX_PLUGIN_NAME = 64;
 
 /**
  * The core carries no framework, so the runner's merge gate can import it directly and prove a real report is accepted
@@ -31,13 +35,29 @@ function fail(reason: string): never {
   throw new CapabilityValidationError(reason);
 }
 
+/** #207, plan D271 style: strict, since a report the API accepts is what placement trusts. */
+function parseInteraction(v: unknown, where: string): InteractionCheck {
+  if (!isObj(v) || Object.keys(v).some((k) => !INTERACTION_KEYS.has(k)) || !isBool(v.ok)) fail(where);
+  const check = v as Obj;
+  const plugin = check.plugin;
+  if (!(plugin === null || (typeof plugin === 'string' && plugin.length > 0 && plugin.length <= MAX_PLUGIN_NAME))) fail(where);
+  if (check.code !== undefined && !(typeof check.code === 'string' && INTERACTION_CODE_RE.test(check.code))) fail(where);
+  return { ok: check.ok as boolean, plugin: plugin as string | null, ...(check.code !== undefined ? { code: check.code as string } : {}) };
+}
+
 function parseProfile(name: string, v: unknown): ProfileNeeds {
   if (!PROFILE_NAME_RE.test(name)) fail(`profile name ${name.slice(0, 70)}`);
   if (!isObj(v) || !PROTOCOLS.includes(v.protocol as NaxProtocol) || !isStrArray(v.providers) || !isBool(v.sandbox)) {
     fail(`profile ${name}`);
   }
   if ((v.providers as string[]).length > MAX_PROVIDERS_PER_PROFILE) fail(`profile ${name} providers`);
-  return { protocol: v.protocol as NaxProtocol, providers: [...(v.providers as string[])], sandbox: v.sandbox as boolean };
+  const interaction = (v as Obj).interaction;
+  return {
+    protocol: v.protocol as NaxProtocol,
+    providers: [...(v.providers as string[])],
+    sandbox: v.sandbox as boolean,
+    ...(interaction !== undefined ? { interaction: parseInteraction(interaction, `profile ${name} interaction`) } : {}),
+  };
 }
 
 const CREDENTIAL_KEYS = new Set(['providerId', 'available', 'stored', 'exec', 'ambient']);
@@ -79,7 +99,7 @@ function parseCredential(c: unknown, i: number): RunnerCredential {
 export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
   if (!isObj(raw)) fail('not an object');
   if (Buffer.byteLength(JSON.stringify(raw), 'utf8') > MAX_CAPABILITIES_BYTES) fail('too large');
-  const { nax, sandbox, profiles, credentials, tools, executors, approvals } = raw;
+  const { nax, sandbox, profiles, credentials, tools, executors, approvals, interaction } = raw;
 
   if (
     !isObj(nax) || !isStr(nax.version) || !Array.isArray(nax.protocols) || nax.protocols.length === 0 ||
@@ -109,5 +129,6 @@ export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
     tools: { git: tools.git as boolean, gh: tools.gh as boolean, glab: tools.glab as boolean },
     executors: [...(executors as Array<'host'>)],
     ...(approvals !== undefined ? { approvals: { relay: true as const } } : {}),
+    ...(interaction !== undefined ? { interaction: parseInteraction(interaction, 'interaction') } : {}),
   };
 }
