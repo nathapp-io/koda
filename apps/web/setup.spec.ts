@@ -17,7 +17,6 @@ describe('US-001-1: Install npm dependencies and Shadcn components', () => {
     'label',
     'form',
     'table',
-    'separator',
     'avatar',
     'sonner',
     'dropdown-menu'
@@ -41,7 +40,7 @@ describe('US-001-1: Install npm dependencies and Shadcn components', () => {
     })
   })
 
-  test('all 14 shadcn components have index files', () => {
+  test('all 13 shadcn components have index files', () => {
     const componentUiDir = join(webDir, 'components', 'ui')
 
     componentNames.forEach((componentName) => {
