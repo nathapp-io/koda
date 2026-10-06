@@ -26,6 +26,7 @@ import { DispatchResultDto, FleetJobDto } from './dto/fleet-job.dto';
 import { FleetJobEventDto } from './dto/fleet-job-event.dto';
 import { FleetJobTicketDto } from '../tickets/dto/ticket-fleet-job.dto';
 import { FleetTicketsService, TicketActor } from '../tickets/fleet-tickets.service';
+import { FleetJobTicketEffects } from '../tickets/fleet-job-ticket.effects';
 
 /** What a budget stop did to its jobs (plan D157). Publish `live` and notify `wake` after the transaction commits. */
 export interface BudgetCancelResult {
@@ -50,6 +51,7 @@ export class FleetJobsService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(APPROVAL_REPOSITORY) private readonly approvals: Pick<IApprovalRepository, 'countPendingByJob'>,
     private readonly fleetTickets: FleetTicketsService,
+    private readonly ticketEffects: FleetJobTicketEffects,
   ) {}
 
   /** Spec §5.1: validate, insert QUEUED (409 on an active duplicate), record, place. */
@@ -97,6 +99,9 @@ export class FleetJobsService {
     this.live.publish([this.live.event(job)]);
     const outcome = await this.placement.placeJob(job.id);
     const fresh = (await this.repo.findById(job.id)) ?? job;
+    if (input.command === 'RUN' && tickets.length > 0 && opts.ticketActor) {
+      await this.ticketEffects.onRunDispatched(opts.ticketActor, tickets);   // C9 D452, after commit
+    }
     return Object.assign(new DispatchResultDto(), {
       job: Object.assign(FleetJobDto.from(fresh), {
         tickets: tickets.map((t) => Object.assign(new FleetJobTicketDto(), { ref: t.ref, title: t.title, status: t.status })),

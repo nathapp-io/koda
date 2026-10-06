@@ -76,4 +76,19 @@ describeIntegration('fleet dispatch with tickets (PG)', () => {
   it('answers 400 for more than 20 refs', async () => {
     await dispatch({ feature: 'many', ticketRefs: Array.from({ length: 21 }, (_, i) => `WEB-${i + 1}`) }).expect(400);
   });
+
+  it('a RUN starts CREATED and VERIFIED tickets and leaves others; a PLAN starts none', async () => {
+    const [created, verified, fixing] = [await ticket(), await ticket('VERIFIED'), await ticket('VERIFY_FIX')];
+    await dispatch({ feature: 'starts', ticketRefs: [created, verified, fixing].map((t) => `WEB-${t.number}`) }).expect(201);
+    const statuses = await prisma.ticket.findMany({ where: { id: { in: [created.id, verified.id, fixing.id] } }, orderBy: { number: 'asc' } });
+    expect(statuses.map((s) => s.status)).toEqual(['IN_PROGRESS', 'IN_PROGRESS', 'VERIFY_FIX']);
+    const activity = await prisma.ticketActivity.findFirst({ where: { ticketId: created.id, toStatus: 'IN_PROGRESS' } });
+    expect(activity?.actorUserId).toBe(world.ids.dev);
+
+    const planned = await ticket();
+    await request(server).post('/api/projects/web/fleet/jobs').set(auth('dev'))
+      .send({ repoId: world.repoId, command: 'PLAN', planFrom: 'docs/spec.md', maxCostUsd: 5, feature: 'plans', ticketRefs: [`WEB-${planned.number}`] })
+      .expect(201);
+    expect((await prisma.ticket.findUniqueOrThrow({ where: { id: planned.id } })).status).toBe('CREATED');
+  });
 });

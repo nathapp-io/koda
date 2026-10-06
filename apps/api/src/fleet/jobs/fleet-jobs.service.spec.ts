@@ -39,6 +39,7 @@ describe('fleet jobs service approvals count (S1.5 2a D272)', () => {
       {} as never,
       approvals as never,
       fleetTickets as never,
+      {} as never,
     );
   });
 
