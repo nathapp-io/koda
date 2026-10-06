@@ -5,7 +5,7 @@
  * `describe.skip`, and `--passWithNoTests` turns that into a silent green). This
  * wrapper sets the flag when any targeted spec is DB-gated, so a story that writes
  * `test/integration/**` actually runs it. The flag makes jest globalSetup push the
- * schema to the test Postgres (`bun run test:db:up`, port 5433); with no database
+ * schema to the test Postgres (compose on 5433, else Testcontainers); with no database
  * the run fails instead of skipping. Unit-only targets stay database-free.
  *
  * A target that is not an existing path (a jest name pattern, a renamed file) also

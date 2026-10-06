@@ -8,28 +8,50 @@
  *
  * In DB mode `.env.test` OVERRIDES inherited variables: a parent process (nax is a
  * Bun program and auto-loads the repo `.env`) can pass down a dev DATABASE_URL, and
- * the schema push below force-resets whatever that URL points at. The URL is then
- * checked by `assertSafeTestDatabaseUrl` before Prisma runs.
+ * the schema push below force-resets whatever that URL points at. An inherited
+ * DATABASE_URL is therefore never used: the database comes from `resolveTestDatabase`
+ * (KODA_TEST_DATABASE_URL, else the compose database named in `.env.test` when it is
+ * up, else a Testcontainers Postgres) and is checked by `assertSafeTestDatabaseUrl`
+ * before Prisma runs. The chosen URL is exported as DATABASE_URL for the specs.
  */
-import { config } from 'dotenv';
+import { config, parse } from 'dotenv';
+import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { execSync } from 'child_process';
 import { PrismaClient } from '@prisma/client';
 import { assertSafeTestDatabaseUrl } from './helpers/test-database-url';
+import { rememberTestDatabase, resolveTestDatabase } from './helpers/test-database';
 import { PARTIAL_UNIQUE_INDEXES } from './helpers/partial-indexes';
+
+const ENV_TEST_PATH = resolve(__dirname, '../.env.test');
 
 export default async function globalSetup(): Promise<void> {
   // Only `bun run test:integration` (and nax's test:scoped / acceptance) set
   // KODA_DB_TESTS=1. Unit runs (`bun run test`) must never need a database.
   const dbMode = process.env.KODA_DB_TESTS === '1';
-  config({ path: resolve(__dirname, '../.env.test'), quiet: true, override: dbMode });
+  config({ path: ENV_TEST_PATH, quiet: true, override: dbMode });
   if (!dbMode) return;
 
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    throw new Error('KODA_DB_TESTS=1 but DATABASE_URL is not set');
+  // The compose URL is read from the file itself, never from process.env, so an inherited
+  // DATABASE_URL cannot stand in for it even if `.env.test` stops defining one.
+  const composeUrl = parse(readFileSync(ENV_TEST_PATH))['DATABASE_URL'];
+  const database = await resolveTestDatabase(process.env, composeUrl);
+  rememberTestDatabase(database);
+  try {
+    await prepareSchema(database.databaseUrl);
+  } catch (error) {
+    // globalTeardown does not run when globalSetup throws: stop a container we started here.
+    await database.stop();
+    throw error;
   }
+  if (database.source === 'testcontainers') {
+    process.stdout.write('KODA_DB_TESTS=1: using a throwaway Testcontainers Postgres\n');
+  }
+}
+
+async function prepareSchema(databaseUrl: string): Promise<void> {
   assertSafeTestDatabaseUrl(databaseUrl);
+  process.env.DATABASE_URL = databaseUrl;
 
   execSync('bunx prisma db push --force-reset --skip-generate', {
     stdio: 'inherit',

@@ -54,6 +54,7 @@ Other apps should stay thin and call this API instead of reimplementing business
 - `@nathapp/nestjs-logging`
 - `@nathapp/nestjs-throttler`
 - Jest for unit, integration, and e2e tests
+- no Redis at runtime: `@nathapp/nestjs-cache` runs with `CacheStrategy.MEMORY` (single API instance; `@keyv/redis` and `@qified/redis` are installed but unused), so tests need Postgres only. Introducing Redis is an architecture change: it needs its own logical DB index (and key prefix) on the shared dev Redis, plus a test-tier Redis in `test/helpers/test-database.ts`
 
 ## Architecture
 
@@ -184,20 +185,21 @@ Integration details:
 - they must NOT require a database: compile the module with `Test.createTestingModule({ imports: [FeatureModule] }).compile()` and mock external collaborators (`PrismaService`, `TRANSACTION_MANAGER`, `ConfigService`) via provider `useValue`
 - `test/integration/` is reserved for behavior that genuinely needs a real DB: repository round-trips, constraints, soft-delete semantics, transactions
 
-Rationale: `bun run test` runs without a database, so DI/module-registration breakage must surface there. `test:integration` requires a real Postgres (`bun run test:db:up` starts a disposable one on port 5433 from the root `docker-compose.test.yml`) and is not always run, so module-wiring tests hidden inside it can mask failures.
+Rationale: `bun run test` runs without a database, so DI/module-registration breakage must surface there. `test:integration` requires a real Postgres (the compose one from `bun run test:db:up` on port 5433, else a throwaway Testcontainers one; see below) and is not always run, so module-wiring tests hidden inside it can mask failures.
 
-### nax runs need the test Postgres
+### Which test Postgres a DB-mode run uses
 
 - integration and e2e specs only run under `KODA_DB_TESTS=1`; without it they are `describe.skip` and pass as zero tests
 - nax's scoped test command (`bun run test:scoped <files>`) sets `KODA_DB_TESTS=1` whenever a targeted path matches `integration` or `e2e`, and the acceptance command always sets it
-- start the database before a nax run that touches `apps/api`: `bun run test:db:up`. With it down, those steps fail with `P1001: Can't reach database server at localhost:5433` instead of skipping
+- jest globalSetup picks the database in this order (`test/helpers/test-database.ts`): `KODA_TEST_DATABASE_URL` when set (CI); else the compose test database named in `.env.test` (localhost:5433) when it answers; else a throwaway Postgres 16 started with Testcontainers (needs Docker) and stopped after the run. An inherited `DATABASE_URL` is never used
+- nax's agent shell is sandboxed without Docker access, so agent-run DB tests need the compose database: run `bun run test:db:up` before a nax run that touches `apps/api`. nax's own quality and acceptance commands run outside the sandbox and fall back to Testcontainers
 - a story that writes a `test/integration/**` spec must see it run and pass under `test:scoped`, not just compile
-- every DB-mode run force-resets the test database (only a local `*_test` database is accepted; `.env.test` overrides an inherited `DATABASE_URL`), so do not run two DB-mode jest runs against the same database at once
+- every DB-mode run force-resets the test database (only a local `*_test` database is accepted), so do not run two DB-mode jest runs against the same database at once. A second checkout (worktree, clone) sets `KODA_TEST_DB_CONTAINER=1` to skip the compose database and use a private container
 
 Useful scripts (run from `apps/api`):
 - `bun run test`
 - `bun run test:scoped <files>` (jest on the given files; DB mode when any is an integration/e2e spec)
-- `bun run test:db:up` (start test Postgres on 5433; `test:db:down` stops it)
+- `bun run test:db:up` (start the compose test Postgres on 5433; `test:db:down` stops it; optional when Docker is available)
 - `bun run test:integration`
 - `bun run db:generate`
 - `bun run db:migrate`

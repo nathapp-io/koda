@@ -2,7 +2,7 @@
  * Guard for jest globalSetup, which runs `prisma db push --force-reset`.
  *
  * Only a Postgres database on the local machine whose name ends in `_test`
- * (e.g. the `docker-compose.test.yml` one at localhost:5433/koda_test) may be
+ * (the `docker-compose.test.yml` one at localhost:5433/koda_test, or a Testcontainers one) may be
  * reset. Anything else, such as a dev database or a stale SQLite URL inherited
  * from a parent process, is refused before Prisma touches it.
  */

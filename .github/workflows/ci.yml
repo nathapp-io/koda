@@ -291,7 +291,8 @@ jobs:
       - name: Integration + e2e (Postgres)
         run: cd apps/api && bun run test:integration
         env:
-          DATABASE_URL: postgresql://koda:koda@localhost:5433/koda_test
+          # Explicit, so a broken service fails the job instead of falling back to Testcontainers.
+          KODA_TEST_DATABASE_URL: postgresql://koda:koda@localhost:5433/koda_test
 
       - name: Runner integration (Postgres, built API)
         run: cd apps/runner && bun run test:integration
