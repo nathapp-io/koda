@@ -41,6 +41,16 @@ describe('FleetDashboardService (S2b (c) §1)', () => {
     expect(g.runners.find((r) => r.id === 'r1')?.naxVersion).toBe('0.83.3');
   });
 
+  it('passes the credential expiry window to the attention rules (S3 §4.4)', async () => {
+    const soon = new Date(DASH_NOW.getTime() + 10 * 86_400_000).toISOString();
+    const caps = dashCaps({ credentials: [{ providerId: 'deepseek', available: true, stored: { kind: 'oauth', expires: soon, expired: false }, ambient: false }] });
+    const repo = fakeRepo({ findRunners: jest.fn().mockResolvedValue([rawRunner({ capabilities: caps })]), findActiveJobs: jest.fn().mockResolvedValue([]) });
+    const v7 = await new FleetDashboardService(repo, budgets, testFleetConfig()).snapshot({ kind: 'global' }, DASH_NOW);
+    expect(v7.attention).toEqual([]);
+    const v14 = await new FleetDashboardService(repo, budgets, testFleetConfig({ credentialExpiryWarnDays: 14 })).snapshot({ kind: 'global' }, DASH_NOW);
+    expect(v14.attention.map((a) => a.conditions)).toEqual([[{ type: 'credential', providerId: 'deepseek', why: 'expiring' }]]);
+  });
+
   it('asks pending approvals only for the listed (capped) jobs', async () => {
     const many = Array.from({ length: 201 }, (_, i) => dashJob({ id: `j${i}` }));
     const repo = fakeRepo({ findActiveJobs: jest.fn().mockResolvedValue(many) });

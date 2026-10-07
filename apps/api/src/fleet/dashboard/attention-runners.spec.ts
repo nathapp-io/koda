@@ -81,6 +81,43 @@ describe('runner_unhealthy (S2b (c) §2.4)', () => {
     expect(run([dashRunner({ capabilities: null, lastSeenAt: secAgo(91) })])[0].conditions).toEqual([{ type: 'offline', jobsHeld: 0 }]);
   });
 
+  it('warns on an OAuth credential expiring within the window, even when no profile names it (S3 §4.4)', () => {
+    const soon = new Date(DASH_NOW.getTime() + 3 * 86_400_000).toISOString();
+    const later = new Date(DASH_NOW.getTime() + 30 * 86_400_000).toISOString();
+    const caps = dashCaps({
+      profiles: {},
+      credentials: [
+        { providerId: 'claude', available: true, stored: { kind: 'oauth', expires: soon, expired: false }, ambient: false },
+        { providerId: 'codex', available: true, stored: { kind: 'oauth', expires: later, expired: false }, ambient: false },
+      ],
+    });
+    expect(run([dashRunner({ capabilities: caps })])).toEqual([
+      expect.objectContaining({ severity: 'warning', conditions: [{ type: 'credential', providerId: 'claude', why: 'expiring' }] }),
+    ]);
+  });
+
+  it('does not add expiring for a provider already reported, and expiring alone never escalates to error', () => {
+    const soon = new Date(DASH_NOW.getTime() + 1 * 86_400_000).toISOString();
+    const unavailable = dashCaps({
+      credentials: [{ providerId: 'deepseek', available: false, stored: { kind: 'oauth', expires: soon, expired: false }, ambient: false }],
+    });
+    expect(run([dashRunner({ capabilities: unavailable })])[0].conditions).toEqual([{ type: 'credential', providerId: 'deepseek', why: 'unavailable' }]);
+    const expiringOnly = dashCaps({
+      credentials: [{ providerId: 'deepseek', available: true, stored: { kind: 'oauth', expires: soon, expired: false }, ambient: false }],
+    });
+    expect(run([dashRunner({ capabilities: expiringOnly })], new Map(), new Set(['r1']))[0]).toMatchObject({
+      severity: 'warning', conditions: [{ type: 'credential', providerId: 'deepseek', why: 'expiring' }],
+    });
+  });
+
+  it('honours the configured window', () => {
+    const in10 = new Date(DASH_NOW.getTime() + 10 * 86_400_000).toISOString();
+    const caps = dashCaps({ credentials: [{ providerId: 'deepseek', available: true, stored: { kind: 'oauth', expires: in10, expired: false }, ambient: false }] });
+    expect(run([dashRunner({ capabilities: caps })])).toEqual([]);
+    expect(runnerUnhealthyItems([dashRunner({ capabilities: caps })], new Map(), new Set(), DASH_NOW, { ...DASH_THRESHOLDS, credentialExpiryWarnDays: 14 }))
+      .toHaveLength(1);
+  });
+
   describe('#207: interaction', () => {
     const broken: InteractionCheck = { ok: false, plugin: 'telegram', code: 'TELEGRAM_NOT_CONFIGURED' };
     const profile = (interaction?: InteractionCheck) => ({ protocol: 'native' as const, providers: [], sandbox: false, ...(interaction ? { interaction } : {}) });

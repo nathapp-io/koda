@@ -7,7 +7,7 @@ export const secAgo = (sec: number): Date => new Date(DASH_NOW.getTime() - sec *
 
 /** The spec §2 defaults. */
 export const DASH_THRESHOLDS: AttentionThresholds = {
-  runnerOfflineSec: 90, jobSilentSec: 180, jobSilentErrorSec: 600, jobStartSec: 300, jobQueuedWarnSec: 60,
+  runnerOfflineSec: 90, jobSilentSec: 180, jobSilentErrorSec: 600, jobStartSec: 300, jobQueuedWarnSec: 60, credentialExpiryWarnDays: 7,
 };
 
 export const dashCaps = (over: Partial<RunnerCapabilities> = {}): RunnerCapabilities => ({
