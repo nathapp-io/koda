@@ -98,13 +98,17 @@ export class ScriptedRunner {
    * the runner speaks protocol v2 and reports the approval relay (S1.5 2a D271), so gated/escalate jobs place on it.
    * With `logs` it speaks protocol v3 (S2a R1): it streams logs over `putLog` and sends no `log` sync events.
    * With `capabilities` the runner reports that blob instead of the default.
+   * S3 §3: with `configJobs` the runner reports the config-jobs capability, so placement offers it
+   * CONFIG_EDIT / CONFIG_DRIFT jobs (runners without it get the permanent misfit `config_jobs`).
    */
   static async enroll(
-    adminToken: string, name: string, opts: { relay?: boolean; logs?: boolean; capabilities?: Record<string, unknown> } = {},
+    adminToken: string, name: string,
+    opts: { relay?: boolean; logs?: boolean; configJobs?: boolean; capabilities?: Record<string, unknown> } = {},
   ): Promise<ScriptedRunner> {
     const protocolVersion = opts.logs ? 3 : opts.relay ? 2 : 1;
-    const base = opts.capabilities ?? E2E_RUNNER_CAPABILITIES;
-    const capabilities = opts.relay ? { ...base, approvals: { relay: true } } : base;
+    const base = opts.relay ? { ...(opts.capabilities ?? E2E_RUNNER_CAPABILITIES), approvals: { relay: true } } : opts.capabilities ?? E2E_RUNNER_CAPABILITIES;
+    // S3 §3: only a runner reporting configJobs is offered CONFIG_EDIT / CONFIG_DRIFT jobs.
+    const capabilities = opts.configJobs ? { ...base, configJobs: true } : base;
     const { token } = await call<{ token: string }>('/fleet/enrollments', { method: 'POST', token: adminToken, body: { labels: ['e2e'] } });
     const { runnerId, apiKey } = await call<{ runnerId: string; apiKey: string }>('/fleet/runner/enroll', {
       method: 'POST',
@@ -184,6 +188,16 @@ export class ScriptedRunner {
   /** PUT the run bundle (accepted while RUNNING or UPLOADING, spec §3.3). */
   async uploadBundle(lease: Lease, content: string): Promise<void> {
     await this.putBundle(lease, gzipSync(Buffer.from(content, 'utf8')));
+  }
+
+  /** S3 §3: the lease-fenced edit set a config job applies (`GET /fleet/runner/jobs/:id/config-edit?leaseEpoch=`). */
+  async getConfigEdit(lease: Lease): Promise<{ mode: string; edits: Array<{ path: string; op: string; content?: string; baseSha: string | null }>; prTitle: string | null; baseSha: string }> {
+    const res = await fetch(`${API_URL}/api/fleet/runner/jobs/${lease.jobId}/config-edit?leaseEpoch=${lease.leaseEpoch}`, {
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+    });
+    const raw = await res.text();
+    if (res.status !== 200) throw new Error(`config-edit fetch failed: ${res.status} ${raw}`);
+    return (JSON.parse(raw) as { data: Awaited<ReturnType<ScriptedRunner['getConfigEdit']>> }).data;
   }
 
   /** PUT a real tar.gz bundle whose members the API's log fallback reads (S2a §2.5), e.g. `nax.stdout`. */
