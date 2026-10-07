@@ -8130,6 +8130,33 @@
         ]
       }
     },
+    "/api/fleet/credential-board": {
+      "get": {
+        "operationId": "FleetCredentialBoardController_get",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialBoardDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Credential health per provider and runner, and the profile inventory (global admin)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/home": {
       "get": {
         "operationId": "HomeController_get",
@@ -12851,7 +12878,8 @@
             "enum": [
               "missing",
               "unavailable",
-              "expired"
+              "expired",
+              "expiring"
             ],
             "type": "string"
           },
@@ -13368,6 +13396,207 @@
           "recentJobs",
           "recentTruncated",
           "attention"
+        ]
+      },
+      "CredentialCellDto": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "enum": [
+              "ok",
+              "expiring",
+              "expired",
+              "unavailable",
+              "missing"
+            ],
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "api-key",
+              "oauth",
+              "exec",
+              "ambient",
+              "none"
+            ],
+            "type": "string"
+          },
+          "expires": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "state",
+          "kind"
+        ]
+      },
+      "ProfileNeedsDto": {
+        "type": "object",
+        "properties": {
+          "protocol": {
+            "enum": [
+              "acp",
+              "native"
+            ],
+            "type": "string"
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sandbox": {
+            "type": "boolean"
+          },
+          "interaction": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "protocol",
+          "providers",
+          "sandbox"
+        ]
+      },
+      "ProfileCellDto": {
+        "type": "object",
+        "properties": {
+          "present": {
+            "type": "boolean"
+          },
+          "needs": {
+            "$ref": "#/components/schemas/ProfileNeedsDto"
+          },
+          "misfit": {
+            "enum": [
+              "disabled",
+              "offline",
+              "budget_paused",
+              "labels",
+              "executor",
+              "protocol",
+              "provider_missing",
+              "provider_unavailable",
+              "sandbox",
+              "interaction",
+              "tools",
+              "approvals_relay",
+              "busy_repo",
+              "capacity"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "present"
+        ]
+      },
+      "CredentialBoardRunnerDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "online": {
+            "type": "boolean",
+            "description": "Synced within FLEET_RUNNER_OFFLINE_SEC"
+          },
+          "readable": {
+            "type": "boolean",
+            "description": "False when the stored capabilities do not parse; the runner then has no cells"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "enabled",
+          "online",
+          "readable"
+        ]
+      },
+      "CredentialProviderRowDto": {
+        "type": "object",
+        "properties": {
+          "providerId": {
+            "type": "string"
+          },
+          "cells": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CredentialCellDto"
+            },
+            "description": "Keyed by runner id"
+          }
+        },
+        "required": [
+          "providerId",
+          "cells"
+        ]
+      },
+      "ProfileRowDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "runners": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ProfileCellDto"
+            },
+            "description": "Keyed by runner id"
+          }
+        },
+        "required": [
+          "name",
+          "runners"
+        ]
+      },
+      "CredentialBoardDto": {
+        "type": "object",
+        "properties": {
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "warnDays": {
+            "type": "number",
+            "description": "FLEET_CREDENTIAL_EXPIRY_WARN_DAYS"
+          },
+          "runners": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialBoardRunnerDto"
+            }
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialProviderRowDto"
+            }
+          },
+          "profiles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProfileRowDto"
+            }
+          }
+        },
+        "required": [
+          "generatedAt",
+          "warnDays",
+          "runners",
+          "providers",
+          "profiles"
         ]
       },
       "HomeActivityDto": {

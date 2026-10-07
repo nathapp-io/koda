@@ -135,4 +135,12 @@ describe('fleet OpenAPI contract', () => {
       .toEqual(expect.arrayContaining(['type', 'jobsHeld', 'providerId', 'why', 'version', 'latest']));
     expect(spec.components.schemas['AttentionReasonDto']).toBeDefined();
   });
+
+  it('exposes the credential board (S3 §4.4)', () => {
+    expect(spec.paths['/api/fleet/credential-board']?.['get']).toBeDefined();
+    expect(Object.keys(spec.components.schemas['CredentialBoardDto']?.properties ?? {}).sort())
+      .toEqual(['generatedAt', 'profiles', 'providers', 'runners', 'warnDays']);
+    expect(JSON.stringify(spec.components.schemas['CredentialCellDto'])).toContain('expiring');
+    expect(JSON.stringify(spec.components.schemas['RunnerConditionDto'])).toContain('expiring');
+  });
 });
