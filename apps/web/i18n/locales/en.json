@@ -1796,6 +1796,29 @@
         "create": "Create",
         "not_allowed": "This is not a path the editor can create (rules, context, config, repo profiles .json and the constitution only).",
         "exists": "This file already exists."
+      },
+      "page": {
+        "title": "nax config",
+        "subtitle": "{repo} · {branch} ({sha})",
+        "checkDrift": "Check drift",
+        "save": "Open PR ({count})",
+        "readOnly": "You can read this repo's nax files. Editing needs the Developer or Admin role in this project.",
+        "activeJob": "A config job for this repo is already queued or running.",
+        "openActiveJob": "Open it",
+        "unreachable": "koda cannot read this repo right now: {message}",
+        "newFile": "New file",
+        "noFiles": "This repo has no editable nax files yet. Use New file to add one.",
+        "pickFile": "Pick a file on the left.",
+        "deleteFile": "Delete file",
+        "deletedNotice": "This file will be deleted by the PR. Discard the change to keep it.",
+        "leaveConfirm": "You have unsaved changes to nax files. Leave and lose them?"
+      },
+      "problem": {
+        "json": "invalid JSON",
+        "too_many": "More than 50 files changed; split the change into smaller PRs.",
+        "file_too_large": "file is larger than 256 KiB",
+        "total_too_large": "The changes add up to more than 1 MiB.",
+        "conflict": "changed upstream; review it and mark it resolved"
       }
     }
   }

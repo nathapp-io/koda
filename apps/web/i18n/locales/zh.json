@@ -1796,6 +1796,29 @@
         "create": "创建",
         "not_allowed": "编辑器不能创建此路径（仅限规则、上下文、配置、仓库配置档 .json 和章程）。",
         "exists": "此文件已存在。"
+      },
+      "page": {
+        "title": "nax 配置",
+        "subtitle": "{repo} · {branch}（{sha}）",
+        "checkDrift": "检查漂移",
+        "save": "创建 PR（{count}）",
+        "readOnly": "你可以查看此仓库的 nax 文件。编辑需要此项目的开发者或管理员角色。",
+        "activeJob": "此仓库已有一个配置任务在排队或运行。",
+        "openActiveJob": "打开",
+        "unreachable": "koda 目前无法读取此仓库：{message}",
+        "newFile": "新建文件",
+        "noFiles": "此仓库还没有可编辑的 nax 文件。使用“新建文件”添加。",
+        "pickFile": "请在左侧选择文件。",
+        "deleteFile": "删除文件",
+        "deletedNotice": "PR 将删除此文件。放弃此改动即可保留。",
+        "leaveConfirm": "nax 文件有未保存的改动。确定离开并丢弃吗？"
+      },
+      "problem": {
+        "json": "JSON 无效",
+        "too_many": "改动超过 50 个文件，请拆分为更小的 PR。",
+        "file_too_large": "文件超过 256 KiB",
+        "total_too_large": "改动总量超过 1 MiB。",
+        "conflict": "上游已改动，请检查后标记为已解决"
       }
     }
   }
