@@ -97,10 +97,14 @@ export class ScriptedRunner {
    * Issues a single-use enrollment token as the admin and enrolls over HTTP, like `koda-runner enroll`. With `relay`
    * the runner speaks protocol v2 and reports the approval relay (S1.5 2a D271), so gated/escalate jobs place on it.
    * With `logs` it speaks protocol v3 (S2a R1): it streams logs over `putLog` and sends no `log` sync events.
+   * With `capabilities` the runner reports that blob instead of the default.
    */
-  static async enroll(adminToken: string, name: string, opts: { relay?: boolean; logs?: boolean } = {}): Promise<ScriptedRunner> {
+  static async enroll(
+    adminToken: string, name: string, opts: { relay?: boolean; logs?: boolean; capabilities?: Record<string, unknown> } = {},
+  ): Promise<ScriptedRunner> {
     const protocolVersion = opts.logs ? 3 : opts.relay ? 2 : 1;
-    const capabilities = opts.relay ? { ...E2E_RUNNER_CAPABILITIES, approvals: { relay: true } } : E2E_RUNNER_CAPABILITIES;
+    const base = opts.capabilities ?? E2E_RUNNER_CAPABILITIES;
+    const capabilities = opts.relay ? { ...base, approvals: { relay: true } } : base;
     const { token } = await call<{ token: string }>('/fleet/enrollments', { method: 'POST', token: adminToken, body: { labels: ['e2e'] } });
     const { runnerId, apiKey } = await call<{ runnerId: string; apiKey: string }>('/fleet/runner/enroll', {
       method: 'POST',
