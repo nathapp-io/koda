@@ -272,6 +272,8 @@ const FLEET_COMPONENT_FILES: Record<FleetComponentName, string> = {
   FleetDashboardRunnerHealthList: 'dashboard/RunnerHealthList.vue',
   FleetDashboardCredentialDigestChips: 'dashboard/CredentialDigestChips.vue',
   FleetDashboardOverview: 'dashboard/Overview.vue',
+  FleetCredentialsCredentialGrid: 'credentials/CredentialGrid.vue',
+  FleetCredentialsProfileInventory: 'credentials/ProfileInventory.vue',
 }
 
 export function mountSfc(file: string, options: MountOptions = {}): Mounted {
@@ -350,3 +352,4 @@ export type FleetComponentName =
   | 'FleetAnalyticsIngestNotice' | 'FleetAnalyticsIngestTable'
   | 'FleetDashboardTiles' | 'FleetDashboardAttentionList' | 'FleetDashboardActiveRunsTable' | 'FleetDashboardRecentRunsList'
   | 'FleetDashboardRunnerHealthList' | 'FleetDashboardCredentialDigestChips' | 'FleetDashboardOverview'
+  | 'FleetCredentialsCredentialGrid' | 'FleetCredentialsProfileInventory'
