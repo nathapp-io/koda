@@ -25,6 +25,7 @@ export function testFleetConfig(overrides: Partial<IFleetConfig> = {}): IFleetCo
     gitTokenReuseMarginSec: 300,
     gitlabTokenTtlSec: 3_600,
     testHooksEnabled: false,
+    testFakeNaxFiles: false,
     jobSilentSec: 180,
     jobSilentErrorSec: 600,
     jobStartSec: 300,

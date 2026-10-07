@@ -66,6 +66,8 @@ export default defineConfig({
         FLEET_ARTIFACT_DIR: path.join(os.tmpdir(), `koda-e2e-fleet-artifacts-${API_PORT}`),
         // S1b 3b D213: the schedules e2e fires a schedule through the test-only hook (never on in production).
         FLEET_TEST_HOOKS: 'true',
+        // S3 plan C11: the config-page e2e seeds nax files through the test-only fake repo-files reader (never on in production).
+        FLEET_TEST_FAKE_NAX_FILES: 'true',
         // S1.5 2b: the bash e2e waits for the 15 s approval expiry sweep; do not depend on NODE_ENV defaults.
         FLEET_SWEEP_ENABLED: 'true',
         // S2b (c) D426: the dashboard reports a queued job no runner fits after 10 s (the env schema minimum) instead

@@ -42,6 +42,8 @@ export interface IFleetConfig {
   gitlabTokenTtlSec: number;
   /** Test-only HTTP hooks (S1b 3b D213): FLEET_TEST_HOOKS=true, and never under NODE_ENV=production. */
   testHooksEnabled: boolean;
+  /** S3 plan C11: serve repo nax files from FakeFleetRepoFilesReader (E2E only; needs testHooksEnabled). */
+  testFakeNaxFiles: boolean;
   /** S2b (c) §2.1: RUNNING job heartbeat age (s) before a dashboard warning; nax beats every 60 s (D404). */
   jobSilentSec: number;
   /** S2b (c) §2.1: heartbeat age (s) before the warning becomes an error; read as max(this, jobSilentSec). */
@@ -79,6 +81,7 @@ export class FleetConfigSchema {
   @IsOptional() @IsString() FLEET_GIT_TOKEN_REUSE_MARGIN_SEC: string;
   @IsOptional() @IsString() FLEET_GITLAB_TOKEN_TTL_SEC: string;
   @IsOptional() @IsString() FLEET_TEST_HOOKS: string;
+  @IsOptional() @IsString() FLEET_TEST_FAKE_NAX_FILES: string;
   @IsOptional() @IsString() FLEET_JOB_SILENT_SEC: string;
   @IsOptional() @IsString() FLEET_JOB_SILENT_ERROR_SEC: string;
   @IsOptional() @IsString() FLEET_JOB_START_SEC: string;
@@ -124,6 +127,7 @@ export const fleetConfig = registerAs(FLEET_CFG, (): IFleetConfig => {
     gitTokenReuseMarginSec: int('FLEET_GIT_TOKEN_REUSE_MARGIN_SEC', 300),
     gitlabTokenTtlSec: int('FLEET_GITLAB_TOKEN_TTL_SEC', 3_600),
     testHooksEnabled: (process.env['FLEET_TEST_HOOKS'] ?? '').toLowerCase() === 'true' && process.env['NODE_ENV'] !== 'production',
+    testFakeNaxFiles: (process.env['FLEET_TEST_FAKE_NAX_FILES'] ?? '').toLowerCase() === 'true' && process.env['NODE_ENV'] !== 'production',
     jobSilentSec: int('FLEET_JOB_SILENT_SEC', 180),
     jobSilentErrorSec: int('FLEET_JOB_SILENT_ERROR_SEC', 600),
     jobStartSec: int('FLEET_JOB_START_SEC', 300),
