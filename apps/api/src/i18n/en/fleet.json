@@ -39,5 +39,10 @@
   "logExpired": { "410": "This log was deleted after the retention window" },
   "analyticsQuery": { "-2": "Invalid analytics request: {reason}" },
   "analyticsDelete": { "-2": "Type {expected} to confirm the deletion" },
-  "ticketJobs": { "404": "This fleet job is not linked to the ticket" }
+  "ticketJobs": { "404": "This fleet job is not linked to the ticket" },
+  "repoUnreachable": { "409": "koda cannot read this repository: {reason}" },
+  "forge": { "502": "The repository host did not answer correctly; try again later" },
+  "naxFile": { "404": "This file does not exist at that commit", "422": "This file cannot be edited here: {reason}" },
+  "configJobActive": { "409": "A config job is already active for this repository: {activeJobId}" },
+  "configEditInput": { "-2": "Invalid config edit: {reason}" }
 }

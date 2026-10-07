@@ -4,6 +4,7 @@ import { EnrollmentService } from './runners/enrollment.service';
 import { RunnersService } from './runners/runners.service';
 import { FleetActivityService } from './activity/fleet-activity.service';
 import { FleetReposService } from './repos/fleet-repos.service';
+import { ConfigJobsService } from './repo-config/config-jobs.service';
 import { LogReadService } from './logs/log-read.service';
 import { FleetLogRetentionProcessor } from './logs/fleet-log-retention.processor';
 import { AnalyticsService } from './analytics/analytics.service';
@@ -37,5 +38,6 @@ describe('FleetModule', () => {
     expect(module.get(FleetLogRetentionProcessor)).toBeDefined();
     expect(module.get(AnalyticsService)).toBeDefined();
     expect(module.get(FleetDashboardService)).toBeDefined();
+    expect(module.get(ConfigJobsService)).toBeDefined();
   });
 });
