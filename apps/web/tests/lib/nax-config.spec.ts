@@ -122,3 +122,71 @@ describe('review focus (S3 plan)', () => {
     expect(draftEdits(draft)).toEqual([{ path: loaded.path, op: 'put', content: '# a again\n', baseSha: 'b2' }])
   })
 })
+
+import { newFileTargets, reapplyEdits, validateNewPath, type NaxFileList } from '~/lib/nax-config'
+
+describe('new file targets (S3 §6 "New file")', () => {
+  test('suggests missing root files, a rule, a profile, and missing files of known mono packages', () => {
+    const entries = [entry('.nax/context.md', 'context'), entry('.nax/mono/apps/api/context.md', 'context')]
+    expect(newFileTargets(entries)).toEqual([
+      '.nax/rules/new-rule.md',
+      '.nax/config.json',
+      '.nax/constitution.md',
+      '.nax/mono/apps/api/config.json',
+      '.nax/profiles/new-profile.json',
+    ])
+  })
+
+  test('validateNewPath refuses disallowed and existing paths', () => {
+    expect(validateNewPath('.nax/rules/x.md', [])).toBeNull()
+    expect(validateNewPath('.nax/profiles/p.env', [])).toBe('not_allowed')
+    expect(validateNewPath('.nax/Rules/x.md', [])).toBe('not_allowed')
+    expect(validateNewPath('.nax/rules/x.md', ['.nax/rules/x.md'])).toBe('exists')
+  })
+})
+
+describe('reapplyEdits (S3 §6 "Reopen edits")', () => {
+  const latest: NaxFileList = {
+    baseSha: 'head2',
+    defaultBranch: 'main',
+    files: [
+      { path: '.nax/context.md', size: 3, blobSha: 'ctx-v2', group: 'context' },
+      { path: '.nax/rules/a.md', size: 3, blobSha: 'a-v1', group: 'rules' },
+      { path: '.nax/rules/taken.md', size: 3, blobSha: 't-v1', group: 'rules' },
+    ],
+  }
+  const contents = {
+    '.nax/context.md': { path: '.nax/context.md', blobSha: 'ctx-v2', content: 'upstream' },
+    '.nax/rules/a.md': { path: '.nax/rules/a.md', blobSha: 'a-v1', content: 'a' },
+    '.nax/rules/taken.md': { path: '.nax/rules/taken.md', blobSha: 't-v1', content: 't' },
+  }
+
+  test('an unchanged base re-applies cleanly; a changed base is flagged with both versions kept', () => {
+    const draft = reapplyEdits([
+      { path: '.nax/rules/a.md', op: 'put', content: 'a2', baseSha: 'a-v1' },
+      { path: '.nax/context.md', op: 'put', content: 'mine', baseSha: 'ctx-v1' },
+    ], latest, contents)
+    expect(draft.baseSha).toBe('head2')
+    expect(draft.files['.nax/rules/a.md']).toEqual({ path: '.nax/rules/a.md', baseSha: 'a-v1', original: 'a', content: 'a2', conflict: false })
+    expect(draft.files['.nax/context.md']).toEqual({ path: '.nax/context.md', baseSha: 'ctx-v2', original: 'upstream', content: 'mine', conflict: true })
+  })
+
+  test('a new file whose path now exists upstream is a conflict against the upstream file', () => {
+    const draft = reapplyEdits([{ path: '.nax/rules/taken.md', op: 'put', content: 'mine', baseSha: null }], latest, contents)
+    expect(draft.files['.nax/rules/taken.md']).toMatchObject({ baseSha: 't-v1', original: 't', content: 'mine', conflict: true })
+  })
+
+  test('an edited file deleted upstream comes back as a flagged new file; a delete of a gone file is dropped', () => {
+    const draft = reapplyEdits([
+      { path: '.nax/rules/gone.md', op: 'put', content: 'mine', baseSha: 'g-v1' },
+      { path: '.nax/rules/also-gone.md', op: 'delete', baseSha: 'x-v1' },
+    ], latest, contents)
+    expect(draft.files['.nax/rules/gone.md']).toEqual({ path: '.nax/rules/gone.md', baseSha: null, original: null, content: 'mine', conflict: true })
+    expect(draft.files['.nax/rules/also-gone.md']).toBeUndefined()
+  })
+
+  test('a stored path outside the allowlist is dropped (defence in depth)', () => {
+    const draft = reapplyEdits([{ path: '.nax/profiles/p.env', op: 'put', content: 'X=1', baseSha: null }], latest, contents)
+    expect(draft.files).toEqual({})
+  })
+})

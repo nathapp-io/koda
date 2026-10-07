@@ -138,3 +138,43 @@ export function groupFiles(entries: readonly NaxFileEntry[], draft: ConfigDraft)
     }))
     .filter((g) => g.files.length > 0)
 }
+
+const ROOT_FILES = ['.nax/config.json', '.nax/constitution.md'] as const
+const MONO_FILE = /^\.nax\/mono\/(.+)\/(context\.md|config\.json)$/
+
+/** Suggested paths for "New file": a rule, missing root files, missing files of known mono packages, a profile. */
+export function newFileTargets(entries: readonly NaxFileEntry[]): string[] {
+  const existing = new Set(entries.map((e) => e.path))
+  const packages = [...new Set(entries.map((e) => MONO_FILE.exec(e.path)?.[1]).filter((p): p is string => p !== undefined))].sort()
+  const monoMissing = packages.flatMap((pkg) => ['context.md', 'config.json'].map((name) => `.nax/mono/${pkg}/${name}`)).filter((p) => !existing.has(p))
+  const rootMissing = ['.nax/context.md', ...ROOT_FILES].filter((p) => !existing.has(p))
+  return ['.nax/rules/new-rule.md', ...rootMissing, ...monoMissing, '.nax/profiles/new-profile.json']
+}
+
+export function validateNewPath(path: string, existing: readonly string[]): 'not_allowed' | 'exists' | null {
+  if (!isAllowedNaxPath(path)) return 'not_allowed'
+  return existing.includes(path) ? 'exists' : null
+}
+
+function reapplyOne(edit: ConfigFileEdit, latest: NaxFileList, contents: Readonly<Record<string, NaxFileContent>>): DraftFile | null {
+  if (!isAllowedNaxPath(edit.path)) return null
+  const current = latest.files.find((f) => f.path === edit.path)
+  if (edit.op === 'delete') {
+    if (!current) return null
+    return { path: edit.path, baseSha: current.blobSha, original: contents[edit.path]?.content ?? '', content: null, conflict: current.blobSha !== edit.baseSha }
+  }
+  const content = edit.content ?? ''
+  if (!current) return { path: edit.path, baseSha: null, original: null, content, conflict: edit.baseSha !== null }
+  const original = contents[edit.path]?.content ?? ''
+  const conflict = current.blobSha !== edit.baseSha
+  if (!conflict && content === original) return null
+  return { path: edit.path, baseSha: current.blobSha, original, content, conflict }
+}
+
+/** Re-applies a failed job's stored edits on the latest files; a file whose base moved is flagged, never merged. */
+export function reapplyEdits(
+  stored: readonly ConfigFileEdit[], latest: NaxFileList, contents: Readonly<Record<string, NaxFileContent>>,
+): ConfigDraft {
+  const files = stored.map((edit) => reapplyOne(edit, latest, contents)).filter((f): f is DraftFile => f !== null)
+  return { baseSha: latest.baseSha, files: Object.fromEntries(files.map((f) => [f.path, f])) }
+}
