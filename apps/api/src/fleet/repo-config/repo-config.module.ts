@@ -13,11 +13,12 @@ import { GithubFleetRepoFilesReader } from './github-fleet-repo-files.reader';
 import { GitlabFleetRepoFilesReader } from './gitlab-fleet-repo-files.reader';
 import { ProjectJobConfigEditController } from './project-job-config-edit.controller';
 import { ProjectRepoConfigController } from './project-repo-config.controller';
+import { RunnerConfigEditController } from './runner-config-edit.controller';
 
 /** Fleet S3 (spec docs/superpowers/specs/2026-10-07-fleet-s3-repo-config-and-credential-board-design.md). */
 @Module({
   imports: [PrismaModule, ProjectAccessModule, FleetActivityModule, GitBrokerModule, FleetJobsModule, SyncModule, ConfigEditStoreModule],
-  controllers: [ProjectRepoConfigController, ProjectJobConfigEditController],
+  controllers: [ProjectRepoConfigController, ProjectJobConfigEditController, RunnerConfigEditController],
   providers: [
     GithubFleetRepoFilesReader, GitlabFleetRepoFilesReader, FleetRepoFilesRouter,
     { provide: FLEET_REPO_FILES_READER, useExisting: FleetRepoFilesRouter },
