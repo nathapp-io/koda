@@ -21,6 +21,7 @@ describe('fleet jobs service approvals count (S1.5 2a D272)', () => {
   let repo: { findPage: jest.Mock; findById: jest.Mock };
   let approvals: { countPendingByJob: jest.Mock };
   let fleetTickets: { forJob: jest.Mock };
+  let configEdits: { findByJobId: jest.Mock };
   let service: FleetJobsService;
 
   beforeEach(() => {
@@ -28,6 +29,7 @@ describe('fleet jobs service approvals count (S1.5 2a D272)', () => {
     approvals = { countPendingByJob: jest.fn() };
     approvals.countPendingByJob.mockResolvedValue(new Map());
     fleetTickets = { forJob: jest.fn().mockResolvedValue([]) };
+    configEdits = { findByJobId: jest.fn() };
     service = new FleetJobsService(
       repo as never,
       {} as never,
@@ -40,6 +42,7 @@ describe('fleet jobs service approvals count (S1.5 2a D272)', () => {
       approvals as never,
       fleetTickets as never,
       {} as never,
+      configEdits as never,
     );
   });
 
@@ -56,6 +59,21 @@ describe('fleet jobs service approvals count (S1.5 2a D272)', () => {
     repo.findById.mockResolvedValue(jobA);
     approvals.countPendingByJob.mockResolvedValue(new Map([[jobA.id, 1]]));
     expect((await service.get(projectId, jobA.id)).pendingApprovals).toBe(1);
+  });
+
+  describe('configEdit on the detail (fleet S3 §4.3)', () => {
+    const cfg = (state: string, configResult: unknown) => ({ ...record('jc'), command: 'CONFIG_DRIFT', state, configResult }) as never;
+    const row = { mode: 'drift', edits: [], prTitle: null, result: { outcome: 'drift', files: ['AGENTS.md'] } };
+
+    it('shows the live result while active and the stored result once terminal; null for a nax job', async () => {
+      configEdits.findByJobId.mockResolvedValue(row);
+      repo.findById.mockResolvedValueOnce(cfg('RUNNING', { outcome: 'drift', files: [] }));
+      expect((await service.get(projectId, 'jc')).configEdit).toEqual({ mode: 'drift', files: [], prTitle: null, result: { outcome: 'drift', files: [] } });
+      repo.findById.mockResolvedValueOnce(cfg('COMPLETED', null));
+      expect((await service.get(projectId, 'jc')).configEdit).toEqual({ mode: 'drift', files: [], prTitle: null, result: { outcome: 'drift', files: ['AGENTS.md'] } });
+      repo.findById.mockResolvedValueOnce(jobA);
+      expect((await service.get(projectId, 'ja')).configEdit).toBeNull();
+    });
   });
 });
 
@@ -86,6 +104,7 @@ describe('fleet jobs service dispatch open-PR guard (#231)', () => {
       {} as never,
       fleetTickets as never,
       {} as never,
+      { findByJobId: jest.fn() } as never,
     );
   };
 
