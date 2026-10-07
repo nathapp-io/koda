@@ -1768,6 +1768,34 @@
       "editor": {
         "tooLarge": "文件过大或不是文本，只能只读查看，无法在此编辑。",
         "jsonError": "JSON 无效：{error}"
+      },
+      "changes": {
+        "title": "改动（{count}）",
+        "discard": "放弃",
+        "discardAll": "全部放弃",
+        "conflict": "上游已改动",
+        "conflictHelp": "提交这次修改之后，默认分支上的此文件又被改动。差异显示最新版本与你的版本，请检查后标记为已解决。",
+        "resolve": "标记为已解决",
+        "approximate": "文件改动太大，无法逐行比较，显示完整的旧文本和新文本。"
+      },
+      "prDialog": {
+        "editTitle": "用这些改动创建 PR",
+        "regenerateTitle": "创建重新生成 PR",
+        "editHelp": "Runner 会应用改动、重新生成 agent 文件、用 nax 校验并创建 PR。校验失败时不会提交任何内容。",
+        "regenerateHelp": "Runner 会根据当前上下文重新生成 agent 文件，并用结果创建 PR。",
+        "title": "PR 标题",
+        "body": "描述（可选）",
+        "titleTooLong": "标题最多 {max} 个字符。",
+        "bodyTooLong": "描述最多 8 KiB。",
+        "submit": "加入队列"
+      },
+      "newFile": {
+        "title": "新建 nax 文件",
+        "help": "选择一个建议位置，或输入编辑器允许的 .nax/ 下的路径。",
+        "path": "路径",
+        "create": "创建",
+        "not_allowed": "编辑器不能创建此路径（仅限规则、上下文、配置、仓库配置档 .json 和章程）。",
+        "exists": "此文件已存在。"
       }
     }
   }

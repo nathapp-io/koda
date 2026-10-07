@@ -1768,6 +1768,34 @@
       "editor": {
         "tooLarge": "This file is too large or not text, so it is shown read-only and cannot be edited here.",
         "jsonError": "Invalid JSON: {error}"
+      },
+      "changes": {
+        "title": "Changes ({count})",
+        "discard": "Discard",
+        "discardAll": "Discard all",
+        "conflict": "Changed upstream",
+        "conflictHelp": "This file changed on the default branch after your edit was made. The diff shows the latest version against yours; check it, then mark it resolved.",
+        "resolve": "Mark resolved",
+        "approximate": "The file changed too much for a line-by-line diff; showing the whole old and new text."
+      },
+      "prDialog": {
+        "editTitle": "Open a PR with these changes",
+        "regenerateTitle": "Open regenerate PR",
+        "editHelp": "A runner applies the changes, regenerates the agent files, validates them with nax and opens the PR. Nothing is committed if validation fails.",
+        "regenerateHelp": "A runner regenerates the agent files from the current context and opens a PR with the result.",
+        "title": "PR title",
+        "body": "Description (optional)",
+        "titleTooLong": "The title can be at most {max} characters.",
+        "bodyTooLong": "The description can be at most 8 KiB.",
+        "submit": "Queue job"
+      },
+      "newFile": {
+        "title": "New nax file",
+        "help": "Pick a suggested location or type a path under .nax/ that the editor allows.",
+        "path": "Path",
+        "create": "Create",
+        "not_allowed": "This is not a path the editor can create (rules, context, config, repo profiles .json and the constitution only).",
+        "exists": "This file already exists."
       }
     }
   }
