@@ -209,90 +209,103 @@ export class TicketTransitionsService {
    * Fire-and-forget: create a GitHub PR when ticket transitions to VERIFIED.
    * Only runs when VCS connection exists and VcsConnectionService/TicketLinksService are available.
    */
-  private createPrForTicket(
+  private async createPrForTicket(
     project: { id: string; key: string },
     ticket: TicketDomain,
   ): Promise<void> {
-    if (!this.vcsConnectionService || !this.ticketLinksService || !this.vcsLinkExtractorService || !this.vcsConfig) return Promise.resolve();
-
     const vcsService = this.vcsConnectionService;
     const vcsLinkExtractor = this.vcsLinkExtractorService;
-    const encryptionKey = this.vcsConfig.encryptionKey;
-    if (!encryptionKey) return Promise.resolve();
+    const vcsConfig = this.vcsConfig;
+    if (!vcsService || !this.ticketLinksService || !vcsLinkExtractor || !vcsConfig) return;
+
+    const encryptionKey = vcsConfig.encryptionKey;
+    if (!encryptionKey) return;
 
     const projectId = project.id;
     const ticketId = ticket.id;
     const projectKey = project.key;
+
+    // Fleet C9 follow-up (#231): the classic auto-PR yields to fleet. When
+    // fleet already owns the ticket (a fleet PR link, or a non-terminal fleet
+    // job), a KEY-N draft PR here would leave two open PRs for the same work.
+    // Best-effort: a failed lookup falls back to the classic path.
+    try {
+      if (await this.ticketRepo.hasFleetOwnership(ticketId)) {
+        this.logger.debug(
+          `[vcs] Skipping classic PR for ${projectKey}-${ticket.number}: fleet owns the ticket`,
+        );
+        return;
+      }
+    } catch (err) {
+      this.logger.warn(
+        `[vcs] Fleet-ownership lookup failed for ticket ${ticketId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
     let createdPrNumber: number | undefined;
     const repo = this.ticketRepo as import('../prisma-tickets.repository').PrismaTicketsRepository;
 
-    return vcsService.getFullByProject(projectId)
-      .then((connection): Promise<void> => {
-        if (!connection.isActive) return Promise.resolve();
+    try {
+      const connection = await vcsService.getFullByProject(projectId);
+      if (!connection.isActive) return;
 
-        const token = decryptToken(connection.encryptedToken, encryptionKey);
-        const provider = providerForConnection(connection, token, this.vcsConfig);
+      const token = decryptToken(connection.encryptedToken, encryptionKey);
+      const provider = providerForConnection(connection, token, vcsConfig);
+      const baseBranch = await provider.getDefaultBranch();
+      const branchName = buildBranchName(projectKey, ticket.number, ticket.title);
+      const prTitle = `${projectKey}-${ticket.number}: ${ticket.title}`;
+      const prBody = ticket.description ?? '';
 
-        return provider.getDefaultBranch().then((baseBranch): Promise<void> => {
-          const branchName = buildBranchName(projectKey, ticket.number, ticket.title);
-          const prTitle = `${projectKey}-${ticket.number}: ${ticket.title}`;
-          const prBody = ticket.description ?? '';
-
-          // BUG-13: create the PR first and persist the TicketLink only on
-          // success. The old flow wrote a `.../pulls/pending` placeholder
-          // before creating the PR, leaving a dead link behind whenever the
-          // provider call failed.
-          return provider.createPullRequest({
-            title: prTitle,
-            body: prBody,
-            branchName,
-            baseBranch,
-            draft: true,
-          }).then((pr): Promise<void> => {
-            createdPrNumber = pr.number;
-            return repo.createTicketLink({
-              ticketId,
-              url: pr.url,
-              provider: connection.provider,
-              externalRef: `${connection.repoOwner}/${connection.repoName}#${pr.number}`,
-              prNumber: pr.number,
-              prState: 'draft',
-              prUpdatedAt: new Date(),
-              linkType: 'pr',
-            }) as unknown as Promise<void>;
-          }).then((): Promise<void> => {
-            return repo.createTicketActivity({
-              ticketId,
-              action: ActivityType.VCS_PR_CREATED,
-            }) as unknown as Promise<void>;
-          }).then((): Promise<void> => {
-            // AC5: After createPrForTicket() completes, extractLinksFromPr() is called
-            if (createdPrNumber === undefined) {
-              // Defensive: never fall back to /pulls/0 if this chain is refactored.
-              return Promise.resolve();
-            }
-            return vcsLinkExtractor.extractLinksFromPr(
-              project,
-              { id: ticket.id, number: ticket.number, externalVcsId: null },
-              connection,
-              encryptionKey,
-              branchName,
-              createdPrNumber,
-            );
-          }).catch((err) => {
-            this.logger.warn(
-              `[vcs] Failed to create PR for ticket ${projectKey}-${ticket.number}: ${err instanceof Error ? err.message : String(err)}`,
-            );
-            return Promise.resolve();
-          });
+      try {
+        // BUG-13: create the PR first and persist the TicketLink only on
+        // success. The old flow wrote a `.../pulls/pending` placeholder
+        // before creating the PR, leaving a dead link behind whenever the
+        // provider call failed.
+        const pr = await provider.createPullRequest({
+          title: prTitle,
+          body: prBody,
+          branchName,
+          baseBranch,
+          draft: true,
         });
-      })
-      .catch((err) => {
-        this.logger.warn(
-          `[vcs] Failed to initiate PR creation for ticket in project ${projectId}: ${err instanceof Error ? err.message : String(err)}`,
+        createdPrNumber = pr.number;
+        await repo.createTicketLink({
+          ticketId,
+          url: pr.url,
+          provider: connection.provider,
+          externalRef: `${connection.repoOwner}/${connection.repoName}#${pr.number}`,
+          prNumber: pr.number,
+          prState: 'draft',
+          prUpdatedAt: new Date(),
+          linkType: 'pr',
+        });
+        await repo.createTicketActivity({
+          ticketId,
+          action: ActivityType.VCS_PR_CREATED,
+        });
+        // AC5: After createPrForTicket() completes, extractLinksFromPr() is called
+        if (createdPrNumber === undefined) {
+          // Defensive: never fall back to /pulls/0 if this chain is refactored.
+          return;
+        }
+        await vcsLinkExtractor.extractLinksFromPr(
+          project,
+          { id: ticket.id, number: ticket.number, externalVcsId: null },
+          connection,
+          encryptionKey,
+          branchName,
+          createdPrNumber,
         );
-        return Promise.resolve();
-      });
+      } catch (err) {
+        this.logger.warn(
+          `[vcs] Failed to create PR for ticket ${projectKey}-${ticket.number}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    } catch (err) {
+      this.logger.warn(
+        `[vcs] Failed to initiate PR creation for ticket in project ${projectId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
 

@@ -61,6 +61,17 @@ export class FleetJobsService {
     const input = normalizeDispatch(dto, repo.defaultBranch);
     const tickets = await this.fleetTickets.resolveForDispatch(projectId, dto.ticketRefs); // C9 D450
 
+    // C9 follow-up (#231): a RUN on a ticket that already has an open VCS PR
+    // would leave two open PRs for the same work. Refuse unless the caller
+    // acknowledges it (the web confirms first, then resends with the flag).
+    if (input.command === 'RUN' && tickets.length > 0 && !dto.acknowledgeOpenPr) {
+      const openPrs = await this.fleetTickets.findOpenVcsPrLinks(tickets.map((t) => t.id));
+      if (openPrs.length > 0) {
+        const refs = openPrs.map((p) => tickets.find((t) => t.id === p.ticketId)?.ref ?? p.ticketId);
+        throw new ConflictAppException({ refs: refs.join(', ') }, 'fleet.dispatchOpenPr');
+      }
+    }
+
     if (input.pinnedRunnerId) {
       const verdict = await this.placement.evaluatePinned(input.pinnedRunnerId, toPlacementJob(input, repo));
       if (verdict === 'not_found') throw new NotFoundAppException({}, 'fleet.runners');

@@ -135,10 +135,10 @@ describe('US-004-3 AC4: type field is a Select with BUG and ENHANCEMENT options'
     expect(source).toContain('ENHANCEMENT')
   })
 
-  test('source uses Select component for type field', () => {
+  test('source uses the dialog-safe FleetNativeSelect for the type field (D137)', () => {
     const source = readFileSync(dialogPath, 'utf-8')
-    expect(source).toContain('Select')
-    expect(source).toContain('SelectItem')
+    expect(source).toContain('FleetNativeSelect')
+    expect(source).toContain('typeOptions')
   })
 
   test('source renders type Select field with FormField wrapper', () => {
@@ -347,10 +347,10 @@ describe('US-001 AC1: type Select has BUG, ENHANCEMENT, TASK, QUESTION options',
     expect(source).toContain('QUESTION')
   })
 
-  test('type Select renders 4 SelectItem components', () => {
+  test('type native select offers the 4 ticket types', () => {
     const source = readFileSync(dialogPath, 'utf-8')
-    const typeSelectItemCount = (source.match(/SelectItem value="(?:BUG|ENHANCEMENT|TASK|QUESTION)"/g) || []).length
-    expect(typeSelectItemCount).toBe(4)
+    const typeOptionCount = (source.match(/value: '(?:BUG|ENHANCEMENT|TASK|QUESTION)'/g) || []).length
+    expect(typeOptionCount).toBe(4)
   })
 })
 

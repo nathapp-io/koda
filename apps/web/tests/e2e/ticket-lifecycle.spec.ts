@@ -47,6 +47,29 @@ test.describe('Ticket Lifecycle', () => {
     await expect(board.getByRole('button', { name: 'New Ticket' })).toBeVisible();
   });
 
+  test('creates a ticket through the New Ticket dialog', async ({ page }) => {
+    // Regression for #232: the shadcn Select listbox was portaled to <body>
+    // and inherited the modal dialog's `pointer-events: none`, so Type could
+    // never be picked and the required field blocked submission. Type and
+    // Priority are now dialog-safe native selects.
+    const title = `E2E Dialog Ticket ${Date.now()}`;
+
+    await webLogin(page);
+    await page.goto(`/${projectSlug}`);
+    await waitForHydration(page);
+
+    const board = page.locator('.overflow-x-auto').first();
+    await board.getByRole('button', { name: 'New Ticket' }).click();
+
+    const dialog = page.getByRole('dialog');
+    await dialog.getByPlaceholder('Short description of the issue').fill(title);
+    await dialog.getByTestId('create-ticket-type').selectOption('BUG');
+    await dialog.getByTestId('create-ticket-priority').selectOption('HIGH');
+    await dialog.getByRole('button', { name: 'Create Ticket' }).click();
+
+    await expect(board.getByText(title)).toBeVisible({ timeout: 5000 });
+  });
+
   test('ticket starts in CREATED status', async ({ page }) => {
     const ticket = await createTicket(token, projectSlug, {
       title: 'E2E Status Check',

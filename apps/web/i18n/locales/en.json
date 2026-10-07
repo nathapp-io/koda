@@ -1460,6 +1460,8 @@
       "submitting": "Dispatching...",
       "conflict": "An active job already runs this feature on this repo.",
       "conflictLink": "Open the active job",
+      "prConflict": "This ticket already has an open pull request: {tickets}. Dispatching a run would open a second PR for the same work.",
+      "prConflictConfirm": "Dispatch anyway",
       "result": {
         "assigned": "Assigned to {runner}",
         "queued": "Queued: no runner fits right now. It starts when one does.",

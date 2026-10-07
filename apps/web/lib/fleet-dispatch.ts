@@ -75,7 +75,7 @@ export const DISPATCH_DEFAULTS: DispatchFormValues = {
 }
 
 /** Form values -> request body: trims, drops empty optionals, planFrom only for PLAN, bash fields only for a gated/escalate RUN (D299). */
-export function toDispatchBody(v: DispatchFormValues): DispatchBody {
+export function toDispatchBody(v: DispatchFormValues, opts: { acknowledgeOpenPr?: boolean } = {}): DispatchBody {
   const ref = (v.ref ?? '').trim()
   const planFrom = (v.planFrom ?? '').trim()
   const pin = (v.pinnedRunnerId ?? '').trim()
@@ -90,6 +90,7 @@ export function toDispatchBody(v: DispatchFormValues): DispatchBody {
     ...(pin ? { pinnedRunnerId: pin } : v.selectorLabels.length > 0 ? { selectorLabels: [...v.selectorLabels] } : {}),
     ...(v.ticketRefs.length > 0 ? { ticketRefs: [...v.ticketRefs] } : {}),
     ...(v.command === 'RUN' ? bashCreateFields(v.bashMode, v.approvalTimeoutMinutes ?? '') : {}),
+    ...(opts.acknowledgeOpenPr ? { acknowledgeOpenPr: true } : {}),
   }
 }
 

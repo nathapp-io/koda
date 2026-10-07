@@ -1085,6 +1085,7 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
       createComment: jest.fn().mockResolvedValue({ id: 'comment-123' }),
       createTicketActivity: jest.fn().mockResolvedValue({ id: 'activity-123' }),
       createTicketLink: jest.fn().mockResolvedValue({ id: 'link-123' }),
+      hasFleetOwnership: jest.fn().mockResolvedValue(false),
       createTicketActivity2: undefined,
     };
     const txManager = { run: (fn: () => unknown) => fn() };
@@ -1115,5 +1116,53 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
       expect.stringContaining('KODA-1'),
       555,
     );
+  });
+
+  it('skips the classic PR when fleet already owns the ticket (#231)', async () => {
+    const provider = {
+      getDefaultBranch: jest.fn().mockResolvedValue('main'),
+      createPullRequest: jest.fn().mockResolvedValue({ number: 999, url: 'https://github.com/acme/widgets/pull/999' }),
+    };
+    (createVcsProvider as jest.Mock).mockReturnValue(provider);
+
+    const connection = {
+      isActive: true,
+      provider: 'github',
+      repoOwner: 'acme',
+      repoName: 'widgets',
+      encryptedToken: 'enc-token',
+    };
+
+    const ticketRepo = {
+      findProjectBySlug: jest.fn().mockResolvedValue(autoPrProject),
+      findTicketByRefRaw: jest.fn().mockResolvedValue(autoPrTicket),
+      updateTicketStatusIf: jest.fn().mockResolvedValue({ ...autoPrTicket, status: TicketStatus.VERIFIED }),
+      createComment: jest.fn().mockResolvedValue({ id: 'comment-123' }),
+      createTicketActivity: jest.fn().mockResolvedValue({ id: 'activity-123' }),
+      createTicketLink: jest.fn().mockResolvedValue({ id: 'link-123' }),
+      hasFleetOwnership: jest.fn().mockResolvedValue(true),
+    };
+    const txManager = { run: (fn: () => unknown) => fn() };
+    const vcsConnectionService = { getFullByProject: jest.fn().mockResolvedValue(connection) };
+    const vcsLinkExtractorService = { extractLinksFromPr: jest.fn().mockResolvedValue(undefined) };
+    const vcsConfig = { encryptionKey: 'k'.repeat(64) };
+
+    const svc = new TicketTransitionsService(
+      ticketRepo as never,
+      txManager as never,
+      undefined,
+      undefined,
+      vcsConnectionService as never,
+      { create: jest.fn() } as never,
+      vcsLinkExtractorService as never,
+      vcsConfig as never,
+    );
+
+    await svc.verify('koda', 'KODA-1', 'Verified', autoPrPrincipal as never);
+
+    expect(ticketRepo.hasFleetOwnership).toHaveBeenCalledWith(autoPrTicket.id);
+    expect(vcsConnectionService.getFullByProject).not.toHaveBeenCalled();
+    expect(provider.createPullRequest).not.toHaveBeenCalled();
+    expect(ticketRepo.createTicketLink).not.toHaveBeenCalled();
   });
 });

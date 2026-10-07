@@ -11,6 +11,7 @@
   "jobs": { "404": "Fleet job not found", "409": "An active job already runs this feature: {activeJobId}" },
   "jobState": { "409": "The job is {state}; this action is not allowed" },
   "dispatch": { "422": "The pinned runner can never run this job: {reason}" },
+  "dispatchOpenPr": { "409": "Ticket(s) already have an open pull request: {refs}" },
   "dispatchInput": { "-2": "Invalid dispatch: {reason}" },
   "sync": { "-2": "Invalid sync request: {reason}" },
   "bundle": { "404": "No bundle has been uploaded for this job", "413": "Bundle larger than {maxBytes} bytes", "415": "Bundles must be application/gzip", "422": "Bundle rejected: {reason}", "410": "The bundle was deleted after the retention window" },

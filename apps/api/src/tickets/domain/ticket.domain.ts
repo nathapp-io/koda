@@ -132,4 +132,11 @@ export interface ITicketRepository {
   findUserById(id: string): Promise<{ id: string; role: string } | null>;
   findAgentById(id: string): Promise<{ id: string } | null>;
   findProjectMemberRole(projectId: string, userId: string): Promise<string | null>;
+  /**
+   * Fleet C9 follow-up (#231): true when the ticket is already owned by fleet
+   * work — a fleet-sourced `pr` link exists, or a non-terminal FleetJobTicket is
+   * linked. The classic VERIFIED auto-PR yields to fleet so one ticket never
+   * ends up with two open PRs.
+   */
+  hasFleetOwnership(ticketId: string): Promise<boolean>;
 }

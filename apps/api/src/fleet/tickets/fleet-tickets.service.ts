@@ -7,6 +7,7 @@ import { FleetJobTicketDto } from './dto/ticket-fleet-job.dto';
 import { TicketFleetJobDto } from './dto/ticket-fleet-job.dto';
 import { FleetTicketEventRecorder } from './fleet-ticket-event.recorder';
 import { PrismaFleetTicketsRepository } from './prisma-fleet-tickets.repository';
+import type { OpenVcsPrLink } from './prisma-fleet-tickets.repository';
 import { parseDispatchRefs } from './ticket-refs';
 
 /** Who a RUN dispatch moves tickets as (spec §3.1, D452). */
@@ -54,6 +55,11 @@ export class FleetTicketsService {
   /** Call inside the dispatch transaction (D450). */
   async link(jobId: string, tickets: readonly DispatchTicket[]): Promise<void> {
     await this.repo.linkTickets(jobId, tickets.map((t) => t.id));
+  }
+
+  /** #231: open VCS PR links on the given ticket ids, so a RUN dispatch can refuse to add a second PR. */
+  async findOpenVcsPrLinks(ticketIds: readonly string[]): Promise<OpenVcsPrLink[]> {
+    return this.repo.findOpenVcsPrLinks(ticketIds);
   }
 
   async forJob(jobId: string): Promise<FleetJobTicketDto[]> {

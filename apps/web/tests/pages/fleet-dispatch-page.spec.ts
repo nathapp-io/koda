@@ -9,7 +9,7 @@ const dispatch = read('pages', '[project]', 'fleet', 'dispatch.vue')
 describe('dispatch page', () => {
   test('validates with the shared schema and sends toDispatchBody', () => {
     expect(dispatch).toContain('toTypedSchema(buildDispatchSchema(t))')
-    expect(dispatch).toContain('jobsApi.dispatch(toDispatchBody(formValues))')
+    expect(dispatch).toContain('jobsApi.dispatch(toDispatchBody(formValues, opts))')
   })
 
   test('a 409 (ret 409) looks up and links the active job (D121); other errors toast the API message', () => {
@@ -70,5 +70,13 @@ describe('dispatch page', () => {
     expect(dispatch).toContain("setFieldValue('ticketRefs', prefill.ticketRefs)")
     expect(dispatch).toContain('prefilled.value = applied ? prefillNotice(prefill) : null')
     expect(dispatch).toContain("prefilled === 'ticket' ? t('fleet.dispatch.prefilledTicket') : t('fleet.dispatch.prefilled')")
+  })
+
+  test('#231: a non-active-job 409 on a RUN with tickets asks to confirm the open PR, then resends acknowledged', () => {
+    expect(dispatch).toContain('const prConflict = ref<{ values: DispatchFormValues; tickets: string[] } | null>(null)')
+    expect(dispatch).toContain("formValues.command === 'RUN'")
+    expect(dispatch).toContain('data-testid="dispatch-pr-conflict"')
+    expect(dispatch).toContain('data-testid="dispatch-pr-conflict-confirm"')
+    expect(dispatch).toContain('submitDispatch(pending.values, { acknowledgeOpenPr: true })')
   })
 })

@@ -4,6 +4,8 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { parseTicketRef } from '../common/utils/ticket-ref.util';
+import { TicketLinkSource } from '../common/enums';
+import { ACTIVE_STATES } from '../fleet/jobs/job-state';
 import type {
   ITicketRepository,
   TicketProject,
@@ -349,5 +351,17 @@ export class PrismaTicketsRepository implements ITicketRepository {
     prUpdatedAt?: Date | null;
   }): Promise<{ id: string }> {
     return this.db.ticketLink.create({ data });
+  }
+
+  async hasFleetOwnership(ticketId: string): Promise<boolean> {
+    const [fleetPr, activeJob] = await Promise.all([
+      this.db.ticketLink.count({
+        where: { ticketId, linkType: 'pr', source: TicketLinkSource.FLEET },
+      }),
+      this.db.fleetJobTicket.count({
+        where: { ticketId, job: { state: { in: [...ACTIVE_STATES] } } },
+      }),
+    ]);
+    return fleetPr > 0 || activeJob > 0;
   }
 }
