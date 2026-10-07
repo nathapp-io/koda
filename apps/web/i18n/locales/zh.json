@@ -1441,6 +1441,11 @@
       "maxCost": "费用上限（美元）",
       "maxCostHint": "最多计费到该金额。测试运行通常花费 $1-2。",
       "prefilled": "已从 PLAN 任务预填。派发前请检查引用分支。",
+      "prefilledTicket": "已根据工单预填。派发前请选择仓库；PLAN 还需填写规格文件路径。",
+      "tickets": "工单",
+      "ticketsHint": "任务将关联这些工单。RUN 会将 CREATED 和 VERIFIED 状态的工单移至进行中。",
+      "ticketsPlaceholder": "按编号或标题搜索，或输入编号后按 Enter",
+      "ticketsMax": "每个任务最多 20 个工单",
       "placement": "调度",
       "placementAuto": "任意合适的执行机",
       "placementLabels": "带这些标签的执行机",
@@ -1472,7 +1477,8 @@
         "maxCost": "请输入大于 0、不超过 10000 且最多 4 位小数的金额",
         "labelsMax": "最多 16 个标签",
         "label": "标签只能使用小写字母、数字、点、短横线或下划线",
-        "labelsOrPin": "请选择标签或执行机，不能同时选择"
+        "labelsOrPin": "请选择标签或执行机，不能同时选择",
+        "tickets": "请使用 WEB-12 这样的工单编号，最多 20 个"
       }
     },
     "analytics": {

@@ -53,7 +53,10 @@ describe('fleet dispatch placement form runtime', () => {
         FormLabel: 'label', FormMessage: 'span', Input: 'input', Button: 'button', Label: 'label',
         PageHeader: 'header', ErrorState: 'div', FleetPlacementResult: 'div',
       },
-      alias: { '~/components/fleet/FleetTokenListInput.vue': TokenInput },
+      alias: {
+        '~/components/fleet/FleetTokenListInput.vue': TokenInput,
+        '~/components/fleet/TicketPicker.vue': { render: () => null },
+      },
       globals: {
         ref: Vue.ref, computed: Vue.computed, onMounted: Vue.onMounted,
         useRoute: () => ({ params: { project: 'koda' } }),

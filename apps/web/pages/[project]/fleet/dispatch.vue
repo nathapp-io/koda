@@ -3,12 +3,13 @@ import { computed, onMounted, ref } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { ApiError, extractApiError } from '~/composables/useApi'
-import { buildDispatchSchema, DISPATCH_DEFAULTS, dispatchPrefillFromQuery, toDispatchBody } from '~/lib/fleet-dispatch'
+import { buildDispatchSchema, DISPATCH_DEFAULTS, dispatchPrefillFromQuery, prefillNotice, toDispatchBody } from '~/lib/fleet-dispatch'
 import { BASH_MODES } from '~/lib/fleet-bash-mode'
 import { canWorkOnFleet } from '~/lib/fleet-jobs'
 import type { DispatchResultDto, FleetJobDto, FleetRunnerSummary } from '~/lib/fleet-types'
 import FleetPlacementResult from '~/components/fleet/FleetPlacementResult.vue'
 import FleetTokenListInput from '~/components/fleet/FleetTokenListInput.vue'
+import FleetTicketPicker from '~/components/fleet/TicketPicker.vue'
 
 definePageMeta({ layout: 'default' })
 
@@ -22,7 +23,8 @@ const { data: viewer } = useProjectViewerRole(slug)
 const canWork = computed(() => canWorkOnFleet(viewer.value))
 
 const loadFailed = ref(false)
-const prefilled = ref(false)
+/** P7: which prefill notice to show, if any. */
+const prefilled = ref<'ticket' | 'plan' | null>(null)
 onMounted(async () => {
   try {
     await options.load()
@@ -37,7 +39,8 @@ onMounted(async () => {
   if (prefill.repoId !== undefined && options.repos.value.some((r) => r.id === prefill.repoId)) { setFieldValue('repoId', prefill.repoId); applied = true }
   if (prefill.feature !== undefined) { setFieldValue('feature', prefill.feature); applied = true }
   if (prefill.ref !== undefined) { setFieldValue('ref', prefill.ref); applied = true }
-  prefilled.value = applied
+  if (prefill.ticketRefs !== undefined) { setFieldValue('ticketRefs', prefill.ticketRefs); applied = true }
+  prefilled.value = applied ? prefillNotice(prefill) : null
 })
 
 async function retry(): Promise<void> {
@@ -109,7 +112,7 @@ const onSubmit = handleSubmit(async (formValues) => {
     <p v-else-if="options.repos.value.length === 0" class="text-sm text-muted-foreground" data-testid="dispatch-no-repos">{{ t('fleet.dispatch.noRepos') }}</p>
 
     <form v-else class="space-y-5" data-testid="dispatch-form" @submit="onSubmit">
-      <p v-if="prefilled" class="rounded-md border border-primary/40 bg-primary/5 p-3 text-sm" data-testid="dispatch-prefilled">{{ t('fleet.dispatch.prefilled') }}</p>
+      <p v-if="prefilled" class="rounded-md border border-primary/40 bg-primary/5 p-3 text-sm" data-testid="dispatch-prefilled">{{ prefilled === 'ticket' ? t('fleet.dispatch.prefilledTicket') : t('fleet.dispatch.prefilled') }}</p>
       <FormField v-slot="{ componentField }" name="repoId">
         <FormItem>
           <FormLabel>{{ t('fleet.dispatch.repo') }}</FormLabel>
@@ -160,6 +163,20 @@ const onSubmit = handleSubmit(async (formValues) => {
             <Input v-bind="componentField" data-testid="dispatch-plan-from" />
           </FormControl>
           <p class="text-xs text-muted-foreground">{{ t('fleet.dispatch.planFromHint') }}</p>
+          <FormMessage />
+        </FormItem>
+      </FormField>
+
+      <FormField name="ticketRefs">
+        <FormItem>
+          <FormLabel>{{ t('fleet.dispatch.tickets') }}</FormLabel>
+          <FleetTicketPicker
+            :slug="slug"
+            :model-value="values.ticketRefs ?? []"
+            test-id="dispatch-tickets"
+            @update:model-value="setFieldValue('ticketRefs', $event)"
+          />
+          <p class="text-xs text-muted-foreground">{{ t('fleet.dispatch.ticketsHint') }}</p>
           <FormMessage />
         </FormItem>
       </FormField>
