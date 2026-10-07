@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { AssignPayload } from '@nathapp/fleet-protocol';
+import type { AssignPayload, FleetJobKindName } from '@nathapp/fleet-protocol';
 import type { UploadOutcome } from '../bundle/upload-bundle';
 import { Journal } from '../journal/journal';
 import { createMemoryLogger } from '../logger';
@@ -21,8 +21,9 @@ function build() {
     uploader: { upload: async () => outcomes.shift() ?? { kind: 'ok' } },
     tuning: { statusPollMs: 2_000, killGraceMs: 30_000, ackPollMs: 250, uploadAckWaitMs: 0, logDrainTimeoutMs: 120_000 }, readoptHeartbeatMs: 120_000,
     logs: NO_LOG_SHIPPING,
+    configEdits: { fetch: async () => ({ mode: 'drift', edits: [], prTitle: null, prBody: null, baseSha: 'a'.repeat(40) }) },
   });
-  const add = (over: Partial<AssignPayload> = {}, epoch = 1, command: 'RUN' | 'PLAN' = 'RUN') =>
+  const add = (over: Partial<AssignPayload> = {}, epoch = 1, command: FleetJobKindName = 'RUN') =>
     journal.insertJob({ assign: assignFor(command, over), leaseEpoch: epoch, repoKey: 'acme/app', jobDir: `/w/.jobs/${over.jobId ?? 'j1'}` }).row;
   return { time, journal, ex, outcomes, supervisor, add };
 }
@@ -316,5 +317,33 @@ describe('shutdown', () => {
     await b.supervisor.idle();
     expect(b.ex.killed).toEqual([]);
     expect(stateNames(b)).toEqual(['RUNNING']);
+  });
+});
+
+describe('readopt: config jobs (D485)', () => {
+  test('a RUNNING config job is rejected and its live subprocess group killed; the server marks it CRASHED', async () => {
+    const b = build();
+    b.add({}, 1, 'CONFIG_DRIFT');
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', pid: 4242, pgid: 4242 });
+    b.ex.alive = true;
+    expect(await b.supervisor.readopt('j1', 1)).toEqual({ result: 'rejected', detail: 'config job interrupted by a runner restart' });
+    expect(b.ex.killed).toEqual([{ pgid: 4242, signal: 'SIGKILL' }]);
+    expect(b.ex.calls).toContain('cleanup:j1');
+    expect(b.journal.getJob('j1', 1)?.doneAt).not.toBeNull();
+  });
+  test('a RUNNING config job between subprocesses (no pid) is rejected without a signal', async () => {
+    const b = build();
+    b.add({}, 1, 'CONFIG_EDIT');
+    b.journal.updateJob('j1', 1, { state: 'UPLOADING' });
+    expect(await b.supervisor.readopt('j1', 1)).toEqual({ result: 'rejected', detail: 'config job interrupted by a runner restart' });
+    expect(b.ex.killed).toEqual([]);
+  });
+  test('an ASSIGNED config job re-prepares from the start and completes', async () => {
+    const b = build();
+    b.add({}, 1, 'CONFIG_DRIFT');
+    expect(await b.supervisor.readopt('j1', 1)).toEqual({ result: 'ok' });
+    await b.supervisor.idle();
+    expect(b.ex.calls).toContain('prepareConfigJob:j1');
+    expect(stateNames(b).at(-1)).toBe('COMPLETED');
   });
 });

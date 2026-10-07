@@ -34,6 +34,10 @@ export interface Tuning {
   readonly logBackoffMaxMs: number;
   /** S2a R5: how long a finished job waits for its logs before UPLOADING. */
   readonly logDrainTimeoutMs: number;
+  /** S3 §5 lifecycle, D483: a config job's hard timeout. */
+  readonly configJobTimeoutMs: number;
+  /** S3 §3, D483: the RUNNING config job's heartbeat snapshot interval. */
+  readonly configHeartbeatMs: number;
 }
 
 /** D42: the design's constants in one place; only `startDaemon` options (tests) override them, runner.json cannot. */
@@ -60,4 +64,6 @@ export const TUNING: Tuning = Object.freeze({
   logPutTimeoutMs: 30_000,
   logBackoffMaxMs: 30_000,
   logDrainTimeoutMs: 120_000,
+  configJobTimeoutMs: 600_000,
+  configHeartbeatMs: 30_000,
 });

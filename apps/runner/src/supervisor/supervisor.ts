@@ -1,3 +1,4 @@
+import { isConfigKind } from '@nathapp/fleet-protocol';
 import { isFinalStatus, type StatusView } from '../verdict/status-view';
 import { JobRun, type JobRunDeps, type RunStart } from './job-run';
 import { killIfOurs } from './kill-if-ours';
@@ -101,6 +102,9 @@ export class Supervisor {
       this.begin(row, 'reprepare');   // D33, D65: every prepare step is idempotent; reap first in case a nax was spawned before the crash
       return OK;
     }
+    // D485: a config job's work happens inside this daemon's process (no detached nax to watch), so a restart ends it;
+    // the server marks it CRASHED and a requeue starts it over on a fresh lease.
+    if (isConfigKind(row.command)) return this.reject(row, 'config job interrupted by a runner restart');
     if (row.pid === null) return this.reject(row, 'no process recorded');
     const alive = this.deps.executor.isAlive(row.pid);
     if (row.command === 'PLAN') {
