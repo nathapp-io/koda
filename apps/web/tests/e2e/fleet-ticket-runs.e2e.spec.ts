@@ -108,6 +108,8 @@ test.describe('Fleet runs on tickets (scripted runner)', () => {
     const lease = await runner.acceptAssign(jobId);
     await runner.report(lease, [
       { type: 'state', payload: { to: 'RUNNING' } },
+      // Spec §5.4: a runner reports FAILED from UPLOADING only.
+      { type: 'state', payload: { to: 'UPLOADING' } },
       { type: 'state', payload: { to: 'FAILED', reason: `acceptance failed ${suffix}`, exitCode: 1 } },
     ]);
 
