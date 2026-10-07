@@ -48,3 +48,35 @@ describe('PrismaTicketsRepository assignee mapping (M26)', () => {
     expect((await repo.findTicketById('t1'))?.assignee).toBeNull();
   });
 });
+
+describe('PrismaTicketsRepository — hasFleetOwnership (#231)', () => {
+  const repoWith = (fleetPrCount: number, activeJobCount: number) => {
+    const ticketLinkCount = jest.fn().mockResolvedValue(fleetPrCount);
+    const fleetJobTicketCount = jest.fn().mockResolvedValue(activeJobCount);
+    const prisma = {
+      client: { ticketLink: { count: ticketLinkCount }, fleetJobTicket: { count: fleetJobTicketCount } },
+    };
+    return { repo: new PrismaTicketsRepository(prisma as never), ticketLinkCount, fleetJobTicketCount };
+  };
+
+  it('is true when a fleet-sourced pr link exists', async () => {
+    const { repo, ticketLinkCount, fleetJobTicketCount } = repoWith(1, 0);
+    await expect(repo.hasFleetOwnership('t1')).resolves.toBe(true);
+    expect(ticketLinkCount).toHaveBeenCalledWith({
+      where: { ticketId: 't1', linkType: 'pr', source: 'fleet' },
+    });
+    expect(fleetJobTicketCount).toHaveBeenCalledWith({
+      where: { ticketId: 't1', job: { state: { in: ['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING'] } } },
+    });
+  });
+
+  it('is true when a non-terminal fleet job is linked', async () => {
+    const { repo } = repoWith(0, 1);
+    await expect(repo.hasFleetOwnership('t1')).resolves.toBe(true);
+  });
+
+  it('is false when neither a fleet pr link nor an active job exists', async () => {
+    const { repo } = repoWith(0, 0);
+    await expect(repo.hasFleetOwnership('t1')).resolves.toBe(false);
+  });
+});

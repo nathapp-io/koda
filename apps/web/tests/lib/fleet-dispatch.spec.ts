@@ -76,6 +76,11 @@ describe('toDispatchBody', () => {
     expect(body.profiles).toEqual(['fast'])
     expect(body.profiles).not.toBe(values.profiles)
   })
+
+  test('#231: acknowledgeOpenPr only travels when the caller opted in', () => {
+    expect(toDispatchBody(valid())).not.toHaveProperty('acknowledgeOpenPr')
+    expect(toDispatchBody(valid(), { acknowledgeOpenPr: true })).toMatchObject({ acknowledgeOpenPr: true })
+  })
 })
 
 describe('bash fields (D299)', () => {

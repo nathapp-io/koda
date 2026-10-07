@@ -1460,6 +1460,8 @@
       "submitting": "派发中...",
       "conflict": "这个仓库上已有一个进行中的任务在处理这个功能。",
       "conflictLink": "打开进行中的任务",
+      "prConflict": "该工单已有打开的拉取请求：{tickets}。继续派发将为同一项工作再开一个 PR。",
+      "prConflictConfirm": "仍然派发",
       "result": {
         "assigned": "已分配给 {runner}",
         "queued": "已排队：目前没有合适的执行机，有合适的执行机时开始。",

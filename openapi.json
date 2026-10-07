@@ -10495,6 +10495,10 @@
               "type": "string",
               "maxLength": 32
             }
+          },
+          "acknowledgeOpenPr": {
+            "type": "boolean",
+            "description": "C9 follow-up (#231): proceed with a RUN even when a target ticket already has an open VCS PR. Without it the dispatch is refused so a ticket does not end up with two PRs."
           }
         },
         "required": [

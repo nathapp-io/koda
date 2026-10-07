@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ArrayMaxSize, IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, Length, Matches, Max, MaxLength, Min } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, Length, Matches, Max, MaxLength, Min } from 'class-validator';
 import type { BashMode } from '../../common/protocol';
 import { LABEL_PATTERN } from '../../runners/dto/create-enrollment.dto';
 
@@ -24,4 +24,7 @@ export class DispatchFleetJobDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(1, 64) pinnedRunnerId?: string;
   @ApiPropertyOptional({ type: [String], maxItems: 20, description: 'Tickets this job works on, KEY-N (fleet C9). A RUN moves CREATED/VERIFIED ones to IN_PROGRESS.' })
   @IsOptional() @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) @MaxLength(32, { each: true }) ticketRefs?: string[];
+
+  @ApiPropertyOptional({ description: 'C9 follow-up (#231): proceed with a RUN even when a target ticket already has an open VCS PR. Without it the dispatch is refused so a ticket does not end up with two PRs.' })
+  @IsOptional() @IsBoolean() acknowledgeOpenPr?: boolean;
 }

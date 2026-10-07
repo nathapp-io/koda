@@ -4,6 +4,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { ApiError, extractApiError } from '~/composables/useApi'
 import { buildDispatchSchema, DISPATCH_DEFAULTS, dispatchPrefillFromQuery, prefillNotice, toDispatchBody } from '~/lib/fleet-dispatch'
+import type { DispatchFormValues } from '~/lib/fleet-dispatch'
 import { BASH_MODES } from '~/lib/fleet-bash-mode'
 import { canWorkOnFleet } from '~/lib/fleet-jobs'
 import type { DispatchResultDto, FleetJobDto, FleetRunnerSummary } from '~/lib/fleet-types'
@@ -84,21 +85,42 @@ function runnerOptionLabel(runner: FleetRunnerSummary): string {
 const pinOptions = computed(() => options.runners.value.map(r => ({ value: r.id, label: runnerOptionLabel(r) })))
 const result = ref<DispatchResultDto | null>(null)
 const activeJob = ref<FleetJobDto | null>(null)
+/** #231: a 409 that is not an active-job conflict means a target ticket already has an open PR. */
+const prConflict = ref<{ values: DispatchFormValues; tickets: string[] } | null>(null)
 
-const onSubmit = handleSubmit(async (formValues) => {
+async function submitDispatch(formValues: DispatchFormValues, opts: { acknowledgeOpenPr?: boolean } = {}): Promise<void> {
   result.value = null
   activeJob.value = null
+  prConflict.value = null
   try {
-    result.value = await jobsApi.dispatch(toDispatchBody(formValues))
+    result.value = await jobsApi.dispatch(toDispatchBody(formValues, opts))
   }
   catch (err: unknown) {
     // D121: a 409 means an active job already runs this (repo, feature); link to it.
     if (err instanceof ApiError && err.code === 409) {
-      activeJob.value = await jobsApi.findActiveJob(formValues.repoId, formValues.feature.trim()).catch(() => null)
+      const active = await jobsApi.findActiveJob(formValues.repoId, formValues.feature.trim()).catch(() => null)
+      if (active) {
+        activeJob.value = active
+      }
+      else if (formValues.command === 'RUN' && (formValues.ticketRefs?.length ?? 0) > 0) {
+        // #231: the target ticket(s) already have an open VCS PR; confirm before adding a second.
+        prConflict.value = { values: formValues, tickets: [...formValues.ticketRefs] }
+        return
+      }
+      toast.error(extractApiError(err))
+      return
     }
     toast.error(extractApiError(err))
   }
-})
+}
+
+const onSubmit = handleSubmit((formValues) => submitDispatch(formValues))
+
+async function confirmPrConflict(): Promise<void> {
+  const pending = prConflict.value
+  if (!pending) return
+  await submitDispatch(pending.values, { acknowledgeOpenPr: true })
+}
 </script>
 
 <template>
@@ -272,6 +294,16 @@ const onSubmit = handleSubmit(async (formValues) => {
       <NuxtLink :to="`/${slug}/fleet/jobs/${activeJob.id}`" class="font-medium text-primary underline-offset-4 hover:underline" data-testid="dispatch-conflict-link">
         {{ t('fleet.dispatch.conflictLink') }}
       </NuxtLink>
+    </div>
+
+    <div v-if="prConflict" class="rounded-md border border-destructive/50 bg-destructive/5 p-4 text-sm" data-testid="dispatch-pr-conflict">
+      <p>{{ t('fleet.dispatch.prConflict', { tickets: prConflict.tickets.join(', ') }) }}</p>
+      <div class="mt-3 flex gap-2">
+        <Button type="button" variant="outline" @click="prConflict = null">{{ t('common.cancel') }}</Button>
+        <Button type="button" variant="destructive" :disabled="isSubmitting" data-testid="dispatch-pr-conflict-confirm" @click="confirmPrConflict">
+          {{ t('fleet.dispatch.prConflictConfirm') }}
+        </Button>
+      </div>
     </div>
 
     <FleetPlacementResult v-if="result" :slug="slug" :result="result" :runner-name="options.runnerName" />

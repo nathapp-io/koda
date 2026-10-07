@@ -274,6 +274,8 @@ export interface DispatchBody {
   approvalTimeoutSec?: number
   /** C9 §2.1: KEY-N refs, at most 20 (D450). */
   ticketRefs?: string[]
+  /** C9 follow-up (#231): resend a RUN after confirming the ticket already has an open PR. */
+  acknowledgeOpenPr?: boolean
 }
 
 /** S1b slice 2a wire types (apps/api/src/fleet/budgets/dto). Money is a decimal string. */

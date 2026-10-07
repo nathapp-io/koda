@@ -58,3 +58,62 @@ describe('fleet jobs service approvals count (S1.5 2a D272)', () => {
     expect((await service.get(projectId, jobA.id)).pendingApprovals).toBe(1);
   });
 });
+
+describe('fleet jobs service dispatch open-PR guard (#231)', () => {
+  const repoRecord = { id: 'r', projectId: 'p', defaultBranch: 'main' };
+  const tickets = [{ id: 't1', ref: 'KODA-1', title: 'x', status: 'CREATED' }];
+  let repo: { findRepo: jest.Mock };
+  let fleetTickets: { resolveForDispatch: jest.Mock; findOpenVcsPrLinks: jest.Mock };
+  let budgets: { assertNotPaused: jest.Mock };
+  let service: FleetJobsService;
+
+  const build = (): void => {
+    repo = { findRepo: jest.fn().mockResolvedValue(repoRecord) };
+    fleetTickets = {
+      resolveForDispatch: jest.fn((_projectId: string, refs?: readonly string[]) => Promise.resolve(refs && refs.length > 0 ? tickets : [])),
+      findOpenVcsPrLinks: jest.fn().mockResolvedValue([{ ticketId: 't1', url: 'https://github.com/acme/widgets/pull/1' }]),
+    };
+    budgets = { assertNotPaused: jest.fn().mockRejectedValue(new Error('budget-stop-sentinel')) };
+    service = new FleetJobsService(
+      repo as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      budgets as never,
+      {} as never,
+      {} as never,
+      fleetTickets as never,
+      {} as never,
+    );
+  };
+
+  const runDto = (over: Record<string, unknown> = {}) => ({
+    repoId: 'r', command: 'RUN' as const, feature: 'f', maxCostUsd: 5, ticketRefs: ['KODA-1'], ...over,
+  });
+
+  it('refuses a RUN when a target ticket already has an open VCS PR', async () => {
+    build();
+    await expect(service.dispatch('u', 'p', runDto() as never)).rejects.toMatchObject({ code: 409 });
+    expect(fleetTickets.findOpenVcsPrLinks).toHaveBeenCalledWith(['t1']);
+  });
+
+  it('skips the guard when acknowledgeOpenPr is set, and lets the dispatch continue', async () => {
+    build();
+    await expect(service.dispatch('u', 'p', runDto({ acknowledgeOpenPr: true }) as never)).rejects.toThrow('budget-stop-sentinel');
+    expect(fleetTickets.findOpenVcsPrLinks).not.toHaveBeenCalled();
+  });
+
+  it('does not look up PRs when no tickets are targeted', async () => {
+    build();
+    await expect(service.dispatch('u', 'p', runDto({ ticketRefs: undefined }) as never)).rejects.toThrow('budget-stop-sentinel');
+    expect(fleetTickets.findOpenVcsPrLinks).not.toHaveBeenCalled();
+  });
+
+  it('does not look up PRs for a PLAN dispatch', async () => {
+    build();
+    await expect(service.dispatch('u', 'p', runDto({ command: 'PLAN', planFrom: 'spec.md' }) as never)).rejects.toThrow('budget-stop-sentinel');
+    expect(fleetTickets.findOpenVcsPrLinks).not.toHaveBeenCalled();
+  });
+});

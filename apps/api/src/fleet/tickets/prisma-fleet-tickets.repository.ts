@@ -32,6 +32,9 @@ export interface RefreshableLink {
   repo: RefreshRepo;
 }
 
+/** #231: an open VCS PR already linked to a ticket targeted by a dispatch. */
+export interface OpenVcsPrLink { ticketId: string; url: string }
+
 /** Fleet C9 (spec §1-§3.2): every Prisma access of the fleet tickets module. Joins an open txManager.run. */
 @Injectable()
 export class PrismaFleetTicketsRepository {
@@ -50,6 +53,20 @@ export class PrismaFleetTicketsRepository {
     return this.db.ticket.findMany({
       where: { projectId, number: { in: [...numbers] } },
       select: { id: true, number: true, title: true, status: true, deletedAt: true },
+    });
+  }
+
+  /** #231: open `vcs` PR links on the given tickets (a null prState counts as open). Caller joins this to refs. */
+  async findOpenVcsPrLinks(ticketIds: readonly string[]): Promise<OpenVcsPrLink[]> {
+    if (ticketIds.length === 0) return [];
+    return this.db.ticketLink.findMany({
+      where: {
+        ticketId: { in: [...ticketIds] },
+        linkType: 'pr',
+        source: TicketLinkSource.VCS,
+        OR: [{ prState: null }, { prState: { notIn: ['merged', 'closed'] } }],
+      },
+      select: { ticketId: true, url: true },
     });
   }
 
