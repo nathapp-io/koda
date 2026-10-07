@@ -8,6 +8,7 @@
  * - `<naxHome>/fake-auth.json` is `{ "providers": [...] }` in nax's AuthListReport row shape
  * - `<naxHome>/fake-sandbox.json` is the whole probe document (default: available)
  * - `<naxHome>/fake-untrusted` makes every folder untrusted
+ * - an unparsable <dir>/.nax/config.json fails CONFIG_PARSE_ERROR; <dir>/.nax/profiles/<name>.json is a repo profile (S3)
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -46,11 +47,13 @@ const failure = (code: string): ProbeAnswer => answer({ error: { code, message: 
 
 function config(args: readonly string[], naxHome: string, cwd: string): ProbeAnswer {
   const dir = flagValue(args, '-d') ?? cwd;
+  const rootConfig = join(dir, '.nax', 'config.json');
+  if (existsSync(rootConfig) && readJson(rootConfig) === null) return failure('CONFIG_PARSE_ERROR');   // S3: config validation
   const chain = (flagValue(args, '--profile') ?? '').split(',').filter(Boolean);
   let requirements = DEFAULT_REQUIREMENTS;
   let interaction: unknown = readJson(join(naxHome, 'fake-interaction.json')) ?? undefined;
   for (const name of chain) {
-    const file = readJson(join(naxHome, 'profiles', `${name}.json`)) ?? readJson(join(dir, '.nax', 'fake-profiles', `${name}.json`));
+    const file = readJson(join(naxHome, 'profiles', `${name}.json`)) ?? readJson(join(dir, '.nax', 'fake-profiles', `${name}.json`)) ?? readJson(join(dir, '.nax', 'profiles', `${name}.json`));
     if (!file) return failure('PROFILE_NOT_FOUND');
     if (typeof file['fakeError'] === 'string') return failure(file['fakeError']);
     if (file['fakeRequirements']) requirements = file['fakeRequirements'] as Requirements;
