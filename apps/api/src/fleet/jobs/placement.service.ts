@@ -6,11 +6,11 @@ import { IVcsConfig, VCS_CFG } from '../../config/vcs.config';
 import type { LiveFleetJobEvent } from '../../live/live-event';
 import { cloneUrlFor } from '../git-broker/clone-url';
 import { BudgetGate } from '../budgets/budget-gate';
-import { budgetReason, jobGateKeys } from '../budgets/budget-rules';
+import { budgetReason } from '../budgets/budget-rules';
 import { buildAssignPayload, gitIdentityFor } from './assign-payload';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import { JobTransitionsService, SYSTEM_ACTOR } from './job-transitions.service';
-import { EMPTY_LOAD, evaluateRunners, firstMisfit, MisfitReason, orderCandidates, PlacementJob, QUEUED_SCAN_LIMIT, toLoads, toPlacementJob } from './placement-rules';
+import { EMPTY_LOAD, evaluateRunners, firstMisfit, jobScopePause, MisfitReason, orderCandidates, PlacementJob, QUEUED_SCAN_LIMIT, toLoads, toPlacementJob } from './placement-rules';
 import { RunnerNotifier } from './runner-notifier';
 import {
   FLEET_JOB_REPOSITORY, FleetJobRecord, FleetRepoRef, IFleetJobRepository, PlacementRunnerRow,
@@ -66,7 +66,7 @@ export class PlacementService {
       if (!repo) throw new Error(`fleet repo ${job.repoId} missing for job ${job.id}`);
       const pauses = await this.budgets.snapshot(now);
       // S1b §2.3 shared pre-assign check: a job whose scope paused after it was queued is cancelled, never assigned.
-      const paused = pauses.match(jobGateKeys(job));
+      const paused = jobScopePause(job, (keys) => pauses.match(keys));
       if (paused) {
         return { outcome: { assigned: false, runnerId: null, leaseEpoch: null, misfits: [] } as PlacementOutcome, live: [await this.cancelForPause(job, paused.id, now)] };
       }
@@ -116,7 +116,7 @@ export class PlacementService {
         if (!job || job.state !== FleetJobState.QUEUED) continue;
         if (job.pinnedRunnerId && job.pinnedRunnerId !== runner.id) continue;
         // S1b §2.3: the same pre-assign check as placeJob.
-        const paused = pauses.match(jobGateKeys(job));
+        const paused = jobScopePause(job, (keys) => pauses.match(keys));
         if (paused) {
           events.push(await this.cancelForPause(job, paused.id, now));
           continue;

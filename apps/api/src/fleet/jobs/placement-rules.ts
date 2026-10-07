@@ -1,11 +1,14 @@
 import type { ProfileNeeds, RunnerCapabilities, BashMode } from '../common/protocol';
 import { isRunnerOnline } from '../common/runner-online';
+import { isConfigKind } from '../common/config-jobs';
+import { jobGateKeys } from '../budgets/budget-rules';
 import type { FleetJobRecord, FleetRepoRef } from './domain/fleet-job.domain';
 
 /** The first placement rule a runner fails (spec §4), reported per runner at dispatch. */
 export type MisfitReason =
   | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
-  | 'provider_unavailable' | 'sandbox' | 'interaction' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity';
+  | 'provider_unavailable' | 'sandbox' | 'interaction' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity'
+  | 'config_jobs';
 
 // budget_paused is not permanent either: it clears on resume or month rollover (S1b §2.3).
 // provider_unavailable is not permanent: a later probe may fix it, so the job queues and a
@@ -13,10 +16,11 @@ export type MisfitReason =
 // interaction is not permanent either: the runner's env is fixed and a re-probe clears it (#207).
 /** A pinned job whose runner fails one of these can never run there: 422 at dispatch (spec §4). */
 export const PERMANENT_MISFITS: ReadonlySet<MisfitReason> = new Set<MisfitReason>([
-  'disabled', 'executor', 'protocol', 'provider_missing', 'sandbox', 'tools', 'approvals_relay',
+  'disabled', 'executor', 'protocol', 'provider_missing', 'sandbox', 'tools', 'approvals_relay', 'config_jobs',
 ]);
 
 export interface PlacementJob {
+  command: string;
   repoId: string;
   provider: 'github' | 'gitlab';
   profiles: readonly string[];
@@ -62,7 +66,14 @@ export function profileMisfit(needs: ProfileNeeds, caps: RunnerCapabilities): Mi
   return null;
 }
 
+function toolsMisfit(job: PlacementJob, caps: RunnerCapabilities): MisfitReason | null {
+  const forgeTool = job.provider === 'github' ? caps.tools.gh : caps.tools.glab;
+  return !caps.tools.git || !forgeTool ? 'tools' : null;
+}
+
 function capabilityMisfit(job: PlacementJob, caps: RunnerCapabilities): MisfitReason | null {
+  // Fleet S3 D470: a config job runs no agent, so only the S3 capability and the forge tools matter.
+  if (isConfigKind(job.command)) return caps.configJobs === true ? toolsMisfit(job, caps) : 'config_jobs';
   // Plan D270: a gated/escalate job on a runner without the relay would have every ask denied (A7), so never place it.
   if (job.bashMode !== 'raw' && caps.approvals?.relay !== true) return 'approvals_relay';
   for (const name of job.profiles) {
@@ -74,16 +85,15 @@ function capabilityMisfit(job: PlacementJob, caps: RunnerCapabilities): MisfitRe
   // #207: a job with no profiles runs on the machine's base config. A job naming profiles is judged on them only:
   // each reported profile's result already includes the base config it overlays.
   if (job.profiles.length === 0 && caps.interaction?.ok === false) return 'interaction';
-  const forgeTool = job.provider === 'github' ? caps.tools.gh : caps.tools.glab;
-  if (!caps.tools.git || !forgeTool) return 'tools';
-  return null;
+  return toolsMisfit(job, caps);
 }
 
 /** Spec §4 steps 1-3, in order. Pinned jobs ignore selector labels (the pin is the candidate set). */
 export function firstMisfit(job: PlacementJob, runner: PlacementRunner, load: RunnerLoad, now: Date, offlineSec: number): MisfitReason | null {
   if (!runner.enabled) return 'disabled';
   if (!isRunnerOnline(runner.lastSeenAt, now, offlineSec)) return 'offline';
-  if (runner.budgetPaused) return 'budget_paused';
+  // Fleet S3 D470: config jobs spend nothing, so a runner's budget pause does not hold them.
+  if (runner.budgetPaused && !isConfigKind(job.command)) return 'budget_paused';
   if (job.pinnedRunnerId === null && !job.selectorLabels.every((label) => runner.labels.includes(label))) return 'labels';
   if (!runner.capabilities.executors.includes('host')) return 'executor';
   const capability = capabilityMisfit(job, runner.capabilities);
@@ -114,11 +124,19 @@ export const toLoads = (refs: readonly { runnerId: string; repoId: string }[]): 
   }, new Map<string, RunnerLoad>());
 
 export const toPlacementJob = (
-  job: Pick<FleetJobRecord, 'repoId' | 'profiles' | 'selectorLabels' | 'pinnedRunnerId' | 'bashMode'>,
+  job: Pick<FleetJobRecord, 'command' | 'repoId' | 'profiles' | 'selectorLabels' | 'pinnedRunnerId' | 'bashMode'>,
   repo: Pick<FleetRepoRef, 'provider'>,
 ): PlacementJob => ({
-  repoId: job.repoId, provider: repo.provider, profiles: job.profiles, selectorLabels: job.selectorLabels, pinnedRunnerId: job.pinnedRunnerId, bashMode: job.bashMode,
+  command: job.command, repoId: job.repoId, provider: repo.provider, profiles: job.profiles, selectorLabels: job.selectorLabels, pinnedRunnerId: job.pinnedRunnerId, bashMode: job.bashMode,
 });
+
+/** S1b §2.3 pre-assign pause check; config jobs spend nothing, so a pause never holds or cancels them (fleet S3 D470). */
+export function jobScopePause<T>(
+  job: { command: string; projectId: string; repoId: string; pinnedRunnerId: string | null },
+  match: (keys: readonly string[]) => T | null,
+): T | null {
+  return isConfigKind(job.command) ? null : match(jobGateKeys(job));
+}
 
 export interface RunnerVerdict<R extends PlacementRunner = PlacementRunner> {
   runner: R;
