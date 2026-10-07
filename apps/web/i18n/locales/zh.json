@@ -1481,6 +1481,16 @@
         "tickets": "请使用 WEB-12 这样的工单编号，最多 20 个"
       }
     },
+    "tickets": {
+      "title": "Fleet 运行",
+      "dispatch": "派发",
+      "viaFleet": "来自 fleet",
+      "pr": "PR",
+      "unlink": "取消关联",
+      "unlinkTitle": "取消关联此 fleet 任务？",
+      "unlinkBody": "任务、其 PR 和工单历史都会保留。该任务将不再显示在此工单上，其 fleet PR 链接也会从工单中移除。",
+      "unlinked": "已取消关联 fleet 任务"
+    },
     "analytics": {
       "title": "集群分析",
       "subtitle": "集群费用的去向与产出。",

@@ -1481,6 +1481,16 @@
         "tickets": "Use ticket refs like WEB-12, at most 20"
       }
     },
+    "tickets": {
+      "title": "Fleet runs",
+      "dispatch": "Dispatch",
+      "viaFleet": "via fleet",
+      "pr": "PR",
+      "unlink": "Unlink",
+      "unlinkTitle": "Unlink this fleet job?",
+      "unlinkBody": "The job, its PR and the ticket history stay. The job leaves this ticket, and its fleet PR link is removed from the ticket.",
+      "unlinked": "Fleet job unlinked"
+    },
     "analytics": {
       "title": "Fleet analytics",
       "subtitle": "Where fleet money goes and what it buys.",
