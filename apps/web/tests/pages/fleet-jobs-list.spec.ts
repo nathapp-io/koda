@@ -86,4 +86,10 @@ describe('fleet jobs list', () => {
     expect(list).toContain("codeLabel(t, te, 'fleet.command', job.command)")
     expect(list).toContain("isConfigJob(job) ? t('fleet.jobs.configFeature') : job.feature")
   })
+
+  test('S3 §6: the fleet page shows the Repos card from the loaded dispatch options', () => {
+    const list = readFileSync(path.join(__dirname, '../..', 'pages', '[project]', 'fleet', 'index.vue'), 'utf-8')
+    expect(list).toContain("import RepoConfigList from '~/components/fleet/config/RepoConfigList.vue'")
+    expect(list).toContain('<RepoConfigList :slug="slug" :repos="options.repos.value" />')
+  })
 })
