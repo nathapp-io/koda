@@ -11,7 +11,7 @@
 **Spec:** `docs/superpowers/specs/2026-10-07-fleet-s3-repo-config-and-credential-board-design.md` (decisions D465-D498).
 
 **Delivery:** three PRs, each cut from `main` only after the previous one merged (no stacking):
-- **PR 1 — Part A** (`feat/fleet-s3-1-credential-board`): Tasks A0-A10. Also carries the spec and this plan.
+- **PR 1 — Part A** (`feat/fleet-s3-1-credential-board`, already created; carries the spec and this plan): Tasks A0-A10.
 - **PR 2 — Parts B1 + B2** (`feat/fleet-s3-2-config-jobs`): Tasks B1-0..B1-13, then B2-1..B2-12 (B2-12 opens the PR).
 - **PR 3 — Part C** (`feat/fleet-s3-3-config-web`): Tasks C0-C13, then C14 (human-run deploy + live check after merge).
 
@@ -96,30 +96,24 @@ Conventions every task follows:
 
 ---
 
-### Task A0: Cut the PR 1 branch
+### Task A0: Start on the PR 1 branch
 
 **Files:** none.
 
-- [ ] **Step 1: Branch from an up-to-date main**
+The branch `feat/fleet-s3-1-credential-board` already exists: it was cut from `main` `a61c11aa` and carries the spec
+and this plan as its first commits. Work on it; do not cut a new one.
+
+- [ ] **Step 1: Check out the branch and bring it up to date with main**
 
 ```bash
 cd /Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda
 git fetch origin
-git switch main
-git pull --ff-only
-git switch -c feat/fleet-s3-1-credential-board
+git switch feat/fleet-s3-1-credential-board
+git rebase origin/main
 ```
 
-Expected: `Switched to a new branch 'feat/fleet-s3-1-credential-board'`.
-
-- [ ] **Step 2: Bring the spec and plan onto the branch**
-
-The spec and this plan live on `docs/fleet-s3-spec`. Copy them in so the PR carries them:
-
-```bash
-git checkout docs/fleet-s3-spec -- docs/superpowers/specs/2026-10-07-fleet-s3-repo-config-and-credential-board-design.md docs/superpowers/plans/2026-10-07-fleet-s3-repo-config-and-credential-board.md
-git commit -m "docs(fleet): S3 spec and plan"
-```
+Expected: the rebase applies cleanly (the branch only adds the spec and plan under `docs/superpowers/`).
+`git log --oneline origin/main..HEAD` lists only the `docs(fleet): S3 ...` commits.
 
 ---
 
