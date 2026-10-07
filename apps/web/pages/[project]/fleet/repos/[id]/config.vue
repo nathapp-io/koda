@@ -203,7 +203,7 @@ const problemText = (p: { path: string | null; code: string }): string =>
     </p>
     <ErrorState v-else-if="loadFailed || !list" @retry="load()" />
     <template v-else>
-      <ul v-if="problems.length > 0" class="space-y-1 text-sm text-destructive" role="alert">
+      <ul v-if="problems.length > 0" class="space-y-1 text-sm text-status-rejected" role="alert">
         <li v-for="p in problems" :key="`${p.path ?? ''}:${p.code}`" data-testid="config-problem">{{ problemText(p) }}</li>
       </ul>
 
