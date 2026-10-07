@@ -738,6 +738,12 @@
       "decomposed": "已拆分",
       "unknown": "未知"
     },
+    "command": {
+      "RUN": "运行",
+      "PLAN": "规划",
+      "CONFIG_EDIT": "配置修改",
+      "CONFIG_DRIFT": "漂移检查"
+    },
     "misfit": {
       "disabled": "执行机已停用",
       "offline": "执行机离线",
@@ -752,7 +758,8 @@
       "tools": "执行机缺少此仓库所需的 git、gh 或 glab",
       "approvals_relay": "该运行器无法转发 bash 审批（需要协议 v2 和 nax 0.83 或更高版本）",
       "busy_repo": "执行机已在运行此仓库的任务",
-      "capacity": "执行机已满载"
+      "capacity": "执行机已满载",
+      "config_jobs": "Runner 版本过旧，不支持配置任务（请升级 Runner）"
     },
     "repoReason": {
       "github_app_not_configured": "koda 服务器未配置 GitHub App",
@@ -1278,6 +1285,7 @@
       "budgets": "预算",
       "schedules": "定时计划",
       "approvals": "审批",
+      "configFeature": "nax 配置",
       "approvalsSection": { "title": "审批", "empty": "尚无 Shell 命令询问。", "open": "打开" },
       "needsApproval": "待审批（{count}）",
       "empty": "还没有 fleet 任务",

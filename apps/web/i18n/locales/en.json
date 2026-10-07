@@ -738,6 +738,12 @@
       "decomposed": "Decomposed",
       "unknown": "Unknown"
     },
+    "command": {
+      "RUN": "Run",
+      "PLAN": "Plan",
+      "CONFIG_EDIT": "Config edit",
+      "CONFIG_DRIFT": "Drift check"
+    },
     "misfit": {
       "disabled": "Runner is disabled",
       "offline": "Runner is offline",
@@ -752,7 +758,8 @@
       "tools": "Runner lacks git, gh or glab for this repo",
       "approvals_relay": "The runner cannot relay bash approvals (needs protocol v2 and nax 0.83 or later)",
       "busy_repo": "Runner already runs a job for this repo",
-      "capacity": "Runner is at capacity"
+      "capacity": "Runner is at capacity",
+      "config_jobs": "Runner is too old for config jobs (upgrade the runner)"
     },
     "repoReason": {
       "github_app_not_configured": "The GitHub App is not configured on the koda server",
@@ -1278,6 +1285,7 @@
       "budgets": "Budgets",
       "schedules": "Schedules",
       "approvals": "Approvals",
+      "configFeature": "nax config",
       "approvalsSection": { "title": "Approvals", "empty": "No shell command asks yet.", "open": "Open" },
       "needsApproval": "Needs approval ({count})",
       "empty": "No fleet jobs yet",

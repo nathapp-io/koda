@@ -279,3 +279,19 @@ describe('runningFirstJobs (slice 4)', () => {
     expect(input.map((j) => j.id)).toEqual(['a', 'b'])
   })
 })
+
+import { isConfigJob, jobCommandLabelKey } from '~/lib/fleet-jobs'
+
+describe('config jobs (S3 §6)', () => {
+  test('isConfigJob is true only for the two config kinds', () => {
+    expect(isConfigJob({ command: 'CONFIG_EDIT' })).toBe(true)
+    expect(isConfigJob({ command: 'CONFIG_DRIFT' })).toBe(true)
+    expect(isConfigJob({ command: 'RUN' })).toBe(false)
+    expect(isConfigJob({ command: 'PLAN' })).toBe(false)
+  })
+
+  test('jobCommandLabelKey maps every kind under fleet.command', () => {
+    expect(jobCommandLabelKey('CONFIG_EDIT')).toBe('fleet.command.CONFIG_EDIT')
+    expect(jobCommandLabelKey('RUN')).toBe('fleet.command.RUN')
+  })
+})
