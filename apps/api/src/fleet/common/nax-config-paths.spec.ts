@@ -71,6 +71,7 @@ describe('API mirrors match the package', () => {
   it('kinds and completed outcomes', () => {
     expect([...apiJobs.CONFIG_JOB_KINDS]).toEqual([...pkgPaths.CONFIG_JOB_KINDS]);
     expect([...apiJobs.CONFIG_COMPLETED_OUTCOMES]).toEqual([...pkgPaths.CONFIG_COMPLETED_OUTCOMES]);
+    expect(apiJobs.CONFIG_JOB_OUTCOMES).toEqual(pkgPaths.CONFIG_JOB_OUTCOMES);
   });
   it.each([['CONFIG_EDIT', true], ['CONFIG_DRIFT', true], ['RUN', false], ['PLAN', false], ['config_edit', false]])(
     'isConfigKind(%s) is %s in both', (kind, expected) => {

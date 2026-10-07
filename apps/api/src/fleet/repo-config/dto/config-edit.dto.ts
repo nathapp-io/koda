@@ -1,10 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsIn, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
+import { CONFIG_JOB_OUTCOMES } from '../../common/config-jobs';
 import type { ConfigEditMode, ConfigJobOutcome } from '../../common/config-jobs';
 import type { NaxPathGroup } from '../../common/nax-config-paths';
 
-const OUTCOMES = ['ok', 'no_changes', 'drift', 'conflict', 'invalid', 'push_failed', 'pr_failed', 'timeout'];
+const OUTCOMES = [...CONFIG_JOB_OUTCOMES];
 const GROUPS = ['rules', 'context', 'config', 'profiles', 'constitution'];
 
 /** Shape only; config-edit-input.ts enforces the allowlist, sizes and duplicates (spec §1, §2). */

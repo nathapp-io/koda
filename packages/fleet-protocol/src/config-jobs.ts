@@ -19,6 +19,9 @@ export type ConfigJobOutcome = 'ok' | 'no_changes' | 'drift' | 'conflict' | 'inv
 /** These end COMPLETED; every other outcome ends FAILED with stateReason = outcome (D471). */
 export const CONFIG_COMPLETED_OUTCOMES: readonly ConfigJobOutcome[] = ['ok', 'no_changes', 'drift'];
 
+/** Every outcome a config job may report (spec §3); the COMPLETED prefix above is a subset. */
+export const CONFIG_JOB_OUTCOMES: readonly ConfigJobOutcome[] = ['ok', 'no_changes', 'drift', 'conflict', 'invalid', 'push_failed', 'pr_failed', 'timeout'];
+
 /** Rides the snapshot event (D475). */
 export interface ConfigJobResult { outcome: ConfigJobOutcome; files?: string[]; output?: string }
 

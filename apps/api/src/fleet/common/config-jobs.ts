@@ -13,4 +13,6 @@ export function isConfigKind(command: string): command is ConfigJobKind {
 
 export const CONFIG_COMPLETED_OUTCOMES: readonly ConfigJobOutcome[] = ['ok', 'no_changes', 'drift'];
 
+export const CONFIG_JOB_OUTCOMES: readonly ConfigJobOutcome[] = ['ok', 'no_changes', 'drift', 'conflict', 'invalid', 'push_failed', 'pr_failed', 'timeout'];
+
 export const CONFIG_RESULT_LIMITS = { maxFiles: 50, maxFileChars: 512, maxOutputBytes: 8_192 } as const;
