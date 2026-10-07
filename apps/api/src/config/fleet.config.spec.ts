@@ -137,4 +137,16 @@ describe('fleet config', () => {
   it.each(['59999', '1.5', 'abc'])('refuses boot on FLEET_PR_REFRESH_MS=%s', (value) => {
     expect(() => validate({ ...BASE, FLEET_PR_REFRESH_MS: value })).toThrow();
   });
+
+  it('defaults the credential expiry warning to 7 days and reads an override (S3 D473)', () => {
+    delete process.env.FLEET_CREDENTIAL_EXPIRY_WARN_DAYS;
+    expect(fleetConfig().credentialExpiryWarnDays).toBe(7);
+    process.env.FLEET_CREDENTIAL_EXPIRY_WARN_DAYS = '14';
+    expect(fleetConfig().credentialExpiryWarnDays).toBe(14);
+    delete process.env.FLEET_CREDENTIAL_EXPIRY_WARN_DAYS;
+  });
+
+  it.each(['0', '91', '1.5', 'abc'])('refuses boot on FLEET_CREDENTIAL_EXPIRY_WARN_DAYS=%s', (value) => {
+    expect(() => validate({ ...BASE, FLEET_CREDENTIAL_EXPIRY_WARN_DAYS: value })).toThrow();
+  });
 });

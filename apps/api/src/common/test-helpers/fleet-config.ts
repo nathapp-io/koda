@@ -30,6 +30,7 @@ export function testFleetConfig(overrides: Partial<IFleetConfig> = {}): IFleetCo
     jobStartSec: 300,
     jobQueuedWarnSec: 60,
     prRefreshMs: 600_000,
+    credentialExpiryWarnDays: 7,
     ...overrides,
   };
 }
