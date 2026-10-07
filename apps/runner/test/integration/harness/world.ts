@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { PrismaClient } from '@prisma/client';
-import type { SyncRequest } from '@nathapp/fleet-protocol';
+import type { ConfigFileEdit, SyncRequest } from '@nathapp/fleet-protocol';
 import type { FakeForge } from '../../../../api/test/helpers/fake-forge';
 import { createCapabilityProbe } from '../../../src/capabilities/create-probe';
 import { enrollRunner } from '../../../src/commands/enroll';
@@ -15,7 +15,7 @@ import { ServerClient } from '../../../src/sync/http';
 import { systemNow } from '../../../src/time';
 import { installFakeGh } from '../../helpers/fake-gh';
 import type { GitHttpRequest } from '../../helpers/git-http';
-import { isolateGit, makeOrigin, type Origin } from '../../helpers/git-fixture';
+import { git as sh, isolateGit, makeOrigin, type Origin } from '../../helpers/git-fixture';
 import { startApi, type RunningApi } from './api-process';
 import { assertPartialIndex, prepareDatabase, runnerTestDatabaseUrl } from './database';
 import { startGitFront, type PushHold } from './git-front';
@@ -68,6 +68,8 @@ export interface World {
   readonly base: string;
   /** The registered admin's access token (project `web`), for user routes such as the log reads (S2a slice 2). */
   readonly adminToken: string;
+  /** The id of the registered origin repo (`acme/app` in project `web`). */
+  readonly repoId: string;
   readonly api: RunningApi;
   readonly prisma: PrismaClient;
   readonly origin: Origin;
@@ -76,6 +78,11 @@ export interface World {
   readonly fakeGh: { binDir: string; logPath: string };
   readonly forgeCloneUrl: string;
   dispatch(input: { feature: string; command?: 'RUN' | 'PLAN'; ref?: string; planFrom?: string; profiles?: string[]; pinnedRunnerId?: string; bashMode?: 'raw' | 'gated' | 'escalate'; approvalTimeoutSec?: number }): Promise<string>;
+  /** S3: a CONFIG_EDIT through the user route (Part B1). Returns the job id. */
+  submitConfigEdit(input: { baseSha: string; edits: ConfigFileEdit[]; prTitle: string; prBody?: string }): Promise<string>;
+  /** S3: a regenerate or drift job written straight to the database (placement picks it up on the next sync). */
+  queueConfigJob(input: { command: 'CONFIG_EDIT' | 'CONFIG_DRIFT'; mode: 'regenerate' | 'drift'; prTitle?: string }): Promise<string>;
+  configEdit(jobId: string): Promise<{ mode: string; result: unknown }>;
   job(id: string): Promise<JobView>;
   events(id: string): Promise<EventView[]>;
   waitForJob(id: string, predicate: (job: JobView) => boolean, timeoutMs?: number): Promise<JobView>;
@@ -148,6 +155,8 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
   const repoId: string = repo.body.data.id;
 
   const files: Record<string, string> = { 'README.md': '# app\n', 'docs/spec.md': '# spec\n', '.nax/config.json': '{}\n' };
+  files['.nax/context.md'] = '# app context\n';   // S3: config jobs regenerate from it
+  files['.nax/rules/a.md'] = '# rule a\n';
   for (const f of FEATURES) files[`.nax/features/${f}/prd.json`] = prd(f, f === 'fb' ? 'OLD-1' : 'US-001');
   // D104: a profile the repo provides (the fake nax reads <clone>/.nax/fake-profiles); the runners have no zai credential.
   files['.nax/fake-profiles/needs-zai.json'] = JSON.stringify({ fakeRequirements: { transport: 'native', providers: ['zai'], sandbox: false } });
@@ -179,7 +188,32 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
   };
 
   const world: World = {
-    base, adminToken: admin, api, prisma, origin, forge, gitRequests: front.requests, holdPushes: () => front.holdPushes(), fakeGh, forgeCloneUrl,
+    base, adminToken: admin, repoId, api, prisma, origin, forge, gitRequests: front.requests, holdPushes: () => front.holdPushes(), fakeGh, forgeCloneUrl,
+    async submitConfigEdit(input) {
+      const res = await http('POST', `/projects/web/fleet/repos/${repoId}/config-edits`, { token: admin, body: input });
+      if (res.status !== 201) throw new Error(`config edit failed: ${JSON.stringify(res.body)}`);
+      return res.body.data.job.id as string;   // Part B1 answers with DispatchResultDto, like dispatch
+    },
+    async queueConfigJob(input) {
+      const [user, project] = await Promise.all([
+        prisma.user.findUniqueOrThrow({ where: { email: HARNESS_ADMIN.email } }),
+        prisma.project.findUniqueOrThrow({ where: { slug: 'web' } }),
+      ]);
+      const baseSha = await sh(origin.dir, 'rev-parse', 'main');
+      // One transaction: placement must never see the job without its edit row.
+      return prisma.$transaction(async (tx) => {
+        const job = await tx.fleetJob.create({ data: {
+          projectId: project.id, repoId, ref: 'main', command: input.command, feature: 'nax-config', profiles: [], maxCostUsd: 0,
+          bashMode: 'raw', selectorLabels: [], requestedById: user.id,
+        } });
+        await tx.fleetConfigEdit.create({ data: { jobId: job.id, mode: input.mode, edits: [], prTitle: input.prTitle ?? null, prBody: null, baseSha } });
+        return job.id;
+      });
+    },
+    async configEdit(jobId) {
+      const row = await prisma.fleetConfigEdit.findUniqueOrThrow({ where: { jobId } });
+      return { mode: row.mode, result: row.result };
+    },
     async dispatch(input) {
       const res = await http('POST', '/projects/web/fleet/jobs', {
         token: admin,
