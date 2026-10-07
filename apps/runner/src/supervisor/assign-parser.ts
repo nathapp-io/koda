@@ -1,4 +1,4 @@
-import type { AssignPayload, BashMode, FleetCommandOut } from '@nathapp/fleet-protocol';
+import { isConfigKind, type AssignPayload, type BashMode, type FleetCommandOut, type FleetJobKindName } from '@nathapp/fleet-protocol';
 import { assertCloneUrl } from '../executor/workspace';
 import { COST_RE, PROFILE_NAME, RESERVED_PREFIX } from '../executor/nax-process';
 import { PathError, assertFeature, assertOwner, assertRelativePath, assertSegment } from '../paths/safe-segment';
@@ -38,7 +38,9 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   const p = command.payload as unknown;
   if (!isObj(p)) return bad('payload');
   if (p['jobId'] !== command.jobId || !checked(() => assertSegment('jobId', p['jobId']))) return bad('jobId');
-  if (p['command'] !== 'RUN' && p['command'] !== 'PLAN') return bad('command');
+  const kind = p['command'];
+  if (typeof kind !== 'string' || (kind !== 'RUN' && kind !== 'PLAN' && !isConfigKind(kind))) return bad('command');
+  const isConfig = isConfigKind(kind);
   const repo = p['repo'];
   if (!isObj(repo) || (repo['provider'] !== 'github' && repo['provider'] !== 'gitlab')) return bad('repo');
   if (!checked(() => assertOwner(repo['owner']))) return bad('owner');
@@ -50,9 +52,9 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   const isPlan = p['command'] === 'PLAN';
   if (isPlan ? !checked(() => assertRelativePath('planFrom', p['planFrom'])) : p['planFrom'] !== null && p['planFrom'] !== undefined) return bad('planFrom');
   const profiles = p['profiles'];
-  if (!Array.isArray(profiles) || profiles.length > 8 || !profiles.every((n) => typeof n === 'string' && PROFILE_NAME.test(n) && !n.startsWith(RESERVED_PREFIX))) return bad('profiles');
+  if (!Array.isArray(profiles) || profiles.length > 8 || (isConfig && profiles.length > 0) || !profiles.every((n) => typeof n === 'string' && PROFILE_NAME.test(n) && !n.startsWith(RESERVED_PREFIX))) return bad('profiles');
   if (typeof p['maxCostUsd'] !== 'string' || !COST_RE.test(p['maxCostUsd'])) return bad('maxCostUsd');
-  if (typeof p['bashMode'] !== 'string' || !BASH_MODES.includes(p['bashMode']) || (isPlan && p['bashMode'] !== 'raw')) return bad('bashMode');
+  if (typeof p['bashMode'] !== 'string' || !BASH_MODES.includes(p['bashMode']) || ((isPlan || isConfig) && p['bashMode'] !== 'raw')) return bad('bashMode');
   // A server that predates S1.5 2a sends no timeout; it also only sends raw jobs.
   const approvalTimeoutSec = p['approvalTimeoutSec'] ?? DEFAULT_APPROVAL_TIMEOUT_SEC;
   if (typeof approvalTimeoutSec !== 'number' || !Number.isInteger(approvalTimeoutSec) || approvalTimeoutSec < 30 || approvalTimeoutSec > 3600) return bad('approvalTimeoutSec');
@@ -62,7 +64,7 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
     ok: true,
     assign: {
       jobId: p['jobId'] as string,
-      command: p['command'],
+      command: kind as FleetJobKindName,
       repo: {
         provider: repo['provider'], owner: repo['owner'] as string, name: repo['name'] as string,
         defaultBranch: repo['defaultBranch'] as string, cloneUrl: repo['cloneUrl'] as string,

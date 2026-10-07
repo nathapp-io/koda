@@ -80,3 +80,18 @@ describe('bashMode and approvalTimeoutSec (S1.5 §4.1)', () => {
     expect(r.ok && r.assign.approvalTimeoutSec).toBe(600);
   });
 });
+
+describe('parseAssign: config jobs (S3 §3)', () => {
+  test.each(['CONFIG_EDIT', 'CONFIG_DRIFT'] as const)('accepts a well-formed %s payload with cost "0"', (command) => {
+    const a = assignFor(command);
+    expect(a.maxCostUsd).toBe('0');
+    expect(parseAssign(cmd(a))).toEqual({ ok: true, assign: a });
+  });
+  test.each([
+    ['a planFrom', { ...assignFor('CONFIG_EDIT'), planFrom: 'docs/x.md' }, 'planFrom'],
+    ['a profile', { ...assignFor('CONFIG_EDIT'), profiles: ['fast'] }, 'profiles'],
+    ['a gated bash mode', { ...assignFor('CONFIG_DRIFT'), bashMode: 'gated' }, 'bashMode'],
+  ])('rejects a config job with %s', (_label, payload, detail) => {
+    expect(parseAssign(cmd(payload))).toEqual({ ok: false, detail: `invalid ${detail}` });
+  });
+});
