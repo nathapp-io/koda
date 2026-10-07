@@ -160,6 +160,30 @@ export interface FleetJobPostRunDto {
 /** S1.5 §1.6: gated/escalate relay nax's bash asks to the approvals inbox; RUN jobs only. */
 export type BashMode = 'raw' | 'gated' | 'escalate'
 
+/** C9 §2.2: a ticket linked to a fleet job (detail, dispatch, cancel and requeue responses). */
+export interface FleetJobTicketDto {
+  ref: string
+  title: string
+  status: string
+}
+
+/** C9 §2.2: GET /projects/:slug/tickets/:ref/fleet-jobs, newest first, read live from the job (D460). */
+export interface TicketFleetJobDto {
+  id: string
+  command: 'RUN' | 'PLAN'
+  feature: string
+  state: FleetJobState
+  stateReason: string | null
+  escalationReason: string | null
+  resultBranch: string | null
+  resultSha: string | null
+  resultPrUrl: string | null
+  /** USD across all attempts, a 4-place decimal string. */
+  costUsd: string
+  queuedAt: string
+  finishedAt: string | null
+}
+
 export interface FleetJobDto {
   id: string
   projectId: string
@@ -209,6 +233,8 @@ export interface FleetJobDto {
   /** S1b 3a D205: the schedule that dispatched the job, and fires merged into it while it was QUEUED. */
   scheduleId: string | null
   coalescedCount: number
+  /** C9 D460: linked tickets on single-job responses; null on list pages. Optional for hand-built fixtures (plan P8). */
+  tickets?: FleetJobTicketDto[] | null
 }
 
 export interface FleetJobEventDto {
@@ -246,6 +272,8 @@ export interface DispatchBody {
   pinnedRunnerId?: string
   bashMode?: BashMode
   approvalTimeoutSec?: number
+  /** C9 §2.1: KEY-N refs, at most 20 (D450). */
+  ticketRefs?: string[]
 }
 
 /** S1b slice 2a wire types (apps/api/src/fleet/budgets/dto). Money is a decimal string. */

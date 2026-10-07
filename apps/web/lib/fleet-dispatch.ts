@@ -2,6 +2,7 @@ import * as z from 'zod'
 import type { DispatchBody } from '~/lib/fleet-types'
 import { BASH_MODES, bashCreateFields, DEFAULT_APPROVAL_TIMEOUT_SEC, isBashTimeoutValid, minutesText } from '~/lib/fleet-bash-mode'
 import { LABEL_PATTERN } from '~/lib/fleet-validation'
+import { MAX_DISPATCH_TICKETS, TICKET_REF_RE, ticketRefsFromQuery } from '~/lib/fleet-ticket-links'
 
 /** apps/api/src/fleet/jobs/dispatch-input.ts FEATURE_RE (nax validateFeatureName). */
 export const FEATURE_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/
@@ -38,6 +39,8 @@ export function buildDispatchSchema(t: Translate) {
     selectorLabels: z.array(z.string()).max(MAX_SELECTOR_LABELS, t('fleet.dispatch.validation.labelsMax'))
       .refine(list => list.every(l => LABEL_PATTERN.test(l)), t('fleet.dispatch.validation.label')),
     pinnedRunnerId: z.string().optional(),
+    ticketRefs: z.array(z.string()).max(MAX_DISPATCH_TICKETS, t('fleet.dispatch.validation.tickets'))
+      .refine(list => list.every(r => TICKET_REF_RE.test(r)), t('fleet.dispatch.validation.tickets')),
     bashMode: z.enum(BASH_MODES),
     /** Under v-if: may be undefined when unmounted (the D182 trap). */
     approvalTimeoutMinutes: z.string().optional(),
@@ -66,6 +69,7 @@ export const DISPATCH_DEFAULTS: DispatchFormValues = {
   maxCostUsd: 5,
   selectorLabels: [],
   pinnedRunnerId: '',
+  ticketRefs: [],
   bashMode: 'raw',
   approvalTimeoutMinutes: minutesText(DEFAULT_APPROVAL_TIMEOUT_SEC),
 }
@@ -84,6 +88,7 @@ export function toDispatchBody(v: DispatchFormValues): DispatchBody {
     ...(v.command === 'PLAN' && planFrom ? { planFrom } : {}),
     ...(v.profiles.length > 0 ? { profiles: [...v.profiles] } : {}),
     ...(pin ? { pinnedRunnerId: pin } : v.selectorLabels.length > 0 ? { selectorLabels: [...v.selectorLabels] } : {}),
+    ...(v.ticketRefs.length > 0 ? { ticketRefs: [...v.ticketRefs] } : {}),
     ...(v.command === 'RUN' ? bashCreateFields(v.bashMode, v.approvalTimeoutMinutes ?? '') : {}),
   }
 }
@@ -94,6 +99,7 @@ export interface DispatchQuery {
   readonly repoId?: unknown
   readonly feature?: unknown
   readonly ref?: unknown
+  readonly tickets?: unknown
 }
 
 const singleText = (value: unknown): string | null =>
@@ -110,7 +116,15 @@ export function dispatchPrefillFromQuery(query?: DispatchQuery | null): Partial<
   if (feature && FEATURE_RE.test(feature) && !feature.includes('..')) prefill.feature = feature
   const ref = singleText(query.ref)
   if (ref && ref.trim() && ref.length <= 255) prefill.ref = ref.trim()
+  const ticketRefs = ticketRefsFromQuery(query.tickets)
+  if (ticketRefs.length > 0) prefill.ticketRefs = ticketRefs
   return prefill
+}
+
+/** P7: the notice a prefilled form shows: from a ticket (tickets, no ref), else from a PLAN job or an admin link. */
+export function prefillNotice(prefill: Partial<DispatchFormValues>): 'ticket' | 'plan' | null {
+  if (Object.keys(prefill).length === 0) return null
+  return prefill.ticketRefs !== undefined && prefill.ref === undefined ? 'ticket' : 'plan'
 }
 
 /** Adds a token to a chain once, trimmed; the list is never mutated. */
