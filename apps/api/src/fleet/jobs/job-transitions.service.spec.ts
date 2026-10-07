@@ -20,6 +20,7 @@ describe('JobTransitionsService', () => {
     update: jest.fn(async (_id: string, patch: Record<string, unknown>) => job({ ...(patch as Partial<FleetJobRecord>), leaseEpoch: patch.bumpEpoch ? 3 : 2 })),
     appendEvent: jest.fn(),
     withdrawPendingCommands: jest.fn(),
+    copyConfigResult: jest.fn(),
   };
   const activity = { record: jest.fn() };
   const live = { event: jest.fn((j: FleetJobRecord) => ({ id: 'e', type: 'fleet_job', projectId: j.projectId, jobId: j.id, state: j.state, at: NOW.toISOString() })), publish: jest.fn() };
@@ -96,5 +97,21 @@ describe('JobTransitionsService', () => {
       .apply({ job: job({ scheduleId: 's1' }), to: 'RUNNING', by: 'runner', now: NOW, actor: { type: 'RUNNER', id: 'run-1' } });
     await svc.apply({ job: job({ state: 'UPLOADING' }), to: 'FAILED', by: 'runner', now: NOW, actor: { type: 'RUNNER', id: 'run-1' } });
     expect(schedules.onJobEnded).not.toHaveBeenCalled();
+  });
+
+  describe('config jobs (fleet S3 D475)', () => {
+    it.each([['COMPLETED', 'runner'], ['FAILED', 'runner'], ['CRASHED', 'server']] as const)(
+      'copies configResult into the edit row on UPLOADING -> %s', async (to, by) => {
+        repo.update.mockImplementationOnce(async (_id: string, patch: Record<string, unknown>) => job({ ...(patch as Partial<FleetJobRecord>), command: 'CONFIG_EDIT' }));
+        await svc.apply({ job: job({ command: 'CONFIG_EDIT', state: 'UPLOADING' }), to, by, now: NOW, actor: ACTOR });
+        expect(repo.copyConfigResult).toHaveBeenCalledWith('j1');
+      });
+
+    it('does not copy for a non-terminal step or for a nax job', async () => {
+      repo.update.mockImplementationOnce(async (_id: string, patch: Record<string, unknown>) => job({ ...(patch as Partial<FleetJobRecord>), command: 'CONFIG_EDIT' }));
+      await svc.apply({ job: job({ command: 'CONFIG_EDIT', state: 'RUNNING' }), to: 'UPLOADING', by: 'runner', now: NOW, actor: ACTOR });
+      await svc.apply({ job: job({ state: 'UPLOADING' }), to: 'COMPLETED', by: 'runner', now: NOW, actor: ACTOR });
+      expect(repo.copyConfigResult).not.toHaveBeenCalled();
+    });
   });
 });

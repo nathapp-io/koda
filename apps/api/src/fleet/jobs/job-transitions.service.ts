@@ -4,6 +4,7 @@ import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { ApprovalCloser } from '../approvals/approval-closer';
 import { canTransition, isTerminal, TransitionActor } from './job-state';
+import { isConfigKind } from '../common/config-jobs';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import { FLEET_JOB_REPOSITORY, FleetJobPatch, FleetJobRecord, IFleetJobRepository } from './domain/fleet-job.domain';
 import { ScheduleProgressService } from '../schedules/schedule-progress.service';
@@ -29,7 +30,7 @@ export class InvalidTransitionError extends Error {
 @Injectable()
 export class JobTransitionsService {
   constructor(
-    @Inject(FLEET_JOB_REPOSITORY) private readonly repo: Pick<IFleetJobRepository, 'update' | 'appendEvent' | 'withdrawPendingCommands'>,
+    @Inject(FLEET_JOB_REPOSITORY) private readonly repo: Pick<IFleetJobRepository, 'update' | 'appendEvent' | 'withdrawPendingCommands' | 'copyConfigResult'>,
     private readonly activity: FleetActivityService,
     private readonly live: FleetJobLivePublisher,
     private readonly schedules: ScheduleProgressService,
@@ -54,6 +55,8 @@ export class JobTransitionsService {
       ...(bump ? { bumpEpoch: true } : {}),
     };
     const after = await this.repo.update(job.id, patch);
+    // Fleet S3 D475: the config job's last reported result becomes its edit row's record, in this transaction.
+    if (terminal && isConfigKind(after.command)) await this.repo.copyConfigResult(after.id);
     const live = await this.record({ before: job, after, by, now, actor: input.actor, reason: input.reason });
     // Spec §1.4 / plan D263: nax has exited or is exiting, so its asks are moot and an unsent answer must not go out.
     const approvalLive = job.state === FleetJobState.RUNNING && to !== FleetJobState.RUNNING ? await this.leaveRunning(after, now) : [];

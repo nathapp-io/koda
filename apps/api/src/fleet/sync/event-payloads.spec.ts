@@ -87,6 +87,13 @@ describe('interpretEvent', () => {
     expect(interpretEvent('approval_request', VALID_ASK)).toEqual(expect.objectContaining({ kind: 'approval' }));
     expect(interpretEvent('approval_request', { ...VALID_ASK, options: [] })).toEqual({ kind: 'invalid', reason: 'approval_request.options' });
   });
+
+  it('mirrors a valid configResult and drops an invalid one without rejecting the snapshot (fleet S3 D475)', () => {
+    expect(interpretEvent('snapshot', { configResult: { outcome: 'drift', files: ['AGENTS.md'] } }))
+      .toEqual({ kind: 'mirror', patch: { configResult: { outcome: 'drift', files: ['AGENTS.md'] } } });
+    expect(interpretEvent('snapshot', { configResult: { outcome: 'nope' }, currentPhase: 'x' }))
+      .toEqual({ kind: 'mirror', patch: { currentPhase: 'x' } });
+  });
 });
 
 describe('postRunStages (S2b (j) §1.3, D429)', () => {

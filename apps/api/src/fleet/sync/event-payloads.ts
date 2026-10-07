@@ -2,6 +2,7 @@ import { FleetJobState } from '../../common/enums';
 import type { BashAsk } from '../approvals/approval-closer';
 import type { FleetJobPatch, FleetJobPostRun, FleetJobStory } from '../jobs/domain/fleet-job.domain';
 import { parseApprovalRequest } from './approval-request-payload';
+import { parseConfigResult } from '../repo-config/config-result';
 
 export type EventEffect =
   | { kind: 'transition'; to: FleetJobState; reason: string | null; exitCode: number | null }
@@ -81,6 +82,7 @@ function mirror(p: Obj): FleetJobPatch {
   const progress = typeof p.progress === 'object' && p.progress !== null && !Array.isArray(p.progress) &&
     Buffer.byteLength(JSON.stringify(p.progress), 'utf8') <= MAX_PROGRESS_BYTES ? p.progress : undefined;
   const stories = storyList(p.stories);
+  const configResult = p.configResult === undefined ? undefined : parseConfigResult(p.configResult) ?? undefined;
   const entries: Array<[keyof FleetJobPatch, unknown]> = [
     ['naxRunId', str(p.naxRunId, 128)],
     ['naxLogRunId', str(p.naxLogRunId, 128)],
@@ -99,6 +101,7 @@ function mirror(p: Obj): FleetJobPatch {
     ['stories', stories],
     ['storiesTruncated', stories === undefined ? undefined : p.storiesTruncated === true],   // D150
     ['postRun', postRunStages(p.postRun)],
+    ['configResult', configResult],
   ];
   return Object.fromEntries(entries.filter(([, v]) => v !== undefined)) as FleetJobPatch;
 }

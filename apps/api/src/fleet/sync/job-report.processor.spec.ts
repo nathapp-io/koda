@@ -94,3 +94,34 @@ describe('JobReportProcessor approval_request (S1.5 §2.2)', () => {
     expect(closer.openBash).not.toHaveBeenCalled();
   });
 });
+
+describe('JobReportProcessor config job end (fleet S3 D476: UPLOADING with no bundle)', () => {
+  it('applies snapshot(configResult) -> UPLOADING -> COMPLETED in one report with no bundle and no ingest', async () => {
+    const repo = makeRepo();
+    repo.seed({ ...runningJob, command: 'CONFIG_EDIT', bashMode: 'raw', maxCostUsd: '0' });
+    const transitions = {
+      apply: jest.fn(async ({ job, to }: { job: FleetJobRecord; to: string }) => {
+        const after = await repo.update(job.id, { state: to as FleetJobRecord['state'] });
+        return { job: after, live: { id: `live-${to}`, type: 'fleet_job', projectId: 'p1', jobId: job.id, state: to, at: NOW.toISOString() }, approvalLive: [] };
+      }),
+    };
+    const fence = { holds: () => true, abandon: jest.fn() };
+    const live = { event: jest.fn(() => ({ id: 'job-live', type: 'fleet_job', projectId: 'p1', jobId: 'job-1', state: 'RUNNING', at: NOW.toISOString() })) };
+    const processor = new JobReportProcessor(repo as never, transitions as never, live as never, fence as never, { record: jest.fn() } as never,
+      { signal: jest.fn() } as never, { openBash: jest.fn() } as never, { run: (fn: () => unknown) => fn() } as never);
+    const configResult = { outcome: 'ok', files: ['.nax/context.md', 'AGENTS.md'] };
+
+    const out = await processor.process('r1', {
+      jobId: 'job-1', leaseEpoch: 1, events: [
+        { seq: 1, type: 'snapshot', payload: { configResult, resultBranch: 'nax-config/job-1', resultSha: 'abc1234', resultPrUrl: 'https://github.com/acme/app/pull/9' } as never },
+        { seq: 2, type: 'state', payload: { to: 'UPLOADING' } },
+        { seq: 3, type: 'state', payload: { to: 'COMPLETED', reason: 'ok' } },
+      ],
+    }, NOW);
+
+    expect(out.ack).toEqual({ jobId: 'job-1', ackedSeq: 3 });
+    expect(transitions.apply.mock.calls.map(([a]) => a.to)).toEqual(['UPLOADING', 'COMPLETED']);
+    expect(transitions.apply.mock.calls[1][0]).toEqual(expect.objectContaining({ reason: 'ok' }));
+    expect(repo.update).toHaveBeenCalledWith('job-1', expect.objectContaining({ configResult, resultBranch: 'nax-config/job-1', resultPrUrl: 'https://github.com/acme/app/pull/9' }));
+  });
+});
