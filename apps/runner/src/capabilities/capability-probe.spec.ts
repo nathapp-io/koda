@@ -18,7 +18,7 @@ describe('StaticCapabilityProbe', () => {
     clock = new Date('2026-10-01T00:00:00.000Z');
     const probe = new StaticCapabilityProbe(stat(), () => clock);
     const first = await probe.probe();
-    expect(first).toEqual({ capabilities: { ...stat(), sandbox: { available: true, probedAt: '2026-10-01T00:00:00.000Z' } }, warnings: [] });
+    expect(first).toEqual({ capabilities: { ...stat(), configJobs: true, sandbox: { available: true, probedAt: '2026-10-01T00:00:00.000Z' } }, warnings: [] });
     clock = new Date('2026-10-01T00:10:00.000Z');
     expect((await probe.probe()).capabilities.sandbox.probedAt).toBe('2026-10-01T00:10:00.000Z');
   });

@@ -23,7 +23,8 @@ export class StaticCapabilityProbe implements CapabilityProbe {
 
   async probe(): Promise<ProbeResult> {
     const { sandbox, ...rest } = structuredClone(this.capabilities);
-    return { capabilities: { ...rest, sandbox: { ...sandbox, probedAt: this.now().toISOString() } }, warnings: [] };
+    // S3 §3: config jobs are a feature of this runner build, not something runner.json declares.
+    return { capabilities: { ...rest, configJobs: true, sandbox: { ...sandbox, probedAt: this.now().toISOString() } }, warnings: [] };
   }
 }
 
