@@ -2,11 +2,12 @@
  * Fleet S1b slice 2a — BudgetEvaluator on PG: warn once, hard stop, cancel set, webhooks, concurrency, the sync signal.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-budget-evaluator.integration.spec.ts
  */
+import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { resetDb } from '../../helpers/reset-db';
-import { bootHttpApp } from '../../helpers/http-app';
+import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
 import { JobReportProcessor } from '../../../src/fleet/sync/job-report.processor';
@@ -17,6 +18,7 @@ jest.setTimeout(20_000);
 
 describeIntegration('budget evaluator (PG)', () => {
   let app: NathApplication;
+  let server: ReturnType<NathApplication['getHttpServer']>;
   let prisma: PrismaClient;
   let world: FleetHttpWorld;
   let evaluator: BudgetEvaluator;
@@ -45,6 +47,7 @@ describeIntegration('budget evaluator (PG)', () => {
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
+    server = app.getHttpServer();
     prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     evaluator = app.get(BudgetEvaluator);
@@ -100,10 +103,43 @@ describeIntegration('budget evaluator (PG)', () => {
     const policy = await projectPolicy({ runningJobs: 'cancel' });
     const runner = await insertRunner(prisma);
     const running = await job({ state: 'RUNNING', runnerId: runner.id, leaseEpoch: 1, costSpentUsd: 11 });
+    // D495: the held half exempts config jobs too (a config job is the repo's only active 'nax-config').
+    const heldConfig = await job({ state: 'RUNNING', runnerId: runner.id, leaseEpoch: 1, command: 'CONFIG_EDIT', feature: 'nax-config', maxCostUsd: new Prisma.Decimal(0) });
     await evaluator.evaluate(policy.id);
     expect(await prisma.fleetCommand.count({ where: { jobId: running.id, type: 'CANCEL', ackedAt: null } })).toBe(1);
+    expect(await reload(heldConfig.id)).toEqual(expect.objectContaining({ state: 'RUNNING', cancelRequestedAt: null, cancelReason: null }));
+    expect(await prisma.fleetCommand.count({ where: { jobId: heldConfig.id, type: 'CANCEL' } })).toBe(0);
     await reports.process(runner.id, { jobId: running.id, leaseEpoch: 1, events: [{ seq: 1, type: 'state', payload: { to: 'CANCELLED', reason: null } }] }, new Date());
     expect(await reload(running.id)).toEqual(expect.objectContaining({ state: 'CANCELLED', stateReason: `budget:${policy.id}` }));
+  });
+
+  // D495: a budget hard stop holds and cancels nax jobs only — config jobs are exempt.
+  it('hard stop cancels a queued RUN job but never a queued config job (D495)', async () => {
+    const policy = await projectPolicy();
+    await job({ costSpentUsd: 10 });
+    const queuedRun = await job({ state: 'QUEUED', firstStartedAt: null });
+    const queuedConfig = await job({ state: 'QUEUED', firstStartedAt: null, command: 'CONFIG_EDIT', feature: 'nax-config', maxCostUsd: new Prisma.Decimal(0) });
+    expect(await evaluator.evaluate(policy.id)).toEqual({ warned: true, stopped: true });
+    expect(await reload(queuedRun.id)).toEqual(expect.objectContaining({ state: 'CANCELLED', stateReason: `budget:${policy.id}` }));
+    expect(await reload(queuedConfig.id)).toEqual(expect.objectContaining({ state: 'QUEUED', cancelRequestedAt: null, cancelReason: null }));
+    expect(await prisma.fleetCommand.count({ where: { jobId: queuedConfig.id, type: 'CANCEL' } })).toBe(0);
+  });
+
+  it('requeues a CRASHED config job in a paused scope while a nax job stays refused (D495)', async () => {
+    await projectPolicy({ pausedAt: new Date(), pausedWindowStart: monthStart(now()) });
+    const configJob = await job({
+      state: 'CRASHED', command: 'CONFIG_EDIT', feature: 'nax-config', maxCostUsd: new Prisma.Decimal(0),
+      stateReason: 'runner silent', finishedAt: new Date(),
+    });
+    const requeue = (id: string) => request(server)
+      .post(`/api/projects/web/fleet/jobs/${id}/requeue`).set({ Authorization: `Bearer ${world.tokens.dev}` });
+    const res = data<{ job: { state: string; leaseEpoch: number } }>(await requeue(configJob.id).expect(200));
+    expect(['QUEUED', 'ASSIGNED']).toContain(res.job.state);
+    expect(await reload(configJob.id)).toEqual(expect.objectContaining({ finishedAt: null }));
+    // The pause still gate-keeps nax jobs in the same scope.
+    const runJob = await job({ state: 'CRASHED', finishedAt: new Date() });
+    await requeue(runJob.id).expect(409);
+    expect(await reload(runJob.id)).toEqual(expect.objectContaining({ state: 'CRASHED', leaseEpoch: 0 }));
   });
 
   it('stops again in the same month after the amount was raised (incident per amount)', async () => {

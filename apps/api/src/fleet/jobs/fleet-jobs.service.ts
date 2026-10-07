@@ -242,7 +242,8 @@ export class FleetJobsService {
         feature = current.feature;
         repoId = current.repoId;
         if (!canTransition(current.state, FleetJobState.QUEUED, 'server')) throw new ConflictAppException({ state: current.state }, 'fleet.jobState');
-        await this.budgets.assertNotPaused(jobGateKeys(current), now);
+        // S3 D495: a budget pause never holds a config job, so only nax jobs are gate-checked here.
+        if (!isConfigKind(current.command)) await this.budgets.assertNotPaused(jobGateKeys(current), now);
         // Plan D4: a requeue is a fresh lease (the transition carries `bumpEpoch: true`).
         // Withdraw pending non-ABANDON commands from the prior epoch so a late runner
         // can no longer ack them, and so the next sync sees no orphan ASSIGN/CANCEL.

@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { BudgetPolicy as PolicyRow, Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { randomUUID } from 'crypto';
-import { FleetJobState } from '../../common/enums';
+import { FleetJobKind, FleetJobState } from '../../common/enums';
 import {
   BudgetPolicyPatch, BudgetPolicyRecord, BudgetRunningJobs, BudgetScope, BudgetScopeType, BudgetWindowKind,
   DuplicateBudgetPolicyError, IBudgetRepository, NewBudgetIncident, NewBudgetPolicy,
@@ -18,6 +18,8 @@ const toPolicy = (r: PolicyRow): BudgetPolicyRecord => ({
 
 const ORDER: Prisma.BudgetPolicyOrderByWithRelationInput[] = [{ scopeKey: 'asc' }, { windowKind: 'asc' }];
 const OLDEST_FIRST: Prisma.FleetJobOrderByWithRelationInput[] = [{ queuedAt: 'asc' }, { id: 'asc' }];
+/** S3 D495: a budget stop never holds or cancels a config job — only nax jobs are selectable. */
+const BUDGET_STOP_COMMANDS = [FleetJobKind.RUN, FleetJobKind.PLAN];
 
 /** S1b §2.1 scope filter; `runnerField` picks the pin (QUEUED) or the holder (spend, held jobs). */
 function jobScope(scope: BudgetScope, runnerField: 'runnerId' | 'pinnedRunnerId'): Prisma.FleetJobWhereInput {
@@ -123,14 +125,18 @@ export class PrismaBudgetRepository implements IBudgetRepository {
 
   async findQueuedJobIds(scope: BudgetScope): Promise<string[]> {
     const rows = await this.db.fleetJob.findMany({
-      where: { ...jobScope(scope, 'pinnedRunnerId'), state: FleetJobState.QUEUED }, orderBy: OLDEST_FIRST, select: { id: true },
+      where: { ...jobScope(scope, 'pinnedRunnerId'), state: FleetJobState.QUEUED, command: { in: BUDGET_STOP_COMMANDS } },
+      orderBy: OLDEST_FIRST, select: { id: true },
     });
     return rows.map((r) => r.id);
   }
 
   async findHeldJobIds(scope: BudgetScope): Promise<string[]> {
     const rows = await this.db.fleetJob.findMany({
-      where: { ...jobScope(scope, 'runnerId'), state: { in: [FleetJobState.ASSIGNED, FleetJobState.RUNNING] } },
+      where: {
+        ...jobScope(scope, 'runnerId'), state: { in: [FleetJobState.ASSIGNED, FleetJobState.RUNNING] },
+        command: { in: BUDGET_STOP_COMMANDS },
+      },
       orderBy: OLDEST_FIRST, select: { id: true },
     });
     return rows.map((r) => r.id);

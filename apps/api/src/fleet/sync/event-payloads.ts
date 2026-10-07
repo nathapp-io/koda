@@ -101,6 +101,7 @@ function mirror(p: Obj): FleetJobPatch {
     ['stories', stories],
     ['storiesTruncated', stories === undefined ? undefined : p.storiesTruncated === true],   // D150
     ['postRun', postRunStages(p.postRun)],
+    // D495: dormant for nax jobs (configEditFor gates on isConfigKind) — mirror() never sees the command to guard with.
     ['configResult', configResult],
   ];
   return Object.fromEntries(entries.filter(([, v]) => v !== undefined)) as FleetJobPatch;
