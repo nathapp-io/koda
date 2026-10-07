@@ -8,7 +8,7 @@ import { table } from '../utils/output';
 interface NaxFileList {
   baseSha: string;
   defaultBranch: string;
-  files: Array<{ path: string; size: number; blobSha: string; group: string }>;
+  files: Array<{ path: string; size?: number | null; blobSha: string; group: string }>;
 }
 
 function registerNaxFiles(fleet: Command): void {
@@ -25,7 +25,7 @@ function registerNaxFiles(fleet: Command): void {
           console.log(JSON.stringify(list, null, 2));
         } else {
           console.log(`${list.defaultBranch} @ ${list.baseSha.slice(0, 12)}`);
-          table(['Group', 'Path', 'Size'], list.files.map((f) => [f.group, f.path, String(f.size)]));
+          table(['Group', 'Path', 'Size'], list.files.map((f) => [f.group, f.path, f.size == null ? '-' : String(f.size)]));
         }
         process.exit(0);
       } catch (err: unknown) {

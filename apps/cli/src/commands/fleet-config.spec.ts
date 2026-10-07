@@ -18,7 +18,12 @@ import { setJsonMode } from '../utils/json-mode';
 const CTX = { apiKey: 'jwt', apiUrl: 'https://koda.example.com', projectSlug: 'web' };
 const list = {
   baseSha: 'abc123def4567890', defaultBranch: 'main',
-  files: [{ path: '.nax/context.md', size: 1200, blobSha: 'b1', group: 'context' }, { path: '.nax/rules/a.md', size: 80, blobSha: 'b2', group: 'rules' }],
+  files: [
+    { path: '.nax/context.md', size: 1200, blobSha: 'b1', group: 'context' },
+    { path: '.nax/rules/a.md', size: 80, blobSha: 'b2', group: 'rules' },
+    // GitLab tree listings carry no size; the table renders '-'.
+    { path: '.nax/profiles/p.json', size: null, blobSha: 'b3', group: 'profiles' },
+  ],
 };
 
 describe('koda fleet nax-files / drift-check (S3 §7)', () => {
@@ -53,6 +58,7 @@ describe('koda fleet nax-files / drift-check (S3 §7)', () => {
     const out = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
     expect(out).toContain('.nax/context.md');
     expect(out).toContain('main @ abc123def456');
+    expect(out).toContain('.nax/profiles/p.json  -');
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
 

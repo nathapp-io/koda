@@ -7,7 +7,8 @@ import {
   isAllowedNaxPath, NAX_CONFIG_LIMITS, naxPathGroup, type ConfigFileEdit, type NaxPathGroup,
 } from '@nathapp/fleet-protocol'
 
-export interface NaxFileEntry { path: string; size: number; blobSha: string; group: NaxPathGroup }
+/** `size` null on GitLab (tree listings carry no size); the web never renders it. */
+export interface NaxFileEntry { path: string; size: number | null; blobSha: string; group: NaxPathGroup }
 export interface NaxFileList { baseSha: string; defaultBranch: string; files: NaxFileEntry[] }
 export interface NaxFileContent { path: string; blobSha: string; content: string }
 
