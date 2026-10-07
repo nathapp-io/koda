@@ -118,4 +118,16 @@ describe('parseCapabilitiesCore', () => {
       expect(() => parseCapabilitiesCore({ ...valid, approvals })).toThrow(/approvals/);
     });
   });
+
+  describe('configJobs (fleet S3 §3)', () => {
+    it('keeps configJobs: true', () => {
+      expect(parseCapabilitiesCore({ ...valid, configJobs: true }).configJobs).toBe(true);
+    });
+    it('omits configJobs when absent (an older runner)', () => {
+      expect(parseCapabilitiesCore(valid)).not.toHaveProperty('configJobs');
+    });
+    it.each([[false], ['yes'], [1], [{}]])('refuses configJobs %p', (configJobs) => {
+      expect(() => parseCapabilitiesCore({ ...valid, configJobs })).toThrow(CapabilityValidationError);
+    });
+  });
 });
