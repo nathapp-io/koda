@@ -28,10 +28,16 @@ const now = ref(new Date())
 const unlinkTarget = ref<TicketFleetJobDto | null>(null)
 const unlinking = ref(false)
 
+/** Only the newest load may write: loads overlap (mount, live reload, after unlink). */
+let latestLoadId = 0
+
 /** P4: secondary content. A failed load keeps what is on screen; the next live event or resync retries. */
 async function load(): Promise<void> {
+  const loadId = ++latestLoadId
   try {
-    runs.value = await $api.get<TicketFleetJobDto[]>(apiPath`/projects/${props.projectSlug}/tickets/${props.ticketRef}/fleet-jobs`)
+    const rows = await $api.get<TicketFleetJobDto[]>(apiPath`/projects/${props.projectSlug}/tickets/${props.ticketRef}/fleet-jobs`)
+    if (loadId !== latestLoadId) return
+    runs.value = rows
     now.value = new Date()
   }
   catch {

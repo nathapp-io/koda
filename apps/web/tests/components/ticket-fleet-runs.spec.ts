@@ -174,3 +174,36 @@ describe('TicketFleetRuns (C9 §4, D461)', () => {
     app.unmount()
   })
 })
+
+describe('TicketFleetRuns load ordering (final review)', () => {
+  test('an older, slower response never overwrites a newer one', async () => {
+    const pending: Array<(rows: TicketFleetJobDto[]) => void> = []
+    let handlers: ProjectEventHandlers | null = null
+    const api = {
+      get: () => new Promise<TicketFleetJobDto[]>((resolve) => { pending.push(resolve) }),
+      delete: async () => undefined,
+    }
+    const app = mountSfc(card, {
+      components: uiStubs,
+      props: { projectSlug: 'web', ticketRef: 'WEB-1', ticketId: 't1', ticketLinks: [], canWork: true },
+      globals: {
+        useI18n: () => enI18n(), useAppToast: () => toastRecorder(),
+        useApi: () => ({ $api: api }),
+        useProjectEvents: (_slug: string, h: ProjectEventHandlers) => { handlers = h },
+      },
+    })
+    await wait()
+    expect(pending).toHaveLength(1)
+    ;(handlers as unknown as ProjectEventHandlers).onResync()
+    await settle()
+    expect(pending).toHaveLength(2)
+
+    // The newer load answers first (the job was unlinked); the older one answers late with the stale row.
+    pending[1]([])
+    await wait()
+    pending[0]([run('j1')])
+    await wait()
+    expect(app.one('[data-testid="ticket-fleet-runs"]')).toBeUndefined()
+    app.unmount()
+  })
+})
