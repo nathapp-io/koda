@@ -56,6 +56,24 @@ describe('ApprovalCloser', () => {
     expect(r.live).toHaveLength(1);
   });
 
+  it('enqueues a fleet_approval_requested outbox event for a budget ask when no decider is watching live (#208)', async () => {
+    const { closer, outbox, liveBus } = fakes();
+    liveBus.listenerCount.mockReturnValue(0);
+    const r = await closer.openBudget(policy(), { windowStart: NOW, spentUsd: '10.5' }, NOW);
+    expect(outbox.record).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'fleet_approval_requested',
+      payload: expect.objectContaining({ approvalId: r.approval?.id, projectId: 'p1', path: `/web/fleet/approvals?id=${r.approval?.id}` }),
+      metadata: { projectId: 'p1', eventId: r.approval?.id },
+    }));
+  });
+
+  it('skips the budget outbox enqueue when a decider is already watching live (#208)', async () => {
+    const { closer, outbox, liveBus } = fakes();
+    liveBus.listenerCount.mockReturnValue(1);
+    await closer.openBudget(policy(), { windowStart: NOW, spentUsd: '10.5' }, NOW);
+    expect(outbox.record).not.toHaveBeenCalled();
+  });
+
   it('supersedes a stray pending approval before opening a new one', async () => {
     const { closer, rows } = fakes();
     const first = await closer.openBudget(policy(), { windowStart: NOW, spentUsd: '10' }, NOW);

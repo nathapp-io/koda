@@ -73,6 +73,7 @@ export class ApprovalCloser {
     });
     await this.record(approval, system, 'approval.requested');
     await this.dispatch(approval, 'fleet.approval.requested');
+    await this.enqueueRequested(approval);
     return { approval, live: [...stray.live, ...this.livePublisher.event(approval)] };
   }
 
