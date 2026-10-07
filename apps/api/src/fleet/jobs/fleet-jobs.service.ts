@@ -158,12 +158,17 @@ export class FleetJobsService {
     });
     if (live) this.live.publish([live]);
     if (wake) this.notifier.notify(wake);
-    return this.withPending(job);
+    return this.withDetail(job);
   }
 
   /** S1.5 2a: one pending-approval count for the single job (plan D272). */
   private async withPending(r: FleetJobRecord): Promise<FleetJobDto> {
     return FleetJobDto.from(r, (await this.approvals.countPendingByJob([r.id])).get(r.id) ?? 0);
+  }
+
+  /** C9 D460: single-job responses (detail, cancel, requeue) carry the linked tickets; lists keep null. */
+  private async withDetail(r: FleetJobRecord): Promise<FleetJobDto> {
+    return Object.assign(await this.withPending(r), { tickets: await this.fleetTickets.forJob(r.id) });
   }
 
   /**
@@ -244,14 +249,14 @@ export class FleetJobsService {
     const outcome = await this.placement.placeJob(queued.id);
     const fresh = (await this.repo.findById(queued.id)) ?? queued;
     return Object.assign(new DispatchResultDto(), {
-      job: await this.withPending(fresh),
+      job: await this.withDetail(fresh),
       placement: { assigned: outcome.assigned, runnerId: outcome.runnerId, misfits: outcome.misfits },
     });
   }
 
   async get(projectId: string, id: string): Promise<FleetJobDto> {
     const job = await this.findInProject(projectId, id);
-    return Object.assign(await this.withPending(job), { tickets: await this.fleetTickets.forJob(job.id) });
+    return this.withDetail(job);
   }
 
   async events(projectId: string, id: string, page: IPageOption): Promise<IPageResult<FleetJobEventDto>> {

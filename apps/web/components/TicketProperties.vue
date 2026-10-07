@@ -28,6 +28,9 @@ interface TicketLink {
   prUpdatedAt?: string | null
   linkType?: string
   title?: string
+  /** C9 1b: `vcs` (default) or `fleet`; fleet links name the job that opened the PR. */
+  source?: string
+  jobId?: string | null
 }
 
 interface Label {
@@ -390,6 +393,13 @@ async function removeLink(linkId: string) {
               {{ t('tickets.pr.badge', { number: (link.prNumber || extractPrNumber(link.externalRef)) ?? 'unknown' }) }}
             </a>
             <span v-if="link.prState" :class="prStateClass(link.prState)">{{ t(`tickets.pr.status.${link.prState}`) }}</span>
+            <NuxtLink
+              v-if="link.source === 'fleet' && link.jobId"
+              :to="`/${projectSlug}/fleet/jobs/${link.jobId}`"
+              :class="[chipClass, 'text-muted-foreground hover:bg-muted']"
+              data-testid="ticket-link-via-fleet"
+            >{{ t('fleet.tickets.viaFleet') }}</NuxtLink>
+            <span v-else-if="link.source === 'fleet'" :class="[chipClass, 'text-muted-foreground']" data-testid="ticket-link-via-fleet">{{ t('fleet.tickets.viaFleet') }}</span>
           </span>
           <Button size="sm" variant="ghost" class="text-status-rejected" @click="removeLink(link.id)">
             {{ t('common.delete') }}

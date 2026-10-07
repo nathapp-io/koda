@@ -152,6 +152,19 @@ Useful scripts:
   stage state needs its key under `fleet.jobs.detail.pipeline.state` and its pin in
   `tests/i18n/fleet-locale-parity.spec.ts`.
 
+## Fleet on tickets (C9)
+
+- The ticket page renders `components/TicketFleetRuns.vue` under `TicketHeader`: it loads
+  `GET /projects/:slug/tickets/:ref/fleet-jobs` itself and follows its own live events (this ticket, its jobs,
+  any `QUEUED` job, resync). It is hidden when empty and never toasts a failed load. Unlink emits `changed`, and the
+  page reloads its links (the fleet PR link goes with the job).
+- Fleet PR links are ordinary `pr` ticket links with `source = 'fleet'` and a `jobId`; `TicketProperties` marks them
+  "via fleet". The ticket page reloads links on every ticket live event, because the server announces new fleet
+  PR links as `TICKET_UPDATED`.
+- Pure logic lives in `lib/fleet-ticket-links.ts` (ref rules, the D461 feature slug, `?tickets=` parsing, picker
+  matching, row reason and PR state). The dispatch form's tickets field is `components/fleet/TicketPicker.vue`.
+- `FleetJobDto.tickets` is filled on single-job responses (detail, dispatch, cancel, requeue) and null on lists.
+
 ## UX redesign (in progress)
 
 A multi-slice UX redesign of this app is planned and tracked in `docs/ux/redesign/MASTER-PLAN.md`. Read it before

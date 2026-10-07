@@ -1307,6 +1307,7 @@
         "finishResult": "Finish result",
         "branch": "Branch",
         "pr": "Pull request",
+        "tickets": "Tickets",
         "planFrom": "Spec path",
         "escalation": "Escalation reason",
         "wipPush": {
@@ -1441,6 +1442,11 @@
       "maxCost": "Max cost (USD)",
       "maxCostHint": "Billed up to this amount. Test runs typically cost $1-2.",
       "prefilled": "Pre-filled from the PLAN job. Check the ref before dispatching.",
+      "prefilledTicket": "Pre-filled from the ticket. Pick the repo, and for a PLAN the spec path, before dispatching.",
+      "tickets": "Tickets",
+      "ticketsHint": "The job is linked to these tickets. A RUN moves CREATED and VERIFIED tickets to In progress.",
+      "ticketsPlaceholder": "Search by ref or title, or type a ref and press Enter",
+      "ticketsMax": "At most 20 tickets per job",
       "placement": "Placement",
       "placementAuto": "Any runner that fits",
       "placementLabels": "Runners with these labels",
@@ -1472,8 +1478,19 @@
         "maxCost": "Enter an amount above 0 and at most 10000, with at most 4 decimals",
         "labelsMax": "At most 16 labels",
         "label": "Labels use lowercase letters, digits, dot, dash or underscore",
-        "labelsOrPin": "Choose labels or a runner, not both"
+        "labelsOrPin": "Choose labels or a runner, not both",
+        "tickets": "Use ticket refs like WEB-12, at most 20"
       }
+    },
+    "tickets": {
+      "title": "Fleet runs",
+      "dispatch": "Dispatch",
+      "viaFleet": "via fleet",
+      "pr": "PR",
+      "unlink": "Unlink",
+      "unlinkTitle": "Unlink this fleet job?",
+      "unlinkBody": "The job, its PR and the ticket history stay. The job leaves this ticket, and its fleet PR link is removed from the ticket.",
+      "unlinked": "Fleet job unlinked"
     },
     "analytics": {
       "title": "Fleet analytics",

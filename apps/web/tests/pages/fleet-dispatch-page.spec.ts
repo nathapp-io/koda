@@ -63,4 +63,12 @@ describe('dispatch page', () => {
     expect(dispatch).toContain('data-testid="dispatch-approval-timeout"')
     expect(dispatch).toContain("BASH_MODES.map(mode => ({ value: mode, label: t(`fleet.bash.mode.${mode}`) }))")
   })
+
+  test('C9: a Tickets field bound to ticketRefs, prefilled from ?tickets= with its own notice (P7)', () => {
+    expect(dispatch).toContain("import FleetTicketPicker from '~/components/fleet/TicketPicker.vue'")
+    expect(dispatch).toMatch(/<FormField name="ticketRefs">[\s\S]*?<FleetTicketPicker[\s\S]*?:model-value="values\.ticketRefs \?\? \[\]"[\s\S]*?test-id="dispatch-tickets"[\s\S]*?@update:model-value="setFieldValue\('ticketRefs', \$event\)"/)
+    expect(dispatch).toContain("setFieldValue('ticketRefs', prefill.ticketRefs)")
+    expect(dispatch).toContain('prefilled.value = applied ? prefillNotice(prefill) : null')
+    expect(dispatch).toContain("prefilled === 'ticket' ? t('fleet.dispatch.prefilledTicket') : t('fleet.dispatch.prefilled')")
+  })
 })

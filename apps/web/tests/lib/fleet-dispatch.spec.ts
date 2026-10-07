@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals'
-import { addToken, buildDispatchSchema, DISPATCH_DEFAULTS, dispatchPrefillFromQuery, removeToken, toDispatchBody, type DispatchFormValues } from '~/lib/fleet-dispatch'
+import { addToken, buildDispatchSchema, DISPATCH_DEFAULTS, dispatchPrefillFromQuery, prefillNotice, removeToken, toDispatchBody, type DispatchFormValues } from '~/lib/fleet-dispatch'
 
 const t = (key: string): string => key
 const schema = buildDispatchSchema(t)
@@ -142,5 +142,34 @@ describe('token lists', () => {
 
   test('removeToken', () => {
     expect(removeToken(['a', 'b'], 'a')).toEqual(['b'])
+  })
+})
+
+describe('dispatch tickets (C9 §4)', () => {
+  test('defaults to none and sends none', () => {
+    expect(DISPATCH_DEFAULTS.ticketRefs).toEqual([])
+    expect(toDispatchBody(valid())).not.toHaveProperty('ticketRefs')
+  })
+
+  test('sends a copy of the chosen refs', () => {
+    const values = valid({ ticketRefs: ['WEB-1', 'WEB-2'] })
+    const body = toDispatchBody(values)
+    expect(body.ticketRefs).toEqual(['WEB-1', 'WEB-2'])
+    expect(body.ticketRefs).not.toBe(values.ticketRefs)
+  })
+
+  test('validates refs and the maximum', () => {
+    expect(messages(valid({ ticketRefs: ['WEB-1'] }))).toEqual([])
+    expect(messages(valid({ ticketRefs: ['web-1'] }))).toContain('fleet.dispatch.validation.tickets')
+    expect(messages(valid({ ticketRefs: Array.from({ length: 21 }, (_, i) => `WEB-${i + 1}`) }))).toContain('fleet.dispatch.validation.tickets')
+  })
+
+  test('prefills tickets from ?tickets= and picks the notice (P7)', () => {
+    const fromTicket = dispatchPrefillFromQuery({ command: 'PLAN', tickets: 'web-3', feature: 'web-3-add-csv-export' })
+    expect(fromTicket).toEqual({ command: 'PLAN', ticketRefs: ['WEB-3'], feature: 'web-3-add-csv-export' })
+    expect(prefillNotice(fromTicket)).toBe('ticket')
+    const handoff = dispatchPrefillFromQuery({ command: 'RUN', repoId: 'r1', feature: 'f', ref: 'feat/f', tickets: 'WEB-3' })
+    expect(prefillNotice(handoff)).toBe('plan')
+    expect(prefillNotice(dispatchPrefillFromQuery({ tickets: 'junk' }))).toBeNull()
   })
 })

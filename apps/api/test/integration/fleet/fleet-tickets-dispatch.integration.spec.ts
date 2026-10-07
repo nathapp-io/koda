@@ -91,4 +91,20 @@ describeIntegration('fleet dispatch with tickets (PG)', () => {
       .expect(201);
     expect((await prisma.ticket.findUniqueOrThrow({ where: { id: planned.id } })).status).toBe('CREATED');
   });
+
+  it('cancel and requeue answer with the linked tickets (slice 1a minor, C9 slice 2)', async () => {
+    const t = await ticket();
+    const res = data<{ job: { id: string } }>(await dispatch({ feature: 'cancel-requeue', ticketRefs: [`WEB-${t.number}`] }).expect(201));
+
+    const cancelled = data<{ state: string; tickets: Array<{ ref: string }> | null }>(
+      await request(server).post(`/api/projects/web/fleet/jobs/${res.job.id}/cancel`).set(auth('dev')).expect(200),
+    );
+    expect(cancelled.state).toBe('CANCELLED');
+    expect(cancelled.tickets?.map((x) => x.ref)).toEqual([`WEB-${t.number}`]);
+
+    const requeued = data<{ job: { tickets: Array<{ ref: string }> | null } }>(
+      await request(server).post(`/api/projects/web/fleet/jobs/${res.job.id}/requeue`).set(auth('dev')).expect(200),
+    );
+    expect(requeued.job.tickets?.map((x) => x.ref)).toEqual([`WEB-${t.number}`]);
+  });
 });
