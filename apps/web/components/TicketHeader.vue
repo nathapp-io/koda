@@ -23,6 +23,8 @@ const props = defineProps<{
   editing: boolean
   editTitle: string
   editPriority: TicketPriority
+  /** C9 D461: where Dispatch leads; null hides it (no permission, no fleet repo, or a closed ticket). */
+  dispatchHref?: { path: string; query: Record<string, string> } | null
 }>()
 
 const emit = defineEmits<{
@@ -98,6 +100,14 @@ onBeforeUnmount(() => {
         @update:model-value="emit('update:editTitle', $event)"
       />
       <div class="flex shrink-0 gap-2">
+        <NuxtLink
+          v-if="!editing && dispatchHref"
+          :to="dispatchHref"
+          class="inline-flex h-9 items-center rounded-md border border-input px-3 text-sm hover:bg-muted"
+          data-testid="ticket-fleet-dispatch"
+        >
+          {{ t('fleet.tickets.dispatch') }}
+        </NuxtLink>
         <Button v-if="!editing" variant="outline" size="sm" @click="emit('start-edit')">
           {{ t('common.edit') }}
         </Button>

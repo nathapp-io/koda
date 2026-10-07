@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, reactive, ref as vueRef, onMounted, onBeforeUnmount } from 'vue'
+import { computed, reactive, ref as vueRef, onMounted, onBeforeUnmount, watch } from 'vue'
 import TicketHeader from '~/components/TicketHeader.vue'
 import TicketActivity from '~/components/TicketActivity.vue'
 import TicketProperties from '~/components/TicketProperties.vue'
+import TicketFleetRuns from '~/components/TicketFleetRuns.vue'
+import { isLinkableTicket, ticketDispatchQuery } from '~/lib/fleet-ticket-links'
 import { createDebouncer } from '~/lib/debounce'
 import { apiPath } from '~/lib/api-path'
 
@@ -26,6 +28,8 @@ interface TicketLink {
   prUpdatedAt?: string | null
   linkType?: string
   title?: string
+  source?: string
+  jobId?: string | null
 }
 
 interface Ticket {
@@ -136,11 +140,14 @@ useProjectEvents(slug, {
     // Any ticket event may have changed the comment thread (transitions create
     // a VERIFICATION/FIX_REPORT/REVIEW comment), so reload it unconditionally.
     void reloadCommentsSilently()
+    // C9 P5: fleet PR links arrive as TICKET_UPDATED.
+    void reloadLinksSilently()
   },
   onResync: () => {
     if (ticketDeleted.value) return
     liveTicketReload.trigger()
     void reloadCommentsSilently()
+    void reloadLinksSilently()
   },
 })
 
@@ -191,6 +198,31 @@ const canManage = computed(() => viewerRoleData.value?.canManage === true)
 const viewerRole = computed(() => viewerRoleData.value?.viewerRole ?? null)
 const canWork = computed(() => canManage.value || viewerRole.value === 'DEVELOPER')
 
+// C9 §4 (D461, P2): Dispatch needs DEVELOPER+, a fleet repo in the project, and an open ticket.
+const hasFleetRepo = vueRef(false)
+
+async function loadFleetRepoFlag(allowed: boolean): Promise<void> {
+  if (!allowed || hasFleetRepo.value) return
+  try {
+    const page = await $api.get<{ records?: unknown[] }>(apiPath`/projects/${slug}/fleet/repos`, { query: { size: '1' } })
+    hasFleetRepo.value = (page.records ?? []).length > 0
+  }
+  catch {
+    // No button: dispatching still works from the fleet pages.
+  }
+}
+
+// Client-only: the role may resolve after mount, and the button is not worth a server round trip.
+onMounted(() => {
+  watch(canWork, loadFleetRepoFlag, { immediate: true })
+})
+
+const dispatchHref = computed(() => {
+  const current = ticket.value
+  if (!current || !canWork.value || !hasFleetRepo.value || !isLinkableTicket(current.status)) return null
+  return { path: `/${slug}/fleet/dispatch`, query: ticketDispatchQuery(current) }
+})
+
 async function refetchAll() {
   // Silent reloads: refresh() would flip `pending` and swap the page for
   // LoadingState, unmounting the properties rail mid-interaction.
@@ -238,11 +270,20 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onPageKeydown))
           :editing="editState.isEditing"
           :edit-title="editState.title"
           :edit-priority="editState.priority"
+          :dispatch-href="dispatchHref"
           @start-edit="startEdit"
           @cancel-edit="cancelEdit"
           @save="saveEdit"
           @update:edit-title="editState.title = $event"
           @update:edit-priority="editState.priority = $event"
+        />
+        <TicketFleetRuns
+          :project-slug="slug"
+          :ticket-ref="ref"
+          :ticket-id="ticket.id"
+          :ticket-links="ticketLinks"
+          :can-work="canWork"
+          @changed="refetchAll()"
         />
       </div>
 
