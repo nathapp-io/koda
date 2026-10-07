@@ -124,7 +124,7 @@ A single module in `packages/fleet-protocol` (pure, no I/O), imported by the API
   case-insensitive).
 - `naxPathGroup(path)`: `rules` | `context` | `config` | `profiles` | `constitution`, for the web tree.
 
-## 3. Runner contract (`packages/fleet-protocol`, protocol v1, additive)
+## 3. Runner contract (`packages/fleet-protocol`, current protocol version 3, additive)
 
 - `FleetJobKindName` gains `CONFIG_EDIT` and `CONFIG_DRIFT`. `AssignPayload` is unchanged in shape; config jobs carry
   the fixed values of §1 (`maxCostUsd = "0"`). It never carries file content. The runner's `parseAssign`
@@ -142,7 +142,7 @@ A single module in `packages/fleet-protocol` (pure, no I/O), imported by the API
   snapshot payload gains `configResult: ConfigJobResult = { outcome: 'ok' | 'no_changes' | 'drift' | 'conflict' |
   'invalid' | 'push_failed' | 'pr_failed' | 'timeout'; files?: string[]; output?: string }`, `files` at most 50 paths
   of at most 512 chars (conflict files, drifted files, or committed files), `output` a nax output tail of at most 8 KiB
-  so the snapshot stays under the 16 KiB event payload cap. `mirror()` (`apps/api/src/fleet/sync/event-payloads.ts`)
+  and the runner trims the serialized result to a 12 KiB budget (output tail first, then trailing file names; D491) so the snapshot stays under the 16 KiB event payload cap. `mirror()` (`apps/api/src/fleet/sync/event-payloads.ts`)
   and `FleetJobPatch` validate and store it in `FleetJob.configResult`; invalid shapes are dropped like other bad
   mirror fields. `resultBranch`, `resultSha`, `resultPrUrl` travel in the same snapshot through the existing validated
   mirror fields. The terminal `state` event carries `reason = outcome`, which sets `stateReason` as today.
@@ -150,13 +150,13 @@ A single module in `packages/fleet-protocol` (pure, no I/O), imported by the API
   UPLOADING (the runner emits UPLOADING then the terminal state directly). This keeps the server and runner transition
   tables unchanged (COMPLETED/FAILED are reachable only from UPLOADING); the plan verifies no server path waits for a
   bundle on a config job. Outcomes `ok`, `no_changes`, `drift` (including an empty file list) -> COMPLETED; every other
-  outcome -> FAILED. A failure before RUNNING (fetch or clone) uses the existing ASSIGNED -> FAILED.
+  outcome -> FAILED. The edit fetch, credentials and checkout run while ASSIGNED, so a failure there uses the existing ASSIGNED -> FAILED (D481).
 - **Liveness**: while RUNNING the runner emits a snapshot with `heartbeatAt` every 30 s, so the dashboard's
   `job_silent` rule and the silence sweep treat config jobs like other jobs.
 - **Placement**: `PlacementJob` gains `command`, set by `toPlacementJob` (shared by placement, the dispatch preview and
   the dashboard dry-run). For config kinds `capabilityMisfit` skips everything except `tools` and the new
   `config_jobs` check (no profile, protocol, provider, sandbox, approvals-relay or base-config interaction checks), and
-  `firstMisfit` skips `budget_paused` (config jobs spend nothing). `disabled`, `offline`, `executor`, `busy_repo` and
+  no budget pause holds a config job: `firstMisfit` skips `budget_paused`, and the job-scope pause in placement and the dashboard dry-run skips config kinds (config jobs spend nothing; D495). `disabled`, `offline`, `executor`, `busy_repo` and
   `capacity` still apply. The runner's nax floor stays 0.83.1; the plan verifies `rules lint`, `generate`,
   `generate --all-packages` and `config --profile --json` behave as in Ground truth on that version.
 
@@ -167,7 +167,7 @@ A single module in `packages/fleet-protocol` (pure, no I/O), imported by the API
 - `GET /projects/:slug/fleet/repos/:repoId/nax-files` -> `{ baseSha, defaultBranch, files: [{ path, size, blobSha, group }] }`,
   only allowlisted paths, sorted by group then path.
 - `GET /projects/:slug/fleet/repos/:repoId/nax-files/content?path=&ref=` -> `{ path, blobSha, content }`. `path` must be
-  allowlisted (400 otherwise); `ref` defaults to `baseSha` from the list call so content and SHAs are consistent.
+  allowlisted (400 otherwise); `ref` defaults to the default branch; an explicit `ref` must be a 40- or 64-hex commit id (400 otherwise), and the web passes the list call's `baseSha` so content and SHAs are consistent. `size` is `null` for GitLab (its tree listing has no sizes; D494).
   Files over 256 KiB or not valid UTF-8 return 422 and are shown read-only as "too large / binary".
 - `FleetRepoFilesReader` interface with `GithubFleetRepoFilesReader` (git trees API at the default-branch commit,
   `recursive=1`, filtered to `.nax/`; blobs API for content) and `GitlabFleetRepoFilesReader` (repository tree
@@ -182,12 +182,12 @@ A single module in `packages/fleet-protocol` (pure, no I/O), imported by the API
 
 ### 4.2 Writes (`CREATE FleetJob` on the project)
 
-- `POST /projects/:slug/fleet/repos/:repoId/config-edits` body `{ baseSha, edits, prTitle, prBody? }` -> `FleetJobDto`.
+- `POST /projects/:slug/fleet/repos/:repoId/config-edits` body `{ baseSha, edits, prTitle, prBody? }` -> `DispatchResultDto` (`{ job, placement }`, as dispatch).
   Validates §1 limits and §2 allowlist on every path (400 with the offending path), then creates `FleetJob` +
   `FleetConfigEdit(mode=edit)` in one transaction. An empty `edits` is 400 (use regenerate).
-- `POST /projects/:slug/fleet/repos/:repoId/config-edits/regenerate` body `{ prTitle, prBody? }` -> `FleetJobDto`
+- `POST /projects/:slug/fleet/repos/:repoId/config-edits/regenerate` body `{ prTitle, prBody? }` -> `DispatchResultDto`
   (`mode=regenerate`, `baseSha` = current default-branch head read at submit).
-- `POST /projects/:slug/fleet/repos/:repoId/drift-checks` -> `FleetJobDto` (`mode=drift`).
+- `POST /projects/:slug/fleet/repos/:repoId/drift-checks` -> `DispatchResultDto` (`mode=drift`, `baseSha` = current default-branch head).
 - All three: 409 `config_job_active` when the active-job index rejects the insert (message names the active job id);
   the repo must belong to the project (404 otherwise). Selector labels and runner pin are not accepted (any fitting
   runner).
@@ -200,7 +200,7 @@ A single module in `packages/fleet-protocol` (pure, no I/O), imported by the API
 
 ### 4.4 Credential board (admin)
 
-- `GET /admin/fleet/credential-board` -> `{ generatedAt, runners: [{ id, name, enabled, online }],
+- `GET /fleet/credential-board` (global admin, `@RequiredPermission('ADMIN')` like the other global fleet routes; the web page is `/admin/fleet/credentials`) -> `{ generatedAt, warnDays, runners: [{ id, name, enabled, online, readable }],
   providers: [{ providerId, cells: { [runnerId]: Cell } }], profiles: [{ name, runners: { [runnerId]: ProfileCell } }] }`.
 - `Cell = { state: 'ok' | 'expiring' | 'expired' | 'unavailable' | 'missing', kind: 'api-key' | 'oauth' | 'exec' |
   'ambient' | 'none', expires?: string }`. `expiring` = `stored.kind === 'oauth'`, not expired, `expires` within 7
@@ -225,8 +225,9 @@ registration, cleanup and `markDone` but skips `prepare`/`spawn`/`watchUntilExit
 implemented in `apps/runner/src/executor/config-job.ts` (steps split into small modules). The log shipper for a config
 job has no `status.json` or nax run log; it ships only the step lines.
 
-1. **Prepare**: fresh job directory under the trusted workspace root; fetch the edit set (§3); emit RUNNING; clone the
-   default branch with the git credential broker (`credentials.acquire`, as `finishPlan` does). The broker's `binDir`
+1. **Prepare** (while ASSIGNED, D481): fetch the edit set (§3); acquire credentials (`credentials.acquire`, as
+   `finishPlan` does); in the runner's shared per-repo clone under the repo mutex (`ensureClone` + `cleanWorkspace`),
+   check out `origin/<defaultBranch>` detached (D480); then emit RUNNING. The broker's `binDir`
    (with the `gh`/`glab` shims) is put first on `PATH` for every later subprocess.
 2. **Staleness** (edit mode): for each edit, `git rev-parse HEAD:<path>` must equal `baseSha`; a `null` `baseSha`
    requires the path to be absent; a delete requires the path to exist at `baseSha`. Any mismatch -> `conflict` with
@@ -239,9 +240,8 @@ job has no `status.json` or nax run log; it ships only the step lines.
 5. **Drift mode**: `git status --porcelain` -> `drift` with the changed files (empty list allowed); stop.
 6. **Validate** (edit, regenerate): `nax rules lint` (non-zero exit = invalid); `nax config --json` (`{error}` =
    invalid); `nax config --profile <name> --json` for each put `.nax/profiles/<name>.json`; for each put
-   `.nax/mono/<pkg>/config.json`, the package config is validated the way nax loads it for that package (the plan
-   pins the exact command, e.g. `nax config --json -d <pkg dir>`, against nax 0.83.x; if nax has no per-package
-   validation entry point, a JSON parse check is used and the limitation is recorded). First failure -> `invalid` with
+   `.nax/mono/<pkg>/config.json`, a JSON-object parse check only (nax 0.83.x has no CLI entry point that loads a
+   package overlay; recorded limitation, D490). First failure -> `invalid` with
    the combined output tail. `rules lint` checks the whole repo, so a broken rule the edit did not touch also fails
    the job as `invalid`; the output names the file, and fixing it in the same edit is the remedy.
 7. **Commit**: empty `git status --porcelain` -> `no_changes`. Otherwise commit all changes as `gitIdentity` with
@@ -257,7 +257,7 @@ job has no `status.json` or nax run log; it ships only the step lines.
 
 Lifecycle:
 
-- Hard timeout 10 minutes (`RUNNER_CONFIG_JOB_TIMEOUT_MS`), implemented inside the config executor (the runner has no
+- Hard timeout 10 minutes (runner `Tuning.configJobTimeoutMs`, code-only like other runner tuning; D483), implemented inside the config executor (the runner has no
   generic per-job timeout): on expiry it kills the current subprocess group -> `timeout`.
 - Cancel: each subprocess is spawned in its own process group and its pgid is recorded in the job's journal row
   (`pgid`) while it runs, so the existing cancel path (SIGTERM to the recorded pgid) works; the executor then stops
@@ -345,3 +345,22 @@ the live check.
 | D477 | Config kinds are routed in `JobRun.lifecycle`, skipping prepare/spawn/watch/finish; the config executor owns its 10-minute timeout, records each subprocess pgid for cancel, and emits a 30 s heartbeat snapshot. |
 | D478 | The config-edit fetch uses the bundle-upload fence pattern (`?leaseEpoch=`, `fence.abandon()` on a miss), allowed in ASSIGNED and RUNNING. |
 | D479 | Fleet analytics excludes config kinds. |
+| D480 | Config jobs use the runner's shared per-repo clone (`<workspaceRoot>/<owner>/<name>`, under the repo mutex, `ensureClone` + `cleanWorkspace`) and a detached checkout of `origin/<defaultBranch>`, not a separate fresh clone: same isolation as every other job, no second copy of the repo. |
+| D481 | The edit fetch, credentials and checkout run while ASSIGNED (`prepareConfigJob`), so a failure there is ASSIGNED -> FAILED (spec §3 "fetch or clone"); RUNNING is emitted after a clean checkout. |
+| D482 | `JobExecutor` gains `prepareConfigJob(job, options)` and `runConfigJob(job, ctx)`; `runConfigJob` returns `ConfigJobRun` (`result` / `failed` / `stopped`), because a setup error and a cancel are not config outcomes. |
+| D483 | The config timeout and heartbeat are runner `Tuning` constants (`configJobTimeoutMs` 600 000, `configHeartbeatMs` 30 000), not environment variables: runner tuning is code-only (D42). |
+| D484 | Every nax / gh / glab call of a config job is spawned detached (own process group); its pid and pgid are written to the journal row while it runs and cleared after. git calls are not tracked: commit, push and status carry the remaining deadline as their timeout, the short rev-parse calls keep git's default; cancel, halt and the deadline are also checked between steps. |
+| D485 | A config job found RUNNING or UPLOADING by READOPT is rejected (`config job interrupted by a runner restart`), so the server marks it CRASHED; requeue is manual. One found ASSIGNED with no pid re-prepares (nothing was pushed yet). |
+| D486 | `matchesProcess` for a config job is true when the recorded pid's argv contains the job's clone path (nax calls pass `-d <repoDir>`) or the job branch `nax-config/<jobId>` (gh / glab calls). |
+| D487 | The job branch is pushed with `--force` to `refs/heads/nax-config/<jobId>`: the namespace belongs to the job, and a requeued attempt replaces the previous attempt's commit (an open PR follows it). |
+| D488 | The terminal state event carries `reason = outcome` for COMPLETED too (`ok`, `no_changes`, `drift`), so the job page can tell "no changes" from "PR opened" without reading `configResult`. |
+| D489 | A cancel that arrives after the config job produced a result does not hide it: a `result` is reported as is; only a run the executor actually stopped ends CANCELLED. |
+| D490 | Per-package `.nax/mono/**/config.json` is checked with a JSON-object parse only: nax 0.83.x has no CLI entry point that loads a package overlay (`nax config --json -d <pkg>` walks up to the root `.nax/` and loads the root config; overlays load only inside `loadConfigForWorkdir` during runs). Recorded as a limitation. |
+| D491 | The runner trims `configResult` to a 12 KiB serialized budget (output tail first, then trailing file names) so the snapshot always fits the 16 KiB event payload cap: the spec's caps (50 x 512-char paths + 8 KiB) can add up to more than 16 KiB. |
+| D492 | The board endpoint is `GET /fleet/credential-board` (global admin); the response carries `warnDays`, a per-runner `readable` flag (unparseable capabilities are listed with no cells), and provider rows = the union of providers with a credential on any runner and providers named in any profile. An `expiring` condition alone stays a warning; an OAuth credential flagged `expired` shows `expired` on the board (the dashboard keeps ignoring OAuth `expired`). |
+| D493 | The API cannot import runtime code from `@nathapp/fleet-protocol` (its production image does not ship `packages/`), so the allowlist, `isConfigKind` and the limits have API copies in `apps/api/src/fleet/common/` with a parity spec run against both. The web imports the package directly (its image ships `packages/` and Nuxt bundles it). |
+| D494 | `NaxFileEntry.size` is `number | null` (GitLab trees carry no sizes); `nax-files/content` `ref` defaults to the default branch and an explicit ref must be a commit id. |
+| D495 | No budget pause (runner `budget_paused` or job-scope) holds or cancels a config job. |
+| D496 | The GitHub reader lists the root tree non-recursively, then the `.nax` subtree recursively, so a large repo's truncated recursive tree cannot drop `.nax` entries; a truncated `.nax` subtree is 502. |
+| D497 | The three submit endpoints return `DispatchResultDto` like dispatch; the runner config-edit fetch answers 404 for a non-config job or a missing edit row. |
+| D498 | E2E stacks have no forge: PR 3 adds a test-only fake `FleetRepoFilesReader` behind `FLEET_TEST_FAKE_NAX_FILES` with a test-hook route to seed files. |
