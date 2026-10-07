@@ -6,6 +6,10 @@
  */
 export const FLEET_PROTOCOL_VERSION = 3 as const;
 
+export * from './nax-config-paths';
+export * from './config-jobs';
+import type { ConfigJobKind, ConfigJobResult } from './config-jobs';
+
 /** S1.5 §1.6: `gated` and `escalate` relay nax bash asks to the approvals inbox (protocol v2 runners only). */
 export type BashMode = 'raw' | 'gated' | 'escalate';
 
@@ -63,6 +67,8 @@ export interface RunnerCapabilities {
   approvals?: { relay: true };
   /** #207: the machine's base nax config (no profile), which a job dispatched with no profiles runs on. */
   interaction?: InteractionCheck;
+  /** Fleet S3 §3: the runner executes CONFIG_EDIT / CONFIG_DRIFT jobs. Absent on older runners (permanent misfit `config_jobs`). */
+  configJobs?: true;
 }
 
 export interface EnrollRequest {
@@ -95,7 +101,7 @@ export interface RunnerIdentity {
 export type FleetJobStateName =
   | 'QUEUED' | 'ASSIGNED' | 'RUNNING' | 'UPLOADING'
   | 'COMPLETED' | 'FAILED' | 'ESCALATED' | 'CRASHED' | 'CANCELLED';
-export type FleetJobKindName = 'RUN' | 'PLAN';
+export type FleetJobKindName = 'RUN' | 'PLAN' | ConfigJobKind;
 export type FleetCommandTypeName = 'ASSIGN' | 'CANCEL' | 'READOPT' | 'ABANDON' | 'APPROVAL_ANSWER';
 export type RunnerEventType = 'state' | 'snapshot' | 'lifecycle' | 'log' | 'approval_request';
 
@@ -142,6 +148,8 @@ export interface SnapshotEventPayload {
   postRun?: { acceptance?: string; regression?: string; finish?: string };
   /** Log events dropped by the runner's rate limit since the last snapshot (§3.2). */
   droppedLogs?: number;
+  /** Fleet S3 §3 (D475): a config job's result; files at most 50 x 512 chars, output at most 8 KiB. */
+  configResult?: ConfigJobResult;
 }
 
 /** STYLE-3: `details` is a free-form array of structured items the runner wants attached to a lifecycle event

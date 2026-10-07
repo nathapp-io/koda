@@ -47,7 +47,7 @@ describe('API enums match the protocol unions', () => {
     QUEUED: true, ASSIGNED: true, RUNNING: true, UPLOADING: true, COMPLETED: true,
     FAILED: true, ESCALATED: true, CRASHED: true, CANCELLED: true,
   };
-  const kinds: Record<FleetJobKindName, true> = { RUN: true, PLAN: true };
+  const kinds: Record<FleetJobKindName, true> = { RUN: true, PLAN: true, CONFIG_EDIT: true, CONFIG_DRIFT: true };
   const commands: Record<FleetCommandTypeName, true> = { ASSIGN: true, CANCEL: true, READOPT: true, ABANDON: true, APPROVAL_ANSWER: true };
 
   it.each([
