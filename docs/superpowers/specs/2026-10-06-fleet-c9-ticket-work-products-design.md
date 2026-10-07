@@ -288,3 +288,6 @@ Sequential PRs, each cut from `main` after the previous merges.
 | D459 | Unlink deletes the join row and that job's `source=fleet` links on that ticket; history (status changes, comments) stays. |
 | D460 | `GET .../tickets/:ref/fleet-jobs` returns at most 50, newest first; `FleetJobDto.tickets` null on lists. |
 | D461 | Web: new `TicketFleetRuns` component; Dispatch button prefills `tickets`, `feature` slug (max 48) and `command=PLAN`; hand-off carries `tickets`. |
+| D462 | (slice 2) The dispatch picker suggests the project's 100 newest open tickets (no ticket search endpoint); older open tickets are typed by ref and validated by the server. |
+| D463 | (slice 2) The Dispatch button is hidden on CLOSED and REJECTED tickets; the Fleet runs card refetches on its ticket's events, its jobs' `fleet_job` events, any `QUEUED` `fleet_job` event, and resync; a failed load shows nothing new and no toast. |
+| D464 | (slice 2, fixes the 1a minor) Cancel and requeue responses carry `FleetJobDto.tickets`, like the job detail. |
