@@ -1,3 +1,4 @@
+import type { ConfigEditPayload, ConfigJobResult } from '@nathapp/fleet-protocol';
 import type { BundleFile } from '../bundle/build-bundle';
 import type { JobLogSources } from '../logs/types';
 import type { JobRow } from '../journal/types';
@@ -38,6 +39,24 @@ export interface JobWatcher {
 
 export type PlanPushOutcome = { ok: true; branch: string; sha: string } | { ok: false; reason: string; cancelled?: true };
 
+/** S3 §5: what a JobRun hands the config executor. `deadlineMs` is on the executor's `nowMs` clock. */
+export interface ConfigJobContext {
+  readonly payload: ConfigEditPayload;
+  readonly deadlineMs: number;
+  /** A cancel was requested or the run was halted. */
+  readonly isStopped: () => boolean;
+  /** D484: the running subprocess (journaled for cancel and READOPT), or null between subprocesses. */
+  readonly onProcess: (proc: { pid: number; pgid: number } | null) => void;
+  /** One line per step, sent as a lifecycle event. */
+  readonly step: (message: string) => void;
+}
+
+/** D482: a config outcome, or a runner error (`failed`), or a run the executor stopped (cancel / halt). */
+export type ConfigJobRun =
+  | { kind: 'result'; result: ConfigJobResult; resultBranch?: string; resultSha?: string; resultPrUrl?: string }
+  | { kind: 'failed'; reason: string }
+  | { kind: 'stopped' };
+
 /**
  * Slice 3 design §1 `executor/`. 3a ships HostExecutor only; a container or VM executor implements the same seam
  * (S1 spec §5.5). Nothing here talks to the server: results are journal events written by the caller.
@@ -71,4 +90,8 @@ export interface JobExecutor {
   resumeApprovals(job: JobRow): Promise<void>;
   /** Plan D285: an abandoned epoch closes its own receiver even when a live higher epoch keeps the profile. */
   releaseApprovals(job: JobRow): Promise<void>;
+  /** S3 D480, D481: credentials, the shared clone, a detached checkout of origin/<defaultBranch>. No profile, no job check. */
+  prepareConfigJob(job: JobRow, options?: PrepareOptions): Promise<PrepareOutcome>;
+  /** S3 §5 steps 2-8 on the prepared clone. Never throws. */
+  runConfigJob(job: JobRow, ctx: ConfigJobContext): Promise<ConfigJobRun>;
 }
