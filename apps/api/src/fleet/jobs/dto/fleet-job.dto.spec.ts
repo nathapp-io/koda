@@ -11,7 +11,7 @@ describe('fleet job DTOs', () => {
       startedAt: null, finishedAt: null, cancelRequestedAt: null, naxRunId: null, naxLogRunId: null, naxCostRunId: null,
       progress: null, currentStoryId: null, currentPhase: null, costSpentUsd: '0.1234', costCarriedUsd: '0', firstStartedAt: null, cancelReason: null, scheduleId: 's1', coalescedCount: 2, scheduleCountedAt: null, lastHeartbeatAt: null,
       finishResult: null, escalationReason: null, exitCode: null, resultBranch: null, resultSha: null, resultPrUrl: null,
-      wipPush: 'failed:diverged', stories: [{ id: 'US-001', title: 't', status: 'passed', attempts: 1, dependsOn: [] }], storiesTruncated: true, postRun: null,
+      wipPush: 'failed:diverged', stories: [{ id: 'US-001', title: 't', status: 'passed', attempts: 1, dependsOn: [] }], storiesTruncated: true, postRun: null, configResult: null,
       eventSeq: 3, ackedRunnerSeq: 2, attributedAt: null, updatedAt: now,
     });
     const json = JSON.parse(JSON.stringify(dto));

@@ -3,6 +3,7 @@ import type { IPageResult } from '@nathapp/nestjs-data';
 import type { FleetCommandType, FleetJobKind, FleetJobState } from '../../../common/enums';
 import type { RunnerCapabilities, BashMode } from '../../common/protocol';
 import type { PlacementRunner } from '../placement-rules';
+import type { ConfigJobResult } from '../../common/config-jobs';
 
 export const FLEET_JOB_REPOSITORY = Symbol('FLEET_JOB_REPOSITORY');
 
@@ -87,6 +88,8 @@ export interface FleetJobRecord {
   storiesTruncated: boolean;
   /** S2b (j): replaced by each snapshot that carries it; cleared on requeue (D427). */
   postRun: FleetJobPostRun | null;
+  /** S3 §3 (D475): a config job's result from its snapshots; cleared on requeue. Null for nax jobs. */
+  configResult: ConfigJobResult | null;
   eventSeq: number;
   ackedRunnerSeq: number;
   attributedAt: Date | null;
@@ -115,7 +118,8 @@ type Mutable =
   | 'cancelRequestedAt' | 'naxRunId' | 'naxLogRunId' | 'naxCostRunId' | 'progress' | 'currentStoryId'
   | 'currentPhase' | 'costSpentUsd' | 'costCarriedUsd' | 'firstStartedAt' | 'cancelReason' | 'lastHeartbeatAt'
   | 'finishResult' | 'escalationReason' | 'exitCode'
-  | 'resultBranch' | 'resultSha' | 'resultPrUrl' | 'wipPush' | 'stories' | 'storiesTruncated' | 'postRun' | 'ackedRunnerSeq';
+  | 'resultBranch' | 'resultSha' | 'resultPrUrl' | 'wipPush' | 'stories' | 'storiesTruncated' | 'postRun' | 'ackedRunnerSeq'
+  | 'configResult';
 
 /** Columns a transition, snapshot or requeue may change. `bumpEpoch` adds one to leaseEpoch (plan D4). */
 export type FleetJobPatch = Partial<Pick<FleetJobRecord, Mutable>> & { bumpEpoch?: boolean };
@@ -234,4 +238,6 @@ export interface IFleetJobRepository {
   /** Plan D19: sets attributedAt when still null; true when this call claimed it. */
   claimAttribution(jobId: string, now: Date): Promise<boolean>;
   findUserDisplayName(userId: string): Promise<string | null>;
+  /** S3 §3 (D475): FleetConfigEdit.result := FleetJob.configResult for this job; no-op without an edit row. Inside the terminal transition. */
+  copyConfigResult(jobId: string): Promise<void>;
 }
