@@ -19,19 +19,15 @@
         <FormField name="type" v-slot="{ componentField }">
           <FormItem>
             <FormLabel>{{ t('tickets.form.type') }}</FormLabel>
-            <Select v-bind="componentField">
-              <FormControl>
-                <SelectTrigger>
-                  <SelectValue :placeholder="t('tickets.form.typePlaceholder')" />
-                </SelectTrigger>
-              </FormControl>
-              <SelectContent>
-                <SelectItem value="BUG">{{ t('tickets.type.BUG') }}</SelectItem>
-                <SelectItem value="ENHANCEMENT">{{ t('tickets.type.ENHANCEMENT') }}</SelectItem>
-                <SelectItem value="TASK">{{ t('tickets.type.TASK') }}</SelectItem>
-                <SelectItem value="QUESTION">{{ t('tickets.type.QUESTION') }}</SelectItem>
-              </SelectContent>
-            </Select>
+            <FormControl>
+              <FleetNativeSelect
+                v-bind="componentField"
+                id="type"
+                :options="typeOptions"
+                :placeholder="t('tickets.form.typePlaceholder')"
+                testid="create-ticket-type"
+              />
+            </FormControl>
             <FormMessage />
           </FormItem>
         </FormField>
@@ -39,19 +35,15 @@
         <FormField name="priority" v-slot="{ componentField }">
           <FormItem>
             <FormLabel>{{ t('tickets.form.priority') }}</FormLabel>
-            <Select v-bind="componentField">
-              <FormControl>
-                <SelectTrigger>
-                  <SelectValue :placeholder="t('tickets.form.priorityPlaceholder')" />
-                </SelectTrigger>
-              </FormControl>
-              <SelectContent>
-                <SelectItem value="LOW">{{ t('tickets.priority.LOW') }}</SelectItem>
-                <SelectItem value="MEDIUM">{{ t('tickets.priority.MEDIUM') }}</SelectItem>
-                <SelectItem value="HIGH">{{ t('tickets.priority.HIGH') }}</SelectItem>
-                <SelectItem value="CRITICAL">{{ t('tickets.priority.CRITICAL') }}</SelectItem>
-              </SelectContent>
-            </Select>
+            <FormControl>
+              <FleetNativeSelect
+                v-bind="componentField"
+                id="priority"
+                :options="priorityOptions"
+                :placeholder="t('tickets.form.priorityPlaceholder')"
+                testid="create-ticket-priority"
+              />
+            </FormControl>
             <FormMessage />
           </FormItem>
         </FormField>
@@ -99,6 +91,20 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const toast = useAppToast()
+
+const typeOptions = computed(() => [
+  { value: 'BUG', label: t('tickets.type.BUG') },
+  { value: 'ENHANCEMENT', label: t('tickets.type.ENHANCEMENT') },
+  { value: 'TASK', label: t('tickets.type.TASK') },
+  { value: 'QUESTION', label: t('tickets.type.QUESTION') },
+])
+
+const priorityOptions = computed(() => [
+  { value: 'LOW', label: t('tickets.priority.LOW') },
+  { value: 'MEDIUM', label: t('tickets.priority.MEDIUM') },
+  { value: 'HIGH', label: t('tickets.priority.HIGH') },
+  { value: 'CRITICAL', label: t('tickets.priority.CRITICAL') },
+])
 
 const formSchema = toTypedSchema(
   z.object({
