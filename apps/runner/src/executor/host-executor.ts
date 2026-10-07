@@ -1,5 +1,6 @@
 import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
+import { isConfigKind } from '@nathapp/fleet-protocol';
 import type { ApprovalRelay } from '../approvals/approval-relay';
 import { NO_JOB_CHECK, type JobCheck } from '../capabilities/job-check';
 import { buildBundle, type BundleFile } from '../bundle/build-bundle';
@@ -15,9 +16,12 @@ import { readPlanCost } from '../verdict/plan-cost';
 import type { StatusView } from '../verdict/status-view';
 import { Watcher, type WatcherSink } from '../watcher/watcher';
 import { readStatusFile } from '../watcher/status-snapshot';
+import { prepareConfigCheckout } from './config-job/checkout';
+import { configBranchName } from './config-job/commit-push';
+import { runConfigJob } from './config-job/config-job';
 import { prepareCheckout } from './checkout';
 import { reasonFromError, type Git } from './git';
-import type { JobExecutor, JobWatcher, FinishPlanOptions, PlanPushOutcome, PrepareOptions, PrepareOutcome, PushProgressOptions, SpawnHandle, WatchOptions } from './job-executor';
+import type { ConfigJobContext, ConfigJobRun, JobExecutor, JobWatcher, FinishPlanOptions, PlanPushOutcome, PrepareOptions, PrepareOutcome, PushProgressOptions, SpawnHandle, WatchOptions } from './job-executor';
 import { deleteJobProfile, jobProfileName, projectNameFor, writeJobProfile } from './job-profile';
 import { buildNaxArgv, isProcessAlive, signalGroup, spawnNax } from './nax-process';
 import { readProcessCommand, reapNaxPids } from './pid-registry';
@@ -42,7 +46,7 @@ export interface HostExecutorDeps {
 
 // D53: a new attempt (including a requeue, which is a new lease epoch over the same job dir, D77) starts from none of these.
 const ATTEMPT_FILES = ['nax-out', 'nax.stdout', 'nax.stderr', 'pre-plan', 'plan-out', 'plan-out.tmp', 'plan-logs', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json'];
-const CANCELLED: PrepareOutcome = { ok: false, reason: 'cancelled', cancelled: true };
+const CANCELLED = { ok: false, reason: 'cancelled', cancelled: true } as const satisfies PrepareOutcome;
 const exists = (path: string): Promise<boolean> => stat(path).then(() => true, () => false);
 
 async function moveAside(from: string, to: string): Promise<void> {
@@ -67,22 +71,30 @@ export class HostExecutor implements JobExecutor {
     return { repoDir: repoDirFor(workspaceRoot, job.assign.repo.owner, job.assign.repo.name), jobDir, outDir: join(jobDir, 'nax-out') };
   }
 
+  /** Design §2 steps 1-2, shared by nax jobs and config jobs (D480): attempt files wiped, credentials, clone, clean. */
+  private async prepareWorkspace(job: JobRow, cancelled: () => boolean): Promise<{ ok: true; repoDir: string; jobDir: string; outDir: string } | { ok: false; reason: string; cancelled?: true }> {
+    const { repoDir, jobDir, outDir } = this.dirs(job);
+    if (cancelled()) return CANCELLED;
+    await Promise.all(ATTEMPT_FILES.map((name) => rm(join(jobDir, name), { recursive: true, force: true })));
+    await mkdir(jobDir, { recursive: true, mode: 0o700 });
+    await chmod(jobDir, 0o700);   // D93: it holds the shims
+    const acquired = await this.deps.credentials.acquire(job, { wait: true, isCancelled: cancelled });
+    if (!acquired.ok) return acquired.cancelled ? CANCELLED : { ok: false, reason: acquired.reason };
+    const { helper } = acquired.credentials;
+    await ensureClone(this.deps.git, { repoDir, cloneUrl: job.assign.repo.cloneUrl, identity: job.assign.gitIdentity, credentialHelper: helper });
+    if (cancelled()) return CANCELLED;
+    await cleanWorkspace(this.deps.git, repoDir, helper);
+    if (cancelled()) return CANCELLED;
+    return { ok: true, repoDir, jobDir, outDir };
+  }
+
   async prepare(job: JobRow, options: PrepareOptions = {}): Promise<PrepareOutcome> {
     const cancelled = (): boolean => options.isCancelled?.() === true;   // D66: polled at every step boundary
     try {
-      const { repoDir, jobDir, outDir } = this.dirs(job);
+      const workspace = await this.prepareWorkspace(job, cancelled);
+      if (!workspace.ok) return workspace;
+      const { repoDir, jobDir, outDir } = workspace;
       const { assign } = job;
-      if (cancelled()) return CANCELLED;
-      await Promise.all(ATTEMPT_FILES.map((name) => rm(join(jobDir, name), { recursive: true, force: true })));
-      await mkdir(jobDir, { recursive: true, mode: 0o700 });
-      await chmod(jobDir, 0o700);   // D93: it holds the shims
-      const acquired = await this.deps.credentials.acquire(job, { wait: true, isCancelled: cancelled });
-      if (!acquired.ok) return acquired.cancelled ? CANCELLED : { ok: false, reason: acquired.reason };
-      const { helper } = acquired.credentials;
-      await ensureClone(this.deps.git, { repoDir, cloneUrl: assign.repo.cloneUrl, identity: assign.gitIdentity, credentialHelper: helper });
-      if (cancelled()) return CANCELLED;
-      await cleanWorkspace(this.deps.git, repoDir, helper);
-      if (cancelled()) return CANCELLED;
       const checkout = await prepareCheckout({ git: this.deps.git, repoDir, assign });
       if (!checkout.ok) return { ok: false, reason: checkout.reason };
       const mismatch = await (this.deps.jobCheck ?? NO_JOB_CHECK).check(assign, repoDir);   // D104
@@ -97,6 +109,24 @@ export class HostExecutor implements JobExecutor {
     } catch (error) {
       return { ok: false, reason: reasonFromError(error) };
     }
+  }
+
+  async prepareConfigJob(job: JobRow, options: PrepareOptions = {}): Promise<PrepareOutcome> {
+    const cancelled = (): boolean => options.isCancelled?.() === true;
+    try {
+      const workspace = await this.prepareWorkspace(job, cancelled);
+      if (!workspace.ok) return workspace;
+      const checkout = await prepareConfigCheckout(this.deps.git, workspace.repoDir, job.assign.repo.defaultBranch);
+      return checkout.ok ? { ok: true, branch: null } : { ok: false, reason: checkout.reason };
+    } catch (error) {
+      return { ok: false, reason: reasonFromError(error) };
+    }
+  }
+
+  runConfigJob(job: JobRow, ctx: ConfigJobContext): Promise<ConfigJobRun> {
+    const { repoDir, jobDir } = this.dirs(job);
+    const { git, credentials, nowMs, sleep } = this.deps;
+    return runConfigJob({ git, naxCommand: this.deps.config.naxCommand, naxHome: this.deps.config.naxHome, credentials, nowMs, ...(sleep ? { sleep } : {}) }, job, { repoDir, jobDir }, ctx);
   }
 
   /**
@@ -132,7 +162,10 @@ export class HostExecutor implements JobExecutor {
   async matchesProcess(job: JobRow): Promise<boolean> {
     if (job.pid === null) return false;
     const command = await readProcessCommand(job.pid);
-    return command !== null && command.includes(jobProfileName(job.jobId));
+    if (command === null) return false;
+    // D486: a config job's nax calls carry `-d <clone>`; its gh / glab calls carry the job branch.
+    if (isConfigKind(job.command)) return command.includes(this.dirs(job).repoDir) || command.includes(configBranchName(job.jobId));
+    return command.includes(jobProfileName(job.jobId));
   }
 
   kill(pgid: number, signal: 'SIGTERM' | 'SIGKILL'): boolean {

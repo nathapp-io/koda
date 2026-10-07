@@ -148,9 +148,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   });
   const supervisor = new Supervisor({
     journal, executor, mutex: new RepoMutex(), uploader, log, now, sleep,
-    tuning: { statusPollMs: tuning.statusPollMs, killGraceMs: tuning.killGraceMs, ackPollMs: tuning.ackPollMs, uploadAckWaitMs: tuning.uploadAckWaitMs, logDrainTimeoutMs: tuning.logDrainTimeoutMs },
+    tuning: {
+      statusPollMs: tuning.statusPollMs, killGraceMs: tuning.killGraceMs, ackPollMs: tuning.ackPollMs, uploadAckWaitMs: tuning.uploadAckWaitMs, logDrainTimeoutMs: tuning.logDrainTimeoutMs,
+      configJobTimeoutMs: tuning.configJobTimeoutMs, configHeartbeatMs: tuning.configHeartbeatMs,
+    },
     readoptHeartbeatMs: tuning.readoptHeartbeatMs,
     logs: shipper,
+    configEdits: { fetch: (jobId, leaseEpoch) => client.getConfigEdit(jobId, leaseEpoch) },   // S3 §3
   });
   const handler = new CommandHandler({ journal, supervisor, workspaceRoot: config.workspaceRoot, log, now, approvals });
 

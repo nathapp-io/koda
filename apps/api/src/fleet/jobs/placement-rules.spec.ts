@@ -1,6 +1,6 @@
 import type { ProfileNeeds, RunnerCapabilities } from '../common/protocol';
 import {
-  EMPTY_LOAD, evaluateRunners, firstMisfit, orderCandidates, PERMANENT_MISFITS, PlacementJob, PlacementRunner, profileMisfit, QUEUED_SCAN_LIMIT,
+  EMPTY_LOAD, evaluateRunners, firstMisfit, jobScopePause, orderCandidates, PERMANENT_MISFITS, PlacementJob, PlacementRunner, profileMisfit, QUEUED_SCAN_LIMIT,
   toLoads, toPlacementJob,
 } from './placement-rules';
 
@@ -20,7 +20,7 @@ const runner = (over: Partial<PlacementRunner> = {}): PlacementRunner => ({
   labels: ['linux', 'gpu'], capacity: 1, capabilities: caps(), ...over,
 });
 const job = (over: Partial<PlacementJob> = {}): PlacementJob => ({
-  repoId: 'repo-1', provider: 'github', profiles: ['fast'], selectorLabels: ['linux'], pinnedRunnerId: null, bashMode: 'raw', ...over,
+  command: 'RUN', repoId: 'repo-1', provider: 'github', profiles: ['fast'], selectorLabels: ['linux'], pinnedRunnerId: null, bashMode: 'raw', ...over,
 });
 const misfit = (j: PlacementJob, r: PlacementRunner, load = EMPTY_LOAD) => firstMisfit(j, r, load, NOW, 90);
 const TG_FAILED = { ok: false, plugin: 'telegram', code: 'TELEGRAM_NOT_CONFIGURED' };
@@ -122,6 +122,55 @@ describe('placement rules (spec §4)', () => {
     const d = { runner: runner({ id: 'd', lastSeenAt: new Date(1) }), load: { active: 0, repoIds: new Set<string>() } };
     expect(orderCandidates([a, b, d, c]).map((x) => x.runner.id)).toEqual(['c', 'd', 'b', 'a']);
   });
+
+  describe('config kinds (fleet S3 §3, D470)', () => {
+    const cfg = (over: Partial<PlacementJob> = {}) => job({ command: 'CONFIG_EDIT', profiles: [], ...over });
+    const s3 = (over: Partial<RunnerCapabilities> = {}) => caps({ configJobs: true, ...over });
+
+    it('fits an S3 runner even when every agent check would fail', () => {
+      const broken = s3({
+        nax: { version: '1', protocols: ['acp'] }, credentials: [], sandbox: { available: false, probedAt: 'x' },
+        interaction: TG_FAILED, approvals: undefined,
+      });
+      expect(misfit(cfg({ bashMode: 'gated' }), runner({ capabilities: broken }))).toBeNull();
+      expect(misfit(cfg({ command: 'CONFIG_DRIFT' }), runner({ capabilities: broken }))).toBeNull();
+    });
+
+    it('gives a runner without the configJobs capability the permanent misfit config_jobs', () => {
+      expect(misfit(cfg(), runner())).toBe('config_jobs');
+      expect(PERMANENT_MISFITS.has('config_jobs')).toBe(true);
+    });
+
+    it('keeps the tools check', () => {
+      expect(misfit(cfg({ provider: 'gitlab' }), runner({ capabilities: s3() }))).toBe('tools');
+      expect(misfit(cfg(), runner({ capabilities: s3({ tools: { git: false, gh: true, glab: true } }) }))).toBe('tools');
+    });
+
+    it('skips budget_paused but keeps disabled, offline, labels, busy_repo and capacity', () => {
+      const ok = runner({ capabilities: s3() });
+      expect(misfit(cfg(), { ...ok, budgetPaused: true })).toBeNull();
+      expect(misfit(job(), { ...runner(), budgetPaused: true })).toBe('budget_paused');
+      expect(misfit(cfg(), { ...ok, enabled: false })).toBe('disabled');
+      expect(misfit(cfg(), { ...ok, lastSeenAt: new Date(NOW.getTime() - 91_000) })).toBe('offline');
+      expect(misfit(cfg({ selectorLabels: ['mac'] }), ok)).toBe('labels');
+      expect(misfit(cfg(), ok, { active: 0, repoIds: new Set(['repo-1']) })).toBe('busy_repo');
+      expect(misfit(cfg(), ok, { active: 1, repoIds: new Set(['other']) })).toBe('capacity');
+    });
+
+    it('carries the command through toPlacementJob', () => {
+      const record = { command: 'CONFIG_DRIFT', repoId: 'repo-1', profiles: [], selectorLabels: [], pinnedRunnerId: null, bashMode: 'raw' as const };
+      expect(toPlacementJob(record as never, { provider: 'github' }).command).toBe('CONFIG_DRIFT');
+    });
+
+    it('never holds a config job on a job-scope budget pause', () => {
+      const match = jest.fn(() => ({ id: 'policy-1' }));
+      const scope = { projectId: 'p1', repoId: 'repo-1', pinnedRunnerId: null };
+      expect(jobScopePause({ command: 'CONFIG_EDIT', ...scope }, match)).toBeNull();
+      expect(match).not.toHaveBeenCalled();
+      expect(jobScopePause({ command: 'RUN', ...scope }, match)).toEqual({ id: 'policy-1' });
+      expect(match).toHaveBeenCalledWith(['global', 'project:p1', 'repo:repo-1']);
+    });
+  });
 });
 
 describe('evaluateRunners (S2b (c) §2.3)', () => {
@@ -155,8 +204,8 @@ describe('placement helpers moved from PlacementService (D413)', () => {
   });
 
   it('toPlacementJob copies the placement fields and the repo provider', () => {
-    expect(toPlacementJob({ repoId: 'x', profiles: ['p'], selectorLabels: ['l'], pinnedRunnerId: null, bashMode: 'gated' }, { provider: 'gitlab' }))
-      .toEqual({ repoId: 'x', provider: 'gitlab', profiles: ['p'], selectorLabels: ['l'], pinnedRunnerId: null, bashMode: 'gated' });
+    expect(toPlacementJob({ command: 'RUN', repoId: 'x', profiles: ['p'], selectorLabels: ['l'], pinnedRunnerId: null, bashMode: 'gated' }, { provider: 'gitlab' }))
+      .toEqual({ command: 'RUN', repoId: 'x', provider: 'gitlab', profiles: ['p'], selectorLabels: ['l'], pinnedRunnerId: null, bashMode: 'gated' });
   });
 
   it('keeps the placement scan window at 50', () => {

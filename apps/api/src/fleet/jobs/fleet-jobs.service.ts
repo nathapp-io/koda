@@ -11,6 +11,9 @@ import { addUsd } from '../budgets/money';
 import { BudgetGate } from '../budgets/budget-gate';
 import { budgetReason, jobGateKeys } from '../budgets/budget-rules';
 import { normalizeDispatch } from './dispatch-input';
+import { isConfigKind } from '../common/config-jobs';
+import { CONFIG_EDIT_REPOSITORY, type IConfigEditRepository } from '../repo-config/domain/config-edit.domain';
+import type { FleetJobConfigEditDto } from '../repo-config/dto/config-edit.dto';
 import { FleetDispatchException } from './fleet-dispatch.exception';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import type { LiveFleetJobEvent } from '../../live/live-event';
@@ -52,6 +55,7 @@ export class FleetJobsService {
     @Inject(APPROVAL_REPOSITORY) private readonly approvals: Pick<IApprovalRepository, 'countPendingByJob'>,
     private readonly fleetTickets: FleetTicketsService,
     private readonly ticketEffects: FleetJobTicketEffects,
+    @Inject(CONFIG_EDIT_REPOSITORY) private readonly configEdits: Pick<IConfigEditRepository, 'findByJobId'>,
   ) {}
 
   /** Spec §5.1: validate, insert QUEUED (409 on an active duplicate), record, place. */
@@ -177,9 +181,17 @@ export class FleetJobsService {
     return FleetJobDto.from(r, (await this.approvals.countPendingByJob([r.id])).get(r.id) ?? 0);
   }
 
-  /** C9 D460: single-job responses (detail, cancel, requeue) carry the linked tickets; lists keep null. */
+  /** C9 D460: single-job responses (detail, cancel, requeue) carry the linked tickets; lists keep null. S3 §4.3 adds configEdit. */
   private async withDetail(r: FleetJobRecord): Promise<FleetJobDto> {
-    return Object.assign(await this.withPending(r), { tickets: await this.fleetTickets.forJob(r.id) });
+    return Object.assign(await this.withPending(r), { tickets: await this.fleetTickets.forJob(r.id), configEdit: await this.configEditFor(r) });
+  }
+
+  /** S3 §4.3: the stored result once the job is terminal (copied in the terminal transition), else the live mirror. */
+  private async configEditFor(r: FleetJobRecord): Promise<FleetJobConfigEditDto | null> {
+    if (!isConfigKind(r.command)) return null;
+    const edit = await this.configEdits.findByJobId(r.id);
+    if (!edit) return null;
+    return { mode: edit.mode, files: edit.edits.map((e) => e.path), prTitle: edit.prTitle, result: isTerminal(r.state) ? edit.result : r.configResult };
   }
 
   /**
@@ -230,7 +242,8 @@ export class FleetJobsService {
         feature = current.feature;
         repoId = current.repoId;
         if (!canTransition(current.state, FleetJobState.QUEUED, 'server')) throw new ConflictAppException({ state: current.state }, 'fleet.jobState');
-        await this.budgets.assertNotPaused(jobGateKeys(current), now);
+        // S3 D495: a budget pause never holds a config job, so only nax jobs are gate-checked here.
+        if (!isConfigKind(current.command)) await this.budgets.assertNotPaused(jobGateKeys(current), now);
         // Plan D4: a requeue is a fresh lease (the transition carries `bumpEpoch: true`).
         // Withdraw pending non-ABANDON commands from the prior epoch so a late runner
         // can no longer ack them, and so the next sync sees no orphan ASSIGN/CANCEL.
@@ -245,7 +258,7 @@ export class FleetJobsService {
             costSpentUsd: '0', costCarriedUsd: addUsd(current.costCarriedUsd, current.costSpentUsd), cancelReason: null,
             lastHeartbeatAt: null, finishResult: null, escalationReason: null, exitCode: null,
             resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null, stories: null, storiesTruncated: false, postRun: null,
-            ackedRunnerSeq: 0, bumpEpoch: true,
+            configResult: null, ackedRunnerSeq: 0, bumpEpoch: true,
           },
         });
       });

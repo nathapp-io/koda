@@ -135,6 +135,46 @@ describe('GitHubAppClient', () => {
       await expect(client.getPullRequest('t', 'acme', 'app', 9)).rejects.toMatchObject({ reason: 'provider_error' });
     });
   });
+
+  describe('.nax reads (fleet S3 §4.1)', () => {
+    const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64');
+
+    it('reads the branch head commit and sends the token', async () => {
+      forge.routes.set('GET /repos/acme/app/git/ref/heads/trunk', () => ({ status: 200, body: { object: { sha: 'c0ffee1', type: 'commit' } } }));
+      await expect(client.getBranchHead('ghs_t', 'acme', 'app', 'trunk')).resolves.toBe('c0ffee1');
+      expect(forge.requests.at(-1)?.headers.authorization).toBe('Bearer ghs_t');
+      forge.routes.clear();
+      await expect(client.getBranchHead('ghs_t', 'acme', 'app', 'trunk')).rejects.toMatchObject({ reason: 'repo_not_found' });
+    });
+
+    it('maps a tree and its truncated flag; drops non blob/tree entries', async () => {
+      forge.routes.set('GET /repos/acme/app/git/trees/t1', () => ({
+        status: 200,
+        body: { truncated: false, tree: [
+          { path: 'rules', type: 'tree', sha: 's1' }, { path: 'rules/a.md', type: 'blob', sha: 's2', size: 12 }, { path: 'sub', type: 'commit', sha: 's3' },
+        ] },
+      }));
+      await expect(client.getTree('t', 'acme', 'app', 't1', true)).resolves.toEqual({
+        truncated: false,
+        entries: [{ path: 'rules', type: 'tree', sha: 's1', size: null }, { path: 'rules/a.md', type: 'blob', sha: 's2', size: 12 }],
+      });
+      expect(forge.requests.at(-1)?.path).toBe('/repos/acme/app/git/trees/t1');
+    });
+
+    it('reads a file at a ref, decoding base64', async () => {
+      forge.routes.set('GET /repos/acme/app/contents/.nax/rules/a.md', () => ({ status: 200, body: { type: 'file', sha: 'b1', size: 5, encoding: 'base64', content: b64('hello') } }));
+      const file = await client.getFile('t', 'acme', 'app', '.nax/rules/a.md', 'c0ffee1');
+      expect(file).toEqual({ sha: 'b1', size: 5, content: Buffer.from('hello') });
+    });
+
+    it('returns null for a missing file or a directory, provider_error for 500', async () => {
+      await expect(client.getFile('t', 'acme', 'app', '.nax/x.md', 'r')).resolves.toBeNull();
+      forge.routes.set('GET /repos/acme/app/contents/.nax', () => ({ status: 200, body: [{ type: 'file' }] }));
+      await expect(client.getFile('t', 'acme', 'app', '.nax', 'r')).resolves.toBeNull();
+      forge.routes.set('GET /repos/acme/app/contents/.nax/x.md', () => ({ status: 500, body: {} }));
+      await expect(client.getFile('t', 'acme', 'app', '.nax/x.md', 'r')).rejects.toBeInstanceOf(RepoCheckException);
+    });
+  });
 });
 
 describe('commentOnPullRequest cache hit', () => {

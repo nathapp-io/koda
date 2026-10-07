@@ -8,6 +8,7 @@ import { FleetHttpClient } from './fleet-http-client';
 import { GitTokenBroker } from './git-token.broker';
 import { RepoCheckException, RepoCheckReason } from './repo-check.exception';
 import type { VcsPrStatus } from '../../vcs/types';
+import type { ForgeFile, ForgeTreeEntry } from './forge-tree';
 
 export interface CanonicalRepo {
   owner: string;
@@ -121,6 +122,50 @@ export class GitHubAppClient {
       url: b.html_url,
       title: typeof b.title === 'string' ? b.title : '',
     };
+  }
+
+  private repoPath(owner: string, name: string): string {
+    return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
+  }
+
+  /** Fleet S3 §4.1: the commit a branch points at. */
+  async getBranchHead(token: string, owner: string, name: string, branch: string): Promise<string> {
+    const ref = branch.split('/').map(encodeURIComponent).join('/');
+    const res = await this.http.request('GET', `${this.api}${this.repoPath(owner, name)}/git/ref/heads/${ref}`, this.headers(token));
+    if (res.status === 404) throw new RepoCheckException('repo_not_found');
+    if (res.status !== 200) throw new RepoCheckException('provider_error');
+    const sha = obj(obj(res.body).object).sha;
+    if (typeof sha !== 'string') throw new RepoCheckException('provider_error');
+    return sha;
+  }
+
+  /** Fleet S3 §4.1: a tree by commit or tree SHA. Entries other than blob/tree (submodules) are dropped. */
+  async getTree(token: string, owner: string, name: string, treeish: string, recursive: boolean): Promise<{ entries: ForgeTreeEntry[]; truncated: boolean }> {
+    const query = recursive ? '?recursive=1' : '';
+    const res = await this.http.request('GET', `${this.api}${this.repoPath(owner, name)}/git/trees/${encodeURIComponent(treeish)}${query}`, this.headers(token));
+    if (res.status !== 200) throw new RepoCheckException('provider_error');
+    const body = obj(res.body);
+    if (!Array.isArray(body.tree)) throw new RepoCheckException('provider_error');
+    const entries = body.tree.flatMap((raw): ForgeTreeEntry[] => {
+      const e = obj(raw);
+      if ((e.type !== 'blob' && e.type !== 'tree') || typeof e.path !== 'string' || typeof e.sha !== 'string') return [];
+      return [{ path: e.path, type: e.type, sha: e.sha, size: typeof e.size === 'number' ? e.size : null }];
+    });
+    return { entries, truncated: body.truncated === true };
+  }
+
+  /** Fleet S3 §4.1: one file at a ref (contents API, base64). Null when absent or not a file. */
+  async getFile(token: string, owner: string, name: string, path: string, ref: string): Promise<ForgeFile | null> {
+    const encoded = path.split('/').map(encodeURIComponent).join('/');
+    const res = await this.http.request('GET', `${this.api}${this.repoPath(owner, name)}/contents/${encoded}?ref=${encodeURIComponent(ref)}`, this.headers(token));
+    if (res.status === 404) return null;
+    if (res.status !== 200) throw new RepoCheckException('provider_error');
+    const b = obj(res.body);
+    if (b.type !== 'file') return null;
+    if (typeof b.sha !== 'string' || typeof b.size !== 'number' || b.encoding !== 'base64' || typeof b.content !== 'string') {
+      throw new RepoCheckException('provider_error');
+    }
+    return { sha: b.sha, size: b.size, content: Buffer.from(b.content, 'base64') };
   }
 
   async verifyRepo(owner: string, name: string, persistedInstallationId?: bigint): Promise<CanonicalRepo & { installationId: bigint }> {

@@ -5,6 +5,7 @@ import { FleetActivityModule } from './activity/fleet-activity.module';
 import { BudgetsModule } from './budgets/budgets.module';
 import { FleetReposModule } from './repos/fleet-repos.module';
 import { FleetJobsModule } from './jobs/fleet-jobs.module';
+import { RepoConfigModule } from './repo-config/repo-config.module';
 import { RunnersModule } from './runners/runners.module';
 import { SchedulesModule } from './schedules/schedules.module';
 import { FleetTicketsModule } from './tickets/fleet-tickets.module';
@@ -16,6 +17,6 @@ import { DashboardModule } from './dashboard/dashboard.module';
 
 /** Fleet S1 (spec docs/superpowers/specs/2026-09-29-fleet-s1-dispatch-design.md). */
 @Module({
-  imports: [FleetActivityModule, BudgetsModule, ApprovalsModule, SchedulesModule, FleetReposModule, FleetJobsModule, FleetTicketsModule, RunnersModule, SyncModule, ArtifactsModule, LogsModule, IngestModule, AnalyticsModule, DashboardModule],
+  imports: [FleetActivityModule, BudgetsModule, ApprovalsModule, SchedulesModule, FleetReposModule, FleetJobsModule, RepoConfigModule, FleetTicketsModule, RunnersModule, SyncModule, ArtifactsModule, LogsModule, IngestModule, AnalyticsModule, DashboardModule],
 })
 export class FleetModule {}

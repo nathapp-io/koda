@@ -758,7 +758,7 @@ model FleetJob {
   projectId          String
   repoId             String
   ref                String
-  command            String // RUN | PLAN
+  command            String // RUN | PLAN | CONFIG_EDIT | CONFIG_DRIFT (S3 §1)
   feature            String
   planFrom           String? // repo-relative spec path, PLAN only
   profiles           String[]
@@ -805,6 +805,7 @@ model FleetJob {
   eventSeq           Int       @default(0) // server timeline counter (plan D2)
   ackedRunnerSeq     Int       @default(0) // cumulative runner ack for leaseEpoch (plan D2)
   attributedAt       DateTime? // PR/MR attribution comment posted (plan D19)
+  configResult       Json? // S3 §3 (D475): ConfigJobResult mirrored from snapshots; null for nax jobs
   updatedAt          DateTime  @updatedAt
 
   project      Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -823,6 +824,7 @@ model FleetJob {
   ticketLinks   TicketLink[]
   storyResults  FleetStoryResult[]
   reviewResults FleetReviewResult[]
+  configEdit    FleetConfigEdit?
 
   @@index([state])
   @@index([runnerId, state])
@@ -832,6 +834,21 @@ model FleetJob {
   @@index([repoId, firstStartedAt])
   @@index([runnerId, firstStartedAt])
   @@index([scheduleId, queuedAt])
+}
+
+/// Fleet S3 §1: the edit set of a CONFIG_EDIT / CONFIG_DRIFT job (D466). 1:1 with FleetJob.
+model FleetConfigEdit {
+  id        String   @id @default(cuid())
+  jobId     String   @unique
+  mode      String // edit | regenerate | drift
+  edits     Json // ConfigFileEdit[]; [] for regenerate and drift
+  prTitle   String?
+  prBody    String?
+  baseSha   String // default-branch commit the editor read
+  result    Json? // ConfigJobResult, copied from FleetJob.configResult on the terminal state
+  createdAt DateTime @default(now())
+
+  job FleetJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 }
 
 /// Fleet C9 §1 (D448): a job dispatched for one or more tickets.

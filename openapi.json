@@ -6415,6 +6415,403 @@
         ]
       }
     },
+    "/api/projects/{slug}/fleet/repos/{repoId}/nax-files": {
+      "get": {
+        "operationId": "ProjectRepoConfigController_list",
+        "parameters": [
+          {
+            "name": "repoId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaxFileListDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "koda cannot read the repo (fleet.repoUnreachable)"
+          },
+          "502": {
+            "description": "The forge failed"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The repo's allowlisted .nax files at the default-branch head (project member)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/repos/{repoId}/nax-files/content": {
+      "get": {
+        "operationId": "ProjectRepoConfigController_read",
+        "parameters": [
+          {
+            "name": "repoId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "required": false,
+            "in": "query",
+            "description": "Commit id from nax-files baseSha; defaults to the default branch",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaxFileContentDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Over 256 KiB or not UTF-8 text (fleet.naxFile)"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One allowlisted .nax file at a commit (project member)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/repos/{repoId}/config-edits": {
+      "post": {
+        "operationId": "ProjectRepoConfigController_submitEdit",
+        "parameters": [
+          {
+            "name": "repoId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitConfigEditDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchResultDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A config job is already active for this repo (fleet.configJobActive)"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Queue a CONFIG_EDIT job: a runner applies the edits, regenerates, validates and opens a PR (project DEVELOPER+)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/repos/{repoId}/config-edits/regenerate": {
+      "post": {
+        "operationId": "ProjectRepoConfigController_submitRegenerate",
+        "parameters": [
+          {
+            "name": "repoId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegenerateConfigDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchResultDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Queue a regenerate PR (CONFIG_EDIT with no file edits) (project DEVELOPER+)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/repos/{repoId}/drift-checks": {
+      "post": {
+        "operationId": "ProjectRepoConfigController_submitDrift",
+        "parameters": [
+          {
+            "name": "repoId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchResultDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Queue a read-only CONFIG_DRIFT job (project DEVELOPER+)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/projects/{slug}/fleet/jobs/{id}/config-edit": {
+      "get": {
+        "operationId": "ProjectJobConfigEditController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigEditPayloadDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A config job's full edit set, for Reopen edits (project member)",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/runner/jobs/{jobId}/config-edit": {
+      "get": {
+        "operationId": "RunnerConfigEditController_get",
+        "parameters": [
+          {
+            "name": "jobId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "leaseEpoch",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigEditPayloadDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale lease (ABANDON queued), or the job is not ASSIGNED/RUNNING"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "A config job's edit set for the lease holder (fleet S3 §3); fetched before RUNNING",
+        "tags": [
+          "fleet-runner"
+        ]
+      }
+    },
+    "/api/fleet/runner/sync": {
+      "post": {
+        "operationId": "RunnerSyncController_sync",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "SyncRequest (packages/fleet-protocol)"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "SyncResponse (packages/fleet-protocol)"
+          },
+          "400": {
+            "description": "Malformed sync request or capabilities"
+          },
+          "426": {
+            "description": "Unsupported protocol version"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Runner sync: events, command acks, token requests; long-polls when idle",
+        "tags": [
+          "fleet-runner"
+        ]
+      }
+    },
     "/api/fleet/enrollments": {
       "post": {
         "operationId": "EnrollmentsController_create",
@@ -6753,43 +7150,6 @@
         "summary": "Runner summaries for dispatch and job lists (project member)",
         "tags": [
           "fleet"
-        ]
-      }
-    },
-    "/api/fleet/runner/sync": {
-      "post": {
-        "operationId": "RunnerSyncController_sync",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "description": "SyncRequest (packages/fleet-protocol)"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "SyncResponse (packages/fleet-protocol)"
-          },
-          "400": {
-            "description": "Malformed sync request or capabilities"
-          },
-          "426": {
-            "description": "Unsupported protocol version"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Runner sync: events, command acks, token requests; long-polls when idle",
-        "tags": [
-          "fleet-runner"
         ]
       }
     },
@@ -10603,6 +10963,74 @@
           "status"
         ]
       },
+      "ConfigJobResultDto": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "enum": [
+              "ok",
+              "no_changes",
+              "drift",
+              "conflict",
+              "invalid",
+              "push_failed",
+              "pr_failed",
+              "timeout"
+            ],
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "output": {
+            "type": "string",
+            "description": "nax output tail, at most 8 KiB"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "FleetJobConfigEditDto": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "enum": [
+              "edit",
+              "regenerate",
+              "drift"
+            ],
+            "type": "string"
+          },
+          "files": {
+            "description": "Edited paths (contents via GET .../config-edit)",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "prTitle": {
+            "type": "string",
+            "nullable": true
+          },
+          "result": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ConfigJobResultDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "mode",
+          "files"
+        ]
+      },
       "FleetJobDto": {
         "type": "object",
         "properties": {
@@ -10621,7 +11049,9 @@
           "command": {
             "enum": [
               "RUN",
-              "PLAN"
+              "PLAN",
+              "CONFIG_EDIT",
+              "CONFIG_DRIFT"
             ],
             "type": "string"
           },
@@ -10816,6 +11246,16 @@
             "items": {
               "$ref": "#/components/schemas/FleetJobTicketDto"
             }
+          },
+          "configEdit": {
+            "nullable": true,
+            "description": "Config job edit summary (fleet S3 §4.3). Null for nax jobs and on list pages.",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FleetJobConfigEditDto"
+              }
+            ]
           }
         },
         "required": [
@@ -10864,7 +11304,8 @@
               "tools",
               "approvals_relay",
               "busy_repo",
-              "capacity"
+              "capacity",
+              "config_jobs"
             ],
             "type": "string"
           }
@@ -11614,6 +12055,189 @@
           "reachable",
           "reason",
           "checkedAt"
+        ]
+      },
+      "NaxFileEntryDto": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "size": {
+            "type": "number",
+            "nullable": true,
+            "description": "Null on GitLab (tree listings carry no size)"
+          },
+          "blobSha": {
+            "type": "string"
+          },
+          "group": {
+            "enum": [
+              "rules",
+              "context",
+              "config",
+              "profiles",
+              "constitution"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "blobSha",
+          "group"
+        ]
+      },
+      "NaxFileListDto": {
+        "type": "object",
+        "properties": {
+          "baseSha": {
+            "type": "string"
+          },
+          "defaultBranch": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NaxFileEntryDto"
+            }
+          }
+        },
+        "required": [
+          "baseSha",
+          "defaultBranch",
+          "files"
+        ]
+      },
+      "NaxFileContentDto": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "blobSha": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "blobSha",
+          "content"
+        ]
+      },
+      "ConfigFileEditDto": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "op": {
+            "enum": [
+              "put",
+              "delete"
+            ],
+            "type": "string"
+          },
+          "content": {
+            "type": "string",
+            "description": "Required for put, forbidden for delete; UTF-8, at most 256 KiB"
+          },
+          "baseSha": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 64,
+            "description": "Blob SHA the file was loaded at; null for a new file"
+          }
+        },
+        "required": [
+          "path",
+          "op",
+          "baseSha"
+        ]
+      },
+      "SubmitConfigEditDto": {
+        "type": "object",
+        "properties": {
+          "baseSha": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Default-branch commit the files were read at (nax-files baseSha)"
+          },
+          "edits": {
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigFileEditDto"
+            }
+          },
+          "prTitle": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "prBody": {
+            "type": "string",
+            "description": "At most 8 KiB"
+          }
+        },
+        "required": [
+          "baseSha",
+          "edits",
+          "prTitle"
+        ]
+      },
+      "RegenerateConfigDto": {
+        "type": "object",
+        "properties": {
+          "prTitle": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "prBody": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "prTitle"
+        ]
+      },
+      "ConfigEditPayloadDto": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "enum": [
+              "edit",
+              "regenerate",
+              "drift"
+            ],
+            "type": "string"
+          },
+          "edits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigFileEditDto"
+            }
+          },
+          "prTitle": {
+            "type": "string",
+            "nullable": true
+          },
+          "prBody": {
+            "type": "string",
+            "nullable": true
+          },
+          "baseSha": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "edits",
+          "baseSha"
         ]
       },
       "CreateEnrollmentDto": {

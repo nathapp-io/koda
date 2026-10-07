@@ -5,6 +5,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { askOnce, type FakeProfile } from './fake-nax-ask';
+import { answerConfigTool } from './fake-nax-config';
 import { answerProbe } from './fake-nax-probe';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, symlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -35,6 +36,12 @@ const probed = answerProbe(args, process.env, process.cwd());   // D108: config,
 if (probed) {
   process.stdout.write(`${probed.stdout}\n`);
   process.exit(probed.code);
+}
+const tool = answerConfigTool(args, process.cwd());   // S3: generate and rules lint (config jobs)
+if (tool) {
+  if (tool.stdout) process.stdout.write(`${tool.stdout}\n`);
+  if (tool.stderr) process.stderr.write(`${tool.stderr}\n`);
+  process.exit(tool.code);
 }
 
 const command = args[0];

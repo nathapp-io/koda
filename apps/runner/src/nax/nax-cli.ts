@@ -51,7 +51,7 @@ export function spawnFailure(errno: string | undefined, name: string): NaxResult
  * Drains the pipe (so the child never blocks on a full buffer) but stops accumulating at `cap`: over-long output is a
  * failure, not a document. Cancelling closes the pipe, so a child still printing gets EPIPE rather than hanging to the timeout.
  */
-async function readCapped(stream: ReadableStream<Uint8Array>, cap: number): Promise<{ text: string; capped: boolean }> {
+export async function readCapped(stream: ReadableStream<Uint8Array>, cap: number): Promise<{ text: string; capped: boolean }> {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;

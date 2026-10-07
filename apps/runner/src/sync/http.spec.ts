@@ -75,6 +75,18 @@ describe('ServerClient', () => {
     await expect(pending).rejects.toThrow(/api key/i);
     expect(called).toBe(false);
   });
+  test('getConfigEdit GETs the fenced config-edit route with the lease epoch and unwraps data (S3 §3)', async () => {
+    let seen = null as { url: string; init: RequestInit | undefined } | null;
+    const payload = { mode: 'drift', edits: [], prTitle: null, prBody: null, baseSha: 'a'.repeat(40) };
+    const c = client(async (url, init) => { seen = { url, init }; return ok(payload); });
+    await expect(c.getConfigEdit('job 1', 3)).resolves.toEqual(payload as never);
+    expect(seen?.url).toBe('https://koda.example.com/koda/api/fleet/runner/jobs/job%201/config-edit?leaseEpoch=3');
+    expect(seen?.init?.method).toBe('GET');
+    expect((seen?.init?.headers as Record<string, string>)['authorization']).toBe('Bearer kr_secret');
+    const fenced = await client(async () => new Response(JSON.stringify({ ret: 1, message: 'stale lease' }), { status: 409 })).getConfigEdit('j', 1).catch((e) => e);
+    expect(fenced).toBeInstanceOf(ServerError);
+    expect(fenced).toMatchObject({ status: 409 });
+  });
 });
 
 describe('uploadBundle', () => {

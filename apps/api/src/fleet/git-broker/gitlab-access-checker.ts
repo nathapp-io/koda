@@ -4,6 +4,7 @@ import { FleetHttpClient } from './fleet-http-client';
 import type { CanonicalRepo } from './github-app-client';
 import { RepoCheckException } from './repo-check.exception';
 import type { VcsPrStatus } from '../../vcs/types';
+import type { ForgeFile, ForgeTreeEntry } from './forge-tree';
 
 const DEVELOPER = 30;
 type Obj = Record<string, unknown>;
@@ -47,6 +48,57 @@ export class GitLabAccessChecker {
       url: b.web_url,
       title: typeof b.title === 'string' ? b.title : '',
     };
+  }
+
+  private project(owner: string, name: string): string {
+    return `${this.vcsConfig.gitlabApiUrl.replace(/\/+$/, '')}/projects/${encodeURIComponent(`${owner}/${name}`)}`;
+  }
+
+  /** Fleet S3 §4.1: the commit a branch points at. */
+  async getBranchHead(token: string, owner: string, name: string, branch: string): Promise<string> {
+    const res = await this.http.request('GET', `${this.project(owner, name)}/repository/branches/${encodeURIComponent(branch)}`, { 'private-token': token });
+    if (res.status === 404) throw new RepoCheckException('repo_not_found');
+    if (res.status !== 200) throw new RepoCheckException('provider_error');
+    const id = obj(obj(res.body).commit).id;
+    if (typeof id !== 'string') throw new RepoCheckException('provider_error');
+    return id;
+  }
+
+  static readonly TREE_PAGE = 100;
+  static readonly TREE_MAX_PAGES = 10;
+
+  /**
+   * Fleet S3 §4.1: recursive tree under `path` at `ref`. FleetHttpClient exposes no headers, so paging stops at the first short
+   * page; more than TREE_MAX_PAGES full pages is refused (a `.nax/` that large is not a config dir).
+   */
+  async listTree(token: string, owner: string, name: string, path: string, ref: string): Promise<ForgeTreeEntry[]> {
+    const out: ForgeTreeEntry[] = [];
+    for (let page = 1; page <= GitLabAccessChecker.TREE_MAX_PAGES; page += 1) {
+      const query = `path=${encodeURIComponent(path)}&ref=${encodeURIComponent(ref)}&recursive=true&per_page=${GitLabAccessChecker.TREE_PAGE}&page=${page}`;
+      const res = await this.http.request('GET', `${this.project(owner, name)}/repository/tree?${query}`, { 'private-token': token });
+      if (res.status === 404) return [];
+      if (res.status !== 200 || !Array.isArray(res.body)) throw new RepoCheckException('provider_error');
+      for (const raw of res.body) {
+        const e = obj(raw);
+        if ((e.type === 'blob' || e.type === 'tree') && typeof e.path === 'string' && typeof e.id === 'string') {
+          out.push({ path: e.path, type: e.type, sha: e.id, size: null });
+        }
+      }
+      if (res.body.length < GitLabAccessChecker.TREE_PAGE) return out;
+    }
+    throw new RepoCheckException('provider_error');
+  }
+
+  /** Fleet S3 §4.1: one file at a ref (files API, base64). Null when absent. */
+  async getFile(token: string, owner: string, name: string, path: string, ref: string): Promise<ForgeFile | null> {
+    const res = await this.http.request('GET', `${this.project(owner, name)}/repository/files/${encodeURIComponent(path)}?ref=${encodeURIComponent(ref)}`, { 'private-token': token });
+    if (res.status === 404) return null;
+    if (res.status !== 200) throw new RepoCheckException('provider_error');
+    const b = obj(res.body);
+    if (typeof b.blob_id !== 'string' || typeof b.size !== 'number' || b.encoding !== 'base64' || typeof b.content !== 'string') {
+      throw new RepoCheckException('provider_error');
+    }
+    return { sha: b.blob_id, size: b.size, content: Buffer.from(b.content, 'base64') };
   }
 
   async verifyRepo(owner: string, name: string, token: string): Promise<CanonicalRepo> {

@@ -1,6 +1,5 @@
-import { jobGateKeys } from '../budgets/budget-rules';
 import {
-  evaluateRunners, MisfitReason, PERMANENT_MISFITS, PlacementRunner, RunnerLoad, toPlacementJob,
+  evaluateRunners, jobScopePause, MisfitReason, PERMANENT_MISFITS, PlacementRunner, RunnerLoad, toPlacementJob,
 } from '../jobs/placement-rules';
 import { jobItem } from './attention-jobs';
 import {
@@ -64,7 +63,7 @@ export function jobUnplaceableItems(input: DryRunInput, now: Date, t: AttentionT
       projectId: job.projectId,
       item: jobItem('job_unplaceable', job, severity, job.queuedAt, { verdict, reasons: reasons.slice(0, DASHBOARD_LIMITS.reasonsShown), reasonsTotal }),
     }];
-    if (input.pauses.match(jobGateKeys(job))) return emit('budget_paused', 'warning', [], 0);
+    if (jobScopePause(job, (keys) => input.pauses.match(keys) ?? null)) return emit('budget_paused', 'warning', [], 0);
     const pool = job.pinnedRunnerId ? candidates.filter((r) => r.id === job.pinnedRunnerId) : candidates;
     if (pool.length === 0) return emit('no_runners', 'error', [], 0);
     const verdicts = evaluateRunners(toPlacementJob(job, job), pool, input.loads, (id) => input.pauses.runnerPaused(id), now, t.runnerOfflineSec);

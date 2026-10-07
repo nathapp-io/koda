@@ -7,6 +7,9 @@ import {
   SpendCell, SpendTotalsRow, StoryListRow, StorySort, StoryStatsRow,
 } from './domain/analytics.domain';
 
+/** Fleet S3 D479: config jobs are not agent runs; job-level panels ignore them. */
+const NAX_JOBS = Prisma.sql`j."command" IN ('RUN', 'PLAN')`;
+
 /** Fixed SQL fragments keyed by validated enums: request text never reaches the SQL. */
 const GROUP_KEY: Record<GroupBy, Prisma.Sql> = {
   model: Prisma.sql`e."model"`,
@@ -140,7 +143,7 @@ export class PrismaAnalyticsRepository implements IAnalyticsRepository {
     const rows = await this.db.$queryRaw<Raw[]>(Prisma.sql`
       SELECT ${column} AS "value", COUNT(*) AS "count"
       FROM "FleetJob" j
-      WHERE j."projectId" = ${projectId} AND j."finishedAt" >= ${from} AND j."finishedAt" < ${to} AND ${column} IS NOT NULL
+      WHERE j."projectId" = ${projectId} AND j."finishedAt" >= ${from} AND j."finishedAt" < ${to} AND ${column} IS NOT NULL AND ${NAX_JOBS}
       GROUP BY 1 ORDER BY 2 DESC, 1 ASC`);
     return rows.map((r) => ({ value: r.value as string, count: num(r.count) }));
   }
@@ -168,7 +171,7 @@ export class PrismaAnalyticsRepository implements IAnalyticsRepository {
         SELECT SUM(i."ledgerCostUsd") AS "ledger" FROM "FleetBundleIngest" i
         WHERE i."jobId" = j."id" AND i."status" IN ('done', 'partial')
       ) l ON TRUE
-      WHERE j."projectId" = ${projectId} AND j."finishedAt" >= ${from} AND j."finishedAt" < ${to}
+      WHERE j."projectId" = ${projectId} AND j."finishedAt" >= ${from} AND j."finishedAt" < ${to} AND ${NAX_JOBS}
       ORDER BY "cost" DESC, j."id" ASC
       LIMIT ${limit}`);
     return rows.map((r) => ({

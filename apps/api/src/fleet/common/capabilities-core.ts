@@ -99,7 +99,7 @@ function parseCredential(c: unknown, i: number): RunnerCredential {
 export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
   if (!isObj(raw)) fail('not an object');
   if (Buffer.byteLength(JSON.stringify(raw), 'utf8') > MAX_CAPABILITIES_BYTES) fail('too large');
-  const { nax, sandbox, profiles, credentials, tools, executors, approvals, interaction } = raw;
+  const { nax, sandbox, profiles, credentials, tools, executors, approvals, interaction, configJobs } = raw;
 
   if (
     !isObj(nax) || !isStr(nax.version) || !Array.isArray(nax.protocols) || nax.protocols.length === 0 ||
@@ -114,6 +114,8 @@ export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
   if (!Array.isArray(executors) || !executors.every((e) => (EXECUTORS as readonly unknown[]).includes(e))) fail('executors');
   // Plan D271: strict like every other field; only exactly { relay: true } is meaningful.
   if (approvals !== undefined && !(isObj(approvals) && approvals.relay === true && Object.keys(approvals).length === 1)) fail('approvals');
+  // Fleet S3 §3: strict like approvals; only exactly `true` is meaningful.
+  if (configJobs !== undefined && configJobs !== true) fail('configJobs');
 
   const parsedCredentials = credentials.map(parseCredential);
 
@@ -130,5 +132,6 @@ export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
     executors: [...(executors as Array<'host'>)],
     ...(approvals !== undefined ? { approvals: { relay: true as const } } : {}),
     ...(interaction !== undefined ? { interaction: parseInteraction(interaction, 'interaction') } : {}),
+    ...(configJobs === true ? { configJobs: true as const } : {}),
   };
 }

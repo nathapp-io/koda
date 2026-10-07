@@ -1,9 +1,10 @@
-import type { SnapshotEventPayload, StateEventPayload } from '@nathapp/fleet-protocol';
+import { CONFIG_COMPLETED_OUTCOMES, isConfigKind, type ConfigJobKind, type SnapshotEventPayload, type StateEventPayload } from '@nathapp/fleet-protocol';
 import type { BundleFile } from '../bundle/build-bundle';
 import type { UploadOutcome } from '../bundle/upload-bundle';
 import { errorMessage } from '../errors';
 import { readDiagnosticTail } from '../diagnostics';
-import type { JobExecutor, JobWatcher } from '../executor/job-executor';
+import { fitConfigResult } from '../executor/config-job/result-fit';
+import type { ConfigJobRun, JobExecutor, JobWatcher } from '../executor/job-executor';
 import { wipPushValue, type ProgressPushOutcome } from '../executor/progress-push';
 import type { Journal } from '../journal/journal';
 import type { JobRow } from '../journal/types';
@@ -13,6 +14,8 @@ import type { Now, Sleep } from '../time';
 import { planVerdict } from '../verdict/plan-verdict';
 import { runVerdict, type Verdict } from '../verdict/run-verdict';
 import { mapStatusToSnapshot } from '../watcher/status-snapshot';
+import { fetchConfigEdit, type ConfigEditSource } from './config-edit-fetch';
+import { CONFIG_HEARTBEAT_MS, startHeartbeat } from './heartbeat';
 import { JobEvents } from './job-events';
 import { killIfOurs } from './kill-if-ours';
 import type { RepoMutex } from './repo-mutex';
@@ -30,6 +33,10 @@ export interface JobRunTuning {
   readonly uploadAckWaitMs: number;
   /** S2a §2.4 (R5): how long the run waits for its logs to reach the server before UPLOADING. */
   readonly logDrainTimeoutMs: number;
+  /** S3 §5 lifecycle, D483: a config job's hard timeout. */
+  readonly configJobTimeoutMs?: number;
+  /** S3 §3, D483: how often a RUNNING config job stamps `heartbeatAt`. */
+  readonly configHeartbeatMs?: number;
 }
 
 export interface JobRunDeps {
@@ -43,12 +50,16 @@ export interface JobRunDeps {
   readonly tuning: JobRunTuning;
   /** S2a §2.4 (plan D321): the runner-wide log shipper; nothing in a tick awaits it. */
   readonly logs: LogShipping;
+  /** S3 §3: the fenced edit-set fetch (daemon.ts over ServerClient.getConfigEdit). Absent: config jobs fail at once. */
+  readonly configEdits?: ConfigEditSource;
 }
 
 export type RunStart = 'prepare' | 'reprepare' | 'watch' | 'finish';
 
 const TICK_WARN_EVERY = 30;
 const PENDING_SCAN_LIMIT = 100_000;
+
+export const CONFIG_JOB_TIMEOUT_MS = 600_000;
 
 function terminalReason(verdict: Verdict, outcome: UploadOutcome): string | undefined {
   if (outcome.kind === 'too-large') return 'bundle too large';
@@ -107,6 +118,11 @@ export class JobRun {
   }
 
   private async lifecycle(from: RunStart): Promise<void> {
+    const { command } = this.mustRow();
+    if (isConfigKind(command)) {
+      await this.runConfig(from, command);
+      return;
+    }
     if ((from === 'prepare' || from === 'reprepare') && !(await this.prepareAndSpawn(from === 'reprepare'))) return;
     this.registerLogs();
     if (from === 'watch') {
@@ -259,6 +275,91 @@ export class JobRun {
     this.events.transition(to, reason);
     await this.cleanup();
     return false;
+  }
+
+  /** S3 §3, §5, D481: the edit fetch and the checkout happen while ASSIGNED; nothing here spawns nax or uploads a bundle. */
+  private async runConfig(from: RunStart, command: ConfigJobKind): Promise<void> {
+    if (from === 'watch' || from === 'finish') {
+      await this.failSafe(new Error('a config job cannot be resumed'));   // D485: READOPT rejects these before a run exists
+      return;
+    }
+    if (this.cancelRequested()) {
+      await this.endBeforeSpawn('CANCELLED', 'cancelled before start');
+      return;
+    }
+    const fetched = await fetchConfigEdit({
+      source: this.deps.configEdits, jobId: this.jobId, leaseEpoch: this.leaseEpoch, command, sleep: this.deps.sleep, isHalted: () => this.halted, log: this.deps.log,
+    });
+    if (this.halted) return;
+    if (fetched.kind === 'stale') {
+      this.deps.log.warn('config edit fetch fenced (stale lease); waiting for ABANDON', { jobId: this.jobId, leaseEpoch: this.leaseEpoch });
+      return;
+    }
+    if (fetched.kind === 'failed') {
+      await this.endBeforeSpawn('FAILED', fetched.reason);
+      return;
+    }
+    // Halted first: after a daemon crash the journal is closed and `cancelRequested` would throw (D40, D67).
+    const stopped = (): boolean => this.halted || this.cancelRequested();
+    const prepared = await this.deps.executor.prepareConfigJob(this.mustRow(), { isCancelled: stopped });
+    if (this.halted) return;
+    if (!prepared.ok) {
+      await (prepared.cancelled ? this.endBeforeSpawn('CANCELLED', 'cancelled before start') : this.endBeforeSpawn('FAILED', prepared.reason));
+      return;
+    }
+    if (this.cancelRequested()) {
+      await this.endBeforeSpawn('CANCELLED', 'cancelled before start');
+      return;
+    }
+    this.events.transition('RUNNING', undefined, { pid: null, pgid: null, branch: null });
+    this.registerLogs();
+    // Read the clock before the heartbeat starts: a test clock moves on every sleep.
+    const deadlineMs = this.deps.now().getTime() + (this.deps.tuning.configJobTimeoutMs ?? CONFIG_JOB_TIMEOUT_MS);
+    const stopHeartbeat = startHeartbeat({
+      everyMs: this.deps.tuning.configHeartbeatMs ?? CONFIG_HEARTBEAT_MS, sleep: this.deps.sleep, now: this.deps.now,
+      emit: (heartbeatAt) => { if (!this.halted) this.events.snapshot({ heartbeatAt }); },
+    });
+    let run: ConfigJobRun;
+    try {
+      run = await this.deps.executor.runConfigJob(this.mustRow(), {
+        payload: fetched.payload,
+        deadlineMs,
+        isStopped: stopped,
+        onProcess: (proc) => { this.deps.journal.updateJob(this.jobId, this.leaseEpoch, { pid: proc?.pid ?? null, pgid: proc?.pgid ?? null }); },
+        step: (message) => { this.events.lifecycle('info', message); },
+      });
+    } finally {
+      stopHeartbeat();
+    }
+    if (this.halted) return;
+    await this.finishConfig(run);
+  }
+
+  /** S3 §3, D471, D476, D488, D489: result snapshot, then UPLOADING with no bundle, then the terminal state. */
+  private async finishConfig(run: ConfigJobRun): Promise<void> {
+    await this.awaitLogs(this.deps.logs.drain(this.jobId, this.leaseEpoch, this.deps.tuning.logDrainTimeoutMs));
+    if (this.halted) return;
+    if (run.kind === 'stopped') {
+      this.events.transition('CANCELLED', 'cancelled');
+      await this.cleanup();
+      return;
+    }
+    if (run.kind === 'failed') {
+      this.events.transition('UPLOADING');
+      this.events.transition('FAILED', run.reason);
+      await this.cleanup();
+      return;
+    }
+    const result = fitConfigResult(run.result);
+    this.events.snapshot({
+      configResult: result,
+      ...(run.resultBranch ? { resultBranch: run.resultBranch } : {}),
+      ...(run.resultSha ? { resultSha: run.resultSha } : {}),
+      ...(run.resultPrUrl ? { resultPrUrl: run.resultPrUrl } : {}),
+    });
+    this.events.transition('UPLOADING');
+    this.events.transition(CONFIG_COMPLETED_OUTCOMES.includes(result.outcome) ? 'COMPLETED' : 'FAILED', result.outcome);
+    await this.cleanup();
   }
 
   private async tick(watcher: JobWatcher, final: boolean): Promise<void> {

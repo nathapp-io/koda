@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { BashMode } from '../../common/protocol';
 import { FleetJobTicketDto } from '../../tickets/dto/ticket-fleet-job.dto';
+import { FleetJobConfigEditDto } from '../../repo-config/dto/config-edit.dto';
 import type { FleetJobRecord } from '../domain/fleet-job.domain';
 import type { MisfitReason } from '../placement-rules';
 
@@ -27,7 +28,7 @@ export class FleetJobDto {
   @ApiProperty() declare projectId: string;
   @ApiProperty() declare repoId: string;
   @ApiProperty() declare ref: string;
-  @ApiProperty({ enum: ['RUN', 'PLAN'] }) declare command: 'RUN' | 'PLAN';
+  @ApiProperty({ enum: ['RUN', 'PLAN', 'CONFIG_EDIT', 'CONFIG_DRIFT'] }) declare command: 'RUN' | 'PLAN' | 'CONFIG_EDIT' | 'CONFIG_DRIFT';
   @ApiProperty() declare feature: string;
   @ApiPropertyOptional({ type: String, nullable: true }) declare planFrom: string | null;
   @ApiProperty({ type: [String] }) declare profiles: string[];
@@ -72,6 +73,8 @@ export class FleetJobDto {
   @ApiProperty({ description: 'Schedule ticks absorbed into this job while it sat queued (S1b §3.2)' }) declare coalescedCount: number;
   @ApiPropertyOptional({ type: [FleetJobTicketDto], nullable: true, description: 'Linked tickets (fleet C9 §2.2). Null on list pages (D460).' })
   declare tickets: FleetJobTicketDto[] | null;
+  @ApiPropertyOptional({ type: FleetJobConfigEditDto, nullable: true, description: 'Config job edit summary (fleet S3 §4.3). Null for nax jobs and on list pages.' })
+  declare configEdit: FleetJobConfigEditDto | null;
 
   /** Internal columns (runnerBootId, eventSeq, ackedRunnerSeq, attributedAt) stay server-side. */
   static from(r: FleetJobRecord, pendingApprovals = 0): FleetJobDto {
@@ -88,7 +91,7 @@ export class FleetJobDto {
       finishResult: r.finishResult, escalationReason: r.escalationReason, exitCode: r.exitCode,
       resultBranch: r.resultBranch, resultSha: r.resultSha, resultPrUrl: r.resultPrUrl, wipPush: r.wipPush,
       stories: r.stories, storiesTruncated: r.storiesTruncated, postRun: r.postRun,
-      scheduleId: r.scheduleId, coalescedCount: r.coalescedCount, tickets: null,
+      scheduleId: r.scheduleId, coalescedCount: r.coalescedCount, tickets: null, configEdit: null,
     });
   }
 
@@ -101,7 +104,7 @@ export class FleetJobDto {
 export class PlacementMisfitDto {
   @ApiProperty() declare runnerId: string;
   @ApiProperty() declare name: string;
-  @ApiProperty({ enum: ['disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox', 'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity'] })
+  @ApiProperty({ enum: ['disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox', 'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity', 'config_jobs'] })
   declare reason: MisfitReason;
 }
 

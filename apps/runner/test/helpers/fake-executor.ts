@@ -1,5 +1,5 @@
 import type { BundleFile } from '../../src/bundle/build-bundle';
-import type { JobExecutor, JobWatcher, FinishPlanOptions, PlanPushOutcome, PrepareOptions, PrepareOutcome, PushProgressOptions, SpawnHandle, WatchOptions } from '../../src/executor/job-executor';
+import type { ConfigJobContext, ConfigJobRun, JobExecutor, JobWatcher, FinishPlanOptions, PlanPushOutcome, PrepareOptions, PrepareOutcome, PushProgressOptions, SpawnHandle, WatchOptions } from '../../src/executor/job-executor';
 import type { ProgressPushOutcome } from '../../src/executor/progress-push';
 import type { JobRow } from '../../src/journal/types';
 import type { JobLogSources } from '../../src/logs/types';
@@ -147,5 +147,26 @@ export class FakeExecutor implements JobExecutor {
 
   async releaseApprovals(job: JobRow): Promise<void> {
     this.calls.push(`releaseApprovals:${job.jobId}`);
+  }
+
+  configPrepare: PrepareOutcome = { ok: true, branch: null };
+  configRun: ConfigJobRun = {
+    kind: 'result', result: { outcome: 'ok', files: ['.nax/rules/a.md', 'CLAUDE.md'] },
+    resultBranch: 'nax-config/j1', resultSha: 'd'.repeat(40), resultPrUrl: 'https://example.test/pr/9',
+  };
+  readonly configContexts: ConfigJobContext[] = [];
+  onConfigRun: (ctx: ConfigJobContext) => Promise<void> = async () => undefined;
+
+  async prepareConfigJob(job: JobRow, options: PrepareOptions = {}): Promise<PrepareOutcome> {
+    this.note('prepareConfigJob', job);
+    this.prepareOptions.push(options);
+    return this.configPrepare;
+  }
+
+  async runConfigJob(job: JobRow, ctx: ConfigJobContext): Promise<ConfigJobRun> {
+    this.note('runConfigJob', job);
+    this.configContexts.push(ctx);
+    await this.onConfigRun(ctx);
+    return this.configRun;
   }
 }

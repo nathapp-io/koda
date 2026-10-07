@@ -22,6 +22,7 @@ describe.skipIf(!enabled)('runner 3b-2 against the real API: capabilities from n
       sandbox: { available: true },
       tools: { git: true, gh: true },
       executors: ['host'],
+      configJobs: true,
     });
   });
 

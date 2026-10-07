@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { EnrollRequest, EnrollResponse, RunnerIdentity, SyncRequest, SyncResponse } from '@nathapp/fleet-protocol';
+import type { ConfigEditPayload, EnrollRequest, EnrollResponse, RunnerIdentity, SyncRequest, SyncResponse } from '@nathapp/fleet-protocol';
 import type { PutLogAnswer, PutLogArgs, PutLogOutcome } from '../logs/types';
 import { errorMessage } from '../errors';
 
@@ -110,6 +110,13 @@ export class ServerClient {
   async me(signal?: AbortSignal): Promise<RunnerIdentity> {
     const response = await this.send(this.url('/fleet/runner/me'), { method: 'GET', headers: this.bearer() }, this.options.requestTimeoutMs ?? 15_000, signal);
     return this.json<RunnerIdentity>(response);
+  }
+
+  /** S3 §3: the edit set of a config job, fenced by the lease epoch like the bundle upload (409 = not ours any more). */
+  async getConfigEdit(jobId: string, leaseEpoch: number, signal?: AbortSignal): Promise<ConfigEditPayload> {
+    const url = `${this.url(`/fleet/runner/jobs/${encodeURIComponent(jobId)}/config-edit`)}?leaseEpoch=${leaseEpoch}`;
+    const response = await this.send(url, { method: 'GET', headers: { ...this.bearer(), 'accept-language': 'en' } }, this.options.requestTimeoutMs ?? 15_000, signal);
+    return this.json<ConfigEditPayload>(response);
   }
 
   sync(request: SyncRequest, signal?: AbortSignal): Promise<SyncResponse> {

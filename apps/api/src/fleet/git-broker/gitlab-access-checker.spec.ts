@@ -80,4 +80,38 @@ describe('GitLabAccessChecker', () => {
       await expect(checker.getMergeRequest('t', 'grp/sub', 'app', 4)).rejects.toMatchObject({ reason: 'provider_error' });
     });
   });
+
+  describe('.nax reads (fleet S3 §4.1)', () => {
+    const P = `/api/v4/projects/${encodeURIComponent('grp/sub/app')}`;
+
+    it('reads the branch head', async () => {
+      forge.routes.set(`GET ${P}/repository/branches/main`, () => ({ status: 200, body: { commit: { id: 'c1' } } }));
+      await expect(checker.getBranchHead('glpat', 'grp/sub', 'app', 'main')).resolves.toBe('c1');
+      expect(forge.requests.at(-1)?.headers['private-token']).toBe('glpat');
+    });
+
+    it('pages the recursive tree until a short page, and returns [] when the path is missing', async () => {
+      const page = (n: number, count: number) => Array.from({ length: count }, (_, i) => ({ id: `s${n}-${i}`, path: `.nax/rules/r${n}-${i}.md`, type: 'blob' }));
+      let calls = 0;
+      forge.routes.set(`GET ${P}/repository/tree`, () => ({ status: 200, body: page(++calls, calls === 1 ? 100 : 3) }));
+      const entries = await checker.listTree('t', 'grp/sub', 'app', '.nax', 'c1');
+      expect(entries).toHaveLength(103);
+      expect(entries[0]).toEqual({ path: '.nax/rules/r1-0.md', type: 'blob', sha: 's1-0', size: null });
+      forge.routes.set(`GET ${P}/repository/tree`, () => ({ status: 404, body: { message: '404 Tree Not Found' } }));
+      await expect(checker.listTree('t', 'grp/sub', 'app', '.nax', 'c1')).resolves.toEqual([]);
+    });
+
+    it('stops after 10 full pages', async () => {
+      forge.routes.set(`GET ${P}/repository/tree`, () => ({ status: 200, body: Array.from({ length: 100 }, (_, i) => ({ id: `s${i}`, path: `.nax/r${i}.md`, type: 'blob' })) }));
+      await expect(checker.listTree('t', 'grp/sub', 'app', '.nax', 'c1')).rejects.toMatchObject({ reason: 'provider_error' });
+    });
+
+    it('reads a file with its blob id; null on 404', async () => {
+      const FILE = `GET ${P}/repository/files/${encodeURIComponent('.nax/context.md')}`;
+      forge.routes.set(FILE, () => ({ status: 200, body: { blob_id: 'b9', size: 2, encoding: 'base64', content: Buffer.from('hi').toString('base64') } }));
+      await expect(checker.getFile('t', 'grp/sub', 'app', '.nax/context.md', 'c1')).resolves.toEqual({ sha: 'b9', size: 2, content: Buffer.from('hi') });
+      forge.routes.delete(FILE);
+      await expect(checker.getFile('t', 'grp/sub', 'app', '.nax/context.md', 'c1')).resolves.toBeNull();
+    });
+  });
 });
