@@ -86,6 +86,7 @@ describe('admin fleet overview page (spec §4.1)', () => {
     expect(p.byId('fleet-dashboard-attention-link').map((n) => n.props.to)).toEqual(['/admin/fleet/runners'])
     expect(p.byId('fleet-dashboard-credential')).toHaveLength(1)
     expect(p.byId('fleet-dashboard-analytics-link')[0].props.to).toBe('/admin/fleet/analytics')
+    expect(p.byId('fleet-dashboard-credentials-link').map((n) => n.props.to)).toEqual(['/admin/fleet/credentials'])
     p.app.unmount()
     expect([...p.polling.stopped].sort((a, b) => a - b)).toEqual([1_000, 10_000])
   })
@@ -142,6 +143,7 @@ describe('project fleet overview page (spec §4.1, B5)', () => {
     expect(p.byId('fleet-dashboard-credentials')).toHaveLength(0)
     expect(p.byId('fleet-dashboard-runner-versions')).toHaveLength(0)
     expect(p.byId('fleet-dashboard-analytics-link')[0].props.to).toBe('/koda/fleet/analytics')
+    expect(p.byId('fleet-dashboard-credentials-link')).toHaveLength(0)
   })
 
   test('a 403 shows the no-access text and stops polling', async () => {

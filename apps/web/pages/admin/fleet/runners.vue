@@ -81,6 +81,11 @@ onBeforeUnmount(polling.stop)
   <div class="space-y-6">
     <PageHeader :title="t('fleet.runners.title')" :subtitle="t('fleet.runners.subtitle')">
       <template #actions>
+        <NuxtLink
+          to="/admin/fleet/credentials"
+          class="mr-4 self-center text-sm text-primary underline-offset-4 hover:underline"
+          data-testid="fleet-runners-credentials-link"
+        >{{ t('fleet.runners.actions.credentials') }}</NuxtLink>
         <Button :disabled="adminOnly" @click="enrollOpen = true">
           <KeyRound class="mr-2 h-4 w-4" />{{ t('fleet.runners.actions.enroll') }}
         </Button>
