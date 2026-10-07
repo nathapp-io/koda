@@ -1307,6 +1307,7 @@
         "finishResult": "Finish result",
         "branch": "Branch",
         "pr": "Pull request",
+        "tickets": "Tickets",
         "planFrom": "Spec path",
         "escalation": "Escalation reason",
         "wipPush": {

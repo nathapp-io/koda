@@ -1307,6 +1307,7 @@
         "finishResult": "收尾结果",
         "branch": "分支",
         "pr": "拉取请求",
+        "tickets": "工单",
         "planFrom": "规格路径",
         "escalation": "升级原因",
         "wipPush": {

@@ -19,6 +19,8 @@ import FleetJobApprovals from '~/components/fleet/JobApprovals.vue'
 import FleetJobAnalytics from '~/components/fleet/JobAnalytics.vue'
 import { bundleExpiredByLogs, logAttemptEpochs } from '~/lib/fleet-job-logs-link'
 import type { FleetJobLogListDto } from '~/lib/fleet-log-types'
+import { ticketsQueryValue } from '~/lib/fleet-ticket-links'
+import { STATUS_DOT, TICKET_CHIP_CLASS, TICKET_DOT_CLASS } from '~/lib/ticket-chips'
 
 definePageMeta({ layout: 'default' })
 
@@ -66,7 +68,9 @@ const showDispatchRun = computed(() => job.value !== null && job.value.command =
 const dispatchRunHref = computed(() => {
   const current = job.value
   if (!current || !current.resultBranch) return `/${slug}/fleet/dispatch`
-  return { path: `/${slug}/fleet/dispatch`, query: { command: 'RUN', repoId: current.repoId, feature: current.feature, ref: current.resultBranch } }
+  // C9 §4: the RUN keeps the PLAN's tickets.
+  const tickets = ticketsQueryValue(current.tickets)
+  return { path: `/${slug}/fleet/dispatch`, query: { command: 'RUN', repoId: current.repoId, feature: current.feature, ref: current.resultBranch, ...(tickets ? { tickets } : {}) } }
 })
 const showBundle = computed(() => job.value !== null && mayHaveBundle(job.value.state))
 const bundleExpired = computed(() => bundleGone.value || bundleExpiredByLogs(logList.value))
@@ -295,6 +299,24 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
           <dd>
             <a v-if="prUrl" :href="prUrl" target="_blank" rel="noopener noreferrer" class="break-all text-primary underline-offset-4 hover:underline" data-testid="fleet-job-pr">{{ prUrl }}</a>
             <span v-else class="break-all">{{ job.resultPrUrl ?? '-' }}</span>
+          </dd>
+        </div>
+        <div v-if="job.tickets && job.tickets.length > 0" class="sm:col-span-3" data-testid="fleet-job-tickets">
+          <dt class="text-muted-foreground">{{ t('fleet.jobs.detail.tickets') }}</dt>
+          <dd class="mt-1 flex flex-wrap gap-2">
+            <NuxtLink
+              v-for="linked in job.tickets"
+              :key="linked.ref"
+              :to="`/${slug}/tickets/${linked.ref}`"
+              :class="[TICKET_CHIP_CLASS, 'max-w-full hover:bg-muted']"
+              data-testid="fleet-job-ticket"
+              :data-ref="linked.ref"
+            >
+              <span :class="[TICKET_DOT_CLASS, STATUS_DOT[linked.status] ?? 'bg-muted-foreground']" aria-hidden="true" />
+              <span class="font-mono">{{ linked.ref }}</span>
+              <span class="truncate">{{ linked.title }}</span>
+              <span class="text-muted-foreground">{{ t(`tickets.status.${linked.status}`) }}</span>
+            </NuxtLink>
           </dd>
         </div>
       </dl>

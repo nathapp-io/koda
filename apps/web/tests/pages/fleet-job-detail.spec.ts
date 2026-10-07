@@ -126,12 +126,31 @@ describe('job detail', () => {
     expect(detail).toContain('job.value.resultBranch !== null')
     expect(detail).toContain('data-testid="fleet-job-dispatch-run"')
     expect(detail).toContain("t('fleet.jobs.actions.dispatchRun')")
-    expect(detail).toContain("query: { command: 'RUN', repoId: current.repoId, feature: current.feature, ref: current.resultBranch }")
+    expect(detail).toContain("query: { command: 'RUN', repoId: current.repoId, feature: current.feature, ref: current.resultBranch, ...(tickets ? { tickets } : {}) }")
   })
 
   test('S2b: the cost and quality section reloads with every live reload (D396)', () => {
     expect(detail).toContain("import FleetJobAnalytics from '~/components/fleet/JobAnalytics.vue'")
     expect(detail).toContain('<FleetJobAnalytics :slug="slug" :job-id="jobId" :reload-key="analyticsReload" />')
     expect(detail).toMatch(/async function reloadSilently\(\): Promise<void> \{\s*analyticsReload\.value \+= 1/)
+  })
+
+  test('C9: the hand-off carries the PLAN job tickets', () => {
+    expect(detail).toContain("import { ticketsQueryValue } from '~/lib/fleet-ticket-links'")
+    expect(detail).toContain('const tickets = ticketsQueryValue(current.tickets)')
+  })
+
+  test('C9: a Tickets row lists the linked tickets with status, linking to each ticket', () => {
+    expect(detail).toContain("import { STATUS_DOT, TICKET_CHIP_CLASS, TICKET_DOT_CLASS } from '~/lib/ticket-chips'")
+    expect(detail).toMatch(/<div v-if="job\.tickets && job\.tickets\.length > 0"[^>]*data-testid="fleet-job-tickets"/)
+    expect(detail).toContain(':to="`/${slug}/tickets/${linked.ref}`"')
+    expect(detail).toContain('data-testid="fleet-job-ticket"')
+    expect(detail).toContain("t(`tickets.status.${linked.status}`)")
+    expect(detail).toContain("t('fleet.jobs.detail.tickets')")
+  })
+
+  test('C9: cancel and requeue render the job from the response, which now carries tickets (Task 1)', () => {
+    expect(detail).toContain('job.value = await jobsApi.cancel(jobId)')
+    expect(detail).toContain('job.value = result.job')
   })
 })
