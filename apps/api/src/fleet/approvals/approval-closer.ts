@@ -1,4 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { OutboxService } from '@nathapp/nestjs-outbox';
+import { ProjectEventBus } from '../../live/project-event-bus';
 import type { LiveFleetApprovalEvent } from '../../live/live-event';
 import { WebhookDispatcherService } from '../../webhook/webhook-dispatcher.service';
 import { FleetActivityService } from '../activity/fleet-activity.service';
@@ -55,6 +57,8 @@ export class ApprovalCloser {
     private readonly activity: FleetActivityService,
     private readonly webhooks: WebhookDispatcherService,
     private readonly livePublisher: ApprovalLivePublisher,
+    private readonly outbox: OutboxService,
+    private readonly liveBus: ProjectEventBus,
   ) {}
 
   async openBudget(policy: BudgetPolicyRecord, at: { windowStart: Date; spentUsd: string }, now: Date): Promise<ApprovalChange> {
@@ -109,6 +113,7 @@ export class ApprovalCloser {
     if (!born) {
       await this.record(created, actor, 'approval.requested');
       await this.dispatch(created, 'fleet.approval.requested');
+      await this.enqueueRequested(created);
       return { approval: created, live: this.livePublisher.event(created) };
     }
     const closed = await this.repo.resolve(created.id, { ...born, decidedAt: now });
@@ -145,5 +150,22 @@ export class ApprovalCloser {
     if (!approval.projectId) return;
     const slug = await this.repo.findProjectSlug(approval.projectId);
     if (slug) await this.webhooks.dispatch(approval.projectId, event, approvalWebhookPayload(approval, slug));
+  }
+
+  /**
+   * Issue #208: with nobody watching the project live, a fresh ask would sit unseen until it times out.
+   * Enqueue a durable outbox event so an offline notification channel can still reach a decider. Skipped
+   * when a live listener is already connected (the live frame covers them). Runs inside the caller's transaction.
+   */
+  private async enqueueRequested(approval: FleetApprovalRecord): Promise<void> {
+    if (!approval.projectId) return;
+    if (this.liveBus.listenerCount(approval.projectId) > 0) return;
+    const slug = await this.repo.findProjectSlug(approval.projectId);
+    if (!slug) return;
+    await this.outbox.record({
+      type: 'fleet_approval_requested',
+      payload: approvalWebhookPayload(approval, slug),
+      metadata: { projectId: approval.projectId, eventId: approval.id },
+    });
   }
 }
