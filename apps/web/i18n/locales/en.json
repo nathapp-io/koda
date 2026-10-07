@@ -1820,6 +1820,25 @@
         "file_too_large": "file is larger than 256 KiB",
         "total_too_large": "The changes add up to more than 1 MiB.",
         "conflict": "changed upstream; review it and mark it resolved"
+      },
+      "panel": {
+        "mode": { "edit": "Config edit", "regenerate": "Regenerate agent files", "drift": "Drift check" },
+        "outcome": {
+          "ok": "PR opened",
+          "no_changes": "No changes (the files already match)",
+          "drift": "Checked",
+          "conflict": "Conflict: files changed upstream",
+          "invalid": "Rejected by nax validation",
+          "push_failed": "Push failed",
+          "pr_failed": "Branch pushed, but the PR could not be opened (open it by hand)",
+          "timeout": "Timed out"
+        },
+        "files": { "ok": "Committed", "conflict": "Changed upstream since you loaded them", "drift": "Generated files that would change" },
+        "edited": "Edited files",
+        "pending": "No result yet",
+        "noDrift": "The generated agent files are in sync with the context.",
+        "reopen": "Reopen edits",
+        "regenerate": "Open regenerate PR"
       }
     }
   }

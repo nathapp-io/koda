@@ -1820,6 +1820,25 @@
         "file_too_large": "文件超过 256 KiB",
         "total_too_large": "改动总量超过 1 MiB。",
         "conflict": "上游已改动，请检查后标记为已解决"
+      },
+      "panel": {
+        "mode": { "edit": "配置修改", "regenerate": "重新生成 agent 文件", "drift": "漂移检查" },
+        "outcome": {
+          "ok": "已创建 PR",
+          "no_changes": "无改动（文件已一致）",
+          "drift": "已检查",
+          "conflict": "冲突：上游文件已改动",
+          "invalid": "未通过 nax 校验",
+          "push_failed": "推送失败",
+          "pr_failed": "分支已推送，但无法创建 PR（请手动创建）",
+          "timeout": "超时"
+        },
+        "files": { "ok": "已提交", "conflict": "加载后上游已改动", "drift": "将会改变的生成文件" },
+        "edited": "修改的文件",
+        "pending": "尚无结果",
+        "noDrift": "生成的 agent 文件与上下文一致。",
+        "reopen": "重新打开修改",
+        "regenerate": "创建重新生成 PR"
       }
     }
   }

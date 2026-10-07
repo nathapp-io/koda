@@ -78,7 +78,7 @@ describe('job detail', () => {
 
   test('renders the story pipeline (graph/list) under the progress block (S2b j, spec J3)', () => {
     expect(detail).toContain("import FleetJobPipeline from '~/components/fleet/story-graph/FleetJobPipeline.vue'")
-    expect(detail).toMatch(/<FleetJobProgress :job="job" \/>\s*<FleetJobPipeline :job="job" \/>/)
+    expect(detail).toMatch(/<FleetJobProgress v-if="!configJob" :job="job" \/>\s*<FleetJobPipeline v-if="!configJob" :job="job" \/>/)
     expect(detail).not.toContain('FleetJobStories')
   })
 
@@ -131,7 +131,7 @@ describe('job detail', () => {
 
   test('S2b: the cost and quality section reloads with every live reload (D396)', () => {
     expect(detail).toContain("import FleetJobAnalytics from '~/components/fleet/JobAnalytics.vue'")
-    expect(detail).toContain('<FleetJobAnalytics :slug="slug" :job-id="jobId" :reload-key="analyticsReload" />')
+    expect(detail).toContain('<FleetJobAnalytics v-if="!configJob" :slug="slug" :job-id="jobId" :reload-key="analyticsReload" />')
     expect(detail).toMatch(/async function reloadSilently\(\): Promise<void> \{\s*analyticsReload\.value \+= 1/)
   })
 
@@ -152,5 +152,22 @@ describe('job detail', () => {
   test('C9: cancel and requeue render the job from the response, which now carries tickets (Task 1)', () => {
     expect(detail).toContain('job.value = await jobsApi.cancel(jobId)')
     expect(detail).toContain('job.value = result.job')
+  })
+})
+
+describe('config jobs (S3 §6)', () => {
+  test('the page swaps nax-only sections for the config panel', () => {
+    expect(detail).toContain("import ConfigJobPanel from '~/components/fleet/config/ConfigJobPanel.vue'")
+    expect(detail).toContain('const configJob = computed(() => job.value !== null && isConfigJob(job.value))')
+    expect(detail).toContain('<ConfigJobPanel v-if="configJob" :job="job" :slug="slug" :can-work="viewer.canWork" @regenerate="regenOpen = true" />')
+    expect(detail).toContain('<FleetJobProgress v-if="!configJob" :job="job" />')
+    expect(detail).toContain('<FleetJobPipeline v-if="!configJob" :job="job" />')
+    expect(detail).toContain('<FleetJobAnalytics v-if="!configJob" :slug="slug" :job-id="jobId" :reload-key="analyticsReload" />')
+    expect(detail).toMatch(/const showBundle = computed\(\(\) => job\.value !== null && !configJob\.value && mayHaveBundle\(job\.value\.state\)\)/)
+  })
+
+  test('regenerate submits for the job repo and opens the new job', () => {
+    expect(detail).toContain('configApi.submitRegenerate(current.repoId, body)')
+    expect(detail).toContain('await navigateTo(`/${slug}/fleet/jobs/${created.job.id}`)')
   })
 })
