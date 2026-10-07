@@ -34,6 +34,18 @@ describe('trackedRun (D484)', () => {
     const grandchild = Number(r.stdout.trim());
     await waitFor(() => !isProcessAlive(grandchild), { timeoutMs: 3_000 });
   });
+  test('a stop whose SIGTERM came from outside ends the call as stopped even when it beat the watcher poll', async () => {
+    let stop = false;
+    let pgid: number | null = null;
+    const { options } = opts({ isStopped: () => stop, onProcess: (proc) => { pgid = proc?.pgid ?? null; } });
+    // The supervisor's CANCEL kills the group between two watcher polls: the child dies of the signal, not of the watcher.
+    setTimeout(() => {
+      stop = true;
+      if (pgid !== null) process.kill(-pgid, 'SIGTERM');
+    }, 10);
+    const r = await trackedRun(['sleep', '5'], options);
+    expect(r).toMatchObject({ stopped: true, timedOut: false });
+  });
   test('the deadline ends a call as timedOut', async () => {
     const { options } = opts({ deadlineMs: Date.now() + 300 });
     const r = await trackedRun(['sleep', '30'], options);

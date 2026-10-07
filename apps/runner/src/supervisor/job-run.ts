@@ -299,7 +299,8 @@ export class JobRun {
       await this.endBeforeSpawn('FAILED', fetched.reason);
       return;
     }
-    const stopped = (): boolean => this.cancelRequested() || this.halted;
+    // Halted first: after a daemon crash the journal is closed and `cancelRequested` would throw (D40, D67).
+    const stopped = (): boolean => this.halted || this.cancelRequested();
     const prepared = await this.deps.executor.prepareConfigJob(this.mustRow(), { isCancelled: stopped });
     if (this.halted) return;
     if (!prepared.ok) {

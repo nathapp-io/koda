@@ -54,6 +54,9 @@ export async function trackedRun(argv: readonly string[], options: TrackedRunOpt
   })();
   try {
     const [stdout, stderr, code] = await Promise.all([readCapped(proc.stdout, OUTPUT_CAP_BYTES), readCapped(proc.stderr, OUTPUT_CAP_BYTES), proc.exited]);
+    // A stop whose SIGTERM came from outside this watcher (the supervisor's CANCEL) can end the call between two
+    // polls: the child died of the signal while a stop was requested, so the exit code is not a verdict (D484).
+    if (!stopped && options.isStopped()) stopped = true;
     return { code, stdout: stdout.text, stderr: stderr.text, timedOut, stopped };
   } finally {
     done = true;   // the watcher never signals after this: the pgid may be reused
