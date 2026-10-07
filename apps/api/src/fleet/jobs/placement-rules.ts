@@ -1,4 +1,4 @@
-import type { RunnerCapabilities, BashMode } from '../common/protocol';
+import type { ProfileNeeds, RunnerCapabilities, BashMode } from '../common/protocol';
 import { isRunnerOnline } from '../common/runner-online';
 import type { FleetJobRecord, FleetRepoRef } from './domain/fleet-job.domain';
 
@@ -47,23 +47,29 @@ export const EMPTY_LOAD: RunnerLoad = Object.freeze({ active: 0, repoIds: new Se
 
 const own = (obj: object, key: string): boolean => Object.prototype.hasOwnProperty.call(obj, key);
 
+/** S3 §4.4: the placement rules for one profile the runner reports (also used by the credential board). */
+export function profileMisfit(needs: ProfileNeeds, caps: RunnerCapabilities): MisfitReason | null {
+  if (!caps.nax.protocols.includes(needs.protocol)) return 'protocol';
+  for (const provider of needs.providers) {
+    const credential = caps.credentials.find((c) => c.providerId === provider);
+    if (!credential) return 'provider_missing';
+    // nax's own verdict (slice 3 design §1.1): available deliberately ignores access-token expiry.
+    if (!credential.available) return 'provider_unavailable';
+  }
+  if (needs.sandbox && !caps.sandbox.available) return 'sandbox';
+  // #207: nax could not start this profile's interaction plugin in the runner's environment.
+  if (needs.interaction?.ok === false) return 'interaction';
+  return null;
+}
+
 function capabilityMisfit(job: PlacementJob, caps: RunnerCapabilities): MisfitReason | null {
   // Plan D270: a gated/escalate job on a runner without the relay would have every ask denied (A7), so never place it.
   if (job.bashMode !== 'raw' && caps.approvals?.relay !== true) return 'approvals_relay';
   for (const name of job.profiles) {
     // A name the runner does not report is repo-provided and unknowable before clone (spec §2.1).
     if (!own(caps.profiles, name)) continue;
-    const needs = caps.profiles[name];
-    if (!caps.nax.protocols.includes(needs.protocol)) return 'protocol';
-    for (const provider of needs.providers) {
-      const credential = caps.credentials.find((c) => c.providerId === provider);
-      if (!credential) return 'provider_missing';
-      // nax's own verdict (slice 3 design §1.1): available deliberately ignores access-token expiry.
-      if (!credential.available) return 'provider_unavailable';
-    }
-    if (needs.sandbox && !caps.sandbox.available) return 'sandbox';
-    // #207: nax could not start this profile's interaction plugin in the runner's environment.
-    if (needs.interaction?.ok === false) return 'interaction';
+    const misfit = profileMisfit(caps.profiles[name], caps);
+    if (misfit) return misfit;
   }
   // #207: a job with no profiles runs on the machine's base config. A job naming profiles is judged on them only:
   // each reported profile's result already includes the base config it overlays.

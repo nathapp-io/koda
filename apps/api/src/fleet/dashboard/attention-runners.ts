@@ -1,5 +1,6 @@
 import type { InteractionCheck, RunnerCapabilities } from '../common/protocol';
 import { isRunnerOnline } from '../common/runner-online';
+import { isExpiring } from './credential-board';
 import { AttentionItem, AttentionThresholds, DashboardRunnerRow, RunnerCondition, Severity } from './dashboard.types';
 import { compareCore, CoreVersion, formatCore, parseCoreVersion } from './nax-version';
 
@@ -14,9 +15,10 @@ export function latestOnlineCore(runners: readonly DashboardRunnerRow[], now: Da
 
 /**
  * Spec §2.4, D405: providers named by the runner's own profiles that have no credential (missing) or
- * an unavailable one; then api-key credentials that expired. OAuth expiry is ignored (placement does).
+ * an unavailable one; then api-key credentials that expired; then (S3 §4.4, D473) OAuth credentials expiring within
+ * the window. OAuth expiry itself is still ignored (nax refreshes; placement follows `available`).
  */
-function credentialConditions(caps: RunnerCapabilities): RunnerCondition[] {
+function credentialConditions(caps: RunnerCapabilities, now: Date, warnDays: number): RunnerCondition[] {
   const needed = [...new Set(Object.values(caps.profiles).flatMap((p) => p.providers))].sort();
   const fromProfiles = needed.flatMap((providerId): RunnerCondition[] => {
     const credential = caps.credentials.find((c) => c.providerId === providerId);
@@ -27,7 +29,11 @@ function credentialConditions(caps: RunnerCapabilities): RunnerCondition[] {
   const expired = caps.credentials
     .filter((c) => c.stored?.kind === 'api-key' && c.stored.expired && !reported.has(c.providerId))
     .map((c): RunnerCondition => ({ type: 'credential', providerId: c.providerId, why: 'expired' }));
-  return [...fromProfiles, ...expired];
+  const seen = new Set([...reported, ...expired.map((c) => c.providerId)]);
+  const expiring = caps.credentials
+    .filter((c) => c.available && !seen.has(c.providerId) && isExpiring(c, now, warnDays))
+    .map((c): RunnerCondition => ({ type: 'credential', providerId: c.providerId, why: 'expiring' }));
+  return [...fromProfiles, ...expired, ...expiring];
 }
 
 /** #207 spec §4.3: base config first, then profiles by code unit; a runner with many broken profiles almost always has one broken base. */
@@ -74,13 +80,14 @@ export function runnerUnhealthyItems(
     if (!r.enabled && (online || jobsHeld === 0)) return [];
     const offline: RunnerCondition[] = online ? [] : [{ type: 'offline', jobsHeld }];
     const caps = r.enabled ? r.capabilities : null;
-    const credentials = caps ? credentialConditions(caps) : [];
+    const credentials = caps ? credentialConditions(caps, now, t.credentialExpiryWarnDays) : [];
     const interaction = caps ? interactionConditions(caps) : [];
     const stale = caps ? staleCondition(caps, latest) : null;
     const conditions = [...offline, ...credentials, ...interaction, ...(stale ? [stale] : [])];
     if (conditions.length === 0) return [];
     // A runner-fixable condition is an error once it keeps a queued job unplaced (spec §2.4; #207 adds interaction).
-    const fixable = credentials.length + interaction.length > 0;
+    // `expiring` blocks no placement, so it never makes the item an error (S3 §4.4).
+    const fixable = credentials.filter((c) => c.why !== 'expiring').length + interaction.length > 0;
     const error = (!online && jobsHeld > 0) || (fixable && fixableBlocked.has(r.id));
     const severity: Severity = error ? 'error' : 'warning';
     return [{

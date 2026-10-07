@@ -90,6 +90,7 @@ export const uiStubs: Record<string, unknown> = Object.fromEntries(
     ['Textarea', 'textarea'],
     ['LoadingState', 'loading-state'], ['EmptyState', 'empty-state'],
     ['ErrorState', 'error-state'],
+    ['Tabs', 'tabs'], ['TabsList', 'tabs-list'], ['TabsTrigger', 'tabs-trigger'], ['TabsContent', 'tabs-content'],
     ['FormItem', 'form-item'], ['FormLabel', 'form-label'], ['FormControl', 'form-control'],
     ['FormMessage', 'form-message'],
     ['FleetAge', 'fleet-age'], ['FleetRunnerCapabilityChips', 'capability-chips'],

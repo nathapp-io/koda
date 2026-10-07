@@ -11,7 +11,7 @@ export const UNPLACEABLE_VERDICTS = [
   'never', 'budget_paused', 'runners_paused', 'waiting_capacity', 'no_fit', 'no_runners', 'fits_not_placed',
 ] as const
 export const CONDITION_TYPES = ['offline', 'credential', 'interaction', 'stale_nax', 'configuration'] as const
-export const CREDENTIAL_WHY = ['missing', 'unavailable', 'expired'] as const
+export const CREDENTIAL_WHY = ['missing', 'unavailable', 'expired', 'expiring'] as const
 export const TILE_IDS = ['runners', 'queued', 'running', 'attention'] as const
 
 export type Severity = (typeof SEVERITIES)[number]

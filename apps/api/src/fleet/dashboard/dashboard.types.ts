@@ -13,6 +13,8 @@ export interface AttentionThresholds {
   jobSilentErrorSec: number;
   jobStartSec: number;
   jobQueuedWarnSec: number;
+  /** S3 §4.4 (D473): OAuth expiry window (days) for the `expiring` credential condition. */
+  credentialExpiryWarnDays: number;
 }
 
 /** Spec §1.2 caps and windows. */
@@ -101,7 +103,7 @@ export const UNPLACEABLE_VERDICTS = ['never', 'budget_paused', 'runners_paused',
 export type UnplaceableVerdict = (typeof UNPLACEABLE_VERDICTS)[number];
 export const CONDITION_TYPES = ['offline', 'credential', 'interaction', 'stale_nax', 'configuration'] as const;
 export type ConditionType = (typeof CONDITION_TYPES)[number];
-export const CREDENTIAL_WHY = ['missing', 'unavailable', 'expired'] as const;
+export const CREDENTIAL_WHY = ['missing', 'unavailable', 'expired', 'expiring'] as const;
 export type CredentialWhy = (typeof CREDENTIAL_WHY)[number];
 /** Every MisfitReason, for the DTO enum (same list as PlacementMisfitDto). */
 export const MISFIT_REASONS: readonly MisfitReason[] = [

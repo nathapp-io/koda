@@ -76,6 +76,7 @@ const envSchema = Joi.object({
   FLEET_JOB_START_SEC: Joi.number().integer().min(30).max(86_400).optional(),
   FLEET_JOB_QUEUED_WARN_SEC: Joi.number().integer().min(10).max(86_400).optional(),
   FLEET_PR_REFRESH_MS: Joi.number().integer().min(60_000).max(86_400_000).optional(),
+  FLEET_CREDENTIAL_EXPIRY_WARN_DAYS: Joi.number().integer().min(1).max(90).optional(),
 }).unknown(true);
 
 export function validate(config: Record<string, unknown>): Record<string, unknown> {

@@ -117,6 +117,9 @@ Useful scripts:
 - Ages are measured on the server clock (`serverNow`: `generatedAt` + client time since arrival), never by comparing
   the browser clock with server time.
 - The project scope never shows credential chips, versions or runner links (B5); the API already nulls them.
+- `/admin/fleet/credentials` (S3) renders `components/fleet/credentials/` from `useFleetCredentialBoard` (load on
+  mount + Refresh, no polling). Board logic is pure in `lib/fleet-credential-board.ts`; a new cell state needs its key
+  under `fleet.credentials.state` and its pin in `tests/i18n/fleet-locale-parity.spec.ts`.
 
 ## Fleet story graph (S2b (j))
 

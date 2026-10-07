@@ -1,6 +1,6 @@
-import type { RunnerCapabilities } from '../common/protocol';
+import type { ProfileNeeds, RunnerCapabilities } from '../common/protocol';
 import {
-  EMPTY_LOAD, evaluateRunners, firstMisfit, orderCandidates, PERMANENT_MISFITS, PlacementJob, PlacementRunner, QUEUED_SCAN_LIMIT,
+  EMPTY_LOAD, evaluateRunners, firstMisfit, orderCandidates, PERMANENT_MISFITS, PlacementJob, PlacementRunner, profileMisfit, QUEUED_SCAN_LIMIT,
   toLoads, toPlacementJob,
 } from './placement-rules';
 
@@ -190,5 +190,21 @@ describe('#207: interaction plugin checks', () => {
   it('reports sandbox before interaction on the same profile (placement order)', () => {
     const r = runner({ capabilities: caps({ profiles: brokenFast, sandbox: { available: false, probedAt: 'x' } }) });
     expect(misfit(job(), r)).toBe('sandbox');
+  });
+});
+
+describe('profileMisfit (S3 §4.4: one profile, the placement rules)', () => {
+  const needs = (over: Partial<ProfileNeeds> = {}): ProfileNeeds => ({ protocol: 'native', providers: ['deepseek'], sandbox: true, ...over });
+
+  it('fits when protocol, providers, sandbox and interaction are fine', () => {
+    expect(profileMisfit(needs(), caps())).toBeNull();
+  });
+
+  it('reports, in placement order, protocol, provider_missing, provider_unavailable, sandbox, interaction', () => {
+    expect(profileMisfit(needs({ protocol: 'acp' }), caps())).toBe('protocol');
+    expect(profileMisfit(needs({ providers: ['openai'] }), caps())).toBe('provider_missing');
+    expect(profileMisfit(needs(), caps({ credentials: [cred({ available: false })] }))).toBe('provider_unavailable');
+    expect(profileMisfit(needs(), caps({ sandbox: { available: false, probedAt: NOW.toISOString() } }))).toBe('sandbox');
+    expect(profileMisfit(needs({ interaction: TG_FAILED }), caps())).toBe('interaction');
   });
 });

@@ -48,7 +48,15 @@ const tiles = computed(() => (props.snapshot ? dashboardTiles(props.snapshot.cou
       </section>
 
       <section :id="SECTION_IDS.runners" class="scroll-mt-20 space-y-3" data-testid="fleet-dashboard-section-runners">
-        <h2 class="text-sm font-semibold">{{ t('fleet.dashboard.sections.runners') }}</h2>
+        <div class="flex items-center justify-between">
+          <h2 class="text-sm font-semibold">{{ t('fleet.dashboard.sections.runners') }}</h2>
+          <NuxtLink
+            v-if="scope === 'global'"
+            to="/admin/fleet/credentials"
+            class="text-sm text-primary underline-offset-4 hover:underline"
+            data-testid="fleet-dashboard-credentials-link"
+          >{{ t('fleet.dashboard.runners.board') }}</NuxtLink>
+        </div>
         <FleetDashboardRunnerHealthList :runners="snapshot.runners" :now="now" :scope="scope" />
       </section>
 
