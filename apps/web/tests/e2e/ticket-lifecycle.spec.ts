@@ -62,7 +62,7 @@ test.describe('Ticket Lifecycle', () => {
     await board.getByRole('button', { name: 'New Ticket' }).click();
 
     const dialog = page.getByRole('dialog');
-    await dialog.getByLabel('Title').fill(title);
+    await dialog.getByPlaceholder('Short description of the issue').fill(title);
     await dialog.getByTestId('create-ticket-type').selectOption('BUG');
     await dialog.getByTestId('create-ticket-priority').selectOption('HIGH');
     await dialog.getByRole('button', { name: 'Create Ticket' }).click();
