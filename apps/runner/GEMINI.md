@@ -48,6 +48,7 @@ src/journal/         bun:sqlite, WAL, synchronous FULL; every row is written BEF
 src/sync/            ServerClient, batching (one entry per jobId, 1 MiB budget), SyncLoop (abort only an idle poll, backoff, 426/401 stop)
 src/supervisor/      RepoMutex, JobEvents (legal transitions only), JobRun (one job), Supervisor, CommandHandler
 src/executor/        JobExecutor seam + HostExecutor (git workspace, branch rules, detached nax, PLAN commit)
+src/executor/config-job/  S3 config jobs: payload re-validation, staleness, apply, nax generate / lint / config, commit, push, PR
 src/credentials/     TokenCache, CredentialBroker (one unix socket per job epoch in socketDir), git-cred helper, gh/glab shim
 src/watcher/         status.json poll and run ids; RUN only: prd.json story list (S1b 1b), capped 100 stories / 8 KiB
 src/logs/            LogShipper (S2a): raw byte windows of the run log, stdout and stderr PUT at exact offsets, 2 in flight, drained with final=1 before UPLOADING
@@ -67,7 +68,8 @@ src/paths/           safe path segments
 - The sync request carries one entry per jobId (the server 400s a duplicate) and stays under the body budget.
 - Never log or persist the runner API key outside `identity.json`; the `Logger` redacts secret-looking keys.
 - No `console.log` outside `src/main.ts` and `src/logger.ts`.
-- Emit only the S1 spec 5.4 runner transitions (`JobEvents.transition` refuses the rest). A spawned job always goes RUNNING -> UPLOADING -> terminal; a job that never spawned goes ASSIGNED -> FAILED or CANCELLED.
+- Emit only the S1 spec 5.4 runner transitions (`JobEvents.transition` refuses the rest). A spawned job always goes RUNNING -> UPLOADING -> terminal; a job that never spawned goes ASSIGNED -> FAILED or CANCELLED. A config job (S3: `CONFIG_EDIT`, `CONFIG_DRIFT`) spawns no nax run: it fetches its edit set and checks out while ASSIGNED, then RUNNING -> UPLOADING (no bundle) -> COMPLETED | FAILED with `reason = outcome`, or RUNNING -> CANCELLED.
+- Config jobs (`src/executor/config-job/`) re-check every path against the shared `.nax/` allowlist (never a `.env` profile) and never follow a symlink; each nax / gh / glab call is detached and its pid and pgid are journaled while it runs. READOPT rejects a config job that was RUNNING (the server marks it CRASHED).
 - The nax child is detached (own process group) and its output goes to files, so it survives a daemon restart. `stop()` never signals a child. Signal only `-pgid`, and only after `matchesProcess` confirms the pid is still this job (argv carries `koda-job-<jobId>`).
 - `git clean` has no `-x`: ignored nax files (`checkpoint.jsonl`) must survive between runs; `plan/` is ignored too, so prepare deletes stale `plan/*.jsonl` itself.
 - git runs with `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`, `GIT_ASKPASS=true`; a call that may authenticate passes the job helper (`credentialHelper`), every other call keeps an empty helper list; the clone's own helper list is `''` then the job helper. The daemon refuses git older than 2.30.
