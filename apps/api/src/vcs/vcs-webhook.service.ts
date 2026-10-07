@@ -6,7 +6,7 @@ import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 import { VcsIssue } from './types';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
-import { IVcsRepository, TicketLinkData, VCS_REPOSITORY } from './domain/vcs.repository';
+import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 
 /**
@@ -302,8 +302,8 @@ export class VcsWebhookService implements OnModuleDestroy {
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
 
-    // Find TicketLink by prNumber
-    const ticketLink = await this.vcsRepo.findTicketLinkByPrNumber(connection.project.id, prNumber);
+    // Find this repo's TicketLink for the PR
+    const ticketLink = await this.vcsRepo.findTicketLinkForConnectionPr(connection.project.id, connection, prNumber);
 
     if (!ticketLink) {
       // AC7: If no TicketLink matches prNumber, silently ignore
@@ -339,8 +339,8 @@ export class VcsWebhookService implements OnModuleDestroy {
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
 
-    // Find TicketLink by prNumber
-    const ticketLink = await this.vcsRepo.findTicketLinkByPrNumber(connection.project.id, prNumber);
+    // Find this repo's TicketLink for the PR
+    const ticketLink = await this.vcsRepo.findTicketLinkForConnectionPr(connection.project.id, connection, prNumber);
 
     if (!ticketLink) {
       // AC7: If no TicketLink matches prNumber, silently ignore
@@ -356,24 +356,20 @@ export class VcsWebhookService implements OnModuleDestroy {
       return VcsWebhookService.ALREADY_MERGED;
     }
 
-    // Trigger auto-transition logic (same as VcsPrSyncService.handleMergedPrAutoTransition)
-    await this.prSyncService.handleMergedPrAutoTransition(
-      ticketLink as TicketLinkData,
-      {
-        number: pr.number,
-        state: pr.state,
-        draft: pr.draft,
-        merged: pr.merged,
-        mergedAt: pr.merged_at ? new Date(pr.merged_at) : null,
-        mergedBy: pr.merged_by?.login ?? null,
-        mergeSha: pr.merge_commit_sha ?? null,
-        url: pr.html_url,
-        title: pr.title,
-      },
-    );
-
-    // Update prState to merged
-    await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'merged');
+    const outcome = await this.prSyncService.applyMergedPr(ticketLink, {
+      number: pr.number,
+      state: pr.state,
+      draft: pr.draft,
+      merged: pr.merged,
+      mergedAt: pr.merged_at ? new Date(pr.merged_at) : null,
+      mergedBy: pr.merged_by?.login ?? null,
+      mergeSha: pr.merge_commit_sha ?? null,
+      url: pr.html_url,
+      title: pr.title,
+    });
+    if (outcome !== 'updated') {
+      return VcsWebhookService.ignoredWrite(outcome);
+    }
 
     this.logger.debug(`Updated TicketLink ${ticketLink.id} prState to 'merged' for merged PR #${prNumber}`);
 
@@ -393,8 +389,8 @@ export class VcsWebhookService implements OnModuleDestroy {
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
 
-    // Find TicketLink by prNumber
-    const ticketLink = await this.vcsRepo.findTicketLinkByPrNumber(connection.project.id, prNumber);
+    // Find this repo's TicketLink for the PR
+    const ticketLink = await this.vcsRepo.findTicketLinkForConnectionPr(connection.project.id, connection, prNumber);
 
     if (!ticketLink) {
       // AC7: If no TicketLink matches prNumber, silently ignore
@@ -428,8 +424,8 @@ export class VcsWebhookService implements OnModuleDestroy {
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
 
-    // Find TicketLink by prNumber
-    const ticketLink = await this.vcsRepo.findTicketLinkByPrNumber(connection.project.id, prNumber);
+    // Find this repo's TicketLink for the PR
+    const ticketLink = await this.vcsRepo.findTicketLinkForConnectionPr(connection.project.id, connection, prNumber);
 
     if (!ticketLink) {
       // AC7: If no TicketLink matches prNumber, silently ignore
@@ -462,7 +458,7 @@ export class VcsWebhookService implements OnModuleDestroy {
     pr: NonNullable<GitHubWebhookPayload['pull_request']>,
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
-    const ticketLink = await this.vcsRepo.findTicketLinkByPrNumber(connection.project.id, prNumber);
+    const ticketLink = await this.vcsRepo.findTicketLinkForConnectionPr(connection.project.id, connection, prNumber);
 
     if (!ticketLink) {
       return {
@@ -491,7 +487,7 @@ export class VcsWebhookService implements OnModuleDestroy {
     pr: NonNullable<GitHubWebhookPayload['pull_request']>,
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
-    const ticketLink = await this.vcsRepo.findTicketLinkByPrNumber(connection.project.id, prNumber);
+    const ticketLink = await this.vcsRepo.findTicketLinkForConnectionPr(connection.project.id, connection, prNumber);
 
     if (!ticketLink) {
       return {
@@ -522,8 +518,8 @@ export class VcsWebhookService implements OnModuleDestroy {
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
 
-    // Find TicketLink by prNumber to get the associated ticket
-    const ticketLink = await this.vcsRepo.findTicketLinkByPrNumber(connection.project.id, prNumber);
+    // Find this repo's TicketLink for the PR to get the associated ticket
+    const ticketLink = await this.vcsRepo.findTicketLinkForConnectionPr(connection.project.id, connection, prNumber);
 
     if (!ticketLink) {
       return {

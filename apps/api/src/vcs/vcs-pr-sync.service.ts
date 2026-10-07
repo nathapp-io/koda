@@ -11,8 +11,9 @@ import { TicketStatus, CommentType } from '../common/enums';
 import { validateTransition } from '../tickets/state-machine/ticket-transitions';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 import type { VcsTicketDomain } from './domain/vcs.domain';
-import { IVcsRepository, TicketLinkData, VCS_REPOSITORY } from './domain/vcs.repository';
+import { IVcsRepository, TicketLinkData, PrStateWriteResult, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
+import { mapPrState } from './pr-state';
 
 export interface SyncPrStatusResult {
   updated: number;
@@ -43,7 +44,7 @@ export class VcsPrSyncService {
    *   and a VCS_PR_MERGED activity is logged
    * - When prState changes to 'merged' and ticket.status !== 'IN_PROGRESS',
    *   only prState is updated without transition
-   * - Failures in auto-transition do not prevent prState from being persisted
+   * - prState is written first; the transition runs only for the writer that recorded the merge (D457)
    *
    * Per-PR error handling:
    * - General API error: skip the PR, continue with remaining PRs
@@ -66,7 +67,7 @@ export class VcsPrSyncService {
     const provider = providerForConnection(connection, decryptedToken, this.vcsConfig);
 
     // Query TicketLink entries with active PRs and their linked tickets
-    const ticketLinks = (await this.vcsRepo.findActiveTicketLinksWithPrs(project.id)) as TicketLinkData[];
+    const ticketLinks = await this.vcsRepo.findActiveTicketLinksWithPrs(project.id, connection);
 
     let updated = 0;
     let skipped = 0;
@@ -82,7 +83,7 @@ export class VcsPrSyncService {
         const prStatus = await provider.getPullRequestStatus(prNumber);
 
         // Map VcsPrStatus to prState
-        const newPrState = this.mapPrState(prStatus);
+        const newPrState = mapPrState(prStatus);
 
         // Update if state differs
         if (newPrState !== link.prState) {
@@ -90,13 +91,10 @@ export class VcsPrSyncService {
           // never regress them (e.g. a delayed 'opened' event after a merge).
           const terminal = link.prState === 'merged' || link.prState === 'closed';
           if (!terminal) {
-            // Handle auto-transition when PR is merged
-            if (newPrState === 'merged') {
-              await this.handleMergedPrAutoTransition(link, prStatus);
-            }
-
-            // Always update prState regardless of transition outcome
-            if ((await this.vcsRepo.updateTicketLinkWithPrState(link.id, newPrState)) === 'updated') {
+            const outcome = newPrState === 'merged'
+              ? await this.applyMergedPr(link, prStatus)
+              : await this.vcsRepo.updateTicketLinkWithPrState(link.id, newPrState);
+            if (outcome === 'updated') {
               updated++;
             }
 
@@ -139,6 +137,18 @@ export class VcsPrSyncService {
     }
 
     return { updated, skipped };
+  }
+
+  /**
+   * Fleet C9 §3.5 (D457): the one merge step for the VCS poll, the webhook and the fleet
+   * PR-state refresher. The conditional write runs first; only the writer that moved the link
+   * to `merged` transitions the ticket, so two paths that see one merge yield one VERIFY_FIX
+   * and one FIX_REPORT comment. Transition failures are logged inside and never undo the write.
+   */
+  async applyMergedPr(link: TicketLinkData, prStatus: VcsPrStatus): Promise<PrStateWriteResult> {
+    const outcome = await this.vcsRepo.updateTicketLinkWithPrState(link.id, 'merged');
+    if (outcome === 'updated') await this.handleMergedPrAutoTransition(link, prStatus);
+    return outcome;
   }
 
   /**
@@ -189,18 +199,5 @@ export class VcsPrSyncService {
         );
       }
     }
-  }
-
-  /**
-   * Maps VcsPrStatus to a prState string
-   */
-  private mapPrState(prStatus: VcsPrStatus): string {
-    if (prStatus.merged) {
-      return 'merged';
-    }
-    if (prStatus.state === 'open') {
-      return prStatus.draft ? 'draft' : 'open';
-    }
-    return prStatus.state === 'closed' ? 'closed' : prStatus.state;
   }
 }

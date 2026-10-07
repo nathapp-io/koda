@@ -15,6 +15,8 @@ describe('TicketLinksService', () => {
     prNumber: null,
     prUpdatedAt: null,
     linkType: 'url',
+    source: 'vcs',
+    jobId: null,
     createdAt: new Date(),
   };
 

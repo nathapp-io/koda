@@ -247,7 +247,7 @@ describeIntegration('VCS merged-PR auto-transition (H6)', () => {
       getPullRequestStatus: jest.fn().mockResolvedValue(openStatus),
     } as unknown as IVcsProvider);
 
-    const activeLinks = await repo.findActiveTicketLinksWithPrs(projectId);
+    const activeLinks = await repo.findActiveTicketLinksWithPrs(projectId, connection);
     expect(activeLinks).toHaveLength(0);
 
     const result = await syncService.syncPrStatus(

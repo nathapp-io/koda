@@ -62,13 +62,13 @@ function payload(action: string, pr: Partial<NonNullable<GitHubWebhookPayload['p
 }
 
 describe('VcsWebhookService — merged is terminal (M12)', () => {
-  let repo: { findTicketLinkByPrNumber: jest.Mock; updateTicketLinkWithPrState: jest.Mock };
-  let prSync: { handleMergedPrAutoTransition: jest.Mock };
+  let repo: { findTicketLinkForConnectionPr: jest.Mock; updateTicketLinkWithPrState: jest.Mock };
+  let prSync: { applyMergedPr: jest.Mock };
   let service: VcsWebhookService;
 
   beforeEach(() => {
-    repo = { findTicketLinkByPrNumber: jest.fn(), updateTicketLinkWithPrState: jest.fn() };
-    prSync = { handleMergedPrAutoTransition: jest.fn().mockResolvedValue(undefined) };
+    repo = { findTicketLinkForConnectionPr: jest.fn(), updateTicketLinkWithPrState: jest.fn() };
+    prSync = { applyMergedPr: jest.fn().mockResolvedValue('updated') };
     service = new VcsWebhookService(
       repo as unknown as IVcsRepository,
       {} as VcsSyncService,
@@ -86,7 +86,7 @@ describe('VcsWebhookService — merged is terminal (M12)', () => {
     ['reopened', {}, 'open'],
     ['converted_to_draft', { draft: true }, 'draft'],
   ])('a late %s delivery on a merged link is ignored', async (action, pr, attempted) => {
-    repo.findTicketLinkByPrNumber.mockResolvedValue(link('merged'));
+    repo.findTicketLinkForConnectionPr.mockResolvedValue(link('merged'));
     repo.updateTicketLinkWithPrState.mockResolvedValue('already-merged');
 
     const result = await service.handleWebhook(connection, 'pull_request', payload(action, pr));
@@ -96,7 +96,7 @@ describe('VcsWebhookService — merged is terminal (M12)', () => {
   });
 
   it('reports a vanished link as missing, not as already merged', async () => {
-    repo.findTicketLinkByPrNumber.mockResolvedValue(link('open'));
+    repo.findTicketLinkForConnectionPr.mockResolvedValue(link('open'));
     repo.updateTicketLinkWithPrState.mockResolvedValue('not-found');
 
     const result = await service.handleWebhook(connection, 'pull_request', payload('closed', { state: 'closed' }));
@@ -105,7 +105,7 @@ describe('VcsWebhookService — merged is terminal (M12)', () => {
   });
 
   it('a duplicate merged delivery neither re-runs the transition nor rewrites the link', async () => {
-    repo.findTicketLinkByPrNumber.mockResolvedValue(link('merged'));
+    repo.findTicketLinkForConnectionPr.mockResolvedValue(link('merged'));
 
     const result = await service.handleWebhook(
       connection,
@@ -113,14 +113,13 @@ describe('VcsWebhookService — merged is terminal (M12)', () => {
       payload('closed', { state: 'closed', merged: true, merged_at: '2026-09-28T00:00:00Z' }),
     );
 
-    expect(prSync.handleMergedPrAutoTransition).not.toHaveBeenCalled();
+    expect(prSync.applyMergedPr).not.toHaveBeenCalled();
     expect(repo.updateTicketLinkWithPrState).not.toHaveBeenCalled();
     expect(result).toEqual({ success: true, ignored: true, reason: 'PR is already merged' });
   });
 
   it('an open link still moves to merged', async () => {
-    repo.findTicketLinkByPrNumber.mockResolvedValue(link('open'));
-    repo.updateTicketLinkWithPrState.mockResolvedValue('updated');
+    repo.findTicketLinkForConnectionPr.mockResolvedValue(link('open'));
 
     const result = await service.handleWebhook(
       connection,
@@ -128,8 +127,20 @@ describe('VcsWebhookService — merged is terminal (M12)', () => {
       payload('closed', { state: 'closed', merged: true, merged_at: '2026-09-28T00:00:00Z' }),
     );
 
-    expect(prSync.handleMergedPrAutoTransition).toHaveBeenCalledTimes(1);
-    expect(repo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-1', 'merged');
+    expect(prSync.applyMergedPr).toHaveBeenCalledWith(link('open'), expect.objectContaining({ merged: true, url: 'https://github.com/acme/widgets/pull/7' }));
     expect(result).toEqual({ success: true, ignored: false });
+  });
+
+  it('reports a merge another path already recorded as already merged (D457)', async () => {
+    repo.findTicketLinkForConnectionPr.mockResolvedValue(link('open'));
+    prSync.applyMergedPr.mockResolvedValueOnce('already-merged');
+
+    const result = await service.handleWebhook(
+      connection,
+      'pull_request',
+      payload('closed', { state: 'closed', merged: true, merged_at: '2026-09-28T00:00:00Z' }),
+    );
+
+    expect(result).toEqual({ success: true, ignored: true, reason: 'PR is already merged' });
   });
 });

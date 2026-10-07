@@ -125,4 +125,16 @@ describe('fleet config', () => {
   ])('refuses boot on a bad dashboard threshold %s', (key, value) => {
     expect(() => validate({ ...BASE, [key]: value })).toThrow();
   });
+
+  it('defaults the fleet PR refresh to 10 minutes and reads an override (C9 D456)', () => {
+    delete process.env.FLEET_PR_REFRESH_MS;
+    expect(fleetConfig().prRefreshMs).toBe(600_000);
+    process.env.FLEET_PR_REFRESH_MS = '120000';
+    expect(fleetConfig().prRefreshMs).toBe(120_000);
+    delete process.env.FLEET_PR_REFRESH_MS;
+  });
+
+  it.each(['59999', '1.5', 'abc'])('refuses boot on FLEET_PR_REFRESH_MS=%s', (value) => {
+    expect(() => validate({ ...BASE, FLEET_PR_REFRESH_MS: value })).toThrow();
+  });
 });

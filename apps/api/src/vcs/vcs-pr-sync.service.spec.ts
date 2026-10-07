@@ -81,7 +81,7 @@ function makePrStatus(overrides?: Partial<VcsPrStatus>): VcsPrStatus {
 function createMockRepo(): jest.Mocked<IVcsRepository> {
   return {
     findActiveTicketLinksWithPrs: jest.fn().mockResolvedValue([]),
-    findTicketLinkByPrNumber: jest.fn().mockResolvedValue(null),
+    findTicketLinkForConnectionPr: jest.fn().mockResolvedValue(null),
     updateTicketLinkWithPrState: jest.fn().mockResolvedValue('updated'),
     applyMergedPrTransition: jest.fn().mockResolvedValue(undefined),
     findTicketWithProject: jest.fn().mockResolvedValue(null),
@@ -318,6 +318,34 @@ describe('VcsPrSyncService', () => {
       mockRepo.applyMergedPrTransition.mockRejectedValue(new Error('DB error'));
 
       await expect(service.handleMergedPrAutoTransition(link, prStatus)).resolves.not.toThrow();
+    });
+  });
+
+  describe('applyMergedPr (C9 §3.5, D457)', () => {
+    const merged: VcsPrStatus = {
+      number: 7, state: 'closed', draft: false, merged: true, mergedAt: new Date('2026-10-06T00:00:00Z'),
+      mergedBy: 'dev', mergeSha: 'abc', url: 'https://github.com/owner/repo/pull/7', title: 'PR',
+    };
+
+    it('writes merged first, then transitions an IN_PROGRESS ticket', async () => {
+      const link = makeTicketLink();
+      await expect(service.applyMergedPr(link, merged)).resolves.toBe('updated');
+      expect(mockRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-1', 'merged');
+      expect(mockRepo.applyMergedPrTransition).toHaveBeenCalledTimes(1);
+      expect(mockRepo.updateTicketLinkWithPrState.mock.invocationCallOrder[0])
+        .toBeLessThan(mockRepo.applyMergedPrTransition.mock.invocationCallOrder[0]);
+    });
+
+    it.each(['already-merged', 'not-found'] as const)('does not transition when the write returned %s', async (outcome) => {
+      mockRepo.updateTicketLinkWithPrState.mockResolvedValueOnce(outcome);
+      await expect(service.applyMergedPr(makeTicketLink(), merged)).resolves.toBe(outcome);
+      expect(mockRepo.applyMergedPrTransition).not.toHaveBeenCalled();
+    });
+
+    it('records merged without a transition for a ticket that is not IN_PROGRESS', async () => {
+      const link = makeTicketLink({ ticket: { id: 'ticket-1', status: 'CREATED', projectId: 'proj-1', number: 42, externalVcsId: null } });
+      await expect(service.applyMergedPr(link, merged)).resolves.toBe('updated');
+      expect(mockRepo.applyMergedPrTransition).not.toHaveBeenCalled();
     });
   });
 });

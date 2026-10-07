@@ -28,6 +28,8 @@ type PrismaTicketLinkRow = {
   prNumber: number | null;
   prUpdatedAt: Date | null;
   linkType: string;
+  source: string;
+  jobId: string | null;
   createdAt: Date;
 };
 
@@ -117,6 +119,8 @@ export class PrismaTicketsRepository implements ITicketRepository {
         provider: l.provider,
         externalRef: l.externalRef,
         linkType: l.linkType,
+        source: l.source,
+        jobId: l.jobId,
         prNumber: l.prNumber,
         prState: l.prState,
         prUpdatedAt: l.prUpdatedAt,

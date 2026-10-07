@@ -57,7 +57,7 @@ describe('PrismaVcsRepository', () => {
 
   it('findActiveTicketLinksWithPrs filters merged/closed and null deleted tickets', async () => {
     mockFindMany.mockResolvedValue([]);
-    await repo.findActiveTicketLinksWithPrs('p1');
+    await repo.findActiveTicketLinksWithPrs('p1', { repoOwner: 'acme', repoName: 'app' });
 
     expect(mockFindMany).toHaveBeenCalledWith({
       include: {
@@ -80,6 +80,31 @@ describe('PrismaVcsRepository', () => {
         },
       },
     });
+  });
+
+  it('findActiveTicketLinksWithPrs drops links of other repos (D458)', async () => {
+    mockFindMany.mockResolvedValue([
+      { id: 'mine', externalRef: 'acme/app#5', prNumber: 5, source: 'vcs' },
+      { id: 'other', externalRef: 'other/lib#5', prNumber: 5, source: 'fleet' },
+      { id: 'legacy', externalRef: null, prNumber: 6, source: 'vcs' },
+    ]);
+    const rows = await repo.findActiveTicketLinksWithPrs('p1', { repoOwner: 'acme', repoName: 'app' });
+    expect(rows.map((r) => r.id)).toEqual(['mine', 'legacy']);
+  });
+
+  it('findTicketLinkForConnectionPr returns the connection repo link, not another repo with the same number', async () => {
+    mockFindMany.mockResolvedValue([
+      { id: 'other', externalRef: 'other/lib#5', prNumber: 5, source: 'fleet' },
+      { id: 'mine', externalRef: 'ACME/App#5', prNumber: 5, source: 'vcs' },
+    ]);
+    const row = await repo.findTicketLinkForConnectionPr('p1', { repoOwner: 'acme', repoName: 'app' }, 5);
+    expect(row?.id).toBe('mine');
+    expect(mockFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: { prNumber: 5, ticket: { projectId: 'p1' } } }));
+  });
+
+  it('findTicketLinkForConnectionPr returns null when only another repo has that number', async () => {
+    mockFindMany.mockResolvedValue([{ id: 'other', externalRef: 'other/lib#5', prNumber: 5, source: 'fleet' }]);
+    await expect(repo.findTicketLinkForConnectionPr('p1', { repoOwner: 'acme', repoName: 'app' }, 5)).resolves.toBeNull();
   });
 
   it('applyMergedPrTransition writes ticket, comment and activity in txManager.run', async () => {

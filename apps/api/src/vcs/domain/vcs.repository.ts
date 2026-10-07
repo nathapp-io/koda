@@ -1,3 +1,4 @@
+import type { ConnectionRepo } from '../connection-pr-match';
 import type { VcsConnectionDomain, VcsConnectionWithProjectDomain, VcsSyncLogDomain, VcsTicketDomain } from './vcs.domain';
 
 export const VCS_REPOSITORY = Symbol('VCS_REPOSITORY');
@@ -23,6 +24,9 @@ export interface TicketLinkData {
   prState: string | null;
   url: string;
   externalRef: string | null;
+  /** vcs | fleet (fleet C9 §1); absent on hand-built test rows, read as vcs. */
+  source?: string;
+  jobId?: string | null;
   ticket?: {
     id: string;
     status: string;
@@ -89,8 +93,10 @@ export interface IVcsRepository {
   ): Promise<CreateTicketFromIssueResult>;
 
   // TicketLink operations
-  findActiveTicketLinksWithPrs(projectId: string): Promise<TicketLinkData[]>;
-  findTicketLinkByPrNumber(projectId: string, prNumber: number): Promise<TicketLinkData | null>;
+  /** C9 §3.6: active PR links of the project that belong to the connection's repo (D458). */
+  findActiveTicketLinksWithPrs(projectId: string, repo: ConnectionRepo): Promise<TicketLinkData[]>;
+  /** C9 §3.6: the project's link for PR `prNumber` of the connection's repo (D458); webhook lookups. */
+  findTicketLinkForConnectionPr(projectId: string, repo: ConnectionRepo, prNumber: number): Promise<TicketLinkData | null>;
   /**
    * M12: the only TicketLink.prState write. `merged` is terminal: a link already
    * merged is left unchanged. Resolves `updated` when the row changed,

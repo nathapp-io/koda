@@ -45,4 +45,39 @@ describe('GitLabAccessChecker', () => {
     arrange();
     await expect(checker.verifyRepo('Group/Sub', 'App', 'glpat')).rejects.toMatchObject({ reason: reason });
   });
+
+  describe('getMergeRequest (C9 §3.4)', () => {
+    const MR = `GET /api/v4/projects/${encodeURIComponent('grp/sub/app')}/merge_requests/4`;
+
+    it('maps a merged MR and sends the token', async () => {
+      forge.routes.set(MR, () => ({
+        status: 200,
+        body: {
+          state: 'merged', draft: false, merged_at: '2026-10-06T01:00:00Z', merged_by: { username: 'dev' },
+          merge_commit_sha: null, squash_commit_sha: 'sq1', web_url: 'https://gitlab.com/grp/sub/app/-/merge_requests/4', title: 'Fix',
+        },
+      }));
+      await expect(checker.getMergeRequest('glpat', 'grp/sub', 'app', 4)).resolves.toEqual({
+        number: 4, state: 'closed', draft: false, merged: true, mergedAt: new Date('2026-10-06T01:00:00Z'), mergedBy: 'dev',
+        mergeSha: 'sq1', url: 'https://gitlab.com/grp/sub/app/-/merge_requests/4', title: 'Fix',
+      });
+      expect(forge.requests.at(-1)?.headers['private-token']).toBe('glpat');
+    });
+
+    it.each([
+      [{ state: 'opened', draft: true }, { state: 'open', draft: true, merged: false }],
+      [{ state: 'opened', work_in_progress: true }, { state: 'open', draft: true, merged: false }],
+      [{ state: 'closed' }, { state: 'closed', draft: false, merged: false }],
+      [{ state: 'locked' }, { state: 'open', draft: false, merged: false }],
+    ])('maps %j', async (body, expected) => {
+      forge.routes.set(MR, () => ({ status: 200, body: { web_url: 'u', title: 't', ...body } }));
+      await expect(checker.getMergeRequest('t', 'grp/sub', 'app', 4)).resolves.toEqual(expect.objectContaining(expected));
+    });
+
+    it('returns null for 404 and throws provider_error for 502', async () => {
+      await expect(checker.getMergeRequest('t', 'grp/sub', 'app', 4)).resolves.toBeNull();
+      forge.routes.set(MR, () => ({ status: 502, body: {} }));
+      await expect(checker.getMergeRequest('t', 'grp/sub', 'app', 4)).rejects.toMatchObject({ reason: 'provider_error' });
+    });
+  });
 });

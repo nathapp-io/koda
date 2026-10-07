@@ -23,6 +23,8 @@ export class PrismaTicketLinkRepository {
       prNumber: m.prNumber ?? null,
       prUpdatedAt: m.prUpdatedAt ?? null,
       linkType: m.linkType,
+      source: m.source,
+      jobId: m.jobId ?? null,
       createdAt: m.createdAt,
     };
   }

@@ -28,6 +28,12 @@ export class TicketLinkResponseDto {
   @ApiProperty()
   linkType!: string;
 
+  @ApiProperty({ description: 'vcs | fleet: fleet links were written by a fleet job (C9)' })
+  source!: string;
+
+  @ApiProperty({ nullable: true, type: String, description: 'The fleet job that produced the link' })
+  jobId!: string | null;
+
   @ApiProperty({ nullable: true })
   title!: string | null;
 
@@ -46,6 +52,8 @@ export class TicketLinkResponseDto {
       prNumber: link.prNumber ?? null,
       prUpdatedAt: link.prUpdatedAt ?? null,
       linkType: link.linkType ?? 'url',
+      source: link.source ?? 'vcs',
+      jobId: link.jobId ?? null,
       title: link.linkType === 'commit' ? link.externalRef ?? null : null,
       createdAt: link.createdAt,
     };

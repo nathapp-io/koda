@@ -7,6 +7,7 @@ import type { FleetRepoRef } from '../jobs/domain/fleet-job.domain';
 import { FleetHttpClient } from './fleet-http-client';
 import { GitTokenBroker } from './git-token.broker';
 import { RepoCheckException, RepoCheckReason } from './repo-check.exception';
+import type { VcsPrStatus } from '../../vcs/types';
 
 export interface CanonicalRepo {
   owner: string;
@@ -95,6 +96,31 @@ export class GitHubAppClient {
     const path = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues/${number}/comments`;
     const res = await this.http.request('POST', `${this.api}${path}`, this.headers(token), { body });
     return res.status === 201;
+  }
+
+  /**
+   * Fleet C9 §3.4: one PR's state, read with a repo-scoped installation token the caller minted
+   * (one mint per repo per refresh pass, plan P1). Null when the PR does not exist.
+   */
+  async getPullRequest(token: string, owner: string, name: string, number: number): Promise<VcsPrStatus | null> {
+    const path = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls/${number}`;
+    const res = await this.http.request('GET', `${this.api}${path}`, this.headers(token));
+    if (res.status === 404) return null;
+    if (res.status !== 200) throw new RepoCheckException('provider_error');
+    const b = obj(res.body);
+    if (typeof b.state !== 'string' || typeof b.html_url !== 'string') throw new RepoCheckException('provider_error');
+    const mergedBy = obj(b.merged_by).login;
+    return {
+      number,
+      state: b.state,
+      draft: b.draft === true,
+      merged: b.merged === true,
+      mergedAt: typeof b.merged_at === 'string' ? new Date(b.merged_at) : null,
+      mergedBy: typeof mergedBy === 'string' ? mergedBy : null,
+      mergeSha: typeof b.merge_commit_sha === 'string' ? b.merge_commit_sha : null,
+      url: b.html_url,
+      title: typeof b.title === 'string' ? b.title : '',
+    };
   }
 
   async verifyRepo(owner: string, name: string, persistedInstallationId?: bigint): Promise<CanonicalRepo & { installationId: bigint }> {

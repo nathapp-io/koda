@@ -3,6 +3,7 @@ import { IVcsConfig, VCS_CFG } from '../../config/vcs.config';
 import { FleetHttpClient } from './fleet-http-client';
 import type { CanonicalRepo } from './github-app-client';
 import { RepoCheckException } from './repo-check.exception';
+import type { VcsPrStatus } from '../../vcs/types';
 
 const DEVELOPER = 30;
 type Obj = Record<string, unknown>;
@@ -23,6 +24,29 @@ export class GitLabAccessChecker {
     const api = this.vcsConfig.gitlabApiUrl.replace(/\/+$/, '');
     const res = await this.http.request('POST', `${api}/projects/${encodeURIComponent(`${owner}/${name}`)}/merge_requests/${iid}/notes`, { 'private-token': token }, { body });
     return res.status === 201;
+  }
+
+  /** Fleet C9 §3.4: one MR's state with the project's GitLab token. Null when the MR does not exist. */
+  async getMergeRequest(token: string, owner: string, name: string, iid: number): Promise<VcsPrStatus | null> {
+    const api = this.vcsConfig.gitlabApiUrl.replace(/\/+$/, '');
+    const res = await this.http.request('GET', `${api}/projects/${encodeURIComponent(`${owner}/${name}`)}/merge_requests/${iid}`, { 'private-token': token });
+    if (res.status === 404) return null;
+    if (res.status !== 200) throw new RepoCheckException('provider_error');
+    const b = obj(res.body);
+    if (typeof b.state !== 'string' || typeof b.web_url !== 'string') throw new RepoCheckException('provider_error');
+    const mergedBy = obj(b.merged_by).username;
+    const sha = typeof b.merge_commit_sha === 'string' ? b.merge_commit_sha : typeof b.squash_commit_sha === 'string' ? b.squash_commit_sha : null;
+    return {
+      number: iid,
+      state: b.state === 'opened' || b.state === 'locked' ? 'open' : 'closed',
+      draft: b.draft === true || b.work_in_progress === true,
+      merged: b.state === 'merged',
+      mergedAt: typeof b.merged_at === 'string' ? new Date(b.merged_at) : null,
+      mergedBy: typeof mergedBy === 'string' ? mergedBy : null,
+      mergeSha: sha,
+      url: b.web_url,
+      title: typeof b.title === 'string' ? b.title : '',
+    };
   }
 
   async verifyRepo(owner: string, name: string, token: string): Promise<CanonicalRepo> {

@@ -10,5 +10,7 @@ export interface TicketLinkDomain {
   prNumber: number | null;
   prUpdatedAt: Date | null;
   linkType: string;
+  source?: string;
+  jobId?: string | null;
   createdAt: Date;
 }

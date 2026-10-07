@@ -34,7 +34,7 @@ function createMockVcsRepository(sharedEnqueuedEvents?: SharedEnqueuedEvent[]): 
     createTicketFromIssue: jest.fn(),
     findTicketWithProject: jest.fn().mockResolvedValue(null),
     findActiveTicketLinksWithPrs: jest.fn().mockResolvedValue([]),
-    findTicketLinkByPrNumber: jest.fn().mockResolvedValue(null),
+    findTicketLinkForConnectionPr: jest.fn().mockResolvedValue(null),
     updateTicketLinkWithPrState: jest.fn().mockResolvedValue('updated'),
     applyMergedPrTransition: jest.fn(),
     findPendingOutboxEvents: jest.fn().mockImplementation((query: OutboxDedupQuery) => {
@@ -67,7 +67,7 @@ function createMockSyncService() {
 
 function createMockPrSyncService() {
   return {
-    handleMergedPrAutoTransition: jest.fn(),
+    applyMergedPr: jest.fn().mockResolvedValue('updated'),
   };
 }
 
