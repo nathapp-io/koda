@@ -769,6 +769,22 @@
       "gitlab_access_insufficient": "The GitLab token cannot push to this repository",
       "gitlab_scope_missing": "The GitLab token lacks a required scope"
     },
+    "credentials": {
+      "title": "Credential board",
+      "subtitle": "Provider credentials and profiles on every runner. OAuth credentials expiring within {days} days are flagged.",
+      "refresh": "Refresh",
+      "empty": "No runners enrolled",
+      "loadFailed": "Could not load the credential board",
+      "tabs": { "grid": "Credentials", "profiles": "Profiles" },
+      "grid": { "provider": "Provider", "unreadable": "Capabilities unreadable", "expires": "until {date}" },
+      "state": {
+        "ok": "OK", "expiring": "Expiring", "expired": "Expired", "unavailable": "Unavailable", "missing": "Missing", "unknown": "Unknown"
+      },
+      "profiles": {
+        "profile": "Profile", "needs": "Needs", "needsValue": "{protocol} · {providers}", "sandbox": "sandbox",
+        "differs": "differs by runner", "ready": "Ready", "absent": "Not installed", "unknown": "Unknown"
+      }
+    },
     "runners": {
       "title": "Runners",
       "subtitle": "Machines that run nax jobs for koda.",
@@ -789,7 +805,8 @@
         "enable": "Enable",
         "disable": "Disable",
         "edit": "Edit",
-        "delete": "Delete"
+        "delete": "Delete",
+        "credentials": "Credential board"
       },
       "chip": {
         "sandboxOn": "sandbox",
@@ -1685,7 +1702,8 @@
           "credential": {
             "missing": "No credential for {provider}",
             "unavailable": "Credential for {provider} is unavailable",
-            "expired": "API key for {provider} has expired"
+            "expired": "API key for {provider} has expired",
+            "expiring": "OAuth credential for {provider} expires soon"
           }
         }
       },
@@ -1716,7 +1734,8 @@
         "daemon": "daemon {version}",
         "credentialUnavailable": "{provider}: unavailable",
         "credentialServed": "{provider}",
-        "credentialExpiredUndated": "{provider}: {kind}, expired"
+        "credentialExpiredUndated": "{provider}: {kind}, expired",
+        "board": "Credential board"
       },
       "recent": {
         "empty": "No runs in the last 24 hours",

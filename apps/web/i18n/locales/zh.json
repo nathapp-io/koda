@@ -769,6 +769,22 @@
       "gitlab_access_insufficient": "GitLab 令牌无法推送到此仓库",
       "gitlab_scope_missing": "GitLab 令牌缺少必需的权限范围"
     },
+    "credentials": {
+      "title": "凭据面板",
+      "subtitle": "所有运行器上的提供商凭据与配置档。{days} 天内到期的 OAuth 凭据会被标记。",
+      "refresh": "刷新",
+      "empty": "尚未注册运行器",
+      "loadFailed": "无法加载凭据面板",
+      "tabs": { "grid": "凭据", "profiles": "配置档" },
+      "grid": { "provider": "提供商", "unreadable": "能力信息无法读取", "expires": "至 {date}" },
+      "state": {
+        "ok": "正常", "expiring": "即将到期", "expired": "已过期", "unavailable": "不可用", "missing": "缺失", "unknown": "未知"
+      },
+      "profiles": {
+        "profile": "配置档", "needs": "需求", "needsValue": "{protocol} · {providers}", "sandbox": "沙箱",
+        "differs": "各运行器不一致", "ready": "就绪", "absent": "未安装", "unknown": "未知"
+      }
+    },
     "runners": {
       "title": "执行机",
       "subtitle": "为 koda 运行 nax 任务的机器。",
@@ -789,7 +805,8 @@
         "enable": "启用",
         "disable": "停用",
         "edit": "编辑",
-        "delete": "删除"
+        "delete": "删除",
+        "credentials": "凭据面板"
       },
       "chip": {
         "sandboxOn": "沙箱",
@@ -1685,7 +1702,8 @@
           "credential": {
             "missing": "缺少 {provider} 的凭据",
             "unavailable": "{provider} 的凭据当前不可用",
-            "expired": "{provider} 的 API 密钥已过期"
+            "expired": "{provider} 的 API 密钥已过期",
+            "expiring": "{provider} 的 OAuth 凭据即将到期"
           }
         }
       },
@@ -1716,7 +1734,8 @@
         "daemon": "守护进程 {version}",
         "credentialUnavailable": "{provider}：不可用",
         "credentialServed": "{provider}",
-        "credentialExpiredUndated": "{provider}：{kind}，已过期"
+        "credentialExpiredUndated": "{provider}：{kind}，已过期",
+        "board": "凭据面板"
       },
       "recent": {
         "empty": "最近 24 小时内没有运行",

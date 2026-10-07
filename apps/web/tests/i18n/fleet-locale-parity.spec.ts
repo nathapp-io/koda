@@ -1,4 +1,5 @@
 import { describe, test, expect } from '@jest/globals'
+import { CELL_STATES } from '~/lib/fleet-credential-board'
 import { CREDENTIAL_WHY, SEVERITIES, TILE_IDS, UNPLACEABLE_VERDICTS } from '~/lib/fleet-dashboard-types'
 
 const en = require('../../i18n/locales/en.json') as Record<string, unknown>
@@ -58,7 +59,9 @@ const ENUMS: Record<string, string[]> = {
   'fleet.dashboard.severity': ['error', 'warning'],
   'fleet.dashboard.tiles': ['runners', 'queued', 'running', 'attention'],
   'fleet.dashboard.attention.verdict': ['never', 'budget_paused', 'runners_paused', 'waiting_capacity', 'no_fit', 'no_runners', 'fits_not_placed', 'unknown'],
-  'fleet.dashboard.attention.condition.credential': ['missing', 'unavailable', 'expired'],
+  'fleet.dashboard.attention.condition.credential': ['missing', 'unavailable', 'expired', 'expiring'],
+  'fleet.credentials.state': ['ok', 'expiring', 'expired', 'unavailable', 'missing', 'unknown'],
+  'fleet.credentials.profiles': ['profile', 'needs', 'needsValue', 'sandbox', 'differs', 'ready', 'absent', 'unknown'],
   'fleet.dashboard.attention.condition.interaction': ['base', 'profile'],
   'fleet.jobs.detail.pipeline.stage': ['stories', 'acceptance', 'regression', 'finish'],
   'fleet.jobs.detail.pipeline.state': ['pending', 'running', 'passed', 'failed', 'skipped', 'unknown'],
@@ -124,5 +127,6 @@ describe('Fleet locale parity (en and zh)', () => {
     expect([...ENUMS['fleet.dashboard.tiles']].sort()).toEqual([...TILE_IDS].sort())
     expect(ENUMS['fleet.dashboard.attention.verdict'].filter((v) => v !== 'unknown').sort()).toEqual([...UNPLACEABLE_VERDICTS].sort())
     expect([...ENUMS['fleet.dashboard.attention.condition.credential']].sort()).toEqual([...CREDENTIAL_WHY].sort())
+    expect(ENUMS['fleet.credentials.state'].filter((s) => s !== 'unknown').sort()).toEqual([...CELL_STATES].sort())
   })
 })
