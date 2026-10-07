@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { registerFleetAnalytics } from './fleet-analytics';
 import { registerFleetApproval } from './fleet-approval';
 import { registerFleetBudget } from './fleet-budget';
+import { registerFleetConfig } from './fleet-config';
 import { registerFleetDispatch } from './fleet-dispatch';
 import { registerFleetIngest } from './fleet-ingest';
 import { registerFleetJob } from './fleet-job';
@@ -16,6 +17,7 @@ export function fleetCommand(program: Command): Command {
   fleet.description('Dispatch nax runs to fleet runners and follow the jobs');
   registerFleetRunner(fleet);
   registerFleetRepo(fleet);
+  registerFleetConfig(fleet);
   registerFleetDispatch(fleet);
   registerFleetJob(fleet);
   registerFleetBudget(fleet);
