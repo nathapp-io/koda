@@ -1760,6 +1760,15 @@
           "finished": "Finished"
         }
       }
+    },
+    "config": {
+      "tree": { "label": "nax files" },
+      "group": { "rules": "Rules", "context": "Context", "config": "Config", "profiles": "Profiles", "constitution": "Constitution" },
+      "status": { "unchanged": "Unchanged", "modified": "Modified", "new": "New", "deleted": "Deleted" },
+      "editor": {
+        "tooLarge": "This file is too large or not text, so it is shown read-only and cannot be edited here.",
+        "jsonError": "Invalid JSON: {error}"
+      }
     }
   }
 }

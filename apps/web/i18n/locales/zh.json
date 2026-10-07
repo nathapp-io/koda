@@ -1760,6 +1760,15 @@
           "finished": "完成时间"
         }
       }
+    },
+    "config": {
+      "tree": { "label": "nax 文件" },
+      "group": { "rules": "规则", "context": "上下文", "config": "配置", "profiles": "配置档", "constitution": "章程" },
+      "status": { "unchanged": "未修改", "modified": "已修改", "new": "新建", "deleted": "已删除" },
+      "editor": {
+        "tooLarge": "文件过大或不是文本，只能只读查看，无法在此编辑。",
+        "jsonError": "JSON 无效：{error}"
+      }
     }
   }
 }
