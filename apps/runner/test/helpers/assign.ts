@@ -1,6 +1,6 @@
-import type { AssignPayload } from '@nathapp/fleet-protocol';
+import type { AssignPayload, FleetJobKindName } from '@nathapp/fleet-protocol';
 
-export function assignFor(command: 'RUN' | 'PLAN' = 'RUN', over: Partial<AssignPayload> = {}): AssignPayload {
+export function assignFor(command: FleetJobKindName = 'RUN', over: Partial<AssignPayload> = {}): AssignPayload {
   return {
     jobId: 'j1', command,
     repo: { provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', cloneUrl: 'https://github.com/acme/app.git' },
