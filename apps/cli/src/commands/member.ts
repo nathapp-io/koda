@@ -34,7 +34,7 @@ type AssignableRole = 'ADMIN' | 'DEVELOPER' | 'VIEWER';
 
 type InviteOutcome =
   | { outcome: 'ADDED'; member: MemberRow }
-  | { outcome: 'INVITED'; emailed: boolean; invitePath: string; invite: InviteRow };
+  | { outcome: 'INVITED'; emailed?: boolean; invitePath: string; invite?: InviteRow };
 
 interface InviteRow {
   id: string;
@@ -120,9 +120,9 @@ export function memberCommand(program: Command): void {
         } else if (result.outcome === 'ADDED') {
           console.log(`Added ${result.member.email} as ${result.member.role}`);
         } else if (result.emailed) {
-          console.log(`Invite created for ${result.invite.email}. Emailed.`);
+          console.log(`Invite created for ${options.email}. Emailed.`);
         } else {
-          console.log(`Invite created for ${result.invite.email}. Share this link (shown once): ${result.invitePath}`);
+          console.log(`Invite created for ${options.email}. Share this link (shown once): ${result.invitePath}`);
         }
         process.exit(0);
       } catch (err: unknown) {
