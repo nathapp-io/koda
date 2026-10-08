@@ -21,9 +21,17 @@ type InviteRow = {
   project: { name: string };
 };
 
+/** US-005: the anonymous preview also shows the project's slug. */
+type InvitePreviewRow = InviteRow & { project: { name: string; slug: string } };
+
 const INCLUDE_CONTEXT = {
   invitedBy: { select: { name: true } },
   project: { select: { name: true } },
+} as const;
+
+const INCLUDE_PREVIEW = {
+  invitedBy: { select: { name: true } },
+  project: { select: { name: true, slug: true } },
 } as const;
 
 /**
@@ -36,6 +44,11 @@ const LIST_LIMIT = 200;
 /** An invite plus the two display names the inline email needs (spec §4.1). */
 export interface ProjectInviteWithContext extends ProjectInviteRecord {
   projectName: string;
+}
+
+/** US-005: everything the public preview and the accept transaction read from the invite row. */
+export interface ProjectInvitePreview extends ProjectInviteWithContext {
+  projectSlug: string;
 }
 
 export interface CreateProjectInviteInput {
@@ -94,8 +107,78 @@ export class PrismaProjectInvitesRepository {
     return (rows as InviteRow[]).map((row) => this.toRecord(row));
   }
 
+  /** US-005: the only lookup the anonymous preview/accept path may use — the raw token never reaches SQL. */
+  async findByTokenHash(tokenHash: string): Promise<ProjectInvitePreview | null> {
+    const row = await this.db.projectInvite.findUnique({ where: { tokenHash }, include: INCLUDE_PREVIEW });
+    return row ? this.toPreview(row as InvitePreviewRow) : null;
+  }
+
+  /** US-005: admin resend/cancel scope an invite to its project, so another project's id is a 404. */
+  async findByIdForProject(projectId: string, id: string): Promise<ProjectInviteWithContext | null> {
+    const row = await this.db.projectInvite.findFirst({
+      where: { id, projectId },
+      include: INCLUDE_CONTEXT,
+    });
+    return row ? this.toContext(row as InviteRow) : null;
+  }
+
+  /**
+   * US-005 AC-7: the single use of the token is a conditional update, so two concurrent accepts
+   * serialize on the row lock and exactly one sees `count: 1`. Returns false when the invite is
+   * already accepted/cancelled or has expired.
+   */
+  async claimPending(id: string, now: Date): Promise<boolean> {
+    const result = await this.db.projectInvite.updateMany({
+      where: { id, status: 'PENDING', expiresAt: { gt: now } },
+      data: { status: 'ACCEPTED', acceptedAt: now },
+    });
+    return result.count === 1;
+  }
+
+  /** Second half of the accept transaction: the user id only exists after the user row is created. */
+  async setAcceptedBy(id: string, userId: string, now: Date): Promise<void> {
+    await this.db.projectInvite.update({
+      where: { id },
+      data: { acceptedByUserId: userId, acceptedAt: now },
+    });
+  }
+
+  /**
+   * US-005: resend rotates the token and restarts the clock, but only while the invite is still
+   * PENDING (an expired row keeps status PENDING — EXPIRED is computed on read). Returns null when
+   * an accept or cancel won the race, so the caller can answer 409 without having written anything.
+   */
+  async rotate(input: {
+    id: string;
+    projectId: string;
+    tokenHash: string;
+    expiresAt: Date;
+  }): Promise<ProjectInviteWithContext | null> {
+    const result = await this.db.projectInvite.updateMany({
+      where: { id: input.id, projectId: input.projectId, status: 'PENDING' },
+      data: { tokenHash: input.tokenHash, status: 'PENDING', expiresAt: input.expiresAt },
+    });
+    if (result.count !== 1) return null;
+
+    const row = await this.db.projectInvite.findUnique({ where: { id: input.id }, include: INCLUDE_CONTEXT });
+    return row ? this.toContext(row as InviteRow) : null;
+  }
+
+  /** US-005: cancel is final and only ever moves a PENDING row; anything else left untouched. */
+  async cancel(id: string, projectId: string): Promise<boolean> {
+    const result = await this.db.projectInvite.updateMany({
+      where: { id, projectId, status: 'PENDING' },
+      data: { status: 'CANCELLED' },
+    });
+    return result.count === 1;
+  }
+
   private toContext(row: InviteRow): ProjectInviteWithContext {
     return { ...this.toRecord(row), projectName: row.project.name };
+  }
+
+  private toPreview(row: InvitePreviewRow): ProjectInvitePreview {
+    return { ...this.toContext(row), projectSlug: row.project.slug };
   }
 
   private toRecord(row: InviteRow): ProjectInviteRecord {

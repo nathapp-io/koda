@@ -6,8 +6,9 @@ import * as bcrypt from 'bcrypt';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import type { IPrincipal } from './types';
-import { UserResponseDto } from './dto/auth-response.dto';
+import { AuthResponseDto, UserResponseDto } from './dto/auth-response.dto';
 import { PrismaAuthRepository } from './prisma-auth.repository';
+import { UserDomain } from './domain/auth.domain';
 import { userAuthStateCacheKey, userTokenVersionCacheTag } from './token-version.cache';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
@@ -68,14 +69,7 @@ export class AuthService {
     }
     const { user } = created;
 
-    const accessToken = this.generateAccessToken(user.id, user.email, user.role, user.tokenVersion);
-    const refreshToken = this.generateRefreshToken(user.id, user.tokenVersion);
-
-    return {
-      accessToken,
-      refreshToken,
-      user: UserResponseDto.from(user),
-    };
+    return this.issueSession(user);
   }
 
   async registrationStatus(): Promise<{ open: boolean }> {
@@ -101,14 +95,7 @@ export class AuthService {
       throw new AuthException({}, 'auth');
     }
 
-    const accessToken = this.generateAccessToken(user.id, user.email, user.role, user.tokenVersion);
-    const refreshToken = this.generateRefreshToken(user.id, user.tokenVersion);
-
-    return {
-      accessToken,
-      refreshToken,
-      user: UserResponseDto.from(user),
-    };
+    return this.issueSession(user);
   }
 
   async refresh(principal: IPrincipal) {
@@ -124,12 +111,17 @@ export class AuthService {
       throw new AuthException({}, 'auth');
     }
 
-    const accessToken = this.generateAccessToken(user.id, user.email, user.role, user.tokenVersion);
-    const refreshToken = this.generateRefreshToken(user.id, user.tokenVersion);
+    return this.issueSession(user);
+  }
 
+  /**
+   * The one session shape every entry point issues (register, login, refresh and
+   * invite acceptance). The caller owns the user row; this only signs tokens.
+   */
+  issueSession(user: UserDomain): AuthResponseDto {
     return {
-      accessToken,
-      refreshToken,
+      accessToken: this.generateAccessToken(user.id, user.email, user.role, user.tokenVersion),
+      refreshToken: this.generateRefreshToken(user.id, user.tokenVersion),
       user: UserResponseDto.from(user),
     };
   }

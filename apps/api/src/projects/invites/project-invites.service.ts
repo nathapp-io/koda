@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { EmailAvailability } from '../../email/email-availability';
 import { EmailScheduleService } from '../../email/schedule/email-schedule.service';
@@ -14,7 +15,7 @@ import { PrismaProjectInvitesRepository, ProjectInviteWithContext } from './pris
 import { PrismaProjectInvitesMembersRepository, InviteUserState } from './prisma-project-invites-members.repository';
 import { effectiveStatus, ProjectInviteRecord } from './domain/project-invite.domain';
 import { CreateInviteDto } from './dto/create-invite.dto';
-import { InviteCreateResultDto, InviteDto } from './dto/invite.dto';
+import { InviteCreateResultDto, InviteDto, InviteResendResultDto } from './dto/invite.dto';
 
 const DAY_MS = 86_400_000;
 /** Transactional notices carry no user preference, so MEMBER_ADDED is always rendered in English. */
@@ -62,6 +63,46 @@ export class ProjectInvitesService {
     const now = new Date();
     const records = await this.invites.list(projectId);
     return records.map((record) => this.toDto(record, now));
+  }
+
+  /**
+   * US-005: rotates the token so a leaked or stale link dies, restarts the TTL and reports whether the
+   * replacement email went out. Only a PENDING invite may be resent — an expired row is still PENDING
+   * (EXPIRED is computed on read), while ACCEPTED and CANCELLED are final and answer 409.
+   */
+  async resend(
+    slug: string,
+    id: string,
+    principal: KodaPrincipal,
+    locale: string,
+  ): Promise<InviteResendResultDto> {
+    const projectId = await this.access.findProjectIdBySlug(slug);
+    await this.access.assertProjectAdmin(projectId, principal);
+
+    const invite = await this.invites.findByIdForProject(projectId, id);
+    if (!invite) throw new NotFoundAppException({}, 'invites');
+    if (invite.status !== 'PENDING') throw new ConflictAppException({}, 'invites.final');
+
+    const now = new Date();
+    const { raw, hash } = generateInviteToken();
+    const expiresAt = new Date(now.getTime() + this.email.config().inviteTtlDays * DAY_MS);
+    const rotated = await this.invites.rotate({ id, projectId, tokenHash: hash, expiresAt });
+    // An accept or cancel that won the race left a final row; nothing was written, so this is a 409.
+    if (!rotated) throw new ConflictAppException({}, 'invites.final');
+
+    const emailed = this.email.configured ? await this.sendInvite(rotated, raw, rotated.email, locale) : false;
+    return { invite: this.toDto(rotated, now), invitePath: `/invite/${raw}`, emailed };
+  }
+
+  /** US-005: cancel is final. A PENDING invite becomes CANCELLED; anything already final answers 409. */
+  async cancel(slug: string, id: string, principal: KodaPrincipal): Promise<void> {
+    const projectId = await this.access.findProjectIdBySlug(slug);
+    await this.access.assertProjectAdmin(projectId, principal);
+
+    const invite = await this.invites.findByIdForProject(projectId, id);
+    if (!invite) throw new NotFoundAppException({}, 'invites');
+    if (invite.status !== 'PENDING') throw new ConflictAppException({}, 'invites.final');
+    if (!(await this.invites.cancel(id, projectId))) throw new ConflictAppException({}, 'invites.final');
   }
 
   /** An active account joins immediately; a disabled account (or an existing membership) is a 409. */

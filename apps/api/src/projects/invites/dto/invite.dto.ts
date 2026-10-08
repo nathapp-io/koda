@@ -21,3 +21,13 @@ export class InviteCreateResultDto {
   @ApiPropertyOptional() declare invitePath?: string;
   @ApiPropertyOptional() declare emailed?: boolean;
 }
+
+/**
+ * Fleet S4b US-005: the resend result. The rotated raw token appears exactly
+ * once, in `invitePath`; the stored row keeps only its sha256 digest.
+ */
+export class InviteResendResultDto {
+  @ApiProperty({ type: InviteDto }) declare invite: InviteDto;
+  @ApiProperty() declare invitePath: string;
+  @ApiProperty() declare emailed: boolean;
+}
