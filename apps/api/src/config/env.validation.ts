@@ -33,6 +33,14 @@ const envSchema = Joi.object({
     .integer()
     .min(0)
     .optional(),
+  // Fleet S4b §1 (email.config.ts enforces the SMTP_URL-dependent requirements).
+  SMTP_URL: Joi.string().optional(),
+  EMAIL_FROM: Joi.string().optional(),
+  WEB_PUBLIC_URL: Joi.string().uri({ scheme: ['http', 'https'] }).optional(),
+  EMAIL_DELAY_SEC: Joi.number().integer().min(0).optional(),
+  EMAIL_APPROVAL_DELAY_SEC: Joi.number().integer().min(0).optional(),
+  EMAIL_MAX_ATTEMPTS: Joi.number().integer().min(1).optional(),
+  INVITE_TTL_DAYS: Joi.number().integer().min(1).max(30).optional(),
   // Digits-only to match the class-validator `@Matches(/^\d+$/)` rule in
   // live.config.ts (`Joi.number()` would coerce '1e3' / '100.0' and diverge).
   LIVE_HEARTBEAT_MS: Joi.string()
