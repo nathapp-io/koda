@@ -1841,5 +1841,52 @@
         "regenerate": "创建重新生成 PR"
       }
     }
+  },
+  "notifications": {
+    "title": "通知",
+    "subtitle": "你关注的工单以及需要你处理的 fleet 任务。",
+    "empty": "没有新通知。",
+    "emptyUnread": "没有未读通知。",
+    "markAllRead": "全部标为已读",
+    "viewAll": "查看全部",
+    "settings": "通知设置",
+    "prev": "上一页",
+    "next": "下一页",
+    "filter": { "all": "全部", "unread": "未读" },
+    "bell": { "label": "通知，{count} 条未读", "title": "通知" },
+    "kinds": {
+      "ticket_assigned": "{actorName} 将 {ref} 分配给你：{ticketTitle}",
+      "ticket_mentioned": "{actorName} 在 {ref} 中提到了你",
+      "ticket_commented": "{actorName} 评论了 {ref}",
+      "ticket_status_changed": "{ref} 从 {fromStatus} 变为 {newStatus}",
+      "job_escalated": "{repo} 上的 fleet 任务已升级处理",
+      "job_failed": "{repo} 上的 fleet 任务失败",
+      "job_crashed": "{repo} 上的 fleet 任务崩溃",
+      "job_pr_opened": "{repo} 上的 fleet 任务创建了 PR",
+      "approval_requested": "需要审批：{repo} 上的 {kind}",
+      "budget_warn": "预算 {scope} 已用 {spentUsd} / {amountUsd} USD",
+      "budget_hard_stop": "预算 {scope} 在 {spentUsd} / {amountUsd} USD 处停止",
+      "runner_offline": "Runner {runner} 已离线",
+      "credential_expiring": "{runner} 上的 {provider} 凭据将于 {expiresAt} 过期"
+    },
+    "categories": {
+      "ASSIGNED": { "label": "分配给我", "description": "有工单分配给你。" },
+      "MENTIONED": { "label": "提及", "description": "有人在工单或评论中提到你。" },
+      "WATCHED_ACTIVITY": { "label": "关注的工单", "description": "你关注的工单有新评论或状态变化。" },
+      "FLEET_NEEDS_YOU": { "label": "Fleet 需要你", "description": "你发起的 fleet 任务异常结束或创建了 PR；审批请求（管理员）。" },
+      "FLEET_HEALTH": { "label": "Fleet 健康", "description": "预算告警、Runner 离线和凭据即将过期（管理员）。" }
+    },
+    "preferences": {
+      "title": "通知设置",
+      "subtitle": "选择哪些通知进入你的收件箱。",
+      "inApp": "站内",
+      "saved": "通知设置已保存"
+    },
+    "watch": {
+      "watch": "关注",
+      "unwatch": "取消关注",
+      "count": "{count} 人关注",
+      "failed": "无法更新关注状态"
+    }
   }
 }

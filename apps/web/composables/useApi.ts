@@ -253,6 +253,9 @@ export const useApi = () => {
   const patch = <T = unknown>(path: string, body: Record<string, unknown> = {}, options: Record<string, unknown> = {}) =>
     request<T>(`${baseURL}${path}`, { ...options, method: 'PATCH', body })
 
+  const put = <T = unknown>(path: string, body: Record<string, unknown> = {}, options: Record<string, unknown> = {}) =>
+    request<T>(`${baseURL}${path}`, { ...options, method: 'PUT', body })
+
   const delete_ = <T = unknown>(path: string, options: Record<string, unknown> = {}) =>
     request<T>(`${baseURL}${path}`, { ...options, method: 'DELETE' })
 
@@ -273,6 +276,7 @@ export const useApi = () => {
     $api: {
       get,
       post,
+      put,
       patch,
       delete: delete_,
       download,
