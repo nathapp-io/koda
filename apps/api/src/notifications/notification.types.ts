@@ -1,9 +1,12 @@
+import { NotificationChannel } from '@nathapp/nestjs-notify';
+
 /** Fleet S4a: the notification contract shared by the pipeline, producers and API (spec §1-§3). */
 export const NOTIFICATION_CATEGORIES = ['ASSIGNED', 'MENTIONED', 'WATCHED_ACTIVITY', 'FLEET_NEEDS_YOU', 'FLEET_HEALTH'] as const;
 export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
 
-export const NOTIFICATION_CHANNELS = ['IN_APP'] as const;
-export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
+/** S4b D524: nestjs-notify's lowercase channel values. */
+export type NotificationChannelValue = `${NotificationChannel.IN_APP}` | `${NotificationChannel.EMAIL}`;
+export const NOTIFICATION_CHANNELS: readonly NotificationChannelValue[] = [NotificationChannel.IN_APP, NotificationChannel.EMAIL];
 
 export const WATCH_REASONS = ['REPORTER', 'ASSIGNEE', 'COMMENTER', 'MENTIONED', 'MANUAL'] as const;
 export type WatchReason = (typeof WATCH_REASONS)[number];

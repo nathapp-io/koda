@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { NotificationChannel } from '@nathapp/nestjs-notify';
 import { UserEventBus } from '../live/user-event-bus';
 import { NotificationEligibility } from './notification-eligibility';
 import { NotificationPreferencesService } from './notification-preferences.service';
@@ -36,7 +37,7 @@ export class NotificationWriter {
     const categories = unique(drafts.map((d) => d.category));
     const off = new Map<NotificationCategory, ReadonlySet<string>>(await Promise.all(categories.map(async (category) => {
       const userIds = unique(drafts.filter((d) => d.category === category).map((d) => d.userId));
-      return [category, await this.preferences.disabledUserIds(userIds, category, 'IN_APP')] as const;
+      return [category, await this.preferences.disabledUserIds(userIds, category, NotificationChannel.IN_APP)] as const;
     })));
     return drafts.filter((d) => !off.get(d.category)?.has(d.userId));
   }
