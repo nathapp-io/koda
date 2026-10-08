@@ -4,6 +4,10 @@ import {
   projectMembersControllerList,
   projectMembersControllerRemove,
   projectMembersControllerUpdateRole,
+  projectInvitesControllerCreate,
+  projectInvitesControllerList,
+  projectInvitesControllerResend,
+  projectInvitesControllerCancel,
 } from '../generated';
 import { table } from '../utils/output';
 import { unwrap } from '../utils/api';
@@ -27,6 +31,18 @@ interface MemberPage {
 }
 
 type AssignableRole = 'ADMIN' | 'DEVELOPER' | 'VIEWER';
+
+type InviteOutcome =
+  | { outcome: 'ADDED'; member: MemberRow }
+  | { outcome: 'INVITED'; emailed: boolean; invitePath: string; invite: InviteRow };
+
+interface InviteRow {
+  id: string;
+  email: string;
+  role: string;
+  status: string;
+  expiresAt: string;
+}
 
 // Listing works with an agent key. Add/role/remove need a project-admin or
 // global-admin user access token passed through KODA_API_KEY.
@@ -81,6 +97,76 @@ export function memberCommand(program: Command): void {
         process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `No user with email ${options.email} (or project not found)` });
+      }
+    });
+
+  member
+    .command('invite')
+    .description('Invite an email address to the project')
+    .requiredOption('--email <email>', 'Email address to invite')
+    .requiredOption('--role <role>', 'ADMIN, DEVELOPER or VIEWER')
+    .option('--project <slug>', 'Project slug')
+    .option('--json', 'Output as JSON')
+    .action(async (options) => {
+      try {
+        const ctx = await withContext({ projectSlug: options.project });
+        const response = await projectInvitesControllerCreate({
+          path: { slug: ctx.projectSlug },
+          body: { email: options.email, role: options.role as AssignableRole },
+        } as Parameters<typeof projectInvitesControllerCreate>[0]);
+        const result = unwrap<InviteOutcome>(response);
+        if (options.json) {
+          console.log(JSON.stringify(result, null, 2));
+        } else if (result.outcome === 'ADDED') {
+          console.log(`Added ${result.member.email} as ${result.member.role}`);
+        } else if (result.emailed) {
+          console.log(`Invite created for ${result.invite.email}. Emailed.`);
+        } else {
+          console.log(`Invite created for ${result.invite.email}. Share this link (shown once): ${result.invitePath}`);
+        }
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err);
+      }
+    });
+
+  member
+    .command('invites')
+    .description('List and manage project invites')
+    .option('--project <slug>', 'Project slug')
+    .option('--cancel <id>', 'Cancel a pending invite')
+    .option('--resend <id>', 'Resend an invite')
+    .option('--json', 'Output as JSON')
+    .action(async (options) => {
+      try {
+        const ctx = await withContext({ projectSlug: options.project });
+        if (options.cancel) {
+          const response = await projectInvitesControllerCancel({ path: { slug: ctx.projectSlug, id: options.cancel } });
+          const result = unwrap<unknown>(response);
+          if (options.json) console.log(JSON.stringify(result, null, 2));
+          else console.log(`Cancelled invite ${options.cancel}`);
+        } else if (options.resend) {
+          const response = await projectInvitesControllerResend({
+            path: { slug: ctx.projectSlug, id: options.resend },
+          } as Parameters<typeof projectInvitesControllerResend>[0]);
+          const result = unwrap<{ invitePath: string }>(response);
+          if (options.json) console.log(JSON.stringify(result, null, 2));
+          else console.log(result.invitePath);
+        } else {
+          const response = await projectInvitesControllerList({ path: { slug: ctx.projectSlug } });
+          const invites = unwrap<InviteRow[]>(response);
+          if (options.json) console.log(JSON.stringify(invites, null, 2));
+          else table(['ID', 'Email', 'Role', 'Status', 'Expires'], invites.map((invite) => [
+            invite.id,
+            invite.email,
+            invite.role,
+            invite.status,
+            invite.expiresAt,
+          ]));
+        }
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err);
       }
     });
 
