@@ -15,13 +15,21 @@ import { TicketNotificationSubscriber } from './ticket-notification.subscriber';
 import { TicketWatchController } from './ticket-watch.controller';
 import { TicketWatchService } from './ticket-watch.service';
 import { TicketWatchersRepository } from './ticket-watchers.repository';
+import { BudgetStoreModule } from '../fleet/budgets/budget-store.module';
+import { FleetApprovalRequestedSubscriber } from './fleet/fleet-approval-requested.subscriber';
+import { FleetBudgetIncidentSubscriber } from './fleet/fleet-budget-incident.subscriber';
+import { FleetHealthAlertSubscriber } from './fleet/fleet-health-alert.subscriber';
+import { FleetHealthAlertsRepository } from './fleet/fleet-health-alerts.repository';
+import { FleetHealthDetector } from './fleet/fleet-health.detector';
+import { FleetJobOutcomeSubscriber } from './fleet/fleet-job-outcome.subscriber';
+import { FleetNotificationReader } from './fleet/fleet-notification.reader';
 
 /**
  * Fleet S4a: in-app notifications. Producers are outbox fan-out handlers (D500); the writer is the
  * only path that inserts rows. Controllers are added in Tasks A8-A9.
  */
 @Module({
-  imports: [OutboxModule, LiveModule, ProjectAccessModule],
+  imports: [OutboxModule, LiveModule, ProjectAccessModule, BudgetStoreModule],
   controllers: [MeNotificationsController, TicketWatchController],
   providers: [
     MeNotificationsService,
@@ -35,6 +43,14 @@ import { TicketWatchersRepository } from './ticket-watchers.repository';
     TicketNotificationReadsRepository,
     TicketMentionResolver,
     TicketNotificationSubscriber,
+    // Fleet S4a §2.4 (Part D)
+    FleetNotificationReader,
+    FleetHealthAlertsRepository,
+    FleetJobOutcomeSubscriber,
+    FleetApprovalRequestedSubscriber,
+    FleetBudgetIncidentSubscriber,
+    FleetHealthDetector,
+    FleetHealthAlertSubscriber,
   ],
   exports: [NotificationWriter, NotificationEligibility],
 })
