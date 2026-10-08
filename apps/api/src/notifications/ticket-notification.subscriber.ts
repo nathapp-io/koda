@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { FanOutPublisher } from '../outbox/fan-out-publisher';
+import { parseMentions } from './mentions';
 import { NotificationWriter } from './notification-writer';
 import { TicketMentionResolver } from './ticket-mention.resolver';
 import { TicketForNotification, TicketNotificationReadsRepository } from './ticket-notification-reads.repository';
@@ -101,6 +102,15 @@ export class TicketNotificationSubscriber implements OnModuleInit {
       }
       case 'status_changed':
         return { facts: base, excerpt: null };
+      case 'TICKET_UPDATED': {
+        const next = event.data.description;
+        if (typeof next !== 'string') return null; // description unchanged
+        const previous = typeof event.data.previousDescription === 'string' ? event.data.previousDescription : null;
+        const before = new Set(parseMentions(previous)); // events before Task C2 carry none: every token is new
+        const added = (await this.mentions.mentionedUserIds(ticket.projectId, next)).filter((id) => !before.has(id));
+        if (added.length === 0) return null;
+        return { facts: { ...base, mentionedIds: added }, excerpt: next };
+      }
       default:
         return null;
     }

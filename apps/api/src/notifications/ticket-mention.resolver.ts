@@ -1,13 +1,28 @@
 import { Injectable } from '@nestjs/common';
+import { PrismaClient } from '@prisma/client';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { parseMentions } from './mentions';
 
 /**
- * Fleet S4a §2.3 seam. Part A ships no mention parsing: every call returns no ids. Part C (slice 3)
- * replaces the body with `@[label](user:<id>)` parsing filtered to project members and global admins,
- * keeping this signature.
+ * Fleet S4a §2.3 (slice 3): who a text mentions. Only enabled project members and enabled global admins count;
+ * a token for anyone else is ignored (D504). Order follows the text.
  */
 @Injectable()
 export class TicketMentionResolver {
-  async mentionedUserIds(_projectId: string, _text: string | null): Promise<readonly string[]> {
-    return [];
+  constructor(private readonly prisma: PrismaService<PrismaClient>) {}
+
+  async mentionedUserIds(projectId: string, text: string | null): Promise<readonly string[]> {
+    const ids = parseMentions(text);
+    if (ids.length === 0) return [];
+    const users = await this.prisma.client.user.findMany({
+      where: {
+        id: { in: [...ids] },
+        disabled: false,
+        OR: [{ role: 'ADMIN' }, { projectMemberships: { some: { projectId } } }],
+      },
+      select: { id: true },
+    });
+    const allowed = new Set(users.map((u) => u.id));
+    return ids.filter((userId) => allowed.has(userId));
   }
 }
