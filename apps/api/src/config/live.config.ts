@@ -5,7 +5,11 @@ import { IsOptional, Matches } from 'class-validator';
 export const LIVE_CFG = 'live';
 export const DEFAULT_LIVE_HEARTBEAT_MS = 25_000;
 export const MIN_LIVE_HEARTBEAT_MS = 100;
-export const MAX_LIVE_STREAMS_PER_USER = 5;
+/**
+ * Per-user open streams across project streams and `/me/events` (S4a D509). Every signed-in tab holds the user
+ * stream and a project page adds its own, so 10 keeps five project tabs live (was 5 before the S4a bell).
+ */
+export const MAX_LIVE_STREAMS_PER_USER = 10;
 
 export interface ILiveConfig {
   heartbeatMs: number;

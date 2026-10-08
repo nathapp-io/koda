@@ -8,6 +8,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { OutboxRelay } from '@nathapp/nestjs-outbox';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
+import { MAX_LIVE_STREAMS_PER_USER } from '../../../src/config/live.config';
 import { LiveStreamRegistry } from '../../../src/live/live-stream-registry';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
@@ -173,15 +174,15 @@ describeIntegration('GET /projects/:slug/events (PG)', () => {
     await anonymous.body?.cancel();
   });
 
-  it('caps a user at 5 streams and frees a slot when one closes', async () => {
-    const five = await Promise.all([1, 2, 3, 4, 5].map(() => stream('capper')));
-    await Promise.all(five.map((c) => c.next((m) => m.event === 'ready')));
+  it('caps a user at MAX_LIVE_STREAMS_PER_USER (10) streams and frees a slot when one closes', async () => {
+    const full = await Promise.all(Array.from({ length: MAX_LIVE_STREAMS_PER_USER }, () => stream('capper')));
+    await Promise.all(full.map((c) => c.next((m) => m.event === 'ready')));
 
-    const sixth = await stream('capper');
-    await expectRefused(sixth, 429, /throttle/i);
+    const extra = await stream('capper');
+    await expectRefused(extra, 429, /throttle/i);
 
-    five[0].close();
-    await waitFor(() => registry.activeFor(ids.capper) === 4);
+    full[0].close();
+    await waitFor(() => registry.activeFor(ids.capper) === MAX_LIVE_STREAMS_PER_USER - 1);
     const again = await stream('capper');
     expect(again.status).toBe(200);
     await again.next((m) => m.event === 'ready');

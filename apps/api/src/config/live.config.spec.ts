@@ -10,7 +10,7 @@ describe('liveConfig', () => {
 
   it('defaults to a 25 s heartbeat and 5 streams per user', () => {
     delete process.env['LIVE_HEARTBEAT_MS'];
-    expect(liveConfig()).toEqual({ heartbeatMs: 25000, maxStreamsPerUser: 5 });
+    expect(liveConfig()).toEqual({ heartbeatMs: 25000, maxStreamsPerUser: 10 });
   });
 
   it('reads LIVE_HEARTBEAT_MS', () => {
