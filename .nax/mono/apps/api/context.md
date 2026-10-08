@@ -232,3 +232,14 @@ Rules:
   the "queued but not placed" dry-run calls `evaluateRunners` from `jobs/placement-rules.ts`, never a copy of the
   placement logic. The API sends structured attention fields, no prose (clients word them). Project scope must not
   carry another project's job ids, features, repos or slugs, nor any credential provider, expiry or version.
+
+## Notifications (fleet S4a)
+
+- `src/notifications/` owns in-app notifications. Producers are outbox fan-out handlers (`FanOutPublisher.register`);
+  domain services only enqueue events. `NotificationWriter.deliver` is the only insert path (eligibility, IN_APP
+  preference, `createManyAndReturn({ skipDuplicates })` on `(userId, sourceType, sourceId, kind)`, then
+  `UserEventBus.publish`). A producer throws only on database failure; a missing or deleted source ends quietly.
+- `TicketWatcher` rows are insert-if-absent; unwatch is a sticky `muted` flag. Assignment and mentions ignore mute.
+- `/me/*` routes are users-only and never take a user id. `/me/events` shares `LiveStreamRegistry` with project
+  streams.
+- Notification text: English `title`/`body` (CLI fallback, truncated to 200/280), web renders from `kind` + `params`.
