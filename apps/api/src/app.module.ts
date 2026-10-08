@@ -45,6 +45,7 @@ import { ragConfig } from './config/rag.config';
 import { vcsConfig } from './config/vcs.config';
 import { outboxConfig } from './config/outbox.config';
 import { notificationsConfig } from './config/notifications.config';
+import { globalThrottleLimit } from './config/throttle-limit';
 import { liveConfig } from './config/live.config';
 import { webhookConfig } from './config/webhook.config';
 import { fleetConfig } from './config/fleet.config';
@@ -84,7 +85,7 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
     }),
     ThrottlerModule.forRootAsync({
       useFactory: () => ({
-        throttlers: [{ name: 'default', ttl: 60000, limit: 100 }],
+        throttlers: [{ name: 'default', ttl: 60000, limit: globalThrottleLimit() }],
       }),
     }),
     AuthModule,

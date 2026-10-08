@@ -60,6 +60,9 @@ export default defineConfig({
         // a single client IP) stay under the limit even with CI retries that
         // restart workers and clear the per-worker session cache.
         AUTH_LOGIN_THROTTLE_LIMIT: process.env['AUTH_LOGIN_THROTTLE_LIMIT'] ?? '50',
+        // Every spec shares one client IP; the S4a notification bell adds two API reads per page load,
+        // which pushes a full run past the production 100/min default throttle.
+        THROTTLE_LIMIT: process.env['THROTTLE_LIMIT'] ?? '1000',
         // Fleet slice 4c: the scripted runner's idle sync returns within 1 s instead of
         // long-polling 25 s, and job bundles land outside the repo.
         FLEET_SYNC_WAIT_MS: '1000',
