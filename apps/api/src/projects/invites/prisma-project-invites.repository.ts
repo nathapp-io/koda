@@ -26,6 +26,13 @@ const INCLUDE_CONTEXT = {
   project: { select: { name: true } },
 } as const;
 
+/**
+ * The invite list is not paginated, so the newest page is capped. `ProjectInvite` grows with every invite
+ * ever created for a project; a bare `findMany` would make both the query and the `GET /projects/:slug/invites`
+ * response grow without bound (api-data rules, Pagination Anti-Patterns).
+ */
+const LIST_LIMIT = 200;
+
 /** An invite plus the two display names the inline email needs (spec §4.1). */
 export interface ProjectInviteWithContext extends ProjectInviteRecord {
   projectName: string;
@@ -82,6 +89,7 @@ export class PrismaProjectInvitesRepository {
       where: { projectId },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: INCLUDE_CONTEXT,
+      take: LIST_LIMIT,
     });
     return (rows as InviteRow[]).map((row) => this.toRecord(row));
   }
