@@ -3,7 +3,7 @@
   "feature": "fleet-s4b-email-invites",
   "branchName": "feat/fleet-s4b-email-invites",
   "createdAt": "2026-10-10T00:00:00.000Z",
-  "updatedAt": "2026-10-08T14:11:19.503Z",
+  "updatedAt": "2026-10-08T14:50:03.838Z",
   "userStories": [
     {
       "id": "US-001",
@@ -331,8 +331,8 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -403,7 +403,10 @@
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Few CLI files and existing patterns, but admin invite operations and one-time token disclosure are security-sensitive."
+        "reasoning": "Few CLI files and existing patterns, but admin invite operations and one-time token disclosure are security-sensitive.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/cli/src/commands/member.ts",
@@ -421,7 +424,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "359cd71af3f19b4920f88d3c1bae30bb8342cde0"
     },
     {
       "id": "US-007",
