@@ -8,6 +8,18 @@ export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
 export type NotificationChannelValue = `${NotificationChannel.IN_APP}` | `${NotificationChannel.EMAIL}`;
 export const NOTIFICATION_CHANNELS: readonly NotificationChannelValue[] = [NotificationChannel.IN_APP, NotificationChannel.EMAIL];
 
+/**
+ * S4b D517 (US-001): email default per category when a user has no `(category, 'email')` row. The in-app
+ * default stays "missing row = on".
+ */
+export const EMAIL_CATEGORY_DEFAULTS: Readonly<Record<NotificationCategory, boolean>> = {
+  ASSIGNED: true,
+  MENTIONED: true,
+  FLEET_NEEDS_YOU: true,
+  WATCHED_ACTIVITY: false,
+  FLEET_HEALTH: false,
+};
+
 export const WATCH_REASONS = ['REPORTER', 'ASSIGNEE', 'COMMENTER', 'MENTIONED', 'MANUAL'] as const;
 export type WatchReason = (typeof WATCH_REASONS)[number];
 
