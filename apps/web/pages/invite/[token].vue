@@ -94,7 +94,7 @@ const onSubmit = handleSubmit(async (values) => {
           <Input id="password" v-model="password" type="password" :placeholder="t('invite.passwordPlaceholder')" />
         </div>
 
-        <p v-if="accountExists" data-testid="invite-account-exists" class="text-sm text-destructive">
+        <p v-if="accountExists" data-testid="invite-account-exists" class="text-sm text-status-rejected">
           {{ t('invite.accountExists') }}
         </p>
 
