@@ -36,7 +36,7 @@ export class NotificationRetentionProcessor {
     const before = new Date(now.getTime() - days * DAY_MS);
     try {
       const deleted = await this.repo.purgeRead(before);
-      this.logger.log(`Purged ${deleted} read notification(s) created before ${before.toISOString()}`);
+      this.logger.log(`Purged ${deleted} read notification(s) read before ${before.toISOString()}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Notification retention purge failed, will retry next run: ${message}`);

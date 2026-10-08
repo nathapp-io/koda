@@ -69,6 +69,16 @@ describeIntegration('notifications repositories (PG)', () => {
     expect(await prisma.notification.count({ where: { sourceId: 'old-unread' } })).toBe(1);
   });
 
+  it('purgeRead counts from when a row was read: an old row read recently is kept (D511)', async () => {
+    const created = new Date('2020-01-01T00:00:00Z');
+    const readRecently = new Date('2021-06-01T00:00:00Z');
+    await prisma.notification.create({
+      data: { userId: ids.u2, category: 'ASSIGNED', kind: 'k', title: 'old, read late', link: '/x', sourceType: 'ticket_event', sourceId: 'old-read-late', createdAt: created, readAt: readRecently },
+    });
+    await notifications.purgeRead(new Date('2021-01-01T00:00:00Z'));
+    expect(await prisma.notification.count({ where: { sourceId: 'old-read-late' } })).toBe(1);
+  });
+
   it('auto-watch never un-mutes; watch/unwatch toggle the sticky mute (D502)', async () => {
     await watchers.ensure(ids.ticket, [{ userId: ids.u1, reason: 'REPORTER' }]);
     await watchers.unwatch(ids.ticket, ids.u1);

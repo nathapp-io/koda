@@ -74,7 +74,7 @@ export class NotificationsRepository {
   }
 
   async purgeRead(before: Date): Promise<number> {
-    const { count } = await this.db.notification.deleteMany({ where: { readAt: { not: null }, createdAt: { lt: before } } });
+    const { count } = await this.db.notification.deleteMany({ where: { readAt: { lt: before } } });
     return count;
   }
 }

@@ -72,10 +72,10 @@ describe('NotificationsRepository (S4a §1)', () => {
     });
   });
 
-  it('purgeRead deletes read rows created before the cutoff only', async () => {
+  it('purgeRead deletes rows read before the cutoff only (D511)', async () => {
     const { repo, notification } = setup();
     const before = new Date('2026-07-01T00:00:00Z');
     await expect(repo.purgeRead(before)).resolves.toBe(3);
-    expect(notification.deleteMany).toHaveBeenCalledWith({ where: { readAt: { not: null }, createdAt: { lt: before } } });
+    expect(notification.deleteMany).toHaveBeenCalledWith({ where: { readAt: { lt: before } } });
   });
 });

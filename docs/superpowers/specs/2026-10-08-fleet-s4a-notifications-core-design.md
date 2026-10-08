@@ -156,8 +156,8 @@ model FleetHealthAlert {          // slice 4
 - Backfill (slice 1 migration SQL): one watcher row per existing ticket for the reporter (`REPORTER`), the user
   assignee (`ASSIGNEE`), and each distinct user commenter (`COMMENTER`); deleted tickets skipped.
 - A missing preference row means enabled. Unknown categories are rejected by the DTO.
-- Retention: `NotificationRetentionProcessor` `@Cron('30 4 * * *')` deletes read rows older than
-  `NOTIFICATION_RETENTION_DAYS` (default 90); unread rows are kept. `FleetHealthAlert` rows closed for more than 30
+- Retention: `NotificationRetentionProcessor` `@Cron('30 4 * * *')` deletes rows read more than
+  `NOTIFICATION_RETENTION_DAYS` ago (default 90, counted from `readAt`); unread rows are kept. `FleetHealthAlert` rows closed for more than 30
   days are deleted by the same job.
 
 ## 2. Producers
@@ -319,7 +319,7 @@ live check after slice 4 (human-run).
 | D508 | Budget notifications ride on the evaluator's existing deduplicated incidents. |
 | D509 | The user live stream is content-free and refetch-driven, sharing the per-user stream cap with project streams. |
 | D510 | Notification text carries no secrets or command content; agents never receive notifications. |
-| D511 | Read notifications are purged after 90 days; unread are kept. |
+| D511 | Read notifications are purged 90 days after they were read (`readAt`); unread are kept. |
 | D512 | `OutboxEvent.projectId` becomes nullable; `PrismaOutboxStore.save` accepts a missing `metadata.projectId` only for `GLOBAL_OUTBOX_TYPES` = `fleet_budget_incident`, `fleet_health_alert` (both are global; the column was NOT NULL with an FK). |
 | D513 | `fleet_job_outcome` is enqueued by `FleetJobOutcomeRecorder` inside `JobTransitionsService.apply` (every terminal transition, caller's transaction) and inside the ingest correction transaction (late ESCALATED, late PR url); no after-commit fallback is needed. |
 | D514 | The approval consumer notifies only asks still `pending` when the handler runs, so the backlog enqueued since #236 does not flood admins. |
