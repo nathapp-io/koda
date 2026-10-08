@@ -2,18 +2,20 @@
 export const MENTION_LIMIT = 20;
 
 /**
- * D504: `@[<label>](user:<cuid>)`. The label is display-only (never `]`); the id is a lowercase cuid. Plain `@name`
+ * D504: `@[<label>](user:<cuid>)`. The label is display-only: 1-100 chars, never `[`, `]`, `@` or a newline (the bound
+ * keeps matching linear on hostile text: each `@[` scans at most 100 chars). The id is a lowercase cuid. Plain `@name`
  * is never parsed. Global: use only through `matchAll` / `replace`, which do not share `lastIndex` state.
  * The web copy in apps/web/lib/mentions.ts must stay identical.
  */
-export const MENTION_TOKEN = /@\[([^\]]+)\]\(user:(c[a-z0-9]{20,32})\)/g;
+export const MENTION_TOKEN = /@\[([^[\]@\n]{1,100})\]\(user:(c[a-z0-9]{20,32})\)/g;
 
 /** Distinct mentioned user ids in first-seen order, capped at MENTION_LIMIT. */
 export function parseMentions(text: string | null | undefined): readonly string[] {
   if (!text) return [];
-  return [...text.matchAll(MENTION_TOKEN)].reduce<readonly string[]>((ids, match) => {
-    const userId = match[2];
-    if (ids.length >= MENTION_LIMIT || ids.includes(userId)) return ids;
-    return [...ids, userId];
-  }, []);
+  const ids = new Set<string>();
+  for (const match of text.matchAll(MENTION_TOKEN)) {
+    ids.add(match[2]);
+    if (ids.size >= MENTION_LIMIT) break; // stop scanning once the cap is reached
+  }
+  return [...ids];
 }

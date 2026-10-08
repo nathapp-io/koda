@@ -48,4 +48,17 @@ describe('parseMentions (S4a §2.3, D504)', () => {
     expect(parseMentions(text)).toEqual([]);
     expect(Date.now() - started).toBeLessThan(500);
   });
+
+  it('is linear on hostile input: 50k unclosed "@[" parse fast (ReDoS guard)', () => {
+    const started = Date.now();
+    expect(parseMentions('@['.repeat(50_000))).toEqual([]);
+    expect(parseMentions(`${'@[x'.repeat(30_000)}](user:${id(1)})`)).toEqual([id(1)]); // only the last token closes
+    expect(Date.now() - started).toBeLessThan(250);
+  });
+
+  it('ignores a label longer than 100 characters or containing "[", "@" or a newline', () => {
+    expect(parseMentions(`@[${'a'.repeat(101)}](user:${id(1)})`)).toEqual([]);
+    expect(parseMentions(`@[a@b](user:${id(1)}) @[a[b](user:${id(2)}) @[a\nb](user:${id(3)})`)).toEqual([]);
+    expect(parseMentions(`@[${'a'.repeat(100)}](user:${id(4)})`)).toEqual([id(4)]);
+  });
 });
