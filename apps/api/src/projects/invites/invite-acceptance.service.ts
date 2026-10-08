@@ -52,11 +52,14 @@ export class InviteAcceptanceService {
     const now = new Date();
 
     const user = await this.txManager.run(async () => {
-      const invite = await this.invites.findByTokenHash(hashInviteToken(token));
+      const tokenHash = hashInviteToken(token);
+      const invite = await this.invites.findByTokenHash(tokenHash);
       if (!this.usable(invite, now)) throw this.notFound();
 
       // The single-use gate (AC-7): exactly one concurrent accept sees count 1, the other rolls back.
-      if (!(await this.invites.claimPending(invite.id, now))) throw this.notFound();
+      // The hash is re-checked inside the claim, so a resend that rotated it in between (AC-8) leaves
+      // this superseded link unredeemable rather than accepting an invite the admin replaced.
+      if (!(await this.invites.claimPending(invite.id, tokenHash, now))) throw this.notFound();
 
       // An account created after the invite (case-insensitive) is a conflict, and the claim above
       // rolls back with it, so the invite stays PENDING (AC-9).

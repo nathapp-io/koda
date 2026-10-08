@@ -126,10 +126,14 @@ export class PrismaProjectInvitesRepository {
    * US-005 AC-7: the single use of the token is a conditional update, so two concurrent accepts
    * serialize on the row lock and exactly one sees `count: 1`. Returns false when the invite is
    * already accepted/cancelled or has expired.
+   *
+   * The presented `tokenHash` is part of the guard, not just the lookup key: a resend that rotates
+   * the hash between the caller's read and this update makes the row fail the WHERE (the update
+   * re-checks it under the row lock), so the superseded link cannot be redeemed (AC-8).
    */
-  async claimPending(id: string, now: Date): Promise<boolean> {
+  async claimPending(id: string, tokenHash: string, now: Date): Promise<boolean> {
     const result = await this.db.projectInvite.updateMany({
-      where: { id, status: 'PENDING', expiresAt: { gt: now } },
+      where: { id, tokenHash, status: 'PENDING', expiresAt: { gt: now } },
       data: { status: 'ACCEPTED', acceptedAt: now },
     });
     return result.count === 1;
@@ -147,6 +151,11 @@ export class PrismaProjectInvitesRepository {
    * US-005: resend rotates the token and restarts the clock, but only while the invite is still
    * PENDING (an expired row keeps status PENDING — EXPIRED is computed on read). Returns null when
    * an accept or cancel won the race, so the caller can answer 409 without having written anything.
+   *
+   * The guard is the row's *current* hash, read here rather than taken from the caller's earlier
+   * lookup: two concurrent resends would otherwise both match (rotation leaves the row PENDING) and
+   * both report success, one of them handing back a link that the other had already superseded. The
+   * hash never leaves this repository — the module's public records deliberately omit it.
    */
   async rotate(input: {
     id: string;
@@ -154,8 +163,19 @@ export class PrismaProjectInvitesRepository {
     tokenHash: string;
     expiresAt: Date;
   }): Promise<ProjectInviteWithContext | null> {
+    const current = await this.db.projectInvite.findFirst({
+      where: { id: input.id, projectId: input.projectId },
+      select: { tokenHash: true },
+    });
+    if (!current) return null;
+
     const result = await this.db.projectInvite.updateMany({
-      where: { id: input.id, projectId: input.projectId, status: 'PENDING' },
+      where: {
+        id: input.id,
+        projectId: input.projectId,
+        tokenHash: current.tokenHash,
+        status: 'PENDING',
+      },
       data: { tokenHash: input.tokenHash, status: 'PENDING', expiresAt: input.expiresAt },
     });
     if (result.count !== 1) return null;
