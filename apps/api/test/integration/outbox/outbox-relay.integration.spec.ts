@@ -71,15 +71,18 @@ describeIntegration('outbox relay end to end', () => {
       throw new Error('downstream unavailable');
     });
 
+    // computeBackoff jitters the delay to [0.5, 1.5) x base; pin the low end so the bound is deterministic.
+    const random = jest.spyOn(Math, 'random').mockReturnValue(0);
     const before = Date.now();
     const record = await outbox.record({ type: 'relay_fail', payload: {}, metadata: { projectId, eventId: 'fail-1' } });
     await relay.dispatchPendingBatch();
+    random.mockRestore();
 
     const row = await prisma.client.outboxEvent.findUniqueOrThrow({ where: { id: record.id } });
     expect(row).toMatchObject({ status: 'pending', attempts: 1, owner: null });
     expect(row.lastError).toContain('downstream unavailable');
-    // backoffBaseMs 2000 for the first retry
-    expect(row.nextAttemptAt.getTime()).toBeGreaterThanOrEqual(before + 2000);
+    // backoffBaseMs 2000 for the first retry, jittered down to at most half of it
+    expect(row.nextAttemptAt.getTime()).toBeGreaterThanOrEqual(before + 1000);
 
     // Not due yet: a second cycle leaves it alone.
     await relay.dispatchPendingBatch();
