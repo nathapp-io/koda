@@ -285,7 +285,11 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
     expect((await accept(expired.token)).status).toBe(404);
     expect(await prisma.client.user.count({ where: { email: expired.row.email } })).toBe(0);
     expect((await inviteRow(expired.row.id)).status).toBe('PENDING');
-    expect(await prisma.client.projectMember.count({ where: { projectId: expired.row.projectId } })).toBe(0);
+    // Scoped to the invited address: the earlier accepts in this file already put members in this
+    // project, so a project-wide count says nothing about the expired token having written a row.
+    expect(await prisma.client.projectMember.count({
+      where: { projectId: expired.row.projectId, user: { email: expired.row.email } },
+    })).toBe(0);
   });
 
   // ── US-005 AC-7 ───────────────────────────────────────────────────────────
