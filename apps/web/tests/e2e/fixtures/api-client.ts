@@ -230,6 +230,20 @@ export async function deleteTicket(token: string, projectSlug: string, ticketRef
 }
 
 /** Credentials for the seeded E2E admin user */
+export async function assignTicket(
+  token: string,
+  projectSlug: string,
+  ticketRef: string,
+  userId: string,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/api/projects/${projectSlug}/tickets/${ticketRef}/assign`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ userId }),
+  });
+  if (!res.ok) throw new Error(`Assign ticket failed: ${res.status} ${await res.text()}`);
+}
+
 export const E2E_ADMIN = {
   email: 'admin@koda-e2e.test',
   password: 'E2ePassword1!',
