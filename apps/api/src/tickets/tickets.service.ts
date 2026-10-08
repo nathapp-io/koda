@@ -264,7 +264,11 @@ export class TicketsService {
     const updated = await this.txManager.run(async () => {
       const row = await this.ticketRepo.updateTicket(ticket.id, updateData);
       if (project?.id) {
-        await this.recordTicketEvent(ticket.id, project.id, 'TICKET_UPDATED', principal, { ...updateData });
+        // S4a §2.2: mention notifications diff the new description against the previous one.
+        const eventData = updateData.description !== undefined
+          ? { ...updateData, previousDescription: ticket.description ?? null }
+          : { ...updateData };
+        await this.recordTicketEvent(ticket.id, project.id, 'TICKET_UPDATED', principal, eventData);
       }
       return row;
     });
