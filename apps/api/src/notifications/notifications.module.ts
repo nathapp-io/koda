@@ -5,6 +5,8 @@ import { ProjectAccessModule } from '../projects/project-access.module';
 import { NotificationEligibility } from './notification-eligibility';
 import { NotificationPreferencesService } from './notification-preferences.service';
 import { NotificationRetentionProcessor } from './notification-retention.processor';
+import { MeNotificationsController } from './me-notifications.controller';
+import { MeNotificationsService } from './me-notifications.service';
 import { NotificationWriter } from './notification-writer';
 import { NotificationsRepository } from './notifications.repository';
 import { TicketMentionResolver } from './ticket-mention.resolver';
@@ -18,7 +20,9 @@ import { TicketWatchersRepository } from './ticket-watchers.repository';
  */
 @Module({
   imports: [OutboxModule, LiveModule, ProjectAccessModule],
+  controllers: [MeNotificationsController],
   providers: [
+    MeNotificationsService,
     NotificationsRepository,
     TicketWatchersRepository,
     NotificationPreferencesService,
