@@ -160,3 +160,15 @@ changing layout, navigation, tokens or the ticket board, and update its Status t
 - Ticket chip styling (status/priority dots, type tints, card stripe) lives in `lib/ticket-chips.ts`;
   import it instead of copying chip class maps. `components/FilterBar.vue` is the shared filter-row
   grid. Pattern docs: `docs/ux/component-patterns.md`, `docs/ux/design-tokens.md`.
+
+## Notifications (S4a)
+
+- Header `components/NotificationBell.vue` (every signed-in page) reads `useNotifications()` (tab-shared
+  `useState`), refreshed by `useUserEvents()`: one EventSource to `/api/me/events` per tab (shared hub,
+  `server/api/me/events.get.ts`) plus a 60 s visible-tab poll backstop. Pages `/notifications` and
+  `/settings/notifications`; `components/TicketWatchButton.vue` on ticket detail.
+- Notification copy comes from `notifications.kinds.<kind>` with the row's `params`; an unknown kind falls back to the
+  API `title`. A new kind needs both locales (pinned by `tests/i18n/notifications-locale-parity.spec.ts`).
+- Every page holds a live stream open: E2E must never wait for `networkidle`; use `waitForHydration`.
+- E2E sets `THROTTLE_LIMIT=1000` for the API (`playwright.config.ts`): every spec shares one client IP and the bell adds
+  two reads per page load, which pushes a full run past the production 100/min default.
