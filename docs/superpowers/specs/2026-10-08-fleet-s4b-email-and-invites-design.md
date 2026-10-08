@@ -54,7 +54,7 @@ them) by email when they have not already seen it in the app. Email sending and 
   values (`in_app`, `email`).
 - D525: keep a koda `ProjectInvite` model (not `@nathapp/nestjs-account`, which brings its whole
   Account/Membership/Role model); its fields and status values mirror `IInvitation` so a later move is a mapping.
-- D526 (found while writing the spec, pending user confirmation): because only the token hash is stored, the
+- D526 (found while writing the spec, approved 2026-10-08): because only the token hash is stored, the
   `INVITE` email is sent inline from the create/resend request after commit and is **not retried**; on failure the
   response says `emailed: false` and the admin shares the returned link or resends. (`MEMBER_ADDED` and notification
   email are scheduled and retried as designed.)
