@@ -7,6 +7,7 @@ export function useNotificationPreferences() {
   const { $api } = useApi()
   const view = ref<PreferencesView>({ emailAvailable: false, emailEnabled: false, items: [] })
   const pending = ref(false)
+  let updateQueue: Promise<void> = Promise.resolve()
 
   async function load(): Promise<void> {
     pending.value = true
@@ -17,17 +18,26 @@ export function useNotificationPreferences() {
     }
   }
 
+  /** Queue writes so each full-view response includes all preceding preference updates. */
+  function update(body: Record<string, unknown>): Promise<void> {
+    const request = updateQueue.then(async () => {
+      view.value = await $api.put<PreferencesView>(PREFERENCES_PATH, body)
+    })
+    updateQueue = request.then(() => undefined, () => undefined)
+    return request
+  }
+
   /** Rethrows on failure; the page reports it and keeps the previous view. */
-  async function setInApp(category: NotificationCategory, inApp: boolean): Promise<void> {
-    view.value = await $api.put<PreferencesView>(PREFERENCES_PATH, { items: [{ category, inApp }] })
+  function setInApp(category: NotificationCategory, inApp: boolean): Promise<void> {
+    return update({ items: [{ category, inApp }] })
   }
 
-  async function setEmail(category: NotificationCategory, email: boolean): Promise<void> {
-    view.value = await $api.put<PreferencesView>(PREFERENCES_PATH, { items: [{ category, email }] })
+  function setEmail(category: NotificationCategory, email: boolean): Promise<void> {
+    return update({ items: [{ category, email }] })
   }
 
-  async function setEmailEnabled(emailEnabled: boolean): Promise<void> {
-    view.value = await $api.put<PreferencesView>(PREFERENCES_PATH, { emailEnabled })
+  function setEmailEnabled(emailEnabled: boolean): Promise<void> {
+    return update({ emailEnabled })
   }
 
   return { view, pending, load, setInApp, setEmail, setEmailEnabled }

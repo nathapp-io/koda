@@ -47,6 +47,31 @@ describe('useNotificationPreferences (S4a §3)', () => {
     expect(put).toHaveBeenCalledWith('/me/notification-preferences', { emailEnabled: false })
   })
 
+  test('serializes concurrent writes so an older response cannot overwrite the newer view', async () => {
+    let resolveFirst!: (value: typeof VIEW) => void
+    let resolveSecond!: (value: typeof VIEW) => void
+    const firstResponse = new Promise<typeof VIEW>((resolve) => { resolveFirst = resolve })
+    const secondResponse = new Promise<typeof VIEW>((resolve) => { resolveSecond = resolve })
+    const put = jest.fn()
+      .mockReturnValueOnce(firstResponse)
+      .mockReturnValueOnce(secondResponse)
+    const prefs = await load({ get: jest.fn(async () => VIEW), put })
+    await prefs.load()
+
+    const first = prefs.setEmail('MENTIONED', true)
+    const second = prefs.setEmailEnabled(false)
+    await Promise.resolve()
+    expect(put).toHaveBeenCalledTimes(1)
+    resolveFirst({ ...VIEW, items: ITEMS.map((item) => item.category === 'MENTIONED' ? { ...item, email: true } : item) })
+    await first
+    await Promise.resolve()
+    expect(put).toHaveBeenCalledTimes(2)
+    resolveSecond({ ...VIEW, emailEnabled: false, items: ITEMS.map((item) => item.category === 'MENTIONED' ? { ...item, email: true } : item) })
+    await second
+    expect(prefs.view.value.emailEnabled).toBe(false)
+    expect(prefs.view.value.items.find((item) => item.category === 'MENTIONED')?.email).toBe(true)
+  })
+
   test('a failed PUT rethrows and keeps the previous list', async () => {
     const prefs = await load({ get: jest.fn(async () => VIEW), put: jest.fn(async () => { throw new Error('down') }) })
     await prefs.load()
