@@ -160,3 +160,39 @@ describe('EmailDispatcher (S4b US-002)', () => {
     expect(notify.send).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('EmailDispatcher scheduled ticks (S4b US-002)', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('starts a ~30 second interval on init and stops it on destroy', async () => {
+    jest.useFakeTimers();
+    const { dispatcher, schedule } = setup();
+    dispatcher.onModuleInit();
+    await jest.advanceTimersByTimeAsync(30_000);
+    expect(schedule.claimDue).toHaveBeenCalledTimes(1);
+    dispatcher.onModuleDestroy();
+    schedule.claimDue.mockClear();
+    await jest.advanceTimersByTimeAsync(120_000);
+    expect(schedule.claimDue).not.toHaveBeenCalled();
+  });
+
+  it('a scheduled tick that is still running suppresses the next one (no overlap)', async () => {
+    const { dispatcher, schedule } = setup();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    schedule.claimDue.mockImplementation(async () => { await gate; return []; });
+    const first = dispatcher.runScheduledTick(NOW);
+    await dispatcher.runScheduledTick(NOW);
+    expect(schedule.claimDue).toHaveBeenCalledTimes(1);
+    release();
+    await first;
+  });
+
+  it('logs a failed scheduled tick instead of throwing it', async () => {
+    const { dispatcher, schedule } = setup();
+    schedule.closeAbandonedInvites.mockRejectedValueOnce(new Error('db down'));
+    await expect(dispatcher.runScheduledTick(NOW)).resolves.toBeUndefined();
+  });
+});

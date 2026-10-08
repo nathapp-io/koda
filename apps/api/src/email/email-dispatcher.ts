@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import {
   INotifyService, NOTIFY_SERVICE, NotifyException, NotifyExceptionCode, PermanentNotificationError,
 } from '@nathapp/nestjs-notify';
@@ -13,6 +13,9 @@ export type SendOutcome = 'SENT' | 'FAILED' | 'RETRY';
 /** Rows claimed per tick. Small enough that a stuck send delays the batch by seconds, not minutes. */
 const CLAIM_LIMIT = 50;
 
+/** D518: the in-process dispatcher fires about every 30 seconds (single API instance). */
+const TICK_INTERVAL_MS = 30_000;
+
 /** Codes that mean retrying can never succeed (spec §2.2). */
 const PERMANENT_NOTIFY_CODES = new Set<unknown>([
   NotifyExceptionCode.TEMPLATE_NOT_FOUND, 'TEMPLATE_NOT_FOUND',
@@ -24,11 +27,14 @@ const messageOf = (error: unknown): string => (error instanceof Error ? error.me
 
 /**
  * Fleet S4b US-002 (D518/D519): the delayed email dispatcher. `tick` closes abandoned invite sends,
- * claims due rows and hands each to `sendOne`; one row's failure never stops the batch.
+ * claims due rows and hands each to `sendOne`; one row's failure never stops the batch. A scheduled
+ * tick runs about every 30 seconds and never overlaps a still-running scheduled tick.
  */
 @Injectable()
-export class EmailDispatcher {
+export class EmailDispatcher implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EmailDispatcher.name);
+  private timer: NodeJS.Timeout | null = null;
+  private ticking = false;
 
   constructor(
     private readonly schedule: EmailScheduleService,
@@ -36,6 +42,34 @@ export class EmailDispatcher {
     @Inject(NOTIFY_SERVICE) private readonly notify: INotifyService,
     private readonly email: EmailAvailability,
   ) {}
+
+  onModuleInit(): void {
+    this.timer = setInterval(() => {
+      void this.runScheduledTick();
+    }, TICK_INTERVAL_MS);
+    this.timer.unref();
+  }
+
+  onModuleDestroy(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+
+  /**
+   * The scheduled entry point: a tick that is still in flight suppresses the next interval, so two
+   * scheduled ticks never overlap. A failure of the tick itself (claim/close) is logged, not thrown.
+   */
+  async runScheduledTick(now = new Date()): Promise<void> {
+    if (this.ticking) return;
+    this.ticking = true;
+    try {
+      await this.tick(now);
+    } catch (error) {
+      this.logger.error(`Email dispatch tick failed: ${messageOf(error)}`);
+    } finally {
+      this.ticking = false;
+    }
+  }
 
   async tick(now: Date): Promise<void> {
     await this.schedule.closeAbandonedInvites(now);
