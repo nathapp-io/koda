@@ -188,6 +188,23 @@
         "removed": "Member removed",
         "roleChanged": "Role updated"
       }
+    },
+    "invites": {
+      "title": "Invites",
+      "subtitle": "Invite someone by email, or share a one-time link when email is unavailable.",
+      "emailPlaceholder": "new{'@'}example.com",
+      "send": "Send invite",
+      "shareTitle": "Share this one-time invite link",
+      "notEmailed": "The invite email could not be sent. Share the link below.",
+      "empty": "No pending invites.",
+      "resend": "Resend",
+      "cancel": "Cancel invite",
+      "cancelConfirm": "Cancel the invite for {email}?",
+      "roles": {
+        "ADMIN": "Admin",
+        "DEVELOPER": "Developer",
+        "VIEWER": "Viewer"
+      }
     }
   },
   "tickets": {
@@ -1891,6 +1908,23 @@
       "unwatch": "Unwatch",
       "count": "{count} watching",
       "failed": "Could not update watching"
+    }
+  },
+  "invite": {
+    "title": "You're invited",
+    "subtitle": "Join {projectName}",
+    "loading": "Loading invite…",
+    "invalid": "This invite link is invalid or has expired.",
+    "accountExists": "An account already exists for this email. Sign in instead.",
+    "signedIn": "You're already signed in. Continue to the project.",
+    "name": "Full name",
+    "namePlaceholder": "Jane Doe",
+    "password": "Password",
+    "passwordPlaceholder": "••••••••",
+    "accept": "Create account and join",
+    "validation": {
+      "nameRequired": "Name is required",
+      "passwordMin": "Password must be at least 8 characters"
     }
   }
 }

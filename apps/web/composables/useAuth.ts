@@ -48,6 +48,19 @@ export function useAuth() {
     user.value = response.user
   }
 
+  /**
+   * Redeem a public invite token: create the account and establish the session.
+   * The Nitro route under /api/invites/<token>/accept mirrors register, setting
+   * the httpOnly cookies and returning the new user so client state matches.
+   */
+  async function acceptInvite(token: string, body: { name: string; password: string }): Promise<void> {
+    const response = await $fetch<{ user: AuthUser }>(`/api/invites/${token}/accept`, {
+      method: 'POST',
+      body,
+    })
+    user.value = response.user
+  }
+
   async function logout(): Promise<void> {
     try {
       await $fetch('/api/auth/logout', { method: 'POST' })
@@ -101,5 +114,5 @@ export function useAuth() {
     }
   }
 
-  return { user, isAuthenticated, login, register, logout, fetchUser, refresh }
+  return { user, isAuthenticated, login, register, acceptInvite, logout, fetchUser, refresh }
 }

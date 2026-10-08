@@ -188,6 +188,23 @@
         "removed": "已移除成员",
         "roleChanged": "角色已更新"
       }
+    },
+    "invites": {
+      "title": "邀请",
+      "subtitle": "通过邮箱邀请他人；邮件不可用时也可分享一次性链接。",
+      "emailPlaceholder": "new{'@'}example.com",
+      "send": "发送邀请",
+      "shareTitle": "分享此一次性邀请链接",
+      "notEmailed": "邀请邮件未能发送。请分享下方链接。",
+      "empty": "暂无待处理的邀请。",
+      "resend": "重新发送",
+      "cancel": "取消邀请",
+      "cancelConfirm": "确定取消发送给 {email} 的邀请？",
+      "roles": {
+        "ADMIN": "管理员",
+        "DEVELOPER": "开发者",
+        "VIEWER": "查看者"
+      }
     }
   },
   "tickets": {
@@ -1891,6 +1908,23 @@
       "unwatch": "取消关注",
       "count": "{count} 人关注",
       "failed": "无法更新关注状态"
+    }
+  },
+  "invite": {
+    "title": "你被邀请了",
+    "subtitle": "加入 {projectName}",
+    "loading": "正在加载邀请…",
+    "invalid": "此邀请链接无效或已过期。",
+    "accountExists": "该邮箱已存在账户。请直接登录。",
+    "signedIn": "你已登录。前往项目即可。",
+    "name": "姓名",
+    "namePlaceholder": "张三",
+    "password": "密码",
+    "passwordPlaceholder": "••••••••",
+    "accept": "创建账户并加入",
+    "validation": {
+      "nameRequired": "请输入姓名",
+      "passwordMin": "密码至少需要 8 个字符"
     }
   }
 }
