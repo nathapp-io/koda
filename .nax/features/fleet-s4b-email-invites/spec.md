@@ -216,6 +216,7 @@ must leave zero drift against `schema.prisma`.
   also a 409; otherwise create the user (password hashed as `UsersAdminService.create` does, role `MEMBER`, email from
   the invite, name from the body), set `acceptedByUserId`, create the membership. The session is issued after commit
   through `AuthService.issueSession`.
+- **Web accept page (US-007)** uses the vee-validate + zod form pattern of `apps/web/pages/register.vue`.
 - **Web accept (US-007)** goes through a Nitro route `apps/web/server/api/invites/[token]/accept.post.ts` that sets the
   httpOnly auth cookies exactly like `apps/web/server/api/auth/register.post.ts`.
 - **Contract regeneration.** API stories that change routes or DTOs (US-001, US-004, US-005) run `bun run api:export-spec`
@@ -355,7 +356,6 @@ Error keys live in `apps/api/src/i18n/{en,zh}/invites.json`.
 - `apps/web/pages/[project]/settings.vue` — renders `ProjectMembersPanel` today
 - `apps/web/server/api/auth/register.post.ts` — cookie-setting Nitro route to mirror
 - `apps/web/middleware/auth.global.ts` — public-route handling extended here
-- `apps/web/pages/register.vue` — vee-validate + zod form to mirror on the accept page
 - `apps/web/composables/useAuth.ts` — gains `acceptInvite`, mirroring `register`
 
 ### Creates
