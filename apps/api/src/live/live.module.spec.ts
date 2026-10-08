@@ -4,8 +4,10 @@ import { FanOutPublisher } from '../outbox/fan-out-publisher';
 import { LiveController } from './live.controller';
 import { LiveModule } from './live.module';
 import { LiveStreamRegistry } from './live-stream-registry';
+import { MeLiveController } from './me-live.controller';
 import { ProjectEventBus } from './project-event-bus';
 import { TicketLiveSubscriber } from './ticket-live.subscriber';
+import { UserEventBus } from './user-event-bus';
 
 describe('LiveModule (DI wiring, no database)', () => {
   let moduleRef: TestingModule;
@@ -32,5 +34,10 @@ describe('LiveModule (DI wiring, no database)', () => {
     await moduleRef.init();
     const handlers = moduleRef.get(FanOutPublisher).getHandlers('ticket_event');
     expect(handlers.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('resolves the user bus and the /me/events controller (S4a §4)', () => {
+    expect(moduleRef.get(UserEventBus)).toBeInstanceOf(UserEventBus);
+    expect(moduleRef.get(MeLiveController)).toBeInstanceOf(MeLiveController);
   });
 });
