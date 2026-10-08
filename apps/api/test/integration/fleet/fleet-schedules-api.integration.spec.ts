@@ -5,11 +5,12 @@
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { SchedulesService } from '../../../src/fleet/schedules/schedules.service';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -165,7 +166,7 @@ describeIntegration('fleet schedules API (PG)', () => {
         selectorLabels: [], requestedById: world.ids.dev, scheduleId: row.id, state: 'UPLOADING',
       },
     });
-    const holder = new PrismaClient();
+    const holder = createTestPrismaClient();
     let removing: Promise<void> = Promise.resolve();
     try {
       await holder.$transaction(async (tx) => {

@@ -7,10 +7,11 @@
  * Run: cd apps/api && bun run test:db:up && bun run test:integration -- test/integration/vcs/prisma-models.integration.spec.ts
  */
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Test, TestingModule } from '@nestjs/testing';
 import { resetDb } from '../../helpers/reset-db';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -21,13 +22,7 @@ describeIntegration('VCS Prisma Models', () => {
   beforeAll(async () => {
     if (!DATABASE_URL) return;
 
-    prisma = new PrismaClient({
-      datasources: {
-        db: {
-          url: process.env.DATABASE_URL,
-        },
-      },
-    });
+    prisma = createTestPrismaClient(process.env.DATABASE_URL);
 
     await resetDb();
   });

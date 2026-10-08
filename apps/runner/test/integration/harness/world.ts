@@ -1,7 +1,8 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../../api/src/generated/prisma/client';
+import { createPgAdapter } from '../../../../api/src/prisma/pg-adapter';
 import type { ConfigFileEdit, SyncRequest } from '@nathapp/fleet-protocol';
 import type { FakeForge } from '../../../../api/test/helpers/fake-forge';
 import { createCapabilityProbe } from '../../../src/capabilities/create-probe';
@@ -133,7 +134,7 @@ async function buildWorld(base: string, cleanups: Cleanup[]): Promise<World> {
     GITHUB_API_URL: front.url, VCS_GITLAB_API_URL: `${front.url}/api/v4`,
   }, base);
   cleanups.push(() => api.stop());
-  const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+  const prisma = new PrismaClient({ adapter: createPgAdapter(databaseUrl) });
   cleanups.push(() => prisma.$disconnect());
   await assertPartialIndex(prisma);
 

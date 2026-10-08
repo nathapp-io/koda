@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { FleetApproval as ApprovalRow, Prisma, PrismaClient } from '@prisma/client';
+import { FleetApproval as ApprovalRow, Prisma, PrismaClient } from '../../generated/prisma/client';
 import { Paginate, PrismaService } from '@nathapp/nestjs-prisma';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';

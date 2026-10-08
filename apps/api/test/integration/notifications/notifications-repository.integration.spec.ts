@@ -2,16 +2,16 @@
  * Fleet S4a §1: Notification unique key, read-all cutoff and purge, and watcher semantics on Postgres.
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/notifications/notifications-repository.integration.spec.ts
  */
-import { PrismaClient } from '@prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { NotificationsRepository } from '../../../src/notifications/notifications.repository';
 import { TicketWatchersRepository } from '../../../src/notifications/ticket-watchers.repository';
 import type { NotificationDraft } from '../../../src/notifications/notification.types';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('notifications repositories (PG)', () => {
-  const prisma = new PrismaClient();
+  const prisma = createTestPrismaClient();
   const notifications = new NotificationsRepository({ client: prisma } as never);
   const watchers = new TicketWatchersRepository({ client: prisma } as never);
   const ids = { u1: '', u2: '', project: '', ticket: '' };

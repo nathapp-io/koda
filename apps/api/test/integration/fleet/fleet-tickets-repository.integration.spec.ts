@@ -2,14 +2,15 @@
  * Fleet C9 slice 1a — PrismaFleetTicketsRepository (PG), spec §1-§3.2.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-tickets-repository.integration.spec.ts
  */
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { PrismaFleetTicketsRepository } from '../../../src/fleet/tickets/prisma-fleet-tickets.repository';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('fleet tickets repository (PG)', () => {
-  const prisma = new PrismaClient();
+  const prisma = createTestPrismaClient();
   const repo = new PrismaFleetTicketsRepository({ client: prisma } as never);
   let projectId: string;
   let repoId: string;

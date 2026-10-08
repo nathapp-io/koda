@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { SymbolStore } from '../../src/code-intel/symbol-store';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '../../src/generated/prisma/client';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { PrismaCodeIntelRepository } from '../../src/code-intel/prisma-code-intel.repository';
 

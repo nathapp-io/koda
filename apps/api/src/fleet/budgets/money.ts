@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 
 /** Exact decimal sum of two USD strings, as the 4-decimal string the Decimal(12,4) columns hold. */
 export function addUsd(a: string, b: string): string {

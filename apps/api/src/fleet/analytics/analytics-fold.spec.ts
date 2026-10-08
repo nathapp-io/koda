@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import { foldSeries } from './analytics-fold';
 import type { SpendCell } from './domain/analytics.domain';
 

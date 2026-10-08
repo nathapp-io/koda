@@ -2,15 +2,16 @@
  * Fleet S3 §1 — FleetJob.configResult and FleetConfigEdit (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-config-jobs-schema.integration.spec.ts
  */
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { seedFleetBase } from '../../helpers/fleet-fixtures';
 import { PrismaFleetJobRepository } from '../../../src/fleet/jobs/prisma-fleet-job.repository';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('fleet config jobs schema (PG)', () => {
-  const prisma = new PrismaClient();
+  const prisma = createTestPrismaClient();
   let base: Awaited<ReturnType<typeof seedFleetBase>>;
   const repo = new PrismaFleetJobRepository({ client: prisma } as never);
 

@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { IOutboxStore, OutboxRecord, OutboxStatus } from '@nathapp/nestjs-outbox';
-import { OutboxEvent as OutboxEventModel, Prisma, PrismaClient } from '@prisma/client';
+import { OutboxEvent as OutboxEventModel, Prisma, PrismaClient } from '../generated/prisma/client';
 import { FanOutPublisher } from './fan-out-publisher';
 import { GLOBAL_OUTBOX_TYPES } from './global-outbox-types';
 

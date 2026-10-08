@@ -28,7 +28,7 @@ import { VCS_CFG, IVcsConfig } from '../../../src/config/vcs.config';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { VcsIssue } from '../../../src/vcs/types';
-import { Project, VcsConnection } from '@prisma/client';
+import { Project, VcsConnection } from '../../../src/generated/prisma/client';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { SyncResultDto } from '../../../src/vcs/dto/sync-result.dto';
 

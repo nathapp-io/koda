@@ -13,7 +13,7 @@ DO NOT EDIT MANUALLY — run `nax generate` to regenerate.
 
 **Language:** TypeScript
 
-**Key dependencies:** @prisma/client, @nathapp/typescript-config, @types/bun, typescript
+**Key dependencies:** @nathapp/typescript-config, @types/bun, typescript
 
 **Commands:** test: `npx turbo test` | lint: `bunx turbo lint` | typecheck: `bunx turbo type-check`
 

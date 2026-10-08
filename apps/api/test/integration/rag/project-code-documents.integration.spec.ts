@@ -6,9 +6,10 @@
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaModule, PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaRagRepository } from '../../../src/rag/prisma-rag.repository';
 import { resetDb } from '../../helpers/reset-db';
+import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -25,7 +26,7 @@ describeIntegration('PrismaRagRepository.getProjectCodeDocuments (M14)', () => {
         PrismaModule.forRoot({
           client: PrismaClient,
           transaction: true,
-          clientOptions: { datasources: { db: { url: DATABASE_URL } } },
+          clientOptions: { adapter: createPgAdapter(DATABASE_URL) },
         }),
       ],
       providers: [PrismaRagRepository],

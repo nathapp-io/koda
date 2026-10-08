@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { randomUUID } from 'crypto';
 import { HEALTH_ALERT_KINDS, HealthAlertKind } from './fleet-notification-events';

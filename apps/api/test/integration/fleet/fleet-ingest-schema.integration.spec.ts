@@ -2,13 +2,14 @@
  * Fleet S2b slice 1a — ingest tables (PG), spec §1.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-ingest-schema.integration.spec.ts
  */
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('fleet ingest schema (PG)', () => {
-  const prisma = new PrismaClient();
+  const prisma = createTestPrismaClient();
   let jobId: string;
   let artifactId: string;
   let projectId: string;

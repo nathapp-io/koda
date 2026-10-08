@@ -3,7 +3,7 @@ import { AbstractPrismaRepository, Paginate, PrismaClientLike, PrismaModelDelega
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { MemoryItem as MemoryItemModel, PrismaClient } from '@prisma/client';
+import { MemoryItem as MemoryItemModel, PrismaClient } from '../generated/prisma/client';
 import {
   MemoryQuery,
   ProjectMemoryQuery,

@@ -17,7 +17,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';

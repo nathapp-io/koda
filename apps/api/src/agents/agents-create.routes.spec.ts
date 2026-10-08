@@ -19,7 +19,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { CanActivate, ExecutionContext } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import { PrismaService, PrismaTransactionManager, createMockPrismaService } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import request from 'supertest';

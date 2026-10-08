@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { FleetJobLog as LogRow, PrismaClient } from '@prisma/client';
+import { FleetJobLog as LogRow, PrismaClient } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { FleetJobLogRecord, IFleetJobLogRepository, LogSource, LogStreamName, LogStreamPatch } from './domain/fleet-job-log.domain';
 

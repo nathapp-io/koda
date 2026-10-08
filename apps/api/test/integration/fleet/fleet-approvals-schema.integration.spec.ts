@@ -2,9 +2,9 @@
  * Fleet S1.5 slice 1a — FleetApproval table and the one-pending-per-policy index (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-approvals-schema.integration.spec.ts
  */
-import { PrismaClient } from '@prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { applyMigration, scratchSchemaBefore, ScratchSchema } from '../../helpers/migration-schema';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 // The migration block replays 193 DDL statements across 14 migrations; 13 of the 38 sibling fleet
@@ -14,7 +14,7 @@ jest.setTimeout(20_000);
 const MIGRATION = '20261003090000_fleet_approvals';
 
 describeIntegration('FleetApproval schema (PG)', () => {
-  const prisma = new PrismaClient();
+  const prisma = createTestPrismaClient();
   const base = { type: 'budget_override_required', payload: {}, requestedAt: new Date() };
 
   beforeAll(async () => {

@@ -1,6 +1,6 @@
 import { PrismaTicketsRepository } from './prisma-tickets.repository';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../generated/prisma/client';
 
 describe('PrismaTicketsRepository — updateTicketStatusIf (M3 hardening)', () => {
   it('keys the conditional update on id + status + deletedAt: null so soft-deleted tickets cannot be transitioned', async () => {

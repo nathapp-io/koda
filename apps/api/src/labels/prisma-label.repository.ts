@@ -1,7 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient, Prisma } from '@prisma/client';
+import { PrismaClient, Prisma } from '../generated/prisma/client';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import type {
   ILabelRepository,

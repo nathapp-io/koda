@@ -42,7 +42,7 @@ This runs:
 1) pre-deploy safety checks
 2) backup the database volume (default)
 3) `docker compose pull`
-4) `docker compose run --rm api bunx --package prisma@6.19.2 prisma migrate deploy`
+4) `docker compose run --rm api bunx --package prisma@7.10.0 prisma migrate deploy`
 5) `docker compose up -d api web`
 6) post-deploy health checks
 
@@ -55,7 +55,7 @@ To skip backup explicitly:
 ## Manual migration only
 
 ```bash
-docker compose -f deployments/example/docker-compose.yml run --rm api bunx --package prisma@6.19.2 prisma migrate deploy
+docker compose -f deployments/example/docker-compose.yml run --rm api bunx --package prisma@7.10.0 prisma migrate deploy
 ```
 
 ## Backup strategy (database volume)
@@ -95,5 +95,8 @@ cd deployments/example
 - PostgreSQL is Koda's only database. This example's compose file predates the Postgres-only
   switch and still carried the historical SQLite default; it now ships a `postgres:16` service.
   Set `DATABASE_URL` in `.env` to point at an external Postgres instead if you prefer.
+  With TLS, `sslmode=require` verifies the server certificate (stricter than before the Prisma 7
+  upgrade); for a private CA add `sslrootcert=<path>`, or opt out of the check with `uselibpqcompat=true`.
+  `connection_limit=<n>` sets the connection pool size.
 - Use immutable tags in production (e.g. `KODA_VERSION=v0.4.0`) rather than `latest`.
 - `rollback.sh` updates `KODA_VERSION` in `deployments/example/.env`.

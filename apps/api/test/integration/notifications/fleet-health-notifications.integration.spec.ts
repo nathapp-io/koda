@@ -5,7 +5,7 @@
  */
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { FLEET_CAPS, FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';

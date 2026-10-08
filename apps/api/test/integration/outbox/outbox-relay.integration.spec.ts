@@ -4,7 +4,7 @@
  */
 import { ConfigModule } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaModule, PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { OutboxRelay, OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
@@ -14,6 +14,7 @@ import { OutboxAdminService } from '../../../src/outbox/outbox-admin.service';
 import { OutboxModule } from '../../../src/outbox/outbox.module';
 import { PrismaOutboxRepository } from '../../../src/outbox/prisma-outbox.repository';
 import { resetDb } from '../../helpers/reset-db';
+import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -32,7 +33,7 @@ describeIntegration('outbox relay end to end', () => {
     module = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true, load: [outboxConfig] }),
-        PrismaModule.forRoot({ client: PrismaClient, transaction: true, clientOptions: { datasources: { db: { url: DATABASE_URL } } } }),
+        PrismaModule.forRoot({ client: PrismaClient, transaction: true, clientOptions: { adapter: createPgAdapter(DATABASE_URL) } }),
         OutboxModule,
       ],
     }).compile();
@@ -70,15 +71,18 @@ describeIntegration('outbox relay end to end', () => {
       throw new Error('downstream unavailable');
     });
 
+    // computeBackoff jitters the delay to [0.5, 1.5) x base; pin the low end so the bound is deterministic.
+    const random = jest.spyOn(Math, 'random').mockReturnValue(0);
     const before = Date.now();
     const record = await outbox.record({ type: 'relay_fail', payload: {}, metadata: { projectId, eventId: 'fail-1' } });
     await relay.dispatchPendingBatch();
+    random.mockRestore();
 
     const row = await prisma.client.outboxEvent.findUniqueOrThrow({ where: { id: record.id } });
     expect(row).toMatchObject({ status: 'pending', attempts: 1, owner: null });
     expect(row.lastError).toContain('downstream unavailable');
-    // backoffBaseMs 2000 for the first retry
-    expect(row.nextAttemptAt.getTime()).toBeGreaterThanOrEqual(before + 2000);
+    // backoffBaseMs 2000 for the first retry, jittered down to at most half of it
+    expect(row.nextAttemptAt.getTime()).toBeGreaterThanOrEqual(before + 1000);
 
     // Not due yet: a second cycle leaves it alone.
     await relay.dispatchPendingBatch();

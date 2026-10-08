@@ -1,7 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { AbstractPrismaRepository, PrismaClientLike, PrismaModelDelegate, PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { Webhook as WebhookModel, PrismaClient } from '@prisma/client';
+import { Webhook as WebhookModel, PrismaClient } from '../generated/prisma/client';
 import { WebhookDomain, WebhookListItem, WebhookProjectRef } from './domain/webhook.domain';
 
 export interface CreateWebhookData {

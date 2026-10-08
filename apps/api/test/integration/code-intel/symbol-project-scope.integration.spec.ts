@@ -3,12 +3,13 @@
  * own symbols; a re-upsert never moves a row to another project.
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/code-intel/symbol-project-scope.integration.spec.ts
  */
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaCodeIntelRepository } from '../../../src/code-intel/prisma-code-intel.repository';
 import { symbolFullId } from '../../../src/code-intel/symbol-id';
 import type { SymbolData } from '../../../src/code-intel/symbol-store';
 import { resetDb } from '../../helpers/reset-db';
+import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -32,7 +33,7 @@ describeIntegration('Symbol ids are project-scoped (M13)', () => {
   beforeAll(async () => {
     if (!DATABASE_URL) return;
     await resetDb(DATABASE_URL);
-    prismaService = new PrismaService({ client: PrismaClient, clientOptions: { datasources: { db: { url: DATABASE_URL } } } });
+    prismaService = new PrismaService({ client: PrismaClient, clientOptions: { adapter: createPgAdapter(DATABASE_URL) } });
     await prismaService.onModuleInit();
     prisma = prismaService.client;
     repo = new PrismaCodeIntelRepository(prismaService);

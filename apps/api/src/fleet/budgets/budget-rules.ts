@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import type { BudgetPolicyRecord, BudgetScopeType, BudgetWindowKind } from './domain/budget.domain';
 
 /** Plan D155: the lifetime window's start, stored in incidents and in pausedWindowStart. */

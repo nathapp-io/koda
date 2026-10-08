@@ -1,7 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
-import type { Ticket, VcsSyncLog } from '@prisma/client';
+import { PrismaClient } from '../generated/prisma/client';
+import type { Ticket, VcsSyncLog } from '../generated/prisma/client';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { VcsConnectionDomain, VcsConnectionWithProjectDomain, VcsSyncLogDomain, VcsProjectDomain, VcsTicketDomain } from './domain/vcs.domain';
 import { ConnectionRepo, linkMatchesConnection } from './connection-pr-match';

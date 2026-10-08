@@ -23,7 +23,7 @@ import { AppModule } from '../../src/app.module';
 import { resetDb } from '../helpers/reset-db';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
 
 interface ContextApiResponse {

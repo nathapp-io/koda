@@ -6,7 +6,7 @@ import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { OutboxRelay } from '@nathapp/nestjs-outbox';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 

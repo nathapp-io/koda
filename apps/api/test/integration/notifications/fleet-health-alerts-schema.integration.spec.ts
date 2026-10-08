@@ -2,15 +2,15 @@
  * Fleet S4a §1 — FleetHealthAlert and its repository (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/notifications/fleet-health-alerts-schema.integration.spec.ts
  */
-import { PrismaClient } from '@prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { insertRunner } from '../../helpers/fleet-fixtures';
 import { FleetHealthAlertsRepository } from '../../../src/notifications/fleet/fleet-health-alerts.repository';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('FleetHealthAlert (PG)', () => {
-  const prisma = new PrismaClient();
+  const prisma = createTestPrismaClient();
   const repo = new FleetHealthAlertsRepository({ client: prisma } as never);
   const now = new Date('2026-10-09T12:00:00.000Z');
 

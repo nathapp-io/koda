@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Paginate, PrismaService } from '@nathapp/nestjs-prisma';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
-import { Prisma, PrismaClient, User } from '@prisma/client';
+import { Prisma, PrismaClient, User } from '../generated/prisma/client';
 import { GlobalLock, lockGlobal } from '../common/utils/advisory-lock';
 import { GlobalRole, UserAdminRecord, UserAdminWrite, UserListFilters } from './domain/user-admin.domain';
 

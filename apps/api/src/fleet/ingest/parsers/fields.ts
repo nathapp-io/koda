@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../../generated/prisma/client';
 
 /** D365: typed readers for untrusted bundle JSON. Every reader returns null for anything it does not accept. */
 export function str(v: unknown, max: number): string | null {

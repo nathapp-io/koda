@@ -3,11 +3,12 @@
  * Run: cd apps/api && bun run test:integration -- outbox-retention
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaModule, PrismaService } from '@nathapp/nestjs-prisma';
 import { OutboxStatus } from '@nathapp/nestjs-outbox';
 import { PrismaOutboxRepository } from '../../../src/outbox/prisma-outbox.repository';
 import { resetDb } from '../../helpers/reset-db';
+import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -29,7 +30,7 @@ describeIntegration('PrismaOutboxRepository.deleteTerminalBefore', () => {
         PrismaModule.forRoot({
           client: PrismaClient,
           transaction: true,
-          clientOptions: { datasources: { db: { url: DATABASE_URL } } },
+          clientOptions: { adapter: createPgAdapter(DATABASE_URL) },
         }),
       ],
       providers: [PrismaOutboxRepository],

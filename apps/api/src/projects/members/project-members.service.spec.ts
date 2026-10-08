@@ -1,5 +1,5 @@
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import { ProjectMembersService } from './project-members.service';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';

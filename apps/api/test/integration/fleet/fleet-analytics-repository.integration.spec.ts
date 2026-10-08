@@ -2,7 +2,7 @@
  * Fleet S2b slice 1b — analytics read repository (PG), spec §4.1-4.2.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-analytics-repository.integration.spec.ts
  */
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { resetDb } from '../../helpers/reset-db';
 import { seedFleetBase } from '../../helpers/fleet-fixtures';
@@ -12,11 +12,12 @@ import {
 import { bucketStart } from '../../../src/fleet/analytics/analytics-window';
 import { NONE_KEY } from '../../../src/fleet/analytics/domain/analytics.domain';
 import { PrismaAnalyticsRepository } from '../../../src/fleet/analytics/prisma-analytics.repository';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('analytics read repository (PG)', () => {
-  const prisma = new PrismaClient();
+  const prisma = createTestPrismaClient();
   const repo = new PrismaAnalyticsRepository({ client: prisma } as unknown as PrismaService<PrismaClient>);
   const w = { from: new Date('2026-09-28T00:00:00Z'), to: new Date('2026-10-12T00:00:00Z'), bucket: 'week' as const };
   const tok = { inputTokens: 100, outputTokens: 10, cacheReadTokens: 50, cacheWriteTokens: 5 };

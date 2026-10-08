@@ -2,14 +2,15 @@
  * Fleet S1b slice 2a — budget tables and the FleetJob spend columns (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-budgets-schema.integration.spec.ts
  */
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { seedFleetBase } from '../../helpers/fleet-fixtures';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('fleet budgets schema (PG)', () => {
-  const prisma = new PrismaClient();
+  const prisma = createTestPrismaClient();
   const WINDOW = new Date('2026-10-01T00:00:00.000Z');
 
   beforeAll(async () => {

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '../generated/prisma/client';
 import {
   ACTIVE_JOB_STATES, FAILED_JOB_STATES, OPEN_TICKET_STATUSES, type HomeActivityRow, type HomeApprovalRow, type HomeApprovalScope,
   type HomeCaller, type HomeJobRow, type HomeProjectRow, type HomeTicketRow,

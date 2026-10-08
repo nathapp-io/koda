@@ -2,7 +2,7 @@
  * Fleet S2b slice 1b — analytics delete-on-demand (PG), spec §4.3, D384.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-analytics-delete.integration.spec.ts
  */
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { resetDb } from '../../helpers/reset-db';
 import { seedFleetBase } from '../../helpers/fleet-fixtures';
@@ -10,11 +10,12 @@ import {
   insertAnalyticsJob, insertCostEvent, insertIngestRow, insertReviewResult, insertStoryResult,
 } from '../../helpers/fleet-analytics-fixtures';
 import { PrismaAnalyticsRepository } from '../../../src/fleet/analytics/prisma-analytics.repository';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('analytics delete-on-demand (PG)', () => {
-  const prisma = new PrismaClient();
+  const prisma = createTestPrismaClient();
   const repo = new PrismaAnalyticsRepository({ client: prisma } as unknown as PrismaService<PrismaClient>);
   const cutoff = new Date('2026-10-05T00:00:00Z');
   const now = new Date('2026-10-06T00:00:00Z');

@@ -1,3 +1,4 @@
+import { createTestPrismaClient } from './test-prisma';
 /**
  * Fast per-file database reset for Postgres integration/e2e suites.
  *
@@ -6,7 +7,6 @@
  * application table in one statement and restarts identity sequences,
  * leaving the schema and `_prisma_migrations` intact.
  */
-import { PrismaClient } from '@prisma/client';
 
 interface PgTable {
   tablename: string;
@@ -21,9 +21,7 @@ export async function resetDb(
 ): Promise<void> {
   if (!databaseUrl) return;
 
-  const prisma = new PrismaClient({
-    datasources: { db: { url: databaseUrl } },
-  });
+  const prisma = createTestPrismaClient(databaseUrl);
 
   try {
     const tables = await prisma.$queryRawUnsafe<PgTable[]>(

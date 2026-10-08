@@ -7,7 +7,7 @@ import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { OutboxRelay } from '@nathapp/nestjs-outbox';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MAX_LIVE_STREAMS_PER_USER } from '../../../src/config/live.config';
 import { LiveStreamRegistry } from '../../../src/live/live-stream-registry';
 import { resetDb } from '../../helpers/reset-db';

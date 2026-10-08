@@ -15,7 +15,7 @@ These instructions apply to all AI coding agents in this project.
 
 **Language:** TypeScript
 
-**Key dependencies:** @prisma/client, @typescript-eslint/eslint-plugin, @typescript-eslint/parser, typescript
+**Key dependencies:** @typescript-eslint/eslint-plugin, @typescript-eslint/parser, typescript
 
 **Commands:** test: `npx turbo test` | lint: `bunx turbo lint` | typecheck: `bunx turbo type-check`
 

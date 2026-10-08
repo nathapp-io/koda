@@ -4,7 +4,7 @@
  */
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import request from 'supertest';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';

@@ -4,11 +4,12 @@
  *
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/vcs/pr-state-merged-terminal.integration.spec.ts
  */
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { ITransactionManager } from '@nathapp/nestjs-data';
 import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
 import { resetDb } from '../../helpers/reset-db';
+import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -39,7 +40,7 @@ describeIntegration('PrismaVcsRepository.updateTicketLinkWithPrState (M12)', () 
     await resetDb(DATABASE_URL);
     prismaService = new PrismaService({
       client: PrismaClient,
-      clientOptions: { datasources: { db: { url: DATABASE_URL } } },
+      clientOptions: { adapter: createPgAdapter(DATABASE_URL) },
     });
     await prismaService.onModuleInit();
     prisma = prismaService.client;

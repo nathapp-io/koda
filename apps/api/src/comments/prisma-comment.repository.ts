@@ -1,7 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { AbstractPrismaRepository, PrismaClientLike, PrismaModelDelegate, PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { Comment, PrismaClient } from '@prisma/client';
+import { Comment, PrismaClient } from '../generated/prisma/client';
 import { CommentDomain } from './domain/comment.domain';
 import { parseTicketRef } from '../common/utils/ticket-ref.util';
 

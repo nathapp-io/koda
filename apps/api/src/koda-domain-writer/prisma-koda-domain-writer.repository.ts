@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '../generated/prisma/client';
 
 @Injectable()
 export class PrismaKodaDomainWriterRepository {

@@ -8,7 +8,7 @@
  */
 import { ConfigModule } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { CanActivate, ExecutionContext } from '@nestjs/common';

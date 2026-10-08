@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '../../../../api/src/generated/prisma/client';
 import { assertSafeTestDatabaseUrl } from '../../../../api/test/helpers/test-database-url';
 
 export const API_DIR = resolve(import.meta.dir, '../../../../api');
@@ -7,8 +7,8 @@ const DATABASE_NAME = 'koda_runner_test';
 
 /**
  * D38: a database of our own on the compose test server (`docker-compose.test.yml`, port 5433), so this suite never clobbers
- * the API integration database. `DATABASE_URL` is deliberately ignored: importing `@prisma/client` loads `apps/api/.env`
- * into `process.env`, so a developer's dev URL (or a stale SQLite one) would arrive here. Override with
+ * the API integration database. `DATABASE_URL` is deliberately ignored: an inherited value can come from a developer's
+ * `.env` (Prisma 6 loaded `apps/api/.env` on import), so a dev URL (or a stale SQLite one) would arrive here. Override with
  * `KODA_RUNNER_TEST_DATABASE_URL`; `assertSafeTestDatabaseUrl` still requires a local `*_test` database.
  */
 export function runnerTestDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string {
@@ -22,7 +22,7 @@ export function runnerTestDatabaseUrl(env: NodeJS.ProcessEnv = process.env): str
  */
 export async function prepareDatabase(databaseUrl: string): Promise<void> {
   assertSafeTestDatabaseUrl(databaseUrl);
-  const proc = Bun.spawn(['bunx', 'prisma', 'migrate', 'reset', '--force', '--skip-seed', '--skip-generate'], {
+  const proc = Bun.spawn(['bunx', 'prisma', 'migrate', 'reset', '--force'], {
     cwd: API_DIR, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
     env: { ...process.env, DATABASE_URL: databaseUrl, PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION: 'yes' },
   });

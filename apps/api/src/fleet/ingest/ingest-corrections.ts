@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import { FleetJobState } from '../../common/enums';
 import type { FleetJobPatch, FleetJobRecord } from '../jobs/domain/fleet-job.domain';
 import type { FinishInfo } from './parsers/finish.parser';

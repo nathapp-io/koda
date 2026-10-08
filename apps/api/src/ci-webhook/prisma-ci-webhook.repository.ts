@@ -1,7 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../generated/prisma/client';
 import { runWithTicketNumberRetry } from '../common/utils/ticket-number-retry';
 import { CiProjectDomain, CiTicketDomain } from './domain/ci-webhook.domain';
 

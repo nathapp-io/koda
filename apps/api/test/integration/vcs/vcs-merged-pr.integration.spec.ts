@@ -21,7 +21,7 @@
  * seam (no network); repository, transaction manager, and Prisma are real.
  */
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { ITransactionManager } from '@nathapp/nestjs-data';
 import * as factory from '../../../src/vcs/factory';
@@ -33,6 +33,7 @@ import { encryptToken } from '../../../src/common/utils/encryption.util';
 import type { VcsConnectionDomain } from '../../../src/vcs/domain/vcs.domain';
 import type { VcsPrStatus } from '../../../src/vcs/types';
 import { resetDb } from '../../helpers/reset-db';
+import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -77,7 +78,7 @@ describeIntegration('VCS merged-PR auto-transition (H6)', () => {
 
     prismaService = new PrismaService({
       client: PrismaClient,
-      clientOptions: { datasources: { db: { url: DATABASE_URL } } },
+      clientOptions: { adapter: createPgAdapter(DATABASE_URL) },
     });
     await prismaService.onModuleInit();
     prisma = prismaService.client;

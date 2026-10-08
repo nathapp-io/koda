@@ -46,7 +46,7 @@ services:
   migrate:
     image: koda-api
     build: *api-build
-    command: ["bunx", "--package", "prisma@6.19.2", "prisma", "migrate", "deploy"]
+    command: ["bunx", "--package", "prisma@7.10.0", "prisma", "migrate", "deploy"]
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-koda}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-koda}
     depends_on:

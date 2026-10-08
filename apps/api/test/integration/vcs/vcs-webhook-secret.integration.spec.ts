@@ -6,10 +6,11 @@
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/vcs/vcs-webhook-secret.integration.spec.ts
  */
 import request from 'supertest';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const HEX_32 = /^[0-9a-f]{32}$/;
@@ -31,7 +32,7 @@ describeIntegration('VCS webhook secret (M9)', () => {
     process.env.VCS_ENCRYPTION_KEY = 'ab'.repeat(32);
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_URL } } });
+    prisma = createTestPrismaClient(process.env.DATABASE_URL);
 
     const root = await request(server).post('/api/auth/register')
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD }).expect(201);

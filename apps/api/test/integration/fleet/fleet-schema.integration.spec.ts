@@ -2,13 +2,13 @@
  * Fleet S1 slice 1 — the four fleet tables exist with their constraints (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-schema.integration.spec.ts
  */
-import { PrismaClient } from '@prisma/client';
 import { resetDb } from '../../helpers/reset-db';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('fleet schema (PG)', () => {
-  const prisma = new PrismaClient();
+  const prisma = createTestPrismaClient();
 
   beforeAll(async () => {
     await resetDb();

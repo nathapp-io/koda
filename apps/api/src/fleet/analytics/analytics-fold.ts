@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import { usd4 } from './analytics-window';
 import type { SpendSeriesView } from './analytics.types';
 import { ANALYTICS_LIMITS, OTHER_KEY, SpendCell } from './domain/analytics.domain';

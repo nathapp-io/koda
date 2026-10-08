@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-event';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import type { BashAsk } from '../approvals/approval-closer';

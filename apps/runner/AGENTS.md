@@ -15,7 +15,7 @@ These instructions apply to all AI coding agents in this project.
 
 **Language:** TypeScript
 
-**Key dependencies:** @prisma/client, @nathapp/typescript-config, @types/bun, typescript
+**Key dependencies:** @nathapp/typescript-config, @types/bun, typescript
 
 **Commands:** test: `npx turbo test` | lint: `bunx turbo lint` | typecheck: `bunx turbo type-check`
 

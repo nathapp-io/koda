@@ -3,16 +3,17 @@
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-analytics-config-jobs.integration.spec.ts
  */
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { seedFleetBase } from '../../helpers/fleet-fixtures';
 import { insertAnalyticsJob } from '../../helpers/fleet-analytics-fixtures';
 import { PrismaAnalyticsRepository } from '../../../src/fleet/analytics/prisma-analytics.repository';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('fleet analytics excludes config jobs (PG)', () => {
-  const prisma = new PrismaClient();
+  const prisma = createTestPrismaClient();
   const repo = new PrismaAnalyticsRepository({ client: prisma } as unknown as PrismaService<PrismaClient>);
   const from = new Date('2026-09-28T00:00:00Z');
   const to = new Date('2026-10-12T00:00:00Z');

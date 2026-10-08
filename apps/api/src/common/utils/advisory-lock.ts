@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '../../generated/prisma/client';
 
 /**
  * Transaction-scoped Postgres advisory locks (two-int form).

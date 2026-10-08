@@ -5,7 +5,7 @@
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import type { RunnerCapabilities } from '../../../src/fleet/common/protocol';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';

@@ -4,14 +4,14 @@
  *
  * Run: cd apps/api && bun run test:integration -- test/integration/db/reset-db.integration.spec.ts
  */
-import { PrismaClient } from '@prisma/client';
 import { resetDb } from '../../helpers/reset-db';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('resetDb (Postgres)', () => {
-  const prisma = new PrismaClient({ datasources: { db: { url: DATABASE_URL } } });
+  const prisma = createTestPrismaClient(DATABASE_URL);
 
   afterAll(async () => {
     await prisma.$disconnect();

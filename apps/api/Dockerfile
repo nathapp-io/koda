@@ -63,11 +63,7 @@ COPY --from=prune /app/out/full .
 RUN --mount=type=secret,id=TURBO_TOKEN \
     TURBO_TOKEN=$(cat /run/secrets/TURBO_TOKEN) \
     bun run db:generate && \
-    bun run build && \
-    prisma_client_dir=$(find /app/node_modules/.bun -type d -path '*/node_modules/.prisma/client' | head -n 1) && \
-    test -n "$prisma_client_dir" && \
-    mkdir -p /tmp/prisma-generated && \
-    cp -R "$prisma_client_dir" /tmp/prisma-generated/client
+    bun run build
 
 # Final image
 FROM base
@@ -86,25 +82,19 @@ RUN --mount=type=cache,id=bun-install,target=/root/.bun/install/cache \
            /app/apps/runtime/node_modules/@lancedb/lancedb-linux-x64-gnu && \
     find /app/apps/runtime/node_modules -type f -name '*.map' -delete && \
     find /app/apps/runtime/node_modules/@prisma/client/runtime -type f \
-      \( -name 'edge*' -o -name 'react-native*' -o -name 'index-browser*' -o -name 'wasm-*' -o -name 'query_*wasm-base64*' \) \
+      \( -name 'edge*' -o -name 'react-native*' -o -name 'index-browser*' -o -name '*.mjs' \
+         -o \( -name 'query_compiler_*' ! -name 'query_compiler_fast_bg.postgresql*' \) \) \
       -delete
 
 COPY --from=builder /app/apps/${BUILD_APP}/dist ./apps/runtime/dist
 
 # Prisma runtime assets for in-container migration commands:
+# - /app/prisma.config.ts (schema path, migrations path, DATABASE_URL)
 # - /app/prisma/schema.prisma
 # - /app/prisma/migrations/*
+COPY --from=builder /app/apps/${BUILD_APP}/prisma.config.ts ./prisma.config.ts
 COPY --from=builder /app/apps/${BUILD_APP}/prisma/schema.prisma ./prisma/schema.prisma
 COPY --from=builder /app/apps/${BUILD_APP}/prisma/migrations ./prisma/migrations
-
-# Copy only Prisma generated runtime artifacts instead of the full Bun package store.
-RUN --mount=from=builder,source=/tmp/prisma-generated,target=/tmp/prisma-generated,ro \
-    prisma_client_pkg_dir=$(find /app -type d -path '*/node_modules/@prisma/client' | head -n 1) && \
-    test -n "$prisma_client_pkg_dir" && \
-    prisma_node_modules_dir=$(dirname "$(dirname "$prisma_client_pkg_dir")") && \
-    mkdir -p "$prisma_node_modules_dir/.prisma" && \
-    rm -rf "$prisma_node_modules_dir/.prisma/client" && \
-    cp -R /tmp/prisma-generated/client "$prisma_node_modules_dir/.prisma/client"
 
 ENV ENV_NAME=production
 

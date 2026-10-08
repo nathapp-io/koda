@@ -24,6 +24,8 @@ import { VectorStore } from '../../../src/rag/vector-store.service';
 import { TicketStatus } from '../../../src/common/enums';
 import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
 import { TICKET_REPOSITORY } from '../../../src/tickets/domain/ticket.domain';
+import { testDatabaseUrl } from '../../helpers/test-prisma';
+import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 jest.setTimeout(30000);
 
@@ -65,7 +67,7 @@ describe('RAG close-to-search integration', () => {
     mkdirSync(tmpDir, { recursive: true });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { PrismaClient } = require('@prisma/client') as any;
+    const { PrismaClient } = require('../../../src/generated/prisma/client') as any;
     const fakeEmbedding = new FakeEmbeddingService();
 
     module = await Test.createTestingModule({
@@ -75,7 +77,7 @@ describe('RAG close-to-search integration', () => {
           useFactory: () => {
             return new PrismaService({
               client: PrismaClient,
-              clientOptions: {},
+              clientOptions: { adapter: createPgAdapter(testDatabaseUrl()) },
             });
           },
         },

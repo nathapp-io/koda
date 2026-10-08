@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { CommentType, TicketLinkSource } from '../../common/enums';
 import { parseTicketRef } from '../../common/utils/ticket-ref.util';

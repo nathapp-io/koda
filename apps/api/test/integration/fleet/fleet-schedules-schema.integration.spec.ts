@@ -2,14 +2,15 @@
  * Fleet S1b slice 3a — JobSchedule and the FleetJob schedule link (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-schedules-schema.integration.spec.ts
  */
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { seedFleetBase } from '../../helpers/fleet-fixtures';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('fleet schedules schema (PG)', () => {
-  const prisma = new PrismaClient();
+  const prisma = createTestPrismaClient();
   let base: Awaited<ReturnType<typeof seedFleetBase>>;
   let n = 0;
 
