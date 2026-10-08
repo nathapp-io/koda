@@ -180,6 +180,13 @@ Rationale: `bun run test` runs without a database, so DI/module-registration bre
 - a story that writes a `test/integration/**` spec must see it run and pass under `test:scoped`, not just compile
 - every DB-mode run force-resets the test database (only a local `*_test` database is accepted), so do not run two DB-mode jest runs against the same database at once. A second checkout (worktree, clone) sets `KODA_TEST_DB_CONTAINER=1` to skip the compose database and use a private container
 
+### nax acceptance tests
+
+- One generated file per feature, `apps/api/.nax/features/<feature>/.nax-acceptance.test.ts`, holds every story's ACs as `it('AC-<n>: ...')`. The default jest config (`testRegex` `.*\.spec\.ts`) does not pick it up.
+- Run it from `apps/api` with the compose test Postgres up (`bun run test:db:up`): `KODA_DB_TESTS=1 npx jest --config jest.nax.config.js .nax/features/<feature>/.nax-acceptance.test.ts -t "AC-<a>:|AC-<b>:"`, filtered to your story's AC ids (listed per `storyId` in the repo-root `.nax/features/<feature>/acceptance-refined.json`). Keep the trailing colon so `AC-1` does not also match `AC-10`.
+- This is the same config nax's acceptance stage runs (`.nax/mono/apps/api/config.json` `acceptance.command`). `KODA_DB_TESTS=1` is required: without it the PG-backed ACs get no database.
+- Never copy the file into `src/` or `test/`, never edit it, and never override `--testRegex`/`--testPathIgnorePatterns` to run it.
+
 Useful scripts (run from `apps/api`):
 - `bun run test`
 - `bun run test:scoped <files>` (jest on the given files; DB mode when any is an integration/e2e spec)
