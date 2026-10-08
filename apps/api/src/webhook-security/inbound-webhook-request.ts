@@ -17,7 +17,8 @@ export function signedBytesOf(request: InboundWebhookRequest): string {
 /**
  * Validates an inbound webhook body against a class-validator DTO. Call it only
  * after the signature check, so an unauthenticated caller never sees a
- * validation error. The options mirror the global ValidationPipe.
+ * validation error. The options match the global ValidationPipe except `whitelist`:
+ * unknown payload fields are kept, not stripped.
  */
 export async function parseInboundPayload<T extends object>(
   cls: ClassConstructor<T>,
