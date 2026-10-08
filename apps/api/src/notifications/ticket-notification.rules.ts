@@ -1,9 +1,11 @@
 import type { WatchReason } from './notification.types';
 import type { TicketNotificationKind } from './ticket-notification-text';
 
-export type HandledTicketAction = 'TICKET_CREATED' | 'assigned' | 'COMMENT_ADDED' | 'status_changed';
+export type HandledTicketAction = 'TICKET_CREATED' | 'assigned' | 'COMMENT_ADDED' | 'status_changed' | 'TICKET_UPDATED';
 
-export const HANDLED_TICKET_ACTIONS: ReadonlySet<string> = new Set<HandledTicketAction>(['TICKET_CREATED', 'assigned', 'COMMENT_ADDED', 'status_changed']);
+export const HANDLED_TICKET_ACTIONS: ReadonlySet<string> = new Set<HandledTicketAction>([
+  'TICKET_CREATED', 'assigned', 'COMMENT_ADDED', 'status_changed', 'TICKET_UPDATED',
+]);
 
 export interface TicketEventFacts {
   action: HandledTicketAction;
@@ -28,6 +30,7 @@ export function watchEntries(f: TicketEventFacts): readonly { userId: string; re
     case 'assigned': return watch(f.assigneeUserId, 'ASSIGNEE');
     case 'COMMENT_ADDED': return [...watch(f.commentAuthorId, 'COMMENTER'), ...mentioned(f)];
     case 'status_changed': return [];
+    case 'TICKET_UPDATED': return mentioned(f);
   }
 }
 

@@ -12,6 +12,7 @@ describe('ticket notification rules (S4a §2.2)', () => {
     ['COMMENT_ADDED', facts({ commentAuthorId: 'c', mentionedIds: ['m'] }), [{ userId: 'c', reason: 'COMMENTER' }, { userId: 'm', reason: 'MENTIONED' }]],
     ['COMMENT_ADDED by an agent', facts({ commentAuthorId: null }), []],
     ['status_changed', facts({ action: 'status_changed' }), []],
+    ['TICKET_UPDATED', facts({ action: 'TICKET_UPDATED', mentionedIds: ['m'] }), [{ userId: 'm', reason: 'MENTIONED' }]],
   ])('watch entries for %s', (_name, f, expected) => {
     expect(watchEntries(f)).toEqual(expected);
   });
@@ -41,5 +42,10 @@ describe('ticket notification rules (S4a §2.2)', () => {
     expect(ticketRecipients(facts({ action: 'TICKET_CREATED', reporterId: 'r', mentionedIds: ['m'] }), ['r'])).toEqual([
       { userId: 'm', kind: 'ticket_mentioned' },
     ]);
+  });
+
+  it('TICKET_UPDATED notifies only the newly mentioned, never watchers', () => {
+    expect(ticketRecipients(facts({ action: 'TICKET_UPDATED', mentionedIds: ['m'] }), ['w1', 'm']))
+      .toEqual([{ userId: 'm', kind: 'ticket_mentioned' }]);
   });
 });

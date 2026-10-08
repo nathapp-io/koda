@@ -119,3 +119,10 @@
     }
   }
 }
+
+@layer components {
+  /* S4a @mention chip (comments, descriptions, editor preview). The sanitizer keeps only this exact class. */
+  .mention-chip {
+    @apply rounded bg-primary/10 px-1 font-medium text-primary;
+  }
+}

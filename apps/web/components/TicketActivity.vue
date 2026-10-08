@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
+import { withMentionChips } from '~/lib/mentions'
 import MarkdownEditor from '~/components/MarkdownEditor.vue'
 import CommentThread from '~/components/CommentThread.vue'
 import { renderMarkdownOrEscape } from '~/lib/markdown'
@@ -24,8 +25,13 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
+const memberNames = useProjectMemberNames(props.projectSlug)
+onMounted(() => { void memberNames.load().catch(() => undefined) })
+
 const renderedDescription = computed(() =>
-  props.ticket.description ? renderMarkdownOrEscape(props.ticket.description) : '',
+  props.ticket.description
+    ? renderMarkdownOrEscape(withMentionChips(props.ticket.description, id => memberNames.nameOf(id)))
+    : '',
 )
 
 const sectionHeadingClass = 'text-xs font-semibold uppercase tracking-wide text-muted-foreground'
@@ -38,6 +44,7 @@ const sectionHeadingClass = 'text-xs font-semibold uppercase tracking-wide text-
       <MarkdownEditor
         v-if="editing"
         :model-value="editDescription"
+        :mention-slug="projectSlug"
         :aria-label="t('tickets.detail.description')"
         @update:model-value="emit('update:editDescription', $event)"
       />

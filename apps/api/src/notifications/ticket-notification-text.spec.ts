@@ -37,4 +37,16 @@ describe('ticketDraft (S4a kinds table)', () => {
     expect(assigned.title).toHaveLength(200);
     expect(String(assigned.params.ticketTitle).length).toBeLessThanOrEqual(200);
   });
+
+  it('shows mention tokens as @label in the excerpt, never the raw token or a cut token (review fix)', () => {
+    const token = '@[Bob Lee](user:c000000000000000000000002)';
+    expect(ticketDraft(input({ kind: 'ticket_mentioned', excerpt: `${token} can you look` }))).toMatchObject({
+      body: '@Bob Lee can you look',
+    });
+    const long = `${'x'.repeat(270)} ${token} tail`;
+    const body = ticketDraft(input({ kind: 'ticket_commented', excerpt: long })).body as string;
+    expect(body).not.toContain('](user:');
+    expect(body).not.toContain('@[');
+  });
 });
+

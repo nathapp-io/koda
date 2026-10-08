@@ -1,5 +1,8 @@
 import DOMPurify from 'isomorphic-dompurify'
 import { marked } from 'marked'
+import { escapeHtml } from './escape-html'
+
+export { escapeHtml }
 
 const ALLOWED_TAGS = [
   'a', 'b', 'blockquote', 'br', 'code', 'del', 'div', 'em', 'h1', 'h2', 'h3',
@@ -19,11 +22,14 @@ const LANGUAGE_CLASS = /^language-[\w-]+$/
 
 /**
  * `class` is kept only on <code> with a single `language-*` token (syntax
- * highlighting). Anything else, e.g. `fixed inset-0`, could restyle page
- * chrome from user content.
+ * highlighting), and on <span> as exactly `mention-chip` (S4a @mention chips).
+ * Anything else, e.g. `fixed inset-0`, could restyle page chrome from user content.
  */
 export function keepClassAttribute(tagName: string, value: string): boolean {
-  return tagName.toLowerCase() === 'code' && LANGUAGE_CLASS.test(value.trim())
+  const tag = tagName.toLowerCase()
+  const trimmed = value.trim()
+  if (tag === 'code') return LANGUAGE_CLASS.test(trimmed)
+  return tag === 'span' && trimmed === 'mention-chip'
 }
 
 DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
@@ -31,14 +37,6 @@ DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
   if (!keepClassAttribute(node.nodeName, data.attrValue)) data.keepAttr = false
 })
 
-export function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
 
 /** M24: never throws and never returns unsanitized HTML. */
 export function renderMarkdownOrEscape(markdown: string): string {

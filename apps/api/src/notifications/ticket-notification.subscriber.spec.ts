@@ -126,4 +126,25 @@ describe('TicketNotificationSubscriber (S4a §2.2)', () => {
     writer.deliver.mockRejectedValueOnce(new Error('db down'));
     await expect(sub.handle(envelope('status_changed', { fromStatus: 'A', newStatus: 'B' }))).rejects.toThrow('db down');
   });
+
+  it('TICKET_UPDATED notifies users newly mentioned in the description (S4a slice 3)', async () => {
+    const { sub, mentions, delivered } = setup();
+    const prev = '@[a](user:c000000000000000000000001)';
+    const next = `${prev} @[b](user:c000000000000000000000002)`;
+    mentions.mentionedUserIds.mockResolvedValueOnce(['c000000000000000000000001', 'c000000000000000000000002']);
+    await sub.handle(envelope('TICKET_UPDATED', { description: next, previousDescription: prev }));
+    expect(mentions.mentionedUserIds).toHaveBeenCalledWith('p1', next);
+    expect(delivered()).toEqual([
+      expect.objectContaining({ userId: 'c000000000000000000000002', kind: 'ticket_mentioned', category: 'MENTIONED' }),
+    ]);
+  });
+
+  it('TICKET_UPDATED without a description change or with no new mention does nothing (S4a slice 3)', async () => {
+    const { sub, mentions, writer } = setup();
+    await sub.handle(envelope('TICKET_UPDATED', { title: 'renamed' }));
+    const same = '@[a](user:c000000000000000000000001)';
+    mentions.mentionedUserIds.mockResolvedValueOnce(['c000000000000000000000001']);
+    await sub.handle(envelope('TICKET_UPDATED', { description: same, previousDescription: same }));
+    expect(writer.deliver).not.toHaveBeenCalled();
+  });
 });

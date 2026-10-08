@@ -865,6 +865,49 @@ describe('TicketsService', () => {
       });
     });
 
+    it('S4a §2.2: a description change records the previous description', async () => {
+      const before = { ...fakeTicket, description: 'old body' };
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(fakeProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(before);
+      mockTicketRepo.updateTicket.mockResolvedValue({ ...before, description: 'new body' });
+
+      await service.update('test-project', 'TST-1', { description: 'new body' }, fakeUserPrincipal as any);
+
+      expect(mockTicketEventService.create).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'TICKET_UPDATED', data: { description: 'new body', previousDescription: 'old body' } }),
+      );
+      expect(mockOutbox.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({ data: { description: 'new body', previousDescription: 'old body' } }),
+        }),
+      );
+      // The ticket row itself never receives the extra field.
+      expect(mockTicketRepo.updateTicket).toHaveBeenCalledWith(before.id, { description: 'new body' });
+    });
+
+    it('S4a §2.2: a first description records previousDescription null', async () => {
+      const before = { ...fakeTicket, description: null };
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(fakeProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(before);
+      mockTicketRepo.updateTicket.mockResolvedValue({ ...before, description: 'first' });
+
+      await service.update('test-project', 'TST-1', { description: 'first' }, fakeUserPrincipal as any);
+
+      expect(mockTicketEventService.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { description: 'first', previousDescription: null } }),
+      );
+    });
+
+    it('S4a §2.2: an update without description adds no previousDescription', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(fakeProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(fakeTicket);
+      mockTicketRepo.updateTicket.mockResolvedValue({ ...fakeTicket, title: 'Renamed' });
+
+      await service.update('test-project', 'TST-1', { title: 'Renamed' }, fakeUserPrincipal as any);
+
+      expect(mockTicketEventService.create).toHaveBeenCalledWith(expect.objectContaining({ data: { title: 'Renamed' } }));
+    });
+
     it('emits TicketEvent after softDelete', async () => {
       const deletedTicket = { ...fakeTicket, deletedAt: new Date() };
       mockTicketRepo.findProjectBySlug.mockResolvedValue(fakeProject);

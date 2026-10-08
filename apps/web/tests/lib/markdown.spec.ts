@@ -197,6 +197,10 @@ describe('keepClassAttribute (sanitizer LOW)', () => {
     ['code', 'language-ts fixed', false],
     ['div', 'language-ts', false],
     ['span', 'fixed inset-0 z-50', false],
+    ['span', 'mention-chip', true],
+    ['span', ' mention-chip ', true],
+    ['span', 'mention-chip fixed', false],
+    ['div', 'mention-chip', false],
   ])('<%s class="%s"> keep=%s', (tag, value, keep) => {
     expect(keepClassAttribute(tag, value)).toBe(keep)
   })
