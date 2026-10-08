@@ -63,8 +63,10 @@ categories they receive and which tickets they watch.
 - Runner liveness: `isRunnerOnline(lastSeenAt, now, runnerOfflineSec)` (`fleet/common/runner-online.ts`,
   `FLEET_RUNNER_OFFLINE_SEC` default 90). Credential expiry: `isExpiring(cred, now, warnDays)`
   (`fleet/dashboard/credential-board.ts:23`, `FLEET_CREDENTIAL_EXPIRY_WARN_DAYS` default 7).
-- PR #236 (open, CI green) enqueues `fleet_approval_requested` in `ApprovalCloser.openBash` only when
-  `ProjectEventBus.listenerCount(projectId) === 0`; no consumer exists.
+- PR #236 MERGED (`d9a23c16`): `ApprovalCloser.enqueueRequested` records `fleet_approval_requested` (payload
+  `approvalWebhookPayload(approval, slug)`, metadata `{ projectId, eventId: approval.id }`) for **every** fresh
+  project ask in the caller's transaction (the live-listener gate was dropped before merge); asks without a
+  `projectId` are not enqueued. No consumer exists.
 - Web: `layouts/default.vue` hosts `FleetApprovalBadge`; `useApprovalNotifications` gives a polling toast/browser
   notification for approval asks; `MarkdownEditor.vue` and `CommentThread.vue` are the text inputs.
 - Retention precedent: `OutboxRetentionProcessor` `@Cron('0 4 * * *')`.
@@ -200,7 +202,7 @@ Watchers are upserted first, in the same handler, then recipients resolved.
 | Event type | Enqueued at | Recipients → category |
 |---|---|---|
 | `fleet_job_outcome` | the transaction that writes a job's terminal state (sync report and sweeper paths), for ESCALATED, FAILED, CRASHED, and COMPLETED with `resultPrUrl`; also when ingest later fills `resultPrUrl` | `requestedById` → `FLEET_NEEDS_YOU` |
-| `fleet_approval_requested` | `ApprovalCloser.openBash` (from #236), **always** (gate removed) | global admins → `FLEET_NEEDS_YOU` |
+| `fleet_approval_requested` | already enqueued by `ApprovalCloser.enqueueRequested` (#236); S4a adds only the consumer | global admins → `FLEET_NEEDS_YOU` |
 | `fleet_budget_incident` | inside `BudgetEvaluator.evaluate` when `insertIncident` inserted a `warn` or `hard_stop` row | global admins → `FLEET_HEALTH` |
 | `fleet_health_alert` | `FleetHealthDetector` when it opens an alert | global admins → `FLEET_HEALTH` |
 
@@ -215,7 +217,6 @@ Watchers are upserted first, in the same handler, then recipients resolved.
   Per available runner credential, `isExpiring(cred, now, credentialExpiryWarnDays)` opens a `credential_expiring`
   alert keyed `runnerId:providerId`; leaving the window (refreshed or removed) closes it. Open + enqueue run in one
   transaction.
-- If #236 has not merged when slice 4 starts, slice 4 adds the `openBash` enqueue itself without the gate.
 
 ## 3. API
 
@@ -274,9 +275,9 @@ CLI: `koda notifications [--unread] [--json]`, `koda notifications read <id> | -
 | 1 | `Notification`, `TicketWatcher` (+ backfill), `NotificationPreference`; `NotificationWriter`; ticket subscriber (assign, comment, status, create); `/me/notifications*`, preferences, watch API; `UserEventBus` + `/me/events`; CLI; retention | yes |
 | 2 | Web: bell, `useUserEvents` + proxy, `/notifications`, `/settings/notifications`, Watch button | no |
 | 3 | Mentions: parser, `previousDescription` on description updates, `MENTIONED` producer, web picker + chip render | no |
-| 4 | Fleet: `fleet_job_outcome`, `fleet_approval_requested` consumer (gate removed), `fleet_budget_incident`, `FleetHealthAlert` + `FleetHealthDetector` | yes |
+| 4 | Fleet: `fleet_job_outcome`, `fleet_approval_requested` consumer, `fleet_budget_incident`, `FleetHealthAlert` + `FleetHealthDetector` | yes |
 
-Slices 3 and 4 depend on slice 1 only. Slice 4 prefers #236 merged first.
+Slices 3 and 4 depend on slice 1 only.
 
 ## 8. Testing
 
@@ -307,7 +308,7 @@ live check after slice 4 (human-run).
 | D503 | Preferences are `(user, category, channel)` rows defaulting to enabled; S4a writes `IN_APP` only. |
 | D504 | Mentions are `@[label](user:<id>)` tokens; plain `@name` is never parsed. |
 | D505 | Fleet notifications go to global admins (approvals, health) and to the job requester (outcomes), matching the ADMIN-only fleet surfaces. |
-| D506 | #236's live-listener gate is removed from the enqueue; suppressing external delivery when someone watches live is an S4b rule. |
+| D506 | Approval asks are always enqueued (as merged in #236); suppressing external delivery when someone watches live is an S4b rule. Project-less asks are out of scope. |
 | D507 | Runner-offline and credential-expiring alerts are episodes in `FleetHealthAlert`, opened and closed by a 60 s detector; one notification per opened episode. |
 | D508 | Budget notifications ride on the evaluator's existing deduplicated incidents. |
 | D509 | The user live stream is content-free and refetch-driven, sharing the per-user stream cap with project streams. |
