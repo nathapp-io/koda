@@ -1843,6 +1843,7 @@
     }
   },
   "notifications": {
+    "mentions": { "pickerLabel": "Mention a project member" },
     "title": "Notifications",
     "subtitle": "Tickets you follow and fleet work that needs you.",
     "empty": "You're all caught up.",

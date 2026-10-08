@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { extractApiError } from '~/composables/useApi'
 import { apiPath } from '~/lib/api-path'
+import { splitMentions } from '~/lib/mentions'
 
 interface Comment {
   id: string
@@ -26,6 +27,9 @@ const emit = defineEmits<{
 const { $api } = useApi()
 const { t } = useI18n()
 const toast = useAppToast()
+// S4a: chips show the member's current name; a former member keeps the token's label.
+const memberNames = useProjectMemberNames(props.projectSlug)
+onMounted(() => { void memberNames.load().catch(() => undefined) })
 
 const commentsEndpoint = apiPath`/projects/${props.projectSlug}/tickets/${props.ticketRef}/comments`
 
@@ -136,7 +140,7 @@ async function deleteComment(comment: Comment) {
         </div>
 
         <div v-if="editingId === comment.id" class="space-y-2">
-          <MarkdownEditor v-model="editDraft" :aria-label="t('comments.label')" />
+          <MarkdownEditor v-model="editDraft" :mention-slug="projectSlug" :aria-label="t('comments.label')" />
           <div class="flex gap-2">
             <Button size="sm" @click="saveEdit(comment)">
               {{ t('common.save') }}
@@ -147,7 +151,7 @@ async function deleteComment(comment: Comment) {
           </div>
         </div>
         <template v-else>
-          <p class="text-sm whitespace-pre-wrap">{{ comment.body }}</p>
+          <p class="text-sm whitespace-pre-wrap"><template v-for="(part, index) in splitMentions(comment.body)" :key="index"><span v-if="'userId' in part" class="mention-chip">@{{ memberNames.nameOf(part.userId) ?? part.label }}</span><template v-else>{{ part.text }}</template></template></p>
           <Button size="sm" variant="ghost" @click="startEdit(comment)">
             {{ t('common.edit') }}
           </Button>
@@ -165,7 +169,7 @@ async function deleteComment(comment: Comment) {
         <FormItem>
           <FormLabel>{{ t('comments.label') }}</FormLabel>
           <FormControl>
-            <MarkdownEditor v-bind="componentField" :aria-label="t('comments.label')" />
+            <MarkdownEditor v-bind="componentField" :mention-slug="projectSlug" :aria-label="t('comments.label')" />
           </FormControl>
           <FormMessage />
         </FormItem>

@@ -52,7 +52,7 @@
           <FormItem>
             <FormLabel>{{ t('tickets.form.description') }}</FormLabel>
             <FormControl>
-              <MarkdownEditor v-bind="componentField" />
+              <MarkdownEditor v-bind="componentField" :mention-slug="props.projectSlug" />
             </FormControl>
             <FormMessage />
           </FormItem>

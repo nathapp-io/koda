@@ -1843,6 +1843,7 @@
     }
   },
   "notifications": {
+    "mentions": { "pickerLabel": "提及项目成员" },
     "title": "通知",
     "subtitle": "你关注的工单以及需要你处理的 fleet 任务。",
     "empty": "没有新通知。",
