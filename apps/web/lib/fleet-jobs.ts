@@ -196,6 +196,17 @@ export function pickActiveJob(records: readonly FleetJobDto[]): FleetJobDto | nu
   return records.find(job => isActiveJobState(job.state)) ?? null
 }
 
+/** S3 D465: config jobs share one fixed feature, so at most one is active per repo. */
+export const CONFIG_JOB_FEATURE = 'nax-config'
+
+const CONFIG_KINDS: readonly string[] = ['CONFIG_EDIT', 'CONFIG_DRIFT']
+
+/** S3 §6: config jobs replace the nax sections of the job page with the config panel. */
+export const isConfigJob = (job: Pick<FleetJobDto, 'command'>): boolean => CONFIG_KINDS.includes(job.command)
+
+/** Translation key for a job kind; codeLabel falls back to the raw code for an unknown one. */
+export const jobCommandLabelKey = (command: string): string => `fleet.command.${command}`
+
 /** `koda-job-<id>.tar.gz`, same stem the API's Content-Disposition uses. */
 export const bundleFileName = (jobId: string): string => `koda-job-${jobId}.tar.gz`
 

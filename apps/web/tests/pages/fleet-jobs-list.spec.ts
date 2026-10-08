@@ -81,4 +81,15 @@ describe('fleet jobs list', () => {
     expect(list).toContain("t('fleet.jobs.needsApproval', { count: job.pendingApprovals })")
     expect(liveHandlers(list)).toContain('onFleetApproval: () => liveReload.trigger()')
   })
+
+  test('S3 §6: the command column shows translated kinds and config jobs show a readable feature', () => {
+    expect(list).toContain("codeLabel(t, te, 'fleet.command', job.command)")
+    expect(list).toContain("isConfigJob(job) ? t('fleet.jobs.configFeature') : job.feature")
+  })
+
+  test('S3 §6: the fleet page shows the Repos card from the loaded dispatch options', () => {
+    const list = readFileSync(path.join(__dirname, '../..', 'pages', '[project]', 'fleet', 'index.vue'), 'utf-8')
+    expect(list).toContain("import RepoConfigList from '~/components/fleet/config/RepoConfigList.vue'")
+    expect(list).toContain('<RepoConfigList :slug="slug" :repos="options.repos.value" />')
+  })
 })

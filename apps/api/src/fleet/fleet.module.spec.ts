@@ -5,6 +5,9 @@ import { RunnersService } from './runners/runners.service';
 import { FleetActivityService } from './activity/fleet-activity.service';
 import { FleetReposService } from './repos/fleet-repos.service';
 import { ConfigJobsService } from './repo-config/config-jobs.service';
+import { FakeFleetRepoFilesReader } from './repo-config/fake-fleet-repo-files.reader';
+import { FleetRepoFilesRouter } from './repo-config/fleet-repo-files.router';
+import { selectRepoFilesReader } from './repo-config/repo-config.module';
 import { LogReadService } from './logs/log-read.service';
 import { FleetLogRetentionProcessor } from './logs/fleet-log-retention.processor';
 import { AnalyticsService } from './analytics/analytics.service';
@@ -39,5 +42,16 @@ describe('FleetModule', () => {
     expect(module.get(AnalyticsService)).toBeDefined();
     expect(module.get(FleetDashboardService)).toBeDefined();
     expect(module.get(ConfigJobsService)).toBeDefined();
+  });
+
+  it('binds the fake reader only when both test flags are on (S3 plan C11)', () => {
+    const build = (flags: { testHooksEnabled: boolean; testFakeNaxFiles: boolean }) => {
+      const router = { list: jest.fn(), read: jest.fn() } as unknown as FleetRepoFilesRouter;
+      const fake = new FakeFleetRepoFilesReader();
+      return selectRepoFilesReader(flags, router, fake);
+    };
+    expect(build({ testHooksEnabled: true, testFakeNaxFiles: true })).toBeInstanceOf(FakeFleetRepoFilesReader);
+    expect(build({ testHooksEnabled: true, testFakeNaxFiles: false })).not.toBeInstanceOf(FakeFleetRepoFilesReader);
+    expect(build({ testHooksEnabled: false, testFakeNaxFiles: true })).not.toBeInstanceOf(FakeFleetRepoFilesReader);
   });
 });

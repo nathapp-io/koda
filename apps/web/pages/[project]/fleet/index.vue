@@ -3,10 +3,11 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 import { createDebouncer } from '~/lib/debounce'
 import { codeLabel } from '~/lib/fleet-i18n'
-import { canWorkOnFleet, formatUsd } from '~/lib/fleet-jobs'
+import { canWorkOnFleet, formatUsd, isConfigJob } from '~/lib/fleet-jobs'
 import { FLEET_JOB_STATES } from '~/lib/project-event-stream'
 import { runningFirstJobs } from '~/lib/fleet-jobs'
 import FleetJobStateBadge from '~/components/fleet/FleetJobStateBadge.vue'
+import RepoConfigList from '~/components/fleet/config/RepoConfigList.vue'
 
 definePageMeta({ layout: 'default' })
 
@@ -110,6 +111,8 @@ const sortedJobs = computed(() => runningFirstJobs(jobsApi.jobs.value))
 
     <FleetBudgetBanner ref="banner" :slug="slug" :repo-name="options.repoName" />
 
+    <RepoConfigList :slug="slug" :repos="options.repos.value" />
+
     <FilterBar columns="3">
       <Select v-model="filters.repoId">
         <SelectTrigger data-testid="fleet-filter-repo"><SelectValue :placeholder="t('fleet.jobs.filters.repo')" /></SelectTrigger>
@@ -169,9 +172,9 @@ const sortedJobs = computed(() => runningFirstJobs(jobsApi.jobs.value))
           <TableBody>
             <TableRow v-for="job in sortedJobs" :key="job.id" :data-testid="`fleet-job-row-${job.id}`">
               <TableCell>
-                <NuxtLink :to="`/${slug}/fleet/jobs/${job.id}`" class="font-medium text-primary underline-offset-4 hover:underline">{{ job.feature }}</NuxtLink>
+                <NuxtLink :to="`/${slug}/fleet/jobs/${job.id}`" class="font-medium text-primary underline-offset-4 hover:underline">{{ isConfigJob(job) ? t('fleet.jobs.configFeature') : job.feature }}</NuxtLink>
               </TableCell>
-              <TableCell>{{ job.command }}</TableCell>
+              <TableCell>{{ codeLabel(t, te, 'fleet.command', job.command) }}</TableCell>
               <TableCell>{{ options.repoName(job.repoId) }}</TableCell>
               <TableCell>{{ options.runnerName(job.runnerId) ?? '-' }}</TableCell>
               <TableCell>

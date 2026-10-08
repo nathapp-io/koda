@@ -738,6 +738,12 @@
       "decomposed": "Decomposed",
       "unknown": "Unknown"
     },
+    "command": {
+      "RUN": "Run",
+      "PLAN": "Plan",
+      "CONFIG_EDIT": "Config edit",
+      "CONFIG_DRIFT": "Drift check"
+    },
     "misfit": {
       "disabled": "Runner is disabled",
       "offline": "Runner is offline",
@@ -752,7 +758,8 @@
       "tools": "Runner lacks git, gh or glab for this repo",
       "approvals_relay": "The runner cannot relay bash approvals (needs protocol v2 and nax 0.83 or later)",
       "busy_repo": "Runner already runs a job for this repo",
-      "capacity": "Runner is at capacity"
+      "capacity": "Runner is at capacity",
+      "config_jobs": "Runner is too old for config jobs (upgrade the runner)"
     },
     "repoReason": {
       "github_app_not_configured": "The GitHub App is not configured on the koda server",
@@ -1278,6 +1285,7 @@
       "budgets": "Budgets",
       "schedules": "Schedules",
       "approvals": "Approvals",
+      "configFeature": "nax config",
       "approvalsSection": { "title": "Approvals", "empty": "No shell command asks yet.", "open": "Open" },
       "needsApproval": "Needs approval ({count})",
       "empty": "No fleet jobs yet",
@@ -1751,6 +1759,86 @@
           "cost": "Cost",
           "finished": "Finished"
         }
+      }
+    },
+    "config": {
+      "repos": { "title": "Repos", "open": "nax config" },
+      "tree": { "label": "nax files" },
+      "group": { "rules": "Rules", "context": "Context", "config": "Config", "profiles": "Profiles", "constitution": "Constitution" },
+      "status": { "unchanged": "Unchanged", "modified": "Modified", "new": "New", "deleted": "Deleted" },
+      "editor": {
+        "tooLarge": "This file is too large or not text, so it is shown read-only and cannot be edited here.",
+        "jsonError": "Invalid JSON: {error}"
+      },
+      "changes": {
+        "title": "Changes ({count})",
+        "discard": "Discard",
+        "discardAll": "Discard all",
+        "conflict": "Changed upstream",
+        "conflictHelp": "This file changed on the default branch after your edit was made. The diff shows the latest version against yours; check it, then mark it resolved.",
+        "resolve": "Mark resolved",
+        "approximate": "The file changed too much for a line-by-line diff; showing the whole old and new text."
+      },
+      "prDialog": {
+        "editTitle": "Open a PR with these changes",
+        "regenerateTitle": "Open regenerate PR",
+        "editHelp": "A runner applies the changes, regenerates the agent files, validates them with nax and opens the PR. Nothing is committed if validation fails.",
+        "regenerateHelp": "A runner regenerates the agent files from the current context and opens a PR with the result.",
+        "title": "PR title",
+        "body": "Description (optional)",
+        "titleTooLong": "The title can be at most {max} characters.",
+        "bodyTooLong": "The description can be at most 8 KiB.",
+        "submit": "Queue job"
+      },
+      "newFile": {
+        "title": "New nax file",
+        "help": "Pick a suggested location or type a path under .nax/ that the editor allows.",
+        "path": "Path",
+        "create": "Create",
+        "not_allowed": "This is not a path the editor can create (rules, context, config, repo profiles .json and the constitution only).",
+        "exists": "This file already exists."
+      },
+      "page": {
+        "title": "nax config",
+        "subtitle": "{repo} · {branch} ({sha})",
+        "checkDrift": "Check drift",
+        "save": "Open PR ({count})",
+        "readOnly": "You can read this repo's nax files. Editing needs the Developer or Admin role in this project.",
+        "activeJob": "A config job for this repo is already queued or running.",
+        "openActiveJob": "Open it",
+        "unreachable": "koda cannot read this repo right now: {message}",
+        "newFile": "New file",
+        "noFiles": "This repo has no editable nax files yet. Use New file to add one.",
+        "pickFile": "Pick a file on the left.",
+        "deleteFile": "Delete file",
+        "deletedNotice": "This file will be deleted by the PR. Discard the change to keep it.",
+        "leaveConfirm": "You have unsaved changes to nax files. Leave and lose them?"
+      },
+      "problem": {
+        "json": "invalid JSON",
+        "too_many": "More than 50 files changed; split the change into smaller PRs.",
+        "file_too_large": "file is larger than 256 KiB",
+        "total_too_large": "The changes add up to more than 1 MiB.",
+        "conflict": "changed upstream; review it and mark it resolved"
+      },
+      "panel": {
+        "mode": { "edit": "Config edit", "regenerate": "Regenerate agent files", "drift": "Drift check" },
+        "outcome": {
+          "ok": "PR opened",
+          "no_changes": "No changes (the files already match)",
+          "drift": "Checked",
+          "conflict": "Conflict: files changed upstream",
+          "invalid": "Rejected by nax validation",
+          "push_failed": "Push failed",
+          "pr_failed": "Branch pushed, but the PR could not be opened (open it by hand)",
+          "timeout": "Timed out"
+        },
+        "files": { "ok": "Committed", "conflict": "Changed upstream since you loaded them", "drift": "Generated files that would change" },
+        "edited": "Edited files",
+        "pending": "No result yet",
+        "noDrift": "The generated agent files are in sync with the context.",
+        "reopen": "Reopen edits",
+        "regenerate": "Open regenerate PR"
       }
     }
   }

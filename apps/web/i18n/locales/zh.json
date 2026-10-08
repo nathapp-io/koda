@@ -738,6 +738,12 @@
       "decomposed": "已拆分",
       "unknown": "未知"
     },
+    "command": {
+      "RUN": "运行",
+      "PLAN": "规划",
+      "CONFIG_EDIT": "配置修改",
+      "CONFIG_DRIFT": "漂移检查"
+    },
     "misfit": {
       "disabled": "执行机已停用",
       "offline": "执行机离线",
@@ -752,7 +758,8 @@
       "tools": "执行机缺少此仓库所需的 git、gh 或 glab",
       "approvals_relay": "该运行器无法转发 bash 审批（需要协议 v2 和 nax 0.83 或更高版本）",
       "busy_repo": "执行机已在运行此仓库的任务",
-      "capacity": "执行机已满载"
+      "capacity": "执行机已满载",
+      "config_jobs": "Runner 版本过旧，不支持配置任务（请升级 Runner）"
     },
     "repoReason": {
       "github_app_not_configured": "koda 服务器未配置 GitHub App",
@@ -1278,6 +1285,7 @@
       "budgets": "预算",
       "schedules": "定时计划",
       "approvals": "审批",
+      "configFeature": "nax 配置",
       "approvalsSection": { "title": "审批", "empty": "尚无 Shell 命令询问。", "open": "打开" },
       "needsApproval": "待审批（{count}）",
       "empty": "还没有 fleet 任务",
@@ -1751,6 +1759,86 @@
           "cost": "费用",
           "finished": "完成时间"
         }
+      }
+    },
+    "config": {
+      "repos": { "title": "仓库", "open": "nax 配置" },
+      "tree": { "label": "nax 文件" },
+      "group": { "rules": "规则", "context": "上下文", "config": "配置", "profiles": "配置档", "constitution": "章程" },
+      "status": { "unchanged": "未修改", "modified": "已修改", "new": "新建", "deleted": "已删除" },
+      "editor": {
+        "tooLarge": "文件过大或不是文本，只能只读查看，无法在此编辑。",
+        "jsonError": "JSON 无效：{error}"
+      },
+      "changes": {
+        "title": "改动（{count}）",
+        "discard": "放弃",
+        "discardAll": "全部放弃",
+        "conflict": "上游已改动",
+        "conflictHelp": "提交这次修改之后，默认分支上的此文件又被改动。差异显示最新版本与你的版本，请检查后标记为已解决。",
+        "resolve": "标记为已解决",
+        "approximate": "文件改动太大，无法逐行比较，显示完整的旧文本和新文本。"
+      },
+      "prDialog": {
+        "editTitle": "用这些改动创建 PR",
+        "regenerateTitle": "创建重新生成 PR",
+        "editHelp": "Runner 会应用改动、重新生成 agent 文件、用 nax 校验并创建 PR。校验失败时不会提交任何内容。",
+        "regenerateHelp": "Runner 会根据当前上下文重新生成 agent 文件，并用结果创建 PR。",
+        "title": "PR 标题",
+        "body": "描述（可选）",
+        "titleTooLong": "标题最多 {max} 个字符。",
+        "bodyTooLong": "描述最多 8 KiB。",
+        "submit": "加入队列"
+      },
+      "newFile": {
+        "title": "新建 nax 文件",
+        "help": "选择一个建议位置，或输入编辑器允许的 .nax/ 下的路径。",
+        "path": "路径",
+        "create": "创建",
+        "not_allowed": "编辑器不能创建此路径（仅限规则、上下文、配置、仓库配置档 .json 和章程）。",
+        "exists": "此文件已存在。"
+      },
+      "page": {
+        "title": "nax 配置",
+        "subtitle": "{repo} · {branch}（{sha}）",
+        "checkDrift": "检查漂移",
+        "save": "创建 PR（{count}）",
+        "readOnly": "你可以查看此仓库的 nax 文件。编辑需要此项目的开发者或管理员角色。",
+        "activeJob": "此仓库已有一个配置任务在排队或运行。",
+        "openActiveJob": "打开",
+        "unreachable": "koda 目前无法读取此仓库：{message}",
+        "newFile": "新建文件",
+        "noFiles": "此仓库还没有可编辑的 nax 文件。使用“新建文件”添加。",
+        "pickFile": "请在左侧选择文件。",
+        "deleteFile": "删除文件",
+        "deletedNotice": "PR 将删除此文件。放弃此改动即可保留。",
+        "leaveConfirm": "nax 文件有未保存的改动。确定离开并丢弃吗？"
+      },
+      "problem": {
+        "json": "JSON 无效",
+        "too_many": "改动超过 50 个文件，请拆分为更小的 PR。",
+        "file_too_large": "文件超过 256 KiB",
+        "total_too_large": "改动总量超过 1 MiB。",
+        "conflict": "上游已改动，请检查后标记为已解决"
+      },
+      "panel": {
+        "mode": { "edit": "配置修改", "regenerate": "重新生成 agent 文件", "drift": "漂移检查" },
+        "outcome": {
+          "ok": "已创建 PR",
+          "no_changes": "无改动（文件已一致）",
+          "drift": "已检查",
+          "conflict": "冲突：上游文件已改动",
+          "invalid": "未通过 nax 校验",
+          "push_failed": "推送失败",
+          "pr_failed": "分支已推送，但无法创建 PR（请手动创建）",
+          "timeout": "超时"
+        },
+        "files": { "ok": "已提交", "conflict": "加载后上游已改动", "drift": "将会改变的生成文件" },
+        "edited": "修改的文件",
+        "pending": "尚无结果",
+        "noDrift": "生成的 agent 文件与上下文一致。",
+        "reopen": "重新打开修改",
+        "regenerate": "创建重新生成 PR"
       }
     }
   }

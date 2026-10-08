@@ -20,7 +20,7 @@ function leafPaths(node: unknown, prefix = ''): string[] {
 // dynamic key (fleet.state.<STATE> ...), which used-keys-exist.spec cannot see.
 const ENUMS: Record<string, string[]> = {
   'fleet.state': ['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING', 'COMPLETED', 'FAILED', 'ESCALATED', 'CRASHED', 'CANCELLED'],
-  'fleet.misfit': ['disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox', 'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity'],
+  'fleet.misfit': ['disabled', 'offline', 'budget_paused', 'labels', 'executor', 'protocol', 'provider_missing', 'provider_unavailable', 'sandbox', 'interaction', 'tools', 'approvals_relay', 'busy_repo', 'capacity', 'config_jobs'],
   'fleet.repoReason': [
     'github_app_not_configured', 'github_app_key_unreadable', 'app_not_installed', 'app_permissions_insufficient',
     'repo_not_found', 'provider_unreachable', 'provider_error', 'vcs_connection_missing', 'vcs_connection_mismatch',
@@ -30,6 +30,13 @@ const ENUMS: Record<string, string[]> = {
   'fleet.common.duration': ['s', 'm', 'h', 'd'],
   'fleet.repos.provider': ['github', 'gitlab'],
   'fleet.runners.chip.kind': ['api-key', 'oauth', 'exec', 'ambient', 'none'],
+  'fleet.command': ['CONFIG_DRIFT', 'CONFIG_EDIT', 'PLAN', 'RUN'],
+  'fleet.config.group': ['config', 'constitution', 'context', 'profiles', 'rules'],
+  'fleet.config.status': ['deleted', 'modified', 'new', 'unchanged'],
+  'fleet.config.panel.mode': ['drift', 'edit', 'regenerate'],
+  'fleet.config.panel.outcome': ['conflict', 'drift', 'invalid', 'no_changes', 'ok', 'pr_failed', 'push_failed', 'timeout'],
+  'fleet.config.panel.files': ['conflict', 'drift', 'ok'],
+  'fleet.config.problem': ['conflict', 'file_too_large', 'json', 'too_many', 'total_too_large'],
   'fleet.budgets.scope': ['global', 'project', 'repo', 'runner'],
   'fleet.budgets.scopeText': ['global', 'project', 'repo', 'runner'],
   'fleet.budgets.window': ['calendar_month_utc', 'lifetime'],

@@ -141,6 +141,32 @@ export type { FleetJobState }
 export type MisfitReason =
   | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
   | 'provider_unavailable' | 'sandbox' | 'interaction' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity'
+  | 'config_jobs'
+
+/** S3 §3: RUN | PLAN, plus the two config kinds that run no nax session. */
+export type FleetJobKind = 'RUN' | 'PLAN' | 'CONFIG_EDIT' | 'CONFIG_DRIFT'
+
+/** S3 §1: what a config job was asked to do. */
+export type ConfigEditModeDto = 'edit' | 'regenerate' | 'drift'
+
+/** S3 §3: the runner's outcome; ok, no_changes and drift are COMPLETED, the rest FAILED (D471). */
+export type ConfigJobOutcomeDto = 'ok' | 'no_changes' | 'drift' | 'conflict' | 'invalid' | 'push_failed' | 'pr_failed' | 'timeout'
+
+export interface ConfigJobResultDto {
+  outcome: ConfigJobOutcomeDto
+  /** Conflict files, drifted files, or committed files (at most 50). */
+  files?: string[]
+  /** nax output tail, at most 8 KiB. */
+  output?: string
+}
+
+/** S3 §4.3: on config jobs only; the edit contents are fetched separately (Reopen edits). */
+export interface FleetJobConfigEditDto {
+  mode: ConfigEditModeDto
+  files: string[]
+  prTitle: string | null
+  result: ConfigJobResultDto | null
+}
 
 export interface FleetJobStoryDto {
   id: string
@@ -189,7 +215,7 @@ export interface FleetJobDto {
   projectId: string
   repoId: string
   ref: string
-  command: 'RUN' | 'PLAN'
+  command: FleetJobKind
   feature: string
   planFrom: string | null
   profiles: string[]
@@ -235,6 +261,8 @@ export interface FleetJobDto {
   coalescedCount: number
   /** C9 D460: linked tickets on single-job responses; null on list pages. Optional for hand-built fixtures (plan P8). */
   tickets?: FleetJobTicketDto[] | null
+  /** S3 §4.3: present on config jobs (CONFIG_EDIT, CONFIG_DRIFT); absent or null otherwise. */
+  configEdit?: FleetJobConfigEditDto | null
 }
 
 export interface FleetJobEventDto {

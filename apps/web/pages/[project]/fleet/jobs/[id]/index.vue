@@ -4,7 +4,7 @@ import { ApiError, extractApiError } from '~/composables/useApi'
 import { createDebouncer } from '~/lib/debounce'
 import { budgetStopPolicyId } from '~/lib/fleet-budgets'
 import { loadFleetJobDetail } from '~/lib/fleet-job-detail'
-import { canCancelJob, canRequeueJob, canWorkOnFleet, isTerminalJobState, mayHaveBundle, mergeEvents, safePrUrl, wipPushStatus } from '~/lib/fleet-jobs'
+import { canCancelJob, canRequeueJob, canWorkOnFleet, isConfigJob, isTerminalJobState, mayHaveBundle, mergeEvents, safePrUrl, wipPushStatus } from '~/lib/fleet-jobs'
 import type { DispatchResultDto, FleetApprovalDto, FleetJobDto, FleetJobEventDto } from '~/lib/fleet-types'
 import FleetJobProgress from '~/components/fleet/FleetJobProgress.vue'
 import FleetJobPipeline from '~/components/fleet/story-graph/FleetJobPipeline.vue'
@@ -15,6 +15,9 @@ import { useApprovalCountdown } from '~/composables/useApprovalCountdown'
 import { useFleetApprovals } from '~/composables/useFleetApprovals'
 import { firstPending, inboxPath } from '~/lib/fleet-approvals'
 import { bashSummary } from '~/lib/fleet-bash-mode'
+import { codeLabel } from '~/lib/fleet-i18n'
+import ConfigJobPanel from '~/components/fleet/config/ConfigJobPanel.vue'
+import ConfigPrDialog from '~/components/fleet/config/ConfigPrDialog.vue'
 import FleetJobApprovals from '~/components/fleet/JobApprovals.vue'
 import FleetJobAnalytics from '~/components/fleet/JobAnalytics.vue'
 import { bundleExpiredByLogs, logAttemptEpochs } from '~/lib/fleet-job-logs-link'
@@ -27,12 +30,15 @@ definePageMeta({ layout: 'default' })
 const route = useRoute()
 const slug = route.params.project as string
 const jobId = route.params.id as string
-const { t } = useI18n()
+const { t, te } = useI18n()
 const toast = useAppToast()
 const auth = useAuth()
 const jobsApi = useFleetJobs(slug)
 const options = useFleetDispatchOptions(slug)
 const people = useProjectMemberNames(slug)
+const configApi = useFleetRepoConfig(slug)
+/** S3 §6: the open state of the "Open regenerate PR" dialog. */
+const regenOpen = ref(false)
 const { data: viewerRole } = useProjectViewerRole(slug)
 
 const logsApi = useFleetJobLogs(slug, jobId)
@@ -62,6 +68,8 @@ const viewer = computed(() => ({
   userId: auth.user.value?.id ?? null,
   canWork: canWorkOnFleet(viewerRole.value),
 }))
+/** S3 §6: config jobs run no nax session; the page shows the config panel instead of progress, stories and cost. */
+const configJob = computed(() => job.value !== null && isConfigJob(job.value))
 const canCancel = computed(() => job.value !== null && canCancelJob(job.value, viewer.value))
 const canRequeue = computed(() => job.value !== null && canRequeueJob(job.value, viewer.value))
 const showDispatchRun = computed(() => job.value !== null && job.value.command === 'PLAN' && job.value.state === 'COMPLETED' && job.value.resultBranch !== null && viewer.value.canWork)
@@ -72,7 +80,7 @@ const dispatchRunHref = computed(() => {
   const tickets = ticketsQueryValue(current.tickets)
   return { path: `/${slug}/fleet/dispatch`, query: { command: 'RUN', repoId: current.repoId, feature: current.feature, ref: current.resultBranch, ...(tickets ? { tickets } : {}) } }
 })
-const showBundle = computed(() => job.value !== null && mayHaveBundle(job.value.state))
+const showBundle = computed(() => job.value !== null && !configJob.value && mayHaveBundle(job.value.state))
 const bundleExpired = computed(() => bundleGone.value || bundleExpiredByLogs(logList.value))
 const logAttempts = computed(() => logAttemptEpochs(logList.value))
 const logsHref = `/${slug}/fleet/jobs/${jobId}/logs`
@@ -218,6 +226,16 @@ const downloadBundle = (): Promise<void> => act(async () => {
   }
 })
 
+/** S3 §6: drift -> regenerate PR for the same repo; the new job page follows. */
+const regenerate = (body: { prTitle: string; prBody: string }): Promise<void> => act(async () => {
+  const current = job.value
+  if (!current) return
+  // S3 §4.2 (B1): `{ job, placement }`, like dispatch and requeue.
+  const created = await configApi.submitRegenerate(current.repoId, body)
+  regenOpen.value = false
+  await navigateTo(`/${slug}/fleet/jobs/${created.job.id}`)
+})
+
 const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocaleString() : '-')
 </script>
 
@@ -226,7 +244,7 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
     <LoadingState v-if="pending" />
     <ErrorState v-else-if="loadFailed || !job" @retry="loadJobDetail()" />
     <template v-else>
-      <PageHeader :title="job.feature" :subtitle="`${job.command} | ${options.repoName(job.repoId)} @ ${job.ref}`">
+      <PageHeader :title="configJob ? t('fleet.jobs.configFeature') : job.feature" :subtitle="`${codeLabel(t, te, 'fleet.command', job.command)} | ${options.repoName(job.repoId)} @ ${job.ref}`">
         <template #actions>
           <NuxtLink :to="logsHref" class="inline-flex h-10 items-center rounded-md border border-input px-4 text-sm hover:bg-muted" data-testid="fleet-job-logs-link">
             {{ t('fleet.jobs.actions.logs') }}
@@ -269,6 +287,8 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
         </span>
       </div>
 
+      <ConfigJobPanel v-if="configJob" :job="job" :slug="slug" :can-work="viewer.canWork" @regenerate="regenOpen = true" />
+
       <div v-if="job.pendingApprovals > 0" class="flex flex-wrap items-center gap-3 rounded-md border border-primary p-4 text-sm" data-testid="fleet-job-approval-callout">
         <span class="font-medium">{{ t('fleet.jobs.detail.waitingApproval', { count: job.pendingApprovals }) }}</span>
         <NuxtLink :to="reviewHref" class="text-primary underline-offset-4 hover:underline" data-testid="fleet-job-approval-review">{{ t('fleet.jobs.detail.reviewApproval') }}</NuxtLink>
@@ -279,19 +299,19 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
         <FleetPlacementResult v-if="requeueResult" :slug="slug" :result="requeueResult" :runner-name="options.runnerName" hide-open-link />
       </section>
 
-      <FleetJobProgress :job="job" />
-      <FleetJobPipeline :job="job" />
+      <FleetJobProgress v-if="!configJob" :job="job" />
+      <FleetJobPipeline v-if="!configJob" :job="job" />
 
       <dl class="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.runner') }}</dt><dd data-testid="fleet-job-runner">{{ options.runnerName(job.runnerId) ?? t('fleet.jobs.detail.unassigned') }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.requester') }}</dt><dd>{{ people.nameOf(job.requestedById) ?? t('fleet.jobs.unknownMember') }}</dd></div>
-        <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.profiles') }}</dt><dd>{{ job.profiles.length > 0 ? job.profiles.join(' > ') : '-' }}</dd></div>
-        <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.bash') }}</dt><dd data-testid="fleet-job-bash">{{ bashSummary(t, job.bashMode, job.approvalTimeoutSec) }}</dd></div>
+        <div v-if="!configJob"><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.profiles') }}</dt><dd>{{ job.profiles.length > 0 ? job.profiles.join(' > ') : '-' }}</dd></div>
+        <div v-if="!configJob"><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.bash') }}</dt><dd data-testid="fleet-job-bash">{{ bashSummary(t, job.bashMode, job.approvalTimeoutSec) }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.queuedAt') }}</dt><dd>{{ formatTime(job.queuedAt) }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.startedAt') }}</dt><dd>{{ formatTime(job.startedAt) }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.finishedAt') }}</dt><dd>{{ formatTime(job.finishedAt) }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.heartbeat') }}</dt><dd>{{ formatTime(job.lastHeartbeatAt) }}</dd></div>
-        <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.finishResult') }}</dt><dd data-testid="fleet-job-finish">{{ job.finishResult ?? '-' }}</dd></div>
+        <div v-if="!configJob"><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.finishResult') }}</dt><dd data-testid="fleet-job-finish">{{ job.finishResult ?? '-' }}</dd></div>
         <div><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.branch') }}</dt><dd class="break-all">{{ job.resultBranch ?? '-' }}<template v-if="job.resultSha"> ({{ job.resultSha.slice(0, 12) }})</template><span v-if="wipPush" class="block text-xs text-muted-foreground">{{ wipPush.key === 'failed' ? t('fleet.jobs.detail.wipPush.failed', { reason: wipPush.reason }) : t(`fleet.jobs.detail.wipPush.${wipPush.key}`) }}</span></dd></div>
         <div v-if="job.planFrom"><dt class="text-muted-foreground">{{ t('fleet.jobs.detail.planFrom') }}</dt><dd class="break-all">{{ job.planFrom }}</dd></div>
         <div>
@@ -326,11 +346,13 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
         <p class="whitespace-pre-wrap text-muted-foreground">{{ job.escalationReason }}</p>
       </div>
 
-      <FleetJobAnalytics :slug="slug" :job-id="jobId" :reload-key="analyticsReload" />
+      <FleetJobAnalytics v-if="!configJob" :slug="slug" :job-id="jobId" :reload-key="analyticsReload" />
 
       <FleetJobApprovals v-if="showApprovals" :slug="slug" :approvals="jobApprovals" :now="now" />
 
       <FleetJobTimeline :events="events" :has-more="moreEvents" :loading="loadingEvents" :log-attempts="logAttempts" :logs-href="logsHref" @load-more="loadEventsFrom(eventPage + 1)" />
+
+      <ConfigPrDialog :open="regenOpen" mode="regenerate" :busy="busy" @update:open="regenOpen = $event" @submit="regenerate($event)" />
 
       <Dialog :open="confirmCancel" @update:open="confirmCancel = $event">
         <DialogContent>
