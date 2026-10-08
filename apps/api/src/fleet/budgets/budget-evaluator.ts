@@ -12,6 +12,7 @@ import { RunnerNotifier } from '../jobs/runner-notifier';
 import { budgetActivityPayload, budgetWebhookPayload } from './budget-payloads';
 import { hardReached, isEffectivelyPaused, spendSince, warnReached, windowStart } from './budget-rules';
 import { BUDGET_REPOSITORY, BudgetPolicyRecord, IBudgetRepository } from './domain/budget.domain';
+import { BudgetIncidentRecorder } from './budget-incident.recorder';
 
 const DEBOUNCE_MS = 1_000;
 
@@ -45,6 +46,7 @@ export class BudgetEvaluator implements OnModuleDestroy {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly approvals: ApprovalCloser,
     private readonly approvalLive: ApprovalLivePublisher,
+    private readonly incidents: BudgetIncidentRecorder,
   ) {}
 
   /** Never throws; a failed evaluation is logged and the sweep retries it. */
@@ -94,6 +96,7 @@ export class BudgetEvaluator implements OnModuleDestroy {
   private async warn(policy: BudgetPolicyRecord, start: Date, spent: string): Promise<boolean> {
     const inserted = await this.repo.insertIncident({ policyId: policy.id, kind: 'warn', windowStart: start, spentUsd: spent, amountUsd: policy.amountUsd, actorId: null });
     if (!inserted) return false;
+    await this.incidents.record(policy, 'warn', start, spent); // S4a §2.4: same transaction, under the policy lock
     await this.record('budget.warn', policy, { spentUsd: spent });
     if (policy.projectId) await this.webhooks.dispatch(policy.projectId, 'fleet.budget.warn', budgetWebhookPayload(policy, spent, start));
     return true;
@@ -108,6 +111,7 @@ export class BudgetEvaluator implements OnModuleDestroy {
     const inserted = await this.repo.insertIncident({
       policyId: policy.id, kind: 'hard_stop', windowStart: start, spentUsd: spent, amountUsd: policy.amountUsd, actorId: null, approvalId,
     });
+    if (inserted) await this.incidents.record(policy, 'hard_stop', start, spent); // S4a §2.4: before the cancel set
     const queued = await this.repo.findQueuedJobIds(policy);
     const held = policy.runningJobs === 'cancel' ? await this.repo.findHeldJobIds(policy) : [];
     const cancel = await this.jobs.cancelForBudget([...queued, ...held], { id: policy.id, responsibleUserId: policy.updatedById }, now);
