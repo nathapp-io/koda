@@ -10,8 +10,8 @@ import { EmailScheduleRow } from './schedule/email-schedule.types';
 
 export type SendOutcome = 'SENT' | 'FAILED' | 'RETRY';
 
-/** Rows claimed per tick. Small enough that a stuck send delays the batch by seconds, not minutes. */
-const CLAIM_LIMIT = 50;
+/** Rows claimed per tick (spec §2.2: batch 20). Small enough that a stuck send delays the batch by seconds, not minutes. */
+const CLAIM_LIMIT = 20;
 
 /** D518: the in-process dispatcher fires about every 30 seconds (single API instance). */
 const TICK_INTERVAL_MS = 30_000;
@@ -84,7 +84,14 @@ export class EmailDispatcher implements OnModuleInit, OnModuleDestroy {
         await this.sendOne(row, row.kind, content.data, content.userId, now);
       } catch (error) {
         // A builder or repository failure for one owned row backs it off; the rest of the batch continues.
-        await this.schedule.retryAt(row.id, this.backoffDue(row.attempts, now), messageOf(error));
+        // retryAt itself can throw (DB blip) — log it so a transient scheduling failure does not drop the rest of the batch.
+        try {
+          await this.schedule.retryAt(row.id, this.backoffDue(row.attempts, now), messageOf(error));
+        } catch (retryError) {
+          this.logger.error(
+            `email ${row.id} (${row.kind}) could not be backed off after a build/send failure: ${messageOf(retryError)}`,
+          );
+        }
       }
     }
   }

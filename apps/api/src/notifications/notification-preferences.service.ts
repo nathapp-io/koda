@@ -91,10 +91,20 @@ export class NotificationPreferencesService {
     if (change.emailEnabled !== undefined) {
       await this.packagePrefs.updatePreference(userId, KODA_TENANT_ID, EMAIL, change.emailEnabled);
     }
-    for (const item of change.items ?? []) {
-      if (item.inApp !== undefined) await this.upsertCategory(userId, item.category, IN_APP, item.inApp);
-      if (item.email !== undefined) await this.upsertCategory(userId, item.category, EMAIL, item.email);
-    }
+    const items = change.items ?? [];
+    if (items.length === 0) return;
+    await this.txManager.run(async () => {
+      const client = this.txnClient();
+      for (const item of items) {
+        if (item.inApp !== undefined) await this.upsertCategory(client, userId, item.category, IN_APP, item.inApp);
+        if (item.email !== undefined) await this.upsertCategory(client, userId, item.category, EMAIL, item.email);
+      }
+    });
+  }
+
+  /** The transactional Prisma client when one is open; otherwise the global one. */
+  private txnClient(): PrismaClient {
+    return this.txManager.getClient<PrismaClient>() ?? this.db;
   }
 
   /** The users for whom both the master switch and the category's email switch are on. */
@@ -140,8 +150,8 @@ export class NotificationPreferencesService {
     return { allowed: true };
   }
 
-  private async upsertCategory(userId: string, category: NotificationCategory, channel: string, enabled: boolean): Promise<void> {
-    await this.db.notificationCategoryPreference.upsert({
+  private async upsertCategory(client: PrismaClient, userId: string, category: NotificationCategory, channel: string, enabled: boolean): Promise<void> {
+    await client.notificationCategoryPreference.upsert({
       where: { userId_category_channel: { userId, category, channel } },
       create: { userId, category, channel, enabled },
       update: { enabled },

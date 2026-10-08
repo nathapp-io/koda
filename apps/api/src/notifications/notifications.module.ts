@@ -59,6 +59,6 @@ import { FleetNotificationReader } from './fleet/fleet-notification.reader';
     FleetHealthDetector,
     FleetHealthAlertSubscriber,
   ],
-  exports: [NotificationWriter, NotificationEligibility, EmailDispatcher],
+  exports: [NotificationWriter, NotificationEligibility, EmailDispatcher, EmailContentBuilder],
 })
 export class NotificationsModule {}

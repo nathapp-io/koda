@@ -114,24 +114,29 @@ export class ProjectInvitesService {
     const user: InviteUserState | null = await this.members.findUserState(userId);
     if (!user || user.disabled) throw new ConflictAppException({}, 'invites.userDisabled');
 
-    let member: ProjectMemberRecord;
-    try {
-      member = await this.members.createMember(projectId, userId, role);
-    } catch (error) {
-      if (isUniqueViolation(error, 'userId')) throw new ConflictAppException({}, 'invites.memberExists');
-      throw error;
-    }
+    // Membership write and the MEMBER_ADDED schedule share one transaction: a scheduling
+    // failure rolls the membership back so the admin's retry does not hit a 409 for a
+    // user that was never actually emailed.
+    const member = await this.txManager.run(async () => {
+      let created: ProjectMemberRecord;
+      try {
+        created = await this.members.createMember(projectId, userId, role);
+      } catch (error) {
+        if (isUniqueViolation(error, 'userId')) throw new ConflictAppException({}, 'invites.memberExists');
+        throw error;
+      }
 
-    // The email is a transactional notice: it never consults notification preferences.
-    if (this.email.configured) {
-      await this.schedule.scheduleMemberAdded({
-        userId,
-        projectId,
-        toEmail: user.email,
-        locale: MEMBER_ADDED_LOCALE,
-        dueAt: new Date(),
-      });
-    }
+      if (this.email.configured) {
+        await this.schedule.scheduleMemberAdded({
+          userId,
+          projectId,
+          toEmail: user.email,
+          locale: MEMBER_ADDED_LOCALE,
+          dueAt: new Date(),
+        });
+      }
+      return created;
+    });
 
     return { outcome: 'ADDED', member: ProjectMemberDto.from(member) };
   }
