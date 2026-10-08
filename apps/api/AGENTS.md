@@ -265,6 +265,9 @@ Rules:
 - `/me/*` routes are users-only and never take a user id. `/me/events` shares `LiveStreamRegistry` with project
   streams.
 - Notification text: English `title`/`body` (CLI fallback, truncated to 200/280), web renders from `kind` + `params`.
+- Mentions (S4a slice 3): `notifications/ticket-mention.resolver.ts` resolves `ticket_event` mentions (create description,
+  comment body, newly added on description update via `data.previousDescription`) to enabled project members or
+  global admins. `TICKET_UPDATED` events that change the description carry `previousDescription`.
 - Fleet producers (S4a Part D) live in `src/notifications/fleet/`. Fleet modules never import the notifications
   module: they enqueue outbox events (`fleet_job_outcome` from `FleetJobOutcomeRecorder` inside
   `JobTransitionsService.apply` and the ingest transaction; `fleet_budget_incident` from `BudgetIncidentRecorder` inside

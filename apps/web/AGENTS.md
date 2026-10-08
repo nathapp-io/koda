@@ -194,3 +194,7 @@ changing layout, navigation, tokens or the ticket board, and update its Status t
 - Every page holds a live stream open: E2E must never wait for `networkidle`; use `waitForHydration`.
 - E2E sets `THROTTLE_LIMIT=1000` for the API (`playwright.config.ts`): every spec shares one client IP and the bell adds
   two reads per page load, which pushes a full run past the production 100/min default.
+- @mentions: `MarkdownEditor` takes `mention-slug`; `@` opens a member picker that inserts
+  `@[Name](user:<id>)` (grammar shared with `apps/api/src/notifications/mentions.ts` — keep the two regexes
+  identical; the label is bounded to 1-100 chars without `[ ] @` or newline so matching stays linear). Comments render tokens via `splitMentions` (no v-html); markdown via `withMentionChips` before
+  `renderMarkdownOrEscape`. The sanitizer keeps `class` only for `code.language-*` and `span.mention-chip`.
