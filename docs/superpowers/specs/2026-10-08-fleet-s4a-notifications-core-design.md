@@ -207,7 +207,7 @@ Watchers are upserted first, in the same handler, then recipients resolved.
 
 | Event type | Enqueued at | Recipients → category |
 |---|---|---|
-| `fleet_job_outcome` | the transaction that writes a job's terminal state (sync report and sweeper paths), for ESCALATED, FAILED, CRASHED, and COMPLETED with `resultPrUrl`; also when ingest later fills `resultPrUrl` | `requestedById` → `FLEET_NEEDS_YOU` |
+| `fleet_job_outcome` | inside `JobTransitionsService.apply`, the caller's transaction (D513), for ESCALATED, FAILED, CRASHED, and COMPLETED with `resultPrUrl`; also when ingest later fills `resultPrUrl` | `requestedById` → `FLEET_NEEDS_YOU` |
 | `fleet_approval_requested` | already enqueued by `ApprovalCloser.enqueueRequested` (#236); S4a adds only the consumer | global admins → `FLEET_NEEDS_YOU` |
 | `fleet_budget_incident` | inside `BudgetEvaluator.evaluate` when `insertIncident` inserted a `warn` or `hard_stop` row | global admins → `FLEET_HEALTH` |
 | `fleet_health_alert` | `FleetHealthDetector` when it opens an alert | global admins → `FLEET_HEALTH` |
@@ -218,7 +218,7 @@ Watchers are upserted first, in the same handler, then recipients resolved.
 - Terminal effects run after commit today (`afterTerminal`, sweeper). The plan must locate the transactions that
   write each terminal state and enqueue there; if a path has no enclosing transaction, enqueue from the existing
   after-commit hook and rely on the sweeper re-run plus the unique key (same guarantee as C9 failure comments).
-- `FleetHealthDetector`: `@Interval(60_000)` (disabled when `FLEET_SWEEP_ENABLED=false`). Per runner, an offline
+- `FleetHealthDetector`: every 60 s (D515; disabled when `FLEET_SWEEP_ENABLED=false`; skips offline checks for the first `runnerOfflineSec` after boot). Per runner, an offline
   runner with no open `runner_offline` alert opens one and enqueues; an online runner closes its open alert.
   Per available runner credential, `isExpiring(cred, now, credentialExpiryWarnDays)` opens a `credential_expiring`
   alert keyed `runnerId:providerId`; leaving the window (refreshed or removed) closes it. Open + enqueue run in one
@@ -230,7 +230,7 @@ All `/me/*` routes: user principals only (agents 403), scoped to `principal.id`;
 
 | Route | Purpose |
 |---|---|
-| `GET /me/notifications?unread=true&page=&limit=` | `Page<NotificationDto>`, newest first |
+| `GET /me/notifications?unread=true&current=&size=` | koda `Page<NotificationDto>` (`{ total, current, size, hasNext, hasPrev, records }`), newest first |
 | `GET /me/notifications/unread-count` | `{ count }` |
 | `POST /me/notifications/:id/read` | 204; 404 if not the caller's |
 | `POST /me/notifications/read-all` | 204 |
@@ -320,3 +320,7 @@ live check after slice 4 (human-run).
 | D509 | The user live stream is content-free and refetch-driven, sharing the per-user stream cap with project streams. |
 | D510 | Notification text carries no secrets or command content; agents never receive notifications. |
 | D511 | Read notifications are purged after 90 days; unread are kept. |
+| D512 | `OutboxEvent.projectId` becomes nullable; `PrismaOutboxStore.save` accepts a missing `metadata.projectId` only for `GLOBAL_OUTBOX_TYPES` = `fleet_budget_incident`, `fleet_health_alert` (both are global; the column was NOT NULL with an FK). |
+| D513 | `fleet_job_outcome` is enqueued by `FleetJobOutcomeRecorder` inside `JobTransitionsService.apply` (every terminal transition, caller's transaction) and inside the ingest correction transaction (late ESCALATED, late PR url); no after-commit fallback is needed. |
+| D514 | The approval consumer notifies only asks still `pending` when the handler runs, so the backlog enqueued since #236 does not flood admins. |
+| D515 | The health detector runs every 60 s from `onModuleInit` (the `FleetSweeper` `setInterval` pattern) when `FLEET_SWEEP_ENABLED`; a disabled runner never has an offline alert; unreadable capabilities hold (never close) that runner's credential alerts. |
