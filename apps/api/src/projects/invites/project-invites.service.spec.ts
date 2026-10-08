@@ -251,6 +251,16 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
 });
 
 describe('ProjectInvitesService.list (S4b US-004)', () => {
+  // `list` reads the effective status against the current time; the seeded `expiresAt`/`createdAt`
+  // are anchored to `NOW`, so the clock must match the same instant the `create` block pins.
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it('AC-8: an invite DTO exposes exactly the public fields and no token material', async () => {
     const { service, seed } = setup({ existingUser: null });
     seed({ id: 'i1', email: 'new@x.io', role: 'DEVELOPER', status: 'PENDING' });

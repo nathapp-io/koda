@@ -8893,6 +8893,112 @@
           "home"
         ]
       }
+    },
+    "/api/projects/{slug}/invites": {
+      "get": {
+        "operationId": "ProjectInvitesController_list",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InviteDto"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Project admin role required"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List project invites (project admin)",
+        "tags": [
+          "projects"
+        ]
+      },
+      "post": {
+        "operationId": "ProjectInvitesController_create",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "accept-language",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateInviteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteCreateResultDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Project admin role required"
+          },
+          "404": {
+            "description": "Project not found"
+          },
+          "409": {
+            "description": "Already a member, or the account is disabled"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add an existing user or invite a new address (project admin)",
+        "tags": [
+          "projects"
+        ]
+      }
     }
   },
   "info": {
@@ -15153,6 +15259,100 @@
           "needsYou",
           "projects",
           "activity"
+        ]
+      },
+      "InviteDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "PENDING",
+              "ACCEPTED",
+              "EXPIRED",
+              "CANCELLED"
+            ],
+            "type": "string"
+          },
+          "inviterName": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "role",
+          "status",
+          "expiresAt",
+          "createdAt"
+        ]
+      },
+      "CreateInviteDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "format": "email",
+            "description": "Email to add or invite",
+            "example": "dev@example.com"
+          },
+          "role": {
+            "enum": [
+              "ADMIN",
+              "DEVELOPER",
+              "VIEWER"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "role"
+        ]
+      },
+      "InviteCreateResultDto": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "enum": [
+              "ADDED",
+              "INVITED"
+            ],
+            "type": "string"
+          },
+          "member": {
+            "$ref": "#/components/schemas/ProjectMemberDto"
+          },
+          "invite": {
+            "$ref": "#/components/schemas/InviteDto"
+          },
+          "invitePath": {
+            "type": "string"
+          },
+          "emailed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "outcome"
         ]
       }
     }

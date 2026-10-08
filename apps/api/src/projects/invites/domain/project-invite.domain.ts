@@ -21,9 +21,10 @@ export interface ProjectInviteRecord {
 }
 
 /**
- * Fleet S4b US-004 test-writer stub (RED state): `EXPIRED` is computed on read, a PENDING
- * invite whose `expiresAt` has passed reads as `EXPIRED` without touching the stored row.
+ * Fleet S4b US-004: `EXPIRED` is computed on read, a PENDING invite whose `expiresAt` has passed reads
+ * as `EXPIRED` without touching the stored row. ACCEPTED and CANCELLED are final and never rewritten.
  */
-export function effectiveStatus(_record: ProjectInviteRecord, _now: Date): InviteStatus {
-  return 'PENDING';
+export function effectiveStatus(record: ProjectInviteRecord, now: Date): InviteStatus {
+  if (record.status === 'PENDING' && record.expiresAt.getTime() <= now.getTime()) return 'EXPIRED';
+  return record.status;
 }

@@ -27,8 +27,7 @@ export class EmailContentBuilder {
   ) {}
 
   async build(row: EmailScheduleRow): Promise<EmailContent> {
-    // US-004 test-writer stub (RED): the implementer owns the MEMBER_ADDED build order.
-    if (row.kind === 'MEMBER_ADDED') return { skip: 'READ' };
+    if (row.kind === 'MEMBER_ADDED') return this.buildMemberAdded(row);
 
     if (row.kind !== 'NOTIFICATION' || !row.notificationId) return { skip: 'SOURCE_GONE' };
 
@@ -54,6 +53,36 @@ export class EmailContentBuilder {
         url: this.email.webUrl(notification.link),
         prefsUrl: this.email.webUrl('/settings/notifications'),
       },
+      userId: user.id,
+    };
+  }
+
+  /**
+   * Fleet S4b US-004 build order: user missing or disabled → USER_DISABLED; project missing or
+   * soft-deleted → SOURCE_GONE; membership missing → SOURCE_GONE; otherwise the member data.
+   */
+  private async buildMemberAdded(row: EmailScheduleRow): Promise<EmailContent> {
+    const user = row.userId
+      ? await this.prisma.client.user.findUnique({ where: { id: row.userId }, select: { id: true, disabled: true } })
+      : null;
+    if (!user || user.disabled) return { skip: 'USER_DISABLED' };
+
+    const projectId = row.projectId;
+    if (!projectId) return { skip: 'SOURCE_GONE' };
+    const project = await this.prisma.client.project.findUnique({
+      where: { id: projectId },
+      select: { name: true, slug: true, deletedAt: true },
+    });
+    if (!project || project.deletedAt) return { skip: 'SOURCE_GONE' };
+
+    const membership = await this.prisma.client.projectMember.findUnique({
+      where: { projectId_userId: { projectId, userId: user.id } },
+      select: { role: true },
+    });
+    if (!membership) return { skip: 'SOURCE_GONE' };
+
+    return {
+      data: { projectName: project.name, role: membership.role, url: this.email.webUrl(`/${project.slug}`) },
       userId: user.id,
     };
   }
