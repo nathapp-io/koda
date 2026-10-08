@@ -139,6 +139,10 @@ export function memberCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
+        if (options.cancel && options.resend) {
+          handleApiError(new Error('Choose either --cancel or --resend'), { validationError: true });
+          return;
+        }
         const ctx = await withContext({ projectSlug: options.project });
         if (options.cancel) {
           const response = await projectInvitesControllerCancel({ path: { slug: ctx.projectSlug, id: options.cancel } });
