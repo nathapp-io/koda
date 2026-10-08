@@ -49,7 +49,10 @@ export class EmailScheduleRepository {
     });
   }
 
-  /** An invite email sends once, immediately; the row is written and claimed by the caller's own send path. */
+  /**
+   * An invite email sends once, immediately; the row starts SENDING under a fresh lock so a crash mid-send
+   * leaves it recoverable by `closeAbandonedInvites`. INVITE rows are never returned by `claimDue`.
+   */
   async startInviteSend(input: InviteSend): Promise<EmailScheduleRow> {
     const model = await this.prisma.client.emailSchedule.create({
       data: {
@@ -57,7 +60,10 @@ export class EmailScheduleRepository {
         inviteId: input.inviteId,
         toEmail: input.toEmail,
         locale: input.locale,
+        status: 'SENDING',
+        attempts: 1,
         dueAt: input.now,
+        lockedUntil: new Date(input.now.getTime() + LOCK_MS),
       },
     });
     return this.toRow(model);
@@ -88,7 +94,7 @@ export class EmailScheduleRepository {
   async closeAbandonedInvites(now: Date): Promise<number> {
     const result = await this.prisma.client.emailSchedule.updateMany({
       where: { kind: 'INVITE', status: 'SENDING', lockedUntil: { lt: now } },
-      data: { status: 'FAILED', lockedUntil: null },
+      data: { status: 'FAILED', lastError: 'abandoned', lockedUntil: null },
     });
     return result.count;
   }
