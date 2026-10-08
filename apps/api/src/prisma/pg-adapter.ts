@@ -16,8 +16,8 @@ export interface PgAdapterConfig {
  * - `?schema=` is applied as the adapter `schema` option plus the connection `search_path` (the option
  *   alone qualifies only Prisma-generated SQL, not raw SQL);
  * - `connection_limit` becomes the pg pool `max`; the other Prisma-only parameters are dropped;
- * - `sslmode` keeps its libpq meaning (`require` encrypts without a CA check, as under Prisma 6) through
- *   pg's `uselibpqcompat`, unless the URL already chooses.
+ * - `sslmode` passes through untouched: pg treats `require` as verify-full, stricter than Prisma 6. An
+ *   operator who needs encryption without a certificate check opts in with `uselibpqcompat=true`.
  */
 export function pgAdapterConfig(databaseUrl: string): PgAdapterConfig {
   const url = new URL(databaseUrl);
@@ -31,7 +31,6 @@ export function pgAdapterConfig(databaseUrl: string): PgAdapterConfig {
     throw new Error(`DATABASE_URL connection_limit is not a positive integer: ${limit}`);
   }
   for (const name of PRISMA_ONLY_PARAMS) params.delete(name);
-  if (params.has('sslmode') && !params.has('uselibpqcompat')) params.set('uselibpqcompat', 'true');
   return { connectionString: url.toString(), schema, ...(limit !== null ? { max: Number(limit) } : {}) };
 }
 

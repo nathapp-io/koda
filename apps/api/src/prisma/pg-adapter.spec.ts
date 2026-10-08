@@ -35,15 +35,15 @@ describe('pgAdapterConfig', () => {
     expect(config.max).toBeUndefined();
   });
 
-  it('keeps libpq sslmode meaning (require = encrypt without CA check), as Prisma 6 did', () => {
+  it('never weakens TLS: sslmode passes through without uselibpqcompat, so pg verifies the certificate', () => {
     const params = new URL(pgAdapterConfig('postgresql://u:p@db:5432/koda?sslmode=require').connectionString).searchParams;
     expect(params.get('sslmode')).toBe('require');
-    expect(params.get('uselibpqcompat')).toBe('true');
+    expect(params.has('uselibpqcompat')).toBe(false);
   });
 
-  it('leaves an explicit uselibpqcompat choice alone', () => {
-    const params = new URL(pgAdapterConfig('postgresql://u:p@db:5432/koda?sslmode=verify-full&uselibpqcompat=false').connectionString).searchParams;
-    expect(params.get('uselibpqcompat')).toBe('false');
+  it('keeps an operator-chosen uselibpqcompat', () => {
+    const params = new URL(pgAdapterConfig('postgresql://u:p@db:5432/koda?sslmode=require&uselibpqcompat=true').connectionString).searchParams;
+    expect(params.get('uselibpqcompat')).toBe('true');
   });
 
   it('rejects a connection_limit that is not a positive integer', () => {

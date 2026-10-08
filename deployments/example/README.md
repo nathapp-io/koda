@@ -95,5 +95,8 @@ cd deployments/example
 - PostgreSQL is Koda's only database. This example's compose file predates the Postgres-only
   switch and still carried the historical SQLite default; it now ships a `postgres:16` service.
   Set `DATABASE_URL` in `.env` to point at an external Postgres instead if you prefer.
+  With TLS, `sslmode=require` verifies the server certificate (stricter than before the Prisma 7
+  upgrade); for a private CA add `sslrootcert=<path>`, or opt out of the check with `uselibpqcompat=true`.
+  `connection_limit=<n>` sets the connection pool size.
 - Use immutable tags in production (e.g. `KODA_VERSION=v0.4.0`) rather than `latest`.
 - `rollback.sh` updates `KODA_VERSION` in `deployments/example/.env`.
