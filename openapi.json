@@ -4674,7 +4674,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NotificationPreferencesDto"
+                  "$ref": "#/components/schemas/NotificationPreferencesViewDto"
                 }
               }
             }
@@ -4685,7 +4685,7 @@
             "bearer": []
           }
         ],
-        "summary": "My in-app notification categories",
+        "summary": "My in-app and email notification categories",
         "tags": [
           "notifications"
         ]
@@ -4709,7 +4709,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NotificationPreferencesDto"
+                  "$ref": "#/components/schemas/NotificationPreferencesViewDto"
                 }
               }
             }
@@ -4723,7 +4723,7 @@
             "bearer": []
           }
         ],
-        "summary": "Switch in-app notification categories on or off",
+        "summary": "Switch my notification categories and email on or off",
         "tags": [
           "notifications"
         ]
@@ -11075,6 +11075,54 @@
           "count"
         ]
       },
+      "NotificationPreferenceViewItemDto": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "enum": [
+              "ASSIGNED",
+              "MENTIONED",
+              "WATCHED_ACTIVITY",
+              "FLEET_NEEDS_YOU",
+              "FLEET_HEALTH"
+            ],
+            "type": "string"
+          },
+          "inApp": {
+            "type": "boolean"
+          },
+          "email": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "category",
+          "inApp",
+          "email"
+        ]
+      },
+      "NotificationPreferencesViewDto": {
+        "type": "object",
+        "properties": {
+          "emailAvailable": {
+            "type": "boolean"
+          },
+          "emailEnabled": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NotificationPreferenceViewItemDto"
+            }
+          }
+        },
+        "required": [
+          "emailAvailable",
+          "emailEnabled",
+          "items"
+        ]
+      },
       "NotificationPreferenceItemDto": {
         "type": "object",
         "properties": {
@@ -11090,27 +11138,28 @@
           },
           "inApp": {
             "type": "boolean"
+          },
+          "email": {
+            "type": "boolean"
           }
         },
         "required": [
-          "category",
-          "inApp"
+          "category"
         ]
       },
       "NotificationPreferencesDto": {
         "type": "object",
         "properties": {
+          "emailEnabled": {
+            "type": "boolean"
+          },
           "items": {
-            "minItems": 1,
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/NotificationPreferenceItemDto"
             }
           }
-        },
-        "required": [
-          "items"
-        ]
+        }
       },
       "WatchStateDto": {
         "type": "object",
