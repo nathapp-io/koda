@@ -60,17 +60,20 @@ Symbols this feature reads but does not change (verified on `main` `6f5cd3b5`):
 - `PROJECT_MEMBER_ROLES` (`ADMIN`, `DEVELOPER`, `VIEWER`) — `apps/api/src/projects/members/domain/project-member.domain.ts`.
 - `AuthService.generateAccessToken(userId, email, role, tokenVersion)` and `.generateRefreshToken(userId, tokenVersion)`
   (public) — `apps/api/src/auth/auth.service.ts`; `RegisterDto` and `PASSWORD_COMPLEXITY` — `apps/api/src/auth/dto/register.dto.ts`.
-- Web: `useApi()`, `useAuth()`, `useAppToast()`, `extractApiError()`; `forwardToApi`, `unwrapAuth`, `setAuthCookies`
+- Web: `useApi()`, `useAuth().isAuthenticated`, `useAppToast()`, `extractApiError()`; `forwardToApi`, `unwrapAuth`, `setAuthCookies`
   (used by `apps/web/server/api/auth/register.post.ts`).
-- CLI: `withContext`, `unwrap`, `table`, `handleApiError` (used by `apps/cli/src/commands/member.ts`).
+- CLI: `withContext`, `unwrap`, `table`, `handleApiError` (used by `apps/cli/src/commands/member.ts`); `handleApiError` exits 1 for a 409, 4 for a 404, 3 for a 400 and 2 for a 401 or 403 (`apps/cli/src/utils/error.ts`).
 
 Symbols this feature changes. Each baseline exists only to locate the code; it is never the interface to implement.
 
 **`NotificationWriter.deliver(drafts)`** — `apps/api/src/notifications/notification-writer.ts` (US-002)
 - Baseline: eligibility, in-app preferences, `repo.insertMany`, then `UserEventBus.publish` per inserted row.
-- Target: same steps, plus, after `insertMany` and before the publishes, one `EmailSchedule` row per inserted
-  notification whose user allows email for its category (only when `EmailAvailability.configured`). Constructor gains
-  `EmailScheduleRepository`, `EmailAvailability` and `NotificationEmailRecipients`.
+- Target: same steps, plus one `EmailSchedule` row per inserted notification whose user allows email for its category
+  (only when `EmailAvailability.configured`), scheduled through `EmailScheduleService.scheduleNotifications`. The
+  `insertMany` call and the scheduling call run inside one `txManager.run`, so a scheduling failure rolls back the
+  inserted notifications and the outbox retry redoes both; the `UserEventBus` publishes run after that transaction
+  commits. Constructor gains `EmailScheduleService`, `EmailAvailability`, `NotificationEmailRecipients` and
+  `TRANSACTION_MANAGER`.
 
 **`NotificationsRepository.insertMany(drafts)`** — `apps/api/src/notifications/notifications.repository.ts` (US-002)
 - Baseline: returns `{ id, userId }[]`.
@@ -102,6 +105,36 @@ Symbols this feature changes. Each baseline exists only to locate the code; it i
 
 **Web route middleware** — `apps/web/middleware/auth.global.ts` (US-007)
 - Target: a path starting with `/invite/` returns before the unauthenticated redirect.
+
+**Web `useAuth()`** — `apps/web/composables/useAuth.ts` (US-007)
+- Baseline: `{ user, isAuthenticated, login, register, logout, fetchUser, refresh }`.
+- Target: adds `acceptInvite(token: string, body: { name: string; password: string }): Promise<void>`, which posts
+  `body` to `/api/invites/<token>/accept` (the Nitro route) and sets `user` from the response, like `register`.
+
+### Contracts between stories
+
+- `EmailScheduleService` (US-001, `apps/api/src/email/schedule/email-schedule.service.ts`) is provided and exported by
+  the global `EmailCoreModule`; `EmailScheduleRepository` is provided there but never exported (`.nax/rules/api-data.md`).
+  Methods, all delegating to the repository:
+  - `scheduleNotifications(rows: ReadonlyArray<{ notificationId: string; userId: string; toEmail: string; dueAt: Date }>): Promise<number>`
+  - `scheduleMemberAdded(input: { userId: string; projectId: string; toEmail: string; locale: string; dueAt: Date }): Promise<void>`
+  - `startInviteSend(input: { inviteId: string; toEmail: string; locale: string; now: Date }): Promise<EmailScheduleRow>`
+  - `claimDue(now: Date, limit: number): Promise<EmailScheduleRow[]>` and `closeAbandonedInvites(now: Date): Promise<number>`
+  - terminal transitions `markSent(id, now)`, `markSkipped(id, reason: SkipReason)`, `markFailed(id, error)`, and
+    `retryAt(id, dueAt, error)` (back to `PENDING`)
+- `EmailScheduleRow = { id, kind, notificationId, inviteId, userId, projectId, toEmail, locale, attempts, dueAt }`.
+- `EmailContentBuilder` and `EmailDispatcher` (US-002) are provided and exported by `NotificationsModule`.
+  `EmailDispatcher.sendOne(row: EmailScheduleRow, templateCode, data, userId: string | null, now: Date, retryable = true):
+  Promise<'SENT' | 'FAILED' | 'RETRY'>` is the send step; US-004's `InviteMailer` calls it with `retryable` false.
+- `ProjectInvitesModule` (US-004) imports `NotificationsModule` for `EmailDispatcher`, and `ProjectMembersModule`'s
+  service is not imported: the invites repository owns its own membership and user writes.
+- `POST /projects/:slug/invites` returns one DTO class `InviteCreateResultDto { outcome: 'ADDED' | 'INVITED';
+  member?: ProjectMemberDto; invite?: InviteDto; invitePath?: string; emailed?: boolean }` so the generated CLI types
+  expose every field.
+- `MEMBER_ADDED` and `INVITE` email are transactional notices: they do not consult notification preferences or the email
+  master switch.
+- Invite email locale is `zh` when the create or resend request's `Accept-Language` starts with `zh`, otherwise `en`.
+  `MEMBER_ADDED` and notification email are always `en`.
 
 ### New data (US-001, US-004)
 
@@ -156,7 +189,8 @@ must leave zero drift against `schema.prisma`.
   `UPDATE "EmailSchedule" SET status='SENDING', "lockedUntil"=now+2min, attempts=attempts+1 WHERE id IN (SELECT id ...
   WHERE kind IN ('NOTIFICATION','MEMBER_ADDED') AND ((status='PENDING' AND "dueAt"<=now) OR (status='SENDING' AND
   "lockedUntil"<now)) ORDER BY "dueAt" LIMIT limit FOR UPDATE SKIP LOCKED) RETURNING ...` — the same SKIP LOCKED pattern
-  as `apps/api/src/outbox/prisma-outbox.store.ts`. `INVITE` rows are never claimed.
+  as `apps/api/src/outbox/prisma-outbox.store.ts`. `INVITE` rows are never claimed. Every caller goes through
+  `EmailScheduleService`.
 - **Dispatcher (US-002).** `EmailDispatcher.tick(now)` first closes abandoned invite sends, then claims, then per row:
   `EmailContentBuilder.build(row)` returns either `{ skip: SkipReason }` or `{ data, userId }`; a skip marks the row
   `SKIPPED`; otherwise `sendOne` calls `NOTIFY_SERVICE.send` with `tenantId: KODA_TENANT_ID`, `channel: 'email'`,
@@ -178,7 +212,8 @@ must leave zero drift against `schema.prisma`.
   anything else, including a thrown error, → `emailed: false` and the row `FAILED`.
 - **Accept (US-005)** is one transaction: a conditional update flips the invite `PENDING → ACCEPTED` only when the
   hash matches and `expiresAt > now` (zero rows → 404); if a user with the invite email exists → 409 and the transaction
-  rolls back; otherwise create the user (password hashed as `UsersAdminService.create` does, role `MEMBER`, email from
+  rolls back; a unique violation on the user's email (a concurrent accept of another invite for the same address) is
+  also a 409; otherwise create the user (password hashed as `UsersAdminService.create` does, role `MEMBER`, email from
   the invite, name from the body), set `acceptedByUserId`, create the membership. The session is issued after commit
   through `AuthService.issueSession`.
 - **Web accept (US-007)** goes through a Nitro route `apps/web/server/api/invites/[token]/accept.post.ts` that sets the
@@ -191,14 +226,14 @@ must leave zero drift against `schema.prisma`.
 
 | Route | Auth | Result |
 |---|---|---|
-| `POST /projects/:slug/invites` `{ email, role }` | project ADMIN or global ADMIN | 201 `{ outcome: 'ADDED', member }` or `{ outcome: 'INVITED', invite, invitePath, emailed }`; 409 `MEMBER_EXISTS` / `USER_DISABLED`; 400 bad role |
-| `GET /projects/:slug/invites` | same | `InviteDto[]` newest first, effective status, no token or hash |
-| `POST /projects/:slug/invites/:id/resend` | same | 201 `{ invite, invitePath, emailed }`; 409 unless PENDING or expired; 404 unknown |
-| `DELETE /projects/:slug/invites/:id` | same | 200; PENDING → CANCELLED; final invites unchanged; 404 unknown |
-| `GET /invites/:token` | public, throttled | 200 `{ projectName, projectSlug, email, role, inviterName, expiresAt }`; every invalid state the same 404 |
-| `POST /invites/:token/accept` `{ name, password }` | public, throttled | 201 login-shaped `{ accessToken, refreshToken, user }`; 404 invalid; 409 account exists; 400 weak password |
+| `POST /projects/:slug/invites` `{ email, role }` (US-004) | project ADMIN or global ADMIN | 201 `{ outcome: 'ADDED', member }` or `{ outcome: 'INVITED', invite, invitePath, emailed }`; 409 `MEMBER_EXISTS` / `USER_DISABLED`; 400 bad role |
+| `GET /projects/:slug/invites` (US-004) | same | `InviteDto[]` newest first, effective status, no token or hash |
+| `POST /projects/:slug/invites/:id/resend` (US-005) | same | 201 `{ invite, invitePath, emailed }`; rotates the token, resets `status` to `PENDING` and `expiresAt` to now + `INVITE_TTL_DAYS`; 409 unless PENDING or expired; 404 when the id is unknown or belongs to another project |
+| `DELETE /projects/:slug/invites/:id` (US-005) | same | 200; PENDING → CANCELLED; final invites unchanged; 404 when the id is unknown or belongs to another project |
+| `GET /invites/:token` (US-005) | public, throttled | 200 `{ projectName, projectSlug, email, role, inviterName, expiresAt }`; every invalid state the same 404 |
+| `POST /invites/:token/accept` `{ name, password }` (US-005) | public, throttled | 201 login-shaped `{ accessToken, refreshToken, user }`; 404 invalid; 409 account exists; 400 weak password |
 
-Controllers: `ProjectInvitesController` (methods `create`, `list`, `resend`, `cancel`, so operationIds
+Controllers: `ProjectInvitesController` (methods `create` and `list` added by US-004, `resend` and `cancel` by US-005, so operationIds
 `ProjectInvitesController_create` etc. and generated CLI functions `projectInvitesControllerCreate`,
 `projectInvitesControllerList`, `projectInvitesControllerResend`, `projectInvitesControllerCancel`) and
 `PublicInvitesController` (`preview`, `accept`). `InviteDto = { id, email, role, status, inviterName, expiresAt, createdAt }`.
@@ -209,7 +244,7 @@ Error keys live in `apps/api/src/i18n/{en,zh}/invites.json`.
 - `koda member invite --email <e> --role <ADMIN|DEVELOPER|VIEWER> [--project <slug>] [--json]`
 - `koda member invites [--project <slug>] [--cancel <id>] [--resend <id>] [--json]`
 - stdout: human lines below, or `JSON.stringify(data, null, 2)` with `--json`; stderr: errors through `handleApiError`.
-- Exit 0 success; 1 API/network error (including 404/409 from the API); 2 config/auth error; 3 validation error.
+- Exit codes come from `handleApiError`: 0 success; 1 an API 409 or a network error; 2 config/auth error (401/403); 3 validation error (400); 4 not found (404).
 - Human output: `Added <email> as <role>`; `Invite created for <email>. Emailed.`; `Invite created for <email>. Share
   this link (shown once): <invitePath>`; `invites` prints a table with headers `ID`, `Email`, `Role`, `Status`, `Expires`.
 
@@ -220,14 +255,14 @@ Error keys live in `apps/api/src/i18n/{en,zh}/invites.json`.
 - `PermanentNotificationError`, or `NotifyException` with code `TEMPLATE_NOT_FOUND`, `CHANNEL_NOT_REGISTERED` or
   `TENANT_MISMATCH` → `FAILED` on the first attempt.
 - A `FAILED` row logs one WARN with the row id, kind and attempts only — never the address, the body or the URL.
-- A database error while scheduling inside `NotificationWriter.deliver` propagates, so the outbox retries; the unique
-  keys make the retry harmless.
+- A database error while scheduling inside `NotificationWriter.deliver` propagates and rolls back that call's inserted
+  notifications (one transaction), so the outbox retry inserts and schedules them again.
 - A builder or repository error for one claimed row → that row returns to `PENDING` with backoff; the rest of the batch
   continues.
 - Invite email failure → `emailed: false`, the `INVITE` row `FAILED`, the invite still created (no retry, D526).
 - An `INVITE` row left `SENDING` past its lock (crash) → `FAILED` with `lastError` `abandoned` on the next tick.
 - Accept: any invalid token state → 404 with an identical body; an account created for the invite email after the
-  invite → 409 and nothing is written.
+  invite, or a unique violation on that email during the accept transaction → 409 and nothing is written.
 
 ## Out of Scope
 
@@ -247,8 +282,10 @@ Error keys live in `apps/api/src/i18n/{en,zh}/invites.json`.
 - Adding email or invite coverage to `apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts`, which does not cover members or notifications today.
 - The nightly purge of final `EmailSchedule` rows and of expired, accepted or cancelled `ProjectInvite` rows (S4b design §2.4) is a follow-up; this feature computes `EXPIRED` on read instead of writing it.
 - US-002 only: the WARN line for a `FAILED` email row (row id, kind and attempts only, never the address, body or URL) is required behaviour but is not acceptance-tested in this story.
-- US-002 only: classifying `NotifyException` codes `TEMPLATE_NOT_FOUND`, `CHANNEL_NOT_REGISTERED` and `TENANT_MISMATCH` as permanent is not acceptance-tested; `PermanentNotificationError` is.
+- US-002 only: classifying `NotifyException` with `NotifyExceptionCode.TEMPLATE_NOT_FOUND`, `CHANNEL_NOT_REGISTERED` or `TENANT_MISMATCH` as permanent is not acceptance-tested; `PermanentNotificationError` is.
 - US-004 only: two concurrent `POST /projects/:slug/invites` for the same project and email may both leave a `PENDING` invite; cancel-then-create is atomic per request, not across requests.
+- US-005 only: the 409 mapping for a unique violation when two invites for the same email are accepted concurrently is required but not acceptance-tested.
+- US-004 only: rejecting role `AGENT`, the `INVITE_TTL_DAYS` to `expiresAt` relationship, the 43-character base64url token format, and the 403 guard on list (same `assertProjectAdmin` guard as create, which is tested) are required but not acceptance-tested.
 - US-005 only: per-token or per-IP lockout beyond the existing `AUTH_LOGIN_LIMIT` throttle on the two public invite routes.
 - US-002 only: email for notifications written before this feature ships (no backfill of `EmailSchedule`).
 
@@ -259,7 +296,7 @@ Error keys live in `apps/api/src/i18n/{en,zh}/invites.json`.
 3. **US-003: Web email preference controls** — `Workdir: apps/web` — depends on US-001.
 4. **US-004: Project invites — model, admin routes and invite mail** — `Workdir: apps/api` — depends on US-002.
 5. **US-005: Public invite preview and accept** — `Workdir: apps/api` — depends on US-004.
-6. **US-006: CLI member invite and invites** — `Workdir: apps/cli` — depends on US-004.
+6. **US-006: CLI member invite and invites** — `Workdir: apps/cli` — depends on US-005 (it calls the resend and cancel routes US-005 adds).
 7. **US-007: Web invite dialog and accept page** — `Workdir: apps/web` — depends on US-005.
 
 ### Context Files
@@ -271,13 +308,13 @@ Error keys live in `apps/api/src/i18n/{en,zh}/invites.json`.
 - `apps/api/src/notifications/notification-preferences.service.ts` — the S4a per-category service this story extends
 - `apps/api/src/notifications/me-notifications.controller.ts` — preferences routes whose shape changes
 - `apps/api/src/outbox/prisma-outbox.store.ts` — the SKIP LOCKED claim pattern to mirror
-- `apps/api/src/email/email.module.ts` — `EmailCoreModule`, where the schedule repository is registered (global)
+- `apps/api/src/email/email.module.ts` — `EmailCoreModule` (global), which provides the schedule repository and provides and exports `EmailScheduleService`
 - `docs/superpowers/plans/2026-10-08-fleet-s4b-email-and-invites.md` — Tasks B1 and B2 carry worked code
 
 **US-002**
 
 - `apps/api/src/notifications/notification-writer.ts` — the only notification writer, extended here
-- `apps/api/src/email/schedule/email-schedule.repository.ts` — created by US-001, consumed here
+- `apps/api/src/email/schedule/email-schedule.service.ts` — created by US-001, consumed here
 - `apps/api/src/email/email-availability.ts` — the email-on switch and link builder
 - `apps/api/test/integration/notifications/fleet-budget-approval-notifications.integration.spec.ts` — how to deliver outbox records through `FanOutPublisher` in a PG test
 - `docs/superpowers/plans/2026-10-08-fleet-s4b-email-and-invites.md` — Tasks B3 and B4 carry worked code
@@ -300,7 +337,7 @@ Error keys live in `apps/api/src/i18n/{en,zh}/invites.json`.
 **US-005**
 
 - `apps/api/src/projects/invites/prisma-project-invites.repository.ts` — created by US-004, extended here
-- `apps/api/src/projects/invites/project-invites.service.ts` — created by US-004, gains `resend` and `cancel`
+- `apps/api/src/projects/invites/project-invites.service.ts` — created by US-004, gains `resend` and `cancel` (the controller gains the two routes)
 - `apps/api/src/auth/auth.service.ts` — session issuing refactored into `issueSession`
 - `apps/api/src/auth/auth.controller.ts` — `AUTH_LOGIN_LIMIT` throttle pattern
 - `apps/api/test/helpers/http-app.ts` — `bootHttpApp`, `data`, `loginToken`
@@ -319,6 +356,7 @@ Error keys live in `apps/api/src/i18n/{en,zh}/invites.json`.
 - `apps/web/server/api/auth/register.post.ts` — cookie-setting Nitro route to mirror
 - `apps/web/middleware/auth.global.ts` — public-route handling extended here
 - `apps/web/pages/register.vue` — vee-validate + zod form to mirror on the accept page
+- `apps/web/composables/useAuth.ts` — gains `acceptInvite`, mirroring `register`
 
 ### Creates
 
@@ -328,7 +366,8 @@ Error keys live in `apps/api/src/i18n/{en,zh}/invites.json`.
 
 - `apps/api/prisma/migrations/20261010100000_email_schedule/migration.sql` — `EmailSchedule` table
 - `apps/api/src/email/schedule/email-schedule.types.ts` — `EmailKind`, `EmailStatus`, `SkipReason`, `EmailScheduleRow`, `LOCK_MS`, `LAST_ERROR_MAX`
-- `apps/api/src/email/schedule/email-schedule.repository.ts` — `EmailScheduleRepository`
+- `apps/api/src/email/schedule/email-schedule.repository.ts` — `EmailScheduleRepository` (module-private)
+- `apps/api/src/email/schedule/email-schedule.service.ts` — `EmailScheduleService`, the exported contract
 - `apps/api/test/integration/email/email-schedule-repository.integration.spec.ts` — claim and idempotency on PG
 
 **US-002**
@@ -383,11 +422,12 @@ Error keys live in `apps/api/src/i18n/{en,zh}/invites.json`.
 
 - `apps/api/src/notifications/notification-preferences.service.spec.ts` — its setup constructs NotificationPreferencesService with two arguments and asserts list() returns a bare array of category and inApp pairs. US-001 adds the package PREFERENCE_SERVICE and EmailAvailability constructor arguments and changes list() to return emailAvailable, emailEnabled and items with category, inApp and email. Replacing invariant: in-app values are unchanged per category and appear under items[].inApp.
 - `apps/api/src/notifications/me-notifications.controller.spec.ts` — asserts the preferences routes return items of category and inApp only, and that PUT requires at least one item. Replacing invariant: both routes return emailAvailable, emailEnabled and items with category, inApp and email; PUT accepts emailEnabled alone.
-- `apps/api/src/common/test-helpers/global-stubs.module.ts` — the NotificationsModule DI spec compiles the module with only these global stubs; US-001 makes NotificationPreferencesService inject PREFERENCE_SERVICE and EmailAvailability, so this module must provide useValue stubs for both and for EmailScheduleRepository.
+- `apps/api/src/common/test-helpers/global-stubs.module.ts` — the NotificationsModule DI spec compiles the module with only these global stubs; US-001 makes NotificationPreferencesService inject PREFERENCE_SERVICE and EmailAvailability, so this module must provide useValue stubs for both and for EmailScheduleService.
 
 **US-002**
 
-- `apps/api/src/notifications/notification-writer.spec.ts` — constructs NotificationWriter with four arguments and asserts the call order insert, publish, publish. US-002 adds three constructor arguments and an email-scheduling step between the insert and the publishes. Replacing invariant: the order is insert, schedule, then one publish per inserted row.
+- `apps/api/src/notifications/notification-writer.spec.ts` — constructs NotificationWriter with four arguments and asserts the call order insert, publish, publish. US-002 adds four constructor arguments and wraps the insert and an email-scheduling step in one transaction before the publishes. Replacing invariant: the order is insert, schedule (both inside the transaction), then one publish per inserted row.
+- `apps/api/test/integration/notifications/notifications-repository.integration.spec.ts` — the redelivery test asserts insertMany resolves exactly [{ id, userId }] for the newly inserted row. US-002 makes insertMany also return category, kind and createdAt. Replacing invariant: a repeated draft still inserts nothing, and the newly inserted row carries id, userId, category, kind and createdAt.
 - `apps/api/src/notifications/notifications.repository.spec.ts` — asserts insertMany selects only id and userId and resolves rows of id and userId. Replacing invariant: it selects and returns id, userId, category, kind and createdAt.
 - `apps/api/src/common/test-helpers/global-stubs.module.ts` — NotificationsModule now provides EmailDispatcher and EmailContentBuilder, so the global stubs must also provide a NOTIFY_SERVICE stub for the NotificationsModule DI spec.
 
@@ -410,11 +450,11 @@ Error keys live in `apps/api/src/i18n/{en,zh}/invites.json`.
 
 ### Seams
 
-- S1 (US-001 → US-002) — [integration] `EmailScheduleRepository.scheduleNotifications` and `NotificationPreferencesService.emailAllowedUserIds` reached from `FanOutPublisher.publish` of a `ticket_event` `assigned` outbox record (US-002 AC 13).
+- S1 (US-001 → US-002) — [integration] `EmailScheduleService.scheduleNotifications` and `NotificationPreferencesService.emailAllowedUserIds` reached from `FanOutPublisher.publish` of a `ticket_event` `assigned` outbox record whose `data` is `{ assignedTo: B, assigneeType: 'user' }`, where B is a project member and not the actor (US-002 AC 13).
 - S2 (US-002 → US-002) — [integration] `NOTIFY_SERVICE` reached from `EmailDispatcher.tick` once per due row, and not again on a second tick (US-002 AC 13, AC 14).
 - S3 (US-002 → US-004) — [integration] the dispatcher's send step reached from `POST /projects/:slug/invites` for a new email (US-004 AC 10).
 - S4 (US-001 → US-003) — [unit] the composable's PUT body shape matches the US-001 request contract (US-003 AC 9, AC 10).
-- S5 (US-004 → US-006) — [unit] the CLI calls `projectInvitesControllerCreate` with `{ path: { slug }, body: { email, role } }` (US-006 AC 1).
+- S5 (US-004, US-005 → US-006) — [unit] the CLI calls `projectInvitesControllerCreate` with `{ path: { slug }, body: { email, role } }` (US-006 AC 1).
 - S6 (US-005 → US-007) — [unit] the Nitro route sets auth cookies from the `/invites/<token>/accept` response (US-007 AC 13).
 - S7 (US-004 → US-007) — [unit] the web composable posts `{ email, role }` to `/projects/<slug>/invites` (US-007 AC 7).
 
@@ -422,13 +462,13 @@ Error keys live in `apps/api/src/i18n/{en,zh}/invites.json`.
 
 ### US-001: Email schedule store and two-layer email preferences (`Workdir: apps/api`)
 
-- [integration] Two concurrent `EmailScheduleRepository.claimDue(now, 20)` calls over 30 due `MEMBER_ADDED` rows return disjoint row sets whose sizes sum to 30.
-- [integration] `EmailScheduleRepository.claimDue(now, 20)` leaves a `PENDING` row whose `dueAt` is later than `now` in status `PENDING`.
-- [integration] `EmailScheduleRepository.claimDue(now, 20)` never returns a row of kind `INVITE`, even one that is `SENDING` with `lockedUntil` before `now`.
-- [integration] `EmailScheduleRepository.claimDue(now, 20)` returns a `SENDING` row whose `lockedUntil` is before `now` with its `attempts` increased by one.
-- [integration] `EmailScheduleRepository.closeAbandonedInvites(now)` sets an `INVITE` row that is `SENDING` with `lockedUntil` before `now` to `FAILED` with `lastError` `abandoned`.
-- [integration] Calling `EmailScheduleRepository.scheduleNotifications` twice with the same `notificationId` leaves exactly one `EmailSchedule` row for that notification.
-- [integration] `EmailScheduleRepository.retryAt(id, dueAt, error)` with a 2 000-character `error` stores a `lastError` of exactly 500 characters.
+- [integration] Two concurrent `EmailScheduleService.claimDue(now, 20)` calls over 30 due `MEMBER_ADDED` rows never return the same row id.
+- [integration] `EmailScheduleService.claimDue(now, 20)` leaves a `PENDING` row whose `dueAt` is later than `now` in status `PENDING`.
+- [integration] `EmailScheduleService.claimDue(now, 20)` never returns a row of kind `INVITE`, even one that is `SENDING` with `lockedUntil` before `now`.
+- [integration] `EmailScheduleService.claimDue(now, 20)` returns a `SENDING` row whose `lockedUntil` is before `now` with its `attempts` increased by one.
+- [integration] `EmailScheduleService.closeAbandonedInvites(now)` sets an `INVITE` row that is `SENDING` with `lockedUntil` before `now` to `FAILED` with `lastError` `abandoned`.
+- [integration] Calling `EmailScheduleService.scheduleNotifications` twice with the same `notificationId` leaves exactly one `EmailSchedule` row for that notification.
+- [integration] `EmailScheduleService.retryAt(id, dueAt, error)` with a 2 000-character `error` stores a `lastError` of exactly 500 characters.
 - [unit] For a user with no preference rows, `NotificationPreferencesService.list(userId)` returns `items` whose `email` values are `true` for `ASSIGNED`, `MENTIONED` and `FLEET_NEEDS_YOU` and `false` for `WATCHED_ACTIVITY` and `FLEET_HEALTH`.
 - [unit] `NotificationPreferencesService.list(userId)` returns `emailAvailable` equal to `EmailAvailability.configured`.
 - [unit] `NotificationPreferencesService.emailAllowedUserIds(['off', 'plain'], 'ASSIGNED')` returns only `plain` when user `off` has a package `NotificationPreference` row for tenant `default`, channel `email`, with `enabled` false.
@@ -443,11 +483,11 @@ Error keys live in `apps/api/src/i18n/{en,zh}/invites.json`.
 
 ### US-002: Schedule notification email and dispatch it (`Workdir: apps/api`)
 
-- [unit] When `EmailAvailability.configured` is true and the user is allowed email for `ASSIGNED`, `NotificationWriter.deliver` calls `EmailScheduleRepository.scheduleNotifications` with that notification's id, the user's email address, and `dueAt` equal to the notification's `createdAt` plus `EMAIL_DELAY_SEC` seconds.
+- [unit] When `EmailAvailability.configured` is true and the user is allowed email for `ASSIGNED`, `NotificationWriter.deliver` calls `EmailScheduleService.scheduleNotifications` with that notification's id, the user's email address, and `dueAt` equal to the notification's `createdAt` plus `EMAIL_DELAY_SEC` seconds.
 - [unit] `NotificationWriter.deliver` schedules a notification of kind `approval_requested` with `dueAt` equal to its `createdAt` plus `EMAIL_APPROVAL_DELAY_SEC` seconds.
-- [unit] `NotificationWriter.deliver` does not call `EmailScheduleRepository.scheduleNotifications` when `EmailAvailability.configured` is false.
+- [unit] `NotificationWriter.deliver` does not call `EmailScheduleService.scheduleNotifications` when `EmailAvailability.configured` is false.
 - [unit] `NotificationWriter.deliver` leaves out of the scheduled rows a user whom `NotificationPreferencesService.emailAllowedUserIds` does not return.
-- [unit] `NotificationWriter.deliver` rejects with the same error when `EmailScheduleRepository.scheduleNotifications` throws.
+- [integration] When `EmailScheduleService.scheduleNotifications` throws inside `NotificationWriter.deliver`, no `Notification` row from that call remains committed.
 - [unit] `EmailDispatcher.tick(now)` marks a claimed `NOTIFICATION` row `SKIPPED` with `skipReason` `SOURCE_GONE` when its notification no longer exists.
 - [unit] `EmailDispatcher.tick(now)` marks a claimed `NOTIFICATION` row `SKIPPED` with `skipReason` `USER_DISABLED` when its user is disabled.
 - [unit] `EmailDispatcher.tick(now)` marks a claimed `NOTIFICATION` row `SKIPPED` with the `reason` that `NotificationPreferencesService.emailAllowed` returns when that result is not allowed.
@@ -463,6 +503,7 @@ Error keys live in `apps/api/src/i18n/{en,zh}/invites.json`.
 - The WARN line for a `FAILED` row: required (row id, kind, attempts only) but not acceptance-tested here.
 - Continuing the batch when one claimed row's build or repository call throws: required (that row returns to `PENDING` with backoff) but not acceptance-tested here.
 - The scheduled tick's timer and its no-overlap guard: not acceptance-tested; `tick(now)` is the tested entry point below the timer.
+- `tick(now)` calling `closeAbandonedInvites(now)` before it claims: required but not acceptance-tested here (the repository method is tested in US-001).
 - Classifying `NotifyException` codes as permanent: not acceptance-tested; `PermanentNotificationError` is.
 
 ### US-003: Web email preference controls (`Workdir: apps/web`)
@@ -489,10 +530,10 @@ Error keys live in `apps/api/src/i18n/{en,zh}/invites.json`.
 - [integration] `POST /projects/:slug/invites` with email ` New@X.io ` and role `DEVELOPER`, when an active user with email `new@x.io` exists, creates a `ProjectMember` row with role `DEVELOPER` for that user.
 - [integration] `POST /projects/:slug/invites` for the email of a user who is already a member of the project responds 409.
 - [integration] `POST /projects/:slug/invites` for the email of a disabled user responds 409.
-- [integration] `POST /projects/:slug/invites` with role `AGENT` responds 400.
 - [integration] `POST /projects/:slug/invites` for an email with no account responds 201 with `outcome` `INVITED` and an `invitePath` whose last segment `t` satisfies `hashInviteToken(t)` equal to the stored `ProjectInvite.tokenHash`.
 - [integration] A second `POST /projects/:slug/invites` for the same project and email sets the first invite's `status` to `CANCELLED`.
 - [integration] `GET /projects/:slug/invites` returns invites with no `token` and no `tokenHash` field.
+- [integration] `GET /projects/:slug/invites` reports a `PENDING` invite whose `expiresAt` has passed with `status` `EXPIRED`.
 - [integration] **(seam S3)** With email configured and the registered email delivery channel's `send` spied, `POST /projects/:slug/invites` for a new email invokes `send` once with `recipient` equal to the invite email and a rendered body containing `WEB_PUBLIC_URL` followed by the response's `invitePath`.
 - [integration] When the email delivery channel's `send` throws during `POST /projects/:slug/invites`, the response is 201 with `emailed: false`.
 - [integration] With email not configured, `POST /projects/:slug/invites` for a new email creates no `EmailSchedule` row.
@@ -502,30 +543,35 @@ Error keys live in `apps/api/src/i18n/{en,zh}/invites.json`.
 
 **Out of scope:**
 - Concurrent creates for the same project and email: each request cancels then creates atomically, but two simultaneous requests may both leave a `PENDING` invite (best-effort).
+- Rejecting role `AGENT` (DTO validation), the `INVITE_TTL_DAYS` to `expiresAt` relationship, the token's 43-character base64url format, and the 403 on list (same guard as create): required, not acceptance-tested.
+- The `MEMBER_ADDED` build skips for a disabled user and for a missing membership: required, not acceptance-tested.
 
 ### US-005: Public invite preview and accept (`Workdir: apps/api`)
 
-All integration criteria in this story run against an app booted with `REGISTRATION_ENABLED` false.
+All integration criteria in this story run against an app booted with `REGISTRATION_ENABLED` false. The public invite routes share the `AUTH_LOGIN_LIMIT` throttle (default 5 per minute, read once when `auth-throttle.ts` loads), so the test file sets `AUTH_LOGIN_THROTTLE_LIMIT` high before it imports the app.
 
 - [integration] `GET /invites/:token` for a valid pending invite responds 200 with `projectName`, `projectSlug`, `email`, `role`, `inviterName` and `expiresAt`.
 - [integration] `GET /invites/:token` responds 404 with an identical response body for an unknown token, an expired invite and a cancelled invite.
 - [integration] `POST /invites/:token/accept` with `{ name, password }` creates a user whose email is the invite email and whose global `role` is `MEMBER`.
 - [integration] `POST /invites/:token/accept` creates a `ProjectMember` row for the new user with the invite's role.
 - [integration] The `accessToken` returned by `POST /invites/:token/accept` authorises `GET /projects/:slug` for the invite's project.
-- [integration] A second `POST /invites/:token/accept` with the same token responds 404.
+- [integration] `POST /invites/:token/accept` with the token of an expired invite responds 404.
 - [integration] Two concurrent `POST /invites/:token/accept` requests with the same token produce exactly one 201 response.
 - [integration] After `POST /projects/:slug/invites/:id/resend`, `POST /invites/:token/accept` with the token from before the resend responds 404.
 - [integration] `POST /invites/:token/accept` responds 409 when a user with the invite email was created after the invite.
-- [integration] After that 409, the invite's `status` is still `PENDING`.
+- [integration] `POST /projects/:slug/invites/:id/resend` with the id of an invite that belongs to another project responds 404.
 - [integration] `POST /invites/:token/accept` with password `short` responds 400.
 - [integration] `POST /projects/:slug/invites/:id/resend` on an `ACCEPTED` invite responds 409.
 - [integration] `DELETE /projects/:slug/invites/:id` sets a `PENDING` invite's `status` to `CANCELLED`.
-- [integration] `GET /projects/:slug/invites` reports a `PENDING` invite whose `expiresAt` has passed with `status` `EXPIRED`.
+- [integration] After `POST /projects/:slug/invites/:id/resend` on an expired invite, `POST /invites/:token/accept` with the returned token responds 201.
 - [unit] `PublicInvitesController.preview` and `PublicInvitesController.accept` carry `@Public()` and the same `@Throttle` limit as `AuthController.register`: `AUTH_LOGIN_LIMIT` per 60 000 ms.
 
 **Out of scope:**
 - Password hashing parameters are not asserted; accept hashes the password the same way `UsersAdminService.create` does.
 - Lockout beyond the `AUTH_LOGIN_LIMIT` throttle on the two public routes.
+- The 409 for a unique violation on the new user's email during a concurrent accept: required, not acceptance-tested.
+- The 403 on resend and cancel for a non-admin: same guard as create (tested in US-004), not re-tested here.
+- The invite `status` staying `PENDING` after an accept answered 409: required (the transaction rolls back), not acceptance-tested.
 
 ### US-006: CLI member invite and invites (`Workdir: apps/cli`)
 
