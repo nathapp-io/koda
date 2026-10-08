@@ -19,3 +19,8 @@ export function parseMentions(text: string | null | undefined): readonly string[
   }
   return [...ids];
 }
+
+/** Plain-text form for notification excerpts: every token becomes `@label` (no ids, nothing cut mid-token). */
+export function mentionsAsText(text: string): string {
+  return text.replace(MENTION_TOKEN, (_match, label: string) => `@${label}`);
+}

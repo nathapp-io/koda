@@ -1,4 +1,5 @@
 import { BODY_MAX, NotificationCategory, NotificationDraft, TITLE_MAX, truncate } from './notification.types';
+import { mentionsAsText } from './mentions';
 
 export type TicketNotificationKind = 'ticket_assigned' | 'ticket_mentioned' | 'ticket_commented' | 'ticket_status_changed';
 
@@ -39,7 +40,7 @@ function englishBody(input: TicketDraftInput, ticketTitle: string): string | nul
   switch (input.kind) {
     case 'ticket_assigned': return null;
     case 'ticket_status_changed': return truncate(ticketTitle, BODY_MAX);
-    default: return input.excerpt === null ? null : truncate(input.excerpt, BODY_MAX);
+    default: return input.excerpt === null ? null : truncate(mentionsAsText(input.excerpt), BODY_MAX);
   }
 }
 
