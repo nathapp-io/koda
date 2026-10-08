@@ -3,7 +3,7 @@
   "feature": "fleet-s4b-email-invites",
   "branchName": "feat/fleet-s4b-email-invites",
   "createdAt": "2026-10-10T00:00:00.000Z",
-  "updatedAt": "2026-10-08T13:06:52.486Z",
+  "updatedAt": "2026-10-08T14:11:19.503Z",
   "userStories": [
     {
       "id": "US-001",
@@ -259,8 +259,8 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -338,7 +338,10 @@
       "routing": {
         "complexity": "expert",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Single-use token CAS, concurrent registration and password/session issuance on public routes are security-critical."
+        "reasoning": "Single-use token CAS, concurrent registration and password/session issuance on public routes are security-critical.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
       },
       "contextFiles": [
         "apps/api/src/projects/invites/prisma-project-invites.repository.ts",
@@ -365,7 +368,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "011683256de8f2c27213cf77283a8f3bbf3ed59d"
     },
     {
       "id": "US-006",
