@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { budgetScopeLabel } from '../../notifications/fleet/fleet-notification-events';
 import type { BudgetScope, BudgetScopeType } from './domain/budget.domain';

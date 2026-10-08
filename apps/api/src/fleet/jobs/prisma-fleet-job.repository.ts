@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { FleetCommand as FleetCommandRow, FleetJob as JobRow, Prisma, PrismaClient } from '@prisma/client';
+import { FleetCommand as FleetCommandRow, FleetJob as JobRow, Prisma, PrismaClient } from '../../generated/prisma/client';
 import { Paginate, PrismaService } from '@nathapp/nestjs-prisma';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import type { IPageOption } from '@nathapp/nestjs-common';

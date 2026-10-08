@@ -2,15 +2,16 @@
  * #162 — spent enrollment rows are purged by the two date columns (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/enrollment-retention.integration.spec.ts
  */
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { resetDb } from '../../helpers/reset-db';
 import { PrismaRunnerRepository } from '../../../src/fleet/runners/prisma-runner.repository';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('enrollment retention (PG)', () => {
-  const prisma = new PrismaClient();
+  const prisma = createTestPrismaClient();
   const repo = new PrismaRunnerRepository({ client: prisma } as unknown as PrismaService<PrismaClient>);
   const day = (n: number) => new Date(Date.UTC(2026, 9, n));
 

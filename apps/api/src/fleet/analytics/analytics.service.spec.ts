@@ -1,5 +1,5 @@
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import { ESCALATED_FROM_AUDIT } from '../ingest/ingest-corrections';
 import { AnalyticsService } from './analytics.service';
 import type { IAnalyticsRepository } from './domain/analytics.domain';

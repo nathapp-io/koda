@@ -1,6 +1,6 @@
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { PrismaLabelRepository } from './prisma-label.repository';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../generated/prisma/client';
 
 describe('PrismaLabelRepository', () => {
   describe('createLabel', () => {

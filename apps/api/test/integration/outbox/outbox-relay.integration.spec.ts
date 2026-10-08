@@ -4,7 +4,7 @@
  */
 import { ConfigModule } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaModule, PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { OutboxRelay, OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
@@ -14,6 +14,7 @@ import { OutboxAdminService } from '../../../src/outbox/outbox-admin.service';
 import { OutboxModule } from '../../../src/outbox/outbox.module';
 import { PrismaOutboxRepository } from '../../../src/outbox/prisma-outbox.repository';
 import { resetDb } from '../../helpers/reset-db';
+import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -32,7 +33,7 @@ describeIntegration('outbox relay end to end', () => {
     module = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true, load: [outboxConfig] }),
-        PrismaModule.forRoot({ client: PrismaClient, transaction: true, clientOptions: { datasources: { db: { url: DATABASE_URL } } } }),
+        PrismaModule.forRoot({ client: PrismaClient, transaction: true, clientOptions: { adapter: createPgAdapter(DATABASE_URL) } }),
         OutboxModule,
       ],
     }).compile();

@@ -25,12 +25,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaModule, PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
 import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
 import { TICKET_REPOSITORY } from '../../../src/tickets/domain/ticket.domain';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { resetDb } from '../../helpers/reset-db';
+import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -55,7 +56,7 @@ describeIntegration('M3 ticket transition race (verify vs reject)', () => {
         PrismaModule.forRoot({
           client: PrismaClient,
           transaction: true,
-          clientOptions: { datasources: { db: { url: DATABASE_URL } } },
+          clientOptions: { adapter: createPgAdapter(DATABASE_URL) },
         }),
       ],
       providers: [

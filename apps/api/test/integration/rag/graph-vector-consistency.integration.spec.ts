@@ -4,7 +4,7 @@
  * nodes vectorStale, and the next import heals them.
  * Run: cd apps/api && bun run test:scoped test/integration/rag/graph-vector-consistency.integration.spec.ts
  */
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { IRagConfig } from '../../../src/config/rag.config';
 import { PrismaRagRepository } from '../../../src/rag/prisma-rag.repository';
@@ -13,6 +13,7 @@ import { VectorStore } from '../../../src/rag/vector-store.service';
 import { IncrementalGraphDiffService } from '../../../src/rag/incremental-graph-diff.service';
 import type { GraphifyLinkDto, GraphifyNodeDto } from '../../../src/rag/dto/import-graphify.dto';
 import { resetDb } from '../../helpers/reset-db';
+import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -44,7 +45,7 @@ describeIntegration('M19 graph <-> vector consistency', () => {
 
   beforeAll(async () => {
     await resetDb();
-    prismaService = new PrismaService({ client: PrismaClient, clientOptions: { datasources: { db: { url: process.env.DATABASE_URL } } } });
+    prismaService = new PrismaService({ client: PrismaClient, clientOptions: { adapter: createPgAdapter(process.env.DATABASE_URL) } });
     await prismaService.onModuleInit();
     repo = new PrismaRagRepository(prismaService);
     vectorStore = new VectorStore(ragConfig, embedding as never, undefined, repo);

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { JobSchedule as ScheduleRow, Prisma, PrismaClient } from '@prisma/client';
+import { JobSchedule as ScheduleRow, Prisma, PrismaClient } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { FleetJobState } from '../../common/enums';
 import type { BashMode } from '../common/protocol';

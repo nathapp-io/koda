@@ -2,12 +2,13 @@
  * Outbox replays re-run MemoryOutboxSubscriber: an identical fact must be a no-op.
  * Run: cd apps/api && bun run test:db:up && bun run test:integration -- memory-upsert-replay
  */
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager } from '@nathapp/nestjs-data';
 import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
 import { MemoryKind } from '../../../src/common/enums';
 import { resetDb } from '../../helpers/reset-db';
+import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -18,7 +19,7 @@ describeIntegration('PrismaMemoryItemRepository.upsert replay', () => {
 
   beforeAll(async () => {
     await resetDb();
-    prismaService = new PrismaService({ client: PrismaClient, clientOptions: { datasources: { db: { url: process.env.DATABASE_URL } } } });
+    prismaService = new PrismaService({ client: PrismaClient, clientOptions: { adapter: createPgAdapter(process.env.DATABASE_URL) } });
     await prismaService.onModuleInit();
     const prisma = prismaService.client;
     const txManager: ITransactionManager = {

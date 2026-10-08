@@ -2,15 +2,16 @@
  * Fleet S1 slice 2 — job tables, the active (repoId, feature) index and the migration (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-jobs-schema.integration.spec.ts
  */
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { applyMigration, scratchSchemaBefore, ScratchSchema } from '../../helpers/migration-schema';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const MIGRATION = '20260930090000_fleet_jobs';
 
 describeIntegration('fleet job schema (PG)', () => {
-  const prisma = new PrismaClient();
+  const prisma = createTestPrismaClient();
   let ids: { projectId: string; repoId: string; userId: string };
 
   const job = (feature: string, state = 'QUEUED') => prisma.fleetJob.create({

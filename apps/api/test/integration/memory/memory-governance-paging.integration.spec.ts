@@ -3,13 +3,14 @@
  * and dedup must see duplicates that sit more than one page apart.
  * Run: cd apps/api && bun run test:scoped test/integration/memory/memory-governance-paging.integration.spec.ts
  */
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager } from '@nathapp/nestjs-data';
 import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
 import { MemoryGovernanceService } from '../../../src/memory/memory-governance.service';
 import { MemoryKind } from '../../../src/common/enums';
 import { resetDb } from '../../helpers/reset-db';
+import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -21,7 +22,7 @@ describeIntegration('MemoryGovernanceService paging (M21)', () => {
 
   beforeAll(async () => {
     await resetDb();
-    prismaService = new PrismaService({ client: PrismaClient, clientOptions: { datasources: { db: { url: process.env.DATABASE_URL } } } });
+    prismaService = new PrismaService({ client: PrismaClient, clientOptions: { adapter: createPgAdapter(process.env.DATABASE_URL) } });
     await prismaService.onModuleInit();
     const prisma = prismaService.client;
     const txManager: ITransactionManager = {

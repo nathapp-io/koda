@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '../generated/prisma/client';
 import type { WriteAgentActionInput, WriteTicketEventInput } from '../koda-domain-writer/write-result.dto';
 import type { CreateDecisionEventInput } from './decision-event.service';
 import type { AgentEventDomain, DecisionEventDomain, TicketEventDomain } from './domain/events.domain';

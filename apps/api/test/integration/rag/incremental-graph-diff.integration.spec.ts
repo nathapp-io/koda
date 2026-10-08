@@ -34,6 +34,8 @@ import { EmbeddingService } from '../../../src/rag/embedding.service';
 import type { ITransactionManager } from '@nathapp/nestjs-data';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { GraphifyNodeDto, GraphifyLinkDto } from '../../../src/rag/dto/import-graphify.dto';
+import { testDatabaseUrl } from '../../helpers/test-prisma';
+import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 class FakeEmbeddingService {
   readonly providerName = 'fake';
@@ -95,8 +97,8 @@ describe('IncrementalGraphDiffService integration', () => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           useFactory: (): PrismaService<any> => {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { PrismaClient } = require('@prisma/client') as any;
-            return new PrismaService({ client: PrismaClient, clientOptions: {} });
+            const { PrismaClient } = require('../../../src/generated/prisma/client') as any;
+            return new PrismaService({ client: PrismaClient, clientOptions: { adapter: createPgAdapter(testDatabaseUrl()) } });
           },
         },
         { provide: EmbeddingService, useClass: FakeEmbeddingService },

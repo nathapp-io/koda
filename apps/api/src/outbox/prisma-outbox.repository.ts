@@ -2,7 +2,7 @@ import { Injectable, Inject } from '@nestjs/common';
 import { AbstractPrismaRepository, PrismaClientLike, PrismaModelDelegate, PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { OutboxStatus } from '@nathapp/nestjs-outbox';
-import { OutboxEvent as OutboxEventModel, PrismaClient } from '@prisma/client';
+import { OutboxEvent as OutboxEventModel, PrismaClient } from '../generated/prisma/client';
 import { OutboxEventDomain } from './domain/outbox-event.domain';
 
 @Injectable()

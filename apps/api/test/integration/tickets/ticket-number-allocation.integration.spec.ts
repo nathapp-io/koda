@@ -7,12 +7,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaModule, PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaCiWebhookRepository } from '../../../src/ci-webhook/prisma-ci-webhook.repository';
 import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
 import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
 import { runWithTicketNumberRetry } from '../../../src/common/utils/ticket-number-retry';
 import { resetDb } from '../../helpers/reset-db';
+import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -33,7 +34,7 @@ describeIntegration('M6 ticket-number allocation under concurrency', () => {
         PrismaModule.forRoot({
           client: PrismaClient,
           transaction: true,
-          clientOptions: { datasources: { db: { url: DATABASE_URL } } },
+          clientOptions: { adapter: createPgAdapter(DATABASE_URL) },
         }),
       ],
       providers: [PrismaCiWebhookRepository, PrismaVcsRepository, PrismaTicketsRepository],

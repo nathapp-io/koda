@@ -18,7 +18,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { TicketsService } from '../../../src/tickets/tickets.service';
@@ -32,6 +32,7 @@ import { TicketEventService } from '../../../src/events/ticket-event.service';
 import { OutboxService } from '@nathapp/nestjs-outbox';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { resetDb } from '../../helpers/reset-db';
+import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -81,7 +82,7 @@ describeIntegration('H5 ticket tenancy', () => {
           useFactory: () =>
             new PrismaService({
               client: PrismaClient,
-              clientOptions: { datasources: { db: { url: DATABASE_URL } } },
+              clientOptions: { adapter: createPgAdapter(DATABASE_URL) },
             }),
         },
         {

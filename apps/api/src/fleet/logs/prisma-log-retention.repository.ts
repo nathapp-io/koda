@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TERMINAL_STATES } from '../jobs/job-state';
 import type { ILogRetentionRepository, RetentionCandidate, RetentionCursor } from './domain/log-retention.domain';

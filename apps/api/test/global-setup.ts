@@ -18,10 +18,10 @@ import { config, parse } from 'dotenv';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { execSync } from 'child_process';
-import { PrismaClient } from '@prisma/client';
 import { assertSafeTestDatabaseUrl } from './helpers/test-database-url';
 import { rememberTestDatabase, resolveTestDatabase } from './helpers/test-database';
 import { PARTIAL_UNIQUE_INDEXES } from './helpers/partial-indexes';
+import { createTestPrismaClient } from './helpers/test-prisma';
 
 const ENV_TEST_PATH = resolve(__dirname, '../.env.test');
 
@@ -53,13 +53,13 @@ async function prepareSchema(databaseUrl: string): Promise<void> {
   assertSafeTestDatabaseUrl(databaseUrl);
   process.env.DATABASE_URL = databaseUrl;
 
-  execSync('bunx prisma db push --force-reset --skip-generate', {
+  execSync('bunx prisma db push --force-reset', {
     stdio: 'inherit',
     env: { ...process.env, DATABASE_URL: databaseUrl },
   });
 
   // `db push` cannot express partial indexes; replay the ones migrations ship (plan D2 of slice 1).
-  const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+  const prisma = createTestPrismaClient(databaseUrl);
   try {
     for (const statement of PARTIAL_UNIQUE_INDEXES) await prisma.$executeRawUnsafe(statement);
   } finally {

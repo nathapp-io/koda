@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { BudgetPolicy as PolicyRow, Prisma, PrismaClient } from '@prisma/client';
+import { BudgetPolicy as PolicyRow, Prisma, PrismaClient } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { randomUUID } from 'crypto';
 import { FleetJobKind, FleetJobState } from '../../common/enums';

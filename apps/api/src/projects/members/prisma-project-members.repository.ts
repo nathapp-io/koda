@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Paginate, PrismaService } from '@nathapp/nestjs-prisma';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
-import { PrismaClient, ProjectMember, User } from '@prisma/client';
+import { PrismaClient, ProjectMember, User } from '../../generated/prisma/client';
 import { ActorRole } from '../../common/enums';
 import { lockProjectMembers } from '../../common/utils/advisory-lock';
 import { ProjectMemberRecord, ProjectMemberRole } from './domain/project-member.domain';

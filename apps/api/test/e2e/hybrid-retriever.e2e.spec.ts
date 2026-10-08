@@ -20,7 +20,7 @@ import { AppModule } from '../../src/app.module';
 import { resetDb } from '../helpers/reset-db';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient, ProjectMember } from '@prisma/client';
+import type { PrismaClient, ProjectMember } from '../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
 
 const DATABASE_URL = process.env.DATABASE_URL;

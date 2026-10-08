@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import { isUniqueViolation } from './prisma-errors';
 
 function p2002(target: unknown) {

@@ -6,9 +6,10 @@
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaModule, PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaCodeIntelRepository } from '../../../src/code-intel/prisma-code-intel.repository';
 import { resetDb } from '../../helpers/reset-db';
+import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -26,7 +27,7 @@ describeIntegration('symbol search case sensitivity', () => {
         PrismaModule.forRoot({
           client: PrismaClient,
           transaction: true,
-          clientOptions: { datasources: { db: { url: DATABASE_URL } } },
+          clientOptions: { adapter: createPgAdapter(DATABASE_URL) },
         }),
       ],
       providers: [PrismaCodeIntelRepository],

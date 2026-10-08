@@ -5,7 +5,8 @@
  */
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -48,11 +49,11 @@ describeIntegration('OutboxEvent slice-2 migration', () => {
   const before = new Date();
 
   beforeAll(async () => {
-    admin = new PrismaClient({ datasources: { db: { url: baseUrl } } });
+    admin = createTestPrismaClient(baseUrl);
     await admin.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${SCHEMA}" CASCADE`);
     await admin.$executeRawUnsafe(`CREATE SCHEMA "${SCHEMA}"`);
 
-    db = new PrismaClient({ datasources: { db: { url: withSchema(baseUrl, SCHEMA) } } });
+    db = createTestPrismaClient(withSchema(baseUrl, SCHEMA));
     for (const sql of statements(INIT)) {
       await db.$executeRawUnsafe(sql);
     }

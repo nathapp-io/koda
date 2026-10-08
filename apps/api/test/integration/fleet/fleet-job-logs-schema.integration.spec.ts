@@ -2,15 +2,16 @@
  * Fleet S2a slice 1a — FleetJobLog table and repository (PG), spec §1.2.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-job-logs-schema.integration.spec.ts
  */
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { resetDb } from '../../helpers/reset-db';
 import { PrismaFleetJobLogRepository } from '../../../src/fleet/logs/prisma-fleet-job-log.repository';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('fleet job logs schema (PG)', () => {
-  const prisma = new PrismaClient();
+  const prisma = createTestPrismaClient();
   const repo = new PrismaFleetJobLogRepository({ client: prisma } as unknown as PrismaService<PrismaClient>);
   let jobId: string;
 

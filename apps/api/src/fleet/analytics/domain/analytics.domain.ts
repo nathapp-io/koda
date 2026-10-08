@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import type { Prisma } from '../../../generated/prisma/client';
 
 export type Bucket = 'day' | 'week' | 'month';
 export const BUCKETS: readonly Bucket[] = ['day', 'week', 'month'];

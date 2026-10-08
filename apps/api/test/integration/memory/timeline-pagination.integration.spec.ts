@@ -5,10 +5,11 @@
  * Run: cd apps/api && bun run test:db:up && KODA_DB_TESTS=1 bunx jest test/integration/memory/timeline-pagination
  */
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaTimelineRepository } from '../../../src/memory/prisma-timeline.repository';
 import { TimelineService } from '../../../src/memory/timeline.service';
 import { resetDb } from '../../helpers/reset-db';
+import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -27,7 +28,7 @@ describeIntegration('timeline keyset pagination (PG)', () => {
 
   beforeAll(async () => {
     await resetDb();
-    prisma = new PrismaService({ client: PrismaClient, clientOptions: { datasources: { db: { url: DATABASE_URL } } } });
+    prisma = new PrismaService({ client: PrismaClient, clientOptions: { adapter: createPgAdapter(DATABASE_URL) } });
     await prisma.onModuleInit();
     service = new TimelineService(new PrismaTimelineRepository(prisma));
 

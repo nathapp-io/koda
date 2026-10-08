@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpException } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import { WebhookReplayGuard } from './webhook-replay.guard';
 
 function uniqueViolation(): Prisma.PrismaClientKnownRequestError {

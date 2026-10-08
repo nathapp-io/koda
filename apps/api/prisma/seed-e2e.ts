@@ -4,10 +4,11 @@
  *
  * Run via: bun run seed:e2e (DATABASE_URL=file:./prisma/koda-e2e.db)
  */
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../src/generated/prisma/client';
+import { createPgAdapter } from '../src/prisma/pg-adapter';
 import * as bcrypt from 'bcrypt';
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({ adapter: createPgAdapter(process.env.DATABASE_URL ?? '') });
 
 async function main() {
   console.log('🌱 Seeding E2E test database...');

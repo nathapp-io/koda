@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '../generated/prisma/client';
 
 /** VCS LOW: the SLO dashboard aggregates at most this many metric rows (newest first). */
 export const QUERY_METRICS_LIMIT = 10_000;

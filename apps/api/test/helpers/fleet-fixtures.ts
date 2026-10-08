@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../src/generated/prisma/client';
 import request from 'supertest';
 import type { RunnerCapabilities, SyncRequest } from '../../src/fleet/common/protocol';
 import { AGENT_ROLES } from '../../src/common/enums';

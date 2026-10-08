@@ -3,7 +3,7 @@
  * Run: cd apps/api && bun run test:db:up && bun run test:integration -- prisma-outbox-store
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaModule, PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { ValidationAppException } from '@nathapp/nestjs-common';
@@ -11,6 +11,7 @@ import { OutboxService as NathappOutboxService, OutboxStatus } from '@nathapp/ne
 import { PrismaOutboxStore } from '../../../src/outbox/prisma-outbox.store';
 import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
 import { resetDb } from '../../helpers/reset-db';
+import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -34,7 +35,7 @@ describeIntegration('PrismaOutboxStore', () => {
         PrismaModule.forRoot({
           client: PrismaClient,
           transaction: true,
-          clientOptions: { datasources: { db: { url: DATABASE_URL } } },
+          clientOptions: { adapter: createPgAdapter(DATABASE_URL) },
         }),
       ],
       providers: [PrismaOutboxStore, { provide: FanOutPublisher, useValue: publisher }],

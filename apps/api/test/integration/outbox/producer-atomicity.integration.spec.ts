@@ -4,7 +4,7 @@
  */
 import { ConfigModule } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaModule, PrismaService } from '@nathapp/nestjs-prisma';
 import { outboxConfig } from '../../../src/config/outbox.config';
 import { OutboxModule } from '../../../src/outbox/outbox.module';
@@ -27,6 +27,7 @@ import { TicketStatus, TicketType } from '../../../src/common/enums';
 import { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { resetDb } from '../../helpers/reset-db';
 import { KodaCaslAbilityFactory } from '../../../src/auth/casl/koda-casl-ability.factory';
+import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -55,7 +56,7 @@ describeIntegration('producers record outbox rows atomically', () => {
     module = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true, load: [outboxConfig] }),
-        PrismaModule.forRoot({ client: PrismaClient, transaction: true, clientOptions: { datasources: { db: { url: DATABASE_URL } } } }),
+        PrismaModule.forRoot({ client: PrismaClient, transaction: true, clientOptions: { adapter: createPgAdapter(DATABASE_URL) } }),
         OutboxModule,
       ],
       providers: [

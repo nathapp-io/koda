@@ -5,7 +5,7 @@ import { AuthService } from './auth.service';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 import { ConfigService } from '@nestjs/config';
 import { AppException, AuthException, ForbiddenAppException } from '@nathapp/nestjs-common';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import { AUTH_CFG } from '../config/auth.config';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import type { IPrincipal } from './types';

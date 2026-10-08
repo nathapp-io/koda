@@ -2,16 +2,17 @@
  * Fleet S2b slice 1a — ingest repository (PG), spec §2.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-ingest-repository.integration.spec.ts
  */
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { resetDb } from '../../helpers/reset-db';
 import { seedFleetBase } from '../../helpers/fleet-fixtures';
 import { PrismaBundleIngestRepository } from '../../../src/fleet/ingest/prisma-bundle-ingest.repository';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('bundle ingest repository (PG)', () => {
-  const prisma = new PrismaClient();
+  const prisma = createTestPrismaClient();
   const repo = new PrismaBundleIngestRepository({ client: prisma } as unknown as PrismaService<PrismaClient>);
   let base: Awaited<ReturnType<typeof seedFleetBase>>;
   const now = new Date('2026-10-05T10:00:00Z');

@@ -5,7 +5,8 @@
  */
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../src/generated/prisma/client';
+import { createTestPrismaClient } from './test-prisma';
 
 export const MIGRATIONS_DIR = join(__dirname, '../../prisma/migrations');
 
@@ -40,13 +41,13 @@ export interface ScratchSchema {
 
 /** A fresh schema holding every migration before `target` (target not applied). */
 export async function scratchSchemaBefore(baseUrl: string, schema: string, target: string): Promise<ScratchSchema> {
-  const admin = new PrismaClient({ datasources: { db: { url: baseUrl } } });
+  const admin = createTestPrismaClient(baseUrl);
   await admin.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
   await admin.$executeRawUnsafe(`CREATE SCHEMA "${schema}"`);
 
   const url = new URL(baseUrl);
   url.searchParams.set('schema', schema);
-  const db = new PrismaClient({ datasources: { db: { url: url.toString() } } });
+  const db = createTestPrismaClient(url.toString());
   for (const migration of migrationsBefore(target)) {
     await applyMigration(db, migration);
   }

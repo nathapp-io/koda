@@ -3,17 +3,18 @@
  * event sequencing, command lifecycle, row locks.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-job-repository.integration.spec.ts
  */
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { resetDb } from '../../helpers/reset-db';
 import { PrismaFleetJobRepository } from '../../../src/fleet/jobs/prisma-fleet-job.repository';
 import { DuplicateActiveJobError, NewFleetJob } from '../../../src/fleet/jobs/domain/fleet-job.domain';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const bind = (client: unknown) => new PrismaFleetJobRepository({ client } as unknown as PrismaService<PrismaClient>);
 
 describeIntegration('PrismaFleetJobRepository (PG)', () => {
-  const prisma = new PrismaClient();
+  const prisma = createTestPrismaClient();
   const repo = bind(prisma);
   let base: Omit<NewFleetJob, 'feature'>;
   let runnerId: string;
@@ -65,8 +66,8 @@ describeIntegration('PrismaFleetJobRepository (PG)', () => {
     const job = await repo.createJob({ ...base, feature: 'race' });
     const now = new Date('2026-10-01T12:34:56.789Z');
     const results = await Promise.all([
-      bind(new PrismaClient()).casAssign(job.id, runnerId, 'boot-1', now),
-      bind(new PrismaClient()).casAssign(job.id, runnerId, 'boot-1', now),
+      bind(createTestPrismaClient()).casAssign(job.id, runnerId, 'boot-1', now),
+      bind(createTestPrismaClient()).casAssign(job.id, runnerId, 'boot-1', now),
     ]);
     expect(results.filter((r) => r === 1)).toHaveLength(1);
     expect(results.filter((r) => r === null)).toHaveLength(1);
@@ -109,7 +110,7 @@ describeIntegration('PrismaFleetJobRepository (PG)', () => {
     const job = await repo.createJob({ ...base, feature: 'locks' });
     await prisma.$transaction(async (tx) => {
       await expect(bind(tx).lockById(job.id)).resolves.toEqual(expect.objectContaining({ id: job.id }));
-      await expect(bind(new PrismaClient()).lockById(job.id, { skipLocked: true })).resolves.toBeNull();
+      await expect(bind(createTestPrismaClient()).lockById(job.id, { skipLocked: true })).resolves.toBeNull();
     });
   });
 

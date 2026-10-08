@@ -18,7 +18,7 @@ import request from 'supertest';
 import { AppModule } from '../../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient, ProjectMember } from '@prisma/client';
+import { PrismaClient, ProjectMember } from '../../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 import { createHmac } from 'node:crypto';
 import { resetDb } from '../../helpers/reset-db';

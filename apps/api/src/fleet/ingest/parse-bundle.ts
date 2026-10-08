@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import type { BundleFiles } from './bundle-reader';
 import type { IngestRows } from './domain/bundle-ingest.domain';
 import { parseCostLedger } from './parsers/cost-ledger.parser';

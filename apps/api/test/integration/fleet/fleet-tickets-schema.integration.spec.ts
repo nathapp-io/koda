@@ -2,13 +2,14 @@
  * Fleet C9 slice 1a — FleetJobTicket and TicketLink.source/jobId (PG), spec §1.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-tickets-schema.integration.spec.ts
  */
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('fleet tickets schema (PG)', () => {
-  const prisma = new PrismaClient();
+  const prisma = createTestPrismaClient();
   let projectId: string;
   let repoId: string;
   let userId: string;

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { Project, PrismaClient } from '@prisma/client';
+import { Project, PrismaClient } from '../generated/prisma/client';
 import { ProjectDomain, CreateProjectData } from './domain/project.domain';
 
 @Injectable()

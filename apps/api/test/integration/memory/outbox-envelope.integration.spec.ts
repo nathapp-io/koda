@@ -26,7 +26,7 @@
  * All repositories, services, and the transaction manager are real; nothing is mocked.
  */
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { ITransactionManager } from '@nathapp/nestjs-data';
 import { OutboxRelay, OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
@@ -45,6 +45,7 @@ import { TicketsService } from '../../../src/tickets/tickets.service';
 import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
 import { MemoryKind, TicketStatus } from '../../../src/common/enums';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
+import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -98,7 +99,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
 
     prismaService = new PrismaService({
       client: PrismaClient,
-      clientOptions: { datasources: { db: { url: DATABASE_URL } } },
+      clientOptions: { adapter: createPgAdapter(DATABASE_URL) },
     });
     await prismaService.onModuleInit();
     prisma = prismaService.client;

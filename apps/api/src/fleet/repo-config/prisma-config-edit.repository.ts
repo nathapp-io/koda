@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { FleetConfigEdit as Row, Prisma, PrismaClient } from '@prisma/client';
+import { FleetConfigEdit as Row, Prisma, PrismaClient } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { ConfigEditMode, ConfigFileEdit, ConfigJobResult } from '../common/config-jobs';
 import { ConfigEditRecord, IConfigEditRepository, NewConfigEdit } from './domain/config-edit.domain';

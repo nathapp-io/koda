@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TicketsService } from './tickets.service';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import { TICKET_REPOSITORY } from './domain/ticket.domain';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';

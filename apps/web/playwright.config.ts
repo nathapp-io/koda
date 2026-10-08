@@ -40,7 +40,7 @@ export default defineConfig({
   webServer: [
     {
       // API
-      command: `bash -c "bunx prisma migrate reset --force --skip-seed --skip-generate && bun prisma/seed-e2e.ts && bunx nest start"`,
+      command: `bash -c "bunx prisma migrate reset --force && bun prisma/seed-e2e.ts && bunx nest start"`,
       url: `${API_URL}/api/health`,
       cwd: path.resolve(__dirname, '../api'),
       reuseExistingServer: false,

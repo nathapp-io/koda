@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 
 /** True for a Postgres unique violation (P2002) whose target names `field`. */
 export function isUniqueViolation(error: unknown, field: string): boolean {

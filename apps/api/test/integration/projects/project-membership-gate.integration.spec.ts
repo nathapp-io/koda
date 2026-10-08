@@ -23,7 +23,7 @@
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { CommentsService } from '../../../src/comments/comments.service';
 import { ProjectsService } from '../../../src/projects/projects.service';

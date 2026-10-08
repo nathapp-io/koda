@@ -1,5 +1,5 @@
 import { ValidationAppException } from '@nathapp/nestjs-common';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import { ANALYTICS_LIMITS, AnalyticsWindow, Bucket } from './domain/analytics.domain';
 
 const DAY_MS = 86_400_000;

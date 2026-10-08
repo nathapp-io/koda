@@ -1,6 +1,6 @@
 import { join } from 'path';
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { I18nCoreModule, ServerSecurityConfig } from '@nathapp/nestjs-common';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -8,7 +8,8 @@ import { CacheModule, CacheStrategy } from '@nathapp/nestjs-cache';
 import { LoggingModule } from '@nathapp/nestjs-logging';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { ThrottlerModule, DefaultThrottlerGuard } from '@nathapp/nestjs-throttler';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from './generated/prisma/client';
+import { createPgAdapter } from './prisma/pg-adapter';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { AgentsModule } from './agents/agents.module';
@@ -40,7 +41,7 @@ import { FleetModule } from './fleet/fleet.module';
 import { HomeModule } from './home/home.module';
 import { appConfig } from './config/app.config';
 import { authConfig } from './config/auth.config';
-import { databaseConfig } from './config/database.config';
+import { DATABASE_CFG, IDatabaseConfig, databaseConfig } from './config/database.config';
 import { ragConfig } from './config/rag.config';
 import { vcsConfig } from './config/vcs.config';
 import { outboxConfig } from './config/outbox.config';
@@ -70,10 +71,14 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
       },
     }),
     LoggingModule.register({}),
-    PrismaModule.forRoot({
+    PrismaModule.forRootAsync({
       isGlobal: true,
-      client: PrismaClient,
-      transaction: true,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        client: PrismaClient,
+        clientOptions: { adapter: createPgAdapter(config.getOrThrow<IDatabaseConfig>(DATABASE_CFG).url) },
+        transaction: true,
+      }),
     }),
     CacheModule.register({
       isGlobal: true,
