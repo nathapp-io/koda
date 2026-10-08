@@ -1,31 +1,34 @@
 import { ref } from 'vue'
 import { PREFERENCES_PATH } from '~/lib/notification-types'
-import type { NotificationCategory, NotificationPreferenceDto } from '~/lib/notification-types'
+import type { NotificationCategory, PreferencesView } from '~/lib/notification-types'
 
-interface PreferenceList {
-  items?: NotificationPreferenceDto[]
-}
-
-/** Fleet S4a §3: the caller's per-category in-app toggles. */
+/** Fleet S4a §3: notification channel preferences. */
 export function useNotificationPreferences() {
   const { $api } = useApi()
-  const items = ref<NotificationPreferenceDto[]>([])
+  const view = ref<PreferencesView>({ emailAvailable: false, emailEnabled: false, items: [] })
   const pending = ref(false)
 
   async function load(): Promise<void> {
     pending.value = true
     try {
-      items.value = (await $api.get<PreferenceList>(PREFERENCES_PATH)).items ?? []
+      view.value = await $api.get<PreferencesView>(PREFERENCES_PATH)
     } finally {
       pending.value = false
     }
   }
 
-  /** Rethrows on failure; the page reports it and keeps the previous list. */
+  /** Rethrows on failure; the page reports it and keeps the previous view. */
   async function setInApp(category: NotificationCategory, inApp: boolean): Promise<void> {
-    const res = await $api.put<PreferenceList>(PREFERENCES_PATH, { items: [{ category, inApp }] })
-    items.value = res.items ?? items.value
+    view.value = await $api.put<PreferencesView>(PREFERENCES_PATH, { items: [{ category, inApp }] })
   }
 
-  return { items, pending, load, setInApp }
+  async function setEmail(category: NotificationCategory, email: boolean): Promise<void> {
+    view.value = await $api.put<PreferencesView>(PREFERENCES_PATH, { items: [{ category, email }] })
+  }
+
+  async function setEmailEnabled(emailEnabled: boolean): Promise<void> {
+    view.value = await $api.put<PreferencesView>(PREFERENCES_PATH, { emailEnabled })
+  }
+
+  return { view, pending, load, setInApp, setEmail, setEmailEnabled }
 }

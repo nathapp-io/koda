@@ -1881,6 +1881,9 @@
       "title": "通知设置",
       "subtitle": "选择哪些通知进入你的收件箱。",
       "inApp": "站内",
+      "email": "邮件",
+      "emailEnabled": "邮件通知",
+      "emailUnavailable": "邮件通知不可用",
       "saved": "通知设置已保存"
     },
     "watch": {

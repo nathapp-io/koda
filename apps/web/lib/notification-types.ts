@@ -33,6 +33,13 @@ export interface NotificationPage {
 export interface NotificationPreferenceDto {
   category: NotificationCategory
   inApp: boolean
+  email: boolean
+}
+
+export interface PreferencesView {
+  emailAvailable: boolean
+  emailEnabled: boolean
+  items: NotificationPreferenceDto[]
 }
 
 /** PUT/DELETE .../watch and GET .../watchers; `count` = unmuted watchers. */
