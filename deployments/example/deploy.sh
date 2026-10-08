@@ -64,7 +64,7 @@ docker compose "${COMPOSE_ARGS[@]}" pull
 
 echo "==> Run DB migrations (via api image)"
 docker compose "${COMPOSE_ARGS[@]}" run --rm \
-  api bunx --package prisma@6.19.2 prisma migrate deploy
+  api bunx --package prisma@7.10.0 prisma migrate deploy
 
 echo "==> Start services"
 docker compose "${COMPOSE_ARGS[@]}" up -d api web

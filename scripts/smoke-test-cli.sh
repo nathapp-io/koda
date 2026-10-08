@@ -84,7 +84,7 @@ fi
 # STEP 2: Migrate DB
 # =============================================================================
 log "Step 2: Running migrations..."
-if ! (cd "$API_DIR" && DATABASE_URL="$SMOKE_DATABASE_URL" bunx prisma migrate reset --force --skip-seed --skip-generate > /tmp/koda-smoke-migrate-$$.log 2>&1); then
+if ! (cd "$API_DIR" && DATABASE_URL="$SMOKE_DATABASE_URL" bunx prisma migrate reset --force > /tmp/koda-smoke-migrate-$$.log 2>&1); then
   echo "--- Migration log ---"; cat "/tmp/koda-smoke-migrate-$$.log"; echo "---------------------"
   fail "DB migrations failed"; exit 1
 fi
@@ -152,7 +152,7 @@ USER_ID=$(echo "$REGISTER" | python3 -c "import json,sys; d=json.load(sys.stdin)
 
 # Promote user to ADMIN (idempotent; the first registered user is already ADMIN on a fresh DB)
 if ! (cd "$API_DIR" && echo "UPDATE \"User\" SET \"role\" = 'ADMIN' WHERE \"id\" = '${USER_ID}';" \
-    | bunx prisma db execute --stdin --url "$SMOKE_DATABASE_URL" > /tmp/koda-smoke-promote-$$.log 2>&1); then
+    | DATABASE_URL="$SMOKE_DATABASE_URL" bunx prisma db execute --stdin > /tmp/koda-smoke-promote-$$.log 2>&1); then
   fail "ADMIN promotion failed: $(cat /tmp/koda-smoke-promote-$$.log)"; exit 1
 fi
 
