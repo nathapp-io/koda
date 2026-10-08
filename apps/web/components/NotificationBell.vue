@@ -1,5 +1,5 @@
 <template>
-  <div ref="root" class="relative">
+  <div ref="root" class="relative" @keydown.esc="open = false">
     <button
       type="button"
       class="relative rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -27,7 +27,6 @@
       :aria-label="t('notifications.bell.title')"
       class="absolute right-0 z-40 mt-2 w-80 rounded-md border border-border bg-popover p-2 text-popover-foreground shadow-lg"
       data-testid="notification-panel"
-      @keydown.esc="open = false"
     >
       <div class="flex items-center justify-between px-2 pb-2">
         <span class="text-sm font-semibold">{{ t('notifications.bell.title') }}</span>

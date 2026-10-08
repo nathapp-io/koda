@@ -83,6 +83,20 @@ describe('NotificationBell (S4a §5)', () => {
     m.app.unmount()
   })
 
+  test('Esc closes the open panel while focus is still on the bell button (review fix, a11y)', async () => {
+    const m = mount({ count: 1, latest: [row('1')] })
+    await m.settle()
+    ;(m.byId('notification-bell')[0].props.onClick as () => void)()
+    await m.settle()
+    expect(m.byId('notification-panel')).toHaveLength(1)
+    // The button sits inside the root element, so a keydown on it bubbles to the root handler.
+    const root = m.byId('notification-bell')[0].parent as { props: Record<string, unknown> }
+    ;(root.props.onKeydown as (e: unknown) => void)({ key: 'Escape' })
+    await m.settle()
+    expect(m.byId('notification-panel')).toHaveLength(0)
+    m.app.unmount()
+  })
+
   test('opening the panel lists the latest items, worded from kind + params', async () => {
     const m = mount({ count: 1, latest: [row('1'), row('2', '2026-10-08T01:00:00.000Z')] })
     await m.settle()
