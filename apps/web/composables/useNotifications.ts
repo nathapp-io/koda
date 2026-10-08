@@ -14,8 +14,10 @@ export const LIST_SIZE = 20
  */
 export function useNotifications() {
   const { $api } = useApi()
-  const unreadCount = useState<number>('notifications-unread', () => 0) as Ref<number>
-  const latest = useState<NotificationDto[]>('notifications-latest', () => []) as Ref<NotificationDto[]>
+  // Keyed by user: after a logout the next user on this tab must never see the previous inbox, even briefly.
+  const owner = useAuth().user.value?.id ?? 'anonymous'
+  const unreadCount = useState<number>(`notifications-unread:${owner}`, () => 0) as Ref<number>
+  const latest = useState<NotificationDto[]>(`notifications-latest:${owner}`, () => []) as Ref<NotificationDto[]>
 
   async function refresh(): Promise<void> {
     const [count, page] = await Promise.all([
