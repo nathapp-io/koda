@@ -3,7 +3,7 @@
   "feature": "fleet-s4b-email-invites",
   "branchName": "feat/fleet-s4b-email-invites",
   "createdAt": "2026-10-10T00:00:00.000Z",
-  "updatedAt": "2026-10-08T12:27:02.055Z",
+  "updatedAt": "2026-10-08T12:57:06.100Z",
   "userStories": [
     {
       "id": "US-001",
@@ -111,8 +111,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -199,7 +199,10 @@
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "A few existing web files, familiar form/composable pattern and no new security boundary."
+        "reasoning": "A few existing web files, familiar form/composable pattern and no new security boundary.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/pages/settings/notifications.vue",
@@ -222,7 +225,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "0bb66531e1b6036eaf6a2fca1c98faa0b0780ed9"
     },
     {
       "id": "US-004",
