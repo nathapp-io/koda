@@ -125,7 +125,7 @@ Symbols this feature changes. Each baseline exists only to locate the code; it i
 - `EmailScheduleRow = { id, kind, notificationId, inviteId, userId, projectId, toEmail, locale, attempts, dueAt }`.
 - `EmailContentBuilder` and `EmailDispatcher` (US-002) are provided and exported by `NotificationsModule`.
   `EmailDispatcher.sendOne(row: EmailScheduleRow, templateCode, data, userId: string | null, now: Date, retryable = true):
-  Promise<'SENT' | 'FAILED' | 'RETRY'>` is the send step; US-004's `InviteMailer` calls it with `retryable` false.
+  Promise<'SENT' | 'FAILED' | 'RETRY'>` is the send step and writes the row's transition itself (`markSent`, `markFailed` or `retryAt`); US-004's `InviteMailer` calls it with `retryable` false.
 - `ProjectInvitesModule` (US-004) imports `NotificationsModule` for `EmailDispatcher`, and `ProjectMembersModule`'s
   service is not imported: the invites repository owns its own membership and user writes.
 - `POST /projects/:slug/invites` returns one DTO class `InviteCreateResultDto { outcome: 'ADDED' | 'INVITED';
@@ -211,7 +211,7 @@ must leave zero drift against `schema.prisma`.
   `{ projectName, inviterName, role, url: webUrl('/invite/' + raw), expiresAt }`; a successful send → `emailed: true`;
   anything else, including a thrown error, → `emailed: false` and the row `FAILED`.
 - **Accept (US-005)** is one transaction: a conditional update flips the invite `PENDING → ACCEPTED` only when the
-  hash matches and `expiresAt > now` (zero rows → 404); if a user with the invite email exists → 409 and the transaction
+  hash matches and `expiresAt > now` (zero rows → 404); if a user with the invite email exists (case-insensitive match) → 409 and the transaction
   rolls back; a unique violation on the user's email (a concurrent accept of another invite for the same address) is
   also a 409; otherwise create the user (password hashed as `UsersAdminService.create` does, role `MEMBER`, email from
   the invite, name from the body), set `acceptedByUserId`, create the membership. The session is issued after commit
@@ -285,6 +285,9 @@ Error keys live in `apps/api/src/i18n/{en,zh}/invites.json`.
 - US-002 only: the WARN line for a `FAILED` email row (row id, kind and attempts only, never the address, body or URL) is required behaviour but is not acceptance-tested in this story.
 - US-002 only: classifying `NotifyException` with `NotifyExceptionCode.TEMPLATE_NOT_FOUND`, `CHANNEL_NOT_REGISTERED` or `TENANT_MISMATCH` as permanent is not acceptance-tested; `PermanentNotificationError` is.
 - US-004 only: two concurrent `POST /projects/:slug/invites` for the same project and email may both leave a `PENDING` invite; cancel-then-create is atomic per request, not across requests.
+- US-004 only: choosing locale `zh` for invite email from a `zh` `Accept-Language` header is required but not acceptance-tested.
+- US-002 only: when one claimed row's build or repository call throws, that row returns to `PENDING` with backoff and the batch continues; required, not acceptance-tested.
+- US-002 only: `EmailDispatcher.tick(now)` calls `closeAbandonedInvites(now)` before claiming; required, not acceptance-tested.
 - US-005 only: the 409 mapping for a unique violation when two invites for the same email are accepted concurrently is required but not acceptance-tested.
 - US-004 only: rejecting role `AGENT`, the `INVITE_TTL_DAYS` to `expiresAt` relationship, the 43-character base64url token format, and the 403 guard on list (same `assertProjectAdmin` guard as create, which is tested) are required but not acceptance-tested.
 - US-005 only: per-token or per-IP lockout beyond the existing `AUTH_LOGIN_LIMIT` throttle on the two public invite routes.
@@ -465,17 +468,17 @@ Error keys live in `apps/api/src/i18n/{en,zh}/invites.json`.
 - [integration] Two concurrent `EmailScheduleService.claimDue(now, 20)` calls over 30 due `MEMBER_ADDED` rows never return the same row id.
 - [integration] `EmailScheduleService.claimDue(now, 20)` leaves a `PENDING` row whose `dueAt` is later than `now` in status `PENDING`.
 - [integration] `EmailScheduleService.claimDue(now, 20)` never returns a row of kind `INVITE`, even one that is `SENDING` with `lockedUntil` before `now`.
-- [integration] `EmailScheduleService.claimDue(now, 20)` returns a `SENDING` row whose `lockedUntil` is before `now` with its `attempts` increased by one.
-- [integration] `EmailScheduleService.closeAbandonedInvites(now)` sets an `INVITE` row that is `SENDING` with `lockedUntil` before `now` to `FAILED` with `lastError` `abandoned`.
+- [integration] `EmailScheduleService.claimDue(now, 20)` returns a `SENDING` row whose `lockedUntil` is before `now` with an `attempts` value one higher than it had before the claim.
+- [integration] `EmailScheduleService.closeAbandonedInvites(now)` sets an `INVITE` row that is `SENDING` with `lockedUntil` before `now` to status `FAILED`.
 - [integration] Calling `EmailScheduleService.scheduleNotifications` twice with the same `notificationId` leaves exactly one `EmailSchedule` row for that notification.
 - [integration] `EmailScheduleService.retryAt(id, dueAt, error)` with a 2 000-character `error` stores a `lastError` of exactly 500 characters.
-- [unit] For a user with no preference rows, `NotificationPreferencesService.list(userId)` returns `items` whose `email` values are `true` for `ASSIGNED`, `MENTIONED` and `FLEET_NEEDS_YOU` and `false` for `WATCHED_ACTIVITY` and `FLEET_HEALTH`.
+- [unit] For a user with no preference rows, `NotificationPreferencesService.list(userId)` returns `items` whose `email` value for each category equals `EMAIL_CATEGORY_DEFAULTS[category]` (`ASSIGNED`, `MENTIONED`, `FLEET_NEEDS_YOU` true; `WATCHED_ACTIVITY`, `FLEET_HEALTH` false).
 - [unit] `NotificationPreferencesService.list(userId)` returns `emailAvailable` equal to `EmailAvailability.configured`.
 - [unit] `NotificationPreferencesService.emailAllowedUserIds(['off', 'plain'], 'ASSIGNED')` returns only `plain` when user `off` has a package `NotificationPreference` row for tenant `default`, channel `email`, with `enabled` false.
 - [unit] `NotificationPreferencesService.emailAllowedUserIds(['opt-in'], 'WATCHED_ACTIVITY')` returns `opt-in` when that user has a `NotificationCategoryPreference` row for `WATCHED_ACTIVITY`, channel `email`, with `enabled` true.
 - [unit] `NotificationPreferencesService.emailAllowed(userId, category)` returns `{ allowed: false, reason: 'EMAIL_OFF' }` when the user's email master switch is off.
 - [unit] `NotificationPreferencesService.emailAllowed(userId, category)` returns `{ allowed: false, reason: 'CATEGORY_OFF' }` when the master switch is on and only the category email toggle is off.
-- [integration] `PUT /me/notification-preferences` with body `{ emailEnabled: false }` stores a `NotificationPreference` row with `tenantId` `default`, `channel` `email` and `enabled` false for the caller.
+- [integration] `PUT /me/notification-preferences` with body `{ emailEnabled: false }` stores `enabled` false in the caller's `NotificationPreference` row for tenant `default` and channel `email`.
 - [integration] `PUT /me/notification-preferences` with body `{ items: [{ category: 'MENTIONED', email: false }] }` leaves the caller's `inApp` value for `MENTIONED` unchanged.
 
 **Out of scope:**
@@ -488,11 +491,11 @@ Error keys live in `apps/api/src/i18n/{en,zh}/invites.json`.
 - [unit] `NotificationWriter.deliver` does not call `EmailScheduleService.scheduleNotifications` when `EmailAvailability.configured` is false.
 - [unit] `NotificationWriter.deliver` leaves out of the scheduled rows a user whom `NotificationPreferencesService.emailAllowedUserIds` does not return.
 - [integration] When `EmailScheduleService.scheduleNotifications` throws inside `NotificationWriter.deliver`, no `Notification` row from that call remains committed.
-- [unit] `EmailDispatcher.tick(now)` marks a claimed `NOTIFICATION` row `SKIPPED` with `skipReason` `SOURCE_GONE` when its notification no longer exists.
-- [unit] `EmailDispatcher.tick(now)` marks a claimed `NOTIFICATION` row `SKIPPED` with `skipReason` `USER_DISABLED` when its user is disabled.
-- [unit] `EmailDispatcher.tick(now)` marks a claimed `NOTIFICATION` row `SKIPPED` with the `reason` that `NotificationPreferencesService.emailAllowed` returns when that result is not allowed.
+- [unit] `EmailDispatcher.tick(now)` records `skipReason` `SOURCE_GONE` on a claimed `NOTIFICATION` row when its notification no longer exists.
+- [unit] `EmailDispatcher.tick(now)` records `skipReason` `USER_DISABLED` on a claimed `NOTIFICATION` row when its user is disabled.
+- [unit] `EmailDispatcher.tick(now)` records as `skipReason` the `reason` that `NotificationPreferencesService.emailAllowed` returns when that result is not allowed.
 - [unit] `EmailDispatcher.tick(now)` calls `NOTIFY_SERVICE.send` for an allowed row with `tenantId` `default`, `channel` `email`, `templateCode` `NOTIFICATION`, the row's `toEmail` as `recipient`, and `data.url` equal to `WEB_PUBLIC_URL` joined with the notification's `link`.
-- [unit] When `NOTIFY_SERVICE.send` throws an `Error` for a row with `attempts` 2 and `EMAIL_MAX_ATTEMPTS` 5, `EmailDispatcher.tick(now)` returns the row to `PENDING` with `dueAt` equal to `now` plus 2 minutes.
+- [unit] When `NOTIFY_SERVICE.send` throws an `Error` for a row with `attempts` 2 and `EMAIL_MAX_ATTEMPTS` 5, `EmailDispatcher.tick(now)` sets the row's `dueAt` to `now` plus 2 minutes.
 - [unit] When `NOTIFY_SERVICE.send` throws an `Error` for a row whose `attempts` equals `EMAIL_MAX_ATTEMPTS`, `EmailDispatcher.tick(now)` marks the row `FAILED`.
 - [unit] When `NOTIFY_SERVICE.send` throws `PermanentNotificationError` for a row with `attempts` 1, `EmailDispatcher.tick(now)` marks the row `FAILED`.
 - [integration] **(seam S1, S2)** With email configured and the registered email delivery channel's `send` spied, publishing a `ticket_event` `assigned` outbox record for user B through `FanOutPublisher.publish` and then calling `EmailDispatcher.tick` at a time later than `EMAIL_DELAY_SEC` after it invokes the channel's `send` once with B's email address as `recipient`.
@@ -530,15 +533,15 @@ Error keys live in `apps/api/src/i18n/{en,zh}/invites.json`.
 - [integration] `POST /projects/:slug/invites` with email ` New@X.io ` and role `DEVELOPER`, when an active user with email `new@x.io` exists, creates a `ProjectMember` row with role `DEVELOPER` for that user.
 - [integration] `POST /projects/:slug/invites` for the email of a user who is already a member of the project responds 409.
 - [integration] `POST /projects/:slug/invites` for the email of a disabled user responds 409.
-- [integration] `POST /projects/:slug/invites` for an email with no account responds 201 with `outcome` `INVITED` and an `invitePath` whose last segment `t` satisfies `hashInviteToken(t)` equal to the stored `ProjectInvite.tokenHash`.
+- [integration] `POST /projects/:slug/invites` for an email with no account stores a `ProjectInvite.tokenHash` equal to `hashInviteToken` of the last segment of the response's `invitePath`.
 - [integration] A second `POST /projects/:slug/invites` for the same project and email sets the first invite's `status` to `CANCELLED`.
 - [integration] `GET /projects/:slug/invites` returns invites with no `token` and no `tokenHash` field.
 - [integration] `GET /projects/:slug/invites` reports a `PENDING` invite whose `expiresAt` has passed with `status` `EXPIRED`.
-- [integration] **(seam S3)** With email configured and the registered email delivery channel's `send` spied, `POST /projects/:slug/invites` for a new email invokes `send` once with `recipient` equal to the invite email and a rendered body containing `WEB_PUBLIC_URL` followed by the response's `invitePath`.
-- [integration] When the email delivery channel's `send` throws during `POST /projects/:slug/invites`, the response is 201 with `emailed: false`.
+- [integration] **(seam S3)** With email configured and the registered email delivery channel's `send` spied, `POST /projects/:slug/invites` for a new email invokes `send` with a rendered body containing `WEB_PUBLIC_URL` followed by the response's `invitePath`.
+- [integration] When the email delivery channel's `send` throws during `POST /projects/:slug/invites`, the response has `emailed: false`.
 - [integration] With email not configured, `POST /projects/:slug/invites` for a new email creates no `EmailSchedule` row.
 - [integration] With email configured, `POST /projects/:slug/invites` for an existing active user creates one `MEMBER_ADDED` `EmailSchedule` row with that user's id.
-- [unit] `EmailContentBuilder.build` for a `MEMBER_ADDED` row returns data `{ projectName, role, url }` where `role` is the user's `ProjectMember` role and `url` is `WEB_PUBLIC_URL` joined with `/` and the project slug.
+- [unit] `EmailContentBuilder.build` for a `MEMBER_ADDED` row returns `data` equal to `{ projectName, role, url }`, with `role` the user's `ProjectMember` role and `url` `WEB_PUBLIC_URL` joined with `/` and the project slug.
 - [unit] `EmailContentBuilder.build` for a `MEMBER_ADDED` row returns `{ skip: 'SOURCE_GONE' }` when the project is soft-deleted.
 
 **Out of scope:**
@@ -548,7 +551,7 @@ Error keys live in `apps/api/src/i18n/{en,zh}/invites.json`.
 
 ### US-005: Public invite preview and accept (`Workdir: apps/api`)
 
-All integration criteria in this story run against an app booted with `REGISTRATION_ENABLED` false. The public invite routes share the `AUTH_LOGIN_LIMIT` throttle (default 5 per minute, read once when `auth-throttle.ts` loads), so the test file sets `AUTH_LOGIN_THROTTLE_LIMIT` high before it imports the app.
+All integration criteria in this story run against an app booted with `REGISTRATION_ENABLED` false. The public invite routes share the `AUTH_LOGIN_LIMIT` throttle (default 5 per minute, read once when `auth-throttle.ts` loads), so the test file clears the throttler's in-memory storage between requests through `app.get(DefaultThrottlerGuard)`, as `apps/api/test/integration/users/admin-users.integration.spec.ts` does.
 
 - [integration] `GET /invites/:token` for a valid pending invite responds 200 with `projectName`, `projectSlug`, `email`, `role`, `inviterName` and `expiresAt`.
 - [integration] `GET /invites/:token` responds 404 with an identical response body for an unknown token, an expired invite and a cancelled invite.
