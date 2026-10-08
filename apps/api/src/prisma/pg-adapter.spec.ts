@@ -22,6 +22,34 @@ describe('pgAdapterConfig', () => {
     expect(() => pgAdapterConfig('postgresql://u:p@db:5432/koda?schema=a%3Bdrop')).toThrow(/schema/);
   });
 
+  it('turns the Prisma 6 connection_limit parameter into the pool size', () => {
+    const config = pgAdapterConfig('postgresql://u:p@db:5432/koda?connection_limit=5');
+    expect(config.max).toBe(5);
+    expect(new URL(config.connectionString).searchParams.has('connection_limit')).toBe(false);
+  });
+
+  it('drops the other Prisma-only parameters that pg would ignore', () => {
+    const config = pgAdapterConfig('postgresql://u:p@db:5432/koda?pool_timeout=10&pgbouncer=true&statement_cache_size=0');
+    const params = new URL(config.connectionString).searchParams;
+    expect([...params.keys()]).toEqual([]);
+    expect(config.max).toBeUndefined();
+  });
+
+  it('keeps libpq sslmode meaning (require = encrypt without CA check), as Prisma 6 did', () => {
+    const params = new URL(pgAdapterConfig('postgresql://u:p@db:5432/koda?sslmode=require').connectionString).searchParams;
+    expect(params.get('sslmode')).toBe('require');
+    expect(params.get('uselibpqcompat')).toBe('true');
+  });
+
+  it('leaves an explicit uselibpqcompat choice alone', () => {
+    const params = new URL(pgAdapterConfig('postgresql://u:p@db:5432/koda?sslmode=verify-full&uselibpqcompat=false').connectionString).searchParams;
+    expect(params.get('uselibpqcompat')).toBe('false');
+  });
+
+  it('rejects a connection_limit that is not a positive integer', () => {
+    expect(() => pgAdapterConfig('postgresql://u:p@db:5432/koda?connection_limit=abc')).toThrow(/connection_limit/);
+  });
+
   it('rejects a value that is not a URL', () => {
     expect(() => pgAdapterConfig('not a url')).toThrow();
   });
