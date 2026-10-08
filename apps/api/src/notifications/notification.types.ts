@@ -42,6 +42,18 @@ export interface NotificationDraft {
   readonly actorId: string | null;
 }
 
+/**
+ * S4b US-002: what `NotificationsRepository.insertMany` returns for each row it actually inserted.
+ * The scheduling fields let `NotificationWriter` build one `EmailSchedule` row per new notification.
+ */
+export interface NotificationInserted {
+  id: string;
+  userId: string;
+  category: NotificationCategory;
+  kind: string;
+  createdAt: Date;
+}
+
 export interface NotificationRow {
   id: string;
   userId: string;

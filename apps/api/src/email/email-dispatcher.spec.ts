@@ -140,6 +140,16 @@ describe('EmailDispatcher (S4b US-002)', () => {
     expect(schedule.retryAt).not.toHaveBeenCalled();
   });
 
+  it('US-002 AC10: a transient failure at attempts 2 with EMAIL_MAX_ATTEMPTS 5 retries at now + 2 minutes', async () => {
+    const { dispatcher, schedule, builder, notify } = setup();
+    schedule.claimDue.mockResolvedValue([row({ attempts: 2 })]);
+    builder.build.mockResolvedValue({ data: { title: 'T' }, userId: 'u1' });
+    notify.send.mockRejectedValueOnce(new Error('transport down'));
+    await tick(dispatcher, NOW);
+    expect(schedule.retryAt).toHaveBeenCalledWith('s1', plusMin(NOW, 2), 'transport down');
+    expect(schedule.markFailed).not.toHaveBeenCalled();
+  });
+
   it('does not resend an already SENT row on a second tick (AC29)', async () => {
     const { dispatcher, schedule, builder, notify } = setup();
     schedule.claimDue.mockResolvedValueOnce([row()]).mockResolvedValueOnce([]);
