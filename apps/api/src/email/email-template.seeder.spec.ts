@@ -38,4 +38,16 @@ describe('EmailTemplateSeeder (S4b §1, R3)', () => {
     const en = calls.find((c) => c.code === 'MEMBER_ADDED' && c.locale === 'en');
     expect(zh?.content).toBe(en?.content);
   });
+
+  it('treats a unique violation from a concurrent boot as already seeded (S4b review I3)', async () => {
+    const { seeder, service } = setup();
+    service.create.mockRejectedValueOnce(Object.assign(new Error('Unique constraint failed'), { code: 'P2002' }));
+    await expect(seeder.seed()).resolves.toBe(EMAIL_TEMPLATE_CODES.length * 2 - 1);
+  });
+
+  it('rethrows any other database error', async () => {
+    const { seeder, service } = setup();
+    service.create.mockRejectedValueOnce(new Error('connection refused'));
+    await expect(seeder.seed()).rejects.toThrow('connection refused');
+  });
 });

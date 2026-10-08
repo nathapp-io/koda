@@ -21,6 +21,20 @@ function intEnv(name: string, fallback: number, min: number, max: number): numbe
   return value;
 }
 
+/** Parsed here so a malformed value fails with a message that never echoes the URL (it carries credentials). */
+function smtpUrlEnv(): string | null {
+  const raw = process.env['SMTP_URL']?.trim();
+  if (!raw) return null;
+  let protocol: string;
+  try {
+    protocol = new URL(raw).protocol;
+  } catch {
+    protocol = '';
+  }
+  if (protocol !== 'smtp:' && protocol !== 'smtps:') throw new Error('SMTP_URL must be a valid smtp:// or smtps:// URL');
+  return raw;
+}
+
 function webUrlEnv(): string | null {
   const raw = process.env['WEB_PUBLIC_URL']?.trim();
   if (!raw) return null;
@@ -33,7 +47,7 @@ function webUrlEnv(): string | null {
  * required. Error messages name the variable, never its value (SMTP_URL carries credentials).
  */
 export const emailConfig = registerAs(EMAIL_CFG, (): IEmailConfig => {
-  const smtpUrl = process.env['SMTP_URL']?.trim() || null;
+  const smtpUrl = smtpUrlEnv();
   const from = process.env['EMAIL_FROM']?.trim() || null;
   const webPublicUrl = webUrlEnv();
   if (smtpUrl && !from) throw new Error('EMAIL_FROM is required when SMTP_URL is set');

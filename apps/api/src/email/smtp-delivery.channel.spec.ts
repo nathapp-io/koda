@@ -1,5 +1,5 @@
 import { PermanentNotificationError } from '@nathapp/nestjs-notify';
-import { SmtpDeliveryChannel } from './smtp-delivery.channel';
+import { SmtpDeliveryChannel, smtpEmailProviderFactory } from './smtp-delivery.channel';
 
 const payload = { tenantId: 'default', channel: 'email', templateCode: 'NOTIFICATION', recipient: 'b@x.io' };
 
@@ -32,5 +32,19 @@ describe('SmtpDeliveryChannel (S4b §1)', () => {
     const provider = { send: jest.fn(async () => ({ success: true })) };
     await new SmtpDeliveryChannel(provider as never).send(payload, 'x');
     expect(provider.send).toHaveBeenCalledWith(expect.objectContaining({ subject: '' }));
+  });
+
+  it('factory: a provider construction error never carries the SMTP URL (S4b review I2)', () => {
+    const availability = { config: () => ({ smtpUrl: 'smtp://user:s3cret@h:-1', from: 'k@x' }) };
+    let thrown: unknown;
+    try { smtpEmailProviderFactory(availability as never); } catch (e) { thrown = e; }
+    if (thrown) {
+      expect(String(thrown)).not.toContain('s3cret');
+      expect(JSON.stringify(thrown, Object.getOwnPropertyNames(thrown as object))).not.toContain('s3cret');
+    }
+  });
+
+  it('factory returns null when email is off', () => {
+    expect(smtpEmailProviderFactory({ config: () => ({ smtpUrl: null, from: null }) } as never)).toBeNull();
   });
 });

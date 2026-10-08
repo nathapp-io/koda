@@ -34,9 +34,10 @@ const envSchema = Joi.object({
     .min(0)
     .optional(),
   // Fleet S4b §1 (email.config.ts enforces the SMTP_URL-dependent requirements).
-  SMTP_URL: Joi.string().optional(),
-  EMAIL_FROM: Joi.string().optional(),
-  WEB_PUBLIC_URL: Joi.string().uri({ scheme: ['http', 'https'] }).optional(),
+  // Empty means "email off", so blanks from `${VAR:-}` compose interpolation must pass (review I1).
+  SMTP_URL: Joi.string().allow('').optional(),
+  EMAIL_FROM: Joi.string().allow('').optional(),
+  WEB_PUBLIC_URL: Joi.string().uri({ scheme: ['http', 'https'] }).allow('').optional(),
   EMAIL_DELAY_SEC: Joi.number().integer().min(0).optional(),
   EMAIL_APPROVAL_DELAY_SEC: Joi.number().integer().min(0).optional(),
   EMAIL_MAX_ATTEMPTS: Joi.number().integer().min(1).optional(),

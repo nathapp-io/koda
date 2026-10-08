@@ -32,10 +32,7 @@ export class EmailTemplateSeeder implements OnApplicationBootstrap {
         const text = BY_LOCALE[locale][code] ?? EN_TEMPLATES[code];
         const current = await this.repo.findTemplate(code, locale, KODA_TENANT_ID, NotificationChannel.EMAIL);
         if (!current) {
-          await this.templates.create({
-            tenantId: KODA_TENANT_ID, code, locale, channel: NotificationChannel.EMAIL, subject: text.subject, content: text.html,
-          });
-          changed += 1;
+          if (await this.createIfAbsent({ code, locale, text })) changed += 1;
         } else if (current.subject !== text.subject || current.content !== text.html) {
           await this.templates.update(current.id, KODA_TENANT_ID, { subject: text.subject, content: text.html });
           changed += 1;
@@ -43,5 +40,19 @@ export class EmailTemplateSeeder implements OnApplicationBootstrap {
       }
     }
     return changed;
+  }
+
+  /** A concurrent boot may insert the same row first: its unique violation means "already seeded" (review I3). */
+  private async createIfAbsent(input: { code: EmailTemplateCode; locale: EmailLocale; text: EmailTemplateText }): Promise<boolean> {
+    try {
+      await this.templates.create({
+        tenantId: KODA_TENANT_ID, code: input.code, locale: input.locale, channel: NotificationChannel.EMAIL,
+        subject: input.text.subject, content: input.text.html,
+      });
+      return true;
+    } catch (error) {
+      if ((error as { code?: unknown }).code === 'P2002') return false;
+      throw error;
+    }
   }
 }

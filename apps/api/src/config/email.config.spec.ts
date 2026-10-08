@@ -42,4 +42,11 @@ describe('emailConfig (S4b §1)', () => {
   it('never puts SMTP_URL in an error message', () => {
     expect(() => withEnv({ SMTP_URL: 'smtp://user:s3cret@h', WEB_PUBLIC_URL: 'https://k.x' })).toThrow(/^(?!.*s3cret).*$/);
   });
+
+  it('rejects a malformed or non-SMTP SMTP_URL without echoing it (S4b review I2)', () => {
+    const bad = () => withEnv({ SMTP_URL: 'smtp://user:s3cret@h:-1', EMAIL_FROM: 'k@x', WEB_PUBLIC_URL: 'https://k.x' });
+    expect(bad).toThrow('SMTP_URL must be a valid smtp:// or smtps:// URL');
+    expect(() => withEnv({ SMTP_URL: 'https://user:secret@host', EMAIL_FROM: 'k@x', WEB_PUBLIC_URL: 'https://k.x' }))
+      .toThrow('SMTP_URL must be a valid smtp:// or smtps:// URL');
+  });
 });

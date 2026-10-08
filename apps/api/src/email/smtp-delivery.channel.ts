@@ -11,7 +11,12 @@ export const SMTP_EMAIL_PROVIDER = Symbol('SMTP_EMAIL_PROVIDER');
 export function smtpEmailProviderFactory(availability: EmailAvailability): EmailProvider | null {
   const cfg = availability.config();
   if (!cfg.smtpUrl || !cfg.from) return null;
-  return new SmtpEmailProvider({ url: cfg.smtpUrl, from: cfg.from });
+  try {
+    return new SmtpEmailProvider({ url: cfg.smtpUrl, from: cfg.from });
+  } catch {
+    // nodemailer's URL errors carry the full input (credentials); never let it reach the boot log.
+    throw new Error('SMTP_URL could not be used to create the SMTP transport');
+  }
 }
 
 /** A 5xx SMTP reply about the recipient will not succeed on retry. */
