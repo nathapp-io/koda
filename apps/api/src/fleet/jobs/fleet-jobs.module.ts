@@ -11,6 +11,7 @@ import { ConfigEditStoreModule } from '../repo-config/config-edit-store.module';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import { FleetJobsController } from './fleet-jobs.controller';
 import { FleetJobsService } from './fleet-jobs.service';
+import { FleetJobOutcomeRecorder } from './job-outcome.recorder';
 import { JobTransitionsService } from './job-transitions.service';
 import { PrismaFleetJobRepository } from './prisma-fleet-job.repository';
 import { FLEET_JOB_REPOSITORY } from './domain/fleet-job.domain';
@@ -25,11 +26,12 @@ import { RunnerNotifier } from './runner-notifier';
     PrismaFleetJobRepository,
     { provide: FLEET_JOB_REPOSITORY, useExisting: PrismaFleetJobRepository },
     FleetJobLivePublisher,
+    FleetJobOutcomeRecorder,
     JobTransitionsService,
     RunnerNotifier,
     PlacementService,
     FleetJobsService,
   ],
-  exports: [FLEET_JOB_REPOSITORY, FleetJobLivePublisher, JobTransitionsService, RunnerNotifier, PlacementService, FleetJobsService],
+  exports: [FLEET_JOB_REPOSITORY, FleetJobLivePublisher, FleetJobOutcomeRecorder, JobTransitionsService, RunnerNotifier, PlacementService, FleetJobsService],
 })
 export class FleetJobsModule {}

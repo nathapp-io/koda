@@ -11,7 +11,7 @@ function make(attempts: number, opts: { expired?: boolean; storeFails?: boolean 
     markRetry: jest.fn(), markFailed: jest.fn(), markOutcome: jest.fn(), replaceRows: jest.fn(),
   };
   const store = { get: jest.fn(async () => (opts.storeFails ? Promise.reject(new Error('EIO disk')) : Readable.from([Buffer.from('not gzip')]))) };
-  const svc = new BundleIngestService(repo as never, store as never, {} as never, {} as never, {} as never, {} as never, { run: (fn: () => unknown) => fn() } as never, { upsertPrLinks: jest.fn() } as never);
+  const svc = new BundleIngestService(repo as never, store as never, {} as never, {} as never, {} as never, {} as never, { run: (fn: () => unknown) => fn() } as never, { upsertPrLinks: jest.fn() } as never, { onIngestCorrection: jest.fn() } as never);
   return { svc, repo };
 }
 

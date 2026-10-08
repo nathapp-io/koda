@@ -26,7 +26,8 @@ describe('JobTransitionsService', () => {
   const live = { event: jest.fn((j: FleetJobRecord) => ({ id: 'e', type: 'fleet_job', projectId: j.projectId, jobId: j.id, state: j.state, at: NOW.toISOString() })), publish: jest.fn() };
   const schedules = { onJobEnded: jest.fn(async () => undefined) };
   const closer = { closeForJob: jest.fn().mockResolvedValue([APPROVAL_LIVE]) };
-  const svc = new JobTransitionsService(repo as never, activity as never, live as never, schedules as never, closer as never);
+  const outcomes = { onTerminal: jest.fn(async () => undefined) };
+  const svc = new JobTransitionsService(repo as never, activity as never, live as never, schedules as never, closer as never, outcomes as never);
   afterEach(() => jest.clearAllMocks());
 
   const ACTOR = { type: 'RUNNER', id: 'run-1' } as const;
@@ -86,14 +87,14 @@ describe('JobTransitionsService', () => {
 
   it('counts the end of a scheduled job against its schedule, in the same call (S1b §3.3)', async () => {
     const scheduledRepo = { ...repo, update: jest.fn(async () => job({ state: 'FAILED', scheduleId: 's1' })) };
-    const scheduledSvc = new JobTransitionsService(scheduledRepo as never, activity as never, live as never, schedules as never, closer as never);
+    const scheduledSvc = new JobTransitionsService(scheduledRepo as never, activity as never, live as never, schedules as never, closer as never, { onTerminal: jest.fn() } as never);
     await scheduledSvc.apply({ job: job({ state: 'UPLOADING', scheduleId: 's1' }), to: 'FAILED', by: 'runner', now: NOW, actor: { type: 'RUNNER', id: 'run-1' } });
     expect(schedules.onJobEnded).toHaveBeenCalledWith(expect.objectContaining({ id: 'j1', state: 'FAILED', scheduleId: 's1' }), NOW);
   });
 
   it('does not touch the schedule for a non-terminal transition or an unscheduled job', async () => {
     const running = { ...repo, update: jest.fn(async () => job({ state: 'RUNNING', scheduleId: 's1' })) };
-    await new JobTransitionsService(running as never, activity as never, live as never, schedules as never, closer as never)
+    await new JobTransitionsService(running as never, activity as never, live as never, schedules as never, closer as never, { onTerminal: jest.fn() } as never)
       .apply({ job: job({ scheduleId: 's1' }), to: 'RUNNING', by: 'runner', now: NOW, actor: { type: 'RUNNER', id: 'run-1' } });
     await svc.apply({ job: job({ state: 'UPLOADING' }), to: 'FAILED', by: 'runner', now: NOW, actor: { type: 'RUNNER', id: 'run-1' } });
     expect(schedules.onJobEnded).not.toHaveBeenCalled();
@@ -112,6 +113,24 @@ describe('JobTransitionsService', () => {
       await svc.apply({ job: job({ command: 'CONFIG_EDIT', state: 'RUNNING' }), to: 'UPLOADING', by: 'runner', now: NOW, actor: ACTOR });
       await svc.apply({ job: job({ state: 'UPLOADING' }), to: 'COMPLETED', by: 'runner', now: NOW, actor: ACTOR });
       expect(repo.copyConfigResult).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('notification outcome (S4a §2.4, D513)', () => {
+    it('hands every terminal job to the outcome recorder, after the update', async () => {
+      await svc.apply({ job: job({ state: 'UPLOADING' }), to: 'ESCALATED', by: 'runner', now: NOW, actor: ACTOR });
+      expect(outcomes.onTerminal).toHaveBeenCalledWith(expect.objectContaining({ id: 'j1', state: 'ESCALATED' }));
+      expect(repo.update.mock.invocationCallOrder[0]).toBeLessThan(outcomes.onTerminal.mock.invocationCallOrder[0]);
+    });
+
+    it('passes the bumped epoch of a server terminal transition', async () => {
+      await svc.apply({ job: job({ state: 'RUNNING' }), to: 'CRASHED', by: 'server', now: NOW, actor: SYSTEM_ACTOR });
+      expect(outcomes.onTerminal).toHaveBeenCalledWith(expect.objectContaining({ state: 'CRASHED', leaseEpoch: 3 }));
+    });
+
+    it('does not call the recorder for a non-terminal move', async () => {
+      await svc.apply({ job: job({ state: 'ASSIGNED' }), to: 'RUNNING', by: 'runner', now: NOW, actor: ACTOR });
+      expect(outcomes.onTerminal).not.toHaveBeenCalled();
     });
   });
 });
