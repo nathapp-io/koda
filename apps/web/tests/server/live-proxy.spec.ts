@@ -1,7 +1,7 @@
 import { describe, expect, jest, test } from '@jest/globals'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { buildLiveUpstreamUrl, LIVE_STREAM_HEADERS, openLiveUpstream } from '~/server/utils/live-proxy'
+import { LIVE_STREAM_HEADERS, buildLiveUpstreamUrl, buildUserLiveUpstreamUrl, openLiveUpstream, openLiveUpstreamUrl } from '~/server/utils/live-proxy'
 
 const API = 'http://api:3100'
 
@@ -112,5 +112,49 @@ describe('events.get.ts route', () => {
   test('detects client disconnect on the response, not the request', () => {
     expect(source).toContain("node.res.on('close'")
     expect(source).not.toContain("node.req.on('close'")
+  })
+})
+
+describe('user stream (S4a §4)', () => {
+  test('targets the API /me/events endpoint', () => {
+    expect(buildUserLiveUpstreamUrl(API)).toBe('http://api:3100/api/me/events')
+    expect(buildUserLiveUpstreamUrl('http://api:3100/api/')).toBe('http://api:3100/api/me/events')
+  })
+
+  test('openLiveUpstreamUrl forwards the cookie and aborts with the client', async () => {
+    let signal: AbortSignal | undefined
+    let clientClosed: () => void = () => undefined
+    const fetchImpl = jest.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      signal = init?.signal ?? undefined
+      return streamResponse()
+    })
+    const result = await openLiveUpstreamUrl(buildUserLiveUpstreamUrl(API), {
+      cookie: 'koda_token=abc',
+      onClientClose: (cb) => { clientClosed = cb },
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+
+    expect(result.kind).toBe('stream')
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('http://api:3100/api/me/events')
+    expect(init?.headers).toEqual({ accept: 'text/event-stream', cookie: 'koda_token=abc' })
+    clientClosed()
+    expect(signal?.aborted).toBe(true)
+  })
+
+  test('a refused upstream (429 stream cap) passes its status through', async () => {
+    const fetchImpl = jest.fn(async () => new Response('too many', { status: 429 }))
+    const result = await openLiveUpstreamUrl(buildUserLiveUpstreamUrl(API), {
+      cookie: undefined, onClientClose: () => undefined, fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+    expect(result).toEqual({ kind: 'error', status: 429, body: 'too many' })
+  })
+
+  test('the Nitro route uses the shared helpers and the stream headers', () => {
+    const source = readFileSync(path.join(__dirname, '../../server/api/me/events.get.ts'), 'utf-8')
+    expect(source).toContain('buildUserLiveUpstreamUrl(')
+    expect(source).toContain('openLiveUpstreamUrl(')
+    expect(source).toContain('LIVE_STREAM_HEADERS')
+    expect(source).toContain("event.node.res.on('close', cb)")
   })
 })

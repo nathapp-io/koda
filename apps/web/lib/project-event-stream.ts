@@ -61,6 +61,14 @@ export interface LiveFleetLogEvent {
   at: string
 }
 
+/** S4a §4: content-free notice that the signed-in user has a new notification (GET /api/me/events); the bell refetches. */
+export interface LiveNotificationEvent {
+  id: string
+  type: 'notification'
+  userId: string
+  at: string
+}
+
 /** All event handlers except the resync are optional; a page subscribes to what it shows. */
 export interface ProjectEventHandlers {
   onEvent?: (event: LiveTicketEvent) => void
@@ -68,6 +76,8 @@ export interface ProjectEventHandlers {
   onFleetApproval?: (event: LiveFleetApprovalEvent) => void
   onFleetLog?: (event: LiveFleetLogEvent) => void
   onResync: () => void
+  /** S4a: only the user stream (/api/me/events) sends these. */
+  onNotification?: (event: LiveNotificationEvent) => void
 }
 
 export interface EventSourceLike {
@@ -150,6 +160,18 @@ export function parseFleetLogEvent(raw: string): LiveFleetLogEvent | null {
   }
 }
 
+export function parseNotificationEvent(raw: string): LiveNotificationEvent | null {
+  try {
+    const value = JSON.parse(raw) as Partial<LiveNotificationEvent> | null
+    if (!value || typeof value !== 'object') return null
+    if (value.type !== 'notification' || typeof value.id !== 'string' || value.id.length === 0) return null
+    return value as LiveNotificationEvent
+  }
+  catch {
+    return null
+  }
+}
+
 export function createProjectEventStream(
   url: string,
   handlers: ProjectEventHandlers,
@@ -223,6 +245,13 @@ export function createProjectEventStream(
       es.addEventListener('fleet_log', (ev) => {
         const event = parseFleetLogEvent(ev.data)
         if (event && isNew(event.id)) onFleetLog(event)
+      })
+    }
+    const onNotification = handlers.onNotification
+    if (onNotification) {
+      es.addEventListener('notification', (ev) => {
+        const event = parseNotificationEvent(ev.data)
+        if (event && isNew(event.id)) onNotification(event)
       })
     }
     es.onerror = () => {
