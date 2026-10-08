@@ -367,6 +367,8 @@ export class TicketsService {
       if (principal) {
         await this.recordTicketEvent(ticket.id, project.id, 'assigned', principal, {
           assignedTo: assignInput.userId ?? assignInput.agentId ?? null,
+          // S4a §2.2: the notification producer must not guess whether the id is a user or an agent.
+          assigneeType: assignInput.userId ? 'user' : assignInput.agentId ? 'agent' : null,
         });
       }
       return row;
