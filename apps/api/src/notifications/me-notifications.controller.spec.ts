@@ -27,7 +27,7 @@ function setup() {
 describe('MeNotificationsController (S4a §3)', () => {
   it('refuses agents on every route (403)', async () => {
     const { controller } = setup();
-    await expect(controller.list({}, agent)).rejects.toBeInstanceOf(ForbiddenAppException);
+    await expect(controller.list({} as never, agent)).rejects.toBeInstanceOf(ForbiddenAppException);
     await expect(controller.unreadCount(agent)).rejects.toBeInstanceOf(ForbiddenAppException);
     await expect(controller.markRead('n1', agent)).rejects.toBeInstanceOf(ForbiddenAppException);
     await expect(controller.markAllRead(agent)).rejects.toBeInstanceOf(ForbiddenAppException);
@@ -37,7 +37,7 @@ describe('MeNotificationsController (S4a §3)', () => {
 
   it('lists the caller\'s page with defaults and the unread filter', async () => {
     const { controller, service } = setup();
-    await controller.list({}, user);
+    await controller.list({} as never, user);
     expect(service.list).toHaveBeenCalledWith('u1', { current: 1, size: 20, unreadOnly: false });
     await controller.list({ current: '2', size: '5', unread: 'true' } as never, user);
     expect(service.list).toHaveBeenLastCalledWith('u1', { current: 2, size: 5, unreadOnly: true });
