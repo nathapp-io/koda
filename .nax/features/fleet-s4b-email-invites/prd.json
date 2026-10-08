@@ -3,7 +3,7 @@
   "feature": "fleet-s4b-email-invites",
   "branchName": "feat/fleet-s4b-email-invites",
   "createdAt": "2026-10-10T00:00:00.000Z",
-  "updatedAt": "2026-10-08T14:58:22.859Z",
+  "updatedAt": "2026-10-08T15:30:47.664Z",
   "userStories": [
     {
       "id": "US-001",
@@ -459,8 +459,8 @@
       "dependencies": [
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
