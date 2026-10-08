@@ -40,7 +40,7 @@ function mount(props: Record<string, unknown>) {
   }
   const textarea = () => app.find('[data-stub="textarea"]')[0]
   const type = (value: string, caret = value.length) =>
-    (textarea().props.onInput as (e: unknown) => void)({ target: { value, selectionStart: caret } })
+    (textarea().props.onInput as (e: unknown) => void)({ target: { value, selectionStart: caret, focus: () => undefined, setSelectionRange: () => undefined } })
   return { app, load, namesCalls, settle, textarea, type, byId: (id: string) => app.find(`[data-testid="${id}"]`) }
 }
 
@@ -121,4 +121,54 @@ describe('mention-slug wiring and chip rendering', () => {
     expect(thread).not.toMatch(/v-html="[^"]*comment/)
     expect(read('components', 'TicketActivity.vue')).toContain('renderMarkdownOrEscape(withMentionChips(')
   })
+
+  test('keyboard: ArrowDown/ArrowUp move the active option, Enter picks it, aria-activedescendant follows (review fix)', async () => {
+    const m = mount({ modelValue: 'hi @', mentionSlug: 'koda' })
+    m.type('hi @')
+    await m.settle()
+    const key = (k: string) => {
+      const e = { key: k, preventDefault: jest.fn(), stopPropagation: jest.fn(), target: { value: 'hi @', selectionStart: 4 } }
+      ;(m.textarea().props.onKeydown as (ev: unknown) => void)(e)
+      return e
+    }
+    expect(m.byId('mention-option')).toHaveLength(2)
+    expect(String(m.textarea().props['aria-activedescendant'])).toContain('-0')
+    key('ArrowDown')
+    await m.settle()
+    expect(String(m.textarea().props['aria-activedescendant'])).toContain('-1')
+    key('ArrowDown') // wraps
+    key('ArrowUp')   // back to 1
+    await m.settle()
+    const enter = key('Enter')
+    await m.settle()
+    expect(enter.preventDefault).toHaveBeenCalled()
+    expect(m.app.emitted('update:modelValue').at(-1)).toEqual(['hi @[Bo](user:c000000000000000000000002) '])
+    expect(m.byId('mention-picker')).toHaveLength(0)
+  })
+
+  test('Enter and Escape behave normally when no picker is shown (review fix)', async () => {
+    const m = mount({ modelValue: 'plain', mentionSlug: 'koda' })
+    m.type('plain')
+    await m.settle()
+    const e = { key: 'Enter', preventDefault: jest.fn(), stopPropagation: jest.fn(), target: {} }
+    ;(m.textarea().props.onKeydown as (ev: unknown) => void)(e)
+    const esc = { key: 'Escape', preventDefault: jest.fn(), stopPropagation: jest.fn(), target: {} }
+    ;(m.textarea().props.onKeydown as (ev: unknown) => void)(esc)
+    expect(e.preventDefault).not.toHaveBeenCalled()
+    expect(esc.stopPropagation).not.toHaveBeenCalled()
+  })
+
+  test('after picking, the caret lands right after the inserted token, not at the end (review fix)', async () => {
+    const m = mount({ modelValue: 'hi @an and more', mentionSlug: 'koda' })
+    const el = { value: 'hi @an and more', selectionStart: 6, setSelectionRange: jest.fn(), focus: jest.fn() }
+    ;(m.textarea().props.onInput as (e: unknown) => void)({ target: el })
+    await m.settle()
+    ;(m.byId('mention-option')[0].props.onMousedown as (e: unknown) => void)({ preventDefault: () => undefined })
+    await m.settle()
+    const token = `@[Ann Lee](user:${ID}) `
+    expect(m.app.emitted('update:modelValue').at(-1)).toEqual([`hi ${token} and more`])
+    expect(el.setSelectionRange).toHaveBeenCalledWith(3 + token.length, 3 + token.length)
+    expect(el.focus).toHaveBeenCalled()
+  })
 })
+
