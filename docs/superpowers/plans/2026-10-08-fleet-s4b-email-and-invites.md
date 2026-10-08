@@ -2689,9 +2689,9 @@ it('invite reports ADDED for an existing user', async () => {
   expect(console.log).toHaveBeenCalledWith('Added n@x.io as DEVELOPER');
 });
 it('invites lists pending invites in a table', async () => {
-  (projectInvitesControllerList as jest.Mock).mockResolvedValue({ data: { ret: 0, data: [
+  (projectInvitesControllerList as jest.Mock).mockResolvedValue({ ret: 0, data: [
     { id: 'i1', email: 'n@x.io', role: 'VIEWER', status: 'PENDING', expiresAt: '2026-10-17T00:00:00.000Z' },
-  ] } });
+  ] });
   await program.parseAsync(['node', 'koda', 'member', 'invites']);
   const printed = (console.log as jest.Mock).mock.calls.map((c) => String(c[0])).join('\n');
   expect(printed).toMatch(/ID.*Email.*Role.*Status.*Expires/);
