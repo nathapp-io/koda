@@ -3,7 +3,7 @@
   "feature": "fleet-s4b-email-invites",
   "branchName": "feat/fleet-s4b-email-invites",
   "createdAt": "2026-10-10T00:00:00.000Z",
-  "updatedAt": "2026-10-08T14:50:03.838Z",
+  "updatedAt": "2026-10-08T14:58:22.859Z",
   "userStories": [
     {
       "id": "US-001",
@@ -396,8 +396,8 @@
       "dependencies": [
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -466,7 +466,10 @@
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Public auth route, httpOnly session cookies and one-time invite link UI require strict security test isolation."
+        "reasoning": "Public auth route, httpOnly session cookies and one-time invite link UI require strict security test isolation.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/components/ProjectMembersPanel.vue",
@@ -494,7 +497,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "5024a53f066e3203416be9fecda025ef6c868f9f"
     }
   ],
   "analysis": "This is an enhancement to the NestJS 11/Fastify, Prisma 7 API, Nuxt 3 web app and Commander generated-client CLI, not Express/Next.js despite the automated stack hints. The merged email platform already owns SMTP configuration, templates, the global notify providers and tenant constant: apps/api/src/email/email.module.ts:1-36, apps/api/src/email/email-availability.ts:1-24, apps/api/src/config/email.config.ts:1-64, apps/api/src/email/koda-tenant.ts:1-5. Do not change those platform files except adding providers/exports to EmailCoreModule. The API's only notification insert path is apps/api/src/notifications/notification-writer.ts:17-43; it filters eligibility and IN_APP preferences then inserts and publishes live signals. apps/api/src/notifications/notifications.repository.ts:22-44 uses createManyAndReturn with skipDuplicates and currently returns only id/userId; extend the projection and insert+schedule atomically through TRANSACTION_MANAGER, publishing only after commit. apps/api/src/notifications/notification-preferences.service.ts:1-55 currently reads/writes only in_app per-category rows, missing row on; preserve disabledUserIds and extend list/update for separate package NotificationPreference master (tenant default, channel email) and per-category email defaults. apps/api/src/notifications/me-notifications.controller.ts:62-79 and src/notifications/dto/notification-preferences.dto.ts:1-24 need the new PATCH-like PUT DTO and full response; keep caller-only users guard. apps/api/src/notifications/notifications.module.ts:1-57 registers the writer and must provide/export dispatcher and builder; src/common/test-helpers/global-stubs.module.ts:1-119 must stub the newly injected globals in DI tests. Mirror SKIP LOCKED SQL from apps/api/src/outbox/prisma-outbox.store.ts; Prisma schema and the two SQL migrations must agree without drift, and SQL cannot contain internal semicolons because test/helpers/migration-schema.ts splits statements. API repositories use generated src/generated/prisma/client and txManager.run; do not import @prisma/client or Prisma enums; use isUniqueViolation for adapter errors. Notifications' outbox fan-out must retry on schedule DB failure, not on transport error; delay and retry are EmailSchedule DB state, never Redis/BullMQ. Existing email and notification integration tests provide the real Postgres/outbox/send seam; unit specs in src run without DB while test/integration specs require KODA_DB_TESTS=1 and compose Postgres or Testcontainers; do not run DB resets concurrently. Security: apps/api/src/projects/project-access.service.ts:7-70 enforces project admin/global admin and excludes agents; apps/api/src/projects/members/project-members.service.ts:52-65 and prisma-project-members.repository.ts:47-63 show add/unique mappings and case-insensitive lookup, but invite writes belong to the new invite repository. Existing disabled users need explicit rejection. Invite tokens are returned only in create/resend paths and email, stored only as sha256; public preview/accept must give uniform 404 for invalid states and atomically consume the token. apps/api/src/auth/auth.service.ts:30-158 duplicates token issuance across register/login/refresh and exposes signing methods; factor issueSession and reuse after invite accept commit. apps/api/src/auth/auth.controller.ts:21-30 defines class-load AUTH_LOGIN_LIMIT; move to shared auth-throttle and apply to both public invite routes. apps/api/src/auth/dto/register.dto.ts:5-26 exports password complexity; reuse. Contract changes need root openapi.json regenerated after US-001/004/005, then run bun run generate in US-006 for apps/cli/src/generated without manual edits; API stories have prescribed apps/api workdir even though the committed spec artifact is at repo root. CLI apps/cli/src/commands/member.ts:1-125 uses withContext, generated services, unwrap, table and handleApiError; extend this command, do not implement raw HTTP. Web apps/web/composables/useNotificationPreferences.ts:1-31 currently stores items only and settings page apps/web/pages/settings/notifications.vue:1-74 renders in-app controls; convert to full view while retaining rollback/error toast pattern. apps/web/middleware/auth.global.ts:1-22 currently redirects any guest except login/register; explicitly exempt /invite/ paths. apps/web/composables/useAuth.ts:1-105 stores only user state, while apps/web/server/api/auth/register.post.ts:1-22 demonstrates forwarding and httpOnly cookie setting; replicate this for invite accept, never expose tokens in browser. apps/web/pages/[project]/settings.vue:65-89 currently renders ProjectMembersPanel; mount invite panel beside it and refresh members on ADDED; keep Nuxt useApi proxy and both locale JSONs synchronized. Review docs/ux/redesign/MASTER-PLAN.md before UI layout changes and update its status/decisions if appropriate. Follow docs/superpowers/specs/2026-10-08-fleet-s4b-email-and-invites-design.md (D516-D526) and docs/superpowers/plans/2026-10-08-fleet-s4b-email-and-invites.md (B/C, R1-R7); platform is read-only. Inter-story sequence: schedule/preferences → writer/dispatcher and web settings in parallel → admin invites → public accept → CLI and web invite UI in parallel.",
