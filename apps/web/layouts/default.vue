@@ -317,6 +317,7 @@ const backTo = computed(() => {
         </div>
 
         <div class="flex items-center gap-3">
+          <NotificationBell v-if="auth.user.value" />
           <FleetApprovalBadge v-if="auth.user.value" :key="projectSlug ?? ''" :slug="projectSlug ?? null" />
           <span class="hidden max-w-[16rem] truncate text-sm text-muted-foreground md:inline">
             {{ auth.user.value?.email }}

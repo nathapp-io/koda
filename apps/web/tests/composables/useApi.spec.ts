@@ -143,6 +143,29 @@ describe('AC1b: no Authorization header is set in JS (httpOnly cookie carries au
     const headers = (calledOpts?.headers ?? {}) as Record<string, string>
     expect(headers['Authorization']).toBeUndefined()
   })
+
+  test('PUT sends the body with method PUT and no Authorization header (S4a)', async () => {
+    const fetchMock = makeFetchMock()
+    const { fakeUseAuth, fakeRuntimeConfig } = makeAuthEnv()
+
+    ;(globalThis as Record<string, unknown>).useRuntimeConfig = fakeRuntimeConfig
+    ;(globalThis as Record<string, unknown>).useAuth = fakeUseAuth
+    ;(globalThis as Record<string, unknown>).useI18n = fakeUseI18n
+    ;(globalThis as Record<string, unknown>).$fetch = fetchMock
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    await $api.put('/me/notification-preferences', { items: [{ category: 'ASSIGNED', inApp: false }] })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, calledOpts] = fetchMock.mock.calls[0]
+    expect(url).toBe('http://localhost:3100/me/notification-preferences')
+    expect(calledOpts?.method).toBe('PUT')
+    expect(calledOpts?.body).toEqual({ items: [{ category: 'ASSIGNED', inApp: false }] })
+    const headers = (calledOpts?.headers ?? {}) as Record<string, string>
+    expect(headers['Authorization']).toBeUndefined()
+  })
 })
 
 // ──────────────────────────────────────────────────────────────────────────────

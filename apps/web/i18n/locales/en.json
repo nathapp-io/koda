@@ -1841,5 +1841,52 @@
         "regenerate": "Open regenerate PR"
       }
     }
+  },
+  "notifications": {
+    "title": "Notifications",
+    "subtitle": "Tickets you follow and fleet work that needs you.",
+    "empty": "You're all caught up.",
+    "emptyUnread": "No unread notifications.",
+    "markAllRead": "Mark all read",
+    "viewAll": "View all",
+    "settings": "Notification settings",
+    "prev": "Previous",
+    "next": "Next",
+    "filter": { "all": "All", "unread": "Unread" },
+    "bell": { "label": "Notifications, {count} unread", "title": "Notifications" },
+    "kinds": {
+      "ticket_assigned": "{actorName} assigned you {ref}: {ticketTitle}",
+      "ticket_mentioned": "{actorName} mentioned you on {ref}",
+      "ticket_commented": "{actorName} commented on {ref}",
+      "ticket_status_changed": "{ref} moved {fromStatus} → {newStatus}",
+      "job_escalated": "Fleet job on {repo} escalated",
+      "job_failed": "Fleet job on {repo} failed",
+      "job_crashed": "Fleet job on {repo} crashed",
+      "job_pr_opened": "Fleet job on {repo} opened a PR",
+      "approval_requested": "Approval needed: {kind} on {repo}",
+      "budget_warn": "Budget {scope} reached {spentUsd} of {amountUsd} USD",
+      "budget_hard_stop": "Budget {scope} stopped at {spentUsd} of {amountUsd} USD",
+      "runner_offline": "Runner {runner} is offline",
+      "credential_expiring": "{provider} credential on {runner} expires {expiresAt}"
+    },
+    "categories": {
+      "ASSIGNED": { "label": "Assigned to me", "description": "A ticket is assigned to you." },
+      "MENTIONED": { "label": "Mentions", "description": "Someone mentions you in a ticket or comment." },
+      "WATCHED_ACTIVITY": { "label": "Watched tickets", "description": "Comments and status changes on tickets you watch." },
+      "FLEET_NEEDS_YOU": { "label": "Fleet needs you", "description": "Your fleet jobs finish badly or open a PR; approval asks (admins)." },
+      "FLEET_HEALTH": { "label": "Fleet health", "description": "Budget alerts, offline runners and expiring credentials (admins)." }
+    },
+    "preferences": {
+      "title": "Notification settings",
+      "subtitle": "Choose which notifications reach your inbox.",
+      "inApp": "In-app",
+      "saved": "Notification settings saved"
+    },
+    "watch": {
+      "watch": "Watch",
+      "unwatch": "Unwatch",
+      "count": "{count} watching",
+      "failed": "Could not update watching"
+    }
   }
 }

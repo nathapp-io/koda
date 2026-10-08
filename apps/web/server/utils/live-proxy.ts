@@ -34,10 +34,20 @@ export function buildLiveUpstreamUrl(slug: string, apiInternalUrl: string): stri
   return resolveProxyTarget(`/projects/${slug}/events`, { apiInternalUrl })
 }
 
+export function buildUserLiveUpstreamUrl(apiInternalUrl: string): string {
+  return resolveProxyTarget('/me/events', { apiInternalUrl })
+}
+
+export type LiveUpstreamRequest = Omit<LiveProxyRequest, 'slug' | 'apiInternalUrl'>
+
 export async function openLiveUpstream(req: LiveProxyRequest): Promise<LiveProxyResult> {
   const url = buildLiveUpstreamUrl(req.slug, req.apiInternalUrl)
   if (!url) return { kind: 'error', status: 400, body: 'invalid project slug' }
+  return openLiveUpstreamUrl(url, req)
+}
 
+/** S4a §4: the shared core for the project and the user (`/me/events`) streams. */
+export async function openLiveUpstreamUrl(url: string, req: LiveUpstreamRequest): Promise<LiveProxyResult> {
   const controller = new AbortController()
   req.onClientClose(() => controller.abort())
   const headers: Record<string, string> = req.cookie

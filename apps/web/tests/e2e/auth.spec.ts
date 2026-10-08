@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { webLogin } from './fixtures/page-helpers';
+import { waitForHydration, webLogin } from './fixtures/page-helpers';
 import { forgetSession } from './fixtures/session';
 import { E2E_ADMIN } from './fixtures/api-client';
 
@@ -23,7 +23,8 @@ test.describe('Authentication', () => {
 
     // A hard reload re-runs SSR + auth middleware against /api/auth/me.
     // If SSR fetches dropped the cookies, the middleware would bounce to /login.
-    await page.reload({ waitUntil: 'networkidle' });
+    await page.reload();
+    await waitForHydration(page);
     await expect(page).toHaveURL('/');
     await expect(page).not.toHaveURL(/\/login/);
   });
@@ -57,7 +58,8 @@ test.describe('Authentication', () => {
 
     // A full reload re-runs SSR auth middleware against the rotated access
     // cookie — the session is restored instead of bouncing to /login.
-    await page.reload({ waitUntil: 'networkidle' });
+    await page.reload();
+    await waitForHydration(page);
     await expect(page).toHaveURL('/');
     await expect(page).not.toHaveURL(/\/login/);
   });
