@@ -44,13 +44,13 @@
 
 | # | Question | Answer |
 |---|---|---|
-| P1 | Does `prisma generate` succeed with `DATABASE_URL` unset, when `prisma.config.ts` reads `process.env.DATABASE_URL ?? ''`? || Yes: `env -u DATABASE_URL bunx prisma generate` -> `Generated Prisma Client (7.10.0)`, exit 0 (no placeholder needed). |
-| P2 | Does `bun install` run a package's own `postinstall` script? || Yes: a package `postinstall` ran on `bun install` (echo printed). |
-| P3 | Which `@prisma/client/runtime/query_compiler_*` file does the generated client load for PostgreSQL? || `query_compiler_fast_bg.postgresql.js` + `query_compiler_fast_bg.postgresql.wasm-base64.js` (the `fast` build; `small` unused). |
-| P4 | With `new PrismaPg({ connectionString, options: '-c search_path=s' }, { schema: 's' })`, do an ORM write and `$executeRawUnsafe('CREATE TABLE ...')` both land in schema `s`? || Yes: ORM create and raw `CREATE TABLE` both landed in `probe_s` (`tables in: ["probe_s"]`). |
-| P5 | Does `bun install --production` pull `prisma` (a peer of `@prisma/client`) into node_modules? || Yes: Bun auto-installs the `prisma` peer under `--production` (`node_modules/prisma` + `.bin/prisma` present). Harmless; makes the CLI available in the image. |
-| P6 | With `TZ=Asia/Singapore`, does `$queryRaw` of a `timestamp(3)` column equal the ORM read of the same row (same epoch ms)? || Yes: `TZ=Asia/Singapore` ORM 1791449260422 == raw 1791449260422. Also: raw `SUM(numeric)` returns a Decimal (`1.2345`). P2002 meta = `driverAdapterError.cause.constraint.index = "Item_email_key"`, no `target`. |
-| P7 | Does `generated/prisma/client` export `Prisma.Decimal`, `Prisma.sql`, `Prisma.join`, `Prisma.DbNull`, `Prisma.JsonNull`, `Prisma.TransactionClient`, `Prisma.PrismaClientKnownRequestError`? || All exported: Decimal (internal/class.ts, commonInputTypes.ts); sql, join, DbNull, JsonNull, TransactionClient, PrismaClientKnownRequestError (internal/prismaNamespace.ts). |
+| P1 | Does `prisma generate` succeed with `DATABASE_URL` unset, when `prisma.config.ts` reads `process.env.DATABASE_URL ?? ''`? | Yes: `env -u DATABASE_URL bunx prisma generate` -> `Generated Prisma Client (7.10.0)`, exit 0 (no placeholder needed). |
+| P2 | Does `bun install` run a package's own `postinstall` script? | Yes: a package `postinstall` ran on `bun install` (echo printed). |
+| P3 | Which `@prisma/client/runtime/query_compiler_*` file does the generated client load for PostgreSQL? | `query_compiler_fast_bg.postgresql.js` + `query_compiler_fast_bg.postgresql.wasm-base64.js` (the `fast` build; `small` unused). |
+| P4 | With `new PrismaPg({ connectionString, options: '-c search_path=s' }, { schema: 's' })`, do an ORM write and `$executeRawUnsafe('CREATE TABLE ...')` both land in schema `s`? | Yes: ORM create and raw `CREATE TABLE` both landed in `probe_s` (`tables in: ["probe_s"]`). |
+| P5 | Does `bun install --production` pull `prisma` (a peer of `@prisma/client`) into node_modules? | Yes: Bun auto-installs the `prisma` peer under `--production` (`node_modules/prisma` + `.bin/prisma` present). Harmless; makes the CLI available in the image. |
+| P6 | With `TZ=Asia/Singapore`, does `$queryRaw` of a `timestamp(3)` column equal the ORM read of the same row (same epoch ms)? | Yes: `TZ=Asia/Singapore` ORM 1791449260422 == raw 1791449260422. Also: raw `SUM(numeric)` returns a Decimal (`1.2345`). P2002 meta = `driverAdapterError.cause.constraint.index = "Item_email_key"`, no `target`. |
+| P7 | Does `generated/prisma/client` export `Prisma.Decimal`, `Prisma.sql`, `Prisma.join`, `Prisma.DbNull`, `Prisma.JsonNull`, `Prisma.TransactionClient`, `Prisma.PrismaClientKnownRequestError`? | All exported: Decimal (internal/class.ts, commonInputTypes.ts); sql, join, DbNull, JsonNull, TransactionClient, PrismaClientKnownRequestError (internal/prismaNamespace.ts). |
 
 ---
 

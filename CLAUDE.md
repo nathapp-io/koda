@@ -13,7 +13,7 @@ DO NOT EDIT MANUALLY — run `nax generate` to regenerate.
 
 **Language:** TypeScript
 
-**Key dependencies:** @prisma/client, @typescript-eslint/eslint-plugin, @typescript-eslint/parser, typescript
+**Key dependencies:** @typescript-eslint/eslint-plugin, @typescript-eslint/parser, typescript
 
 **Commands:** test: `npx turbo test` | lint: `bunx turbo lint` | typecheck: `bunx turbo type-check`
 

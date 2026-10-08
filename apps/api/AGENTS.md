@@ -48,7 +48,7 @@ Other apps should stay thin and call this API instead of reimplementing business
 ## Stack
 
 - NestJS 11 + Fastify via `@nathapp/nestjs-app`
-- Prisma 6 via `@nathapp/nestjs-prisma`
+- Prisma 7 via `@nathapp/nestjs-prisma` 4.1 (driver adapter `@prisma/adapter-pg`)
 - `@nathapp/nestjs-auth` v3 for auth
 - `@nathapp/nestjs-common` for JSON envelope, exceptions, i18n helpers
 - `@nathapp/nestjs-logging`
@@ -93,6 +93,12 @@ Cross-cutting modules:
 - ticket workflow transitions must go through the state-machine code
 - user-facing strings should come from API i18n files, not hardcoded literals
 - API responses should use the Nathapp JSON envelope pattern
+- Prisma 7: import `PrismaClient`, `Prisma` and model types from the generated client
+  (`src/generated/prisma/client`; gitignored, rebuilt by `bun install` or `bun run db:generate`), never from
+  `@prisma/client` (ESLint blocks it). Build every client through `createPgAdapter(url)` (`src/prisma/pg-adapter.ts`);
+  tests use `createTestPrismaClient()` (`test/helpers/test-prisma.ts`). The datasource URL lives in `prisma.config.ts`.
+- Unique violations: driver adapters drop `meta.target`. Match fields with `isUniqueViolation` (backed by
+  `getUniqueConstraintTarget`), never by reading `error.meta` yourself.
 
 ## Auth Model
 
@@ -227,7 +233,7 @@ Rules:
 - Publish `fleet_job` live events and wake runners only after the transaction commits.
 - Budgets (`src/fleet/budgets/`, S1b spec §2): window math, scope keys and the effective-pause rule live in `budget-rules.ts`; money is compared with `Prisma.Decimal`, never floats. Dispatch, requeue and both placement entry points read pauses through `BudgetGate`; the evaluator runs only after the sync transaction commits (`BudgetEvaluator.signal`). Budget activity payloads must not carry a `*Key` field (`FleetActivityService` rejects key-like names).
 - Schedules (`src/fleet/schedules/`, S1b spec §3): `cron-schedule.ts` is the only importer of `cron-parser` (five fields, zone proof, 15-minute gap). The ticker claims a due schedule by compare-and-set on `nextFireAt`, then calls `FleetJobsService.dispatch` with no transaction open; a unique violation inside a transaction would abort it. A scheduled job's end is counted in `JobTransitionsService.apply` through `ScheduleProgressService` (same transaction, counted once through `scheduleCountedAt`). `JobSchedule.repoId` and `pinnedRunnerId` have no foreign key on purpose: a deleted repo or runner disables the schedule (`template_invalid`) instead of deleting it.
-- Tests build the schema with `prisma db push`; partial unique indexes live in `test/helpers/partial-indexes.ts` and must also be shipped verbatim by a migration.
+- Tests build the schema with `prisma db push --force-reset`; partial unique indexes live in `test/helpers/partial-indexes.ts` and must also be shipped verbatim by a migration.
 - Every runner write (events, acks, token requests, bundles) is fenced by `(runnerId, leaseEpoch)` through `FenceService`; a mismatch queues one `ABANDON` and stores nothing.
 - Never hold a transaction across the sync long-poll or forge HTTP. One failing job or ack in a sync is logged and skipped, never allowed to fail the whole request.
 - Runner strings are untrusted: parse through `parseSyncRequest` (NUL replaced) and `interpretEvent` (bounded fields dropped, never fatal).
