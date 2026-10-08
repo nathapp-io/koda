@@ -23,6 +23,7 @@ import { authCommand } from './commands/auth';
 import { adminCommand } from './commands/admin';
 import { userCommand } from './commands/user';
 import { memberCommand } from './commands/member';
+import { notificationsCommand } from './commands/notifications';
 import { ciWebhookCommand } from './commands/ci-webhook';
 import { fleetCommand } from './commands/fleet';
 import { setJsonMode } from './utils/json-mode';
@@ -262,6 +263,9 @@ userCommand(program);
 
 // Project membership command
 memberCommand(program);
+
+// Notifications command (S4a)
+notificationsCommand(program);
 
 // CI webhook command
 ciWebhookCommand(program);
