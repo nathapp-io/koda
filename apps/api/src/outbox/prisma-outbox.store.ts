@@ -4,6 +4,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { IOutboxStore, OutboxRecord, OutboxStatus } from '@nathapp/nestjs-outbox';
 import { OutboxEvent as OutboxEventModel, Prisma, PrismaClient } from '@prisma/client';
 import { FanOutPublisher } from './fan-out-publisher';
+import { GLOBAL_OUTBOX_TYPES } from './global-outbox-types';
 
 /**
  * IOutboxStore on Prisma/Postgres for @nathapp/nestjs-outbox.
@@ -25,8 +26,9 @@ export class PrismaOutboxStore implements IOutboxStore {
   ) {}
 
   async save(record: OutboxRecord, client: unknown): Promise<void> {
-    const projectId = record.metadata?.['projectId'];
-    if (typeof projectId !== 'string' || projectId.length === 0) {
+    const raw = record.metadata?.['projectId'];
+    const projectId = typeof raw === 'string' && raw.length > 0 ? raw : null;
+    if (projectId === null && !GLOBAL_OUTBOX_TYPES.has(record.type)) {
       throw new ValidationAppException({ projectId: 'outbox record metadata.projectId is required' }, 'outbox');
     }
     const eventId = record.metadata?.['eventId'];

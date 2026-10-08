@@ -13,6 +13,7 @@ import {
 } from './domain/bundle-ingest.domain';
 import { computeCorrection } from './ingest-corrections';
 import { parseBundle } from './parse-bundle';
+import { FleetJobOutcomeRecorder } from '../jobs/job-outcome.recorder';
 
 const SECRETISH = /(token|secret|password|key)=\S+/gi;
 const trimError = (error: unknown): string =>
@@ -33,6 +34,7 @@ export class BundleIngestService {
     private readonly budgets: BudgetEvaluator,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly ticketEffects: FleetJobTicketEffects,
+    private readonly outcomes: FleetJobOutcomeRecorder,
   ) {}
 
   /** D369: off the request path; never throws. */
@@ -82,6 +84,8 @@ export class BundleIngestService {
       const correction = computeCorrection({ job, leaseEpoch: claim.leaseEpoch, ledgerCostUsd: parsed.ledgerCostUsd, runStatus: parsed.runStatus, finish: parsed.finish });
       const changed = Object.keys(correction.patch).length > 0;
       const updated = changed ? await this.jobs.update(job.id, correction.patch) : job;
+      const prFilled = 'resultPrUrl' in correction.patch;
+      if (correction.escalated || prFilled) await this.outcomes.onIngestCorrection(updated, { escalated: correction.escalated, prFilled });
       if (correction.escalated) {
         await this.jobs.appendEvent(job.id, { leaseEpoch: claim.leaseEpoch, runnerSeq: null, type: 'state', payload: { from: job.state, to: updated.state, by: 'server', reason: updated.stateReason } });
         await this.activity.record({
@@ -92,7 +96,7 @@ export class BundleIngestService {
       await this.repo.markOutcome(claim.id, {
         kind: parsed.partial ? 'partial' : 'done', files: parsed.files, liveCostUsd: correction.liveCostUsd, ledgerCostUsd: parsed.ledgerCostUsd, ingestedAt: now,
       });
-      return { event: this.live.event(updated), spendKeys: correction.costRaised ? jobSpendKeys(updated) : [], prFilled: 'resultPrUrl' in correction.patch };
+      return { event: this.live.event(updated), spendKeys: correction.costRaised ? jobSpendKeys(updated) : [], prFilled };
     });
     if (!result) return;
     this.live.publish([result.event]);

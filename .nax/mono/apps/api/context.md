@@ -243,3 +243,8 @@ Rules:
 - `/me/*` routes are users-only and never take a user id. `/me/events` shares `LiveStreamRegistry` with project
   streams.
 - Notification text: English `title`/`body` (CLI fallback, truncated to 200/280), web renders from `kind` + `params`.
+- Fleet producers (S4a Part D) live in `src/notifications/fleet/`. Fleet modules never import the notifications
+  module: they enqueue outbox events (`fleet_job_outcome` from `FleetJobOutcomeRecorder` inside
+  `JobTransitionsService.apply` and the ingest transaction; `fleet_budget_incident` from `BudgetIncidentRecorder` inside
+  `BudgetEvaluator.evaluate`; `fleet_health_alert` from `FleetHealthDetector`). Only the types in
+  `src/outbox/global-outbox-types.ts` may omit `metadata.projectId`.

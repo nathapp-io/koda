@@ -11,12 +11,13 @@ import { BudgetSweeper } from './budget-sweeper';
 import { BudgetsService } from './budgets.service';
 import { FleetBudgetsController } from './fleet-budgets.controller';
 import { ProjectFleetBudgetsController } from './project-fleet-budgets.controller';
+import { BudgetIncidentRecorder } from './budget-incident.recorder';
 
 /** S1b §2 C1 budgets (plan D160): evaluator, sweeper, management routes. */
 @Module({
   imports: [PrismaModule, ProjectAccessModule, BudgetStoreModule, ApprovalStoreModule, FleetJobsModule, FleetActivityModule, WebhookModule],
   controllers: [FleetBudgetsController, ProjectFleetBudgetsController],
-  providers: [BudgetEvaluator, BudgetSweeper, BudgetsService],
+  providers: [BudgetEvaluator, BudgetIncidentRecorder, BudgetSweeper, BudgetsService],
   exports: [BudgetEvaluator, BudgetsService],
 })
 export class BudgetsModule {}

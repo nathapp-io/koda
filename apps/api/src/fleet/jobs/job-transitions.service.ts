@@ -9,6 +9,7 @@ import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import { FLEET_JOB_REPOSITORY, FleetJobPatch, FleetJobRecord, IFleetJobRepository } from './domain/fleet-job.domain';
 import { ScheduleProgressService } from '../schedules/schedule-progress.service';
 import { SYSTEM_ACTOR, type TransitionActorRef } from '../common/system-actor';
+import { FleetJobOutcomeRecorder } from './job-outcome.recorder';
 
 // The actor of an automatic action lives in a leaf module so budgets, jobs and approvals can all name it
 // without importing each other's services (§2.4 closes an approval from the jobs side — now via
@@ -35,6 +36,7 @@ export class JobTransitionsService {
     private readonly live: FleetJobLivePublisher,
     private readonly schedules: ScheduleProgressService,
     private readonly approvals: ApprovalCloser,
+    private readonly outcomes: FleetJobOutcomeRecorder,
   ) {}
 
   async apply(input: {
@@ -57,6 +59,8 @@ export class JobTransitionsService {
     const after = await this.repo.update(job.id, patch);
     // Fleet S3 D475: the config job's last reported result becomes its edit row's record, in this transaction.
     if (terminal && isConfigKind(after.command)) await this.repo.copyConfigResult(after.id);
+    // Fleet S4a §2.4 (D513): the requester's notification, in this same transaction.
+    if (terminal) await this.outcomes.onTerminal(after);
     const live = await this.record({ before: job, after, by, now, actor: input.actor, reason: input.reason });
     // Spec §1.4 / plan D263: nax has exited or is exiting, so its asks are moot and an unsent answer must not go out.
     const approvalLive = job.state === FleetJobState.RUNNING && to !== FleetJobState.RUNNING ? await this.leaveRunning(after, now) : [];

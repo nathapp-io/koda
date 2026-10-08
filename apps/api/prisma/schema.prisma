@@ -428,7 +428,7 @@ model DecisionEvent {
 
 model OutboxEvent {
   id            String    @id @default(cuid())
-  projectId     String
+  projectId     String? // null only for GLOBAL_OUTBOX_TYPES (S4a D512)
   type          String // ticket_event | agent_event | decision_event | document_indexed | graphify_import | code_commit | webhook_delivery
   eventId       String // canonical record ID this outbox event originated from
   payload       String    @default("{}") // JSON stored as string
@@ -443,7 +443,7 @@ model OutboxEvent {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([status, createdAt])
   @@index([projectId, createdAt])
@@ -646,6 +646,19 @@ model Runner {
   jobs       FleetJob[]     @relation("FleetJobRunner")
   pinnedJobs FleetJob[]     @relation("FleetJobPinnedRunner")
   commands   FleetCommand[]
+}
+
+/// Fleet S4a §1 (D507): one runner-offline or credential-expiring episode. At most one open row per (kind, subjectKey)
+/// (partial unique index in the migration). subjectKey = runnerId, or runnerId:providerId.
+model FleetHealthAlert {
+  id         String    @id @default(cuid())
+  kind       String // runner_offline | credential_expiring
+  subjectKey String
+  openedAt   DateTime  @default(now())
+  closedAt   DateTime?
+
+  @@index([kind, subjectKey, closedAt])
+  @@index([closedAt])
 }
 
 model RunnerEnrollment {

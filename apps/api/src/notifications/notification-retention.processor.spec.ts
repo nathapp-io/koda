@@ -5,8 +5,9 @@ import type { INotificationsConfig } from '../config/notifications.config';
 function setup(config: INotificationsConfig | undefined) {
   const repo = { purgeRead: jest.fn().mockResolvedValue(7) };
   const cfg = { get: jest.fn().mockReturnValue(config) };
-  const processor = new NotificationRetentionProcessor(repo as never, cfg as never);
-  return { processor, repo };
+  const healthAlerts = { purgeClosed: jest.fn().mockResolvedValue(0) };
+  const processor = new NotificationRetentionProcessor(repo as never, cfg as never, healthAlerts as never);
+  return { processor, repo, healthAlerts };
 }
 
 describe('NotificationRetentionProcessor (S4a D511)', () => {
@@ -38,5 +39,18 @@ describe('NotificationRetentionProcessor (S4a D511)', () => {
     const { processor, repo } = setup({ retentionDays: 90 });
     repo.purgeRead.mockRejectedValueOnce(new Error('db down'));
     await expect(processor.scheduledPurge()).resolves.toBeUndefined();
+  });
+
+  it('purges health alerts closed more than 30 days ago, even with notification retention off (S4a §1)', async () => {
+    const { processor, healthAlerts } = setup({ retentionDays: null });
+    await processor.purge(new Date('2026-10-09T04:30:00.000Z'));
+    expect(healthAlerts.purgeClosed).toHaveBeenCalledWith(new Date('2026-09-09T04:30:00.000Z'));
+  });
+
+  it('a failed notification purge does not skip the health-alert purge', async () => {
+    const { processor, repo, healthAlerts } = setup({ retentionDays: 90 });
+    repo.purgeRead.mockRejectedValueOnce(new Error('db down'));
+    await processor.purge(new Date('2026-10-09T04:30:00.000Z'));
+    expect(healthAlerts.purgeClosed).toHaveBeenCalled();
   });
 });

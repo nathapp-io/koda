@@ -23,7 +23,7 @@ function make() {
   const ticketEffects = { upsertPrLinks: jest.fn().mockResolvedValue(undefined) };
   const svc = new BundleIngestService(
     repo as never, store as never, jobs as never, live as never, { record: jest.fn() } as never, { signal: jest.fn() } as never,
-    { run: (fn: () => unknown) => fn() } as never, ticketEffects as never,
+    { run: (fn: () => unknown) => fn() } as never, ticketEffects as never, { onIngestCorrection: jest.fn() } as never,
   );
   return { svc, ticketEffects, repo };
 }

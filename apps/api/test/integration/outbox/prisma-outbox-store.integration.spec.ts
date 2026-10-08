@@ -89,6 +89,18 @@ describeIntegration('PrismaOutboxStore', () => {
       expect(await prisma.client.outboxEvent.count()).toBe(0);
     });
 
+    it('stores a global fleet type without projectId (S4a D512)', async () => {
+      const record = await outbox.record({ type: 'fleet_health_alert', payload: { alertId: 'a1' }, metadata: { eventId: 'a1' } });
+      const row = await prisma.client.outboxEvent.findUniqueOrThrow({ where: { id: record.id } });
+      expect(row).toMatchObject({ projectId: null, eventId: 'a1', type: 'fleet_health_alert' });
+      const [claimed] = await store.claimBatch(10, 30_000, new Date(Date.now() + 1000), 'w1');
+      expect(claimed.metadata).toEqual({ projectId: null, eventId: 'a1' });
+    });
+
+    it('still rejects a non-global type without projectId', async () => {
+      await expect(outbox.record({ type: 'fleet_job_outcome', payload: {} })).rejects.toBeInstanceOf(ValidationAppException);
+    });
+
     it('falls back to the record id when metadata.eventId is absent', async () => {
       const record = await outbox.record({ type: 'ticket_event', payload: {}, metadata: { projectId } });
       const row = await prisma.client.outboxEvent.findUniqueOrThrow({ where: { id: record.id } });
