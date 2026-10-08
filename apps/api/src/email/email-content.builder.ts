@@ -27,6 +27,9 @@ export class EmailContentBuilder {
   ) {}
 
   async build(row: EmailScheduleRow): Promise<EmailContent> {
+    // US-004 test-writer stub (RED): the implementer owns the MEMBER_ADDED build order.
+    if (row.kind === 'MEMBER_ADDED') return { skip: 'READ' };
+
     if (row.kind !== 'NOTIFICATION' || !row.notificationId) return { skip: 'SOURCE_GONE' };
 
     const notification = await this.prisma.client.notification.findUnique({
