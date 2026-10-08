@@ -47,9 +47,12 @@ categories they receive and which tickets they watch.
   transaction (`comments.service.ts:100`, `tickets.service.ts:67`). `FanOutPublisher.register(type, handler)` runs
   every handler per record and retries the whole record if any throws (`outbox/fan-out-publisher.ts`), so handlers
   must be idempotent.
-- Ticket activity reaches the outbox as `ticket_event` with `TicketEvent.action` in `TICKET_CREATED`,
-  `ASSIGNED_TICKET`, `COMMENT_ADDED`, `STATUS_CHANGE`, `TICKET_UPDATED`, `LABEL_CHANGE`, ...
-  (`buildTicketEventOutboxPayload`). `TicketLiveSubscriber` is the precedent consumer.
+- Ticket activity reaches the outbox as `ticket_event` (`buildTicketEventOutboxPayload`: `id, action, ticketId,
+  projectId, actorId, actorType, data`). Actions and `data`: `TICKET_CREATED` `{type, title}`
+  (`tickets.service.ts:124`); `TICKET_UPDATED` = the changed fields (`:267`); `assigned` `{assignedTo}` = user
+  **or** agent id with no type marker (`:368`); `status_changed` `{fromStatus, newStatus}` and `COMMENT_ADDED`
+  `{commentId}` (`ticket-transitions.service.ts:100,126`, `comments.service.ts:100`); `TICKET_DELETED`.
+  `TicketLiveSubscriber` is the precedent consumer.
 - Live: `ProjectEventBus` (in-process, single API instance), `createLiveStream` (heartbeat, token expiry,
   `stillAllowed`), `LiveStreamRegistry` (per-user stream cap), `GET /projects/:slug/events`
   (`live/live.controller.ts`), web `useProjectEvents`.
@@ -179,11 +182,14 @@ Watchers are upserted first, in the same handler, then recipients resolved.
 | Action | Auto-watch | Notify |
 |---|---|---|
 | `TICKET_CREATED` | reporter (`REPORTER`); mentioned users in the description (`MENTIONED`) | mentioned → `MENTIONED` |
-| `ASSIGNED_TICKET` (user assignee) | assignee (`ASSIGNEE`) | assignee → `ASSIGNED` (ignores `muted`) |
+| `assigned` (user assignee) | assignee (`ASSIGNEE`) | assignee → `ASSIGNED` (ignores `muted`) |
 | `COMMENT_ADDED` | commenter (`COMMENTER`); mentioned (`MENTIONED`) | mentioned → `MENTIONED` (ignores `muted`); other unmuted watchers → `WATCHED_ACTIVITY` |
-| `STATUS_CHANGE` | — | unmuted watchers → `WATCHED_ACTIVITY` |
+| `status_changed` | — | unmuted watchers → `WATCHED_ACTIVITY` |
 | `TICKET_UPDATED` with a changed description | newly mentioned (`MENTIONED`) | newly mentioned → `MENTIONED` |
 
+- The `assigned` event gains `data.assigneeType: 'user' | 'agent'` (slice 1) so the producer never guesses; events
+  recorded before the change are resolved by looking the id up in `User`.
+- `COMMENT_ADDED` carries only `commentId`; the producer loads the comment author and body.
 - A user who gets `MENTIONED` or `ASSIGNED` for an event does not also get `WATCHED_ACTIVITY` for the same event.
 - `sourceId` is the `TicketEvent` id. "Newly mentioned" on update compares against the previous description, which
   the event payload must carry (`data.previousDescription` is added where description updates record the event;
