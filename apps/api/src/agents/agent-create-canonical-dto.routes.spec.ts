@@ -4,7 +4,7 @@
  * controller imports the canonical DTOs from `agents/dto/*`.
  *
  * Boots a real Fastify HTTP server with the production validation pipe settings
- * (`useAppGlobalPipes`: `forbidUnknownValues: false, stopAtFirstError: true`) and
+ * (`useAppGlobalPipes`: `forbidUnknownValues: false, stopAtFirstError: true, whitelist: true`) and
  * the real AgentsService over a stubbed repository. No database, no network.
  */
 import { CanActivate, ExecutionContext, ValidationPipe } from '@nestjs/common';
@@ -99,7 +99,7 @@ describe('POST /api/agents with the canonical CreateAgentDto (US-005 AC3)', () =
     app.useGlobalGuards(principalInjector);
     // Mirrors AppFactory.useAppGlobalPipes() — the pipe the route is validated
     // against in production.
-    app.useGlobalPipes(new ValidationPipe({ forbidUnknownValues: false, stopAtFirstError: true }));
+    app.useGlobalPipes(new ValidationPipe({ forbidUnknownValues: false, stopAtFirstError: true, whitelist: true }));
 
     await app.init();
     await app.getHttpAdapter().getInstance().ready();

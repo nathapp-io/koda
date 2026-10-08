@@ -5,6 +5,10 @@ import { resolve } from 'path';
 import { Logger } from '@nestjs/common';
 config({ path: resolve(__dirname, '.env.test'), quiet: true });
 
+// @nathapp/nestjs-prisma >= 4.0.3 `createMockPrismaService` reads `globalThis.jest`, but Jest injects
+// `jest` per module and never sets it on globalThis. Remove once nathapp-nestjs#14 is fixed.
+(globalThis as { jest?: typeof jest }).jest ??= jest;
+
 // Mock NestJS Logger to no-ops to reduce test noise
 jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
 jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
