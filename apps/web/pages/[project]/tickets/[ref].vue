@@ -4,6 +4,7 @@ import TicketHeader from '~/components/TicketHeader.vue'
 import TicketActivity from '~/components/TicketActivity.vue'
 import TicketProperties from '~/components/TicketProperties.vue'
 import TicketFleetRuns from '~/components/TicketFleetRuns.vue'
+import TicketWatchButton from '~/components/TicketWatchButton.vue'
 import { isLinkableTicket, ticketDispatchQuery } from '~/lib/fleet-ticket-links'
 import { createDebouncer } from '~/lib/debounce'
 import { apiPath } from '~/lib/api-path'
@@ -287,7 +288,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onPageKeydown))
         />
       </div>
 
-      <div class="min-w-0 lg:col-span-1 lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-[72px] lg:self-start">
+      <div class="min-w-0 space-y-3 lg:col-span-1 lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-[72px] lg:self-start">
+        <TicketWatchButton :project-slug="slug" :ticket-ref="ref" />
         <TicketProperties
           :ticket="ticket"
           :project-slug="slug"
