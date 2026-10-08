@@ -3,9 +3,10 @@
     <NuxtLink
       v-if="target"
       :to="target"
-      class="inline-flex items-center gap-1 rounded-md border border-amber-500/50 bg-amber-500/15 px-2 py-1 text-sm font-semibold text-foreground hover:bg-amber-500/25"
+      class="inline-flex animate-pulse items-center gap-1 rounded-md border border-amber-500/50 bg-amber-500/15 px-2 py-1 text-sm font-semibold text-foreground hover:bg-amber-500/25"
       :aria-label="t('fleet.approvals.badge.label', { count })"
       :title="t('fleet.approvals.badge.label', { count })"
+      aria-live="polite"
       data-testid="fleet-approval-badge"
       :data-count="count"
     >

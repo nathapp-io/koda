@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { OutboxService } from '@nathapp/nestjs-outbox';
 import type { LiveFleetApprovalEvent } from '../../live/live-event';
 import { WebhookDispatcherService } from '../../webhook/webhook-dispatcher.service';
 import { FleetActivityService } from '../activity/fleet-activity.service';
@@ -55,6 +56,7 @@ export class ApprovalCloser {
     private readonly activity: FleetActivityService,
     private readonly webhooks: WebhookDispatcherService,
     private readonly livePublisher: ApprovalLivePublisher,
+    private readonly outbox: OutboxService,
   ) {}
 
   async openBudget(policy: BudgetPolicyRecord, at: { windowStart: Date; spentUsd: string }, now: Date): Promise<ApprovalChange> {
@@ -69,6 +71,7 @@ export class ApprovalCloser {
     });
     await this.record(approval, system, 'approval.requested');
     await this.dispatch(approval, 'fleet.approval.requested');
+    await this.enqueueRequested(approval);
     return { approval, live: [...stray.live, ...this.livePublisher.event(approval)] };
   }
 
@@ -109,6 +112,7 @@ export class ApprovalCloser {
     if (!born) {
       await this.record(created, actor, 'approval.requested');
       await this.dispatch(created, 'fleet.approval.requested');
+      await this.enqueueRequested(created);
       return { approval: created, live: this.livePublisher.event(created) };
     }
     const closed = await this.repo.resolve(created.id, { ...born, decidedAt: now });
@@ -145,5 +149,20 @@ export class ApprovalCloser {
     if (!approval.projectId) return;
     const slug = await this.repo.findProjectSlug(approval.projectId);
     if (slug) await this.webhooks.dispatch(approval.projectId, event, approvalWebhookPayload(approval, slug));
+  }
+
+  /**
+   * Enqueue every fresh project ask in the caller's transaction. Project live listeners may not
+   * have permission to decide this approval; notification consumers own recipient eligibility.
+   */
+  private async enqueueRequested(approval: FleetApprovalRecord): Promise<void> {
+    if (!approval.projectId) return;
+    const slug = await this.repo.findProjectSlug(approval.projectId);
+    if (!slug) return;
+    await this.outbox.record({
+      type: 'fleet_approval_requested',
+      payload: approvalWebhookPayload(approval, slug),
+      metadata: { projectId: approval.projectId, eventId: approval.id },
+    });
   }
 }

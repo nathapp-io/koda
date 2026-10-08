@@ -98,6 +98,15 @@ describe('FleetApprovalBadge (D247)', () => {
     m.app.unmount()
   })
 
+  test('announces the pending count and pulses while an ask waits (#208)', async () => {
+    const m = mount(jest.fn(async () => counts(2)))
+    await m.settle()
+    const badge = m.el()[0]
+    expect(badge.props['aria-live']).toBe('polite')
+    expect(String(badge.props.class)).toContain('animate-pulse')
+    m.app.unmount()
+  })
+
   test('a failed refresh keeps the last count; a failed first load shows nothing', async () => {
     let fail = false
     const get = jest.fn(async () => {

@@ -9,6 +9,7 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { OutboxService as NathappOutboxService, OutboxStatus } from '@nathapp/nestjs-outbox';
 import { PrismaOutboxStore } from '../../../src/outbox/prisma-outbox.store';
+import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
 import { resetDb } from '../../helpers/reset-db';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -21,6 +22,7 @@ describeIntegration('PrismaOutboxStore', () => {
   let store: PrismaOutboxStore;
   let outbox: NathappOutboxService;
   let projectId: string;
+  const publisher = new FanOutPublisher({ recordLastError: jest.fn() });
 
   const t0 = new Date('2026-09-26T10:00:00.000Z');
   const at = (ms: number): Date => new Date(t0.getTime() + ms);
@@ -35,7 +37,7 @@ describeIntegration('PrismaOutboxStore', () => {
           clientOptions: { datasources: { db: { url: DATABASE_URL } } },
         }),
       ],
-      providers: [PrismaOutboxStore],
+      providers: [PrismaOutboxStore, { provide: FanOutPublisher, useValue: publisher }],
     }).compile();
     prisma = module.get(PrismaService);
     await prisma.onModuleInit();
@@ -101,6 +103,35 @@ describeIntegration('PrismaOutboxStore', () => {
   });
 
   describe('claimBatch', () => {
+    it('holds unhandled approval notifications without blocking other events, then releases them when a consumer registers', async () => {
+      await seed('approval', at(-3000), { type: 'fleet_approval_requested' });
+      await seed('expired-approval', at(-2000), {
+        type: 'fleet_approval_requested', status: 'processing', owner: 'old', leaseUntil: at(-1000),
+      });
+      await seed('ticket', at(-1000));
+      const handler = jest.fn();
+      try {
+        for (let cycle = 0; cycle < 10; cycle += 1) {
+          const claimed = await store.claimBatch(1, 30_000, at(cycle * 1000), 'owner');
+          expect(claimed.map((r) => r.id)).toEqual(cycle === 0 ? ['ticket'] : []);
+        }
+        expect(await prisma.client.outboxEvent.findUniqueOrThrow({ where: { id: 'approval' } }))
+          .toMatchObject({ status: 'pending', attempts: 0, owner: null });
+        publisher.register('fleet_approval_requested', handler);
+        const released = await store.claimBatch(10, 30_000, at(10_000), 'consumer');
+        expect(released.map((r) => r.id)).toEqual(['approval', 'expired-approval']);
+        for (const record of released) {
+          await publisher.publish(record);
+          await store.markPublished(record.id, at(11_000), 'consumer');
+        }
+        expect(handler).toHaveBeenCalledTimes(2);
+        expect(await prisma.client.outboxEvent.findUniqueOrThrow({ where: { id: 'approval' } }))
+          .toMatchObject({ status: 'published', attempts: 0 });
+      } finally {
+        publisher.unregister('fleet_approval_requested', handler);
+      }
+    });
+
     it('claims due pending rows oldest-due first, up to the limit, and leases them', async () => {
       await seed('b', at(-2000));
       await seed('a', at(-3000));

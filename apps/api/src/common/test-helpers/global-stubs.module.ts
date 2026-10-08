@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { OutboxService } from '@nathapp/nestjs-outbox';
 import { CacheManager } from '@nathapp/nestjs-cache';
 import { AgentsService } from '../../agents/agents.service';
 import { AUTH_CFG, IAuthConfig, authConfig } from '../../config/auth.config';
@@ -40,6 +41,10 @@ export const mockCacheManager = {
   set: async () => undefined,
   del: async () => undefined,
 } as unknown as CacheManager;
+
+export const mockOutboxService = {
+  record: jest.fn(async (event: { type: string }) => ({ id: 'outbox-stub', ...event })),
+} as unknown as OutboxService;
 
 export const mockAuthConfig: IAuthConfig = {
   jwtSecret: 'test-secret',
@@ -101,6 +106,7 @@ export const mockFleetConfig: IFleetConfig = testFleetConfig();
     { provide: TRANSACTION_MANAGER, useValue: mockTransactionManager },
     { provide: AgentsService, useValue: mockAgentsService },
     { provide: CacheManager, useValue: mockCacheManager },
+    { provide: OutboxService, useValue: mockOutboxService },
     { provide: AUTH_CFG, useValue: mockAuthConfig },
     { provide: RAG_CFG, useValue: mockRagConfig },
     { provide: VCS_CFG, useValue: mockVcsConfig },
@@ -108,6 +114,6 @@ export const mockFleetConfig: IFleetConfig = testFleetConfig();
     { provide: WEBHOOK_CFG, useValue: mockWebhookConfig },
     { provide: FLEET_CFG, useValue: mockFleetConfig },
   ],
-  exports: [PrismaService, TRANSACTION_MANAGER, ConfigModule, AgentsService, CacheManager, AUTH_CFG, RAG_CFG, VCS_CFG, LIVE_CFG, WEBHOOK_CFG, FLEET_CFG],
+  exports: [PrismaService, TRANSACTION_MANAGER, ConfigModule, AgentsService, CacheManager, OutboxService, AUTH_CFG, RAG_CFG, VCS_CFG, LIVE_CFG, WEBHOOK_CFG, FLEET_CFG],
 })
 export class GlobalStubsModule {}

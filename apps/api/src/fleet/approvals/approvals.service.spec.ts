@@ -76,7 +76,8 @@ function buildBash() {
   const activity = { record: jest.fn(async () => undefined), memberProjectIds: jest.fn(async () => ['p1']) };
   const webhooks = { dispatch: jest.fn(async () => undefined) };
   const closerLive = { event: jest.fn((a: FleetApprovalRecord) => (a.projectId ? [{ approvalId: a.id, status: a.status }] : [])) };
-  const closer = new ApprovalCloser(repo as never, activity as never, webhooks as never, closerLive as never);
+  const closerOutbox = { record: jest.fn(async (e: { type: string }) => ({ id: 'ob', ...e })) };
+  const closer = new ApprovalCloser(repo as never, activity as never, webhooks as never, closerLive as never, closerOutbox as never);
   const live = { publish: jest.fn() };
   const budgetRepo = { lockById: jest.fn() };
   const budgets = { resume: jest.fn() };

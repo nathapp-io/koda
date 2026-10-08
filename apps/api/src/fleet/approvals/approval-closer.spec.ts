@@ -35,8 +35,9 @@ function fakes() {
   const activity = { record: jest.fn(async () => undefined) };
   const webhooks = { dispatch: jest.fn(async () => undefined) };
   const live = { event: jest.fn((a: FleetApprovalRecord) => (a.projectId ? [{ approvalId: a.id, status: a.status }] : [])) };
-  const closer = new ApprovalCloser(repo as never, activity as never, webhooks as never, live as never);
-  return { closer, repo, activity, webhooks, rows };
+  const outbox = { record: jest.fn(async (e: { type: string }) => ({ id: 'ob1', ...e })) };
+  const closer = new ApprovalCloser(repo as never, activity as never, webhooks as never, live as never, outbox as never);
+  return { closer, repo, activity, webhooks, outbox, rows };
 }
 
 describe('ApprovalCloser', () => {
@@ -54,6 +55,16 @@ describe('ApprovalCloser', () => {
     expect(r.live).toHaveLength(1);
   });
 
+  it('enqueues a fleet_approval_requested outbox event for every fresh project budget ask (#208)', async () => {
+    const { closer, outbox } = fakes();
+    const r = await closer.openBudget(policy(), { windowStart: NOW, spentUsd: '10.5' }, NOW);
+    expect(outbox.record).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'fleet_approval_requested',
+      payload: expect.objectContaining({ approvalId: r.approval?.id, projectId: 'p1', path: `/web/fleet/approvals?id=${r.approval?.id}` }),
+      metadata: { projectId: 'p1', eventId: r.approval?.id },
+    }));
+  });
+
   it('supersedes a stray pending approval before opening a new one', async () => {
     const { closer, rows } = fakes();
     const first = await closer.openBudget(policy(), { windowStart: NOW, spentUsd: '10' }, NOW);
@@ -68,10 +79,11 @@ describe('ApprovalCloser', () => {
   });
 
   it('sends no webhook and no live event for a policy with no project', async () => {
-    const { closer, webhooks } = fakes();
+    const { closer, webhooks, outbox } = fakes();
     const r = await closer.openBudget(policy({ scopeType: 'global', scopeId: null, projectId: null }), { windowStart: NOW, spentUsd: '1' }, NOW);
     expect(webhooks.dispatch).not.toHaveBeenCalled();
     expect(r.live).toEqual([]);
+    expect(outbox.record).not.toHaveBeenCalled();
   });
 
   it('closes the pending approval of a policy, or does nothing when there is none', async () => {
@@ -102,8 +114,9 @@ describe('bash (S1.5 2a)', () => {
   let repo!: ReturnType<typeof fakes>['repo'];
   let activity!: ReturnType<typeof fakes>['activity'];
   let webhooks!: ReturnType<typeof fakes>['webhooks'];
+  let outbox!: ReturnType<typeof fakes>['outbox'];
   let rows!: ReturnType<typeof fakes>['rows'];
-  beforeEach(() => { ({ closer, repo, activity, webhooks, rows } = fakes()); });
+  beforeEach(() => { ({ closer, repo, activity, webhooks, outbox, rows } = fakes()); });
   const job = { id: 'j1', projectId: 'p1', leaseEpoch: 2, state: 'RUNNING', bashMode: 'escalate', approvalTimeoutSec: 600, requestedById: 'u9' } as const;
   const ask = (over: Partial<{ naxAskId: string; deadlineAt: Date }> = {}) => ({
     naxAskId: 'ask-1f2e3d4c', deadlineAt: new Date(NOW.getTime() + 300_000), payload: { command: 'bun run test' }, ...over,
@@ -120,6 +133,20 @@ describe('bash (S1.5 2a)', () => {
     expect(live).toHaveLength(1);
   });
 
+  it('enqueues a fleet_approval_requested outbox event for every fresh project bash ask (#208)', async () => {
+    const { approval } = await closer.openBash(job, ask(), 'r1', NOW);
+    expect(outbox.record).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'fleet_approval_requested',
+      payload: expect.objectContaining({ approvalId: approval?.id, projectId: 'p1', jobId: 'j1', path: `/web/fleet/approvals?id=${approval?.id}` }),
+      metadata: { projectId: 'p1', eventId: approval?.id },
+    }));
+  });
+
+  it('does not enqueue an outbox event for a born-closed ask (#208)', async () => {
+    await closer.openBash({ ...job, state: 'UPLOADING' }, ask(), 'r1', NOW);
+    expect(outbox.record).not.toHaveBeenCalled();
+  });
+
   it('caps expiresAt at requestedAt + approvalTimeoutSec', async () => {
     const { approval } = await closer.openBash({ ...job, approvalTimeoutSec: 60 }, ask(), 'r1', NOW);
     expect(approval?.expiresAt).toEqual(new Date(NOW.getTime() + 60_000));
@@ -131,6 +158,7 @@ describe('bash (S1.5 2a)', () => {
     expect(again.approval?.id).toBe(first.approval?.id);
     expect(again.live).toEqual([]);
     expect(repo.create).toHaveBeenCalledTimes(1);
+    expect(outbox.record).toHaveBeenCalledTimes(1);
   });
 
   it.each([

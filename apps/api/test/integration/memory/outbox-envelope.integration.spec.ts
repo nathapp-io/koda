@@ -114,8 +114,8 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
     };
 
     // Real outbox stack (package relay) + real memory fan-out subscriber.
-    const store = new PrismaOutboxStore(prismaService);
     const publisher = new FanOutPublisher(new PrismaOutboxRepository(txManager, prismaService));
+    const store = new PrismaOutboxStore(prismaService, publisher);
     packageOutbox = new NathappOutboxService(store, txManager);
     relay = new OutboxRelay({ store, publisher, relay: { enabled: false } }, store, publisher);
     const ticketEventService = new TicketEventService(new PrismaEventsRepository(prismaService));
