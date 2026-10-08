@@ -1,6 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { NotificationChannel } from '@nathapp/nestjs-notify';
 import { UserEventBus } from '../live/user-event-bus';
+import { EmailAvailability } from '../email/email-availability';
+import { EmailScheduleService } from '../email/schedule/email-schedule.service';
+import { NotificationEmailRecipients } from '../email/notification-email-recipients';
 import { NotificationEligibility } from './notification-eligibility';
 import { NotificationPreferencesService } from './notification-preferences.service';
 import { NotificationsRepository } from './notifications.repository';
@@ -20,6 +24,10 @@ export class NotificationWriter {
     private readonly preferences: NotificationPreferencesService,
     private readonly repo: NotificationsRepository,
     private readonly bus: UserEventBus,
+    private readonly email: EmailAvailability,
+    private readonly schedule: EmailScheduleService,
+    private readonly recipients: NotificationEmailRecipients,
+    @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
 
   async deliver(drafts: readonly NotificationDraft[]): Promise<number> {

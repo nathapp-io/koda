@@ -4,7 +4,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { OutboxService } from '@nathapp/nestjs-outbox';
 import { CacheManager } from '@nathapp/nestjs-cache';
-import { PREFERENCE_SERVICE } from '@nathapp/nestjs-notify';
+import { INotifyService, NOTIFY_SERVICE, PREFERENCE_SERVICE } from '@nathapp/nestjs-notify';
 import { AgentsService } from '../../agents/agents.service';
 import { EmailAvailability } from '../../email/email-availability';
 import { EmailScheduleService } from '../../email/schedule/email-schedule.service';
@@ -76,6 +76,11 @@ export const mockEmailScheduleService = {
   retryAt: jest.fn(async () => undefined),
 } as unknown as EmailScheduleService;
 
+/** S4b US-002: the dispatcher injects nestjs-notify's package service; stub it for module specs. */
+export const mockNotifyService = {
+  send: jest.fn(async () => undefined),
+} as unknown as INotifyService;
+
 export const mockAuthConfig: IAuthConfig = {
   jwtSecret: 'test-secret',
   jwtExpiresIn: '15m',
@@ -138,6 +143,7 @@ export const mockFleetConfig: IFleetConfig = testFleetConfig();
     { provide: CacheManager, useValue: mockCacheManager },
     { provide: OutboxService, useValue: mockOutboxService },
     { provide: PREFERENCE_SERVICE, useValue: mockPreferenceService },
+    { provide: NOTIFY_SERVICE, useValue: mockNotifyService },
     { provide: EmailAvailability, useValue: mockEmailAvailability },
     { provide: EmailScheduleService, useValue: mockEmailScheduleService },
     { provide: AUTH_CFG, useValue: mockAuthConfig },
@@ -147,6 +153,6 @@ export const mockFleetConfig: IFleetConfig = testFleetConfig();
     { provide: WEBHOOK_CFG, useValue: mockWebhookConfig },
     { provide: FLEET_CFG, useValue: mockFleetConfig },
   ],
-  exports: [PrismaService, TRANSACTION_MANAGER, ConfigModule, AgentsService, CacheManager, OutboxService, PREFERENCE_SERVICE, EmailAvailability, EmailScheduleService, AUTH_CFG, RAG_CFG, VCS_CFG, LIVE_CFG, WEBHOOK_CFG, FLEET_CFG],
+  exports: [PrismaService, TRANSACTION_MANAGER, ConfigModule, AgentsService, CacheManager, OutboxService, PREFERENCE_SERVICE, NOTIFY_SERVICE, EmailAvailability, EmailScheduleService, AUTH_CFG, RAG_CFG, VCS_CFG, LIVE_CFG, WEBHOOK_CFG, FLEET_CFG],
 })
 export class GlobalStubsModule {}
