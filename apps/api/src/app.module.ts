@@ -31,6 +31,7 @@ import { OutboxModule } from './outbox/outbox.module';
 import { OutboxAdminModule } from './outbox/outbox-admin.module';
 import { LiveModule } from './live/live.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { EmailModule } from './email/email.module';
 import { MemoryModule } from './memory/memory.module';
 import { CodeIntelModule } from './code-intel/code-intel.module';
 import { EntityGraphModule } from './entity-graph/entity-graph.module';
@@ -46,6 +47,7 @@ import { ragConfig } from './config/rag.config';
 import { vcsConfig } from './config/vcs.config';
 import { outboxConfig } from './config/outbox.config';
 import { notificationsConfig } from './config/notifications.config';
+import { emailConfig } from './config/email.config';
 import { globalThrottleLimit } from './config/throttle-limit';
 import { liveConfig } from './config/live.config';
 import { webhookConfig } from './config/webhook.config';
@@ -58,7 +60,7 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
-      load: [appConfig, authConfig, databaseConfig, ragConfig, vcsConfig, outboxConfig, liveConfig, webhookConfig, fleetConfig, notificationsConfig, ServerSecurityConfig],
+      load: [appConfig, authConfig, databaseConfig, ragConfig, vcsConfig, outboxConfig, liveConfig, webhookConfig, fleetConfig, notificationsConfig, emailConfig, ServerSecurityConfig],
       validate: validate,
     }),
     ConfigBridgeModule,
@@ -113,6 +115,7 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
     OutboxAdminModule,
     LiveModule,
     NotificationsModule,
+    EmailModule,
     KodaDomainWriterModule,
     MemoryModule,
     CodeIntelModule,

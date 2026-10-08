@@ -29,8 +29,8 @@ describe('NotificationWriter (S4a §2.1)', () => {
     const { writer, preferences, repo, bus, order } = setup();
     const count = await writer.deliver([draft('a'), draft('ineligible'), draft('muted-pref'), draft('b', { category: 'ASSIGNED', kind: 'ticket_assigned' })]);
     expect(count).toBe(2);
-    expect(preferences.disabledUserIds).toHaveBeenCalledWith(['a', 'muted-pref'], 'WATCHED_ACTIVITY', 'IN_APP');
-    expect(preferences.disabledUserIds).toHaveBeenCalledWith(['b'], 'ASSIGNED', 'IN_APP');
+    expect(preferences.disabledUserIds).toHaveBeenCalledWith(['a', 'muted-pref'], 'WATCHED_ACTIVITY', 'in_app');
+    expect(preferences.disabledUserIds).toHaveBeenCalledWith(['b'], 'ASSIGNED', 'in_app');
     expect(repo.insertMany.mock.calls[0][0].map((d: NotificationDraft) => d.userId)).toEqual(['a', 'b']);
     expect(bus.publish).toHaveBeenCalledWith({ type: 'notification', userId: 'a', id: 'n0', at: expect.any(String) });
     expect(order).toEqual(['insert', 'publish', 'publish']);

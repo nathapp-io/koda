@@ -33,15 +33,15 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  createdTickets          Ticket[]                 @relation("TicketCreatedByUser")
-  assignedTickets         Ticket[]                 @relation("TicketAssignedToUser")
-  comments                Comment[]                @relation("CommentByUser")
-  projectMemberships      ProjectMember[]
-  fleetJobs               FleetJob[]               @relation("FleetJobRequestedBy")
-  jobSchedules            JobSchedule[]            @relation("JobScheduleCreatedBy")
-  notifications           Notification[]
-  ticketWatches           TicketWatcher[]
-  notificationPreferences NotificationPreference[]
+  createdTickets                  Ticket[]                         @relation("TicketCreatedByUser")
+  assignedTickets                 Ticket[]                         @relation("TicketAssignedToUser")
+  comments                        Comment[]                        @relation("CommentByUser")
+  projectMemberships              ProjectMember[]
+  fleetJobs                       FleetJob[]                       @relation("FleetJobRequestedBy")
+  jobSchedules                    JobSchedule[]                    @relation("JobScheduleCreatedBy")
+  notifications                   Notification[]
+  ticketWatches                   TicketWatcher[]
+  notificationCategoryPreferences NotificationCategoryPreference[]
 }
 
 model Agent {
@@ -317,10 +317,10 @@ model TicketWatcher {
 }
 
 /// Fleet S4a §1: per-user category switch per channel. A missing row means enabled.
-model NotificationPreference {
+model NotificationCategoryPreference {
   userId   String
   category String
-  channel  String // IN_APP (S4a); EMAIL (S4b)
+  channel  String // 'in_app' | 'email' (nestjs-notify NotificationChannel values)
   enabled  Boolean
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1129,4 +1129,68 @@ model FleetReviewResult {
 
   @@unique([jobId, leaseEpoch, recordId])
   @@index([projectId, at])
+}
+
+// === @nathapp/nestjs-notify 1.1 (S4b D523) — copied verbatim, do not edit ===
+// === @nathapp/nestjs-notify schema fragment ===
+// Append these models to your application's schema.prisma.
+// IMPORTANT: NotificationPreference requires @@unique([userId, tenantId, channel])
+// for the atomic upsert in PrismaPreferenceRepository.upsertByUserAndChannel.
+//
+// TZ NOTE: All DateTime fields use @db.Timestamptz(6) (timestamptz in PostgreSQL).
+// When migrating an existing database, use:
+//   ALTER TABLE t ALTER COLUMN col TYPE TIMESTAMPTZ(6) USING col AT TIME ZONE 'UTC';
+// The USING clause treats existing values as UTC — safe if your DB was UTC-configured.
+// Verify your DB timezone (SHOW timezone;) before running migrations on production data.
+
+model NotificationPreference {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  tenantId  String   @map("tenant_id")
+  channel   String
+  enabled   Boolean  @default(true)
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([userId, tenantId, channel])
+  @@map("notification_preferences")
+}
+
+model DeliveryLog {
+  id                String    @id @default(uuid())
+  tenantId          String    @map("tenant_id")
+  userId            String?   @map("user_id")
+  channel           String
+  templateCode      String    @map("template_code")
+  recipient         String    @db.VarChar(512)
+  status            String
+  providerMessageId String?   @map("provider_message_id")
+  errorMessage      String?   @map("error_message") @db.Text
+  metadata          Json      @default("{}")
+  sentAt            DateTime? @map("sent_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tenantId])
+  @@index([recipient, tenantId])
+  @@index([tenantId, providerMessageId])
+  @@map("delivery_logs")
+}
+
+model NotificationTemplate {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  code      String
+  channel   String?
+  locale    String
+  subject   String?  @db.Text
+  content   String   @db.Text
+  isActive  Boolean  @default(true) @map("is_active")
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([tenantId, code, locale, channel])
+  @@index([tenantId])
+  @@map("notification_templates")
 }
