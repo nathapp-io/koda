@@ -46,7 +46,7 @@ export class LiveController {
       throw new ThrottleAppException({}, 'live');
     }
     return createLiveStream({
-      projectId,
+      key: projectId,
       heartbeatMs: this.config.heartbeatMs,
       expiresAtMs: tokenExpiryMs(jwtPayload),
       now: Date.now,

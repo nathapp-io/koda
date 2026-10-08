@@ -1095,7 +1095,7 @@ describe('TicketsService', () => {
           actorId: 'user-123',
           actorType: 'user',
           source: 'internal',
-          data: { assignedTo: 'user-456' },
+          data: { assignedTo: 'user-456', assigneeType: 'user' },
         }),
       );
       expect(mockOutbox.record).toHaveBeenCalledWith(

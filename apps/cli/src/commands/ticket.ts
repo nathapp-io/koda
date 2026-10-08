@@ -27,6 +27,7 @@ import { handleApiError } from '../utils/error';
 import { requireForce } from '../utils/force';
 import { withContext } from '../utils/context';
 import { parsePositiveInt } from '../utils/parse-positive-int';
+import { registerTicketWatch } from './ticket-watch';
 
 type TicketRow = {
   ref?: string;
@@ -673,4 +674,6 @@ export function ticketCommand(program: Command): void {
         handleApiError(err, { notFoundMessage: `Ticket or label not found` });
       }
     });
+
+  registerTicketWatch(ticket);
 }

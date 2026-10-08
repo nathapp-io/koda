@@ -10,11 +10,11 @@ function setup(overrides: Partial<LiveStreamOptions> = {}) {
   let listener: ((event: LiveEvent) => void) | null = null;
   const unsubscribe = jest.fn();
   const options: LiveStreamOptions = {
-    projectId: 'p1',
+    key: 'p1',
     heartbeatMs: 1000,
     expiresAtMs: null,
     now: () => 0,
-    subscribe: jest.fn((_projectId, l) => {
+    subscribe: jest.fn((_key, l) => {
       listener = l;
       return unsubscribe;
     }),

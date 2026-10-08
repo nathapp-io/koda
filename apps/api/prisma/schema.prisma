@@ -32,12 +32,15 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  createdTickets     Ticket[]        @relation("TicketCreatedByUser")
-  assignedTickets    Ticket[]        @relation("TicketAssignedToUser")
-  comments           Comment[]       @relation("CommentByUser")
-  projectMemberships ProjectMember[]
-  fleetJobs          FleetJob[]      @relation("FleetJobRequestedBy")
-  jobSchedules       JobSchedule[]   @relation("JobScheduleCreatedBy")
+  createdTickets          Ticket[]                 @relation("TicketCreatedByUser")
+  assignedTickets         Ticket[]                 @relation("TicketAssignedToUser")
+  comments                Comment[]                @relation("CommentByUser")
+  projectMemberships      ProjectMember[]
+  fleetJobs               FleetJob[]               @relation("FleetJobRequestedBy")
+  jobSchedules            JobSchedule[]            @relation("JobScheduleCreatedBy")
+  notifications           Notification[]
+  ticketWatches           TicketWatcher[]
+  notificationPreferences NotificationPreference[]
 }
 
 model Agent {
@@ -117,6 +120,7 @@ model Project {
   fleetRepos         FleetRepo[]
   fleetJobs          FleetJob[]
   jobSchedules       JobSchedule[]
+  notifications      Notification[]
 
   @@index([deletedAt])
 }
@@ -167,6 +171,7 @@ model Ticket {
   fleetJobs       FleetJobTicket[]
   activities      TicketActivity[]
   links           TicketLink[]
+  watchers        TicketWatcher[]
 
   @@unique([projectId, number])
   @@index([projectId, status])
@@ -267,6 +272,59 @@ model TicketLink {
   @@unique([ticketId, url])
   @@index([externalRef])
   @@index([jobId])
+}
+
+/// Fleet S4a §1: one in-app notification for one user. Unique per (user, source, kind): outbox redelivery inserts nothing.
+model Notification {
+  id         String    @id @default(cuid())
+  userId     String
+  projectId  String? // null for global fleet health
+  category   String // ASSIGNED | MENTIONED | WATCHED_ACTIVITY | FLEET_NEEDS_YOU | FLEET_HEALTH
+  kind       String // ticket_assigned | ticket_mentioned | ticket_commented | ticket_status_changed | job_* | approval_requested | budget_* | runner_offline | credential_expiring
+  title      String // English fallback (CLI, API consumers)
+  body       String?
+  params     Json      @default("{}") // kind-specific values for web i18n rendering
+  link       String // in-app path
+  sourceType String // ticket_event | fleet_job | fleet_approval | fleet_budget_incident | fleet_health_alert
+  sourceId   String
+  actorId    String?
+  readAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, sourceType, sourceId, kind])
+  @@index([userId, readAt, createdAt])
+  @@index([userId, createdAt])
+}
+
+/// Fleet S4a §1: who follows a ticket. Unwatch is a sticky `muted` flag; auto-watch never un-mutes.
+model TicketWatcher {
+  ticketId  String
+  userId    String
+  reason    String // REPORTER | ASSIGNEE | COMMENTER | MENTIONED | MANUAL
+  muted     Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([ticketId, userId])
+  @@index([userId])
+}
+
+/// Fleet S4a §1: per-user category switch per channel. A missing row means enabled.
+model NotificationPreference {
+  userId   String
+  category String
+  channel  String // IN_APP (S4a); EMAIL (S4b)
+  enabled  Boolean
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, category, channel])
 }
 
 // ---------------------------------------------------------------------------
@@ -808,16 +866,16 @@ model FleetJob {
   configResult       Json? // S3 §3 (D475): ConfigJobResult mirrored from snapshots; null for nax jobs
   updatedAt          DateTime  @updatedAt
 
-  project      Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  repo         FleetRepo          @relation(fields: [repoId], references: [id], onDelete: Cascade)
-  runner       Runner?            @relation("FleetJobRunner", fields: [runnerId], references: [id], onDelete: SetNull)
-  pinnedRunner Runner?            @relation("FleetJobPinnedRunner", fields: [pinnedRunnerId], references: [id], onDelete: SetNull)
-  requestedBy  User               @relation("FleetJobRequestedBy", fields: [requestedById], references: [id])
-  schedule     JobSchedule?       @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
-  events       FleetJobEvent[]
-  commands     FleetCommand[]
-  artifacts    FleetJobArtifact[]
-  logs         FleetJobLog[]
+  project       Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repo          FleetRepo           @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  runner        Runner?             @relation("FleetJobRunner", fields: [runnerId], references: [id], onDelete: SetNull)
+  pinnedRunner  Runner?             @relation("FleetJobPinnedRunner", fields: [pinnedRunnerId], references: [id], onDelete: SetNull)
+  requestedBy   User                @relation("FleetJobRequestedBy", fields: [requestedById], references: [id])
+  schedule      JobSchedule?        @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  events        FleetJobEvent[]
+  commands      FleetCommand[]
+  artifacts     FleetJobArtifact[]
+  logs          FleetJobLog[]
   ingests       FleetBundleIngest[]
   costEvents    FleetCostEvent[]
   tickets       FleetJobTicket[]
@@ -904,14 +962,14 @@ model FleetCommand {
 
 /// Uploaded run bundle, one per job and lease epoch (plan D3).
 model FleetJobArtifact {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   jobId      String
   leaseEpoch Int
   kind       String // bundle
   storageKey String
   sizeBytes  BigInt
   sha256     String
-  createdAt  DateTime @default(now())
+  createdAt  DateTime  @default(now())
   expiredAt  DateTime? // S2a retention: the file is gone (spec §5)
 
   job FleetJob @relation(fields: [jobId], references: [id], onDelete: Cascade)

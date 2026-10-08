@@ -4518,6 +4518,356 @@
         ]
       }
     },
+    "/api/me/notifications": {
+      "get": {
+        "operationId": "MeNotificationsController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "unread",
+            "required": false,
+            "in": "query",
+            "description": "true = unread only",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPageDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Agents and runners have no inbox"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "My notifications, newest first (users only)",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/me/notifications/unread-count": {
+      "get": {
+        "operationId": "MeNotificationsController_unreadCount",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnreadCountDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "How many of my notifications are unread",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/me/notifications/{id}/read": {
+      "post": {
+        "operationId": "MeNotificationsController_markRead",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Read"
+          },
+          "404": {
+            "description": "No such notification of mine"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Mark one of my notifications read (idempotent)",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/me/notifications/read-all": {
+      "post": {
+        "operationId": "MeNotificationsController_markAllRead",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "Read"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Mark every notification I had when this request arrived read",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/me/notification-preferences": {
+      "get": {
+        "operationId": "MeNotificationsController_getPreferences",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPreferencesDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "My in-app notification categories",
+        "tags": [
+          "notifications"
+        ]
+      },
+      "put": {
+        "operationId": "MeNotificationsController_updatePreferences",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationPreferencesDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPreferencesDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown category or malformed body"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Switch in-app notification categories on or off",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/projects/{slug}/tickets/{ref}/watchers": {
+      "get": {
+        "operationId": "TicketWatchController_state",
+        "parameters": [
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchStateDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Ticket not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Whether I watch this ticket, and how many people do",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/projects/{slug}/tickets/{ref}/watch": {
+      "put": {
+        "operationId": "TicketWatchController_watch",
+        "parameters": [
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchStateDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Ticket not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Watch this ticket (receive its activity notifications)",
+        "tags": [
+          "notifications"
+        ]
+      },
+      "delete": {
+        "operationId": "TicketWatchController_unwatch",
+        "parameters": [
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchStateDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Ticket not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Stop watching this ticket; assignments and mentions still notify",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
     "/api/fleet/activity": {
       "get": {
         "operationId": "FleetActivityController_list",
@@ -10605,6 +10955,178 @@
         "required": [
           "success",
           "message"
+        ]
+      },
+      "NotificationDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "category": {
+            "enum": [
+              "ASSIGNED",
+              "MENTIONED",
+              "WATCHED_ACTIVITY",
+              "FLEET_NEEDS_YOU",
+              "FLEET_HEALTH"
+            ],
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "description": "ticket_assigned, ticket_mentioned, ticket_commented, ticket_status_changed, job_*, approval_requested, budget_*, runner_offline, credential_expiring"
+          },
+          "title": {
+            "type": "string",
+            "description": "English fallback; the web renders from kind + params"
+          },
+          "body": {
+            "type": "string",
+            "nullable": true
+          },
+          "link": {
+            "type": "string",
+            "description": "In-app path, e.g. /koda/tickets/KODA-12"
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            }
+          },
+          "projectId": {
+            "type": "string",
+            "nullable": true
+          },
+          "actorId": {
+            "type": "string",
+            "nullable": true
+          },
+          "readAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "category",
+          "kind",
+          "title",
+          "link",
+          "params",
+          "createdAt"
+        ]
+      },
+      "NotificationPageDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "current": {
+            "type": "number"
+          },
+          "size": {
+            "type": "number"
+          },
+          "hasNext": {
+            "type": "boolean"
+          },
+          "hasPrev": {
+            "type": "boolean"
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NotificationDto"
+            }
+          }
+        },
+        "required": [
+          "total",
+          "current",
+          "size",
+          "hasNext",
+          "hasPrev",
+          "records"
+        ]
+      },
+      "UnreadCountDto": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "count"
+        ]
+      },
+      "NotificationPreferenceItemDto": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "enum": [
+              "ASSIGNED",
+              "MENTIONED",
+              "WATCHED_ACTIVITY",
+              "FLEET_NEEDS_YOU",
+              "FLEET_HEALTH"
+            ],
+            "type": "string"
+          },
+          "inApp": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "category",
+          "inApp"
+        ]
+      },
+      "NotificationPreferencesDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NotificationPreferenceItemDto"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "WatchStateDto": {
+        "type": "object",
+        "properties": {
+          "watching": {
+            "type": "boolean",
+            "description": "Whether the caller receives activity notifications for this ticket"
+          },
+          "count": {
+            "type": "number",
+            "description": "Unmuted watchers"
+          }
+        },
+        "required": [
+          "watching",
+          "count"
         ]
       },
       "BudgetPolicyDto": {

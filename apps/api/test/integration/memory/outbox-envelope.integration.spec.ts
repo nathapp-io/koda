@@ -287,7 +287,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
       projectId,
       actorId: adminUserId,
       actorType: 'user',
-      data: { assignedTo: adminUserId },
+      data: { assignedTo: adminUserId, assigneeType: 'user' },
     });
 
     await relay.dispatchPendingBatch();
