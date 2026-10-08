@@ -12,6 +12,8 @@ import { NotificationsRepository } from './notifications.repository';
 import { TicketMentionResolver } from './ticket-mention.resolver';
 import { TicketNotificationReadsRepository } from './ticket-notification-reads.repository';
 import { TicketNotificationSubscriber } from './ticket-notification.subscriber';
+import { TicketWatchController } from './ticket-watch.controller';
+import { TicketWatchService } from './ticket-watch.service';
 import { TicketWatchersRepository } from './ticket-watchers.repository';
 
 /**
@@ -20,9 +22,10 @@ import { TicketWatchersRepository } from './ticket-watchers.repository';
  */
 @Module({
   imports: [OutboxModule, LiveModule, ProjectAccessModule],
-  controllers: [MeNotificationsController],
+  controllers: [MeNotificationsController, TicketWatchController],
   providers: [
     MeNotificationsService,
+    TicketWatchService,
     NotificationsRepository,
     TicketWatchersRepository,
     NotificationPreferencesService,
