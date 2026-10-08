@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 import { useNotificationPreferences } from '~/composables/useNotificationPreferences'
 import { NOTIFICATION_CATEGORIES } from '~/lib/notification-types'
@@ -17,22 +17,29 @@ const rows = computed(() => NOTIFICATION_CATEGORIES.map((category) => ({
   inApp: items.value.find((i) => i.category === category)?.inApp ?? true,
 })))
 
+/** True when the first load failed: never show defaulted (all-on) toggles the user could save over real settings. */
+const loadFailed = ref(false)
+
 async function reload(): Promise<void> {
   try {
     await load()
+    loadFailed.value = false
   } catch (err: unknown) {
+    loadFailed.value = items.value.length === 0
     toast.error(extractApiError(err))
   }
 }
 
 async function onToggle(category: NotificationCategory, event: Event): Promise<void> {
-  const checked = (event.target as HTMLInputElement).checked
+  const box = event.target as HTMLInputElement
+  const checked = box.checked
   try {
     await setInApp(category, checked)
     toast.success(t('notifications.preferences.saved'))
   } catch (err: unknown) {
+    // The stored value did not change, so Vue would not re-patch `checked`: put the native box back by hand.
+    box.checked = !checked
     toast.error(extractApiError(err))
-    await reload()
   }
 }
 
@@ -43,6 +50,7 @@ onMounted(() => { void reload() })
   <div class="max-w-2xl space-y-6">
     <PageHeader :title="t('notifications.preferences.title')" :subtitle="t('notifications.preferences.subtitle')" />
     <LoadingState v-if="pending && items.length === 0" />
+    <ErrorState v-else-if="loadFailed" @retry="reload()" />
     <ul v-else class="divide-y divide-border rounded-md border border-border">
       <li v-for="row in rows" :key="row.category" class="flex items-center justify-between gap-4 px-4 py-3">
         <label :for="`notification-pref-${row.category}`" class="min-w-0">

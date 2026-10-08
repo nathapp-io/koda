@@ -53,12 +53,21 @@ describe('/settings/notifications (S4a §5)', () => {
     expect(p.toast.successes).toEqual(['Notification settings saved'])
   })
 
-  test('a failed save reports the error and reloads the stored state', async () => {
+  test('a failed save reports the error and puts the checkbox back without a reload (review fix)', async () => {
     const p = mountPage(jest.fn(async () => { throw new Error('nope') }))
     await p.settle()
-    ;(p.box('MENTIONED').props.onChange as (e: unknown) => void)({ target: { checked: false } })
+    const target = { checked: false }
+    ;(p.box('MENTIONED').props.onChange as (e: unknown) => void)({ target })
     await p.settle()
     expect(p.toast.errors).toEqual(['nope'])
-    expect(p.fake.load).toHaveBeenCalledTimes(2)
+    expect(target.checked).toBe(true)
+    expect(p.fake.load).toHaveBeenCalledTimes(1)
+  })
+
+  test('a failed first load shows an error state, never all-on toggles (review fix)', async () => {
+    const p = mountPage(jest.fn(), jest.fn(async () => { throw new Error('down') }))
+    await p.settle()
+    expect(p.app.find('[data-stub="error-state"]').length).toBe(1)
+    expect(p.box('ASSIGNED')).toBeUndefined()
   })
 })
