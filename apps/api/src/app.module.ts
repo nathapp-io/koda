@@ -31,6 +31,7 @@ import { OutboxModule } from './outbox/outbox.module';
 import { OutboxAdminModule } from './outbox/outbox-admin.module';
 import { LiveModule } from './live/live.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { EmailModule } from './email/email.module';
 import { MemoryModule } from './memory/memory.module';
 import { CodeIntelModule } from './code-intel/code-intel.module';
 import { EntityGraphModule } from './entity-graph/entity-graph.module';
@@ -114,6 +115,7 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
     OutboxAdminModule,
     LiveModule,
     NotificationsModule,
+    EmailModule,
     KodaDomainWriterModule,
     MemoryModule,
     CodeIntelModule,
