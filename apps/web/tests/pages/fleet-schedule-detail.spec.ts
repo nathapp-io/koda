@@ -14,7 +14,7 @@ describe('schedule detail page', () => {
   test('history comes from the jobs API filtered by this schedule, paged, newest first (D221)', () => {
     expect(detail).toContain('jobsApi.load({ scheduleId, page: historyPage.value })')
     expect(detail).toContain('historyRows(jobsApi.jobs.value, !jobsApi.hasNext.value)')
-    expect(detail).toContain('<FleetScheduleHistory :slug="slug" :rows="rows" />')
+    expect(detail).toContain('<FleetScheduleHistory :slug="slug" :rows="rows" :timezone="schedule.timezone" />')
   })
 
   test('live: any fleet_job notice and resync reload schedule and history, debounced; 60 s poll (D222)', () => {
@@ -57,5 +57,11 @@ describe('schedule detail page', () => {
   test('a stale detail load (get resolved null) keeps the row on screen (D224)', () => {
     expect(detail).toContain('const row = await api.get(scheduleId)')
     expect(detail).toContain('if (row === null) return')
+  })
+
+  test('history queued-at renders in the schedule zone (issue #192 item 5)', () => {
+    const history = readFileSync(path.join(__dirname, '../..', 'components', 'fleet', 'ScheduleHistory.vue'), 'utf-8')
+    expect(history).toContain('formatInZone(row.job.queuedAt, timezone)')
+    expect(history).not.toContain('toLocaleString')
   })
 })
