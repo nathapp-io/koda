@@ -24,9 +24,9 @@ const { t } = useI18n()
 const toast = useAppToast()
 
 const agents = useProjectAgents(slug)
-// useProjectViewerRole returns { data, pending, error, refresh } in production;
-// tests mock it with { role, isAdmin, isGlobalAdmin } (plain values). The
-// viewerRoleAndGlobal helper unwraps both shapes to the same primitives.
+// `useProjectViewerRole` returns the `useAsyncData` envelope
+// `{ data, pending, error, refresh }`; the test harness mirrors that
+// same shape, so `readViewer` only has to unwrap one variant.
 const viewerRoleRaw = useProjectViewerRole(slug)
 // Local aliases so the template can use the same `pending`/`error`/`refresh`
 // identifiers as the other project pages (the loading-state test scans for
@@ -76,26 +76,21 @@ function resolveViewer(canManageValue: unknown, viewerRoleValue: unknown): { can
   return { canManage: false, viewerRole: typeof viewerRoleValue === 'string' ? viewerRoleValue : null }
 }
 
-// Accept the SSR-friendly { data, pending, error, refresh } shape, the
-// earlier { role, isAdmin, isGlobalAdmin } mock shape, and the new
-// { canManage, viewerRole } shape. The page never reads role/capability
-// arrays — the roster endpoint returns them as plain strings.
-function readViewer(): { canManage: boolean; viewerRole: string | null; isGlobalAdmin: boolean } {
-  if (!viewerRoleRaw) return { canManage: false, viewerRole: null, isGlobalAdmin: false }
-  const dataField = (viewerRoleRaw as { data?: { value?: unknown; canManage?: boolean; viewerRole?: string | null } }).data
+// `useProjectViewerRole` returns the `useAsyncData` envelope:
+// `{ data: ref({ canManage, viewerRole }), pending, error, refresh }`.
+// `data` starts at the default `{ canManage: false, viewerRole: null }`
+// and updates when the SSR/CSR fetch resolves with the caller's actual
+// project role and management rights. The global-admin branch is
+// covered by the server's `canManage` flag (a global ADMIN gets
+// `canManage: true` even on projects they don't directly belong to).
+function readViewer(): { canManage: boolean; viewerRole: string | null } {
+  if (!viewerRoleRaw) return { canManage: false, viewerRole: null }
+  const dataField = (viewerRoleRaw as { data?: { value?: { canManage?: boolean; viewerRole?: string | null } } }).data
   if (dataField && typeof dataField === 'object' && 'value' in dataField) {
-    const inner = (dataField as { value?: { canManage?: boolean; viewerRole?: string | null } }).value
-    const resolved = resolveViewer(inner?.canManage, inner?.viewerRole)
-    return { ...resolved, isGlobalAdmin: false }
+    const inner = dataField.value
+    return resolveViewer(inner?.canManage, inner?.viewerRole)
   }
-  const raw = viewerRoleRaw as {
-    canManage?: boolean
-    viewerRole?: string | null
-    role?: string | null
-    isGlobalAdmin?: boolean
-  }
-  const resolved = resolveViewer(raw.canManage, raw.viewerRole ?? raw.role)
-  return { ...resolved, isGlobalAdmin: raw.isGlobalAdmin === true }
+  return { canManage: false, viewerRole: null }
 }
 
 // `canManage` is read by both the template (needs reactivity so Add/Remove
@@ -109,7 +104,7 @@ function readViewer(): { canManage: boolean; viewerRole: string | null; isGlobal
 // still passes after the microtask `mountPage` awaits.
 const canManageComputed = computed(() => {
   const resolved = readViewer()
-  return resolved.canManage || resolved.viewerRole === 'ADMIN' || resolved.isGlobalAdmin
+  return resolved.canManage || resolved.viewerRole === 'ADMIN'
 })
 // `isEmptyComputed` reads `items.value` (a ref) so it tracks the roster
 // ref directly; the `let` binding mirrors it the same way as `canManage`.
@@ -145,6 +140,7 @@ function agentStatusDot(status: string) {
 
 function openAddDialog(): void {
   blockedTicketRefs.value = []
+  addErrorMessage.value = null
   addDialogOpen.value = true
   // Refresh the memo of available agents so the dialog's own load
   // (driven by its `open` watcher) is mirrored in the page's bindings.
@@ -302,7 +298,7 @@ async function removeAgent(agent: ProjectAgent): Promise<void> {
             <span class="text-sm tabular-nums">{{ agent.openTicketCount }}</span>
             <div v-if="agent.openTicketCount > 0" class="mt-1 flex flex-col gap-0.5">
               <NuxtLink
-                v-for="ref in agent.openTicketRefs"
+                v-for="ref in (agent.openTicketRefs ?? []).filter((entry: string) => typeof entry === 'string' && entry.length > 0)"
                 :key="ref"
                 :to="apiPath`/${slug}/tickets/${ref}`"
                 class="text-xs text-primary hover:underline"
