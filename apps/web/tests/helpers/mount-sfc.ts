@@ -122,7 +122,7 @@ const VUE_HELPERS = ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount',
 const NUXT_AUTO_IMPORTS = [
   'useI18n', 'useAppToast', 'useState', 'useHead', 'navigateTo', 'useApi', 'useRuntimeConfig', 'definePageMeta',
   'useAsyncData', 'useVisiblePolling', 'useFleetRunners', 'useFleetRepos', 'useRoute', 'useRouter',
-  'useFleetDispatchOptions', 'useFleetJobs', 'useProjectViewerRole',
+  'useFleetDispatchOptions', 'useFleetJobs', 'useProjectViewerRole', 'useProjectMembers',
   'useAdminUsers', 'useProjectEvents', 'useAuth', 'useProjectMemberNames', 'useFleetJobLogs',
   'useFleetRepoConfig', 'onBeforeRouteLeave',
 ] as const
