@@ -3,7 +3,7 @@
   "feature": "fleet-s4c-team-access",
   "branchName": "feat/fleet-s4c-team-access",
   "createdAt": "2026-10-09T00:00:00Z",
-  "updatedAt": "2026-10-09T03:24:59.037Z",
+  "updatedAt": "2026-10-09T03:52:30.602Z",
   "userStories": [
     {
       "id": "US-001",
@@ -40,7 +40,10 @@
       "routing": {
         "complexity": "expert",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Cross-cutting access control and migration with flag-dependent behaviour and many existing call sites."
+        "reasoning": "Cross-cutting access control and migration with flag-dependent behaviour and many existing call sites.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
       },
       "contextFiles": [
         "apps/api/src/projects/project-access.service.ts",
@@ -118,7 +121,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "abe0d192e75ba5abd3da6c08fe1488726cf56564"
     },
     {
       "id": "US-002",
@@ -186,7 +193,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -252,7 +262,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -324,7 +337,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -361,7 +377,10 @@
         "apps/cli/src/utils/error.ts"
       ],
       "workdir": "apps/cli",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -414,7 +433,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -458,7 +480,10 @@
         "apps/web/tests/components/AssigneePicker.spec.ts"
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "This is a NestJS 11/Fastify, Prisma 7, Bun Turborepo, not the Express/Next.js stack inferred in the supplied scanner context; web is Nuxt 3 and CLI Commander.js (apps/api/AGENTS.md; apps/web/AGENTS.md; apps/cli/AGENTS.md). The API is the system of record and uses @nathapp JSON envelopes, local string enums and generated Prisma client; follow nathapp-nestjs-patterns before writing API code. US-001 must land schema + migration before downstream reads: Prisma AgentProject composite PK (agentId, projectId), cascade agent/project FKs, nullable addedBy FK; backfill distinct pairs from assigned/created tickets and comment authors including soft-deleted tickets, no subsequent resync. Tests push schema directly, so edit schema AND migration; migration backfill needs separate scratch pre-migration schema test. Projects/access: ProjectAccessService currently bypasses all non-users (apps/api/src/projects/project-access.service.ts:9-33); keep runner bypass, inject optional AUTH_CFG fail closed, check agent roster there. ProjectsService currently lists every project for agents (apps/api/src/projects/projects.service.ts:70-91); branch on scoping flag. AgentsService.findMe and suggestTicket currently have no roster read (apps/api/src/agents/agents.service.ts:170-185,242-273); target agent pickup is checked even when global ADMIN calls. Auth config schema/factory needs on/off and env validation (apps/api/src/config/auth.config.ts:8-49). Existing project controller GET agents derives from assigned tickets and PATCH resolves against that list (apps/api/src/projects/projects.controller.ts:166-216); replace with explicit roster, retain membership and admin/self gates. ProjectMembersService.add currently accepts any found user ID (apps/api/src/projects/members/project-members.service.ts:43-57); repository lookup and DTO must expose disabled. TicketsService.assign currently performs existence/member checks outside the update transaction (apps/api/src/tickets/tickets.service.ts:318-389); move checks and update inside transaction, take common project-agents advisory lock before checking agent and assigning, also use it before checking open tickets and removing roster. Lock pattern is transaction-scoped pg_advisory_xact_lock (apps/api/src/common/utils/advisory-lock.ts:1-26); no lock for concurrent disabled-user changes by design. New assignees module mirrors invites, owns private repository token, filters non-disabled members and ACTIVE/PAUSED roster agents, combines ordered lists with bounded literal substring matching; connect it in AppModule. Roster reads/writes belong in existing PrismaProjectRepository, PrismaAgentRepository and PrismaTicketsRepository; only ProjectAccessService may add a constructor parameter. Global agent permissions remain CASL global roles; scoping-off restores reach, not assignment or roster safeguards. API locale keys go into both en/zh; update OpenAPI and generated CLI using bun run generate, never edit generated client. bootHttpApp currently takes only registrationEnabled (apps/api/test/helpers/http-app.ts:17-19), add temporary scoping env override around AppFactory.create. Existing unit, integration and e2e suites in spec embed pre-scoping agent access and bare-array agent responses; revise fixtures and expectations, particularly fleet approvals, project-membership gate, endpoint lifecycle, agents pickup and code-intel. Integration/e2e DB tests require KODA_DB_TESTS=1 and local test Postgres, run sequentially because DB reset; DI module tests must be co-located DB-free unit tests. CLI project command currently uses generated operations and unwrap/table (apps/cli/src/commands/project.ts:1-39); member command demonstrates withContext({projectSlug}) (apps/cli/src/commands/member.ts:62). Preserve exit codes and error formatter. Web project agents page currently consumes a bare array, retains status controls (apps/web/pages/[project]/agents.vue:1-137); use Nuxt composable/useApi and new DTO, project-admin-only edits, translate both locale files. TicketProperties has free-text user ID assignment and separate unassign (apps/web/components/TicketProperties.vue:157-184,296-298); replace only assign UI with debounced picker. Members panel has no disabled badge (apps/web/components/ProjectMembersPanel.vue:70). Web UX master plan requires update of status/decisions when changing layouts/pages (docs/ux/redesign/MASTER-PLAN.md:34-58); preserve semantic tokens and no v-html. Dependencies: US-001 -> US-002 -> US-003 -> US-004, with CLI and agents page from US-003 and picker from US-004. Security risks: accidental bypass on cross-project paths, missing fail-closed config, off-mode mistakenly bypassing assign guard, DELETE/assign race, 404 vs 403 vs 409 semantics, contract shape and fixture migration. Flag default ON requires backfill before serving scoped requests; off offers temporary reach rollback without disabling roster/assignment invariants. Each API contract change regenerates committed root openapi.json and CLI generated files through bun run generate (these cross-workspace generated artifacts are outputs of generation, not hand-authored story scope).",
