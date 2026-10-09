@@ -90,6 +90,7 @@ describe('ProjectsController', () => {
 
     agentsService = {
       findByProject: jest.fn(),
+      listProjectRoster: jest.fn(),
       update: jest.fn(),
     } as unknown as jest.Mocked<AgentsService>;
 
@@ -259,27 +260,46 @@ describe('ProjectsController', () => {
   });
 
   describe('getProjectAgents', () => {
-    const mockAgent = {
-      id: 'agent-1',
-      name: 'Bot',
-      slug: 'bot',
-      status: 'ACTIVE',
-      maxConcurrentTickets: 3,
-      roles: [],
-      capabilities: [],
-      createdAt: new Date(),
-      updatedAt: new Date(),
+    const mockAddedAt = new Date('2026-10-01T00:00:00.000Z');
+
+    const makeRosterDto = (over: {
+      slug?: string;
+      name?: string;
+      status?: string;
+      roles?: string[];
+      capabilities?: string[];
+      openTicketCount?: number;
+      openTicketRefs?: string[];
+      addedById?: string | null;
+      addedByName?: string | null;
+    } = {}) => {
+      const addedById = over.addedById === undefined ? null : over.addedById;
+      return {
+        slug: over.slug ?? 'bot',
+        name: over.name ?? 'Bot',
+        status: over.status ?? 'ACTIVE',
+        roles: over.roles ?? [],
+        capabilities: over.capabilities ?? [],
+        openTicketCount: over.openTicketCount ?? 0,
+        openTicketRefs: over.openTicketRefs ?? [],
+        addedAt: mockAddedAt.toISOString(),
+        addedBy: addedById ? { id: addedById, name: over.addedByName ?? null } : null,
+      };
     };
 
     it('US-002 AC1: returns the scoped project roster including agents without tickets', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
       projectsService.assertProjectMembership.mockResolvedValue(undefined);
-      agentsService.findByProject.mockResolvedValue([mockAgent] as any);
+      agentsService.listProjectRoster.mockResolvedValue({
+        scoping: true,
+        items: [makeRosterDto()],
+      } as any);
 
       const result = await controller.getProjectAgents('alpha', adminPrincipal);
       const data = (result as any).data;
 
       expect(projectsService.findBySlug).toHaveBeenCalledWith('alpha');
+      expect(agentsService.listProjectRoster).toHaveBeenCalledWith('alpha');
       expect(data.scoping).toBe(true);
       expect(data.items.map((agent: { slug: string }) => agent.slug)).toContain('bot');
     });
@@ -287,7 +307,10 @@ describe('ProjectsController', () => {
     it('US-002 AC2: exposes roster metadata, roles, capabilities, and ticket summary', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
       projectsService.assertProjectMembership.mockResolvedValue(undefined);
-      agentsService.findByProject.mockResolvedValue([mockAgent] as any);
+      agentsService.listProjectRoster.mockResolvedValue({
+        scoping: true,
+        items: [makeRosterDto({ addedById: 'user-admin', addedByName: 'admin@example.com' })],
+      } as any);
 
       const result = await controller.getProjectAgents('alpha', adminPrincipal);
       const data = (result as any).data;
@@ -308,7 +331,10 @@ describe('ProjectsController', () => {
     it('US-002 AC3: returns null addedBy for backfilled roster entries', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
       projectsService.assertProjectMembership.mockResolvedValue(undefined);
-      agentsService.findByProject.mockResolvedValue([mockAgent] as any);
+      agentsService.listProjectRoster.mockResolvedValue({
+        scoping: true,
+        items: [makeRosterDto({ addedById: null, addedByName: null })],
+      } as any);
 
       const result = await controller.getProjectAgents('alpha', adminPrincipal);
       const data = (result as any).data;
@@ -319,7 +345,10 @@ describe('ProjectsController', () => {
     it('US-002 AC4: lists only roster entries rather than ticket-derived agents', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
       projectsService.assertProjectMembership.mockResolvedValue(undefined);
-      agentsService.findByProject.mockResolvedValue([mockAgent] as any);
+      agentsService.listProjectRoster.mockResolvedValue({
+        scoping: true,
+        items: [makeRosterDto({ slug: 'bot' })],
+      } as any);
 
       const result = await controller.getProjectAgents('alpha', adminPrincipal);
       const data = (result as any).data;
@@ -331,7 +360,10 @@ describe('ProjectsController', () => {
     it('US-002 AC5: reports open ticket count and oldest-first references', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
       projectsService.assertProjectMembership.mockResolvedValue(undefined);
-      agentsService.findByProject.mockResolvedValue([mockAgent] as any);
+      agentsService.listProjectRoster.mockResolvedValue({
+        scoping: true,
+        items: [makeRosterDto({ openTicketCount: 2, openTicketRefs: ['ALP-1', 'ALP-2'] })],
+      } as any);
 
       const result = await controller.getProjectAgents('alpha', adminPrincipal);
       const data = (result as any).data;
@@ -344,7 +376,10 @@ describe('ProjectsController', () => {
     it('US-002 AC6: caps open ticket refs at ten without capping the count', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
       projectsService.assertProjectMembership.mockResolvedValue(undefined);
-      agentsService.findByProject.mockResolvedValue([mockAgent] as any);
+      agentsService.listProjectRoster.mockResolvedValue({
+        scoping: true,
+        items: [makeRosterDto({ openTicketCount: 12, openTicketRefs: Array.from({ length: 10 }, (_, i) => `ALP-${i + 1}`) })],
+      } as any);
 
       const result = await controller.getProjectAgents('alpha', adminPrincipal);
       const data = (result as any).data;
@@ -357,7 +392,10 @@ describe('ProjectsController', () => {
     it('US-002 AC9: reports roster scoping disabled when the feature flag is off', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
       projectsService.assertProjectMembership.mockResolvedValue(undefined);
-      agentsService.findByProject.mockResolvedValue([mockAgent] as any);
+      agentsService.listProjectRoster.mockResolvedValue({
+        scoping: false,
+        items: [makeRosterDto()],
+      } as any);
 
       const result = await controller.getProjectAgents('alpha', memberPrincipal);
 
@@ -367,11 +405,14 @@ describe('ProjectsController', () => {
     it('returns agents for a project member', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
       projectsService.assertProjectMembership.mockResolvedValue(undefined);
-      agentsService.findByProject.mockResolvedValue([mockAgent] as any);
+      agentsService.listProjectRoster.mockResolvedValue({
+        scoping: true,
+        items: [makeRosterDto()],
+      } as any);
 
       const result = await controller.getProjectAgents('alpha', memberPrincipal);
 
-      expect((result as any).data).toHaveLength(1);
+      expect((result as any).data.items).toHaveLength(1);
     });
 
     it('US-002 AC7: returns forbidden for a non-member user', async () => {
@@ -386,12 +427,15 @@ describe('ProjectsController', () => {
     it('allows agent principals without membership check', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
       projectsService.assertProjectMembership.mockResolvedValue(undefined);
-      agentsService.findByProject.mockResolvedValue([mockAgent] as any);
+      agentsService.listProjectRoster.mockResolvedValue({
+        scoping: true,
+        items: [makeRosterDto()],
+      } as any);
 
       const result = await controller.getProjectAgents('alpha', agentPrincipal);
 
       expect(projectsService.assertProjectMembership).toHaveBeenCalledWith('proj-1', agentPrincipal);
-      expect((result as any).data).toHaveLength(1);
+      expect((result as any).data.items).toHaveLength(1);
     });
   });
 
@@ -408,6 +452,18 @@ describe('ProjectsController', () => {
       updatedAt: new Date(),
     };
 
+    const rosterEntry = (slug: string, name: string) => ({
+      slug,
+      name,
+      status: 'ACTIVE',
+      roles: [],
+      capabilities: [],
+      openTicketCount: 0,
+      openTicketRefs: [],
+      addedAt: new Date().toISOString(),
+      addedBy: { id: 'user-admin', name: 'admin' },
+    });
+
     const makeAgentPrincipal = (id: string, slug: string): KodaPrincipal => ({
       actorType: 'agent',
       id,
@@ -423,12 +479,16 @@ describe('ProjectsController', () => {
 
     it('US-002 AC10: updates a rostered agent status for admin principal', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      agentsService.findByProject.mockResolvedValue([mockUpdatedAgent] as any);
+      agentsService.listProjectRoster.mockResolvedValue({
+        scoping: true,
+        items: [rosterEntry('bot', 'Bot')],
+      } as any);
       agentsService.update.mockResolvedValue(mockUpdatedAgent as any);
 
       const result = await controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, adminPrincipal);
 
       expect(projectsService.findBySlug).toHaveBeenCalledWith('alpha');
+      expect(agentsService.listProjectRoster).toHaveBeenCalledWith('alpha');
       expect(agentsService.update).toHaveBeenCalledWith('bot', { status: 'PAUSED' });
       expect((result as any).data.status).toBe('PAUSED');
     });
@@ -443,7 +503,10 @@ describe('ProjectsController', () => {
 
     it('H4: allows a project-level ADMIN (global MEMBER with ProjectMember role ADMIN)', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      agentsService.findByProject.mockResolvedValue([mockUpdatedAgent] as any);
+      agentsService.listProjectRoster.mockResolvedValue({
+        scoping: true,
+        items: [rosterEntry('bot', 'Bot')],
+      } as any);
       agentsService.update.mockResolvedValue(mockUpdatedAgent as any);
       projectsService.findMembershipRole.mockResolvedValue('ADMIN');
 
@@ -456,7 +519,10 @@ describe('ProjectsController', () => {
 
     it('H4: forbids a non-admin user (project member) from updating agent status', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      agentsService.findByProject.mockResolvedValue([mockUpdatedAgent] as any);
+      agentsService.listProjectRoster.mockResolvedValue({
+        scoping: true,
+        items: [rosterEntry('bot', 'Bot')],
+      } as any);
 
       await expect(
         controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, memberPrincipal),
@@ -466,7 +532,12 @@ describe('ProjectsController', () => {
 
     it('US-002 AC11: returns not found for an assigned agent with no roster row', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      agentsService.findByProject.mockResolvedValue([mockUpdatedAgent] as any);
+      // The roster is empty: an agent that was assigned tickets is no longer in
+      // scope through this route because it has no AgentProject row.
+      agentsService.listProjectRoster.mockResolvedValue({
+        scoping: true,
+        items: [],
+      } as any);
       agentsService.update.mockResolvedValue(mockUpdatedAgent as any);
 
       await expect(
@@ -476,7 +547,10 @@ describe('ProjectsController', () => {
 
     it('throws NotFoundAppException when agent is not in the project', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      agentsService.findByProject.mockResolvedValue([]);
+      agentsService.listProjectRoster.mockResolvedValue({
+        scoping: true,
+        items: [],
+      } as any);
 
       await expect(
         controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, memberPrincipal),
@@ -485,7 +559,10 @@ describe('ProjectsController', () => {
 
     it('US-002 AC12: denies an unrostered agent changing its own status', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      agentsService.findByProject.mockResolvedValue([]);
+      agentsService.listProjectRoster.mockResolvedValue({
+        scoping: true,
+        items: [],
+      } as any);
 
       await expect(
         controller.updateProjectAgent('alpha', 'agent-a', { status: 'OFFLINE' }, makeAgentPrincipal('agent-a', 'agent-a')),
@@ -494,7 +571,10 @@ describe('ProjectsController', () => {
 
     it('H4: another agent cannot change my status', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      agentsService.findByProject.mockResolvedValue([{ ...mockUpdatedAgent, id: 'agent-b', slug: 'agent-b' }] as any);
+      agentsService.listProjectRoster.mockResolvedValue({
+        scoping: true,
+        items: [rosterEntry('agent-b', 'Other Bot')],
+      } as any);
 
       await expect(
         controller.updateProjectAgent('alpha', 'agent-b', { status: 'OFFLINE' }, makeAgentPrincipal('agent-a', 'agent-a')),
@@ -504,7 +584,10 @@ describe('ProjectsController', () => {
 
     it('H4: an agent can set its own status to OFFLINE', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      agentsService.findByProject.mockResolvedValue([{ ...mockUpdatedAgent, id: 'agent-a', slug: 'agent-a' }] as any);
+      agentsService.listProjectRoster.mockResolvedValue({
+        scoping: true,
+        items: [rosterEntry('agent-a', 'Self Bot')],
+      } as any);
       agentsService.update.mockResolvedValue({ ...mockUpdatedAgent, id: 'agent-a', slug: 'agent-a', status: 'OFFLINE' } as any);
 
       const result = await controller.updateProjectAgent('alpha', 'agent-a', { status: 'OFFLINE' }, makeAgentPrincipal('agent-a', 'agent-a'));

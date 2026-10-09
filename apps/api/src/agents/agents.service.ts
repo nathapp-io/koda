@@ -5,7 +5,7 @@ import { NotFoundAppException, ValidationAppException, ForbiddenAppException } f
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { createHmac, randomBytes } from 'crypto';
 import { AGENT_ROLES, type AgentRoleNames } from '../common/enums';
-import { AgentResponseDto, AgentMeResponseDto } from './dto/agent-response.dto';
+import { AgentResponseDto, AgentMeResponseDto, ProjectAgentListDto } from './dto/agent-response.dto';
 import { TicketResponseDto } from '../tickets/dto/ticket-response.dto';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
@@ -181,6 +181,27 @@ export class AgentsService {
     const result = await this.agentRepo.findByProjectSlug(projectSlug);
     if (!result) throw new NotFoundAppException({}, 'projects');
     return AgentResponseDto.fromMany(result.agents);
+  }
+
+  /**
+   * US-002 (D530): the project's explicit agent roster. Reads the AgentProject
+   * table — rostered agents without tickets appear; ticket holders without a
+   * roster row do not. Throws 404 when the project is missing or soft-deleted
+   * so callers can surface a stable error without guessing from an empty list.
+   *
+   * `scoping` reflects `AGENT_PROJECT_SCOPING` — the same flag the
+   * ProjectAccessService reads to gate agent reach. Off = the response carries
+   * `scoping: false`; the caller still gets the rostered list (post-001
+   * state, just without the gate).
+   */
+  async listProjectRoster(projectSlug: string): Promise<ProjectAgentListDto> {
+    const project = await this.agentRepo.findProjectBySlug(projectSlug);
+    if (!project || project.deletedAt) {
+      throw new NotFoundAppException({}, 'projects');
+    }
+
+    const records = await this.agentRepo.findProjectRoster(project.id);
+    return ProjectAgentListDto.from(records, this.agentScopingEnabled());
   }
 
   async update(slug: string, updateData: UpdateAgentDto): Promise<AgentResponseDto> {

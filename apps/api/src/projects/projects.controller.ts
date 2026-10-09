@@ -165,8 +165,8 @@ export class ProjectsController {
   }
 
   @Get(':slug/agents')
-  @ApiOperation({ summary: 'List agents active in a project (derived from assigned tickets)' })
-  @ApiResponse({ status: 200, description: 'Agents retrieved successfully' })
+  @ApiOperation({ summary: 'List the project agent roster (admin or member; un-paged)' })
+  @ApiResponse({ status: 200, description: 'Roster retrieved successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - no project access' })
   @ApiResponse({ status: 404, description: 'Project not found' })
@@ -176,7 +176,10 @@ export class ProjectsController {
   ) {
     const project = await this.projectsService.findBySlug(slug);
     await this.projectsService.assertProjectMembership(project.id, principal);
-    const data = await this.agentsService.findByProject(slug);
+    // Rostered agents may read their own roster without a ProjectMember row
+    // (their project reach comes from the AgentProject table). assertProjectMembership
+    // already admits them; we fall through to the list call either way.
+    const data = await this.agentsService.listProjectRoster(slug);
     return JsonResponse.Ok(data);
   }
 
@@ -194,10 +197,20 @@ export class ProjectsController {
     @Principal() principal: KodaPrincipal,
   ) {
     const project = await this.projectsService.findBySlug(slug);
-    const projectAgents = await this.agentsService.findByProject(slug);
-    const target = projectAgents.find((a) => a.slug === agentSlug);
+    // US-002: the target agent is resolved through the project roster, not the
+    // ticket-derived list. An agent assigned tickets but absent from the roster
+    // returns 404 — roster membership is the only thing this route mutates.
+    const roster = await this.agentsService.listProjectRoster(slug);
+    const target = roster.items.find((a) => a.slug === agentSlug);
     if (!target) {
-      throw new NotFoundAppException({}, 'agents');
+      // US-002 AC12: an unrostered agent calling with its own API key is
+      // refused (the guard would have already 403'd, but unit tests bypass the
+      // guard and call the handler directly). A user principal asking for a
+      // non-rostered agent gets 404 — there's nothing here for them.
+      if (isAgentPrincipal(principal) && principal.slug === agentSlug) {
+        throw new ForbiddenAppException({}, 'projectAgents');
+      }
+      throw new NotFoundAppException({}, 'projectAgents');
     }
 
     // H4: only global or project ADMINs may change agent state; an agent may
@@ -206,7 +219,7 @@ export class ProjectsController {
       isUserPrincipal(principal) &&
       (principal.role === 'ADMIN' ||
         (await this.projectsService.findMembershipRole(project.id, principal.id)) === ActorRole.ADMIN);
-    const isSelf = isAgentPrincipal(principal) && principal.id === target.id;
+    const isSelf = isAgentPrincipal(principal) && principal.slug === agentSlug;
     if (!isAdmin && !isSelf) {
       throw new ForbiddenAppException({}, 'projects');
     }

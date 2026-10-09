@@ -1736,7 +1736,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Agents retrieved successfully"
+            "description": "Roster retrieved successfully"
           },
           "401": {
             "description": "Unauthorized"
@@ -1753,7 +1753,7 @@
             "bearer": []
           }
         ],
-        "summary": "List agents active in a project (derived from assigned tickets)",
+        "summary": "List the project agent roster (admin or member; un-paged)",
         "tags": [
           "projects"
         ]

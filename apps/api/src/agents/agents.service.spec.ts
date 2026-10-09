@@ -75,6 +75,7 @@ describe('AgentsService', () => {
     findByProjectSlug: jest.fn(),
     isOnProjectRoster: jest.fn(),
     findRosterProjects: jest.fn(),
+    findProjectRoster: jest.fn(),
   };
 
   const mockAuthConfig: IAuthConfig = {
@@ -896,6 +897,98 @@ describe('AgentsService', () => {
       mockAgentRepo.findByProjectSlug.mockResolvedValue(null);
 
       await expect(service.findByProject('nonexistent')).rejects.toThrow(NotFoundAppException);
+    });
+  });
+
+  describe('listProjectRoster', () => {
+    const makeRecord = (over: {
+      slug?: string;
+      addedById?: string | null;
+      addedByName?: string | null;
+      openTicketCount?: number;
+      openTicketRefs?: string[];
+    } = {}) => ({
+      slug: over.slug ?? 'bot',
+      name: 'Bot',
+      status: 'ACTIVE',
+      roles: ['DEVELOPER'],
+      capabilities: ['typescript'],
+      openTicketCount: over.openTicketCount ?? 0,
+      openTicketRefs: over.openTicketRefs ?? [],
+      addedAt: new Date('2026-10-01T00:00:00.000Z'),
+      addedById: over.addedById === undefined ? 'user-admin' : over.addedById,
+      addedByName: over.addedByName === undefined ? 'Admin' : over.addedByName,
+    });
+
+    it('returns the scoped project roster as ProjectAgentListDto', async () => {
+      mockAgentRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-1', slug: 'alpha', deletedAt: null });
+      mockAgentRepo.findProjectRoster.mockResolvedValue([makeRecord()]);
+
+      const result = await service.listProjectRoster('alpha');
+
+      expect(mockAgentRepo.findProjectBySlug).toHaveBeenCalledWith('alpha');
+      expect(mockAgentRepo.findProjectRoster).toHaveBeenCalledWith('proj-1');
+      expect(result.scoping).toBe(true);
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0]).toMatchObject({
+        slug: 'bot',
+        status: 'ACTIVE',
+        roles: ['DEVELOPER'],
+        capabilities: ['typescript'],
+        openTicketCount: 0,
+        openTicketRefs: [],
+        addedBy: { id: 'user-admin', name: 'Admin' },
+      });
+      expect(result.items[0].addedAt).toEqual(expect.any(String));
+    });
+
+    it('returns null addedBy for backfilled roster rows', async () => {
+      mockAgentRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-1', slug: 'alpha', deletedAt: null });
+      mockAgentRepo.findProjectRoster.mockResolvedValue([makeRecord({ addedById: null, addedByName: null })]);
+
+      const result = await service.listProjectRoster('alpha');
+
+      expect(result.items[0].addedBy).toBeNull();
+    });
+
+    it('carries the open-ticket summary from the repository', async () => {
+      mockAgentRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-1', slug: 'alpha', deletedAt: null });
+      mockAgentRepo.findProjectRoster.mockResolvedValue([
+        makeRecord({ openTicketCount: 3, openTicketRefs: ['ALP-1', 'ALP-2', 'ALP-3'] }),
+      ]);
+
+      const result = await service.listProjectRoster('alpha');
+
+      expect(result.items[0].openTicketCount).toBe(3);
+      expect(result.items[0].openTicketRefs).toEqual(['ALP-1', 'ALP-2', 'ALP-3']);
+    });
+
+    it('returns scoping: false when AGENT_PROJECT_SCOPING is off', async () => {
+      // Reboot the module with scoping off
+      const modOff = await Test.createTestingModule({
+        providers: [
+          AgentsService,
+          { provide: PrismaAgentRepository, useValue: mockAgentRepo },
+          { provide: AUTH_CFG, useValue: { ...mockAuthConfig, agentProjectScoping: false } },
+          { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
+          { provide: KodaDomainWriter, useValue: mockKodaDomainWriter },
+        ],
+      }).compile();
+      const offService = modOff.get<AgentsService>(AgentsService);
+      mockAgentRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-1', slug: 'alpha', deletedAt: null });
+      mockAgentRepo.findProjectRoster.mockResolvedValue([]);
+
+      const result = await offService.listProjectRoster('alpha');
+
+      expect(result.scoping).toBe(false);
+      expect(result.items).toEqual([]);
+    });
+
+    it('throws NotFoundAppException when the project is missing or soft-deleted', async () => {
+      mockAgentRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-1', slug: 'alpha', deletedAt: new Date() });
+
+      await expect(service.listProjectRoster('alpha')).rejects.toThrow(NotFoundAppException);
+      expect(mockAgentRepo.findProjectRoster).not.toHaveBeenCalled();
     });
   });
 

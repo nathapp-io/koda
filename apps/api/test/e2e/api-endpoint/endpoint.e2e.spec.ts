@@ -1330,10 +1330,13 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(200);
 
-      const data = body<{ id: string; slug: string; status: string }[]>(res);
-      expect(Array.isArray(data)).toBe(true);
-      // agentSlug has an assigned ticket (set up in beforeAll); it must appear in the list
-      const found = data.find((a) => a.slug === agentSlug);
+      // US-002: the response shape is { scoping, items: ProjectAgentDto[] }
+      const data = body<{ scoping: boolean; items: { slug: string; status: string }[] }>(res);
+      expect(data).toHaveProperty('scoping');
+      expect(Array.isArray(data.items)).toBe(true);
+      // agentSlug has an assigned ticket (set up in beforeAll) and is on the
+      // roster (also in beforeAll), so it must appear in items.
+      const found = data.items.find((a) => a.slug === agentSlug);
       expect(found).toBeDefined();
       expect(found?.status).toBeDefined();
     });

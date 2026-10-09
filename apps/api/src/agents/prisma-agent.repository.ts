@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaClient } from '../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
+import { TicketStatus } from '../common/enums';
+import type { ProjectAgentRecord } from './dto/agent-response.dto';
+
+/** US-002: at most this many refs surface in the open-ticket list per roster row. */
+const MAX_OPEN_TICKET_REFS = 10;
 
 @Injectable()
 export class PrismaAgentRepository {
@@ -174,6 +179,93 @@ export class PrismaAgentRepository {
       include: {
         labels: { include: { label: true } },
       },
+    });
+  }
+
+  /**
+   * US-002: the project's explicit agent roster — one row per AgentProject,
+   * ordered by agent name, with roles, capabilities, the adding user's id and
+   * name, and a grouped open-ticket summary. "Open" excludes CLOSED, REJECTED,
+   * and soft-deleted tickets (soft-deleted rows are filtered server-side, not
+   * counted and not surfaced as refs).
+   *
+   * The open-ticket counts and the ref list come from one grouped query per
+   * list call: refs are sorted by `createdAt ASC` and capped at 10 so the
+   * total count and the ref list are consistent inside a single snapshot.
+   */
+  async findProjectRoster(projectId: string): Promise<ProjectAgentRecord[]> {
+    const rosterRows = await this.db.agentProject.findMany({
+      where: { projectId },
+      orderBy: { agent: { name: 'asc' } },
+      select: {
+        createdAt: true,
+        addedById: true,
+        addedBy: { select: { id: true, name: true } },
+        agent: {
+          select: {
+            slug: true,
+            name: true,
+            status: true,
+            roles: { select: { role: true } },
+            capabilities: { select: { capability: true } },
+          },
+        },
+      },
+    });
+
+    if (rosterRows.length === 0) return [];
+
+    const agentSlugs = rosterRows.map((row) => row.agent.slug);
+
+    const openTickets = await this.db.ticket.findMany({
+      where: {
+        projectId,
+        assignedToAgent: { slug: { in: agentSlugs } },
+        status: { notIn: [TicketStatus.CLOSED, TicketStatus.REJECTED] },
+        deletedAt: null,
+      },
+      select: {
+        number: true,
+        createdAt: true,
+        assignedToAgent: { select: { slug: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const projectKeyRow = await this.db.project.findUnique({
+      where: { id: projectId },
+      select: { key: true },
+    });
+    const projectKey = projectKeyRow?.key ?? '';
+
+    const byAgent = new Map<string, { count: number; refs: string[] }>();
+    for (const slug of agentSlugs) byAgent.set(slug, { count: 0, refs: [] });
+
+    for (const ticket of openTickets) {
+      const slug = ticket.assignedToAgent?.slug;
+      if (!slug) continue;
+      const bucket = byAgent.get(slug);
+      if (!bucket) continue;
+      bucket.count += 1;
+      if (bucket.refs.length < MAX_OPEN_TICKET_REFS) {
+        bucket.refs.push(`${projectKey}-${ticket.number}`);
+      }
+    }
+
+    return rosterRows.map((row) => {
+      const bucket = byAgent.get(row.agent.slug) ?? { count: 0, refs: [] };
+      return {
+        slug: row.agent.slug,
+        name: row.agent.name,
+        status: row.agent.status,
+        roles: row.agent.roles.map((r) => r.role),
+        capabilities: row.agent.capabilities.map((c) => c.capability),
+        openTicketCount: bucket.count,
+        openTicketRefs: bucket.refs,
+        addedAt: row.createdAt,
+        addedById: row.addedById,
+        addedByName: row.addedBy?.name ?? null,
+      };
     });
   }
 }
