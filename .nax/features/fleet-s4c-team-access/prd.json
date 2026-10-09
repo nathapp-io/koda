@@ -3,7 +3,7 @@
   "feature": "fleet-s4c-team-access",
   "branchName": "feat/fleet-s4c-team-access",
   "createdAt": "2026-10-09T00:00:00Z",
-  "updatedAt": "2026-10-09T08:15:17.242Z",
+  "updatedAt": "2026-10-09T08:23:15.931Z",
   "userStories": [
     {
       "id": "US-001",
@@ -373,8 +373,8 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -428,7 +428,10 @@
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "UI role-gated controls consume admin-restricted endpoints and must not expose agent roster mutations to other viewers."
+        "reasoning": "UI role-gated controls consume admin-restricted endpoints and must not expose agent roster mutations to other viewers.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/pages/[project]/agents.vue",
@@ -452,7 +455,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "2192c087120b1f77cb19a6a813f5136c9fb8d08c"
     },
     {
       "id": "US-007",
