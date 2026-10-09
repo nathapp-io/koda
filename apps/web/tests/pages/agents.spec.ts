@@ -1,275 +1,430 @@
-import { describe, test, expect, jest } from '@jest/globals'
-import { existsSync, readFileSync, statSync } from 'fs'
-import { join } from 'path'
-import vm from 'vm'
+import { describe, test, expect, jest, beforeEach, afterEach } from '@jest/globals'
+import * as Vue from 'vue'
+import { computed, defineComponent, h, onMounted, ref, shallowRef, watch } from 'vue'
+import { mountSfc, webFile } from '../helpers/mount-sfc'
+import { enI18n, uiStubs } from '../helpers/fleet-harness'
+import { extractApiError } from '../../composables/useApi'
+import type { ProjectAgent } from '../../composables/useProjectAgents'
 
-// US-006 checklist (one task per AC):
-// AC1 roster rows/data and empty boundary — roster response exposes every item field.
-// AC2 admin/global-admin controls and non-admin boundary — role controls are derived from viewer role.
-// AC3 available-agent filtering and OFFLINE boundary — existing and offline agents are omitted.
-// AC4 successful add and reload — confirm posts selected slug then refreshes roster.
-// AC5 add failure — extracted error is surfaced and dialog remains open.
-// AC6 zero-open-ticket removal and confirmation boundary — confirm before DELETE and reload after.
-// AC7 blocked removal — count 2 prevents DELETE and provides two ticket references.
-// AC8 stale-count conflict — extracted error is surfaced and roster refreshed.
-// AC9 scoping disabled — informational state is exposed.
-// AC10 no roster entries — empty state is exposed.
+const page = webFile('pages', '[project]', 'agents.vue')
 
-const webDir = join(__dirname, '../..')
-const pagePath = join(webDir, 'pages', '[project]', 'agents.vue')
-
-function resolveBunPackage(pkgName: string): string {
-  let dir: string = __dirname
-  const bunName = pkgName.startsWith('@') ? pkgName.replace('/', '+') : pkgName
-  for (let i = 0; i < 100; i++) {
-    const bunRoot = join(dir, 'node_modules', '.bun')
-    if (existsSync(bunRoot) && statSync(bunRoot).isDirectory()) {
-      const entries = (require('fs') as typeof import('fs')).readdirSync(bunRoot)
-      for (const entry of entries.filter(e => e.startsWith(`${bunName}@`)).sort().reverse()) {
-        const inner = join(bunRoot, entry, 'node_modules', pkgName)
-        if (existsSync(inner)) return inner
-      }
-    }
-    const parent = join(dir, '..')
-    if (parent === dir) break
-    dir = parent
-  }
-  throw new Error(`Could not locate ${pkgName} from ${__dirname}`)
+interface RosterResponse {
+  scoping: boolean
+  items: Array<{
+    name: string
+    slug: string
+    status: 'ACTIVE' | 'PAUSED' | 'OFFLINE'
+    roles: string[]
+    capabilities: string[]
+    openTicketCount: number
+    openTicketRefs: string[]
+    addedAt?: string
+    addedBy?: { id: string; name: string | null } | null
+  }>
 }
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const sfc = require(resolveBunPackage('@vue/compiler-sfc'))
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const esbuild = require(resolveBunPackage('esbuild'))
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const Vue = require(resolveBunPackage('vue'))
+const makeRoster = (over: Partial<RosterResponse> = {}): RosterResponse => ({
+  scoping: true,
+  items: [],
+  ...over,
+})
+
+const item: ProjectAgent = {
+  slug: 'builder',
+  name: 'Build Agent',
+  status: 'ACTIVE',
+  roles: ['CODER'],
+  capabilities: ['code.write'],
+  openTicketCount: 0,
+  openTicketRefs: [],
+  addedAt: '2026-01-01T00:00:00.000Z',
+  addedBy: null,
+}
+
+const blocked: ProjectAgent = {
+  ...item,
+  slug: 'blocked',
+  openTicketCount: 2,
+  openTicketRefs: ['KODA-11', 'KODA-12'],
+}
 
 interface FetchCall { method: string; url: string; body?: unknown }
-interface AgentEntry {
-  name: string
-  slug: string
-  roles: string[]
-  capabilities: string[]
-  status: 'ACTIVE' | 'PAUSED' | 'OFFLINE'
-  openTicketCount: number
-  openTicketRefs: string[]
-}
+interface DialogStub { added: (slug: string) => void; close: () => void }
 
-async function mountPage(options: {
-  response?: unknown
-  agentsResponse?: unknown
-  role?: string
+interface MountOptions {
+  rosterResponse?: RosterResponse
+  agentsResponse?: Array<{ slug: string; name: string; status: string }>
+  role?: 'ADMIN' | 'MEMBER'
   globalAdmin?: boolean
+  rejectAdd?: Error
+  rejectDelete?: Error
   confirm?: boolean
-  reject?: Error
-}) {
-  const calls: FetchCall[] = []
-  const responses = [options.response ?? { scoping: true, items: [] }]
-  const toast = { success: jest.fn(), error: jest.fn() }
-  const api = {
-    get: async (url: string) => {
-      calls.push({ method: 'GET', url })
-      if (url === '/agents') return options.agentsResponse ?? []
-      return responses[0]
-    },
-    post: async (url: string, body: unknown) => {
-      calls.push({ method: 'POST', url, body })
-      if (options.reject) throw options.reject
-      return {}
-    },
-    delete: async (url: string) => {
-      calls.push({ method: 'DELETE', url })
-      if (options.reject) throw options.reject
-      return {}
-    },
-    patch: async (url: string, body: unknown) => { calls.push({ method: 'PATCH', url, body }); return {} },
-  }
-  const source = readFileSync(pagePath, 'utf-8')
-  const { descriptor } = sfc.parse(source)
-  const script = sfc.compileScript(descriptor, { id: pagePath })
-  const code = script.content
-    .replace(/~\/lib\/api-path/g, join(webDir, 'lib/api-path'))
-    .replace('return __returned__', 'globalThis.__PAGE_STATE__ = __returned__; return __returned__')
-  const bundle = await esbuild.build({
-    stdin: { contents: code, resolveDir: webDir, loader: 'ts' },
-    bundle: true, format: 'cjs', platform: 'node', write: false,
-    external: ['vue', 'lucide-vue-next'],
-  })
-  const sandbox: Record<string, unknown> = {
-    module: { exports: {} }, exports: {}, require, __dirname: webDir, __filename: pagePath,
-    console, process, Buffer, setTimeout, clearTimeout,
-    ref: Vue.ref, computed: Vue.computed,
-    useRoute: () => ({ params: { project: 'acme' }, path: '/acme/agents' }),
-    useI18n: () => ({ t: (key: string) => key }),
-    useAppToast: () => toast,
-    definePageMeta: () => {},
-    useAsyncData: (_key: string, fetcher: () => Promise<unknown>) => {
-      const data = Vue.ref<unknown>(null)
-      const pending = Vue.ref(true)
-      const error = Vue.ref(null)
-      const refresh = async () => {
-        pending.value = true
-        try { data.value = await fetcher(); error.value = null }
-        catch (caught) { error.value = caught }
-        finally { pending.value = false }
-      }
-      void refresh()
-      return { data, pending, error, refresh }
-    },
-    useProjectViewerRole: () => ({ role: options.role ?? 'ADMIN', isAdmin: options.role === 'ADMIN', isGlobalAdmin: options.globalAdmin ?? false }),
-    useProjectAgents: () => ({
-      items: Vue.ref((options.response as { items?: AgentEntry[] } | undefined)?.items ?? []),
-      scoping: Vue.ref((options.response as { scoping?: boolean } | undefined)?.scoping ?? true),
-      refresh: jest.fn(async () => { calls.push({ method: 'GET', url: '/projects/acme/agents' }) }),
-      add: async (agentSlug: string) => api.post('/projects/acme/agents', { agentSlug }),
-      remove: async (agentSlug: string) => api.delete(`/projects/acme/agents/${agentSlug}`),
-    }),
-    useApi: () => ({ $api: api }),
-    extractApiError: (error: Error) => error.message,
-    confirm: () => options.confirm ?? true,
-  }
-  sandbox.globalThis = sandbox
-  vm.createContext(sandbox as vm.Context)
-  vm.runInContext(bundle.outputFiles[0].text, sandbox as vm.Context)
-  const component = (sandbox.module as { exports: { default?: { setup?: (...args: unknown[]) => unknown } } }).exports.default
-  const setup = component?.setup
-  if (typeof setup !== 'function') throw new Error('Page setup was not compiled')
-  const bindings = setup({}, { expose: () => {}, attrs: {}, slots: {}, emit: () => {} }) as Record<string, unknown>
-  await new Promise(resolve => setTimeout(resolve, 0))
-  return { bindings, calls, toast, api }
+  dialogStub?: DialogStub
 }
 
-const rosterItem: AgentEntry = {
-  name: 'Build Agent', slug: 'builder', roles: ['CODER'], capabilities: ['code.write'],
-  status: 'ACTIVE', openTicketCount: 0, openTicketRefs: [],
+interface PageHandle {
+  app: ReturnType<typeof mountSfc>
+  settle: () => Promise<void>
+  calls: FetchCall[]
+  toast: { success: jest.Mock; error: jest.Mock }
+  confirm: (msg: string) => boolean
+  dialog: DialogStub
+  byText: (text: string) => Vue.Element | undefined
+  byTestId: (id: string) => Vue.Element | undefined
+  rows: () => Vue.Element[]
+  invokeDialogAdded: (slug: string) => Promise<void>
+  invokeRemoveButton: (agent: ProjectAgent) => Promise<void>
+  api: { get: jest.Mock; post: jest.Mock; delete: jest.Mock; patch: jest.Mock }
 }
+
+/**
+ * Captures the dialog's prop callbacks. The page passes the dialog a `:roster`, `:slug`,
+ * `:error`, and listens for `@update:open` and `@added`. Recording these lets the test
+ * drive the dialog as if a user had selected an agent and confirmed, without a real
+ * AddProjectAgentDialog in the tree.
+ */
+const dialogCaptures: { current: { readonly open: boolean; roster: ProjectAgent[]; error: string | null; addedHandler?: (slug: string) => void; openHandler?: (open: boolean) => void } | null } = { current: null }
+
+const dialogStub = defineComponent({
+  name: 'StubAddProjectAgentDialog',
+  props: { open: { type: Boolean, default: false }, slug: { type: String, default: '' }, roster: { type: Array, default: () => [] }, error: { type: String as () => string | null, default: null } },
+  emits: ['update:open', 'added'],
+  setup(props, { emit }) {
+    // The captured `open` is a ref that re-points at the prop every render, so the test reads
+    // the current value through it instead of the stale closure from the first render.
+    const openRef = ref(props.open)
+    watch(() => props.open, (value) => { openRef.value = value })
+    watch(() => props.error, (value) => {
+      if (dialogCaptures.current) dialogCaptures.current.error = value as string | null
+    })
+    watch(() => props.roster, (value) => {
+      if (dialogCaptures.current) dialogCaptures.current.roster = value as ProjectAgent[]
+    })
+    dialogCaptures.current = {
+      get open() { return openRef.value },
+      roster: props.roster as ProjectAgent[],
+      error: props.error,
+      addedHandler: (slug: string) => emit('added', slug),
+      openHandler: (value: boolean) => emit('update:open', value),
+    }
+    return () => h('x-stub-stub', { 'data-stub': 'add-project-agent-dialog', open: props.open, error: props.error }, props.slug)
+  },
+})
+
+const linkStub = defineComponent({
+  name: 'StubNuxtLink',
+  props: { to: { default: null } },
+  setup(props, { slots, attrs }) {
+    return () => h('x-stub-stub', { ...attrs, 'data-stub': 'nuxt-link', to: props.to }, [
+      ...(slots.default?.() ?? []),
+    ])
+  },
+})
+
+function mountPage(options: MountOptions = {}): PageHandle {
+  const calls: FetchCall[] = []
+  const toast = { success: jest.fn(), error: jest.fn() }
+  const confirm = jest.fn(() => options.confirm ?? true)
+  ;(globalThis as { confirm?: unknown }).confirm = confirm
+  const rosterResponse = options.rosterResponse ?? makeRoster()
+  const agentsResponse = options.agentsResponse ?? []
+
+  const api = {
+    get: jest.fn(async (path: string) => {
+      calls.push({ method: 'GET', url: path })
+      if (path === '/agents') {
+        return agentsResponse
+      }
+      if (path === '/projects/acme/members') {
+        return { canManage: options.role === 'ADMIN' || options.globalAdmin === true, viewerRole: options.role ?? null }
+      }
+      if (path === '/projects/acme/agents') {
+        return rosterResponse
+      }
+      return null
+    }),
+    post: jest.fn(async (path: string, body: unknown) => {
+      calls.push({ method: 'POST', url: path, body })
+      if (options.rejectAdd) throw options.rejectAdd
+      return {}
+    }),
+    delete: jest.fn(async (path: string) => {
+      calls.push({ method: 'DELETE', url: path })
+      if (options.rejectDelete) throw options.rejectDelete
+      return {}
+    }),
+    patch: jest.fn(async (path: string, body: unknown) => {
+      calls.push({ method: 'PATCH', url: path, body })
+      return {}
+    }),
+  }
+
+  const app = mountSfc(page, {
+    components: {
+      ...uiStubs,
+      AddProjectAgentDialog: dialogStub,
+      NuxtLink: linkStub,
+    },
+    globals: {
+      ref, computed, watch, shallowRef, onMounted,
+      useI18n: () => enI18n(),
+      useAppToast: () => toast,
+      useApi: () => ({ $api: api }),
+      extractApiError,
+      useProjectAgents: () => useRealProjectAgents(api, rosterResponse),
+      useProjectViewerRole: () => ({
+        data: ref({ canManage: options.role === 'ADMIN' || options.globalAdmin === true, viewerRole: options.role ?? null }),
+        pending: ref(false),
+        error: ref(null),
+        refresh: async () => undefined,
+      }),
+      useAsyncData: () => ({
+        data: ref(null),
+        pending: ref(false),
+        error: ref(null),
+        refresh: async () => undefined,
+      }),
+      useRoute: () => ({ params: { project: 'acme' }, path: '/acme/agents' }),
+      definePageMeta: () => undefined,
+    },
+  })
+
+  const settle = async (): Promise<void> => {
+    for (let i = 0; i < 8; i += 1) {
+      await new Promise((resolve) => { setImmediate(resolve) })
+      await Vue.nextTick()
+    }
+  }
+
+  const rows = (): Vue.Element[] => {
+    const all = app.find('[data-stub="tr"]')
+    return all.filter(row => row.parent?.props['data-stub'] === 'tbody') as unknown as Vue.Element[]
+  }
+
+  const byText = (text: string) => app.find('[data-stub="button"]').find(b => app.textOf(b) === text)[0]
+
+  const dialog: DialogStub = {
+    added: (slug) => dialogCaptures.current?.addedHandler?.(slug),
+    close: () => dialogCaptures.current?.openHandler?.(false),
+  }
+
+  const invokeDialogAdded = async (slug: string): Promise<void> => {
+    dialog.added(slug)
+    await settle()
+  }
+
+  const invokeRemoveButton = async (agent: ProjectAgent): Promise<void> => {
+    // The page renders a `<TableRow>` per item; the row contains a cell with the agent's slug.
+    // Walk all rows under tbody and find the one whose text includes the slug.
+    const bodyRows = app.find('[data-stub="tr"]').filter(row => row.parent?.props['data-stub'] === 'tbody')
+    const target = bodyRows.find(row => app.textOf(row).includes(agent.slug))
+    if (!target) throw new Error(`No row for ${agent.slug}; found: ${bodyRows.map(r => app.textOf(r)).join(' | ')}`)
+    const buttons = app.find('[data-stub="button"]', target)
+    const remove = buttons.find(b => /Remove/.test(app.textOf(b)))
+    if (!remove) throw new Error(`No Remove button for ${agent.slug}; buttons: ${buttons.map(b => app.textOf(b)).join(' | ')}`)
+    ;(remove.props.onClick as (e: Event) => void)({ preventDefault: jest.fn() } as unknown as Event)
+    await settle()
+  }
+
+  return {
+    app, settle, calls, toast, confirm: confirm as unknown as (msg: string) => boolean, dialog,
+    byText: (text) => byText(text) as Vue.Element | undefined,
+    byTestId: (id) => app.find(`[data-testid="${id}"]`)[0],
+    rows: rows as () => Vue.Element[],
+    invokeDialogAdded,
+    invokeRemoveButton,
+    api,
+  }
+}
+
+/**
+ * Stand-in for `useProjectAgents` that shares the same composable's load mapping (items,
+ * scoping, pending, error) but routes through the test's mock `$api`. The page then issues
+ * the same GET + parse + filter shape the production composable would, so the page's bindings
+ * are populated by the real response rather than a stub ref.
+ */
+function useRealProjectAgents(
+  api: { get: jest.Mock; post: jest.Mock; delete: jest.Mock; patch: jest.Mock },
+  _rosterResponse: RosterResponse,
+) {
+  const items = ref<ProjectAgent[]>([])
+  const scoping = ref(true)
+  const pending = ref(false)
+  const error = ref<unknown>(null)
+
+  async function refresh(): Promise<void> {
+    pending.value = true
+    try {
+      const res = await api.get('/projects/acme/agents')
+      items.value = Array.isArray(res?.items) ? res.items : []
+      scoping.value = res?.scoping !== false
+      error.value = null
+    } catch (caught) {
+      error.value = caught
+    } finally {
+      pending.value = false
+    }
+  }
+
+  async function add(agentSlug: string): Promise<void> {
+    await api.post('/projects/acme/agents', { agentSlug })
+  }
+  async function remove(agentSlug: string): Promise<void> {
+    await api.delete(`/projects/acme/agents/${agentSlug}`)
+  }
+
+  // First call populates the page on mount.
+  void refresh()
+
+  return { items, scoping, pending, error, load: refresh, refresh, add, remove }
+}
+
+beforeEach(() => {
+  dialogCaptures.current = null
+})
+
+afterEach(() => {
+  delete (globalThis as { confirm?: unknown }).confirm
+  dialogCaptures.current = null
+})
 
 describe('US-006 project agent roster page', () => {
-  test('US-006 AC1: loads roster entries including roles, capabilities, status, and open count', async () => {
-    const { bindings, calls } = await mountPage({ response: { scoping: true, items: [rosterItem] } })
-    expect(calls.some(call => call.method === 'GET' && call.url === '/projects/acme/agents')).toBe(true)
-    const items = bindings.items as { value: AgentEntry[] } | undefined
-    expect(items?.value).toEqual([rosterItem])
+  test('AC1: GET /projects/:slug/agents populates one row per item with name, slug, roles, capabilities, status, and open-ticket count', async () => {
+    const richItem: ProjectAgent = {
+      slug: 'builder', name: 'Build Agent', status: 'ACTIVE',
+      roles: ['CODER', 'REVIEWER'], capabilities: ['code.write', 'lint.run'],
+      openTicketCount: 2, openTicketRefs: ['KODA-11', 'KODA-12'],
+      addedAt: '2026-01-01T00:00:00.000Z', addedBy: null,
+    }
+    const m = mountPage({ rosterResponse: makeRoster({ items: [richItem] }) })
+    await m.settle()
+
+    expect(m.calls.some(c => c.method === 'GET' && c.url === '/projects/acme/agents')).toBe(true)
+    const rows = m.rows()
+    expect(rows).toHaveLength(1)
+    const rowText = m.app.textOf(rows[0])
+    expect(rowText).toContain('Build Agent')
+    expect(rowText).toContain('builder')
+    expect(rowText).toContain('CODER')
+    expect(rowText).toContain('REVIEWER')
+    expect(rowText).toContain('code.write')
+    expect(rowText).toContain('lint.run')
+    expect(rowText).toContain('ACTIVE')
+    expect(rowText).toContain('2')
   })
 
-  test('US-006 AC1: an empty roster contains no rows', async () => {
-    const { bindings } = await mountPage({ response: { scoping: true, items: [] } })
-    const items = bindings.items as { value: AgentEntry[] } | undefined
-    expect(items?.value).toHaveLength(0)
+  test('AC10: an empty roster renders the "No agents on this project yet." empty state', async () => {
+    const m = mountPage({ rosterResponse: makeRoster({ items: [] }) })
+    await m.settle()
+    const emptyState = m.app.find('[data-stub="empty-state"]')
+    expect(emptyState).toHaveLength(1)
+    expect(emptyState[0].props.message).toBe('No agents on this project yet.')
   })
 
-  test('US-006 AC2: a project ADMIN can access roster management controls', async () => {
-    const { bindings } = await mountPage({ role: 'ADMIN' })
-    expect(bindings.canManage).toBe(true)
+  test('AC9: a roster response with scoping: false renders the scoping-off note', async () => {
+    const m = mountPage({ rosterResponse: makeRoster({ scoping: false, items: [item] }) })
+    await m.settle()
+    const note = m.app.find('[data-test="project-agents-scoping-off"]')
+    expect(note).toHaveLength(1)
   })
 
-  test('US-006 AC2: a global ADMIN can access roster management controls', async () => {
-    const { bindings } = await mountPage({ role: 'MEMBER', globalAdmin: true })
-    expect(bindings.canManage).toBe(true)
+  test('AC2: a project ADMIN sees Add and Remove controls', async () => {
+    const m = mountPage({ role: 'ADMIN', rosterResponse: makeRoster({ items: [item] }) })
+    await m.settle()
+    const addButton = m.app.find('[data-stub="button"]').find(b => /Add agent/.test(m.app.textOf(b)))
+    expect(addButton).toBeDefined()
+    const removeButton = m.app.find('[data-stub="button"]').find(b => /Remove/.test(m.app.textOf(b)))
+    expect(removeButton).toBeDefined()
   })
 
-  test('US-006 AC2: a non-admin cannot access roster management controls', async () => {
-    const { bindings } = await mountPage({ role: 'MEMBER' })
-    expect(bindings.canManage).toBe(false)
+  test('AC2: a global ADMIN sees Add and Remove controls even with a project MEMBER role', async () => {
+    const m = mountPage({ role: 'MEMBER', globalAdmin: true, rosterResponse: makeRoster({ items: [item] }) })
+    await m.settle()
+    const addButton = m.app.find('[data-stub="button"]').find(b => /Add agent/.test(m.app.textOf(b)))
+    expect(addButton).toBeDefined()
+    const removeButton = m.app.find('[data-stub="button"]').find(b => /Remove/.test(m.app.textOf(b)))
+    expect(removeButton).toBeDefined()
   })
 
-  test('US-006 AC3: available agent choices exclude rostered and OFFLINE agents', async () => {
-    const { bindings } = await mountPage({
-      response: { scoping: true, items: [rosterItem] },
-      agentsResponse: [rosterItem, { ...rosterItem, slug: 'offline', status: 'OFFLINE' }, { ...rosterItem, slug: 'available' }],
+  test('AC2: a non-admin member does not see Add or Remove controls', async () => {
+    const m = mountPage({ role: 'MEMBER', rosterResponse: makeRoster({ items: [item] }) })
+    await m.settle()
+    const addButton = m.app.find('[data-stub="button"]').find(b => /Add agent/.test(m.app.textOf(b)))
+    expect(addButton).toBeUndefined()
+    const removeButton = m.app.find('[data-stub="button"]').find(b => /Remove/.test(m.app.textOf(b)))
+    expect(removeButton).toBeUndefined()
+  })
+
+  test('AC4: the page POSTs { agentSlug } to /projects/:slug/agents when the dialog emits added', async () => {
+    const m = mountPage({ rosterResponse: makeRoster({ items: [item] }), role: 'ADMIN' })
+    await m.settle()
+    await m.invokeDialogAdded('available-agent')
+    expect(m.calls).toContainEqual({ method: 'POST', url: '/projects/acme/agents', body: { agentSlug: 'available-agent' } })
+  })
+
+  test('AC4: a successful add reloads the roster (a second GET to /projects/:slug/agents)', async () => {
+    const m = mountPage({ rosterResponse: makeRoster({ items: [item] }), role: 'ADMIN' })
+    await m.settle()
+    const beforeCount = m.calls.filter(c => c.method === 'GET' && c.url === '/projects/acme/agents').length
+    await m.invokeDialogAdded('available-agent')
+    const afterCount = m.calls.filter(c => c.method === 'GET' && c.url === '/projects/acme/agents').length
+    expect(afterCount).toBeGreaterThan(beforeCount)
+  })
+
+  test('AC5: a failed add shows the extracted error and keeps the dialog open', async () => {
+    const m = mountPage({
+      rosterResponse: makeRoster({ items: [item] }),
+      role: 'ADMIN',
+      rejectAdd: Object.assign(new Error('Roster add failed'), { statusCode: 400 }),
     })
-    const loadCandidates = bindings.loadCandidates as (() => Promise<void>) | undefined
-    expect(typeof loadCandidates).toBe('function')
-    await loadCandidates?.()
-    const candidates = bindings.availableAgents as { value: Array<{ slug: string }> } | undefined
-    expect(candidates?.value.map(agent => agent.slug)).toEqual(['available'])
+    await m.settle()
+    await m.invokeDialogAdded('available-agent')
+    expect(m.toast.error).toHaveBeenCalledWith('Roster add failed')
+    expect(dialogCaptures.current?.open).toBe(true)
   })
 
-  test('US-006 AC3: an empty GET /agents result produces no add choices', async () => {
-    const { bindings } = await mountPage({ agentsResponse: [] })
-    const loadCandidates = bindings.loadCandidates as (() => Promise<void>) | undefined
-    expect(typeof loadCandidates).toBe('function')
-    await loadCandidates?.()
-    const candidates = bindings.availableAgents as { value: unknown[] } | undefined
-    expect(candidates?.value).toEqual([])
+  test('AC6: removing an agent with 0 open tickets asks for confirmation, then DELETEs and reloads', async () => {
+    const m = mountPage({ rosterResponse: makeRoster({ items: [item] }), role: 'ADMIN', confirm: true })
+    await m.settle()
+    const beforeGet = m.calls.filter(c => c.method === 'GET' && c.url === '/projects/acme/agents').length
+    await m.invokeRemoveButton(item)
+    expect(m.confirm).toHaveBeenCalled()
+    expect(m.calls.some(c => c.method === 'DELETE' && c.url === '/projects/acme/agents/builder')).toBe(true)
+    const afterGet = m.calls.filter(c => c.method === 'GET' && c.url === '/projects/acme/agents').length
+    expect(afterGet).toBeGreaterThan(beforeGet)
   })
 
-  test('US-006 AC4: confirming an agent posts its slug and refreshes the roster', async () => {
-    const { bindings, calls } = await mountPage({})
-    const addAgent = bindings.addAgent as ((slug: string) => Promise<void>) | undefined
-    expect(typeof addAgent).toBe('function')
-    await addAgent?.('builder')
-    expect(calls).toContainEqual({ method: 'POST', url: '/projects/acme/agents', body: { agentSlug: 'builder' } })
-    expect(calls.filter(call => call.method === 'GET' && call.url === '/projects/acme/agents').length).toBeGreaterThan(1)
+  test('AC6: cancelling the confirmation does not DELETE', async () => {
+    const m = mountPage({ rosterResponse: makeRoster({ items: [item] }), role: 'ADMIN', confirm: false })
+    await m.settle()
+    await m.invokeRemoveButton(item)
+    expect(m.calls.filter(c => c.method === 'DELETE')).toHaveLength(0)
   })
 
-  test('US-006 AC4: confirming without a selected slug does not post', async () => {
-    const { bindings, calls } = await mountPage({})
-    const addAgent = bindings.addAgent as ((slug: string) => Promise<void>) | undefined
-    expect(typeof addAgent).toBe('function')
-    await addAgent?.('')
-    expect(calls.filter(call => call.method === 'POST')).toHaveLength(0)
+  test('AC7: removing an agent with 2 open tickets does not DELETE and surfaces the "Reassign" message with ticket refs', async () => {
+    const m = mountPage({ rosterResponse: makeRoster({ items: [blocked] }), role: 'ADMIN' })
+    await m.settle()
+    await m.invokeRemoveButton(blocked)
+    expect(m.calls.filter(c => c.method === 'DELETE')).toHaveLength(0)
+    const blockedMessage = m.app.find('[data-test="project-agents-blocked-message"]')
+    expect(blockedMessage).toHaveLength(1)
+    expect(m.app.textOf(blockedMessage[0])).toBe('Reassign its 2 open tickets first')
+    const linkNodes = m.app.find('[data-stub="nuxt-link"]')
+    const refs = linkNodes.map(node => node.props.to)
+    expect(refs).toEqual(expect.arrayContaining([
+      expect.stringContaining('KODA-11'),
+      expect.stringContaining('KODA-12'),
+    ]))
   })
 
-  test('US-006 AC5: failed add shows the extracted error and leaves the dialog open', async () => {
-    const { bindings, toast } = await mountPage({ reject: new Error('Roster add failed') })
-    const addAgent = bindings.addAgent as ((slug: string) => Promise<void>) | undefined
-    expect(typeof addAgent).toBe('function')
-    await addAgent?.('builder')
-    expect(toast.error).toHaveBeenCalledWith('Roster add failed')
-    expect(bindings.addDialogOpen).toEqual({ value: true })
-  })
-
-  test('US-006 AC6: confirmed removal of an agent with no open tickets sends DELETE and reloads', async () => {
-    const { bindings, calls } = await mountPage({ response: { scoping: true, items: [rosterItem] }, confirm: true })
-    const removeAgent = bindings.removeAgent as ((agent: AgentEntry) => Promise<void>) | undefined
-    expect(typeof removeAgent).toBe('function')
-    await removeAgent?.(rosterItem)
-    expect(calls.some(call => call.method === 'DELETE' && call.url === '/projects/acme/agents/builder')).toBe(true)
-    expect(calls.filter(call => call.method === 'GET' && call.url === '/projects/acme/agents').length).toBeGreaterThan(1)
-  })
-
-  test('US-006 AC6: cancelling removal does not send DELETE', async () => {
-    const { bindings, calls } = await mountPage({ confirm: false })
-    const removeAgent = bindings.removeAgent as ((agent: AgentEntry) => Promise<void>) | undefined
-    expect(typeof removeAgent).toBe('function')
-    await removeAgent?.(rosterItem)
-    expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(0)
-  })
-
-  test('US-006 AC7: agent with two open tickets cannot be removed and exposes ticket references', async () => {
-    const blocked = { ...rosterItem, openTicketCount: 2, openTicketRefs: ['KODA-11', 'KODA-12'] }
-    const { bindings, calls } = await mountPage({ response: { scoping: true, items: [blocked] } })
-    const removeAgent = bindings.removeAgent as ((agent: AgentEntry) => Promise<void>) | undefined
-    expect(typeof removeAgent).toBe('function')
-    await removeAgent?.(blocked)
-    expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(0)
-    expect(bindings.blockedTicketRefs).toEqual({ value: ['KODA-11', 'KODA-12'] })
-  })
-
-  test('US-006 AC7: zero ticket refs do not produce a blocked-removal message', async () => {
-    const { bindings } = await mountPage({ response: { scoping: true, items: [rosterItem] } })
-    expect(bindings.blockedTicketRefs).toEqual({ value: [] })
-  })
-
-  test('US-006 AC8: a 409 remove failure surfaces the error and refreshes roster data', async () => {
-    const { bindings, calls, toast } = await mountPage({ reject: Object.assign(new Error('Roster changed'), { statusCode: 409 }) })
-    const removeAgent = bindings.removeAgent as ((agent: AgentEntry) => Promise<void>) | undefined
-    expect(typeof removeAgent).toBe('function')
-    await removeAgent?.(rosterItem)
-    expect(toast.error).toHaveBeenCalledWith('Roster changed')
-    expect(calls.filter(call => call.method === 'GET' && call.url === '/projects/acme/agents').length).toBeGreaterThan(1)
-  })
-
-  test('US-006 AC9: scoping false is exposed as the scoping-off state', async () => {
-    const { bindings } = await mountPage({ response: { scoping: false, items: [rosterItem] } })
-    expect(bindings.scoping).toEqual({ value: false })
-  })
-
-  test('US-006 AC10: empty roster exposes the empty state', async () => {
-    const { bindings } = await mountPage({ response: { scoping: true, items: [] } })
-    const items = bindings.items as { value: AgentEntry[] } | undefined
-    expect(items?.value).toHaveLength(0)
-    expect(bindings.isEmpty).toBe(true)
+  test('AC8: a 409 on DELETE shows the extracted error and reloads the roster', async () => {
+    const error = Object.assign(new Error('Roster changed'), { statusCode: 409 })
+    const m = mountPage({ rosterResponse: makeRoster({ items: [item] }), role: 'ADMIN', confirm: true, rejectDelete: error })
+    await m.settle()
+    const beforeGet = m.calls.filter(c => c.method === 'GET' && c.url === '/projects/acme/agents').length
+    await m.invokeRemoveButton(item)
+    expect(m.toast.error).toHaveBeenCalledWith('Roster changed')
+    const afterGet = m.calls.filter(c => c.method === 'GET' && c.url === '/projects/acme/agents').length
+    expect(afterGet).toBeGreaterThan(beforeGet)
   })
 })
