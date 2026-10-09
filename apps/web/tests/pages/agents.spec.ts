@@ -4,7 +4,7 @@ import { computed, defineComponent, h, onMounted, ref, shallowRef, watch } from 
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { enI18n, uiStubs } from '../helpers/fleet-harness'
 import { extractApiError } from '../../composables/useApi'
-import type { ProjectAgent } from '../../composables/useProjectAgents'
+import { useProjectAgents, type ProjectAgent } from '../../composables/useProjectAgents'
 
 const page = webFile('pages', '[project]', 'agents.vue')
 
@@ -171,7 +171,7 @@ function mountPage(options: MountOptions = {}): PageHandle {
       useAppToast: () => toast,
       useApi: () => ({ $api: api }),
       extractApiError,
-      useProjectAgents: () => useRealProjectAgents(api, rosterResponse),
+      useProjectAgents: () => useProjectAgents('acme'),
       useProjectViewerRole: () => ({
         data: ref({ canManage: options.role === 'ADMIN' || options.globalAdmin === true, viewerRole: options.role ?? null }),
         pending: ref(false),
@@ -235,48 +235,6 @@ function mountPage(options: MountOptions = {}): PageHandle {
     invokeRemoveButton,
     api,
   }
-}
-
-/**
- * Stand-in for `useProjectAgents` that shares the same composable's load mapping (items,
- * scoping, pending, error) but routes through the test's mock `$api`. The page then issues
- * the same GET + parse + filter shape the production composable would, so the page's bindings
- * are populated by the real response rather than a stub ref.
- */
-function useRealProjectAgents(
-  api: { get: jest.Mock; post: jest.Mock; delete: jest.Mock; patch: jest.Mock },
-  _rosterResponse: RosterResponse,
-) {
-  const items = ref<ProjectAgent[]>([])
-  const scoping = ref(true)
-  const pending = ref(false)
-  const error = ref<unknown>(null)
-
-  async function refresh(): Promise<void> {
-    pending.value = true
-    try {
-      const res = await api.get('/projects/acme/agents')
-      items.value = Array.isArray(res?.items) ? res.items : []
-      scoping.value = res?.scoping !== false
-      error.value = null
-    } catch (caught) {
-      error.value = caught
-    } finally {
-      pending.value = false
-    }
-  }
-
-  async function add(agentSlug: string): Promise<void> {
-    await api.post('/projects/acme/agents', { agentSlug })
-  }
-  async function remove(agentSlug: string): Promise<void> {
-    await api.delete(`/projects/acme/agents/${agentSlug}`)
-  }
-
-  // First call populates the page on mount.
-  void refresh()
-
-  return { items, scoping, pending, error, load: refresh, refresh, add, remove }
 }
 
 beforeEach(() => {
