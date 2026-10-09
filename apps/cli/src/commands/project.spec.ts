@@ -550,6 +550,25 @@ describe('projectCommand', () => {
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
+    it('US-005: prints the server-returned agent slug after adding', async () => {
+      (projectsControllerAddProjectAgent as jest.Mock).mockResolvedValue({ ret: 0, data: { slug: 'server-agent-slug' } });
+      await findCommand('agent-add')?.parseAsync(['node', 'test', 'bot-1', '--project', 'alpha']);
+      expect(logSpy).toHaveBeenCalledWith('Added server-agent-slug to alpha');
+    });
+
+    it('US-005: prints the added agent DTO as JSON', async () => {
+      const agent = { slug: 'bot-1', name: 'Bot One', status: 'ACTIVE', roles: [], capabilities: [], openTicketCount: 0, openTicketRefs: [], addedAt: '2026-01-01', addedBy: null };
+      (projectsControllerAddProjectAgent as jest.Mock).mockResolvedValue({ ret: 0, data: agent });
+      await findCommand('agent-add')?.parseAsync(['node', 'test', 'bot-1', '--project', 'alpha', '--json']);
+      expect(logSpy).toHaveBeenCalledWith(JSON.stringify(agent, null, 2));
+    });
+
+    it('US-005: prints the removal result as JSON', async () => {
+      (projectsControllerRemoveProjectAgent as jest.Mock).mockResolvedValue(undefined);
+      await findCommand('agent-remove')?.parseAsync(['node', 'test', 'bot-1', '--project', 'alpha', '--json']);
+      expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ removed: 'bot-1' }, null, 2));
+    });
+
     it('US-005 AC-5: removes an agent from the project', async () => {
       (projectsControllerRemoveProjectAgent as jest.Mock).mockResolvedValue(undefined);
       await findCommand('agent-remove')?.parseAsync(['node', 'test', 'bot-1', '--project', 'alpha']);

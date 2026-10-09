@@ -9,6 +9,7 @@ import {
   projectsControllerGetProjectAgents,
   projectsControllerAddProjectAgent,
   projectsControllerRemoveProjectAgent,
+  type ProjectAgentDto,
 } from '../generated';
 import { configureApiClient } from '../utils/api-client';
 import { table, error } from '../utils/output';
@@ -55,9 +56,9 @@ export function projectCommand(program: Command): void {
           path: { slug: ctx.projectSlug },
           body: { agentSlug },
         });
-        const added = unwrap<unknown>(response);
+        const added = unwrap<ProjectAgentDto>(response);
         if (options.json) console.log(JSON.stringify(added, null, 2));
-        else console.log(`Added ${agentSlug} to ${ctx.projectSlug}`);
+        else console.log(`Added ${added.slug} to ${ctx.projectSlug}`);
         process.exit(0);
       } catch (err: unknown) {
         handleApiError(err);
