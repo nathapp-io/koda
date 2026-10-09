@@ -153,9 +153,9 @@ describe('US-002 AC5: pages/[project]/agents.vue renders loading state when pend
     expect(source).toMatch(/\bpending\b/)
   })
 
-  test('source has v-if="pending" directive for loading block', () => {
+  test('source shows the loading block only while pending with no rows yet', () => {
     const source = readFileSync(agentsPath, 'utf-8')
-    expect(source).toMatch(/v-if=["']pending["']/)
+    expect(source).toMatch(/v-if="pending && items\.length === 0"/)
   })
 
   test('loading block renders LoadingState component or loading text', () => {

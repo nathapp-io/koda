@@ -10,7 +10,9 @@
  *   AC11  every matrix route → 403 for a non-member DEVELOPER
  *   AC12  every matrix route → a status other than 403/404 for a member DEVELOPER
  * plus the Postgres-backed forms of AC1, AC2, AC3, AC6, AC7, AC8 and AC9
- * (real repository + real membership rows, no repository double).
+ * (real repository + real membership rows, no repository double). S4c US-001
+ * redefines AC8 for agents: the agent's list is its non-deleted AgentProject
+ * roster (AC11), so this file seeds roster rows and asserts the rostered subset.
  *
  * Visibility only: AC11/AC12 prove the membership gate (non-member 403, member
  * not 403/404). Write routes are exercised with a global-ADMIN member so that
@@ -239,12 +241,21 @@ describeIntegration('US-002 project membership gate (PG)', () => {
     agent.id = agentPayload.agent.id;
     agent.slug = agentPayload.agent.slug;
     agent.apiKey = agentPayload.apiKey;
+    // S4c US-001: the agent's project reach comes from AgentProject roster rows,
+    // not from ticket assignments.
+    const rosterProjects = await prisma.project.findMany({
+      where: { slug: { in: ['team', 'other'] } },
+      select: { id: true },
+    });
+    await prisma.agentProject.createMany({
+      data: rosterProjects.map((project) => ({ projectId: project.id, agentId: agent.id })),
+    });
     // Assigned so `AgentsService.findByProject('team')` lists it for the
     // PATCH /projects/:slug/agents/:agentSlug route.
     await request(server).post(`/api/projects/team/tickets/${refs.agent}/assign`).set(auth('root'))
       .send({ agentId: agent.id }).expect(200);
-    // Agents have no ProjectMember row: an agent-authored comment in `other`
-    // proves the agent path skips the membership gate (AC3).
+    // The agent holds no ProjectMember row: an agent-authored comment in `other`
+    // proves the agent path reads the agent roster instead of ProjectMember (AC3).
     agentCommentId = await addComment('other', otherRef, '', 'agent comment', agent.apiKey);
   }, 60_000);
 
@@ -281,10 +292,10 @@ describeIntegration('US-002 project membership gate (PG)', () => {
     expect(projects.map((p) => p.slug).sort()).toEqual(['other', 'team', 'third']);
   }, TEST_TIMEOUT_MS);
 
-  it('AC8: findAllForPrincipal returns every non-deleted project for an agent principal', async () => {
+  it('AC8: findAllForPrincipal returns only the rostered non-deleted projects for an agent principal', async () => {
     const projects = await projectsService.findAllForPrincipal(agentPrincipal(agent));
 
-    expect(projects.map((p) => p.slug).sort()).toEqual(['other', 'team', 'third']);
+    expect(projects.map((p) => p.slug).sort()).toEqual(['other', 'team']);
   }, TEST_TIMEOUT_MS);
 
   it('AC6 boundary: findAllForPrincipal returns no project for a user with no membership row', async () => {

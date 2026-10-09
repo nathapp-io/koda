@@ -66,17 +66,19 @@ describeIntegration('fleet approvals API (PG)', () => {
     prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
     world = await seedFleetHttpWorld(server, prisma);
     agent = await seedFleetHttpAgent(server, world.tokens.root);
+    // S4c US-001: an AgentProject row is the agent's project association.
+    await prisma.agentProject.create({ data: { projectId: world.projectId, agentId: agent.id } });
     // Only anchors an already-running bash ask; keep it out of placement for the budget requeue cases.
     runner = await insertRunner(prisma, { createdById: world.ids.root, enabled: false });
-    // Agents currently have no ProjectMember row: a ticket assignment is their project association.
     await prisma.ticket.create({ data: {
       projectId: world.projectId, number: 1, type: 'TASK', title: 'Fleet agent work', status: 'IN_PROGRESS',
       assignedToAgentId: agent.id, createdByUserId: world.ids.root,
     } });
     // Prove the key authenticates as this agent and has access through the real project membership guard.
     expect(data<{ id: string }>(await request(server).get('/api/agents/me').set(as(agent.apiKey)).expect(200)).id).toBe(agent.id);
-    expect(data<Array<{ id: string }>>(await request(server).get('/api/projects/web/agents').set(as(agent.apiKey)).expect(200))
-      .map((a) => a.id)).toContain(agent.id);
+    expect(data<{ scoping: boolean; items: { id?: string; slug: string }[] }>(
+      await request(server).get('/api/projects/web/agents').set(as(agent.apiKey)).expect(200),
+    ).items.map((a) => a.slug)).toContain(agent.slug);
     evaluator = app.get(BudgetEvaluator);
     approvals = app.get(ApprovalsService);
     await request(server).post('/api/admin/users').set(tok('root')).send({ email: 'padmin@koda.test', name: 'padmin', password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);

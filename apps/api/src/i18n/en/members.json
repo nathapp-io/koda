@@ -4,5 +4,6 @@
   "40003": "Project admin role required",
   "-2": "Validation error",
   "user": { "404": "No user with that email address" },
+  "userDisabled": { "409": "This account is disabled and cannot be added to a project" },
   "lastAdmin": { "409": "A project must keep at least one admin" }
 }

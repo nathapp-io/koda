@@ -125,6 +125,7 @@ Current config concepts in code:
 - keep command behavior covered with Jest specs
 - prefer testing command modules and config resolution over snapshot-heavy tests
 - mock generated client boundaries rather than making real network calls
+- nax acceptance: one generated file per feature, `apps/cli/.nax/features/<feature>/.nax-acceptance.test.ts`, holds every story's ACs as `it('AC-<n>: ...')` / `test('AC-<n>: ...')`. It is written for bun's test runner (`bun:test`, `mock.module`), and the CLI jest `testRegex` only matches `*.spec.ts`, so `bun run test` never runs it. nax runs it with its default acceptance command; run it from `apps/cli` the same way: `bun test .nax/features/<feature>/.nax-acceptance.test.ts --timeout=60000 -t "AC-<a>:|AC-<b>:"`, filtered to your story's AC ids (listed per `storyId` in the repo-root `.nax/features/<feature>/acceptance-refined.json`). Keep the trailing colon so `AC-1` does not also match `AC-10`. Never copy the file into `src/`, never rename it to `.spec.ts`, never edit it, and never change the jest `testRegex` to run it.
 
 Useful scripts:
 - `bun run test`

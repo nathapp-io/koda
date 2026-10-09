@@ -8,7 +8,7 @@ import type { PrismaClient } from '../../generated/prisma/client';
  * The lock serializes a check-then-write (e.g. "is this the last admin?")
  * that a unique index cannot express.
  */
-export const KODA_LOCK_CLASS = { GLOBAL: 72400, PROJECT_MEMBERS: 72401 } as const;
+export const KODA_LOCK_CLASS = { GLOBAL: 72400, PROJECT_MEMBERS: 72401, PROJECT_AGENTS: 72402 } as const;
 
 export const GlobalLock = { USER_BOOTSTRAP: 1, USER_ADMINISTRATION: 2 } as const;
 export type GlobalLockKey = (typeof GlobalLock)[keyof typeof GlobalLock];
@@ -23,4 +23,14 @@ export async function lockGlobal(db: RawQueryClient, key: GlobalLockKey): Promis
 
 export async function lockProjectMembers(db: RawQueryClient, projectId: string): Promise<void> {
   await db.$queryRaw`SELECT 1 AS locked FROM (SELECT pg_advisory_xact_lock(${KODA_LOCK_CLASS.PROJECT_MEMBERS}::int4, hashtext(${projectId}))) AS l`;
+}
+
+/**
+ * Serializes a project's agent roster against ticket assignment in that project
+ * (S4c US-003/US-004): a removal counts the agent's open tickets, and an assign
+ * checks the roster, so both take this lock before reading. A different class
+ * from PROJECT_MEMBERS so roster writes never block membership writes.
+ */
+export async function lockProjectAgents(db: RawQueryClient, projectId: string): Promise<void> {
+  await db.$queryRaw`SELECT 1 AS locked FROM (SELECT pg_advisory_xact_lock(${KODA_LOCK_CLASS.PROJECT_AGENTS}::int4, hashtext(${projectId}))) AS l`;
 }

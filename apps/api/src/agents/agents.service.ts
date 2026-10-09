@@ -6,6 +6,8 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { createHmac, randomBytes } from 'crypto';
 import { AGENT_ROLES, type AgentRoleNames } from '../common/enums';
 import { AgentResponseDto } from './dto/agent-response.dto';
+import { AgentMeResponseDto } from './dto/agent-me-response.dto';
+import { ProjectAgentDto, ProjectAgentListDto } from './dto/project-agent.dto';
 import { TicketResponseDto } from '../tickets/dto/ticket-response.dto';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
@@ -167,20 +169,122 @@ export class AgentsService {
     return AgentResponseDto.from(agent);
   }
 
-  async findMe(agentId: string): Promise<AgentResponseDto> {
+  async findMe(agentId: string): Promise<AgentMeResponseDto> {
     const agent = await this.agentRepo.findById(agentId);
 
     if (!agent) {
       throw new NotFoundAppException({}, 'agents');
     }
 
-    return AgentResponseDto.from(agent);
+    return AgentMeResponseDto.fromMe(agent, await this.agentRepo.findRosterProjects(agentId));
   }
 
   async findByProject(projectSlug: string): Promise<AgentResponseDto[]> {
     const result = await this.agentRepo.findByProjectSlug(projectSlug);
     if (!result) throw new NotFoundAppException({}, 'projects');
     return AgentResponseDto.fromMany(result.agents);
+  }
+
+  /**
+   * US-002 (D530): the project's explicit agent roster. Reads the AgentProject
+   * table — rostered agents without tickets appear; ticket holders without a
+   * roster row do not. Throws 404 when the project is missing or soft-deleted
+   * so callers can surface a stable error without guessing from an empty list.
+   *
+   * `scoping` reflects `AGENT_PROJECT_SCOPING` — the same flag the
+   * ProjectAccessService reads to gate agent reach. Off = the response carries
+   * `scoping: false`; the caller still gets the rostered list (post-001
+   * state, just without the gate).
+   */
+  async listProjectRoster(projectSlug: string): Promise<ProjectAgentListDto> {
+    const project = await this.agentRepo.findProjectBySlug(projectSlug);
+    if (!project || project.deletedAt) {
+      throw new NotFoundAppException({}, 'projects');
+    }
+
+    const records = await this.agentRepo.findProjectRoster(project.id);
+    return ProjectAgentListDto.from(records, this.agentScopingEnabled());
+  }
+
+  /**
+   * S4c US-003 (D530): put an agent on a project's roster. The caller's right to
+   * do so is checked at the boundary (project ADMIN or global ADMIN); this only
+   * knows the roster rules: the project and the agent must exist, an OFFLINE
+   * agent cannot be added (it could not authenticate anyway), and the row is
+   * keyed on (agent, project) so a duplicate add is a conflict.
+   *
+   * The insert and the re-read run under the same per-project roster lock
+   * `removeFromProject` takes, so a concurrent add/remove of the same agent
+   * serializes: a removal can no longer delete the row between the insert and
+   * the re-read, which would have reported 404 for a row that was just created.
+   *
+   * Returns the roster row as the list serves it, so POST and GET agree on the
+   * shape the CLI and the web read.
+   */
+  async addToProject(projectSlug: string, agentSlug: string, addedById: string): Promise<ProjectAgentDto> {
+    const project = await this.agentRepo.findProjectBySlug(projectSlug);
+    if (!project || project.deletedAt) throw new NotFoundAppException({}, 'projects');
+
+    const agent = await this.agentRepo.findBySlugScalar(agentSlug);
+    if (!agent) throw new NotFoundAppException({}, 'agents');
+    if (agent.status === 'OFFLINE') throw new ConflictAppException({}, 'projectAgents.agentOffline');
+
+    const record = await this.txManager.run(async () => {
+      await this.agentRepo.lockProjectAgents(project.id);
+
+      const added = await this.agentRepo.addToProjectRoster(agent.id, project.id, addedById);
+      if (added === 'alreadyAssigned') throw new ConflictAppException({}, 'projectAgents.alreadyAssigned');
+
+      return (await this.agentRepo.findProjectRoster(project.id)).find((row) => row.slug === agent.slug) ?? null;
+    });
+
+    if (!record) throw new NotFoundAppException({}, 'projectAgents');
+    return ProjectAgentDto.from(record);
+  }
+
+  /**
+   * True when the agent is on the project's roster. A single membership lookup:
+   * no roster listing and no open-ticket scan, so it is cheap to call per request.
+   */
+  async isOnProjectRosterBySlug(projectSlug: string, agentSlug: string): Promise<boolean> {
+    const project = await this.agentRepo.findProjectBySlug(projectSlug);
+    if (!project || project.deletedAt) return false;
+    const agent = await this.agentRepo.findBySlugScalar(agentSlug);
+    if (!agent) return false;
+    return this.agentRepo.isOnProjectRoster(agent.id, project.id);
+  }
+
+  /**
+   * S4c US-003 (D530/D531): take an agent off a project's roster. Removal is
+   * refused while the agent still holds open tickets in that project, and the
+   * whole read-then-write runs under the project's roster lock so a concurrent
+   * assignment cannot slip an open ticket in between the count and the delete
+   * (US-004 takes the same lock from the assignment side).
+   */
+  async removeFromProject(projectSlug: string, agentSlug: string): Promise<void> {
+    const project = await this.agentRepo.findProjectBySlug(projectSlug);
+    if (!project || project.deletedAt) throw new NotFoundAppException({}, 'projects');
+
+    const agent = await this.agentRepo.findBySlugScalar(agentSlug);
+    if (!agent) throw new NotFoundAppException({}, 'projectAgents');
+
+    await this.txManager.run(async () => {
+      await this.agentRepo.lockProjectAgents(project.id);
+
+      if (!(await this.agentRepo.isOnProjectRoster(agent.id, project.id))) {
+        throw new NotFoundAppException({}, 'projectAgents');
+      }
+
+      const open = await this.agentRepo.countOpenProjectTickets(agent.id, project.id);
+      if (open.count > 0) {
+        throw new ConflictAppException(
+          { count: open.count, refs: open.refs.join(', ') },
+          'projectAgents.hasOpenTickets',
+        );
+      }
+
+      await this.agentRepo.removeFromProjectRoster(agent.id, project.id);
+    });
   }
 
   async update(slug: string, updateData: UpdateAgentDto): Promise<AgentResponseDto> {
@@ -236,8 +340,19 @@ export class AgentsService {
   };
 
   /**
+   * S4c US-001 (D528): an absent flag means scoping is on. Only an explicit
+   * `agentProjectScoping: false` restores the pre-S4c agent reach.
+   */
+  agentScopingEnabled(): boolean {
+    return this.authConfig.agentProjectScoping !== false;
+  }
+
+  /**
    * US-003: ticket pickup is gated to the agent itself, or to a global ADMIN
    * user. 403 for everyone else; 404 when the project is missing or soft-deleted.
+   *
+   * S4c US-001: while project scoping is on, the target agent must also be on
+   * the project's roster — a pickup is an act inside that project.
    */
   async suggestTicket(
     agentSlug: string,
@@ -259,6 +374,10 @@ export class AgentsService {
     // existence from agents that should not see it.
     if (!project || project.deletedAt) {
       throw new NotFoundAppException({}, 'agents');
+    }
+
+    if (this.agentScopingEnabled() && !(await this.agentRepo.isOnProjectRoster(agent.id, project.id))) {
+      throw new ForbiddenAppException({}, 'projects');
     }
 
     const tickets = await this.agentRepo.findVerifiedUnassignedTickets(project.id);

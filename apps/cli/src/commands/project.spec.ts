@@ -31,6 +31,9 @@ jest.mock('../generated', () => ({
   projectsControllerCreate: jest.fn(),
   projectsControllerRemove: jest.fn(),
   projectsControllerUpdate: jest.fn(),
+  projectsControllerGetProjectAgents: jest.fn(),
+  projectsControllerAddProjectAgent: jest.fn(),
+  projectsControllerRemoveProjectAgent: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
@@ -68,6 +71,9 @@ import {
   projectsControllerCreate,
   projectsControllerRemove,
   projectsControllerUpdate,
+  projectsControllerGetProjectAgents,
+  projectsControllerAddProjectAgent,
+  projectsControllerRemoveProjectAgent,
 } from '../generated';
 
 describe('projectCommand', () => {
@@ -99,6 +105,9 @@ describe('projectCommand', () => {
     (projectsControllerCreate as jest.Mock).mockReset();
     (projectsControllerRemove as jest.Mock).mockReset();
     (projectsControllerUpdate as jest.Mock).mockReset();
+    (projectsControllerGetProjectAgents as jest.Mock).mockReset();
+    (projectsControllerAddProjectAgent as jest.Mock).mockReset();
+    (projectsControllerRemoveProjectAgent as jest.Mock).mockReset();
   });
 
   afterEach(() => {
@@ -500,6 +509,80 @@ describe('projectCommand', () => {
       const allCalls = logSpy.mock.calls.flat().join(' ');
       expect(allCalls).toContain('Description');
       expect(allCalls).toContain('A nice project description');
+    });
+  });
+
+  describe('project agent roster commands', () => {
+    const findCommand = (name: string) => program.commands.find((cmd) => cmd.name() === 'project')?.commands.find((cmd) => cmd.name() === name);
+
+    it('US-005 AC-1: lists roster entries in a table', async () => {
+      (projectsControllerGetProjectAgents as jest.Mock).mockResolvedValue({ ret: 0, data: { scoping: true, items: [
+        { slug: 'bot-1', name: 'Bot One', status: 'ACTIVE', openTicketCount: 3 },
+      ] } });
+      await findCommand('agents')?.parseAsync(['node', 'test', '--project', 'alpha']);
+      expect(projectsControllerGetProjectAgents).toHaveBeenCalledWith({ path: { slug: 'alpha' } });
+      const output = logSpy.mock.calls.flat().join(' ');
+      expect(output).toContain('bot-1');
+      expect(output).toContain('Bot One');
+      expect(output).toContain('ACTIVE');
+      expect(output).toContain('3');
+    });
+
+    it('US-005 AC-2: prints the roster response as JSON', async () => {
+      const roster = { scoping: true, items: [{ slug: 'bot-1', name: 'Bot One', status: 'ACTIVE', openTicketCount: 0 }] };
+      (projectsControllerGetProjectAgents as jest.Mock).mockResolvedValue({ ret: 0, data: roster });
+      await findCommand('agents')?.parseAsync(['node', 'test', '--project', 'alpha', '--json']);
+      expect(logSpy).toHaveBeenCalledWith(JSON.stringify(roster, null, 2));
+    });
+
+    it('US-005 AC-3: warns when agent scoping is off', async () => {
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      (projectsControllerGetProjectAgents as jest.Mock).mockResolvedValue({ ret: 0, data: { scoping: false, items: [] } });
+      await findCommand('agents')?.parseAsync(['node', 'test', '--project', 'alpha']);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Agent scoping is off on this server'));
+    });
+
+    it('US-005 AC-4: adds an agent to the project', async () => {
+      (projectsControllerAddProjectAgent as jest.Mock).mockResolvedValue({ ret: 0, data: { slug: 'bot-1' } });
+      await findCommand('agent-add')?.parseAsync(['node', 'test', 'bot-1', '--project', 'alpha']);
+      expect(projectsControllerAddProjectAgent).toHaveBeenCalledWith({ path: { slug: 'alpha' }, body: { agentSlug: 'bot-1' } });
+      expect(logSpy).toHaveBeenCalledWith('Added bot-1 to alpha');
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('US-005: prints the server-returned agent slug after adding', async () => {
+      (projectsControllerAddProjectAgent as jest.Mock).mockResolvedValue({ ret: 0, data: { slug: 'server-agent-slug' } });
+      await findCommand('agent-add')?.parseAsync(['node', 'test', 'bot-1', '--project', 'alpha']);
+      expect(logSpy).toHaveBeenCalledWith('Added server-agent-slug to alpha');
+    });
+
+    it('US-005: prints the added agent DTO as JSON', async () => {
+      const agent = { slug: 'bot-1', name: 'Bot One', status: 'ACTIVE', roles: [], capabilities: [], openTicketCount: 0, openTicketRefs: [], addedAt: '2026-01-01', addedBy: null };
+      (projectsControllerAddProjectAgent as jest.Mock).mockResolvedValue({ ret: 0, data: agent });
+      await findCommand('agent-add')?.parseAsync(['node', 'test', 'bot-1', '--project', 'alpha', '--json']);
+      expect(logSpy).toHaveBeenCalledWith(JSON.stringify(agent, null, 2));
+    });
+
+    it('US-005: prints the removal result as JSON', async () => {
+      (projectsControllerRemoveProjectAgent as jest.Mock).mockResolvedValue(undefined);
+      await findCommand('agent-remove')?.parseAsync(['node', 'test', 'bot-1', '--project', 'alpha', '--json']);
+      expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ removed: 'bot-1' }, null, 2));
+    });
+
+    it('US-005 AC-5: removes an agent from the project', async () => {
+      (projectsControllerRemoveProjectAgent as jest.Mock).mockResolvedValue(undefined);
+      await findCommand('agent-remove')?.parseAsync(['node', 'test', 'bot-1', '--project', 'alpha']);
+      expect(projectsControllerRemoveProjectAgent).toHaveBeenCalledWith({ path: { slug: 'alpha', agentSlug: 'bot-1' } });
+      expect(logSpy).toHaveBeenCalledWith('Removed bot-1 from alpha');
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('US-005 AC-6: reports an API conflict when removing an agent', async () => {
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      (projectsControllerRemoveProjectAgent as jest.Mock).mockRejectedValue({ statusCode: 409, message: 'Open tickets: KODA-12' });
+      await findCommand('agent-remove')?.parseAsync(['node', 'test', 'bot-1', '--project', 'alpha']);
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Open tickets: KODA-12'));
     });
   });
 

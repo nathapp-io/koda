@@ -43,6 +43,7 @@ model User {
   ticketWatches                   TicketWatcher[]
   notificationCategoryPreferences NotificationCategoryPreference[]
   sentProjectInvites              ProjectInvite[]                  @relation("ProjectInviteInvitedBy")
+  addedAgentProjects              AgentProject[]                   @relation("AgentProjectAddedBy")
 }
 
 model Agent {
@@ -57,9 +58,27 @@ model Agent {
 
   roles           AgentRoleEntry[]
   capabilities    AgentCapabilityEntry[]
+  projects        AgentProject[]
   createdTickets  Ticket[]               @relation("TicketCreatedByAgent")
   assignedTickets Ticket[]               @relation("TicketAssignedToAgent")
   comments        Comment[]              @relation("CommentByAgent")
+}
+
+/// S4c US-001: an agent's explicit project roster. A row grants project reach
+/// only — an agent's permissions inside the project still come from its global
+/// AgentRoleEntry roles (D529).
+model AgentProject {
+  agentId   String
+  projectId String
+  addedById String?
+  createdAt DateTime @default(now())
+
+  agent   Agent   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  addedBy User?   @relation("AgentProjectAddedBy", fields: [addedById], references: [id], onDelete: SetNull)
+
+  @@id([agentId, projectId])
+  @@index([projectId])
 }
 
 model AgentRoleEntry {
@@ -124,6 +143,7 @@ model Project {
   jobSchedules       JobSchedule[]
   notifications      Notification[]
   invites            ProjectInvite[]
+  agents             AgentProject[]
 
   @@index([deletedAt])
 }

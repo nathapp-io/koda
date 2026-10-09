@@ -85,9 +85,12 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
         .send({ name: 'AST Developer Agent', slug: 'ast-developer-agent', roles: ['DEVELOPER'] });
 
       expect(agentRes.status).toBe(201);
-      const agentData = body<{ id: string; slug: string; apiKey: string }>(agentRes);
-      agentSlug = agentData.slug;
+      // POST /api/agents returns { apiKey, agent } — the agent's own fields live
+      // under `agent`, and the roster fixture below needs the real slug.
+      const agentData = body<{ apiKey: string; agent: { id: string; slug: string } }>(agentRes);
+      agentSlug = agentData.agent.slug;
       agentApiKey = agentData.apiKey;
+      expect(agentSlug).toBe('ast-developer-agent');
     });
   });
 
@@ -101,6 +104,14 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
       expect(res.status).toBe(201);
       const data = body<{ slug: string }>(res);
       projectSlug = data.slug;
+
+      // S4c US-001: the DEVELOPER agent reaches the project through its roster row.
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const agent = await prisma.client.agent.findUniqueOrThrow({ where: { slug: agentSlug } });
+      await prisma.client.agentProject.create({
+        data: { projectId: project.id, agentId: agent.id },
+      });
     });
   });
 

@@ -184,6 +184,19 @@ else
   fail "Create agent: $AGENT"; exit 1
 fi
 
+# S4c US-001: agent project reach is roster-scoped (fail closed). The CLI
+# below authenticates as this agent, so put it on the project roster —
+# without the row every project-scoped command 403s.
+ROSTER=$(curl -s -X POST "$API_URL/api/projects/koda/agents" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $JWT" \
+  -d '{"agentSlug":"smoke-agent"}' 2>&1)
+if echo "$ROSTER" | grep -q '"slug"'; then
+  ok "Add agent to project roster"
+else
+  fail "Add agent to roster: $ROSTER"; exit 1
+fi
+
 # =============================================================================
 # STEP 5: Configure CLI
 # =============================================================================

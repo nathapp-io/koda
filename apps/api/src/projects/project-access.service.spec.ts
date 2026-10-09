@@ -2,6 +2,26 @@ import { ProjectAccessService } from './project-access.service';
 import { NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
+/**
+ * Awaits a refusal and asserts it is a ForbiddenAppException. `prefix` is the
+ * i18n namespace the refusal is answered with — S4c US-001 AC5 pins agent
+ * roster refusals to `projects`, the same namespace a non-member user gets.
+ */
+async function expectForbidden(
+  promise: Promise<unknown>,
+  prefix?: string,
+): Promise<ForbiddenAppException> {
+  const error = await promise.then(
+    () => null,
+    (reason: unknown) => reason,
+  );
+  expect(error).toBeInstanceOf(ForbiddenAppException);
+  if (prefix !== undefined) {
+    expect((error as ForbiddenAppException).prefix).toBe(prefix);
+  }
+  return error as ForbiddenAppException;
+}
+
 describe('ProjectAccessService', () => {
   let service: ProjectAccessService;
   let mockProjectRepo: any;
@@ -10,6 +30,7 @@ describe('ProjectAccessService', () => {
     mockProjectRepo = {
       findBySlug: jest.fn(),
       findMembershipRole: jest.fn(),
+      isAgentOnRoster: jest.fn(),
     };
 
     service = new ProjectAccessService(mockProjectRepo as any);
@@ -59,8 +80,18 @@ describe('ProjectAccessService', () => {
       expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
     });
 
-    it('passes without checking membership for agent principal', async () => {
+    it('admits a rostered agent after one roster lookup', async () => {
+      mockProjectRepo.isAgentOnRoster.mockResolvedValue(true);
       await expect(service.assertProjectMembership('p1', agentPrincipal)).resolves.toBeUndefined();
+      expect(mockProjectRepo.isAgentOnRoster).toHaveBeenCalledWith('p1', 'ag1');
+      expect(mockProjectRepo.isAgentOnRoster).toHaveBeenCalledTimes(1);
+      expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
+    });
+
+    it('refuses an agent absent from the project roster with a projects-scoped 403', async () => {
+      mockProjectRepo.isAgentOnRoster.mockResolvedValue(false);
+      await expectForbidden(service.assertProjectMembership('p1', agentPrincipal), 'projects');
+      expect(mockProjectRepo.isAgentOnRoster).toHaveBeenCalledWith('p1', 'ag1');
       expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
     });
 
@@ -94,8 +125,27 @@ describe('ProjectAccessService', () => {
       expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
     });
 
-    it('returns null for an agent without a membership lookup', async () => {
+    it('returns null for a rostered agent with no membership lookup', async () => {
+      mockProjectRepo.isAgentOnRoster.mockResolvedValue(true);
       await expect(service.resolveMembership('p1', agentPrincipal)).resolves.toBeNull();
+      expect(mockProjectRepo.isAgentOnRoster).toHaveBeenCalledWith('p1', 'ag1');
+      expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
+    });
+
+    it('throws a projects-scoped ForbiddenAppException for an agent absent from the project roster', async () => {
+      mockProjectRepo.isAgentOnRoster.mockResolvedValue(false);
+      await expectForbidden(service.resolveMembership('p1', agentPrincipal), 'projects');
+      expect(mockProjectRepo.isAgentOnRoster).toHaveBeenCalledWith('p1', 'ag1');
+      expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
+    });
+
+    it('returns null for an agent without a roster lookup when scoping is off', async () => {
+      const unscoped = new ProjectAccessService(
+        mockProjectRepo as any,
+        { agentProjectScoping: false } as any,
+      );
+      await expect(unscoped.resolveMembership('p1', agentPrincipal)).resolves.toBeNull();
+      expect(mockProjectRepo.isAgentOnRoster).not.toHaveBeenCalled();
       expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
     });
 

@@ -1,0 +1,31 @@
+{
+  "generatedAt": "2026-10-09T03:51:01.206Z",
+  "acFingerprint": "sha256:beb0b5ab1ede7435b293f34a5d05dd16efe5760faf083950cb86bc7339cd53de",
+  "layoutFingerprint": "sha256:eaafd52e858bc20c86f94d54db7436766c875d027aaa68d0a1b3b14e8dafd330",
+  "storyCount": 7,
+  "acCount": 82,
+  "generator": "nax",
+  "coverage": [
+    {
+      "testPath": "apps/api/.nax/features/fleet-s4c-team-access/.nax-acceptance.test.ts",
+      "expected": 57,
+      "found": 57,
+      "missing": []
+    },
+    {
+      "testPath": "apps/cli/.nax/features/fleet-s4c-team-access/.nax-acceptance.test.ts",
+      "expected": 6,
+      "found": 6,
+      "missing": []
+    },
+    {
+      "testPath": "apps/web/.nax/features/fleet-s4c-team-access/.nax-acceptance.test.ts",
+      "expected": 19,
+      "found": 17,
+      "missing": [
+        "AC-13",
+        "AC-14"
+      ]
+    }
+  ]
+}

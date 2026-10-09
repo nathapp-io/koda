@@ -35,9 +35,11 @@ export class MemoryController {
     if (!isUserPrincipal(principal) && !isAgentPrincipal(principal)) {
       throw new ForbiddenAppException({}, 'memory');
     }
-    // Agents qualify as today. For users, assertProjectMembership lets global
-    // admins through and requires a ProjectMember row (any role) for everyone
-    // else — the previous MEMORY_WRITE_ROLES check compared the GLOBAL role,
+    // Agents need an AgentProject roster row for the project (S4c US-001);
+    // AGENT_PROJECT_SCOPING=off restores the previous pass-through. For users,
+    // assertProjectMembership lets global admins through and requires a
+    // ProjectMember row (any role) for everyone else — the previous
+    // MEMORY_WRITE_ROLES check compared the GLOBAL role,
     // locking out users whose write access was only granted at project level.
     // It also closes the cross-project write path (member of project A writing
     // to project B).

@@ -1,0 +1,527 @@
+{
+  "project": "koda",
+  "feature": "fleet-s4c-team-access",
+  "branchName": "feat/fleet-s4c-team-access",
+  "createdAt": "2026-10-09T00:00:00Z",
+  "updatedAt": "2026-10-09T11:44:36.365Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Agent roster store, scoping flag and enforcement",
+      "description": "**Goal** — Create and backfill AgentProject, and scope agent project reach by default across project routes, project lists and pickup.\n\n**Motivation** — Agents bypass project scoping entirely: ProjectAccessService.resolveMembership returns null for every non-user principal, so any agent key reads and writes every project.\n\n**Approach** — D527: the migration backfills AgentProject from history; access is explicit afterwards. D528: AGENT_PROJECT_SCOPING=on|off, default on. off restores pre-S4c agent reach exactly (resolveMembership, GET /projects, pickup). The roster, its routes, the assign and member-add guards (including the agent-roster check on assign) and the assignees endpoint apply in both modes. D529: a roster row grants access only. An agent's permissions inside a project still come from its global AgentRoleEntry roles via KodaCaslAbilityFactory.agentPermissions; there is no per-project agent role. D533: scoping covers cross-project paths too (GET /projects, pickup), not only /projects/:slug routes. D534: enforcement is central in ProjectAccessService.resolveMembership. Wiring rule (this spec): no existing constructor gains a parameter except ProjectAccessService, whose new parameter is @Optional(). Roster reads and writes go through existing collaborators (PrismaProjectRepository, PrismaAgentRepository, the tickets repository) so existing DI-compiling test suites keep resolving. Update ProjectAccessService and ProjectMembershipGuard docblocks to say agent: roster-checked, returns null; update memory.controller.ts's \"Agents qualify as today\" comment to say agents need a roster row. Schema: AgentProject { agentId String; projectId String; addedById String?; createdAt DateTime @default(now()); agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade); project Project @relation(fields: [projectId], references: [id], onDelete: Cascade); addedBy User? @relation(\"AgentProjectAddedBy\", fields: [addedById], references: [id], onDelete: SetNull); @@id([agentId, projectId]); @@index([projectId]) }; back-relations Agent.projects, Project.agents, User.addedAgentProjects. Migration 20261011090000_agent_projects appends one-time INSERT INTO AgentProject SELECT assignedToAgentId/projectId FROM Ticket UNION createdByAgentId/projectId FROM Ticket UNION authorAgentId/projectId FROM Comment JOIN Ticket, ON CONFLICT DO NOTHING; soft-deleted tickets count; addedById NULL. Three roster checks across project, agent and ticket repositories use existence of the same (agentId, projectId) row. Config absent means scoping on; off bypasses only reach. Run bun run generate for committed API contract and generated CLI client, never hand-edit generated files. Update legacy tests' roster fixtures and expectations as specified, including fleet approvals, membership guard/routes, project lists, agent pickup, endpoint e2e and code-intel.\n\n**Scope** — In: schema, backfill, config, central project access, project list, pickup, /agents/me roster projects, HTTP boot helper and affected tests. Out: roster list/write endpoints (US-002/003), assignment checks (US-004), per-project agent roles, runner scoping, caching roster lookups, repeated backfill, changing agent CASL permission checks.\n\n**Interface** — `IAuthConfig` gains `agentProjectScoping?: boolean`; `AuthConfigSchema` gains `AGENT_PROJECT_SCOPING?: 'on' | 'off'` (`@IsOptional() @IsIn(['on', 'off'])`); factory sets `agentProjectScoping = AGENT_PROJECT_SCOPING !== 'off'`; env validation uses `Joi.string().valid('on', 'off').default('on')`. `ProjectAccessService` constructor is `(private projectRepo: PrismaProjectRepository, @Optional() @Inject(AUTH_CFG) private authConfig?: IAuthConfig)`; `agentScopingEnabled(): boolean` returns `this.authConfig?.agentProjectScoping !== false`; `resolveMembership(projectId, principal): Promise<string | null>` retains user/runner behaviour, returns null for an agent in off mode without lookup or a rostered agent in on mode, otherwise throws `ForbiddenAppException({}, 'projects')`. `IProjectRepository` / `PrismaProjectRepository`: `isAgentOnRoster(projectId: string, agentId: string): Promise<boolean>` and `findAllForAgent(agentId: string): Promise<ProjectDomain[]>` (non-deleted, findAll order). `ProjectsService.findAllForPrincipal` returns findAll for global ADMIN and off-mode agents, findAllForAgent(principal.id) for on-mode agents, and preserves findAllForUser for ordinary users; constructor unchanged. `PrismaAgentRepository`: `isOnProjectRoster(agentId, projectId): Promise<boolean>`; `findRosterProjects(agentId): Promise<{ slug: string; name: string }[]>` (non-deleted, slug order). `AgentsService.agentScopingEnabled(): boolean`; `suggestTicket(agentSlug, projectSlug, principal)` gates target after caller/project checks (unknown project still 404 agents); `findMe(agentId): Promise<AgentMeResponseDto>` adds `projects` in both modes. `bootHttpApp` optionally accepts `agentProjectScoping?: 'on' | 'off'` around AppFactory.create, restoring env afterwards.",
+      "acceptanceCriteria": [
+        "When AGENT_PROJECT_SCOPING is unset, authConfig() returns agentProjectScoping: true.",
+        "When AGENT_PROJECT_SCOPING=maybe, authConfig() throws a validation error naming AGENT_PROJECT_SCOPING.",
+        "When the 20261011090000_agent_projects migration backfill runs over agent A assigned a ticket in P1, agent A's comment on a soft-deleted ticket in P2, and agent B's created ticket in P1, AgentProject contains exactly (A,P1), (A,P2), (B,P1), each with addedById null.",
+        "When isAgentOnRoster(projectId, agentId) resolves true with no auth config injected, ProjectAccessService.resolveMembership(projectId, agentPrincipal) resolves null.",
+        "When isAgentOnRoster(projectId, agentId) resolves false with no auth config injected, ProjectAccessService.resolveMembership(projectId, agentPrincipal) rejects with ForbiddenAppException (prefix projects).",
+        "When injected auth config has agentProjectScoping: false, ProjectAccessService.resolveMembership(projectId, agentPrincipal) resolves null without calling isAgentOnRoster.",
+        "When given runnerPrincipal, ProjectAccessService.resolveMembership(projectId, runnerPrincipal) resolves null without calling isAgentOnRoster.",
+        "When isAgentOnRoster rejects with a database error, ProjectAccessService.resolveMembership(projectId, agentPrincipal) rejects with that error.",
+        "With scoping on and no AgentProject row, GET /api/projects/:slug/tickets with an agent API key returns 403.",
+        "With scoping on and an AgentProject row for the agent and project, GET /api/projects/:slug/tickets with that agent API key returns 200.",
+        "With scoping on, GET /api/projects with an agent API key returns only its rostered non-deleted projects.",
+        "With AGENT_PROJECT_SCOPING=off, GET /api/projects with an agent API key returns every non-deleted project.",
+        "With scoping on and a target agent absent from a project's roster, GET /api/agents/:slug/pickup?project=<slug> by a global ADMIN returns 403.",
+        "With AGENT_PROJECT_SCOPING=off and a target agent absent from a project's roster, GET /api/agents/:slug/pickup?project=<slug> by a global ADMIN returns 200.",
+        "When GET /api/agents/me uses an agent API key, its projects lists { slug, name } for each non-deleted roster project, ordered by slug."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "security",
+        "migration"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-cutting access control and migration with flag-dependent behaviour and many existing call sites.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
+      },
+      "contextFiles": [
+        "apps/api/src/projects/project-access.service.ts",
+        "apps/api/src/projects/prisma-project.repository.ts",
+        "apps/api/src/config/auth.config.ts",
+        "apps/api/src/agents/agents.service.ts",
+        "apps/api/src/projects/projects.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261011090000_agent_projects/migration.sql",
+        "apps/api/src/agents/dto/agent-me-response.dto.ts",
+        "apps/api/test/integration/projects/agent-project-scoping.integration.spec.ts",
+        "apps/api/test/integration/projects/agent-projects-backfill.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "gains the AgentProject model and the Agent.projects, Project.agents and User.addedAgentProjects back-relations; integration suites build their schema from this file."
+        },
+        {
+          "path": "apps/api/test/helpers/http-app.ts",
+          "reason": "bootHttpApp accepts only registrationEnabled. Replacing invariant: it also accepts an optional agentProjectScoping ('on' | 'off'), set in process.env only around AppFactory.create and restored in finally; omitting it leaves the default (on)."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approvals-api.integration.spec.ts",
+          "reason": "beforeAll (`:68-79`) seeds an agent associated with project web only through an assigned ticket, then asserts GET /api/projects/web/agents with the agent key returns 200; with scoping on that is 403 and the suite fails in setup. Replacing invariant: insert the agent's AgentProject row for project web right after seedFleetHttpAgent (before `:78`); the comment at `:71` is updated to say the roster row is the association."
+        },
+        {
+          "path": "apps/api/src/projects/project-access.service.spec.ts",
+          "reason": "\"passes without checking membership for agent principal\" (`:62`) and \"returns null for an agent without a membership lookup\" (`:97`) assume an unscoped agent; with no config injected scoping is on. Replacing invariant: a rostered agent resolves null, an unrostered agent rejects with ForbiddenAppException, and with agentProjectScoping false an agent resolves null without a roster lookup."
+        },
+        {
+          "path": "apps/api/src/projects/project-membership.guard.spec.ts",
+          "reason": "\"AC3: returns true for an agent principal without a membership lookup\" (`:195`) and \"AC15: returns true for an agent principal on a handler carrying @ProjectRoles\" (`:295`) assume an unscoped agent. Replacing invariant: the guard admits a rostered agent and rejects an unrostered one with 403."
+        },
+        {
+          "path": "apps/api/src/projects/project-membership.guard.routes.spec.ts",
+          "reason": "\"AC8 boundary: an agent principal is admitted to POST :ref/assign with no membership row\" (`:266`) expects 200 for an agent with no roster row. Replacing invariant: admitted when the agent has a roster row (still no ProjectMember row)."
+        },
+        {
+          "path": "apps/api/src/projects/projects.service.spec.ts",
+          "reason": "\"passes without checking membership for agent principal\" (`:196`) assumes an unscoped agent. Replacing invariant: a rostered agent passes, an unrostered agent is rejected."
+        },
+        {
+          "path": "apps/api/test/unit/projects/projects-find-all-for-principal.spec.ts",
+          "reason": "\"AC8: returns every non-deleted project for an agent principal\" (`:206`) expects all projects. Replacing invariant: with scoping on an agent gets only its rostered non-deleted projects; with agentProjectScoping false it gets every non-deleted project."
+        },
+        {
+          "path": "apps/api/src/agents/agents.service.spec.ts",
+          "reason": "the findMe test (`:408-413`) asserts toEqual(mockAgentDto), which now also carries projects; the suggestTicket tests (`:673-800`) use an agentRepo mock without the roster method. Replacing invariant: findMe returns the agent fields plus projects; suggestTicket behaves as before for a rostered target."
+        },
+        {
+          "path": "apps/api/src/agents/agents-pickup.routes.spec.ts",
+          "reason": "the agentRepo stub (`~:118`) lacks the roster method and the AC9 (`~:178-198`) and AC12 (`~:230`) 200 paths have no roster row. Replacing invariant: those paths return 200 when the target agent is rostered."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-membership-gate.integration.spec.ts",
+          "reason": "beforeAll (`:237-248`) has agent team-bot act on team and other with no roster row; \"AC8: findAllForPrincipal returns every non-deleted project for an agent principal\" (`:284`) and \"AC3: CommentsService.update proceeds to the CASL check\" (`:349`) assume unscoped agents. Replacing invariant: seed AgentProject rows for team and other immediately after the agent is created and before the assign at `:244`; findAllForPrincipal returns only rostered projects."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "the agent created at `:226-246` acts on its project with agentApiKey (`:515`, `:737`, `:1259`, `:1635`, `:1650`, `~:2395`) with no roster row, and \"GET /api/agents/:slug/pickup — returns null data when no VERIFIED unassigned tickets remain\" (`:1586-1612`) creates a fresh agent pickup-empty-agent and calls pickup on the project. Replacing invariant: insert an AgentProject row for every (agent, project) pair a test acts on — the main agent right after it is created, pickup-empty-agent right after its creation; the existing expectations then hold unchanged."
+        },
+        {
+          "path": "apps/api/test/e2e/agents.e2e.spec.ts",
+          "reason": "the pickup tests (`:221`, `:247-257`) call pickup for an agent not on the project's roster; the second creates a new project AEM and picks up there. Replacing invariant: insert an AgentProject row for each (agent, project) pair the test picks up on — the setup project in setup, and AEM right after it is created; expectations unchanged."
+        },
+        {
+          "path": "apps/api/test/e2e/ast-index.e2e.spec.ts",
+          "reason": "\"DEVELOPER agent should be able to call indexCommit\" (`:235`) expects 201 for an unrostered agent. Replacing invariant: the agent is rostered on the project in setup; expectation unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/code-intel/code-intel-project-roles.integration.spec.ts",
+          "reason": "the agent case of \"%s reads every code-intel route\" (`:74`, agent created `:42`) expects 200 with no roster row. Replacing invariant: insert the agent's AgentProject row in setup; expectation unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "abe0d192e75ba5abd3da6c08fe1488726cf56564"
+    },
+    {
+      "id": "US-002",
+      "title": "Project agent roster read and status routes",
+      "description": "**Goal** — Return the explicit project agent roster with ticket counts and resolve agent status changes through it.\n\n**Motivation** — GET /projects/:slug/agents lists agents that happen to have tickets assigned in the project, so a project has no real agent roster.\n\n**Approach** — D530: project ADMIN and global ADMIN change a project's roster; any project member (or rostered agent) reads it. `ProjectAgentDto { slug, name, status, roles: string[], capabilities: string[], openTicketCount: number, openTicketRefs: string[], addedAt: string, addedBy: { id: string; name: string | null } | null }`. `ProjectAgentListDto { scoping: boolean; items: ProjectAgentDto[] }`, items ordered by name, un-paged (a documented exception to KodaPageQuery). Open = tickets in this project assigned to the agent, deletedAt null, status not CLOSED or REJECTED. openTicketRefs holds up to 10 refs built as <Project.key>-<Ticket.number>, oldest createdAt first, from one grouped query per list call. GET /projects/:slug/agents keeps inline assertProjectMembership and returns listProjectRoster, including rostered agents without tickets and excluding ticket holders without a roster row; off mode scoping false, reach unchanged. PATCH /projects/:slug/agents/:agentSlug keeps ProjectMembershipGuard and existing admin-or-self check, resolves target through roster, 404 projectAgents when absent. PrismaAgentRepository.findProjectRoster(projectId): Promise<ProjectAgentRecord[]> builds ordered list, roles/capabilities, adding user metadata and grouped open-ticket counts/refs. New projectAgents en/zh i18n files have 404, alreadyAssigned.409, agentOffline.409, hasOpenTickets.409 (English: \"{count} open tickets are still assigned to this agent: {refs}\"). Regenerate committed API contract and generated CLI client via bun run generate.\n\n**Scope** — In: roster GET/PATCH, DTO, query and error locale files, existing unit/e2e test adjustment. Out: POST/DELETE roster changes (US-003), assignment and assignees endpoint (US-004), removal of legacy findByProject helpers.\n\n**Interface** — `AgentsService.listProjectRoster(projectSlug): Promise<ProjectAgentListDto>`; `PrismaAgentRepository.findProjectRoster(projectId): Promise<ProjectAgentRecord[]>`; `ProjectsController.getProjectAgents` returns `JsonResponse.Ok(ProjectAgentListDto)` and `updateProjectAgent` resolves its target through the roster rather than ticket-derived list.",
+      "acceptanceCriteria": [
+        "When a project member calls GET /api/projects/:slug/agents, data.scoping is true and data.items includes a rostered agent with no tickets in that project.",
+        "When GET /api/projects/:slug/agents returns a roster entry added by a user, that entry includes roles, capabilities, status, addedAt, and addedBy { id, name } for that user.",
+        "When GET /api/projects/:slug/agents returns a backfilled row whose addedById is null, its addedBy is null.",
+        "When GET /api/projects/:slug/agents is called, items excludes an agent assigned tickets in the project but with no AgentProject row.",
+        "Given CREATED, IN_PROGRESS, CLOSED, REJECTED and soft-deleted CREATED assigned tickets for a rostered agent, GET /api/projects/:slug/agents returns openTicketCount 2 and the two <Project.key>-<number> openTicketRefs oldest first.",
+        "Given 12 open project tickets for a rostered agent, GET /api/projects/:slug/agents returns openTicketCount 12 and 10 openTicketRefs.",
+        "When a non-member user calls GET /api/projects/:slug/agents, it returns 403.",
+        "With scoping on, when an unrostered agent calls GET /api/projects/:slug/agents with its API key, it returns 403.",
+        "With AGENT_PROJECT_SCOPING=off, GET /api/projects/:slug/agents returns scoping: false.",
+        "When a project ADMIN PATCHes /api/projects/:slug/agents/:agentSlug with { status: 'PAUSED' } for a rostered agent with no tickets, it returns 200.",
+        "When a project ADMIN PATCHes /api/projects/:slug/agents/:agentSlug for an unrostered agent with tickets in the project, it returns 404.",
+        "With scoping on, when an unrostered agent PATCHes /api/projects/:slug/agents/:agentSlug with its own API key, it returns 403."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Project-route authorization and roster-based target resolution are access-control changes with DTO/query contract changes.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/projects/projects.controller.ts",
+        "apps/api/src/agents/prisma-agent.repository.ts",
+        "apps/api/src/agents/dto/agent-response.dto.ts",
+        "apps/api/test/integration/projects/project-members.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/agents/dto/project-agent.dto.ts",
+        "apps/api/src/i18n/en/projectAgents.json",
+        "apps/api/src/i18n/zh/projectAgents.json",
+        "apps/api/test/integration/projects/project-agents-read.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/projects/projects.controller.spec.ts",
+          "reason": "describe getProjectAgents (`:261-316`) mocks agentsService.findByProject and asserts a bare array (data[0].slug); describe updateProjectAgent (`:318-~400`) mocks findByProject to resolve the target. Replacing invariant: getProjectAgents returns the ProjectAgentListDto from agentsService.listProjectRoster; updateProjectAgent resolves the target through the roster."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "\"GET /api/projects/:slug/agents — 200 returns agents with assigned tickets\" (`:1319`) asserts Array.isArray(data); \"PATCH .../agents/:agentSlug — 200 updates agent status\" (`:1346`). Replacing invariant: data.items contains the rostered agent; PATCH succeeds for a rostered agent."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approvals-api.integration.spec.ts",
+          "reason": "beforeAll (`:78-79`) maps the GET /api/projects/web/agents body as an array. Replacing invariant: read data.items and assert it contains the agent."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-membership-gate.integration.spec.ts",
+          "reason": "the matrix case for the PATCH agent-status route (`:575`) resolves the target through the old ticket-derived list. Replacing invariant: the target is resolved through the roster."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "d198332a0569a60a796abda285716ef1996df1f8"
+    },
+    {
+      "id": "US-003",
+      "title": "Roster add/remove and disabled-member guard",
+      "description": "**Goal** — Allow project/global admins to add and remove project agents while refusing unsafe removals and disabled member additions.\n\n**Motivation** — A project has no real agent roster; ProjectMembersService.add adds a disabled user while the S4b invite path already refuses one.\n\n**Approach** — D530: project ADMIN and global ADMIN change a project's roster; any project member (or rostered agent) reads it. D531: removing an agent with open tickets in the project is refused (409). POST /projects/:slug/agents { agentSlug } -> 201 ProjectAgentDto; 404 agents unknown agent; 409 projectAgents.alreadyAssigned; 409 projectAgents.agentOffline. DELETE /projects/:slug/agents/:agentSlug -> 204; 404 projectAgents not on roster; 409 projectAgents.hasOpenTickets, message args { count, refs } (refs = up to 10 refs joined with , ). Both routes use ProjectMembershipGuard with project-ADMIN-or-global-ADMIN check used by updateProjectAgent, and reject agent principals even if rostered. `PrismaAgentRepository.addToProjectRoster(agentId, projectId, addedById): Promise<void>` maps PK conflict to a typed result; `countOpenProjectTickets(agentId, projectId): Promise<{ count: number; refs: string[] }>` caps refs at 10 oldest first; `removeFromProjectRoster(agentId, projectId): Promise<void>`; `lockProjectAgents(projectId): Promise<void>` invokes transaction client's shared advisory lock. `advisory-lock.ts` gains `KODA_LOCK_CLASS.PROJECT_AGENTS = 72402` and `lockProjectAgents(db, projectId)`, same shape as lockProjectMembers. `AgentsService.removeFromProject` runs lockProjectAgents -> countOpenProjectTickets -> 409 or removeFromProjectRoster in one txManager.run; assignment takes same lock (US-004). Replace findUserIdByEmail with `findUserByEmail(email): Promise<{ id: string; disabled: boolean } | null>`; disabled add throws ConflictAppException({}, 'members.userDisabled') before createMember. `ProjectMemberDto.from` adds disabled boolean from ProjectMemberRecord.disabled. Add members.userDisabled.409 in both API locales. Run bun run generate for contract/client; update endpoint lifecycle and member service specs.\n\n**Scope** — In: admin-controlled POST/DELETE roster, shared lock helper, open-ticket conflict, disabled member add, disabled member DTO. Out: assign-side lock and disabled-assignee guard (US-004), CLI/web clients (US-005/006/007), user-account enable/disable, notifications about roster changes.\n\n**Interface** — `AgentsService.addToProject(projectSlug, agentSlug, addedById): Promise<ProjectAgentDto>`; `AgentsService.removeFromProject(projectSlug, agentSlug): Promise<void>`; `PrismaAgentRepository.addToProjectRoster(agentId, projectId, addedById): Promise<void>`; `PrismaAgentRepository.countOpenProjectTickets(agentId, projectId): Promise<{ count: number; refs: string[] }>`; `PrismaAgentRepository.removeFromProjectRoster(agentId, projectId): Promise<void>`; `PrismaAgentRepository.lockProjectAgents(projectId): Promise<void>`; `ProjectMembersService.add` refuses disabled found user; `ProjectsController.addProjectAgent` and `removeProjectAgent` generate CLI names `projectsControllerAddProjectAgent`, `projectsControllerRemoveProjectAgent`. `AddProjectAgentDto { agentSlug }`.",
+      "acceptanceCriteria": [
+        "When a project ADMIN POSTs /api/projects/:slug/agents with { agentSlug }, it returns 201 with ProjectAgentDto and stores addedById equal to that admin's ID.",
+        "When a non-member global ADMIN POSTs /api/projects/:slug/agents, it returns 201.",
+        "When a project DEVELOPER POSTs /api/projects/:slug/agents, it returns 403 and stores no AgentProject row.",
+        "When POST /api/projects/:slug/agents names an agent already rostered, it returns 409 with the projectAgents.alreadyAssigned message.",
+        "When POST /api/projects/:slug/agents names an OFFLINE agent, it returns 409 with the projectAgents.agentOffline message.",
+        "When POST /api/projects/:slug/agents has an unknown agentSlug, it returns 404.",
+        "Given a rostered agent with 2 open project tickets, DELETE /api/projects/:slug/agents/:agentSlug returns 409 with 2 and both ticket refs in the message, and its AgentProject row remains.",
+        "Given a rostered agent with no open tickets, DELETE /api/projects/:slug/agents/:agentSlug returns 204 and deletes its AgentProject row.",
+        "After DELETE /api/projects/:slug/agents/:agentSlug returns 204, the removed agent's next GET /api/projects/:slug/tickets with its API key returns 403.",
+        "When DELETE /api/projects/:slug/agents/:agentSlug names an agent not on the roster, it returns 404.",
+        "When a project DEVELOPER DELETEs /api/projects/:slug/agents/:agentSlug, it returns 403 and the AgentProject row remains.",
+        "When a rostered agent POSTs /api/projects/:slug/agents using its own API key, it returns 403 and stores no AgentProject row.",
+        "When a rostered agent DELETEs /api/projects/:slug/agents/:agentSlug using its own API key, it returns 403 and its AgentProject row remains.",
+        "When POST /api/projects/:slug/members names a disabled user's email, it returns 409 with the members.userDisabled message and creates no membership row.",
+        "When GET /api/projects/:slug/members lists disabled and enabled members, it returns disabled: true and disabled: false respectively.",
+        "When a project ADMIN POSTs an existing enabled user's email to /api/projects/:slug/members, a membership row for that user is created."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "security",
+        "concurrency"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 1,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Admin role enforcement, synchronized mutation and disabled-user guard span several modules.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
+      },
+      "contextFiles": [
+        "apps/api/src/projects/projects.controller.ts",
+        "apps/api/src/common/utils/advisory-lock.ts",
+        "apps/api/src/projects/members/project-members.service.ts",
+        "apps/api/src/projects/members/prisma-project-members.repository.ts",
+        "apps/api/src/projects/members/dto/project-member.dto.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/agents/dto/add-project-agent.dto.ts",
+        "apps/api/test/integration/projects/project-agents-write.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/projects/members/project-members.service.spec.ts",
+          "reason": "\"add: unknown email is 404, duplicate member is 409\" (`:78`) mocks findUserIdByEmail, which is replaced by findUserByEmail. Replacing invariant: unknown email 404, duplicate 409, disabled user 409 members.userDisabled."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "the endpoint lifecycle suite must cover every endpoint (rule api-testing); this story adds the POST and DELETE roster cases (happy path plus one error each). Existing expectations unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b65c97fd9449cb9fdea1ffcac2b364b89fe49d61"
+    },
+    {
+      "id": "US-004",
+      "title": "Safe ticket assignment and searchable assignees",
+      "description": "**Goal** — Prevent assignment to disabled users and ineligible agents, serialize roster removal with assignment, and expose valid assignees.\n\n**Motivation** — TicketsService.assign accepts any existing agent for any project and does not check User.disabled; the web assigns through a free-text user-id input.\n\n**Approach** — `TicketsService.assign` moves lookups, checks and update into one txManager.run. User path order: missing -> 404 (today); disabled -> 409 tickets.userDisabled; not a member -> 403 (today; global ADMIN exempt). Agent path order: ticketRepo.lockProjectAgents(projectId); missing -> 404 (today); not on roster -> 409 tickets.agentNotInProject; status OFFLINE -> 409 tickets.agentOffline. Applies in both flag modes (D528). Shared lock is KODA_LOCK_CLASS.PROJECT_AGENTS=72402 and lockProjectAgents(db, projectId) taken first inside both remove and assign transactions; serialized remove/assign must not leave a ticket assigned to removed agent. New GET /projects/:slug/assignees?q=&limit= uses ProjectMembershipGuard and returns { items: AssigneeDto[] }. `AssigneeDto { type: 'user' | 'agent'; id: string; name: string; secondary: string; status?: string }`: users are non-disabled project members (id User.id, secondary email); agents are rostered ACTIVE or PAUSED (id Agent.id, secondary slug, status set). Users first, then agents, each sorted by name. q trimmed, case-insensitive substring of name, email or slug; q >100 is 400; limit default 20, integer 1..50, applies to combined list (400 otherwise). % and _ in q match literally. Repository extends AbstractPrismaRepository behind a private symbol token, not exported by standalone ProjectAssigneesModule imported by AppModule. Add tickets.userDisabled.409, tickets.agentNotInProject.409, tickets.agentOffline.409 in both API locales. Regenerate committed OpenAPI and generated CLI client. User disabled concurrently with assignment is best-effort (no lock); disabled read is inside assign transaction.\n\n**Scope** — In: ticket-repository signatures/guards, common transaction lock on agent assignment, standalone assignees module/repository/query DTO, both API locales, endpoint lifecycle and unit/integration tests. Out: UI picker (US-007), ticket-list agent-assignee filter, concurrent user-disable lock.\n\n**Interface** — `ITicketRepository.findUserById(id): Promise<{ id: string; role: string; disabled: boolean } | null>`; `findAgentById(id): Promise<{ id: string; status: string } | null>`; `isAgentOnProjectRoster(projectId, agentId): Promise<boolean>`; `lockProjectAgents(projectId): Promise<void>`. `ProjectAssigneesService.search` implements validated combined lookup; `AssigneeDto { type: 'user' | 'agent'; id: string; name: string; secondary: string; status?: string }`, `AssigneeListDto { items: AssigneeDto[] }`, `AssigneeQuery` validates q and limit; standalone `ProjectAssigneesModule` registers GET /projects/:slug/assignees.",
+      "acceptanceCriteria": [
+        "When POST /api/projects/:slug/tickets/:ref/assign names a disabled non-member userId, it returns 409 with the tickets.userDisabled message and leaves the ticket unassigned.",
+        "When POST /api/projects/:slug/tickets/:ref/assign names an unrostered OFFLINE agentId, it returns 409 with the tickets.agentNotInProject message.",
+        "When POST /api/projects/:slug/tickets/:ref/assign names a rostered OFFLINE agentId, it returns 409 with the tickets.agentOffline message.",
+        "When POST /api/projects/:slug/tickets/:ref/assign names a rostered ACTIVE agentId, it returns 200 and sets assignedToAgentId.",
+        "With AGENT_PROJECT_SCOPING=off, when POST /api/projects/:slug/tickets/:ref/assign names an unrostered agentId, it still returns 409 with the tickets.agentNotInProject message.",
+        "Given a rostered agent holding no open project tickets, concurrent DELETE /api/projects/:slug/agents/:agentSlug and POST /api/projects/:slug/tickets/:ref/assign on PG end either with DELETE 204 and assign 409 tickets.agentNotInProject, or assign 200 and DELETE 409 projectAgents.hasOpenTickets.",
+        "When GET /api/projects/:slug/assignees lists project members, it returns non-disabled users as type user with id equal to User.id and secondary equal to email, omitting disabled members.",
+        "When GET /api/projects/:slug/assignees lists agents, it returns rostered ACTIVE and PAUSED agents as type agent with id equal to Agent.id, secondary equal to slug and status set, omitting OFFLINE rostered agents.",
+        "When GET /api/projects/:slug/assignees lists agents, it omits agents without an AgentProject row for that project.",
+        "When GET /api/projects/:slug/assignees returns users and agents, it puts all users before all agents and orders each group by name.",
+        "When GET /api/projects/:slug/assignees?q=ALI runs, it matches member Alice and agent alias-bot case-insensitively.",
+        "Given 3 matching users and 2 matching agents, GET /api/projects/:slug/assignees?limit=2 returns 2 items.",
+        "When GET /api/projects/:slug/assignees?limit=51 runs, it returns 400.",
+        "When GET /api/projects/:slug/assignees receives q of 101 characters, it returns 400.",
+        "When a non-member user calls GET /api/projects/:slug/assignees, it returns 403.",
+        "When GET /api/projects/:slug/assignees?limit=0 runs, it returns 400.",
+        "When GET /api/projects/:slug/assignees?q=%25 runs, it only returns assignees whose searchable fields contain a literal percent sign."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "security",
+        "concurrency"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Transaction ordering and access-controlled new module with cross-path concurrency guarantee.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
+      },
+      "contextFiles": [
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/src/tickets/prisma-tickets.repository.ts",
+        "apps/api/src/tickets/domain/ticket.domain.ts",
+        "apps/api/src/projects/invites/project-invites.module.ts",
+        "apps/api/src/projects/members/project-members.controller.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/projects/assignees/project-assignees.module.ts",
+        "apps/api/src/projects/assignees/project-assignees.controller.ts",
+        "apps/api/src/projects/assignees/project-assignees.service.ts",
+        "apps/api/src/projects/assignees/prisma-project-assignees.repository.ts",
+        "apps/api/src/projects/assignees/dto/assignee.dto.ts",
+        "apps/api/test/integration/tickets/ticket-assign-guards.integration.spec.ts",
+        "apps/api/test/integration/projects/project-assignees.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/tickets/tickets.service.spec.ts",
+          "reason": "\"should assign ticket to agent\" (`~:1008`) resolves findAgentById to an object without status and the ticketRepo mock lacks isAgentOnProjectRoster and lockProjectAgents. Replacing invariant: assigning a rostered ACTIVE agent sets assignedToAgentId; an unrostered agent is refused with 409."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "\"POST .../assign — assigns ticket to agent\" (`:1196`) passes once the agent is rostered (US-001 setup); this story adds the assignees route cases (happy path plus one error). Existing expectations unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "f582622179ff5c96a7ba7c78637ac1a57dc1c548"
+    },
+    {
+      "id": "US-005",
+      "title": "CLI project agent roster commands",
+      "description": "**Goal** — Expose project agent roster list/add/remove from the thin CLI using generated API methods.\n\n**Motivation** — A project has no real agent roster; terminal users need management commands backed by the API.\n\n**Approach** — Subcommands of koda project, each taking --project <slug> resolved through withContext({ projectSlug }) like member.ts, and --json: koda project agents calls projectsControllerGetProjectAgents; stdout table Slug | Name | Status | Open tickets (or ProjectAgentListDto JSON); when scoping false, stderr note \"Agent scoping is off on this server\". koda project agent-add <agentSlug> calls projectsControllerAddProjectAgent; stdout `Added <agentSlug> to <project>` (or ProjectAgentDto JSON). koda project agent-remove <agentSlug> calls projectsControllerRemoveProjectAgent; stdout `Removed <agentSlug> from <project>`. Exit 0 success; exit 1 API/network error with API's translated message (including 409 open-ticket refs) on stderr via handleApiError; exit 2 config/auth error. Use unwrap, configureApiClient and existing output helpers; never duplicate backend role or roster logic or hand-edit generated client.\n\n**Scope** — In: three subcommands and mocked generated client unit tests. Out: API roster routes (US-003), web roster page (US-006), local permission logic.\n\n**Interface** — `projectsControllerGetProjectAgents({ path: { slug } })`, `projectsControllerAddProjectAgent({ path: { slug }, body: { agentSlug } })`, `projectsControllerRemoveProjectAgent({ path: { slug, agentSlug } })`; list response `ProjectAgentListDto { scoping: boolean; items: ProjectAgentDto[] }`.",
+      "acceptanceCriteria": [
+        "When koda project agents --project alpha runs, it calls projectsControllerGetProjectAgents with path { slug: 'alpha' } and prints one table row per item with slug, name, status and open-ticket count.",
+        "When koda project agents --project alpha --json runs, it prints the { scoping, items } response as JSON.",
+        "When koda project agents receives scoping: false, it writes 'Agent scoping is off on this server' to stderr.",
+        "When koda project agent-add bot-1 --project alpha runs, it calls projectsControllerAddProjectAgent with path { slug: 'alpha' } and body { agentSlug: 'bot-1' } and exits 0.",
+        "When koda project agent-remove bot-1 --project alpha runs, it calls projectsControllerRemoveProjectAgent with path { slug: 'alpha', agentSlug: 'bot-1' } and exits 0.",
+        "When koda project agent-remove bot-1 --project alpha receives an API 409, it exits 1 and writes the API error message to stderr."
+      ],
+      "tags": [
+        "feature",
+        "cli"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Existing CLI group plus tests consume generated endpoints without new authorization rules.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/cli/src/commands/project.ts",
+        "apps/cli/src/commands/member.ts",
+        "apps/cli/src/commands/project.spec.ts",
+        "apps/cli/src/utils/error.ts"
+      ],
+      "workdir": "apps/cli",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "ee8df12cc6854facb16d2746a379296ddee14255"
+    },
+    {
+      "id": "US-006",
+      "title": "Web project agents roster page",
+      "description": "**Goal** — Show explicit project agent roster and admin add/remove actions in the Nuxt agents page.\n\n**Motivation** — GET /projects/:slug/agents lists agents that happen to have tickets assigned in the project, so a project has no real agent roster.\n\n**Approach** — pages/[project]/agents.vue reads ProjectAgentListDto through a new useProjectAgents(slug) composable. Table: name, slug, roles, capabilities, status, open tickets; project ADMINs and global ADMINs also see added by/at and a Remove button. \"Add agent\" (project ADMINs and global ADMINs) opens AddProjectAgentDialog.vue, which lists GET /agents minus the roster minus OFFLINE agents and posts { agentSlug }. Remove asks for confirmation; a row with openTicketCount > 0 shows \"Reassign its N open tickets first\" with openTicketRefs as ticket links instead of sending DELETE. When scoping is false the page shows an info note. Empty state \"No agents on this project yet.\" The pause/resume control stays. Project ADMIN or global ADMIN sees management controls, determined from useProjectViewerRole. Use /api-proxied Nuxt useApi, apiPath and extractApiError to toast failures; on 409 remove reload roster so stale counts refresh. All UI text goes through t(...) and both apps/web/i18n/locales/{en,zh}.json. Preserve current capability column and status PATCH route; the new ProjectAgentDto has slug but no id, so key rows by slug rather than the old Agent.id. Read docs/ux/redesign/MASTER-PLAN.md before page/layout changes and update its Status table and Decisions log in the same PR.\n\n**Scope** — In: Nuxt roster composable, page, add dialog, UI translations and tests. Out: backend roster/write routes (US-002/003), assignee picker (US-007), agents section on members panel, per-project agent roles.\n\n**Interface** — `useProjectAgents(slug)` provides list/add/remove/refresh against GET/POST/DELETE `/projects/:slug/agents` using `ProjectAgentListDto { scoping: boolean; items: ProjectAgentDto[] }`; `AddProjectAgentDialog.vue` posts `{ agentSlug }` to `/projects/:slug/agents` and refreshes roster on success.",
+      "acceptanceCriteria": [
+        "When pages/[project]/agents.vue receives GET /projects/:slug/agents with items, it renders one row per item with name, slug, roles, capabilities, status and open-ticket count.",
+        "When the viewer is project ADMIN or global ADMIN, pages/[project]/agents.vue shows Add agent and Remove buttons; otherwise it hides them.",
+        "When AddProjectAgentDialog lists agents from GET /agents, it excludes agents already rostered and those whose status is OFFLINE.",
+        "When AddProjectAgentDialog confirms a selected agent, it posts { agentSlug } to /projects/:slug/agents and reloads the roster.",
+        "When POST /projects/:slug/agents fails, AddProjectAgentDialog displays the error via extractApiError and stays open.",
+        "When removing a roster entry with openTicketCount 0, the page sends DELETE /projects/:slug/agents/:agentSlug only after confirmation and reloads the roster.",
+        "When removing a roster entry with openTicketCount 2, the page shows 'Reassign its 2 open tickets first' and links each openTicketRefs entry to its ticket page without sending DELETE.",
+        "When DELETE /projects/:slug/agents/:agentSlug returns 409, the page shows the error via extractApiError and reloads the roster.",
+        "When GET /projects/:slug/agents has scoping: false, pages/[project]/agents.vue shows the scoping-off info note.",
+        "When GET /projects/:slug/agents has empty items, pages/[project]/agents.vue shows the 'No agents on this project yet.' empty state."
+      ],
+      "tags": [
+        "feature",
+        "web"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "UI role-gated controls consume admin-restricted endpoints and must not expose agent roster mutations to other viewers.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/agents.vue",
+        "apps/web/tests/pages/agents.spec.ts",
+        "apps/web/components/ProjectInvitesPanel.vue",
+        "apps/web/composables/useProjectMembers.ts",
+        "apps/web/composables/useProjectViewerRole.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/composables/useProjectAgents.ts",
+        "apps/web/components/AddProjectAgentDialog.vue",
+        "apps/web/tests/components/AddProjectAgentDialog.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/pages/agents.spec.ts",
+          "reason": "pins the page's fetch and columns (`:39` path pattern, `:71` capabilities column, `:110` capabilities badges, `:207` patch path) against a bare-array response. Replacing invariant: the page fetches the project agents route, renders the items of the ProjectAgentListDto (capabilities column kept) and patches status at the per-agent route."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "2192c087120b1f77cb19a6a813f5136c9fb8d08c"
+    },
+    {
+      "id": "US-007",
+      "title": "Web assignee picker and disabled-member badge",
+      "description": "**Goal** — Replace free-text ticket assignment with eligible assignee search and identify disabled members in the project panel.\n\n**Motivation** — The web assigns a ticket through a free-text user-id input, and the members panel cannot show a disabled member because ProjectMemberDto drops the disabled flag.\n\n**Approach** — AssigneePicker.vue: combobox over GET /projects/:slug/assignees?q= (200 ms debounce), \"People\" and \"Agents\" groups, \"(paused)\" tag; choosing an item passes its type and id to TicketProperties, which posts { userId } or { agentId } to /projects/:slug/tickets/:ref/assign. It replaces the free-text input in TicketProperties.vue; the current-assignee display and Unassign stay. ProjectMembersPanel.vue: a \"Disabled\" badge and no role select for a member whose disabled is true; ProjectMember type in useProjectMembers.ts gains disabled: boolean. All strings via t(...) in apps/web/i18n/locales/{en,zh}.json; API errors via extractApiError. Use Nuxt useApi + relative /api proxy and safe interpolation, not a generated web client. Read docs/ux/redesign/MASTER-PLAN.md before changing ticket UI and update Status table and Decisions log in the same PR.\n\n**Scope** — In: assignee picker, TicketProperties assignment integration, disabled-member type and badge, translations and component tests. Out: backend assignees/assignment guards (US-004), changing Unassign/current-assignee display, enabling/disabling user accounts or an agents section on members panel.\n\n**Interface** — `AssigneeDto { type: 'user' | 'agent'; id: string; name: string; secondary: string; status?: string }`; GET `/projects/:slug/assignees?q=<text>` returns `{ items: AssigneeDto[] }`; TicketProperties POST `/projects/:slug/tickets/:ref/assign` takes `{ userId: id }` or `{ agentId: id }`, emits `changed` only after success; `ProjectMember.disabled: boolean`.",
+      "acceptanceCriteria": [
+        "When the user stops typing in AssigneePicker, it sends one GET /projects/:slug/assignees?q=<text> request 200 ms later.",
+        "When AssigneePicker receives user and agent items, it renders users under People and agents under Agents, with '(paused)' on a PAUSED agent item.",
+        "When a user item is chosen in AssigneePicker inside TicketProperties, it POSTs { userId: <id> } to /projects/:slug/tickets/:ref/assign and emits changed.",
+        "When an agent item is chosen in AssigneePicker inside TicketProperties, it POSTs { agentId: <id> } to /projects/:slug/tickets/:ref/assign and emits changed.",
+        "When the assign POST returns 409, TicketProperties shows the error through extractApiError and does not emit changed.",
+        "When TicketProperties renders, it no longer renders the free-text user-id assign input.",
+        "When ProjectMembersPanel receives a member whose disabled is true, it renders the Disabled badge.",
+        "When ProjectMembersPanel receives a disabled member and the viewer can manage members, it hides that member's role select.",
+        "When ProjectMembersPanel receives a member whose disabled is false, it renders no Disabled badge."
+      ],
+      "tags": [
+        "feature",
+        "web"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Multi-component UI and debounced integration; server owns authorization, no client-side security enforcement.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/web/components/TicketProperties.vue",
+        "apps/web/components/ProjectMembersPanel.vue",
+        "apps/web/composables/useProjectMembers.ts",
+        "apps/web/tests/components/ProjectMembersPanel.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/components/AssigneePicker.vue",
+        "apps/web/tests/components/AssigneePicker.spec.ts"
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "69ac38adfd26f2483122cf3856696475cdd0186e"
+    }
+  ],
+  "analysis": "This is a NestJS 11/Fastify, Prisma 7, Bun Turborepo, not the Express/Next.js stack inferred in the supplied scanner context; web is Nuxt 3 and CLI Commander.js (apps/api/AGENTS.md; apps/web/AGENTS.md; apps/cli/AGENTS.md). The API is the system of record and uses @nathapp JSON envelopes, local string enums and generated Prisma client; follow nathapp-nestjs-patterns before writing API code. US-001 must land schema + migration before downstream reads: Prisma AgentProject composite PK (agentId, projectId), cascade agent/project FKs, nullable addedBy FK; backfill distinct pairs from assigned/created tickets and comment authors including soft-deleted tickets, no subsequent resync. Tests push schema directly, so edit schema AND migration; migration backfill needs separate scratch pre-migration schema test. Projects/access: ProjectAccessService currently bypasses all non-users (apps/api/src/projects/project-access.service.ts:9-33); keep runner bypass, inject optional AUTH_CFG fail closed, check agent roster there. ProjectsService currently lists every project for agents (apps/api/src/projects/projects.service.ts:70-91); branch on scoping flag. AgentsService.findMe and suggestTicket currently have no roster read (apps/api/src/agents/agents.service.ts:170-185,242-273); target agent pickup is checked even when global ADMIN calls. Auth config schema/factory needs on/off and env validation (apps/api/src/config/auth.config.ts:8-49). Existing project controller GET agents derives from assigned tickets and PATCH resolves against that list (apps/api/src/projects/projects.controller.ts:166-216); replace with explicit roster, retain membership and admin/self gates. ProjectMembersService.add currently accepts any found user ID (apps/api/src/projects/members/project-members.service.ts:43-57); repository lookup and DTO must expose disabled. TicketsService.assign currently performs existence/member checks outside the update transaction (apps/api/src/tickets/tickets.service.ts:318-389); move checks and update inside transaction, take common project-agents advisory lock before checking agent and assigning, also use it before checking open tickets and removing roster. Lock pattern is transaction-scoped pg_advisory_xact_lock (apps/api/src/common/utils/advisory-lock.ts:1-26); no lock for concurrent disabled-user changes by design. New assignees module mirrors invites, owns private repository token, filters non-disabled members and ACTIVE/PAUSED roster agents, combines ordered lists with bounded literal substring matching; connect it in AppModule. Roster reads/writes belong in existing PrismaProjectRepository, PrismaAgentRepository and PrismaTicketsRepository; only ProjectAccessService may add a constructor parameter. Global agent permissions remain CASL global roles; scoping-off restores reach, not assignment or roster safeguards. API locale keys go into both en/zh; update OpenAPI and generated CLI using bun run generate, never edit generated client. bootHttpApp currently takes only registrationEnabled (apps/api/test/helpers/http-app.ts:17-19), add temporary scoping env override around AppFactory.create. Existing unit, integration and e2e suites in spec embed pre-scoping agent access and bare-array agent responses; revise fixtures and expectations, particularly fleet approvals, project-membership gate, endpoint lifecycle, agents pickup and code-intel. Integration/e2e DB tests require KODA_DB_TESTS=1 and local test Postgres, run sequentially because DB reset; DI module tests must be co-located DB-free unit tests. CLI project command currently uses generated operations and unwrap/table (apps/cli/src/commands/project.ts:1-39); member command demonstrates withContext({projectSlug}) (apps/cli/src/commands/member.ts:62). Preserve exit codes and error formatter. Web project agents page currently consumes a bare array, retains status controls (apps/web/pages/[project]/agents.vue:1-137); use Nuxt composable/useApi and new DTO, project-admin-only edits, translate both locale files. TicketProperties has free-text user ID assignment and separate unassign (apps/web/components/TicketProperties.vue:157-184,296-298); replace only assign UI with debounced picker. Members panel has no disabled badge (apps/web/components/ProjectMembersPanel.vue:70). Web UX master plan requires update of status/decisions when changing layouts/pages (docs/ux/redesign/MASTER-PLAN.md:34-58); preserve semantic tokens and no v-html. Dependencies: US-001 -> US-002 -> US-003 -> US-004, with CLI and agents page from US-003 and picker from US-004. Security risks: accidental bypass on cross-project paths, missing fail-closed config, off-mode mistakenly bypassing assign guard, DELETE/assign race, 404 vs 403 vs 409 semantics, contract shape and fixture migration. Flag default ON requires backfill before serving scoped requests; off offers temporary reach rollback without disabling roster/assignment invariants. Each API contract change regenerates committed root openapi.json and CLI generated files through bun run generate (these cross-workspace generated artifacts are outputs of generation, not hand-authored story scope).",
+  "outOfScope": [
+    "Per-project agent roles or per-project capability overrides; an agent's permissions inside a project come only from its global `AgentRoleEntry` roles.",
+    "Fleet runners (`Runner` model, `kr_` keys, `RunnerPrincipal`) are not scoped by the agent roster and keep their current behaviour.",
+    "Restricting `GET /agents` and `GET /agents/:slug`; both stay readable by any authenticated actor.",
+    "A project admin enabling or disabling user accounts; only a global ADMIN does that, unchanged.",
+    "An agent-assignee filter on the ticket list.",
+    "Notifications or emails about roster changes.",
+    "Removing the now-unused `AgentsService.findByProject` and `PrismaAgentRepository.findByProjectSlug`; they stay in place for a later cleanup.",
+    "Ownership checks on `repoId` / `repoRefs` / `ticketIds` passed to `ContextBuilderService` and `getChangeImpact`; a pre-existing gap, not agent-specific.",
+    "An agents section on the members panel.",
+    "Caching roster lookups; `resolveMembership` reads the roster on every request.",
+    "Re-running the backfill after deploy; it runs once inside the migration.",
+    "US-001 only: agent permissions inside a rostered project are unchanged; `assertProjectRoles` and `assertProjectPermission` keep their agent behaviour.",
+    "US-004 only: no ACs pin `limit=0` or non-integer `limit`, whitespace-only `q`, the email branch of `q`, or literal matching of `%`/`_`; the Design states that behaviour and the hardening pass may suggest tests.",
+    "US-004 only: a user disabled concurrently with an assign to that user is best-effort (no lock); the disabled check reads the row inside the assign transaction."
+  ],
+  "routingProfile": "native-m3"
+}

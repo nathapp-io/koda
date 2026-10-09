@@ -33,6 +33,8 @@ import {
 } from '../auth/principal/koda-principal.types';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { AgentsService } from '../agents/agents.service';
+import { AddProjectAgentDto } from '../agents/dto/add-project-agent.dto';
+import { ProjectAgentDto, ProjectAgentListDto } from '../agents/dto/project-agent.dto';
 import { UpdateAgentDto } from '../agents/dto/update-agent.dto';
 import { ActorRole } from '../common/enums';
 import { ProjectMembershipGuard } from './project-membership.guard';
@@ -165,8 +167,8 @@ export class ProjectsController {
   }
 
   @Get(':slug/agents')
-  @ApiOperation({ summary: 'List agents active in a project (derived from assigned tickets)' })
-  @ApiResponse({ status: 200, description: 'Agents retrieved successfully' })
+  @ApiOperation({ summary: 'List the project agent roster (admin or member; un-paged)' })
+  @ApiResponse({ status: 200, type: ProjectAgentListDto, description: 'Roster retrieved successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - no project access' })
   @ApiResponse({ status: 404, description: 'Project not found' })
@@ -176,8 +178,48 @@ export class ProjectsController {
   ) {
     const project = await this.projectsService.findBySlug(slug);
     await this.projectsService.assertProjectMembership(project.id, principal);
-    const data = await this.agentsService.findByProject(slug);
+    const data = await this.agentsService.listProjectRoster(slug);
     return JsonResponse.Ok(data);
+  }
+
+  @Post(':slug/agents')
+  @HttpCode(201)
+  @UseGuards(ProjectMembershipGuard)
+  @ApiOperation({ summary: 'Add an agent to the project roster (project or global admin)' })
+  @ApiResponse({ status: 201, type: ProjectAgentDto, description: 'Agent added to the roster' })
+  @ApiResponse({ status: 400, description: 'Invalid request data' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - project admin role or global admin required' })
+  @ApiResponse({ status: 404, description: 'Project or agent not found' })
+  @ApiResponse({ status: 409, description: 'Agent is already on the roster, or is OFFLINE' })
+  async addProjectAgent(
+    @Param('slug') slug: string,
+    @Body() addAgentDto: AddProjectAgentDto,
+    @CurrentProject() ctx: ProjectContext,
+    @Principal() principal: KodaPrincipal,
+  ) {
+    await this.projectsService.assertProjectAdmin(ctx.project.id, principal);
+    const data = await this.agentsService.addToProject(slug, addAgentDto.agentSlug, principal.id);
+    return JsonResponse.Ok(data);
+  }
+
+  @Delete(':slug/agents/:agentSlug')
+  @HttpCode(204)
+  @UseGuards(ProjectMembershipGuard)
+  @ApiOperation({ summary: 'Remove an agent from the project roster (project or global admin)' })
+  @ApiResponse({ status: 204, description: 'Agent removed from the roster' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - project admin role or global admin required' })
+  @ApiResponse({ status: 404, description: 'Project, agent or roster entry not found' })
+  @ApiResponse({ status: 409, description: 'The agent still holds open tickets in this project' })
+  async removeProjectAgent(
+    @Param('slug') slug: string,
+    @Param('agentSlug') agentSlug: string,
+    @CurrentProject() ctx: ProjectContext,
+    @Principal() principal: KodaPrincipal,
+  ): Promise<void> {
+    await this.projectsService.assertProjectAdmin(ctx.project.id, principal);
+    await this.agentsService.removeFromProject(slug, agentSlug);
   }
 
   @Patch(':slug/agents/:agentSlug')
@@ -194,10 +236,19 @@ export class ProjectsController {
     @Principal() principal: KodaPrincipal,
   ) {
     const project = await this.projectsService.findBySlug(slug);
-    const projectAgents = await this.agentsService.findByProject(slug);
-    const target = projectAgents.find((a) => a.slug === agentSlug);
-    if (!target) {
-      throw new NotFoundAppException({}, 'agents');
+    // US-002: the target agent is resolved through the project roster, not the
+    // ticket-derived list. An agent assigned tickets but absent from the roster
+    // returns 404 — roster membership is the only thing this route mutates.
+    const onRoster = await this.agentsService.isOnProjectRosterBySlug(slug, agentSlug);
+    if (!onRoster) {
+      // US-002 AC12: an unrostered agent calling with its own API key is
+      // refused (the guard would have already 403'd, but unit tests bypass the
+      // guard and call the handler directly). A user principal asking for a
+      // non-rostered agent gets 404 — there's nothing here for them.
+      if (isAgentPrincipal(principal) && principal.slug === agentSlug) {
+        throw new ForbiddenAppException({}, 'projectAgents');
+      }
+      throw new NotFoundAppException({}, 'projectAgents');
     }
 
     // H4: only global or project ADMINs may change agent state; an agent may
@@ -206,7 +257,7 @@ export class ProjectsController {
       isUserPrincipal(principal) &&
       (principal.role === 'ADMIN' ||
         (await this.projectsService.findMembershipRole(project.id, principal.id)) === ActorRole.ADMIN);
-    const isSelf = isAgentPrincipal(principal) && principal.id === target.id;
+    const isSelf = isAgentPrincipal(principal) && principal.slug === agentSlug;
     if (!isAdmin && !isSelf) {
       throw new ForbiddenAppException({}, 'projects');
     }

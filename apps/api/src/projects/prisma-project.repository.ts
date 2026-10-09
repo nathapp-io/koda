@@ -81,4 +81,30 @@ export class PrismaProjectRepository {
     });
     return m?.role ?? null;
   }
+
+  /**
+   * S4c US-001: membership of the agent roster. The row carries no role — it
+   * grants project reach only; permissions come from AgentRoleEntry.
+   */
+  async isAgentOnRoster(projectId: string, agentId: string): Promise<boolean> {
+    const row = await this.prisma.client.agentProject.findUnique({
+      where: { agentId_projectId: { agentId, projectId } },
+      select: { agentId: true },
+    });
+    return row !== null;
+  }
+
+  /**
+   * S4c US-001: every non-deleted project on the agent's roster, in findAll
+   * order (the repository's list order).
+   */
+  async findAllForAgent(agentId: string): Promise<ProjectDomain[]> {
+    const models = await this.prisma.client.project.findMany({
+      where: {
+        deletedAt: null,
+        agents: { some: { agentId } },
+      },
+    });
+    return models.map((m) => this.toDomain(m));
+  }
 }

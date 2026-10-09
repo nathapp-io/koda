@@ -21,6 +21,8 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient, ProjectMember } from '../../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 import { createHmac } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { resetDb } from '../../helpers/reset-db';
 
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -31,6 +33,46 @@ function body<T = unknown>(res: request.Response): T {
   expect(res.body).toHaveProperty('ret', 0);
   expect(res.body).toHaveProperty('data');
   return res.body.data as T;
+}
+
+/**
+ * The library refusal envelope: `{ ret, message }` — no extra `data`.
+ *
+ * Asserting only that the stringified body *contains* the refusing key passes whether the
+ * message was translated or the lookup fell back to the raw key, so a refusal is pinned to
+ * the exact i18n key's sentence and its interpolation args. An entry that is not nested
+ * under its status
+ * (`"agentOffline": { "409": … }` rather than a flat `"agentOffline": "…"`) never resolves
+ * for `<prefix>.<code>`: the 409 then ships the raw key as its message and this fails.
+ */
+function refusal(res: request.Response, key: string, args: Record<string, unknown> = {}): void {
+  const envelope = res.body as { ret: number; message: string };
+  expect(envelope.ret).not.toBe(0);
+  expect(envelope).not.toHaveProperty('data');
+
+  // `projectAgents.alreadyAssigned.409` → src/i18n/en/projectAgents.json → alreadyAssigned.409
+  const [namespace, ...segments] = key.split('.');
+  const catalog = JSON.parse(
+    readFileSync(join(__dirname, '../../../src/i18n/en', `${namespace}.json`), 'utf8'),
+  ) as Record<string, unknown>;
+  const sentence = segments.reduce<unknown>(
+    (node, segment) =>
+      typeof node === 'object' && node !== null ? (node as Record<string, unknown>)[segment] : undefined,
+    catalog,
+  );
+
+  if (typeof sentence !== 'string') {
+    // A flat `"agentOffline": "…"` entry never resolves for `<prefix>.<code>`, so the 409
+    // would ship the raw key as its message instead of a sentence.
+    throw new Error(`${key} is not declared in src/i18n/en/${namespace}.json`);
+  }
+
+  // The refusal message is that sentence with its `{arg}` placeholders filled in.
+  expect(envelope.message).toBe(
+    sentence.replace(/\{(\w+)\}/g, (placeholder, name: string) =>
+      name in args ? String(args[name]) : placeholder,
+    ),
+  );
 }
 
 describeIntegration('API Integration Tests', () => {
@@ -252,8 +294,11 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${agentApiKey}`)
         .expect(200);
 
-      const data = body<{ slug: string }>(res);
+      const data = body<{ slug: string; projects: Array<{ slug: string; name: string }> }>(res);
       expect(data.slug).toBe('subrina-coder');
+      // S4c US-001 (AC15): the roster projects are always part of the payload —
+      // this agent holds no AgentProject row yet, so the list is empty.
+      expect(data.projects).toEqual([]);
     });
 
     it('GET /api/agents/:slug — agent by slug', async () => {
@@ -310,6 +355,11 @@ describeIntegration('API Integration Tests', () => {
         await prisma.client.projectMember.create({
           data: { projectId: project.id, userId: adminUser.id, role: 'ADMIN' },
         });
+      }
+      // S4c US-001: the agent API key reaches this project through its
+      // AgentProject roster row, not through any ProjectMember row.
+      if (project) {
+        await prisma.client.agentProject.create({ data: { projectId: project.id, agentId } });
       }
     });
 
@@ -1232,6 +1282,143 @@ describeIntegration('API Integration Tests', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────
+  // 18b. Safe Ticket Assignment and Assignees (US-004)
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('18b. Safe Ticket Assignment and Assignees (US-004)', () => {
+    let safeAssignTicketRef: string;
+    let safeAssignTicketId: string;
+
+    beforeAll(async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ type: 'BUG', title: 'Safe assignment candidate', priority: 'MEDIUM' })
+        .expect(201);
+      const created = body<{ id: string; ref: string }>(res);
+      safeAssignTicketRef = created.ref;
+      safeAssignTicketId = created.id;
+    });
+
+    it('US-004 AC1: rejects a disabled non-member user and leaves the ticket unassigned', async () => {
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      const member = await prisma.client.user.findUnique({ where: { email: 'member@koda.test' } });
+      expect(member).toBeTruthy();
+      const user = member as NonNullable<typeof member>;
+      await prisma.client.user.update({ where: { id: user.id }, data: { disabled: true } });
+
+      try {
+        const res = await request(httpServer)
+          .post(`/api/projects/${projectSlug}/tickets/${safeAssignTicketRef}/assign`)
+          .set('Authorization', `Bearer ${userAccessToken}`)
+          .send({ userId: user.id })
+          .expect(409);
+        refusal(res, 'tickets.userDisabled.409');
+        const ticket = await prisma.client.ticket.findUnique({ where: { id: safeAssignTicketId } });
+        expect(ticket?.assignedToUserId).toBeNull();
+      } finally {
+        await prisma.client.user.update({ where: { id: user.id }, data: { disabled: false } });
+      }
+    });
+
+    it('US-004 AC2: rejects an unrostered offline agent', async () => {
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      const project = await prisma.client.project.findUnique({ where: { slug: projectSlug } });
+      expect(project).toBeTruthy();
+      const safeProject = project as NonNullable<typeof project>;
+      await prisma.client.agent.update({ where: { id: agentId }, data: { status: 'OFFLINE' } });
+      await prisma.client.agentProject.delete({
+        where: { agentId_projectId: { agentId, projectId: safeProject.id } },
+      });
+      try {
+        const res = await request(httpServer)
+          .post(`/api/projects/${projectSlug}/tickets/${safeAssignTicketRef}/assign`)
+          .set('Authorization', `Bearer ${userAccessToken}`)
+          .send({ agentId })
+          .expect(409);
+        refusal(res, 'tickets.agentNotInProject.409');
+      } finally {
+        await prisma.client.agentProject.create({ data: { agentId, projectId: safeProject.id } });
+        await prisma.client.agent.update({ where: { id: agentId }, data: { status: 'ACTIVE' } });
+      }
+    });
+
+    it('US-004 AC3: rejects an offline agent that is on the project roster', async () => {
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      const agent = await prisma.client.agent.update({ where: { id: agentId }, data: { status: 'OFFLINE' } });
+      try {
+        const res = await request(httpServer)
+          .post(`/api/projects/${projectSlug}/tickets/${safeAssignTicketRef}/assign`)
+          .set('Authorization', `Bearer ${userAccessToken}`)
+          .send({ agentId })
+          .expect(409);
+        refusal(res, 'tickets.agentOffline.409');
+      } finally {
+        await prisma.client.agent.update({ where: { id: agent.id }, data: { status: 'ACTIVE' } });
+      }
+    });
+
+    it('US-004 AC7-10: returns ordered, typed non-disabled users and rostered active agents', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/assignees`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+      const data = body<{ items: Array<{ type: string; id: string; name: string; secondary: string; status?: string }> }>(res);
+      const users = data.items.filter((item) => item.type === 'user');
+      const agents = data.items.filter((item) => item.type === 'agent');
+      expect(users.length).toBeGreaterThan(0);
+      expect(agents).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'agent', id: agentId, secondary: agentSlug, status: 'ACTIVE' }),
+      ]));
+      expect(data.items.findIndex((item) => item.type === 'agent')).toBeGreaterThanOrEqual(users.length);
+      expect(users.map((item) => item.name)).toEqual([...users.map((item) => item.name)].sort((a, b) => a.localeCompare(b)));
+      expect(agents.map((item) => item.name)).toEqual([...agents.map((item) => item.name)].sort((a, b) => a.localeCompare(b)));
+    });
+
+    it('US-004 AC11: matches users and agents by case-insensitive name or slug query', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/assignees`)
+        .query({ q: 'SUBRINA' })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+      const data = body<{ items: Array<{ type: string; id: string }> }>(res);
+      expect(data.items).toContainEqual(expect.objectContaining({ type: 'agent', id: agentId }));
+    });
+
+    it('US-004 AC12: applies limit to the combined assignee result', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/assignees`)
+        .query({ limit: 1 })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+      expect(body<{ items: unknown[] }>(res).items).toHaveLength(1);
+    });
+
+    it('US-004 AC13: rejects a limit above 50', async () => {
+      await request(httpServer)
+        .get(`/api/projects/${projectSlug}/assignees`)
+        .query({ limit: 51 })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(400);
+    });
+
+    it('US-004 AC14: rejects a query longer than 100 characters', async () => {
+      await request(httpServer)
+        .get(`/api/projects/${projectSlug}/assignees`)
+        .query({ q: 'a'.repeat(101) })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(400);
+    });
+
+    it('US-004 AC15: denies a non-member from searching project assignees', async () => {
+      await request(httpServer)
+        .get(`/api/projects/${projectSlug}/assignees`)
+        .set('Authorization', `Bearer ${nonAdminUserAccessToken}`)
+        .expect(403);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
   // 19. Agent Auto-Pickup
   // ─────────────────────────────────────────────────────────────────
 
@@ -1322,10 +1509,13 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(200);
 
-      const data = body<{ id: string; slug: string; status: string }[]>(res);
-      expect(Array.isArray(data)).toBe(true);
-      // agentSlug has an assigned ticket (set up in beforeAll); it must appear in the list
-      const found = data.find((a) => a.slug === agentSlug);
+      // US-002: the response shape is { scoping, items: ProjectAgentDto[] }
+      const data = body<{ scoping: boolean; items: { slug: string; status: string }[] }>(res);
+      expect(data).toHaveProperty('scoping');
+      expect(Array.isArray(data.items)).toBe(true);
+      // agentSlug has an assigned ticket (set up in beforeAll) and is on the
+      // roster (also in beforeAll), so it must appear in items.
+      const found = data.items.find((a) => a.slug === agentSlug);
       expect(found).toBeDefined();
       expect(found?.status).toBeDefined();
     });
@@ -1595,6 +1785,16 @@ describeIntegration('API Integration Tests', () => {
       .expect(201);
 
     const freshAgentSlug = body<{ agent: { slug: string } }>(freshAgentRes).agent.slug;
+
+    // S4c US-001: the pickup target must be on the project's AgentProject roster.
+    const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+    const pickupProject = await prisma.client.project.findUnique({ where: { slug: projectSlug } });
+    const pickupAgent = await prisma.client.agent.findUnique({ where: { slug: freshAgentSlug } });
+    if (pickupProject && pickupAgent) {
+      await prisma.client.agentProject.create({
+        data: { projectId: pickupProject.id, agentId: pickupAgent.id },
+      });
+    }
 
     // Use a project that has no VERIFIED unassigned tickets for this new agent
     // The simplest way: use a non-existent project slug → service returns null (or 404 for project)
@@ -2410,6 +2610,256 @@ describeIntegration('API Integration Tests', () => {
 
       expect(data.commitHash).toBeTruthy();
       expect(typeof data.impactScore).toBe('number');
+    });
+  });
+
+  describe('US-003 Project agent roster writes', () => {
+    let rosterAgentSlug: string;
+    let rosterAgentId: string;
+    let rosterAgentApiKey: string;
+
+    it('AC1: project ADMIN adds an agent and records the administrator', async () => {
+      const createRes = await request(httpServer)
+        .post('/api/agents')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'Roster Target', slug: 'roster-target', maxConcurrentTickets: 1, roles: ['DEVELOPER'] })
+        .expect(201);
+      const created = body<{ agent: { id: string; slug: string }; apiKey: string }>(createRes);
+      rosterAgentSlug = created.agent.slug;
+      rosterAgentId = created.agent.id;
+      rosterAgentApiKey = created.apiKey;
+
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/agents`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ agentSlug: rosterAgentSlug })
+        .expect(201);
+
+      expect(body<{ slug: string }>(res).slug).toBe(rosterAgentSlug);
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const admin = await prisma.client.user.findUniqueOrThrow({ where: { email: 'admin@koda.test' } });
+      const rosterEntry = await prisma.client.agentProject.findUnique({
+        where: { agentId_projectId: { agentId: rosterAgentId, projectId: project.id } },
+      });
+      expect(rosterEntry?.addedById).toBe(admin.id);
+    });
+
+    it('AC2: a global ADMIN who is not a project member can add a roster entry', async () => {
+      const projectRes = await request(httpServer)
+        .post('/api/projects')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'Global Admin Roster Project', slug: 'global-roster-project', key: 'GRP' })
+        .expect(201);
+      const globalProjectSlug = body<{ slug: string }>(projectRes).slug;
+
+      await request(httpServer)
+        .post(`/api/projects/${globalProjectSlug}/agents`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ agentSlug: rosterAgentSlug })
+        .expect(201);
+    });
+
+    it('AC3: a project DEVELOPER cannot add an agent', async () => {
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const user = await prisma.client.user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
+      await prisma.client.projectMember.upsert({
+        where: { projectId_userId: { projectId: project.id, userId: user.id } },
+        create: { projectId: project.id, userId: user.id, role: 'DEVELOPER' },
+        update: { role: 'DEVELOPER' },
+      });
+      const candidate = await request(httpServer)
+        .post('/api/agents')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'Developer Blocked Target', slug: 'developer-blocked-target', roles: ['DEVELOPER'] })
+        .expect(201);
+      const candidateSlug = body<{ agent: { slug: string; id: string } }>(candidate).agent;
+
+      await request(httpServer)
+        .post(`/api/projects/${projectSlug}/agents`)
+        .set('Authorization', `Bearer ${nonAdminUserAccessToken}`)
+        .send({ agentSlug: candidateSlug.slug })
+        .expect(403);
+
+      const rosterEntry = await prisma.client.agentProject.findUnique({
+        where: { agentId_projectId: { agentId: candidateSlug.id, projectId: project.id } },
+      });
+      expect(rosterEntry).toBeNull();
+
+      await request(httpServer)
+        .post(`/api/projects/${projectSlug}/agents`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ agentSlug: candidateSlug.slug })
+        .expect(201);
+      await request(httpServer)
+        .delete(`/api/projects/${projectSlug}/agents/${candidateSlug.slug}`)
+        .set('Authorization', `Bearer ${nonAdminUserAccessToken}`)
+        .expect(403);
+      const retainedEntry = await prisma.client.agentProject.findUnique({
+        where: { agentId_projectId: { agentId: candidateSlug.id, projectId: project.id } },
+      });
+      expect(retainedEntry).not.toBeNull();
+    });
+
+    it('AC5: adding an OFFLINE agent returns the offline conflict', async () => {
+      const candidateRes = await request(httpServer)
+        .post('/api/agents')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'Offline Roster Target', slug: 'offline-roster-target', roles: ['DEVELOPER'] })
+        .expect(201);
+      const candidate = body<{ agent: { id: string; slug: string } }>(candidateRes).agent;
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      await prisma.client.agent.update({ where: { id: candidate.id }, data: { status: 'OFFLINE' } });
+
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/agents`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ agentSlug: candidate.slug })
+        .expect(409);
+      refusal(res, 'projectAgents.agentOffline.409');
+
+      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const rosterEntry = await prisma.client.agentProject.findUnique({
+        where: { agentId_projectId: { agentId: candidate.id, projectId: project.id } },
+      });
+      expect(rosterEntry).toBeNull();
+    });
+
+    it('AC4: adding an already-rostered agent returns 409 with the duplicate message', async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/agents`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ agentSlug: rosterAgentSlug })
+        .expect(409);
+
+      refusal(res, 'projectAgents.alreadyAssigned.409');
+    });
+
+    it('AC6: adding an unknown agent returns 404', async () => {
+      await request(httpServer)
+        .post(`/api/projects/${projectSlug}/agents`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ agentSlug: 'unknown-roster-agent' })
+        .expect(404);
+    });
+
+    it('AC12: a rostered agent cannot POST roster changes using its API key', async () => {
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      await request(httpServer)
+        .post(`/api/projects/${projectSlug}/agents`)
+        .set('Authorization', `Bearer ${rosterAgentApiKey}`)
+        .send({ agentSlug: rosterAgentSlug })
+        .expect(403);
+      const rosterEntry = await prisma.client.agentProject.findUnique({
+        where: { agentId_projectId: { agentId: rosterAgentId, projectId: project.id } },
+      });
+      expect(rosterEntry).not.toBeNull();
+    });
+
+    it('AC13: a rostered agent cannot DELETE roster entries using its API key', async () => {
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      await request(httpServer)
+        .delete(`/api/projects/${projectSlug}/agents/${rosterAgentSlug}`)
+        .set('Authorization', `Bearer ${rosterAgentApiKey}`)
+        .expect(403);
+      const rosterEntry = await prisma.client.agentProject.findUnique({
+        where: { agentId_projectId: { agentId: rosterAgentId, projectId: project.id } },
+      });
+      expect(rosterEntry).not.toBeNull();
+    });
+
+    it('AC10: removing an agent not on the roster returns 404', async () => {
+      await request(httpServer)
+        .delete(`/api/projects/${projectSlug}/agents/not-rostered-agent`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(404);
+    });
+
+    it('AC7: refuses to remove a rostered agent with open tickets and reports their refs', async () => {
+      const refs: string[] = [];
+      for (const title of ['Roster blocker one', 'Roster blocker two']) {
+        const created = await request(httpServer)
+          .post(`/api/projects/${projectSlug}/tickets`)
+          .set('Authorization', `Bearer ${userAccessToken}`)
+          .send({ type: 'TASK', title })
+          .expect(201);
+        refs.push(body<{ ref: string }>(created).ref);
+      }
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      await prisma.client.ticket.updateMany({
+        where: { projectId: project.id, number: { in: refs.map((ref) => Number(ref.split('-')[1])) } },
+        data: { assignedToAgentId: rosterAgentId },
+      });
+
+      const res = await request(httpServer)
+        .delete(`/api/projects/${projectSlug}/agents/${rosterAgentSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(409);
+      // The refusal names the count and every open ref (AC-34), and carries them as args.
+      refusal(res, 'projectAgents.hasOpenTickets.409', { count: 2, refs: refs.join(', ') });
+
+      const rosterEntry = await prisma.client.agentProject.findUnique({
+        where: { agentId_projectId: { agentId: rosterAgentId, projectId: project.id } },
+      });
+      expect(rosterEntry).not.toBeNull();
+    });
+
+    it('AC8: removes a rostered agent without open tickets and deletes its roster row', async () => {
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      await prisma.client.ticket.updateMany({
+        where: { projectId: project.id, assignedToAgentId: rosterAgentId },
+        data: { assignedToAgentId: null },
+      });
+      await request(httpServer)
+        .delete(`/api/projects/${projectSlug}/agents/${rosterAgentSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(204);
+
+      const rosterEntry = await prisma.client.agentProject.findUnique({
+        where: { agentId_projectId: { agentId: rosterAgentId, projectId: project.id } },
+      });
+      expect(rosterEntry).toBeNull();
+    });
+
+    it('AC9: a removed agent is denied project ticket access', async () => {
+      await request(httpServer)
+        .get(`/api/projects/${projectSlug}/tickets`)
+        .set('Authorization', `Bearer ${rosterAgentApiKey}`)
+        .expect(403);
+    });
+  });
+
+  describe('US-003 Disabled member guard', () => {
+    const disabledMemberEmail = 'disabled-member@koda.test';
+
+    it('AC14: adding a disabled user is refused with the disabled-account message and stores no membership', async () => {
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+
+      const registered = await request(httpServer)
+        .post('/api/auth/register')
+        .send({ email: disabledMemberEmail, name: 'Disabled Member', password: 'Member1234!Aa' })
+        .expect(201);
+      const disabledUser = body<{ user: { id: string } }>(registered).user;
+      await prisma.client.user.update({ where: { id: disabledUser.id }, data: { disabled: true } });
+
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/members`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ email: disabledMemberEmail })
+        .expect(409);
+
+      refusal(res, 'members.userDisabled.409');
+
+      const membership = await prisma.client.projectMember.findUnique({
+        where: { projectId_userId: { projectId: project.id, userId: disabledUser.id } },
+      });
+      expect(membership).toBeNull();
     });
   });
 });

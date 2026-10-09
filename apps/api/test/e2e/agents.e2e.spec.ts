@@ -98,11 +98,18 @@ describeIntegration('Agents API E2E', () => {
       })
       .expect(201);
 
-    const data = body<{ apiKey: string; agent: { slug: string; name: string } }>(res);
+    const data = body<{ apiKey: string; agent: { id: string; slug: string; name: string } }>(res);
     expect(data.apiKey).toBeTruthy();
     expect(data.agent.slug).toBe(baseAgentSlug);
     agentApiKey = data.apiKey;
     agentSlug = data.agent.slug;
+
+    // S4c US-001: the agent reaches the setup project through its AgentProject row.
+    const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+    const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+    await prisma.client.agentProject.create({
+      data: { projectId: project.id, agentId: data.agent.id },
+    });
   });
 
   it('POST /api/agents — returns 403 for non-admin user', async () => {
@@ -140,14 +147,54 @@ describeIntegration('Agents API E2E', () => {
     expect(data.capabilities.map((item) => item.capability)).toEqual(expect.arrayContaining(['typescript', 'nestjs']));
   });
 
-  it('GET /api/agents/me — returns current agent with API key', async () => {
+  it('GET /api/agents/me — returns the current agent with its live roster projects (AC15)', async () => {
+    // S4c US-001 (AC15): `projects` lists { slug, name } per non-deleted roster
+    // project, ordered by slug. `alpha` is rostered after the project created in
+    // beforeAll, so a pass cannot come from insertion order, and `zulu` is
+    // soft-deleted after its roster row exists, so only the deletedAt filter can
+    // keep it out of the list.
+    const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+    const agent = await prisma.client.agent.findUniqueOrThrow({ where: { slug: agentSlug } });
+
+    const alphaRes = await request(httpServer)
+      .post('/api/projects')
+      .set('Authorization', `Bearer ${adminAccessToken}`)
+      .send({ name: 'Agents E2E Alpha', slug: 'agents-e2e-alpha', key: 'AEA' })
+      .expect(201);
+    const alphaSlug = body<{ slug: string }>(alphaRes).slug;
+    const alpha = await prisma.client.project.findUniqueOrThrow({ where: { slug: alphaSlug } });
+
+    const zuluRes = await request(httpServer)
+      .post('/api/projects')
+      .set('Authorization', `Bearer ${adminAccessToken}`)
+      .send({ name: 'Agents E2E Zulu', slug: 'agents-e2e-zulu', key: 'AEZ' })
+      .expect(201);
+    const zuluSlug = body<{ slug: string }>(zuluRes).slug;
+    const zulu = await prisma.client.project.findUniqueOrThrow({ where: { slug: zuluSlug } });
+
+    await prisma.client.agentProject.createMany({
+      data: [
+        { projectId: alpha.id, agentId: agent.id },
+        { projectId: zulu.id, agentId: agent.id },
+      ],
+    });
+
+    await request(httpServer)
+      .delete(`/api/projects/${zuluSlug}`)
+      .set('Authorization', `Bearer ${adminAccessToken}`)
+      .expect(204);
+
     const res = await request(httpServer)
       .get('/api/agents/me')
       .set('Authorization', `Bearer ${agentApiKey}`)
       .expect(200);
 
-    const data = body<{ slug: string }>(res);
+    const data = body<{ slug: string; projects: Array<{ slug: string; name: string }> }>(res);
     expect(data.slug).toBe(agentSlug);
+    expect(data.projects).toEqual([
+      { slug: 'agents-e2e-alpha', name: 'Agents E2E Alpha' },
+      { slug: 'agents-e2e-project', name: 'Agents E2E Project' },
+    ]);
   });
 
   it('PATCH /api/agents/:slug — updates scalar fields', async () => {
@@ -252,6 +299,15 @@ describeIntegration('Agents API E2E', () => {
       .expect(201);
 
     const emptyProjectSlug = body<{ slug: string }>(emptyProjectRes).slug;
+
+    // S4c US-001: the pickup target needs a roster row on the empty project too
+    // (it has no VERIFIED tickets, so pickup returns null rather than 403).
+    const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+    const emptyProject = await prisma.client.project.findUniqueOrThrow({ where: { slug: emptyProjectSlug } });
+    const agent = await prisma.client.agent.findUniqueOrThrow({ where: { slug: agentSlug } });
+    await prisma.client.agentProject.create({
+      data: { projectId: emptyProject.id, agentId: agent.id },
+    });
 
     const res = await request(httpServer)
       .get(`/api/agents/${agentSlug}/pickup`)

@@ -18,7 +18,7 @@ import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
  *     which fails closed.
  *  2. Resolve the project (404 if missing or soft-deleted) and the caller's
  *     membership role ONCE (403 for a non-member user; global ADMIN -> 'ADMIN',
- *     agent -> null, no query for either).
+ *     no query; agent -> roster-checked, returns null, one query).
  *  3. Attach `request.projectContext` for @CurrentProject() (#145, guard half).
  *  4. @ProjectRoles(...): refuse a non-admin user whose role is not listed.
  *  5. @ProjectPermission(...): check it against the ability for

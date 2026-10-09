@@ -2,6 +2,7 @@
 import { computed, ref as vueRef } from 'vue'
 import { ChevronDown } from 'lucide-vue-next'
 import TicketActionPanel from '~/components/TicketActionPanel.vue'
+import AssigneePicker from '~/components/AssigneePicker.vue'
 import { extractApiError } from '~/composables/useApi'
 import { safeHref } from '~/lib/safe-url'
 import { apiPath } from '~/lib/api-path'
@@ -154,14 +155,20 @@ const hasLinkedSection = computed(() =>
   plainLinks.value.length > 0,
 )
 
-const assigneeUserId = vueRef('')
 const assigning = vueRef(false)
 
-async function assignTicket() {
-  if (!assigneeUserId.value.trim()) return
+interface AssigneeChoice {
+  type: 'user' | 'agent'
+  id: string
+}
+
+async function onAssigneeSelect(choice: AssigneeChoice): Promise<void> {
+  // A second pick while one assign is in flight would race the first POST.
+  if (assigning.value) return
+  const payload = choice.type === 'user' ? { userId: choice.id } : { agentId: choice.id }
   assigning.value = true
   try {
-    await $api.post(apiPath`/projects/${props.projectSlug}/tickets/${props.ticketRef}/assign`, { userId: assigneeUserId.value.trim() })
+    await $api.post(apiPath`/projects/${props.projectSlug}/tickets/${props.ticketRef}/assign`, payload)
     toast.success(t('tickets.toast.assigned'))
     emit('changed')
   } catch (err: unknown) {
@@ -293,11 +300,8 @@ async function removeLink(linkId: string) {
           <span v-else class="text-sm text-muted-foreground">{{ t('common.unassigned') }}</span>
         </div>
         <div v-if="canWork" class="space-y-2 border-t pt-2.5">
-          <Input v-model="assigneeUserId" :placeholder="t('tickets.assign.userIdPlaceholder')" />
+          <AssigneePicker :project-slug="projectSlug" :disabled="assigning" @select="onAssigneeSelect" />
           <div class="flex items-center gap-2">
-            <Button size="sm" :disabled="assigning || !assigneeUserId.trim()" @click="assignTicket">
-              {{ t('tickets.assign.assign') }}
-            </Button>
             <Button size="sm" variant="outline" :disabled="assigning" @click="unassignTicket">
               {{ t('tickets.assign.unassign') }}
             </Button>

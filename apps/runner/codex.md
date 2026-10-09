@@ -87,6 +87,7 @@ src/paths/           safe path segments
 ## Testing
 
 - Unit specs are `src/**/*.spec.ts`; run `bun run test` (no database).
+- nax acceptance: one generated file per feature, `apps/runner/.nax/features/<feature>/.nax-acceptance.test.ts`, holds every story's ACs as `test('AC-<n>: ...')`. `bun run test` only covers `src` and `test/unit`, so it never runs it. nax runs it with its default acceptance command; run it from `apps/runner` the same way: `bun test .nax/features/<feature>/.nax-acceptance.test.ts --timeout=60000 -t "AC-<a>:|AC-<b>:"`, filtered to your story's AC ids (listed per `storyId` in the repo-root `.nax/features/<feature>/acceptance-refined.json`). Keep the trailing colon so `AC-1` does not also match `AC-10`. Never copy the file into `src/` or `test/` and never edit it.
 - Integration specs (`test/integration/*.integration.spec.ts`, 3a-2) need `KODA_DB_TESTS=1`, the test Postgres and a built API.
 - Prefer real files and real SQLite (`:memory:` or a temp file) over mocks; the sync loop takes an injected client.
 - Specs that need real git and the fake nax are `test/unit/*.spec.ts`; `test/fixtures/fake-nax.ts` is the fake nax (scenarios via `FAKE_NAX_*` env; a failed run exits 1 like the real one, and the verdict never reads the exit code). Real git runs in tests, isolated by `isolateGit()`.

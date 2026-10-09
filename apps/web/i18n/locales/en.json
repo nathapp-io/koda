@@ -176,6 +176,8 @@
       "remove": "Remove",
       "removeConfirm": "Remove {email} from this project?",
       "empty": "No members yet.",
+      "disabledBadge": "Disabled",
+      "roleLabel": "Role",
       "loadMore": "Load more",
       "roles": {
         "ADMIN": "Admin",
@@ -297,6 +299,16 @@
       "assign": "Assign",
       "unassign": "Unassign"
     },
+    "assignee": {
+      "searchPlaceholder": "Search people or agents",
+      "group": {
+        "people": "People",
+        "agents": "Agents"
+      },
+      "pausedTag": "(paused)",
+      "empty": "No matching people or agents",
+      "loadError": "Couldn't load assignees. Try again."
+    },
     "labels": {
       "select": "Select label",
       "add": "Add Label"
@@ -406,18 +418,47 @@
     "title": "Agents",
     "createAgent": "Create Agent",
     "empty": "No agents yet.",
+    "project": {
+      "empty": "No agents on this project yet.",
+      "scopingOff": "Project agent scoping is disabled on this instance. Roster changes may be ignored.",
+      "openTickets": "Open tickets: {count}",
+      "reassignFirst": "Reassign its {count} open tickets first",
+      "addedBy": "Added by {name}",
+      "addedAt": "Added {date}",
+      "addAgent": "Add agent",
+      "added": "Agent added to the project",
+      "addFailed": "Failed to add agent",
+      "removed": "Agent removed from the project",
+      "removeFailed": "Failed to remove agent"
+    },
     "columns": {
       "name": "Name",
       "slug": "Slug",
       "roles": "Roles",
       "capabilities": "Capabilities",
       "status": "Status",
-      "actions": "Actions"
+      "actions": "Actions",
+      "openTickets": "Open tickets",
+      "addedBy": "Added by",
+      "addedAt": "Added"
     },
     "status": {
       "ACTIVE": "ACTIVE",
       "PAUSED": "PAUSED",
       "OFFLINE": "OFFLINE"
+    },
+    "addProjectAgent": {
+      "title": "Add agent to project",
+      "description": "Pick an agent to add to this project. OFFLINE agents and agents already on the roster are not offered.",
+      "noCandidates": "No more agents are available to add.",
+      "selectPlaceholder": "Choose an agent…",
+      "confirm": "Add agent"
+    },
+    "removeProjectAgent": {
+      "title": "Remove agent",
+      "confirm": "Remove {name} from this project? Open tickets will block this action.",
+      "blocked": "Cannot remove {name}: {message}",
+      "remove": "Remove"
     },
     "toast": {
       "created": "Agent created successfully",

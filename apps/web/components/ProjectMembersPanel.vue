@@ -64,9 +64,25 @@ onMounted(async () => {
 
     <form v-if="canManage" class="flex flex-wrap gap-2" @submit.prevent="onAdd">
       <Input v-model="newEmail" type="email" class="max-w-xs" :placeholder="t('projects.members.addEmail')" />
-      <select v-model="newRole" class="h-9 rounded-md border border-input bg-background px-2 text-sm">
-        <option v-for="role in ASSIGNABLE_MEMBER_ROLES" :key="role" :value="role">{{ t(`projects.members.roles.${role}`) }}</option>
-      </select>
+      <div
+        role="radiogroup"
+        :aria-label="t('projects.members.roleLabel')"
+        class="flex h-9 items-center rounded-md border border-input bg-background p-0.5 text-sm"
+      >
+        <Button
+          v-for="role in ASSIGNABLE_MEMBER_ROLES"
+          :key="role"
+          type="button"
+          variant="ghost"
+          size="sm"
+          :data-role="role"
+          :aria-pressed="newRole === role"
+          :class="newRole === role ? 'bg-muted font-medium' : 'text-muted-foreground hover:text-foreground'"
+          @click="newRole = role"
+        >
+          {{ t(`projects.members.roles.${role}`) }}
+        </Button>
+      </div>
       <Button type="submit" :disabled="adding">{{ adding ? t('common.loading') : t('projects.members.add') }}</Button>
     </form>
 
@@ -75,18 +91,35 @@ onMounted(async () => {
     <ul v-else class="divide-y divide-border">
       <li v-for="member in members" :key="member.userId" class="flex items-center justify-between gap-4 py-2">
         <div>
-          <div class="text-sm font-medium">{{ member.name || member.email }}</div>
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium">{{ member.name || member.email }}</span>
+            <span v-if="member.disabled" data-testid="member-disabled-badge" class="inline-flex h-[22px] items-center rounded-full border border-status-rejected/40 bg-status-rejected/10 px-2.5 text-xs font-medium text-status-rejected">
+              {{ t('projects.members.disabledBadge') }}
+            </span>
+          </div>
           <div class="text-xs text-muted-foreground">{{ member.email }}</div>
         </div>
         <div class="flex items-center gap-2">
-          <select
-            v-if="canManage && isAssignableRole(member.role)"
-            :value="member.role"
-            class="h-8 rounded-md border border-input bg-background px-2 text-sm"
-            @change="onRoleChange(member, ($event.target as HTMLSelectElement).value as AssignableMemberRole)"
+          <div
+            v-if="canManage && !member.disabled && isAssignableRole(member.role)"
+            role="radiogroup"
+            :aria-label="`${t('projects.members.roleLabel')}: ${member.name || member.email}`"
+            class="flex h-8 items-center rounded-md border border-input bg-background p-0.5 text-sm"
           >
-            <option v-for="role in ASSIGNABLE_MEMBER_ROLES" :key="role" :value="role">{{ t(`projects.members.roles.${role}`) }}</option>
-          </select>
+            <Button
+              v-for="role in ASSIGNABLE_MEMBER_ROLES"
+              :key="role"
+              type="button"
+              variant="ghost"
+              size="sm"
+              :data-role="role"
+              :aria-pressed="member.role === role"
+              :class="member.role === role ? 'bg-muted font-medium' : 'text-muted-foreground hover:text-foreground'"
+              @click="onRoleChange(member, role)"
+            >
+              {{ t(`projects.members.roles.${role}`) }}
+            </Button>
+          </div>
           <span v-else class="text-sm">{{ t(`projects.members.roles.${member.role}`) }}</span>
           <Button v-if="canManage" size="sm" variant="outline" @click="onRemove(member)">{{ t('projects.members.remove') }}</Button>
         </div>

@@ -18,6 +18,7 @@ describe('ProjectMembersService', () => {
     repo = {
       findMemberPage: jest.fn(),
       findMember: jest.fn(),
+      findUserByEmail: jest.fn(),
       findUserIdByEmail: jest.fn(),
       createMember: jest.fn(async (_p: string, userId: string, role: string) => member(userId, role)),
       updateMemberRole: jest.fn(async (_p: string, userId: string, role: string) => member(userId, role)),
@@ -76,14 +77,51 @@ describe('ProjectMembersService', () => {
   });
 
   it('add: unknown email is 404, duplicate member is 409', async () => {
+    repo.findUserByEmail.mockResolvedValueOnce(null);
     repo.findUserIdByEmail.mockResolvedValueOnce(null);
     await expect(service.add('proj', { email: 'ghost@k.t', role: 'VIEWER' }, globalAdmin)).rejects.toBeInstanceOf(NotFoundAppException);
 
+    repo.findUserByEmail.mockResolvedValueOnce({ id: 'u1', disabled: false });
     repo.findUserIdByEmail.mockResolvedValueOnce('u1');
     repo.createMember.mockRejectedValueOnce(new Prisma.PrismaClientKnownRequestError('dup', {
       code: 'P2002', clientVersion: 'test', meta: { target: ['projectId', 'userId'] },
     }));
     await expect(service.add('proj', { email: 'u1@k.t', role: 'VIEWER' }, globalAdmin)).rejects.toBeInstanceOf(ConflictAppException);
+  });
+
+  it('AC14: refuses to add a disabled user without creating membership', async () => {
+    repo.findUserByEmail.mockResolvedValue({ id: 'disabled-user', disabled: true });
+    repo.findUserIdByEmail.mockResolvedValue('disabled-user');
+
+    // The disabled refusal is the `members.userDisabled.409` AppException (the
+    // i18n key lives in `prefix`; the HTTP body renders it through the global
+    // exception filter, which a service-level test does not run).
+    const error = await service.add('proj', { email: 'disabled@k.t', role: 'VIEWER' }, globalAdmin)
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ConflictAppException);
+    expect((error as ConflictAppException).prefix).toBe('members.userDisabled');
+    expect((error as ConflictAppException).httpStatus).toBe(409);
+
+    expect(repo.createMember).not.toHaveBeenCalled();
+  });
+
+  it('AC15: lists each member disabled state', async () => {
+    repo.findMemberPage.mockResolvedValue({
+      total: 2,
+      current: 1,
+      size: 20,
+      hasNext: false,
+      hasPrev: false,
+      records: [member('disabled-user', 'VIEWER', true), member('enabled-user', 'DEVELOPER', false)],
+    });
+    access.resolveMembership.mockResolvedValue('ADMIN');
+
+    const result = await service.list('proj', projectAdmin, { current: 1, size: 20 });
+
+    expect(result.page.records).toEqual(expect.arrayContaining([
+      expect.objectContaining({ userId: 'disabled-user', disabled: true }),
+      expect.objectContaining({ userId: 'enabled-user', disabled: false }),
+    ]));
   });
 
   it('updateRole/remove 404 a non-member', async () => {

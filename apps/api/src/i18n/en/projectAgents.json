@@ -1,0 +1,14 @@
+{
+  "notFound": "Project agent not found",
+  "404": "Project agent not found",
+  "alreadyAssigned": {
+    "409": "Agent is already on the project roster"
+  },
+  "409": "Agent is already on the project roster",
+  "agentOffline": {
+    "409": "Agent is offline and cannot be added to the project"
+  },
+  "hasOpenTickets": {
+    "409": "{count} open tickets are still assigned to this agent: {refs}"
+  }
+}

@@ -10,6 +10,7 @@ export interface ProjectMember {
   name: string | null
   role: string
   joinedAt: string
+  disabled: boolean
 }
 
 interface MemberPage {

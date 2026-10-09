@@ -70,5 +70,23 @@
         "smartTestRunner": {
             "testFilePatterns": ["**/*.spec.ts"]
         }
+    },
+    "mcp": {
+        "servers": {
+            "codebase-memory": {
+                "command": "codebase-memory-mcp",
+                "stages": ["run"],
+                "allowedTools": [
+                    "search_graph",
+                    "trace_path",
+                    "get_code_snippet",
+                    "get_architecture",
+                    "search_code",
+                    "detect_changes",
+                    "check_index_coverage",
+                    "list_projects"
+                ]
+            }
+        }
     }
 }

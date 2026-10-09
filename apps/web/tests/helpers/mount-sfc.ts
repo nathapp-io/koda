@@ -61,6 +61,14 @@ export interface Mounted {
   textOf: (found: FakeNode) => string
   /** Args of every emit the component fired, in order; filtered by name when given. */
   emitted: (name?: string) => unknown[][]
+  /**
+   * Update the root component's props. The props are wrapped in a reactive proxy at mount time
+   * (see Vue's createApp), so re-assigning keys here triggers any `watch`/`computed` that reads
+   * them — this is the path that lets a test simulate "open the dialog" and observe its watcher.
+   */
+  setProps: (props: Record<string, unknown>) => void
+  /** Reach the running component instance, mostly for `defineExpose` handles the test drives. */
+  instance: () => { expose?: Record<string, unknown> } | null
   unmount: () => void
 }
 
@@ -114,7 +122,7 @@ const VUE_HELPERS = ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount',
 const NUXT_AUTO_IMPORTS = [
   'useI18n', 'useAppToast', 'useState', 'useHead', 'navigateTo', 'useApi', 'useRuntimeConfig', 'definePageMeta',
   'useAsyncData', 'useVisiblePolling', 'useFleetRunners', 'useFleetRepos', 'useRoute', 'useRouter',
-  'useFleetDispatchOptions', 'useFleetJobs', 'useProjectViewerRole',
+  'useFleetDispatchOptions', 'useFleetJobs', 'useProjectViewerRole', 'useProjectMembers',
   'useAdminUsers', 'useProjectEvents', 'useAuth', 'useProjectMemberNames', 'useFleetJobLogs',
   'useFleetRepoConfig', 'onBeforeRouteLeave',
 ] as const
@@ -330,6 +338,36 @@ const walk = (selector: string, from: FakeNode = root, into: FakeNode[] = []): F
     text: () => textOf(root),
     textOf,
     emitted: (name?: string) => records.filter(([n]) => name === undefined || n === name).map(([, args]) => args),
+    /**
+     * Update the props on the running component instance directly. Vue stores the live props
+     * on `_instance.props` as a `shallowReactive` proxy; mutating it here fires any watcher
+     * declared on the component (`watch(() => props.x, …)`) and triggers a re-render — the
+     * path a test needs to "open the dialog" without a real parent.
+     */
+    setProps: (next: Record<string, unknown>) => {
+      const appInstance = (app as unknown as { _instance?: { props?: Record<string, unknown>; subTree?: { component?: { props?: Record<string, unknown>; subTree?: { component?: { props?: Record<string, unknown> } } } } } })._instance
+      const targets: Array<Record<string, unknown>> = []
+      if (appInstance?.props) targets.push(appInstance.props)
+      let subtree: { component?: { props?: Record<string, unknown>; subTree?: { component?: { props?: Record<string, unknown> } } } } | undefined = appInstance?.subTree
+      while (subtree) {
+        if (subtree.component?.props) targets.push(subtree.component.props)
+        subtree = subtree.component?.subTree
+      }
+      for (const target of targets) {
+        for (const [key, value] of Object.entries(next)) target[key] = value
+      }
+    },
+    /**
+     * Walks the running instance tree and returns the first child component's exposed bindings.
+     * The harness wraps the inner component in a `withEmitRecorder` shim, so the dialog's
+     * `defineExpose` lives on `app._instance.subTree.component.exposed`. Tests that want to
+     * drive a method on a child component (the dialog's `loadCandidates`, say) get it here.
+     */
+    instance: () => {
+      const appInstance = (app as unknown as { _instance?: { subTree?: { component?: { exposed?: Record<string, unknown> } } } })._instance
+      const exposed = appInstance?.subTree?.component?.exposed
+      return exposed ? { expose: exposed } : null
+    },
     unmount: () => app.unmount(),
   }
 }

@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AgentsService } from './agents.service';
 import { PrismaAgentRepository } from './prisma-agent.repository';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
-import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { createHmac } from 'crypto';
 import { randomBytes } from 'crypto';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
@@ -73,6 +73,9 @@ describe('AgentsService', () => {
     findProjectBySlug: jest.fn(),
     findVerifiedUnassignedTickets: jest.fn(),
     findByProjectSlug: jest.fn(),
+    isOnProjectRoster: jest.fn(),
+    findRosterProjects: jest.fn(),
+    findProjectRoster: jest.fn(),
   };
 
   const mockAuthConfig: IAuthConfig = {
@@ -115,6 +118,10 @@ describe('AgentsService', () => {
 
     mockAgentRepo.replaceRoles.mockResolvedValue(undefined);
     mockAgentRepo.replaceCapabilities.mockResolvedValue(undefined);
+    // S4c US-001: GET /agents/me always carries the roster projects, and a
+    // rostered target agent is the default for the pickup tests.
+    mockAgentRepo.findRosterProjects.mockResolvedValue([]);
+    mockAgentRepo.isOnProjectRoster.mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -405,13 +412,43 @@ describe('AgentsService', () => {
   });
 
   describe('findMe', () => {
-    it('should return authenticated agent profile by id', async () => {
+    it('should return authenticated agent profile by id with its roster projects', async () => {
+      mockAgentRepo.findById.mockResolvedValue(mockAgentWithRelations);
+      mockAgentRepo.findRosterProjects.mockResolvedValue([{ slug: 'koda', name: 'Koda' }]);
+
+      const result = await service.findMe('agent-123');
+
+      expect(result).toEqual({
+        ...mockAgentDto,
+        projects: [{ slug: 'koda', name: 'Koda' }],
+      });
+      expect(agentRepo.findById).toHaveBeenCalledWith('agent-123');
+      expect(agentRepo.findRosterProjects).toHaveBeenCalledWith('agent-123');
+    });
+
+    it('should report an empty project list for an agent with no roster rows', async () => {
       mockAgentRepo.findById.mockResolvedValue(mockAgentWithRelations);
 
       const result = await service.findMe('agent-123');
 
-      expect(result).toEqual(mockAgentDto);
-      expect(agentRepo.findById).toHaveBeenCalledWith('agent-123');
+      expect(result.projects).toEqual([]);
+    });
+
+    it('should list each roster project as slug and name, in repository order (S4c US-001 AC15)', async () => {
+      mockAgentRepo.findById.mockResolvedValue(mockAgentWithRelations);
+      // The repository returns non-deleted roster projects ordered by slug; the
+      // DTO must keep that order and must not leak any other column.
+      mockAgentRepo.findRosterProjects.mockResolvedValue([
+        { slug: 'alpha', name: 'Alpha', deletedAt: null },
+        { slug: 'bravo', name: 'Bravo', id: 'project-2' },
+      ] as never);
+
+      const result = await service.findMe('agent-123');
+
+      expect(result.projects).toEqual([
+        { slug: 'alpha', name: 'Alpha' },
+        { slug: 'bravo', name: 'Bravo' },
+      ]);
     });
 
     it('should include roles with all AgentRole enum values', async () => {
@@ -747,6 +784,35 @@ describe('AgentsService', () => {
       await expect(service.suggestTicket('nonexistent', 'koda', authorizedPrincipal)).rejects.toThrow();
     });
 
+    it('should throw ForbiddenAppException when the target agent is not on the project roster (S4c US-001 AC13)', async () => {
+      mockAgentRepo.findBySlugWithCapabilities.mockResolvedValue(mockAgentForPickup);
+      mockAgentRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockAgentRepo.isOnProjectRoster.mockResolvedValue(false);
+
+      await expect(
+        service.suggestTicket('test-agent', 'koda', authorizedPrincipal),
+      ).rejects.toBeInstanceOf(ForbiddenAppException);
+      expect(agentRepo.isOnProjectRoster).toHaveBeenCalledWith('agent-123', 'project-1');
+      expect(agentRepo.findVerifiedUnassignedTickets).not.toHaveBeenCalled();
+    });
+
+    it('should admit an unrostered target when agent project scoping is off (S4c US-001 AC14)', async () => {
+      const unscoped = new AgentsService(
+        mockAgentRepo as never,
+        { ...mockAuthConfig, agentProjectScoping: false },
+        mockTxManager as never,
+        mockKodaDomainWriter as never,
+      );
+
+      mockAgentRepo.findBySlugWithCapabilities.mockResolvedValue(mockAgentForPickup);
+      mockAgentRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockAgentRepo.isOnProjectRoster.mockResolvedValue(false);
+      mockAgentRepo.findVerifiedUnassignedTickets.mockResolvedValue([]);
+
+      await expect(unscoped.suggestTicket('test-agent', 'koda', authorizedPrincipal)).resolves.toBeNull();
+      expect(agentRepo.isOnProjectRoster).not.toHaveBeenCalled();
+    });
+
     it('should return highest-priority ticket when all scores are 0 (score-0 fallback)', async () => {
       mockAgentRepo.findBySlugWithCapabilities.mockResolvedValue(mockAgentForPickup);
       mockAgentRepo.findProjectBySlug.mockResolvedValue(mockProject);
@@ -831,6 +897,98 @@ describe('AgentsService', () => {
       mockAgentRepo.findByProjectSlug.mockResolvedValue(null);
 
       await expect(service.findByProject('nonexistent')).rejects.toThrow(NotFoundAppException);
+    });
+  });
+
+  describe('listProjectRoster', () => {
+    const makeRecord = (over: {
+      slug?: string;
+      addedById?: string | null;
+      addedByName?: string | null;
+      openTicketCount?: number;
+      openTicketRefs?: string[];
+    } = {}) => ({
+      slug: over.slug ?? 'bot',
+      name: 'Bot',
+      status: 'ACTIVE',
+      roles: ['DEVELOPER'],
+      capabilities: ['typescript'],
+      openTicketCount: over.openTicketCount ?? 0,
+      openTicketRefs: over.openTicketRefs ?? [],
+      addedAt: new Date('2026-10-01T00:00:00.000Z'),
+      addedById: over.addedById === undefined ? 'user-admin' : over.addedById,
+      addedByName: over.addedByName === undefined ? 'Admin' : over.addedByName,
+    });
+
+    it('returns the scoped project roster as ProjectAgentListDto', async () => {
+      mockAgentRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-1', slug: 'alpha', deletedAt: null });
+      mockAgentRepo.findProjectRoster.mockResolvedValue([makeRecord()]);
+
+      const result = await service.listProjectRoster('alpha');
+
+      expect(mockAgentRepo.findProjectBySlug).toHaveBeenCalledWith('alpha');
+      expect(mockAgentRepo.findProjectRoster).toHaveBeenCalledWith('proj-1');
+      expect(result.scoping).toBe(true);
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0]).toMatchObject({
+        slug: 'bot',
+        status: 'ACTIVE',
+        roles: ['DEVELOPER'],
+        capabilities: ['typescript'],
+        openTicketCount: 0,
+        openTicketRefs: [],
+        addedBy: { id: 'user-admin', name: 'Admin' },
+      });
+      expect(result.items[0].addedAt).toEqual(expect.any(String));
+    });
+
+    it('returns null addedBy for backfilled roster rows', async () => {
+      mockAgentRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-1', slug: 'alpha', deletedAt: null });
+      mockAgentRepo.findProjectRoster.mockResolvedValue([makeRecord({ addedById: null, addedByName: null })]);
+
+      const result = await service.listProjectRoster('alpha');
+
+      expect(result.items[0].addedBy).toBeNull();
+    });
+
+    it('carries the open-ticket summary from the repository', async () => {
+      mockAgentRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-1', slug: 'alpha', deletedAt: null });
+      mockAgentRepo.findProjectRoster.mockResolvedValue([
+        makeRecord({ openTicketCount: 3, openTicketRefs: ['ALP-1', 'ALP-2', 'ALP-3'] }),
+      ]);
+
+      const result = await service.listProjectRoster('alpha');
+
+      expect(result.items[0].openTicketCount).toBe(3);
+      expect(result.items[0].openTicketRefs).toEqual(['ALP-1', 'ALP-2', 'ALP-3']);
+    });
+
+    it('returns scoping: false when AGENT_PROJECT_SCOPING is off', async () => {
+      // Reboot the module with scoping off
+      const modOff = await Test.createTestingModule({
+        providers: [
+          AgentsService,
+          { provide: PrismaAgentRepository, useValue: mockAgentRepo },
+          { provide: AUTH_CFG, useValue: { ...mockAuthConfig, agentProjectScoping: false } },
+          { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
+          { provide: KodaDomainWriter, useValue: mockKodaDomainWriter },
+        ],
+      }).compile();
+      const offService = modOff.get<AgentsService>(AgentsService);
+      mockAgentRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-1', slug: 'alpha', deletedAt: null });
+      mockAgentRepo.findProjectRoster.mockResolvedValue([]);
+
+      const result = await offService.listProjectRoster('alpha');
+
+      expect(result.scoping).toBe(false);
+      expect(result.items).toEqual([]);
+    });
+
+    it('throws NotFoundAppException when the project is missing or soft-deleted', async () => {
+      mockAgentRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-1', slug: 'alpha', deletedAt: new Date() });
+
+      await expect(service.listProjectRoster('alpha')).rejects.toThrow(NotFoundAppException);
+      expect(mockAgentRepo.findProjectRoster).not.toHaveBeenCalled();
     });
   });
 
