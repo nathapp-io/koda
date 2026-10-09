@@ -252,8 +252,11 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${agentApiKey}`)
         .expect(200);
 
-      const data = body<{ slug: string }>(res);
+      const data = body<{ slug: string; projects: Array<{ slug: string; name: string }> }>(res);
       expect(data.slug).toBe('subrina-coder');
+      // S4c US-001 (AC15): the roster projects are always part of the payload —
+      // this agent holds no AgentProject row yet, so the list is empty.
+      expect(data.projects).toEqual([]);
     });
 
     it('GET /api/agents/:slug — agent by slug', async () => {
