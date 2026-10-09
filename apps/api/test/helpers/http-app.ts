@@ -10,23 +10,13 @@ import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
 export const TEST_PASSWORD = 'Admin1234!Aa';
 
 /**
- * Config factories read process.env during AppFactory.create, so the flags are
+ * Config factories read process.env during AppFactory.create, so the flag is
  * set only for the create call and restored afterwards (test files share one
  * process under maxWorkers: 1).
- *
- * `agentProjectScoping` (S4c US-001) is omitted by most suites, which leaves the
- * default (on); pass 'off' to restore the pre-S4c agent reach.
  */
-export async function bootHttpApp(opts: {
-  registrationEnabled: boolean;
-  agentProjectScoping?: 'on' | 'off';
-}): Promise<NathApplication> {
-  const previousRegistration = process.env.REGISTRATION_ENABLED;
-  const previousScoping = process.env.AGENT_PROJECT_SCOPING;
+export async function bootHttpApp(opts: { registrationEnabled: boolean }): Promise<NathApplication> {
+  const previous = process.env.REGISTRATION_ENABLED;
   process.env.REGISTRATION_ENABLED = String(opts.registrationEnabled);
-  if (opts.agentProjectScoping !== undefined) {
-    process.env.AGENT_PROJECT_SCOPING = opts.agentProjectScoping;
-  }
   try {
     const app = await AppFactory.create(AppModule);
     app.setJwtAuthGuard(app.get(CombinedAuthGuard));
@@ -34,10 +24,8 @@ export async function bootHttpApp(opts: {
     await app.init();
     return app;
   } finally {
-    if (previousRegistration === undefined) delete process.env.REGISTRATION_ENABLED;
-    else process.env.REGISTRATION_ENABLED = previousRegistration;
-    if (previousScoping === undefined) delete process.env.AGENT_PROJECT_SCOPING;
-    else process.env.AGENT_PROJECT_SCOPING = previousScoping;
+    if (previous === undefined) delete process.env.REGISTRATION_ENABLED;
+    else process.env.REGISTRATION_ENABLED = previous;
   }
 }
 

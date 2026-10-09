@@ -29,6 +29,26 @@ interface MembershipRepoStub {
   isAgentOnRoster: jest.Mock;
 }
 
+/**
+ * Awaits a refusal and asserts it is a ForbiddenAppException. `prefix` is the
+ * i18n namespace the refusal is answered with — S4c US-001 AC5 pins the agent
+ * roster refusal to `projects`, the same namespace a non-member user gets.
+ */
+async function expectForbidden(
+  promise: Promise<unknown>,
+  prefix?: string,
+): Promise<ForbiddenAppException> {
+  const error = await promise.then(
+    () => null,
+    (reason: unknown) => reason,
+  );
+  expect(error).toBeInstanceOf(ForbiddenAppException);
+  if (prefix !== undefined) {
+    expect((error as ForbiddenAppException).prefix).toBe(prefix);
+  }
+  return error as ForbiddenAppException;
+}
+
 /** Controller stub carrying @ProjectRoles on a handler, as the KB write routes do. */
 class KbWriteRouteStub {
   @ProjectRoles('ADMIN', 'DEVELOPER', 'AGENT')
@@ -207,13 +227,15 @@ describe('ProjectMembershipGuard (US-001)', () => {
     expect(membershipRepo.findMembershipRole).not.toHaveBeenCalled();
   });
 
-  it('AC3 boundary: throws ForbiddenAppException for an agent absent from the project roster', async () => {
+  it('AC3 boundary: throws a projects-scoped ForbiddenAppException for an agent absent from the project roster', async () => {
     membershipRepo.findBySlug.mockResolvedValue(activeProject);
     membershipRepo.isAgentOnRoster.mockResolvedValue(false);
 
-    await expect(
+    await expectForbidden(
       guard.canActivate(makeExecutionContext({ params: { slug: 'alpha' }, user: agentPrincipal })),
-    ).rejects.toBeInstanceOf(ForbiddenAppException);
+      'projects',
+    );
+    expect(membershipRepo.findMembershipRole).not.toHaveBeenCalled();
   });
 
   // ---------------------------------------------------------------------------

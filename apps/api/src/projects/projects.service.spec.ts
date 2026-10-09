@@ -197,12 +197,19 @@ describe('ProjectsService', () => {
     it('passes a rostered agent principal without a membership lookup', async () => {
       mockProjectRepo.isAgentOnRoster.mockResolvedValue(true);
       await expect(service.assertProjectMembership('p1', agentPrincipal)).resolves.toBeUndefined();
+      expect(mockProjectRepo.isAgentOnRoster).toHaveBeenCalledWith('p1', 'ag1');
       expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
     });
 
-    it('refuses an agent principal absent from the project roster', async () => {
+    it('refuses an agent principal absent from the project roster with a projects-scoped 403', async () => {
       mockProjectRepo.isAgentOnRoster.mockResolvedValue(false);
-      await expect(service.assertProjectMembership('p1', agentPrincipal)).rejects.toBeInstanceOf(ForbiddenAppException);
+
+      const error = await rejectionOf(service.assertProjectMembership('p1', agentPrincipal));
+
+      expect(error).toBeInstanceOf(ForbiddenAppException);
+      expect((error as ForbiddenAppException).prefix).toBe('projects');
+      expect(mockProjectRepo.isAgentOnRoster).toHaveBeenCalledWith('p1', 'ag1');
+      expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
     });
 
     it('throws ForbiddenAppException when membership role is null', async () => {

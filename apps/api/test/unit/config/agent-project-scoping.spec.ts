@@ -29,6 +29,15 @@ describe('US-001 agent project scoping configuration', () => {
   });
 
   it('US-001 AC2: rejects an unsupported scoping value naming AGENT_PROJECT_SCOPING', () => {
-    expect(() => validate({ ...REQUIRED_ENV, AGENT_PROJECT_SCOPING: 'maybe' })).toThrow(/AGENT_PROJECT_SCOPING/);
+    expect(() => validate({ ...REQUIRED_ENV, AGENT_PROJECT_SCOPING: 'maybe' })).toThrow(
+      /AGENT_PROJECT_SCOPING/,
+    );
+
+    // The AC names the config factory the app boots with, so pin that path too:
+    // it validates through AuthConfigSchema rather than the Joi env schema.
+    Object.assign(process.env, REQUIRED_ENV);
+    process.env.AGENT_PROJECT_SCOPING = 'maybe';
+
+    expect(() => authConfig()).toThrow(/AGENT_PROJECT_SCOPING/);
   });
 });

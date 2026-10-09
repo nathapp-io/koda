@@ -10,7 +10,9 @@
  *   AC11  every matrix route → 403 for a non-member DEVELOPER
  *   AC12  every matrix route → a status other than 403/404 for a member DEVELOPER
  * plus the Postgres-backed forms of AC1, AC2, AC3, AC6, AC7, AC8 and AC9
- * (real repository + real membership rows, no repository double).
+ * (real repository + real membership rows, no repository double). S4c US-001
+ * redefines AC8 for agents: the agent's list is its non-deleted AgentProject
+ * roster (AC11), so this file seeds roster rows and asserts the rostered subset.
  *
  * Visibility only: AC11/AC12 prove the membership gate (non-member 403, member
  * not 403/404). Write routes are exercised with a global-ADMIN member so that

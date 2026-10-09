@@ -433,6 +433,23 @@ describe('AgentsService', () => {
       expect(result.projects).toEqual([]);
     });
 
+    it('should list each roster project as slug and name, in repository order (S4c US-001 AC15)', async () => {
+      mockAgentRepo.findById.mockResolvedValue(mockAgentWithRelations);
+      // The repository returns non-deleted roster projects ordered by slug; the
+      // DTO must keep that order and must not leak any other column.
+      mockAgentRepo.findRosterProjects.mockResolvedValue([
+        { slug: 'alpha', name: 'Alpha', deletedAt: null },
+        { slug: 'bravo', name: 'Bravo', id: 'project-2' },
+      ] as never);
+
+      const result = await service.findMe('agent-123');
+
+      expect(result.projects).toEqual([
+        { slug: 'alpha', name: 'Alpha' },
+        { slug: 'bravo', name: 'Bravo' },
+      ]);
+    });
+
     it('should include roles with all AgentRole enum values', async () => {
       const agentWithAllRoles = {
         ...mockAgentWithRelations,
@@ -766,7 +783,7 @@ describe('AgentsService', () => {
       await expect(service.suggestTicket('nonexistent', 'koda', authorizedPrincipal)).rejects.toThrow();
     });
 
-    it('should throw ForbiddenAppException when the target agent is not on the project roster', async () => {
+    it('should throw ForbiddenAppException when the target agent is not on the project roster (S4c US-001 AC13)', async () => {
       mockAgentRepo.findBySlugWithCapabilities.mockResolvedValue(mockAgentForPickup);
       mockAgentRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockAgentRepo.isOnProjectRoster.mockResolvedValue(false);
@@ -778,7 +795,7 @@ describe('AgentsService', () => {
       expect(agentRepo.findVerifiedUnassignedTickets).not.toHaveBeenCalled();
     });
 
-    it('should admit an unrostered target when agent project scoping is off', async () => {
+    it('should admit an unrostered target when agent project scoping is off (S4c US-001 AC14)', async () => {
       const unscoped = new AgentsService(
         mockAgentRepo as never,
         { ...mockAuthConfig, agentProjectScoping: false },

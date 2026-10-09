@@ -6,10 +6,16 @@
  *   AC8  … every non-deleted project for an agent principal
  *   AC9  … never a soft-deleted project, even for a member of it
  *
+ * S4c US-001 changes AC8 for agents: while `AGENT_PROJECT_SCOPING` is on
+ * (the default) an agent gets exactly the non-deleted projects on its
+ * `AgentProject` roster (AC11); only an explicit `off` — and the pre-S4c agent
+ * reach — returns every non-deleted project (AC12).
+ *
  * The repository double mirrors `PrismaProjectRepository`: it yields only
- * non-deleted rows, and a membership-scoped selector yields only the caller's
- * rows (their `ProjectMember` rows). The DB-backed form of AC6–AC9 — real
- * repository, real membership rows — lives in
+ * non-deleted rows, a membership-scoped selector yields only the caller's rows
+ * (their `ProjectMember` rows), and the agent roster selector yields only the
+ * caller's roster rows. The DB-backed form of AC6–AC9 — real repository, real
+ * membership rows — lives in
  * `test/integration/projects/project-membership-gate.integration.spec.ts`.
  */
 import { ProjectsService } from '../../../src/projects/projects.service';
@@ -58,9 +64,9 @@ const MEMBERSHIPS: Record<string, string[]> = {
   'user-multi': ['alpha', 'bravo', 'delta'],
 };
 
-/** AgentProject roster rows, keyed by agent id (S4c US-001). */
+/** AgentProject roster rows, keyed by agent id (S4c US-001). `delta` is soft-deleted. */
 const AGENT_ROSTER: Record<string, string[]> = {
-  'agent-1': ['alpha', 'bravo'],
+  'agent-1': ['alpha', 'bravo', 'delta'],
 };
 
 type RepoDouble = Record<string, jest.Mock>;
@@ -217,14 +223,16 @@ describe('ProjectsService.findAllForPrincipal (US-002)', () => {
     expect(slugsOf(projects)).toEqual(['alpha', 'bravo', 'charlie']);
   });
 
-  it('AC8: returns only the agent rostered projects while scoping is on', async () => {
+  it('AC11 (S4c US-001): returns exactly the agent roster projects, never a soft-deleted one', async () => {
     const projects = await service.findAllForPrincipal(AGENT_PRINCIPAL);
 
     expect(slugsOf(projects)).toEqual(['alpha', 'bravo']);
+    // `delta` is on the roster but soft-deleted: the roster never resurrects it.
+    expect(slugsOf(projects)).not.toContain('delta');
     expect(repo.findAllForAgent).toHaveBeenCalledWith('agent-1');
   });
 
-  it('AC8 boundary (S4c US-001): with scoping off an agent gets every non-deleted project', async () => {
+  it('AC12 (S4c US-001): with scoping off an agent gets every non-deleted project', async () => {
     const unscoped = new ProjectsService(
       repo as unknown as PrismaProjectRepository,
       {

@@ -295,6 +295,34 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     expect(membershipRepo.findBySlug).toHaveBeenCalledWith('alpha');
   });
 
+  it('AC5 (S4c US-001): POST :ref/assign returns 403 for an agent absent from the project roster', async () => {
+    // #144: an agent whose roles would otherwise pass the permission check, so
+    // the only reason for the refusal is the missing AgentProject row.
+    currentPrincipal = {
+      actorType: 'agent',
+      id: 'agent-1',
+      name: 'bot',
+      slug: 'bot',
+      status: 'ACTIVE',
+      agentRoles: ['TRIAGER'],
+      capabilities: [],
+      blacklisted: false,
+      revoked: false,
+      authorities: ['WORKER'],
+    };
+    membershipRepo.isAgentOnRoster.mockResolvedValue(false);
+    membershipRepo.findMembershipRole.mockResolvedValue(null);
+
+    const res = await request(app.getHttpServer())
+      .post('/api/projects/alpha/tickets/KODA-1/assign')
+      .send({ userId: 'user-2' });
+
+    expect(res.status).toBe(403);
+    expect(membershipRepo.isAgentOnRoster).toHaveBeenCalledWith('proj-1', 'agent-1');
+    expect(membershipRepo.findMembershipRole).not.toHaveBeenCalled();
+    expect(ticketsService.assign).not.toHaveBeenCalled();
+  });
+
   // ---------------------------------------------------------------------------
   // AC10 / AC11 — GET /api/projects/:slug
   // ---------------------------------------------------------------------------

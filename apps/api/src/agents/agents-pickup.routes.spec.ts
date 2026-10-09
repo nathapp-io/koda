@@ -12,7 +12,7 @@ import request from 'supertest';
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
 import { PrismaAgentRepository } from './prisma-agent.repository';
-import { AUTH_CFG } from '../config/auth.config';
+import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
 import { AgentAuthProvider } from '../auth/agent-auth.provider';
 import {
@@ -103,16 +103,17 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
     isOnProjectRoster: jest.Mock;
   };
 
-  beforeEach(async () => {
-    agentRepo = {
-      findBySlugWithCapabilities: jest.fn(),
-      findProjectBySlug: jest.fn(),
-      findVerifiedUnassignedTickets: jest.fn(),
-      findBySlug: jest.fn(),
-      findById: jest.fn(),
-      isOnProjectRoster: jest.fn(),
-    };
+  const DEFAULT_AUTH_CONFIG: Omit<IAuthConfig, 'agentProjectScoping'> = {
+    jwtSecret: 'jwt-secret',
+    jwtExpiresIn: '15m',
+    jwtRefreshSecret: 'jwt-refresh-secret',
+    jwtRefreshExpiresIn: '7d',
+    apiKeySecret: 'test-secret',
+    registrationEnabled: false,
+  };
 
+  /** Boots the real controller + service against the stubbed repository. */
+  async function bootApp(authConfig: Partial<IAuthConfig> = {}): Promise<void> {
     testingModule = await Test.createTestingModule({
       controllers: [AgentsController],
       providers: [
@@ -120,14 +121,7 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
         { provide: PrismaAgentRepository, useValue: agentRepo },
         {
           provide: AUTH_CFG,
-          useValue: {
-            jwtSecret: 'jwt-secret',
-            jwtExpiresIn: '15m',
-            jwtRefreshSecret: 'jwt-refresh-secret',
-            jwtRefreshExpiresIn: '7d',
-            apiKeySecret: 'test-secret',
-            registrationEnabled: false,
-          },
+          useValue: { ...DEFAULT_AUTH_CONFIG, ...authConfig },
         },
         {
           provide: TRANSACTION_MANAGER,
@@ -161,9 +155,10 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
 
     await app.init();
     await app.getHttpAdapter().getInstance().ready();
+  }
 
-    currentPrincipal = agentPrincipal('test-agent');
-
+  /** The preconditions every pickup test starts from: a project with two candidates. */
+  function seedHappyPath(): void {
     agentRepo.findBySlugWithCapabilities.mockResolvedValue(AGENT_ROW);
     agentRepo.findProjectBySlug.mockResolvedValue(PROJECT);
     // S4c US-001: the target agent is on the project roster unless a test says otherwise.
@@ -172,6 +167,21 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
       makeTicket('ticket-1', 1, 'HIGH', ['typescript']),
       makeTicket('ticket-2', 2, 'CRITICAL', []),
     ]);
+  }
+
+  beforeEach(async () => {
+    agentRepo = {
+      findBySlugWithCapabilities: jest.fn(),
+      findProjectBySlug: jest.fn(),
+      findVerifiedUnassignedTickets: jest.fn(),
+      findBySlug: jest.fn(),
+      findById: jest.fn(),
+      isOnProjectRoster: jest.fn(),
+    };
+
+    await bootApp();
+    currentPrincipal = agentPrincipal('test-agent');
+    seedHappyPath();
   });
 
   afterEach(async () => {
@@ -243,7 +253,7 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
     expect(res.body.data.matchScore).toBe(1);
   });
 
-  it('AC12 boundary (S4c US-001): returns 403 when the target agent is not on the project roster', async () => {
+  it('S4c US-001 AC13: returns 403 when the target agent is not on the project roster', async () => {
     agentRepo.isOnProjectRoster.mockResolvedValue(false);
     currentPrincipal = userPrincipal('ADMIN');
 
@@ -254,6 +264,22 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
     expect(res.status).toBe(403);
     expect(agentRepo.isOnProjectRoster).toHaveBeenCalledWith('agent-123', 'project-1');
     expect(agentRepo.findVerifiedUnassignedTickets).not.toHaveBeenCalled();
+  });
+
+  it('S4c US-001 AC14: admits an unrostered target when agent project scoping is off', async () => {
+    await app.close();
+    await bootApp({ agentProjectScoping: false });
+    seedHappyPath();
+    agentRepo.isOnProjectRoster.mockResolvedValue(false);
+    currentPrincipal = userPrincipal('ADMIN');
+
+    const res = await request(app.getHttpServer())
+      .get('/api/agents/test-agent/pickup')
+      .query({ project: 'koda' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.ticket.ref).toBe('KT-1');
+    expect(agentRepo.isOnProjectRoster).not.toHaveBeenCalled();
   });
 
   it('AC13: returns 404 when the project is soft-deleted', async () => {
