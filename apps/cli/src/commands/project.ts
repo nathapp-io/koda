@@ -10,6 +10,7 @@ import {
   projectsControllerAddProjectAgent,
   projectsControllerRemoveProjectAgent,
   type ProjectAgentDto,
+  type ProjectAgentListDto,
 } from '../generated';
 import { configureApiClient } from '../utils/api-client';
 import { table, error } from '../utils/output';
@@ -30,7 +31,7 @@ export function projectCommand(program: Command): void {
       try {
         const ctx = await withContext({ projectSlug: options.project });
         const response = await projectsControllerGetProjectAgents({ path: { slug: ctx.projectSlug } });
-        const roster = unwrap<{ scoping: boolean; items: Array<{ slug: string; name: string; status: string; openTicketCount: number }> }>(response);
+        const roster = unwrap<ProjectAgentListDto>(response);
         if (options.json) console.log(JSON.stringify(roster, null, 2));
         else {
           table(['Slug', 'Name', 'Status', 'Open tickets'], roster.items.map((item) => [

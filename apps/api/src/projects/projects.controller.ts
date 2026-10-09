@@ -34,7 +34,7 @@ import {
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { AgentsService } from '../agents/agents.service';
 import { AddProjectAgentDto } from '../agents/dto/add-project-agent.dto';
-import { ProjectAgentDto } from '../agents/dto/agent-response.dto';
+import { ProjectAgentDto, ProjectAgentListDto } from '../agents/dto/project-agent.dto';
 import { UpdateAgentDto } from '../agents/dto/update-agent.dto';
 import { ActorRole } from '../common/enums';
 import { ProjectMembershipGuard } from './project-membership.guard';
@@ -168,7 +168,7 @@ export class ProjectsController {
 
   @Get(':slug/agents')
   @ApiOperation({ summary: 'List the project agent roster (admin or member; un-paged)' })
-  @ApiResponse({ status: 200, description: 'Roster retrieved successfully' })
+  @ApiResponse({ status: 200, type: ProjectAgentListDto, description: 'Roster retrieved successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - no project access' })
   @ApiResponse({ status: 404, description: 'Project not found' })
@@ -178,9 +178,6 @@ export class ProjectsController {
   ) {
     const project = await this.projectsService.findBySlug(slug);
     await this.projectsService.assertProjectMembership(project.id, principal);
-    // Rostered agents may read their own roster without a ProjectMember row
-    // (their project reach comes from the AgentProject table). assertProjectMembership
-    // already admits them; we fall through to the list call either way.
     const data = await this.agentsService.listProjectRoster(slug);
     return JsonResponse.Ok(data);
   }
@@ -242,9 +239,8 @@ export class ProjectsController {
     // US-002: the target agent is resolved through the project roster, not the
     // ticket-derived list. An agent assigned tickets but absent from the roster
     // returns 404 — roster membership is the only thing this route mutates.
-    const roster = await this.agentsService.listProjectRoster(slug);
-    const target = roster.items.find((a) => a.slug === agentSlug);
-    if (!target) {
+    const onRoster = await this.agentsService.isOnProjectRosterBySlug(slug, agentSlug);
+    if (!onRoster) {
       // US-002 AC12: an unrostered agent calling with its own API key is
       // refused (the guard would have already 403'd, but unit tests bypass the
       // guard and call the handler directly). A user principal asking for a

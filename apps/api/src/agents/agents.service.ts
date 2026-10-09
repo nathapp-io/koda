@@ -5,7 +5,9 @@ import { NotFoundAppException, ValidationAppException, ForbiddenAppException } f
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { createHmac, randomBytes } from 'crypto';
 import { AGENT_ROLES, type AgentRoleNames } from '../common/enums';
-import { AgentResponseDto, AgentMeResponseDto, ProjectAgentDto, ProjectAgentListDto } from './dto/agent-response.dto';
+import { AgentResponseDto } from './dto/agent-response.dto';
+import { AgentMeResponseDto } from './dto/agent-me-response.dto';
+import { ProjectAgentDto, ProjectAgentListDto } from './dto/project-agent.dto';
 import { TicketResponseDto } from '../tickets/dto/ticket-response.dto';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
@@ -241,6 +243,18 @@ export class AgentsService {
   }
 
   /**
+   * True when the agent is on the project's roster. A single membership lookup:
+   * no roster listing and no open-ticket scan, so it is cheap to call per request.
+   */
+  async isOnProjectRosterBySlug(projectSlug: string, agentSlug: string): Promise<boolean> {
+    const project = await this.agentRepo.findProjectBySlug(projectSlug);
+    if (!project || project.deletedAt) return false;
+    const agent = await this.agentRepo.findBySlugScalar(agentSlug);
+    if (!agent) return false;
+    return this.agentRepo.isOnProjectRoster(agent.id, project.id);
+  }
+
+  /**
    * S4c US-003 (D530/D531): take an agent off a project's roster. Removal is
    * refused while the agent still holds open tickets in that project, and the
    * whole read-then-write runs under the project's roster lock so a concurrent
@@ -363,7 +377,7 @@ export class AgentsService {
     }
 
     if (this.agentScopingEnabled() && !(await this.agentRepo.isOnProjectRoster(agent.id, project.id))) {
-      throw new ForbiddenAppException({}, 'agents');
+      throw new ForbiddenAppException({}, 'projects');
     }
 
     const tickets = await this.agentRepo.findVerifiedUnassignedTickets(project.id);

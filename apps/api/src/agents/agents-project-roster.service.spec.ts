@@ -10,7 +10,7 @@ import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { AgentsService } from './agents.service';
 import { PrismaAgentRepository } from './prisma-agent.repository';
 import { IAuthConfig } from '../config/auth.config';
-import type { ProjectAgentRecord } from './dto/agent-response.dto';
+import type { ProjectAgentRecord } from './dto/project-agent.dto';
 
 const record = (over: Partial<ProjectAgentRecord> = {}): ProjectAgentRecord => ({
   slug: 'bot',

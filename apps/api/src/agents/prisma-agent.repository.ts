@@ -4,7 +4,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TicketStatus } from '../common/enums';
 import { KodaError } from '../common/koda-error';
 import { lockProjectAgents } from '../common/utils/advisory-lock';
-import type { ProjectAgentRecord } from './dto/agent-response.dto';
+import type { ProjectAgentRecord } from './dto/project-agent.dto';
 
 /** US-002: at most this many refs surface in the open-ticket list per roster row. */
 const MAX_OPEN_TICKET_REFS = 10;
@@ -309,7 +309,10 @@ export class PrismaAgentRepository {
       where: { id: projectId },
       select: { key: true },
     });
-    const projectKey = projectKeyRow?.key ?? '';
+    if (!projectKeyRow) {
+      throw new KodaError('PROJECT_NOT_FOUND', `project ${projectId} disappeared while reading its agent roster`);
+    }
+    const projectKey = projectKeyRow.key;
 
     const byAgent = new Map<string, { count: number; refs: string[] }>();
     for (const slug of agentSlugs) byAgent.set(slug, { count: 0, refs: [] });

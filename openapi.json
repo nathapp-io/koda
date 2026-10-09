@@ -1736,7 +1736,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Roster retrieved successfully"
+            "description": "Roster retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectAgentListDto"
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized"
@@ -10128,19 +10135,6 @@
           }
         }
       },
-      "AddProjectAgentDto": {
-        "type": "object",
-        "properties": {
-          "agentSlug": {
-            "type": "string",
-            "description": "Slug of an existing agent",
-            "example": "bot-1"
-          }
-        },
-        "required": [
-          "agentSlug"
-        ]
-      },
       "ProjectAgentAddedByDto": {
         "type": "object",
         "properties": {
@@ -10213,6 +10207,37 @@
           "openTicketRefs",
           "addedAt",
           "addedBy"
+        ]
+      },
+      "ProjectAgentListDto": {
+        "type": "object",
+        "properties": {
+          "scoping": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProjectAgentDto"
+            }
+          }
+        },
+        "required": [
+          "scoping",
+          "items"
+        ]
+      },
+      "AddProjectAgentDto": {
+        "type": "object",
+        "properties": {
+          "agentSlug": {
+            "type": "string",
+            "description": "Slug of an existing agent",
+            "example": "bot-1"
+          }
+        },
+        "required": [
+          "agentSlug"
         ]
       },
       "SourceFileDto": {
