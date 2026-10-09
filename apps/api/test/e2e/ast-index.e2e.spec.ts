@@ -85,9 +85,12 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
         .send({ name: 'AST Developer Agent', slug: 'ast-developer-agent', roles: ['DEVELOPER'] });
 
       expect(agentRes.status).toBe(201);
-      const agentData = body<{ id: string; slug: string; apiKey: string }>(agentRes);
-      agentSlug = agentData.slug;
+      // POST /api/agents returns { apiKey, agent } — the agent's own fields live
+      // under `agent`, and the roster fixture below needs the real slug.
+      const agentData = body<{ apiKey: string; agent: { id: string; slug: string } }>(agentRes);
+      agentSlug = agentData.agent.slug;
       agentApiKey = agentData.apiKey;
+      expect(agentSlug).toBe('ast-developer-agent');
     });
   });
 
