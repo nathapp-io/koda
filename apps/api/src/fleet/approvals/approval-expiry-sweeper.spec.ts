@@ -9,7 +9,7 @@ function build(over: { sweepEnabled?: boolean; locked?: object | null } = {}) {
   const closer = { expire: jest.fn().mockResolvedValue({ approval: { ...due, status: 'expired' }, live: [{ approvalId: 'a1' }] }) };
   const live = { publish: jest.fn() };
   const tx = { run: (fn: () => Promise<unknown>) => fn() };
-  const sweeper = new ApprovalExpirySweeper(repo as never, jobs as never, closer as never, live as never, tx as never, { sweepEnabled: over.sweepEnabled ?? false });
+  const sweeper = new ApprovalExpirySweeper(repo as never, jobs as never, closer as never, live as never, tx as never, { sweepEnabled: over.sweepEnabled ?? false, approvalSweepMs: 15_000 });
   return { sweeper, repo, jobs, closer, live };
 }
 

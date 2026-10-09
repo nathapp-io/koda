@@ -12,6 +12,7 @@ export function testFleetConfig(overrides: Partial<IFleetConfig> = {}): IFleetCo
     jobCrashSec: 300,
     syncWaitMs: 0,
     sweepEnabled: false,
+    approvalSweepMs: 15_000,
     bundleMaxBytes: 200 * 1024 * 1024,
     logMaxBytes: 256 * 1024 * 1024,
     logChunkMaxBytes: 1024 * 1024,

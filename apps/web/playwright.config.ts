@@ -19,6 +19,13 @@ process.env['E2E_WEB_URL'] = WEB_URL;
 // E2E_WEB_MODE=build (CI): serve the production build instead of `nuxt dev`.
 // Build first: `bunx turbo run build --filter=@nathapp/koda-web`.
 const WEB_BUILD_MODE = process.env['E2E_WEB_MODE'] === 'build';
+// E2E_API_MODE=dist (CI): start the prebuilt API (`bunx turbo run build
+// --filter=@nathapp/koda-api` first) instead of `bunx nest start`, which
+// recompiles the whole app on the webServer's critical path.
+const API_DIST_MODE = process.env['E2E_API_MODE'] === 'dist';
+const API_BOOT = `bunx prisma migrate reset --force && bun prisma/seed-e2e.ts`;
+const API_NEST_COMMAND = `bash -c "${API_BOOT} && bunx nest start"`;
+const API_DIST_COMMAND = `bash -c "test -f dist/main.js || { echo 'E2E_API_MODE=dist needs an API build first (bunx turbo run build --filter=@nathapp/koda-api)' >&2; exit 1; }; ${API_BOOT} && node dist/main.js"`;
 const WEB_DEV_COMMAND = `bash -lc "bunx nuxt dev --port ${WEB_PORT} 2>&1 | grep -Ev 'Two component files resolving to the same name|/components/ui/.*/index.ts|/components/ui/.*/[A-Za-z]+\\.vue|MODULE_TYPELESS_PACKAGE_JSON|Reparsing as ES module because module syntax was detected|To eliminate this warning, add "type": "module"'"`;
 const WEB_BUILD_COMMAND = `bash -c "test -f .output/server/index.mjs || { echo 'E2E_WEB_MODE=build needs a web build first' >&2; exit 1; }; node .output/server/index.mjs"`;
 
@@ -40,7 +47,7 @@ export default defineConfig({
   webServer: [
     {
       // API
-      command: `bash -c "bunx prisma migrate reset --force && bun prisma/seed-e2e.ts && bunx nest start"`,
+      command: API_DIST_MODE ? API_DIST_COMMAND : API_NEST_COMMAND,
       url: `${API_URL}/api/health`,
       cwd: path.resolve(__dirname, '../api'),
       reuseExistingServer: false,
@@ -71,8 +78,10 @@ export default defineConfig({
         FLEET_TEST_HOOKS: 'true',
         // S3 plan C11: the config-page e2e seeds nax files through the test-only fake repo-files reader (never on in production).
         FLEET_TEST_FAKE_NAX_FILES: 'true',
-        // S1.5 2b: the bash e2e waits for the 15 s approval expiry sweep; do not depend on NODE_ENV defaults.
+        // S1.5 2b: the bash e2e waits for the approval expiry sweep; run it every 2 s
+        // (default 15 s) so a timed-out ask is marked expired right after its deadline.
         FLEET_SWEEP_ENABLED: 'true',
+        FLEET_APPROVAL_SWEEP_MS: '2000',
         // S2b (c) D426: the dashboard reports a queued job no runner fits after 10 s (the env schema minimum) instead
         // of 60 s. Only the dashboard reads this threshold.
         FLEET_JOB_QUEUED_WARN_SEC: '10',
