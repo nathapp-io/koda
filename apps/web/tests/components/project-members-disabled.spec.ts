@@ -68,6 +68,36 @@ describe('ProjectMembersPanel disabled member badge (US-007)', () => {
     app.unmount()
   })
 
+  test('AC8 (positive control): an enabled member the viewer can manage renders the role select', async () => {
+    // AC8 only pins that the disabled member's role control is hidden, and
+    // AC9 only pins badge absence for an enabled member. A regression that
+    // hid all role controls (e.g. a v-if typo) would still pass both — the
+    // hidden state would simply be the always-true result. This positive
+    // control pins the complementary truth the spec implies: when the
+    // member is enabled and the viewer can manage, the per-member role
+    // control IS rendered with one button per role and exactly one pressed
+    // button matching the member's role.
+    const app = await mountPanel(false)
+    const li = app.one('li')
+    if (!li) throw new Error('member <li> not rendered')
+    // Scope to the per-member <li> so the "add member" form's radiogroup
+    // (which is outside the <ul>) does not contaminate the assertion.
+    const roleGroup = app.find('[role="radiogroup"]', li)
+    expect(roleGroup).toHaveLength(1)
+    const roleGroupEl = roleGroup[0]
+    if (!roleGroupEl) throw new Error('role radiogroup not rendered')
+    const memberRoleButtons = app
+      .find('x-stub-stub', roleGroupEl)
+      .filter((b) => typeof b.props['data-role'] === 'string')
+    expect(memberRoleButtons.map((b) => b.props['data-role'])).toEqual(['ADMIN', 'DEVELOPER', 'VIEWER'])
+    const pressed = memberRoleButtons.filter((b) => b.props['aria-pressed'] === true)
+    expect(pressed).toHaveLength(1)
+    const pressedButton = pressed[0]
+    if (!pressedButton) throw new Error('no role button is pressed')
+    expect(pressedButton.props['data-role']).toBe('DEVELOPER')
+    app.unmount()
+  })
+
   test('AC9: renders no Disabled badge for an enabled project member', async () => {
     const app = await mountPanel(false)
     expect(app.find('[data-testid="member-disabled-badge"]')).toHaveLength(0)
