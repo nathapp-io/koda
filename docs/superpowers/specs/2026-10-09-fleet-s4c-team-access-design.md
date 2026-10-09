@@ -19,11 +19,13 @@ list instead of typed as an id.
    memory, pickup) and does not see P in `GET /projects`.
 2. A project ADMIN (or global ADMIN) adds the agent to P from the web or CLI; the agent's next request to P succeeds.
 3. After deploy, every existing agent can still reach every project it has history in (backfill), and nothing else.
-4. Removing an agent that has open tickets in P fails with 409 and names the tickets; after reassigning them the
-   removal succeeds.
+4. Removing an agent that has open tickets in P fails with 409 and the agents page names the tickets; after
+   reassigning them the removal succeeds. A concurrent assign cannot slip past a removal (roster row lock, §3.4).
 5. The ticket assignee picker lists only active project members and the project's non-OFFLINE agents; the API refuses
-   a disabled user (409 `USER_DISABLED`) or an agent not on the project (409 `AGENT_NOT_IN_PROJECT`) either way.
-6. Adding a disabled user as a member directly fails with 409 `USER_DISABLED` (the invite path already does).
+   a disabled user (409 `tickets.userDisabled`) or an agent not on the project (409 `tickets.agentNotInProject`)
+   either way.
+6. Adding a disabled user as a member directly fails with 409 `members.userDisabled` (the invite path already does
+   with `invites.userDisabled`).
 7. With `AGENT_PROJECT_SCOPING=off`, agents reach every project as before S4c; roster, picker and guards still work.
 
 ## Rulings (user, 2026-10-09)
@@ -34,7 +36,7 @@ list instead of typed as an id.
   `AgentRoleEntry` roles via `KodaCaslAbilityFactory.agentPermissions` (Q2 A). No per-project agent role.
 - D530: project ADMIN and global ADMIN manage a project's agent roster; any project member reads it. Agent CRUD and key
   rotation stay global-ADMIN-only (Q3 A).
-- D531: removing an agent with open tickets in the project is refused with 409 `AGENT_HAS_OPEN_TICKETS` (Q4 A).
+- D531: removing an agent with open tickets in the project is refused with 409 `projectAgents.hasOpenTickets` (Q4 A).
 - D532: UI scope = assignee picker, project agents page, disabled-member badge (Q5 A, B, C). No agents section on the
   members panel.
 - D533: scoping covers cross-project paths too, not only `/projects/:slug` routes (Q6 A).
@@ -53,11 +55,27 @@ list instead of typed as an id.
   `ForbiddenAppException({}, 'projects')`. `assertProjectRoles` returns early for non-users; `exemptAgents` skips the
   permission check for agents.
 - Routes that gate through `resolveMembership` / `assertProjectMembership` (all fixed by D534): every `/projects/:slug/...`
-  route (guard), `context/:slug` (guard via `params.slug`), code-intel `symbols*` (`@ProjectSlugFrom('query',
+  route, either via `ProjectMembershipGuard` or an inline assert (inline: `GET /projects/:slug/agents`
+  projects.controller.ts:167-179, members list project-members.service.ts:39, memory-read memory-read.controller.ts:34,
+  timeline timeline.controller.ts:23, ticket-links ticket-links.controller.ts:40, vcs vcs.controller.ts:82ff, live
+  live.controller.ts:42), `context/:slug` (guard via `params.slug`), code-intel `symbols*` (`@ProjectSlugFrom('query',
   'projectSlug')`), `code-intel/index` (`checkProjectMembership`), `memory/*` (`assertWriteAuthorized` ->
   `assertProjectMembership`), `PATCH/DELETE comments/:id` (`assertCommentProjectMembership`, comments.service.ts:160).
 - Routes that do NOT: `GET /projects` (`ProjectsService.findAllForPrincipal` returns all projects for agents,
-  projects.service.ts:79-87); `GET /agents/:slug/pickup?project=` (agents.controller.ts:107). `GET /home` is user-only.
+  projects.service.ts:79-87); `GET /agents/:slug/pickup?project=` (agents.controller.ts:107;
+  `AgentsService.suggestTicket` agents.service.ts:242-262 allows only the owning agent or a global ADMIN, never calls
+  `resolveMembership`, unknown project -> 404 `agents`). User-only (not agent-reachable): `GET /home`, `me/events`,
+  `projects/:slug/events`, `me/notifications*`, `fleet/activity`, `fleet/approval-counts`. Token-auth: webhook,
+  ci-webhook, vcs-webhook, `fleet/runner/*`. Global-ADMIN-only: other `fleet/*`, `projects/:slug/ci-webhook-token`,
+  `PATCH/DELETE /projects/:slug`.
+- `ProjectContext.role` is documented "null for an agent" (`project-context.ts:6`, guard docblock); `'AGENT'` is
+  also a legacy `ProjectMember.role` value for users (`common/enums.ts:73,81`).
+- 409s: `ConflictAppException(args, prefix)` (`common/exceptions/conflict-app.exception.ts`) resolves the i18n key
+  `<prefix>.409` (e.g. `invites.userDisabled.409` in `i18n/{en,zh}/invites.json`); the web sees the envelope
+  `{ ret, message, errors? }` (`apps/web/composables/useApi.ts`) — no code field, no data field.
+- Paging convention: `KodaPageQuery` (`current`, `size`) -> `{ total, current, size, hasNext, hasPrev, records }`.
+  `GET /projects/:slug/agents` returns a bare array today (projects.controller.ts:179), consumed by web
+  `agents.vue:34` and the CLI.
 - `GET /projects/:slug/agents` (projects.controller.ts:167; `prisma-agent.repository.ts:118-138`) lists agents with at
   least one non-deleted ticket assigned in the project; `PATCH /projects/:slug/agents/:agentSlug` (line 183) resolves
   through that list. Web `pages/[project]/agents.vue:34` uses both.
@@ -80,6 +98,9 @@ list instead of typed as an id.
 - A project admin enabling/disabling users (global ADMIN only, unchanged).
 - Agent-assignee filter on the ticket list.
 - Notifications for roster changes.
+- Pre-existing, not agent-specific: `ContextBuilderService` / `getChangeImpact` accept `repoId` / `repoRefs` /
+  `ticketIds` from the request without checking they belong to the project (projects.controller.ts:141-160,
+  context-builder.service.ts:237-262). Not part of D533; file a follow-up issue.
 
 ## 1. Data
 
@@ -99,19 +120,25 @@ model AgentProject {
   @@id([agentId, projectId])
   @@index([projectId])
 }
+
+// back-relations
+model Agent   { /* ... */ projects           AgentProject[] }
+model Project { /* ... */ agents             AgentProject[] }
+model User    { /* ... */ addedAgentProjects AgentProject[] @relation("AgentProjectAddedBy") }
 ```
 
-Backfill in the same migration (raw SQL, runs once), `addedById` NULL:
+The migration creates the table, FKs and index (Prisma-generated DDL), then backfills (raw SQL appended, runs once;
+`addedById` NULL, `createdAt` from the column default):
 
 ```sql
-INSERT INTO "AgentProject" ("agentId", "projectId", "createdAt")
-SELECT DISTINCT a, p, now() FROM (
+INSERT INTO "AgentProject" ("agentId", "projectId")
+SELECT a, p FROM (
   SELECT "assignedToAgentId" AS a, "projectId" AS p FROM "Ticket" WHERE "assignedToAgentId" IS NOT NULL
   UNION SELECT "createdByAgentId", "projectId" FROM "Ticket" WHERE "createdByAgentId" IS NOT NULL
   UNION SELECT c."authorAgentId", t."projectId" FROM "Comment" c JOIN "Ticket" t ON t.id = c."ticketId"
         WHERE c."authorAgentId" IS NOT NULL
 ) s
-ON CONFLICT DO NOTHING;
+ON CONFLICT ("agentId", "projectId") DO NOTHING;
 ```
 
 Column names verified against `schema.prisma` (`Ticket.assignedToAgentId`, `Ticket.createdByAgentId`,
@@ -129,50 +156,65 @@ S4c. Everything else (roster, assign/member guards, 409s, assignees endpoint) ap
 ### 3.1 Enforcement (flag `on`)
 
 - `ProjectAccessService.resolveMembership(projectId, principal)`: for an agent principal, look up
-  `AgentProject(agentId, projectId)` on every call (no cache); present -> return `'AGENT'`, absent -> throw
-  `ForbiddenAppException({}, 'projects')` (same as a non-member user). User and global-ADMIN branches unchanged.
-  - Returning `'AGENT'` must not change agent permissions: `assertProjectRoles` keeps returning early for non-users,
-    and `assertProjectPermission` keeps using `agentPermissions` (D529). The plan verifies no caller treats a non-null
-    agent role as a project role.
-  - The membership lookup is read live, so a removed agent is refused on its next request; the cached
-    `AgentPrincipal` carries no project data and needs no invalidation.
-- `ProjectsService.findAllForPrincipal`: agent -> projects with an `AgentProject` row (non-deleted).
-- `GET /agents/:slug/pickup?project=`: 403 `projects` unless the *target* agent (`:slug`) is on the project's roster;
-  when the caller is an agent, it must also be on the roster (via `resolveMembership`). The caller still needs
-  today's permission to call the route.
-- `GET /agents/me`: adds `projects: [{ slug, name }]` (the agent's roster entries, non-deleted projects), in both modes.
+  `AgentProject(agentId, projectId)` on every call (no cache); absent -> throw `ForbiddenAppException({}, 'projects')`
+  (same as a non-member user); present -> return **`null`**, exactly what agents get today. With the flag `off` the
+  lookup is skipped and `null` is returned, so `off` is identical to pre-S4c.
+  - Returning `null` (not `'AGENT'`) keeps `ProjectContext.role` = "null for an agent" (`project-context.ts:6`), keeps
+    members-list `viewerRole` unchanged, and avoids the legacy user role `'AGENT'`. Agent permissions inside the
+    project stay with `agentPermissions` (D529). Update the `resolveMembership` and guard docblocks to say "agent:
+    roster-checked, returns null".
+  - The lookup is read live, so a removed agent is refused on its next request; the cached `AgentPrincipal` carries
+    no project data and needs no invalidation.
+- `ProjectsService.findAllForPrincipal`: agent -> non-deleted projects with an `AgentProject` row (flag `off`: all).
+- `GET /agents/:slug/pickup?project=` (`AgentsService.suggestTicket`): after resolving the project (unknown project
+  stays 404 `agents`), when the flag is `on` the *target* agent (`:slug`) must be on the project's roster, else 403
+  `projects`. This applies to both permitted callers (the owning agent and a global ADMIN). Existing caller rules
+  unchanged.
+- `GET /agents/me`: adds `projects: [{ slug, name }]` (the agent's roster entries, non-deleted projects), both modes.
 
 ### 3.2 Roster endpoints (D530)
 
+Response DTO `ProjectAgentDto { slug, name, status, roles, openTicketCount, openTicketRefs, addedAt, addedBy: { id,
+name } | null }`. `openTicketCount` = tickets in this project assigned to the agent, `deletedAt` null, status not
+CLOSED/REJECTED; `openTicketRefs` = up to 10 of those refs, oldest first (one grouped query for the page, not per row).
+
 | Route | Who | Behaviour |
 |---|---|---|
-| `GET /projects/:slug/agents` | any project member / assigned agent | `{ scoping: boolean, items: [{ slug, name, status, roles, openTicketCount, addedAt, addedBy: { id, name } \| null }] }` ordered by name. Replaces the "agents with tickets here" meaning. `openTicketCount` = tickets in this project assigned to the agent, not deleted, status not CLOSED/REJECTED. |
-| `POST /projects/:slug/agents` `{ agentSlug }` | project ADMIN, global ADMIN | 201 roster entry. 404 unknown agent; 409 `AGENT_ALREADY_ASSIGNED` (PK conflict, incl. concurrent adds); 409 `AGENT_OFFLINE` for status OFFLINE. |
-| `DELETE /projects/:slug/agents/:agentSlug` | project ADMIN, global ADMIN | 204. 404 not on roster. 409 `AGENT_HAS_OPEN_TICKETS` with `{ count, refs }` (`refs` = up to 10 ticket refs, oldest first) while `openTicketCount > 0` (D531). |
+| `GET /projects/:slug/agents` | any project member / rostered agent (inline assert as today) | `{ scoping: boolean, items: ProjectAgentDto[] }` ordered by name; un-paged (a roster is small; documented exception to `KodaPageQuery`). **Shape change** from today's bare array: web `agents.vue` and the CLI are updated in the same PRs. |
+| `POST /projects/:slug/agents` `{ agentSlug }` | project ADMIN, global ADMIN | 201 `ProjectAgentDto`. 404 `agents` unknown agent; 409 `projectAgents.alreadyAssigned` (PK conflict, incl. concurrent adds); 409 `projectAgents.agentOffline` for status OFFLINE. |
+| `DELETE /projects/:slug/agents/:agentSlug` | project ADMIN, global ADMIN | 204. 404 `projectAgents` not on roster. 409 `projectAgents.hasOpenTickets` while open tickets exist (D531); message args `{ count, refs }` (refs joined, up to 10) so the CLI prints them; the web reads `openTicketRefs` from the roster row it already has (the error envelope carries no data). |
 | `PATCH /projects/:slug/agents/:agentSlug` | unchanged (global ADMIN, project ADMIN, the agent itself) | Existing status route; now resolves the agent through the roster (404 if not on it). |
 
-Error codes are i18n keys in the existing `projects` namespace style; the plan picks exact keys.
+New i18n file `apps/api/src/i18n/{en,zh}/projectAgents.json` with `alreadyAssigned.409`, `agentOffline.409`,
+`hasOpenTickets.409` ("{count} open tickets are still assigned to this agent: {refs}"), `404`.
 
 ### 3.3 Assignees endpoint
 
-`GET /projects/:slug/assignees?q=&limit=` (any project member; `limit` default 20, max 50):
-`{ items: [{ type: 'user' | 'agent', id, name, secondary }] }`, users first then agents, each by name.
-- users: project members with `disabled = false` (global ADMINs who are not members are not listed);
-  `secondary` = email.
-- agents: roster entries with status ACTIVE or PAUSED; `secondary` = slug; PAUSED surfaces as `status` on the item.
+New controller `@Controller('projects/:slug/assignees')`, `GET` with `q` and `limit` (default 20, max 50), any
+project member or rostered agent (guard). Un-paged typeahead (documented exception to `KodaPageQuery`):
+`{ items: [{ type: 'user' | 'agent', id, name, secondary, status? }] }`, users first then agents, each by name.
+- users: project members with `disabled = false` (global ADMINs who are not members are not listed); `secondary` =
+  email.
+- agents: roster entries with status ACTIVE or PAUSED; `secondary` = slug; `status` set for agents.
 - `q` (trimmed, max 100): case-insensitive substring on name, email (users) or slug (agents).
 
 ### 3.4 Guards (both modes)
 
-- `TicketsService.assign`:
-  - `{ userId }`: user `disabled` -> 409 `USER_DISABLED` (checked before membership).
-  - `{ agentId }`: agent not on the project's roster -> 409 `AGENT_NOT_IN_PROJECT`; status OFFLINE -> 409
-    `AGENT_OFFLINE`.
-  - Check and update in one `txManager.run`.
-- `ProjectMembersService.add`: disabled user -> 409 `USER_DISABLED`.
-- Remove vs concurrent assign: the roster delete and the open-ticket count run in one transaction; an assign that
-  commits after the count can leave one ticket assigned to a removed agent. Accepted: the agent then simply has no
-  access, and the ticket can be reassigned.
+`TicketsService.assign`: the ticket lookup, the checks and the update run in one `txManager.run`. Order:
+- `{ userId }`: user missing -> 404 (today); `disabled` -> 409 `tickets.userDisabled` (`findUserById`,
+  prisma-tickets.repository.ts:236, now selects `disabled`); not a member -> 403 (today; global ADMIN exempt).
+- `{ agentId }`: agent missing -> 404 (today); not on the roster -> 409 `tickets.agentNotInProject`; status OFFLINE ->
+  409 `tickets.agentOffline`. The roster read is `SELECT ... FROM "AgentProject" WHERE ... FOR SHARE`, so it blocks
+  on a concurrent removal.
+- Roster removal (`DELETE /projects/:slug/agents/:agentSlug`), one transaction: `DELETE` the roster row (takes the row
+  lock, waits for any assign holding `FOR SHARE` to commit), then count open tickets; count > 0 -> roll back, 409.
+  An assign that committed first is counted; an assign that starts after the delete sees no row and gets 409. The
+  race is closed.
+
+`ProjectMembersService.add`: disabled user -> 409 `members.userDisabled`.
+
+New i18n keys: `tickets.userDisabled.409`, `tickets.agentNotInProject.409`, `tickets.agentOffline.409`,
+`members.userDisabled.409` (en + zh).
 
 ### 3.5 CLI
 
@@ -189,12 +231,12 @@ Under `apps/cli/src/commands/project.ts`, using the generated client:
   `extractApiError` toast.
 - **`pages/[project]/agents.vue`** (rework): table (name, slug, roles, status, open tickets; admins also see added
   by/at and Remove). Admin "Add agent" opens **`AddProjectAgentDialog.vue`** (new): picks from `GET /agents` minus
-  roster minus OFFLINE, posts `{ agentSlug }`. Remove confirm; on `AGENT_HAS_OPEN_TICKETS` shows "Reassign its N open
-  tickets first" with the refs as ticket links. Existing pause/resume control kept. Empty state "No agents on this
+  roster minus OFFLINE, posts `{ agentSlug }`. Remove confirm; when the row has `openTicketCount > 0` (or the DELETE returns 409) shows "Reassign its N open
+  tickets first" with `openTicketRefs` as ticket links (refreshing the roster after a 409). Existing pause/resume control kept. Empty state "No agents on this
   project yet." When `scoping` is false: info note "Agent scoping is off on this server: all agents can reach every
   project."
 - **`ProjectMembersPanel.vue`**: "Disabled" badge, row greyed, role select hidden for disabled members; add errors
-  (`USER_DISABLED`) shown as today.
+  (`members.userDisabled`) shown as today.
 - i18n keys in `en.json` and `zh.json`.
 
 ## 5. Edge cases
@@ -227,7 +269,9 @@ Under `apps/cli/src/commands/project.ts`, using the generated client:
   guard.
 - Integration (PG): a role-matrix spec running one agent key against tickets, comments (incl. `comments/:id`), labels,
   context, code-intel, memory, pickup and `GET /projects`, assigned vs unassigned, then the same with the flag off;
-  backfill migration test (agents with tickets/comments in two projects, soft-deleted ticket included).
+  backfill migration test (agents with tickets/comments in two projects, soft-deleted ticket included); a
+  concurrency test: a removal and an assign racing on PG (two transactions) end with either a 409 removal or a 409
+  assign, never an assigned ticket for a removed agent; `GET /projects/:slug/agents` new shape consumed by the CLI.
 - CLI: unit tests for the three commands.
 - Web: unit tests for `AssigneePicker`, `AddProjectAgentDialog`, the disabled badge; one Playwright journey: admin adds
   an agent, assigns a ticket to it via the picker, removal blocked with refs, reassign, remove succeeds.
