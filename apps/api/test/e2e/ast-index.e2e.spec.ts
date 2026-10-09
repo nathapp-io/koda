@@ -101,6 +101,14 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
       expect(res.status).toBe(201);
       const data = body<{ slug: string }>(res);
       projectSlug = data.slug;
+
+      // S4c US-001: the DEVELOPER agent reaches the project through its roster row.
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const agent = await prisma.client.agent.findUniqueOrThrow({ where: { slug: agentSlug } });
+      await prisma.client.agentProject.create({
+        data: { projectId: project.id, agentId: agent.id },
+      });
     });
   });
 

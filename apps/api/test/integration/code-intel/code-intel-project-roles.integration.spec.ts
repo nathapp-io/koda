@@ -7,6 +7,8 @@
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 
@@ -42,6 +44,14 @@ describeIntegration('code-intel project-role gate (Slice 4)', () => {
     const agent = await request(server).post('/api/agents').set(auth('root'))
       .send({ name: 'Intel Agent', slug: 'intel-agent', roles: [] }).expect(201);
     tokens.agent = data<{ apiKey: string }>(agent).apiKey;
+
+    // S4c US-001: the agent reads the project through its AgentProject roster row.
+    const prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    const intelProject = await prisma.project.findUniqueOrThrow({ where: { slug: 'intel' } });
+    const intelAgent = await prisma.agent.findUniqueOrThrow({ where: { slug: 'intel-agent' } });
+    await prisma.agentProject.create({
+      data: { projectId: intelProject.id, agentId: intelAgent.id },
+    });
 
     await request(server).post('/api/code-intel/index').set(auth('root')).send({
       repoId: 'acme/widgets',

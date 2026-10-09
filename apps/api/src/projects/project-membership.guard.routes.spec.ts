@@ -31,6 +31,7 @@ import { KodaPrincipal, UserPrincipal } from '../auth/principal/koda-principal.t
 interface MembershipRepoStub {
   findBySlug: jest.Mock;
   findMembershipRole: jest.Mock;
+  isAgentOnRoster: jest.Mock;
 }
 
 interface TicketsServiceStub {
@@ -113,7 +114,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
   };
 
   beforeAll(async () => {
-    membershipRepo = { findBySlug: jest.fn(), findMembershipRole: jest.fn() };
+    membershipRepo = { findBySlug: jest.fn(), findMembershipRole: jest.fn(), isAgentOnRoster: jest.fn() };
 
     ticketsService = {
       create: jest.fn(),
@@ -263,7 +264,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     expect(membershipRepo.findBySlug).toHaveBeenCalledWith('alpha');
   });
 
-  it('AC8 boundary: an agent principal is admitted to POST :ref/assign with no membership row', async () => {
+  it('AC8 boundary: a rostered agent principal is admitted to POST :ref/assign with no membership row', async () => {
     // #144: assign requires UPDATE Ticket; TRIAGER agents have it (DEVELOPER
     // agents only get TRANSITION). This test is about membership semantics, so
     // the agent carries a role that passes the permission check.
@@ -280,12 +281,15 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
       authorities: ['WORKER'],
     };
     membershipRepo.findMembershipRole.mockResolvedValue(null);
+    // S4c US-001: the agent reaches the project through its AgentProject row.
+    membershipRepo.isAgentOnRoster.mockResolvedValue(true);
 
     const res = await request(app.getHttpServer())
       .post('/api/projects/alpha/tickets/KODA-1/assign')
       .send({ userId: 'user-2' });
 
     expect(res.status).toBe(200);
+    expect(membershipRepo.isAgentOnRoster).toHaveBeenCalledWith('proj-1', 'agent-1');
     expect(membershipRepo.findMembershipRole).not.toHaveBeenCalled();
     // The route is guarded: the slug is still resolved before the handler runs.
     expect(membershipRepo.findBySlug).toHaveBeenCalledWith('alpha');

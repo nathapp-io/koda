@@ -26,6 +26,7 @@ import {
 interface MembershipRepoStub {
   findBySlug: jest.Mock;
   findMembershipRole: jest.Mock;
+  isAgentOnRoster: jest.Mock;
 }
 
 /** Controller stub carrying @ProjectRoles on a handler, as the KB write routes do. */
@@ -129,7 +130,7 @@ describe('ProjectMembershipGuard (US-001)', () => {
   const activeProject = { id: 'proj-1', slug: 'alpha', deletedAt: null };
 
   beforeEach(() => {
-    membershipRepo = { findBySlug: jest.fn(), findMembershipRole: jest.fn() };
+    membershipRepo = { findBySlug: jest.fn(), findMembershipRole: jest.fn(), isAgentOnRoster: jest.fn() };
     access = new ProjectAccessService(membershipRepo as unknown as PrismaProjectRepository);
     findMembershipRoleSpy = jest.spyOn(access, 'findMembershipRole');
     guard = new ProjectMembershipGuard(access, new Reflector());
@@ -189,19 +190,30 @@ describe('ProjectMembershipGuard (US-001)', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // AC3 — agents bypass the membership gate
+  // AC3 — agents are roster-checked (S4c US-001)
   // ---------------------------------------------------------------------------
 
-  it('AC3: returns true for an agent principal without a membership lookup', async () => {
+  it('AC3: returns true for a rostered agent principal without a membership lookup', async () => {
     membershipRepo.findBySlug.mockResolvedValue(activeProject);
     membershipRepo.findMembershipRole.mockResolvedValue(null);
+    membershipRepo.isAgentOnRoster.mockResolvedValue(true);
 
     const result = await guard.canActivate(
       makeExecutionContext({ params: { slug: 'alpha' }, user: agentPrincipal }),
     );
 
     expect(result).toBe(true);
+    expect(membershipRepo.isAgentOnRoster).toHaveBeenCalledWith('proj-1', 'agent-1');
     expect(membershipRepo.findMembershipRole).not.toHaveBeenCalled();
+  });
+
+  it('AC3 boundary: throws ForbiddenAppException for an agent absent from the project roster', async () => {
+    membershipRepo.findBySlug.mockResolvedValue(activeProject);
+    membershipRepo.isAgentOnRoster.mockResolvedValue(false);
+
+    await expect(
+      guard.canActivate(makeExecutionContext({ params: { slug: 'alpha' }, user: agentPrincipal })),
+    ).rejects.toBeInstanceOf(ForbiddenAppException);
   });
 
   // ---------------------------------------------------------------------------
@@ -292,8 +304,9 @@ describe('ProjectMembershipGuard (US-001)', () => {
   // AC15 / AC16 — @ProjectRoles applied to a handler
   // ---------------------------------------------------------------------------
 
-  it('AC15: returns true for an agent principal on a handler carrying @ProjectRoles without calling findMembershipRole', async () => {
+  it('AC15: returns true for a rostered agent principal on a handler carrying @ProjectRoles without calling findMembershipRole', async () => {
     membershipRepo.findBySlug.mockResolvedValue(activeProject);
+    membershipRepo.isAgentOnRoster.mockResolvedValue(true);
 
     const result = await guard.canActivate(
       makeExecutionContext(
@@ -407,6 +420,8 @@ describe('ProjectMembershipGuard (US-001)', () => {
     beforeEach(() => {
       guardWithCasl = new ProjectMembershipGuard(access, new Reflector(), new KodaCaslAbilityFactory());
       membershipRepo.findBySlug.mockResolvedValue({ id: 'p1', slug: 'team', deletedAt: null });
+      // S4c US-001: agents are roster-checked before the permission check.
+      membershipRepo.isAgentOnRoster.mockResolvedValue(true);
     });
 
     it('attaches ProjectContext with the membership role, querying membership exactly once', async () => {

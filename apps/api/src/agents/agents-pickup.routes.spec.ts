@@ -100,6 +100,7 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
     findVerifiedUnassignedTickets: jest.Mock;
     findBySlug: jest.Mock;
     findById: jest.Mock;
+    isOnProjectRoster: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -109,6 +110,7 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
       findVerifiedUnassignedTickets: jest.fn(),
       findBySlug: jest.fn(),
       findById: jest.fn(),
+      isOnProjectRoster: jest.fn(),
     };
 
     testingModule = await Test.createTestingModule({
@@ -164,6 +166,8 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
 
     agentRepo.findBySlugWithCapabilities.mockResolvedValue(AGENT_ROW);
     agentRepo.findProjectBySlug.mockResolvedValue(PROJECT);
+    // S4c US-001: the target agent is on the project roster unless a test says otherwise.
+    agentRepo.isOnProjectRoster.mockResolvedValue(true);
     agentRepo.findVerifiedUnassignedTickets.mockResolvedValue([
       makeTicket('ticket-1', 1, 'HIGH', ['typescript']),
       makeTicket('ticket-2', 2, 'CRITICAL', []),
@@ -237,6 +241,19 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.ticket.ref).toBe('KT-1');
     expect(res.body.data.matchScore).toBe(1);
+  });
+
+  it('AC12 boundary (S4c US-001): returns 403 when the target agent is not on the project roster', async () => {
+    agentRepo.isOnProjectRoster.mockResolvedValue(false);
+    currentPrincipal = userPrincipal('ADMIN');
+
+    const res = await request(app.getHttpServer())
+      .get('/api/agents/test-agent/pickup')
+      .query({ project: 'koda' });
+
+    expect(res.status).toBe(403);
+    expect(agentRepo.isOnProjectRoster).toHaveBeenCalledWith('agent-123', 'project-1');
+    expect(agentRepo.findVerifiedUnassignedTickets).not.toHaveBeenCalled();
   });
 
   it('AC13: returns 404 when the project is soft-deleted', async () => {

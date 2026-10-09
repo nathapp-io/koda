@@ -5,7 +5,7 @@ import { NotFoundAppException, ValidationAppException, ForbiddenAppException } f
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { createHmac, randomBytes } from 'crypto';
 import { AGENT_ROLES, type AgentRoleNames } from '../common/enums';
-import { AgentResponseDto } from './dto/agent-response.dto';
+import { AgentResponseDto, AgentMeResponseDto } from './dto/agent-response.dto';
 import { TicketResponseDto } from '../tickets/dto/ticket-response.dto';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
@@ -167,14 +167,14 @@ export class AgentsService {
     return AgentResponseDto.from(agent);
   }
 
-  async findMe(agentId: string): Promise<AgentResponseDto> {
+  async findMe(agentId: string): Promise<AgentMeResponseDto> {
     const agent = await this.agentRepo.findById(agentId);
 
     if (!agent) {
       throw new NotFoundAppException({}, 'agents');
     }
 
-    return AgentResponseDto.from(agent);
+    return AgentMeResponseDto.fromMe(agent, await this.agentRepo.findRosterProjects(agentId));
   }
 
   async findByProject(projectSlug: string): Promise<AgentResponseDto[]> {
@@ -236,8 +236,19 @@ export class AgentsService {
   };
 
   /**
+   * S4c US-001 (D528): an absent flag means scoping is on. Only an explicit
+   * `agentProjectScoping: false` restores the pre-S4c agent reach.
+   */
+  agentScopingEnabled(): boolean {
+    return this.authConfig.agentProjectScoping !== false;
+  }
+
+  /**
    * US-003: ticket pickup is gated to the agent itself, or to a global ADMIN
    * user. 403 for everyone else; 404 when the project is missing or soft-deleted.
+   *
+   * S4c US-001: while project scoping is on, the target agent must also be on
+   * the project's roster — a pickup is an act inside that project.
    */
   async suggestTicket(
     agentSlug: string,
@@ -259,6 +270,10 @@ export class AgentsService {
     // existence from agents that should not see it.
     if (!project || project.deletedAt) {
       throw new NotFoundAppException({}, 'agents');
+    }
+
+    if (this.agentScopingEnabled() && !(await this.agentRepo.isOnProjectRoster(agent.id, project.id))) {
+      throw new ForbiddenAppException({}, 'agents');
     }
 
     const tickets = await this.agentRepo.findVerifiedUnassignedTickets(project.id);

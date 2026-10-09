@@ -10,6 +10,7 @@ describe('ProjectAccessService', () => {
     mockProjectRepo = {
       findBySlug: jest.fn(),
       findMembershipRole: jest.fn(),
+      isAgentOnRoster: jest.fn(),
     };
 
     service = new ProjectAccessService(mockProjectRepo as any);
@@ -59,9 +60,16 @@ describe('ProjectAccessService', () => {
       expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
     });
 
-    it('passes without checking membership for agent principal', async () => {
+    it('admits a rostered agent after one roster lookup', async () => {
+      mockProjectRepo.isAgentOnRoster.mockResolvedValue(true);
       await expect(service.assertProjectMembership('p1', agentPrincipal)).resolves.toBeUndefined();
+      expect(mockProjectRepo.isAgentOnRoster).toHaveBeenCalledWith('p1', 'ag1');
       expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
+    });
+
+    it('refuses an agent absent from the project roster', async () => {
+      mockProjectRepo.isAgentOnRoster.mockResolvedValue(false);
+      await expect(service.assertProjectMembership('p1', agentPrincipal)).rejects.toBeInstanceOf(ForbiddenAppException);
     });
 
     it('throws ForbiddenAppException when membership role is null', async () => {
@@ -94,8 +102,25 @@ describe('ProjectAccessService', () => {
       expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
     });
 
-    it('returns null for an agent without a membership lookup', async () => {
+    it('returns null for a rostered agent with no membership lookup', async () => {
+      mockProjectRepo.isAgentOnRoster.mockResolvedValue(true);
       await expect(service.resolveMembership('p1', agentPrincipal)).resolves.toBeNull();
+      expect(mockProjectRepo.isAgentOnRoster).toHaveBeenCalledWith('p1', 'ag1');
+      expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenAppException for an agent absent from the project roster', async () => {
+      mockProjectRepo.isAgentOnRoster.mockResolvedValue(false);
+      await expect(service.resolveMembership('p1', agentPrincipal)).rejects.toBeInstanceOf(ForbiddenAppException);
+    });
+
+    it('returns null for an agent without a roster lookup when scoping is off', async () => {
+      const unscoped = new ProjectAccessService(
+        mockProjectRepo as any,
+        { agentProjectScoping: false } as any,
+      );
+      await expect(unscoped.resolveMembership('p1', agentPrincipal)).resolves.toBeNull();
+      expect(mockProjectRepo.isAgentOnRoster).not.toHaveBeenCalled();
       expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
     });
 

@@ -98,11 +98,18 @@ describeIntegration('Agents API E2E', () => {
       })
       .expect(201);
 
-    const data = body<{ apiKey: string; agent: { slug: string; name: string } }>(res);
+    const data = body<{ apiKey: string; agent: { id: string; slug: string; name: string } }>(res);
     expect(data.apiKey).toBeTruthy();
     expect(data.agent.slug).toBe(baseAgentSlug);
     agentApiKey = data.apiKey;
     agentSlug = data.agent.slug;
+
+    // S4c US-001: the agent reaches the setup project through its AgentProject row.
+    const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+    const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+    await prisma.client.agentProject.create({
+      data: { projectId: project.id, agentId: data.agent.id },
+    });
   });
 
   it('POST /api/agents — returns 403 for non-admin user', async () => {
@@ -252,6 +259,15 @@ describeIntegration('Agents API E2E', () => {
       .expect(201);
 
     const emptyProjectSlug = body<{ slug: string }>(emptyProjectRes).slug;
+
+    // S4c US-001: the pickup target needs a roster row on the empty project too
+    // (it has no VERIFIED tickets, so pickup returns null rather than 403).
+    const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+    const emptyProject = await prisma.client.project.findUniqueOrThrow({ where: { slug: emptyProjectSlug } });
+    const agent = await prisma.client.agent.findUniqueOrThrow({ where: { slug: agentSlug } });
+    await prisma.client.agentProject.create({
+      data: { projectId: emptyProject.id, agentId: agent.id },
+    });
 
     const res = await request(httpServer)
       .get(`/api/agents/${agentSlug}/pickup`)

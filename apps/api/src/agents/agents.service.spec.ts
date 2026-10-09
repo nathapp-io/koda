@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AgentsService } from './agents.service';
 import { PrismaAgentRepository } from './prisma-agent.repository';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
-import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { createHmac } from 'crypto';
 import { randomBytes } from 'crypto';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
@@ -73,6 +73,8 @@ describe('AgentsService', () => {
     findProjectBySlug: jest.fn(),
     findVerifiedUnassignedTickets: jest.fn(),
     findByProjectSlug: jest.fn(),
+    isOnProjectRoster: jest.fn(),
+    findRosterProjects: jest.fn(),
   };
 
   const mockAuthConfig: IAuthConfig = {
@@ -115,6 +117,10 @@ describe('AgentsService', () => {
 
     mockAgentRepo.replaceRoles.mockResolvedValue(undefined);
     mockAgentRepo.replaceCapabilities.mockResolvedValue(undefined);
+    // S4c US-001: GET /agents/me always carries the roster projects, and a
+    // rostered target agent is the default for the pickup tests.
+    mockAgentRepo.findRosterProjects.mockResolvedValue([]);
+    mockAgentRepo.isOnProjectRoster.mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -405,13 +411,26 @@ describe('AgentsService', () => {
   });
 
   describe('findMe', () => {
-    it('should return authenticated agent profile by id', async () => {
+    it('should return authenticated agent profile by id with its roster projects', async () => {
+      mockAgentRepo.findById.mockResolvedValue(mockAgentWithRelations);
+      mockAgentRepo.findRosterProjects.mockResolvedValue([{ slug: 'koda', name: 'Koda' }]);
+
+      const result = await service.findMe('agent-123');
+
+      expect(result).toEqual({
+        ...mockAgentDto,
+        projects: [{ slug: 'koda', name: 'Koda' }],
+      });
+      expect(agentRepo.findById).toHaveBeenCalledWith('agent-123');
+      expect(agentRepo.findRosterProjects).toHaveBeenCalledWith('agent-123');
+    });
+
+    it('should report an empty project list for an agent with no roster rows', async () => {
       mockAgentRepo.findById.mockResolvedValue(mockAgentWithRelations);
 
       const result = await service.findMe('agent-123');
 
-      expect(result).toEqual(mockAgentDto);
-      expect(agentRepo.findById).toHaveBeenCalledWith('agent-123');
+      expect(result.projects).toEqual([]);
     });
 
     it('should include roles with all AgentRole enum values', async () => {
@@ -745,6 +764,35 @@ describe('AgentsService', () => {
       mockAgentRepo.findBySlugWithCapabilities.mockResolvedValue(null);
 
       await expect(service.suggestTicket('nonexistent', 'koda', authorizedPrincipal)).rejects.toThrow();
+    });
+
+    it('should throw ForbiddenAppException when the target agent is not on the project roster', async () => {
+      mockAgentRepo.findBySlugWithCapabilities.mockResolvedValue(mockAgentForPickup);
+      mockAgentRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockAgentRepo.isOnProjectRoster.mockResolvedValue(false);
+
+      await expect(
+        service.suggestTicket('test-agent', 'koda', authorizedPrincipal),
+      ).rejects.toBeInstanceOf(ForbiddenAppException);
+      expect(agentRepo.isOnProjectRoster).toHaveBeenCalledWith('agent-123', 'project-1');
+      expect(agentRepo.findVerifiedUnassignedTickets).not.toHaveBeenCalled();
+    });
+
+    it('should admit an unrostered target when agent project scoping is off', async () => {
+      const unscoped = new AgentsService(
+        mockAgentRepo as never,
+        { ...mockAuthConfig, agentProjectScoping: false },
+        mockTxManager as never,
+        mockKodaDomainWriter as never,
+      );
+
+      mockAgentRepo.findBySlugWithCapabilities.mockResolvedValue(mockAgentForPickup);
+      mockAgentRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockAgentRepo.isOnProjectRoster.mockResolvedValue(false);
+      mockAgentRepo.findVerifiedUnassignedTickets.mockResolvedValue([]);
+
+      await expect(unscoped.suggestTicket('test-agent', 'koda', authorizedPrincipal)).resolves.toBeNull();
+      expect(agentRepo.isOnProjectRoster).not.toHaveBeenCalled();
     });
 
     it('should return highest-priority ticket when all scores are 0 (score-0 fallback)', async () => {

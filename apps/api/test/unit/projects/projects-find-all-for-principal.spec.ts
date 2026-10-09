@@ -58,6 +58,11 @@ const MEMBERSHIPS: Record<string, string[]> = {
   'user-multi': ['alpha', 'bravo', 'delta'],
 };
 
+/** AgentProject roster rows, keyed by agent id (S4c US-001). */
+const AGENT_ROSTER: Record<string, string[]> = {
+  'agent-1': ['alpha', 'bravo'],
+};
+
 type RepoDouble = Record<string, jest.Mock>;
 
 /**
@@ -100,6 +105,15 @@ function createRepoDouble(): RepoDouble {
       const slugs = MEMBERSHIPS[userId];
       const row = ALL_ROWS.find((p) => p.id === projectId);
       return slugs && row && slugs.includes(row.slug) ? 'DEVELOPER' : null;
+    }),
+    isAgentOnRoster: jest.fn(async (projectId: string, agentId: string) => {
+      const slugs = AGENT_ROSTER[agentId] ?? [];
+      const row = ALL_ROWS.find((p) => p.id === projectId);
+      return row !== undefined && slugs.includes(row.slug);
+    }),
+    findAllForAgent: jest.fn(async (agentId: string) => {
+      const slugs = AGENT_ROSTER[agentId] ?? [];
+      return NON_DELETED.filter((candidate) => slugs.includes(candidate.slug));
     }),
   };
 
@@ -203,10 +217,30 @@ describe('ProjectsService.findAllForPrincipal (US-002)', () => {
     expect(slugsOf(projects)).toEqual(['alpha', 'bravo', 'charlie']);
   });
 
-  it('AC8: returns every non-deleted project for an agent principal', async () => {
+  it('AC8: returns only the agent rostered projects while scoping is on', async () => {
     const projects = await service.findAllForPrincipal(AGENT_PRINCIPAL);
 
+    expect(slugsOf(projects)).toEqual(['alpha', 'bravo']);
+    expect(repo.findAllForAgent).toHaveBeenCalledWith('agent-1');
+  });
+
+  it('AC8 boundary (S4c US-001): with scoping off an agent gets every non-deleted project', async () => {
+    const unscoped = new ProjectsService(
+      repo as unknown as PrismaProjectRepository,
+      {
+        deleteAllBySourceType: jest.fn(),
+        clearProjectCaches: jest.fn(),
+      } as unknown as RagService,
+      undefined,
+      new ProjectAccessService(repo as unknown as PrismaProjectRepository, {
+        agentProjectScoping: false,
+      } as never),
+    );
+
+    const projects = await unscoped.findAllForPrincipal(AGENT_PRINCIPAL);
+
     expect(slugsOf(projects)).toEqual(['alpha', 'bravo', 'charlie']);
+    expect(repo.findAllForAgent).not.toHaveBeenCalled();
   });
 
   it('AC9: never returns a soft-deleted project, even for a member of it', async () => {

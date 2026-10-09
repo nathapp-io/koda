@@ -115,6 +115,31 @@ export class PrismaAgentRepository {
     return this.db.project.findUnique({ where: { slug } });
   }
 
+  /**
+   * S4c US-001: whether the agent holds an AgentProject roster row for the
+   * project. The row grants project reach; it carries no role.
+   */
+  async isOnProjectRoster(agentId: string, projectId: string): Promise<boolean> {
+    const row = await this.db.agentProject.findUnique({
+      where: { agentId_projectId: { agentId, projectId } },
+      select: { agentId: true },
+    });
+    return row !== null;
+  }
+
+  /**
+   * S4c US-001: the agent's non-deleted roster projects, ordered by slug.
+   * Feeds GET /agents/me; soft-deleted projects never appear.
+   */
+  async findRosterProjects(agentId: string): Promise<{ slug: string; name: string }[]> {
+    const rows = await this.db.agentProject.findMany({
+      where: { agentId, project: { deletedAt: null } },
+      select: { project: { select: { slug: true, name: true } } },
+      orderBy: { project: { slug: 'asc' } },
+    });
+    return rows.map((row) => row.project);
+  }
+
   async findByProjectSlug(projectSlug: string) {
     const project = await this.db.project.findUnique({
       where: { slug: projectSlug },

@@ -22,6 +22,15 @@ export class AgentCapabilityDto {
   capability!: string;
 }
 
+/** S4c US-001: one non-deleted project on an agent's roster (GET /agents/me). */
+export class AgentMeProjectDto {
+  @ApiProperty()
+  slug!: string;
+
+  @ApiProperty()
+  name!: string;
+}
+
 export class AgentResponseDto {
   @ApiProperty()
   id!: string;
@@ -68,5 +77,25 @@ export class AgentResponseDto {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   static fromMany(agents: any[]): AgentResponseDto[] {
     return agents.map(a => AgentResponseDto.from(a));
+  }
+}
+
+/**
+ * S4c US-001: the agent's own profile (GET /agents/me). Same fields as
+ * AgentResponseDto plus the non-deleted projects on its roster, slug-ordered.
+ */
+export class AgentMeResponseDto extends AgentResponseDto {
+  @ApiProperty({ type: AgentMeProjectDto, isArray: true })
+  projects!: AgentMeProjectDto[];
+
+  static fromMe(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    agent: any,
+    projects: readonly { slug: string; name: string }[],
+  ): AgentMeResponseDto {
+    return {
+      ...AgentResponseDto.from(agent),
+      projects: projects.map((p) => ({ slug: p.slug, name: p.name })),
+    };
   }
 }

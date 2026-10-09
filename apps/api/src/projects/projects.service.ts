@@ -70,18 +70,21 @@ export class ProjectsService {
   /**
    * US-002: list projects scoped to the calling principal.
    *  - User principals get only projects where they hold a `ProjectMember` row.
-   *  - Global ADMIN user principals and any agent principal see every
-   *    non-deleted project.
+   *  - Global ADMIN user principals see every non-deleted project.
+   *  - Agents (S4c US-001, D533) see exactly their AgentProject roster unless
+   *    `AGENT_PROJECT_SCOPING=off`.
    *  - Soft-deleted projects are never returned.
    *
    * Returns domain objects; callers wrap them in the HTTP DTO at the boundary.
    */
   async findAllForPrincipal(principal: KodaPrincipal): Promise<ProjectDomain[]> {
-    if (
-      principal.actorType === 'agent' ||
-      (principal.actorType === 'user' && principal.role === 'ADMIN')
-    ) {
+    if (principal.actorType === 'user' && principal.role === 'ADMIN') {
       return this.projectRepo.findAll();
+    }
+    if (principal.actorType === 'agent') {
+      return this.access.agentScopingEnabled()
+        ? this.projectRepo.findAllForAgent(principal.id)
+        : this.projectRepo.findAll();
     }
     return this.projectRepo.findAllForUser(principal.id);
   }

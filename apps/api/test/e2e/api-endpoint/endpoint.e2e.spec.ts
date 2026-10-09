@@ -311,6 +311,11 @@ describeIntegration('API Integration Tests', () => {
           data: { projectId: project.id, userId: adminUser.id, role: 'ADMIN' },
         });
       }
+      // S4c US-001: the agent API key reaches this project through its
+      // AgentProject roster row, not through any ProjectMember row.
+      if (project) {
+        await prisma.client.agentProject.create({ data: { projectId: project.id, agentId } });
+      }
     });
 
     it('POST /api/projects — 409 for duplicate key', async () => {
@@ -1595,6 +1600,16 @@ describeIntegration('API Integration Tests', () => {
       .expect(201);
 
     const freshAgentSlug = body<{ agent: { slug: string } }>(freshAgentRes).agent.slug;
+
+    // S4c US-001: the pickup target must be on the project's AgentProject roster.
+    const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+    const pickupProject = await prisma.client.project.findUnique({ where: { slug: projectSlug } });
+    const pickupAgent = await prisma.client.agent.findUnique({ where: { slug: freshAgentSlug } });
+    if (pickupProject && pickupAgent) {
+      await prisma.client.agentProject.create({
+        data: { projectId: pickupProject.id, agentId: pickupAgent.id },
+      });
+    }
 
     // Use a project that has no VERIFIED unassigned tickets for this new agent
     // The simplest way: use a non-existent project slug → service returns null (or 404 for project)

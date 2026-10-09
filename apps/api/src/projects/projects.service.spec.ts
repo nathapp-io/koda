@@ -36,6 +36,7 @@ describe('ProjectsService', () => {
       updateBySlug: jest.fn(),
       findAllIds: jest.fn(),
       findMembershipRole: jest.fn(),
+      isAgentOnRoster: jest.fn(),
     };
 
     ragService = {
@@ -193,9 +194,15 @@ describe('ProjectsService', () => {
       expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
     });
 
-    it('passes without checking membership for agent principal', async () => {
+    it('passes a rostered agent principal without a membership lookup', async () => {
+      mockProjectRepo.isAgentOnRoster.mockResolvedValue(true);
       await expect(service.assertProjectMembership('p1', agentPrincipal)).resolves.toBeUndefined();
       expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
+    });
+
+    it('refuses an agent principal absent from the project roster', async () => {
+      mockProjectRepo.isAgentOnRoster.mockResolvedValue(false);
+      await expect(service.assertProjectMembership('p1', agentPrincipal)).rejects.toBeInstanceOf(ForbiddenAppException);
     });
 
     it('throws ForbiddenAppException when membership role is null', async () => {
