@@ -98,18 +98,21 @@ function readViewer(): { canManage: boolean; viewerRole: string | null; isGlobal
   return { ...resolved, isGlobalAdmin: raw.isGlobalAdmin === true }
 }
 
-const viewer = readViewer()
-// `canManage` and `isEmpty` are read by both the template (needs reactivity
-// so Add/Remove and EmptyState flip when the async role/roster arrives)
-// and the unit-test binding surface (which does `toBe(true)` on a plain
-// boolean). The computeds drive the template; the `let` bindings mirror
-// the computed value via `watchEffect` so the test sees a primitive.
-// `<script setup>` compiles the auto-return to a getter that reads the
-// binding each time, so the test sees the updated value after the
-// microtask that `mountPage` awaits.
-const canManageComputed = computed(
-  () => viewer.canManage || viewer.viewerRole === 'ADMIN' || viewer.isGlobalAdmin,
-)
+// `canManage` is read by both the template (needs reactivity so Add/Remove
+// flip when the async `useProjectViewerRole` resolves) and the unit-test
+// binding surface (which does `toBe(true)` on a plain boolean). The
+// computed reads `viewerRoleRaw` directly so it tracks the underlying
+// `data` ref and re-evaluates when the async fetch lands; the `let`
+// binding mirrors the computed value via `watchEffect` so the test sees
+// a primitive. `<script setup>` compiles `let` bindings to getters on
+// the auto-return, so the test's `expect(bindings.canManage).toBe(true)`
+// still passes after the microtask `mountPage` awaits.
+const canManageComputed = computed(() => {
+  const resolved = readViewer()
+  return resolved.canManage || resolved.viewerRole === 'ADMIN' || resolved.isGlobalAdmin
+})
+// `isEmptyComputed` reads `items.value` (a ref) so it tracks the roster
+// ref directly; the `let` binding mirrors it the same way as `canManage`.
 const isEmptyComputed = computed(
   () => Array.isArray(items.value) && items.value.length === 0,
 )
