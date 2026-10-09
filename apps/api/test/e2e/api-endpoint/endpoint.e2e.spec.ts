@@ -21,6 +21,8 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient, ProjectMember } from '../../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 import { createHmac } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { resetDb } from '../../helpers/reset-db';
 
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -31,6 +33,50 @@ function body<T = unknown>(res: request.Response): T {
   expect(res.body).toHaveProperty('ret', 0);
   expect(res.body).toHaveProperty('data');
   return res.body.data as T;
+}
+
+/**
+ * Koda's refusal envelope (`KodaExceptionsFilter`): `{ ret, message, data: { key, args } }`.
+ *
+ * Asserting only that the stringified body *contains* the refusing key passes whether the
+ * message was translated or the lookup fell back to the raw key, so a refusal is pinned to
+ * the exact i18n key it carries, its interpolation args, and the sentence `src/i18n/en`
+ * declares for that key. An entry that is not nested under its status
+ * (`"agentOffline": { "409": … }` rather than a flat `"agentOffline": "…"`) never resolves
+ * for `<prefix>.<code>`: the 409 then ships the raw key as its message and this fails.
+ */
+function refusal(res: request.Response, key: string, args: Record<string, unknown> = {}): void {
+  const envelope = res.body as {
+    ret: number;
+    message: string;
+    data: { key: string; args: Record<string, unknown> };
+  };
+  expect(envelope.ret).not.toBe(0);
+  expect(envelope.data).toEqual({ key, args });
+
+  // `projectAgents.alreadyAssigned.409` → src/i18n/en/projectAgents.json → alreadyAssigned.409
+  const [namespace, ...segments] = key.split('.');
+  const catalog = JSON.parse(
+    readFileSync(join(__dirname, '../../../src/i18n/en', `${namespace}.json`), 'utf8'),
+  ) as Record<string, unknown>;
+  const sentence = segments.reduce<unknown>(
+    (node, segment) =>
+      typeof node === 'object' && node !== null ? (node as Record<string, unknown>)[segment] : undefined,
+    catalog,
+  );
+
+  if (typeof sentence !== 'string') {
+    // A flat `"agentOffline": "…"` entry never resolves for `<prefix>.<code>`, so the 409
+    // would ship the raw key as its message instead of a sentence.
+    throw new Error(`${key} is not declared in src/i18n/en/${namespace}.json`);
+  }
+
+  // The refusal message is that sentence with its `{arg}` placeholders filled in.
+  expect(envelope.message).toBe(
+    sentence.replace(/\{(\w+)\}/g, (placeholder, name: string) =>
+      name in args ? String(args[name]) : placeholder,
+    ),
+  );
 }
 
 describeIntegration('API Integration Tests', () => {
@@ -2538,7 +2584,13 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .send({ agentSlug: candidate.slug })
         .expect(409);
-      expect(JSON.stringify(res.body)).toContain('projectAgents.agentOffline');
+      refusal(res, 'projectAgents.agentOffline.409');
+
+      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const rosterEntry = await prisma.client.agentProject.findUnique({
+        where: { agentId_projectId: { agentId: candidate.id, projectId: project.id } },
+      });
+      expect(rosterEntry).toBeNull();
     });
 
     it('AC4: adding an already-rostered agent returns 409 with the duplicate message', async () => {
@@ -2548,7 +2600,7 @@ describeIntegration('API Integration Tests', () => {
         .send({ agentSlug: rosterAgentSlug })
         .expect(409);
 
-      expect(JSON.stringify(res.body)).toContain('projectAgents.alreadyAssigned');
+      refusal(res, 'projectAgents.alreadyAssigned.409');
     });
 
     it('AC6: adding an unknown agent returns 404', async () => {
@@ -2614,9 +2666,8 @@ describeIntegration('API Integration Tests', () => {
         .delete(`/api/projects/${projectSlug}/agents/${rosterAgentSlug}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(409);
-      const errorBody = JSON.stringify(res.body);
-      expect(errorBody).toContain('2');
-      for (const ref of refs) expect(errorBody).toContain(ref);
+      // The refusal names the count and every open ref (AC-34), and carries them as args.
+      refusal(res, 'projectAgents.hasOpenTickets.409', { count: 2, refs: refs.join(',') });
 
       const rosterEntry = await prisma.client.agentProject.findUnique({
         where: { agentId_projectId: { agentId: rosterAgentId, projectId: project.id } },
@@ -2647,6 +2698,35 @@ describeIntegration('API Integration Tests', () => {
         .get(`/api/projects/${projectSlug}/tickets`)
         .set('Authorization', `Bearer ${rosterAgentApiKey}`)
         .expect(403);
+    });
+  });
+
+  describe('US-003 Disabled member guard', () => {
+    const disabledMemberEmail = 'disabled-member@koda.test';
+
+    it('AC14: adding a disabled user is refused with the disabled-account message and stores no membership', async () => {
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+
+      const registered = await request(httpServer)
+        .post('/api/auth/register')
+        .send({ email: disabledMemberEmail, name: 'Disabled Member', password: 'Member1234!Aa' })
+        .expect(201);
+      const disabledUser = body<{ user: { id: string } }>(registered).user;
+      await prisma.client.user.update({ where: { id: disabledUser.id }, data: { disabled: true } });
+
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/members`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ email: disabledMemberEmail })
+        .expect(409);
+
+      refusal(res, 'members.userDisabled.409');
+
+      const membership = await prisma.client.projectMember.findUnique({
+        where: { projectId_userId: { projectId: project.id, userId: disabledUser.id } },
+      });
+      expect(membership).toBeNull();
     });
   });
 });
