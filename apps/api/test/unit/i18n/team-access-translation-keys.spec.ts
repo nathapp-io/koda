@@ -2,7 +2,7 @@
  * S4c US-003 — the roster conflict messages.
  *
  * Every roster refusal is an AppException whose prefix is turned into an i18n key
- * by `KodaExceptionsFilter` / `GlobalExceptionsFilter` as `${prefix}.${code}`:
+ * by `GlobalExceptionsFilter` as `${prefix}.${code}`:
  *
  *   - `projectAgents.alreadyAssigned` + 409 -> `projectAgents.alreadyAssigned.409`
  *   - `projectAgents.agentOffline`    + 409 -> `projectAgents.agentOffline.409`
@@ -30,7 +30,7 @@ const ALREADY_ASSIGNED_KEY = 'projectAgents.alreadyAssigned.409';
 const AGENT_OFFLINE_KEY = 'projectAgents.agentOffline.409';
 /** Key GlobalExceptionsFilter builds from new ConflictAppException({...}, 'projectAgents.hasOpenTickets'). */
 const OPEN_TICKETS_KEY = 'projectAgents.hasOpenTickets.409';
-const ARGS = { count: 2, refs: 'ALP-3,ALP-4' };
+const ARGS = { count: 2, refs: 'ALP-3, ALP-4' };
 
 describe('S4c US-003: roster conflict translation keys', () => {
   let moduleRef: TestingModule;
@@ -100,7 +100,7 @@ describe('S4c US-003: roster conflict translation keys', () => {
 
     expect(translated).not.toBe(OPEN_TICKETS_KEY);
     expect(translated).toContain('2');
-    expect(translated).toContain('ALP-3,ALP-4');
+    expect(translated).toContain('ALP-3, ALP-4');
   });
 
   it.each(['en', 'zh'])('%s: leaves no unresolved {count}/{refs} placeholder', (lang) => {

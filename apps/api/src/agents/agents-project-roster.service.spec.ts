@@ -139,7 +139,7 @@ describe('AgentsService project roster writes (S4c US-003)', () => {
 
       expect(error).toBeInstanceOf(ConflictAppException);
       expect((error as ConflictAppException).prefix).toBe('projectAgents.hasOpenTickets');
-      expect((error as ConflictAppException).args).toEqual({ count: 2, refs: 'ALP-1,ALP-2' });
+      expect((error as ConflictAppException).args).toEqual({ count: 2, refs: 'ALP-1, ALP-2' });
       expect(repo.removeFromProjectRoster).not.toHaveBeenCalled();
     });
 

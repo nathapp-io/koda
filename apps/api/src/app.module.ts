@@ -2,7 +2,7 @@ import { join } from 'path';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
-import { GlobalExceptionsFilter, I18nCoreModule, ServerSecurityConfig } from '@nathapp/nestjs-common';
+import { I18nCoreModule, ServerSecurityConfig } from '@nathapp/nestjs-common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { CacheModule, CacheStrategy } from '@nathapp/nestjs-cache';
 import { LoggingModule } from '@nathapp/nestjs-logging';
@@ -56,7 +56,6 @@ import { webhookConfig } from './config/webhook.config';
 import { fleetConfig } from './config/fleet.config';
 import { validate } from './config/env.validation';
 import { ConfigBridgeModule } from './config/config-bridge.module';
-import { KodaExceptionsFilter } from './common/exceptions/koda-exceptions.filter';
 
 @Module({
   imports: [
@@ -135,10 +134,6 @@ import { KodaExceptionsFilter } from './common/exceptions/koda-exceptions.filter
     // H2: register the throttler guard globally so @Throttle decorators are enforced.
     // DefaultThrottlerGuard is exported (and injectable) via ThrottlerModule above.
     { provide: APP_GUARD, useClass: DefaultThrottlerGuard },
-    // S4c US-003: NathApplication's useAppGlobalFilters() resolves this token from DI
-    // before building its own filter, so the Koda error envelope (ret + message + the
-    // refusing i18n key and args in `data`) is the one the API installs.
-    { provide: GlobalExceptionsFilter, useClass: KodaExceptionsFilter },
   ],
 })
 export class AppModule {}

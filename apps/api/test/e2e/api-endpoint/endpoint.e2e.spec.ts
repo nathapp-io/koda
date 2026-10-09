@@ -36,23 +36,19 @@ function body<T = unknown>(res: request.Response): T {
 }
 
 /**
- * Koda's refusal envelope (`KodaExceptionsFilter`): `{ ret, message, data: { key, args } }`.
+ * The library refusal envelope: `{ ret, message }` — no extra `data`.
  *
  * Asserting only that the stringified body *contains* the refusing key passes whether the
  * message was translated or the lookup fell back to the raw key, so a refusal is pinned to
- * the exact i18n key it carries, its interpolation args, and the sentence `src/i18n/en`
- * declares for that key. An entry that is not nested under its status
+ * the exact i18n key's sentence and its interpolation args. An entry that is not nested
+ * under its status
  * (`"agentOffline": { "409": … }` rather than a flat `"agentOffline": "…"`) never resolves
  * for `<prefix>.<code>`: the 409 then ships the raw key as its message and this fails.
  */
 function refusal(res: request.Response, key: string, args: Record<string, unknown> = {}): void {
-  const envelope = res.body as {
-    ret: number;
-    message: string;
-    data: { key: string; args: Record<string, unknown> };
-  };
+  const envelope = res.body as { ret: number; message: string };
   expect(envelope.ret).not.toBe(0);
-  expect(envelope.data).toEqual({ key, args });
+  expect(envelope).not.toHaveProperty('data');
 
   // `projectAgents.alreadyAssigned.409` → src/i18n/en/projectAgents.json → alreadyAssigned.409
   const [namespace, ...segments] = key.split('.');
@@ -2804,7 +2800,7 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(409);
       // The refusal names the count and every open ref (AC-34), and carries them as args.
-      refusal(res, 'projectAgents.hasOpenTickets.409', { count: 2, refs: refs.join(',') });
+      refusal(res, 'projectAgents.hasOpenTickets.409', { count: 2, refs: refs.join(', ') });
 
       const rosterEntry = await prisma.client.agentProject.findUnique({
         where: { agentId_projectId: { agentId: rosterAgentId, projectId: project.id } },

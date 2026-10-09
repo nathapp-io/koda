@@ -278,7 +278,7 @@ export class AgentsService {
       const open = await this.agentRepo.countOpenProjectTickets(agent.id, project.id);
       if (open.count > 0) {
         throw new ConflictAppException(
-          { count: open.count, refs: open.refs.join(',') },
+          { count: open.count, refs: open.refs.join(', ') },
           'projectAgents.hasOpenTickets',
         );
       }

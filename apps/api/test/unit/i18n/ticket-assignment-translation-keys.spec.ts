@@ -3,8 +3,7 @@
  *
  * `TicketsService.assign` refuses a disabled user or an ineligible agent with
  * `new ConflictAppException({}, 'tickets.<key>')`, and
- * `KodaExceptionsFilter` / `GlobalExceptionsFilter` build the i18n key from
- * `${prefix}.${code}`:
+ * `GlobalExceptionsFilter` builds the i18n key from `${prefix}.${code}`:
  *
  *   - `tickets.userDisabled`      + 409 -> `tickets.userDisabled.409`
  *   - `tickets.agentNotInProject` + 409 -> `tickets.agentNotInProject.409`
