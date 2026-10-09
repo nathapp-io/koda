@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaClient } from '../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TicketStatus } from '../common/enums';
+import { lockProjectAgents } from '../common/utils/advisory-lock';
 import type { ProjectAgentRecord } from './dto/agent-response.dto';
 
 /** US-002: at most this many refs surface in the open-ticket list per roster row. */
@@ -130,6 +131,63 @@ export class PrismaAgentRepository {
       select: { agentId: true },
     });
     return row !== null;
+  }
+
+  /**
+   * S4c US-003 (D530): add the agent to the project's roster. The composite
+   * primary key makes a concurrent duplicate add a race, so the insert skips
+   * the conflicting row instead of throwing and reports which happened — the
+   * caller turns 'alreadyAssigned' into a 409.
+   */
+  async addToProjectRoster(
+    agentId: string,
+    projectId: string,
+    addedById: string,
+  ): Promise<'created' | 'alreadyAssigned'> {
+    const { count } = await this.db.agentProject.createMany({
+      data: [{ agentId, projectId, addedById }],
+      skipDuplicates: true,
+    });
+    return count === 1 ? 'created' : 'alreadyAssigned';
+  }
+
+  /**
+   * S4c US-003 (D531): the agent's open tickets in the project — `count` is the
+   * exact total, `refs` the oldest {@link MAX_OPEN_TICKET_REFS} as
+   * `<Project.key>-<number>`. "Open" means not CLOSED/REJECTED and not
+   * soft-deleted, the same rule the roster read uses.
+   */
+  async countOpenProjectTickets(agentId: string, projectId: string): Promise<{ count: number; refs: string[] }> {
+    const where = {
+      projectId,
+      assignedToAgentId: agentId,
+      status: { notIn: [TicketStatus.CLOSED, TicketStatus.REJECTED] },
+      deletedAt: null,
+    };
+    const [count, oldest, project] = await Promise.all([
+      this.db.ticket.count({ where }),
+      this.db.ticket.findMany({
+        where,
+        select: { number: true },
+        orderBy: [{ createdAt: 'asc' }, { number: 'asc' }],
+        take: MAX_OPEN_TICKET_REFS,
+      }),
+      this.db.project.findUnique({ where: { id: projectId }, select: { key: true } }),
+    ]);
+    return { count, refs: oldest.map((ticket) => `${project?.key ?? ''}-${ticket.number}`) };
+  }
+
+  /** S4c US-003 (D530): drop the agent's roster row. A missing row deletes nothing. */
+  async removeFromProjectRoster(agentId: string, projectId: string): Promise<void> {
+    await this.db.agentProject.deleteMany({ where: { agentId, projectId } });
+  }
+
+  /**
+   * Serializes roster removal against ticket assignment for the project.
+   * Call inside txManager.run only.
+   */
+  async lockProjectAgents(projectId: string): Promise<void> {
+    await lockProjectAgents(this.db, projectId);
   }
 
   /**

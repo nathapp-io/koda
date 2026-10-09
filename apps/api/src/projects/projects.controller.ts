@@ -33,6 +33,8 @@ import {
 } from '../auth/principal/koda-principal.types';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { AgentsService } from '../agents/agents.service';
+import { AddProjectAgentDto } from '../agents/dto/add-project-agent.dto';
+import { ProjectAgentDto } from '../agents/dto/agent-response.dto';
 import { UpdateAgentDto } from '../agents/dto/update-agent.dto';
 import { ActorRole } from '../common/enums';
 import { ProjectMembershipGuard } from './project-membership.guard';
@@ -181,6 +183,46 @@ export class ProjectsController {
     // already admits them; we fall through to the list call either way.
     const data = await this.agentsService.listProjectRoster(slug);
     return JsonResponse.Ok(data);
+  }
+
+  @Post(':slug/agents')
+  @HttpCode(201)
+  @UseGuards(ProjectMembershipGuard)
+  @ApiOperation({ summary: 'Add an agent to the project roster (project or global admin)' })
+  @ApiResponse({ status: 201, type: ProjectAgentDto, description: 'Agent added to the roster' })
+  @ApiResponse({ status: 400, description: 'Invalid request data' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - project admin role or global admin required' })
+  @ApiResponse({ status: 404, description: 'Project or agent not found' })
+  @ApiResponse({ status: 409, description: 'Agent is already on the roster, or is OFFLINE' })
+  async addProjectAgent(
+    @Param('slug') slug: string,
+    @Body() addAgentDto: AddProjectAgentDto,
+    @CurrentProject() ctx: ProjectContext,
+    @Principal() principal: KodaPrincipal,
+  ) {
+    await this.projectsService.assertProjectAdmin(ctx.project.id, principal);
+    const data = await this.agentsService.addToProject(slug, addAgentDto.agentSlug, principal.id);
+    return JsonResponse.Ok(data);
+  }
+
+  @Delete(':slug/agents/:agentSlug')
+  @HttpCode(204)
+  @UseGuards(ProjectMembershipGuard)
+  @ApiOperation({ summary: 'Remove an agent from the project roster (project or global admin)' })
+  @ApiResponse({ status: 204, description: 'Agent removed from the roster' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - project admin role or global admin required' })
+  @ApiResponse({ status: 404, description: 'Project, agent or roster entry not found' })
+  @ApiResponse({ status: 409, description: 'The agent still holds open tickets in this project' })
+  async removeProjectAgent(
+    @Param('slug') slug: string,
+    @Param('agentSlug') agentSlug: string,
+    @CurrentProject() ctx: ProjectContext,
+    @Principal() principal: KodaPrincipal,
+  ): Promise<void> {
+    await this.projectsService.assertProjectAdmin(ctx.project.id, principal);
+    await this.agentsService.removeFromProject(slug, agentSlug);
   }
 
   @Patch(':slug/agents/:agentSlug')

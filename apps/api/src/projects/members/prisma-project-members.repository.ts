@@ -54,6 +54,18 @@ export class PrismaProjectMembersRepository {
     return u?.id ?? null;
   }
 
+  /**
+   * S4c US-003: the user plus the account state the membership gate needs — a
+   * disabled account must not be granted membership.
+   */
+  async findUserByEmail(email: string): Promise<{ id: string; disabled: boolean } | null> {
+    const u = await this.db.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
+      select: { id: true, disabled: true },
+    });
+    return u ?? null;
+  }
+
   async createMember(projectId: string, userId: string, role: ProjectMemberRole): Promise<ProjectMemberRecord> {
     const m = await this.db.projectMember.create({ data: { projectId, userId, role }, include: { user: true } });
     return this.toRecord(m);

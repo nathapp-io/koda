@@ -1757,9 +1757,115 @@
         "tags": [
           "projects"
         ]
+      },
+      "post": {
+        "operationId": "ProjectsController_addProjectAgent",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddProjectAgentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Agent added to the roster",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectAgentDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request data"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - project admin role or global admin required"
+          },
+          "404": {
+            "description": "Project or agent not found"
+          },
+          "409": {
+            "description": "Agent is already on the roster, or is OFFLINE"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add an agent to the project roster (project or global admin)",
+        "tags": [
+          "projects"
+        ]
       }
     },
     "/api/projects/{slug}/agents/{agentSlug}": {
+      "delete": {
+        "operationId": "ProjectsController_removeProjectAgent",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "agentSlug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Agent removed from the roster"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - project admin role or global admin required"
+          },
+          "404": {
+            "description": "Project, agent or roster entry not found"
+          },
+          "409": {
+            "description": "The agent still holds open tickets in this project"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove an agent from the project roster (project or global admin)",
+        "tags": [
+          "projects"
+        ]
+      },
       "patch": {
         "operationId": "ProjectsController_updateProjectAgent",
         "parameters": [
@@ -9963,6 +10069,93 @@
           }
         }
       },
+      "AddProjectAgentDto": {
+        "type": "object",
+        "properties": {
+          "agentSlug": {
+            "type": "string",
+            "description": "Slug of an existing agent",
+            "example": "bot-1"
+          }
+        },
+        "required": [
+          "agentSlug"
+        ]
+      },
+      "ProjectAgentAddedByDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "ProjectAgentDto": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "openTicketCount": {
+            "type": "number"
+          },
+          "openTicketRefs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "addedAt": {
+            "type": "string"
+          },
+          "addedBy": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProjectAgentAddedByDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "status",
+          "roles",
+          "capabilities",
+          "openTicketCount",
+          "openTicketRefs",
+          "addedAt",
+          "addedBy"
+        ]
+      },
       "SourceFileDto": {
         "type": "object",
         "properties": {
@@ -10023,8 +10216,7 @@
           }
         },
         "required": [
-          "email",
-          "role"
+          "email"
         ]
       },
       "ProjectMemberDto": {
@@ -10049,6 +10241,9 @@
               "VIEWER"
             ]
           },
+          "disabled": {
+            "type": "boolean"
+          },
           "joinedAt": {
             "format": "date-time",
             "type": "string"
@@ -10058,6 +10253,7 @@
           "userId",
           "email",
           "role",
+          "disabled",
           "joinedAt"
         ]
       },

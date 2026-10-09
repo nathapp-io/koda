@@ -44,10 +44,13 @@ export class ProjectMembersService {
   async add(slug: string, dto: AddMemberDto, principal: KodaPrincipal): Promise<ProjectMemberDto> {
     const projectId = await this.access.findProjectIdBySlug(slug);
     await this.access.assertProjectAdmin(projectId, principal);
-    const userId = await this.membersRepo.findUserIdByEmail(dto.email);
-    if (!userId) throw new NotFoundAppException({}, 'members.user');
+    const user = await this.membersRepo.findUserByEmail(dto.email);
+    if (!user) throw new NotFoundAppException({}, 'members.user');
+    // A disabled account cannot act on the project, so it is never granted
+    // membership — the S4b invite path refuses one the same way.
+    if (user.disabled) throw new ConflictAppException({}, 'members.userDisabled');
     try {
-      return ProjectMemberDto.from(await this.membersRepo.createMember(projectId, userId, dto.role));
+      return ProjectMemberDto.from(await this.membersRepo.createMember(projectId, user.id, dto.role ?? ActorRole.VIEWER));
     } catch (error) {
       if (isUniqueViolation(error, 'userId')) throw new ConflictAppException({}, 'members');
       throw error;

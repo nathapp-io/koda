@@ -4,5 +4,7 @@
   "alreadyAssigned": "Agent is already on the project roster",
   "409": "Agent is already on the project roster",
   "agentOffline": "Agent is offline and cannot be added to the project",
-  "hasOpenTickets": "{count} open tickets are still assigned to this agent: {refs}"
+  "hasOpenTickets": {
+    "409": "{count} open tickets are still assigned to this agent: {refs}"
+  }
 }

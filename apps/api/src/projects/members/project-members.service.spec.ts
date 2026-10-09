@@ -93,8 +93,14 @@ describe('ProjectMembersService', () => {
     repo.findUserByEmail.mockResolvedValue({ id: 'disabled-user', disabled: true });
     repo.findUserIdByEmail.mockResolvedValue('disabled-user');
 
-    await expect(service.add('proj', { email: 'disabled@k.t', role: 'VIEWER' }, globalAdmin))
-      .rejects.toMatchObject({ message: expect.stringContaining('members.userDisabled') });
+    // The disabled refusal is the `members.userDisabled.409` AppException (the
+    // i18n key lives in `prefix`; the HTTP body renders it through the global
+    // exception filter, which a service-level test does not run).
+    const error = await service.add('proj', { email: 'disabled@k.t', role: 'VIEWER' }, globalAdmin)
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ConflictAppException);
+    expect((error as ConflictAppException).prefix).toBe('members.userDisabled');
+    expect((error as ConflictAppException).httpStatus).toBe(409);
 
     expect(repo.createMember).not.toHaveBeenCalled();
   });

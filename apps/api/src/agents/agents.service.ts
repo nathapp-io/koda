@@ -5,7 +5,7 @@ import { NotFoundAppException, ValidationAppException, ForbiddenAppException } f
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { createHmac, randomBytes } from 'crypto';
 import { AGENT_ROLES, type AgentRoleNames } from '../common/enums';
-import { AgentResponseDto, AgentMeResponseDto, ProjectAgentListDto } from './dto/agent-response.dto';
+import { AgentResponseDto, AgentMeResponseDto, ProjectAgentDto, ProjectAgentListDto } from './dto/agent-response.dto';
 import { TicketResponseDto } from '../tickets/dto/ticket-response.dto';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
@@ -202,6 +202,65 @@ export class AgentsService {
 
     const records = await this.agentRepo.findProjectRoster(project.id);
     return ProjectAgentListDto.from(records, this.agentScopingEnabled());
+  }
+
+  /**
+   * S4c US-003 (D530): put an agent on a project's roster. The caller's right to
+   * do so is checked at the boundary (project ADMIN or global ADMIN); this only
+   * knows the roster rules: the project and the agent must exist, an OFFLINE
+   * agent cannot be added (it could not authenticate anyway), and the row is
+   * keyed on (agent, project) so a duplicate add is a conflict.
+   *
+   * Returns the roster row as the list serves it, so POST and GET agree on the
+   * shape the CLI and the web read.
+   */
+  async addToProject(projectSlug: string, agentSlug: string, addedById: string): Promise<ProjectAgentDto> {
+    const project = await this.agentRepo.findProjectBySlug(projectSlug);
+    if (!project || project.deletedAt) throw new NotFoundAppException({}, 'projects');
+
+    const agent = await this.agentRepo.findBySlugScalar(agentSlug);
+    if (!agent) throw new NotFoundAppException({}, 'agents');
+    if (agent.status === 'OFFLINE') throw new ConflictAppException({}, 'projectAgents.agentOffline');
+
+    const added = await this.agentRepo.addToProjectRoster(agent.id, project.id, addedById);
+    if (added === 'alreadyAssigned') throw new ConflictAppException({}, 'projectAgents.alreadyAssigned');
+
+    const record = (await this.agentRepo.findProjectRoster(project.id)).find((row) => row.slug === agent.slug);
+    if (!record) throw new NotFoundAppException({}, 'projectAgents');
+    return ProjectAgentDto.from(record);
+  }
+
+  /**
+   * S4c US-003 (D530/D531): take an agent off a project's roster. Removal is
+   * refused while the agent still holds open tickets in that project, and the
+   * whole read-then-write runs under the project's roster lock so a concurrent
+   * assignment cannot slip an open ticket in between the count and the delete
+   * (US-004 takes the same lock from the assignment side).
+   */
+  async removeFromProject(projectSlug: string, agentSlug: string): Promise<void> {
+    const project = await this.agentRepo.findProjectBySlug(projectSlug);
+    if (!project || project.deletedAt) throw new NotFoundAppException({}, 'projects');
+
+    const agent = await this.agentRepo.findBySlugScalar(agentSlug);
+    if (!agent) throw new NotFoundAppException({}, 'projectAgents');
+
+    await this.txManager.run(async () => {
+      await this.agentRepo.lockProjectAgents(project.id);
+
+      if (!(await this.agentRepo.isOnProjectRoster(agent.id, project.id))) {
+        throw new NotFoundAppException({}, 'projectAgents');
+      }
+
+      const open = await this.agentRepo.countOpenProjectTickets(agent.id, project.id);
+      if (open.count > 0) {
+        throw new ConflictAppException(
+          { count: open.count, refs: open.refs.join(',') },
+          'projectAgents.hasOpenTickets',
+        );
+      }
+
+      await this.agentRepo.removeFromProjectRoster(agent.id, project.id);
+    });
   }
 
   async update(slug: string, updateData: UpdateAgentDto): Promise<AgentResponseDto> {

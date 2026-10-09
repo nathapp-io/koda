@@ -193,6 +193,14 @@ export class ProjectsService {
     return this.access.assertProjectMembership(projectId, principal);
   }
 
+  /**
+   * S4c US-003 (D530): project ADMIN or global ADMIN; agents never manage a
+   * project's agent roster, even when they are on it.
+   */
+  assertProjectAdmin(projectId: string, principal: KodaPrincipal): Promise<void> {
+    return this.access.assertProjectAdmin(projectId, principal);
+  }
+
   findMembershipRole(projectId: string, userId: string): Promise<string | null> {
     return this.projectRepo.findMembershipRole(projectId, userId);
   }
