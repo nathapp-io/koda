@@ -84,4 +84,16 @@ describe('useFleetSchedules', () => {
     await loading
     expect(s.schedules.value.map((x: ScheduleDto) => x.enabled)).toEqual([false])
   })
+
+  test('a get that started before a mutation resolves null (D224)', async () => {
+    const slow = deferred<ScheduleDto>()
+    const get = jest.fn(() => slow.promise)
+    withApi({ get, post: jest.fn(async () => row('a', 'alpha', { enabled: false })) })
+    const { useFleetSchedules } = await import(composablePath)
+    const s = useFleetSchedules('koda')
+    const loading = s.get('a')
+    await s.disable('a')
+    slow.resolve(row('a', 'alpha', { enabled: true }))
+    expect(await loading).toBeNull()
+  })
 })

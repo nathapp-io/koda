@@ -53,4 +53,9 @@ describe('schedule detail page', () => {
     expect(detail).toContain('data-testid="fleet-schedule-bash"')
     expect(detail).toContain('bashSummary(t, schedule.bashMode, schedule.approvalTimeoutSec)')
   })
+
+  test('a stale detail load (get resolved null) keeps the row on screen (D224)', () => {
+    expect(detail).toContain('const row = await api.get(scheduleId)')
+    expect(detail).toContain('if (row === null) return')
+  })
 })

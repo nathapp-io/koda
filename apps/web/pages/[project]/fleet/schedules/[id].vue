@@ -61,7 +61,9 @@ const isNotFound = (err: unknown): boolean => err instanceof ApiError && (err.co
  */
 async function loadSchedule(silent: boolean): Promise<void> {
   try {
-    schedule.value = await api.get(scheduleId)
+    const row = await api.get(scheduleId)
+    if (row === null) return
+    schedule.value = row
     loadFailed.value = false
   }
   catch (err: unknown) {

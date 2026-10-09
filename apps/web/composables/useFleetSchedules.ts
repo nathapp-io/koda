@@ -26,7 +26,11 @@ export function useFleetSchedules(slug: string) {
     schedules.value = sortSchedules(rows ?? [])
   }
 
-  const get = (id: string): Promise<ScheduleDto> => $api.get<ScheduleDto>(scheduleItem(slug, id))
+  const get = async (id: string): Promise<ScheduleDto | null> => {
+    const epoch = mutationEpoch
+    const row = await $api.get<ScheduleDto>(scheduleItem(slug, id))
+    return epoch === mutationEpoch ? row : null
+  }
 
   /** Puts a saved row in the list (replacing the same id) and invalidates in-flight loads. */
   function apply(saved: ScheduleDto): void {
