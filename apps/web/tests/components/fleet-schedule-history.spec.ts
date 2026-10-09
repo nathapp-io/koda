@@ -19,10 +19,10 @@ const job = (id: string, over: Partial<FleetJobDto> = {}): FleetJobDto => ({
   scheduleId: 's1', coalescedCount: 0, ...over,
 })
 
-function mountHistory(jobs: FleetJobDto[], oldestLoaded = true) {
+function mountHistory(jobs: FleetJobDto[], oldestLoaded = true, timezone = 'UTC') {
   return mountSfc(history, {
     components: uiStubs,
-    props: { slug: 'koda', rows: historyRows(jobs, oldestLoaded) },
+    props: { slug: 'koda', rows: historyRows(jobs, oldestLoaded), timezone },
     globals: { ref, computed, watch, nextTick, onMounted: Vue.onMounted, useI18n: () => enI18n() },
   })
 }
@@ -67,6 +67,12 @@ describe('FleetScheduleHistory', () => {
     expect(cell(app, 'j2', 'fleet-schedule-run-reason')).toBe('Stopped by a fleet budget')
     // Oldest loaded row of a page that is not the last: no delta (Review Focus 5).
     expect(cell(app, 'j2', 'fleet-schedule-run-stories')).toBe('2/2 (-)')
+    app.unmount()
+  })
+
+  test('queued-at renders in the schedule timezone, not the browser zone (issue #192 item 5)', () => {
+    const app = mountHistory([job('j1')], true, 'Asia/Shanghai')
+    expect(cell(app, 'j1', 'fleet-schedule-run-queued')).toBe('Oct 2, 2026, 8:00 AM')
     app.unmount()
   })
 })

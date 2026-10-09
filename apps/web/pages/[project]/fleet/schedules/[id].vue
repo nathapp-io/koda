@@ -61,7 +61,9 @@ const isNotFound = (err: unknown): boolean => err instanceof ApiError && (err.co
  */
 async function loadSchedule(silent: boolean): Promise<void> {
   try {
-    schedule.value = await api.get(scheduleId)
+    const row = await api.get(scheduleId)
+    if (row === null) return
+    schedule.value = row
     loadFailed.value = false
   }
   catch (err: unknown) {
@@ -186,7 +188,7 @@ const runnerOptions = computed(() => options.runners.value.map((r) => ({ value: 
         <h2 class="text-sm font-medium">{{ t('fleet.schedules.history.title') }}</h2>
         <ErrorState v-if="historyFailed" @retry="loadHistory()" />
         <template v-else>
-          <FleetScheduleHistory :slug="slug" :rows="rows" />
+          <FleetScheduleHistory :slug="slug" :rows="rows" :timezone="schedule.timezone" />
           <div v-if="historyPage > 1 || jobsApi.hasNext.value" class="flex justify-end gap-2">
             <Button variant="outline" size="sm" :disabled="historyPage <= 1" @click="goTo(historyPage - 1)">{{ t('fleet.schedules.history.previous') }}</Button>
             <Button variant="outline" size="sm" :disabled="!jobsApi.hasNext.value" @click="goTo(historyPage + 1)">{{ t('fleet.schedules.history.next') }}</Button>

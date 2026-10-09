@@ -72,4 +72,12 @@ describeIntegration('fleet test hooks (PG)', () => {
     await fire('no-such-schedule', world.tokens.root).expect(404);
     expect(await prisma.fleetJob.count()).toBe(0);
   });
+
+  it('refuses a disabled schedule with 409 and dispatches nothing (issue #192 item 3)', async () => {
+    const created = await create();
+    await request(server).post(`${BASE}/${created.id}/disable`).set(as(world.tokens.dev)).expect(200);
+    const res = await fire(created.id, world.tokens.root).expect(409);
+    expect(res.body.message).toContain('disabled');
+    expect(await prisma.fleetJob.count()).toBe(0);
+  });
 });

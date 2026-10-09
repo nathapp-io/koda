@@ -93,7 +93,7 @@ describe('Schedules list page (behaviour)', () => {
     expect(m.hasTestid('fleet-schedule-create')).toBe(true)
     expect(m.rowButtons('a')).toEqual(['fleet-schedule-disable', 'fleet-schedule-edit', 'fleet-schedule-delete'])
     expect(m.rowButtons('b')).toEqual([])
-    expect(m.app.text()).toContain('Only the schedule owner or a project administrator can change a schedule.')
+    expect(m.app.text()).not.toContain('Only the schedule owner or a project administrator can change a schedule.')
     m.app.unmount()
   })
 
@@ -111,6 +111,20 @@ describe('Schedules list page (behaviour)', () => {
     const m = mountList(ROWS, ADMIN)
     await m.settle()
     expect(m.rowButtons('b')).toEqual(['fleet-schedule-disable', 'fleet-schedule-edit', 'fleet-schedule-delete'])
+    expect(m.app.text()).not.toContain('Only the schedule owner or a project administrator can change a schedule.')
+    m.app.unmount()
+  })
+
+  test('a developer who owns no schedule sees the read-only line', async () => {
+    const m = mountList([schedule('b', { createdById: 'someone-else' })], DEVELOPER)
+    await m.settle()
+    expect(m.app.text()).toContain('Only the schedule owner or a project administrator can change a schedule.')
+    m.app.unmount()
+  })
+
+  test('an admin with no schedules sees no read-only line', async () => {
+    const m = mountList([], ADMIN)
+    await m.settle()
     expect(m.app.text()).not.toContain('Only the schedule owner or a project administrator can change a schedule.')
     m.app.unmount()
   })

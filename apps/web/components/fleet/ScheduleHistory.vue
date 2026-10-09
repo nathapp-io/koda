@@ -27,7 +27,7 @@
           <TableCell data-testid="fleet-schedule-run-coalesced">{{ row.job.coalescedCount }}</TableCell>
           <TableCell data-testid="fleet-schedule-run-push" class="text-xs">{{ pushText(row) }}</TableCell>
           <TableCell data-testid="fleet-schedule-run-reason" class="max-w-[16rem] break-words text-xs" :title="row.job.stateReason ?? ''">{{ reasonText(row) }}</TableCell>
-          <TableCell class="whitespace-nowrap text-xs">{{ new Date(row.job.queuedAt).toLocaleString() }}</TableCell>
+          <TableCell data-testid="fleet-schedule-run-queued" class="whitespace-nowrap text-xs">{{ formatInZone(row.job.queuedAt, timezone) }}</TableCell>
         </TableRow>
       </TableBody>
     </Table>
@@ -35,11 +35,11 @@
 </template>
 
 <script setup lang="ts">
-import { formatDelta } from '~/lib/fleet-schedules'
+import { formatDelta, formatInZone } from '~/lib/fleet-schedules'
 import type { HistoryRow } from '~/lib/fleet-schedules'
 import FleetJobStateBadge from '~/components/fleet/FleetJobStateBadge.vue'
 
-defineProps<{ slug: string; rows: HistoryRow[] }>()
+defineProps<{ slug: string; rows: HistoryRow[]; timezone: string }>()
 
 const { t } = useI18n()
 

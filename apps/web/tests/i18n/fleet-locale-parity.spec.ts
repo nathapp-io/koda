@@ -73,6 +73,7 @@ const ENUMS: Record<string, string[]> = {
   'fleet.jobs.detail.pipeline.stage': ['stories', 'acceptance', 'regression', 'finish'],
   'fleet.jobs.detail.pipeline.state': ['pending', 'running', 'passed', 'failed', 'skipped', 'unknown'],
   'fleet.jobs.detail.pipeline.view': ['label', 'graph', 'list'],
+  'fleet.jobs.detail.wipPush': ['pushed', 'none', 'failed'],
 }
 
 describe('Fleet locale parity (en and zh)', () => {
