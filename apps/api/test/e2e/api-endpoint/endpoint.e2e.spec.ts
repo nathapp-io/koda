@@ -1317,7 +1317,7 @@ describeIntegration('API Integration Tests', () => {
           .set('Authorization', `Bearer ${userAccessToken}`)
           .send({ userId: user.id })
           .expect(409);
-        refusal(res, 'tickets.userDisabled');
+        refusal(res, 'tickets.userDisabled.409');
         const ticket = await prisma.client.ticket.findUnique({ where: { id: safeAssignTicketId } });
         expect(ticket?.assignedToUserId).toBeNull();
       } finally {
@@ -1340,7 +1340,7 @@ describeIntegration('API Integration Tests', () => {
           .set('Authorization', `Bearer ${userAccessToken}`)
           .send({ agentId })
           .expect(409);
-        refusal(res, 'tickets.agentNotInProject');
+        refusal(res, 'tickets.agentNotInProject.409');
       } finally {
         await prisma.client.agentProject.create({ data: { agentId, projectId: safeProject.id } });
         await prisma.client.agent.update({ where: { id: agentId }, data: { status: 'ACTIVE' } });
@@ -1356,7 +1356,7 @@ describeIntegration('API Integration Tests', () => {
           .set('Authorization', `Bearer ${userAccessToken}`)
           .send({ agentId })
           .expect(409);
-        refusal(res, 'tickets.agentOffline');
+        refusal(res, 'tickets.agentOffline.409');
       } finally {
         await prisma.client.agent.update({ where: { id: agent.id }, data: { status: 'ACTIVE' } });
       }

@@ -15,6 +15,7 @@ import { UsersModule } from './users/users.module';
 import { AgentsModule } from './agents/agents.module';
 import { ProjectsModule } from './projects/projects.module';
 import { ProjectMembersModule } from './projects/members/project-members.module';
+import { ProjectAssigneesModule } from './projects/assignees/project-assignees.module';
 import { ProjectInvitesModule } from './projects/invites/project-invites.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { CommentsModule } from './comments/comments.module';
@@ -102,6 +103,7 @@ import { KodaExceptionsFilter } from './common/exceptions/koda-exceptions.filter
     AgentsModule,
     ProjectsModule,
     ProjectMembersModule,
+    ProjectAssigneesModule,
     TicketsModule,
     CommentsModule,
     LabelsModule,

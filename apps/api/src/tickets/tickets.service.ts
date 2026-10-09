@@ -1,5 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -13,7 +14,7 @@ import { buildGitUrl } from '../common/utils/git-url.util';
 import { actorForeignKeys } from '../auth/principal/actor-foreign-keys';
 import { actorKind, KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { runWithTicketNumberRetry } from '../common/utils/ticket-number-retry';
-import { TICKET_REPOSITORY, ITicketRepository, TicketDomain } from './domain/ticket.domain';
+import { TICKET_REPOSITORY, ITicketRepository, TicketDomain, AssignTicketData } from './domain/ticket.domain';
 import { TicketEventService } from '../events/ticket-event.service';
 import { buildTicketEventOutboxPayload } from '../events/outbox-envelope.util';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
@@ -326,47 +327,65 @@ export class TicketsService {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    const ticket = await this.findByRef(projectSlug, ref);
-    if (!ticket) {
-      throw new NotFoundAppException({}, 'tickets');
-    }
-
-    // Existence + project membership checks so FK violations surface as 404/403
-    // instead of a raw Prisma 500 (BUG-2).
-    if (assignInput.userId) {
-      const user = await this.ticketRepo.findUserById(assignInput.userId);
-      if (!user) {
-        throw new NotFoundAppException({}, 'tickets');
-      }
-      // BUG-17: ADMIN-role assignees are implicit members (mirrors
-      // ProjectAccessService.assertProjectMembership's admin exemption).
-      if (user.role !== 'ADMIN') {
-        const role = await this.ticketRepo.findProjectMemberRole(project.id, assignInput.userId);
-        if (!role) {
-          throw new ForbiddenAppException({}, 'tickets');
-        }
-      }
-    } else if (assignInput.agentId) {
-      const agent = await this.ticketRepo.findAgentById(assignInput.agentId);
-      if (!agent) {
-        throw new NotFoundAppException({}, 'tickets');
-      }
-    }
-
-    const assignData = {
-      assignedToUserId: null as string | null,
-      assignedToAgentId: null as string | null,
-    };
-
-    if (assignInput.userId) {
-      assignData.assignedToUserId = assignInput.userId;
-    } else if (assignInput.agentId) {
-      assignData.assignedToAgentId = assignInput.agentId;
-    }
-
-    // H13: record an 'assigned' ticket_event so memory extraction and entity-graph
-    // updates run for assignment activity.
+    // S4c US-004: the ticket lookup, the assignee lookups, the eligibility
+    // checks and the write share one transaction. The agent path takes the
+    // project's roster lock before reading the roster, the same lock
+    // `AgentsService.removeFromProject` holds, so a concurrent removal and
+    // assignment serialize and a ticket can never end up assigned to an agent
+    // that was just taken off the roster. Roster eligibility holds in both
+    // AGENT_PROJECT_SCOPING modes (D528): the flag gates agent reach, never who
+    // a project may assign its tickets to.
     const updated = await this.txManager.run(async () => {
+      const ticket = await this.ticketRepo.findTicketScoped(project.id, project.key, ref);
+      if (!ticket || ticket.deletedAt) {
+        throw new NotFoundAppException({}, 'tickets');
+      }
+
+      const assignData: AssignTicketData = {
+        assignedToUserId: null,
+        assignedToAgentId: null,
+      };
+
+      if (assignInput.userId) {
+        const user = await this.ticketRepo.findUserById(assignInput.userId);
+        if (!user) {
+          throw new NotFoundAppException({}, 'tickets');
+        }
+        // A disabled account cannot act on the project, so it is never an
+        // assignee. Best-effort against a concurrent disable: the read happens
+        // inside this transaction but takes no lock on the user row.
+        if (user.disabled) {
+          throw new ConflictAppException({}, 'tickets.userDisabled');
+        }
+        // BUG-17: ADMIN-role assignees are implicit members (mirrors
+        // ProjectAccessService.assertProjectMembership's admin exemption).
+        if (user.role !== 'ADMIN') {
+          const role = await this.ticketRepo.findProjectMemberRole(project.id, user.id);
+          if (!role) {
+            throw new ForbiddenAppException({}, 'tickets');
+          }
+        }
+        assignData.assignedToUserId = user.id;
+      } else if (assignInput.agentId) {
+        await this.ticketRepo.lockProjectAgents(project.id);
+        const agent = await this.ticketRepo.findAgentById(assignInput.agentId);
+        if (!agent) {
+          throw new NotFoundAppException({}, 'tickets');
+        }
+        // Roster before status: an unrostered OFFLINE agent is refused as
+        // not-in-project (the roster is the gate, the status the second rule).
+        if (!(await this.ticketRepo.isAgentOnProjectRoster(project.id, agent.id))) {
+          throw new ConflictAppException({}, 'tickets.agentNotInProject');
+        }
+        // An OFFLINE agent cannot authenticate, so it cannot work the ticket.
+        if (agent.status === 'OFFLINE') {
+          throw new ConflictAppException({}, 'tickets.agentOffline');
+        }
+        assignData.assignedToAgentId = agent.id;
+      }
+
+      // H13: record an 'assigned' ticket_event so memory extraction and entity-graph
+      // updates run for assignment activity.
       const row = await this.ticketRepo.assignTicket(ticket.id, assignData);
       if (principal) {
         await this.recordTicketEvent(ticket.id, project.id, 'assigned', principal, {

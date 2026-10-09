@@ -129,8 +129,27 @@ export interface ITicketRepository {
    * row matched (stale read — another writer transitioned the ticket).
    */
   updateTicketStatusIf(id: string, from: string, to: string): Promise<TicketDomain | null>;
-  findUserById(id: string): Promise<{ id: string; role: string } | null>;
-  findAgentById(id: string): Promise<{ id: string } | null>;
+  /**
+   * S4c US-004: the assignee's account state, not just its existence — a
+   * disabled account can never be assigned a ticket.
+   */
+  findUserById(id: string): Promise<{ id: string; role: string; disabled: boolean } | null>;
+  /**
+   * S4c US-004: the agent's id plus its lifecycle status; an OFFLINE agent
+   * cannot be assigned a ticket.
+   */
+  findAgentById(id: string): Promise<{ id: string; status: string } | null>;
+  /**
+   * S4c US-004: whether the agent holds an `AgentProject` roster row for the
+   * project. Assignment requires the roster in both scoping modes.
+   */
+  isAgentOnProjectRoster(projectId: string, agentId: string): Promise<boolean>;
+  /**
+   * S4c US-004: serializes ticket assignment against roster removal for one
+   * project — `AgentsService.removeFromProject` takes the same lock. Call only
+   * inside `txManager.run`: the advisory lock is released at COMMIT/ROLLBACK.
+   */
+  lockProjectAgents(projectId: string): Promise<void>;
   findProjectMemberRole(projectId: string, userId: string): Promise<string | null>;
   /**
    * Fleet C9 follow-up (#231): true when the ticket is already owned by fleet

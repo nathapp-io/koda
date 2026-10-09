@@ -6,5 +6,14 @@
   "-2": "Validation error",
   "40003": "Access denied",
   "titleRequired": "Ticket title is required",
-  "typeRequired": "Ticket type is required"
+  "typeRequired": "Ticket type is required",
+  "userDisabled": {
+    "409": "This account is disabled and cannot be assigned a ticket"
+  },
+  "agentNotInProject": {
+    "409": "Agent is not on this project's roster"
+  },
+  "agentOffline": {
+    "409": "Agent is offline and cannot be assigned a ticket"
+  }
 }

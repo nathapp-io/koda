@@ -6,5 +6,14 @@
   "-2": "验证错误",
   "40003": "访问被拒绝",
   "titleRequired": "工单标题为必填项",
-  "typeRequired": "工单类型为必填项"
+  "typeRequired": "工单类型为必填项",
+  "userDisabled": {
+    "409": "该账户已被禁用，无法分配工单"
+  },
+  "agentNotInProject": {
+    "409": "代理不在该项目名册中"
+  },
+  "agentOffline": {
+    "409": "代理处于离线状态，无法分配工单"
+  }
 }

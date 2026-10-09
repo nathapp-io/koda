@@ -2406,6 +2406,65 @@
         ]
       }
     },
+    "/api/projects/{slug}/assignees": {
+      "get": {
+        "operationId": "ProjectAssigneesController_search",
+        "parameters": [
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Case-insensitive substring of a name, email or slug",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Maximum combined number of assignees",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Assignees: { items: [{ type, id, name, secondary, status? }] } — users first, then agents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssigneeListDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "q longer than 100 characters, or limit outside 1..50"
+          },
+          "403": {
+            "description": "Not a project member"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Search assignees of a project (any member, or a rostered agent)",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
     "/api/projects/{slug}/tickets": {
       "post": {
         "operationId": "TicketsController_create",
@@ -10271,6 +10330,54 @@
         },
         "required": [
           "role"
+        ]
+      },
+      "AssigneeDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "enum": [
+              "user",
+              "agent"
+            ],
+            "type": "string",
+            "description": "Whether the assignee is a user or an agent"
+          },
+          "id": {
+            "type": "string",
+            "description": "User.id for a user, Agent.id for an agent"
+          },
+          "name": {
+            "type": "string"
+          },
+          "secondary": {
+            "type": "string",
+            "description": "The email for a user, the slug for an agent"
+          },
+          "status": {
+            "type": "string",
+            "description": "Agent status (ACTIVE | PAUSED); absent for users"
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "name",
+          "secondary"
+        ]
+      },
+      "AssigneeListDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AssigneeDto"
+            }
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "CreateTicketDto": {

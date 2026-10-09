@@ -6,6 +6,7 @@ import { TICKET_REPOSITORY } from './domain/ticket.domain';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { NotFoundAppException, ForbiddenAppException, Page } from '@nathapp/nestjs-common';
+import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import type { KodaAgentRole } from '../auth/principal/koda-principal.types';
 import { TicketEventService } from '../events/ticket-event.service';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
@@ -111,6 +112,8 @@ describe('TicketsService', () => {
     findTicketByRefRaw: jest.fn(),
     findUserById: jest.fn(),
     findAgentById: jest.fn(),
+    isAgentOnProjectRoster: jest.fn(),
+    lockProjectAgents: jest.fn(),
     findProjectMemberRole: jest.fn(),
   };
 
@@ -1009,7 +1012,8 @@ describe('TicketsService', () => {
     it('should assign ticket to agent', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
-      mockTicketRepo.findAgentById.mockResolvedValue({ id: 'agent-456' });
+      mockTicketRepo.findAgentById.mockResolvedValue({ id: 'agent-456', status: 'ACTIVE' });
+      mockTicketRepo.isAgentOnProjectRoster.mockResolvedValue(true);
       mockTicketRepo.assignTicket.mockResolvedValue({
         ...mockTicket,
         assignedToAgentId: 'agent-456',
@@ -1021,6 +1025,76 @@ describe('TicketsService', () => {
       expect(result.assignedToAgentId).toBe('agent-456');
       expect(result.assignedToUserId).toBeNull();
       expect(mockTicketRepo.findAgentById).toHaveBeenCalledWith('agent-456');
+      expect(mockTicketRepo.isAgentOnProjectRoster).toHaveBeenCalledWith('proj-123', 'agent-456');
+    });
+
+    it('U4-AC2/AC5: refuses an agent that is not on the project roster (409), whatever the scoping flag', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
+      mockTicketRepo.findAgentById.mockResolvedValue({ id: 'agent-456', status: 'ACTIVE' });
+      mockTicketRepo.isAgentOnProjectRoster.mockResolvedValue(false);
+
+      const error = await service
+        .assign('koda', 'KODA-1', { agentId: 'agent-456' })
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ConflictAppException);
+      expect((error as ConflictAppException).prefix).toBe('tickets.agentNotInProject');
+      expect((error as ConflictAppException).httpStatus).toBe(409);
+      expect(mockTicketRepo.assignTicket).not.toHaveBeenCalled();
+    });
+
+    it('U4-AC3: refuses a rostered OFFLINE agent (409 tickets.agentOffline)', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
+      mockTicketRepo.findAgentById.mockResolvedValue({ id: 'agent-456', status: 'OFFLINE' });
+      mockTicketRepo.isAgentOnProjectRoster.mockResolvedValue(true);
+
+      const error = await service
+        .assign('koda', 'KODA-1', { agentId: 'agent-456' })
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ConflictAppException);
+      expect((error as ConflictAppException).prefix).toBe('tickets.agentOffline');
+      expect(mockTicketRepo.assignTicket).not.toHaveBeenCalled();
+    });
+
+    it('U4-AC1: refuses a disabled user (409 tickets.userDisabled) and leaves the ticket unassigned', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
+      mockTicketRepo.findUserById.mockResolvedValue({ id: 'user-456', role: 'MEMBER', disabled: true });
+
+      const error = await service
+        .assign('koda', 'KODA-1', { userId: 'user-456' })
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ConflictAppException);
+      expect((error as ConflictAppException).prefix).toBe('tickets.userDisabled');
+      // Disabled wins over non-member: the membership read never runs.
+      expect(mockTicketRepo.findProjectMemberRole).not.toHaveBeenCalled();
+      expect(mockTicketRepo.assignTicket).not.toHaveBeenCalled();
+    });
+
+    it('U4-AC6: takes the project roster lock before reading the roster, inside the assignment transaction', async () => {
+      const seen: boolean[] = [];
+      mockTicketRepo.lockProjectAgents.mockImplementation(async () => {
+        seen.push(inTx);
+      });
+      mockTicketRepo.isAgentOnProjectRoster.mockImplementation(async () => {
+        seen.push(inTx);
+        return true;
+      });
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
+      mockTicketRepo.findAgentById.mockResolvedValue({ id: 'agent-456', status: 'ACTIVE' });
+      mockTicketRepo.assignTicket.mockResolvedValue({ ...mockTicket, assignedToAgentId: 'agent-456' });
+
+      await service.assign('koda', 'KODA-1', { agentId: 'agent-456' });
+
+      expect(seen).toEqual([true, true]);
+      expect(mockTicketRepo.lockProjectAgents.mock.invocationCallOrder[0]).toBeLessThan(
+        mockTicketRepo.isAgentOnProjectRoster.mock.invocationCallOrder[0],
+      );
     });
 
     it('should unassign ticket when neither userId nor agentId provided', async () => {

@@ -4,6 +4,7 @@ import { PrismaClient, Prisma } from '../generated/prisma/client';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { parseTicketRef } from '../common/utils/ticket-ref.util';
+import { lockProjectAgents } from '../common/utils/advisory-lock';
 import { TicketLinkSource } from '../common/enums';
 import { ACTIVE_STATES } from '../fleet/jobs/job-state';
 import type {
@@ -233,12 +234,29 @@ export class PrismaTicketsRepository implements ITicketRepository {
     return this.toDomain(row);
   }
 
-  async findUserById(id: string): Promise<{ id: string; role: string } | null> {
-    return this.db.user.findUnique({ where: { id }, select: { id: true, role: true } });
+  async findUserById(id: string): Promise<{ id: string; role: string; disabled: boolean } | null> {
+    return this.db.user.findUnique({ where: { id }, select: { id: true, role: true, disabled: true } });
   }
 
-  async findAgentById(id: string): Promise<{ id: string } | null> {
-    return this.db.agent.findUnique({ where: { id }, select: { id: true } });
+  async findAgentById(id: string): Promise<{ id: string; status: string } | null> {
+    return this.db.agent.findUnique({ where: { id }, select: { id: true, status: true } });
+  }
+
+  /**
+   * S4c US-004: read under the project's roster lock so the answer cannot flip
+   * between the check and the assignment write.
+   */
+  async isAgentOnProjectRoster(projectId: string, agentId: string): Promise<boolean> {
+    const row = await this.db.agentProject.findUnique({
+      where: { agentId_projectId: { agentId, projectId } },
+      select: { agentId: true },
+    });
+    return row !== null;
+  }
+
+  /** S4c US-004: the same lock `AgentsService.removeFromProject` holds. */
+  async lockProjectAgents(projectId: string): Promise<void> {
+    await lockProjectAgents(this.db, projectId);
   }
 
   async findProjectMemberRole(projectId: string, userId: string): Promise<string | null> {
