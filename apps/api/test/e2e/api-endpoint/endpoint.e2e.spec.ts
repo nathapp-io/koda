@@ -1286,6 +1286,143 @@ describeIntegration('API Integration Tests', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────
+  // 18b. Safe Ticket Assignment and Assignees (US-004)
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('18b. Safe Ticket Assignment and Assignees (US-004)', () => {
+    let safeAssignTicketRef: string;
+    let safeAssignTicketId: string;
+
+    beforeAll(async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ type: 'BUG', title: 'Safe assignment candidate', priority: 'MEDIUM' })
+        .expect(201);
+      const created = body<{ id: string; ref: string }>(res);
+      safeAssignTicketRef = created.ref;
+      safeAssignTicketId = created.id;
+    });
+
+    it('US-004 AC1: rejects a disabled non-member user and leaves the ticket unassigned', async () => {
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      const member = await prisma.client.user.findUnique({ where: { email: 'member@koda.test' } });
+      expect(member).toBeTruthy();
+      const user = member as NonNullable<typeof member>;
+      await prisma.client.user.update({ where: { id: user.id }, data: { disabled: true } });
+
+      try {
+        const res = await request(httpServer)
+          .post(`/api/projects/${projectSlug}/tickets/${safeAssignTicketRef}/assign`)
+          .set('Authorization', `Bearer ${userAccessToken}`)
+          .send({ userId: user.id })
+          .expect(409);
+        refusal(res, 'tickets.userDisabled');
+        const ticket = await prisma.client.ticket.findUnique({ where: { id: safeAssignTicketId } });
+        expect(ticket?.assignedToUserId).toBeNull();
+      } finally {
+        await prisma.client.user.update({ where: { id: user.id }, data: { disabled: false } });
+      }
+    });
+
+    it('US-004 AC2: rejects an unrostered offline agent', async () => {
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      const project = await prisma.client.project.findUnique({ where: { slug: projectSlug } });
+      expect(project).toBeTruthy();
+      const safeProject = project as NonNullable<typeof project>;
+      await prisma.client.agent.update({ where: { id: agentId }, data: { status: 'OFFLINE' } });
+      await prisma.client.agentProject.delete({
+        where: { agentId_projectId: { agentId, projectId: safeProject.id } },
+      });
+      try {
+        const res = await request(httpServer)
+          .post(`/api/projects/${projectSlug}/tickets/${safeAssignTicketRef}/assign`)
+          .set('Authorization', `Bearer ${userAccessToken}`)
+          .send({ agentId })
+          .expect(409);
+        refusal(res, 'tickets.agentNotInProject');
+      } finally {
+        await prisma.client.agentProject.create({ data: { agentId, projectId: safeProject.id } });
+        await prisma.client.agent.update({ where: { id: agentId }, data: { status: 'ACTIVE' } });
+      }
+    });
+
+    it('US-004 AC3: rejects an offline agent that is on the project roster', async () => {
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      const agent = await prisma.client.agent.update({ where: { id: agentId }, data: { status: 'OFFLINE' } });
+      try {
+        const res = await request(httpServer)
+          .post(`/api/projects/${projectSlug}/tickets/${safeAssignTicketRef}/assign`)
+          .set('Authorization', `Bearer ${userAccessToken}`)
+          .send({ agentId })
+          .expect(409);
+        refusal(res, 'tickets.agentOffline');
+      } finally {
+        await prisma.client.agent.update({ where: { id: agent.id }, data: { status: 'ACTIVE' } });
+      }
+    });
+
+    it('US-004 AC7-10: returns ordered, typed non-disabled users and rostered active agents', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/assignees`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+      const data = body<{ items: Array<{ type: string; id: string; name: string; secondary: string; status?: string }> }>(res);
+      const users = data.items.filter((item) => item.type === 'user');
+      const agents = data.items.filter((item) => item.type === 'agent');
+      expect(users.length).toBeGreaterThan(0);
+      expect(agents).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'agent', id: agentId, secondary: agentSlug, status: 'ACTIVE' }),
+      ]));
+      expect(data.items.findIndex((item) => item.type === 'agent')).toBeGreaterThanOrEqual(users.length);
+      expect(users.map((item) => item.name)).toEqual([...users.map((item) => item.name)].sort((a, b) => a.localeCompare(b)));
+      expect(agents.map((item) => item.name)).toEqual([...agents.map((item) => item.name)].sort((a, b) => a.localeCompare(b)));
+    });
+
+    it('US-004 AC11: matches users and agents by case-insensitive name or slug query', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/assignees`)
+        .query({ q: 'SUBRINA' })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+      const data = body<{ items: Array<{ type: string; id: string }> }>(res);
+      expect(data.items).toContainEqual(expect.objectContaining({ type: 'agent', id: agentId }));
+    });
+
+    it('US-004 AC12: applies limit to the combined assignee result', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/assignees`)
+        .query({ limit: 1 })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+      expect(body<{ items: unknown[] }>(res).items).toHaveLength(1);
+    });
+
+    it('US-004 AC13: rejects a limit above 50', async () => {
+      await request(httpServer)
+        .get(`/api/projects/${projectSlug}/assignees`)
+        .query({ limit: 51 })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(400);
+    });
+
+    it('US-004 AC14: rejects a query longer than 100 characters', async () => {
+      await request(httpServer)
+        .get(`/api/projects/${projectSlug}/assignees`)
+        .query({ q: 'a'.repeat(101) })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(400);
+    });
+
+    it('US-004 AC15: denies a non-member from searching project assignees', async () => {
+      await request(httpServer)
+        .get(`/api/projects/${projectSlug}/assignees`)
+        .set('Authorization', `Bearer ${nonAdminUserAccessToken}`)
+        .expect(403);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
   // 19. Agent Auto-Pickup
   // ─────────────────────────────────────────────────────────────────
 
