@@ -132,6 +132,23 @@ Rules:
 - never manually edit generated `AGENTS.md`; edit the matching `context.md` source instead
 - when changing app-specific guidance, update the file under `.nax/mono/apps/<app>/context.md`
 
+## Code Navigation (codebase-memory MCP)
+
+The repo is indexed by the `codebase-memory` MCP server (configured in `.nax/config.json` under `mcp.servers`, attached to the `run` stage; nax names its tools `codebase-memory__<tool>`). Use it for structural questions before reading or grepping file by file:
+- `search_graph` to find a symbol (class, function, route handler) by name or pattern
+- `trace_path` for callers and callees of a symbol (who calls `TicketsService.assign`, what a controller reaches)
+- `get_code_snippet` to read one symbol's exact source
+- `get_architecture` for a module or package overview
+- `search_code` for literal text across the indexed code
+- `detect_changes` to see which symbols the current diff touches
+- `check_index_coverage` to confirm the files you rely on are indexed and current before trusting a graph answer
+- `list_projects` to look up the exact `project` name (its `root_path` must match the repository root)
+
+Rules:
+- the `project` argument is the repository root's absolute path with every `/` replaced by `-` and no leading `-` (for example `Users-alice-src-koda`); confirm it with `list_projects` when unsure
+- the index can lag behind uncommitted or very recent edits: confirm with a direct file read before editing, and fall back to `Read` / `Grep` when a symbol is missing from the graph
+- use plain text search, not the graph, for config files, JSON, Markdown, i18n keys and Prisma schema
+
 ## Tests
 
 Default organization rules:
