@@ -134,6 +134,7 @@ describe('AssigneePicker and ticket assignment (US-007)', () => {
   })
 
   test('AC6: renders no free-text user-id assignment field', () => {
+    const i18n = enI18n()
     const app = mountSfc(propertiesFile, {
       props: {
         ticket: { id: 't1', ref: 'WEB-1', title: 'Ticket', type: 'TASK', priority: 'LOW', status: 'CREATED', createdAt: '2026-01-01T00:00:00Z' },
@@ -141,9 +142,17 @@ describe('AssigneePicker and ticket assignment (US-007)', () => {
       },
       components: propertyStubs,
       alias: { '~/components/TicketActionPanel.vue': { default: { render: () => null } } },
-      globals: { useApi: () => ({ $api: { get: jest.fn(async () => ({})), post: jest.fn(async () => undefined), delete: jest.fn(async () => undefined) } }), useI18n: () => ({ ...enI18n(), locale: ref('en') }), useAppToast: () => ({ success: jest.fn(), error: jest.fn() }) },
+      globals: { useApi: () => ({ $api: { get: jest.fn(async () => ({})), post: jest.fn(async () => undefined), delete: jest.fn(async () => undefined) } }), useI18n: () => ({ ...i18n, locale: ref('en') }), useAppToast: () => ({ success: jest.fn(), error: jest.fn() }) },
     })
-    expect(app.find('input').some((input) => input.props.placeholder === 'tickets.assign.userIdPlaceholder')).toBe(false)
+    // The free-text field, if it existed, would render the translated
+    // `tickets.assign.userIdPlaceholder` (en: "User ID"). Compare against the
+    // resolved string — the previous assertion compared to the i18n KEY and
+    // therefore never matched anything, passing even when the legacy field
+    // was present.
+    const userIdPlaceholder = i18n.t('tickets.assign.userIdPlaceholder')
+    const inputsWithUserIdPlaceholder = app.find('input').filter((input) => input.props.placeholder === userIdPlaceholder)
+    expect(userIdPlaceholder).not.toBe('tickets.assign.userIdPlaceholder')
+    expect(inputsWithUserIdPlaceholder).toHaveLength(0)
     app.unmount()
   })
 })

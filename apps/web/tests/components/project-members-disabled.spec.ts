@@ -35,19 +35,42 @@ async function mountPanel(disabled: boolean) {
 describe('ProjectMembersPanel disabled member badge (US-007)', () => {
   test('AC7: renders Disabled for a disabled project member', async () => {
     const app = await mountPanel(true)
-    expect(app.text()).toContain('Disabled')
+    const badges = app.find('[data-testid="member-disabled-badge"]')
+    expect(badges).toHaveLength(1)
+    const badge = badges[0]
+    if (!badge) throw new Error('disabled badge not rendered')
+    expect(app.textOf(badge)).toBe('Disabled')
     app.unmount()
   })
 
   test('AC8: hides a disabled member role select when the viewer can manage members', async () => {
     const app = await mountPanel(true)
-    expect(app.find('select').filter((select) => select.props.value === 'DEVELOPER')).toHaveLength(0)
+    // The role control is a native <select> in the legacy implementation and
+    // a Button radiogroup (`role="radiogroup"`) in the current one. Both
+    // flavours live inside the disabled member's <li> when the viewer can
+    // manage; the spec requires the per-member control to be hidden, so walk
+    // from the disabled badge up to the <li> and assert no role control
+    // (select or radiogroup) survives inside it.
+    //
+    // The previous assertion searched the whole tree for `select` and is
+    // vacuous now: no native <select> is rendered anywhere on the page, so
+    // it is always empty and passes for any member state.
+    const badge = app.one('[data-testid="member-disabled-badge"]')
+    if (!badge) throw new Error('disabled badge not rendered')
+    const memberLi = badge.parent?.parent?.parent
+    if (!memberLi) throw new Error('disabled badge has no enclosing <li>')
+    expect(memberLi.tag).toBe('li')
+    const roleControlsInLi = [
+      ...app.find('[role="radiogroup"]', memberLi),
+      ...app.find('select', memberLi),
+    ]
+    expect(roleControlsInLi).toHaveLength(0)
     app.unmount()
   })
 
   test('AC9: renders no Disabled badge for an enabled project member', async () => {
     const app = await mountPanel(false)
-    expect(app.text()).not.toContain('Disabled')
+    expect(app.find('[data-testid="member-disabled-badge"]')).toHaveLength(0)
     app.unmount()
   })
 })
