@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, ref, watchEffect } from 'vue'
 import { apiPath } from '~/lib/api-path'
 import { TICKET_CHIP_CLASS, TICKET_DOT_CLASS } from '~/lib/ticket-chips'
 import { extractApiError } from '~/composables/useApi'
@@ -35,8 +36,26 @@ const pending = agents.pending
 const error = agents.error
 const refresh = agents.refresh
 
-const addDialogOpen = { value: false }
-const blockedTicketRefs = { value: [] as string[] }
+const addDialogOpenRef = ref(false)
+const blockedTicketRefsRef = ref<string[]>([])
+const addErrorMessageRef = ref<string | null>(null)
+// Wrapper objects expose `.value` to the test surface (`toEqual({ value }))`)
+// and to the template (`v-if="addDialogOpen.value"`), while the underlying
+// refs give Vue the reactivity it needs to re-render when these flip. A
+// plain `{ value: false }` would not be reactive and the Add dialog and
+// the "Reassign first" message would never visibly toggle in production.
+const addDialogOpen = {
+  get value() { return addDialogOpenRef.value },
+  set value(v: boolean) { addDialogOpenRef.value = v },
+}
+const blockedTicketRefs = {
+  get value() { return blockedTicketRefsRef.value },
+  set value(v: string[]) { blockedTicketRefsRef.value = v },
+}
+const addErrorMessage = {
+  get value() { return addErrorMessageRef.value },
+  set value(v: string | null) { addErrorMessageRef.value = v },
+}
 // Local mirror of the roster so the add dialog can read the current set
 // without round-tripping the page through a ref. useProjectAgents.items is
 // already a ref; expose it under a stable name.
@@ -80,8 +99,33 @@ function readViewer(): { canManage: boolean; viewerRole: string | null; isGlobal
 }
 
 const viewer = readViewer()
-const canManage: boolean = viewer.canManage || viewer.viewerRole === 'ADMIN' || viewer.isGlobalAdmin
-const isEmpty: boolean = Array.isArray(items.value) && items.value.length === 0
+// `canManage` and `isEmpty` are read by both the template (needs reactivity
+// so Add/Remove and EmptyState flip when the async role/roster arrives)
+// and the unit-test binding surface (which does `toBe(true)` on a plain
+// boolean). The computeds drive the template; the `let` bindings mirror
+// the computed value via `watchEffect` so the test sees a primitive.
+// `<script setup>` compiles the auto-return to a getter that reads the
+// binding each time, so the test sees the updated value after the
+// microtask that `mountPage` awaits.
+const canManageComputed = computed(
+  () => viewer.canManage || viewer.viewerRole === 'ADMIN' || viewer.isGlobalAdmin,
+)
+const isEmptyComputed = computed(
+  () => Array.isArray(items.value) && items.value.length === 0,
+)
+let canManage: boolean = canManageComputed.value
+let isEmpty: boolean = isEmptyComputed.value
+watchEffect(() => {
+  canManage = canManageComputed.value
+  isEmpty = isEmptyComputed.value
+})
+// The template's reactive reads of `canManageComputed`/`isEmptyComputed`
+// drive the UI, and the test binding reads `canManage`/`isEmpty` (the
+// primitive mirrors kept in sync above). The empty `void` reads keep the
+// linter from flagging the `let` bindings as unused while preserving
+// their plain-boolean contract for `toBe(true)`.
+void canManage
+void isEmpty
 
 // Agent status dots use the status tokens directly (the lib's STATUS_DOT is
 // keyed by ticket status names, not token names). The i18n label always
@@ -139,13 +183,17 @@ function apiErrorMessage(err: unknown): string {
 
 async function addAgent(agentSlug: string): Promise<void> {
   if (!agentSlug) return
+  addErrorMessage.value = null
   try {
     await agents.add(agentSlug)
     toast.success(t('agents.project.added'))
     addDialogOpen.value = false
+    addErrorMessage.value = null
     await refresh()
   } catch (caught) {
-    toast.error(apiErrorMessage(caught))
+    const message = apiErrorMessage(caught)
+    toast.error(message)
+    addErrorMessage.value = message
     // Keep the dialog open so the caller can correct the input and retry.
     addDialogOpen.value = true
   }
@@ -184,7 +232,7 @@ async function removeAgent(agent: ProjectAgent): Promise<void> {
   <div class="space-y-6">
     <PageHeader :title="t('agents.title')">
       <template #actions>
-        <Button v-if="canManage" @click="openAddDialog">
+        <Button v-if="canManageComputed" @click="openAddDialog">
           {{ t('agents.project.addAgent') }}
         </Button>
       </template>
@@ -200,7 +248,7 @@ async function removeAgent(agent: ProjectAgent): Promise<void> {
 
     <LoadingState v-if="pending" />
     <ErrorState v-else-if="error" @retry="refresh()" />
-    <EmptyState v-else-if="isEmpty" :message="t('agents.project.empty')" />
+    <EmptyState v-else-if="isEmptyComputed" :message="t('agents.project.empty')" />
     <Table v-else>
       <TableHeader>
         <TableRow>
@@ -210,7 +258,7 @@ async function removeAgent(agent: ProjectAgent): Promise<void> {
           <TableHead>{{ t('agents.columns.capabilities') }}</TableHead>
           <TableHead>{{ t('agents.columns.status') }}</TableHead>
           <TableHead>{{ t('agents.columns.openTickets') }}</TableHead>
-          <TableHead v-if="canManage">{{ t('agents.columns.actions') }}</TableHead>
+          <TableHead v-if="canManageComputed">{{ t('agents.columns.actions') }}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -260,7 +308,7 @@ async function removeAgent(agent: ProjectAgent): Promise<void> {
               </NuxtLink>
             </div>
           </TableCell>
-          <TableCell v-if="canManage">
+          <TableCell v-if="canManageComputed">
             <div class="flex flex-col gap-1">
               <Button variant="ghost" size="sm" @click="removeAgent(agent)">
                 {{ t('agents.removeProjectAgent.remove') }}
@@ -279,11 +327,12 @@ async function removeAgent(agent: ProjectAgent): Promise<void> {
     </Table>
 
     <AddProjectAgentDialog
-      v-if="canManage"
+      v-if="canManageComputed"
       :open="addDialogOpen.value"
       @update:open="(v: boolean) => (addDialogOpen.value = v)"
       :slug="slug"
       :roster="items"
+      :error="addErrorMessage.value"
       @added="(agentSlug: string) => addAgent(agentSlug)"
     />
   </div>

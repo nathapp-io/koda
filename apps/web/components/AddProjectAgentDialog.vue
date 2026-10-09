@@ -7,14 +7,14 @@
  * local ref so the parent can read it through a v-model or by passing the
  * ref back, and so the picker can be reset on every open.
  *
- * The dialog does not own the POST: it emits `add` with the selected slug
+ * The dialog does not own the POST: it emits `added` with the selected slug
  * and lets the page (which owns useProjectAgents) call the API. On a POST
- * failure the dialog stays open and surfaces `extractApiError(err)`, so the
- * caller can decide to retry without re-opening the dialog.
+ * failure the page forwards the extracted error message via the `error`
+ * prop, and the page keeps the dialog open so the caller can correct the
+ * input and retry.
  */
 import { ref, watch } from 'vue'
 import { extractApiError } from '~/composables/useApi'
-import { apiPath } from '~/lib/api-path'
 
 interface RosterEntry { slug: string }
 interface AgentChoice {
@@ -30,6 +30,8 @@ const props = defineProps<{
   slug: string
   /** Rostered agent slugs to exclude from the available-agents list. */
   roster: RosterEntry[]
+  /** Error message from a failed POST, forwarded by the page. */
+  error: string | null
 }>()
 
 const emit = defineEmits<{
@@ -43,9 +45,7 @@ const { $api } = useApi()
 const availableAgents = ref<AgentChoice[]>([])
 const candidatesError = ref<string | null>(null)
 const selectedSlug = ref('')
-const isAdding = ref(false)
 const isLoadingCandidates = ref(false)
-const addError = ref<string | null>(null)
 
 const rosterSlugs = computed(() => new Set((props.roster ?? []).map((entry) => entry.slug)))
 
@@ -54,7 +54,6 @@ watch(
   (isOpen) => {
     if (isOpen) {
       selectedSlug.value = ''
-      addError.value = null
       void loadCandidates()
     }
   },
@@ -78,19 +77,9 @@ async function loadCandidates(): Promise<void> {
 
 defineExpose({ loadCandidates, availableAgents })
 
-async function onConfirm(): Promise<void> {
-  if (!selectedSlug.value || isAdding.value) return
-  isAdding.value = true
-  addError.value = null
-  try {
-    await $api.post(apiPath`/projects/${props.slug}/agents`, { agentSlug: selectedSlug.value })
-    emit('added', selectedSlug.value)
-    emit('update:open', false)
-  } catch (caught) {
-    addError.value = extractApiError(caught)
-  } finally {
-    isAdding.value = false
-  }
+function onConfirm(): void {
+  if (!selectedSlug.value) return
+  emit('added', selectedSlug.value)
 }
 
 function onCancel(): void {
@@ -132,16 +121,16 @@ function onCancel(): void {
         </p>
       </div>
 
-      <div v-if="addError" class="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-status-rejected">
-        {{ addError }}
+      <div v-if="error" class="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-status-rejected">
+        {{ error }}
       </div>
 
       <DialogFooter>
         <Button type="button" variant="outline" @click="onCancel">
           {{ t('common.cancel') }}
         </Button>
-        <Button type="button" :disabled="!selectedSlug || isAdding" @click="onConfirm">
-          {{ isAdding ? t('agents.addProjectAgent.adding') : t('agents.addProjectAgent.confirm') }}
+        <Button type="button" :disabled="!selectedSlug" @click="onConfirm">
+          {{ t('agents.addProjectAgent.confirm') }}
         </Button>
       </DialogFooter>
     </DialogContent>

@@ -440,8 +440,7 @@
       "description": "选择要添加到此项目的代理。已离线或已在名单中的代理不会显示。",
       "noCandidates": "没有更多可添加的代理。",
       "selectPlaceholder": "选择代理…",
-      "confirm": "添加代理",
-      "adding": "添加中…"
+      "confirm": "添加代理"
     },
     "removeProjectAgent": {
       "title": "移除代理",

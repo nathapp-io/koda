@@ -440,8 +440,7 @@
       "description": "Pick an agent to add to this project. OFFLINE agents and agents already on the roster are not offered.",
       "noCandidates": "No more agents are available to add.",
       "selectPlaceholder": "Choose an agent…",
-      "confirm": "Add agent",
-      "adding": "Adding…"
+      "confirm": "Add agent"
     },
     "removeProjectAgent": {
       "title": "Remove agent",
