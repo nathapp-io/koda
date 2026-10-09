@@ -256,12 +256,12 @@ jobs:
           POSTGRES_DB: koda_test
         ports:
           - 5433:5432
+        # --tmpfs keeps Postgres on memory-backed storage (test data only), like docker-compose.test.yml locally.
         options: >-
           --health-cmd "pg_isready -U koda -d koda_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-          # Test data only: keep Postgres on tmpfs like docker-compose.test.yml does locally.
           --tmpfs /var/lib/postgresql/data
     steps:
       - uses: actions/checkout@v4
@@ -323,12 +323,12 @@ jobs:
           POSTGRES_DB: koda_test
         ports:
           - 5433:5432
+        # --tmpfs keeps Postgres on memory-backed storage (test data only), like docker-compose.test.yml locally.
         options: >-
           --health-cmd "pg_isready -U koda -d koda_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-          # Test data only: keep Postgres on tmpfs like docker-compose.test.yml does locally.
           --tmpfs /var/lib/postgresql/data
     steps:
       - uses: actions/checkout@v4
@@ -380,12 +380,12 @@ jobs:
           POSTGRES_DB: koda_e2e
         ports:
           - 5433:5432
+        # --tmpfs keeps Postgres on memory-backed storage (test data only), like docker-compose.test.yml locally.
         options: >-
           --health-cmd "pg_isready -U koda -d koda_e2e"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-          # Test data only: keep Postgres on tmpfs like docker-compose.test.yml does locally.
           --tmpfs /var/lib/postgresql/data
     steps:
       - uses: actions/checkout@v4
@@ -469,12 +469,12 @@ jobs:
           POSTGRES_DB: koda_eval
         ports:
           - 5432:5432
+        # --tmpfs keeps Postgres on memory-backed storage (test data only), like docker-compose.test.yml locally.
         options: >-
           --health-cmd "pg_isready -U koda -d koda_eval"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-          # Test data only: keep Postgres on tmpfs like docker-compose.test.yml does locally.
           --tmpfs /var/lib/postgresql/data
     steps:
       - uses: actions/checkout@v4
@@ -539,12 +539,12 @@ jobs:
           POSTGRES_DB: koda_smoke
         ports:
           - 5433:5432
+        # --tmpfs keeps Postgres on memory-backed storage (test data only), like docker-compose.test.yml locally.
         options: >-
           --health-cmd "pg_isready -U koda -d koda_smoke"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-          # Test data only: keep Postgres on tmpfs like docker-compose.test.yml does locally.
           --tmpfs /var/lib/postgresql/data
     steps:
       - uses: actions/checkout@v4
