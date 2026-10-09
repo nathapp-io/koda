@@ -306,7 +306,8 @@
         "agents": "Agents"
       },
       "pausedTag": "(paused)",
-      "empty": "No matching people or agents"
+      "empty": "No matching people or agents",
+      "loadError": "Couldn't load assignees. Try again."
     },
     "labels": {
       "select": "Select label",

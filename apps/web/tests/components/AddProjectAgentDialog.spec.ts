@@ -72,6 +72,7 @@ interface MountOptions {
   error: string | null
   agents: AgentChoice[]
   get?: Get
+  submitting?: boolean
 }
 
 interface DialogHandle {
@@ -89,6 +90,7 @@ function mountDialog(options: MountOptions): DialogHandle {
       slug: options.slug,
       roster: options.roster,
       error: options.error,
+      submitting: options.submitting ?? false,
     },
     components: {
       ...uiStubs,
@@ -207,6 +209,27 @@ describe('AddProjectAgentDialog (US-006 AC3-5)', () => {
     const buttons = app.find('[data-stub="button"]')
     const confirm = buttons.find(button => /Add agent/.test(app.textOf(button)))
     if (!confirm) throw new Error('Confirm button was not rendered')
+    ;(confirm.props.onClick as (event: Event) => void)({ preventDefault: jest.fn() } as unknown as Event)
+    expect(app.emitted('added')).toEqual([])
+    app.unmount()
+  })
+
+  test('WEB-2: while the add POST is in flight Confirm is disabled and does not emit added', async () => {
+    const agents: AgentChoice[] = [{ slug: 'available-agent', name: 'Available', status: 'ACTIVE' }]
+    const { app, settle, setOpen } = mountDialog({
+      open: false, slug: 'acme', roster: [], error: null, agents, get: jest.fn(async () => agents) as unknown as Get,
+      submitting: true,
+    })
+    await setOpen(true)
+    await settle()
+    const select = app.one('[data-stub="select"]')
+    const setValue = select?.props.setModelValue as (value: string) => void
+    setValue('available-agent')
+    await settle()
+    const buttons = app.find('[data-stub="button"]')
+    const confirm = buttons.find(button => /Add agent/.test(app.textOf(button)))
+    if (!confirm) throw new Error('Confirm button was not rendered')
+    expect(confirm.props.disabled).toBe(true)
     ;(confirm.props.onClick as (event: Event) => void)({ preventDefault: jest.fn() } as unknown as Event)
     expect(app.emitted('added')).toEqual([])
     app.unmount()

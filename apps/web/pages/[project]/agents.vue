@@ -26,6 +26,13 @@ const scoping = agents.scoping
 
 const addDialogOpen = ref(false)
 const addErrorMessage = ref<string | null>(null)
+// Guards the add POST: the dialog's Confirm can emit `added` twice before the
+// first POST settles (double-click), and a duplicate POST would 409 after the
+// first add already succeeded.
+const adding = ref(false)
+// The row with a mutation in flight; its controls are disabled so a status
+// PATCH and a removal cannot run concurrently for the same agent.
+const busySlug = ref<string | null>(null)
 // The agent whose removal was refused for open tickets, and the refs that
 // block it. The links render only under that agent's row.
 const blockedAgentSlug = ref<string | null>(null)
@@ -103,7 +110,8 @@ function apiErrorMessage(err: unknown): string {
 }
 
 async function addAgent(agentSlug: string): Promise<void> {
-  if (!agentSlug) return
+  if (!agentSlug || adding.value) return
+  adding.value = true
   addErrorMessage.value = null
   try {
     await agents.add(agentSlug)
@@ -117,22 +125,31 @@ async function addAgent(agentSlug: string): Promise<void> {
     // caller can correct the input and retry.
     addErrorMessage.value = apiErrorMessage(caught)
     addDialogOpen.value = true
+  } finally {
+    adding.value = false
   }
 }
 
-async function changeStatus(agent: ProjectAgent, status: string): Promise<void> {
-  if (status === agent.status) return
+async function changeStatus(agent: ProjectAgent, status: string, select?: HTMLSelectElement): Promise<void> {
+  if (status === agent.status || busySlug.value) return
+  busySlug.value = agent.slug
   try {
     await agents.changeStatus(agent.slug, status)
     await refresh()
   } catch (caught) {
     toast.error(apiErrorMessage(caught))
+    // Revert the select to the row's real status. refresh() alone cannot do
+    // it: the reloaded items carry the same status value, so the `:value`
+    // prop never changes and Vue leaves the refused option displayed.
+    if (select) select.value = agent.status
     await refresh()
+  } finally {
+    busySlug.value = null
   }
 }
 
 function onStatusChange(agent: ProjectAgent, event: Event): void {
-  void changeStatus(agent, (event.target as HTMLSelectElement).value)
+  void changeStatus(agent, (event.target as HTMLSelectElement).value, event.target as HTMLSelectElement)
 }
 
 async function removeAgent(agent: ProjectAgent): Promise<void> {
@@ -156,8 +173,10 @@ async function removeAgent(agent: ProjectAgent): Promise<void> {
     : (typeof window !== 'undefined' && typeof window.confirm === 'function'
       ? window.confirm.bind(window)
       : () => false)
+  if (busySlug.value) return
   const ok = confirmFn(t('agents.removeProjectAgent.confirm', { name: agent.name }))
   if (!ok) return
+  busySlug.value = agent.slug
   try {
     await agents.remove(agent.slug)
     toast.success(t('agents.project.removed'))
@@ -166,6 +185,8 @@ async function removeAgent(agent: ProjectAgent): Promise<void> {
     toast.error(apiErrorMessage(caught))
     // 409: stale counts — reload so the page shows current open tickets.
     await refresh()
+  } finally {
+    busySlug.value = null
   }
 }
 </script>
@@ -253,14 +274,20 @@ async function removeAgent(agent: ProjectAgent): Promise<void> {
               <select
                 :value="agent.status"
                 :aria-label="t('agents.columns.status')"
-                class="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                :disabled="busySlug === agent.slug"
+                class="h-8 rounded-md border border-input bg-background px-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
                 @change="onStatusChange(agent, $event)"
               >
                 <option v-for="status in AGENT_STATUSES" :key="status" :value="status">
                   {{ t(`agents.status.${status}`) }}
                 </option>
               </select>
-              <Button variant="ghost" size="sm" @click="removeAgent(agent)">
+              <Button
+                variant="ghost"
+                size="sm"
+                :disabled="busySlug === agent.slug"
+                @click="removeAgent(agent)"
+              >
                 {{ t('agents.removeProjectAgent.remove') }}
               </Button>
               <div v-if="blockedAgentSlug === agent.slug" class="flex flex-col gap-0.5">
@@ -291,6 +318,7 @@ async function removeAgent(agent: ProjectAgent): Promise<void> {
       @update:open="setAddDialogOpen"
       :roster="items"
       :error="addErrorMessage"
+      :submitting="adding"
       @added="(agentSlug: string) => addAgent(agentSlug)"
     />
   </div>

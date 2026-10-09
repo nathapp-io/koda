@@ -58,6 +58,7 @@ interface MountOptions {
   globalAdmin?: boolean
   rejectAdd?: Error
   rejectDelete?: Error
+  rejectPatch?: Error
   confirm?: boolean
   dialogStub?: DialogStub
 }
@@ -155,6 +156,7 @@ function mountPage(options: MountOptions = {}): PageHandle {
     }),
     patch: jest.fn(async (path: string, body: unknown) => {
       calls.push({ method: 'PATCH', url: path, body })
+      if (options.rejectPatch) throw options.rejectPatch
       return {}
     }),
   }
@@ -384,5 +386,52 @@ describe('US-006 project agent roster page', () => {
     expect(m.toast.error).toHaveBeenCalledWith('Roster changed')
     const afterGet = m.calls.filter(c => c.method === 'GET' && c.url === '/projects/acme/agents').length
     expect(afterGet).toBeGreaterThan(beforeGet)
+  })
+
+  test('WEB-1: a failed status PATCH reverts the select to the row status and toasts', async () => {
+    const error = Object.assign(new Error('Status refused'), { statusCode: 409 })
+    const m = mountPage({ rosterResponse: makeRoster({ items: [item] }), role: 'ADMIN', rejectPatch: error })
+    await m.settle()
+    const select = m.app.one('select')
+    expect(select).toBeDefined()
+    // The user picks PAUSED; the PATCH fails. The page must put the refused
+    // value back: refresh() alone cannot, because the reloaded items carry
+    // the same status and Vue never re-patches the select.
+    const target = { value: 'PAUSED' } as unknown as HTMLSelectElement
+    ;(select?.props.onChange as (e: Event) => void)({ target } as unknown as Event)
+    await m.settle()
+    expect(m.api.patch).toHaveBeenCalledWith('/projects/acme/agents/builder', { status: 'PAUSED' })
+    expect(target.value).toBe('ACTIVE')
+    expect(m.toast.error).toHaveBeenCalledWith('Status refused')
+  })
+
+  test('WEB-5: while a status PATCH is in flight the row controls are disabled', async () => {
+    let release: (value: unknown) => void = () => undefined
+    const m = mountPage({ rosterResponse: makeRoster({ items: [item] }), role: 'ADMIN' })
+    await m.settle()
+    m.api.patch.mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
+    const select = m.app.one('select')
+    ;(select?.props.onChange as (e: Event) => void)({ target: { value: 'PAUSED' } } as unknown as Event)
+    await Vue.nextTick()
+    expect(m.app.one('select')?.props.disabled).toBe(true)
+    release(undefined)
+    await m.settle()
+    expect(m.app.one('select')?.props.disabled).toBe(false)
+  })
+
+  test('WEB-2: a second `added` while the add POST is in flight does not POST twice', async () => {
+    let release: (value: unknown) => void = () => undefined
+    const m = mountPage({ rosterResponse: makeRoster({ items: [item] }), role: 'ADMIN' })
+    await m.settle()
+    m.api.post.mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
+    // Two emits in the same tick: a double-click on Confirm before the first
+    // POST settles. The page guard must swallow the second one.
+    m.dialog.added('available-agent')
+    m.dialog.added('available-agent')
+    release(undefined)
+    await m.settle()
+    // mockImplementationOnce replaces the recorder, so count on the mock itself.
+    expect(m.api.post).toHaveBeenCalledTimes(1)
+    expect(m.api.post).toHaveBeenCalledWith('/projects/acme/agents', { agentSlug: 'available-agent' })
   })
 })

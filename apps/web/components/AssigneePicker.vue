@@ -18,16 +18,24 @@ const emit = defineEmits<{
 
 const { $api } = useApi()
 const { t } = useI18n()
+// Captured at setup: useAppToast needs the active Nuxt instance, which is not
+// guaranteed inside a debounced/async callback after await.
+const toast = useAppToast()
 
 const search = vueRef('')
 const items = vueRef<AssigneeItem[]>([])
 const loading = vueRef(false)
+// Distinguishes a failed roster load from a legitimately empty result: the
+// empty text must not claim "no matching people or agents" when the request
+// itself failed.
+const loadError = vueRef(false)
 
 const userItems = computed(() => items.value.filter((item) => item.type === 'user'))
 const agentItems = computed(() => items.value.filter((item) => item.type === 'agent'))
 
 let requestSeq = 0
 let debounceHandle: ReturnType<typeof setTimeout> | null = null
+let abortController: AbortController | null = null
 
 function clearDebounce(): void {
   if (debounceHandle !== null) {
@@ -38,21 +46,25 @@ function clearDebounce(): void {
 
 async function fetchAssignees(query: string): Promise<void> {
   const seq = ++requestSeq
+  // Superseded searches are aborted, not just discarded: the stale request
+  // stops as early as possible instead of running to completion.
+  abortController?.abort()
+  const controller = new AbortController()
+  abortController = controller
   loading.value = true
+  loadError.value = false
   try {
     const response = await $api.get<{ items: AssigneeItem[] }>(apiPath`/projects/${props.projectSlug}/assignees`, {
       query: { q: query },
+      signal: controller.signal,
     })
     if (seq !== requestSeq) return
     items.value = response.items ?? []
   } catch (err: unknown) {
-    if (seq !== requestSeq) return
+    if (seq !== requestSeq || controller.signal.aborted) return
     items.value = []
-    try {
-      useAppToast().error(extractApiError(err))
-    } catch {
-      // No toast in scope (e.g. tests); the empty result still signals the failure.
-    }
+    loadError.value = true
+    toast.error(extractApiError(err))
   } finally {
     if (seq === requestSeq) loading.value = false
   }
@@ -87,11 +99,12 @@ onMounted(() => {
   fetchAssignees('')
 })
 
-// Drop a pending debounce and ignore any in-flight response once the picker
-// is gone, so no request or toast fires after unmount.
+// Drop a pending debounce and ignore/abort any in-flight response once the
+// picker is gone, so no request or toast fires after unmount.
 onBeforeUnmount(() => {
   clearDebounce()
   requestSeq++
+  abortController?.abort()
 })
 </script>
 
@@ -147,7 +160,14 @@ onBeforeUnmount(() => {
       </ul>
     </div>
     <p
-      v-if="!loading && userItems.length === 0 && agentItems.length === 0"
+      v-if="loadError"
+      class="text-xs text-status-rejected"
+      data-testid="assignee-load-error"
+    >
+      {{ t('tickets.assignee.loadError') }}
+    </p>
+    <p
+      v-else-if="!loading && userItems.length === 0 && agentItems.length === 0"
       class="text-xs text-muted-foreground"
     >
       {{ t('tickets.assignee.empty') }}

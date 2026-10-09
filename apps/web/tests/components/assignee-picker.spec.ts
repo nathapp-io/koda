@@ -21,7 +21,7 @@ describe('AssigneePicker and ticket assignment (US-007)', () => {
     const app = mountSfc(pickerFile, {
       props: { projectSlug: 'web' },
       components: uiStubs,
-      globals: { useApi: () => ({ $api: { get } }), useI18n: () => enI18n() },
+      globals: { useApi: () => ({ $api: { get } }), useI18n: () => enI18n(), useAppToast: () => ({ success: jest.fn(), error: jest.fn() }) },
     })
     const input = app.one('[data-testid="assignee-search"]')
     expect(input).toBeDefined()
@@ -36,7 +36,9 @@ describe('AssigneePicker and ticket assignment (US-007)', () => {
     await flush()
     const aliceCalls = get.mock.calls.filter(([, args]) => (args as { query: { q: string } }).query.q === 'alice')
     expect(aliceCalls).toHaveLength(1)
-    expect(aliceCalls[0]).toEqual(['/projects/web/assignees', { query: { q: 'alice' } }])
+    // The signal aborts a superseded search; every call carries a live one.
+    expect(aliceCalls[0]).toEqual(['/projects/web/assignees', { query: { q: 'alice' }, signal: expect.any(AbortSignal) }])
+    expect((aliceCalls[0][1] as { signal: AbortSignal }).signal.aborted).toBe(false)
     app.unmount()
     jest.useRealTimers()
   })
@@ -49,7 +51,7 @@ describe('AssigneePicker and ticket assignment (US-007)', () => {
     const app = mountSfc(pickerFile, {
       props: { projectSlug: 'web' },
       components: uiStubs,
-      globals: { useApi: () => ({ $api: { get } }), useI18n: () => enI18n() },
+      globals: { useApi: () => ({ $api: { get } }), useI18n: () => enI18n(), useAppToast: () => ({ success: jest.fn(), error: jest.fn() }) },
     })
     const input = app.one('[data-testid="assignee-search"]')
     expect(input).toBeDefined()
@@ -63,6 +65,58 @@ describe('AssigneePicker and ticket assignment (US-007)', () => {
     expect(app.text()).toContain('Builder')
     expect(app.text()).toContain('(paused)')
     app.unmount()
+  })
+
+  test('WEB-3: a failed search shows the error state, not the empty text, and recovers', async () => {
+    const toastError = jest.fn()
+    const get = jest.fn()
+      .mockRejectedValueOnce(new Error('Network down'))
+      .mockResolvedValue({ items: [{ type: 'user', id: 'u1', name: 'Alice', secondary: 'alice@example.test' }] })
+    const app = mountSfc(pickerFile, {
+      props: { projectSlug: 'web' },
+      components: uiStubs,
+      globals: { useApi: () => ({ $api: { get } }), useI18n: () => enI18n(), useAppToast: () => ({ success: jest.fn(), error: toastError }) },
+    })
+    await flush()
+    // The failure is its own state: the "no matches" copy must not claim the
+    // roster is empty when the request itself failed.
+    expect(app.one('[data-testid="assignee-load-error"]')).toBeDefined()
+    expect(app.text()).not.toContain('No matching people or agents')
+    expect(toastError).toHaveBeenCalledWith('Network down')
+
+    // A later successful search clears the error and renders the results.
+    const update = app.one('[data-testid="assignee-search"]')?.props['onUpdate:modelValue'] as (v: string) => void
+    update('')
+    await flush()
+    expect(app.one('[data-testid="assignee-load-error"]')).toBeUndefined()
+    expect(app.text()).toContain('Alice')
+    app.unmount()
+  })
+
+  test('WEB-4: a superseded search aborts the previous in-flight request', async () => {
+    jest.useFakeTimers()
+    const pending: Array<{ resolve: (value: { items: unknown[] }) => void; signal: AbortSignal }> = []
+    const get = jest.fn((_path: string, args?: { signal: AbortSignal }) =>
+      new Promise<{ items: unknown[] }>((resolve) => {
+        pending.push({ resolve, signal: args?.signal as AbortSignal })
+      }))
+    const app = mountSfc(pickerFile, {
+      props: { projectSlug: 'web' },
+      components: uiStubs,
+      globals: { useApi: () => ({ $api: { get } }), useI18n: () => enI18n(), useAppToast: () => ({ success: jest.fn(), error: jest.fn() }) },
+    })
+    await flush()
+    expect(pending).toHaveLength(1)
+    const update = app.one('[data-testid="assignee-search"]')?.props['onUpdate:modelValue'] as (v: string) => void
+    update('alice')
+    await nextTick()
+    jest.advanceTimersByTime(200)
+    await flush()
+    expect(pending).toHaveLength(2)
+    expect(pending[0].signal.aborted).toBe(true)
+    expect(pending[1].signal.aborted).toBe(false)
+    app.unmount()
+    jest.useRealTimers()
   })
 
   test.each([

@@ -29,6 +29,8 @@ const props = defineProps<{
   roster: RosterEntry[]
   /** Error message from a failed POST, forwarded by the page. */
   error: string | null
+  /** True while the page's add POST is in flight; Confirm is disabled. */
+  submitting?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -75,7 +77,7 @@ async function loadCandidates(): Promise<void> {
 defineExpose({ loadCandidates, availableAgents })
 
 function onConfirm(): void {
-  if (!selectedSlug.value) return
+  if (!selectedSlug.value || props.submitting) return
   emit('added', selectedSlug.value)
 }
 
@@ -126,7 +128,7 @@ function onCancel(): void {
         <Button type="button" variant="outline" @click="onCancel">
           {{ t('common.cancel') }}
         </Button>
-        <Button type="button" :disabled="!selectedSlug" @click="onConfirm">
+        <Button type="button" :disabled="!selectedSlug || props.submitting" @click="onConfirm">
           {{ t('agents.addProjectAgent.confirm') }}
         </Button>
       </DialogFooter>

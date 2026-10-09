@@ -306,7 +306,8 @@
         "agents": "代理"
       },
       "pausedTag": "（已暂停）",
-      "empty": "暂无匹配的人员或代理"
+      "empty": "暂无匹配的人员或代理",
+      "loadError": "加载候选人失败，请重试"
     },
     "labels": {
       "select": "选择标签",
