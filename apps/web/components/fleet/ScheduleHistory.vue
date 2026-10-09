@@ -27,7 +27,7 @@
           <TableCell data-testid="fleet-schedule-run-coalesced">{{ row.job.coalescedCount }}</TableCell>
           <TableCell data-testid="fleet-schedule-run-push" class="text-xs">{{ pushText(row) }}</TableCell>
           <TableCell data-testid="fleet-schedule-run-reason" class="max-w-[16rem] break-words text-xs" :title="row.job.stateReason ?? ''">{{ reasonText(row) }}</TableCell>
-          <TableCell class="whitespace-nowrap text-xs">{{ formatInZone(row.job.queuedAt, timezone) }}</TableCell>
+          <TableCell data-testid="fleet-schedule-run-queued" class="whitespace-nowrap text-xs">{{ formatInZone(row.job.queuedAt, timezone) }}</TableCell>
         </TableRow>
       </TableBody>
     </Table>
