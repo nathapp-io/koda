@@ -406,18 +406,48 @@
     "title": "代理",
     "createAgent": "创建代理",
     "empty": "暂无代理。",
+    "project": {
+      "empty": "该项目暂无代理。",
+      "scopingOff": "本实例已禁用项目代理范围。名单更改可能不会生效。",
+      "openTickets": "未完成工单:{count}",
+      "reassignFirst": "请先重新分配其 {count} 个未完成工单",
+      "addedBy": "由 {name} 添加",
+      "addedAt": "添加于 {date}",
+      "addAgent": "添加代理",
+      "added": "代理已添加到项目",
+      "addFailed": "添加代理失败",
+      "removed": "代理已从项目中移除",
+      "removeFailed": "移除代理失败"
+    },
     "columns": {
       "name": "名称",
       "slug": "标识符",
       "roles": "角色",
       "capabilities": "能力",
       "status": "状态",
-      "actions": "操作"
+      "actions": "操作",
+      "openTickets": "未完成工单",
+      "addedBy": "添加人",
+      "addedAt": "添加时间"
     },
     "status": {
       "ACTIVE": "ACTIVE",
       "PAUSED": "PAUSED",
       "OFFLINE": "OFFLINE"
+    },
+    "addProjectAgent": {
+      "title": "将代理添加到项目",
+      "description": "选择要添加到此项目的代理。已离线或已在名单中的代理不会显示。",
+      "noCandidates": "没有更多可添加的代理。",
+      "selectPlaceholder": "选择代理…",
+      "confirm": "添加代理",
+      "adding": "添加中…"
+    },
+    "removeProjectAgent": {
+      "title": "移除代理",
+      "confirm": "确定要从本项目中移除 {name}?未完成工单将阻止此操作。",
+      "blocked": "无法移除 {name}:{message}",
+      "remove": "移除"
     },
     "toast": {
       "created": "代理创建成功",
