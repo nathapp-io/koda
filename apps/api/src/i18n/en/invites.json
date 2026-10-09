@@ -1,0 +1,7 @@
+{
+  "404": "Invite not found",
+  "final": { "409": "This invite is already accepted or cancelled" },
+  "accountExists": { "409": "An account already exists for this email address" },
+  "memberExists": { "409": "User is already a member of this project" },
+  "userDisabled": { "409": "This account is disabled and cannot be added to a project" }
+}

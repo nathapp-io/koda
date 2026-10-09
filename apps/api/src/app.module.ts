@@ -15,6 +15,7 @@ import { UsersModule } from './users/users.module';
 import { AgentsModule } from './agents/agents.module';
 import { ProjectsModule } from './projects/projects.module';
 import { ProjectMembersModule } from './projects/members/project-members.module';
+import { ProjectInvitesModule } from './projects/invites/project-invites.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { CommentsModule } from './comments/comments.module';
 import { LabelsModule } from './labels/labels.module';
@@ -125,6 +126,7 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
     MonitoringModule,
     FleetModule,
     HomeModule,
+    ProjectInvitesModule,
   ],
   providers: [
     // H2: register the throttler guard globally so @Throttle decorators are enforced.

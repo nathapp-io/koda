@@ -13,7 +13,7 @@ DO NOT EDIT MANUALLY — run `nax generate` to regenerate.
 
 **Language:** TypeScript
 
-**Key dependencies:** @fastify/helmet, @fastify/static, @nathapp/nestjs-prisma, @nestjs/cache-manager, @nestjs/common, @nestjs/config, @nestjs/core, @nestjs/platform-fastify, @nestjs/schedule, @nestjs/swagger
+**Key dependencies:** @fastify/helmet, @fastify/static, @nathapp/nestjs-notify-prisma, @nathapp/nestjs-prisma, @nestjs/cache-manager, @nestjs/common, @nestjs/config, @nestjs/core, @nestjs/event-emitter, @nestjs/platform-fastify
 
 **Commands:** test: `npx turbo test` | lint: `bunx turbo lint` | typecheck: `bunx turbo type-check`
 
@@ -199,6 +199,13 @@ Rationale: `bun run test` runs without a database, so DI/module-registration bre
 - nax's agent shell is sandboxed without Docker access, so agent-run DB tests need the compose database: run `bun run test:db:up` before a nax run that touches `apps/api`. nax's own quality and acceptance commands run outside the sandbox and fall back to Testcontainers
 - a story that writes a `test/integration/**` spec must see it run and pass under `test:scoped`, not just compile
 - every DB-mode run force-resets the test database (only a local `*_test` database is accepted), so do not run two DB-mode jest runs against the same database at once. A second checkout (worktree, clone) sets `KODA_TEST_DB_CONTAINER=1` to skip the compose database and use a private container
+
+### nax acceptance tests
+
+- One generated file per feature, `apps/api/.nax/features/<feature>/.nax-acceptance.test.ts`, holds every story's ACs as `it('AC-<n>: ...')`. The default jest config (`testRegex` `.*\.spec\.ts`) does not pick it up.
+- Run it from `apps/api` with the compose test Postgres up (`bun run test:db:up`): `KODA_DB_TESTS=1 npx jest --config jest.nax.config.js .nax/features/<feature>/.nax-acceptance.test.ts -t "AC-<a>:|AC-<b>:"`, filtered to your story's AC ids (listed per `storyId` in the repo-root `.nax/features/<feature>/acceptance-refined.json`). Keep the trailing colon so `AC-1` does not also match `AC-10`.
+- This is the same config nax's acceptance stage runs (`.nax/mono/apps/api/config.json` `acceptance.command`). `KODA_DB_TESTS=1` is required: without it the PG-backed ACs get no database.
+- Never copy the file into `src/` or `test/`, never edit it, and never override `--testRegex`/`--testPathIgnorePatterns` to run it.
 
 Useful scripts (run from `apps/api`):
 - `bun run test`

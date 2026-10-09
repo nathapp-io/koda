@@ -4674,7 +4674,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NotificationPreferencesDto"
+                  "$ref": "#/components/schemas/NotificationPreferencesViewDto"
                 }
               }
             }
@@ -4685,7 +4685,7 @@
             "bearer": []
           }
         ],
-        "summary": "My in-app notification categories",
+        "summary": "My in-app and email notification categories",
         "tags": [
           "notifications"
         ]
@@ -4709,7 +4709,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NotificationPreferencesDto"
+                  "$ref": "#/components/schemas/NotificationPreferencesViewDto"
                 }
               }
             }
@@ -4723,7 +4723,7 @@
             "bearer": []
           }
         ],
-        "summary": "Switch in-app notification categories on or off",
+        "summary": "Switch my notification categories and email on or off",
         "tags": [
           "notifications"
         ]
@@ -8893,6 +8893,303 @@
           "home"
         ]
       }
+    },
+    "/api/projects/{slug}/invites": {
+      "get": {
+        "operationId": "ProjectInvitesController_list",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InviteDto"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Project admin role required"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List project invites (project admin)",
+        "tags": [
+          "projects"
+        ]
+      },
+      "post": {
+        "operationId": "ProjectInvitesController_create",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "accept-language",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateInviteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteCreateResultDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Project admin role required"
+          },
+          "404": {
+            "description": "Project not found"
+          },
+          "409": {
+            "description": "Already a member, or the account is disabled"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add an existing user or invite a new address (project admin)",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/projects/{slug}/invites/{id}/resend": {
+      "post": {
+        "operationId": "ProjectInvitesController_resend",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "accept-language",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteResendResultDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Project admin role required"
+          },
+          "404": {
+            "description": "Project or invite not found"
+          },
+          "409": {
+            "description": "Invite is already accepted or cancelled"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rotate a pending invite token and resend the invite email (project admin)",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/projects/{slug}/invites/{id}": {
+      "delete": {
+        "operationId": "ProjectInvitesController_cancel",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invite cancelled"
+          },
+          "403": {
+            "description": "Project admin role required"
+          },
+          "404": {
+            "description": "Project or invite not found"
+          },
+          "409": {
+            "description": "Invite is already accepted or cancelled"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Cancel a pending invite (project admin)",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/invites/{token}": {
+      "get": {
+        "operationId": "PublicInvitesController_preview",
+        "parameters": [
+          {
+            "name": "token",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitePreviewDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown, expired, cancelled or accepted token"
+          }
+        },
+        "summary": "Preview an invite token (anonymous)",
+        "tags": [
+          "invites"
+        ]
+      }
+    },
+    "/api/invites/{token}/accept": {
+      "post": {
+        "operationId": "PublicInvitesController_accept",
+        "parameters": [
+          {
+            "name": "token",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptInviteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid name or password"
+          },
+          "404": {
+            "description": "Unknown, expired or already redeemed token"
+          },
+          "409": {
+            "description": "An account already exists for the invited address"
+          }
+        },
+        "summary": "Accept an invite, creating the account and issuing a session (anonymous)",
+        "tags": [
+          "invites"
+        ]
+      }
     }
   },
   "info": {
@@ -11075,6 +11372,54 @@
           "count"
         ]
       },
+      "NotificationPreferenceViewItemDto": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "enum": [
+              "ASSIGNED",
+              "MENTIONED",
+              "WATCHED_ACTIVITY",
+              "FLEET_NEEDS_YOU",
+              "FLEET_HEALTH"
+            ],
+            "type": "string"
+          },
+          "inApp": {
+            "type": "boolean"
+          },
+          "email": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "category",
+          "inApp",
+          "email"
+        ]
+      },
+      "NotificationPreferencesViewDto": {
+        "type": "object",
+        "properties": {
+          "emailAvailable": {
+            "type": "boolean"
+          },
+          "emailEnabled": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NotificationPreferenceViewItemDto"
+            }
+          }
+        },
+        "required": [
+          "emailAvailable",
+          "emailEnabled",
+          "items"
+        ]
+      },
       "NotificationPreferenceItemDto": {
         "type": "object",
         "properties": {
@@ -11090,27 +11435,28 @@
           },
           "inApp": {
             "type": "boolean"
+          },
+          "email": {
+            "type": "boolean"
           }
         },
         "required": [
-          "category",
-          "inApp"
+          "category"
         ]
       },
       "NotificationPreferencesDto": {
         "type": "object",
         "properties": {
+          "emailEnabled": {
+            "type": "boolean"
+          },
           "items": {
-            "minItems": 1,
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/NotificationPreferenceItemDto"
             }
           }
-        },
-        "required": [
-          "items"
-        ]
+        }
       },
       "WatchStateDto": {
         "type": "object",
@@ -15104,6 +15450,169 @@
           "needsYou",
           "projects",
           "activity"
+        ]
+      },
+      "InviteDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "PENDING",
+              "ACCEPTED",
+              "EXPIRED",
+              "CANCELLED"
+            ],
+            "type": "string"
+          },
+          "inviterName": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "role",
+          "status",
+          "expiresAt",
+          "createdAt"
+        ]
+      },
+      "CreateInviteDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "format": "email",
+            "description": "Email to add or invite",
+            "example": "dev@example.com"
+          },
+          "role": {
+            "enum": [
+              "ADMIN",
+              "DEVELOPER",
+              "VIEWER"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "role"
+        ]
+      },
+      "InviteCreateResultDto": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "enum": [
+              "ADDED",
+              "INVITED"
+            ],
+            "type": "string"
+          },
+          "member": {
+            "$ref": "#/components/schemas/ProjectMemberDto"
+          },
+          "invite": {
+            "$ref": "#/components/schemas/InviteDto"
+          },
+          "invitePath": {
+            "type": "string"
+          },
+          "emailed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "InviteResendResultDto": {
+        "type": "object",
+        "properties": {
+          "invite": {
+            "$ref": "#/components/schemas/InviteDto"
+          },
+          "invitePath": {
+            "type": "string"
+          },
+          "emailed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "invite",
+          "invitePath",
+          "emailed"
+        ]
+      },
+      "InvitePreviewDto": {
+        "type": "object",
+        "properties": {
+          "projectName": {
+            "type": "string"
+          },
+          "projectSlug": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "inviterName": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectName",
+          "projectSlug",
+          "email",
+          "role",
+          "expiresAt"
+        ]
+      },
+      "AcceptInviteDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "example": "Jane Doe"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "example": "StrongPass123!"
+          }
+        },
+        "required": [
+          "password"
         ]
       }
     }

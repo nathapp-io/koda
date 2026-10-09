@@ -1,31 +1,44 @@
 import { ref } from 'vue'
 import { PREFERENCES_PATH } from '~/lib/notification-types'
-import type { NotificationCategory, NotificationPreferenceDto } from '~/lib/notification-types'
+import type { NotificationCategory, PreferencesView } from '~/lib/notification-types'
 
-interface PreferenceList {
-  items?: NotificationPreferenceDto[]
-}
-
-/** Fleet S4a §3: the caller's per-category in-app toggles. */
+/** Fleet S4a §3: notification channel preferences. */
 export function useNotificationPreferences() {
   const { $api } = useApi()
-  const items = ref<NotificationPreferenceDto[]>([])
+  const view = ref<PreferencesView>({ emailAvailable: false, emailEnabled: false, items: [] })
   const pending = ref(false)
+  let updateQueue: Promise<void> = Promise.resolve()
 
   async function load(): Promise<void> {
     pending.value = true
     try {
-      items.value = (await $api.get<PreferenceList>(PREFERENCES_PATH)).items ?? []
+      view.value = await $api.get<PreferencesView>(PREFERENCES_PATH)
     } finally {
       pending.value = false
     }
   }
 
-  /** Rethrows on failure; the page reports it and keeps the previous list. */
-  async function setInApp(category: NotificationCategory, inApp: boolean): Promise<void> {
-    const res = await $api.put<PreferenceList>(PREFERENCES_PATH, { items: [{ category, inApp }] })
-    items.value = res.items ?? items.value
+  /** Queue writes so each full-view response includes all preceding preference updates. */
+  function update(body: Record<string, unknown>): Promise<void> {
+    const request = updateQueue.then(async () => {
+      view.value = await $api.put<PreferencesView>(PREFERENCES_PATH, body)
+    })
+    updateQueue = request.then(() => undefined, () => undefined)
+    return request
   }
 
-  return { items, pending, load, setInApp }
+  /** Rethrows on failure; the page reports it and keeps the previous view. */
+  function setInApp(category: NotificationCategory, inApp: boolean): Promise<void> {
+    return update({ items: [{ category, inApp }] })
+  }
+
+  function setEmail(category: NotificationCategory, email: boolean): Promise<void> {
+    return update({ items: [{ category, email }] })
+  }
+
+  function setEmailEnabled(emailEnabled: boolean): Promise<void> {
+    return update({ emailEnabled })
+  }
+
+  return { view, pending, load, setInApp, setEmail, setEmailEnabled }
 }

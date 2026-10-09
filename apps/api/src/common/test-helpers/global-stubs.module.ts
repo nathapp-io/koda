@@ -4,7 +4,10 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { OutboxService } from '@nathapp/nestjs-outbox';
 import { CacheManager } from '@nathapp/nestjs-cache';
+import { INotifyService, NOTIFY_SERVICE, PREFERENCE_SERVICE } from '@nathapp/nestjs-notify';
 import { AgentsService } from '../../agents/agents.service';
+import { EmailAvailability } from '../../email/email-availability';
+import { EmailScheduleService } from '../../email/schedule/email-schedule.service';
 import { AUTH_CFG, IAuthConfig, authConfig } from '../../config/auth.config';
 import { RAG_CFG, IRagConfig } from '../../config/rag.config';
 import { VCS_CFG, IVcsConfig, vcsConfig } from '../../config/vcs.config';
@@ -45,6 +48,38 @@ export const mockCacheManager = {
 export const mockOutboxService = {
   record: jest.fn(async (event: { type: string }) => ({ id: 'outbox-stub', ...event })),
 } as unknown as OutboxService;
+
+/** S4b US-001: NotificationPreferencesService injects the package preference service (global). */
+export const mockPreferenceService = {
+  getPreferences: jest.fn(async () => []),
+  updatePreference: jest.fn(async () => ({})),
+  isChannelEnabled: jest.fn(async () => true),
+};
+
+/** S4b US-001: NotificationPreferencesService injects EmailAvailability (global EmailCoreModule). */
+export const mockEmailAvailability = {
+  configured: true,
+  config: () => ({ smtpUrl: null, from: null, webPublicUrl: null, delaySec: 300, approvalDelaySec: 60, maxAttempts: 5, inviteTtlDays: 7 }),
+  webUrl: jest.fn((path: string) => `http://web.test${path}`),
+} as unknown as EmailAvailability;
+
+/** S4b US-001: EmailScheduleService is provided globally by EmailCoreModule; stub it for module specs. */
+export const mockEmailScheduleService = {
+  scheduleNotifications: jest.fn(async () => 0),
+  scheduleMemberAdded: jest.fn(async () => undefined),
+  startInviteSend: jest.fn(),
+  claimDue: jest.fn(async () => []),
+  closeAbandonedInvites: jest.fn(async () => 0),
+  markSent: jest.fn(async () => undefined),
+  markSkipped: jest.fn(async () => undefined),
+  markFailed: jest.fn(async () => undefined),
+  retryAt: jest.fn(async () => undefined),
+} as unknown as EmailScheduleService;
+
+/** S4b US-002: the dispatcher injects nestjs-notify's package service; stub it for module specs. */
+export const mockNotifyService = {
+  send: jest.fn(async () => undefined),
+} as unknown as INotifyService;
 
 export const mockAuthConfig: IAuthConfig = {
   jwtSecret: 'test-secret',
@@ -107,6 +142,10 @@ export const mockFleetConfig: IFleetConfig = testFleetConfig();
     { provide: AgentsService, useValue: mockAgentsService },
     { provide: CacheManager, useValue: mockCacheManager },
     { provide: OutboxService, useValue: mockOutboxService },
+    { provide: PREFERENCE_SERVICE, useValue: mockPreferenceService },
+    { provide: NOTIFY_SERVICE, useValue: mockNotifyService },
+    { provide: EmailAvailability, useValue: mockEmailAvailability },
+    { provide: EmailScheduleService, useValue: mockEmailScheduleService },
     { provide: AUTH_CFG, useValue: mockAuthConfig },
     { provide: RAG_CFG, useValue: mockRagConfig },
     { provide: VCS_CFG, useValue: mockVcsConfig },
@@ -114,6 +153,6 @@ export const mockFleetConfig: IFleetConfig = testFleetConfig();
     { provide: WEBHOOK_CFG, useValue: mockWebhookConfig },
     { provide: FLEET_CFG, useValue: mockFleetConfig },
   ],
-  exports: [PrismaService, TRANSACTION_MANAGER, ConfigModule, AgentsService, CacheManager, OutboxService, AUTH_CFG, RAG_CFG, VCS_CFG, LIVE_CFG, WEBHOOK_CFG, FLEET_CFG],
+  exports: [PrismaService, TRANSACTION_MANAGER, ConfigModule, AgentsService, CacheManager, OutboxService, PREFERENCE_SERVICE, NOTIFY_SERVICE, EmailAvailability, EmailScheduleService, AUTH_CFG, RAG_CFG, VCS_CFG, LIVE_CFG, WEBHOOK_CFG, FLEET_CFG],
 })
 export class GlobalStubsModule {}

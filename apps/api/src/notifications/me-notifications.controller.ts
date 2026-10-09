@@ -6,7 +6,7 @@ import { isUserPrincipal, KodaPrincipal, UserPrincipal } from '../auth/principal
 import { parseQuery } from '../common/dto/koda-page.query';
 import { ListNotificationsQuery } from './dto/list-notifications.query';
 import { NotificationPageDto, UnreadCountDto } from './dto/notification.dto';
-import { NotificationPreferencesDto } from './dto/notification-preferences.dto';
+import { NotificationPreferencesDto, NotificationPreferencesViewDto } from './dto/notification-preferences.dto';
 import { MeNotificationsService } from './me-notifications.service';
 import { NotificationPreferencesService } from './notification-preferences.service';
 
@@ -61,19 +61,19 @@ export class MeNotificationsController {
   }
 
   @Get('notification-preferences')
-  @ApiOperation({ summary: 'My in-app notification categories' })
-  @ApiResponse({ status: 200, type: NotificationPreferencesDto })
+  @ApiOperation({ summary: 'My in-app and email notification categories' })
+  @ApiResponse({ status: 200, type: NotificationPreferencesViewDto })
   async getPreferences(@Principal() principal: KodaPrincipal) {
-    return JsonResponse.Ok({ items: await this.preferences.list(caller(principal).id) });
+    return JsonResponse.Ok(await this.preferences.list(caller(principal).id));
   }
 
   @Put('notification-preferences')
-  @ApiOperation({ summary: 'Switch in-app notification categories on or off' })
-  @ApiResponse({ status: 200, type: NotificationPreferencesDto })
+  @ApiOperation({ summary: 'Switch my notification categories and email on or off' })
+  @ApiResponse({ status: 200, type: NotificationPreferencesViewDto })
   @ApiResponse({ status: 400, description: 'Unknown category or malformed body' })
   async updatePreferences(@Body() dto: NotificationPreferencesDto, @Principal() principal: KodaPrincipal) {
     const me = caller(principal);
-    await this.preferences.update(me.id, dto.items.map((i) => ({ category: i.category, inApp: i.inApp })));
-    return JsonResponse.Ok({ items: await this.preferences.list(me.id) });
+    await this.preferences.update(me.id, { emailEnabled: dto.emailEnabled, items: dto.items });
+    return JsonResponse.Ok(await this.preferences.list(me.id));
   }
 }

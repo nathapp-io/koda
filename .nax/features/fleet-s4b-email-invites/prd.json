@@ -1,0 +1,533 @@
+{
+  "project": "koda",
+  "feature": "fleet-s4b-email-invites",
+  "branchName": "feat/fleet-s4b-email-invites",
+  "createdAt": "2026-10-10T00:00:00.000Z",
+  "updatedAt": "2026-10-08T15:30:47.664Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Email schedule store and two-layer email preferences",
+      "description": "**Goal** — Persist and safely claim delayed email work and expose a master email switch plus five per-category email toggles.\n\n**Motivation** — Today a notification only reaches a user who opens koda.\n\n**Approach** — Email is off when `SMTP_URL` is unset or blank: nothing is scheduled, the dispatcher does nothing, invites still work and return the link to the admin (D520). Every email path checks `EmailAvailability.configured`. Email category defaults when a user has no `(category, 'email')` row (D517): `ASSIGNED`, `MENTIONED`, `FLEET_NEEDS_YOU` on; `WATCHED_ACTIVITY`, `FLEET_HEALTH` off. The in-app default stays \"missing row = on\". Define `EMAIL_CATEGORY_DEFAULTS` in `apps/api/src/notifications/notification.types.ts` alongside the existing category constants. The email master switch is the package's `NotificationPreference` row `(userId, KODA_TENANT_ID, 'email')`; a missing row means on. Email requires both the master switch and the category toggle on. Retries: `EMAIL_MAX_ATTEMPTS` (default 5); backoff `2^(attempts-1)` minutes; claim lock 2 minutes; batch 20; tick every 30 000 ms. `EmailScheduleRepository.claimDue(now, limit)` is one SQL statement: `UPDATE \"EmailSchedule\" SET status='SENDING', \"lockedUntil\"=now+2min, attempts=attempts+1 WHERE id IN (SELECT id ... WHERE kind IN ('NOTIFICATION','MEMBER_ADDED') AND ((status='PENDING' AND \"dueAt\"<=now) OR (status='SENDING' AND \"lockedUntil\"<now)) ORDER BY \"dueAt\" LIMIT limit FOR UPDATE SKIP LOCKED) RETURNING ...` — the same SKIP LOCKED pattern as `apps/api/src/outbox/prisma-outbox.store.ts`. `INVITE` rows are never claimed. Every caller goes through `EmailScheduleService`. Schema `EmailSchedule`: id cuid primary key; kind, unique nullable notificationId with onDelete Cascade to Notification, inviteId, userId, projectId, toEmail, locale default en, status default PENDING, skipReason, attempts default 0, dueAt, lockedUntil, lastError capped at 500, sentAt, createdAt, updatedAt; index `(status,dueAt)`. Migration `20261010100000_email_schedule` must have no semicolon within a statement and zero schema drift. Provide repository privately and service globally via EmailCoreModule. PUT updates only supplied master/item fields; GET includes availability. Regenerate `openapi.json` after DTO change.\n\n**Interface**\n```typescript\ntype PreferencesView = { emailAvailable: boolean; emailEnabled: boolean; items: { category: NotificationCategory; inApp: boolean; email: boolean }[] };\nlist(userId: string): Promise<PreferencesView>;\nupdate(userId: string, change: { emailEnabled?: boolean; items?: { category: NotificationCategory; inApp?: boolean; email?: boolean }[] }): Promise<void>;\nemailAllowedUserIds(userIds: readonly string[], category: NotificationCategory): Promise<ReadonlySet<string>>;\nemailAllowed(userId: string, category: NotificationCategory): Promise<{ allowed: true } | { allowed: false; reason: 'EMAIL_OFF' | 'CATEGORY_OFF' }>;\nscheduleNotifications(rows: ReadonlyArray<{ notificationId: string; userId: string; toEmail: string; dueAt: Date }>): Promise<number>;\nscheduleMemberAdded(input: { userId: string; projectId: string; toEmail: string; locale: string; dueAt: Date }): Promise<void>;\nstartInviteSend(input: { inviteId: string; toEmail: string; locale: string; now: Date }): Promise<EmailScheduleRow>;\nclaimDue(now: Date, limit: number): Promise<EmailScheduleRow[]>;\ncloseAbandonedInvites(now: Date): Promise<number>;\nmarkSent(id: string, now: Date): Promise<void>; markSkipped(id: string, reason: SkipReason): Promise<void>; markFailed(id: string, error: string): Promise<void>; retryAt(id: string, dueAt: Date, error: string): Promise<void>;\ntype EmailScheduleRow = { id: string; kind: EmailKind; notificationId: string | null; inviteId: string | null; userId: string | null; projectId: string | null; toEmail: string; locale: string; attempts: number; dueAt: Date };\n```\n\n**Scope** — In: schema/migration, claim/state service, preference DTO/controller/service, global providers and existing DI/unit assertions. Out: writer scheduling/dispatcher (US-002), web controls (US-003), invite entity (US-004).",
+      "acceptanceCriteria": [
+        "When two concurrent EmailScheduleService.claimDue(now, 20) calls claim 30 due MEMBER_ADDED rows, then they return no shared row id.",
+        "When EmailScheduleService.claimDue(now, 20) sees a PENDING row due after now, then that row remains PENDING.",
+        "When EmailScheduleService.claimDue(now, 20) sees an INVITE row even if SENDING with expired lockedUntil, then it does not return that row.",
+        "When EmailScheduleService.claimDue(now, 20) sees a SENDING row with lockedUntil before now, then it returns that row with attempts increased by one.",
+        "When EmailScheduleService.closeAbandonedInvites(now) sees an INVITE row SENDING past its lock, then it marks it FAILED.",
+        "When EmailScheduleService.scheduleNotifications is called twice with one notificationId, then exactly one EmailSchedule row remains for that notification.",
+        "When EmailScheduleService.retryAt(id, dueAt, error) receives a 2,000-character error, then stored lastError has exactly 500 characters.",
+        "When NotificationPreferencesService.list(userId) reads a user without preference rows, then items[].email equals EMAIL_CATEGORY_DEFAULTS for all five categories (ASSIGNED, MENTIONED and FLEET_NEEDS_YOU true; WATCHED_ACTIVITY and FLEET_HEALTH false).",
+        "When NotificationPreferencesService.list(userId) reads availability, then emailAvailable equals EmailAvailability.configured.",
+        "When NotificationPreferencesService.emailAllowedUserIds(['off', 'plain'], 'ASSIGNED') sees off's disabled package NotificationPreference for tenant default and channel email, then it returns only plain.",
+        "When NotificationPreferencesService.emailAllowedUserIds(['opt-in'], 'WATCHED_ACTIVITY') sees opt-in's enabled category email preference, then it returns opt-in.",
+        "When NotificationPreferencesService.emailAllowed(userId, category) sees the master email switch off, then it returns { allowed: false, reason: 'EMAIL_OFF' }.",
+        "When NotificationPreferencesService.emailAllowed(userId, category) sees the master on and category email off, then it returns { allowed: false, reason: 'CATEGORY_OFF' }.",
+        "When PUT /me/notification-preferences receives { emailEnabled: false }, then the caller's package NotificationPreference row for tenant default and channel email stores enabled false.",
+        "When PUT /me/notification-preferences receives { items: [{ category: 'MENTIONED', email: false }] }, then the caller's MENTIONED inApp value stays unchanged."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "persistence",
+        "preferences",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "The concurrent SKIP LOCKED claim, schema migration and two-layer preference persistence cross modules, but the existing caller-scoped guard is unchanged.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/notifications/notification-preferences.service.ts",
+        "apps/api/src/notifications/me-notifications.controller.ts",
+        "apps/api/src/outbox/prisma-outbox.store.ts",
+        "apps/api/src/email/email.module.ts",
+        "docs/superpowers/plans/2026-10-08-fleet-s4b-email-and-invites.md"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261010100000_email_schedule/migration.sql",
+        "apps/api/src/email/schedule/email-schedule.types.ts",
+        "apps/api/src/email/schedule/email-schedule.repository.ts",
+        "apps/api/src/email/schedule/email-schedule.service.ts",
+        "apps/api/test/integration/email/email-schedule-repository.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/notifications/notification-preferences.service.spec.ts",
+          "reason": "its setup constructs NotificationPreferencesService with two arguments and asserts list() returns a bare array of category and inApp pairs. US-001 adds the package PREFERENCE_SERVICE and EmailAvailability constructor arguments and changes list() to return emailAvailable, emailEnabled and items with category, inApp and email. Replacing invariant: in-app values are unchanged per category and appear under items[].inApp."
+        },
+        {
+          "path": "apps/api/src/notifications/me-notifications.controller.spec.ts",
+          "reason": "asserts the preferences routes return items of category and inApp only, and that PUT requires at least one item. Replacing invariant: both routes return emailAvailable, emailEnabled and items with category, inApp and email; PUT accepts emailEnabled alone."
+        },
+        {
+          "path": "apps/api/src/common/test-helpers/global-stubs.module.ts",
+          "reason": "the NotificationsModule DI spec compiles the module with only these global stubs; US-001 makes NotificationPreferencesService inject PREFERENCE_SERVICE and EmailAvailability, so this module must provide useValue stubs for both and for EmailScheduleService."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "3d4bb57658136000f52d9cabbdb284823b80313b"
+    },
+    {
+      "id": "US-002",
+      "title": "Schedule notification email and dispatch it",
+      "description": "**Goal** — Atomically schedule opted-in new in-app notifications and deliver only still-unread emails through a nonoverlapping retrying dispatcher.\n\n**Motivation** — Today a notification only reaches a user who opens koda.\n\n**Approach** — Delayed send (D518): a notification email is due `EMAIL_DELAY_SEC` (default 300) after the notification's `createdAt`, or `EMAIL_APPROVAL_DELAY_SEC` (default 60) when `Notification.kind === 'approval_requested'`, and is sent only if the notification is still unread at send time. One email per notification (D519). `NotificationWriter.deliver(drafts)`: same steps, plus one `EmailSchedule` row per inserted notification whose user allows email for its category (only when `EmailAvailability.configured`), scheduled through `EmailScheduleService.scheduleNotifications`. The `insertMany` call and the scheduling call run inside one `txManager.run`, so a scheduling failure rolls back the inserted notifications and the outbox retry redoes both; the `UserEventBus` publishes run after that transaction commits. Constructor gains `EmailScheduleService`, `EmailAvailability`, `NotificationEmailRecipients` and `TRANSACTION_MANAGER`. `NotificationsRepository.insertMany(drafts)` returns `{ id, userId, category, kind, createdAt }[]`. `EmailDispatcher.tick(now)` first closes abandoned invite sends, then claims, then per row: `EmailContentBuilder.build(row)` returns either `{ skip: SkipReason }` or `{ data, userId }`; a skip marks the row `SKIPPED`; otherwise `sendOne` calls `NOTIFY_SERVICE.send` with `tenantId: KODA_TENANT_ID`, `channel: 'email'`, `templateCode: row.kind`, `locale: row.locale`, `recipient: row.toEmail`. One row's error never stops the batch. A scheduled tick runs about every 30 seconds and does not overlap a running tick. Build order for a NOTIFICATION row (US-002): notification missing → `SOURCE_GONE`; `readAt` set → `READ`; user missing or disabled → `USER_DISABLED`; `emailAllowed` not allowed → its reason; otherwise data `{ title, body: body ?? '', url: webUrl(link), prefsUrl: webUrl('/settings/notifications') }`. SMTP or transport failure on a scheduled row → row back to `PENDING` with `dueAt = now + 2^(attempts-1)` minutes and `lastError` (first 500 characters); after `EMAIL_MAX_ATTEMPTS` → `FAILED`. `PermanentNotificationError`, or `NotifyException` with code `TEMPLATE_NOT_FOUND`, `CHANNEL_NOT_REGISTERED` or `TENANT_MISMATCH` → `FAILED` on the first attempt. A `FAILED` row logs one WARN with the row id, kind and attempts only — never the address, the body or the URL. A builder or repository error for one claimed row → that row returns to `PENDING` with backoff; the rest of the batch continues. `MEMBER_ADDED` and `INVITE` email are transactional notices: they do not consult notification preferences or the email master switch. Extend NotificationsModule providers/exports; stub NOTIFY_SERVICE for DI tests.\n\n**Interface**\n```typescript\nclass NotificationEmailRecipients { emails(userIds: readonly string[]): Promise<ReadonlyMap<string, string>>; }\nclass EmailContentBuilder { build(row: EmailScheduleRow): Promise<{ skip: SkipReason } | { data: Record<string, unknown>; userId: string | null }>; }\nclass EmailDispatcher { tick(now: Date): Promise<void>; sendOne(row: EmailScheduleRow, templateCode: string, data: Record<string, unknown>, userId: string | null, now: Date, retryable?: boolean): Promise<'SENT' | 'FAILED' | 'RETRY'>; }\n```\n\n**Scope** — In: new-notification schedule, English content, channel sending, retries and idempotent outbox-to-send integration. Out: MEMBER_ADDED builder branch and inline invite mail (US-004), backfilling old notifications, agent recipients, digests, batching and BullMQ/Redis/notify queue processing.",
+      "acceptanceCriteria": [
+        "When email is configured and ASSIGNED email is allowed, then NotificationWriter.deliver schedules the inserted notification id and user's email with dueAt equal to createdAt plus EMAIL_DELAY_SEC seconds.",
+        "When NotificationWriter.deliver inserts kind approval_requested, then it schedules dueAt at createdAt plus EMAIL_APPROVAL_DELAY_SEC seconds.",
+        "When EmailAvailability.configured is false, then NotificationWriter.deliver does not call EmailScheduleService.scheduleNotifications.",
+        "When NotificationPreferencesService.emailAllowedUserIds excludes a user, then NotificationWriter.deliver leaves that user out of the scheduled rows.",
+        "When EmailScheduleService.scheduleNotifications throws inside NotificationWriter.deliver, then no Notification row inserted by that call remains committed.",
+        "When EmailDispatcher.tick(now) claims a NOTIFICATION row whose notification is gone, then it stores skipReason SOURCE_GONE.",
+        "When EmailDispatcher.tick(now) claims a NOTIFICATION row whose user is disabled, then it stores skipReason USER_DISABLED.",
+        "When NotificationPreferencesService.emailAllowed returns a disallowed reason, then EmailDispatcher.tick(now) records that reason as skipReason.",
+        "When EmailDispatcher.tick(now) sends an allowed row, then NOTIFY_SERVICE.send receives tenantId default, channel email, templateCode NOTIFICATION, the row's toEmail as recipient, and data.url equal to WEB_PUBLIC_URL joined with the notification link.",
+        "When NOTIFY_SERVICE.send throws Error for a row at attempts 2 with EMAIL_MAX_ATTEMPTS 5, then EmailDispatcher.tick(now) retries it at now plus 2 minutes.",
+        "When NOTIFY_SERVICE.send throws Error at EMAIL_MAX_ATTEMPTS, then EmailDispatcher.tick(now) marks the row FAILED.",
+        "When NOTIFY_SERVICE.send throws PermanentNotificationError at attempts 1, then EmailDispatcher.tick(now) marks the row FAILED.",
+        "When a configured email delivery channel is spied and FanOutPublisher.publish publishes a ticket_event assigned outbox record for user B, where B is a project member and not the actor, with data { assignedTo: B, assigneeType: 'user' }, then EmailDispatcher.tick after EMAIL_DELAY_SEC invokes the channel's send once with B's address as recipient.",
+        "When EmailDispatcher.tick is called a second time after that send, then the channel's send is not called again.",
+        "When B marks their notification read using POST /me/notifications/:id/read before its due time, then EmailDispatcher.tick after EMAIL_DELAY_SEC does not send it."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "notifications",
+        "email"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Atomic writer scheduling, the existing SKIP LOCKED store and notify transport meet at an outbox-to-dispatch seam, but this story changes no authentication or token boundary.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/notifications/notification-writer.ts",
+        "apps/api/src/email/schedule/email-schedule.service.ts",
+        "apps/api/src/email/email-availability.ts",
+        "apps/api/test/integration/notifications/fleet-budget-approval-notifications.integration.spec.ts",
+        "docs/superpowers/plans/2026-10-08-fleet-s4b-email-and-invites.md"
+      ],
+      "expectedFiles": [
+        "apps/api/src/notifications/notification-email-recipients.ts",
+        "apps/api/src/email/dispatch/send-outcome.ts",
+        "apps/api/src/email/dispatch/email-content.builder.ts",
+        "apps/api/src/email/dispatch/email-dispatcher.ts",
+        "apps/api/test/integration/email/notification-email.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/notifications/notification-writer.spec.ts",
+          "reason": "constructs NotificationWriter with four arguments and asserts the call order insert, publish, publish. US-002 adds four constructor arguments and wraps the insert and an email-scheduling step in one transaction before the publishes. Replacing invariant: the order is insert, schedule (both inside the transaction), then one publish per inserted row."
+        },
+        {
+          "path": "apps/api/test/integration/notifications/notifications-repository.integration.spec.ts",
+          "reason": "the redelivery test asserts insertMany resolves exactly [{ id, userId }] for the newly inserted row. US-002 makes insertMany also return category, kind and createdAt. Replacing invariant: a repeated draft still inserts nothing, and the newly inserted row carries id, userId, category, kind and createdAt."
+        },
+        {
+          "path": "apps/api/src/notifications/notifications.repository.spec.ts",
+          "reason": "asserts insertMany selects only id and userId and resolves rows of id and userId. Replacing invariant: it selects and returns id, userId, category, kind and createdAt."
+        },
+        {
+          "path": "apps/api/src/common/test-helpers/global-stubs.module.ts",
+          "reason": "NotificationsModule now provides EmailDispatcher and EmailContentBuilder, so the global stubs must also provide a NOTIFY_SERVICE stub for the NotificationsModule DI spec."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "c4e1da567303a8bf0fa915fb3da516365f73c1f1"
+    },
+    {
+      "id": "US-003",
+      "title": "Web email preference controls",
+      "description": "**Goal** — Expose master and per-category notification email controls alongside existing in-app preferences in Nuxt.\n\n**Motivation** — A team that does not sit in the app needs to choose which notifications arrive by email.\n\n**Approach** — Web `useNotificationPreferences()` — `apps/web/composables/useNotificationPreferences.ts`: Baseline: `{ items, pending, load, setInApp }`. Target: `{ view, pending, load, setInApp, setEmail, setEmailEnabled }` where `view` holds the whole `PreferencesView`. Persist single-field PUT bodies rather than overwriting other toggles: `{ items: [{ category, email }] }` or `{ emailEnabled }`. Disable master when emailAvailable is false and categories when unavailable or master off, show unavailable text, and restore native checkbox on failure with `extractApiError` and `useAppToast().error`. Update both locales and existing S4a unit assertions to read view.items.\n\n**Interface**\n```typescript\ntype PreferencesView = { emailAvailable: boolean; emailEnabled: boolean; items: { category: NotificationCategory; inApp: boolean; email: boolean }[] };\nuseNotificationPreferences(): { view: Ref<PreferencesView>; pending: Ref<boolean>; load(): Promise<void>; setInApp(category: NotificationCategory, inApp: boolean): Promise<void>; setEmail(category: NotificationCategory, email: boolean): Promise<void>; setEmailEnabled(enabled: boolean): Promise<void> };\n```\n\n**Scope** — In: settings UI, API composable, web types and en/zh translations. Out: API preference persistence (US-001), invite UI (US-007).",
+      "acceptanceCriteria": [
+        "When /settings/notifications loads a view, then notification-email-master checkbox checked equals view.emailEnabled.",
+        "When /settings/notifications loads a view, then notification-pref-email-<CATEGORY> is rendered for each of the five categories with checked equal to the item's email value.",
+        "When view.emailAvailable is false, then notification-email-master is disabled.",
+        "When view.emailAvailable is false, then every notification-pref-email-<CATEGORY> is disabled.",
+        "When view.emailAvailable is false, then the page shows the text of notifications.preferences.emailUnavailable.",
+        "When view.emailEnabled is false, then every notification-pref-email-<CATEGORY> is disabled.",
+        "When notification-email-master is unchecked, then the page calls setEmailEnabled(false).",
+        "When notification-pref-email-MENTIONED is unchecked, then the page calls setEmail('MENTIONED', false).",
+        "When setEmail('MENTIONED', false) is called, then useApi().put sends exactly { items: [{ category: 'MENTIONED', email: false }] } to /me/notification-preferences.",
+        "When setEmailEnabled(false) is called, then useApi().put sends exactly { emailEnabled: false } to /me/notification-preferences.",
+        "When useNotificationPreferences().load() completes, then view contains the response emailAvailable, emailEnabled and items.",
+        "When setInApp('MENTIONED', false) succeeds, then view.items reflects the returned inApp setting while the existing per-category in-app toggle remains usable.",
+        "When setEmail rejects, then the page restores the checkbox's previous checked state.",
+        "When setEmail rejects, then the page calls useAppToast().error with extractApiError(err).",
+        "When the zh locale is loaded, then it defines every notifications.preferences key defined by en."
+      ],
+      "tags": [
+        "feature",
+        "web",
+        "preferences",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A few existing web files, familiar form/composable pattern and no new security boundary.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/pages/settings/notifications.vue",
+        "apps/web/composables/useNotificationPreferences.ts",
+        "apps/web/lib/notification-types.ts",
+        "apps/web/tests/pages/notification-settings-page.spec.ts",
+        "apps/web/tests/composables/useNotificationPreferences.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/pages/notification-settings-page.spec.ts",
+          "reason": "its fake composable exposes items and the S4a cases read items; US-003 changes the composable to expose view. Replacing invariant: the S4a in-app cases read view.items and otherwise pass unchanged."
+        },
+        {
+          "path": "apps/web/tests/composables/useNotificationPreferences.spec.ts",
+          "reason": "asserts load() stores the response items array and setInApp replaces items; US-003 stores the whole view. Replacing invariant: view.items holds what items held."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "0bb66531e1b6036eaf6a2fca1c98faa0b0780ed9"
+    },
+    {
+      "id": "US-004",
+      "title": "Project invites model, admin routes and invite mail",
+      "description": "**Goal** — Let a project admin add an existing active user directly or invite a new address with a one-time link and optional inline email.\n\n**Motivation** — Adding a person to a project currently requires a global admin to create an account and hand over a password.\n\n**Approach** — Invite token: 32 random bytes, base64url (43 characters); stored only as its sha256 hex; expires after `INVITE_TTL_DAYS` (default 7). `ProjectInvite` fields: id cuid, projectId (cascade project), normalized email, role ADMIN|DEVELOPER|VIEWER, unique tokenHash, status default PENDING (PENDING|ACCEPTED|EXPIRED|CANCELLED), invitedById (cascade user), acceptedByUserId, acceptedAt, expiresAt, createdAt, updatedAt; index `(projectId,email,status)`. Migration `20261010110000_project_invites` must contain no internal semicolons and have zero drift. Invite create (US-004) order: resolve project → `assertProjectAdmin` → normalise email (trim, lowercase) → `findUserIdByEmail`. Existing active user: create membership (unique violation → 409), schedule `MEMBER_ADDED` due now when configured, return `{ outcome: 'ADDED', member }`. Existing disabled user → 409. No user: in one transaction cancel any PENDING invite for `(projectId, email)` and create a new one; after commit, when configured, send the `INVITE` email inline (`InviteMailer`); return `{ outcome: 'INVITED', invite, invitePath: '/invite/' + raw, emailed }`. Inline invite mail (US-004): `InviteMailer.sendInvite` records an `INVITE` `EmailSchedule` row (status `SENDING`, attempts 1, lock now+2min) and sends it once through the dispatcher's send step with retry disabled, with data `{ projectName, inviterName, role, url: webUrl('/invite/' + raw), expiresAt }`; a successful send → `emailed: true`; anything else, including a thrown error, → `emailed: false` and the row `FAILED`. Invite email locale is `zh` when the create or resend request's `Accept-Language` starts with `zh`, otherwise `en`. `MEMBER_ADDED` and notification email are always `en`. Build order for a MEMBER_ADDED row (US-004): user missing or disabled → `USER_DISABLED`; project missing or soft-deleted → `SOURCE_GONE`; membership missing → `SOURCE_GONE`; otherwise `{ projectName, role, url: webUrl('/' + slug) }`. `MEMBER_ADDED` and `INVITE` email are transactional notices: they do not consult notification preferences or the email master switch. `ProjectInvitesModule` imports `NotificationsModule` for `EmailDispatcher`, and `ProjectMembersModule`'s service is not imported: the invites repository owns its own membership and user writes. Register `ProjectInvitesModule` in `apps/api/src/app.module.ts`. `ProjectInvitesController` create and list return Swagger DTOs; GET lists newest first with effective EXPIRED for overdue pending invites, never a token/hash; use localized error keys in en/zh. Regenerate openapi.json.\n\n**Interface**\n```typescript\nfunction generateInviteToken(): { raw: string; hash: string };\nfunction hashInviteToken(raw: string): string;\nfunction effectiveStatus(record: ProjectInviteRecord, now: Date): InviteStatus;\nclass ProjectInvitesService { create(slug: string, input: CreateInviteDto, principal: KodaPrincipal, locale: string): Promise<InviteCreateResultDto>; list(slug: string, principal: KodaPrincipal): Promise<InviteDto[]>; }\nclass InviteMailer { sendInvite(input: { inviteId: string; toEmail: string; locale: string; rawToken: string; projectName: string; inviterName: string; role: string; expiresAt: Date }): Promise<boolean>; }\nclass InviteCreateResultDto { outcome: 'ADDED' | 'INVITED'; member?: ProjectMemberDto; invite?: InviteDto; invitePath?: string; emailed?: boolean; }\ntype InviteDto = { id: string; email: string; role: string; status: InviteStatus; inviterName: string; expiresAt: Date; createdAt: Date };\n```\n\n**Scope** — In: model/admin create-list, role guard, existing-user membership, invitation creation, immediate mail, MEMBER_ADDED content. Out: resend/cancel/public preview/accept (US-005), CLI (US-006), web panel (US-007), storing raw token or retrying invite mail.",
+      "acceptanceCriteria": [
+        "When generateInviteToken() returns raw and hash, then hash equals the 64-character lowercase sha256 hex digest of raw.",
+        "When a project member without project ADMIN or global ADMIN calls POST /projects/:slug/invites, then the response is 403.",
+        "When POST /projects/:slug/invites receives email ' New@X.io ' and role DEVELOPER for existing active user new@x.io, then it creates a DEVELOPER ProjectMember for that user.",
+        "When POST /projects/:slug/invites targets a user already a project member, then the response is 409.",
+        "When POST /projects/:slug/invites targets a disabled user, then the response is 409.",
+        "When POST /projects/:slug/invites targets an address with no account, then stored ProjectInvite.tokenHash equals hashInviteToken of the last segment of response.invitePath.",
+        "When POST /projects/:slug/invites is called again for the same project and email, then the earlier invite's status is CANCELLED.",
+        "When GET /projects/:slug/invites returns an invite, then it contains neither token nor tokenHash.",
+        "When GET /projects/:slug/invites reads a PENDING invite whose expiresAt passed, then it reports status EXPIRED.",
+        "When a configured registered delivery channel is spied and POST /projects/:slug/invites creates a new invite, then channel.send receives a rendered body containing WEB_PUBLIC_URL followed by response.invitePath.",
+        "When the delivery channel throws during POST /projects/:slug/invites, then the response includes emailed: false.",
+        "When email is not configured and POST /projects/:slug/invites creates a new invite, then no EmailSchedule row is created.",
+        "When email is configured and POST /projects/:slug/invites adds an existing active user, then exactly one MEMBER_ADDED EmailSchedule row holds that user's id.",
+        "When EmailContentBuilder.build processes a MEMBER_ADDED row with an active user, active project and membership, then data equals { projectName, role, url } with the membership role and WEB_PUBLIC_URL joined to '/' and the project slug.",
+        "When EmailContentBuilder.build processes a MEMBER_ADDED row for a soft-deleted project, then it returns { skip: 'SOURCE_GONE' }."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "invites",
+        "security",
+        "email"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Admin RBAC, cryptographic single-use links, transactional membership and nonretryable external email are security-critical cross-module work.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
+      },
+      "contextFiles": [
+        "apps/api/src/projects/members/project-members.service.ts",
+        "apps/api/src/projects/members/prisma-project-members.repository.ts",
+        "apps/api/src/projects/members/project-members.controller.ts",
+        "apps/api/src/email/dispatch/email-dispatcher.ts",
+        "apps/api/src/email/dispatch/email-content.builder.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261010110000_project_invites/migration.sql",
+        "apps/api/src/projects/invites/invite-token.ts",
+        "apps/api/src/projects/invites/domain/project-invite.domain.ts",
+        "apps/api/src/projects/invites/prisma-project-invites.repository.ts",
+        "apps/api/src/projects/invites/project-invites.service.ts",
+        "apps/api/src/projects/invites/invite-mailer.ts",
+        "apps/api/src/projects/invites/project-invites.controller.ts",
+        "apps/api/src/projects/invites/project-invites.module.ts",
+        "apps/api/src/projects/invites/dto/create-invite.dto.ts",
+        "apps/api/src/projects/invites/dto/invite.dto.ts",
+        "apps/api/src/i18n/en/invites.json",
+        "apps/api/src/i18n/zh/invites.json",
+        "apps/api/test/integration/projects/project-invites-admin.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b9fb2c8dad651ae65d56545dac513ba1af597f4f"
+    },
+    {
+      "id": "US-005",
+      "title": "Public invite preview, accept, resend and cancel",
+      "description": "**Goal** — Complete single-use invite redemption, token rotation and cancellation, with sessions issued for newly created members.\n\n**Motivation** — A project admin needs to onboard someone without handing over a password, even when registration is closed.\n\n**Approach** — Accept (US-005) is one transaction: a conditional update flips the invite `PENDING → ACCEPTED` only when the hash matches and `expiresAt > now` (zero rows → 404); if a user with the invite email exists (case-insensitive match) → 409 and the transaction rolls back; a unique violation on the user's email (a concurrent accept of another invite for the same address) is also a 409; otherwise create the user (password hashed as `UsersAdminService.create` does, role `MEMBER`, email from the invite, name from the body), set `acceptedByUserId`, create the membership. The session is issued after commit through `AuthService.issueSession`; import `AuthModule` (which exports AuthService) into `ProjectInvitesModule` when adding `InviteAcceptanceService`. `GET /invites/:token` is public, throttled, and returns `{ projectName, projectSlug, email, role, inviterName, expiresAt }`; unknown/expired/cancelled/accepted tokens produce identical 404 responses. `POST /invites/:token/accept` takes name and password validated like RegisterDto and returns login-shaped session at 201; @Public and the same AUTH_LOGIN_LIMIT throttle (5/60s default and env override) as register. Resend by project ADMIN/global ADMIN rotates tokenHash, resets PENDING and expiresAt to now + INVITE_TTL_DAYS, returns new invitePath and emailed, and accepts only PENDING or expired invites; cancel changes PENDING to CANCELLED and leaves final records unchanged. Unknown or wrong-project invite ids → 404; accepted resend → 409. Move the class-load constant from auth.controller.ts to auth-throttle.ts. Refactor register, login and refresh to issueSession as well; preserve disabled/revoked checks. Regenerate openapi.json for resend, cancel, preview and accept DTOs. All integration tests boot with REGISTRATION_ENABLED false; clear DefaultThrottlerGuard in-memory storage between requests as in admin-users.integration.spec.ts.\n\n**Interface**\n```typescript\nclass AuthService { issueSession(user: UserDomain): { accessToken: string; refreshToken: string; user: UserResponseDto }; }\nexport const AUTH_LOGIN_LIMIT: number;\nclass ProjectInvitesService { resend(slug: string, id: string, principal: KodaPrincipal, locale: string): Promise<{ invite: InviteDto; invitePath: string; emailed: boolean }>; cancel(slug: string, id: string, principal: KodaPrincipal): Promise<void>; }\nclass InviteAcceptanceService { preview(token: string): Promise<InvitePreviewDto>; accept(token: string, body: AcceptInviteDto): Promise<{ accessToken: string; refreshToken: string; user: UserResponseDto }>; }\n```\n\n**Scope** — In: public preview/accept, admin resend/cancel, password validation, guarded session issuing. Out: admin create/list (US-004), CLI (US-006), Nitro/web accept UI (US-007), password reset and custom lockout.",
+      "acceptanceCriteria": [
+        "When GET /invites/:token previews a valid pending invite, then the 200 body contains projectName, projectSlug, email, role, inviterName and expiresAt.",
+        "When GET /invites/:token previews unknown, expired and cancelled tokens, then all three 404 response bodies are identical.",
+        "When POST /invites/:token/accept receives valid name and password, then it creates a user with the invite email and global role MEMBER.",
+        "When POST /invites/:token/accept succeeds, then it creates a ProjectMember for the new user with the invite's role.",
+        "When POST /invites/:token/accept returns accessToken, then that token authorises GET /projects/:slug for the invite's project.",
+        "When POST /invites/:token/accept receives an expired token, then it responds 404.",
+        "When two concurrent POST /invites/:token/accept calls use the same token, then exactly one responds 201.",
+        "When POST /projects/:slug/invites/:id/resend rotates an invite token, then POST /invites/:token/accept using the previous token responds 404.",
+        "When an account for the invited email was created after the invite, then POST /invites/:token/accept responds 409.",
+        "When POST /projects/:slug/invites/:id/resend references an invite in another project, then it responds 404.",
+        "When POST /invites/:token/accept receives password 'short', then it responds 400.",
+        "When POST /projects/:slug/invites/:id/resend targets an ACCEPTED invite, then it responds 409.",
+        "When DELETE /projects/:slug/invites/:id targets a PENDING invite, then its status becomes CANCELLED.",
+        "When POST /projects/:slug/invites/:id/resend targets an expired invite, then POST /invites/:token/accept using the returned token responds 201.",
+        "When PublicInvitesController.preview and .accept receive anonymous requests, then both carry @Public() and the same @Throttle limit of AUTH_LOGIN_LIMIT per 60,000 ms as AuthController.register."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "invites",
+        "security",
+        "auth"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Single-use token CAS, concurrent registration and password/session issuance on public routes are security-critical.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
+      },
+      "contextFiles": [
+        "apps/api/src/projects/invites/prisma-project-invites.repository.ts",
+        "apps/api/src/projects/invites/project-invites.service.ts",
+        "apps/api/src/auth/auth.service.ts",
+        "apps/api/src/auth/auth.controller.ts",
+        "apps/api/test/helpers/http-app.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/auth/auth-throttle.ts",
+        "apps/api/src/projects/invites/invite-acceptance.service.ts",
+        "apps/api/src/projects/invites/public-invites.controller.ts",
+        "apps/api/src/projects/invites/dto/accept-invite.dto.ts",
+        "apps/api/src/projects/invites/dto/invite-preview.dto.ts",
+        "apps/api/test/integration/projects/project-invites-api.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/auth/auth.controller.spec.ts",
+          "reason": "its throttle tests read the login limit from the auth controller module at class-load time; US-005 moves the constant to the new auth throttle module. Replacing invariant: the same 5-per-minute default and the same AUTH_LOGIN_THROTTLE_LIMIT override apply to login, register, logout and the two public invite routes."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "011683256de8f2c27213cf77283a8f3bbf3ed59d"
+    },
+    {
+      "id": "US-006",
+      "title": "CLI member invite and invites commands",
+      "description": "**Goal** — Provide project-admin terminal commands to invite, list, resend and cancel through the generated API client.\n\n**Motivation** — A project admin needs to bring a new person into a project without a global admin handing over a password.\n\n**Approach** — `koda member invite --email <e> --role <ADMIN|DEVELOPER|VIEWER> [--project <slug>] [--json]`; `koda member invites [--project <slug>] [--cancel <id>] [--resend <id>] [--json]`. stdout: human lines below, or `JSON.stringify(data, null, 2)` with `--json`; stderr: errors through `handleApiError`. Exit codes come from `handleApiError`: 0 success; 1 an API 409 or a network error; 2 config/auth error (401/403); 3 validation error (400); 4 not found (404). Human output: `Added <email> as <role>`; `Invite created for <email>. Emailed.`; `Invite created for <email>. Share this link (shown once): <invitePath>`; `invites` prints a table with headers `ID`, `Email`, `Role`, `Status`, `Expires`. Resend prints its new invitePath. Run `bun run generate` from the monorepo root after API routes/DTOs are complete; do not hand-edit generated code. Call `projectInvitesControllerCreate`, `projectInvitesControllerList`, `projectInvitesControllerResend`, `projectInvitesControllerCancel` via withContext/unwrap/handleApiError; preserve existing member commands.\n\n**Interface**\n```typescript\nprojectInvitesControllerCreate({ path: { slug }, body: { email, role } });\nprojectInvitesControllerList({ path: { slug } });\nprojectInvitesControllerResend({ path: { slug, id } });\nprojectInvitesControllerCancel({ path: { slug, id } });\n```\n\n**Scope** — In: member command group and generated client regeneration. Out: API invite routes (US-004/005) and web invite UI (US-007).",
+      "acceptanceCriteria": [
+        "When koda member invite --email n@x.io --role DEVELOPER runs, then projectInvitesControllerCreate receives { path: { slug: <context project> }, body: { email: 'n@x.io', role: 'DEVELOPER' } }.",
+        "When invite returns outcome INVITED, emailed false and invitePath /invite/abc, then koda member invite prints 'Invite created for n@x.io. Share this link (shown once): /invite/abc'.",
+        "When invite returns outcome INVITED and emailed true, then koda member invite prints 'Invite created for n@x.io. Emailed.'.",
+        "When invite returns outcome ADDED, then koda member invite prints 'Added n@x.io as DEVELOPER'.",
+        "When koda member invite --json succeeds, then it prints JSON.stringify(result, null, 2).",
+        "When koda member invites lists invites, then it prints a table with ID, Email, Role, Status and Expires headers and one row per result of projectInvitesControllerList.",
+        "When koda member invites --cancel i1 runs, then projectInvitesControllerCancel receives { path: { slug: <context project>, id: 'i1' } }.",
+        "When koda member invites --resend i1 runs, then projectInvitesControllerResend receives { path: { slug: <context project>, id: 'i1' } }.",
+        "When koda member invites --resend i1 succeeds, then it prints the returned invitePath.",
+        "When projectInvitesControllerCreate rejects with API 409, then koda member invite reports through handleApiError and exits with code 1.",
+        "When koda member add --email n@x.io --role DEVELOPER runs after adding invite subcommands, then it still calls projectMembersControllerAdd with the resolved project slug and the existing email/role body."
+      ],
+      "tags": [
+        "feature",
+        "cli",
+        "security"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Few CLI files and existing patterns, but admin invite operations and one-time token disclosure are security-sensitive.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/cli/src/commands/member.ts",
+        "apps/cli/src/commands/member.spec.ts",
+        "apps/cli/src/utils/output.ts",
+        "apps/cli/src/utils/error.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/cli/src/commands/member.spec.ts",
+          "reason": "its mock factory for the generated client lists only the four member functions; US-006 adds the four invite functions (projectInvitesControllerCreate, projectInvitesControllerList, projectInvitesControllerResend, projectInvitesControllerCancel). Replacing invariant: the existing member command cases pass unchanged."
+        }
+      ],
+      "workdir": "apps/cli",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "359cd71af3f19b4920f88d3c1bae30bb8342cde0"
+    },
+    {
+      "id": "US-007",
+      "title": "Web invite dialog and accept page",
+      "description": "**Goal** — Let project admins create/manage invites and let guests redeem a link into a cookie-backed session and project membership.\n\n**Motivation** — A project admin needs to onboard a new person without handing over a password, including when SMTP is unavailable.\n\n**Approach** — Web accept page (US-007) uses the vee-validate + zod form pattern of `apps/web/pages/register.vue`. Web accept (US-007) goes through a Nitro route `apps/web/server/api/invites/[token]/accept.post.ts` that sets the httpOnly auth cookies exactly like `apps/web/server/api/auth/register.post.ts`. Web `useAuth()` — `apps/web/composables/useAuth.ts`: Baseline: `{ user, isAuthenticated, login, register, logout, fetchUser, refresh }`. Target: adds `acceptInvite(token: string, body: { name: string; password: string }): Promise<void>`, which posts `body` to `/api/invites/<token>/accept` (the Nitro route) and sets `user` from the response, like `register`. Web route middleware — `apps/web/middleware/auth.global.ts`: a path starting with `/invite/` returns before the unauthenticated redirect. `ProjectInvitesPanel` sits beside `ProjectMembersPanel` on project settings, opens an invite dialog, loads the pending list and issues create/resend/cancel through `useProjectInvites(slug)`, emits member-added for ADDED so the settings page refreshes its member list, and shows an absolute one-time share link using window.location.origin when INVITED or resent. Confirm cancel. Preview via useApi GET on public page, show signed-in state instead of accept form when authenticated, navigate to /<projectSlug> on success, show invalid and account-exists localized text on respective 404/409. Use interpolated text, not HTML, for untrusted invite display. Update both locale JSON files and cover Nitro cookie forwarding.\n\n**Interface**\n```typescript\nuseProjectInvites(slug: string): { invites: Ref<InviteDto[]>; load(): Promise<void>; create(email: string, role: 'ADMIN' | 'DEVELOPER' | 'VIEWER'): Promise<InviteCreateResultDto>; resend(id: string): Promise<{ invitePath: string; emailed: boolean }>; cancel(id: string): Promise<void> };\ninviteLink(path: string): string;\nuseAuth().acceptInvite(token: string, body: { name: string; password: string }): Promise<void>;\n```\n\n**Scope** — In: project invite panel, public accept screen, public-route exemption, Nitro httpOnly cookies, locale and UI tests. Out: API invitation business rules (US-004/005), CLI commands (US-006), Playwright invite end-to-end test.",
+      "acceptanceCriteria": [
+        "When ProjectInvitesPanel submits email new@x.io and role DEVELOPER, then it calls useProjectInvites(slug).create('new@x.io', 'DEVELOPER').",
+        "When ProjectInvitesPanel receives outcome INVITED, then invite-link contains window.location.origin joined with the returned invitePath.",
+        "When ProjectInvitesPanel receives emailed false, then it displays the text of projects.invites.notEmailed.",
+        "When ProjectInvitesPanel receives outcome ADDED, then it emits member-added.",
+        "When ProjectInvitesPanel resends invite i1, then invite-link contains the invitePath returned by resend('i1').",
+        "When cancel is clicked for invite i1, then cancel('i1') is called only if window.confirm returns true.",
+        "When useProjectInvites(slug).create(email, role) is called, then useApi() posts exactly { email, role } to /projects/<slug>/invites.",
+        "When /invite/[token] loads, then it GETs /invites/<token> through useApi() and displays the preview projectName.",
+        "When GET /invites/<token> returns 404, then /invite/[token] displays the text of invite.invalid.",
+        "When useAuth().isAuthenticated is true, then /invite/[token] renders invite-signed-in instead of the accept form.",
+        "When invite-accept-form submits name and password, then it calls useAuth().acceptInvite(<token>, { name, password }).",
+        "When acceptInvite resolves, then /invite/[token] navigates to /<projectSlug>.",
+        "When the Nitro invite accept route receives accessToken and refreshToken from forwardToApi('/invites/<token>/accept'), then it calls setAuthCookies with those tokens.",
+        "When acceptInvite rejects with status 409, then /invite/[token] displays the text of invite.accountExists.",
+        "When an unauthenticated visitor navigates to /invite/abc, then middleware/auth.global.ts does not redirect to /login."
+      ],
+      "tags": [
+        "feature",
+        "web",
+        "invites",
+        "security",
+        "auth",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Public auth route, httpOnly session cookies and one-time invite link UI require strict security test isolation.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/web/components/ProjectMembersPanel.vue",
+        "apps/web/pages/[project]/settings.vue",
+        "apps/web/server/api/auth/register.post.ts",
+        "apps/web/middleware/auth.global.ts",
+        "apps/web/composables/useAuth.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/composables/useProjectInvites.ts",
+        "apps/web/components/ProjectInvitesPanel.vue",
+        "apps/web/pages/invite/[token].vue",
+        "apps/web/server/api/invites/[token]/accept.post.ts",
+        "apps/web/tests/components/ProjectInvitesPanel.spec.ts",
+        "apps/web/tests/pages/invite-accept.spec.ts",
+        "apps/web/tests/server/invite-accept-route.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/middleware/auth.spec.ts",
+          "reason": "gains the invite public-route case; existing cases keep asserting that unauthenticated visits to protected routes redirect to the login page."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "5024a53f066e3203416be9fecda025ef6c868f9f"
+    }
+  ],
+  "analysis": "This is an enhancement to the NestJS 11/Fastify, Prisma 7 API, Nuxt 3 web app and Commander generated-client CLI, not Express/Next.js despite the automated stack hints. The merged email platform already owns SMTP configuration, templates, the global notify providers and tenant constant: apps/api/src/email/email.module.ts:1-36, apps/api/src/email/email-availability.ts:1-24, apps/api/src/config/email.config.ts:1-64, apps/api/src/email/koda-tenant.ts:1-5. Do not change those platform files except adding providers/exports to EmailCoreModule. The API's only notification insert path is apps/api/src/notifications/notification-writer.ts:17-43; it filters eligibility and IN_APP preferences then inserts and publishes live signals. apps/api/src/notifications/notifications.repository.ts:22-44 uses createManyAndReturn with skipDuplicates and currently returns only id/userId; extend the projection and insert+schedule atomically through TRANSACTION_MANAGER, publishing only after commit. apps/api/src/notifications/notification-preferences.service.ts:1-55 currently reads/writes only in_app per-category rows, missing row on; preserve disabledUserIds and extend list/update for separate package NotificationPreference master (tenant default, channel email) and per-category email defaults. apps/api/src/notifications/me-notifications.controller.ts:62-79 and src/notifications/dto/notification-preferences.dto.ts:1-24 need the new PATCH-like PUT DTO and full response; keep caller-only users guard. apps/api/src/notifications/notifications.module.ts:1-57 registers the writer and must provide/export dispatcher and builder; src/common/test-helpers/global-stubs.module.ts:1-119 must stub the newly injected globals in DI tests. Mirror SKIP LOCKED SQL from apps/api/src/outbox/prisma-outbox.store.ts; Prisma schema and the two SQL migrations must agree without drift, and SQL cannot contain internal semicolons because test/helpers/migration-schema.ts splits statements. API repositories use generated src/generated/prisma/client and txManager.run; do not import @prisma/client or Prisma enums; use isUniqueViolation for adapter errors. Notifications' outbox fan-out must retry on schedule DB failure, not on transport error; delay and retry are EmailSchedule DB state, never Redis/BullMQ. Existing email and notification integration tests provide the real Postgres/outbox/send seam; unit specs in src run without DB while test/integration specs require KODA_DB_TESTS=1 and compose Postgres or Testcontainers; do not run DB resets concurrently. Security: apps/api/src/projects/project-access.service.ts:7-70 enforces project admin/global admin and excludes agents; apps/api/src/projects/members/project-members.service.ts:52-65 and prisma-project-members.repository.ts:47-63 show add/unique mappings and case-insensitive lookup, but invite writes belong to the new invite repository. Existing disabled users need explicit rejection. Invite tokens are returned only in create/resend paths and email, stored only as sha256; public preview/accept must give uniform 404 for invalid states and atomically consume the token. apps/api/src/auth/auth.service.ts:30-158 duplicates token issuance across register/login/refresh and exposes signing methods; factor issueSession and reuse after invite accept commit. apps/api/src/auth/auth.controller.ts:21-30 defines class-load AUTH_LOGIN_LIMIT; move to shared auth-throttle and apply to both public invite routes. apps/api/src/auth/dto/register.dto.ts:5-26 exports password complexity; reuse. Contract changes need root openapi.json regenerated after US-001/004/005, then run bun run generate in US-006 for apps/cli/src/generated without manual edits; API stories have prescribed apps/api workdir even though the committed spec artifact is at repo root. CLI apps/cli/src/commands/member.ts:1-125 uses withContext, generated services, unwrap, table and handleApiError; extend this command, do not implement raw HTTP. Web apps/web/composables/useNotificationPreferences.ts:1-31 currently stores items only and settings page apps/web/pages/settings/notifications.vue:1-74 renders in-app controls; convert to full view while retaining rollback/error toast pattern. apps/web/middleware/auth.global.ts:1-22 currently redirects any guest except login/register; explicitly exempt /invite/ paths. apps/web/composables/useAuth.ts:1-105 stores only user state, while apps/web/server/api/auth/register.post.ts:1-22 demonstrates forwarding and httpOnly cookie setting; replicate this for invite accept, never expose tokens in browser. apps/web/pages/[project]/settings.vue:65-89 currently renders ProjectMembersPanel; mount invite panel beside it and refresh members on ADDED; keep Nuxt useApi proxy and both locale JSONs synchronized. Review docs/ux/redesign/MASTER-PLAN.md before UI layout changes and update its status/decisions if appropriate. Follow docs/superpowers/specs/2026-10-08-fleet-s4b-email-and-invites-design.md (D516-D526) and docs/superpowers/plans/2026-10-08-fleet-s4b-email-and-invites.md (B/C, R1-R7); platform is read-only. Inter-story sequence: schedule/preferences → writer/dispatcher and web settings in parallel → admin invites → public accept → CLI and web invite UI in parallel.",
+  "outOfScope": [
+    "Password reset or forgot-password by email (D521).",
+    "Digests, batching or quiet hours: exactly one email per notification (D519).",
+    "Unsubscribe tokens in email links; preferences stay behind login.",
+    "Editing email templates in the UI, per-tenant template overrides, and bounce or delivery webhooks (`providerEventNormalizer`).",
+    "Adopting `@nathapp/nestjs-account` invitations or memberships, multi-tenant koda, and coordinating more than one API instance.",
+    "Email for agents: agents are never notification or email recipients.",
+    "BullMQ, Redis or the `nestjs-notify` queue processor (`enableProcessor`): the delay and retries live in the `EmailSchedule` table.",
+    "Retrying invite email: only the token hash is stored, so a failed invite email is reported as `emailed: false` and the admin shares the link or resends (D526).",
+    "Storing, logging or returning the raw invite token anywhere except the create and resend responses and the invite email.",
+    "A per-user email locale: notification email is always rendered in `en`; only invite email picks `zh` from `Accept-Language`.",
+    "Changing the merged S4b platform pieces (`EmailModule`, `SmtpDeliveryChannel`, `email.config.ts`, the seeded templates, `KODA_TENANT_ID`).",
+    "Deploying to koda-wk or editing anything under `deployments/` or the koda-wk compose files.",
+    "The Mailpit SMTP end-to-end test and the Playwright invite end-to-end test: they run after this nax run, outside story acceptance.",
+    "Adding email or invite coverage to `apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts`, which does not cover members or notifications today.",
+    "The nightly purge of final `EmailSchedule` rows and of expired, accepted or cancelled `ProjectInvite` rows (S4b design §2.4) is a follow-up; this feature computes `EXPIRED` on read instead of writing it.",
+    "US-002 only: the WARN line for a `FAILED` email row (row id, kind and attempts only, never the address, body or URL) is required behaviour but is not acceptance-tested in this story.",
+    "US-002 only: classifying `NotifyException` with `NotifyExceptionCode.TEMPLATE_NOT_FOUND`, `CHANNEL_NOT_REGISTERED` or `TENANT_MISMATCH` as permanent is not acceptance-tested; `PermanentNotificationError` is.",
+    "US-004 only: two concurrent `POST /projects/:slug/invites` for the same project and email may both leave a `PENDING` invite; cancel-then-create is atomic per request, not across requests.",
+    "US-004 only: choosing locale `zh` for invite email from a `zh` `Accept-Language` header is required but not acceptance-tested.",
+    "US-002 only: when one claimed row's build or repository call throws, that row returns to `PENDING` with backoff and the batch continues; required, not acceptance-tested.",
+    "US-002 only: `EmailDispatcher.tick(now)` calls `closeAbandonedInvites(now)` before claiming; required, not acceptance-tested.",
+    "US-005 only: the 409 mapping for a unique violation when two invites for the same email are accepted concurrently is required but not acceptance-tested.",
+    "US-004 only: rejecting role `AGENT`, the `INVITE_TTL_DAYS` to `expiresAt` relationship, the 43-character base64url token format, and the 403 guard on list (same `assertProjectAdmin` guard as create, which is tested) are required but not acceptance-tested.",
+    "US-005 only: per-token or per-IP lockout beyond the existing `AUTH_LOGIN_LIMIT` throttle on the two public invite routes.",
+    "US-002 only: email for notifications written before this feature ships (no backfill of `EmailSchedule`)."
+  ],
+  "routingProfile": "native-ds"
+}

@@ -8,6 +8,18 @@ export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
 export type NotificationChannelValue = `${NotificationChannel.IN_APP}` | `${NotificationChannel.EMAIL}`;
 export const NOTIFICATION_CHANNELS: readonly NotificationChannelValue[] = [NotificationChannel.IN_APP, NotificationChannel.EMAIL];
 
+/**
+ * S4b D517 (US-001): email default per category when a user has no `(category, 'email')` row. The in-app
+ * default stays "missing row = on".
+ */
+export const EMAIL_CATEGORY_DEFAULTS: Readonly<Record<NotificationCategory, boolean>> = {
+  ASSIGNED: true,
+  MENTIONED: true,
+  FLEET_NEEDS_YOU: true,
+  WATCHED_ACTIVITY: false,
+  FLEET_HEALTH: false,
+};
+
 export const WATCH_REASONS = ['REPORTER', 'ASSIGNEE', 'COMMENTER', 'MENTIONED', 'MANUAL'] as const;
 export type WatchReason = (typeof WATCH_REASONS)[number];
 
@@ -28,6 +40,18 @@ export interface NotificationDraft {
   readonly sourceType: NotificationSourceType;
   readonly sourceId: string;
   readonly actorId: string | null;
+}
+
+/**
+ * S4b US-002: what `NotificationsRepository.insertMany` returns for each row it actually inserted.
+ * The scheduling fields let `NotificationWriter` build one `EmailSchedule` row per new notification.
+ */
+export interface NotificationInserted {
+  id: string;
+  userId: string;
+  category: NotificationCategory;
+  kind: string;
+  createdAt: Date;
 }
 
 export interface NotificationRow {

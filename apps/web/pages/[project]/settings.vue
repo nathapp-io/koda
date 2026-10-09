@@ -102,6 +102,8 @@ const { data: projectData, pending: loadingProject, error: projectError, refresh
         </div>
 
         <ProjectMembersPanel :slug="slug" />
+
+        <ProjectInvitesPanel :slug="slug" @member-added="refreshProject()" />
       </TabsContent>
 
       <!-- VCS Integration Tab -->

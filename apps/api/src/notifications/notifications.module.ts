@@ -2,6 +2,9 @@ import { Module } from '@nestjs/common';
 import { LiveModule } from '../live/live.module';
 import { OutboxModule } from '../outbox/outbox.module';
 import { ProjectAccessModule } from '../projects/project-access.module';
+import { EmailContentBuilder } from '../email/email-content.builder';
+import { EmailDispatcher } from '../email/email-dispatcher';
+import { NotificationEmailRecipients } from '../email/notification-email-recipients';
 import { NotificationEligibility } from './notification-eligibility';
 import { NotificationPreferencesService } from './notification-preferences.service';
 import { NotificationRetentionProcessor } from './notification-retention.processor';
@@ -39,6 +42,10 @@ import { FleetNotificationReader } from './fleet/fleet-notification.reader';
     NotificationPreferencesService,
     NotificationEligibility,
     NotificationWriter,
+    // Fleet S4b US-002: scheduling and delivery
+    NotificationEmailRecipients,
+    EmailContentBuilder,
+    EmailDispatcher,
     NotificationRetentionProcessor,
     TicketNotificationReadsRepository,
     TicketMentionResolver,
@@ -52,6 +59,6 @@ import { FleetNotificationReader } from './fleet/fleet-notification.reader';
     FleetHealthDetector,
     FleetHealthAlertSubscriber,
   ],
-  exports: [NotificationWriter, NotificationEligibility],
+  exports: [NotificationWriter, NotificationEligibility, EmailDispatcher, EmailContentBuilder],
 })
 export class NotificationsModule {}

@@ -110,6 +110,7 @@ Rules:
 - component/page logic should have Jest coverage where practical
 - end-to-end journeys belong in Playwright
 - keep SSR and auth-sensitive behavior in mind when changing routing or composables
+- nax acceptance: one generated file per feature, `apps/web/.nax/features/<feature>/.nax-acceptance.test.ts`, holds every story's ACs as `it('AC-<n>: ...')`. The web jest config ignores `.nax/`, so `bun run test` never runs it. nax runs it with bun's test runner; run it from `apps/web` the same way: `bun test .nax/features/<feature>/.nax-acceptance.test.ts --timeout=60000 -t "AC-<a>:|AC-<b>:"`, filtered to your story's AC ids (listed per `storyId` in the repo-root `.nax/features/<feature>/acceptance-refined.json`). Keep the trailing colon so `AC-1` does not also match `AC-10`. Never copy the file into `tests/`, never edit it, and never change the jest `testPathIgnorePatterns` to run it.
 
 Useful scripts:
 - `bun run test`

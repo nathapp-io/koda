@@ -32,9 +32,11 @@ describeIntegration('notifications repositories (PG)', () => {
     await prisma.$disconnect();
   });
 
-  it('a repeated draft inserts nothing (outbox redelivery, D501)', async () => {
+  it('a repeated draft inserts nothing and the inserted row carries scheduling fields (outbox redelivery, D501/US-002)', async () => {
     expect(await notifications.insertMany([draft()])).toHaveLength(1);
-    expect(await notifications.insertMany([draft(), draft({ userId: ids.u2 })])).toEqual([{ id: expect.any(String), userId: ids.u2 }]);
+    expect(await notifications.insertMany([draft(), draft({ userId: ids.u2 })])).toEqual([
+      expect.objectContaining({ id: expect.any(String), userId: ids.u2, category: 'ASSIGNED', kind: 'ticket_assigned', createdAt: expect.any(Date) }),
+    ]);
     expect(await prisma.notification.count({ where: { sourceId: 'evt-1' } })).toBe(2);
   });
 

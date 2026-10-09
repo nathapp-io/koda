@@ -241,3 +241,49 @@ describe('AC5: stale token triggers fetchUser and redirects on failure', () => {
     expect(result).toMatchObject({ redirect: '/login' })
   })
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// US-007 AC15 — /invite/** is a public route
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('US-007 AC15: unauthenticated visit to /invite/abc is not redirected to /login', () => {
+  test('an anonymous /invite/abc visit returns without a navigation', async () => {
+    const { userRef, isAuthenticated } = makeAuthEnv(null)
+    const fetchUserMock = jest.fn(async () => false)
+    const navigateToMock = jest.fn((path: string) => ({ redirect: path }))
+
+    ;(globalThis as Record<string, unknown>).useAuth = () => ({
+      user: userRef, isAuthenticated, fetchUser: fetchUserMock,
+    })
+    ;(globalThis as Record<string, unknown>).navigateTo = navigateToMock
+    ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: (to: unknown, from: unknown) => unknown) => fn
+
+    const mod = await import(`${middlewarePath}`)
+    const middleware = mod.default
+
+    const result = await middleware(makeRoute('/invite/abc'), makeRoute('/'))
+
+    expect(navigateToMock).not.toHaveBeenCalled()
+    expect(result === undefined || result === true).toBe(true)
+  })
+
+  test('an authenticated /invite/abc visit also returns without a navigation', async () => {
+    const { userRef, isAuthenticated } = makeAuthEnv('valid-jwt', { id: '1', email: 'a@b.com' })
+    const fetchUserMock = jest.fn(async () => true)
+    const navigateToMock = jest.fn((path: string) => ({ redirect: path }))
+
+    ;(globalThis as Record<string, unknown>).useAuth = () => ({
+      user: userRef, isAuthenticated, fetchUser: fetchUserMock,
+    })
+    ;(globalThis as Record<string, unknown>).navigateTo = navigateToMock
+    ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: (to: unknown, from: unknown) => unknown) => fn
+
+    const mod = await import(`${middlewarePath}`)
+    const middleware = mod.default
+
+    const result = await middleware(makeRoute('/invite/abc'), makeRoute('/'))
+
+    expect(navigateToMock).not.toHaveBeenCalled()
+    expect(result === undefined || result === true).toBe(true)
+  })
+})

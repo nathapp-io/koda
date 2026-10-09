@@ -132,10 +132,10 @@ describeIntegration('notifications API (PG)', () => {
     await drain();
     expect((await inbox('dev')).total).toBe(devBefore);
     expect(await kinds('watcher')).toContain('ticket_status_changed /notif/tickets/NTF-1');
-    const prefs = data<{ items: Array<{ category: string; inApp: boolean }> }>(
+    const prefs = data<{ items: Array<{ category: string; inApp: boolean; email: boolean }> }>(
       await request(server).get('/api/me/notification-preferences').set(auth('dev')).expect(200));
-    expect(prefs.items).toContainEqual({ category: 'WATCHED_ACTIVITY', inApp: false });
-    expect(prefs.items).toContainEqual({ category: 'ASSIGNED', inApp: true });
+    expect(prefs.items).toContainEqual(expect.objectContaining({ category: 'WATCHED_ACTIVITY', inApp: false }));
+    expect(prefs.items).toContainEqual(expect.objectContaining({ category: 'ASSIGNED', inApp: true }));
   });
 
   it('unwatch mutes activity but an assignment still notifies (D502)', async () => {

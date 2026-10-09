@@ -7,25 +7,26 @@ const draft = (over: Partial<NotificationDraft> = {}): NotificationDraft => ({
 });
 
 function setup() {
+  const insertedRow = { id: 'n1', userId: 'u1', category: 'ASSIGNED', kind: 'ticket_assigned', createdAt: new Date('2026-10-01T00:00:00Z') };
   const notification = {
-    createManyAndReturn: jest.fn().mockResolvedValue([{ id: 'n1', userId: 'u1' }]),
+    createManyAndReturn: jest.fn().mockResolvedValue([insertedRow]),
     findMany: jest.fn().mockResolvedValue([]),
     count: jest.fn().mockResolvedValue(0),
     updateMany: jest.fn().mockResolvedValue({ count: 0 }),
     deleteMany: jest.fn().mockResolvedValue({ count: 3 }),
   };
   const repo = new NotificationsRepository({ client: { notification } } as never);
-  return { repo, notification };
+  return { repo, notification, insertedRow };
 }
 
 describe('NotificationsRepository (S4a §1)', () => {
-  it('inserts with skipDuplicates and returns only the inserted ids', async () => {
-    const { repo, notification } = setup();
-    await expect(repo.insertMany([draft()])).resolves.toEqual([{ id: 'n1', userId: 'u1' }]);
+  it('US-002: inserts with skipDuplicates and returns id, userId, category, kind and createdAt', async () => {
+    const { repo, notification, insertedRow } = setup();
+    await expect(repo.insertMany([draft()])).resolves.toEqual([insertedRow]);
     expect(notification.createManyAndReturn).toHaveBeenCalledWith({
       data: [expect.objectContaining({ userId: 'u1', sourceType: 'ticket_event', sourceId: 'e1', kind: 'ticket_assigned', params: { ref: 'PP-1' } })],
       skipDuplicates: true,
-      select: { id: true, userId: true },
+      select: { id: true, userId: true, category: true, kind: true, createdAt: true },
     });
   });
 

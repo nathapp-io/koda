@@ -1,6 +1,7 @@
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { MeNotificationsController } from './me-notifications.controller';
+import type { PreferencesView } from './notification-preferences.service';
 
 const user: KodaPrincipal = {
   actorType: 'user', id: 'u1', sub: 'u1', role: 'MEMBER', email: 'u1@k.t', name: 'u1', blacklisted: false, revoked: false, authorities: [],
@@ -8,6 +9,12 @@ const user: KodaPrincipal = {
 const agent: KodaPrincipal = {
   actorType: 'agent', id: 'a1', sub: 'a1', slug: 'bot', status: 'ACTIVE', agentRoles: [], capabilities: [],
   name: 'bot', blacklisted: false, revoked: false, authorities: [],
+};
+
+const view: PreferencesView = {
+  emailAvailable: true,
+  emailEnabled: true,
+  items: [{ category: 'ASSIGNED', inApp: true, email: true }],
 };
 
 function setup() {
@@ -18,7 +25,7 @@ function setup() {
     markAllRead: jest.fn().mockResolvedValue(undefined),
   };
   const preferences = {
-    list: jest.fn().mockResolvedValue([{ category: 'ASSIGNED', inApp: true }]),
+    list: jest.fn().mockResolvedValue(view),
     update: jest.fn().mockResolvedValue(undefined),
   };
   return { service, preferences, controller: new MeNotificationsController(service as never, preferences as never) };
@@ -32,7 +39,7 @@ describe('MeNotificationsController (S4a §3)', () => {
     await expect(controller.markRead('n1', agent)).rejects.toBeInstanceOf(ForbiddenAppException);
     await expect(controller.markAllRead(agent)).rejects.toBeInstanceOf(ForbiddenAppException);
     await expect(controller.getPreferences(agent)).rejects.toBeInstanceOf(ForbiddenAppException);
-    await expect(controller.updatePreferences({ items: [] }, agent)).rejects.toBeInstanceOf(ForbiddenAppException);
+    await expect(controller.updatePreferences({ items: [] } as never, agent)).rejects.toBeInstanceOf(ForbiddenAppException);
   });
 
   it('lists the caller\'s page with defaults and the unread filter', async () => {
@@ -53,10 +60,30 @@ describe('MeNotificationsController (S4a §3)', () => {
     expect(cutoff.getTime()).toBeLessThanOrEqual(Date.now());
   });
 
-  it('reads and writes the caller\'s preferences', async () => {
+  it('US-001: GET returns availability, the master switch and items with category, inApp and email', async () => {
     const { controller, preferences } = setup();
-    const res = await controller.updatePreferences({ items: [{ category: 'FLEET_HEALTH', inApp: false }] }, user);
-    expect(preferences.update).toHaveBeenCalledWith('u1', [{ category: 'FLEET_HEALTH', inApp: false }]);
-    expect(res).toEqual(expect.objectContaining({ data: { items: [{ category: 'ASSIGNED', inApp: true }] } }));
+    const res = await controller.getPreferences(user);
+    expect(preferences.list).toHaveBeenCalledWith('u1');
+    expect(res).toEqual(expect.objectContaining({ data: view }));
+    expect(res.data).toEqual(expect.objectContaining({
+      emailAvailable: true,
+      emailEnabled: true,
+      items: [{ category: 'ASSIGNED', inApp: true, email: true }],
+    }));
+  });
+
+  it('US-001 AC14: PUT accepts emailEnabled alone and forwards it to the service', async () => {
+    const { controller, preferences } = setup();
+    const res = await controller.updatePreferences({ emailEnabled: false } as never, user);
+    expect(preferences.update).toHaveBeenCalledWith('u1', expect.objectContaining({ emailEnabled: false }));
+    expect(res).toEqual(expect.objectContaining({ data: view }));
+  });
+
+  it('US-001 AC15: PUT forwards a category item with only the email field', async () => {
+    const { controller, preferences } = setup();
+    await controller.updatePreferences({ items: [{ category: 'MENTIONED', email: false }] } as never, user);
+    expect(preferences.update).toHaveBeenCalledWith('u1', expect.objectContaining({
+      items: [{ category: 'MENTIONED', email: false }],
+    }));
   });
 });

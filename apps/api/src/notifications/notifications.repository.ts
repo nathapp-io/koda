@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, PrismaClient } from '../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { NotificationDraft, NotificationParams, NotificationRow } from './notification.types';
+import type { NotificationDraft, NotificationInserted, NotificationParams, NotificationRow } from './notification.types';
 
 const ROW_SELECT = {
   id: true, userId: true, projectId: true, category: true, kind: true, title: true, body: true, link: true,
@@ -25,17 +25,18 @@ export class NotificationsRepository {
   }
 
   /** D501: the unique (userId, sourceType, sourceId, kind) key makes a repeat insert a no-op. */
-  async insertMany(drafts: readonly NotificationDraft[]): Promise<readonly { id: string; userId: string }[]> {
+  async insertMany(drafts: readonly NotificationDraft[]): Promise<readonly NotificationInserted[]> {
     if (drafts.length === 0) return [];
-    return this.db.notification.createManyAndReturn({
+    const rows = await this.db.notification.createManyAndReturn({
       data: drafts.map((d) => ({
         userId: d.userId, projectId: d.projectId, category: d.category, kind: d.kind, title: d.title, body: d.body,
         link: d.link, params: { ...d.params } as Prisma.InputJsonObject, sourceType: d.sourceType, sourceId: d.sourceId,
         actorId: d.actorId,
       })),
       skipDuplicates: true,
-      select: { id: true, userId: true },
+      select: { id: true, userId: true, category: true, kind: true, createdAt: true },
     });
+    return rows.map((r) => ({ ...r, category: r.category as NotificationInserted['category'] }));
   }
 
   async page(userId: string, opts: { unreadOnly: boolean; page: number; limit: number }): Promise<{ items: NotificationRow[]; total: number }> {

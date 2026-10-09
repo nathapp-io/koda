@@ -1,0 +1,28 @@
+{
+  "generatedAt": "2026-10-08T11:58:55.311Z",
+  "acFingerprint": "sha256:b2893797f119e454fd824df0dd6f9cfd86f1a8cd139dff1e58de3f3672e7b4c4",
+  "layoutFingerprint": "sha256:bca9316b4025ee148e393b9797a2417bc955215e167f312dc272699395184a45",
+  "storyCount": 7,
+  "acCount": 101,
+  "generator": "nax",
+  "coverage": [
+    {
+      "testPath": "apps/api/.nax/features/fleet-s4b-email-invites/.nax-acceptance.test.ts",
+      "expected": 60,
+      "found": 60,
+      "missing": []
+    },
+    {
+      "testPath": "apps/web/.nax/features/fleet-s4b-email-invites/.nax-acceptance.test.ts",
+      "expected": 30,
+      "found": 30,
+      "missing": []
+    },
+    {
+      "testPath": "apps/cli/.nax/features/fleet-s4b-email-invites/.nax-acceptance.test.ts",
+      "expected": 11,
+      "found": 11,
+      "missing": []
+    }
+  ]
+}
