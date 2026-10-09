@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref as vueRef } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref as vueRef } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 import { apiPath } from '~/lib/api-path'
 
@@ -11,7 +11,7 @@ interface AssigneeItem {
   status?: string
 }
 
-const props = defineProps<{ projectSlug: string }>()
+const props = defineProps<{ projectSlug: string; disabled?: boolean }>()
 const emit = defineEmits<{
   (e: 'select', value: { type: 'user' | 'agent'; id: string }): void
 }>()
@@ -86,6 +86,13 @@ function isPaused(item: AssigneeItem): boolean {
 onMounted(() => {
   fetchAssignees('')
 })
+
+// Drop a pending debounce and ignore any in-flight response once the picker
+// is gone, so no request or toast fires after unmount.
+onBeforeUnmount(() => {
+  clearDebounce()
+  requestSeq++
+})
 </script>
 
 <template>
@@ -94,6 +101,8 @@ onMounted(() => {
       :model-value="search"
       data-testid="assignee-search"
       :placeholder="t('tickets.assignee.searchPlaceholder')"
+      :aria-label="t('tickets.assignee.searchPlaceholder')"
+      :disabled="disabled"
       @update:model-value="onSearchUpdate"
     />
     <div v-if="userItems.length > 0" data-testid="assignee-group-people">
@@ -106,6 +115,7 @@ onMounted(() => {
             type="button"
             class="flex w-full items-center justify-between gap-2 rounded-md border border-border bg-card px-2 py-1 text-left text-sm hover:bg-muted"
             :data-testid="`assignee-option-${item.id}`"
+            :disabled="disabled"
             @click="onPick(item)"
           >
             <span class="truncate">{{ item.name }}</span>
@@ -124,6 +134,7 @@ onMounted(() => {
             type="button"
             class="flex w-full items-center justify-between gap-2 rounded-md border border-border bg-card px-2 py-1 text-left text-sm hover:bg-muted"
             :data-testid="`assignee-option-${item.id}`"
+            :disabled="disabled"
             @click="onPick(item)"
           >
             <span class="truncate">

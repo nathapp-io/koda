@@ -103,6 +103,7 @@ onMounted(async () => {
           <div
             v-if="canManage && !member.disabled && isAssignableRole(member.role)"
             role="radiogroup"
+            :aria-label="`${t('projects.members.roleLabel')}: ${member.name || member.email}`"
             class="flex h-8 items-center rounded-md border border-input bg-background p-0.5 text-sm"
           >
             <Button
@@ -120,7 +121,7 @@ onMounted(async () => {
             </Button>
           </div>
           <span v-else class="text-sm">{{ t(`projects.members.roles.${member.role}`) }}</span>
-          <Button v-if="canManage && !member.disabled" size="sm" variant="outline" @click="onRemove(member)">{{ t('projects.members.remove') }}</Button>
+          <Button v-if="canManage" size="sm" variant="outline" @click="onRemove(member)">{{ t('projects.members.remove') }}</Button>
         </div>
       </li>
     </ul>

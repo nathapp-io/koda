@@ -163,6 +163,8 @@ interface AssigneeChoice {
 }
 
 async function onAssigneeSelect(choice: AssigneeChoice): Promise<void> {
+  // A second pick while one assign is in flight would race the first POST.
+  if (assigning.value) return
   const payload = choice.type === 'user' ? { userId: choice.id } : { agentId: choice.id }
   assigning.value = true
   try {
@@ -298,7 +300,7 @@ async function removeLink(linkId: string) {
           <span v-else class="text-sm text-muted-foreground">{{ t('common.unassigned') }}</span>
         </div>
         <div v-if="canWork" class="space-y-2 border-t pt-2.5">
-          <AssigneePicker :project-slug="projectSlug" @select="onAssigneeSelect" />
+          <AssigneePicker :project-slug="projectSlug" :disabled="assigning" @select="onAssigneeSelect" />
           <div class="flex items-center gap-2">
             <Button size="sm" variant="outline" :disabled="assigning" @click="unassignTicket">
               {{ t('tickets.assign.unassign') }}

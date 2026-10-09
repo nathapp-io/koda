@@ -65,5 +65,9 @@ export function useProjectAgents(slug: string) {
     await $api.delete(apiPath`/projects/${slug}/agents/${agentSlug}`)
   }
 
-  return { items, scoping, pending, error, load, refresh, add, remove }
+  async function changeStatus(agentSlug: string, status: string): Promise<void> {
+    await $api.patch(apiPath`/projects/${slug}/agents/${agentSlug}`, { status })
+  }
+
+  return { items, scoping, pending, error, load, refresh, add, remove, changeStatus }
 }

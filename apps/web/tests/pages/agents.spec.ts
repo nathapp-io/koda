@@ -282,7 +282,7 @@ describe('US-006 project agent roster page', () => {
   test('AC9: a roster response with scoping: false renders the scoping-off note', async () => {
     const m = mountPage({ rosterResponse: makeRoster({ scoping: false, items: [item] }) })
     await m.settle()
-    const note = m.app.find('[data-test="project-agents-scoping-off"]')
+    const note = m.app.find('[data-testid="project-agents-scoping-off"]')
     expect(note).toHaveLength(1)
   })
 
@@ -337,7 +337,7 @@ describe('US-006 project agent roster page', () => {
     })
     await m.settle()
     await m.invokeDialogAdded('available-agent')
-    expect(m.toast.error).toHaveBeenCalledWith('Roster add failed')
+    expect(dialogCaptures.current?.error).toBe('Roster add failed')
     expect(dialogCaptures.current?.open).toBe(true)
   })
 
@@ -364,7 +364,7 @@ describe('US-006 project agent roster page', () => {
     await m.settle()
     await m.invokeRemoveButton(blocked)
     expect(m.calls.filter(c => c.method === 'DELETE')).toHaveLength(0)
-    const blockedMessage = m.app.find('[data-test="project-agents-blocked-message"]')
+    const blockedMessage = m.app.find('[data-testid="project-agents-blocked-message"]')
     expect(blockedMessage).toHaveLength(1)
     expect(m.app.textOf(blockedMessage[0])).toBe('Reassign its 2 open tickets first')
     const linkNodes = m.app.find('[data-stub="nuxt-link"]')

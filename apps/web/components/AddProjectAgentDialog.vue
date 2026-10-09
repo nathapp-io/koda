@@ -2,10 +2,9 @@
 /**
  * Add an agent to a project's roster.
  *
- * `loadCandidates` is called by the parent when the dialog opens (or when the
- * parent wants to retry). The dialog keeps the available-agents list in a
- * local ref so the parent can read it through a v-model or by passing the
- * ref back, and so the picker can be reset on every open.
+ * The dialog loads its own candidates: a watcher on `open` calls
+ * `loadCandidates`, which fetches `GET /agents` and keeps the unrostered, online
+ * agents in a local ref. The picker is reset on every open.
  *
  * The dialog does not own the POST: it emits `added` with the selected slug
  * and lets the page (which owns useProjectAgents) call the API. On a POST
@@ -26,8 +25,6 @@ interface AgentChoice {
 
 const props = defineProps<{
   open: boolean
-  /** Project slug — used for the page-routed fetch. */
-  slug: string
   /** Rostered agent slugs to exclude from the available-agents list. */
   roster: RosterEntry[]
   /** Error message from a failed POST, forwarded by the page. */
