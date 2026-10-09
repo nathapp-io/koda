@@ -6,15 +6,81 @@ import {
   projectsControllerCreate,
   projectsControllerRemove,
   projectsControllerUpdate,
+  projectsControllerGetProjectAgents,
+  projectsControllerAddProjectAgent,
+  projectsControllerRemoveProjectAgent,
 } from '../generated';
 import { configureApiClient } from '../utils/api-client';
 import { table, error } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { requireForce } from '../utils/force';
+import { withContext } from '../utils/context';
 
 export function projectCommand(program: Command): void {
   const project = program.command('project');
+
+  project
+    .command('agents')
+    .description('List agents rostered to a project')
+    .option('--project <slug>', 'Project slug')
+    .option('--json', 'Output as JSON')
+    .action(async (options) => {
+      try {
+        const ctx = await withContext({ projectSlug: options.project });
+        const response = await projectsControllerGetProjectAgents({ path: { slug: ctx.projectSlug } });
+        const roster = unwrap<{ scoping: boolean; items: Array<{ slug: string; name: string; status: string; openTicketCount: number }> }>(response);
+        if (options.json) console.log(JSON.stringify(roster, null, 2));
+        else {
+          table(['Slug', 'Name', 'Status', 'Open tickets'], roster.items.map((item) => [
+            item.slug, item.name, item.status, String(item.openTicketCount),
+          ]));
+        }
+        if (!roster.scoping) error('Agent scoping is off on this server');
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err);
+      }
+    });
+
+  project
+    .command('agent-add <agentSlug>')
+    .description('Add an agent to a project roster')
+    .option('--project <slug>', 'Project slug')
+    .option('--json', 'Output as JSON')
+    .action(async (agentSlug: string, options) => {
+      try {
+        const ctx = await withContext({ projectSlug: options.project });
+        const response = await projectsControllerAddProjectAgent({
+          path: { slug: ctx.projectSlug },
+          body: { agentSlug },
+        });
+        const added = unwrap<unknown>(response);
+        if (options.json) console.log(JSON.stringify(added, null, 2));
+        else console.log(`Added ${agentSlug} to ${ctx.projectSlug}`);
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err);
+      }
+    });
+
+  project
+    .command('agent-remove <agentSlug>')
+    .description('Remove an agent from a project roster')
+    .option('--project <slug>', 'Project slug')
+    .option('--json', 'Output as JSON')
+    .action(async (agentSlug: string, options) => {
+      try {
+        const ctx = await withContext({ projectSlug: options.project });
+        const response = await projectsControllerRemoveProjectAgent({ path: { slug: ctx.projectSlug, agentSlug } });
+        const removed = unwrap<unknown>(response);
+        if (options.json) console.log(JSON.stringify(removed, null, 2));
+        else console.log(`Removed ${agentSlug} from ${ctx.projectSlug}`);
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err);
+      }
+    });
 
   project
     .command('list')
