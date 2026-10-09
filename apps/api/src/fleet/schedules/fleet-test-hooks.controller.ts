@@ -2,6 +2,7 @@ import { Controller, HttpCode, Inject, Param, Post } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { RequiredPermission } from '@nathapp/nestjs-auth';
 import { JsonResponse, NotFoundAppException } from '@nathapp/nestjs-common';
+import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { IScheduleRepository, SCHEDULE_REPOSITORY } from './domain/schedule.domain';
 import { ScheduleTicker } from './schedule-ticker';
@@ -29,6 +30,7 @@ export class FleetTestHooksController {
     if (!this.fleetConfig.testHooksEnabled) throw new NotFoundAppException({}, 'fleet.schedules');
     const schedule = await this.schedules.findById(id);
     if (!schedule) throw new NotFoundAppException({}, 'fleet.schedules');
+    if (!schedule.enabled) throw new ConflictAppException({}, 'fleet.scheduleDisabled');
     const at = schedule.nextFireAt;
     return JsonResponse.Ok({ firedAt: at.toISOString(), result: await this.ticker.tick(at) });
   }

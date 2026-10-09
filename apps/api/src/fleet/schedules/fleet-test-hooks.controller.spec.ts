@@ -1,13 +1,14 @@
 import { JsonResponse, NotFoundAppException } from '@nathapp/nestjs-common';
+import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FleetTestHooksController } from './fleet-test-hooks.controller';
 
 const DUE = new Date('2026-10-02T03:00:00.000Z');
 const RESULT = { claimed: 1, dispatched: 1, coalesced: 0, skipped: 0, disabled: 0, failed: 0 };
 
-function build(enabled: boolean, found = true) {
+function build(hooksEnabled: boolean, found = true, scheduleEnabled = true) {
   const ticker = { tick: jest.fn(async () => RESULT) };
-  const repo = { findById: jest.fn(async () => (found ? { id: 's1', nextFireAt: DUE } : null)) };
-  const controller = new FleetTestHooksController(ticker as never, repo as never, { testHooksEnabled: enabled });
+  const repo = { findById: jest.fn(async () => (found ? { id: 's1', nextFireAt: DUE, enabled: scheduleEnabled } : null)) };
+  const controller = new FleetTestHooksController(ticker as never, repo as never, { testHooksEnabled: hooksEnabled });
   return { ticker, repo, controller };
 }
 
@@ -31,5 +32,11 @@ describe('FleetTestHooksController (3b D213)', () => {
     expect(h.repo.findById).toHaveBeenCalledWith('s1');
     expect(h.ticker.tick).toHaveBeenCalledWith(DUE);
     expect(res).toEqual(JsonResponse.Ok({ firedAt: DUE.toISOString(), result: RESULT }));
+  });
+
+  it('refuses a disabled schedule with 409 and runs no ticker round', async () => {
+    const h = build(true, true, false);
+    await expect(h.controller.fire('s1')).rejects.toBeInstanceOf(ConflictAppException);
+    expect(h.ticker.tick).not.toHaveBeenCalled();
   });
 });

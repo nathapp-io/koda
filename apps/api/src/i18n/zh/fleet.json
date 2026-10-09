@@ -26,6 +26,7 @@
   "scheduleInput": { "-2": "无效的计划：{reason}" },
   "scheduleCronTooFrequent": { "-2": "计划的触发间隔不得少于 {minutes} 分钟" },
   "scheduleOwnerNoAccess": { "409": "该计划的所有者已无权向此项目派发任务；所有者需要开发者或更高权限" },
+  "scheduleDisabled": { "409": "该计划已停用；启用后才能触发" },
   "approvals": { "404": "未找到该审批" },
   "approvalNotPending": { "409": "该审批已不再处于待处理状态" },
   "approvalDecisionInvalid": { "-2": "不允许此决定：{reason}" },
