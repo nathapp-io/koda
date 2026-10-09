@@ -211,6 +211,11 @@ export class AgentsService {
    * agent cannot be added (it could not authenticate anyway), and the row is
    * keyed on (agent, project) so a duplicate add is a conflict.
    *
+   * The insert and the re-read run under the same per-project roster lock
+   * `removeFromProject` takes, so a concurrent add/remove of the same agent
+   * serializes: a removal can no longer delete the row between the insert and
+   * the re-read, which would have reported 404 for a row that was just created.
+   *
    * Returns the roster row as the list serves it, so POST and GET agree on the
    * shape the CLI and the web read.
    */
@@ -222,10 +227,15 @@ export class AgentsService {
     if (!agent) throw new NotFoundAppException({}, 'agents');
     if (agent.status === 'OFFLINE') throw new ConflictAppException({}, 'projectAgents.agentOffline');
 
-    const added = await this.agentRepo.addToProjectRoster(agent.id, project.id, addedById);
-    if (added === 'alreadyAssigned') throw new ConflictAppException({}, 'projectAgents.alreadyAssigned');
+    const record = await this.txManager.run(async () => {
+      await this.agentRepo.lockProjectAgents(project.id);
 
-    const record = (await this.agentRepo.findProjectRoster(project.id)).find((row) => row.slug === agent.slug);
+      const added = await this.agentRepo.addToProjectRoster(agent.id, project.id, addedById);
+      if (added === 'alreadyAssigned') throw new ConflictAppException({}, 'projectAgents.alreadyAssigned');
+
+      return (await this.agentRepo.findProjectRoster(project.id)).find((row) => row.slug === agent.slug) ?? null;
+    });
+
     if (!record) throw new NotFoundAppException({}, 'projectAgents');
     return ProjectAgentDto.from(record);
   }

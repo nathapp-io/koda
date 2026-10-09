@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaClient } from '../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TicketStatus } from '../common/enums';
+import { KodaError } from '../common/koda-error';
 import { lockProjectAgents } from '../common/utils/advisory-lock';
 import type { ProjectAgentRecord } from './dto/agent-response.dto';
 
@@ -156,6 +157,14 @@ export class PrismaAgentRepository {
    * exact total, `refs` the oldest {@link MAX_OPEN_TICKET_REFS} as
    * `<Project.key>-<number>`. "Open" means not CLOSED/REJECTED and not
    * soft-deleted, the same rule the roster read uses.
+   *
+   * The queries run one after another on purpose: this is called inside
+   * `AgentsService.removeFromProject`'s `txManager.run`, so `db` is a single
+   * interactive transaction client, and issuing concurrent queries on one
+   * connection is not safe on every driver (the pg adapter warns about exactly
+   * that). A project row that cannot be read is an invariant failure — a ref
+   * without its project key would surface a malformed `<key>-<number>` to the
+   * user, so refuse instead of degrading.
    */
   async countOpenProjectTickets(agentId: string, projectId: string): Promise<{ count: number; refs: string[] }> {
     const where = {
@@ -164,17 +173,23 @@ export class PrismaAgentRepository {
       status: { notIn: [TicketStatus.CLOSED, TicketStatus.REJECTED] },
       deletedAt: null,
     };
-    const [count, oldest, project] = await Promise.all([
-      this.db.ticket.count({ where }),
-      this.db.ticket.findMany({
-        where,
-        select: { number: true },
-        orderBy: [{ createdAt: 'asc' }, { number: 'asc' }],
-        take: MAX_OPEN_TICKET_REFS,
-      }),
-      this.db.project.findUnique({ where: { id: projectId }, select: { key: true } }),
-    ]);
-    return { count, refs: oldest.map((ticket) => `${project?.key ?? ''}-${ticket.number}`) };
+    const count = await this.db.ticket.count({ where });
+    const oldest = await this.db.ticket.findMany({
+      where,
+      select: { number: true },
+      orderBy: [{ createdAt: 'asc' }, { number: 'asc' }],
+      take: MAX_OPEN_TICKET_REFS,
+    });
+    if (oldest.length === 0) return { count, refs: [] };
+
+    const project = await this.db.project.findUnique({ where: { id: projectId }, select: { key: true } });
+    if (!project) {
+      throw new KodaError(
+        'PROJECT_NOT_FOUND',
+        `project ${projectId} disappeared while counting open tickets for agent ${agentId}`,
+      );
+    }
+    return { count, refs: oldest.map((ticket) => `${project.key}-${ticket.number}`) };
   }
 
   /** S4c US-003 (D530): drop the agent's roster row. A missing row deletes nothing. */
