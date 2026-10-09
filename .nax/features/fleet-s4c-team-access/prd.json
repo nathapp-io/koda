@@ -3,7 +3,7 @@
   "feature": "fleet-s4c-team-access",
   "branchName": "feat/fleet-s4c-team-access",
   "createdAt": "2026-10-09T00:00:00Z",
-  "updatedAt": "2026-10-09T09:50:10.231Z",
+  "updatedAt": "2026-10-09T11:44:36.365Z",
   "userStories": [
     {
       "id": "US-001",
@@ -221,7 +221,8 @@
         "When a rostered agent POSTs /api/projects/:slug/agents using its own API key, it returns 403 and stores no AgentProject row.",
         "When a rostered agent DELETEs /api/projects/:slug/agents/:agentSlug using its own API key, it returns 403 and its AgentProject row remains.",
         "When POST /api/projects/:slug/members names a disabled user's email, it returns 409 with the members.userDisabled message and creates no membership row.",
-        "When GET /api/projects/:slug/members lists disabled and enabled members, it returns disabled: true and disabled: false respectively."
+        "When GET /api/projects/:slug/members lists disabled and enabled members, it returns disabled: true and disabled: false respectively.",
+        "When a project ADMIN POSTs an existing enabled user's email to /api/projects/:slug/members, a membership row for that user is created."
       ],
       "tags": [
         "feature",
@@ -254,9 +255,6 @@
       "expectedFiles": [
         "apps/api/src/agents/dto/add-project-agent.dto.ts",
         "apps/api/test/integration/projects/project-agents-write.integration.spec.ts"
-      ],
-      "suggestedCriteria": [
-        "When a project ADMIN POSTs an existing enabled user's email to /api/projects/:slug/members, a membership row for that user is created."
       ],
       "modifiedFiles": [
         {
@@ -294,7 +292,9 @@
         "Given 3 matching users and 2 matching agents, GET /api/projects/:slug/assignees?limit=2 returns 2 items.",
         "When GET /api/projects/:slug/assignees?limit=51 runs, it returns 400.",
         "When GET /api/projects/:slug/assignees receives q of 101 characters, it returns 400.",
-        "When a non-member user calls GET /api/projects/:slug/assignees, it returns 403."
+        "When a non-member user calls GET /api/projects/:slug/assignees, it returns 403.",
+        "When GET /api/projects/:slug/assignees?limit=0 runs, it returns 400.",
+        "When GET /api/projects/:slug/assignees?q=%25 runs, it only returns assignees whose searchable fields contain a literal percent sign."
       ],
       "tags": [
         "feature",
@@ -332,10 +332,6 @@
         "apps/api/src/projects/assignees/dto/assignee.dto.ts",
         "apps/api/test/integration/tickets/ticket-assign-guards.integration.spec.ts",
         "apps/api/test/integration/projects/project-assignees.integration.spec.ts"
-      ],
-      "suggestedCriteria": [
-        "When GET /api/projects/:slug/assignees?limit=0 runs, it returns 400.",
-        "When GET /api/projects/:slug/assignees?q=%25 runs, it only returns assignees whose searchable fields contain a literal percent sign."
       ],
       "modifiedFiles": [
         {
@@ -480,8 +476,8 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
