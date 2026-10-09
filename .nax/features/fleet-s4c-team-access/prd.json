@@ -3,7 +3,7 @@
   "feature": "fleet-s4c-team-access",
   "branchName": "feat/fleet-s4c-team-access",
   "createdAt": "2026-10-09T00:00:00Z",
-  "updatedAt": "2026-10-09T05:41:15.126Z",
+  "updatedAt": "2026-10-09T06:20:27.005Z",
   "userStories": [
     {
       "id": "US-001",
@@ -232,9 +232,9 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
+      "status": "failed",
       "passes": false,
-      "attempts": 0,
+      "attempts": 1,
       "escalations": [],
       "routing": {
         "complexity": "expert",
