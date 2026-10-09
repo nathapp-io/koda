@@ -6,6 +6,7 @@ import { useFleetScheduleActions } from '~/composables/useFleetScheduleActions'
 import { useFleetSchedules } from '~/composables/useFleetSchedules'
 import { createDebouncer } from '~/lib/debounce'
 import { canWorkOnFleet } from '~/lib/fleet-jobs'
+import { canChangeSchedule } from '~/lib/fleet-schedules'
 import type { ScheduleViewer } from '~/lib/fleet-schedules'
 import type { ScheduleDto } from '~/lib/fleet-types'
 
@@ -111,7 +112,7 @@ const runnerOptions = computed(() => options.runners.value.map((r) => ({ value: 
       </template>
     </PageHeader>
 
-    <p v-if="!viewer.canManage && !forbidden" class="text-sm text-muted-foreground" data-testid="fleet-schedule-readonly">{{ t('fleet.schedules.readOnly') }}</p>
+    <p v-if="!viewer.canManage && !forbidden && !api.schedules.value.some((s) => canChangeSchedule(s, viewer))" class="text-sm text-muted-foreground" data-testid="fleet-schedule-readonly">{{ t('fleet.schedules.readOnly') }}</p>
     <p v-if="forbidden" class="text-sm text-muted-foreground" data-testid="fleet-schedule-forbidden">{{ t('fleet.schedules.forbidden') }}</p>
     <p v-if="stale" class="text-sm text-muted-foreground">{{ t('fleet.common.stale') }}</p>
 
