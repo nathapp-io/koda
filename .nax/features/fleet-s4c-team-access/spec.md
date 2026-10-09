@@ -1,4 +1,3 @@
-<!-- spec-writing: completed-through-phase-5 -->
 # SPEC: Fleet S4c — Team Access (Per-Project Agents, Disabled-User Guard)
 
 ## Summary
@@ -58,7 +57,7 @@ implement.
 - Baseline: `constructor(private projectRepo: PrismaProjectRepository)`; `resolveMembership(projectId, principal):
   Promise<string | null>` returns `null` for any non-user principal without a query.
 - Target: `constructor(private projectRepo: PrismaProjectRepository, @Optional() @Inject(AUTH_CFG) private
-  authConfig?: IAuthConfig)` (optional with a fail-closed default: absent config = scoping on); new
+  authConfig?: IAuthConfig)` (optional with a fail-closed default: absent config = scoping on; `@Optional()` is used because the dependency has a defined default, as `ProjectMembershipGuard` and `ProjectsService` already do for config-like dependencies, so unit suites that build the service with one argument keep compiling); new
   `agentScopingEnabled(): boolean` returns `this.authConfig?.agentProjectScoping !== false`. `resolveMembership` is
   unchanged for users and for runner principals; for an agent principal (`isAgentPrincipal`) it returns `null` without a
   query when `agentScopingEnabled()` is false, returns `null` when `projectRepo.isAgentOnRoster(projectId,
@@ -80,7 +79,7 @@ and US-003 the rest)
 - Target: new methods `isOnProjectRoster(agentId, projectId): Promise<boolean>`; `findRosterProjects(agentId):
   Promise<{ slug: string; name: string }[]>`; `findProjectRoster(projectId): Promise<ProjectAgentRecord[]>`;
   `addToProjectRoster(agentId, projectId, addedById): Promise<void>` (maps the PK conflict to a typed result);
-  `countOpenProjectTickets(agentId, projectId): Promise<{ count: number; refs: string[] }>`;
+  `countOpenProjectTickets(agentId, projectId): Promise<{ count: number; refs: string[] }>` (`refs` capped at 10, oldest first);
   `removeFromProjectRoster(agentId, projectId): Promise<void>`; `lockProjectAgents(projectId): Promise<void>` (calls
   `lockProjectAgents` from `advisory-lock.ts` on the transaction client).
 
@@ -142,7 +141,8 @@ Symbols this feature reads but does not change:
 
 ### New data (US-001)
 
-Migration `apps/api/prisma/migrations/20261011090000_agent_projects/migration.sql`:
+Schema edit in `apps/api/prisma/schema.prisma` (integration suites build the schema with `prisma db push`), plus migration
+`apps/api/prisma/migrations/20261011090000_agent_projects/migration.sql`:
 
 ```prisma
 model AgentProject {
@@ -175,13 +175,19 @@ SELECT a, p FROM (
 ON CONFLICT ("agentId", "projectId") DO NOTHING;
 ```
 
-Soft-deleted tickets count as history. `addedById` stays NULL for backfilled rows.
+Soft-deleted tickets count as history. `addedById` stays NULL for backfilled rows. The backfill test follows
+`test/integration/notifications/notifications-backfill-migration.integration.spec.ts` (`scratchSchemaBefore`,
+`applyMigration` from `test/helpers/migration-schema.ts`).
+
+The three roster checks (`PrismaProjectRepository.isAgentOnRoster`, `PrismaAgentRepository.isOnProjectRoster`,
+`PrismaTicketsRepository.isAgentOnProjectRoster`) all run the same query: an `AgentProject` row exists for the
+(agentId, projectId) pair.
 
 ### Roster DTOs (US-002)
 
 `apps/api/src/agents/dto/project-agent.dto.ts`:
 - `ProjectAgentDto { slug, name, status, roles: string[], capabilities: string[], openTicketCount: number,
-  openTicketRefs: string[], addedAt: string, addedBy: { id: string; name: string } | null }`.
+  openTicketRefs: string[], addedAt: string, addedBy: { id: string; name: string | null } | null }`.
 - `ProjectAgentListDto { scoping: boolean; items: ProjectAgentDto[] }`, items ordered by name, un-paged (a documented
   exception to `KodaPageQuery`).
 - Open = tickets in this project assigned to the agent, `deletedAt` null, status not `CLOSED` or `REJECTED`.
@@ -199,24 +205,29 @@ up assigned to an agent removed from its project.
 
 | Route | Who | Behaviour | Story |
 |---|---|---|---|
-| `GET /projects/:slug/agents` | project member, rostered agent (403 otherwise) | `ProjectAgentListDto` | US-002 |
+| `GET /projects/:slug/agents` | project member, rostered agent (scoping on; any agent when off) (403 otherwise) | `ProjectAgentListDto` | US-002 |
 | `PATCH /projects/:slug/agents/:agentSlug` | unchanged (admins, or the agent itself) | resolves through the roster; 404 `projectAgents` when not on it | US-002 |
 | `POST /projects/:slug/agents` `{ agentSlug }` | project ADMIN, global ADMIN (403 otherwise) | 201 `ProjectAgentDto`; 404 `agents` unknown agent; 409 `projectAgents.alreadyAssigned`; 409 `projectAgents.agentOffline` | US-003 |
-| `DELETE /projects/:slug/agents/:agentSlug` | project ADMIN, global ADMIN (403 otherwise) | 204; 404 `projectAgents` not on roster; 409 `projectAgents.hasOpenTickets`, message args `{ count, refs }` | US-003 |
-| `GET /projects/:slug/assignees?q=&limit=` | project member, rostered agent (`ProjectMembershipGuard`; 403 otherwise) | `{ items: AssigneeDto[] }` (below) | US-004 |
+| `DELETE /projects/:slug/agents/:agentSlug` | project ADMIN, global ADMIN (403 otherwise) | 204; 404 `projectAgents` not on roster; 409 `projectAgents.hasOpenTickets`, message args `{ count, refs }` (`refs` = up to 10 refs joined with `, `) | US-003 |
+| `GET /projects/:slug/assignees?q=&limit=` | project member, rostered agent (scoping on; any agent when off) (`ProjectMembershipGuard`; 403 otherwise) | `{ items: AssigneeDto[] }` (below) | US-004 |
 
 `AssigneeDto { type: 'user' | 'agent'; id: string; name: string; secondary: string; status?: string }`: users are
 non-disabled project members (`id` = `User.id`, `secondary` = email); agents are rostered agents with status `ACTIVE`
 or `PAUSED` (`id` = `Agent.id`, `secondary` = slug, `status` set). Users come first, then agents, each ordered by
 name. `q` is trimmed and matched case-insensitively as a substring of name, email (users) or slug (agents); `q`
-longer than 100 characters is a 400 validation error. `limit` defaults to 20, applies to the combined list, and a
-value above 50 is a 400 validation error. The route lives in a new standalone `ProjectAssigneesModule` imported by
+longer than 100 characters is a 400 validation error. `limit` defaults to 20, applies to the combined list, and must
+be an integer from 1 to 50 (400 otherwise). `%` and `_` in `q` match literally. The new repository extends
+`AbstractPrismaRepository` and sits behind a symbol token the module does not export (rule api-data). The route lives in a new standalone `ProjectAssigneesModule` imported by
 `AppModule`.
 
 New i18n files `apps/api/src/i18n/{en,zh}/projectAgents.json` with `404`, `alreadyAssigned.409`, `agentOffline.409`,
 `hasOpenTickets.409` (en: "{count} open tickets are still assigned to this agent: {refs}"). New keys
 `members.userDisabled.409`, `tickets.userDisabled.409`, `tickets.agentNotInProject.409`, `tickets.agentOffline.409` in
 both locales.
+
+Integration ACs that need `AGENT_PROJECT_SCOPING=off` boot through `bootHttpApp` (`test/helpers/http-app.ts`), which
+US-001 extends with an optional `agentProjectScoping?: 'on' | 'off'` set only around `AppFactory.create` and restored
+afterwards, exactly like `registrationEnabled`.
 
 Each API story regenerates the committed contract with `bun run generate` (`openapi.json` and
 `apps/cli/src/generated/`); those generated files are never hand-edited.
@@ -279,6 +290,7 @@ Subcommands of `koda project`, each taking `--project <slug>` resolved through `
 - Caching roster lookups; `resolveMembership` reads the roster on every request.
 - Re-running the backfill after deploy; it runs once inside the migration.
 - US-001 only: agent permissions inside a rostered project are unchanged; `assertProjectRoles` and `assertProjectPermission` keep their agent behaviour.
+- US-004 only: no ACs pin `limit=0` or non-integer `limit`, whitespace-only `q`, the email branch of `q`, or literal matching of `%`/`_`; the Design states that behaviour and the hardening pass may suggest tests.
 - US-004 only: a user disabled concurrently with an assign to that user is best-effort (no lock); the disabled check reads the row inside the assign transaction.
 
 ## Stories
@@ -339,6 +351,7 @@ Subcommands of `koda project`, each taking `--project <slug>` resolved through `
 - `apps/web/tests/pages/agents.spec.ts` — the page's existing test harness
 - `apps/web/components/ProjectInvitesPanel.vue` — admin dialog + list pattern to mirror
 - `apps/web/composables/useProjectMembers.ts` — composable pattern to mirror
+- `apps/web/composables/useProjectViewerRole.ts` — viewer project role for the admin-only controls
 
 **US-007**
 
@@ -395,6 +408,9 @@ Subcommands of `koda project`, each taking `--project <slug>` resolved through `
 
 **US-001**
 
+- `apps/api/prisma/schema.prisma` — gains the AgentProject model and the Agent.projects, Project.agents and User.addedAgentProjects back-relations; integration suites build their schema from this file.
+- `apps/api/test/helpers/http-app.ts` — bootHttpApp accepts only registrationEnabled. Replacing invariant: it also accepts an optional agentProjectScoping ('on' | 'off'), set in process.env only around AppFactory.create and restored in finally; omitting it leaves the default (on).
+- `apps/api/test/integration/fleet/fleet-approvals-api.integration.spec.ts` — beforeAll (`:68-79`) seeds an agent associated with project web only through an assigned ticket, then asserts GET /api/projects/web/agents with the agent key returns 200; with scoping on that is 403 and the suite fails in setup. Replacing invariant: insert the agent's AgentProject row for project web right after seedFleetHttpAgent (before `:78`); the comment at `:71` is updated to say the roster row is the association.
 - `apps/api/src/projects/project-access.service.spec.ts` — "passes without checking membership for agent principal" (`:62`) and "returns null for an agent without a membership lookup" (`:97`) assume an unscoped agent; with no config injected scoping is on. Replacing invariant: a rostered agent resolves null, an unrostered agent rejects with ForbiddenAppException, and with agentProjectScoping false an agent resolves null without a roster lookup.
 - `apps/api/src/projects/project-membership.guard.spec.ts` — "AC3: returns true for an agent principal without a membership lookup" (`:195`) and "AC15: returns true for an agent principal on a handler carrying @ProjectRoles" (`:295`) assume an unscoped agent. Replacing invariant: the guard admits a rostered agent and rejects an unrostered one with 403.
 - `apps/api/src/projects/project-membership.guard.routes.spec.ts` — "AC8 boundary: an agent principal is admitted to POST :ref/assign with no membership row" (`:266`) expects 200 for an agent with no roster row. Replacing invariant: admitted when the agent has a roster row (still no ProjectMember row).
@@ -402,9 +418,9 @@ Subcommands of `koda project`, each taking `--project <slug>` resolved through `
 - `apps/api/test/unit/projects/projects-find-all-for-principal.spec.ts` — "AC8: returns every non-deleted project for an agent principal" (`:206`) expects all projects. Replacing invariant: with scoping on an agent gets only its rostered non-deleted projects; with agentProjectScoping false it gets every non-deleted project.
 - `apps/api/src/agents/agents.service.spec.ts` — the findMe test (`:408-413`) asserts toEqual(mockAgentDto), which now also carries projects; the suggestTicket tests (`:673-800`) use an agentRepo mock without the roster method. Replacing invariant: findMe returns the agent fields plus projects; suggestTicket behaves as before for a rostered target.
 - `apps/api/src/agents/agents-pickup.routes.spec.ts` — the agentRepo stub (`~:118`) lacks the roster method and the AC9 (`~:178-198`) and AC12 (`~:230`) 200 paths have no roster row. Replacing invariant: those paths return 200 when the target agent is rostered.
-- `apps/api/test/integration/projects/project-membership-gate.integration.spec.ts` — beforeAll (`:237-248`) has agent team-bot act on team and other with no roster row; "AC8: findAllForPrincipal returns every non-deleted project for an agent principal" (`:284`) and "AC3: CommentsService.update proceeds to the CASL check" (`:349`) assume unscoped agents. Replacing invariant: seed AgentProject rows for the projects the agent acts on; findAllForPrincipal returns only rostered projects.
-- `apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts` — the agent created at `:226-246` acts on its project with agentApiKey (`:515`, `:737`, `:1259`, `:1635`, `:1650`, `~:2395`) with no roster row. Replacing invariant: insert the agent's AgentProject row right after creating it; the existing expectations then hold unchanged.
-- `apps/api/test/e2e/agents.e2e.spec.ts` — the pickup tests (`:221`, `~:248`) call pickup for an agent not on the project's roster. Replacing invariant: insert the AgentProject row in setup; expectations unchanged.
+- `apps/api/test/integration/projects/project-membership-gate.integration.spec.ts` — beforeAll (`:237-248`) has agent team-bot act on team and other with no roster row; "AC8: findAllForPrincipal returns every non-deleted project for an agent principal" (`:284`) and "AC3: CommentsService.update proceeds to the CASL check" (`:349`) assume unscoped agents. Replacing invariant: seed AgentProject rows for team and other immediately after the agent is created and before the assign at `:244`; findAllForPrincipal returns only rostered projects.
+- `apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts` — the agent created at `:226-246` acts on its project with agentApiKey (`:515`, `:737`, `:1259`, `:1635`, `:1650`, `~:2395`) with no roster row, and "GET /api/agents/:slug/pickup — returns null data when no VERIFIED unassigned tickets remain" (`:1586-1612`) creates a fresh agent pickup-empty-agent and calls pickup on the project. Replacing invariant: insert an AgentProject row for every (agent, project) pair a test acts on — the main agent right after it is created, pickup-empty-agent right after its creation; the existing expectations then hold unchanged.
+- `apps/api/test/e2e/agents.e2e.spec.ts` — the pickup tests (`:221`, `:247-257`) call pickup for an agent not on the project's roster; the second creates a new project AEM and picks up there. Replacing invariant: insert an AgentProject row for each (agent, project) pair the test picks up on — the setup project in setup, and AEM right after it is created; expectations unchanged.
 - `apps/api/test/e2e/ast-index.e2e.spec.ts` — "DEVELOPER agent should be able to call indexCommit" (`:235`) expects 201 for an unrostered agent. Replacing invariant: the agent is rostered on the project in setup; expectation unchanged.
 - `apps/api/test/integration/code-intel/code-intel-project-roles.integration.spec.ts` — the agent case of "%s reads every code-intel route" (`:74`, agent created `:42`) expects 200 with no roster row. Replacing invariant: insert the agent's AgentProject row in setup; expectation unchanged.
 
@@ -412,6 +428,7 @@ Subcommands of `koda project`, each taking `--project <slug>` resolved through `
 
 - `apps/api/src/projects/projects.controller.spec.ts` — describe getProjectAgents (`:261-316`) mocks agentsService.findByProject and asserts a bare array (data[0].slug); describe updateProjectAgent (`:318-~400`) mocks findByProject to resolve the target. Replacing invariant: getProjectAgents returns the ProjectAgentListDto from agentsService.listProjectRoster; updateProjectAgent resolves the target through the roster.
 - `apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts` — "GET /api/projects/:slug/agents — 200 returns agents with assigned tickets" (`:1319`) asserts Array.isArray(data); "PATCH .../agents/:agentSlug — 200 updates agent status" (`:1346`). Replacing invariant: data.items contains the rostered agent; PATCH succeeds for a rostered agent.
+- `apps/api/test/integration/fleet/fleet-approvals-api.integration.spec.ts` — beforeAll (`:78-79`) maps the GET /api/projects/web/agents body as an array. Replacing invariant: read data.items and assert it contains the agent.
 - `apps/api/test/integration/projects/project-membership-gate.integration.spec.ts` — the matrix case for the PATCH agent-status route (`:575`) resolves the target through the old ticket-derived list. Replacing invariant: the target is resolved through the roster.
 
 **US-003**
@@ -434,7 +451,7 @@ None. The story only adds subcommands to `project.ts` and new cases to `project.
 
 **US-007**
 
-None. No existing web test pins the free-text assign input (`assigneeUserId`, `tickets.assign.userIdPlaceholder`); `tests/openapi/web-gap-ops.spec.ts:41` only requires `TicketProperties.vue` to keep posting to the assign URL, which `AssigneePicker` does.
+None. No existing web test pins the free-text assign input (`assigneeUserId`, `tickets.assign.userIdPlaceholder`); `tests/openapi/web-gap-ops.spec.ts:41-47` checks that the `TicketProperties.vue` source still contains the assign URL literal, which stays because Unassign keeps posting to it.
 
 ### Seams
 
@@ -491,8 +508,10 @@ None. No existing web test pins the free-text assign input (`assigneeUserId`, `t
 9. [integration] After `DELETE /api/projects/:slug/agents/:agentSlug` returns 204, that agent's next `GET /api/projects/:slug/tickets` with its API key returns 403.
 10. [integration] `DELETE /api/projects/:slug/agents/:agentSlug` for an agent not on the roster returns 404.
 11. [integration] `DELETE /api/projects/:slug/agents/:agentSlug` by a project DEVELOPER returns 403 and the `AgentProject` row remains.
-12. [integration] `POST /api/projects/:slug/members` with the email of a disabled user returns 409 with the `members.userDisabled` message and creates no membership row.
-13. [integration] `GET /api/projects/:slug/members` returns `disabled: true` for a member whose user account is disabled and `disabled: false` for an enabled member.
+12. [integration] `POST /api/projects/:slug/agents` with `{ agentSlug }` using the API key of an agent already on that project's roster returns 403 and stores no row.
+13. [integration] `DELETE /api/projects/:slug/agents/:agentSlug` using the API key of that rostered agent itself returns 403 and the `AgentProject` row remains.
+14. [integration] `POST /api/projects/:slug/members` with the email of a disabled user returns 409 with the `members.userDisabled` message and creates no membership row.
+15. [integration] `GET /api/projects/:slug/members` returns `disabled: true` for a member whose user account is disabled and `disabled: false` for an enabled member.
 
 ### US-004: Assign guards and assignees endpoint (`Workdir: apps/api`)
 
@@ -501,7 +520,7 @@ None. No existing web test pins the free-text assign input (`assigneeUserId`, `t
 3. [integration] `POST /api/projects/:slug/tickets/:ref/assign` with `{ agentId }` of a rostered agent whose status is `OFFLINE` returns 409 with the `tickets.agentOffline` message.
 4. [integration] `POST /api/projects/:slug/tickets/:ref/assign` with `{ agentId }` of a rostered `ACTIVE` agent returns 200 and sets `assignedToAgentId`.
 5. [integration] With `AGENT_PROJECT_SCOPING=off`, `POST /api/projects/:slug/tickets/:ref/assign` with `{ agentId }` of an unrostered agent still returns 409 with the `tickets.agentNotInProject` message.
-6. [integration] When `DELETE /api/projects/:slug/agents/:agentSlug` and an assign of a second ticket to that agent run concurrently on PG, the outcome is either a 409 removal with the agent still rostered or a 409 assign with the agent removed — never a removed agent holding an open ticket in the project.
+6. [integration] For a rostered agent holding no open tickets in the project, running `DELETE /api/projects/:slug/agents/:agentSlug` and `POST /api/projects/:slug/tickets/:ref/assign` with that agent's `agentId` concurrently on PG ends in exactly one of: DELETE 204 with the assign 409 `tickets.agentNotInProject`, or the assign 200 with the DELETE 409 `projectAgents.hasOpenTickets`.
 7. [integration] `GET /api/projects/:slug/assignees` lists non-disabled project members as `type: 'user'` with `id` = the user id and `secondary` = email, and omits a disabled member.
 8. [integration] `GET /api/projects/:slug/assignees` lists rostered `ACTIVE` and `PAUSED` agents as `type: 'agent'` with `id` = the agent id, `secondary` = slug and `status` set, and omits an `OFFLINE` rostered agent.
 9. [integration] `GET /api/projects/:slug/assignees` omits an agent that is not on the project's roster.
