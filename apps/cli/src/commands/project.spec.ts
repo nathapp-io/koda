@@ -551,7 +551,7 @@ describe('projectCommand', () => {
     });
 
     it('US-005 AC-5: removes an agent from the project', async () => {
-      (projectsControllerRemoveProjectAgent as jest.Mock).mockResolvedValue({ ret: 0, data: undefined });
+      (projectsControllerRemoveProjectAgent as jest.Mock).mockResolvedValue(undefined);
       await findCommand('agent-remove')?.parseAsync(['node', 'test', 'bot-1', '--project', 'alpha']);
       expect(projectsControllerRemoveProjectAgent).toHaveBeenCalledWith({ path: { slug: 'alpha', agentSlug: 'bot-1' } });
       expect(logSpy).toHaveBeenCalledWith('Removed bot-1 from alpha');

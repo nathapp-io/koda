@@ -72,9 +72,8 @@ export function projectCommand(program: Command): void {
     .action(async (agentSlug: string, options) => {
       try {
         const ctx = await withContext({ projectSlug: options.project });
-        const response = await projectsControllerRemoveProjectAgent({ path: { slug: ctx.projectSlug, agentSlug } });
-        const removed = unwrap<unknown>(response);
-        if (options.json) console.log(JSON.stringify(removed, null, 2));
+        await projectsControllerRemoveProjectAgent({ path: { slug: ctx.projectSlug, agentSlug } });
+        if (options.json) console.log(JSON.stringify({ removed: agentSlug }, null, 2));
         else console.log(`Removed ${agentSlug} from ${ctx.projectSlug}`);
         process.exit(0);
       } catch (err: unknown) {
