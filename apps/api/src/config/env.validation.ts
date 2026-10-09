@@ -76,6 +76,7 @@ const envSchema = Joi.object({
   FLEET_JOB_CRASH_SEC: Joi.number().integer().min(30).max(86_400).optional(),
   FLEET_SYNC_WAIT_MS: Joi.number().integer().min(0).max(60_000).optional(),
   FLEET_SWEEP_ENABLED: Joi.string().pattern(/^(true|false)$/i).optional(),
+  FLEET_APPROVAL_SWEEP_MS: Joi.number().integer().min(100).max(60_000).optional(),
   FLEET_TEST_HOOKS: Joi.string().pattern(/^(true|false)$/i).optional(),
   FLEET_TEST_FAKE_NAX_FILES: Joi.string().pattern(/^(true|false)$/i).optional(),
   FLEET_BUNDLE_MAX_BYTES: Joi.number().integer().min(1_024).max(2_147_483_647).optional(),

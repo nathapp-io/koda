@@ -3,7 +3,9 @@ module.exports = {
   rootDir: ".",
   roots: ["<rootDir>"],
   testMatch: ["**/.nax/**/*.test.ts"],
-  transform: { "^.+\\.(t|j)s$": "ts-jest" },
+  // isolatedModules: transpile without per-file diagnostics — full type checking is
+  // the `type-check` job's job; keeping it here made every CI test run ~2x slower.
+  transform: { "^.+\\.(t|j)s$": ["ts-jest", { isolatedModules: true }] },
   testEnvironment: "node",
   forceExit: true,
   maxWorkers: 1,

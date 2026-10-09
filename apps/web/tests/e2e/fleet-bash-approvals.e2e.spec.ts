@@ -105,12 +105,12 @@ test.describe('Fleet bash approvals (scripted relay runner)', () => {
     await waitForHydration(page);
     const row = page.getByTestId(`fleet-approval-row-${approval.id}`);
     await expect(row.getByTestId('fleet-approval-bash-deny')).toBeVisible();
-    // At 0 the panel stops offering a decision (D292). The 15 s sweep may already have replaced the panel with the
+    // At 0 the panel stops offering a decision (D292). The expiry sweep may already have replaced the panel with the
     // outcome (its live notice re-fetches the row), so either end state is accepted here.
     await expect(row.getByTestId('fleet-approval-bash-deny')).toHaveCount(0, { timeout: 45_000 });
     await expect(row.getByTestId('fleet-approval-bash-countdown').or(row.getByTestId('fleet-approval-outcome-decision'))).toBeVisible();
 
-    // The 15 s sweeper marks it expired; the reloaded row reads Expired, Timed out.
+    // The sweeper (FLEET_APPROVAL_SWEEP_MS, 2 s in e2e) marks it expired; the reloaded row reads Expired, Timed out.
     await expect.poll(async () => (await jobApprovals(token, SLUG, jobId))[0]?.status, { timeout: 45_000, ...POLL }).toBe('expired');
     await page.reload();
     await waitForHydration(page);

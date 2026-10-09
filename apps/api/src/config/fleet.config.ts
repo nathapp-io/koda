@@ -19,6 +19,8 @@ export interface IFleetConfig {
   syncWaitMs: number;
   /** In-process silence sweep (plan D11). */
   sweepEnabled: boolean;
+  /** Spec §2.4: approval-expiry sweep interval (ms); e2e shortens it (FLEET_APPROVAL_SWEEP_MS). */
+  approvalSweepMs: number;
   bundleMaxBytes: number;
   /** S2a §7: per stream per attempt cap. */
   logMaxBytes: number;
@@ -68,6 +70,7 @@ export class FleetConfigSchema {
   @IsOptional() @IsString() FLEET_JOB_CRASH_SEC: string;
   @IsOptional() @IsString() FLEET_SYNC_WAIT_MS: string;
   @IsOptional() @IsString() FLEET_SWEEP_ENABLED: string;
+  @IsOptional() @IsString() FLEET_APPROVAL_SWEEP_MS: string;
   @IsOptional() @IsString() FLEET_BUNDLE_MAX_BYTES: string;
   @IsOptional() @IsString() FLEET_LOG_MAX_BYTES: string;
   @IsOptional() @IsString() FLEET_LOG_CHUNK_MAX_BYTES: string;
@@ -114,6 +117,7 @@ export const fleetConfig = registerAs(FLEET_CFG, (): IFleetConfig => {
     jobCrashSec: int('FLEET_JOB_CRASH_SEC', 300),
     syncWaitMs: int('FLEET_SYNC_WAIT_MS', 25_000),
     sweepEnabled: sweep !== undefined ? sweep.toLowerCase() === 'true' : !isTest(),
+    approvalSweepMs: int('FLEET_APPROVAL_SWEEP_MS', 15_000),
     bundleMaxBytes: int('FLEET_BUNDLE_MAX_BYTES', 200 * 1024 * 1024),
     logMaxBytes: int('FLEET_LOG_MAX_BYTES', 256 * 1024 * 1024),
     logChunkMaxBytes: int('FLEET_LOG_CHUNK_MAX_BYTES', 1024 * 1024),

@@ -7,7 +7,6 @@ import { ApprovalCloser } from './approval-closer';
 import { ApprovalLivePublisher } from './approval-live.publisher';
 import { APPROVAL_REPOSITORY, FleetApprovalRecord, IApprovalRepository } from './domain/approval.domain';
 
-const SWEEP_INTERVAL_MS = 15_000;
 const MAX_PER_TICK = 100;
 
 export interface ApprovalExpiryResult { expired: number; failed: number }
@@ -24,14 +23,14 @@ export class ApprovalExpirySweeper implements OnModuleInit, OnModuleDestroy {
     private readonly closer: ApprovalCloser,
     private readonly live: ApprovalLivePublisher,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
-    @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'sweepEnabled'>,
+    @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'sweepEnabled' | 'approvalSweepMs'>,
   ) {}
 
   onModuleInit(): void {
     if (!this.fleetConfig.sweepEnabled) return;
     this.timer = setInterval(() => {
       this.tick().catch((error: unknown) => this.logger.error(`Approval expiry sweep failed: ${error instanceof Error ? error.message : String(error)}`));
-    }, SWEEP_INTERVAL_MS);
+    }, this.fleetConfig.approvalSweepMs);
     this.timer.unref();
   }
 

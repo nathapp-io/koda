@@ -21,6 +21,12 @@ on:
   # applies the same filter instead; the other jobs skip (= pass) without code changes.
   pull_request:
     branches: [main]
+
+# A new push to the same branch/PR cancels the superseded run instead of letting it
+# finish; only the latest run per ref keeps burning runners.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 env:
   TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
   TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
@@ -250,11 +256,13 @@ jobs:
           POSTGRES_DB: koda_test
         ports:
           - 5433:5432
+        # --tmpfs keeps Postgres on memory-backed storage (test data only), like docker-compose.test.yml locally.
         options: >-
           --health-cmd "pg_isready -U koda -d koda_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+          --tmpfs /var/lib/postgresql/data
     steps:
       - uses: actions/checkout@v4
 
@@ -294,32 +302,34 @@ jobs:
           # Explicit, so a broken service fails the job instead of falling back to Testcontainers.
           KODA_TEST_DATABASE_URL: postgresql://koda:koda@localhost:5433/koda_test
 
-      - name: Runner integration (Postgres, built API)
-        run: cd apps/runner && bun run test:integration
-        env:
-          KODA_DB_TESTS: "1"
-
-  # ─── Web e2e (Playwright, Postgres, built web) ─────────────────────────────
-  e2e:
-    name: e2e
+  # ─── Runner integration (Postgres, built API) ───────────────────────────────
+  # Runs in parallel with `integration`: the runner suite uses its own database
+  # (`koda_runner_test`, auto-created by `prisma migrate reset`; see
+  # apps/runner/test/integration/harness/database.ts), so it never contends with
+  # the API jest run on `koda_test`. NOTE: add `runner integration` to the
+  # required checks if the suite should gate merges.
+  runner-integration:
+    name: runner integration
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:16
         env:
           POSTGRES_USER: koda
           POSTGRES_PASSWORD: koda
-          POSTGRES_DB: koda_e2e
+          POSTGRES_DB: koda_test
         ports:
           - 5433:5432
+        # --tmpfs keeps Postgres on memory-backed storage (test data only), like docker-compose.test.yml locally.
         options: >-
-          --health-cmd "pg_isready -U koda -d koda_e2e"
+          --health-cmd "pg_isready -U koda -d koda_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+          --tmpfs /var/lib/postgresql/data
     steps:
       - uses: actions/checkout@v4
 
@@ -345,6 +355,69 @@ jobs:
       - name: Generate Prisma client
         run: bun run db:generate
 
+      # The runner suite spawns the built API (apps/api/dist) against koda_runner_test.
+      - name: Build API
+        run: bunx turbo run build --filter=@nathapp/koda-api
+
+      - name: Runner integration (Postgres, built API)
+        run: cd apps/runner && bun run test:integration
+        env:
+          KODA_DB_TESTS: "1"
+
+  # ─── Web e2e (Playwright, Postgres, built web) ─────────────────────────────
+  e2e:
+    name: e2e
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: koda
+          POSTGRES_PASSWORD: koda
+          POSTGRES_DB: koda_e2e
+        ports:
+          - 5433:5432
+        # --tmpfs keeps Postgres on memory-backed storage (test data only), like docker-compose.test.yml locally.
+        options: >-
+          --health-cmd "pg_isready -U koda -d koda_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+          --tmpfs /var/lib/postgresql/data
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Cache bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: bun run db:generate
+
+      # The Playwright API webServer runs `node dist/main.js` (E2E_API_MODE=dist)
+      # instead of `bunx nest start`, which recompiles the whole app on the
+      # webServer's critical path.
+      - name: Build API
+        run: bunx turbo run build --filter=@nathapp/koda-api
+
       - name: Build web
         run: bunx turbo run build --filter=@nathapp/koda-web
 
@@ -362,6 +435,7 @@ jobs:
         env:
           CI: "true"
           E2E_WEB_MODE: build
+          E2E_API_MODE: dist
           E2E_DATABASE_URL: postgresql://koda:koda@localhost:5433/koda_e2e
           # Dummy secrets for the e2e API only (env validation requires them).
           JWT_SECRET: e2e-jwt-secret-not-a-real-secret
@@ -395,11 +469,13 @@ jobs:
           POSTGRES_DB: koda_eval
         ports:
           - 5432:5432
+        # --tmpfs keeps Postgres on memory-backed storage (test data only), like docker-compose.test.yml locally.
         options: >-
           --health-cmd "pg_isready -U koda -d koda_eval"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+          --tmpfs /var/lib/postgresql/data
     steps:
       - uses: actions/checkout@v4
 
@@ -463,11 +539,13 @@ jobs:
           POSTGRES_DB: koda_smoke
         ports:
           - 5433:5432
+        # --tmpfs keeps Postgres on memory-backed storage (test data only), like docker-compose.test.yml locally.
         options: >-
           --health-cmd "pg_isready -U koda -d koda_smoke"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+          --tmpfs /var/lib/postgresql/data
     steps:
       - uses: actions/checkout@v4
 
