@@ -88,6 +88,7 @@ export const uiStubs: Record<string, unknown> = Object.fromEntries(
     ['TableRow', 'tr'], ['TableHead', 'th'], ['TableCell', 'td'],
     ['Badge', 'badge'], ['Button', 'button'], ['Input', 'input'], ['Label', 'label'],
     ['Textarea', 'textarea'],
+    ['Avatar', 'avatar'], ['AvatarFallback', 'avatar-fallback'], ['AvatarImage', 'avatar-image'],
     ['LoadingState', 'loading-state'], ['EmptyState', 'empty-state'],
     ['ErrorState', 'error-state'],
     ['Tabs', 'tabs'], ['TabsList', 'tabs-list'], ['TabsTrigger', 'tabs-trigger'], ['TabsContent', 'tabs-content'],

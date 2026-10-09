@@ -176,6 +176,8 @@
       "remove": "移除",
       "removeConfirm": "确定将 {email} 移出此项目？",
       "empty": "暂无成员。",
+      "disabledBadge": "已停用",
+      "roleLabel": "角色",
       "loadMore": "加载更多",
       "roles": {
         "ADMIN": "管理员",
@@ -296,6 +298,15 @@
       "userIdPlaceholder": "用户 ID",
       "assign": "指派",
       "unassign": "取消指派"
+    },
+    "assignee": {
+      "searchPlaceholder": "搜索人员或代理",
+      "group": {
+        "people": "人员",
+        "agents": "代理"
+      },
+      "pausedTag": "（已暂停）",
+      "empty": "暂无匹配的人员或代理"
     },
     "labels": {
       "select": "选择标签",

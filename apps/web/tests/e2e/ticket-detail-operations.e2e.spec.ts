@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import {
   login,
   createProject,
+  addProjectMember,
   createTicket,
   deleteProject,
   transitionTicket,
@@ -10,7 +11,6 @@ import {
 import { webLogin, confirmTransitionDialog, generateUniqueProjectKey } from './fixtures/page-helpers';
 
 const API_URL = process.env['E2E_API_URL'] ?? 'http://localhost:3102';
-const ASSIGN_REGEX = /^Assign$|^指派$/i;
 const CLOSE_REGEX = /^Close$|^关闭$/i;
 const DELETE_REGEX = /^Delete$|^删除$/i;
 const DELETE_TICKET_REGEX = /Delete Ticket|删除工单/i;
@@ -92,6 +92,10 @@ test.describe('Ticket Detail Operations', () => {
 
   test('sends assign, close, and delete ticket requests', async ({ page }) => {
     const title = `E2E Assign Close ${Date.now()}`;
+    // contract drift: the assignee picker (US-007) lists project members, so
+    // add the admin as a member first; the previous free-text user-id input
+    // accepted any userId.
+    await addProjectMember(token, projectSlug, E2E_ADMIN.email, 'DEVELOPER');
     const ticket = await createTicket(token, projectSlug, { title, type: 'BUG' });
     await transitionTicket(token, projectSlug, ticket.ref, 'verify', { body: 'verify for close action visibility' });
 
@@ -99,19 +103,16 @@ test.describe('Ticket Detail Operations', () => {
     // The page holds a live EventSource open, so 'networkidle' never settles.
     await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible({ timeout: 10000 });
     await waitForHydration(page);
-    const assigneeInput = page.getByPlaceholder(/User ID|用户 ID/i).first();
-    await assigneeInput.fill(userId);
-    await expect(assigneeInput).toHaveValue(userId);
-
-    // Wait for the Assign button to become enabled after filling input
-    const assignButton = page.locator('button', { hasText: ASSIGN_REGEX }).first();
-    await expect(assignButton).toBeEnabled({ timeout: 5000 });
+    const pickerInput = page.locator('[data-testid="assignee-search"]').first();
+    await pickerInput.fill(E2E_ADMIN.email);
+    const adminOption = page.locator(`[data-testid="assignee-option-${userId}"]`).first();
+    await expect(adminOption).toBeVisible({ timeout: 10000 });
 
     const assignRequest = page.waitForRequest(request =>
       request.method() === 'POST' &&
       request.url().includes(`/api/projects/${projectSlug}/tickets/${ticket.ref}/assign`)
     );
-    await assignButton.click();
+    await adminOption.click();
     await expect(assignRequest).resolves.toBeTruthy();
 
     const closeRequest = page.waitForRequest(request =>

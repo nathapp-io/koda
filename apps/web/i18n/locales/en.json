@@ -176,6 +176,8 @@
       "remove": "Remove",
       "removeConfirm": "Remove {email} from this project?",
       "empty": "No members yet.",
+      "disabledBadge": "Disabled",
+      "roleLabel": "Role",
       "loadMore": "Load more",
       "roles": {
         "ADMIN": "Admin",
@@ -296,6 +298,15 @@
       "userIdPlaceholder": "User ID",
       "assign": "Assign",
       "unassign": "Unassign"
+    },
+    "assignee": {
+      "searchPlaceholder": "Search people or agents",
+      "group": {
+        "people": "People",
+        "agents": "Agents"
+      },
+      "pausedTag": "(paused)",
+      "empty": "No matching people or agents"
     },
     "labels": {
       "select": "Select label",

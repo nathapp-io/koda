@@ -6,8 +6,11 @@ import { enI18n, uiStubs } from '../helpers/fleet-harness'
 const pickerFile = webFile('components', 'AssigneePicker.vue')
 const propertiesFile = webFile('components', 'TicketProperties.vue')
 const propertyStubs = { ...uiStubs, Select: uiStubs.Button, SelectTrigger: uiStubs.Button, SelectValue: uiStubs.Button, SelectContent: uiStubs.Button, SelectItem: uiStubs.Button }
+// Drain a microtask + the Vue scheduler. Jest 29's modern fake timers intercept
+// `setTimeout(resolve, 0)` after `advanceTimersByTime(...)` and never fire it,
+// so a microtask-based settle is what lets AC1 reach its asserts.
 const flush = async (): Promise<void> => {
-  await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  await Promise.resolve()
   await nextTick()
 }
 
@@ -28,11 +31,12 @@ describe('AssigneePicker and ticket assignment (US-007)', () => {
     await nextTick()
     jest.advanceTimersByTime(199)
     await nextTick()
-    expect(get).not.toHaveBeenCalled()
+    expect(get.mock.calls.some(([, args]) => (args as { query: { q: string } }).query.q === 'alice')).toBe(false)
     jest.advanceTimersByTime(1)
     await flush()
-    expect(get).toHaveBeenCalledTimes(1)
-    expect(get).toHaveBeenCalledWith('/projects/web/assignees', { query: { q: 'alice' } })
+    const aliceCalls = get.mock.calls.filter(([, args]) => (args as { query: { q: string } }).query.q === 'alice')
+    expect(aliceCalls).toHaveLength(1)
+    expect(aliceCalls[0]).toEqual(['/projects/web/assignees', { query: { q: 'alice' } }])
     app.unmount()
     jest.useRealTimers()
   })
@@ -74,11 +78,18 @@ describe('AssigneePicker and ticket assignment (US-007)', () => {
       components: propertyStubs,
       alias: { '~/components/TicketActionPanel.vue': { default: { render: () => null } } },
       globals: {
-        useApi: () => ({ $api: { post, get: jest.fn(async () => ({})), delete: jest.fn(async () => undefined) } }),
+        useApi: () => ({ $api: { post, get: jest.fn(async () => ({ items: [
+          { type: 'user', id: 'u1', name: 'Alice', secondary: 'alice@example.test' },
+          { type: 'agent', id: 'a1', name: 'Builder', secondary: 'builder', status: 'ACTIVE' },
+        ] })), delete: jest.fn(async () => undefined) } }),
         useI18n: () => ({ ...enI18n(), locale: ref('en') }), useAppToast: () => ({ success: jest.fn(), error: jest.fn() }),
         safeHref: (value: string) => value,
       },
     })
+    // contract drift: drain the initial `fetchAssignees('')` microtask before
+    // asserting on the rendered option — the spec asserts on DOM state after
+    // an async fetch resolves.
+    await flush()
     const choice = app.one(`[data-testid="assignee-option-${id}"]`)
     expect(choice).toBeDefined()
     const click = choice?.props.onClick
@@ -103,10 +114,14 @@ describe('AssigneePicker and ticket assignment (US-007)', () => {
       components: propertyStubs,
       alias: { '~/components/TicketActionPanel.vue': { default: { render: () => null } } },
       globals: {
-        useApi: () => ({ $api: { post, get: jest.fn(async () => ({})), delete: jest.fn(async () => undefined) } }),
+        useApi: () => ({ $api: { post, get: jest.fn(async () => ({ items: [
+          { type: 'user', id: 'u1', name: 'Alice', secondary: 'alice@example.test' },
+        ] })), delete: jest.fn(async () => undefined) } }),
         useI18n: () => ({ ...enI18n(), locale: ref('en') }), useAppToast: () => ({ success: jest.fn(), error: toastError }),
       },
     })
+    // See AC3/AC4: drain the initial fetch before asserting on DOM.
+    await flush()
     const choice = app.one('[data-testid="assignee-option-u1"]')
     expect(choice).toBeDefined()
     const click = choice?.props.onClick
