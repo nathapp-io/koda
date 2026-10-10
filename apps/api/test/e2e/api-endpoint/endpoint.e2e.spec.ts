@@ -3295,6 +3295,22 @@ describeIntegration('API Integration Tests', () => {
       },
     });
 
+    const liveSession = async (feature: string, over: Record<string, unknown> = {}) => {
+      const thread = await newThread(feature, over);
+      const runner = await db().runner.create({ data: {
+        name: `session-${thread.id}`, apiKeyHash: `session-hash-${thread.id}`, os: 'linux', arch: 'x64', labels: ['linux'],
+        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, threadBackends: { native: ['m1'], acp: [] } },
+        daemonVersion: '0.1.0', protocolVersion: 4, bootId: 'session-boot', lastSeenAt: new Date(), createdById: world.ids.root,
+      } });
+      await db().chatThread.update({ where: { id: thread.id }, data: { runnerId: runner.id } });
+      const job = await db().fleetJob.create({ data: {
+        projectId: thread.projectId, repoId: thread.repoId, ref: thread.baseRef, command: 'THREAD', feature: `thread-${thread.id}`,
+        profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, threadId: thread.id,
+        runnerId: runner.id, state: 'RUNNING', leaseEpoch: 7,
+      } });
+      return { thread, runner, job };
+    };
+
     it('US-004 AC5: creator send inserts a pending user message at sequence 1', async () => {
       const thread = await newThread('send-first');
       const res = await sendMessage(thread.id).expect(201);
@@ -3399,6 +3415,98 @@ describeIntegration('API Integration Tests', () => {
     it('US-004 access: refuses a message from a non-creator', async () => {
       const thread = await newThread('send-noncreator', { createdById: world.ids.root });
       await sendMessage(thread.id).expect(403);
+    });
+
+    it('US-007 AC2: stop returns the no-session conflict', async () => {
+      const thread = await newThread('stop-no-session');
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/stop`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(409);
+      threadMessage(res, 'threads.noSession.409');
+    });
+
+    it('US-007 AC4: end-session returns the no-session conflict', async () => {
+      const thread = await newThread('close-no-session');
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/end-session`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(409);
+      threadMessage(res, 'threads.noSession.409');
+    });
+
+    it('US-007 AC6: answer returns the no-question conflict without a session', async () => {
+      const thread = await newThread('answer-no-question');
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/answer`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({ requestId: 'q1', text: 'yes' }).expect(409);
+      threadMessage(res, 'threads.noQuestion.409');
+    });
+
+    it('US-007 AC7: creator updates the thread cost cap', async () => {
+      const thread = await newThread('patch-cap');
+      const res = await request(httpServer).patch(`/api/projects/${projectSlug}/threads/${thread.id}`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({ maxCostUsd: 10 }).expect(200);
+      expect(body<{ maxCostUsd: string }>(res).maxCostUsd).toBe('10');
+    });
+
+    it('US-007 AC1: stop queues a turn-stop command for the live runner epoch', async () => {
+      const { thread, runner, job } = await liveSession('stop-live');
+      await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/stop`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(200);
+      await expect(db().fleetCommand.findMany({ where: { jobId: job.id, type: 'THREAD_STOP_TURN' } })).resolves.toEqual([
+        expect.objectContaining({ runnerId: runner.id, leaseEpoch: 7, payload: {} }),
+      ]);
+    });
+
+    it('US-007 AC3: stop denies a developer who is not the creator', async () => {
+      const { thread } = await liveSession('stop-noncreator', { createdById: world.ids.root });
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/stop`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(403);
+      threadMessage(res, 'threads.notCreator.403');
+    });
+
+    it('US-007 AC4: end-session queues a close command for the live runner epoch', async () => {
+      const { thread, runner, job } = await liveSession('close-live');
+      await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/end-session`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(200);
+      await expect(db().fleetCommand.findMany({ where: { jobId: job.id, type: 'THREAD_CLOSE' } })).resolves.toEqual([
+        expect.objectContaining({ runnerId: runner.id, leaseEpoch: 7 }),
+      ]);
+    });
+
+    it('US-007 AC5: answer queues the matching pending question', async () => {
+      const { thread, runner, job } = await liveSession('answer-live', { pendingQuestion: { requestId: 'q1' } });
+      await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/answer`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({ requestId: 'q1', text: 'yes' }).expect(200);
+      await expect(db().fleetCommand.findMany({ where: { jobId: job.id, type: 'THREAD_ANSWER' } })).resolves.toEqual([
+        expect.objectContaining({ runnerId: runner.id, leaseEpoch: 7, payload: { requestId: 'q1', text: 'yes' } }),
+      ]);
+    });
+
+    it('US-007 AC6: answer rejects a different pending question', async () => {
+      const { thread } = await liveSession('answer-mismatch', { pendingQuestion: { requestId: 'q1' } });
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/answer`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({ requestId: 'q2', text: 'yes' }).expect(409);
+      threadMessage(res, 'threads.noQuestion.409');
+    });
+
+    it('US-007 AC8: creator archives a running thread and requests cancellation', async () => {
+      const { thread, job } = await liveSession('archive-thread');
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/archive`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(200);
+      expect(body<{ status: string }>(res).status).toBe('ARCHIVED');
+      expect(await db().fleetJob.findUniqueOrThrow({ where: { id: job.id } })).toEqual(expect.objectContaining({ cancelRequestedAt: expect.any(Date) }));
+      expect(await db().fleetCommand.count({ where: { jobId: job.id, type: 'CANCEL' } })).toBe(1);
+    });
+
+    it('US-007 AC9: project admin can archive another creator thread', async () => {
+      const thread = await newThread('archive-admin', { createdById: world.ids.dev });
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/archive`)
+        .set('Authorization', `Bearer ${world.tokens.root}`).send({}).expect(200);
+      expect(body<{ status: string }>(res).status).toBe('ARCHIVED');
+    });
+
+    it('US-007 AC10: developer cannot archive another creator thread', async () => {
+      const thread = await newThread('archive-noncreator', { createdById: world.ids.root });
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/archive`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(403);
+      threadMessage(res, 'threads.notCreator.403');
     });
   });
 });
