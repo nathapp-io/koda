@@ -47,6 +47,7 @@ describeDb('US-005 thread send HTTP guards', () => {
     config.threadsEnabled = true;
   }, 30_000);
 
+  afterEach(async () => { await db.runner.deleteMany({ where: { name: { in: ['offline-send-guard', 'old-protocol-guard', 'closing-runner'] } } }); });
   afterAll(async () => { if (app) await app.close(); });
 
   const makeThread = (over: Record<string, unknown> = {}) => db.chatThread.create({ data: {
@@ -65,7 +66,7 @@ describeDb('US-005 thread send HTTP guards', () => {
       profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, state: 'CRASHED', threadId: thread.id,
     } });
     const res = await request(httpServer).post(`/api/projects/web/fleet/jobs/${job.id}/requeue`).set('Authorization', `Bearer ${world.tokens.dev}`).send().expect(409);
-    expect(res.body.message).toContain('Job cannot be requeued');
+    expect(res.body.message).toContain('The job is CRASHED');
     expect((await db.fleetJob.findUniqueOrThrow({ where: { id: job.id } })).state).toBe('CRASHED');
   });
 
