@@ -3104,7 +3104,7 @@ describeIntegration('API Integration Tests', () => {
       }
     };
     const createThread = (feature: string, token = world.tokens.dev) => request(httpServer)
-      .post('/api/projects/web/threads')
+      .post(`/api/projects/${projectSlug}/threads`)
       .set('Authorization', `Bearer ${token}`)
       .send({ repoId: world.repoId, feature, title: feature, backend: { kind: 'native' } });
 
@@ -3146,6 +3146,7 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('US-003 AC2: snapshots only enabled skills with the source SHA', async () => {
+      await db().projectSkill.deleteMany({ where: { projectId: world.projectId } });
       const source = await db().skillSource.create({ data: {
         gitUrl: 'https://github.com/acme/thread-skills', owner: 'acme', repo: 'thread-skills', ref: 'main', path: '',
         resolvedSha: 'sha-thread-skills', status: 'OK', createdById: world.ids.root,
@@ -3203,13 +3204,13 @@ describeIntegration('API Integration Tests', () => {
 
     it('US-003 AC8: rejects a feature outside the feature naming format', async () => {
       const res = await createThread('Add Auth').expect(400);
-      refusal(res, 'threads.input.400');
+      refusal(res, 'threads.input.400', { reason: 'feature' });
     });
 
     it('US-003 AC9: rejects an unsupported ACP backend agent', async () => {
-      const res = await request(httpServer).post('/api/projects/web/threads').set('Authorization', `Bearer ${world.tokens.dev}`)
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads`).set('Authorization', `Bearer ${world.tokens.dev}`)
         .send({ repoId: world.repoId, feature: 'bad-backend', title: 'Bad backend', backend: { kind: 'acp', agent: 'gemini' } }).expect(400);
-      refusal(res, 'threads.input.400');
+      refusal(res, 'threads.input.400', { reason: 'backend' });
     });
 
     it('US-003 AC10: rejects a second active thread for the same repo and feature', async () => {
@@ -3219,10 +3220,9 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('US-003 AC11: returns not found for a repo belonging to another project', async () => {
-      const res = await request(httpServer).post('/api/projects/web/threads').set('Authorization', `Bearer ${world.tokens.dev}`)
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads`).set('Authorization', `Bearer ${world.tokens.dev}`)
         .send({ repoId: world.foreignRepoId, feature: 'foreign-repo', title: 'Foreign repo', backend: { kind: 'native' } }).expect(404);
-      expect(res.body).toHaveProperty('ret');
-      expect(res.body.message).not.toBe('Cannot POST /api/projects/web/threads');
+      refusal(res, 'fleet.repos.404');
     });
 
     it('US-003 AC12: lists project threads for a viewer ordered by recent activity', async () => {
@@ -3232,7 +3232,7 @@ describeIntegration('API Integration Tests', () => {
       await db().chatThread.update({ where: { id: newer.id }, data: { lastActivityAt: new Date('2021-01-01T00:00:00Z') } });
       await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.viewer } }, data: { role: 'VIEWER' } });
       try {
-        const res = await request(httpServer).get('/api/projects/web/threads').set('Authorization', `Bearer ${world.tokens.viewer}`).expect(200);
+        const res = await request(httpServer).get(`/api/projects/${projectSlug}/threads`).set('Authorization', `Bearer ${world.tokens.viewer}`).expect(200);
         const items = body<Array<{ id: string }>>(res);
         expect(items.findIndex((item) => item.id === newer.id)).toBeLessThan(items.findIndex((item) => item.id === older.id));
       } finally {
@@ -3242,13 +3242,13 @@ describeIntegration('API Integration Tests', () => {
 
     it('US-003 AC12: returns not found when listing threads for an unknown project', async () => {
       const res = await request(httpServer).get('/api/projects/no-such-project/threads').set('Authorization', `Bearer ${world.tokens.dev}`).expect(404);
-      expect(res.body.message).not.toBe('Cannot GET /api/projects/no-such-project/threads');
+      expect(res.body.message).toBe('Project not found');
     });
 
     it('US-003 AC13: gets a thread while the feature kill switch is disabled', async () => {
       config().threadsEnabled = false;
       try {
-        const res = await request(httpServer).get(`/api/projects/web/threads/${threadId}`).set('Authorization', `Bearer ${world.tokens.dev}`).expect(200);
+        const res = await request(httpServer).get(`/api/projects/${projectSlug}/threads/${threadId}`).set('Authorization', `Bearer ${world.tokens.dev}`).expect(200);
         expect(body<{ id: string }>(res).id).toBe(threadId);
       } finally {
         config().threadsEnabled = true;
@@ -3260,7 +3260,7 @@ describeIntegration('API Integration Tests', () => {
         projectId: world.opsProjectId, repoId: world.foreignRepoId, baseRef: 'main', feature: 'foreign-thread', title: 'Foreign',
         createdById: world.ids.root, backend: { kind: 'native' }, skills: [], specPath: '.nax/features/foreign-thread/spec.md',
       } });
-      const res = await request(httpServer).get(`/api/projects/web/threads/${foreignThread.id}`).set('Authorization', `Bearer ${world.tokens.dev}`).expect(404);
+      const res = await request(httpServer).get(`/api/projects/${projectSlug}/threads/${foreignThread.id}`).set('Authorization', `Bearer ${world.tokens.dev}`).expect(404);
       threadMessage(res, 'threads.notFound.404');
     });
 
@@ -3270,13 +3270,13 @@ describeIntegration('API Integration Tests', () => {
         createdById: world.ids.dev, backend: { kind: 'native' }, skills: [], specPath: '.nax/features/messages-thread/spec.md',
       } });
       await db().chatMessage.createMany({ data: [1, 2, 3].map((seq) => ({ threadId: thread.id, seq, role: 'user', authorUserId: world.ids.dev, content: `message-${seq}`, status: 'complete' })) });
-      const res = await request(httpServer).get(`/api/projects/web/threads/${thread.id}/messages?afterSeq=1`).set('Authorization', `Bearer ${world.tokens.dev}`).expect(200);
+      const res = await request(httpServer).get(`/api/projects/${projectSlug}/threads/${thread.id}/messages?afterSeq=1`).set('Authorization', `Bearer ${world.tokens.dev}`).expect(200);
       expect(body<{ items: Array<{ seq: number }> }>(res).items.map((message) => message.seq)).toEqual([2, 3]);
     });
 
     it('US-003 AC15: returns not found for messages on an unknown thread', async () => {
-      const res = await request(httpServer).get('/api/projects/web/threads/no-such-thread/messages').set('Authorization', `Bearer ${world.tokens.dev}`).expect(404);
-      expect(res.body.message).not.toBe('Cannot GET /api/projects/web/threads/no-such-thread/messages');
+      const res = await request(httpServer).get(`/api/projects/${projectSlug}/threads/no-such-thread/messages`).set('Authorization', `Bearer ${world.tokens.dev}`).expect(404);
+      threadMessage(res, 'threads.notFound.404');
     });
   });
 });

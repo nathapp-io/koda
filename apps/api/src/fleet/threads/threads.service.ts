@@ -28,7 +28,7 @@ export class ThreadsService {
     try {
       return await this.threads.create({ projectId, repoId: repo.id, baseRef: normalized.baseRef, feature: normalized.feature, title: normalized.title, createdById: userId, backend: normalized.backend, skills, maxCostUsd: normalized.maxCostUsd });
     } catch (error) {
-      if (isUniqueViolation(error, 'repoId') && isUniqueViolation(error, 'feature')) throw new ConflictAppException({ feature: normalized.feature }, 'threads.featureTaken');
+      if (isUniqueViolation(error, 'repo_feature')) throw new ConflictAppException({ feature: normalized.feature }, 'threads.featureTaken');
       throw error;
     }
   }

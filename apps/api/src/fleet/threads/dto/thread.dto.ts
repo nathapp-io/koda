@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { Allow } from 'class-validator';
 import type { ThreadSkillSource } from '../../../skills/skill-catalog.domain';
 import type { ThreadBackend } from '../../common/thread-jobs';
 
@@ -43,10 +44,10 @@ export class ChatMessageDto {
 }
 
 export class CreateThreadDto {
-  @ApiProperty() repoId: string;
-  @ApiProperty() feature: string;
-  @ApiProperty({ required: false }) baseRef?: string;
-  @ApiProperty() title: string;
-  @ApiProperty({ required: false }) maxCostUsd?: number;
-  @ApiProperty({ type: 'object', additionalProperties: true }) backend: ThreadBackend;
+  @Allow() @ApiProperty() repoId: string;
+  @Allow() @ApiProperty() feature: string;
+  @Allow() @ApiProperty({ required: false }) baseRef?: string;
+  @Allow() @ApiProperty() title: string;
+  @Allow() @ApiProperty({ required: false }) maxCostUsd?: number;
+  @Allow() @ApiProperty({ type: 'object', additionalProperties: true }) backend: ThreadBackend;
 }
