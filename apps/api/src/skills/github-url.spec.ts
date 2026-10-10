@@ -44,8 +44,18 @@ describe('parseGitHubUrl (US-001)', () => {
     expect(parseGitHubUrl('https://github.com/acme/widgets.git/')).toMatchObject({ repo: 'widgets' });
   });
 
+  it('strips an uppercase .GIT suffix and returns the bare repo name', () => {
+    expect(parseGitHubUrl('https://github.com/acme/widgets.GIT')).toEqual({
+      owner: 'acme',
+      repo: 'widgets',
+      gitUrl: 'https://github.com/acme/widgets',
+    });
+  });
+
   it.each([
     ['a repo that is only ".git"', 'https://github.com/acme/.git'],
+    ['a repo that is only ".Git"', 'https://github.com/acme/.Git'],
+    ['a repo that is only ".GIT"', 'https://github.com/acme/.GIT'],
     ['a repo of "."', 'https://github.com/acme/.'],
     ['an owner of ".."', 'https://github.com/../widgets'],
     ['a missing repo', 'https://github.com/acme'],

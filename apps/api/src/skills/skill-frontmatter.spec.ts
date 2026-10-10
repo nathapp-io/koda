@@ -78,6 +78,23 @@ describe('parseSkillFrontmatter (US-001)', () => {
     expectInvalidSkill('---\nname: spec-review\ndescription: |\n  Review a spec\n---\n');
   });
 
+  it('rejects a block-scalar description with an indentation indicator (">2") with invalid_skill', () => {
+    expectInvalidSkill('---\nname: spec-review\ndescription: >2\n  Review a spec\n---\n');
+  });
+
+  it('keeps a single-line description that starts with ">" or "|"', () => {
+    expect(parseSkillFrontmatter('---\nname: spec-review\ndescription: >hello\n---\n').description).toBe('>hello');
+    expect(parseSkillFrontmatter('---\nname: spec-review\ndescription: |pipe\n---\n').description).toBe('|pipe');
+  });
+
+  it('truncates a description on a code-point boundary, never splitting a surrogate pair', () => {
+    // 1023 ASCII characters then an astral emoji (two UTF-16 units): a naive slice(0, 1024) keeps a lone high surrogate.
+    const description = `${'a'.repeat(1023)}😀tail`;
+    const result = parseSkillFrontmatter(`---\nname: spec-review\ndescription: ${description}\n---\n`).description;
+    expect(result).toBe(`${'a'.repeat(1023)}😀`);
+    expect(result.isWellFormed()).toBe(true);
+  });
+
   it('AC-11: rejects a frontmatter with a name and no description with invalid_skill', () => {
     expectInvalidSkill('---\nname: spec-review\n---\n');
   });

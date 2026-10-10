@@ -2,6 +2,8 @@ import { SkillResolveError } from './skill-resolver';
 
 const NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const MAX_DESCRIPTION_LENGTH = 1024;
+/** A YAML block-scalar header alone on the line: `>` or `|` with optional chomping (`+`/`-`) and indent (digit) indicators. */
+const BLOCK_SCALAR_HEADER = /^[>|](?:[+-]\d?|\d[+-]?)?$/;
 
 /**
  * Reads `name` and `description` from a SKILL.md frontmatter block. Only single-line scalars are
@@ -21,7 +23,7 @@ export function parseSkillFrontmatter(text: string): { name: string; description
   const description = scalar(block, 'description');
   if (description === undefined || description === '') throw invalidSkill();
 
-  return { name, description: description.slice(0, MAX_DESCRIPTION_LENGTH) };
+  return { name, description: truncateCodePoints(description, MAX_DESCRIPTION_LENGTH) };
 }
 
 /** Strips a leading UTF-8 BOM and normalizes CRLF line endings. */
@@ -39,8 +41,13 @@ function scalar(block: string[], key: string): string | undefined {
   if (line === undefined) return undefined;
 
   const raw = line.slice(prefix.length).trim();
-  if (raw === '>' || raw === '|' || raw.startsWith('>') || raw.startsWith('|')) throw invalidSkill();
+  if (BLOCK_SCALAR_HEADER.test(raw)) throw invalidSkill();
   return unquote(raw);
+}
+
+/** First `max` code points, so a surrogate pair is never cut in half. */
+function truncateCodePoints(value: string, max: number): string {
+  return Array.from(value).slice(0, max).join('');
 }
 
 function unquote(value: string): string {
