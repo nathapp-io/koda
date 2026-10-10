@@ -12,5 +12,5 @@
   "turnRunning": { "409": "A thread turn is already running" },
   "noSession": { "409": "Thread has no active session" },
   "noQuestion": { "409": "Thread has no pending question" },
-  "notCreator": { "403": "Only the thread creator can perform this action" }
+  "notCreator": { "403": "Only the thread creator can perform this action", "40003": "Only the thread creator can perform this action" }
 }

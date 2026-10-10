@@ -1,6 +1,5 @@
 import type { ThreadSkillSource } from '../../../skills/skill-catalog.domain';
 import type { ThreadBackend } from '../../common/thread-jobs';
-import type { FleetCommandRecord, FleetJobRecord } from '../../jobs/domain/fleet-job.domain';
 
 export const CHAT_THREAD_REPOSITORY = Symbol('CHAT_THREAD_REPOSITORY');
 
@@ -25,8 +24,6 @@ export interface ChatThreadRepository {
   messages(threadId: string, afterSeq: number, limit: number): Promise<ChatMessageRecord[]>;
   sendMessage(input: { projectId: string; threadId: string; userId: string; text: string; clientMessageId: string }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }>;
   replaceCommandPayload(commandId: string, payload: unknown): Promise<void>;
-  applyInputAck(command: FleetCommandRecord, result: string, detail: string): Promise<void>;
-  applyJobEnded(job: FleetJobRecord): Promise<void>;
   archivedThreadIds(runnerId: string): Promise<string[]>;
   updateCap(projectId: string, threadId: string, userId: string, maxCostUsd: string): Promise<ChatThreadRecord>;
   command(projectId: string, threadId: string, userId: string, type: string, payload: object): Promise<void>;

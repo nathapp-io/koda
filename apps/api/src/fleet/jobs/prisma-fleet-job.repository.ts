@@ -167,7 +167,7 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     const rows = await this.db.runner.findMany({
       where: ids ? { id: { in: [...ids] } } : {},
       orderBy: { id: 'asc' },
-      select: { id: true, name: true, enabled: true, lastSeenAt: true, labels: true, capacity: true, capabilities: true, bootId: true, protocolVersion: true, threadCapacity: true },
+      select: { id: true, name: true, enabled: true, lastSeenAt: true, bootedAt: true, labels: true, capacity: true, capabilities: true, bootId: true, protocolVersion: true, threadCapacity: true },
     });
     // Stored capabilities were validated by parseCapabilities at enroll/sync time.
     return rows.map((r) => ({ ...r, capabilities: r.capabilities as unknown as RunnerCapabilities }));

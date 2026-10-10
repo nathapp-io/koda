@@ -37,6 +37,8 @@ export interface PlacementRunner {
   name: string;
   enabled: boolean;
   lastSeenAt: Date;
+  /** Set for runners created by enrollment; legacy/test rows may have no observed boot. */
+  bootedAt?: Date | null;
   labels: readonly string[];
   capacity: number;
   capabilities: RunnerCapabilities;
@@ -101,7 +103,7 @@ export function firstMisfit(job: PlacementJob, runner: PlacementRunner, load: Ru
   // Fleet S3 D470: config jobs spend nothing, so a runner's budget pause does not hold them.
   if (runner.budgetPaused && !isConfigKind(job.command)) return 'budget_paused';
   if (job.pinnedRunnerId === null && !job.selectorLabels.every((label) => runner.labels.includes(label))) return 'labels';
-  if (!runner.capabilities.executors.includes('host')) return 'executor';
+  if (!runner.capabilities.executors?.includes('host')) return 'executor';
   if (isThreadKind(job.command)) {
     if (!job.thread?.enabled) return 'threads_disabled';
     if ((runner.protocolVersion ?? 0) < 4) return 'protocol';
@@ -121,11 +123,12 @@ export function firstMisfit(job: PlacementJob, runner: PlacementRunner, load: Ru
   return null;
 }
 
-/** Spec §4 step 4: fewest active jobs, then oldest lastSeenAt; id breaks ties deterministically. */
+/** Spec §4 step 4: fewest active jobs, then observed boots, protocol, oldest lastSeenAt, and id. */
 export function orderCandidates<T extends { runner: PlacementRunner; load: RunnerLoad }>(fits: readonly T[]): T[] {
   return [...fits].sort(
     (a, b) =>
       a.load.active - b.load.active ||
+      Number(b.runner.bootedAt !== null && b.runner.bootedAt !== undefined) - Number(a.runner.bootedAt !== null && a.runner.bootedAt !== undefined) ||
       a.runner.lastSeenAt.getTime() - b.runner.lastSeenAt.getTime() ||
       a.runner.id.localeCompare(b.runner.id),
   );
