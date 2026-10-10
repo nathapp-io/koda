@@ -138,12 +138,16 @@ export const FleetJobState = {
 } as const;
 export type FleetJobState = (typeof FleetJobState)[keyof typeof FleetJobState];
 
-/** Fleet S1: FleetJob.command. S3 adds the config kinds (spec §1). */
-export const FleetJobKind = { RUN: 'RUN', PLAN: 'PLAN', CONFIG_EDIT: 'CONFIG_EDIT', CONFIG_DRIFT: 'CONFIG_DRIFT' } as const;
+/** Fleet S1: FleetJob.command. S3 adds the config kinds (spec §1); S5a adds THREAD. */
+export const FleetJobKind = { RUN: 'RUN', PLAN: 'PLAN', CONFIG_EDIT: 'CONFIG_EDIT', CONFIG_DRIFT: 'CONFIG_DRIFT', THREAD: 'THREAD' } as const;
 export type FleetJobKind = (typeof FleetJobKind)[keyof typeof FleetJobKind];
 
 /** Fleet S1: FleetCommand.type. */
-export const FleetCommandType = { ASSIGN: 'ASSIGN', CANCEL: 'CANCEL', READOPT: 'READOPT', ABANDON: 'ABANDON', /** S1.5 §3: a human's answer to a relayed nax bash ask. */ APPROVAL_ANSWER: 'APPROVAL_ANSWER' } as const;
+export const FleetCommandType = {
+  ASSIGN: 'ASSIGN', CANCEL: 'CANCEL', READOPT: 'READOPT', ABANDON: 'ABANDON', /** S1.5 §3: a human's answer to a relayed nax bash ask. */ APPROVAL_ANSWER: 'APPROVAL_ANSWER',
+  /** S5a: thread commands (THREAD_PUBLISH is declared, not queued before phase C). */
+  THREAD_INPUT: 'THREAD_INPUT', THREAD_ANSWER: 'THREAD_ANSWER', THREAD_STOP_TURN: 'THREAD_STOP_TURN', THREAD_CLOSE: 'THREAD_CLOSE', THREAD_PUBLISH: 'THREAD_PUBLISH',
+} as const;
 export type FleetCommandType = (typeof FleetCommandType)[keyof typeof FleetCommandType];
 
 /** Fleet S1: FleetCommand.ackResult. `withdrawn` and `stale` are server-set (plan D4, D8). */

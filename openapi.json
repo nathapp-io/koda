@@ -12540,7 +12540,8 @@
               "RUN",
               "PLAN",
               "CONFIG_EDIT",
-              "CONFIG_DRIFT"
+              "CONFIG_DRIFT",
+              "THREAD"
             ],
             "type": "string"
           },

@@ -28,7 +28,7 @@ export class FleetJobDto {
   @ApiProperty() declare projectId: string;
   @ApiProperty() declare repoId: string;
   @ApiProperty() declare ref: string;
-  @ApiProperty({ enum: ['RUN', 'PLAN', 'CONFIG_EDIT', 'CONFIG_DRIFT'] }) declare command: 'RUN' | 'PLAN' | 'CONFIG_EDIT' | 'CONFIG_DRIFT';
+  @ApiProperty({ enum: ['RUN', 'PLAN', 'CONFIG_EDIT', 'CONFIG_DRIFT', 'THREAD'] }) declare command: 'RUN' | 'PLAN' | 'CONFIG_EDIT' | 'CONFIG_DRIFT' | 'THREAD';
   @ApiProperty() declare feature: string;
   @ApiPropertyOptional({ type: String, nullable: true }) declare planFrom: string | null;
   @ApiProperty({ type: [String] }) declare profiles: string[];
