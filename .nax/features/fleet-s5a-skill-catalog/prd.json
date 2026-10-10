@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-skill-catalog",
   "branchName": "feat/fleet-s5a-skill-catalog",
   "createdAt": "2026-10-10T00:00:00.000Z",
-  "updatedAt": "2026-10-10T04:49:54.333Z",
+  "updatedAt": "2026-10-10T05:29:43.182Z",
   "userStories": [
     {
       "id": "US-001",
@@ -180,8 +180,8 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -272,7 +272,10 @@
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Transactional in-place replacement preserving ids and cascades plus conflict atomicity; global-ADMIN access control is security-critical, so the security override applies."
+        "reasoning": "Transactional in-place replacement preserving ids and cascades plus conflict atomicity; global-ADMIN access control is security-critical, so the security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/skills/skills.service.ts",
@@ -303,7 +306,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "4817c547df1a274307f4f1590510876c8472f86a"
     },
     {
       "id": "US-005",

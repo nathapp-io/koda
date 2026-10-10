@@ -2907,4 +2907,75 @@ describeIntegration('API Integration Tests', () => {
         .expect(400);
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────
+  // US-004 Skill source update + delete — admin routes
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('US-004 Skill source update & delete', () => {
+    it('POST /api/admin/skills/sources/:id/update — 200 with the booted app resolver spied', async () => {
+      const resolver = app.get<SkillResolver>(SKILL_RESOLVER, { strict: false });
+      const resolve = jest.spyOn(resolver, 'resolve');
+      try {
+        resolve.mockResolvedValueOnce({ sha: 's1', skills: [{ name: 'e2e-update-skill', description: 'old', dir: 'skills/a' }] });
+        const created = body<{ id: string }>(
+          await request(httpServer)
+            .post('/api/admin/skills/sources')
+            .set('Authorization', `Bearer ${userAccessToken}`)
+            .send({ gitUrl: 'https://github.com/NathApp-IO/e2e-update-skills.git', ref: 'main', path: '' })
+            .expect(201),
+        );
+
+        resolve.mockResolvedValueOnce({ sha: 's2', skills: [{ name: 'e2e-update-skill', description: 'new', dir: 'skills/a' }] });
+        const res = await request(httpServer)
+          .post(`/api/admin/skills/sources/${created.id}/update`)
+          .set('Authorization', `Bearer ${userAccessToken}`)
+          .expect(200);
+
+        expect(body<{ status: string; resolvedSha: string }>(res)).toMatchObject({ status: 'OK', resolvedSha: 's2' });
+      } finally {
+        if (resolver) resolve.mockRestore();
+      }
+    });
+
+    it('POST /api/admin/skills/sources/:id/update — 404 for an unknown id', async () => {
+      const res = await request(httpServer)
+        .post('/api/admin/skills/sources/e2e-unknown-source-id/update')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(404);
+
+      refusal(res, 'skills.sourceNotFound.404');
+    });
+
+    it('DELETE /api/admin/skills/sources/:id — 204 for a global admin', async () => {
+      const resolver = app.get<SkillResolver>(SKILL_RESOLVER, { strict: false });
+      const resolve = jest.spyOn(resolver, 'resolve');
+      try {
+        resolve.mockResolvedValueOnce({ sha: 's1', skills: [{ name: 'e2e-delete-skill', description: 'd', dir: 'skills/a' }] });
+        const created = body<{ id: string }>(
+          await request(httpServer)
+            .post('/api/admin/skills/sources')
+            .set('Authorization', `Bearer ${userAccessToken}`)
+            .send({ gitUrl: 'https://github.com/NathApp-IO/e2e-delete-skills.git', ref: 'main', path: '' })
+            .expect(201),
+        );
+
+        await request(httpServer)
+          .delete(`/api/admin/skills/sources/${created.id}`)
+          .set('Authorization', `Bearer ${userAccessToken}`)
+          .expect(204);
+      } finally {
+        if (resolver) resolve.mockRestore();
+      }
+    });
+
+    it('DELETE /api/admin/skills/sources/:id — 404 for an unknown id', async () => {
+      const res = await request(httpServer)
+        .delete('/api/admin/skills/sources/e2e-unknown-source-id')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(404);
+
+      refusal(res, 'skills.sourceNotFound.404');
+    });
+  });
 });
