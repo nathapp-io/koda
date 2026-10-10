@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-core",
   "branchName": "feat/fleet-s5a-thread-core",
   "createdAt": "2026-10-10T00:00:00.000Z",
-  "updatedAt": "2026-10-10T08:58:48.405Z",
+  "updatedAt": "2026-10-10T09:28:13.405Z",
   "userStories": [
     {
       "id": "US-001",
@@ -37,7 +37,10 @@
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Additive contract types, runtime mirror and strict parser following existing config-jobs/approvals patterns; spans package plus API files but no new abstractions."
+        "reasoning": "Additive contract types, runtime mirror and strict parser following existing config-jobs/approvals patterns; spans package plus API files but no new abstractions.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "packages/fleet-protocol/src/index.ts",
@@ -65,7 +68,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "aebed7bcd07ba9a47b5e9d564c549a088bc5b5fb"
     },
     {
       "id": "US-002",
@@ -142,7 +149,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -222,7 +232,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -295,7 +308,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -354,7 +370,10 @@
         "POST /api/projects/:slug/fleet/jobs/:id/requeue on a CRASHED RUN job still requeues it as before"
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -416,7 +435,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -489,7 +511,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "Feature B1 of fleet S5a phase B: API-only core of brainstorm threads. All stories are workdir apps/api, except US-001 also touches packages/fleet-protocol (type-only consumers in the API; apps/api production code must use `import type` from the package, pinned by protocol.spec.ts, so runtime values are mirrored in apps/api/src/fleet/common/thread-jobs.ts as config-jobs.ts mirrors packages/fleet-protocol/src/config-jobs.ts; specs import the package at runtime to pin parity).\n\nKEY EXISTING CODE (verified on main 2969dcf4): FleetJobsService.cancel (apps/api/src/fleet/jobs/fleet-jobs.service.ts:140); BudgetGate.assertNotPaused (budgets/budget-gate.ts:16) + jobGateKeys (budgets/budget-rules.ts); isRunnerOnline (fleet/common/runner-online.ts); RunnerNotifier.notify (jobs/runner-notifier.ts); FEATURE_RE/GIT_REF_RE (jobs/dispatch-input.ts:9-11); controller pattern in fleet/jobs/fleet-jobs.controller.ts (ProjectMembershipGuard, @ProjectPermission, @CurrentProject, isUserPrincipal, casl.createForUser(withProjectRole(...))); config-job pattern (job + 1:1 input row in one tx, then placement.placeJob) in fleet/repo-config/config-jobs.service.ts:117-149; store-module precedent in fleet/schedules/schedule-store.module.ts (ApprovalStoreModule, BudgetStoreModule, ScheduleStoreModule); placement in jobs/placement-rules.ts (PlacementJob:22, PlacementRunner:32, RunnerLoad:45, MisfitReason:8, firstMisfit:92) and jobs/placement.service.ts (fillRunner:101); sync in sync/sync.service.ts:50; acks in sync/command-ack.processor.ts:48; terminal hooks in jobs/job-transitions.service.ts:42; outcome recorder jobs/job-outcome.recorder.ts:21; sweeper sync/fleet-sweeper.ts:48; dashboard misfits dashboard/dashboard.types.ts:109 and dashboard/attention-unplaceable.ts.\n\nBINDING RULINGS: D541 members read all threads, only the creator acts (send, stop, end session, answer, raise cap), archive is creator or project ADMIN (ctx.role==='ADMIN', includes global ADMIN); agent API keys refused 403 threads.principal on every thread route via one assertUser per handler. B1-R1 thread slots are counted by the server (v4 sync carries no freeThreadSlots; assign QUEUED THREAD jobs up to Runner.threadCapacity minus live THREAD jobs; threadCapacity server-only via admin PATCH). B1-R2 package FLEET_PROTOCOL_VERSION stays 3; API accepts 4. B1-R3 paused budget -> existing 409 fleet.budgetPaused. B1-R4 THREAD jobs never enqueue fleet_job_outcome. B1-R5 FLEET_THREADS_ENABLED default false, read from fleetConfig.threadsEnabled on EVERY request (never cached at construction) so integration suites toggle app.get(FLEET_CFG).threadsEnabled.\n\nLOCK ORDER (every thread write: send, stop, end session, answer, cap, archive, ThreadJobEffects): job, then thread. Read the thread's current job id without a lock, lockById the job, then SELECT ... FOR UPDATE the ChatThread row, then re-read the current job; if changed release and retry once, then 409 threads.turnRunning. JobTransitionsService.apply already holds the job lock when calling ThreadJobEffects.onJobEnded, which then locks the thread, so orders agree.\n\nSEND CHECK ORDER is implemented once as pure sendRefusal(state) in thread-send-rules.ts (US-005) and the service throws the matching exception. US-004 builds the send happy path (message insert with seq from UPDATE ... nextSeq+1 RETURNING, THREAD job + FleetThreadTurn in one tx, or THREAD_INPUT FleetCommand for a live session); US-005 adds the ordered guards and requeue refusal.\n\nPLACEMENT: THREAD is its own load class (RunnerLoad.threads); toLoads puts held THREAD refs (ActiveJobRef.command) into threads only, so non-THREAD busy_repo/capacity ignore them. New optional fields (RunnerLoad.threads, PlacementRunner.protocolVersion/threadCapacity, ActiveJobRef.command, PlacementJob.thread) keep existing spec literals compiling. fillRunner skips THREAD jobs; fillRunnerThreads(runnerId, now) locks the runner and assigns QUEUED THREAD jobs within QUEUED_SCAN_LIMIT; SyncService.sync calls it for protocolVersion >= 4 regardless of freeSlots. assign passes ThreadAssign to buildAssignPayload and pinThreadRunner in the same tx after a successful casAssign.\n\nTEST INFRA: integration suites build schema from schema.prisma via prisma db push (cannot create partial indexes) so PARTIAL_UNIQUE_INDEXES in apps/api/test/helpers/partial-indexes.ts must gain the ChatThread partial unique index verbatim as in the migration (pinned by a unit spec under apps/api/test/unit/fleet). testFleetConfig (apps/api/src/common/test-helpers/fleet-config.ts) must gain threadsEnabled:false or type-check fails. protocol.spec.ts literals (kinds, commands Record<Union,true>) must be extended or compile fails. insertRunner/THREAD_CAPS fixtures in apps/api/test/helpers/fleet-fixtures.ts (US-004). The endpoint lifecycle e2e (apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts) must cover every new endpoint (rule api-testing) with FLEET_THREADS_ENABLED=true. After each contract-changing story run `bun run generate` / api:export-spec to refresh committed openapi.json; never edit apps/cli/src/generated. i18n: apps/api/src/i18n/{en,zh}/threads.json carry every threads.* key from US-003. nax run notes: DB-backed tests need compose test Postgres (`bun run test:db:up` in apps/api).\n\nRISKS: (1) deadlock if lock order job-then-thread is violated anywhere; (2) FleetJob.threadId added to NewFleetJob/FleetJobRecord affects every FleetJobRecord literal in specs; (3) JobTransitionsService and CommandAckProcessor take ThreadJobEffects as LAST constructor param so positional specs keep working with a stub; (4) widened unions in packages/fleet-protocol must still compile for apps/runner (build gate for US-001: `bun run type-check` at repo root); (5) THREAD jobs must never go through FleetJobsService.dispatch/evaluatePinned; requeue refuses them; (6) errorReason can carry runner-supplied text (max 200 chars, plain text); (7) migration must default existing Runner rows to threadCapacity 2.",
