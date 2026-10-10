@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-skill-catalog",
   "branchName": "feat/fleet-s5a-skill-catalog",
   "createdAt": "2026-10-10T00:00:00.000Z",
-  "updatedAt": "2026-10-10T06:14:20.469Z",
+  "updatedAt": "2026-10-10T06:34:38.843Z",
   "userStories": [
     {
       "id": "US-001",
@@ -417,8 +417,8 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -502,7 +502,10 @@
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Several UI files following existing patterns (tabs, layout links, palette entries) plus a hand-written shadcn Switch; permission gating in the UI is cosmetic since the API enforces access."
+        "reasoning": "Several UI files following existing patterns (tabs, layout links, palette entries) plus a hand-written shadcn Switch; permission gating in the UI is cosmetic since the API enforces access.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/pages/[project]/settings.vue",
@@ -540,7 +543,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "189f2ae11435211f0776128a8ab2b3aa1c249ed4"
     }
   ],
   "analysis": "Greenfield feature inside an existing NestJS 11 + Fastify + Prisma API (apps/api) and Nuxt 3 web app (apps/web). No skill concept exists today: no model, route or page. Everything runs in the API/web; nothing runs on a fleet runner.\n\nKey existing code (verified by spec on main 3162822d):\n- apps/api/src/fleet/git-broker/fleet-http-client.ts:13 FleetHttpClient.request(method, url, headers, body?) -> {status, body}; bounded by FLEET_HTTP_TIMEOUT_MS, never follows redirects, parses JSON, throws RepoCheckException('provider_unreachable') on network failure/redirect and RepoCheckException('provider_error') on non-JSON body.\n- apps/api/src/fleet/git-broker/github-app-client.ts: getTree (:143) and getFile (:158) are the request/parse pattern to mirror, but they require an App token so the resolver issues the same requests anonymously via FleetHttpClient.\n- apps/api/src/fleet/git-broker/git-broker.module.ts: exports must gain FleetHttpClient (US-002).\n- apps/api/src/config/vcs.config.ts:5,32 VCS_CFG / IVcsConfig.githubApiUrl.\n- apps/api/src/fleet/repos/fleet-repos.controller.ts:15-50 global-admin CRUD pattern (@RequiredPermission('ADMIN'), @Principal(), JsonResponse.Ok); fleet-repos.module.ts shows ProjectAccessModule import.\n- apps/api/src/projects/projects.controller.ts:185-204 addProjectAgent: @UseGuards(ProjectMembershipGuard), @CurrentProject() ctx, projectsService.assertProjectAdmin(ctx.project.id, principal) (ProjectAccessService.assertProjectAdmin).\n- apps/api/src/auth/principal/koda-principal.types.ts isUserPrincipal: each project-skill handler must refuse non-user principals with ForbiddenAppException (AGENT_PROJECT_SCOPING=off admits agents through the guard; assertUser helpers in fleet controllers are module-private).\n- apps/api/src/vcs/provider-construction-sites.spec.ts is a tripwire forbidding the literal 'github.com/${' in src/: build gitUrl by concatenating a GITHUB_WEB_BASE='https://github.com/' constant with owner + '/' + repo.\n- Errors: ValidationAppException(args, 'skills.unsupportedHost') -> key unsupportedHost.-2; ConflictAppException -> .409 (skills.nameConflict, skills.sourceExists); NotFoundAppException -> .404 (skills.notFound, skills.sourceNotFound). Messages in apps/api/src/i18n/{en,zh}/skills.json (pattern: invites.json, fleet.json).\n- Statuses are string constants in apps/api/src/common/enums.ts (no Prisma enums).\n- Module layering rule api-data: repository (module-private, token SKILL_CATALOG_REPOSITORY, returns service-owned domain types from skill-catalog.domain.ts) -> service (exported) -> public controllers. Multi-row writes inside txManager.run(). List queries bounded (sources take 200 ordered by createdAt; project skills take 10000).\n- Controllers need @ApiTags('skills'), @ApiBearerAuth(), @ApiOperation and @ApiResponse per status (spec-integrity.integration.spec.ts).\n- apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts must cover every new endpoint (rule api-testing); resolver is spied via jest.spyOn(app.get(SKILL_RESOLVER), 'resolve') (pattern: test/integration/fleet/fleet-pr-refresher.integration.spec.ts:57). Tests never call GitHub.\n- openapi.json is committed; regenerate with `bun run api:export-spec` (or `bun run generate`) after API contract changes in US-003/004/005. Never hand-edit apps/cli/src/generated/. CLI gains no commands.\n- Prisma: new migration 20261012090000_skill_catalog; Project gains back-relation skills ProjectSkill[]. Integration suites build schema from schema.prisma; migration test uses scratchSchemaBefore/applyMigration from apps/api/test/helpers/migration-schema.ts and createTestPrismaClient from test-prisma.ts.\n- Web: pages/admin/fleet/repos.vue + composables/useFleetRepos.ts (admin table pattern incl. 403 -> adminOnly note); pages/[project]/settings.vue:76-110 Tabs (project, vcs) gains skills tab, TabsList grid-cols-2 -> grid-cols-3; layouts/default.vue:175-186 ADMIN links (v-if=isGlobalAdmin; admin check at :51); components/CommandPalette.vue:27 global entries (admin check useAuth().user.value?.role === 'ADMIN'); components/ProjectMembersPanel.vue confirm-dialog/toast patterns; composables/useProjectViewerRole.ts canManage; tests/layouts/default-fleet-nav.spec.ts layout test pattern. components/ui/switch/ is new, hand-written over radix-vue SwitchRoot/SwitchThumb (no shadcn CLI, no network). i18n en.json and zh.json must change together (locale-parity tests); apps/web has its own i18n separate from API.\n\nRisks: (1) US-005 shares skills.service.ts, endpoint.e2e.spec.ts and openapi.json with US-003/004, hence serialization via dependencies. (2) US-006 and US-007 both edit the web locale files; US-007 depends on US-006. (3) Update replacement must keep Skill.id for surviving names so ProjectSkill rows survive; vanished names cascade. (4) Name conflicts across sources must write nothing (create) and change nothing (update). (5) Anonymous GitHub rate limit ~60/h per IP; resolve costs 2 calls + 1 per skill. (6) Concurrent duplicate creates may 500 (accepted, out of scope). (7) Security: all routes are access-controlled (global ADMIN / project ADMIN / member, agents refused) so API stories use three-session-tdd.\n\nMigration path: purely additive (new tables), no backfill. Rollback = drop the three tables.",
