@@ -21,6 +21,7 @@ import { CommandAckProcessor } from './command-ack.processor';
 import { JobReportProcessor } from './job-report.processor';
 import { PrAttributionService } from './pr-attribution.service';
 import { parseSyncRequest } from './sync-request.parser';
+import { ThreadJobEffects } from '../threads/thread-job-effects';
 
 /**
  * POST /fleet/runner/sync (spec §3.2). Step 1 is several short transactions (plan D5):
@@ -45,6 +46,7 @@ export class SyncService {
     private readonly attribution: PrAttributionService,
     private readonly ticketEffects: FleetJobTicketEffects,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly threadEffects: ThreadJobEffects,
   ) {}
 
   async sync(runnerId: string, raw: unknown): Promise<SyncResponse> {
@@ -100,6 +102,7 @@ export class SyncService {
     return {
       jobAcks, commands, gitTokens: tokens.gitTokens, gitTokenErrors: tokens.gitTokenErrors,
       unknownJobIds: [...new Set([...unknownJobIds, ...tokens.unknownJobIds])],
+      archivedThreadIds: await this.threadEffects.archivedThreadIds(runnerId),
     };
   }
 

@@ -22,6 +22,7 @@ import { sendRefusal, type ThreadSendRefusal } from './thread-send-rules';
 import type { ChatMessageRecord, ChatThreadRecord, ChatThreadRepository } from './domain/chat-thread.domain';
 import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
 import type { ThreadBackend } from '../common/thread-jobs';
+import { isThreadKind, THREAD_LIMITS } from '../common/thread-jobs';
 
 /** A budget refusal carries the paused policy so the 409 names its scope. */
 type SendRefusalResult = { refusal: 'budgetPaused'; pausedPolicy: BudgetPolicyRecord } | { refusal: Exclude<ThreadSendRefusal, 'budgetPaused'> | null; pausedPolicy: null };
@@ -67,6 +68,86 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
   async messages(threadId: string, afterSeq: number, limit: number): Promise<ChatMessageRecord[]> {
     const rows = await this.prisma.client.chatMessage.findMany({ where: { threadId, seq: { gt: afterSeq } }, orderBy: { seq: 'asc' }, take: limit });
     return rows.map(({ threadId: _threadId, ...row }) => ({ ...row, costUsd: row.costUsd?.toString() ?? null }));
+  }
+
+  async replaceCommandPayload(commandId: string, payload: unknown): Promise<void> {
+    await this.prisma.client.fleetCommand.update({ where: { id: commandId }, data: { payload: payload as Prisma.InputJsonValue } });
+  }
+
+  async applyInputAck(command: import('../jobs/domain/fleet-job.domain').FleetCommandRecord, result: string, detail: string): Promise<void> {
+    if (command.type === FleetCommandType.THREAD_INPUT) {
+      const { messageId } = command.payload as { messageId?: unknown };
+      if (typeof messageId === 'string' && result === 'rejected') await this.prisma.client.chatMessage.updateMany({ where: { id: messageId }, data: { status: 'errored', errorReason: detail.slice(0, 200) } });
+      if (typeof messageId === 'string') await this.replaceCommandPayload(command.id, { messageId });
+    } else if (command.type === FleetCommandType.THREAD_ANSWER) {
+      const { requestId } = command.payload as { requestId?: unknown };
+      await this.replaceCommandPayload(command.id, { requestId });
+    }
+  }
+
+  async applyJobEnded(job: import('../jobs/domain/fleet-job.domain').FleetJobRecord): Promise<void> {
+    if (!isThreadKind(job.command) || !job.threadId) return;
+    await this.prisma.client.chatMessage.updateMany({ where: { threadId: job.threadId, status: { in: ['pending', 'streaming'] } }, data: { status: 'errored', errorReason: job.state.toLowerCase() } });
+    await this.prisma.client.chatThread.updateMany({ where: { id: job.threadId }, data: { pendingQuestion: Prisma.DbNull } });
+  }
+
+  async archivedThreadIds(runnerId: string): Promise<string[]> {
+    const rows = await this.prisma.client.chatThread.findMany({ where: { runnerId, status: 'ARCHIVED' }, orderBy: [{ archivedAt: 'desc' }, { id: 'desc' }], take: THREAD_LIMITS.maxArchivedThreadIds, select: { id: true } });
+    return rows.map((row) => row.id);
+  }
+
+  async updateCap(projectId: string, threadId: string, userId: string, maxCostUsd: string): Promise<ChatThreadRecord> {
+    const updated = await this.txManager.run(async () => {
+      const before = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId } });
+      if (!before) throw new NotFoundAppException({}, 'threads.notFound');
+      if (before.createdById !== userId) throw new ForbiddenAppException({}, 'threads.notCreator');
+      const job = await this.currentThreadJob(threadId);
+      if (job) await this.jobs.lockById(job.id);
+      await this.prisma.client.$queryRaw`SELECT "id" FROM "ChatThread" WHERE "id" = ${threadId} FOR UPDATE`;
+      const row = await this.prisma.client.chatThread.update({ where: { id: threadId }, data: { maxCostUsd } });
+      return this.mapThread(row, job);
+    });
+    return updated;
+  }
+
+  async command(projectId: string, threadId: string, userId: string, type: string, payload: object): Promise<void> {
+    let runnerId: string | null = null;
+    await this.txManager.run(async () => {
+      const before = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId } });
+      if (!before) throw new NotFoundAppException({}, 'threads.notFound');
+      if (before.createdById !== userId) throw new ForbiddenAppException({}, 'threads.notCreator');
+      const current = await this.currentThreadJob(threadId);
+      if (current) await this.jobs.lockById(current.id);
+      await this.prisma.client.$queryRaw`SELECT "id" FROM "ChatThread" WHERE "id" = ${threadId} FOR UPDATE`;
+      const job = await this.currentThreadJob(threadId);
+      if (!current || current.id !== job?.id || job.state !== 'RUNNING' || !job.runnerId) throw new ConflictAppException({}, 'threads.noSession');
+      const closed = await this.prisma.client.fleetCommand.findFirst({ where: { jobId: job.id, type: FleetCommandType.THREAD_CLOSE, leaseEpoch: job.leaseEpoch }, select: { id: true } });
+      if (closed) throw new ConflictAppException({}, 'threads.noSession');
+      if (type === FleetCommandType.THREAD_ANSWER) {
+        const question = before.pendingQuestion as { requestId?: unknown } | null;
+        const requestId = (payload as { requestId?: unknown }).requestId;
+        if (!question || question.requestId !== requestId) throw new ConflictAppException({}, 'threads.noQuestion');
+      }
+      await this.jobs.createCommand({ runnerId: job.runnerId, jobId: job.id, type: type as FleetCommandType, leaseEpoch: job.leaseEpoch, payload });
+      runnerId = job.runnerId;
+    });
+    if (runnerId) this.notifier.notify(runnerId);
+  }
+
+  async archive(projectId: string, threadId: string, userId: string, canArchive: boolean): Promise<string | null> {
+    return this.txManager.run(async () => {
+      const before = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId } });
+      if (!before) throw new NotFoundAppException({}, 'threads.notFound');
+      if (before.createdById !== userId && !canArchive) throw new ForbiddenAppException({}, 'threads.notCreator');
+      const current = await this.currentThreadJob(threadId);
+      if (current) await this.jobs.lockById(current.id);
+      await this.prisma.client.$queryRaw`SELECT "id" FROM "ChatThread" WHERE "id" = ${threadId} FOR UPDATE`;
+      const thread = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId } });
+      if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
+      if (thread.status === 'ARCHIVED') return null;
+      await this.prisma.client.chatThread.update({ where: { id: threadId }, data: { status: 'ARCHIVED', archivedAt: new Date() } });
+      return current?.id ?? null;
+    });
   }
 
   async sendMessage(input: { projectId: string; threadId: string; userId: string; text: string; clientMessageId: string }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }> {

@@ -5,6 +5,7 @@ import {
   buildJobOutcomePayload, FLEET_JOB_OUTCOME, JobOutcome, jobOutcomeOf,
 } from '../../notifications/fleet/fleet-notification-events';
 import { FLEET_JOB_REPOSITORY, FleetJobRecord, IFleetJobRepository } from './domain/fleet-job.domain';
+import { isThreadKind } from '../common/thread-jobs';
 
 /**
  * Fleet S4a §2.4 (D513): the enqueue side of `fleet_job_outcome`. Always called inside the caller's transaction,
@@ -19,6 +20,7 @@ export class FleetJobOutcomeRecorder {
   ) {}
 
   async onTerminal(job: FleetJobRecord): Promise<void> {
+    if (isThreadKind(job.command)) return;
     const outcome = jobOutcomeOf(job.state, job.resultPrUrl);
     if (outcome) await this.enqueue(job, outcome);
   }

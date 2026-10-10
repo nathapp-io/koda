@@ -53,6 +53,15 @@ export class SendMessageResultDto {
   @ApiProperty({ nullable: true }) jobId: string | null;
 }
 
+export class UpdateThreadDto {
+  @Allow() @ApiProperty() maxCostUsd: number;
+}
+
+export class AnswerQuestionDto {
+  @Allow() @ApiProperty({ minLength: 1, maxLength: 128 }) requestId: string;
+  @Allow() @ApiProperty({ minLength: 1, maxLength: 32768 }) text: string;
+}
+
 export class CreateThreadDto {
   @Allow() @ApiProperty() repoId: string;
   @Allow() @ApiProperty() feature: string;

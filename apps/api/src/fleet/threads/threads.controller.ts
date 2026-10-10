@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { CaslPermissionAction, Principal } from '@nathapp/nestjs-auth';
 import { ForbiddenAppException, JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
@@ -10,7 +10,7 @@ import { ProjectMembershipGuard } from '../../projects/project-membership.guard'
 import type { ProjectContext } from '../../projects/project-context';
 import { withProjectRole } from '../../projects/project-context';
 import { ThreadsService } from './threads.service';
-import { ChatMessageDto, CreateThreadDto, SendMessageDto, SendMessageResultDto, ThreadDto } from './dto/thread.dto';
+import { AnswerQuestionDto, ChatMessageDto, CreateThreadDto, SendMessageDto, SendMessageResultDto, ThreadDto, UpdateThreadDto } from './dto/thread.dto';
 
 @ApiTags('fleet threads')
 @ApiBearerAuth()
@@ -53,6 +53,46 @@ export class ThreadsController {
   @ApiResponse({ status: 200, type: ThreadDto })
   async get(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
     this.assertUser(principal);
+    return JsonResponse.Ok(await this.threads.get(ctx.project.id, id));
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update a chat thread cost cap' })
+  @ApiResponse({ status: 200, type: ThreadDto })
+  async update(@Param('id') id: string, @Body() dto: UpdateThreadDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    this.assertUser(principal);
+    return JsonResponse.Ok(await this.threads.updateCap(ctx.project.id, id, principal.id, dto.maxCostUsd));
+  }
+
+  @Post(':id/stop')
+  @HttpCode(200)
+  async stop(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    this.assertUser(principal);
+    await this.threads.stop(ctx.project.id, id, principal.id);
+    return JsonResponse.Ok({});
+  }
+
+  @Post(':id/end-session')
+  @HttpCode(200)
+  async endSession(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    this.assertUser(principal);
+    await this.threads.endSession(ctx.project.id, id, principal.id);
+    return JsonResponse.Ok({});
+  }
+
+  @Post(':id/answer')
+  @HttpCode(200)
+  async answer(@Param('id') id: string, @Body() dto: AnswerQuestionDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    this.assertUser(principal);
+    await this.threads.answer(ctx.project.id, id, principal.id, dto);
+    return JsonResponse.Ok({});
+  }
+
+  @Post(':id/archive')
+  @HttpCode(200)
+  async archive(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    this.assertUser(principal);
+    await this.threads.archive(ctx.project.id, id, principal.id, ctx.role === 'ADMIN');
     return JsonResponse.Ok(await this.threads.get(ctx.project.id, id));
   }
 

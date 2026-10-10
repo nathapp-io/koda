@@ -8,7 +8,9 @@ import { SkillsService } from '../../skills/skills.service';
 import { FLEET_REPO_REPOSITORY, type IFleetRepoRepository } from '../repos/domain/fleet-repo.domain';
 import { CHAT_THREAD_REPOSITORY, type ChatMessageRecord, type ChatThreadRecord, type ChatThreadRepository } from './domain/chat-thread.domain';
 import { validateCreateThread, type CreateThreadInput } from './thread-input';
-import type { SendMessageDto } from './dto/thread.dto';
+import type { AnswerQuestionDto, SendMessageDto } from './dto/thread.dto';
+import { FleetCommandType } from '../../common/enums';
+import { FleetJobsService } from '../jobs/fleet-jobs.service';
 
 @Injectable()
 export class ThreadsService {
@@ -17,6 +19,7 @@ export class ThreadsService {
     @Inject(FLEET_REPO_REPOSITORY) private readonly repos: IFleetRepoRepository,
     private readonly skills: SkillsService,
     @Inject(FLEET_CFG) private readonly config: ConfigType<typeof fleetConfig>,
+    private readonly fleetJobs: FleetJobsService,
   ) {}
 
   async create(projectId: string, userId: string, input: CreateThreadInput): Promise<ChatThreadRecord> {
@@ -44,6 +47,36 @@ export class ThreadsService {
     const thread = await this.get(projectId, id);
     return { items: await this.threads.messages(thread.id, afterSeq, limit) };
   }
+
+  async updateCap(projectId: string, threadId: string, userId: string, value: unknown): Promise<ChatThreadRecord> {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0.0001 || value > 10000 || !/^\d+(?:\.\d{1,4})?$/.test(String(value))) throw new ValidationAppException({ reason: 'maxCostUsd' }, 'threads.input');
+    return this.threads.updateCap(projectId, threadId, userId, String(value));
+  }
+
+  stop(projectId: string, threadId: string, userId: string): Promise<void> {
+    return this.threads.command(projectId, threadId, userId, FleetCommandType.THREAD_STOP_TURN, {});
+  }
+
+  endSession(projectId: string, threadId: string, userId: string): Promise<void> {
+    return this.threads.command(projectId, threadId, userId, FleetCommandType.THREAD_CLOSE, {});
+  }
+
+  async answer(projectId: string, threadId: string, userId: string, input: AnswerQuestionDto): Promise<void> {
+    if (typeof input.requestId !== 'string' || input.requestId.length < 1 || input.requestId.length > 128 || typeof input.text !== 'string' || input.text.length < 1 || Buffer.byteLength(input.text, 'utf8') > 32768) throw new ValidationAppException({ reason: 'answer' }, 'threads.input');
+    return this.threads.command(projectId, threadId, userId, FleetCommandType.THREAD_ANSWER, input);
+  }
+
+  async archive(projectId: string, threadId: string, userId: string, canArchive: boolean): Promise<void> {
+    const jobId = await this.threads.archive(projectId, threadId, userId, canArchive);
+    if (!jobId) return;
+    try { await this.fleetJobs.cancel(userId, projectId, jobId, true); }
+    catch (error) {
+      if (!(error instanceof ConflictAppException)) throw error;
+      // The terminal transition may win after archive commits.
+    }
+  }
+
+  archivedThreadIds(runnerId: string): Promise<string[]> { return this.threads.archivedThreadIds(runnerId); }
 
   async sendMessage(projectId: string, threadId: string, userId: string, input: SendMessageDto): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }> {
     if (!this.config.threadsEnabled) throw new ConflictAppException({}, 'threads.disabled');
