@@ -22,9 +22,12 @@ import { PrismaClient, ProjectMember } from '../../../src/generated/prisma/clien
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 import { SKILL_RESOLVER, SkillResolver } from '../../../src/skills/skill-resolver';
 import { createHmac } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resetDb } from '../../helpers/reset-db';
+import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
+import { SkillsService } from '../../../src/skills/skills.service';
+import { FleetHttpWorld } from '../../helpers/fleet-fixtures';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -3078,6 +3081,202 @@ describeIntegration('API Integration Tests', () => {
         .expect(404);
 
       refusal(res, 'skills.notFound.404');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // US-003 Thread create, list, get and messages routes
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('US-003 Thread routes', () => {
+    let world: FleetHttpWorld;
+    let threadId: string;
+
+    const config = () => app.get<IFleetConfig>(FLEET_CFG, { strict: false });
+    const db = () => app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    const threadMessage = (res: request.Response, key: string) => {
+      const [namespace, ...segments] = key.split('.');
+      const path = join(__dirname, '../../../src/i18n/en', `${namespace}.json`);
+      if (existsSync(path)) {
+        refusal(res, key);
+      } else {
+        expect(res.body.message).toBe(segments.join('.'));
+      }
+    };
+    const createThread = (feature: string, token = world.tokens.dev) => request(httpServer)
+      .post('/api/projects/web/threads')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ repoId: world.repoId, feature, title: feature, backend: { kind: 'native' } });
+
+    beforeAll(async () => {
+      const prisma = db();
+      const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const developer = await prisma.user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
+      const admin = await prisma.user.findUniqueOrThrow({ where: { email: 'admin@koda.test' } });
+      const repo = await prisma.fleetRepo.create({ data: {
+        projectId: project.id, provider: 'github', owner: 'acme', name: 'threads-app', defaultBranch: 'trunk',
+        githubInstallationId: BigInt(77), createdById: admin.id,
+      } });
+      const foreignProject = await prisma.project.create({ data: { name: 'Threads foreign', slug: 'threads-foreign', key: 'THRF' } });
+      const foreignRepo = await prisma.fleetRepo.create({ data: {
+        projectId: foreignProject.id, provider: 'github', owner: 'acme', name: 'threads-foreign', defaultBranch: 'main',
+        githubInstallationId: BigInt(77), createdById: admin.id,
+      } });
+      await prisma.projectMember.upsert({
+        where: { projectId_userId: { projectId: project.id, userId: developer.id } },
+        create: { projectId: project.id, userId: developer.id, role: 'DEVELOPER' }, update: { role: 'DEVELOPER' },
+      });
+      await prisma.agentProject.upsert({
+        where: { agentId_projectId: { agentId, projectId: project.id } },
+        create: { agentId, projectId: project.id, addedById: admin.id }, update: {},
+      });
+      world = {
+        tokens: { root: userAccessToken, dev: nonAdminUserAccessToken, viewer: nonAdminUserAccessToken, outsider: nonAdminUserAccessToken },
+        ids: { root: admin.id, dev: developer.id, viewer: developer.id, outsider: developer.id },
+        projectId: project.id, opsProjectId: foreignProject.id, repoId: repo.id, foreignRepoId: foreignRepo.id,
+      };
+      config().threadsEnabled = true;
+    });
+
+    it('US-003 AC1: creates an active thread with repo defaults and caller identity', async () => {
+      const res = await createThread('add-auth').expect(201);
+      const thread = body<{ id: string; status: string; createdById: string; baseRef: string; specPath: string; maxCostUsd: string }>(res);
+      expect(thread).toMatchObject({ status: 'ACTIVE', createdById: world.ids.dev, baseRef: 'trunk', specPath: '.nax/features/add-auth/spec.md', maxCostUsd: '5' });
+      threadId = thread.id;
+    });
+
+    it('US-003 AC2: snapshots only enabled skills with the source SHA', async () => {
+      const source = await db().skillSource.create({ data: {
+        gitUrl: 'https://github.com/acme/thread-skills', owner: 'acme', repo: 'thread-skills', ref: 'main', path: '',
+        resolvedSha: 'sha-thread-skills', status: 'OK', createdById: world.ids.root,
+      } });
+      const selected = await db().skill.create({ data: { sourceId: source.id, name: 'thread-spec-review', dir: 'skills/spec-review', description: 'Review the spec' } });
+      await db().skill.create({ data: { sourceId: source.id, name: 'thread-spec-writing', dir: 'skills/spec-writing', description: 'Write the spec' } });
+      await db().projectSkill.create({ data: { projectId: world.projectId, skillId: selected.id } });
+
+      const res = await createThread('skill-snapshot').expect(201);
+      expect(body<{ skills: unknown }>(res).skills).toEqual([{ sourceId: source.id, owner: source.owner, repo: source.repo, sha: 'sha-thread-skills', skills: [{ name: selected.name, dir: selected.dir, description: selected.description }] }]);
+    });
+
+    it('US-003 AC3: requests the project skill snapshot once for thread creation', async () => {
+      const skills = app.get(SkillsService);
+      expect(typeof skills.snapshotForProject).toBe('function');
+      const snapshot = jest.spyOn(skills, 'snapshotForProject');
+      try {
+        await createThread('snapshot-call').expect(201);
+        expect(snapshot).toHaveBeenCalledTimes(1);
+        expect(snapshot).toHaveBeenCalledWith(world.projectId);
+      } finally {
+        snapshot.mockRestore();
+      }
+    });
+
+    it('US-003 AC4: creates no fleet job for a new thread', async () => {
+      const created = body<{ id: string }>(await createThread('no-job-created').expect(201));
+      const jobs = await db().fleetJob.findMany({ where: { threadId: created.id }, take: 1 });
+      expect(jobs).toHaveLength(0);
+    });
+
+    it('US-003 AC5: refuses thread creation by a project viewer', async () => {
+      await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.viewer } }, data: { role: 'VIEWER' } });
+      try {
+        await createThread('viewer-denied', world.tokens.viewer).expect(403);
+      } finally {
+        await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.dev } }, data: { role: 'DEVELOPER' } });
+      }
+    });
+
+    it('US-003 AC6: refuses an agent principal with the thread principal message', async () => {
+      const res = await createThread('agent-denied', agentApiKey).expect(403);
+      refusal(res, 'threads.principal.403');
+    });
+
+    it('US-003 AC7: refuses create when threads are disabled', async () => {
+      config().threadsEnabled = false;
+      try {
+        const res = await createThread('disabled-create').expect(409);
+        refusal(res, 'threads.disabled.409');
+      } finally {
+        config().threadsEnabled = true;
+      }
+    });
+
+    it('US-003 AC8: rejects a feature outside the feature naming format', async () => {
+      const res = await createThread('Add Auth').expect(400);
+      refusal(res, 'threads.input.400');
+    });
+
+    it('US-003 AC9: rejects an unsupported ACP backend agent', async () => {
+      const res = await request(httpServer).post('/api/projects/web/threads').set('Authorization', `Bearer ${world.tokens.dev}`)
+        .send({ repoId: world.repoId, feature: 'bad-backend', title: 'Bad backend', backend: { kind: 'acp', agent: 'gemini' } }).expect(400);
+      refusal(res, 'threads.input.400');
+    });
+
+    it('US-003 AC10: rejects a second active thread for the same repo and feature', async () => {
+      await createThread('same-active-feature').expect(201);
+      const res = await createThread('same-active-feature').expect(409);
+      refusal(res, 'threads.featureTaken.409', { feature: 'same-active-feature' });
+    });
+
+    it('US-003 AC11: returns not found for a repo belonging to another project', async () => {
+      const res = await request(httpServer).post('/api/projects/web/threads').set('Authorization', `Bearer ${world.tokens.dev}`)
+        .send({ repoId: world.foreignRepoId, feature: 'foreign-repo', title: 'Foreign repo', backend: { kind: 'native' } }).expect(404);
+      expect(res.body).toHaveProperty('ret');
+      expect(res.body.message).not.toBe('Cannot POST /api/projects/web/threads');
+    });
+
+    it('US-003 AC12: lists project threads for a viewer ordered by recent activity', async () => {
+      const older = body<{ id: string }>(await createThread('list-older').expect(201));
+      const newer = body<{ id: string }>(await createThread('list-newer').expect(201));
+      await db().chatThread.update({ where: { id: older.id }, data: { lastActivityAt: new Date('2020-01-01T00:00:00Z') } });
+      await db().chatThread.update({ where: { id: newer.id }, data: { lastActivityAt: new Date('2021-01-01T00:00:00Z') } });
+      await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.viewer } }, data: { role: 'VIEWER' } });
+      try {
+        const res = await request(httpServer).get('/api/projects/web/threads').set('Authorization', `Bearer ${world.tokens.viewer}`).expect(200);
+        const items = body<Array<{ id: string }>>(res);
+        expect(items.findIndex((item) => item.id === newer.id)).toBeLessThan(items.findIndex((item) => item.id === older.id));
+      } finally {
+        await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.dev } }, data: { role: 'DEVELOPER' } });
+      }
+    });
+
+    it('US-003 AC12: returns not found when listing threads for an unknown project', async () => {
+      const res = await request(httpServer).get('/api/projects/no-such-project/threads').set('Authorization', `Bearer ${world.tokens.dev}`).expect(404);
+      expect(res.body.message).not.toBe('Cannot GET /api/projects/no-such-project/threads');
+    });
+
+    it('US-003 AC13: gets a thread while the feature kill switch is disabled', async () => {
+      config().threadsEnabled = false;
+      try {
+        const res = await request(httpServer).get(`/api/projects/web/threads/${threadId}`).set('Authorization', `Bearer ${world.tokens.dev}`).expect(200);
+        expect(body<{ id: string }>(res).id).toBe(threadId);
+      } finally {
+        config().threadsEnabled = true;
+      }
+    });
+
+    it('US-003 AC14: hides a thread belonging to another project', async () => {
+      const foreignThread = await db().chatThread.create({ data: {
+        projectId: world.opsProjectId, repoId: world.foreignRepoId, baseRef: 'main', feature: 'foreign-thread', title: 'Foreign',
+        createdById: world.ids.root, backend: { kind: 'native' }, skills: [], specPath: '.nax/features/foreign-thread/spec.md',
+      } });
+      const res = await request(httpServer).get(`/api/projects/web/threads/${foreignThread.id}`).set('Authorization', `Bearer ${world.tokens.dev}`).expect(404);
+      threadMessage(res, 'threads.notFound.404');
+    });
+
+    it('US-003 AC15: returns messages after the requested sequence in ascending order', async () => {
+      const thread = await db().chatThread.create({ data: {
+        projectId: world.projectId, repoId: world.repoId, baseRef: 'trunk', feature: 'messages-thread', title: 'Messages',
+        createdById: world.ids.dev, backend: { kind: 'native' }, skills: [], specPath: '.nax/features/messages-thread/spec.md',
+      } });
+      await db().chatMessage.createMany({ data: [1, 2, 3].map((seq) => ({ threadId: thread.id, seq, role: 'user', authorUserId: world.ids.dev, content: `message-${seq}`, status: 'complete' })) });
+      const res = await request(httpServer).get(`/api/projects/web/threads/${thread.id}/messages?afterSeq=1`).set('Authorization', `Bearer ${world.tokens.dev}`).expect(200);
+      expect(body<{ items: Array<{ seq: number }> }>(res).items.map((message) => message.seq)).toEqual([2, 3]);
+    });
+
+    it('US-003 AC15: returns not found for messages on an unknown thread', async () => {
+      const res = await request(httpServer).get('/api/projects/web/threads/no-such-thread/messages').set('Authorization', `Bearer ${world.tokens.dev}`).expect(404);
+      expect(res.body.message).not.toBe('Cannot GET /api/projects/web/threads/no-such-thread/messages');
     });
   });
 });

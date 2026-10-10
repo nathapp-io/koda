@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-core",
   "branchName": "feat/fleet-s5a-thread-core",
   "createdAt": "2026-10-10T00:00:00.000Z",
-  "updatedAt": "2026-10-10T09:35:51.996Z",
+  "updatedAt": "2026-10-10T09:55:09.758Z",
   "userStories": [
     {
       "id": "US-001",
@@ -103,8 +103,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -195,7 +195,10 @@
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "New module, repository, service, controller, validation and skill snapshot across several modules; includes principal/role access control (agent refusal, DEVELOPER+ check), so the security override applies."
+        "reasoning": "New module, repository, service, controller, validation and skill snapshot across several modules; includes principal/role access control (agent refusal, DEVELOPER+ check), so the security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/fleet-jobs.controller.ts",
@@ -239,7 +242,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "b29d6feb62cdb19e1191922c88598dccff639dc5"
     },
     {
       "id": "US-004",
