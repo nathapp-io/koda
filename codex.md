@@ -154,20 +154,23 @@ Rules:
 
 ## Code Navigation (codebase-memory MCP)
 
-The repo is indexed by the `codebase-memory` MCP server (configured in `.nax/config.json` under `mcp.servers`, attached to the `run` stage; nax names its tools `codebase-memory__<tool>`). Use it for structural questions before reading or grepping file by file:
-- `search_graph` to find a symbol (class, function, route handler) by name or pattern
-- `trace_path` for callers and callees of a symbol (who calls `TicketsService.assign`, what a controller reaches)
-- `get_code_snippet` to read one symbol's exact source
+Use `codebase-memory-mcp` for graph-first code navigation. In nax, the server ID is `codebase-memory` and its tools are named `codebase-memory__<tool>`; use the equivalent exposed names in other hosts. Availability depends on the host's MCP configuration and session stage.
+
+Before discovering symbols, callers, dependencies, routes or architecture, call `codebase-memory__list_projects`. Select the entry whose `root_path` matches the absolute **Execution repository/worktree root** supplied in the nax prompt, and reuse its returned project identifier. If the host does not supply a root, obtain it with `git rev-parse --show-toplevel` (nax Git tool: `{"subcommand":"rev-parse"}`). Never derive or guess the identifier, or select a different repository. If results are truncated, read the tool's spill file or paginate until the matching entry is found.
+
+Then call the appropriate MCP tool before structural exploration with directory listings, whole-file reads or grep:
+- `search_graph` to find symbols or routes
+- `trace_path` for callers and callees
+- `get_code_snippet` to read a symbol's exact source
 - `get_architecture` for a module or package overview
-- `search_code` for literal text across the indexed code
-- `detect_changes` to see which symbols the current diff touches
-- `check_index_coverage` to confirm the files you rely on are indexed and current before trusting a graph answer
-- `list_projects` to look up the exact `project` name (its `root_path` must match the repository root)
+- `search_code` for literal text across indexed code
+- `detect_changes` for symbols touched by the diff
+- `check_index_coverage` to verify the relevant files are indexed and current
 
 Rules:
-- the `project` argument is the repository root's absolute path with every `/` replaced by `-` and no leading `-` (for example `Users-alice-src-koda`); confirm it with `list_projects` when unsure
-- the index can lag behind uncommitted or very recent edits: confirm with a direct file read before editing, and fall back to `Read` / `Grep` when a symbol is missing from the graph
-- use plain text search, not the graph, for config files, JSON, Markdown, i18n keys and Prisma schema
+- fall back to direct reads or text search for structural discovery only when the MCP server is unavailable, no matching project is indexed, or a graph query returns insufficient results; explain the fallback
+- the index can lag behind recent edits: read the known file before editing; this does not replace graph-first discovery
+- use text search directly for config files, JSON, Markdown, i18n keys and Prisma schema
 
 ## Tests
 
