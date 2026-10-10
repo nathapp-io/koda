@@ -4,6 +4,7 @@ import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-com
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { parseGitHubUrl } from './github-url';
+import { isUniqueViolation } from '../common/utils/prisma-errors';
 import { SKILL_CATALOG_REPOSITORY, SkillCatalogRepository, SkillSourceDomain, formatSkillResolveReason } from './skill-catalog.domain';
 import { SKILL_RESOLVER, SkillResolver, SkillResolveError } from './skill-resolver';
 
@@ -58,23 +59,35 @@ export class SkillsService {
     let resolution: Awaited<ReturnType<SkillResolver['resolve']>>;
     try {
       resolution = await this.resolver.resolve({ owner: source.owner, repo: source.repo, ref: source.ref, path: source.path });
+      if (resolution.skills.length === 0) throw new SkillResolveError('no_skills');
     } catch (error) {
       if (!(error instanceof SkillResolveError)) throw error;
-      return this.txManager.run(() => this.catalog.markResolveFailed(id, formatSkillResolveReason(error.reason, error.detail)));
+      const failed = await this.txManager.run(() => this.catalog.markResolveFailed(id, formatSkillResolveReason(error.reason, error.detail)));
+      if (!failed) throw new NotFoundAppException({}, 'skills.sourceNotFound');
+      return failed;
     }
 
-    for (const skill of resolution.skills) {
-      const owner = await this.catalog.findSkillOwner(skill.name);
-      if (owner && owner.id !== id) {
-        throw new ConflictAppException({ name: skill.name, gitUrl: owner.gitUrl }, 'skills.nameConflict');
-      }
+    const owners = await this.catalog.findSkillOwners(resolution.skills.map((skill) => skill.name));
+    const otherOwner = owners.find(({ source }) => source.id !== id);
+    if (otherOwner) {
+      throw new ConflictAppException({ name: otherOwner.name, gitUrl: otherOwner.source.gitUrl }, 'skills.nameConflict');
     }
 
-    return this.txManager.run(() => this.catalog.replaceSourceSkills(id, {
-      resolvedSha: resolution.sha,
-      resolvedAt: new Date(),
-      skills: resolution.skills,
-    }));
+    try {
+      const updated = await this.txManager.run(() => this.catalog.replaceSourceSkills(id, {
+        resolvedSha: resolution.sha,
+        resolvedAt: new Date(),
+        skills: resolution.skills,
+      }));
+      if (!updated) throw new NotFoundAppException({}, 'skills.sourceNotFound');
+      return updated;
+    } catch (error) {
+      if (!isUniqueViolation(error, 'name')) throw error;
+      const racedOwners = await this.catalog.findSkillOwners(resolution.skills.map((skill) => skill.name));
+      const racedOwner = racedOwners.find(({ source }) => source.id !== id);
+      if (!racedOwner) throw error;
+      throw new ConflictAppException({ name: racedOwner.name, gitUrl: racedOwner.source.gitUrl }, 'skills.nameConflict');
+    }
   }
 
   async deleteSource(id: string): Promise<void> {

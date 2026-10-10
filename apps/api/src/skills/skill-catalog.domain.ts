@@ -29,13 +29,14 @@ export interface SkillCatalogRepository {
   findSource(owner: string, repo: string, ref: string, path: string): Promise<SkillSourceDomain | null>;
   findSourceById(id: string): Promise<SkillSourceDomain | null>;
   findSkillOwner(name: string): Promise<SkillSourceDomain | null>;
-  replaceSourceSkills(id: string, input: { resolvedSha: string; resolvedAt: Date; skills: Array<Omit<SkillDomain, 'id'>> }): Promise<SkillSourceDomain>;
-  markResolveFailed(id: string, statusReason: string): Promise<SkillSourceDomain>;
+  findSkillOwners(names: string[]): Promise<Array<{ name: string; source: SkillSourceDomain }>>;
+  replaceSourceSkills(id: string, input: { resolvedSha: string; resolvedAt: Date; skills: Array<Omit<SkillDomain, 'id'>> }): Promise<SkillSourceDomain | null>;
+  markResolveFailed(id: string, statusReason: string): Promise<SkillSourceDomain | null>;
   deleteSource(id: string): Promise<boolean>;
   createSource(input: Omit<SkillSourceDomain, 'id' | 'createdAt' | 'skills'> & { createdById: string; skills: Array<Omit<SkillDomain, 'id'>> }): Promise<SkillSourceDomain>;
   listSources(): Promise<SkillSourceDomain[]>;
 }
 
 export function formatSkillResolveReason(reason: SkillResolveReason, detail?: string): string {
-  return (detail ? `${reason}:${detail}` : reason).slice(0, 300);
+  return Array.from(detail ? `${reason}:${detail}` : reason).slice(0, 300).join('');
 }
