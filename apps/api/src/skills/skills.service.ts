@@ -5,7 +5,7 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { parseGitHubUrl } from './github-url';
 import { isUniqueViolation } from '../common/utils/prisma-errors';
-import { SKILL_CATALOG_REPOSITORY, SkillCatalogRepository, SkillSourceDomain, formatSkillResolveReason } from './skill-catalog.domain';
+import { SKILL_CATALOG_REPOSITORY, SkillCatalogRepository, SkillSourceDomain, ThreadSkillSource, formatSkillResolveReason } from './skill-catalog.domain';
 import { SKILL_RESOLVER, SkillResolver, SkillResolveError } from './skill-resolver';
 
 @Injectable()
@@ -100,6 +100,10 @@ export class SkillsService {
 
   listProjectSkills(projectId: string) {
     return this.catalog.listProjectSkills(projectId);
+  }
+
+  snapshotForProject(projectId: string): Promise<ThreadSkillSource[]> {
+    return this.catalog.listEnabledSnapshot(projectId);
   }
 
   async enableProjectSkill(projectId: string, skillId: string, userId: string) {

@@ -1,0 +1,16 @@
+{
+  "principal": { "403": "Only users can access chat threads" },
+  "notFound": { "404": "Thread not found" },
+  "input": { "-2": "Invalid thread input: {reason}" },
+  "disabled": { "409": "Chat threads are disabled" },
+  "featureTaken": { "409": "An active thread already uses feature {feature}" },
+  "archived": { "409": "Thread is archived" },
+  "costCap": { "409": "Thread cost cap reached" },
+  "runnerOffline": { "409": "Thread runner is offline" },
+  "runnerOutdated": { "409": "Thread runner is outdated" },
+  "closing": { "409": "Thread is closing" },
+  "turnRunning": { "409": "A thread turn is already running" },
+  "noSession": { "409": "Thread has no active session" },
+  "noQuestion": { "409": "Thread has no pending question" },
+  "notCreator": { "403": "Only the thread creator can perform this action" }
+}
