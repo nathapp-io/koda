@@ -11,6 +11,7 @@ import { buildAssignPayload, gitIdentityFor } from './assign-payload';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import { JobTransitionsService, SYSTEM_ACTOR } from './job-transitions.service';
 import { EMPTY_LOAD, evaluateRunners, firstMisfit, jobScopePause, MisfitReason, orderCandidates, PlacementJob, QUEUED_SCAN_LIMIT, toLoads, toPlacementJob } from './placement-rules';
+import { isThreadKind } from '../common/thread-jobs';
 import { RunnerNotifier } from './runner-notifier';
 import {
   FLEET_JOB_REPOSITORY, FleetJobRecord, FleetRepoRef, IFleetJobRepository, PlacementRunnerRow,
@@ -81,7 +82,8 @@ export class PlacementService {
       }
       const runners = await this.repo.findPlacementRunners(ids);
       const loads = toLoads(await this.repo.findActiveLoads(ids));
-      const placementJob = toPlacementJob(job, repo);
+      const threadAssign = isThreadKind(job.command) ? await this.repo.findThreadAssign(job.id) : null;
+      const placementJob = toPlacementJob(job, repo, isThreadKind(job.command) && threadAssign ? { backend: threadAssign.backend, enabled: this.fleetConfig.threadsEnabled } : undefined);
       const evaluated = evaluateRunners(placementJob, runners, loads, (id) => pauses.runnerPaused(id), now, this.fleetConfig.runnerOfflineSec);
       const misfits = evaluated
         .filter((e) => e.reason !== null)
@@ -113,7 +115,7 @@ export class PlacementService {
       for (const id of slots > 0 ? await this.repo.findQueuedIds(QUEUED_SCAN_LIMIT) : []) {
         if (slots <= 0) break;
         const job = await this.repo.lockById(id, { skipLocked: true });
-        if (!job || job.state !== FleetJobState.QUEUED) continue;
+        if (!job || job.state !== FleetJobState.QUEUED || isThreadKind(job.command)) continue;
         if (job.pinnedRunnerId && job.pinnedRunnerId !== runner.id) continue;
         // S1b §2.3: the same pre-assign check as placeJob.
         const paused = jobScopePause(job, (keys) => pauses.match(keys));
@@ -137,6 +139,41 @@ export class PlacementService {
     return assigned;
   }
 
+  async fillRunnerThreads(runnerId: string, now = new Date()): Promise<void> {
+    const { live, assigned } = await this.txManager.run(async () => {
+      const locked = await this.repo.lockRunners([runnerId]);
+      const [runner] = await this.repo.findPlacementRunners(locked);
+      if (!runner || !runner.enabled) return { live: [] as LiveFleetJobEvent[], assigned: 0 };
+      const pauses = await this.budgets.snapshot(now);
+      const candidate = { ...runner, budgetPaused: pauses.runnerPaused(runner.id) };
+      const load = toLoads(await this.repo.findActiveLoads([runner.id])).get(runner.id) ?? EMPTY_LOAD;
+      let slots = (runner.threadCapacity ?? 0) - (load.threads ?? 0);
+      const events: LiveFleetJobEvent[] = [];
+      let count = 0;
+      for (const id of slots > 0 ? await this.repo.findQueuedIds(QUEUED_SCAN_LIMIT) : []) {
+        if (slots <= 0) break;
+        const job = await this.repo.lockById(id, { skipLocked: true });
+        if (!job || job.state !== FleetJobState.QUEUED || !isThreadKind(job.command)) continue;
+        if (job.pinnedRunnerId && job.pinnedRunnerId !== runner.id) continue;
+        const paused = jobScopePause(job, (keys) => pauses.match(keys));
+        if (paused) { events.push(await this.cancelForPause(job, paused.id, now)); continue; }
+        const [repo, thread] = await Promise.all([this.repo.findRepo(job.repoId), this.repo.findThreadAssign(job.id)]);
+        if (!repo || !thread) continue;
+        const placementJob = toPlacementJob(job, repo, { backend: thread.backend, enabled: this.fleetConfig.threadsEnabled });
+        const currentLoad = { ...load, threads: (runner.threadCapacity ?? 0) - slots };
+        if (firstMisfit(placementJob, candidate, currentLoad, now, this.fleetConfig.runnerOfflineSec) !== null) continue;
+        const done = await this.assign(job, repo, runner, now);
+        if (!done) continue;
+        events.push(done.live);
+        count += 1;
+        slots -= 1;
+      }
+      return { live: events, assigned: count };
+    });
+    this.live.publish(live);
+    if (assigned > 0) this.notifier.notify(runnerId);
+  }
+
   /** S1b §2.3: cancel a QUEUED job in a paused scope. The transition's activity row names the policy (plan D170). */
   private async cancelForPause(job: FleetJobRecord, policyId: string, now: Date): Promise<LiveFleetJobEvent> {
     const reason = budgetReason(policyId);
@@ -149,7 +186,9 @@ export class PlacementService {
     if (leaseEpoch === null) return null; // another placement won (spec §6.1)
     const after = await this.repo.findById(job.id);
     if (!after) return null;
-    const payload = buildAssignPayload(after, repo, cloneUrlFor(repo, this.vcsConfig), gitIdentityFor(repo.provider, this.fleetConfig));
+    const thread = isThreadKind(job.command) ? await this.repo.findThreadAssign(job.id) : undefined;
+    const payload = buildAssignPayload(after, repo, cloneUrlFor(repo, this.vcsConfig), gitIdentityFor(repo.provider, this.fleetConfig), thread ?? undefined);
+    if (thread) await this.repo.pinThreadRunner(thread.threadId, runner.id);
     await this.repo.createCommand({ runnerId: runner.id, jobId: job.id, type: FleetCommandType.ASSIGN, leaseEpoch, payload });
     const live = await this.transitions.record({ before: job, after, by: 'server', now, actor: SYSTEM_ACTOR, reason: `assigned to ${runner.name}` });
     return { leaseEpoch, live };

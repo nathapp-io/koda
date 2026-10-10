@@ -27,4 +27,12 @@ describe('buildAssignPayload', () => {
     const payload = buildAssignPayload({ ...job, bashMode: 'escalate', approvalTimeoutSec: 120 }, repo, 'https://x/y.git', identity);
     expect(payload).toEqual(expect.objectContaining({ bashMode: 'escalate', approvalTimeoutSec: 120 }));
   });
+
+  it('US-006: includes the supplied THREAD assignment block', () => {
+    const thread = {
+      threadId: 't1', action: 'SESSION' as const, feature: 'add-auth', resume: false, instructions: 'instructions',
+      backend: { kind: 'native' as const }, skills: [], initialMessage: { messageId: 'm1', text: 'hello' },
+    };
+    expect(buildAssignPayload({ ...job, command: 'THREAD' }, repo, 'https://x/y.git', identity, thread).thread).toEqual(thread);
+  });
 });

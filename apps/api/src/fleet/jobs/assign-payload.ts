@@ -1,6 +1,7 @@
 import type { IFleetConfig } from '../../config/fleet.config';
 import type { AssignPayload, GitIdentity } from '../common/protocol';
 import type { FleetJobRecord, FleetRepoRef } from './domain/fleet-job.domain';
+import type { ThreadAssign } from '../common/thread-jobs';
 
 /**
  * Plan D17: the App bot for GitHub, the configured bot for GitLab.
@@ -23,7 +24,7 @@ export function gitIdentityFor(
   return { name: bot, email: `${bot}@users.noreply.github.com` };
 }
 
-export function buildAssignPayload(job: FleetJobRecord, repo: FleetRepoRef, cloneUrl: string, gitIdentity: GitIdentity): AssignPayload {
+export function buildAssignPayload(job: FleetJobRecord, repo: FleetRepoRef, cloneUrl: string, gitIdentity: GitIdentity, thread?: ThreadAssign): AssignPayload {
   return {
     jobId: job.id,
     command: job.command,
@@ -36,5 +37,6 @@ export function buildAssignPayload(job: FleetJobRecord, repo: FleetRepoRef, clon
     bashMode: job.bashMode,
     approvalTimeoutSec: job.approvalTimeoutSec,
     gitIdentity,
+    ...(thread ? { thread } : {}),
   };
 }

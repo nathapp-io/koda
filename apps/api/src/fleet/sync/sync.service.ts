@@ -86,6 +86,7 @@ export class SyncService {
     this.live.publish(live);
     this.approvalLive.publish(approvalLive);
     if (req.freeSlots > 0) await this.placement.fillRunner(runnerId, req.freeSlots, now);
+    if (req.protocolVersion >= 4) await this.placement.fillRunnerThreads(runnerId, now);
     await this.afterTerminal(live.filter((e) => isTerminal(e.state)).map((e) => e.jobId));
 
     const tokens = await this.grantTokens(runnerId, req.tokenRequests, now);

@@ -9167,6 +9167,68 @@
       }
     },
     "/api/projects/{slug}/threads/{id}/messages": {
+      "post": {
+        "operationId": "ThreadsController_sendMessage",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendMessageResultDto"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendMessageResultDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Send a message to a chat thread",
+        "tags": [
+          "fleet threads"
+        ]
+      },
       "get": {
         "operationId": "ThreadsController_messages",
         "parameters": [
@@ -12969,7 +13031,10 @@
               "approvals_relay",
               "busy_repo",
               "capacity",
-              "config_jobs"
+              "config_jobs",
+              "thread_capacity",
+              "thread_backend",
+              "threads_disabled"
             ],
             "type": "string"
           }
@@ -15140,7 +15205,10 @@
               "tools",
               "approvals_relay",
               "busy_repo",
-              "capacity"
+              "capacity",
+              "thread_capacity",
+              "thread_backend",
+              "threads_disabled"
             ],
             "type": "string"
           }
@@ -15783,7 +15851,10 @@
               "tools",
               "approvals_relay",
               "busy_repo",
-              "capacity"
+              "capacity",
+              "thread_capacity",
+              "thread_backend",
+              "threads_disabled"
             ],
             "type": "string"
           }
@@ -16029,6 +16100,24 @@
           "activeJob"
         ]
       },
+      "SendMessageDto": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32768
+          },
+          "clientMessageId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          }
+        },
+        "required": [
+          "text",
+          "clientMessageId"
+        ]
+      },
       "ChatMessageDto": {
         "type": "object",
         "properties": {
@@ -16104,6 +16193,22 @@
           "costUsd",
           "costSource",
           "createdAt"
+        ]
+      },
+      "SendMessageResultDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "$ref": "#/components/schemas/ChatMessageDto"
+          },
+          "jobId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "message",
+          "jobId"
         ]
       },
       "SkillDto": {

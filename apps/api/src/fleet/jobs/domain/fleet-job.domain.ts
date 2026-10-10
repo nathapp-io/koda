@@ -3,6 +3,7 @@ import type { IPageResult } from '@nathapp/nestjs-data';
 import type { FleetCommandType, FleetJobKind, FleetJobState } from '../../../common/enums';
 import type { RunnerCapabilities, BashMode } from '../../common/protocol';
 import type { PlacementRunner } from '../placement-rules';
+import type { ThreadAssign } from '../../common/thread-jobs';
 import type { ConfigJobResult } from '../../common/config-jobs';
 
 export const FLEET_JOB_REPOSITORY = Symbol('FLEET_JOB_REPOSITORY');
@@ -186,6 +187,7 @@ export interface FleetRepoRef {
 export interface ActiveJobRef {
   runnerId: string;
   repoId: string;
+  command?: string;
 }
 
 export type PlacementRunnerRow = PlacementRunner & { bootId: string };
@@ -214,6 +216,8 @@ export interface IFleetJobRepository {
   /** Locks runner rows in id order (all when ids is undefined); returns the locked ids. */
   lockRunners(ids?: readonly string[]): Promise<string[]>;
   findActiveLoads(runnerIds: readonly string[]): Promise<ActiveJobRef[]>;
+  findThreadAssign(jobId: string): Promise<ThreadAssign | null>;
+  pinThreadRunner(threadId: string, runnerId: string): Promise<void>;
 
   /** Takes the next server seq from FleetJob.eventSeq (row-locked by the increment). */
   appendEvent(jobId: string, event: { leaseEpoch: number; runnerSeq: number | null; type: string; payload: unknown }): Promise<FleetJobEventRecord>;

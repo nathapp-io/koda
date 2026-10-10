@@ -7,6 +7,7 @@ import type { IPageResult } from '@nathapp/nestjs-data';
 import { FleetCommandAckResult, FleetCommandType, FleetJobState, FleetJobKind } from '../../common/enums';
 import type { RunnerCapabilities, BashMode } from '../common/protocol';
 import { ACTIVE_STATES, RUNNER_HELD_STATES } from './job-state';
+import type { ThreadAssign } from '../common/thread-jobs';
 import type { ConfigJobResult } from '../common/config-jobs';
 import {
   ActiveJobRef, DuplicateActiveJobError, FleetArtifactRecord, FleetCommandRecord, FleetJobEventRecord, FleetJobFilters,
@@ -166,7 +167,7 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     const rows = await this.db.runner.findMany({
       where: ids ? { id: { in: [...ids] } } : {},
       orderBy: { id: 'asc' },
-      select: { id: true, name: true, enabled: true, lastSeenAt: true, labels: true, capacity: true, capabilities: true, bootId: true },
+      select: { id: true, name: true, enabled: true, lastSeenAt: true, labels: true, capacity: true, capabilities: true, bootId: true, protocolVersion: true, threadCapacity: true },
     });
     // Stored capabilities were validated by parseCapabilities at enroll/sync time.
     return rows.map((r) => ({ ...r, capabilities: r.capabilities as unknown as RunnerCapabilities }));
@@ -183,9 +184,27 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     if (runnerIds.length === 0) return [];
     const rows = await this.db.fleetJob.findMany({
       where: { runnerId: { in: [...runnerIds] }, state: { in: [...RUNNER_HELD_STATES] } },
-      select: { runnerId: true, repoId: true },
+      select: { runnerId: true, repoId: true, command: true },
     });
-    return rows.map((r) => ({ runnerId: r.runnerId as string, repoId: r.repoId }));
+    return rows.map((r) => ({ runnerId: r.runnerId as string, repoId: r.repoId, command: r.command }));
+  }
+
+  async findThreadAssign(jobId: string): Promise<ThreadAssign | null> {
+    const turn = await this.db.fleetThreadTurn.findUnique({ where: { jobId } });
+    if (!turn) return null;
+    const thread = await this.db.chatThread.findUnique({ where: { id: turn.threadId }, select: { feature: true } });
+    if (!thread) return null;
+    const message = turn.initialMessageId ? await this.db.chatMessage.findUnique({ where: { id: turn.initialMessageId }, select: { id: true, content: true } }) : null;
+    return {
+      threadId: turn.threadId, action: turn.action as ThreadAssign['action'], feature: thread.feature, resume: turn.resume,
+      instructions: turn.instructions, backend: turn.backend as unknown as ThreadAssign['backend'],
+      skills: turn.skills as unknown as ThreadAssign['skills'],
+      initialMessage: message ? { messageId: message.id, text: message.content } : null,
+    };
+  }
+
+  async pinThreadRunner(threadId: string, runnerId: string): Promise<void> {
+    await this.db.chatThread.updateMany({ where: { id: threadId, runnerId: null }, data: { runnerId } });
   }
 
   /**

@@ -173,6 +173,37 @@ describe('placement rules (spec §4)', () => {
   });
 });
 
+describe('THREAD placement (US-006)', () => {
+  const threadJob = (over: Partial<PlacementJob> = {}) => job({ command: 'THREAD', profiles: [], thread: { backend: { kind: 'native' }, enabled: true }, ...over });
+  const threadRunner = (over: Partial<PlacementRunner> = {}) => runner({ protocolVersion: 4, threadCapacity: 2, capabilities: caps({ threadBackends: { native: ['m1'], acp: [] } }), ...over });
+
+  it('counts THREAD refs in their own load class', () => {
+    expect(toLoads([{ runnerId: 'r1', repoId: 'rA', command: 'THREAD' }]).get('r1')).toEqual({ active: 0, repoIds: new Set(), threads: 1 });
+  });
+  it('does not block a RUN job on a repo held by THREAD', () => {
+    const threadLoad = toLoads([{ runnerId: 'r1', repoId: 'rA', command: 'THREAD' }]).get('r1');
+    expect(misfit(job({ repoId: 'rA' }), runner(), threadLoad ?? EMPTY_LOAD)).toBeNull();
+  });
+  it('fits THREAD despite finite capacity, same-repo load, and broken interaction/sandbox', () => {
+    const capsWithIssues = caps({ threadBackends: { native: ['m1'], acp: [] }, interaction: TG_FAILED, sandbox: { available: false, probedAt: 'x' } });
+    expect(misfit(threadJob(), threadRunner({ capabilities: capsWithIssues }), { active: 1, repoIds: new Set(['repo-1']), threads: 0 })).toBeNull();
+  });
+  it('reports thread capacity after backend fit', () => {
+    expect(misfit(threadJob(), threadRunner(), { active: 0, repoIds: new Set(), threads: 2 })).toBe('thread_capacity');
+  });
+  it.each([
+    [{ kind: 'native', model: 'm2' }, { native: ['m1'], acp: [] }],
+    [{ kind: 'acp', agent: 'claude' }, { native: [], acp: [] }],
+  ] as const)('reports unsupported thread backend', (backend, threadBackends) => {
+    expect(misfit(threadJob({ thread: { backend, enabled: true } }), threadRunner({ capabilities: caps({ threadBackends }) }))).toBe('thread_backend');
+  });
+  it('requires protocol v4 and enabled thread placement', () => {
+    expect(misfit(threadJob(), threadRunner({ protocolVersion: 3 }))).toBe('protocol');
+    expect(misfit(threadJob({ thread: { backend: { kind: 'native' }, enabled: false } }), threadRunner())).toBe('threads_disabled');
+    expect(misfit(threadJob({ thread: undefined }), threadRunner())).toBe('threads_disabled');
+  });
+});
+
 describe('evaluateRunners (S2b (c) §2.3)', () => {
   it('returns one verdict per runner, applying each runner pause and load', () => {
     const loads = new Map([['r2', { active: 1, repoIds: new Set(['other-repo']) }]]);
