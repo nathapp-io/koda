@@ -1949,6 +1949,7 @@
       "tab": "Skills",
       "title": "Skills",
       "description": "Enable catalog skills for this project.",
+      "sourceRef": "{url} @ {ref}",
       "sourceFailed": "The skill source failed to resolve; its pinned commit may be stale."
     }
   },

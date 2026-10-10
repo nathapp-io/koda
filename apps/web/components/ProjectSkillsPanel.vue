@@ -7,8 +7,14 @@ const props = defineProps<{ slug: string }>()
 const { t } = useI18n()
 const toast = useAppToast()
 const { list, enable, disable } = useProjectSkills()
-const { data: viewer } = useProjectViewerRole(props.slug)
+const { data: viewer, error: viewerError } = useProjectViewerRole(props.slug)
 const canManage = computed(() => viewer.value?.canManage === true)
+
+// A failed role fetch leaves canManage false, which looks the same as a non-admin viewer. Surface the
+// failure so the admin knows why every switch is locked. The switches stay disabled: the API decides.
+watch(viewerError, (err) => {
+  if (err) toast.error(extractApiError(err))
+}, { immediate: true })
 
 const skills = ref<ProjectSkillDto[]>([])
 const loading = ref(true)
@@ -73,6 +79,9 @@ onMounted(async () => {
             >{{ shortSha(skill.source.resolvedSha) }}</span>
           </div>
           <p class="text-sm text-muted-foreground">{{ skill.description }}</p>
+          <p class="text-xs text-muted-foreground break-all">
+            {{ t('skills.project.sourceRef', { url: skill.source.gitUrl, ref: skill.source.ref }) }}
+          </p>
           <p v-if="skill.source.status === 'RESOLVE_FAILED'" class="text-xs text-status-rejected">
             {{ t('skills.project.sourceFailed') }}
           </p>

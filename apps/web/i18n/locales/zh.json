@@ -1949,6 +1949,7 @@
       "tab": "技能",
       "title": "技能",
       "description": "为此项目启用目录中的技能。",
+      "sourceRef": "{url} @ {ref}",
       "sourceFailed": "技能来源解析失败；其固定的提交可能已过期。"
     }
   },

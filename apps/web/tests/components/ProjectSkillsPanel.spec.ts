@@ -42,6 +42,8 @@ const switchStub = {
 interface MountOver {
   items?: ProjectSkill[]
   canManage?: boolean
+  /** When set, the viewer-role fetch fails with this error instead of resolving. */
+  viewerError?: unknown
   list?: jest.Mock
   put?: jest.Mock
   del?: jest.Mock
@@ -69,7 +71,10 @@ function mountPanel(over: MountOver = {}) {
       useI18n: () => enI18n(),
       useAppToast: () => toasts,
       useProjectSkills,
-      useProjectViewerRole: () => ({ data: ref({ canManage, viewerRole: canManage ? 'ADMIN' : 'DEVELOPER' }) }),
+      useProjectViewerRole: () => ({
+        data: ref({ canManage, viewerRole: canManage ? 'ADMIN' : 'DEVELOPER' }),
+        error: ref(over.viewerError ?? null),
+      }),
     },
   })
 
@@ -224,6 +229,36 @@ describe('ProjectSkillsPanel (US-007)', () => {
     await settle()
 
     expect(app.text()).not.toContain(enI18n().t('skills.project.sourceFailed'))
+    unmount()
+  })
+
+  test('US-007 AC7 (error path): a failed viewer-role fetch toasts its message and keeps every switch disabled', async () => {
+    // On failure the composable's default is canManage false, so mount the failed state as it really is.
+    const { switchIn, toasts, settle, unmount } = mountPanel({ canManage: false, viewerError: new ApiError(500, 'Members unavailable') })
+    await settle()
+
+    expect(toasts.errors).toEqual(['Members unavailable'])
+    expect(switchIn('alpha').props.disabled).toBe(true)
+    unmount()
+  })
+
+  test('US-007 AC7 (control): a successful viewer-role fetch toasts nothing', async () => {
+    const { toasts, settle, unmount } = mountPanel({ canManage: true })
+    await settle()
+
+    expect(toasts.errors).toEqual([])
+    unmount()
+  })
+
+  test('US-007 (source context): each row shows the source git URL and ref', async () => {
+    const { app, settle, unmount } = mountPanel({
+      items: [skill('alpha', { source: { id: 's', gitUrl: 'https://github.com/o/alpha-skills', ref: 'release/v2', resolvedSha: null, status: 'OK' } })],
+    })
+    await settle()
+
+    const row = app.textOf(app.find('[data-testid="skill-row-alpha"]')[0])
+    expect(row).toContain('https://github.com/o/alpha-skills')
+    expect(row).toContain('release/v2')
     unmount()
   })
 
