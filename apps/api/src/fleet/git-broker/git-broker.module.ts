@@ -10,6 +10,6 @@ import { GitTokenBroker } from './git-token.broker';
 @Module({
   imports: [VcsModule],
   providers: [FleetHttpClient, GitHubAppClient, GitLabAccessChecker, GitLabTokenSource, GitTokenBroker],
-  exports: [GitHubAppClient, GitLabAccessChecker, GitLabTokenSource, GitTokenBroker],
+  exports: [FleetHttpClient, GitHubAppClient, GitLabAccessChecker, GitLabTokenSource, GitTokenBroker],
 })
 export class GitBrokerModule {}
