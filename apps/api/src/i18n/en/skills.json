@@ -1,0 +1,7 @@
+{
+  "unsupportedHost": { "-2": "Only public GitHub repository URLs are supported" },
+  "nameConflict": { "409": "Skill {name} is already registered by {gitUrl}" },
+  "sourceExists": { "409": "This skill source is already registered" },
+  "notFound": { "404": "Skill not found" },
+  "sourceNotFound": { "404": "Skill source not found" }
+}

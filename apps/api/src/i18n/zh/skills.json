@@ -1,0 +1,7 @@
+{
+  "unsupportedHost": { "-2": "仅支持公开的 GitHub 仓库地址" },
+  "nameConflict": { "409": "技能 {name} 已由 {gitUrl} 注册" },
+  "sourceExists": { "409": "此技能源已注册" },
+  "notFound": { "404": "未找到技能" },
+  "sourceNotFound": { "404": "未找到技能源" }
+}

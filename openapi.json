@@ -9362,6 +9362,80 @@
           "invites"
         ]
       }
+    },
+    "/api/admin/skills/sources": {
+      "get": {
+        "operationId": "AdminSkillsController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillSourceListDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Global admin required"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List registered skill sources (global admin)",
+        "tags": [
+          "skills"
+        ]
+      },
+      "post": {
+        "operationId": "AdminSkillsController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSkillSourceDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillSourceDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid source URL or request"
+          },
+          "403": {
+            "description": "Global admin required"
+          },
+          "409": {
+            "description": "Source or skill name already registered"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Register and resolve a public GitHub skill source (global admin)",
+        "tags": [
+          "skills"
+        ]
+      }
     }
   },
   "info": {
@@ -15941,6 +16015,127 @@
         },
         "required": [
           "password"
+        ]
+      },
+      "SkillDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "dir": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "dir"
+        ]
+      },
+      "SkillSourceDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "gitUrl": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "resolvedSha": {
+            "type": "string",
+            "nullable": true
+          },
+          "resolvedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "OK",
+              "RESOLVE_FAILED"
+            ]
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkillDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "gitUrl",
+          "ref",
+          "path",
+          "resolvedSha",
+          "resolvedAt",
+          "status",
+          "statusReason",
+          "createdAt",
+          "skills"
+        ]
+      },
+      "SkillSourceListDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkillSourceDto"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "CreateSkillSourceDto": {
+        "type": "object",
+        "properties": {
+          "gitUrl": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[^\\s]+$"
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 200,
+            "pattern": "^(?:[A-Za-z0-9_.-]+(?:\\/[A-Za-z0-9_.-]+)*)?$",
+            "description": "Empty string or slash-separated safe directory path"
+          }
+        },
+        "required": [
+          "gitUrl",
+          "ref",
+          "path"
         ]
       }
     }
