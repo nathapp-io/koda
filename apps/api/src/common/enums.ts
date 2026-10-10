@@ -149,3 +149,7 @@ export type FleetCommandType = (typeof FleetCommandType)[keyof typeof FleetComma
 /** Fleet S1: FleetCommand.ackResult. `withdrawn` and `stale` are server-set (plan D4, D8). */
 export const FleetCommandAckResult = { OK: 'ok', REJECTED: 'rejected', WITHDRAWN: 'withdrawn', STALE: 'stale' } as const;
 export type FleetCommandAckResult = (typeof FleetCommandAckResult)[keyof typeof FleetCommandAckResult];
+
+/** Skill catalog: SkillSource.status (a source whose last resolve failed keeps its row). */
+export const SkillSourceStatus = { OK: 'OK', RESOLVE_FAILED: 'RESOLVE_FAILED' } as const;
+export type SkillSourceStatus = (typeof SkillSourceStatus)[keyof typeof SkillSourceStatus];
