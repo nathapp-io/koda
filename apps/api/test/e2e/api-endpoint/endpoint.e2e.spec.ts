@@ -3022,6 +3022,11 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('GET /api/projects/:slug/skills — 403 for a non-member', async () => {
+      const db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+      const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const user = await db.user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
+      await db.projectMember.deleteMany({ where: { projectId: project.id, userId: user.id } });
+
       await request(httpServer)
         .get(`/api/projects/${projectSlug}/skills`)
         .set('Authorization', `Bearer ${nonAdminUserAccessToken}`)

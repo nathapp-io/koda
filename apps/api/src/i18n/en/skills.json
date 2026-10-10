@@ -1,6 +1,7 @@
 {
   "unsupportedHost": { "-2": "Only public GitHub repository URLs are supported" },
   "principal": { "403": "Only user principals can create skill sources" },
+  "projectPrincipal": { "403": "Only user principals can manage project skills" },
   "nameConflict": { "409": "Skill {name} is already registered by {gitUrl}" },
   "sourceExists": { "409": "This skill source is already registered" },
   "notFound": { "404": "Skill not found" },

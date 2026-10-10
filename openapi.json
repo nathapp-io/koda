@@ -9516,6 +9516,145 @@
           "skills"
         ]
       }
+    },
+    "/api/projects/{slug}/skills": {
+      "get": {
+        "operationId": "ProjectSkillsController_list",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "description": "Project slug",
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectSkillListDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Project membership required"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List catalog skills and their project enablement",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/api/projects/{slug}/skills/{skillId}": {
+      "put": {
+        "operationId": "ProjectSkillsController_enable",
+        "parameters": [
+          {
+            "name": "skillId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "description": "Project slug",
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectSkillDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Project admin required"
+          },
+          "404": {
+            "description": "Project or skill not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Enable a catalog skill for this project",
+        "tags": [
+          "skills"
+        ]
+      },
+      "delete": {
+        "operationId": "ProjectSkillsController_disable",
+        "parameters": [
+          {
+            "name": "skillId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "description": "Project slug",
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Skill disabled"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Project admin required"
+          },
+          "404": {
+            "description": "Project or skill not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Disable a catalog skill for this project",
+        "tags": [
+          "skills"
+        ]
+      }
     }
   },
   "info": {
@@ -16217,6 +16356,65 @@
           "gitUrl",
           "ref",
           "path"
+        ]
+      },
+      "ProjectSkillDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "gitUrl": {
+                "type": "string"
+              },
+              "ref": {
+                "type": "string"
+              },
+              "resolvedSha": {
+                "type": "string",
+                "nullable": true
+              },
+              "status": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "enabled",
+          "source"
+        ]
+      },
+      "ProjectSkillListDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProjectSkillDto"
+            }
+          }
+        },
+        "required": [
+          "items"
         ]
       }
     }

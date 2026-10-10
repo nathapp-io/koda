@@ -98,4 +98,20 @@ export class SkillsService {
   listSources(): Promise<SkillSourceDomain[]> {
     return this.catalog.listSources();
   }
+
+  listProjectSkills(projectId: string) {
+    return this.catalog.listProjectSkills(projectId);
+  }
+
+  async enableProjectSkill(projectId: string, skillId: string, userId: string) {
+    const skill = await this.catalog.enableProjectSkill(projectId, skillId, userId);
+    if (!skill) throw new NotFoundAppException({}, 'skills.notFound');
+    return skill;
+  }
+
+  async disableProjectSkill(projectId: string, skillId: string): Promise<void> {
+    if (!await this.catalog.disableProjectSkill(skillId, projectId)) {
+      throw new NotFoundAppException({}, 'skills.notFound');
+    }
+  }
 }

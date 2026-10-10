@@ -9,6 +9,14 @@ export interface SkillDomain {
   dir: string;
 }
 
+export interface ProjectSkillDomain {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  source: Pick<SkillSourceDomain, 'id' | 'gitUrl' | 'ref' | 'resolvedSha' | 'status'>;
+}
+
 export interface SkillSourceDomain {
   id: string;
   gitUrl: string;
@@ -35,6 +43,9 @@ export interface SkillCatalogRepository {
   deleteSource(id: string): Promise<boolean>;
   createSource(input: Omit<SkillSourceDomain, 'id' | 'createdAt' | 'skills'> & { createdById: string; skills: Array<Omit<SkillDomain, 'id'>> }): Promise<SkillSourceDomain>;
   listSources(): Promise<SkillSourceDomain[]>;
+  listProjectSkills(projectId: string): Promise<ProjectSkillDomain[]>;
+  enableProjectSkill(projectId: string, skillId: string, userId: string): Promise<ProjectSkillDomain | null>;
+  disableProjectSkill(skillId: string, projectId: string): Promise<boolean>;
 }
 
 export function formatSkillResolveReason(reason: SkillResolveReason, detail?: string): string {

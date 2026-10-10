@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { AbstractPrismaRepository, PrismaClientLike, PrismaModelDelegate, PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { PrismaClient, SkillSource as SkillSourceModel } from '../generated/prisma/client';
-import type { SkillCatalogRepository, SkillDomain, SkillSourceDomain } from './skill-catalog.domain';
+import type { ProjectSkillDomain, SkillCatalogRepository, SkillDomain, SkillSourceDomain } from './skill-catalog.domain';
 
 @Injectable()
 export class PrismaSkillCatalogRepository extends AbstractPrismaRepository<SkillSourceDomain, SkillSourceModel, string> implements SkillCatalogRepository {
@@ -126,5 +126,59 @@ export class PrismaSkillCatalogRepository extends AbstractPrismaRepository<Skill
       include: { skills: { orderBy: { name: 'asc' } } },
     });
     return sources.map((source) => ({ ...this.toDomain(source), skills: source.skills }));
+  }
+
+  async listProjectSkills(projectId: string): Promise<ProjectSkillDomain[]> {
+    const skills = await this.prisma.client.skill.findMany({
+      take: 10000,
+      orderBy: { name: 'asc' },
+      include: {
+        source: true,
+        projects: { where: { projectId }, select: { skillId: true } },
+      },
+    });
+    return skills.map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      enabled: skill.projects.length > 0,
+      source: {
+        id: skill.source.id,
+        gitUrl: skill.source.gitUrl,
+        ref: skill.source.ref,
+        resolvedSha: skill.source.resolvedSha,
+        status: skill.source.status as SkillSourceDomain['status'],
+      },
+    }));
+  }
+
+  async enableProjectSkill(projectId: string, skillId: string, userId: string): Promise<ProjectSkillDomain | null> {
+    const skill = await this.prisma.client.skill.findUnique({ where: { id: skillId }, include: { source: true } });
+    if (!skill) return null;
+    await this.prisma.client.projectSkill.upsert({
+      where: { projectId_skillId: { projectId, skillId } },
+      create: { projectId, skillId, enabledById: userId },
+      update: { enabledById: userId },
+    });
+    return {
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      enabled: true,
+      source: {
+        id: skill.source.id,
+        gitUrl: skill.source.gitUrl,
+        ref: skill.source.ref,
+        resolvedSha: skill.source.resolvedSha,
+        status: skill.source.status as SkillSourceDomain['status'],
+      },
+    };
+  }
+
+  async disableProjectSkill(skillId: string, projectId: string): Promise<boolean> {
+    const skill = await this.prisma.client.skill.findUnique({ where: { id: skillId } });
+    if (!skill) return false;
+    await this.prisma.client.projectSkill.deleteMany({ where: { projectId, skillId } });
+    return true;
   }
 }
