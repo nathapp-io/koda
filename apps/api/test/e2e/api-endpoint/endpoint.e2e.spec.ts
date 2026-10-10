@@ -20,6 +20,7 @@ import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient, ProjectMember } from '../../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
+import { SKILL_RESOLVER, SkillResolver } from '../../../src/skills/skill-resolver';
 import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -104,7 +105,10 @@ describeIntegration('API Integration Tests', () => {
     // Global guards MUST be registered BEFORE init() — NestJS compiles route
     // handlers during init() and captures guards at that point. Guards set after
     // init() are invisible to the compiled handlers.
-    app = await AppFactory.create(AppModule);
+    // `abortOnError: false` makes the Nest factory rethrow instead of process.exit(1) when a
+    // token is looked up before its module registers — the US-003 skills tests rely on it so a
+    // missing SKILL_RESOLVER fails its own test instead of the whole suite.
+    app = await AppFactory.create(AppModule, { abortOnError: false });
 
     // Get CombinedAuthGuard from DI before init() — DI container is ready
     const combinedGuard = app.get(CombinedAuthGuard);
@@ -2860,6 +2864,55 @@ describeIntegration('API Integration Tests', () => {
         where: { projectId_userId: { projectId: project.id, userId: disabledUser.id } },
       });
       expect(membership).toBeNull();
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // US-003 Skill sources — admin routes
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('US-003 Skill sources', () => {
+    it('GET /api/admin/skills/sources — 200 for a global admin', async () => {
+      const res = await request(httpServer)
+        .get('/api/admin/skills/sources')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      expect(body<{ items: unknown[] }>(res)).toHaveProperty('items');
+    });
+
+    it('POST /api/admin/skills/sources — 201 with the booted app resolver spied', async () => {
+      // In RED the token is not registered yet: fall back to a plain mock so the status
+      // assertion, not a setup crash, documents what is missing.
+      const resolver = (() => {
+        try {
+          return app.get<SkillResolver>(SKILL_RESOLVER, { strict: false });
+        } catch {
+          return undefined;
+        }
+      })();
+      const resolve = resolver ? jest.spyOn(resolver, 'resolve') : jest.fn();
+      resolve.mockResolvedValue({ sha: 's1', skills: [{ name: 'spec-review', description: 'd', dir: 'skills/spec-review' }] });
+
+      try {
+        const res = await request(httpServer)
+          .post('/api/admin/skills/sources')
+          .set('Authorization', `Bearer ${userAccessToken}`)
+          .send({ gitUrl: 'https://github.com/NathApp-IO/nax-spec-kit-skills.git', ref: 'main', path: 'skills' })
+          .expect(201);
+
+        expect(body<{ status: string; resolvedSha: string }>(res)).toMatchObject({ status: 'OK', resolvedSha: 's1' });
+      } finally {
+        if (resolver) resolve.mockRestore();
+      }
+    });
+
+    it('POST /api/admin/skills/sources — 400 for a GitLab URL', async () => {
+      await request(httpServer)
+        .post('/api/admin/skills/sources')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ gitUrl: 'https://gitlab.com/a/b', ref: 'main', path: '' })
+        .expect(400);
     });
   });
 });

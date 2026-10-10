@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-skill-catalog",
   "branchName": "feat/fleet-s5a-skill-catalog",
   "createdAt": "2026-10-10T00:00:00.000Z",
-  "updatedAt": "2026-10-10T04:40:57.248Z",
+  "updatedAt": "2026-10-10T04:49:54.333Z",
   "userStories": [
     {
       "id": "US-001",
@@ -108,8 +108,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -187,7 +187,10 @@
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "New module with repository/service/controller layering, DI binding and transactional writes; global-ADMIN access control and agent-principal refusal make it security-critical, so the security override applies."
+        "reasoning": "New module with repository/service/controller layering, DI binding and transactional writes; global-ADMIN access control and agent-principal refusal make it security-critical, so the security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/app.module.ts",
@@ -228,7 +231,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "88fc4a41b61efb5df6270e8f227e4259136d2917"
     },
     {
       "id": "US-004",
