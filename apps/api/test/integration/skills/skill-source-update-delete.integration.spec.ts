@@ -149,21 +149,26 @@ describeIntegration('US-004 admin skill source update + delete (PG)', () => {
       { name: 'a', description: 'old', dir: 'skills/a' },
       { name: 'b', description: 'old-b', dir: 'skills/b' },
     ]);
+    await prisma.skillSource.update({
+      where: { id: sourceId },
+      data: { owner: 'stored-owner', repo: 'stored-repo', ref: 'release/v2', path: 'nested/skills' },
+    });
     resolve.mockResolvedValue({
       sha: 'sha-after',
       skills: [
-        { name: 'a', description: 'new', dir: 'skills/a' },
+        { name: 'a', description: 'new', dir: 'skills/a-renamed' },
         { name: 'c', description: 'new-c', dir: 'skills/c' },
       ],
     });
 
     const dto = data<SourceDto>(await update(sourceId).expect(200));
 
+    expect(resolve).toHaveBeenCalledWith({ owner: 'stored-owner', repo: 'stored-repo', ref: 'release/v2', path: 'nested/skills' });
     expect(dto.status).toBe('OK');
     expect(dto.resolvedSha).toBe('sha-after');
     expect(dto.skills.map((s) => s.name)).toEqual(['a', 'c']);
     const byNameAfter = Object.fromEntries(dto.skills.map((s) => [s.name, s]));
-    expect(byNameAfter.a).toEqual({ id: byName.a.id, name: 'a', description: 'new', dir: 'skills/a' });
+    expect(byNameAfter.a).toEqual({ id: byName.a.id, name: 'a', description: 'new', dir: 'skills/a-renamed' });
     expect(byNameAfter.c.id).toEqual(expect.any(String));
     expect(byNameAfter.c).toMatchObject({ name: 'c', description: 'new-c', dir: 'skills/c' });
   });
