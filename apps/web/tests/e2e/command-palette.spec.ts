@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { login, createProject, deleteProject, E2E_ADMIN } from './fixtures/api-client'
-import { webLogin, generateUniqueProjectKey } from './fixtures/page-helpers'
+import { webLogin, generateUniqueProjectKey, waitForHydration } from './fixtures/page-helpers'
 
 test.describe('Command palette', () => {
   let token: string
@@ -31,6 +31,22 @@ test.describe('Command palette', () => {
     await expect(dialog.getByRole('option', { name: /Palette/ }).first()).toBeVisible()
     await page.keyboard.press('Enter')
     await expect(page).toHaveURL(new RegExp(`/${slug}$`))
+    await expect(page.getByRole('dialog')).toBeHidden()
+  })
+
+  test('the project agents entry opens the project roster (issue #252)', async ({ page }) => {
+    await webLogin(page)
+    await page.goto(`/${slug}`)
+    await waitForHydration(page)
+    await page.keyboard.press('Control+K')
+    const dialog = page.getByRole('dialog')
+    const input = dialog.getByRole('combobox')
+    await input.fill('agents')
+    // The global registry entry also matches "agents" and comes first in the list,
+    // so select the project entry by its slug hint rather than pressing Enter.
+    await expect(dialog.getByRole('option', { name: `Agents ${slug}` })).toBeVisible()
+    await dialog.getByRole('option', { name: `Agents ${slug}` }).click()
+    await expect(page).toHaveURL(new RegExp(`/${slug}/agents$`))
     await expect(page.getByRole('dialog')).toBeHidden()
   })
 

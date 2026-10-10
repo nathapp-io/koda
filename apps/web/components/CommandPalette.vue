@@ -32,6 +32,7 @@ const commands = computed<Command[]>(() => {
     list.push(
       { id: 'board', label: t('nav.board'), hint, icon: Kanban, run: go(`/${slug}`) },
       { id: 'labels', label: t('nav.labels'), hint, icon: Tag, run: go(`/${slug}/labels`) },
+      { id: 'project-agents', label: t('nav.agents'), hint, icon: Bot, run: go(`/${slug}/agents`) },
       { id: 'kb', label: t('nav.kb'), hint, icon: BookOpen, run: go(`/${slug}/kb`) },
       { id: 'timeline', label: t('nav.timeline'), hint, icon: Clock, run: go(`/${slug}/timeline`) },
       { id: 'memory', label: t('nav.memory'), hint, icon: Brain, run: go(`/${slug}/memory`) },

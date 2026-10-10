@@ -74,7 +74,7 @@ data-driven) and keep the source order below.
 2. **Admin** (`nav.sectionAdmin`, rendered only for global admins): Users, Fleet overview
    (`/admin/fleet`), Runners, Repos, Budgets, Approvals, Fleet analytics.
 3. **Project block** (rendered when inside `/:project/*`, shown **first** via CSS `order-first`;
-   DOM order is unchanged): project name, then Work (Board, Labels), Knowledge (KB, Timeline,
+   DOM order is unchanged): project name, then Work (Board, Labels, Agents), Knowledge (KB, Timeline,
    Memory, Code Intel), Fleet (Overview above Fleet jobs, then Fleet analytics), and Settings.
 
 ### Behavior

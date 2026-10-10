@@ -120,21 +120,22 @@ describe('US-001 AC4: global /agents NuxtLink with Bot icon visible without proj
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC5 — Project-scoped /${projectSlug}/agents NuxtLink is NOT present
+// AC5 — the standalone page itself is not project-scoped.
+// Repointed by issue #252: the layout now DOES carry a project-scoped roster
+// link (pinned by tests/layouts/project-agents-nav.spec.ts), so this AC reads
+// pages/agents.vue — the surface it was actually about.
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('US-001 AC5: project-scoped /${projectSlug}/agents NuxtLink is NOT present', () => {
-  test('source does NOT have NuxtLink with pattern /${projectSlug}/agents', () => {
-    const source = readFileSync(layoutPath, 'utf-8')
-    expect(source).not.toMatch(/to=['"`]\/\$\{[^}]+\}\/agents['"`]/)
+describe('US-001 AC5: pages/agents.vue is not project-scoped', () => {
+  test('the standalone page does not use a project-scoped agents route', () => {
+    const source = readFileSync(standaloneAgentsPagePath, 'utf-8')
+    expect(source).not.toMatch(/\/\$\{[^}]+\}\/agents/)
   })
 
-  test('source does NOT have agents link inside v-if="projectSlug" section', () => {
+  test('the layout keeps the global /agents link alongside the project roster link', () => {
     const source = readFileSync(layoutPath, 'utf-8')
-    // The project-scoped agents link should be removed
-    // Check that there's no /agents link that references projectSlug
-    const hasProjectScopedAgentsLink = source.match(/\/\$\{[^}]+\}\/agents/)
-    expect(hasProjectScopedAgentsLink).toBe(null)
+    expect(source).toMatch(/to=['"`]\/agents['"`]/)
+    expect(source).toContain(':to="`/${projectSlug}/agents`"')
   })
 })
 
