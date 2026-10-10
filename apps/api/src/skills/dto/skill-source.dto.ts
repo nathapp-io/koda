@@ -1,6 +1,26 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import {
+  IsString,
+  Matches,
+  MaxLength,
+  MinLength,
+  Validate,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
+} from 'class-validator';
 import type { SkillSourceDomain } from '../skill-catalog.domain';
+
+@ValidatorConstraint({ name: 'noControlCharacters', async: false })
+class NoControlCharactersConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    if (typeof value !== 'string') return false;
+    for (let index = 0; index < value.length; index += 1) {
+      const code = value.charCodeAt(index);
+      if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return false;
+    }
+    return true;
+  }
+}
 
 export class SkillDto {
   @ApiProperty() declare id: string;
@@ -43,7 +63,14 @@ export class SkillSourceListDto {
 
 export class CreateSkillSourceDto {
   @ApiProperty({ maxLength: 500 }) @IsString() @MaxLength(500) declare gitUrl: string;
-  @ApiProperty() @IsString() @MinLength(1) @MaxLength(200) @Matches(/^[^\s\u0000-\u001F\u007F-\u009F]+$/) @Matches(/^(?!.*\.\.).*$/) declare ref: string;
+  @ApiProperty()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  @Matches(/^[^\s]+$/)
+  @Matches(/^(?!.*\.\.).*$/)
+  @Validate(NoControlCharactersConstraint)
+  declare ref: string;
   @ApiProperty({ description: 'Empty string or slash-separated safe directory path', maxLength: 200 })
   @IsString() @MaxLength(200) @Matches(/^(?:[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*)?$/) @Matches(/^(?!.*(?:^|\/)\.\.?($|\/)).*$/)
   declare path: string;
