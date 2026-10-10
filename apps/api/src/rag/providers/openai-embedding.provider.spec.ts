@@ -1,18 +1,19 @@
+import type { MockInstance } from 'vitest';
 import { OpenAIEmbeddingProvider } from './openai-embedding.provider';
 
 const VECTOR_A = [0.1, 0.2, 0.3];
 const VECTOR_B = [0.4, 0.5, 0.6];
 
 function mockFetch(ok: boolean, body: unknown) {
-  return jest.fn().mockResolvedValue({
+  return vi.fn().mockResolvedValue({
     ok,
-    json: jest.fn().mockResolvedValue(body),
+    json: vi.fn().mockResolvedValue(body),
   });
 }
 
 describe('OpenAIEmbeddingProvider', () => {
   let provider: OpenAIEmbeddingProvider;
-  let fetchSpy: jest.SpyInstance;
+  let fetchSpy: MockInstance;
 
   beforeEach(() => {
     provider = new OpenAIEmbeddingProvider('sk-test', 'text-embedding-3-small');
@@ -34,7 +35,7 @@ describe('OpenAIEmbeddingProvider', () => {
 
   describe('embed', () => {
     it('returns embedding vector on success', async () => {
-      fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(
+      fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(
         mockFetch(true, { data: [{ embedding: VECTOR_A }] }) as never,
       );
       const result = await provider.embed('hello');
@@ -42,7 +43,7 @@ describe('OpenAIEmbeddingProvider', () => {
     });
 
     it('sends correct Authorization header', async () => {
-      fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(
+      fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(
         mockFetch(true, { data: [{ embedding: VECTOR_A }] }) as never,
       );
       await provider.embed('test');
@@ -55,14 +56,14 @@ describe('OpenAIEmbeddingProvider', () => {
     });
 
     it('throws ValidationAppException when response is not ok', async () => {
-      fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(mockFetch(false, {}) as never);
+      fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(mockFetch(false, {}) as never);
       await expect(provider.embed('fail')).rejects.toThrow();
     });
   });
 
   describe('embedBatch', () => {
     it('returns embeddings in index order', async () => {
-      fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(
+      fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(
         mockFetch(true, {
           data: [
             { embedding: VECTOR_B, index: 1 },
@@ -76,7 +77,7 @@ describe('OpenAIEmbeddingProvider', () => {
     });
 
     it('sends all texts in single request body', async () => {
-      fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(
+      fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(
         mockFetch(true, { data: [{ embedding: VECTOR_A, index: 0 }] }) as never,
       );
       await provider.embedBatch(['a', 'b']);
@@ -89,7 +90,7 @@ describe('OpenAIEmbeddingProvider', () => {
     });
 
     it('throws ValidationAppException when response is not ok', async () => {
-      fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(mockFetch(false, {}) as never);
+      fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(mockFetch(false, {}) as never);
       await expect(provider.embedBatch(['fail'])).rejects.toThrow();
     });
   });

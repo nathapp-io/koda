@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { PrismaProjectRepository } from '../../../src/projects/prisma-project.repository';
 import { ProjectAccessService } from '../../../src/projects/project-access.service';
@@ -16,14 +17,14 @@ const runner: RunnerPrincipal = {
 };
 
 type ProjectRepositoryDouble = {
-  isAgentOnRoster: jest.Mock<Promise<boolean>, [string, string]>;
-  findMembershipRole: jest.Mock;
+  isAgentOnRoster: Mock<(...args: [string, string]) => Promise<boolean>>;
+  findMembershipRole: Mock;
 };
 
 function setup(authConfig?: Partial<IAuthConfig>) {
   const repo: ProjectRepositoryDouble = {
-    isAgentOnRoster: jest.fn<Promise<boolean>, [string, string]>(),
-    findMembershipRole: jest.fn(),
+    isAgentOnRoster: vi.fn<(...args: [string, string]) => Promise<boolean>>(),
+    findMembershipRole: vi.fn(),
   };
   const service = new ProjectAccessService(
     repo as unknown as PrismaProjectRepository,

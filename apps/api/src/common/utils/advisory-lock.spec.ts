@@ -2,7 +2,7 @@ import { GlobalLock, KODA_LOCK_CLASS, lockGlobal, lockProjectMembers } from './a
 
 describe('advisory locks', () => {
   function fakeDb() {
-    const $queryRaw = jest.fn().mockResolvedValue([{ locked: 1 }]);
+    const $queryRaw = vi.fn().mockResolvedValue([{ locked: 1 }]);
     return { db: { $queryRaw } as never, $queryRaw };
   }
 

@@ -10,12 +10,12 @@ const row = (over = {}) => ({
 });
 
 describe('RunnersService', () => {
-  const repo = { findRunnerById: jest.fn(), findRunnerPage: jest.fn(), updateRunner: jest.fn(), deleteRunner: jest.fn(), lockForDelete: jest.fn(), countUnfinishedJobs: jest.fn() };
-  const activity = { record: jest.fn() };
+  const repo = { findRunnerById: vi.fn(), findRunnerPage: vi.fn(), updateRunner: vi.fn(), deleteRunner: vi.fn(), lockForDelete: vi.fn(), countUnfinishedJobs: vi.fn() };
+  const activity = { record: vi.fn() };
   const tx = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
   const service = new RunnersService(repo as never, activity as never, tx as never, testFleetConfig({ runnerOfflineSec: 90 }));
 
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => vi.clearAllMocks());
 
   it('404s an unknown runner', async () => {
     repo.findRunnerById.mockResolvedValue(null);

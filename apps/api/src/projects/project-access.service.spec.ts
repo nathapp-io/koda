@@ -28,16 +28,16 @@ describe('ProjectAccessService', () => {
 
   beforeEach(() => {
     mockProjectRepo = {
-      findBySlug: jest.fn(),
-      findMembershipRole: jest.fn(),
-      isAgentOnRoster: jest.fn(),
+      findBySlug: vi.fn(),
+      findMembershipRole: vi.fn(),
+      isAgentOnRoster: vi.fn(),
     };
 
     service = new ProjectAccessService(mockProjectRepo as any);
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('findProjectIdBySlug', () => {

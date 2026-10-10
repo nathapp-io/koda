@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 /**
  * GitHubProvider PR Methods Integration Tests
  *
@@ -13,7 +14,7 @@ import { CreatePrParams, VcsPullRequest } from '../../../src/vcs/types';
 
 describe('GitHubProvider PR Methods', () => {
   let provider: GitHubProvider;
-  let mockHttpClient: jest.Mocked<HttpClient>;
+  let mockHttpClient: Mocked<HttpClient>;
 
   const testOwner = 'test-owner';
   const testRepo = 'test-repo';
@@ -21,8 +22,8 @@ describe('GitHubProvider PR Methods', () => {
 
   beforeEach(() => {
     mockHttpClient = {
-      get: jest.fn(),
-      post: jest.fn(),
+      get: vi.fn(),
+      post: vi.fn(),
     };
 
     provider = new GitHubProvider(testOwner, testRepo, testToken, mockHttpClient);

@@ -21,15 +21,15 @@ describe('TicketLinksService', () => {
   };
 
   const mockTicketLinkRepo = {
-    findProjectBySlug: jest.fn(),
-    findTicketByNumber: jest.fn(),
-    findTicketById: jest.fn(),
-    findLinkByUrl: jest.fn(),
-    createLink: jest.fn(),
-    findLinksByTicket: jest.fn(),
-    findLinkByIdAndTicket: jest.fn(),
-    deleteLink: jest.fn(),
-    findByPrNumber: jest.fn(),
+    findProjectBySlug: vi.fn(),
+    findTicketByNumber: vi.fn(),
+    findTicketById: vi.fn(),
+    findLinkByUrl: vi.fn(),
+    createLink: vi.fn(),
+    findLinksByTicket: vi.fn(),
+    findLinkByIdAndTicket: vi.fn(),
+    deleteLink: vi.fn(),
+    findByPrNumber: vi.fn(),
   };
 
   beforeEach(() => {
@@ -37,7 +37,7 @@ describe('TicketLinksService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('create', () => {

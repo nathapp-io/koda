@@ -1,3 +1,4 @@
+import type { Mock, Mocked } from 'vitest';
 /**
  * Failing tests for US-004 SLO Dashboard + Token Budget Metrics adversarial review.
  *
@@ -57,6 +58,8 @@
  *        maintaining a separate copy of the threshold.
  */
 
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ContextBuilderService, GetProjectContextQuery } from '../../../src/context/context-builder.service';
 import { CONTEXT_REPOSITORY } from '../../../src/context/domain/context.domain';
@@ -72,32 +75,32 @@ import { SloDashboardService } from '../../../src/monitoring/slo-dashboard.servi
 const PROJECT_ID = 'p-slo-adversarial-1';
 
 interface ModuleOverrides {
-  contextRepo?: { projectExistsAndNotDeleted: jest.Mock };
-  canonical?: { getSnapshot: jest.Mock };
-  memoryRepo?: { findByProjectMemory: jest.Mock };
-  hybridRetriever?: { search: jest.Mock };
-  entityGraph?: { getRelatedEntities: jest.Mock };
-  impactAnalysis?: { getChangeImpact: jest.Mock };
-  sloDashboard?: Partial<jest.Mocked<SloDashboardService>>;
+  contextRepo?: { projectExistsAndNotDeleted: Mock };
+  canonical?: { getSnapshot: Mock };
+  memoryRepo?: { findByProjectMemory: Mock };
+  hybridRetriever?: { search: Mock };
+  entityGraph?: { getRelatedEntities: Mock };
+  impactAnalysis?: { getChangeImpact: Mock };
+  sloDashboard?: Partial<Mocked<SloDashboardService>>;
 }
 
-function makeSloDashboardMock(overrides: Partial<jest.Mocked<SloDashboardService>> = {}) {
+function makeSloDashboardMock(overrides: Partial<Mocked<SloDashboardService>> = {}) {
   return {
-    recordQueryMetric: jest.fn().mockResolvedValue(undefined),
-    recordStaleHit: jest.fn().mockResolvedValue(undefined),
-    getSloMetrics: jest.fn(),
-    isStaleHit: jest.fn(),
+    recordQueryMetric: vi.fn().mockResolvedValue(undefined),
+    recordStaleHit: vi.fn().mockResolvedValue(undefined),
+    getSloMetrics: vi.fn(),
+    isStaleHit: vi.fn(),
     ...overrides,
-  } as unknown as jest.Mocked<SloDashboardService>;
+  } as unknown as Mocked<SloDashboardService>;
 }
 
 async function makeModule(overrides: ModuleOverrides = {}) {
   const mockContextRepo = overrides.contextRepo ?? {
-    projectExistsAndNotDeleted: jest.fn().mockResolvedValue(true),
+    projectExistsAndNotDeleted: vi.fn().mockResolvedValue(true),
   };
 
   const mockCanonical = overrides.canonical ?? {
-    getSnapshot: jest.fn().mockResolvedValue({
+    getSnapshot: vi.fn().mockResolvedValue({
       tickets: [],
       recentEvents: [],
       activeDecisions: [],
@@ -106,11 +109,11 @@ async function makeModule(overrides: ModuleOverrides = {}) {
   };
 
   const mockMemoryRepo = overrides.memoryRepo ?? {
-    findByProjectMemory: jest.fn().mockResolvedValue({ records: [], total: 0, current: 1, size: 10, hasNext: false, hasPrev: false }),
+    findByProjectMemory: vi.fn().mockResolvedValue({ records: [], total: 0, current: 1, size: 10, hasNext: false, hasPrev: false }),
   };
 
   const mockHybridRetriever = overrides.hybridRetriever ?? {
-    search: jest.fn().mockResolvedValue({
+    search: vi.fn().mockResolvedValue({
       results: [],
       scores: [],
       retrievedAt: new Date().toISOString(),
@@ -118,11 +121,11 @@ async function makeModule(overrides: ModuleOverrides = {}) {
   };
 
   const mockEntityGraph = overrides.entityGraph ?? {
-    getRelatedEntities: jest.fn().mockResolvedValue([]),
+    getRelatedEntities: vi.fn().mockResolvedValue([]),
   };
 
   const mockImpactAnalysis = overrides.impactAnalysis ?? {
-    getChangeImpact: jest.fn().mockResolvedValue(null),
+    getChangeImpact: vi.fn().mockResolvedValue(null),
   };
 
   const mockSloDashboard = overrides.sloDashboard ?? makeSloDashboardMock();
@@ -191,7 +194,7 @@ describe('ContextBuilderService — AC-1/AC-4 adversarial: hadProvenance checks 
     const { service } = await makeModule({
       sloDashboard: sloMock,
       hybridRetriever: {
-        search: jest.fn().mockResolvedValue({
+        search: vi.fn().mockResolvedValue({
           results: resultsWithoutProvenance,
           scores: [{ vectorScore: 0.4, lexicalScore: 0.3, entityScore: 0.2, recencyScore: 0.1, finalScore: 0.95 }],
           retrievedAt: new Date().toISOString(),
@@ -229,7 +232,7 @@ describe('ContextBuilderService — AC-1/AC-4 adversarial: hadProvenance checks 
     const { service } = await makeModule({
       sloDashboard: sloMock,
       hybridRetriever: {
-        search: jest.fn().mockResolvedValue({
+        search: vi.fn().mockResolvedValue({
           results: resultsWithProvenance,
           scores: [{ vectorScore: 0.4, lexicalScore: 0.3, entityScore: 0.2, recencyScore: 0.1, finalScore: 0.95 }],
           retrievedAt: new Date().toISOString(),
@@ -260,7 +263,7 @@ describe('ContextBuilderService — AC-1/AC-4 adversarial: hadProvenance checks 
     const { service } = await makeModule({
       sloDashboard: sloMock,
       hybridRetriever: {
-        search: jest.fn().mockResolvedValue({
+        search: vi.fn().mockResolvedValue({
           results: [],
           scores: [],
           retrievedAt: new Date().toISOString(),
@@ -296,7 +299,7 @@ describe('ContextBuilderService — AC-1/AC-4 adversarial: hadProvenance checks 
     const { service } = await makeModule({
       sloDashboard: sloMock,
       hybridRetriever: {
-        search: jest.fn().mockResolvedValue({
+        search: vi.fn().mockResolvedValue({
           results: [withProvenance, withoutProvenance],
           scores: [
             { vectorScore: 0.4, lexicalScore: 0.3, entityScore: 0.2, recencyScore: 0.1, finalScore: 0.95 },
@@ -340,14 +343,14 @@ describe('ContextBuilderService — AC-6 adversarial: leakageIncidentCount refle
     const { service } = await makeModule({
       sloDashboard: sloMock,
       hybridRetriever: {
-        search: jest.fn().mockResolvedValue({
+        search: vi.fn().mockResolvedValue({
           results: [largeDocument],
           scores: [{ vectorScore: 0.4, lexicalScore: 0.3, entityScore: 0.2, recencyScore: 0.1, finalScore: 0.95 }],
           retrievedAt: new Date().toISOString(),
         }),
       },
       memoryRepo: {
-        findByProjectMemory: jest.fn().mockResolvedValue({
+        findByProjectMemory: vi.fn().mockResolvedValue({
           records: [
             {
               id: 'mem-1',
@@ -402,14 +405,14 @@ describe('ContextBuilderService — AC-6 adversarial: leakageIncidentCount refle
     const { service } = await makeModule({
       sloDashboard: sloMock,
       hybridRetriever: {
-        search: jest.fn().mockResolvedValue({
+        search: vi.fn().mockResolvedValue({
           results: [largeDocument],
           scores: [{ vectorScore: 0.4, lexicalScore: 0.3, entityScore: 0.2, recencyScore: 0.1, finalScore: 0.95 }],
           retrievedAt: new Date().toISOString(),
         }),
       },
       memoryRepo: {
-        findByProjectMemory: jest.fn().mockResolvedValue({
+        findByProjectMemory: vi.fn().mockResolvedValue({
           records: [
             {
               id: 'mem-1',
@@ -465,7 +468,7 @@ describe('ContextBuilderService — AC-6 adversarial: leakageIncidentCount refle
     const { service } = await makeModule({
       sloDashboard: sloMock,
       hybridRetriever: {
-        search: jest.fn().mockResolvedValue({
+        search: vi.fn().mockResolvedValue({
           results: [smallDocument],
           scores: [{ vectorScore: 0.4, lexicalScore: 0.3, entityScore: 0.2, recencyScore: 0.1, finalScore: 0.95 }],
           retrievedAt: new Date().toISOString(),
@@ -498,7 +501,7 @@ describe('ContextBuilderService — AC-5 adversarial: countStaleHits delegates t
   it('uses SloDashboardService.isStaleHit() to determine staleness for each result', async () => {
     // isStaleHit returns false by default, so no stale hits.
     const sloMock = makeSloDashboardMock({
-      isStaleHit: jest.fn().mockReturnValue(false),
+      isStaleHit: vi.fn().mockReturnValue(false),
     });
 
     const sevenDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
@@ -511,7 +514,7 @@ describe('ContextBuilderService — AC-5 adversarial: countStaleHits delegates t
     const { service } = await makeModule({
       sloDashboard: sloMock,
       hybridRetriever: {
-        search: jest.fn().mockResolvedValue({
+        search: vi.fn().mockResolvedValue({
           results: [staleResult],
           scores: [{ vectorScore: 0.4, lexicalScore: 0.3, entityScore: 0.2, recencyScore: 0.1, finalScore: 0.95 }],
           retrievedAt: new Date().toISOString(),
@@ -538,7 +541,7 @@ describe('ContextBuilderService — AC-5 adversarial: countStaleHits delegates t
   it('counts stale hits consistently with SloDashboardService.isStaleHit()', async () => {
     // isStaleHit returns true for the stale result to simulate agreement.
     const sloMock = makeSloDashboardMock({
-      isStaleHit: jest.fn().mockReturnValue(true),
+      isStaleHit: vi.fn().mockReturnValue(true),
     });
 
     const sevenDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
@@ -551,7 +554,7 @@ describe('ContextBuilderService — AC-5 adversarial: countStaleHits delegates t
     const { service } = await makeModule({
       sloDashboard: sloMock,
       hybridRetriever: {
-        search: jest.fn().mockResolvedValue({
+        search: vi.fn().mockResolvedValue({
           results: [staleResult],
           scores: [{ vectorScore: 0.4, lexicalScore: 0.3, entityScore: 0.2, recencyScore: 0.1, finalScore: 0.95 }],
           retrievedAt: new Date().toISOString(),
@@ -614,12 +617,10 @@ describe('SloDashboardService — AC-1 adversarial: recordStaleHit() persists do
     // in TypeScript means the parameter is intentionally unused.
 
     // Dynamic import to check the actual source code.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const fs = require('fs');
-    const serviceSource = fs.readFileSync(
-      require.resolve('../../../src/monitoring/slo-dashboard.service'),
+    const serviceSource = readFileSync(
+      resolve(__dirname, '../../../src/monitoring/slo-dashboard.service.ts'),
       'utf8',
-    ) as string;
+    );
 
     // The parameter must NOT be prefixed with _ if it's actually used.
     // Bug: the parameter is named _docId (underscore-prefixed = intentionally unused).

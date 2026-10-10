@@ -1,3 +1,4 @@
+import type { MockInstance } from 'vitest';
 /**
  * Failing tests documenting two adversarial findings in policy-gates-runner.ts.
  *
@@ -30,12 +31,8 @@
  */
 
 // ─── module-level state shared with mock factories ───────────────────────────
-// Variables prefixed with "mock" are accessible inside jest.mock factories even
+// Variables prefixed with "mock" are accessible inside vi.mock factories even
 // after hoisting.  Do NOT rename them.
-// export {} converts this file from a TS script to a module so its top-level
-// declarations do not collide with identically-named variables in sibling spec files.
-export {};
-
 let mockGateResult: { passed: boolean; blockedReason?: string; gates?: { name: string; passed: boolean }[] } = {
   passed: true,
   gates: [],
@@ -45,7 +42,7 @@ let mockWriteFilePaths: string[] = [];
 
 // ─── module mocks ─────────────────────────────────────────────────────────────
 
-jest.mock('../../../src/policy/policy-gate.service', () => ({
+vi.mock('../../../src/policy/policy-gate.service', () => ({
   PolicyGateService: class MockPolicyGateService {
     async runAllGates() {
       return mockGateResult;
@@ -56,11 +53,10 @@ jest.mock('../../../src/policy/policy-gate.service', () => ({
 // Prevent NestFactory from attempting a real NestJS bootstrap in unit tests.
 // The get() call returns an instance of the already-mocked PolicyGateService so
 // runAllGates() reads from mockGateResult as before.
-jest.mock('@nestjs/core', () => ({
+vi.mock('@nestjs/core', () => ({
   NestFactory: {
     createApplicationContext: async () => {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { PolicyGateService: Svc } = require('../../../src/policy/policy-gate.service');
+      const { PolicyGateService: Svc } = await import('../../../src/policy/policy-gate.service');
       return {
         get: () => new Svc(),
         close: async () => Promise.resolve(),
@@ -70,7 +66,7 @@ jest.mock('@nestjs/core', () => ({
 }));
 
 // Track writeFile calls so tests can assert slo-snapshot.json was written.
-jest.mock('fs/promises', () => ({
+vi.mock('fs/promises', () => ({
   mkdir: () => Promise.resolve(undefined),
   writeFile: (p: unknown) => {
     if (typeof p === 'string') mockWriteFilePaths.push(p);
@@ -84,13 +80,13 @@ jest.mock('fs/promises', () => ({
  * Intercept process.exit and return a promise that resolves with the exit code.
  * Returns the spy so the caller can restore it in a finally block.
  */
-function interceptExit(): { exitPromise: Promise<number>; exitSpy: jest.SpyInstance } {
+function interceptExit(): { exitPromise: Promise<number>; exitSpy: MockInstance } {
   let resolveExit!: (code: number) => void;
   const exitPromise = new Promise<number>((resolve) => {
     resolveExit = resolve;
   });
 
-  const exitSpy = jest.spyOn(process, 'exit').mockImplementation((code) => {
+  const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => {
     resolveExit(typeof code === 'number' ? code : 0);
     return undefined as never;
   });
@@ -114,7 +110,7 @@ describe('policy-gates-runner — undefined gates: slo-snapshot.json must be wri
   const originalArgv = process.argv;
 
   beforeEach(() => {
-    jest.resetModules();
+    vi.resetModules();
     process.argv = ['node', 'policy-gates-runner.ts', '--project=test-project'];
     mockWriteFilePaths = [];
   });
@@ -128,13 +124,12 @@ describe('policy-gates-runner — undefined gates: slo-snapshot.json must be wri
     mockGateResult = { passed: true };
 
     const { exitPromise, exitSpy } = interceptExit();
-    const consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
-    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     try {
       // Act: loading the module immediately triggers main().catch(…).
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('../../../scripts/policy-gates-runner');
+      await import('../../../scripts/policy-gates-runner');
 
       await withTimeout(exitPromise, 'process.exit was not called within 5 s');
 
@@ -153,7 +148,7 @@ describe('policy-gates-runner — undefined gates: summary table must be printed
   const originalArgv = process.argv;
 
   beforeEach(() => {
-    jest.resetModules();
+    vi.resetModules();
     process.argv = ['node', 'policy-gates-runner.ts', '--project=test-project'];
     mockWriteFilePaths = [];
   });
@@ -169,15 +164,14 @@ describe('policy-gates-runner — undefined gates: summary table must be printed
     const { exitPromise, exitSpy } = interceptExit();
 
     const capturedLogs: string[] = [];
-    const consoleLogSpy = jest.spyOn(console, 'log').mockImplementation((msg: unknown) => {
+    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation((msg: unknown) => {
       if (typeof msg === 'string') capturedLogs.push(msg);
     });
-    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     try {
       // Act
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('../../../scripts/policy-gates-runner');
+      await import('../../../scripts/policy-gates-runner');
 
       await withTimeout(exitPromise, 'process.exit was not called within 5 s');
 

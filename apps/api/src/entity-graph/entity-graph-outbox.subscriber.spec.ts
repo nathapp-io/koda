@@ -7,8 +7,8 @@ describe('EntityGraphOutboxSubscriber', () => {
   it('registers ticket_event and graphify_import and forwards to EntityGraphService', async () => {
     const registry = new FanOutPublisher(noopLastErrors);
     const svc = {
-      onTicketEvent: jest.fn().mockResolvedValue(undefined),
-      onGraphifyImport: jest.fn().mockResolvedValue(undefined),
+      onTicketEvent: vi.fn().mockResolvedValue(undefined),
+      onGraphifyImport: vi.fn().mockResolvedValue(undefined),
     } as unknown as EntityGraphService;
 
     new EntityGraphOutboxSubscriber(registry, svc).onModuleInit();

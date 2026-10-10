@@ -4,8 +4,8 @@ import { EMAIL_TEMPLATE_CODES } from './templates/template-codes';
 type Seeded = { code: string; locale: string; subject: string; content: string };
 
 function setup(existing: Record<string, { id: string; subject: string; content: string }> = {}) {
-  const repo = { findTemplate: jest.fn(async (code: string, locale: string) => existing[`${code}:${locale}`] ?? null) };
-  const service = { create: jest.fn(async (x: unknown) => x), update: jest.fn(async (x: unknown) => x) };
+  const repo = { findTemplate: vi.fn(async (code: string, locale: string) => existing[`${code}:${locale}`] ?? null) };
+  const service = { create: vi.fn(async (x: unknown) => x), update: vi.fn(async (x: unknown) => x) };
   return { seeder: new EmailTemplateSeeder(repo as never, service as never), repo, service };
 }
 

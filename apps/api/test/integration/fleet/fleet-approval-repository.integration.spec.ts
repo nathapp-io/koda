@@ -14,7 +14,7 @@ import type { ApprovalResolution, NewFleetApproval } from '../../../src/fleet/ap
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
-jest.setTimeout(20_000);
+vi.setConfig({ testTimeout: 20_000 });
 
 describeIntegration('approval repository (PG)', () => {
   let app: NathApplication;

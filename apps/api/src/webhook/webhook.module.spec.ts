@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 /**
  * US-004 — WebhookModule DI wiring for the guarded outbound client.
  *
@@ -29,15 +30,15 @@ import { WebhookModule } from './webhook.module';
 import { WebhookDomain } from './domain/webhook.domain';
 import { GlobalStubsModule } from '../common/test-helpers/global-stubs.module';
 
-function makeWebhookRepoMock(webhook: WebhookDomain | null = null): jest.Mocked<PrismaWebhookRepository> {
+function makeWebhookRepoMock(webhook: WebhookDomain | null = null): Mocked<PrismaWebhookRepository> {
   return {
-    createWebhook: jest.fn(),
-    findByProject: jest.fn(),
-    findActiveByProject: jest.fn(),
-    findById: jest.fn().mockResolvedValue(webhook),
-    deleteWebhook: jest.fn(),
-    findProjectBySlug: jest.fn(),
-  } as unknown as jest.Mocked<PrismaWebhookRepository>;
+    createWebhook: vi.fn(),
+    findByProject: vi.fn(),
+    findActiveByProject: vi.fn(),
+    findById: vi.fn().mockResolvedValue(webhook),
+    deleteWebhook: vi.fn(),
+    findProjectBySlug: vi.fn(),
+  } as unknown as Mocked<PrismaWebhookRepository>;
 }
 
 function makeActiveWebhook(): WebhookDomain {
@@ -67,7 +68,7 @@ describe('WebhookModule (DI wiring)', () => {
   describe('WebhookDeliveryHandler DI smoke', () => {
     it('US-004 wiring: compiles and resolves WebhookDeliveryHandler with a mocked PrismaWebhookRepository and a mocked OutboundHttpClient, with no database-backed Prisma provider', async () => {
       const webhookRepoMock = makeWebhookRepoMock();
-      const httpMock = { post: jest.fn().mockResolvedValue(undefined) };
+      const httpMock = { post: vi.fn().mockResolvedValue(undefined) };
 
       moduleRef = await Test.createTestingModule({
         imports: [GlobalStubsModule],
@@ -85,7 +86,7 @@ describe('WebhookModule (DI wiring)', () => {
 
     it('US-004 wiring boundary: module.get(WebhookDeliveryHandler) does not throw when only the two mocked collaborators are provided', async () => {
       const webhookRepoMock = makeWebhookRepoMock();
-      const httpMock = { post: jest.fn().mockResolvedValue(undefined) };
+      const httpMock = { post: vi.fn().mockResolvedValue(undefined) };
 
       moduleRef = await Test.createTestingModule({
         imports: [GlobalStubsModule],
@@ -103,7 +104,7 @@ describe('WebhookModule (DI wiring)', () => {
     it('US-004 wiring: the resolved handler delivers through the injected OutboundHttpClient', async () => {
       const webhook = makeActiveWebhook();
       const webhookRepoMock = makeWebhookRepoMock(webhook);
-      const post = jest.fn().mockResolvedValue(undefined);
+      const post = vi.fn().mockResolvedValue(undefined);
       const httpMock = { post };
 
       moduleRef = await Test.createTestingModule({

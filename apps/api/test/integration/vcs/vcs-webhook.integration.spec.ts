@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 /**
  * VCS Webhook Handler Tests (VCS-P1-004-C)
  *
@@ -26,10 +27,10 @@ import { AuthException } from '@nathapp/nestjs-common';
 
 describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
   let controller: VcsWebhookController;
-  let webhookService: jest.Mocked<VcsWebhookService>;
-  let connectionService: jest.Mocked<VcsConnectionService>;
-  let syncService: jest.Mocked<VcsSyncService>;
-  let projectsService: jest.Mocked<ProjectsService>;
+  let webhookService: Mocked<VcsWebhookService>;
+  let connectionService: Mocked<VcsConnectionService>;
+  let syncService: Mocked<VcsSyncService>;
+  let projectsService: Mocked<ProjectsService>;
   let module: TestingModule;
 
   // Helper to update default mocks after each test
@@ -138,23 +139,23 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
 
   beforeEach(async () => {
     const mockVcsServiceInstance = {
-      findByProject: jest.fn().mockResolvedValue(mockVcsConnection),
-      getFullByProject: jest.fn().mockResolvedValue(mockVcsConnection),
-      findInboundTarget: jest.fn().mockResolvedValue(mockTarget),
+      findByProject: vi.fn().mockResolvedValue(mockVcsConnection),
+      getFullByProject: vi.fn().mockResolvedValue(mockVcsConnection),
+      findInboundTarget: vi.fn().mockResolvedValue(mockTarget),
     };
 
     const mockSyncServiceInstance = {
-      syncIssue: jest.fn(),
-      filterByAllowedAuthors: jest.fn((issues) => issues),
+      syncIssue: vi.fn(),
+      filterByAllowedAuthors: vi.fn((issues) => issues),
     };
 
     const mockWebhookServiceInstance = {
-      verifySignature: jest.fn(),
-      handleWebhook: jest.fn(),
+      verifySignature: vi.fn(),
+      handleWebhook: vi.fn(),
     };
 
     const mockProjectsServiceInstance = {
-      findBySlug: jest.fn().mockResolvedValue(mockProject),
+      findBySlug: vi.fn().mockResolvedValue(mockProject),
     };
 
     module = await Test.createTestingModule({
@@ -166,16 +167,16 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
         { provide: ProjectsService, useValue: mockProjectsServiceInstance },
         {
           provide: WebhookReplayGuard,
-          useValue: { assertFresh: jest.fn().mockResolvedValue(undefined), forget: jest.fn() },
+          useValue: { assertFresh: vi.fn().mockResolvedValue(undefined), forget: vi.fn() },
         },
       ],
     }).compile();
 
     controller = module.get<VcsWebhookController>(VcsWebhookController);
-    connectionService = module.get(VcsConnectionService) as jest.Mocked<VcsConnectionService>;
-    syncService = module.get(VcsSyncService) as jest.Mocked<VcsSyncService>;
-    webhookService = module.get(VcsWebhookService) as jest.Mocked<VcsWebhookService>;
-    projectsService = module.get(ProjectsService) as jest.Mocked<ProjectsService>;
+    connectionService = module.get(VcsConnectionService) as Mocked<VcsConnectionService>;
+    syncService = module.get(VcsSyncService) as Mocked<VcsSyncService>;
+    webhookService = module.get(VcsWebhookService) as Mocked<VcsWebhookService>;
+    projectsService = module.get(ProjectsService) as Mocked<ProjectsService>;
   });
 
   // Reset all mocks before each test

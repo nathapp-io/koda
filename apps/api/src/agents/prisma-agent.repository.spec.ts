@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * US-003 — PrismaAgentRepository.createRolesAndCapabilities must write the role
  * and capability rows with sequential `createMany` calls on the ambient client
@@ -16,21 +17,21 @@ describe('PrismaAgentRepository.createRolesAndCapabilities (US-003)', () => {
   let testingModule: TestingModule;
   let repository: PrismaAgentRepository;
   let prisma: MockPrismaService;
-  let roleCreateMany: jest.Mock;
-  let capabilityCreateMany: jest.Mock;
+  let roleCreateMany: Mock;
+  let capabilityCreateMany: Mock;
 
   beforeEach(async () => {
-    prisma = createMockPrismaService();
+    prisma = createMockPrismaService({ fn: vi.fn });
 
-    roleCreateMany = jest.fn().mockResolvedValue({ count: 2 });
-    capabilityCreateMany = jest.fn().mockResolvedValue({ count: 1 });
+    roleCreateMany = vi.fn().mockResolvedValue({ count: 2 });
+    capabilityCreateMany = vi.fn().mockResolvedValue({ count: 1 });
 
     prisma.client.agentRoleEntry = { createMany: roleCreateMany };
     prisma.client.agentCapabilityEntry = { createMany: capabilityCreateMany };
 
     // Prisma's array form: run the promises and settle them, so a rejected write
     // is handled here rather than becoming an unhandled rejection.
-    (prisma.client.$transaction as jest.Mock).mockImplementation(
+    (prisma.client.$transaction as Mock).mockImplementation(
       async (arg: unknown) =>
         Array.isArray(arg) ? Promise.all(arg) : (arg as () => Promise<unknown>)(),
     );
@@ -42,9 +43,9 @@ describe('PrismaAgentRepository.createRolesAndCapabilities (US-003)', () => {
         {
           provide: TRANSACTION_MANAGER,
           useValue: {
-            run: jest.fn((fn: () => Promise<unknown>) => fn()),
-            getClient: jest.fn(),
-            isInTransaction: jest.fn(() => false),
+            run: vi.fn((fn: () => Promise<unknown>) => fn()),
+            getClient: vi.fn(),
+            isInTransaction: vi.fn(() => false),
           },
         },
       ],
@@ -55,7 +56,7 @@ describe('PrismaAgentRepository.createRolesAndCapabilities (US-003)', () => {
 
   afterEach(async () => {
     await testingModule.close();
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('AC8: issues one agentRoleEntry.createMany and one agentCapabilityEntry.createMany on the ambient client', async () => {

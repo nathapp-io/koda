@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AstIndexService, SymbolIndexResult, CallerInfo, CalleeInfo } from '../../src/code-intel/ast-index.service';
 import { SymbolStore } from '../../src/code-intel/symbol-store';
@@ -6,29 +7,29 @@ import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 
 describe('AstIndexService', () => {
   let service: AstIndexService;
-  let symbolStore: jest.Mocked<SymbolStore>;
-  let codeGraph: jest.Mocked<CodeGraphService>;
+  let symbolStore: Mocked<SymbolStore>;
+  let codeGraph: Mocked<CodeGraphService>;
 
   const mockTxManager = {
-    run: jest.fn((fn: () => Promise<unknown>) => fn()),
-    getClient: jest.fn(),
-    isInTransaction: jest.fn(() => false),
+    run: vi.fn((fn: () => Promise<unknown>) => fn()),
+    getClient: vi.fn(),
+    isInTransaction: vi.fn(() => false),
   };
 
   const mockCodeGraph = {
-    parseSourceFile: jest.fn(),
-    extractSymbols: jest.fn(),
-    extractCallers: jest.fn(),
-    extractCallees: jest.fn(),
-    resolveRelationships: jest.fn(),
+    parseSourceFile: vi.fn(),
+    extractSymbols: vi.fn(),
+    extractCallers: vi.fn(),
+    extractCallees: vi.fn(),
+    resolveRelationships: vi.fn(),
   };
 
   const mockSymbolStore = {
-    upsertSymbol: jest.fn(),
-    findBySymbolId: jest.fn(),
-    findCallers: jest.fn(),
-    findCallees: jest.fn(),
-    deleteByFile: jest.fn(),
+    upsertSymbol: vi.fn(),
+    findBySymbolId: vi.fn(),
+    findCallers: vi.fn(),
+    findCallees: vi.fn(),
+    deleteByFile: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -47,7 +48,7 @@ describe('AstIndexService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('indexCommit', () => {

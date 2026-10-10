@@ -17,7 +17,7 @@ import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../../../src/fleet/jo
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
-jest.setTimeout(20_000);
+vi.setConfig({ testTimeout: 20_000 });
 
 describeIntegration('fleet job outcome notifications (PG)', () => {
   let app: NathApplication;

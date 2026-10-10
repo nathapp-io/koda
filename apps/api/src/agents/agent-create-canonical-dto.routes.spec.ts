@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * US-005 — AC3: POST /api/agents with a valid body still returns 201 after the
  * service-local `CreateAgentDto` / `UpdateAgentDto` classes are deleted and the
@@ -21,14 +22,14 @@ import { AgentAuthProvider } from '../auth/agent-auth.provider';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 interface AgentRepositoryStub {
-  create: jest.Mock;
-  createRolesAndCapabilities: jest.Mock;
+  create: Mock;
+  createRolesAndCapabilities: Mock;
 }
 
 interface TxManagerStub {
-  run: jest.Mock;
-  getClient: jest.Mock;
-  isInTransaction: jest.Mock;
+  run: Mock;
+  getClient: Mock;
+  isInTransaction: Mock;
 }
 
 const authConfig: IAuthConfig = {
@@ -61,13 +62,13 @@ describe('POST /api/agents with the canonical CreateAgentDto (US-005 AC3)', () =
 
   beforeAll(async () => {
     agentRepo = {
-      create: jest.fn(),
-      createRolesAndCapabilities: jest.fn().mockResolvedValue(undefined),
+      create: vi.fn(),
+      createRolesAndCapabilities: vi.fn().mockResolvedValue(undefined),
     };
     txManager = {
-      run: jest.fn((fn: () => Promise<unknown>) => fn()),
-      getClient: jest.fn(),
-      isInTransaction: jest.fn(() => false),
+      run: vi.fn((fn: () => Promise<unknown>) => fn()),
+      getClient: vi.fn(),
+      isInTransaction: vi.fn(() => false),
     };
 
     testingModule = await Test.createTestingModule({
@@ -79,11 +80,11 @@ describe('POST /api/agents with the canonical CreateAgentDto (US-005 AC3)', () =
         { provide: AUTH_CFG, useValue: authConfig },
         {
           provide: KodaDomainWriter,
-          useValue: { writeAgentAction: jest.fn().mockResolvedValue({ canonicalId: 'evt-1' }) },
+          useValue: { writeAgentAction: vi.fn().mockResolvedValue({ canonicalId: 'evt-1' }) },
         },
         {
           provide: AgentAuthProvider,
-          useValue: { invalidateByTag: jest.fn().mockResolvedValue(undefined) },
+          useValue: { invalidateByTag: vi.fn().mockResolvedValue(undefined) },
         },
       ],
     }).compile();
@@ -110,7 +111,7 @@ describe('POST /api/agents with the canonical CreateAgentDto (US-005 AC3)', () =
   });
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     txManager.run.mockImplementation((fn: () => Promise<unknown>) => fn());
     agentRepo.createRolesAndCapabilities.mockResolvedValue(undefined);
   });

@@ -17,7 +17,7 @@ const HEX_32 = /^[0-9a-f]{32}$/;
 const ROTATE = '/api/projects/hooks/vcs/webhook-secret/rotate';
 
 describeIntegration('VCS webhook secret (M9)', () => {
-  jest.setTimeout(60000);
+  vi.setConfig({ testTimeout: 60000 });
   let app: NathApplication;
   let server: Parameters<typeof request>[0];
   let prisma: PrismaClient;

@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { Prisma } from '../../generated/prisma/client';
 import type { ITransactionManager } from '@nathapp/nestjs-data';
@@ -15,15 +16,15 @@ function p2002(target: unknown): Prisma.PrismaClientKnownRequestError {
   });
 }
 
-function txManager(inTransaction = false): ITransactionManager & { run: jest.Mock } {
+function txManager(inTransaction = false): ITransactionManager & { run: Mock } {
   return {
-    run: jest.fn((fn: () => Promise<unknown>) => fn()),
-    getClient: jest.fn(),
+    run: vi.fn((fn: () => Promise<unknown>) => fn()),
+    getClient: vi.fn(),
     isInTransaction: () => inTransaction,
-  } as unknown as ITransactionManager & { run: jest.Mock };
+  } as unknown as ITransactionManager & { run: Mock };
 }
 
-const noSleep = { sleep: jest.fn(() => Promise.resolve()), random: () => 0 };
+const noSleep = { sleep: vi.fn(() => Promise.resolve()), random: () => 0 };
 
 describe('isTicketNumberConflict', () => {
   it('matches P2002 with an array target containing number', () => {
@@ -48,7 +49,7 @@ describe('isTicketNumberConflict', () => {
 describe('runWithTicketNumberRetry', () => {
   it('returns the first successful result, one transaction per attempt', async () => {
     const tx = txManager();
-    const work = jest
+    const work = vi
       .fn()
       .mockRejectedValueOnce(p2002(['projectId', 'number']))
       .mockResolvedValueOnce('ticket');
@@ -59,7 +60,7 @@ describe('runWithTicketNumberRetry', () => {
 
   it('gives up after maxAttempts with a 409', async () => {
     const tx = txManager();
-    const work = jest.fn().mockRejectedValue(p2002(['projectId', 'number']));
+    const work = vi.fn().mockRejectedValue(p2002(['projectId', 'number']));
 
     const err = await runWithTicketNumberRetry(tx, work, noSleep).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(HttpException);
@@ -70,7 +71,7 @@ describe('runWithTicketNumberRetry', () => {
   it('propagates a P2002 on another constraint untouched and does not retry', async () => {
     const tx = txManager();
     const other = p2002(['externalVcsId']);
-    const work = jest.fn().mockRejectedValue(other);
+    const work = vi.fn().mockRejectedValue(other);
 
     await expect(runWithTicketNumberRetry(tx, work, noSleep)).rejects.toBe(other);
     expect(tx.run).toHaveBeenCalledTimes(1);
@@ -78,7 +79,7 @@ describe('runWithTicketNumberRetry', () => {
 
   it('inside an outer transaction runs once and maps a conflict to 409', async () => {
     const tx = txManager(true);
-    const work = jest.fn().mockRejectedValue(p2002(['projectId', 'number']));
+    const work = vi.fn().mockRejectedValue(p2002(['projectId', 'number']));
 
     const err = await runWithTicketNumberRetry(tx, work, noSleep).catch((e: unknown) => e);
     expect((err as HttpException).getStatus()).toBe(HttpStatus.CONFLICT);
@@ -87,8 +88,8 @@ describe('runWithTicketNumberRetry', () => {
 
   it('backs off with jitter growing per attempt', async () => {
     const tx = txManager();
-    const sleep = jest.fn(() => Promise.resolve());
-    const work = jest
+    const sleep = vi.fn(() => Promise.resolve());
+    const work = vi
       .fn()
       .mockRejectedValueOnce(p2002(['projectId', 'number']))
       .mockRejectedValueOnce(p2002(['projectId', 'number']))

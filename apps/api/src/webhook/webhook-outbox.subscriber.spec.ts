@@ -6,7 +6,7 @@ import { noopLastErrors, outboxRecord } from '../../test/helpers/outbox-record';
 describe('WebhookOutboxSubscriber', () => {
   it('registers webhook_delivery and forwards payload to WebhookDeliveryHandler', async () => {
     const registry = new FanOutPublisher(noopLastErrors);
-    const deliveryHandler = { handle: jest.fn().mockResolvedValue(undefined) } as unknown as WebhookDeliveryHandler;
+    const deliveryHandler = { handle: vi.fn().mockResolvedValue(undefined) } as unknown as WebhookDeliveryHandler;
 
     new WebhookOutboxSubscriber(registry, deliveryHandler).onModuleInit();
     expect(registry.getHandlers('webhook_delivery').length).toBe(1);

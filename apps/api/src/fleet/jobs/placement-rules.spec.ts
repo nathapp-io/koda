@@ -163,7 +163,7 @@ describe('placement rules (spec §4)', () => {
     });
 
     it('never holds a config job on a job-scope budget pause', () => {
-      const match = jest.fn(() => ({ id: 'policy-1' }));
+      const match = vi.fn(() => ({ id: 'policy-1' }));
       const scope = { projectId: 'p1', repoId: 'repo-1', pinnedRunnerId: null };
       expect(jobScopePause({ command: 'CONFIG_EDIT', ...scope }, match)).toBeNull();
       expect(match).not.toHaveBeenCalled();

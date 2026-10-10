@@ -322,7 +322,7 @@ describe('ExtractionService', () => {
 
     beforeEach(() => {
       mockRepository = {
-        upsert: jest.fn(),
+        upsert: vi.fn(),
       };
     });
 

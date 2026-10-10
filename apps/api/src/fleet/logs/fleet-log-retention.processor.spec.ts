@@ -5,27 +5,27 @@ import { FleetLogRetentionProcessor, RETENTION_BATCH } from './fleet-log-retenti
 describe('FleetLogRetentionProcessor (S2a §5)', () => {
   const calls: string[] = [];
   const repo = {
-    findCandidates: jest.fn(),
-    findBundleKeys: jest.fn(async () => ['jobs/j1/1/a.tar.gz']),
-    expireRows: jest.fn(async () => {
+    findCandidates: vi.fn(),
+    findBundleKeys: vi.fn(async () => ['jobs/j1/1/a.tar.gz']),
+    expireRows: vi.fn(async () => {
       calls.push('rows');
       return { events: 1, logs: 1, artifacts: 1 };
     }),
   };
-  const jobs = { lockById: jest.fn(async (id: string): Promise<{ id: string } | null> => {
+  const jobs = { lockById: vi.fn(async (id: string): Promise<{ id: string } | null> => {
     calls.push(`lock:${id}`);
     return { id };
   }) };
-  const tx = { run: jest.fn((fn: () => unknown) => fn()) };
-  const logStore = { deletePrefix: jest.fn(async (p: string) => { calls.push(`rm:${p}`); }) };
-  const artifacts = { delete: jest.fn(async (k: string) => { calls.push(`rm:${k}`); }) };
+  const tx = { run: vi.fn((fn: () => unknown) => fn()) };
+  const logStore = { deletePrefix: vi.fn(async (p: string) => { calls.push(`rm:${p}`); }) };
+  const artifacts = { delete: vi.fn(async (k: string) => { calls.push(`rm:${k}`); }) };
   const make = (days: number | null = 30) =>
     new FleetLogRetentionProcessor(repo as never, jobs as never, tx as never, logStore, artifacts, testFleetConfig({ logRetentionDays: days }));
   const candidate = (id: string, leaseEpoch = 1) => ({ id, leaseEpoch, finishedAt: new Date('2026-08-01T00:00:00.000Z') });
 
   afterEach(() => {
-    jest.clearAllMocks();
-    jest.useRealTimers();
+    vi.clearAllMocks();
+    vi.useRealTimers();
     calls.length = 0;
   });
 
@@ -39,7 +39,7 @@ describe('FleetLogRetentionProcessor (S2a §5)', () => {
   });
 
   it('selects jobs that ended before now - days', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-10-31T04:45:00.000Z'));
+    vi.useFakeTimers().setSystemTime(new Date('2026-10-31T04:45:00.000Z'));
     repo.findCandidates.mockResolvedValue([]);
     await make(30).scheduledPurge();
     expect(repo.findCandidates).toHaveBeenCalledWith(new Date('2026-10-01T04:45:00.000Z'), null, RETENTION_BATCH);

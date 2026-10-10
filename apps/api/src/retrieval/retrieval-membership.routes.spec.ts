@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * US-005 — AC2: `@UseGuards(ProjectMembershipGuard)` on RetrievalController.
  *
@@ -23,12 +24,12 @@ import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 import { KodaPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
 
 interface ProjectRepositoryStub {
-  findBySlug: jest.Mock;
-  findMembershipRole: jest.Mock;
+  findBySlug: Mock;
+  findMembershipRole: Mock;
 }
 
 interface EvaluationServiceStub {
-  runQueries: jest.Mock;
+  runQueries: Mock;
 }
 
 function makeUserPrincipal(id: string, role: 'ADMIN' | 'MEMBER'): UserPrincipal {
@@ -56,13 +57,13 @@ describe('RetrievalController membership gate (US-005 AC2)', () => {
 
   // Records every execution of the real guard: the only way to observe, from
   // the outside, that ProjectMembershipGuard sits in this route's guard chain.
-  const guardCanActivate = jest.spyOn(ProjectMembershipGuard.prototype, 'canActivate');
+  const guardCanActivate = vi.spyOn(ProjectMembershipGuard.prototype, 'canActivate');
 
   const developerUser = makeUserPrincipal('user-dev', 'MEMBER');
 
   beforeAll(async () => {
-    projectRepo = { findBySlug: jest.fn(), findMembershipRole: jest.fn() };
-    evaluationService = { runQueries: jest.fn() };
+    projectRepo = { findBySlug: vi.fn(), findMembershipRole: vi.fn() };
+    evaluationService = { runQueries: vi.fn() };
 
     testingModule = await Test.createTestingModule({
       controllers: [RetrievalController],
@@ -100,7 +101,7 @@ describe('RetrievalController membership gate (US-005 AC2)', () => {
   });
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     currentPrincipal = developerUser;
 

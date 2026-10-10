@@ -4,16 +4,16 @@ import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
 import { MemoryItem } from './memory-item-repository';
 
 const createMockRepository = () => ({
-  findByProject: jest.fn(),
-  findByProjectMemory: jest.fn(),
-  findActiveAfterId: jest.fn(),
-  findDuplicateActiveKeys: jest.fn(),
-  findActiveByKey: jest.fn(),
-  upsert: jest.fn(),
-  findActive: jest.fn(),
-  updateDirect: jest.fn(),
-  reject: jest.fn(),
-  softDelete: jest.fn(),
+  findByProject: vi.fn(),
+  findByProjectMemory: vi.fn(),
+  findActiveAfterId: vi.fn(),
+  findDuplicateActiveKeys: vi.fn(),
+  findActiveByKey: vi.fn(),
+  upsert: vi.fn(),
+  findActive: vi.fn(),
+  updateDirect: vi.fn(),
+  reject: vi.fn(),
+  softDelete: vi.fn(),
 });
 
 describe('MemoryGovernanceService', () => {
@@ -34,17 +34,17 @@ describe('MemoryGovernanceService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('AC-2: runCleanup() executes all four sub-jobs', () => {
     it('should call all four sub-job methods', async () => {
       const projectId = 'project-123';
 
-      jest.spyOn(service, 'expireMemories').mockResolvedValue({ count: 5 });
-      jest.spyOn(service, 'downrankStaleLowConfidence').mockResolvedValue({ count: 3 });
-      jest.spyOn(service, 'deduplicate').mockResolvedValue({ count: 2 });
-      jest.spyOn(service, 'applySupersession').mockResolvedValue({ count: 1 });
+      vi.spyOn(service, 'expireMemories').mockResolvedValue({ count: 5 });
+      vi.spyOn(service, 'downrankStaleLowConfidence').mockResolvedValue({ count: 3 });
+      vi.spyOn(service, 'deduplicate').mockResolvedValue({ count: 2 });
+      vi.spyOn(service, 'applySupersession').mockResolvedValue({ count: 1 });
 
       await service.runCleanup(projectId);
 
@@ -57,10 +57,10 @@ describe('MemoryGovernanceService', () => {
     it('should return GovernanceResult with all counts and durationMs', async () => {
       const projectId = 'project-123';
 
-      jest.spyOn(service, 'expireMemories').mockResolvedValue({ count: 10 });
-      jest.spyOn(service, 'downrankStaleLowConfidence').mockResolvedValue({ count: 5 });
-      jest.spyOn(service, 'deduplicate').mockResolvedValue({ count: 3 });
-      jest.spyOn(service, 'applySupersession').mockResolvedValue({ count: 2 });
+      vi.spyOn(service, 'expireMemories').mockResolvedValue({ count: 10 });
+      vi.spyOn(service, 'downrankStaleLowConfidence').mockResolvedValue({ count: 5 });
+      vi.spyOn(service, 'deduplicate').mockResolvedValue({ count: 3 });
+      vi.spyOn(service, 'applySupersession').mockResolvedValue({ count: 2 });
 
       const result = await service.runCleanup(projectId);
 
@@ -335,7 +335,7 @@ describe('MemoryGovernanceService', () => {
         { id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: pastDate, createdAt: pastDate, updatedAt: pastDate },
       ]);
       mockRepository.findDuplicateActiveKeys.mockResolvedValue([]);
-      jest.spyOn(service, 'downrankStaleLowConfidence').mockResolvedValue({ count: 0 });
+      vi.spyOn(service, 'downrankStaleLowConfidence').mockResolvedValue({ count: 0 });
       mockRepository.updateDirect.mockResolvedValue(undefined);
 
       await service.runCleanup(projectId);
@@ -352,7 +352,7 @@ describe('MemoryGovernanceService', () => {
         { id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: pastDate, createdAt: pastDate, updatedAt: pastDate },
       ]);
       mockRepository.findDuplicateActiveKeys.mockResolvedValue([]);
-      jest.spyOn(service, 'downrankStaleLowConfidence').mockResolvedValue({ count: 0 });
+      vi.spyOn(service, 'downrankStaleLowConfidence').mockResolvedValue({ count: 0 });
       mockRepository.updateDirect.mockResolvedValue(undefined);
 
       await service.runCleanup(projectId);

@@ -1,3 +1,4 @@
+import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AgentsService } from './agents.service';
 import { PrismaAgentRepository } from './prisma-agent.repository';
@@ -11,8 +12,8 @@ import { AgentPrincipal } from '../auth/principal/koda-principal.types';
 
 describe('AgentsService', () => {
   let service: AgentsService;
-  let agentRepo: jest.Mocked<PrismaAgentRepository>;
-  let kodaDomainWriter: { writeAgentAction: jest.Mock };
+  let agentRepo: Mocked<PrismaAgentRepository>;
+  let kodaDomainWriter: { writeAgentAction: Mock };
 
   const mockAgent = {
     id: 'agent-123',
@@ -57,25 +58,25 @@ describe('AgentsService', () => {
   };
 
   const mockAgentRepo = {
-    findAll: jest.fn(),
-    findBySlug: jest.fn(),
-    findById: jest.fn(),
-    findBySlugWithCapabilities: jest.fn(),
-    findBySlugScalar: jest.fn(),
-    findByIdScalar: jest.fn(),
-    create: jest.fn(),
-    updateApiKeyHash: jest.fn(),
-    update: jest.fn(),
-    deleteBySlug: jest.fn(),
-    createRolesAndCapabilities: jest.fn(),
-    replaceRoles: jest.fn(),
-    replaceCapabilities: jest.fn(),
-    findProjectBySlug: jest.fn(),
-    findVerifiedUnassignedTickets: jest.fn(),
-    findByProjectSlug: jest.fn(),
-    isOnProjectRoster: jest.fn(),
-    findRosterProjects: jest.fn(),
-    findProjectRoster: jest.fn(),
+    findAll: vi.fn(),
+    findBySlug: vi.fn(),
+    findById: vi.fn(),
+    findBySlugWithCapabilities: vi.fn(),
+    findBySlugScalar: vi.fn(),
+    findByIdScalar: vi.fn(),
+    create: vi.fn(),
+    updateApiKeyHash: vi.fn(),
+    update: vi.fn(),
+    deleteBySlug: vi.fn(),
+    createRolesAndCapabilities: vi.fn(),
+    replaceRoles: vi.fn(),
+    replaceCapabilities: vi.fn(),
+    findProjectBySlug: vi.fn(),
+    findVerifiedUnassignedTickets: vi.fn(),
+    findByProjectSlug: vi.fn(),
+    isOnProjectRoster: vi.fn(),
+    findRosterProjects: vi.fn(),
+    findProjectRoster: vi.fn(),
   };
 
   const mockAuthConfig: IAuthConfig = {
@@ -88,15 +89,15 @@ describe('AgentsService', () => {
   };
 
   const mockKodaDomainWriter = {
-    writeAgentAction: jest.fn().mockResolvedValue({ canonicalId: 'evt-1' }),
+    writeAgentAction: vi.fn().mockResolvedValue({ canonicalId: 'evt-1' }),
   };
 
   // US-003: AgentsService wraps the agent create in txManager.run — the provider
   // must exist or the module cannot be compiled.
   const mockTxManager = {
-    run: jest.fn((fn: () => Promise<unknown>) => fn()),
-    getClient: jest.fn(),
-    isInTransaction: jest.fn(() => false),
+    run: vi.fn((fn: () => Promise<unknown>) => fn()),
+    getClient: vi.fn(),
+    isInTransaction: vi.fn(() => false),
   };
 
   beforeEach(async () => {
@@ -125,7 +126,7 @@ describe('AgentsService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('generateApiKey', () => {
@@ -155,7 +156,7 @@ describe('AgentsService', () => {
         });
 
         expect(agentRepo.create).toHaveBeenCalled();
-        const createCall = (agentRepo.create as jest.Mock).mock.calls[0][0];
+        const createCall = (agentRepo.create as Mock).mock.calls[0][0];
 
         const expectedHash = createHmac('sha256', 'test-secret').update(result.apiKey).digest('hex');
         expect(createCall.apiKeyHash).toBe(expectedHash);
@@ -184,7 +185,7 @@ describe('AgentsService', () => {
           roles: ['DEVELOPER'],
         });
 
-        const createCall = (agentRepo.create as jest.Mock).mock.calls[0][0];
+        const createCall = (agentRepo.create as Mock).mock.calls[0][0];
 
         // Should NOT store raw key
         expect(createCall.apiKeyHash).not.toBe(result.apiKey);
@@ -201,7 +202,7 @@ describe('AgentsService', () => {
         });
 
         expect(agentRepo.create).toHaveBeenCalled();
-        const createCall = (agentRepo.create as jest.Mock).mock.calls[0][0];
+        const createCall = (agentRepo.create as Mock).mock.calls[0][0];
         expect(createCall.name).toBe('Test Agent');
         expect(createCall.slug).toBe('test-agent');
       });
@@ -217,7 +218,7 @@ describe('AgentsService', () => {
 
         const expectedHash = createHmac('sha256', 'test-secret').update(result.apiKey).digest('hex');
 
-        const createCall = (agentRepo.create as jest.Mock).mock.calls[0][0];
+        const createCall = (agentRepo.create as Mock).mock.calls[0][0];
         expect(createCall.apiKeyHash).toBe(expectedHash);
       });
 
@@ -291,7 +292,7 @@ describe('AgentsService', () => {
         const result = await service.generateApiKey('agent-123');
 
         expect(agentRepo.updateApiKeyHash).toHaveBeenCalled();
-        const [, newHash] = (agentRepo.updateApiKeyHash as jest.Mock).mock.calls[0];
+        const [, newHash] = (agentRepo.updateApiKeyHash as Mock).mock.calls[0];
 
         const expectedHash = createHmac('sha256', 'test-secret').update(result.apiKey).digest('hex');
         expect(newHash).toBe(expectedHash);
@@ -744,7 +745,7 @@ describe('AgentsService', () => {
     });
 
     beforeEach(() => {
-      jest.clearAllMocks();
+      vi.clearAllMocks();
     });
 
     it('should return highest-scored ticket with matchScore and matchedCapabilities', async () => {

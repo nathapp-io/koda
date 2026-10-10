@@ -60,19 +60,19 @@ describe('US-004: project conflict responses', () => {
   let httpServer: ReturnType<INestApplication['getHttpServer']>;
 
   const projectRepo = {
-    findBySlug: jest.fn(),
-    findByKey: jest.fn(),
-    findAll: jest.fn(),
-    findAllForUser: jest.fn(),
-    createProject: jest.fn(),
-    updateBySlug: jest.fn(),
-    findAllIds: jest.fn(),
-    findMembershipRole: jest.fn(),
+    findBySlug: vi.fn(),
+    findByKey: vi.fn(),
+    findAll: vi.fn(),
+    findAllForUser: vi.fn(),
+    createProject: vi.fn(),
+    updateBySlug: vi.fn(),
+    findAllIds: vi.fn(),
+    findMembershipRole: vi.fn(),
   };
 
   const ragService = {
-    deleteAllBySourceType: jest.fn(),
-    clearProjectCaches: jest.fn(),
+    deleteAllBySourceType: vi.fn(),
+    clearProjectCaches: vi.fn(),
   };
 
   beforeAll(async () => {
@@ -99,7 +99,7 @@ describe('US-004: project conflict responses', () => {
   });
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     projectRepo.createProject.mockImplementation(async (data: { name: string; slug: string; key: string }) => ({
       ...ALPHA_PROJECT,
       ...data,

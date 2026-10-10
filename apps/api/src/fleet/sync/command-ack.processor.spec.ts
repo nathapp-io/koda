@@ -28,14 +28,14 @@ function makeProcessor(commandRecord: FleetCommandRecord) {
   let cmd = commandRecord;
   let job: FleetJobRecord = runningJob;
   const repo = {
-    findCommand: jest.fn(async () => cmd),
-    lockById: jest.fn(async () => job),
-    ackCommand: jest.fn(),
+    findCommand: vi.fn(async () => cmd),
+    lockById: vi.fn(async () => job),
+    ackCommand: vi.fn(),
   };
-  const transitions = { apply: jest.fn(async () => ({ job: runningJob, live: JOB_LIVE, approvalLive: [APPROVAL_LIVE] })) };
-  const fence = { holds: jest.fn(() => true), abandon: jest.fn() };
-  const activity = { record: jest.fn() };
-  const approvals = { lockById: jest.fn(), setOutcome: jest.fn() };
+  const transitions = { apply: vi.fn(async () => ({ job: runningJob, live: JOB_LIVE, approvalLive: [APPROVAL_LIVE] })) };
+  const fence = { holds: vi.fn(() => true), abandon: vi.fn() };
+  const activity = { record: vi.fn() };
+  const approvals = { lockById: vi.fn(), setOutcome: vi.fn() };
   const tx = { run: (fn: () => unknown) => fn() };
   const processor = new CommandAckProcessor(repo as never, transitions as never, fence as never, activity as never, approvals as never, tx as never);
   const seedCommand = (c: FleetCommandRecord) => { cmd = c; };

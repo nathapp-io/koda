@@ -38,12 +38,12 @@ import { PrAttributionService } from './pr-attribution.service';
 describe('PrAttributionService on a config job PR (fleet S3 §5 step 8: attribution replaces a PR body footer)', () => {
   it('posts "Dispatched by <name> via koda job <id>" for a terminal CONFIG_EDIT with a PR on its own repo', async () => {
     const repo = {
-      findById: jest.fn(async () => ({ id: 'job-9', state: 'COMPLETED', command: 'CONFIG_EDIT', resultPrUrl: 'https://github.com/acme/app/pull/12', repoId: 'repo-1', leaseEpoch: 1, requestedById: 'u1' })),
-      findRepo: jest.fn(async () => ({ id: 'repo-1', projectId: 'p1', provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', githubInstallationId: BigInt(77) })),
-      claimAttribution: jest.fn(async () => true),
-      findUserDisplayName: jest.fn(async () => 'Dev One'),
+      findById: vi.fn(async () => ({ id: 'job-9', state: 'COMPLETED', command: 'CONFIG_EDIT', resultPrUrl: 'https://github.com/acme/app/pull/12', repoId: 'repo-1', leaseEpoch: 1, requestedById: 'u1' })),
+      findRepo: vi.fn(async () => ({ id: 'repo-1', projectId: 'p1', provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', githubInstallationId: BigInt(77) })),
+      claimAttribution: vi.fn(async () => true),
+      findUserDisplayName: vi.fn(async () => 'Dev One'),
     };
-    const github = { commentOnPullRequest: jest.fn(async () => true) };
+    const github = { commentOnPullRequest: vi.fn(async () => true) };
     const svc = new PrAttributionService(repo as never, github as never, {} as never, {} as never);
     await expect(svc.attribute('job-9')).resolves.toBe('posted');
     expect(github.commentOnPullRequest).toHaveBeenCalledWith(BigInt(77), 'acme', 'app', 12, 'Dispatched by Dev One via koda job job-9', expect.objectContaining({ jobId: 'job-9' }));

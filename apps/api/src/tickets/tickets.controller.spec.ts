@@ -19,8 +19,8 @@ describe('TicketsController', () => {
   let service: TicketsService;
 
   const mockProjectsService = {
-    findProjectIdBySlug: jest.fn().mockResolvedValue('proj-123'),
-    assertProjectMembership: jest.fn().mockResolvedValue(undefined),
+    findProjectIdBySlug: vi.fn().mockResolvedValue('proj-123'),
+    assertProjectMembership: vi.fn().mockResolvedValue(undefined),
   };
 
   const _mockProject = {
@@ -101,25 +101,25 @@ describe('TicketsController', () => {
   };
 
   const mockTicketsService = {
-    create: jest.fn(),
-    findAll: jest.fn(),
-    findByRef: jest.fn(),
-    findByRefWithActions: jest.fn(),
-    update: jest.fn(),
-    softDelete: jest.fn(),
-    assign: jest.fn(),
+    create: vi.fn(),
+    findAll: vi.fn(),
+    findByRef: vi.fn(),
+    findByRefWithActions: vi.fn(),
+    update: vi.fn(),
+    softDelete: vi.fn(),
+    assign: vi.fn(),
   };
 
   // ProjectContext a global-ADMIN caller would receive from ProjectMembershipGuard.
   const adminProject = { project: { id: 'proj-1', slug: 'koda' }, role: 'ADMIN' };
 
   const mockTransitionsService = {
-    verify: jest.fn(),
-    start: jest.fn(),
-    fix: jest.fn(),
-    verifyFix: jest.fn(),
-    close: jest.fn(),
-    reject: jest.fn(),
+    verify: vi.fn(),
+    start: vi.fn(),
+    fix: vi.fn(),
+    verifyFix: vi.fn(),
+    close: vi.fn(),
+    reject: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -141,7 +141,7 @@ describe('TicketsController', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('POST /api/projects/:slug/tickets', () => {

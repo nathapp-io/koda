@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import { Global, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -20,10 +21,10 @@ import { testFleetConfig } from './fleet-config';
 export const mockPrismaService = {
   client: {
     project: {
-      findMany: jest.fn().mockResolvedValue([]),
+      findMany: vi.fn().mockResolvedValue([]),
     },
     projectMember: {
-      findUnique: jest.fn().mockResolvedValue(null),
+      findUnique: vi.fn().mockResolvedValue(null),
     },
   },
 } as unknown as PrismaService;
@@ -46,39 +47,39 @@ export const mockCacheManager = {
 } as unknown as CacheManager;
 
 export const mockOutboxService = {
-  record: jest.fn(async (event: { type: string }) => ({ id: 'outbox-stub', ...event })),
+  record: vi.fn(async (event: { type: string }) => ({ id: 'outbox-stub', ...event })),
 } as unknown as OutboxService;
 
 /** S4b US-001: NotificationPreferencesService injects the package preference service (global). */
 export const mockPreferenceService = {
-  getPreferences: jest.fn(async () => []),
-  updatePreference: jest.fn(async () => ({})),
-  isChannelEnabled: jest.fn(async () => true),
+  getPreferences: vi.fn(async () => []),
+  updatePreference: vi.fn(async () => ({})),
+  isChannelEnabled: vi.fn(async () => true),
 };
 
 /** S4b US-001: NotificationPreferencesService injects EmailAvailability (global EmailCoreModule). */
 export const mockEmailAvailability = {
   configured: true,
   config: () => ({ smtpUrl: null, from: null, webPublicUrl: null, delaySec: 300, approvalDelaySec: 60, maxAttempts: 5, inviteTtlDays: 7 }),
-  webUrl: jest.fn((path: string) => `http://web.test${path}`),
+  webUrl: vi.fn((path: string) => `http://web.test${path}`),
 } as unknown as EmailAvailability;
 
 /** S4b US-001: EmailScheduleService is provided globally by EmailCoreModule; stub it for module specs. */
 export const mockEmailScheduleService = {
-  scheduleNotifications: jest.fn(async () => 0),
-  scheduleMemberAdded: jest.fn(async () => undefined),
-  startInviteSend: jest.fn(),
-  claimDue: jest.fn(async () => []),
-  closeAbandonedInvites: jest.fn(async () => 0),
-  markSent: jest.fn(async () => undefined),
-  markSkipped: jest.fn(async () => undefined),
-  markFailed: jest.fn(async () => undefined),
-  retryAt: jest.fn(async () => undefined),
+  scheduleNotifications: vi.fn(async () => 0),
+  scheduleMemberAdded: vi.fn(async () => undefined),
+  startInviteSend: vi.fn(),
+  claimDue: vi.fn(async () => []),
+  closeAbandonedInvites: vi.fn(async () => 0),
+  markSent: vi.fn(async () => undefined),
+  markSkipped: vi.fn(async () => undefined),
+  markFailed: vi.fn(async () => undefined),
+  retryAt: vi.fn(async () => undefined),
 } as unknown as EmailScheduleService;
 
 /** S4b US-002: the dispatcher injects nestjs-notify's package service; stub it for module specs. */
 export const mockNotifyService = {
-  send: jest.fn(async () => undefined),
+  send: vi.fn(async () => undefined),
 } as unknown as INotifyService;
 
 export const mockAuthConfig: IAuthConfig = {

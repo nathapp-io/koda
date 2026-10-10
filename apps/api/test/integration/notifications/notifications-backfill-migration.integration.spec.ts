@@ -11,7 +11,7 @@ const TARGET = '20261009090000_notifications_core';
 interface WatchRow { ticketId: string; userId: string; reason: string; muted: boolean }
 
 describeIntegration('notifications core migration backfill (S4a §1)', () => {
-  jest.setTimeout(60000);
+  vi.setConfig({ testTimeout: 60000 });
   let scratch: ScratchSchema;
 
   beforeAll(async () => {

@@ -1,3 +1,4 @@
+import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { IVcsRepository, TicketLinkData, VCS_REPOSITORY } from './domain/vcs.repository';
@@ -5,12 +6,12 @@ import { NotFoundAppException } from '@nathapp/nestjs-common';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
 import { VcsPrStatus } from './types';
 
-jest.mock('./factory', () => ({
-  createVcsProvider: jest.fn(),
+vi.mock('./factory', () => ({
+  createVcsProvider: vi.fn(),
 }));
 
-jest.mock('../common/utils/encryption.util', () => ({
-  decryptToken: jest.fn().mockReturnValue('plain-token'),
+vi.mock('../common/utils/encryption.util', () => ({
+  decryptToken: vi.fn().mockReturnValue('plain-token'),
 }));
 
 import { createVcsProvider } from './factory';
@@ -78,38 +79,38 @@ function makePrStatus(overrides?: Partial<VcsPrStatus>): VcsPrStatus {
   };
 }
 
-function createMockRepo(): jest.Mocked<IVcsRepository> {
+function createMockRepo(): Mocked<IVcsRepository> {
   return {
-    findActiveTicketLinksWithPrs: jest.fn().mockResolvedValue([]),
-    findTicketLinkForConnectionPr: jest.fn().mockResolvedValue(null),
-    updateTicketLinkWithPrState: jest.fn().mockResolvedValue('updated'),
-    applyMergedPrTransition: jest.fn().mockResolvedValue(undefined),
-    findTicketWithProject: jest.fn().mockResolvedValue(null),
-    findProjectById: jest.fn().mockResolvedValue(null),
-    findVcsConnectionByProjectId: jest.fn().mockResolvedValue(null),
-    findVcsConnectionById: jest.fn().mockResolvedValue(null),
-    findVcsConnectionByProjectSlug: jest.fn().mockResolvedValue(null),
-    findPollingConnections: jest.fn().mockResolvedValue([]),
-    createVcsConnection: jest.fn(),
-    updateVcsConnection: jest.fn(),
-    updateVcsConnectionLastSynced: jest.fn().mockResolvedValue(undefined),
-    deleteVcsConnection: jest.fn().mockResolvedValue(undefined),
-    createVcsSyncLog: jest.fn().mockResolvedValue({} as never),
-    findExistingTicketByExternalId: jest.fn().mockResolvedValue(null),
-    createTicketFromIssue: jest.fn(),
-    findPendingOutboxEvents: jest.fn().mockResolvedValue([]),
-  } as jest.Mocked<IVcsRepository>;
+    findActiveTicketLinksWithPrs: vi.fn().mockResolvedValue([]),
+    findTicketLinkForConnectionPr: vi.fn().mockResolvedValue(null),
+    updateTicketLinkWithPrState: vi.fn().mockResolvedValue('updated'),
+    applyMergedPrTransition: vi.fn().mockResolvedValue(undefined),
+    findTicketWithProject: vi.fn().mockResolvedValue(null),
+    findProjectById: vi.fn().mockResolvedValue(null),
+    findVcsConnectionByProjectId: vi.fn().mockResolvedValue(null),
+    findVcsConnectionById: vi.fn().mockResolvedValue(null),
+    findVcsConnectionByProjectSlug: vi.fn().mockResolvedValue(null),
+    findPollingConnections: vi.fn().mockResolvedValue([]),
+    createVcsConnection: vi.fn(),
+    updateVcsConnection: vi.fn(),
+    updateVcsConnectionLastSynced: vi.fn().mockResolvedValue(undefined),
+    deleteVcsConnection: vi.fn().mockResolvedValue(undefined),
+    createVcsSyncLog: vi.fn().mockResolvedValue({} as never),
+    findExistingTicketByExternalId: vi.fn().mockResolvedValue(null),
+    createTicketFromIssue: vi.fn(),
+    findPendingOutboxEvents: vi.fn().mockResolvedValue([]),
+  } as Mocked<IVcsRepository>;
 }
 
 describe('VcsPrSyncService', () => {
   let service: VcsPrSyncService;
-  let mockRepo: jest.Mocked<IVcsRepository>;
+  let mockRepo: Mocked<IVcsRepository>;
   let mockProvider: {
-    getPullRequestStatus: jest.Mock;
-    listPrCommits: jest.Mock;
-    fetchIssues: jest.Mock;
-    fetchIssue: jest.Mock;
-    testConnection: jest.Mock;
+    getPullRequestStatus: Mock;
+    listPrCommits: Mock;
+    fetchIssues: Mock;
+    fetchIssue: Mock;
+    testConnection: Mock;
   };
 
   const project = makeProject();
@@ -120,14 +121,14 @@ describe('VcsPrSyncService', () => {
     mockRepo = createMockRepo();
 
     mockProvider = {
-      getPullRequestStatus: jest.fn().mockResolvedValue(makePrStatus()),
-      listPrCommits: jest.fn().mockResolvedValue([]),
-      fetchIssues: jest.fn(),
-      fetchIssue: jest.fn(),
-      testConnection: jest.fn(),
+      getPullRequestStatus: vi.fn().mockResolvedValue(makePrStatus()),
+      listPrCommits: vi.fn().mockResolvedValue([]),
+      fetchIssues: vi.fn(),
+      fetchIssue: vi.fn(),
+      testConnection: vi.fn(),
     };
 
-    (createVcsProvider as jest.Mock).mockReturnValue(mockProvider);
+    (createVcsProvider as Mock).mockReturnValue(mockProvider);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -140,7 +141,7 @@ describe('VcsPrSyncService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('syncPrStatus', () => {

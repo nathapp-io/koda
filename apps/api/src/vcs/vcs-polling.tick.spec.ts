@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * M10: each polling tick re-reads its connection by id, stops when the
  * connection is gone/inactive/not polling, stores the fetch cursor as
@@ -12,8 +13,8 @@ import type { VcsSyncService } from './vcs-sync.service';
 import type { VcsPrSyncService } from './vcs-pr-sync.service';
 import type { IVcsConfig } from '../config/vcs.config';
 
-jest.mock('./factory', () => ({ createVcsProvider: jest.fn() }));
-jest.mock('../common/utils/encryption.util', () => ({ decryptToken: jest.fn().mockReturnValue('plain') }));
+vi.mock('./factory', () => ({ createVcsProvider: vi.fn() }));
+vi.mock('../common/utils/encryption.util', () => ({ decryptToken: vi.fn().mockReturnValue('plain') }));
 
 import { createVcsProvider } from './factory';
 
@@ -30,26 +31,26 @@ function connection(overrides: Partial<VcsConnectionWithProjectDomain> = {}): Vc
 }
 
 describe('VcsPollingService tick (M10)', () => {
-  let repo: Record<string, jest.Mock>;
-  let registry: { addInterval: jest.Mock; deleteInterval: jest.Mock };
-  let fetchIssues: jest.Mock;
+  let repo: Record<string, Mock>;
+  let registry: { addInterval: Mock; deleteInterval: Mock };
+  let fetchIssues: Mock;
   let service: VcsPollingService;
-  let unhandled: jest.Mock;
+  let unhandled: Mock;
 
   beforeEach(() => {
-    jest.useFakeTimers();
-    unhandled = jest.fn();
+    vi.useFakeTimers();
+    unhandled = vi.fn();
     process.on('unhandledRejection', unhandled);
-    fetchIssues = jest.fn().mockResolvedValue({ issues: [], cursor: null, capped: false });
-    (createVcsProvider as jest.Mock).mockReturnValue({ fetchIssues });
+    fetchIssues = vi.fn().mockResolvedValue({ issues: [], cursor: null, capped: false });
+    (createVcsProvider as Mock).mockReturnValue({ fetchIssues });
     repo = {
-      findVcsConnectionById: jest.fn(),
-      updateVcsConnectionLastSynced: jest.fn().mockResolvedValue(undefined),
-      createVcsSyncLog: jest.fn().mockResolvedValue({}),
+      findVcsConnectionById: vi.fn(),
+      updateVcsConnectionLastSynced: vi.fn().mockResolvedValue(undefined),
+      createVcsSyncLog: vi.fn().mockResolvedValue({}),
     };
-    registry = { addInterval: jest.fn(), deleteInterval: jest.fn() };
-    const sync = { filterByAllowedAuthors: jest.fn((issues) => issues), syncIssue: jest.fn() };
-    const prSync = { syncPrStatus: jest.fn().mockResolvedValue({ updated: 0, skipped: 0 }) };
+    registry = { addInterval: vi.fn(), deleteInterval: vi.fn() };
+    const sync = { filterByAllowedAuthors: vi.fn((issues) => issues), syncIssue: vi.fn() };
+    const prSync = { syncPrStatus: vi.fn().mockResolvedValue({ updated: 0, skipped: 0 }) };
     service = new VcsPollingService(
       repo as unknown as IVcsRepository,
       registry as unknown as SchedulerRegistry,
@@ -61,12 +62,12 @@ describe('VcsPollingService tick (M10)', () => {
 
   afterEach(async () => {
     await service.onModuleDestroy();
-    jest.clearAllTimers();
-    jest.useRealTimers();
+    vi.clearAllTimers();
+    vi.useRealTimers();
     process.off('unhandledRejection', unhandled);
   });
 
-  const tick = () => jest.advanceTimersByTimeAsync(INTERVAL);
+  const tick = () => vi.advanceTimersByTimeAsync(INTERVAL);
 
   it('polls with the connection as it is now, not as it was scheduled', async () => {
     const cursor = new Date('2026-09-20T00:00:00Z');

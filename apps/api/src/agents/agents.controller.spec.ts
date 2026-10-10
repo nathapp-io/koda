@@ -63,14 +63,14 @@ describe('AgentsController', () => {
   };
 
   const mockAgentsService = {
-    generateApiKey: jest.fn(),
-    findAll: jest.fn(),
-    findBySlug: jest.fn(),
-    findMe: jest.fn(),
-    update: jest.fn(),
-    updateRoles: jest.fn(),
-    updateCapabilities: jest.fn(),
-    rotateApiKey: jest.fn(),
+    generateApiKey: vi.fn(),
+    findAll: vi.fn(),
+    findBySlug: vi.fn(),
+    findMe: vi.fn(),
+    update: vi.fn(),
+    updateRoles: vi.fn(),
+    updateCapabilities: vi.fn(),
+    rotateApiKey: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -84,7 +84,7 @@ describe('AgentsController', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('POST /api/agents', () => {

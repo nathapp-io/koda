@@ -119,14 +119,14 @@ describe('MemoryItemRepository', () => {
 
   const mockPrismaClient = {
     memoryItem: {
-      findMany: jest.fn(),
-      findUnique: jest.fn(),
-      create: jest.fn(),
-      update: jest.fn(),
-      findFirst: jest.fn(),
-      count: jest.fn(),
+      findMany: vi.fn(),
+      findUnique: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      findFirst: vi.fn(),
+      count: vi.fn(),
     },
-    $transaction: jest.fn(),
+    $transaction: vi.fn(),
   };
 
   const mockPrismaService = {
@@ -147,7 +147,7 @@ describe('MemoryItemRepository', () => {
     repository = module.get<MemoryItemRepository>('MemoryItemRepository');
     prismaService = module.get<PrismaService<any>>(PrismaService);
 
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('findByProject', () => {

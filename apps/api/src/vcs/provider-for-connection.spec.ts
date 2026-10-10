@@ -1,8 +1,9 @@
+import type { Mock } from 'vitest';
 import { branchWebUrl, providerForConnection, repoWebUrl } from './provider-for-connection';
 import { parseRepoPath, HttpClient } from './factory';
 
-function recordingClient(data: unknown = { default_branch: 'main' }): HttpClient & { get: jest.Mock } {
-  return { get: jest.fn().mockResolvedValue({ data }), post: jest.fn() } as HttpClient & { get: jest.Mock };
+function recordingClient(data: unknown = { default_branch: 'main' }): HttpClient & { get: Mock } {
+  return { get: vi.fn().mockResolvedValue({ data }), post: vi.fn() } as HttpClient & { get: Mock };
 }
 
 describe('repoWebUrl / branchWebUrl (BUG-14)', () => {

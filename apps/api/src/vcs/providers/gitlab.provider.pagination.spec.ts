@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { GitLabProvider } from './gitlab.provider';
 import type { HttpClient } from '../factory';
 
@@ -15,12 +16,12 @@ function issue(iid: number, updatedAt: string) {
 }
 
 describe('GitLabProvider.fetchIssues pagination (M10)', () => {
-  let get: jest.Mock;
+  let get: Mock;
   let provider: GitLabProvider;
 
   beforeEach(() => {
-    get = jest.fn();
-    provider = new GitLabProvider('g', 'r', 'tok', { get, post: jest.fn() } as unknown as HttpClient);
+    get = vi.fn();
+    provider = new GitLabProvider('g', 'r', 'tok', { get, post: vi.fn() } as unknown as HttpClient);
   });
 
   it('pages with X-Next-Page in update order, since the cursor', async () => {

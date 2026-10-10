@@ -14,9 +14,9 @@ function uniqueViolation(): Prisma.PrismaClientKnownRequestError {
 describe('WebhookReplayGuard', () => {
   let guard: WebhookReplayGuard;
 
-  const findUniqueMock = jest.fn();
-  const createMock = jest.fn();
-  const deleteManyMock = jest.fn();
+  const findUniqueMock = vi.fn();
+  const createMock = vi.fn();
+  const deleteManyMock = vi.fn();
 
   const prismaMock = {
     client: {
@@ -44,7 +44,7 @@ describe('WebhookReplayGuard', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('rejects when deliveryId is missing', async () => {
@@ -161,10 +161,10 @@ describe('WebhookReplayGuard', () => {
   });
 
   it('accepts a retried delivery after the in-memory window expires (BUG-18)', async () => {
-    jest.useFakeTimers();
+    vi.useFakeTimers();
     try {
       await guard.assertFresh({ projectId: 'p1', source: 'ci', deliveryId: 'd9' });
-      jest.advanceTimersByTime(6 * 60 * 1000);
+      vi.advanceTimersByTime(6 * 60 * 1000);
       findUniqueMock.mockResolvedValueOnce(null);
       createMock.mockResolvedValueOnce({ id: 'delivery-row-2' });
 
@@ -172,7 +172,7 @@ describe('WebhookReplayGuard', () => {
         guard.assertFresh({ projectId: 'p1', source: 'ci', deliveryId: 'd9' }),
       ).resolves.toBeUndefined();
     } finally {
-      jest.useRealTimers();
+      vi.useRealTimers();
     }
   });
 

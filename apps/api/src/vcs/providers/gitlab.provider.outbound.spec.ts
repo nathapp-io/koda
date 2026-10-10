@@ -1,3 +1,4 @@
+import type { MockInstance } from 'vitest';
 /**
  * BUG-14 outbound: auto-MR creation proceeds when the branch already exists.
  * GitLab reports that as HTTP 400 with {"message":"Branch already exists"},
@@ -10,14 +11,14 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 describe('GitLabProvider.createPullRequest with the default HTTP client', () => {
-  let fetchSpy: jest.SpyInstance;
+  let fetchSpy: MockInstance;
 
   afterEach(() => {
     if (fetchSpy) fetchSpy.mockRestore();
   });
 
   it('creates the MR when the branch already exists', async () => {
-    fetchSpy = jest.spyOn(global, 'fetch')
+    fetchSpy = vi.spyOn(global, 'fetch')
       .mockResolvedValueOnce(jsonResponse(200, { default_branch: 'main' }))
       .mockResolvedValueOnce(jsonResponse(400, { message: 'Branch already exists' }))
       .mockResolvedValueOnce(jsonResponse(201, { iid: 4, web_url: 'https://gitlab.com/g/r/-/merge_requests/4', state: 'opened', draft: true }));
@@ -30,7 +31,7 @@ describe('GitLabProvider.createPullRequest with the default HTTP client', () => 
   });
 
   it('still fails on any other 400', async () => {
-    fetchSpy = jest.spyOn(global, 'fetch')
+    fetchSpy = vi.spyOn(global, 'fetch')
       .mockResolvedValueOnce(jsonResponse(200, { default_branch: 'main' }))
       .mockResolvedValueOnce(jsonResponse(400, { message: 'Invalid branch name' }));
     const provider = createVcsProvider('gitlab', { provider: 'gitlab', token: 't', repoUrl: 'https://gitlab.com/g/r' });

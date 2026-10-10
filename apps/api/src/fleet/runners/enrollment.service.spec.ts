@@ -15,17 +15,17 @@ const body = {
 
 describe('EnrollmentService', () => {
   const repo = {
-    createEnrollment: jest.fn(), findEnrollmentPage: jest.fn(), consumeEnrollment: jest.fn(),
-    createRunner: jest.fn(), linkEnrollment: jest.fn(),
+    createEnrollment: vi.fn(), findEnrollmentPage: vi.fn(), consumeEnrollment: vi.fn(),
+    createRunner: vi.fn(), linkEnrollment: vi.fn(),
   };
-  const activity = { record: jest.fn() };
+  const activity = { record: vi.fn() };
   const tx = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
   const service = new EnrollmentService(
     repo as never, activity as never, tx as never,
     { apiKeySecret: 's3cret' } as never, testFleetConfig({ enrollmentTtlSec: 3600 }),
   );
 
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => vi.clearAllMocks());
 
   it('issues a ke_ token once, stores only its hash, and records activity', async () => {
     repo.createEnrollment.mockImplementation(async (d) => ({ id: 'e1', labels: d.labels, expiresAt: d.expiresAt, usedAt: null, runnerId: null, createdById: 'u1', createdAt: new Date() }));

@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * US-004 — admin skill source update + delete routes (PG).
  *
@@ -57,7 +58,7 @@ describeIntegration('US-004 admin skill source update + delete (PG)', () => {
   let agentApiKey: string;
   let adminId: string;
   let projectId: string;
-  let resolve: jest.Mock;
+  let resolve: Mock;
 
   const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
   const update = (id: string, token = admin) =>
@@ -129,7 +130,7 @@ describeIntegration('US-004 admin skill source update + delete (PG)', () => {
     ).id;
 
     const resolver = app.get<SkillResolver>(SKILL_RESOLVER, { strict: false });
-    resolve = jest.spyOn(resolver, 'resolve');
+    resolve = vi.spyOn(resolver, 'resolve');
   }, 30_000);
 
   afterAll(async () => {

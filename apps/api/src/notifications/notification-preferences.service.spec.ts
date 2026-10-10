@@ -24,17 +24,17 @@ function setup(rows: { master?: Row[]; category?: Row[] } = {}) {
   const masterRows = rows.master ?? [];
   const categoryRows = rows.category ?? [];
   const notificationCategoryPreference = {
-    findMany: jest.fn(async ({ where }: { where: Record<string, unknown> }) => categoryRows.filter((r) => matchWhere(r, where))),
-    upsert: jest.fn().mockResolvedValue({}),
+    findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => categoryRows.filter((r) => matchWhere(r, where))),
+    upsert: vi.fn().mockResolvedValue({}),
   };
   const notificationPreference = {
-    findMany: jest.fn(async ({ where }: { where: Record<string, unknown> }) => masterRows.filter((r) => matchWhere(r, where))),
+    findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => masterRows.filter((r) => matchWhere(r, where))),
   };
-  const txManager = { run: jest.fn((fn: () => Promise<unknown>) => fn()), getClient: jest.fn(), isInTransaction: jest.fn(() => false) };
+  const txManager = { run: vi.fn((fn: () => Promise<unknown>) => fn()), getClient: vi.fn(), isInTransaction: vi.fn(() => false) };
   const packagePrefs = {
-    getPreferences: jest.fn(async () => []),
-    updatePreference: jest.fn(async () => ({})),
-    isChannelEnabled: jest.fn(async () => true),
+    getPreferences: vi.fn(async () => []),
+    updatePreference: vi.fn(async () => ({})),
+    isChannelEnabled: vi.fn(async () => true),
   };
   const email = { configured: true };
   const service = new NotificationPreferencesService(

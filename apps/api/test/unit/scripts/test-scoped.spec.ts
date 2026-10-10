@@ -48,32 +48,34 @@ describe('test-scoped', () => {
     it('runs unit specs without the database flag', () => {
       const run = buildScopedRun(['src/a.spec.ts'], ['src/a.spec.ts']);
       expect(run.env.KODA_DB_TESTS).toBeUndefined();
-      expect(run.args).toEqual(['jest', 'src/a.spec.ts', '--forceExit', '--passWithNoTests']);
+      expect(run.args).toEqual(['vitest', 'run', 'src/a.spec.ts', '--passWithNoTests']);
     });
 
     it('sets KODA_DB_TESTS=1 and keeps integration specs when a DB-gated spec is targeted', () => {
       const target = 'test/integration/x.integration.spec.ts';
       const run = buildScopedRun([target], [target]);
       expect(run.env.KODA_DB_TESTS).toBe('1');
-      expect(run.args).toEqual(['jest', target, '--forceExit', '--passWithNoTests']);
-      expect(run.args.join(' ')).not.toContain('testPathIgnorePatterns');
+      expect(run.args).toEqual(['vitest', 'run', target, '--passWithNoTests']);
+      expect(run.args.join(' ')).not.toContain('--exclude');
     });
 
     it('decides DB mode from the expanded spec list, not the raw target', () => {
       const run = buildScopedRun(['test/'], ['test/unit/a.spec.ts', 'test/integration/b.integration.spec.ts']);
       expect(run.env.KODA_DB_TESTS).toBe('1');
-      expect(run.args).toEqual(['jest', 'test/', '--forceExit', '--passWithNoTests']);
+      expect(run.args).toEqual(['vitest', 'run', 'test/', '--passWithNoTests']);
     });
 
     it('falls back to the unit suite when no target is given', () => {
       const run = buildScopedRun([], []);
       expect(run.env.KODA_DB_TESTS).toBeUndefined();
       expect(run.args).toEqual([
-        'jest',
-        '--forceExit',
+        'vitest',
+        'run',
         '--passWithNoTests',
-        '--testPathIgnorePatterns=integration',
-        '--testPathIgnorePatterns=e2e',
+        '--exclude',
+        'test/integration/**',
+        '--exclude',
+        'test/e2e/**',
       ]);
     });
   });
@@ -109,8 +111,8 @@ describe('test-scoped', () => {
       expect(hasUnresolvedTarget(['tenancy'])).toBe(true);
     });
 
-    it('does not count a jest flag as an unresolved target', () => {
-      expect(hasUnresolvedTarget([__filename, '--runInBand'])).toBe(false);
+    it('does not count a runner flag as an unresolved target', () => {
+      expect(hasUnresolvedTarget([__filename, '--bail'])).toBe(false);
     });
 
     it('is false when every target exists', () => {

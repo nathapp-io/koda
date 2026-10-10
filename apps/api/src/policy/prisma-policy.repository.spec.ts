@@ -1,7 +1,7 @@
 import { PrismaPolicyRepository } from './prisma-policy.repository';
 
 describe('PrismaPolicyRepository', () => {
-  const mockFindUnique = jest.fn();
+  const mockFindUnique = vi.fn();
   const mockPrisma = {
     client: {
       ticket: {
@@ -13,7 +13,7 @@ describe('PrismaPolicyRepository', () => {
   let repo: PrismaPolicyRepository;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     repo = new PrismaPolicyRepository(mockPrisma as never);
   });
 

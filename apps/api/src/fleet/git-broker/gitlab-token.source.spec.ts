@@ -5,11 +5,11 @@ import { RepoCheckException } from './repo-check.exception';
 const KEY = 'a'.repeat(64);
 
 describe('GitLabTokenSource', () => {
-  const vcsRepo = { findVcsConnectionByProjectId: jest.fn() };
+  const vcsRepo = { findVcsConnectionByProjectId: vi.fn() };
   const make = (encryptionKey: string | undefined = KEY) => new GitLabTokenSource(vcsRepo as never, { encryptionKey } as never);
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('decrypts the connected project token', async () => {

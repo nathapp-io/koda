@@ -1,12 +1,13 @@
+import type { Mocked } from 'vitest';
 import { SloDashboardService, MemoryQueryMetricInput, SloMetrics } from './slo-dashboard.service';
 import { PrismaMonitoringRepository } from './prisma-monitoring.repository';
 
-function createMockRepository(): jest.Mocked<PrismaMonitoringRepository> {
+function createMockRepository(): Mocked<PrismaMonitoringRepository> {
   return {
-    createQueryMetric: jest.fn(),
-    findQueryMetrics: jest.fn(),
-    countMemoryItems: jest.fn(),
-  } as unknown as jest.Mocked<PrismaMonitoringRepository>;
+    createQueryMetric: vi.fn(),
+    findQueryMetrics: vi.fn(),
+    countMemoryItems: vi.fn(),
+  } as unknown as Mocked<PrismaMonitoringRepository>;
 }
 
 function makeMetric(overrides: Partial<MemoryQueryMetricInput> = {}): MemoryQueryMetricInput {
@@ -36,7 +37,7 @@ function makeRecord(overrides: Partial<Record<string, unknown>> = {}) {
 
 describe('SloDashboardService', () => {
   let service: SloDashboardService;
-  let repo: jest.Mocked<PrismaMonitoringRepository>;
+  let repo: Mocked<PrismaMonitoringRepository>;
 
   beforeEach(() => {
     repo = createMockRepository();

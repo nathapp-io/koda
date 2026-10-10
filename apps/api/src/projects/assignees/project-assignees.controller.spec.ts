@@ -7,7 +7,7 @@ const PROJECT: ProjectContext = { project: { id: 'proj-1', slug: 'koda' }, role:
 
 describe('ProjectAssigneesController', () => {
   const serviceWith = (items: unknown[]) => {
-    const search = jest.fn().mockResolvedValue({ items });
+    const search = vi.fn().mockResolvedValue({ items });
     return {
       controller: new ProjectAssigneesController({ search } as unknown as ProjectAssigneesService),
       search,

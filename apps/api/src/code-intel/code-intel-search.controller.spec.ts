@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import request from 'supertest';
@@ -77,13 +78,13 @@ async function callSearch(
 
 describe('CodeIntelController.searchSymbols()', () => {
   let controller: CodeIntelController;
-  let mockSearchSymbols: jest.Mock;
-  let mockGetSymbol: jest.Mock;
+  let mockSearchSymbols: Mock;
+  let mockGetSymbol: Mock;
   let module: TestingModule;
 
   beforeEach(async () => {
-    mockSearchSymbols = jest.fn();
-    mockGetSymbol = jest.fn();
+    mockSearchSymbols = vi.fn();
+    mockGetSymbol = vi.fn();
 
     module = await Test.createTestingModule({
       controllers: [CodeIntelController],
@@ -91,18 +92,18 @@ describe('CodeIntelController.searchSymbols()', () => {
         {
           provide: AstIndexService,
           useValue: {
-            indexCommit: jest.fn(),
+            indexCommit: vi.fn(),
             getSymbol: mockGetSymbol,
-            getCallers: jest.fn(),
-            getCallees: jest.fn(),
+            getCallers: vi.fn(),
+            getCallees: vi.fn(),
             searchSymbols: mockSearchSymbols,
           } as unknown as AstIndexService,
         },
         {
           provide: ProjectAccessService,
           useValue: {
-            findProjectIdBySlug: jest.fn().mockResolvedValue('proj-1'),
-            assertProjectMembership: jest.fn().mockResolvedValue(undefined),
+            findProjectIdBySlug: vi.fn().mockResolvedValue('proj-1'),
+            assertProjectMembership: vi.fn().mockResolvedValue(undefined),
           } as unknown as ProjectAccessService,
         },
       ],
@@ -113,7 +114,7 @@ describe('CodeIntelController.searchSymbols()', () => {
 
   afterEach(async () => {
     await module.close();
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   // -------------------------------------------------------------------------
@@ -355,8 +356,8 @@ describe('CodeIntelController.searchSymbols()', () => {
 
 describe('AC10 HTTP routing: detail route is not shadowed by the search route', () => {
   let routingApp: NestFastifyApplication;
-  let mockSearchForRouting: jest.Mock;
-  let mockGetSymbolForRouting: jest.Mock;
+  let mockSearchForRouting: Mock;
+  let mockGetSymbolForRouting: Mock;
 
   const stubbedSymbol = {
     id: 'repo:src/a.ts::Sym',
@@ -374,8 +375,8 @@ describe('AC10 HTTP routing: detail route is not shadowed by the search route', 
   };
 
   beforeAll(async () => {
-    mockSearchForRouting = jest.fn().mockResolvedValue({ items: [], total: 0 });
-    mockGetSymbolForRouting = jest.fn().mockResolvedValue(stubbedSymbol);
+    mockSearchForRouting = vi.fn().mockResolvedValue({ items: [], total: 0 });
+    mockGetSymbolForRouting = vi.fn().mockResolvedValue(stubbedSymbol);
 
     const routingModule = await Test.createTestingModule({
       controllers: [CodeIntelController],
@@ -383,18 +384,18 @@ describe('AC10 HTTP routing: detail route is not shadowed by the search route', 
         {
           provide: AstIndexService,
           useValue: {
-            indexCommit: jest.fn(),
+            indexCommit: vi.fn(),
             getSymbol: mockGetSymbolForRouting,
-            getCallers: jest.fn().mockResolvedValue([]),
-            getCallees: jest.fn().mockResolvedValue([]),
+            getCallers: vi.fn().mockResolvedValue([]),
+            getCallees: vi.fn().mockResolvedValue([]),
             searchSymbols: mockSearchForRouting,
           } as unknown as AstIndexService,
         },
         {
           provide: ProjectAccessService,
           useValue: {
-            findProjectIdBySlug: jest.fn().mockResolvedValue('proj-1'),
-            assertProjectMembership: jest.fn().mockResolvedValue(undefined),
+            findProjectIdBySlug: vi.fn().mockResolvedValue('proj-1'),
+            assertProjectMembership: vi.fn().mockResolvedValue(undefined),
           } as unknown as ProjectAccessService,
         },
       ],

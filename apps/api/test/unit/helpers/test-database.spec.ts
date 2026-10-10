@@ -17,8 +17,8 @@ function container(): TestDatabase & { stopped: boolean } {
 
 describe('resolveTestDatabase', () => {
   it('uses KODA_TEST_DATABASE_URL first, without probing or starting anything', async () => {
-    const probe = jest.fn();
-    const start = jest.fn();
+    const probe = vi.fn();
+    const start = vi.fn();
     const db = await resolveTestDatabase(
       { KODA_TEST_DATABASE_URL: 'postgresql://koda:koda@localhost:6543/koda_test' },
       COMPOSE_URL,
@@ -31,7 +31,7 @@ describe('resolveTestDatabase', () => {
   });
 
   it('uses the compose test database when it answers', async () => {
-    const start = jest.fn();
+    const start = vi.fn();
     const db = await resolveTestDatabase({}, COMPOSE_URL, { probe: async () => true, start });
     expect(db.databaseUrl).toBe(COMPOSE_URL);
     expect(db.source).toBe('compose');
@@ -51,7 +51,7 @@ describe('resolveTestDatabase', () => {
   });
 
   it('skips the compose database when KODA_TEST_DB_CONTAINER=1 asks for a private container', async () => {
-    const probe = jest.fn(async () => true);
+    const probe = vi.fn(async () => true);
     const db = await resolveTestDatabase({ KODA_TEST_DB_CONTAINER: '1' }, COMPOSE_URL, {
       probe,
       start: async () => container(),
@@ -61,7 +61,7 @@ describe('resolveTestDatabase', () => {
   });
 
   it('starts a container when there is no compose URL at all', async () => {
-    const probe = jest.fn();
+    const probe = vi.fn();
     const db = await resolveTestDatabase({}, undefined, { probe, start: async () => container() });
     expect(db.source).toBe('testcontainers');
     expect(probe).not.toHaveBeenCalled();

@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { Prisma } from '../../generated/prisma/client';
 import { ESCALATED_FROM_AUDIT } from '../ingest/ingest-corrections';
@@ -8,38 +9,38 @@ const D = (v: string) => new Prisma.Decimal(v);
 const now = new Date('2026-10-05T12:00:00.000Z');
 const EMPTY_TOTALS = { costUsd: D('0'), inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, jobs: 0 };
 
-function fakeRepo(over: Partial<Record<keyof IAnalyticsRepository, jest.Mock>> = {}): IAnalyticsRepository & Record<string, jest.Mock> {
+function fakeRepo(over: Partial<Record<keyof IAnalyticsRepository, Mock>> = {}): IAnalyticsRepository & Record<string, Mock> {
   return {
-    spendCells: jest.fn().mockResolvedValue([]),
-    spendTotals: jest.fn().mockResolvedValue(EMPTY_TOTALS),
-    jobCostSums: jest.fn().mockResolvedValue([]),
-    ingestHealth: jest.fn().mockResolvedValue({ pending: 0, failed: 0 }),
-    labels: jest.fn().mockResolvedValue(new Map()),
-    storyStats: jest.fn().mockResolvedValue({ stories: 0, firstPass: 0, attempts: 0 }),
-    firstPassCells: jest.fn().mockResolvedValue([]),
-    reviewers: jest.fn().mockResolvedValue([]),
-    reviewerSeverities: jest.fn().mockResolvedValue([]),
-    finishResults: jest.fn().mockResolvedValue([]),
-    escalationReasons: jest.fn().mockResolvedValue([]),
-    topStories: jest.fn().mockResolvedValue([]),
-    topJobs: jest.fn().mockResolvedValue([]),
-    jobSlices: jest.fn().mockResolvedValue([]),
-    latestIngest: jest.fn().mockResolvedValue(null),
-    jobStories: jest.fn().mockResolvedValue([]),
-    jobReviews: jest.fn().mockResolvedValue([]),
-    findProjectSlug: jest.fn().mockResolvedValue('web'),
-    deleteRows: jest.fn().mockResolvedValue({ costEvents: 3, stories: 2, reviews: 1, ingestRowsMarked: 1 }),
+    spendCells: vi.fn().mockResolvedValue([]),
+    spendTotals: vi.fn().mockResolvedValue(EMPTY_TOTALS),
+    jobCostSums: vi.fn().mockResolvedValue([]),
+    ingestHealth: vi.fn().mockResolvedValue({ pending: 0, failed: 0 }),
+    labels: vi.fn().mockResolvedValue(new Map()),
+    storyStats: vi.fn().mockResolvedValue({ stories: 0, firstPass: 0, attempts: 0 }),
+    firstPassCells: vi.fn().mockResolvedValue([]),
+    reviewers: vi.fn().mockResolvedValue([]),
+    reviewerSeverities: vi.fn().mockResolvedValue([]),
+    finishResults: vi.fn().mockResolvedValue([]),
+    escalationReasons: vi.fn().mockResolvedValue([]),
+    topStories: vi.fn().mockResolvedValue([]),
+    topJobs: vi.fn().mockResolvedValue([]),
+    jobSlices: vi.fn().mockResolvedValue([]),
+    latestIngest: vi.fn().mockResolvedValue(null),
+    jobStories: vi.fn().mockResolvedValue([]),
+    jobReviews: vi.fn().mockResolvedValue([]),
+    findProjectSlug: vi.fn().mockResolvedValue('web'),
+    deleteRows: vi.fn().mockResolvedValue({ costEvents: 3, stories: 2, reviews: 1, ingestRowsMarked: 1 }),
     ...over,
-  } as IAnalyticsRepository & Record<string, jest.Mock>;
+  } as IAnalyticsRepository & Record<string, Mock>;
 }
 
 describe('AnalyticsService', () => {
-  const jobs = { findById: jest.fn() };
-  const activity = { record: jest.fn() };
-  const txManager = { run: jest.fn((fn: () => Promise<unknown>) => fn()) };
+  const jobs = { findById: vi.fn() };
+  const activity = { record: vi.fn() };
+  const txManager = { run: vi.fn((fn: () => Promise<unknown>) => fn()) };
   const make = (repo: IAnalyticsRepository) => new AnalyticsService(repo, jobs as never, activity as never, txManager as never);
 
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => vi.clearAllMocks());
 
   it('answers an empty project with zero money, null rates and no series', async () => {
     const s = await make(fakeRepo()).spend('p1', {}, now);
@@ -51,9 +52,9 @@ describe('AnalyticsService', () => {
 
   it('passes the scope and group, labels the series and computes the cache share', async () => {
     const repo = fakeRepo({
-      spendCells: jest.fn().mockResolvedValue([{ key: 'r1', t: new Date('2026-10-01T00:00:00Z'), costUsd: D('1.23456'), tokens: 9 }]),
-      spendTotals: jest.fn().mockResolvedValue({ costUsd: D('1.23456'), inputTokens: 300, outputTokens: 30, cacheReadTokens: 150, cacheWriteTokens: 15, jobs: 2 }),
-      labels: jest.fn().mockResolvedValue(new Map([['r1', 'acme/app']])),
+      spendCells: vi.fn().mockResolvedValue([{ key: 'r1', t: new Date('2026-10-01T00:00:00Z'), costUsd: D('1.23456'), tokens: 9 }]),
+      spendTotals: vi.fn().mockResolvedValue({ costUsd: D('1.23456'), inputTokens: 300, outputTokens: 30, cacheReadTokens: 150, cacheWriteTokens: 15, jobs: 2 }),
+      labels: vi.fn().mockResolvedValue(new Map([['r1', 'acme/app']])),
     });
     const s = await make(repo).spend(null, { from: '2026-10-01', to: '2026-10-03', groupBy: 'repo' }, now);
     expect(repo.spendCells).toHaveBeenCalledWith({ projectId: null }, expect.objectContaining({ bucket: 'day' }), 'repo');
@@ -66,12 +67,12 @@ describe('AnalyticsService', () => {
   it('reports the median per-job spend rounded once, and folds after `top` series (D388)', async () => {
     const t = new Date('2026-10-01T00:00:00Z');
     const repo = fakeRepo({
-      spendCells: jest.fn().mockResolvedValue([
+      spendCells: vi.fn().mockResolvedValue([
         { key: 'a', t, costUsd: D('3'), tokens: 1 },
         { key: 'b', t, costUsd: D('2'), tokens: 1 },
         { key: 'c', t, costUsd: D('1'), tokens: 1 },
       ]),
-      jobCostSums: jest.fn().mockResolvedValue([D('0.00001'), D('0.00002')]),
+      jobCostSums: vi.fn().mockResolvedValue([D('0.00001'), D('0.00002')]),
     });
     const s = await make(repo).spend('p1', { from: '2026-10-01', to: '2026-10-02', top: 2 }, now);
     expect(repo.jobCostSums).toHaveBeenCalledWith({ projectId: 'p1' }, new Date('2026-10-01T00:00:00Z'), new Date('2026-10-02T00:00:00Z'));
@@ -82,7 +83,7 @@ describe('AnalyticsService', () => {
   it('keeps 12 series when top is absent', async () => {
     const t = new Date('2026-10-01T00:00:00Z');
     const cells = Array.from({ length: 13 }, (_, i) => ({ key: `k${String(i).padStart(2, '0')}`, t, costUsd: D(String(13 - i)), tokens: 1 }));
-    const s = await make(fakeRepo({ spendCells: jest.fn().mockResolvedValue(cells) })).spend('p1', { from: '2026-10-01', to: '2026-10-02' }, now);
+    const s = await make(fakeRepo({ spendCells: vi.fn().mockResolvedValue(cells) })).spend('p1', { from: '2026-10-01', to: '2026-10-02' }, now);
     expect(s.series).toHaveLength(13);
     expect(s.series[12]).toMatchObject({ key: 'other', folded: true });
   });
@@ -104,18 +105,18 @@ describe('AnalyticsService', () => {
   });
 
   it('computes first-pass rate and average attempts', async () => {
-    const q = await make(fakeRepo({ storyStats: jest.fn().mockResolvedValue({ stories: 4, firstPass: 3, attempts: 6 }) })).quality('p1', {}, now);
+    const q = await make(fakeRepo({ storyStats: vi.fn().mockResolvedValue({ stories: 4, firstPass: 3, attempts: 6 }) })).quality('p1', {}, now);
     expect(q.firstPassRate).toBe(0.75);
     expect(q.avgAttempts).toBe(1.5);
   });
 
   it('lists stories with the default limit and sort, and jobs with drift', async () => {
     const repo = fakeRepo({
-      topStories: jest.fn().mockResolvedValue([{
+      topStories: vi.fn().mockResolvedValue([{
         jobId: 'j1', leaseEpoch: 1, featureName: 'f', storyId: 'US-1', attempts: 2, firstPassSuccess: false, success: true,
         costUsd: D('0.30004'), completedAt: new Date('2026-10-02T00:00:00Z'),
       }]),
-      topJobs: jest.fn().mockResolvedValue([
+      topJobs: vi.fn().mockResolvedValue([
         { jobId: 'j1', command: 'RUN', featureName: 'f', state: 'COMPLETED', costUsd: D('0.6'), ledgerCostUsd: D('0.65'), finishedAt: new Date('2026-10-02T00:00:00Z') },
         { jobId: 'j2', command: 'PLAN', featureName: 'g', state: 'COMPLETED', costUsd: D('0.2'), ledgerCostUsd: null, finishedAt: null },
       ]),
@@ -135,8 +136,8 @@ describe('AnalyticsService', () => {
   it('breaks a job down, 404 outside the project', async () => {
     jobs.findById.mockResolvedValue({ id: 'j1', projectId: 'p1', stateReason: ESCALATED_FROM_AUDIT });
     const repo = fakeRepo({
-      jobSlices: jest.fn().mockResolvedValue([{ key: 'm1', costUsd: D('0.00012'), tokens: 10 }]),
-      latestIngest: jest.fn().mockResolvedValue({
+      jobSlices: vi.fn().mockResolvedValue([{ key: 'm1', costUsd: D('0.00012'), tokens: 10 }]),
+      latestIngest: vi.fn().mockResolvedValue({
         leaseEpoch: 2, status: 'done', files: { cost: 'done:v8' }, ingestedAt: new Date('2026-10-02T13:00:00Z'), error: null,
         liveCostUsd: D('0.4'), ledgerCostUsd: D('0.5'),
       }),
@@ -165,7 +166,7 @@ describe('AnalyticsService', () => {
     const svc = make(repo);
     await expect(svc.deleteRows('u1', { before: '2026-10-01T00:00:00Z', confirm: 'web' }, now)).rejects.toBeInstanceOf(ValidationAppException);
     await expect(svc.deleteRows('u1', { before: '2026-10-01T00:00:00Z', projectId: 'p1', confirm: 'ALL' }, now)).rejects.toBeInstanceOf(ValidationAppException);
-    (repo.findProjectSlug as jest.Mock).mockResolvedValueOnce(null);
+    (repo.findProjectSlug as Mock).mockResolvedValueOnce(null);
     await expect(svc.deleteRows('u1', { before: '2026-10-01T00:00:00Z', projectId: 'gone', confirm: 'gone' }, now)).rejects.toBeInstanceOf(NotFoundAppException);
     expect(repo.deleteRows).not.toHaveBeenCalled();
 
@@ -183,7 +184,7 @@ describe('AnalyticsService', () => {
   });
 
   it('counts unfinished and failed ingests of jobs finished in the window (D388)', async () => {
-    const repo = fakeRepo({ ingestHealth: jest.fn().mockResolvedValue({ pending: 2, failed: 1 }) });
+    const repo = fakeRepo({ ingestHealth: vi.fn().mockResolvedValue({ pending: 2, failed: 1 }) });
     const r = await make(repo).ingestHealth('p1', { from: '2026-10-01', to: '2026-10-08' }, now);
     expect(repo.ingestHealth).toHaveBeenCalledWith('p1', new Date('2026-10-01T00:00:00Z'), new Date('2026-10-08T00:00:00Z'));
     expect(r).toEqual({ window: { from: '2026-10-01T00:00:00.000Z', to: '2026-10-08T00:00:00.000Z' }, pending: 2, failed: 1 });

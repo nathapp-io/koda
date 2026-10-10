@@ -10,8 +10,8 @@ const transactionManager = {
 } as unknown as ITransactionManager;
 
 const repositoryWith = (members: unknown[], roster: unknown[]) => {
-  const memberFindMany = jest.fn().mockResolvedValue(members);
-  const rosterFindMany = jest.fn().mockResolvedValue(roster);
+  const memberFindMany = vi.fn().mockResolvedValue(members);
+  const rosterFindMany = vi.fn().mockResolvedValue(roster);
   const prisma = {
     client: {
       projectMember: { findMany: memberFindMany },

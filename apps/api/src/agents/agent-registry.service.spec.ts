@@ -112,7 +112,7 @@ describe('AgentRegistryService', () => {
         agentId: 'claude-code',
         name: 'Claude Code',
         capabilities: ['ticket_ops' as AgentCapability, 'code_write' as AgentCapability],
-        formatContext: jest.fn(),
+        formatContext: vi.fn(),
       };
 
       registry.register('claude-code', adapter);
@@ -197,14 +197,14 @@ describe('AgentRegistryService', () => {
         agentId: 'claude-code',
         name: 'Claude Code v1',
         capabilities: ['ticket_ops' as AgentCapability],
-        formatContext: jest.fn().mockReturnValue('v1 output'),
+        formatContext: vi.fn().mockReturnValue('v1 output'),
       };
 
       const secondAdapter: AgentAdapter = {
         agentId: 'claude-code',
         name: 'Claude Code v2',
         capabilities: ['ticket_ops' as AgentCapability, 'code_write' as AgentCapability],
-        formatContext: jest.fn().mockReturnValue('v2 output'),
+        formatContext: vi.fn().mockReturnValue('v2 output'),
       };
 
       registry.register('claude-code', firstAdapter);
@@ -227,7 +227,7 @@ describe('AgentRegistryService', () => {
         agentId: 'my-agent',
         name: 'My Agent',
         capabilities: ['ticket_ops' as AgentCapability],
-        formatContext: jest.fn(),
+        formatContext: vi.fn(),
       };
 
       expect(() => registry.register('different-id', adapter)).toThrow();

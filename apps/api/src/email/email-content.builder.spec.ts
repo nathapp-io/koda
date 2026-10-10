@@ -9,10 +9,10 @@ const row = (over: Partial<EmailScheduleRow> = {}): EmailScheduleRow => ({
 });
 
 function setup() {
-  const notification = { findUnique: jest.fn(), findFirst: jest.fn() };
-  const user = { findUnique: jest.fn(), findFirst: jest.fn() };
-  const preferences = { emailAllowed: jest.fn(async (): Promise<{ allowed: boolean; reason?: string }> => ({ allowed: true })) };
-  const email = { configured: true, webUrl: jest.fn((path: string) => `${WEB}${path}`) };
+  const notification = { findUnique: vi.fn(), findFirst: vi.fn() };
+  const user = { findUnique: vi.fn(), findFirst: vi.fn() };
+  const preferences = { emailAllowed: vi.fn(async (): Promise<{ allowed: boolean; reason?: string }> => ({ allowed: true })) };
+  const email = { configured: true, webUrl: vi.fn((path: string) => `${WEB}${path}`) };
   const builder = new EmailContentBuilder(
     { client: { notification, user } } as never,
     preferences as never,
@@ -101,11 +101,11 @@ describe('EmailContentBuilder MEMBER_ADDED content (S4b US-004)', () => {
   });
 
   function setupMemberAdded() {
-    const user = { findUnique: jest.fn(), findFirst: jest.fn() };
-    const project = { findUnique: jest.fn(), findFirst: jest.fn() };
-    const projectMember = { findUnique: jest.fn(), findFirst: jest.fn() };
-    const preferences = { emailAllowed: jest.fn(async () => ({ allowed: true })) };
-    const email = { configured: true, webUrl: jest.fn((path: string) => `${WEB}${path}`) };
+    const user = { findUnique: vi.fn(), findFirst: vi.fn() };
+    const project = { findUnique: vi.fn(), findFirst: vi.fn() };
+    const projectMember = { findUnique: vi.fn(), findFirst: vi.fn() };
+    const preferences = { emailAllowed: vi.fn(async () => ({ allowed: true })) };
+    const email = { configured: true, webUrl: vi.fn((path: string) => `${WEB}${path}`) };
     const builder = new EmailContentBuilder(
       { client: { user, project, projectMember } } as never,
       preferences as never,

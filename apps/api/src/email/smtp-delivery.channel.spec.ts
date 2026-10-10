@@ -5,14 +5,14 @@ const payload = { tenantId: 'default', channel: 'email', templateCode: 'NOTIFICA
 
 describe('SmtpDeliveryChannel (S4b §1)', () => {
   it('sends the rendered subject and html and returns the message id', async () => {
-    const provider = { send: jest.fn(async () => ({ success: true, requestId: 'mid-1' })) };
+    const provider = { send: vi.fn(async () => ({ success: true, requestId: 'mid-1' })) };
     const channel = new SmtpDeliveryChannel(provider as never);
     await expect(channel.send(payload, '<p>hi</p>', 'Subj')).resolves.toEqual({ providerMessageId: 'mid-1' });
     expect(provider.send).toHaveBeenCalledWith({ recipient: 'b@x.io', subject: 'Subj', message: '<p>hi</p>' });
   });
 
   it('throws a retryable Error when the provider reports failure', async () => {
-    const provider = { send: jest.fn(async () => ({ success: false, message: 'ECONNREFUSED' })) };
+    const provider = { send: vi.fn(async () => ({ success: false, message: 'ECONNREFUSED' })) };
     const err = await new SmtpDeliveryChannel(provider as never).send(payload, 'x', 's').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(PermanentNotificationError);
@@ -20,7 +20,7 @@ describe('SmtpDeliveryChannel (S4b §1)', () => {
   });
 
   it('throws a permanent error for a rejected recipient (SMTP 55x)', async () => {
-    const provider = { send: jest.fn(async () => ({ success: false, message: '550 5.1.1 mailbox unavailable' })) };
+    const provider = { send: vi.fn(async () => ({ success: false, message: '550 5.1.1 mailbox unavailable' })) };
     await expect(new SmtpDeliveryChannel(provider as never).send(payload, 'x', 's')).rejects.toBeInstanceOf(PermanentNotificationError);
   });
 
@@ -29,7 +29,7 @@ describe('SmtpDeliveryChannel (S4b §1)', () => {
   });
 
   it('uses an empty subject when the template has none', async () => {
-    const provider = { send: jest.fn(async () => ({ success: true })) };
+    const provider = { send: vi.fn(async () => ({ success: true })) };
     await new SmtpDeliveryChannel(provider as never).send(payload, 'x');
     expect(provider.send).toHaveBeenCalledWith(expect.objectContaining({ subject: '' }));
   });

@@ -8,7 +8,7 @@ const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : descr
 const TARGET = '20261010090000_notify_platform';
 
 describeIntegration('notify platform migration (S4b §2.1)', () => {
-  jest.setTimeout(60000);
+  vi.setConfig({ testTimeout: 60000 });
   let scratch: ScratchSchema;
 
   beforeAll(async () => {

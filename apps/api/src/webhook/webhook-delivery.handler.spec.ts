@@ -1,3 +1,4 @@
+import type { Mock, Mocked } from 'vitest';
 /**
  * US-004 — `WebhookDeliveryHandler` delegates signed delivery to `OutboundHttpClient`.
  *
@@ -19,14 +20,14 @@ import type { PrismaWebhookRepository } from './prisma-webhook.repository';
 import { WebhookDomain } from './domain/webhook.domain';
 import { OutboundHttpClient, WebhookDeliveryError } from './outbound/outbound-http-client';
 
-function makeWebhookRepo(): jest.Mocked<PrismaWebhookRepository> {
+function makeWebhookRepo(): Mocked<PrismaWebhookRepository> {
   return {
-    createWebhook: jest.fn(),
-    findByProject: jest.fn(),
-    findById: jest.fn(),
-    deleteWebhook: jest.fn(),
-    findProjectBySlug: jest.fn(),
-  } as unknown as jest.Mocked<PrismaWebhookRepository>;
+    createWebhook: vi.fn(),
+    findByProject: vi.fn(),
+    findById: vi.fn(),
+    deleteWebhook: vi.fn(),
+    findProjectBySlug: vi.fn(),
+  } as unknown as Mocked<PrismaWebhookRepository>;
 }
 
 function makeWebhook(overrides: Partial<WebhookDomain> = {}): WebhookDomain {
@@ -42,17 +43,17 @@ function makeWebhook(overrides: Partial<WebhookDomain> = {}): WebhookDomain {
   };
 }
 
-type PostMock = jest.Mock<Promise<void>, [string, Record<string, string>, string]>;
+type PostMock = Mock<(...args: [string, Record<string, string>, string]) => Promise<void>>;
 
 interface HandlerHarness {
   handler: WebhookDeliveryHandler;
   post: PostMock;
-  webhookRepo: jest.Mocked<PrismaWebhookRepository>;
+  webhookRepo: Mocked<PrismaWebhookRepository>;
 }
 
 function makeHandler(): HandlerHarness {
   const webhookRepo = makeWebhookRepo();
-  const post: PostMock = jest.fn<Promise<void>, [string, Record<string, string>, string]>(
+  const post: PostMock = vi.fn<(...args: [string, Record<string, string>, string]) => Promise<void>>(
     (): Promise<void> => Promise.resolve(),
   );
   const http = { post } as unknown as OutboundHttpClient;
@@ -67,13 +68,13 @@ function hmacHex(secret: string, body: string): string {
 describe('WebhookDeliveryHandler', () => {
   let harness: HandlerHarness;
   let originalFetch: typeof global.fetch | undefined;
-  let fetchSpy: jest.Mock;
+  let fetchSpy: Mock;
 
   beforeEach(() => {
     harness = makeHandler();
 
     originalFetch = global.fetch;
-    fetchSpy = jest.fn();
+    fetchSpy = vi.fn();
     global.fetch = fetchSpy as unknown as typeof global.fetch;
   });
 

@@ -23,7 +23,7 @@ describeIntegration('PrismaOutboxStore', () => {
   let store: PrismaOutboxStore;
   let outbox: NathappOutboxService;
   let projectId: string;
-  const publisher = new FanOutPublisher({ recordLastError: jest.fn() });
+  const publisher = new FanOutPublisher({ recordLastError: vi.fn() });
 
   const t0 = new Date('2026-09-26T10:00:00.000Z');
   const at = (ms: number): Date => new Date(t0.getTime() + ms);
@@ -122,7 +122,7 @@ describeIntegration('PrismaOutboxStore', () => {
         type: 'fleet_approval_requested', status: 'processing', owner: 'old', leaseUntil: at(-1000),
       });
       await seed('ticket', at(-1000));
-      const handler = jest.fn();
+      const handler = vi.fn();
       try {
         for (let cycle = 0; cycle < 10; cycle += 1) {
           const claimed = await store.claimBatch(1, 30_000, at(cycle * 1000), 'owner');

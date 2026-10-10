@@ -28,7 +28,7 @@ describe('PolicyGateService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   // -------------------------------------------------------------------------
@@ -88,7 +88,7 @@ describe('PolicyGateService', () => {
       // We can spy on the private method indirectly by passing a project that exposes
       // the token-budget path with an injected contextBuilderService that overshoots.
       const overshotContextBuilder = {
-        getProjectContext: jest.fn().mockResolvedValue({
+        getProjectContext: vi.fn().mockResolvedValue({
           meta: { tokensUsed: 9999 }, // massively over budget
         }),
       };
@@ -212,7 +212,7 @@ describe('PolicyGateService', () => {
 
     it('passes even when CanonicalStateService throws (falls back to fixtures)', async () => {
       const failingCanonical = {
-        getSnapshot: jest.fn().mockRejectedValue(new Error('service unavailable')),
+        getSnapshot: vi.fn().mockRejectedValue(new Error('service unavailable')),
       };
       const svc = new PolicyGateService(failingCanonical as never, undefined, undefined);
       const result = await svc.runAllGates('gate-fixture-project-a');
@@ -222,7 +222,7 @@ describe('PolicyGateService', () => {
 
     it('passes when PrismaPolicyRepository throws (falls back to fixture map)', async () => {
       const failingRepo = {
-        findTicketById: jest.fn().mockRejectedValue(new Error('db error')),
+        findTicketById: vi.fn().mockRejectedValue(new Error('db error')),
       };
       const svc = new PolicyGateService(undefined, failingRepo as never, undefined);
       const result = await svc.runAllGates('gate-fixture-project-a');
@@ -234,7 +234,7 @@ describe('PolicyGateService', () => {
       // Provide a CanonicalStateService that returns a ticket with a different status
       // than the fixture Prisma map (PRISMA_FIXTURE_MAP has gate-fixture-ticket-0 as 'open').
       const fakeCanonical = {
-        getSnapshot: jest.fn().mockResolvedValue({
+        getSnapshot: vi.fn().mockResolvedValue({
           tickets: [
             { id: 'gate-fixture-ticket-0', status: 'WRONG_STATUS', priority: 'high', title: 'Fixture Ticket 0' },
           ],
@@ -317,7 +317,7 @@ describe('PolicyGateService', () => {
 
     it('fails when contextBuilderService returns tokensUsed above 1050 (budget=1000, tolerance=5%)', async () => {
       const overshotCtxBuilder = {
-        getProjectContext: jest.fn().mockResolvedValue({
+        getProjectContext: vi.fn().mockResolvedValue({
           meta: { tokensUsed: 1051 },
         }),
       };
@@ -330,7 +330,7 @@ describe('PolicyGateService', () => {
 
     it('passes when contextBuilderService returns tokensUsed exactly at 1050 (boundary)', async () => {
       const boundaryCtxBuilder = {
-        getProjectContext: jest.fn().mockResolvedValue({
+        getProjectContext: vi.fn().mockResolvedValue({
           meta: { tokensUsed: 1050 },
         }),
       };
@@ -342,7 +342,7 @@ describe('PolicyGateService', () => {
 
     it('passes when contextBuilderService returns tokensUsed at 1049', async () => {
       const justUnderCtxBuilder = {
-        getProjectContext: jest.fn().mockResolvedValue({
+        getProjectContext: vi.fn().mockResolvedValue({
           meta: { tokensUsed: 1049 },
         }),
       };
@@ -354,7 +354,7 @@ describe('PolicyGateService', () => {
 
     it('falls back to fixture (800 tokens) and passes when contextBuilderService throws', async () => {
       const failingCtxBuilder = {
-        getProjectContext: jest.fn().mockRejectedValue(new Error('context unavailable')),
+        getProjectContext: vi.fn().mockRejectedValue(new Error('context unavailable')),
       };
       const svc = new PolicyGateService(undefined, undefined, failingCtxBuilder as never);
       const result = await svc.runAllGates('gate-fixture-project-a');
@@ -398,7 +398,7 @@ describe('PolicyGateService', () => {
         ],
       };
       const fakeCanonical = {
-        getSnapshot: jest.fn().mockResolvedValue(fakeSnapshot),
+        getSnapshot: vi.fn().mockResolvedValue(fakeSnapshot),
       };
       const svc = new PolicyGateService(fakeCanonical as never, undefined, undefined);
       const result = await svc.runAllGates('gate-fixture-project-a');
@@ -413,7 +413,7 @@ describe('PolicyGateService', () => {
       // We mock findTicketById to return data matching the canonical fixture for each ID
       // so TruthConsistencyGate sees no discrepancy.
       const fakeRepo = {
-        findTicketById: jest.fn().mockImplementation((id: string) => {
+        findTicketById: vi.fn().mockImplementation((id: string) => {
           const match = /gate-fixture-ticket-(\d+)/.exec(id);
           if (!match) return Promise.resolve(null);
           const i = parseInt(match[1], 10);
@@ -434,7 +434,7 @@ describe('PolicyGateService', () => {
 
     it('uses ContextBuilderService when injected and getProjectContext succeeds', async () => {
       const fakeCtxBuilder = {
-        getProjectContext: jest.fn().mockResolvedValue({
+        getProjectContext: vi.fn().mockResolvedValue({
           meta: { tokensUsed: 500 },
         }),
       };

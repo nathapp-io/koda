@@ -27,7 +27,7 @@ function setup(opts: SetupOptions = {}) {
   const store: ProjectInviteRecord[] = [];
 
   const invites = {
-    cancelPending: jest.fn(async (projectId: string, email: string) => {
+    cancelPending: vi.fn(async (projectId: string, email: string) => {
       let count = 0;
       for (const row of store) {
         if (row.projectId === projectId && row.email === email && row.status === 'PENDING') {
@@ -37,7 +37,7 @@ function setup(opts: SetupOptions = {}) {
       }
       return count;
     }),
-    create: jest.fn(async (input: {
+    create: vi.fn(async (input: {
       projectId: string; email: string; role: 'ADMIN' | 'DEVELOPER' | 'VIEWER';
       tokenHash: string; invitedById: string; expiresAt: Date;
     }): Promise<ProjectInviteRecord> => {
@@ -57,17 +57,17 @@ function setup(opts: SetupOptions = {}) {
       store.push(record);
       return record;
     }),
-    list: jest.fn(async () => [...store]),
-    findById: jest.fn(),
-    rotate: jest.fn(),
-    cancel: jest.fn(),
+    list: vi.fn(async () => [...store]),
+    findById: vi.fn(),
+    rotate: vi.fn(),
+    cancel: vi.fn(),
   };
 
   const members = {
-    findUserIdByEmail: jest.fn(async () => (opts.existingUser ? opts.existingUser.id : null)),
-    findUserState: jest.fn(async () =>
+    findUserIdByEmail: vi.fn(async () => (opts.existingUser ? opts.existingUser.id : null)),
+    findUserState: vi.fn(async () =>
       opts.existingUser ? { id: opts.existingUser.id, email: 'b@x.io', disabled: opts.existingUser.disabled } : null),
-    createMember: jest.fn(async (_projectId: string, userId: string, role: string) => {
+    createMember: vi.fn(async (_projectId: string, userId: string, role: string) => {
       if (opts.memberExists) {
         throw new Prisma.PrismaClientKnownRequestError('duplicate', {
           code: 'P2002', clientVersion: 'test', meta: { target: ['projectId', 'userId'] },
@@ -78,17 +78,17 @@ function setup(opts: SetupOptions = {}) {
   };
 
   const access = {
-    findProjectIdBySlug: jest.fn(async () => 'p1'),
-    assertProjectAdmin: jest.fn(async () => undefined),
+    findProjectIdBySlug: vi.fn(async () => 'p1'),
+    assertProjectAdmin: vi.fn(async () => undefined),
   };
 
-  const mailer = { sendInvite: jest.fn(async (_input: unknown) => true) };
-  const schedule = { scheduleMemberAdded: jest.fn(async () => undefined) };
+  const mailer = { sendInvite: vi.fn(async (_input: unknown) => true) };
+  const schedule = { scheduleMemberAdded: vi.fn(async () => undefined) };
   const email = { configured: opts.configured ?? true, config: () => ({ inviteTtlDays: 7 }) };
   const txManager = {
     run: <T>(fn: () => Promise<T>) => fn(),
-    getClient: jest.fn(),
-    isInTransaction: jest.fn(() => false),
+    getClient: vi.fn(),
+    isInTransaction: vi.fn(() => false),
   };
 
   const service = new ProjectInvitesService(
@@ -125,11 +125,11 @@ function setup(opts: SetupOptions = {}) {
 
 describe('ProjectInvitesService.create (S4b US-004)', () => {
   beforeEach(() => {
-    jest.useFakeTimers();
-    jest.setSystemTime(NOW);
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
   });
   afterEach(() => {
-    jest.useRealTimers();
+    vi.useRealTimers();
   });
 
   it('AC-2: a non-admin is rejected with 403 before any invite or membership write', async () => {
@@ -254,11 +254,11 @@ describe('ProjectInvitesService.list (S4b US-004)', () => {
   // `list` reads the effective status against the current time; the seeded `expiresAt`/`createdAt`
   // are anchored to `NOW`, so the clock must match the same instant the `create` block pins.
   beforeEach(() => {
-    jest.useFakeTimers();
-    jest.setSystemTime(NOW);
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
   });
   afterEach(() => {
-    jest.useRealTimers();
+    vi.useRealTimers();
   });
 
   it('AC-8: an invite DTO exposes exactly the public fields and no token material', async () => {

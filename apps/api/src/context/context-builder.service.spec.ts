@@ -1,5 +1,6 @@
+import type { Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
-import { createMock } from '@golevelup/ts-jest';
+import { createMock } from '@golevelup/ts-vitest';
 import { InternalAppException } from '@nathapp/nestjs-common';
 import { ContextBuilderService, GetProjectContextQuery, ProjectNotFoundError } from './context-builder.service';
 import { CanonicalStateService, CanonicalTicket, CanonicalEvent, CanonicalDecision } from '../memory/canonical-state.service';
@@ -102,13 +103,13 @@ const baseQuery: GetProjectContextQuery = {
 
 describe('ContextBuilderService', () => {
   let service: ContextBuilderService;
-  let contextRepository: jest.Mocked<IContextRepository>;
-  let canonicalStateService: jest.Mocked<CanonicalStateService>;
-  let memoryItemRepository: jest.Mocked<PrismaMemoryItemRepository>;
-  let hybridRetrieverService: jest.Mocked<HybridRetrieverService>;
-  let entityGraphService: jest.Mocked<EntityGraphService>;
-  let impactAnalysisService: jest.Mocked<ImpactAnalysisService>;
-  let sloDashboardService: jest.Mocked<SloDashboardService>;
+  let contextRepository: Mocked<IContextRepository>;
+  let canonicalStateService: Mocked<CanonicalStateService>;
+  let memoryItemRepository: Mocked<PrismaMemoryItemRepository>;
+  let hybridRetrieverService: Mocked<HybridRetrieverService>;
+  let entityGraphService: Mocked<EntityGraphService>;
+  let impactAnalysisService: Mocked<ImpactAnalysisService>;
+  let sloDashboardService: Mocked<SloDashboardService>;
 
   const setupDefaultStubs = () => {
     contextRepository.projectExistsAndNotDeleted.mockResolvedValue(true);
@@ -145,7 +146,7 @@ describe('ContextBuilderService', () => {
     }).compile();
 
     service = module.get(ContextBuilderService);
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('project existence check', () => {

@@ -4,7 +4,7 @@ import { FleetJobLogsController } from './fleet-job-logs.controller';
 const statusOf = (p: Promise<unknown>) => p.then(() => 0, (e: { getStatus(): number }) => e.getStatus());
 
 describe('FleetJobLogsController', () => {
-  const reads = { list: jest.fn(async () => ({ attempts: [] })), entries: jest.fn(), raw: jest.fn(), download: jest.fn() };
+  const reads = { list: vi.fn(async () => ({ attempts: [] })), entries: vi.fn(), raw: vi.fn(), download: vi.fn() };
   const controller = new FleetJobLogsController(reads as never);
   const ctx = { project: { id: 'p1' } } as never;
   const agent = { actorType: 'agent', id: 'a1' } as never;

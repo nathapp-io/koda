@@ -70,23 +70,23 @@ describe('US-003 (M2): TicketsService.update() — status field routes through t
   const mockPrismaService = {
     client: {
       project: {
-        findUnique: jest.fn(),
+        findUnique: vi.fn(),
       },
       ticket: {
-        findUnique: jest.fn(),
-        update: jest.fn(),
-        count: jest.fn(),
-        findMany: jest.fn(),
+        findUnique: vi.fn(),
+        update: vi.fn(),
+        count: vi.fn(),
+        findMany: vi.fn(),
       },
-      $transaction: jest.fn(),
+      $transaction: vi.fn(),
     },
   };
 
   const mockTransitionsService = {
     // Fix-wave B: update() calls this before applyUpdate so a 403 never
     // follows a partial field write.
-    assertTransitionPermission: jest.fn(),
-    executeTransitionPublic: jest.fn(),
+    assertTransitionPermission: vi.fn(),
+    executeTransitionPublic: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -99,13 +99,13 @@ describe('US-003 (M2): TicketsService.update() — status field routes through t
         {
           provide: TRANSACTION_MANAGER,
           useValue: {
-            run: jest.fn((fn: () => Promise<unknown>) => fn()),
-            getClient: jest.fn(),
-            isInTransaction: jest.fn(() => false),
+            run: vi.fn((fn: () => Promise<unknown>) => fn()),
+            getClient: vi.fn(),
+            isInTransaction: vi.fn(() => false),
           },
         },
-        { provide: TicketEventService, useValue: { create: jest.fn().mockResolvedValue({ id: 'evt-1' }) } },
-        { provide: OutboxService, useValue: { record: jest.fn().mockResolvedValue(undefined) } },
+        { provide: TicketEventService, useValue: { create: vi.fn().mockResolvedValue({ id: 'evt-1' }) } },
+        { provide: OutboxService, useValue: { record: vi.fn().mockResolvedValue(undefined) } },
         { provide: TicketTransitionsService, useValue: mockTransitionsService },
         KodaCaslAbilityFactory,
       ],
@@ -115,7 +115,7 @@ describe('US-003 (M2): TicketsService.update() — status field routes through t
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('AC-1: valid status change delegates to the transitions service and returns the updated ticket', () => {

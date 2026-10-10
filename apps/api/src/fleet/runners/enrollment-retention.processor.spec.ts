@@ -3,10 +3,10 @@ import { EnrollmentRetentionProcessor } from './enrollment-retention.processor';
 import { testFleetConfig } from '../../common/test-helpers/fleet-config';
 
 describe('EnrollmentRetentionProcessor', () => {
-  const repo = { deleteSpentEnrollmentsBefore: jest.fn() };
+  const repo = { deleteSpentEnrollmentsBefore: vi.fn() };
   afterEach(() => {
-    jest.clearAllMocks();
-    jest.useRealTimers();
+    vi.clearAllMocks();
+    vi.useRealTimers();
   });
 
   it('runs daily at 04:30 (03:00 memory governance, 04:00 outbox retention)', () => {
@@ -15,7 +15,7 @@ describe('EnrollmentRetentionProcessor', () => {
   });
 
   it('deletes rows spent before the retention window', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-10-31T04:30:00.000Z'));
+    vi.useFakeTimers().setSystemTime(new Date('2026-10-31T04:30:00.000Z'));
     repo.deleteSpentEnrollmentsBefore.mockResolvedValue(3);
     await new EnrollmentRetentionProcessor(repo as never, testFleetConfig({ enrollmentRetentionDays: 30 })).scheduledPurge();
     expect(repo.deleteSpentEnrollmentsBefore).toHaveBeenCalledWith(new Date('2026-10-01T04:30:00.000Z'));

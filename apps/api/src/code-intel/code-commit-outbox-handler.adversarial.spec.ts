@@ -23,9 +23,9 @@ describe('Adversarial Review Findings — code-commit-outbox-handler.ts', () => 
   //   on SELF_DECLARED_DEPS_METADATA to identify custom injection tokens.
   // ──────────────────────────────────────────────────────────────────────────
   describe('Bug 1: @Inject() decorator usage', () => {
-    it('should set self-declared dependency metadata on the ConfigService constructor parameter', () => {
+    it('should set self-declared dependency metadata on the ConfigService constructor parameter', async () => {
       // Import the class so decorators are evaluated and metadata is available
-      const { CodeCommitOutboxHandler } = require('./code-commit-outbox-handler');
+      const { CodeCommitOutboxHandler } = await import('./code-commit-outbox-handler');
 
       const declaredDeps = Reflect.getMetadata(
         SELF_DECLARED_DEPS_METADATA,

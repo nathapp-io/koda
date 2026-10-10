@@ -89,11 +89,11 @@ describe('LabelsController', () => {
   };
 
   const mockLabelsService = {
-    create: jest.fn(),
-    findByProject: jest.fn(),
-    delete: jest.fn(),
-    assignToTicket: jest.fn(),
-    removeFromTicket: jest.fn(),
+    create: vi.fn(),
+    findByProject: vi.fn(),
+    delete: vi.fn(),
+    assignToTicket: vi.fn(),
+    removeFromTicket: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -113,7 +113,7 @@ describe('LabelsController', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('POST /api/projects/:slug/labels', () => {

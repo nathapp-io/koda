@@ -1,3 +1,4 @@
+import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
@@ -16,13 +17,13 @@ import { UpdateVcsConnectionDto } from './dto/update-vcs-connection.dto';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
-jest.mock('./factory', () => ({
-  createVcsProvider: jest.fn(),
+vi.mock('./factory', () => ({
+  createVcsProvider: vi.fn(),
 }));
 
-jest.mock('../common/utils/encryption.util', () => ({
-  decryptToken: jest.fn().mockReturnValue('plain-token'),
-  encryptToken: jest.fn().mockReturnValue('enc-token'),
+vi.mock('../common/utils/encryption.util', () => ({
+  decryptToken: vi.fn().mockReturnValue('plain-token'),
+  encryptToken: vi.fn().mockReturnValue('enc-token'),
 }));
 
 import { createVcsProvider } from './factory';
@@ -88,12 +89,12 @@ function makeFullConnection(overrides?: Partial<VcsConnectionDomain>): VcsConnec
 
 describe('VcsController', () => {
   let controller: VcsController;
-  let mockProjectsService: jest.Mocked<
+  let mockProjectsService: Mocked<
     Pick<ProjectsService, 'findBySlug' | 'assertProjectMembership'>
   >;
-  let mockVcsService: jest.Mocked<Pick<VcsConnectionService, 'create' | 'findByProject' | 'update' | 'delete' | 'testConnection' | 'getFullByProject' | 'rotateWebhookSecret'>>;
-  let mockSyncService: jest.Mocked<Pick<VcsSyncService, 'syncIssue' | 'fullSync'>>;
-  let mockPrSyncService: jest.Mocked<Pick<VcsPrSyncService, 'syncPrStatus'>>;
+  let mockVcsService: Mocked<Pick<VcsConnectionService, 'create' | 'findByProject' | 'update' | 'delete' | 'testConnection' | 'getFullByProject' | 'rotateWebhookSecret'>>;
+  let mockSyncService: Mocked<Pick<VcsSyncService, 'syncIssue' | 'fullSync'>>;
+  let mockPrSyncService: Mocked<Pick<VcsPrSyncService, 'syncPrStatus'>>;
   let mockVcsConfig: { encryptionKey: string | null };
 
   const encryptionKey = 'test-key-32-chars-exactly-padded!!';
@@ -135,27 +136,27 @@ describe('VcsController', () => {
 
   beforeEach(async () => {
     mockProjectsService = {
-      findBySlug: jest.fn().mockResolvedValue(makeProjectDto()),
-      assertProjectMembership: jest.fn().mockResolvedValue(undefined),
+      findBySlug: vi.fn().mockResolvedValue(makeProjectDto()),
+      assertProjectMembership: vi.fn().mockResolvedValue(undefined),
     };
 
     mockVcsService = {
-      create: jest.fn().mockResolvedValue(makeConnectionResponse()),
-      findByProject: jest.fn().mockResolvedValue(makeConnectionResponse()),
-      update: jest.fn().mockResolvedValue(makeConnectionResponse()),
-      delete: jest.fn().mockResolvedValue(undefined),
-      testConnection: jest.fn().mockResolvedValue({ ok: true, latencyMs: 42 }),
-      getFullByProject: jest.fn().mockResolvedValue(makeFullConnection()),
-      rotateWebhookSecret: jest.fn().mockResolvedValue({ webhookSecret: 'a'.repeat(32) }),
+      create: vi.fn().mockResolvedValue(makeConnectionResponse()),
+      findByProject: vi.fn().mockResolvedValue(makeConnectionResponse()),
+      update: vi.fn().mockResolvedValue(makeConnectionResponse()),
+      delete: vi.fn().mockResolvedValue(undefined),
+      testConnection: vi.fn().mockResolvedValue({ ok: true, latencyMs: 42 }),
+      getFullByProject: vi.fn().mockResolvedValue(makeFullConnection()),
+      rotateWebhookSecret: vi.fn().mockResolvedValue({ webhookSecret: 'a'.repeat(32) }),
     };
 
     mockSyncService = {
-      syncIssue: jest.fn().mockResolvedValue({ action: 'created', ticketId: 't-1', ticketNumber: 5, ticketTitle: 'Issue title' }),
-      fullSync: jest.fn().mockResolvedValue({ issuesSynced: 2, issuesSkipped: 1, createdTickets: [{ id: 't-1', number: 5, title: 'Issue title' }], errors: [] }),
+      syncIssue: vi.fn().mockResolvedValue({ action: 'created', ticketId: 't-1', ticketNumber: 5, ticketTitle: 'Issue title' }),
+      fullSync: vi.fn().mockResolvedValue({ issuesSynced: 2, issuesSkipped: 1, createdTickets: [{ id: 't-1', number: 5, title: 'Issue title' }], errors: [] }),
     };
 
     mockPrSyncService = {
-      syncPrStatus: jest.fn().mockResolvedValue({ updated: 3, skipped: 0 }),
+      syncPrStatus: vi.fn().mockResolvedValue({ updated: 3, skipped: 0 }),
     };
 
     mockVcsConfig = {
@@ -178,7 +179,7 @@ describe('VcsController', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('createConnection', () => {
@@ -349,7 +350,7 @@ describe('VcsController', () => {
   describe('syncIssue', () => {
     it('should fetch the issue and create a ticket, returning the sync result', async () => {
       const mockProvider = {
-        fetchIssue: jest.fn().mockResolvedValue({
+        fetchIssue: vi.fn().mockResolvedValue({
           number: 5,
           title: 'Issue title',
           body: 'Body',
@@ -358,12 +359,12 @@ describe('VcsController', () => {
           labels: [],
           createdAt: new Date(),
         }),
-        fetchIssues: jest.fn(),
-        testConnection: jest.fn(),
-        getPullRequestStatus: jest.fn(),
-        listPrCommits: jest.fn(),
+        fetchIssues: vi.fn(),
+        testConnection: vi.fn(),
+        getPullRequestStatus: vi.fn(),
+        listPrCommits: vi.fn(),
       };
-      (createVcsProvider as jest.Mock).mockReturnValue(mockProvider);
+      (createVcsProvider as Mock).mockReturnValue(mockProvider);
 
       mockSyncService.syncIssue.mockResolvedValue({ action: 'created', ticketId: 't-1', ticketNumber: 5, ticketTitle: 'Issue title' });
 
@@ -390,7 +391,7 @@ describe('VcsController', () => {
 
     it('should throw 409 CONFLICT when the issue is already synced', async () => {
       const mockProvider = {
-        fetchIssue: jest.fn().mockResolvedValue({
+        fetchIssue: vi.fn().mockResolvedValue({
           number: 5,
           title: 'Existing issue',
           body: null,
@@ -399,12 +400,12 @@ describe('VcsController', () => {
           labels: [],
           createdAt: new Date(),
         }),
-        fetchIssues: jest.fn(),
-        testConnection: jest.fn(),
-        getPullRequestStatus: jest.fn(),
-        listPrCommits: jest.fn(),
+        fetchIssues: vi.fn(),
+        testConnection: vi.fn(),
+        getPullRequestStatus: vi.fn(),
+        listPrCommits: vi.fn(),
       };
-      (createVcsProvider as jest.Mock).mockReturnValue(mockProvider);
+      (createVcsProvider as Mock).mockReturnValue(mockProvider);
 
       mockSyncService.syncIssue.mockResolvedValue({ action: 'skipped', reason: 'already exists' });
 

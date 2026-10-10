@@ -60,7 +60,7 @@ describe('TicketLiveSubscriber', () => {
   it('registers on ticket_event and publishes mapped events to the bus', async () => {
     const registry = new FanOutPublisher(noopLastErrors);
     const bus = new ProjectEventBus();
-    const listener = jest.fn();
+    const listener = vi.fn();
     bus.subscribe('p1', listener);
     new TicketLiveSubscriber(registry, bus).onModuleInit();
 
@@ -72,7 +72,7 @@ describe('TicketLiveSubscriber', () => {
   it('drops unknown actions silently', async () => {
     const registry = new FanOutPublisher(noopLastErrors);
     const bus = new ProjectEventBus();
-    const listener = jest.fn();
+    const listener = vi.fn();
     bus.subscribe('p1', listener);
     new TicketLiveSubscriber(registry, bus).onModuleInit();
 
@@ -83,7 +83,7 @@ describe('TicketLiveSubscriber', () => {
 
   it('never throws, so it can never cause an outbox retry', async () => {
     const registry = new FanOutPublisher(noopLastErrors);
-    const bus = { publish: jest.fn(() => { throw new Error('bus down'); }) } as unknown as ProjectEventBus;
+    const bus = { publish: vi.fn(() => { throw new Error('bus down'); }) } as unknown as ProjectEventBus;
     new TicketLiveSubscriber(registry, bus).onModuleInit();
 
     await expect(registry.publish(outboxRecord('ticket_event', envelope('TICKET_CREATED')))).resolves.toBeUndefined();

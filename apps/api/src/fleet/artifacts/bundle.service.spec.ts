@@ -7,10 +7,10 @@ const statusOf = (p: Promise<unknown>) => p.then(() => 0, (e: { getStatus(): num
 describe('BundleService.download (S2a D341)', () => {
   const job = { id: 'j1', projectId: 'p1' };
   const artifact = (leaseEpoch: number, expiredAt: Date | null) => ({ id: `a${leaseEpoch}`, jobId: 'j1', leaseEpoch, kind: 'bundle', storageKey: `jobs/j1/${leaseEpoch}/x.tar.gz`, sizeBytes: 3n, sha256: 'x', createdAt: new Date(0), expiredAt });
-  const repo = { findById: jest.fn(async () => job), findLatestArtifact: jest.fn() };
-  const store = { get: jest.fn(async () => Readable.from([Buffer.from('tgz')])) };
+  const repo = { findById: vi.fn(async () => job), findLatestArtifact: vi.fn() };
+  const store = { get: vi.fn(async () => Readable.from([Buffer.from('tgz')])) };
   const svc = new BundleService(repo as never, store as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => vi.clearAllMocks());
 
   it('streams the newest unexpired bundle', async () => {
     repo.findLatestArtifact.mockResolvedValueOnce(artifact(2, null));

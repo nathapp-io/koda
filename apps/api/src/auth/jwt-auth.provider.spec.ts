@@ -7,11 +7,11 @@ describe('JwtAuthProvider', () => {
   let provider: JwtAuthProvider;
 
   const mockAuthRepository = {
-    findUserById: jest.fn(),
+    findUserById: vi.fn(),
   };
 
   const mockCacheManager = {
-    get: jest.fn(),
+    get: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -27,7 +27,7 @@ describe('JwtAuthProvider', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   const payload = (tokenVersion: number) => ({ sub: 'user-1', email: 'a@b.com', role: 'MEMBER', tokenVersion });

@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * US-004: KodaDomainWriter derives a user actor's project roles from membership.
  *
@@ -64,14 +65,14 @@ describe('US-004: KodaDomainWriter role provenance', () => {
 
     const prismaMock = {
       client: {
-        project: { findUnique: jest.fn() },
-        user: { findUnique: jest.fn(), findFirst: jest.fn() },
-        projectMember: { findUnique: jest.fn(), findFirst: jest.fn() },
+        project: { findUnique: vi.fn() },
+        user: { findUnique: vi.fn(), findFirst: vi.fn() },
+        projectMember: { findUnique: vi.fn(), findFirst: vi.fn() },
       },
     };
 
-    const ticketEventService = { create: jest.fn() };
-    const outbox = { record: jest.fn() };
+    const ticketEventService = { create: vi.fn() };
+    const outbox = { record: vi.fn() };
 
     /** Wire the mocked Prisma client for one global role + one membership role. */
     function givenUser(globalRole: string, membershipRole: string | null): void {
@@ -103,24 +104,24 @@ describe('US-004: KodaDomainWriter role provenance', () => {
           { provide: PrismaService, useValue: prismaMock },
           {
             provide: RagService,
-            useValue: { indexDocument: jest.fn(), importGraphify: jest.fn() },
+            useValue: { indexDocument: vi.fn(), importGraphify: vi.fn() },
           },
           { provide: NathappOutboxService, useValue: outbox },
           {
             provide: TRANSACTION_MANAGER,
             useValue: {
-              run: jest.fn((fn: () => Promise<unknown>) => fn()),
-              getClient: jest.fn(),
-              isInTransaction: jest.fn(() => false),
+              run: vi.fn((fn: () => Promise<unknown>) => fn()),
+              getClient: vi.fn(),
+              isInTransaction: vi.fn(() => false),
             },
           },
           {
             provide: AgentAuthProvider,
-            useValue: { loadAgentRoles: jest.fn().mockResolvedValue(['AGENT']) },
+            useValue: { loadAgentRoles: vi.fn().mockResolvedValue(['AGENT']) },
           },
           { provide: TicketEventService, useValue: ticketEventService },
-          { provide: AgentEventService, useValue: { create: jest.fn() } },
-          { provide: DecisionEventService, useValue: { create: jest.fn() } },
+          { provide: AgentEventService, useValue: { create: vi.fn() } },
+          { provide: DecisionEventService, useValue: { create: vi.fn() } },
         ],
       }).compile();
 
@@ -132,7 +133,7 @@ describe('US-004: KodaDomainWriter role provenance', () => {
     });
 
     beforeEach(() => {
-      jest.clearAllMocks();
+      vi.clearAllMocks();
       ticketEventService.create.mockResolvedValue({
         id: 'event-1',
         action: 'TICKET_CREATED',
@@ -197,7 +198,7 @@ describe('US-004: KodaDomainWriter role provenance', () => {
     });
 
     it('still loads agent roles through AgentAuthProvider for agent actors', async () => {
-      const agentAuthProvider = moduleRef.get<{ loadAgentRoles: jest.Mock }>(AgentAuthProvider);
+      const agentAuthProvider = moduleRef.get<{ loadAgentRoles: Mock }>(AgentAuthProvider);
       prismaMock.client.project.findUnique.mockResolvedValue({ id: PROJECT_ID, deletedAt: null });
 
       await expect(
@@ -217,12 +218,12 @@ describe('US-004: KodaDomainWriter role provenance', () => {
     let moduleRef: TestingModule;
 
     const writerRepo = {
-      findProjectById: jest.fn(),
-      findUserProjectRoles: jest.fn(),
+      findProjectById: vi.fn(),
+      findUserProjectRoles: vi.fn(),
     };
 
-    const ticketEventService = { create: jest.fn() };
-    const outbox = { record: jest.fn() };
+    const ticketEventService = { create: vi.fn() };
+    const outbox = { record: vi.fn() };
 
     beforeAll(async () => {
       moduleRef = await Test.createTestingModule({
@@ -231,24 +232,24 @@ describe('US-004: KodaDomainWriter role provenance', () => {
           { provide: PrismaKodaDomainWriterRepository, useValue: writerRepo },
           {
             provide: RagService,
-            useValue: { indexDocument: jest.fn(), importGraphify: jest.fn() },
+            useValue: { indexDocument: vi.fn(), importGraphify: vi.fn() },
           },
           { provide: NathappOutboxService, useValue: outbox },
           {
             provide: TRANSACTION_MANAGER,
             useValue: {
-              run: jest.fn((fn: () => Promise<unknown>) => fn()),
-              getClient: jest.fn(),
-              isInTransaction: jest.fn(() => false),
+              run: vi.fn((fn: () => Promise<unknown>) => fn()),
+              getClient: vi.fn(),
+              isInTransaction: vi.fn(() => false),
             },
           },
           {
             provide: AgentAuthProvider,
-            useValue: { loadAgentRoles: jest.fn().mockResolvedValue(['AGENT']) },
+            useValue: { loadAgentRoles: vi.fn().mockResolvedValue(['AGENT']) },
           },
           { provide: TicketEventService, useValue: ticketEventService },
-          { provide: AgentEventService, useValue: { create: jest.fn() } },
-          { provide: DecisionEventService, useValue: { create: jest.fn() } },
+          { provide: AgentEventService, useValue: { create: vi.fn() } },
+          { provide: DecisionEventService, useValue: { create: vi.fn() } },
         ],
       }).compile();
 
@@ -260,7 +261,7 @@ describe('US-004: KodaDomainWriter role provenance', () => {
     });
 
     beforeEach(() => {
-      jest.clearAllMocks();
+      vi.clearAllMocks();
       writerRepo.findProjectById.mockResolvedValue({ id: PROJECT_ID });
       ticketEventService.create.mockResolvedValue({
         id: 'event-1',

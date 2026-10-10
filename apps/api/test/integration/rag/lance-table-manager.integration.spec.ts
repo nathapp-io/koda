@@ -40,7 +40,7 @@ import { VectorStore } from '../../../src/rag/vector-store.service';
 import { HybridRetrieverService } from '../../../src/rag/hybrid-retriever.service';
 import { LanceTableManager, InMemoryTable } from '../../../src/rag/lance-table-manager';
 
-jest.setTimeout(60000);
+vi.setConfig({ testTimeout: 60000 });
 
 class FakeEmbeddingService {
   readonly providerName = 'fake';
@@ -461,9 +461,9 @@ describe('LanceTableManager', () => {
       ragRepository,
       manager,
     );
-    const onFirstAccessSpy = jest.fn().mockResolvedValue(undefined);
+    const onFirstAccessSpy = vi.fn().mockResolvedValue(undefined);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const strategy = { onFirstAccess: onFirstAccessSpy, onInsert: jest.fn(), onDestroy: jest.fn() } as any;
+    const strategy = { onFirstAccess: onFirstAccessSpy, onInsert: vi.fn(), onDestroy: vi.fn() } as any;
     const vectorStore = new VectorStore(
       ragConfig,
       embedding as never,

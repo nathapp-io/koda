@@ -2890,7 +2890,7 @@ describeIntegration('API Integration Tests', () => {
 
     it('POST /api/admin/skills/sources — 201 with the booted app resolver spied', async () => {
       const resolver = app.get<SkillResolver>(SKILL_RESOLVER, { strict: false });
-      const resolve = jest.spyOn(resolver, 'resolve');
+      const resolve = vi.spyOn(resolver, 'resolve');
       resolve.mockResolvedValue({ sha: 's1', skills: [{ name: 'spec-review', description: 'd', dir: 'skills/spec-review' }] });
 
       try {
@@ -2922,7 +2922,7 @@ describeIntegration('API Integration Tests', () => {
   describe('US-004 Skill source update & delete', () => {
     it('POST /api/admin/skills/sources/:id/update — 200 with the booted app resolver spied', async () => {
       const resolver = app.get<SkillResolver>(SKILL_RESOLVER, { strict: false });
-      const resolve = jest.spyOn(resolver, 'resolve');
+      const resolve = vi.spyOn(resolver, 'resolve');
       try {
         resolve.mockResolvedValueOnce({ sha: 's1', skills: [{ name: 'e2e-update-skill', description: 'old', dir: 'skills/a' }] });
         const created = body<{ id: string }>(
@@ -2956,7 +2956,7 @@ describeIntegration('API Integration Tests', () => {
 
     it('DELETE /api/admin/skills/sources/:id — 204 for a global admin', async () => {
       const resolver = app.get<SkillResolver>(SKILL_RESOLVER, { strict: false });
-      const resolve = jest.spyOn(resolver, 'resolve');
+      const resolve = vi.spyOn(resolver, 'resolve');
       try {
         resolve.mockResolvedValueOnce({ sha: 's1', skills: [{ name: 'e2e-delete-skill', description: 'd', dir: 'skills/a' }] });
         const created = body<{ id: string }>(

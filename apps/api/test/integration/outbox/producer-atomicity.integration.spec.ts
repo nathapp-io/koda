@@ -73,8 +73,8 @@ describeIntegration('producers record outbox rows atomically', () => {
         PrismaWebhookRepository,
         KodaDomainWriter,
         PrismaKodaDomainWriterRepository,
-        { provide: RagService, useValue: { indexDocument: jest.fn(), importGraphify: jest.fn() } },
-        { provide: AgentAuthProvider, useValue: { loadAgentRoles: jest.fn().mockResolvedValue(['AGENT']) } },
+        { provide: RagService, useValue: { indexDocument: vi.fn(), importGraphify: vi.fn() } },
+        { provide: AgentAuthProvider, useValue: { loadAgentRoles: vi.fn().mockResolvedValue(['AGENT']) } },
       ],
     }).compile();
     prisma = module.get(PrismaService);
@@ -121,7 +121,7 @@ describeIntegration('producers record outbox rows atomically', () => {
   });
 
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   afterAll(async () => {
@@ -140,7 +140,7 @@ describeIntegration('producers record outbox rows atomically', () => {
   });
 
   it('ticket create rolls back the ticket and its TicketEvent when the outbox write fails', async () => {
-    jest.spyOn(store, 'save').mockRejectedValueOnce(new Error('outbox down'));
+    vi.spyOn(store, 'save').mockRejectedValueOnce(new Error('outbox down'));
     const ticketsBefore = await prisma.client.ticket.count();
     const eventsBefore = await prisma.client.ticketEvent.count();
 
@@ -165,7 +165,7 @@ describeIntegration('producers record outbox rows atomically', () => {
     const created = await tickets.create('atomic', { type: TicketType.BUG, title: 'Four' }, principal);
     await prisma.client.ticket.update({ where: { id: created.id }, data: { status: TicketStatus.VERIFIED } });
     await prisma.client.outboxEvent.deleteMany({});
-    jest.spyOn(store, 'save').mockRejectedValueOnce(new Error('outbox down'));
+    vi.spyOn(store, 'save').mockRejectedValueOnce(new Error('outbox down'));
 
     await expect(transitions.start('atomic', created.id, principal)).rejects.toThrow('outbox down');
 
@@ -175,7 +175,7 @@ describeIntegration('producers record outbox rows atomically', () => {
   });
 
   it('writeAgentAction rolls back the AgentEvent when the outbox write fails', async () => {
-    jest.spyOn(store, 'save').mockRejectedValueOnce(new Error('outbox down'));
+    vi.spyOn(store, 'save').mockRejectedValueOnce(new Error('outbox down'));
     const before = await prisma.client.agentEvent.count();
 
     await expect(writer.writeAgentAction(agentActionInput)).rejects.toThrow('outbox down');

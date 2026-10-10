@@ -7,7 +7,7 @@ describe('KodaJwtRefreshStrategyProvider', () => {
   let provider: KodaJwtRefreshStrategyProvider;
 
   const mockAuthRepository = {
-    findUserById: jest.fn(),
+    findUserById: vi.fn(),
   };
 
   const mockJwtOptions = {
@@ -28,7 +28,7 @@ describe('KodaJwtRefreshStrategyProvider', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('is not revoked when the payload tokenVersion matches the user record', async () => {

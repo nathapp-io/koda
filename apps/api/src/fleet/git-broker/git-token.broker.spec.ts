@@ -7,11 +7,11 @@ const gitlab: FleetRepoRef = { ...github, provider: 'gitlab', githubInstallation
 const NOW = new Date('2026-10-01T00:00:00.000Z');
 
 describe('GitTokenBroker', () => {
-  const app = { mintInstallationToken: jest.fn() };
-  const lab = { resolve: jest.fn() };
+  const app = { mintInstallationToken: vi.fn() };
+  const lab = { resolve: vi.fn() };
   let broker: GitTokenBroker;
   beforeEach(() => {
-    jest.resetAllMocks();
+    vi.resetAllMocks();
     broker = new GitTokenBroker(
       { gitTokenReuseMarginSec: 300, gitlabTokenTtlSec: 3_600 },
       app as never,

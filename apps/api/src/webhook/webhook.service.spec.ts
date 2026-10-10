@@ -1,3 +1,4 @@
+import type { Mock, Mocked } from 'vitest';
 /**
  * US-003 — validate create URLs and add the ADMIN-only update path to WebhookService.
  *
@@ -24,23 +25,23 @@ import type { IWebhookConfig } from '../config/webhook.config';
 import type { WebhookDomain, WebhookListItem, WebhookView } from './domain/webhook.domain';
 
 interface UrlGuardStub {
-  checkUrl: jest.Mock<Promise<void>, [string]>;
+  checkUrl: Mock<(...args: [string]) => Promise<void>>;
 }
 
 function makeUrlGuardStub(): UrlGuardStub {
-  return { checkUrl: jest.fn<Promise<void>, [string]>().mockResolvedValue(undefined) };
+  return { checkUrl: vi.fn<(...args: [string]) => Promise<void>>().mockResolvedValue(undefined) };
 }
 
-function makeWebhookRepo(): jest.Mocked<PrismaWebhookRepository> {
+function makeWebhookRepo(): Mocked<PrismaWebhookRepository> {
   return {
-    createWebhook: jest.fn(),
-    findByProject: jest.fn(),
-    findActiveByProject: jest.fn(),
-    findById: jest.fn(),
-    deleteWebhook: jest.fn(),
-    findProjectBySlug: jest.fn(),
-    update: jest.fn(),
-  } as unknown as jest.Mocked<PrismaWebhookRepository>;
+    createWebhook: vi.fn(),
+    findByProject: vi.fn(),
+    findActiveByProject: vi.fn(),
+    findById: vi.fn(),
+    deleteWebhook: vi.fn(),
+    findProjectBySlug: vi.fn(),
+    update: vi.fn(),
+  } as unknown as Mocked<PrismaWebhookRepository>;
 }
 
 const mockWebhook: WebhookDomain = {
@@ -100,7 +101,7 @@ function makeUnresolvableResolver(): DnsResolver {
 
 describe('WebhookService', () => {
   let service: WebhookService;
-  let webhookRepo: jest.Mocked<PrismaWebhookRepository>;
+  let webhookRepo: Mocked<PrismaWebhookRepository>;
   let urlGuard: UrlGuardStub;
 
   beforeEach(() => {
@@ -110,7 +111,7 @@ describe('WebhookService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('create', () => {

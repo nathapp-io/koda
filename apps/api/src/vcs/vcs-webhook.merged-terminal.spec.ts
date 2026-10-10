@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * M12: a late pull_request delivery (fresh delivery id, so replay protection
  * lets it through) must not regress a merged link. The repository refuses the
@@ -62,13 +63,13 @@ function payload(action: string, pr: Partial<NonNullable<GitHubWebhookPayload['p
 }
 
 describe('VcsWebhookService — merged is terminal (M12)', () => {
-  let repo: { findTicketLinkForConnectionPr: jest.Mock; updateTicketLinkWithPrState: jest.Mock };
-  let prSync: { applyMergedPr: jest.Mock };
+  let repo: { findTicketLinkForConnectionPr: Mock; updateTicketLinkWithPrState: Mock };
+  let prSync: { applyMergedPr: Mock };
   let service: VcsWebhookService;
 
   beforeEach(() => {
-    repo = { findTicketLinkForConnectionPr: jest.fn(), updateTicketLinkWithPrState: jest.fn() };
-    prSync = { applyMergedPr: jest.fn().mockResolvedValue('updated') };
+    repo = { findTicketLinkForConnectionPr: vi.fn(), updateTicketLinkWithPrState: vi.fn() };
+    prSync = { applyMergedPr: vi.fn().mockResolvedValue('updated') };
     service = new VcsWebhookService(
       repo as unknown as IVcsRepository,
       {} as VcsSyncService,

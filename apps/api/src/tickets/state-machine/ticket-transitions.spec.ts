@@ -299,7 +299,7 @@ describe('validateTransition', () => {
     it('provides clear error message for invalid transition', () => {
       try {
         validateTransition(TicketStatus.CREATED, TicketStatus.CLOSED);
-        fail('Should have thrown');
+        assert.fail('Should have thrown');
       } catch (error) {
         expect(error).toBeInstanceOf(AppException);
         const err = error as AppException;
@@ -310,7 +310,7 @@ describe('validateTransition', () => {
     it('provides clear error message when comment type is required but missing', () => {
       try {
         validateTransition(TicketStatus.CREATED, TicketStatus.VERIFIED);
-        fail('Should have thrown');
+        assert.fail('Should have thrown');
       } catch (error) {
         expect(error).toBeInstanceOf(AppException);
         const err = error as AppException;
@@ -321,7 +321,7 @@ describe('validateTransition', () => {
     it('provides clear error message when comment type is wrong', () => {
       try {
         validateTransition(TicketStatus.CREATED, TicketStatus.VERIFIED, CommentType.GENERAL);
-        fail('Should have thrown');
+        assert.fail('Should have thrown');
       } catch (error) {
         expect(error).toBeInstanceOf(AppException);
         const err = error as AppException;

@@ -22,22 +22,22 @@ const record = (over: Partial<FleetJobRecord> = {}): FleetJobRecord => ({
 
 function setup() {
   const jobs = {
-    findRepo: jest.fn(async (id: string) => (id === 'repo-1' ? REPO : id === 'foreign' ? { ...REPO, id, projectId: 'p2' } : null)),
-    createJob: jest.fn(async (data: Partial<FleetJobRecord>) => record({ ...data } as Partial<FleetJobRecord>)),
-    appendEvent: jest.fn(),
-    findActiveJobId: jest.fn(async () => 'job-active'),
-    findById: jest.fn(async () => record()),
-    lockById: jest.fn(async () => record()),
+    findRepo: vi.fn(async (id: string) => (id === 'repo-1' ? REPO : id === 'foreign' ? { ...REPO, id, projectId: 'p2' } : null)),
+    createJob: vi.fn(async (data: Partial<FleetJobRecord>) => record({ ...data } as Partial<FleetJobRecord>)),
+    appendEvent: vi.fn(),
+    findActiveJobId: vi.fn(async () => 'job-active'),
+    findById: vi.fn(async () => record()),
+    lockById: vi.fn(async () => record()),
   };
   const edits = {
-    create: jest.fn(async (d: Record<string, unknown>) => ({ id: 'e1', result: null, createdAt: NOW, ...d })),
-    findByJobId: jest.fn(async () => ({ id: 'e1', jobId: 'job-1', mode: 'edit', edits: [{ path: '.nax/context.md', op: 'put', content: '# x', baseSha: null }], prTitle: 'T', prBody: null, baseSha: SHA, result: null, createdAt: NOW })),
+    create: vi.fn(async (d: Record<string, unknown>) => ({ id: 'e1', result: null, createdAt: NOW, ...d })),
+    findByJobId: vi.fn(async () => ({ id: 'e1', jobId: 'job-1', mode: 'edit', edits: [{ path: '.nax/context.md', op: 'put', content: '# x', baseSha: null }], prTitle: 'T', prBody: null, baseSha: SHA, result: null, createdAt: NOW })),
   };
-  const reader = { list: jest.fn(async () => ({ baseSha: 'b'.repeat(40), defaultBranch: 'trunk', files: [] })), read: jest.fn(async () => ({ path: '.nax/context.md', blobSha: 'k', content: 'x' })) };
-  const activity = { record: jest.fn() };
-  const live = { event: jest.fn(() => ({ id: 'l' })), publish: jest.fn() };
-  const placement = { placeJob: jest.fn(async () => ({ assigned: false, runnerId: null, leaseEpoch: null, misfits: [] })) };
-  const fence = { holds: jest.fn((j: FleetJobRecord, r: string, e: number) => j.runnerId === r && j.leaseEpoch === e), abandon: jest.fn() };
+  const reader = { list: vi.fn(async () => ({ baseSha: 'b'.repeat(40), defaultBranch: 'trunk', files: [] })), read: vi.fn(async () => ({ path: '.nax/context.md', blobSha: 'k', content: 'x' })) };
+  const activity = { record: vi.fn() };
+  const live = { event: vi.fn(() => ({ id: 'l' })), publish: vi.fn() };
+  const placement = { placeJob: vi.fn(async () => ({ assigned: false, runnerId: null, leaseEpoch: null, misfits: [] })) };
+  const fence = { holds: vi.fn((j: FleetJobRecord, r: string, e: number) => j.runnerId === r && j.leaseEpoch === e), abandon: vi.fn() };
   const tx = { run: (fn: () => unknown) => fn() };
   const svc = new ConfigJobsService(jobs as never, edits as never, reader as never, activity as never, live as never, placement as never, fence as never, tx as never);
   return { svc, jobs, edits, reader, activity, placement, fence };

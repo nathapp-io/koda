@@ -17,18 +17,18 @@ const job = (over: Partial<FleetJobRecord> = {}): FleetJobRecord => ({
 
 describe('JobTransitionsService', () => {
   const repo = {
-    update: jest.fn(async (_id: string, patch: Record<string, unknown>) => job({ ...(patch as Partial<FleetJobRecord>), leaseEpoch: patch.bumpEpoch ? 3 : 2 })),
-    appendEvent: jest.fn(),
-    withdrawPendingCommands: jest.fn(),
-    copyConfigResult: jest.fn(),
+    update: vi.fn(async (_id: string, patch: Record<string, unknown>) => job({ ...(patch as Partial<FleetJobRecord>), leaseEpoch: patch.bumpEpoch ? 3 : 2 })),
+    appendEvent: vi.fn(),
+    withdrawPendingCommands: vi.fn(),
+    copyConfigResult: vi.fn(),
   };
-  const activity = { record: jest.fn() };
-  const live = { event: jest.fn((j: FleetJobRecord) => ({ id: 'e', type: 'fleet_job', projectId: j.projectId, jobId: j.id, state: j.state, at: NOW.toISOString() })), publish: jest.fn() };
-  const schedules = { onJobEnded: jest.fn(async () => undefined) };
-  const closer = { closeForJob: jest.fn().mockResolvedValue([APPROVAL_LIVE]) };
-  const outcomes = { onTerminal: jest.fn(async () => undefined) };
+  const activity = { record: vi.fn() };
+  const live = { event: vi.fn((j: FleetJobRecord) => ({ id: 'e', type: 'fleet_job', projectId: j.projectId, jobId: j.id, state: j.state, at: NOW.toISOString() })), publish: vi.fn() };
+  const schedules = { onJobEnded: vi.fn(async () => undefined) };
+  const closer = { closeForJob: vi.fn().mockResolvedValue([APPROVAL_LIVE]) };
+  const outcomes = { onTerminal: vi.fn(async () => undefined) };
   const svc = new JobTransitionsService(repo as never, activity as never, live as never, schedules as never, closer as never, outcomes as never);
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => vi.clearAllMocks());
 
   const ACTOR = { type: 'RUNNER', id: 'run-1' } as const;
 
@@ -86,15 +86,15 @@ describe('JobTransitionsService', () => {
   });
 
   it('counts the end of a scheduled job against its schedule, in the same call (S1b §3.3)', async () => {
-    const scheduledRepo = { ...repo, update: jest.fn(async () => job({ state: 'FAILED', scheduleId: 's1' })) };
-    const scheduledSvc = new JobTransitionsService(scheduledRepo as never, activity as never, live as never, schedules as never, closer as never, { onTerminal: jest.fn() } as never);
+    const scheduledRepo = { ...repo, update: vi.fn(async () => job({ state: 'FAILED', scheduleId: 's1' })) };
+    const scheduledSvc = new JobTransitionsService(scheduledRepo as never, activity as never, live as never, schedules as never, closer as never, { onTerminal: vi.fn() } as never);
     await scheduledSvc.apply({ job: job({ state: 'UPLOADING', scheduleId: 's1' }), to: 'FAILED', by: 'runner', now: NOW, actor: { type: 'RUNNER', id: 'run-1' } });
     expect(schedules.onJobEnded).toHaveBeenCalledWith(expect.objectContaining({ id: 'j1', state: 'FAILED', scheduleId: 's1' }), NOW);
   });
 
   it('does not touch the schedule for a non-terminal transition or an unscheduled job', async () => {
-    const running = { ...repo, update: jest.fn(async () => job({ state: 'RUNNING', scheduleId: 's1' })) };
-    await new JobTransitionsService(running as never, activity as never, live as never, schedules as never, closer as never, { onTerminal: jest.fn() } as never)
+    const running = { ...repo, update: vi.fn(async () => job({ state: 'RUNNING', scheduleId: 's1' })) };
+    await new JobTransitionsService(running as never, activity as never, live as never, schedules as never, closer as never, { onTerminal: vi.fn() } as never)
       .apply({ job: job({ scheduleId: 's1' }), to: 'RUNNING', by: 'runner', now: NOW, actor: { type: 'RUNNER', id: 'run-1' } });
     await svc.apply({ job: job({ state: 'UPLOADING' }), to: 'FAILED', by: 'runner', now: NOW, actor: { type: 'RUNNER', id: 'run-1' } });
     expect(schedules.onJobEnded).not.toHaveBeenCalled();

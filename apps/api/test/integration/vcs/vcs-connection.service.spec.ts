@@ -43,18 +43,18 @@ describe('VcsConnectionService', () => {
   };
 
   const mockPrismaDelegate = {
-    findUnique: jest.fn(),
-    findMany: jest.fn(),
-    findFirst: jest.fn(),
-    create: jest.fn(),
-    update: jest.fn(),
-    delete: jest.fn(),
+    findUnique: vi.fn(),
+    findMany: vi.fn(),
+    findFirst: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
   };
 
   beforeEach(async () => {
     // Reset all mocks before each test
-    jest.clearAllMocks();
-    jest.restoreAllMocks();
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
 
     module = await Test.createTestingModule({
       providers: [
@@ -64,9 +64,9 @@ describe('VcsConnectionService', () => {
         {
           provide: TRANSACTION_MANAGER,
           useValue: {
-            run: jest.fn((fn: () => Promise<unknown>) => fn()),
-            getClient: jest.fn(),
-            isInTransaction: jest.fn(() => false),
+            run: vi.fn((fn: () => Promise<unknown>) => fn()),
+            getClient: vi.fn(),
+            isInTransaction: vi.fn(() => false),
           },
         },
         {
@@ -81,16 +81,16 @@ describe('VcsConnectionService', () => {
         {
           provide: ConfigService,
           useValue: {
-            get: jest.fn(),
+            get: vi.fn(),
           },
         },
         { provide: VCS_CFG, useValue: mockVcsConfig },
         {
           provide: VcsPollingService,
           useValue: {
-            schedulePolling: jest.fn(),
-            unschedulePolling: jest.fn(),
-            refreshConnectionSchedule: jest.fn().mockResolvedValue(undefined),
+            schedulePolling: vi.fn(),
+            unschedulePolling: vi.fn(),
+            refreshConnectionSchedule: vi.fn().mockResolvedValue(undefined),
           },
         },
       ],
@@ -225,7 +225,7 @@ describe('VcsConnectionService', () => {
       ];
 
       for (const test of urlTests) {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
 
         const dto: CreateVcsConnectionDto = {
           provider: VcsProviderType.GITHUB,
@@ -658,10 +658,10 @@ describe('VcsConnectionService', () => {
       };
 
       const mockProvider: Partial<IVcsProvider> = {
-        testConnection: jest.fn().mockResolvedValue({ ok: true }),
+        testConnection: vi.fn().mockResolvedValue({ ok: true }),
       };
 
-      jest.spyOn(vcsFactory, 'createVcsProvider').mockReturnValue(mockProvider as IVcsProvider);
+      vi.spyOn(vcsFactory, 'createVcsProvider').mockReturnValue(mockProvider as IVcsProvider);
       mockPrismaDelegate.findUnique.mockResolvedValueOnce(existingConnection);
 
       const result = await service.testConnection(projectId, encryptionKey);
@@ -707,10 +707,10 @@ describe('VcsConnectionService', () => {
       };
 
       const mockProvider: Partial<IVcsProvider> = {
-        testConnection: jest.fn().mockResolvedValue({ ok: true }),
+        testConnection: vi.fn().mockResolvedValue({ ok: true }),
       };
 
-      jest.spyOn(vcsFactory, 'createVcsProvider').mockReturnValue(mockProvider as IVcsProvider);
+      vi.spyOn(vcsFactory, 'createVcsProvider').mockReturnValue(mockProvider as IVcsProvider);
       mockPrismaDelegate.findUnique.mockResolvedValueOnce(existingConnection);
 
       const result = await service.testConnection(projectId, encryptionKey);
@@ -742,10 +742,10 @@ describe('VcsConnectionService', () => {
       };
 
       const mockProvider: Partial<IVcsProvider> = {
-        testConnection: jest.fn().mockResolvedValue({ ok: false, error: 'Invalid token' }),
+        testConnection: vi.fn().mockResolvedValue({ ok: false, error: 'Invalid token' }),
       };
 
-      jest.spyOn(vcsFactory, 'createVcsProvider').mockReturnValue(mockProvider as IVcsProvider);
+      vi.spyOn(vcsFactory, 'createVcsProvider').mockReturnValue(mockProvider as IVcsProvider);
       mockPrismaDelegate.findUnique.mockResolvedValueOnce(existingConnection);
 
       const result = await service.testConnection(projectId, encryptionKey);
@@ -801,7 +801,7 @@ describe('VcsConnectionService', () => {
         updatedAt: new Date(),
       };
 
-      jest
+      vi
         .spyOn(vcsFactory, 'createVcsProvider')
         .mockImplementation(() => {
           throw new ValidationAppException('Unsupported provider');
@@ -846,14 +846,14 @@ describe('VcsConnectionService', () => {
       };
 
       const mockProvider: Partial<IVcsProvider> = {
-        testConnection: jest.fn(async () => {
+        testConnection: vi.fn(async () => {
           // Simulate some delay
           await new Promise((resolve) => setTimeout(resolve, 50));
           return { ok: true };
         }),
       };
 
-      jest.spyOn(vcsFactory, 'createVcsProvider').mockReturnValue(mockProvider as IVcsProvider);
+      vi.spyOn(vcsFactory, 'createVcsProvider').mockReturnValue(mockProvider as IVcsProvider);
       mockPrismaDelegate.findUnique.mockResolvedValueOnce(existingConnection);
 
       const result = await service.testConnection(projectId, encryptionKey);

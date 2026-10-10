@@ -14,7 +14,7 @@ describe('KodaCaslAbilityFactory - AstIndex permissions', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   const mockUserPrincipal = (role: 'MEMBER' | 'ADMIN'): UserPrincipal => ({

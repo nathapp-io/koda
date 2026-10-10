@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { TicketStatus, CommentType, ActivityType } from '../../common/enums';
@@ -10,9 +11,9 @@ import { TICKET_REPOSITORY } from '../domain/ticket.domain';
 import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
 import type { AgentPrincipal, KodaPrincipal, UserPrincipal } from '../../auth/principal/koda-principal.types';
 
-jest.mock('../../vcs/factory', () => ({ createVcsProvider: jest.fn() }));
-jest.mock('../../common/utils/encryption.util', () => ({
-  decryptToken: jest.fn().mockReturnValue('plain-token'),
+vi.mock('../../vcs/factory', () => ({ createVcsProvider: vi.fn() }));
+vi.mock('../../common/utils/encryption.util', () => ({
+  decryptToken: vi.fn().mockReturnValue('plain-token'),
 }));
 
 import { createVcsProvider } from '../../vcs/factory';
@@ -121,32 +122,32 @@ describe('TicketTransitionsService', () => {
 
   beforeEach(async () => {
     mockTxManager = {
-      run: jest.fn((fn: () => unknown) => fn()),
-      getClient: jest.fn(),
-      isInTransaction: jest.fn(() => false),
+      run: vi.fn((fn: () => unknown) => fn()),
+      getClient: vi.fn(),
+      isInTransaction: vi.fn(() => false),
     };
 
     mockTicketRepo = {
-      findProjectBySlug: jest.fn(),
-      findLastTicketInProject: jest.fn(),
-      createTicket: jest.fn(),
-      findTicketByProjectAndNumber: jest.fn(),
-      findTicketById: jest.fn(),
-      updateTicket: jest.fn(),
-      assignTicket: jest.fn(),
-      softDeleteTicket: jest.fn(),
-      findTicketByRefRaw: jest.fn(),
+      findProjectBySlug: vi.fn(),
+      findLastTicketInProject: vi.fn(),
+      createTicket: vi.fn(),
+      findTicketByProjectAndNumber: vi.fn(),
+      findTicketById: vi.fn(),
+      updateTicket: vi.fn(),
+      assignTicket: vi.fn(),
+      softDeleteTicket: vi.fn(),
+      findTicketByRefRaw: vi.fn(),
       // PrismaTicketsRepository extras used by transitions
-      findTicketWithComments: jest.fn(),
-      updateTicketStatusIf: jest.fn(),
-      createComment: jest.fn(),
-      createTicketActivity: jest.fn(),
-      createTicketLink: jest.fn(),
-      updateTicketLink: jest.fn(),
+      findTicketWithComments: vi.fn(),
+      updateTicketStatusIf: vi.fn(),
+      createComment: vi.fn(),
+      createTicketActivity: vi.fn(),
+      createTicketLink: vi.fn(),
+      updateTicketLink: vi.fn(),
     };
 
-    mockTicketEventService = { create: jest.fn().mockResolvedValue({ id: 'ev-1', createdAt: new Date() }) };
-    mockOutbox = { record: jest.fn().mockResolvedValue(undefined) };
+    mockTicketEventService = { create: vi.fn().mockResolvedValue({ id: 'ev-1', createdAt: new Date() }) };
+    mockOutbox = { record: vi.fn().mockResolvedValue(undefined) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -175,7 +176,7 @@ describe('TicketTransitionsService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('verify (CREATED → VERIFIED)', () => {
@@ -886,31 +887,31 @@ describe('TicketTransitionsService (H13: outbox emission)', () => {
   };
 
   function buildService(overrides: {
-    ticketEventService?: { create: jest.Mock };
-    outboxService?: { record: jest.Mock };
+    ticketEventService?: { create: Mock };
+    outboxService?: { record: Mock };
   } = {}) {
     const ticketRepo = {
-      findProjectBySlug: jest.fn().mockResolvedValue(mockProject),
-      findTicketByRefRaw: jest.fn().mockResolvedValue(mockTicket),
+      findProjectBySlug: vi.fn().mockResolvedValue(mockProject),
+      findTicketByRefRaw: vi.fn().mockResolvedValue(mockTicket),
       // M3: the merged service uses the conditional update; the stub resolves
       // with the transitioned ticket so the H13 emission assertions below run.
-      updateTicketStatusIf: jest.fn().mockResolvedValue({ ...mockTicket, status: TicketStatus.IN_PROGRESS }),
-      createComment: jest.fn().mockResolvedValue({ id: 'comment-1' }),
-      createTicketActivity: jest.fn().mockResolvedValue({ id: 'activity-1' }),
+      updateTicketStatusIf: vi.fn().mockResolvedValue({ ...mockTicket, status: TicketStatus.IN_PROGRESS }),
+      createComment: vi.fn().mockResolvedValue({ id: 'comment-1' }),
+      createTicketActivity: vi.fn().mockResolvedValue({ id: 'activity-1' }),
     };
     const txManager = {
-      run: jest.fn((fn: () => unknown) => fn()),
-      getClient: jest.fn(),
-      isInTransaction: jest.fn(() => false),
+      run: vi.fn((fn: () => unknown) => fn()),
+      getClient: vi.fn(),
+      isInTransaction: vi.fn(() => false),
     };
     const ticketEventService = overrides.ticketEventService ?? {
-      create: jest.fn().mockResolvedValue(mockEvent),
+      create: vi.fn().mockResolvedValue(mockEvent),
     };
     const outboxService = overrides.outboxService ?? {
-      record: jest.fn().mockResolvedValue(undefined),
+      record: vi.fn().mockResolvedValue(undefined),
     };
     const webhookDispatcher = {
-      dispatch: jest.fn().mockResolvedValue(undefined),
+      dispatch: vi.fn().mockResolvedValue(undefined),
     };
     const service = new TicketTransitionsService(
       ticketRepo as never,
@@ -990,7 +991,7 @@ describe('TicketTransitionsService (H13: outbox emission)', () => {
 
   it('fails the transition when event emission throws (no silent drop)', async () => {
     const { service } = buildService({
-      ticketEventService: { create: jest.fn().mockRejectedValue(new Error('event store down')) },
+      ticketEventService: { create: vi.fn().mockRejectedValue(new Error('event store down')) },
     });
 
     await expect(service.start('koda', 'KODA-1', principal)).rejects.toThrow('event store down');
@@ -1065,10 +1066,10 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
   it('passes the created PR number as the sixth argument to extractLinksFromPr', async () => {
     const createdPr = { number: 555, url: 'https://github.com/acme/widgets/pull/555' };
     const provider = {
-      getDefaultBranch: jest.fn().mockResolvedValue('main'),
-      createPullRequest: jest.fn().mockResolvedValue(createdPr),
+      getDefaultBranch: vi.fn().mockResolvedValue('main'),
+      createPullRequest: vi.fn().mockResolvedValue(createdPr),
     };
-    (createVcsProvider as jest.Mock).mockReturnValue(provider);
+    (createVcsProvider as Mock).mockReturnValue(provider);
 
     const connection = {
       isActive: true,
@@ -1079,18 +1080,18 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
     };
 
     const ticketRepo = {
-      findProjectBySlug: jest.fn().mockResolvedValue(autoPrProject),
-      findTicketByRefRaw: jest.fn().mockResolvedValue(autoPrTicket),
-      updateTicketStatusIf: jest.fn().mockResolvedValue({ ...autoPrTicket, status: TicketStatus.VERIFIED }),
-      createComment: jest.fn().mockResolvedValue({ id: 'comment-123' }),
-      createTicketActivity: jest.fn().mockResolvedValue({ id: 'activity-123' }),
-      createTicketLink: jest.fn().mockResolvedValue({ id: 'link-123' }),
-      hasFleetOwnership: jest.fn().mockResolvedValue(false),
+      findProjectBySlug: vi.fn().mockResolvedValue(autoPrProject),
+      findTicketByRefRaw: vi.fn().mockResolvedValue(autoPrTicket),
+      updateTicketStatusIf: vi.fn().mockResolvedValue({ ...autoPrTicket, status: TicketStatus.VERIFIED }),
+      createComment: vi.fn().mockResolvedValue({ id: 'comment-123' }),
+      createTicketActivity: vi.fn().mockResolvedValue({ id: 'activity-123' }),
+      createTicketLink: vi.fn().mockResolvedValue({ id: 'link-123' }),
+      hasFleetOwnership: vi.fn().mockResolvedValue(false),
       createTicketActivity2: undefined,
     };
     const txManager = { run: (fn: () => unknown) => fn() };
-    const vcsConnectionService = { getFullByProject: jest.fn().mockResolvedValue(connection) };
-    const vcsLinkExtractorService = { extractLinksFromPr: jest.fn().mockResolvedValue(undefined) };
+    const vcsConnectionService = { getFullByProject: vi.fn().mockResolvedValue(connection) };
+    const vcsLinkExtractorService = { extractLinksFromPr: vi.fn().mockResolvedValue(undefined) };
     const vcsConfig = { encryptionKey: 'k'.repeat(64) };
 
     const svc = new TicketTransitionsService(
@@ -1099,7 +1100,7 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
       undefined,
       undefined,
       vcsConnectionService as never,
-      { create: jest.fn() } as never,
+      { create: vi.fn() } as never,
       vcsLinkExtractorService as never,
       vcsConfig as never,
     );
@@ -1120,10 +1121,10 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
 
   it('skips the classic PR when fleet already owns the ticket (#231)', async () => {
     const provider = {
-      getDefaultBranch: jest.fn().mockResolvedValue('main'),
-      createPullRequest: jest.fn().mockResolvedValue({ number: 999, url: 'https://github.com/acme/widgets/pull/999' }),
+      getDefaultBranch: vi.fn().mockResolvedValue('main'),
+      createPullRequest: vi.fn().mockResolvedValue({ number: 999, url: 'https://github.com/acme/widgets/pull/999' }),
     };
-    (createVcsProvider as jest.Mock).mockReturnValue(provider);
+    (createVcsProvider as Mock).mockReturnValue(provider);
 
     const connection = {
       isActive: true,
@@ -1134,17 +1135,17 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
     };
 
     const ticketRepo = {
-      findProjectBySlug: jest.fn().mockResolvedValue(autoPrProject),
-      findTicketByRefRaw: jest.fn().mockResolvedValue(autoPrTicket),
-      updateTicketStatusIf: jest.fn().mockResolvedValue({ ...autoPrTicket, status: TicketStatus.VERIFIED }),
-      createComment: jest.fn().mockResolvedValue({ id: 'comment-123' }),
-      createTicketActivity: jest.fn().mockResolvedValue({ id: 'activity-123' }),
-      createTicketLink: jest.fn().mockResolvedValue({ id: 'link-123' }),
-      hasFleetOwnership: jest.fn().mockResolvedValue(true),
+      findProjectBySlug: vi.fn().mockResolvedValue(autoPrProject),
+      findTicketByRefRaw: vi.fn().mockResolvedValue(autoPrTicket),
+      updateTicketStatusIf: vi.fn().mockResolvedValue({ ...autoPrTicket, status: TicketStatus.VERIFIED }),
+      createComment: vi.fn().mockResolvedValue({ id: 'comment-123' }),
+      createTicketActivity: vi.fn().mockResolvedValue({ id: 'activity-123' }),
+      createTicketLink: vi.fn().mockResolvedValue({ id: 'link-123' }),
+      hasFleetOwnership: vi.fn().mockResolvedValue(true),
     };
     const txManager = { run: (fn: () => unknown) => fn() };
-    const vcsConnectionService = { getFullByProject: jest.fn().mockResolvedValue(connection) };
-    const vcsLinkExtractorService = { extractLinksFromPr: jest.fn().mockResolvedValue(undefined) };
+    const vcsConnectionService = { getFullByProject: vi.fn().mockResolvedValue(connection) };
+    const vcsLinkExtractorService = { extractLinksFromPr: vi.fn().mockResolvedValue(undefined) };
     const vcsConfig = { encryptionKey: 'k'.repeat(64) };
 
     const svc = new TicketTransitionsService(
@@ -1153,7 +1154,7 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
       undefined,
       undefined,
       vcsConnectionService as never,
-      { create: jest.fn() } as never,
+      { create: vi.fn() } as never,
       vcsLinkExtractorService as never,
       vcsConfig as never,
     );

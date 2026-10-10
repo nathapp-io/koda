@@ -12,12 +12,12 @@ import { MemoryLogRepo } from './test-helpers/memory-log-repo';
 describe('LogFallbackService', () => {
   const root = mkdtempSync(join(tmpdir(), 'koda-fallback-'));
   const store = new LocalDiskLogStore({ artifactDir: root });
-  const live = { touch: jest.fn() };
+  const live = { touch: vi.fn() };
   let repo: MemoryLogRepo;
   let bundle: Buffer;
   let job: { id: string; projectId: string; command: string; feature: string; naxLogRunId: string | null; leaseEpoch: number };
-  const artifacts = { get: jest.fn(async () => Readable.from([bundle])) };
-  const jobs = { findById: jest.fn(async () => job) };
+  const artifacts = { get: vi.fn(async () => Readable.from([bundle])) };
+  const jobs = { findById: vi.fn(async () => job) };
   let n = 0;
   const svc = () => new LogFallbackService(artifacts as never, store, repo as never, jobs as never, live as never, { logMaxBytes: 16 } as never);
   const file = (s: LogStreamName) => readFileSync(join(root, logKey(job.id, 1, s)), 'utf8');
@@ -28,7 +28,7 @@ describe('LogFallbackService', () => {
     repo = new MemoryLogRepo();
     job = { id: `jf${n}`, projectId: 'p1', command: 'RUN', feature: 'f', naxLogRunId: 'r1', leaseEpoch: 1 };
   });
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => vi.clearAllMocks());
 
   it('fills missing and incomplete streams; leaves complete and truncated ones alone', async () => {
     bundle = await tarGz([{ name: runLog, body: 'R1\nR2\n' }, { name: 'nax.stdout', body: 'OUT' }, { name: 'nax.stderr', body: 'ERR' }]);

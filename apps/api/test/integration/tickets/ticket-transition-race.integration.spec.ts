@@ -123,7 +123,7 @@ describeIntegration('M3 ticket transition race (verify vs reject)', () => {
     // conditional update: first commits, second matches 0 rows → 409.
     const original = repo.findTicketByRefRaw.bind(repo);
     let completed = 0;
-    jest.spyOn(repo, 'findTicketByRefRaw').mockImplementation(async (...args) => {
+    vi.spyOn(repo, 'findTicketByRefRaw').mockImplementation(async (...args) => {
       const result = await original(...args);
       completed++;
       while (completed < 2) {
@@ -138,7 +138,7 @@ describeIntegration('M3 ticket transition race (verify vs reject)', () => {
     ]);
 
     // Restore before assertions so later tests are unaffected.
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
 
     const settled: PromiseSettledResult<unknown>[] = [verifyResult, rejectResult];
     const fulfilled = settled.filter(

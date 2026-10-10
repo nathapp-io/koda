@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * VcsPollingService Integration Tests
  *
@@ -102,21 +103,21 @@ describe('VcsPollingService', () => {
 
   // Mock Prisma delegates
   const mockVcsConnectionDelegate = {
-    findUnique: jest.fn(),
-    findMany: jest.fn(),
-    findFirst: jest.fn(),
-    create: jest.fn(),
-    update: jest.fn(),
-    delete: jest.fn(),
+    findUnique: vi.fn(),
+    findMany: vi.fn(),
+    findFirst: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
   };
 
   const mockVcsSyncLogDelegate = {
-    findUnique: jest.fn(),
-    findMany: jest.fn(),
-    findFirst: jest.fn(),
-    create: jest.fn(),
-    update: jest.fn(),
-    delete: jest.fn(),
+    findUnique: vi.fn(),
+    findMany: vi.fn(),
+    findFirst: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
   };
 
   const mockClient = {
@@ -126,15 +127,15 @@ describe('VcsPollingService', () => {
 
   // Mock VCS repository (repo-level methods used by VcsPollingService)
   const mockVcsRepository = {
-    findPollingConnections: jest.fn(),
-    findVcsConnectionById: jest.fn(),
-    updateVcsConnectionLastSynced: jest.fn(),
-    createVcsSyncLog: jest.fn(),
-    findExistingTicketByExternalId: jest.fn(),
-    createTicketFromIssue: jest.fn(),
-    findActiveTicketLinksWithPrs: jest.fn(),
-    updateTicketLinkWithPrState: jest.fn(),
-    applyMergedPrTransition: jest.fn(),
+    findPollingConnections: vi.fn(),
+    findVcsConnectionById: vi.fn(),
+    updateVcsConnectionLastSynced: vi.fn(),
+    createVcsSyncLog: vi.fn(),
+    findExistingTicketByExternalId: vi.fn(),
+    createTicketFromIssue: vi.fn(),
+    findActiveTicketLinksWithPrs: vi.fn(),
+    updateTicketLinkWithPrState: vi.fn(),
+    applyMergedPrTransition: vi.fn(),
   };
 
   const mockVcsConfig: IVcsConfig = {
@@ -150,8 +151,8 @@ describe('VcsPollingService', () => {
   const createdIntervals: NodeJS.Timeout[] = [];
 
   beforeEach(async () => {
-    jest.clearAllMocks();
-    jest.restoreAllMocks();
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
 
     module = await Test.createTestingModule({
       providers: [
@@ -160,7 +161,7 @@ describe('VcsPollingService', () => {
         {
           provide: VcsPrSyncService,
           useValue: {
-            syncPrStatus: jest.fn(),
+            syncPrStatus: vi.fn(),
           },
         },
         {
@@ -176,17 +177,17 @@ describe('VcsPollingService', () => {
         {
           provide: SchedulerRegistry,
           useValue: {
-            addInterval: jest.fn((_name: string, interval: NodeJS.Timeout) => {
+            addInterval: vi.fn((_name: string, interval: NodeJS.Timeout) => {
               createdIntervals.push(interval);
             }),
-            deleteInterval: jest.fn(),
-            getInterval: jest.fn(),
-            getIntervals: jest.fn(() => []),
+            deleteInterval: vi.fn(),
+            getInterval: vi.fn(),
+            getIntervals: vi.fn(() => []),
           },
         },
         {
           provide: ConfigService,
-          useValue: { get: jest.fn().mockReturnValue('test-encryption-key') },
+          useValue: { get: vi.fn().mockReturnValue('test-encryption-key') },
         },
         { provide: VCS_CFG, useValue: mockVcsConfig },
       ],
@@ -227,7 +228,7 @@ describe('VcsPollingService', () => {
       await service.onModuleInit();
 
       expect(schedulerRegistry.addInterval).toHaveBeenCalled();
-      const addIntervalCalls = (schedulerRegistry.addInterval as jest.Mock).mock.calls;
+      const addIntervalCalls = (schedulerRegistry.addInterval as Mock).mock.calls;
       expect(addIntervalCalls.length).toBe(1);
       expect(addIntervalCalls[0][0]).toBe(`vcs-polling-${connectionId}`);
     });
@@ -253,7 +254,7 @@ describe('VcsPollingService', () => {
 
       // Only the active connection should be registered
       expect(schedulerRegistry.addInterval).toHaveBeenCalledTimes(1);
-      const addIntervalCalls = (schedulerRegistry.addInterval as jest.Mock).mock.calls;
+      const addIntervalCalls = (schedulerRegistry.addInterval as Mock).mock.calls;
       expect(addIntervalCalls[0][0]).toBe(`vcs-polling-${activeConn.id}`);
     });
 
@@ -274,12 +275,12 @@ describe('VcsPollingService', () => {
     it('should filter issues by allowedAuthors list', async () => {
       const connectionWithProject = { ...mockVcsConnection, project: mockProject };
       const mockProvider = {
-        fetchIssues: jest.fn().mockResolvedValue({ issues: [mockVcsIssue1, mockVcsIssue2, mockVcsIssueOther], cursor: null, capped: false }),
+        fetchIssues: vi.fn().mockResolvedValue({ issues: [mockVcsIssue1, mockVcsIssue2, mockVcsIssueOther], cursor: null, capped: false }),
       };
 
       // Mock the provider creation
-      jest.spyOn(vcsSyncService, 'filterByAllowedAuthors').mockReturnValue([mockVcsIssue1, mockVcsIssue2]);
-      jest.spyOn(vcsSyncService, 'syncIssue').mockResolvedValue({ action: 'created', ticketId: 'ticket-1' });
+      vi.spyOn(vcsSyncService, 'filterByAllowedAuthors').mockReturnValue([mockVcsIssue1, mockVcsIssue2]);
+      vi.spyOn(vcsSyncService, 'syncIssue').mockResolvedValue({ action: 'created', ticketId: 'ticket-1' });
 
       mockVcsConnectionDelegate.update.mockResolvedValue(connectionWithProject);
       mockVcsSyncLogDelegate.create.mockResolvedValue({});
@@ -287,7 +288,7 @@ describe('VcsPollingService', () => {
       await service.schedulePolling(connectionWithProject);
 
       // Trigger the polling interval
-      const addIntervalCalls = (schedulerRegistry.addInterval as jest.Mock).mock.calls;
+      const addIntervalCalls = (schedulerRegistry.addInterval as Mock).mock.calls;
       const intervalCallback = addIntervalCalls[0][1];
 
       // Note: This will fail because we need to mock the provider properly
@@ -497,20 +498,20 @@ describe('VcsPollingService', () => {
     it('should remove existing interval before creating new one', async () => {
       const connectionWithProject = { ...mockVcsConnection, project: mockProject };
 
-      (schedulerRegistry.deleteInterval as jest.Mock).mockImplementation(() => {
+      (schedulerRegistry.deleteInterval as Mock).mockImplementation(() => {
         // First call should attempt to delete existing interval
       });
 
       await service.schedulePolling(connectionWithProject);
 
-      const deleteIntervalCalls = (schedulerRegistry.deleteInterval as jest.Mock).mock.calls;
+      const deleteIntervalCalls = (schedulerRegistry.deleteInterval as Mock).mock.calls;
       expect(deleteIntervalCalls.length).toBeGreaterThanOrEqual(0);
     });
 
     it('should handle deleteInterval error gracefully when interval does not exist', async () => {
       const connectionWithProject = { ...mockVcsConnection, project: mockProject };
 
-      (schedulerRegistry.deleteInterval as jest.Mock).mockImplementation(() => {
+      (schedulerRegistry.deleteInterval as Mock).mockImplementation(() => {
         throw new Error('Interval not found');
       });
 
@@ -530,7 +531,7 @@ describe('VcsPollingService', () => {
 
       await service.schedulePolling(connectionWithProject);
 
-      const addIntervalCalls = (schedulerRegistry.addInterval as jest.Mock).mock.calls;
+      const addIntervalCalls = (schedulerRegistry.addInterval as Mock).mock.calls;
       const interval = addIntervalCalls[0][1];
       // The interval should be set with the custom polling interval
       expect(interval).toBeDefined();
@@ -564,13 +565,13 @@ describe('VcsPollingService', () => {
       await service.schedulePolling(connectionWithProject);
       await service.schedulePolling(connectionWithProject);
 
-      const addIntervalCalls = (schedulerRegistry.addInterval as jest.Mock).mock.calls;
+      const addIntervalCalls = (schedulerRegistry.addInterval as Mock).mock.calls;
       expect(addIntervalCalls.length).toBe(2);
     });
 
     it('should log debug message when polling is scheduled', async () => {
       const connectionWithProject = { ...mockVcsConnection, project: mockProject };
-      const debugSpy = jest.spyOn(service['logger'], 'debug');
+      const debugSpy = vi.spyOn(service['logger'], 'debug');
 
       await service.schedulePolling(connectionWithProject);
 

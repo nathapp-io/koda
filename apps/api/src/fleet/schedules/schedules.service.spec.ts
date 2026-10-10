@@ -16,19 +16,19 @@ const REPO = { id: 'r1', projectId: 'p1', provider: 'github' as const, owner: 'a
 
 function build(current: ScheduleRecord | null = schedule()) {
   const repo = {
-    findByProject: jest.fn(async () => (current ? [current] : [])),
-    findById: jest.fn(async () => current),
-    lockById: jest.fn(async () => current),
-    create: jest.fn(async (data: Record<string, unknown>) => ({ ...schedule(), ...data, id: 'new' }) as ScheduleRecord),
-    update: jest.fn(async (_id: string, patch: Partial<ScheduleRecord>) => ({ ...(current as ScheduleRecord), ...patch })),
-    delete: jest.fn(async () => undefined),
-    sumCostBySchedule: jest.fn(async () => new Map<string, string>()),
-    findOwnerAccess: jest.fn(async () => ({ exists: true, disabled: false, globalRole: 'MEMBER', projectRole: 'DEVELOPER' })),
+    findByProject: vi.fn(async () => (current ? [current] : [])),
+    findById: vi.fn(async () => current),
+    lockById: vi.fn(async () => current),
+    create: vi.fn(async (data: Record<string, unknown>) => ({ ...schedule(), ...data, id: 'new' }) as ScheduleRecord),
+    update: vi.fn(async (_id: string, patch: Partial<ScheduleRecord>) => ({ ...(current as ScheduleRecord), ...patch })),
+    delete: vi.fn(async () => undefined),
+    sumCostBySchedule: vi.fn(async () => new Map<string, string>()),
+    findOwnerAccess: vi.fn(async () => ({ exists: true, disabled: false, globalRole: 'MEMBER', projectRole: 'DEVELOPER' })),
   };
-  const jobsRepo = { findRepo: jest.fn(async () => REPO as typeof REPO | null) };
-  const placement = { evaluatePinned: jest.fn(async (): Promise<string | null> => null) };
-  const activity = { record: jest.fn(async () => undefined) };
-  const txManager = { run: jest.fn(async <T>(fn: () => Promise<T>) => fn()) };
+  const jobsRepo = { findRepo: vi.fn(async () => REPO as typeof REPO | null) };
+  const placement = { evaluatePinned: vi.fn(async (): Promise<string | null> => null) };
+  const activity = { record: vi.fn(async () => undefined) };
+  const txManager = { run: vi.fn(async <T>(fn: () => Promise<T>) => fn()) };
   const svc = new SchedulesService(repo as never, jobsRepo as never, placement as never, activity as never, txManager as never);
   return { repo, jobsRepo, placement, activity, svc };
 }

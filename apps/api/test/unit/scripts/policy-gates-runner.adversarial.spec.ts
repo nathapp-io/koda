@@ -25,7 +25,7 @@
  */
 
 // ─── module-level state shared with mock factory ──────────────────────────────
-// The jest.mock factory is hoisted before imports, but the variable initialiser
+// The vi.mock factory is hoisted before imports, but the variable initialiser
 // runs before any test.  Reassigning mockGateResult in a test controls what
 // runAllGates returns in that test because the factory reads the variable by
 // reference each time the mock module is loaded.
@@ -37,7 +37,7 @@ let mockGateResult: { passed: boolean; gates?: { name: string; passed: boolean }
 
 // ─── module mocks ─────────────────────────────────────────────────────────────
 
-jest.mock('../../../src/policy/policy-gate.service', () => ({
+vi.mock('../../../src/policy/policy-gate.service', () => ({
   PolicyGateService: class MockPolicyGateService {
     async runAllGates() {
       return mockGateResult;
@@ -48,11 +48,10 @@ jest.mock('../../../src/policy/policy-gate.service', () => ({
 // Prevent NestFactory from attempting a real NestJS bootstrap in unit tests.
 // The get() call returns an instance of the already-mocked PolicyGateService so
 // runAllGates() reads from mockGateResult as before.
-jest.mock('@nestjs/core', () => ({
+vi.mock('@nestjs/core', () => ({
   NestFactory: {
     createApplicationContext: async () => {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { PolicyGateService: Svc } = require('../../../src/policy/policy-gate.service');
+      const { PolicyGateService: Svc } = await import('../../../src/policy/policy-gate.service');
       return {
         get: () => new Svc(),
         close: async () => Promise.resolve(),
@@ -61,8 +60,8 @@ jest.mock('@nestjs/core', () => ({
   },
 }));
 
-// Prevent real filesystem I/O; simple arrow functions survive jest.resetModules().
-jest.mock('fs/promises', () => ({
+// Prevent real filesystem I/O; simple arrow functions survive vi.resetModules().
+vi.mock('fs/promises', () => ({
   mkdir: () => Promise.resolve(undefined),
   writeFile: () => Promise.resolve(undefined),
 }));
@@ -74,9 +73,9 @@ describe('policy-gates-runner — printSummaryTable: undefined gates must not cr
 
   beforeEach(() => {
     // Reset the module registry so each test reloads the script fresh and
-    // re-triggers main().  The jest.mock registrations (factories) are unaffected
-    // by jest.resetModules() and continue to apply to the fresh require.
-    jest.resetModules();
+    // re-triggers main().  The vi.mock registrations (factories) are unaffected
+    // by vi.resetModules() and continue to apply to the fresh require.
+    vi.resetModules();
     process.argv = ['node', 'policy-gates-runner.ts', '--project=test-project'];
   });
 
@@ -96,17 +95,16 @@ describe('policy-gates-runner — printSummaryTable: undefined gates must not cr
       resolveExit = resolve;
     });
 
-    const exitSpy = jest.spyOn(process, 'exit').mockImplementation((code) => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => {
       resolveExit(typeof code === 'number' ? code : 0);
       return undefined as never;
     });
 
     try {
-      // Act: require the script — its module body calls main().catch(...) immediately.
-      // The require itself returns synchronously; main() completes asynchronously and
+      // Act: import the script — its module body calls main().catch(...) immediately.
+      // The import resolves once the module body runs; main() completes asynchronously and
       // signals completion via process.exit.
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('../../../scripts/policy-gates-runner');
+      await import('../../../scripts/policy-gates-runner');
 
       // Wait for main() to finish.  5 s is generous for a unit test; a timeout here
       // means process.exit was never called, which is itself a bug.

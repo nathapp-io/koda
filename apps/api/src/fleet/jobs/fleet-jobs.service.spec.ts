@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { FleetJobsService } from './fleet-jobs.service';
 import type { FleetJobRecord } from './domain/fleet-job.domain';
 
@@ -18,18 +19,18 @@ describe('fleet jobs service approvals count (S1.5 2a D272)', () => {
   const projectId = 'p';
   const jobA = record('ja');
   const jobB = record('jb');
-  let repo: { findPage: jest.Mock; findById: jest.Mock };
-  let approvals: { countPendingByJob: jest.Mock };
-  let fleetTickets: { forJob: jest.Mock };
-  let configEdits: { findByJobId: jest.Mock };
+  let repo: { findPage: Mock; findById: Mock };
+  let approvals: { countPendingByJob: Mock };
+  let fleetTickets: { forJob: Mock };
+  let configEdits: { findByJobId: Mock };
   let service: FleetJobsService;
 
   beforeEach(() => {
-    repo = { findPage: jest.fn(), findById: jest.fn() };
-    approvals = { countPendingByJob: jest.fn() };
+    repo = { findPage: vi.fn(), findById: vi.fn() };
+    approvals = { countPendingByJob: vi.fn() };
     approvals.countPendingByJob.mockResolvedValue(new Map());
-    fleetTickets = { forJob: jest.fn().mockResolvedValue([]) };
-    configEdits = { findByJobId: jest.fn() };
+    fleetTickets = { forJob: vi.fn().mockResolvedValue([]) };
+    configEdits = { findByJobId: vi.fn() };
     service = new FleetJobsService(
       repo as never,
       {} as never,
@@ -80,18 +81,18 @@ describe('fleet jobs service approvals count (S1.5 2a D272)', () => {
 describe('fleet jobs service dispatch open-PR guard (#231)', () => {
   const repoRecord = { id: 'r', projectId: 'p', defaultBranch: 'main' };
   const tickets = [{ id: 't1', ref: 'KODA-1', title: 'x', status: 'CREATED' }];
-  let repo: { findRepo: jest.Mock };
-  let fleetTickets: { resolveForDispatch: jest.Mock; findOpenVcsPrLinks: jest.Mock };
-  let budgets: { assertNotPaused: jest.Mock };
+  let repo: { findRepo: Mock };
+  let fleetTickets: { resolveForDispatch: Mock; findOpenVcsPrLinks: Mock };
+  let budgets: { assertNotPaused: Mock };
   let service: FleetJobsService;
 
   const build = (): void => {
-    repo = { findRepo: jest.fn().mockResolvedValue(repoRecord) };
+    repo = { findRepo: vi.fn().mockResolvedValue(repoRecord) };
     fleetTickets = {
-      resolveForDispatch: jest.fn((_projectId: string, refs?: readonly string[]) => Promise.resolve(refs && refs.length > 0 ? tickets : [])),
-      findOpenVcsPrLinks: jest.fn().mockResolvedValue([{ ticketId: 't1', url: 'https://github.com/acme/widgets/pull/1' }]),
+      resolveForDispatch: vi.fn((_projectId: string, refs?: readonly string[]) => Promise.resolve(refs && refs.length > 0 ? tickets : [])),
+      findOpenVcsPrLinks: vi.fn().mockResolvedValue([{ ticketId: 't1', url: 'https://github.com/acme/widgets/pull/1' }]),
     };
-    budgets = { assertNotPaused: jest.fn().mockRejectedValue(new Error('budget-stop-sentinel')) };
+    budgets = { assertNotPaused: vi.fn().mockRejectedValue(new Error('budget-stop-sentinel')) };
     service = new FleetJobsService(
       repo as never,
       {} as never,
@@ -104,7 +105,7 @@ describe('fleet jobs service dispatch open-PR guard (#231)', () => {
       {} as never,
       fleetTickets as never,
       {} as never,
-      { findByJobId: jest.fn() } as never,
+      { findByJobId: vi.fn() } as never,
     );
   };
 

@@ -18,6 +18,7 @@ import { RAG_CFG, IRagConfig } from '../../../src/config/rag.config';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
 import { RagService } from '../../../src/rag/rag.service';
 import { VectorStore } from '../../../src/rag/vector-store.service';
@@ -26,8 +27,9 @@ import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.rep
 import { TICKET_REPOSITORY } from '../../../src/tickets/domain/ticket.domain';
 import { testDatabaseUrl } from '../../helpers/test-prisma';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 
-jest.setTimeout(30000);
+vi.setConfig({ testTimeout: 30000 });
 
 // Deterministic fake embeddings — same text always produces same vector
 class FakeEmbeddingService {
@@ -63,11 +65,9 @@ describe('RAG close-to-search integration', () => {
   let principalId: string;
 
   beforeAll(async () => {
-    tmpDir = join(require('node:os').tmpdir(), `koda-rag-close-search-${Date.now()}`);
+    tmpDir = join(tmpdir(), `koda-rag-close-search-${Date.now()}`);
     mkdirSync(tmpDir, { recursive: true });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { PrismaClient } = require('../../../src/generated/prisma/client') as any;
     const fakeEmbedding = new FakeEmbeddingService();
 
     module = await Test.createTestingModule({
@@ -81,7 +81,7 @@ describe('RAG close-to-search integration', () => {
             });
           },
         },
-        { provide: TRANSACTION_MANAGER, useValue: { run: (fn: () => Promise<unknown>) => fn(), getClient: jest.fn(), isInTransaction: jest.fn(() => false) } },
+        { provide: TRANSACTION_MANAGER, useValue: { run: (fn: () => Promise<unknown>) => fn(), getClient: vi.fn(), isInTransaction: vi.fn(() => false) } },
         PrismaTicketsRepository,
         { provide: TICKET_REPOSITORY, useExisting: PrismaTicketsRepository },
         TicketTransitionsService,

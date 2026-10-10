@@ -72,12 +72,12 @@ describe('VcsPollingService PR Sync Integration (VCS-P3-002-C AC1)', () => {
   };
 
   const mockVcsConnectionDelegate = {
-    findMany: jest.fn(),
-    update: jest.fn(),
+    findMany: vi.fn(),
+    update: vi.fn(),
   };
 
   const mockVcsSyncLogDelegate = {
-    create: jest.fn(),
+    create: vi.fn(),
   };
 
   const mockClient = {
@@ -98,8 +98,8 @@ describe('VcsPollingService PR Sync Integration (VCS-P3-002-C AC1)', () => {
   const createdIntervals: NodeJS.Timeout[] = [];
 
   beforeEach(async () => {
-    jest.clearAllMocks();
-    jest.restoreAllMocks();
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
 
     module = await Test.createTestingModule({
       providers: [
@@ -109,11 +109,11 @@ describe('VcsPollingService PR Sync Integration (VCS-P3-002-C AC1)', () => {
         {
           provide: VCS_REPOSITORY,
           useValue: {
-            findExistingTicketByExternalId: jest.fn(),
-            createTicketFromIssue: jest.fn(),
-            findActiveTicketLinksWithPrs: jest.fn(),
-            updateTicketLinkWithPrState: jest.fn(),
-            applyMergedPrTransition: jest.fn(),
+            findExistingTicketByExternalId: vi.fn(),
+            createTicketFromIssue: vi.fn(),
+            findActiveTicketLinksWithPrs: vi.fn(),
+            updateTicketLinkWithPrState: vi.fn(),
+            applyMergedPrTransition: vi.fn(),
           },
         },
         {
@@ -124,17 +124,17 @@ describe('VcsPollingService PR Sync Integration (VCS-P3-002-C AC1)', () => {
         },
         {
           provide: ConfigService,
-          useValue: { get: jest.fn().mockReturnValue('test-encryption-key') },
+          useValue: { get: vi.fn().mockReturnValue('test-encryption-key') },
         },
         { provide: VCS_CFG, useValue: mockVcsConfig },
         {
           provide: SchedulerRegistry,
           useValue: {
-            addInterval: jest.fn((_name: string, interval: NodeJS.Timeout) => {
+            addInterval: vi.fn((_name: string, interval: NodeJS.Timeout) => {
               createdIntervals.push(interval);
             }),
-            deleteInterval: jest.fn(),
-            getIntervals: jest.fn(() => []),
+            deleteInterval: vi.fn(),
+            getIntervals: vi.fn(() => []),
           },
         },
       ],
@@ -160,7 +160,7 @@ describe('VcsPollingService PR Sync Integration (VCS-P3-002-C AC1)', () => {
 
       // Spy on VcsPrSyncService.syncPrStatus - this is the key assertion
       // The implementation should call syncPrStatus() after issue sync
-      const syncPrStatusSpy = jest.spyOn(prSyncService, 'syncPrStatus').mockResolvedValue({ updated: 0, skipped: 0 });
+      const syncPrStatusSpy = vi.spyOn(prSyncService, 'syncPrStatus').mockResolvedValue({ updated: 0, skipped: 0 });
 
       // Mock connection update and sync log
       mockVcsConnectionDelegate.update.mockResolvedValue(connectionWithProject);
@@ -176,7 +176,7 @@ describe('VcsPollingService PR Sync Integration (VCS-P3-002-C AC1)', () => {
     it('should call syncPrStatus() even when no issues are synced', async () => {
       const connectionWithProject = { ...mockVcsConnection, project: mockProject };
 
-      const syncPrStatusSpy = jest.spyOn(prSyncService, 'syncPrStatus').mockResolvedValue({ updated: 0, skipped: 0 });
+      const syncPrStatusSpy = vi.spyOn(prSyncService, 'syncPrStatus').mockResolvedValue({ updated: 0, skipped: 0 });
 
       mockVcsConnectionDelegate.update.mockResolvedValue(connectionWithProject);
       mockVcsSyncLogDelegate.create.mockResolvedValue({});
@@ -192,7 +192,7 @@ describe('VcsPollingService PR Sync Integration (VCS-P3-002-C AC1)', () => {
 
       process.env.VCS_ENCRYPTION_KEY = encryptionKey;
 
-      const syncPrStatusSpy = jest.spyOn(prSyncService, 'syncPrStatus').mockResolvedValue({ updated: 0, skipped: 0 });
+      const syncPrStatusSpy = vi.spyOn(prSyncService, 'syncPrStatus').mockResolvedValue({ updated: 0, skipped: 0 });
 
       mockVcsConnectionDelegate.update.mockResolvedValue(connectionWithProject);
       mockVcsSyncLogDelegate.create.mockResolvedValue({});

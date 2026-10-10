@@ -9,7 +9,7 @@ const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : descr
 const TARGET = '20260929090100_symbol_project_scoped_ids';
 
 describeIntegration('symbol id migration (M13)', () => {
-  jest.setTimeout(60000);
+  vi.setConfig({ testTimeout: 60000 });
   let scratch: ScratchSchema;
 
   beforeAll(async () => {

@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { plainToClass } from 'class-transformer';
 import { validate } from 'class-validator';
 import * as fs from 'fs';
@@ -17,16 +18,12 @@ import { ImportGraphifyDto, GraphifyNodeDto, GraphifyLinkDto } from '../../../sr
 import { PrismaRagRepository } from '../../../src/rag/prisma-rag.repository';
 import { ProjectAccessService } from '../../../src/projects/project-access.service';
 
-// Variable-path require helper for the not-yet-existing ImportGraphifyDto (US-003).
-// TypeScript only statically resolves string-literal require() paths.
-// Using a runtime-computed path compiles cleanly and throws "Cannot find module"
-// at test execution time — the correct RED-phase failure signal.
+// Variable-path import helper for ImportGraphifyDto (US-003). A runtime-computed
+// path compiles cleanly and fails with "Cannot find module" at test execution time.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function loadImportGraphifyModule(): any {
-  // Non-literal path: TypeScript returns `any`, no static resolution error.
-  const modulePath = path.join(__dirname, '../../../src/rag/dto/import-graphify.dto');
-  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-return
-  return require(modulePath);
+async function loadImportGraphifyModule(): Promise<any> {
+  const modulePath = path.join(__dirname, '../../../src/rag/dto/import-graphify.dto.ts');
+  return import(modulePath);
 }
 
 describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
@@ -327,7 +324,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
     // AC6: ImportGraphifyDto rejects a request body missing the nodes field
     it('AC6: should reject a body missing the nodes field with a validation error', async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { ImportGraphifyDto } = loadImportGraphifyModule() as { ImportGraphifyDto: new() => any };
+      const { ImportGraphifyDto } = (await loadImportGraphifyModule()) as { ImportGraphifyDto: new() => any };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const dto = plainToClass(ImportGraphifyDto as any, { links: [] });
 
@@ -340,7 +337,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
     // AC7: links is optional — no validation error when links is absent
     it('AC7: should accept a body with nodes present and links absent (links is optional)', async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { ImportGraphifyDto } = loadImportGraphifyModule() as { ImportGraphifyDto: new() => any };
+      const { ImportGraphifyDto } = (await loadImportGraphifyModule()) as { ImportGraphifyDto: new() => any };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const dto = plainToClass(ImportGraphifyDto as any, {
         nodes: [{ id: 'node-1', label: 'MyClass', type: 'class', source_file: 'src/my.ts' }],
@@ -353,7 +350,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
 
     it('should accept a body with both nodes and links present', async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { ImportGraphifyDto } = loadImportGraphifyModule() as { ImportGraphifyDto: new() => any };
+      const { ImportGraphifyDto } = (await loadImportGraphifyModule()) as { ImportGraphifyDto: new() => any };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const dto = plainToClass(ImportGraphifyDto as any, {
         nodes: [
@@ -370,7 +367,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
 
     it('should accept nodes: [] with links: [] (empty import)', async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { ImportGraphifyDto } = loadImportGraphifyModule() as { ImportGraphifyDto: new() => any };
+      const { ImportGraphifyDto } = (await loadImportGraphifyModule()) as { ImportGraphifyDto: new() => any };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const dto = plainToClass(ImportGraphifyDto as any, { nodes: [], links: [] });
 
@@ -381,7 +378,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
 
     it('should accept nodes: [] with links absent (empty import, links optional)', async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { ImportGraphifyDto } = loadImportGraphifyModule() as { ImportGraphifyDto: new() => any };
+      const { ImportGraphifyDto } = (await loadImportGraphifyModule()) as { ImportGraphifyDto: new() => any };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const dto = plainToClass(ImportGraphifyDto as any, { nodes: [] });
 
@@ -392,7 +389,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
 
     it('GraphifyNodeDto: should require id and label fields on each node', async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { ImportGraphifyDto } = loadImportGraphifyModule() as { ImportGraphifyDto: new() => any };
+      const { ImportGraphifyDto } = (await loadImportGraphifyModule()) as { ImportGraphifyDto: new() => any };
       // Node missing both id and label
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const dto = plainToClass(ImportGraphifyDto as any, {
@@ -406,7 +403,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
 
     it('GraphifyLinkDto: should require source and target fields on each link', async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { ImportGraphifyDto } = loadImportGraphifyModule() as { ImportGraphifyDto: new() => any };
+      const { ImportGraphifyDto } = (await loadImportGraphifyModule()) as { ImportGraphifyDto: new() => any };
       // Link missing source and target
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const dto = plainToClass(ImportGraphifyDto as any, {
@@ -421,7 +418,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
 
     it('GraphifyNodeDto: type, source_file, and community fields are optional', async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { ImportGraphifyDto } = loadImportGraphifyModule() as { ImportGraphifyDto: new() => any };
+      const { ImportGraphifyDto } = (await loadImportGraphifyModule()) as { ImportGraphifyDto: new() => any };
       // Minimal node: only id and label
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const dto = plainToClass(ImportGraphifyDto as any, {
@@ -435,7 +432,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
 
     it('GraphifyNodeDto: community accepts numeric values', async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { ImportGraphifyDto } = loadImportGraphifyModule() as { ImportGraphifyDto: new() => any };
+      const { ImportGraphifyDto } = (await loadImportGraphifyModule()) as { ImportGraphifyDto: new() => any };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const dto = plainToClass(ImportGraphifyDto as any, {
         nodes: [{ id: 'n1', label: 'WithCommunity', community: 0 }],
@@ -448,7 +445,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
 
     it('GraphifyLinkDto: relation field is optional', async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { ImportGraphifyDto } = loadImportGraphifyModule() as { ImportGraphifyDto: new() => any };
+      const { ImportGraphifyDto } = (await loadImportGraphifyModule()) as { ImportGraphifyDto: new() => any };
       // Link without relation
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const dto = plainToClass(ImportGraphifyDto as any, {
@@ -476,9 +473,9 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
   describe('US-003: RagController.importGraphify — controller behavior with mocked services', () => {
     let controller: RagController;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let mockRagService: Record<string, jest.Mock>;
-    let mockTxClient: { project: { update: jest.Mock } };
-    let mockPrismaClient: { project: { findUnique: jest.Mock; update: jest.Mock }; $transaction: jest.Mock };
+    let mockRagService: Record<string, Mock>;
+    let mockTxClient: { project: { update: Mock } };
+    let mockPrismaClient: { project: { findUnique: Mock; update: Mock }; $transaction: Mock };
 
     const mockProject = {
       id: 'proj-cuid-abc123',
@@ -505,28 +502,28 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
     beforeEach(async () => {
       mockTxClient = {
         project: {
-          update: jest.fn().mockResolvedValue(mockProject),
+          update: vi.fn().mockResolvedValue(mockProject),
         },
       };
 
       mockPrismaClient = {
         project: {
-          findUnique: jest.fn().mockResolvedValue(mockProject),
-          update: jest.fn().mockResolvedValue(mockProject),
+          findUnique: vi.fn().mockResolvedValue(mockProject),
+          update: vi.fn().mockResolvedValue(mockProject),
         },
-        $transaction: jest.fn().mockImplementation(
+        $transaction: vi.fn().mockImplementation(
           async (fn: (tx: typeof mockTxClient) => Promise<unknown>) => fn(mockTxClient),
         ),
       };
 
       mockRagService = {
-        importGraphify: jest.fn().mockResolvedValue({ imported: sampleNodes.length, cleared: 0 }),
-        indexDocument: jest.fn().mockResolvedValue(undefined),
-        deleteBySource: jest.fn().mockResolvedValue(undefined),
-        deleteAllBySourceType: jest.fn().mockResolvedValue(0),
-        search: jest.fn().mockResolvedValue([]),
-        listDocuments: jest.fn().mockResolvedValue([]),
-        optimizeTable: jest.fn().mockResolvedValue(undefined),
+        importGraphify: vi.fn().mockResolvedValue({ imported: sampleNodes.length, cleared: 0 }),
+        indexDocument: vi.fn().mockResolvedValue(undefined),
+        deleteBySource: vi.fn().mockResolvedValue(undefined),
+        deleteAllBySourceType: vi.fn().mockResolvedValue(0),
+        search: vi.fn().mockResolvedValue([]),
+        listDocuments: vi.fn().mockResolvedValue([]),
+        optimizeTable: vi.fn().mockResolvedValue(undefined),
       };
 
       const mockPrismaService = { client: mockPrismaClient };
@@ -536,8 +533,8 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
         providers: [
           { provide: RagService, useValue: mockRagService },
           { provide: PrismaService, useValue: mockPrismaService },
-          { provide: HybridRetrieverService, useValue: { search: jest.fn(), indexDocument: jest.fn() } },
-          { provide: EvaluationService, useValue: { evaluate: jest.fn() } },
+          { provide: HybridRetrieverService, useValue: { search: vi.fn(), indexDocument: vi.fn() } },
+          { provide: EvaluationService, useValue: { evaluate: vi.fn() } },
           PrismaRagRepository,
           // US-001: the class-level ProjectMembershipGuard is instantiated by the DI
           // container even though these tests call the controller directly, so its
@@ -550,7 +547,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
     });
 
     afterEach(() => {
-      jest.clearAllMocks();
+      vi.clearAllMocks();
     });
 
     // AC8: import route calls ragService.importGraphify with correct args

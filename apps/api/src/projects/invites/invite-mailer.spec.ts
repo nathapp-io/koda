@@ -20,8 +20,8 @@ const inviteRow = (): EmailScheduleRow => ({
 
 function setup(outcome: 'SENT' | 'FAILED' | 'RETRY' = 'SENT') {
   const row = inviteRow();
-  const schedule = { startInviteSend: jest.fn(async () => row) };
-  const dispatcher = { sendOne: jest.fn(async () => outcome) };
+  const schedule = { startInviteSend: vi.fn(async () => row) };
+  const dispatcher = { sendOne: vi.fn(async () => outcome) };
   const email = { configured: true, webUrl: (path: string) => `https://k.x${path}` };
   const mailer = new InviteMailer(schedule as never, dispatcher as never, email as never);
   const input = {
@@ -39,11 +39,11 @@ function setup(outcome: 'SENT' | 'FAILED' | 'RETRY' = 'SENT') {
 
 describe('InviteMailer (S4b US-004)', () => {
   beforeEach(() => {
-    jest.useFakeTimers();
-    jest.setSystemTime(NOW);
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
   });
   afterEach(() => {
-    jest.useRealTimers();
+    vi.useRealTimers();
   });
 
   it('AC-10: records the INVITE send and sends the raw link once with retry disabled', async () => {

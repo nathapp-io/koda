@@ -56,25 +56,25 @@ interface SetupOptions {
 function setup(opts: SetupOptions = {}) {
   const calls: string[] = [];
   const invites = {
-    findByTokenHash: jest.fn(async (_tokenHash: string) =>
+    findByTokenHash: vi.fn(async (_tokenHash: string) =>
       opts.row === undefined ? inviteRow() : opts.row),
-    claimPending: jest.fn(async () => {
+    claimPending: vi.fn(async () => {
       calls.push('claim');
       return !opts.claimLost;
     }),
-    setAcceptedBy: jest.fn(async (_id: string, _userId: string, _now: Date) => {
+    setAcceptedBy: vi.fn(async (_id: string, _userId: string, _now: Date) => {
       calls.push('setAcceptedBy');
     }),
   };
 
   const members = {
-    findUserIdByEmail: jest.fn(async () => (opts.existingAccount ? 'u-existing' : null)),
-    createInvitedUser: jest.fn(async (input: { name: string; passwordHash: string }) => {
+    findUserIdByEmail: vi.fn(async () => (opts.existingAccount ? 'u-existing' : null)),
+    createInvitedUser: vi.fn(async (input: { name: string; passwordHash: string }) => {
       calls.push('createUser');
       if (opts.createFails) throw opts.createFails;
       return userDomain({ name: input.name, passwordHash: input.passwordHash });
     }),
-    createMember: jest.fn(async (_projectId: string, userId: string, role: string) => {
+    createMember: vi.fn(async (_projectId: string, userId: string, role: string) => {
       calls.push('createMember');
       return { userId, email: 'new@x.io', name: 'New User', role, disabled: false, joinedAt: NOW };
     }),
@@ -90,12 +90,12 @@ function setup(opts: SetupOptions = {}) {
         inTransaction = false;
       }
     },
-    getClient: jest.fn(),
-    isInTransaction: jest.fn(() => inTransaction),
+    getClient: vi.fn(),
+    isInTransaction: vi.fn(() => inTransaction),
   };
 
   const auth = {
-    issueSession: jest.fn((user: UserDomain) => {
+    issueSession: vi.fn((user: UserDomain) => {
       calls.push('session');
       return { accessToken: 'a', refreshToken: 'r', user: { id: user.id, email: user.email, role: user.role } };
     }),
@@ -115,11 +115,11 @@ const validBody = { name: 'New User', password: 'StrongPass123!' };
 
 describe('InviteAcceptanceService.preview (S4b US-005)', () => {
   beforeEach(() => {
-    jest.useFakeTimers();
-    jest.setSystemTime(NOW);
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
   });
   afterEach(() => {
-    jest.useRealTimers();
+    vi.useRealTimers();
   });
 
   it('AC-1: returns exactly the six public fields and hashes the token before lookup', async () => {
@@ -160,11 +160,11 @@ describe('InviteAcceptanceService.preview (S4b US-005)', () => {
 
 describe('InviteAcceptanceService.accept (S4b US-005)', () => {
   beforeEach(() => {
-    jest.useFakeTimers();
-    jest.setSystemTime(NOW);
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
   });
   afterEach(() => {
-    jest.useRealTimers();
+    vi.useRealTimers();
   });
 
   it('AC-3/AC-4: creates the MEMBER account, the invite-role membership and issues the session after commit', async () => {

@@ -56,12 +56,12 @@ const withNames = (row: FakeRow) => ({ ...row, invitedBy: { name: 'Ada' }, proje
 function delegate(start: FakeRow = startRow()) {
   let row: FakeRow = { ...start };
 
-  const findFirst = jest.fn(async (args: { where: Record<string, unknown>; select?: Record<string, true> }) => {
+  const findFirst = vi.fn(async (args: { where: Record<string, unknown>; select?: Record<string, true> }) => {
     if (args.where['id'] !== row.id || args.where['projectId'] !== row.projectId) return null;
     return args.select ? { tokenHash: row.tokenHash } : withNames(row);
   });
 
-  const updateMany = jest.fn(async (args: { where: Record<string, unknown>; data: Partial<FakeRow> }) => {
+  const updateMany = vi.fn(async (args: { where: Record<string, unknown>; data: Partial<FakeRow> }) => {
     const { where } = args;
     const matches =
       (where['id'] === undefined || where['id'] === row.id) &&
@@ -73,7 +73,7 @@ function delegate(start: FakeRow = startRow()) {
     return { count: 1 };
   });
 
-  const findUnique = jest.fn(async () => withNames(row));
+  const findUnique = vi.fn(async () => withNames(row));
 
   return {
     repo: new PrismaProjectInvitesRepository({

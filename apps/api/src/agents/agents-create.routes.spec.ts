@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * US-003 — POST /api/agents over a real Fastify HTTP server.
  *
@@ -104,15 +105,15 @@ describe('POST /api/agents (US-003)', () => {
     nextAgentId = 0;
     als = new AsyncLocalStorage();
 
-    prisma = createMockPrismaService();
+    prisma = createMockPrismaService({ fn: vi.fn });
 
     // The ambient (non-transaction) client mocks and the per-transaction
-    // client mocks share the same `jest.fn` instances, so any
+    // client mocks share the same `vi.fn` instances, so any
     // `mockRejectedValue` / `mockResolvedValue` a test sets via
     // `prisma.client.agentRoleEntry.createMany` takes effect whether the
     // production code reads it from the ambient client or the transaction
     // client — exactly the seam a real Prisma transaction client would have.
-    const agentCreate = jest.fn(async ({ data }: { data: Partial<AgentRow> }) => {
+    const agentCreate = vi.fn(async ({ data }: { data: Partial<AgentRow> }) => {
       if (agents.some((agent) => agent.slug === data.slug)) {
         throw duplicateSlugError();
       }
@@ -130,19 +131,19 @@ describe('POST /api/agents (US-003)', () => {
       agents.push(row);
       return row;
     });
-    const agentFindUnique = jest.fn(
+    const agentFindUnique = vi.fn(
       async ({ where }: { where: { slug?: string; id?: string } }) =>
         agents.find((agent) =>
           where.slug !== undefined ? agent.slug === where.slug : agent.id === where.id,
         ) ?? null,
     );
-    const agentFindMany = jest.fn(async () => agents);
-    const agentUpdate = jest.fn(async () => agents[0]);
-    const roleEntryCreateMany = jest.fn(async ({ data }: { data: EntryRow[] }) => {
+    const agentFindMany = vi.fn(async () => agents);
+    const agentUpdate = vi.fn(async () => agents[0]);
+    const roleEntryCreateMany = vi.fn(async ({ data }: { data: EntryRow[] }) => {
       roleEntries.push(...data);
       return { count: data.length };
     });
-    const capabilityEntryCreateMany = jest.fn(async ({ data }: { data: EntryRow[] }) => {
+    const capabilityEntryCreateMany = vi.fn(async ({ data }: { data: EntryRow[] }) => {
       capabilityEntries.push(...data);
       return { count: data.length };
     });
@@ -165,7 +166,7 @@ describe('POST /api/agents (US-003)', () => {
     // The ambient (non-transaction) prisma client.
     ambientClient = {
       ...buildClient(),
-      $transaction: jest.fn(),
+      $transaction: vi.fn(),
     };
 
     // `$transaction(async (tx) => { ... })` is the one piece of production
@@ -178,7 +179,7 @@ describe('POST /api/agents (US-003)', () => {
     // don't have one. AC7 outcome ("no agent row behind after a failed
     // roles/capabilities write") is verified at the integration-test level
     // against a real Prisma instance.
-    (ambientClient.$transaction as jest.Mock).mockImplementation(
+    (ambientClient.$transaction as Mock).mockImplementation(
       async (callback: (tx: unknown) => Promise<unknown>) => {
         const txClient = Object.assign(Object.create(ambientClient), { __isTxClient: true });
         // Replicate the production `PrismaTransactionManager.run` wiring
@@ -234,11 +235,11 @@ describe('POST /api/agents (US-003)', () => {
         },
         {
           provide: KodaDomainWriter,
-          useValue: { writeAgentAction: jest.fn().mockResolvedValue({ canonicalId: 'evt-1' }) },
+          useValue: { writeAgentAction: vi.fn().mockResolvedValue({ canonicalId: 'evt-1' }) },
         },
         {
           provide: AgentAuthProvider,
-          useValue: { invalidateByTag: jest.fn().mockResolvedValue(undefined) },
+          useValue: { invalidateByTag: vi.fn().mockResolvedValue(undefined) },
         },
       ],
     }).compile();
@@ -264,7 +265,7 @@ describe('POST /api/agents (US-003)', () => {
 
   afterEach(async () => {
     if (app) await app.close();
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it("AC2: persists the schema default status, not the client-supplied 'OFFLINE'", async () => {
@@ -331,7 +332,7 @@ describe('POST /api/agents (US-003)', () => {
     // Prisma `$transaction` performs). Verifying that the row is actually
     // gone after a failure requires a real database; see
     // `test/integration/agents/agents-create-rollback.integration.spec.ts`.
-    (prisma.client.agentRoleEntry.createMany as jest.Mock).mockRejectedValue(
+    (prisma.client.agentRoleEntry.createMany as Mock).mockRejectedValue(
       new Error('agentRoleEntry insert failed'),
     );
 
@@ -358,7 +359,7 @@ describe('POST /api/agents (US-003)', () => {
   });
 
   it('AC7 boundary: a failing capability write is also wrapped in one txManager.run callback', async () => {
-    (prisma.client.agentCapabilityEntry.createMany as jest.Mock).mockRejectedValue(
+    (prisma.client.agentCapabilityEntry.createMany as Mock).mockRejectedValue(
       new Error('agentCapabilityEntry insert failed'),
     );
 

@@ -1,25 +1,25 @@
-jest.mock('@lancedb/lancedb', () => ({
-  connect: jest.fn().mockResolvedValue({
-    tableNames: jest.fn().mockResolvedValue([]),
-    createTable: jest.fn().mockResolvedValue({
-      delete: jest.fn().mockResolvedValue(undefined),
-      createIndex: jest.fn().mockResolvedValue(undefined),
-      add: jest.fn().mockResolvedValue(undefined),
-      query: jest.fn().mockReturnValue({ limit: jest.fn().mockReturnThis(), toArray: jest.fn().mockResolvedValue([]) }),
-      countRows: jest.fn().mockResolvedValue(0),
+vi.mock('@lancedb/lancedb', () => ({
+  connect: vi.fn().mockResolvedValue({
+    tableNames: vi.fn().mockResolvedValue([]),
+    createTable: vi.fn().mockResolvedValue({
+      delete: vi.fn().mockResolvedValue(undefined),
+      createIndex: vi.fn().mockResolvedValue(undefined),
+      add: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue([]) }),
+      countRows: vi.fn().mockResolvedValue(0),
     }),
-    openTable: jest.fn().mockResolvedValue({
-      delete: jest.fn().mockResolvedValue(undefined),
-      createIndex: jest.fn().mockResolvedValue(undefined),
-      add: jest.fn().mockResolvedValue(undefined),
-      query: jest.fn().mockReturnValue({ limit: jest.fn().mockReturnThis(), toArray: jest.fn().mockResolvedValue([]) }),
-      countRows: jest.fn().mockResolvedValue(0),
-      search: jest.fn().mockResolvedValue([]),
-      vectorSearch: jest.fn().mockReturnValue({ distanceType: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(), toArray: jest.fn().mockResolvedValue([]) }),
-      optimize: jest.fn().mockResolvedValue(undefined),
+    openTable: vi.fn().mockResolvedValue({
+      delete: vi.fn().mockResolvedValue(undefined),
+      createIndex: vi.fn().mockResolvedValue(undefined),
+      add: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue([]) }),
+      countRows: vi.fn().mockResolvedValue(0),
+      search: vi.fn().mockResolvedValue([]),
+      vectorSearch: vi.fn().mockReturnValue({ distanceType: vi.fn().mockReturnThis(), limit: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue([]) }),
+      optimize: vi.fn().mockResolvedValue(undefined),
     }),
   }),
-  Index: { fts: jest.fn().mockReturnValue({}) },
+  Index: { fts: vi.fn().mockReturnValue({}) },
 }));
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -36,6 +36,7 @@ import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { GraphifyNodeDto, GraphifyLinkDto } from '../../../src/rag/dto/import-graphify.dto';
 import { testDatabaseUrl } from '../../helpers/test-prisma';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 
 class FakeEmbeddingService {
   readonly providerName = 'fake';
@@ -57,9 +58,9 @@ class FakeEmbeddingService {
 }
 
 const mockTxManager = {
-  run: jest.fn((fn: () => Promise<unknown>) => fn()),
-  getClient: jest.fn(),
-  isInTransaction: jest.fn(() => false),
+  run: vi.fn((fn: () => Promise<unknown>) => fn()),
+  getClient: vi.fn(),
+  isInTransaction: vi.fn(() => false),
 };
 
 /**
@@ -96,8 +97,6 @@ describe('IncrementalGraphDiffService integration', () => {
           provide: PrismaService,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           useFactory: (): PrismaService<any> => {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { PrismaClient } = require('../../../src/generated/prisma/client') as any;
             return new PrismaService({ client: PrismaClient, clientOptions: { adapter: createPgAdapter(testDatabaseUrl()) } });
           },
         },
@@ -162,7 +161,7 @@ describe('IncrementalGraphDiffService integration', () => {
 
       // diff path: nodes are persisted through GraphStoreService.applyDiff
       // (one Prisma transaction), not via the full-reimport delete+rewrite.
-      const applySpy = jest.spyOn(graphStore, 'applyDiff');
+      const applySpy = vi.spyOn(graphStore, 'applyDiff');
 
       const firstResult = await ragService.importGraphify(projectId, nodes, links);
 

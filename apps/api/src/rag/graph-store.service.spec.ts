@@ -1,20 +1,21 @@
+import type { Mocked } from 'vitest';
 import { GraphStoreService } from './graph-store.service';
 import type { PrismaRagRepository } from './prisma-rag.repository';
 
-function makeRagRepo(): jest.Mocked<PrismaRagRepository> {
+function makeRagRepo(): Mocked<PrismaRagRepository> {
   return {
-    getStoredGraphNodes: jest.fn(),
-    getStoredGraphLinks: jest.fn(),
-    applyGraphDiff: jest.fn(),
-    markGraphNodesVectorStale: jest.fn(),
-    findVectorStaleNodeIds: jest.fn(),
-    clearGraphNodeVectorStale: jest.fn(),
-  } as unknown as jest.Mocked<PrismaRagRepository>;
+    getStoredGraphNodes: vi.fn(),
+    getStoredGraphLinks: vi.fn(),
+    applyGraphDiff: vi.fn(),
+    markGraphNodesVectorStale: vi.fn(),
+    findVectorStaleNodeIds: vi.fn(),
+    clearGraphNodeVectorStale: vi.fn(),
+  } as unknown as Mocked<PrismaRagRepository>;
 }
 
 describe('GraphStoreService', () => {
   let service: GraphStoreService;
-  let ragRepo: jest.Mocked<PrismaRagRepository>;
+  let ragRepo: Mocked<PrismaRagRepository>;
 
   beforeEach(() => {
     ragRepo = makeRagRepo();
@@ -22,7 +23,7 @@ describe('GraphStoreService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('getStoredGraph', () => {

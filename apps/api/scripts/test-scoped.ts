@@ -1,21 +1,21 @@
 /**
- * Scoped Jest run for nax (`quality.commands.testScoped` in .nax/mono/apps/api/config.json).
+ * Scoped Vitest run for nax (`quality.commands.testScoped` in .nax/mono/apps/api/config.json).
  *
  * Integration and e2e specs only run when `KODA_DB_TESTS=1` (otherwise they are
  * `describe.skip`, and `--passWithNoTests` turns that into a silent green). This
  * wrapper sets the flag when any targeted spec is DB-gated, so a story that writes
- * `test/integration/**` actually runs it. The flag makes jest globalSetup push the
+ * `test/integration/**` actually runs it. The flag makes the Vitest globalSetup push the
  * schema to the test Postgres (compose on 5433, else Testcontainers); with no database
  * the run fails instead of skipping. Unit-only targets stay database-free.
  *
- * A target that is not an existing path (a jest name pattern, a renamed file) also
- * turns DB mode on: jest may still match integration specs through it, and without
+ * A target that is not an existing path (a filename filter, a renamed file) also
+ * turns DB mode on: vitest may still match integration specs through it, and without
  * the flag they would skip silently. globalSetup only ever resets a local `*_test`
  * database (test/helpers/test-database-url.ts).
  *
  * Run it with `bun --no-env-file` (the `test:scoped` script does): Bun otherwise loads
  * the developer's `apps/api/.env` (NODE_ENV, secrets, DATABASE_URL) into this process
- * and jest inherits it, so scoped runs would diverge from `bun run test`.
+ * and vitest inherits it, so scoped runs would diverge from `bun run test`.
  *
  * Usage: bun --no-env-file scripts/test-scoped.ts <file|dir|pattern>...
  */
@@ -28,8 +28,8 @@ import * as path from 'path';
 // *.e2e specs. Anchored so a parent directory such as `koda-e2e-fix/` does not match.
 const DB_GATED = [/(^|\/)test\/(integration|e2e)\//, /\.(integration|e2e)\.spec\.ts$/];
 const SPEC_FILE = /\.spec\.ts$/;
-const BASE_ARGS = ['--forceExit', '--passWithNoTests'] as const;
-const UNIT_ONLY_ARGS = ['--testPathIgnorePatterns=integration', '--testPathIgnorePatterns=e2e'] as const;
+const BASE_ARGS = ['--passWithNoTests'] as const;
+const UNIT_ONLY_ARGS = ['--exclude', 'test/integration/**', '--exclude', 'test/e2e/**'] as const;
 
 export interface ScopedRun {
   args: string[];
@@ -65,10 +65,10 @@ export function buildScopedRun(
   unresolved = false,
 ): ScopedRun {
   if (targets.length === 0) {
-    return { args: ['jest', ...BASE_ARGS, ...UNIT_ONLY_ARGS], env: {} };
+    return { args: ['vitest', 'run', ...BASE_ARGS, ...UNIT_ONLY_ARGS], env: {} };
   }
   return {
-    args: ['jest', ...targets, ...BASE_ARGS],
+    args: ['vitest', 'run', ...targets, ...BASE_ARGS],
     env: unresolved || needsDatabase(expanded) ? { KODA_DB_TESTS: '1' } : {},
   };
 }
@@ -84,7 +84,7 @@ function main(): void {
     env: { ...process.env, ...run.env },
   });
   if (result.error) {
-    process.stderr.write(`test-scoped: failed to start jest: ${result.error.message}\n`);
+    process.stderr.write(`test-scoped: failed to start vitest: ${result.error.message}\n`);
     process.exit(1);
   }
   process.exit(result.status ?? 1);

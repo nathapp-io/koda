@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 /**
  * ContextBuilderService — Shared Retrieval Contract
  * US-001: Testing comprehensive getProjectContext() implementation
@@ -31,52 +32,52 @@ import { TRANSACTION_MANAGER, ITransactionManager } from '@nathapp/nestjs-data';
 // This test anticipates its interface and behavior
 describe('ContextBuilderService', () => {
   let service: any; // Placeholder for ContextBuilderService
-  let canonicalStateService: jest.Mocked<any>;
-  let timelineService: jest.Mocked<any>;
-  let memoryItemRepository: jest.Mocked<any>;
-  let hybridRetrieverService: jest.Mocked<any>;
-  let entityGraphService: jest.Mocked<any>;
-  let impactAnalysisService: jest.Mocked<any>;
-  let mockTxManager: jest.Mocked<ITransactionManager>;
+  let canonicalStateService: Mocked<any>;
+  let timelineService: Mocked<any>;
+  let memoryItemRepository: Mocked<any>;
+  let hybridRetrieverService: Mocked<any>;
+  let entityGraphService: Mocked<any>;
+  let impactAnalysisService: Mocked<any>;
+  let mockTxManager: Mocked<ITransactionManager>;
 
   const mockProjectId = 'proj-test-001';
   const mockActorId = 'actor-001';
 
   beforeEach(async () => {
     mockTxManager = {
-      run: jest.fn((fn) => fn()),
-      getClient: jest.fn(),
-      isInTransaction: jest.fn(() => false),
-    } as unknown as jest.Mocked<ITransactionManager>;
+      run: vi.fn((fn) => fn()),
+      getClient: vi.fn(),
+      isInTransaction: vi.fn(() => false),
+    } as unknown as Mocked<ITransactionManager>;
 
     canonicalStateService = {
-      getSnapshot: jest.fn(),
-      recordEvent: jest.fn(),
-      recordDecision: jest.fn(),
+      getSnapshot: vi.fn(),
+      recordEvent: vi.fn(),
+      recordDecision: vi.fn(),
     };
 
     timelineService = {
-      getProjectTimeline: jest.fn(),
-      getTicketHistory: jest.fn(),
+      getProjectTimeline: vi.fn(),
+      getTicketHistory: vi.fn(),
     };
 
     memoryItemRepository = {
-      findByProjectMemory: jest.fn(),
-      findActive: jest.fn(),
-      upsert: jest.fn(),
+      findByProjectMemory: vi.fn(),
+      findActive: vi.fn(),
+      upsert: vi.fn(),
     };
 
     hybridRetrieverService = {
-      search: jest.fn(),
+      search: vi.fn(),
     };
 
     entityGraphService = {
-      getEntityPaths: jest.fn(),
-      getConnectedEntities: jest.fn(),
+      getEntityPaths: vi.fn(),
+      getConnectedEntities: vi.fn(),
     };
 
     impactAnalysisService = {
-      analyzeImpact: jest.fn(),
+      analyzeImpact: vi.fn(),
     };
 
     // NOTE: This module creation will fail until ContextBuilderService is created in src/context/
@@ -87,7 +88,7 @@ describe('ContextBuilderService', () => {
         {
           provide: 'ContextBuilderService',
           useValue: {
-            getProjectContext: jest.fn(),
+            getProjectContext: vi.fn(),
           },
         },
         { provide: CanonicalStateService, useValue: canonicalStateService },
@@ -586,7 +587,7 @@ describe('ContextBuilderService', () => {
 
       try {
         await service.getProjectContext(query);
-        fail('Should have thrown');
+        assert.fail('Should have thrown');
       } catch (err) {
         expect(err).toBeInstanceOf(AppException);
       }

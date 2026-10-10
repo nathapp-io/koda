@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * US-003 — GET /api/agents/:slug/pickup authorization, over a real Fastify HTTP
  * server. The controller and AgentsService are real; only the repository is
@@ -95,12 +96,12 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
   let currentPrincipal: KodaPrincipal;
 
   let agentRepo: {
-    findBySlugWithCapabilities: jest.Mock;
-    findProjectBySlug: jest.Mock;
-    findVerifiedUnassignedTickets: jest.Mock;
-    findBySlug: jest.Mock;
-    findById: jest.Mock;
-    isOnProjectRoster: jest.Mock;
+    findBySlugWithCapabilities: Mock;
+    findProjectBySlug: Mock;
+    findVerifiedUnassignedTickets: Mock;
+    findBySlug: Mock;
+    findById: Mock;
+    isOnProjectRoster: Mock;
   };
 
   const DEFAULT_AUTH_CONFIG: Omit<IAuthConfig, 'agentProjectScoping'> = {
@@ -126,18 +127,18 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
         {
           provide: TRANSACTION_MANAGER,
           useValue: {
-            run: jest.fn((fn: () => Promise<unknown>) => fn()),
-            getClient: jest.fn(),
-            isInTransaction: jest.fn(() => false),
+            run: vi.fn((fn: () => Promise<unknown>) => fn()),
+            getClient: vi.fn(),
+            isInTransaction: vi.fn(() => false),
           },
         },
         {
           provide: KodaDomainWriter,
-          useValue: { writeAgentAction: jest.fn().mockResolvedValue({ canonicalId: 'evt-1' }) },
+          useValue: { writeAgentAction: vi.fn().mockResolvedValue({ canonicalId: 'evt-1' }) },
         },
         {
           provide: AgentAuthProvider,
-          useValue: { invalidateByTag: jest.fn().mockResolvedValue(undefined) },
+          useValue: { invalidateByTag: vi.fn().mockResolvedValue(undefined) },
         },
       ],
     }).compile();
@@ -171,12 +172,12 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
 
   beforeEach(async () => {
     agentRepo = {
-      findBySlugWithCapabilities: jest.fn(),
-      findProjectBySlug: jest.fn(),
-      findVerifiedUnassignedTickets: jest.fn(),
-      findBySlug: jest.fn(),
-      findById: jest.fn(),
-      isOnProjectRoster: jest.fn(),
+      findBySlugWithCapabilities: vi.fn(),
+      findProjectBySlug: vi.fn(),
+      findVerifiedUnassignedTickets: vi.fn(),
+      findBySlug: vi.fn(),
+      findById: vi.fn(),
+      isOnProjectRoster: vi.fn(),
     };
 
     await bootApp();
@@ -186,7 +187,7 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
 
   afterEach(async () => {
     if (app) await app.close();
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('AC9: returns 200 when authenticated as that agent', async () => {

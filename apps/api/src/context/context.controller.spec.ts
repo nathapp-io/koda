@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { ContextController } from './context.controller';
@@ -50,20 +51,20 @@ const agentPrincipal: KodaPrincipal = {
 
 describe('ContextController', () => {
   let controller: ContextController;
-  let contextBuilderService: { getProjectContext: jest.Mock };
+  let contextBuilderService: { getProjectContext: Mock };
   let projectAccess: {
-    findProjectIdBySlug: jest.Mock;
-    assertProjectMembership: jest.Mock;
+    findProjectIdBySlug: Mock;
+    assertProjectMembership: Mock;
   };
 
   beforeEach(async () => {
     contextBuilderService = {
-      getProjectContext: jest.fn().mockResolvedValue(makeContextResponse()),
+      getProjectContext: vi.fn().mockResolvedValue(makeContextResponse()),
     };
 
     projectAccess = {
-      findProjectIdBySlug: jest.fn().mockResolvedValue('project-1'),
-      assertProjectMembership: jest.fn().mockResolvedValue(undefined),
+      findProjectIdBySlug: vi.fn().mockResolvedValue('project-1'),
+      assertProjectMembership: vi.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -75,7 +76,7 @@ describe('ContextController', () => {
     }).compile();
 
     controller = module.get(ContextController);
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     // Default: project found, membership ok
     projectAccess.findProjectIdBySlug.mockResolvedValue('project-1');

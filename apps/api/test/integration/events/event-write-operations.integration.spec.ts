@@ -100,63 +100,63 @@ describe('Event Write Operations and Actor Resolution', () => {
   const mockPrismaService = {
     client: {
       project: {
-        findUnique: jest.fn(),
-        findFirst: jest.fn(),
+        findUnique: vi.fn(),
+        findFirst: vi.fn(),
       },
       agent: {
-        findUnique: jest.fn(),
-        findFirst: jest.fn(),
+        findUnique: vi.fn(),
+        findFirst: vi.fn(),
       },
       ticket: {
-        findUnique: jest.fn(),
-        create: jest.fn(),
-        findMany: jest.fn(),
+        findUnique: vi.fn(),
+        create: vi.fn(),
+        findMany: vi.fn(),
       },
       ticketEvent: {
-        create: jest.fn(),
-        findUnique: jest.fn(),
-        findMany: jest.fn(),
+        create: vi.fn(),
+        findUnique: vi.fn(),
+        findMany: vi.fn(),
       },
       agentEvent: {
-        create: jest.fn(),
-        findUnique: jest.fn(),
-        findMany: jest.fn(),
+        create: vi.fn(),
+        findUnique: vi.fn(),
+        findMany: vi.fn(),
       },
       decisionEvent: {
-        create: jest.fn(),
-        findUnique: jest.fn(),
-        findMany: jest.fn(),
+        create: vi.fn(),
+        findUnique: vi.fn(),
+        findMany: vi.fn(),
       },
       outboxEvent: {
-        create: jest.fn(),
-        findMany: jest.fn(),
+        create: vi.fn(),
+        findMany: vi.fn(),
       },
       agentRoleEntry: {
-        findMany: jest.fn(),
+        findMany: vi.fn(),
       },
       // US-004: a user actor's project roles are read from User.role and
       // ProjectMember.role, so the writer's repository needs both delegates.
       user: {
-        findUnique: jest.fn(),
-        findFirst: jest.fn(),
+        findUnique: vi.fn(),
+        findFirst: vi.fn(),
       },
       projectMember: {
-        findUnique: jest.fn(),
-        findFirst: jest.fn(),
+        findUnique: vi.fn(),
+        findFirst: vi.fn(),
       },
-      $transaction: jest.fn(),
+      $transaction: vi.fn(),
     },
   };
 
   const mockRagService = {
-    indexDocument: jest.fn(),
-    importGraphify: jest.fn(),
-    validateProjectId: jest.fn(),
-    search: jest.fn(),
+    indexDocument: vi.fn(),
+    importGraphify: vi.fn(),
+    validateProjectId: vi.fn(),
+    search: vi.fn(),
   };
 
   const mockOutbox = {
-    record: jest.fn().mockResolvedValue(undefined),
+    record: vi.fn().mockResolvedValue(undefined),
   };
 
   beforeEach(async () => {
@@ -175,12 +175,12 @@ describe('Event Write Operations and Actor Resolution', () => {
           // Transactions run inline; the writer's writes hit the mocked Prisma client.
           provide: TRANSACTION_MANAGER,
           useValue: {
-            run: jest.fn((fn: () => Promise<unknown>) => fn()),
-            getClient: jest.fn(),
-            isInTransaction: jest.fn(() => false),
+            run: vi.fn((fn: () => Promise<unknown>) => fn()),
+            getClient: vi.fn(),
+            isInTransaction: vi.fn(() => false),
           },
         },
-        { provide: AgentAuthProvider, useValue: { loadAgentRoles: jest.fn().mockResolvedValue([]) } },
+        { provide: AgentAuthProvider, useValue: { loadAgentRoles: vi.fn().mockResolvedValue([]) } },
       ],
     }).compile();
 
@@ -191,7 +191,7 @@ describe('Event Write Operations and Actor Resolution', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   // ═══════════════════════════════════════════════════════════════════════════

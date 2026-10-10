@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 /**
  * GitLab Provider Integration Tests
  *
@@ -13,7 +14,7 @@ import { HttpClient } from '../../../src/vcs/factory';
 
 describe('GitLabProvider (Integration)', () => {
   let provider: GitLabProvider;
-  let mockHttpClient: jest.Mocked<HttpClient>;
+  let mockHttpClient: Mocked<HttpClient>;
 
   const testOwner = 'test-owner';
   const testRepo = 'test-repo';
@@ -22,8 +23,8 @@ describe('GitLabProvider (Integration)', () => {
 
   beforeEach(() => {
     mockHttpClient = {
-      get: jest.fn(),
-      post: jest.fn(),
+      get: vi.fn(),
+      post: vi.fn(),
     };
 
     provider = new GitLabProvider(testOwner, testRepo, testToken, mockHttpClient);

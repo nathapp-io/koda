@@ -1,3 +1,4 @@
+import type { MockInstance } from 'vitest';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import type { IRagConfig } from '../config/rag.config';
 import { VectorStore } from './vector-store.service';
@@ -15,13 +16,13 @@ const ragConfig = {
 describe('VectorStore.deleteBySource filter guard', () => {
   let manager: LanceTableManager;
   let store: VectorStore;
-  let deleteSpy: jest.SpyInstance;
+  let deleteSpy: MockInstance;
 
   beforeEach(async () => {
     manager = new LanceTableManager(ragConfig);
     store = new VectorStore(ragConfig, undefined, undefined, undefined, undefined, manager);
     const table = await manager.getOrCreateTable('project_proj-1');
-    deleteSpy = jest.spyOn(table, 'delete');
+    deleteSpy = vi.spyOn(table, 'delete');
   });
 
   it.each([

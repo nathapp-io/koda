@@ -12,16 +12,16 @@ describe('HttpClient.post', () => {
   describe('interface compliance', () => {
     it('should have post method defined in interface', () => {
       const httpClient: HttpClient = {
-        get: jest.fn(),
-        post: jest.fn(),
+        get: vi.fn(),
+        post: vi.fn(),
       };
       expect(typeof httpClient.post).toBe('function');
     });
 
     it('should accept url and config parameters', async () => {
       const httpClient: HttpClient = {
-        get: jest.fn(),
-        post: jest.fn().mockResolvedValue({ data: {} }),
+        get: vi.fn(),
+        post: vi.fn().mockResolvedValue({ data: {} }),
       };
 
       await httpClient.post('https://api.github.com/test', {
@@ -40,8 +40,8 @@ describe('HttpClient.post', () => {
 
     it('should return Promise<{ data: unknown }>', async () => {
       const httpClient: HttpClient = {
-        get: jest.fn(),
-        post: jest.fn().mockResolvedValue({ data: { id: 123 } }),
+        get: vi.fn(),
+        post: vi.fn().mockResolvedValue({ data: { id: 123 } }),
       };
 
       const result = await httpClient.post('https://api.github.com/test', {
@@ -57,8 +57,8 @@ describe('HttpClient.post', () => {
   describe('VcsProviderConfig httpClient factory', () => {
     it('should create HttpClient with post method when httpClient is provided in config', () => {
       const mockHttpClient = {
-        get: jest.fn(),
-        post: jest.fn(),
+        get: vi.fn(),
+        post: vi.fn(),
       };
 
       const config = {

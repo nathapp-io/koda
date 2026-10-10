@@ -27,12 +27,12 @@ function makeDbSymbolRow(data: SymbolData) {
 
 function makeRepositoryMock() {
   return {
-    upsertSymbol: jest.fn(),
-    findSymbolByExactId: jest.fn(),
-    findSymbolsByFallback: jest.fn(),
-    findSymbolsByIds: jest.fn(),
-    findSymbolsByIdsOrNames: jest.fn(),
-    deleteSymbolsByFile: jest.fn(),
+    upsertSymbol: vi.fn(),
+    findSymbolByExactId: vi.fn(),
+    findSymbolsByFallback: vi.fn(),
+    findSymbolsByIds: vi.fn(),
+    findSymbolsByIdsOrNames: vi.fn(),
+    deleteSymbolsByFile: vi.fn(),
   };
 }
 

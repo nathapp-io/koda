@@ -3,16 +3,16 @@ import { PrismaOutboxRepository } from './prisma-outbox.repository';
 
 describe('PrismaOutboxRepository', () => {
   const mockTxManager = {
-    run: jest.fn((fn: () => Promise<unknown>) => fn()),
-    getClient: jest.fn(),
-    isInTransaction: jest.fn(() => false),
+    run: vi.fn((fn: () => Promise<unknown>) => fn()),
+    getClient: vi.fn(),
+    isInTransaction: vi.fn(() => false),
   };
 
-  const mockFindUnique = jest.fn();
-  const mockFindMany = jest.fn();
-  const mockUpdateMany = jest.fn();
-  const mockCount = jest.fn();
-  const mockDeleteMany = jest.fn();
+  const mockFindUnique = vi.fn();
+  const mockFindMany = vi.fn();
+  const mockUpdateMany = vi.fn();
+  const mockCount = vi.fn();
+  const mockDeleteMany = vi.fn();
   const mockPrisma = {
     client: {
       outboxEvent: {
@@ -28,7 +28,7 @@ describe('PrismaOutboxRepository', () => {
   let repo: PrismaOutboxRepository;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     repo = new PrismaOutboxRepository(mockTxManager as never, mockPrisma as never);
   });
 

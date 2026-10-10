@@ -6,24 +6,24 @@ const caps = { nax: { version: '0.83.5', protocols: ['native'] }, sandbox: { ava
 
 describe('FleetHealthDetector (S4a §2.4, D507, D515)', () => {
   const repo = {
-    findRunners: jest.fn(async () => [{ id: 'rn1', name: 'wk-mac', enabled: true, lastSeenAt: new Date(T0 - 600_000), capabilities: caps }]),
-    findOpen: jest.fn(async () => []),
-    open: jest.fn(async () => 'al1'),
-    close: jest.fn(async () => 0),
+    findRunners: vi.fn(async () => [{ id: 'rn1', name: 'wk-mac', enabled: true, lastSeenAt: new Date(T0 - 600_000), capabilities: caps }]),
+    findOpen: vi.fn(async () => []),
+    open: vi.fn(async () => 'al1'),
+    close: vi.fn(async () => 0),
   };
-  const outbox = { record: jest.fn(async () => undefined) };
+  const outbox = { record: vi.fn(async () => undefined) };
   const order: string[] = [];
-  const tx = { run: jest.fn(async (fn: () => Promise<unknown>) => { order.push('tx:start'); const r = await fn(); order.push('tx:end'); return r; }) };
+  const tx = { run: vi.fn(async (fn: () => Promise<unknown>) => { order.push('tx:start'); const r = await fn(); order.push('tx:end'); return r; }) };
   let detector: FleetHealthDetector;
 
   beforeEach(() => {
-    jest.useFakeTimers({ now: T0 });
+    vi.useFakeTimers({ now: T0 });
     detector = new FleetHealthDetector(repo as never, outbox as never, tx as never, CFG as never);
     order.length = 0;
   });
   afterEach(() => {
-    jest.useRealTimers();
-    jest.clearAllMocks();
+    vi.useRealTimers();
+    vi.clearAllMocks();
   });
 
   it('boot grace: a runner silent since before the API booted is not reported in the first runnerOfflineSec', async () => {
@@ -59,7 +59,7 @@ describe('FleetHealthDetector (S4a §2.4, D507, D515)', () => {
   });
 
   it('does not start a timer when the sweep is disabled', () => {
-    const spy = jest.spyOn(global, 'setInterval');
+    const spy = vi.spyOn(global, 'setInterval');
     detector.onModuleInit();
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();

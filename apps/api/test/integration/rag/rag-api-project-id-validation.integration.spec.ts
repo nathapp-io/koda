@@ -32,7 +32,7 @@ describe('RagController — Project ID Validation at API Boundary (AC6)', () => 
     mockPrismaService = {
       client: {
         project: {
-          findUnique: jest.fn().mockImplementation(({ where }) => {
+          findUnique: vi.fn().mockImplementation(({ where }) => {
             // Valid test project ID returns a valid project
             if (where.id === 'clgtz5zrp0000jvz4z6x8y9z0' || where.slug === 'valid-project') {
               return Promise.resolve({
@@ -53,13 +53,13 @@ describe('RagController — Project ID Validation at API Boundary (AC6)', () => 
         {
           provide: RagService,
           useValue: {
-            indexDocument: jest.fn().mockResolvedValue(undefined),
-            search: jest.fn().mockResolvedValue({ results: [], verdict: 'no_match' }),
-            listDocuments: jest.fn().mockResolvedValue([]),
-            deleteBySource: jest.fn().mockResolvedValue(undefined),
-            deleteAllBySourceType: jest.fn().mockResolvedValue(0),
-            importGraphify: jest.fn().mockResolvedValue({ imported: 0, cleared: 0 }),
-            optimizeTable: jest.fn().mockResolvedValue(undefined),
+            indexDocument: vi.fn().mockResolvedValue(undefined),
+            search: vi.fn().mockResolvedValue({ results: [], verdict: 'no_match' }),
+            listDocuments: vi.fn().mockResolvedValue([]),
+            deleteBySource: vi.fn().mockResolvedValue(undefined),
+            deleteAllBySourceType: vi.fn().mockResolvedValue(0),
+            importGraphify: vi.fn().mockResolvedValue({ imported: 0, cleared: 0 }),
+            optimizeTable: vi.fn().mockResolvedValue(undefined),
           },
         },
         {
@@ -69,20 +69,20 @@ describe('RagController — Project ID Validation at API Boundary (AC6)', () => 
         {
           provide: ConfigService,
           useValue: {
-            get: jest.fn().mockReturnValue(undefined),
+            get: vi.fn().mockReturnValue(undefined),
           },
         },
         {
           provide: HybridRetrieverService,
           useValue: {
-            indexDocument: jest.fn().mockResolvedValue(undefined),
-            search: jest.fn().mockResolvedValue({ results: [], scores: [], retrievedAt: new Date() }),
+            indexDocument: vi.fn().mockResolvedValue(undefined),
+            search: vi.fn().mockResolvedValue({ results: [], scores: [], retrievedAt: new Date() }),
           },
         },
         {
           provide: EvaluationService,
           useValue: {
-            runQueries: jest.fn().mockResolvedValue({ precision: 0, queries: [] }),
+            runQueries: vi.fn().mockResolvedValue({ precision: 0, queries: [] }),
           },
         },
         PrismaRagRepository,

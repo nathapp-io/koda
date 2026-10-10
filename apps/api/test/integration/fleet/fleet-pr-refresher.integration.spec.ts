@@ -1,3 +1,4 @@
+import type { MockInstance } from 'vitest';
 /**
  * Fleet C9 slice 1b — fleet PR-state refresher (PG), spec §3.4, §3.5, §6.
  * The forge is stubbed on the app's GitHubAppClient instance; DB, VCS repository and merge step are real.
@@ -22,7 +23,7 @@ describeIntegration('fleet PR-state refresher (PG)', () => {
   let prisma: PrismaClient;
   let world: FleetHttpWorld;
   let refresher: FleetPrStateRefresher;
-  let getPullRequest: jest.SpyInstance;
+  let getPullRequest: MockInstance;
   let n = 0;
 
   const status = (over: Partial<VcsPrStatus> = {}): VcsPrStatus => ({
@@ -55,8 +56,8 @@ describeIntegration('fleet PR-state refresher (PG)', () => {
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     refresher = app.get(FleetPrStateRefresher);
     const github = app.get(GitHubAppClient);
-    jest.spyOn(github, 'mintInstallationToken').mockResolvedValue({ token: 'ghs_test', expiresAt: new Date(Date.now() + 3_600_000) });
-    getPullRequest = jest.spyOn(github, 'getPullRequest');
+    vi.spyOn(github, 'mintInstallationToken').mockResolvedValue({ token: 'ghs_test', expiresAt: new Date(Date.now() + 3_600_000) });
+    getPullRequest = vi.spyOn(github, 'getPullRequest');
   });
   beforeEach(async () => {
     getPullRequest.mockReset();

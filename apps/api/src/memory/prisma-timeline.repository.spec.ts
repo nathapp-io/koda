@@ -5,9 +5,9 @@ import { PrismaTimelineRepository } from './prisma-timeline.repository';
 describe('PrismaTimelineRepository', () => {
   let repository: PrismaTimelineRepository;
 
-  const mockTicketEvent = { findMany: jest.fn() };
-  const mockAgentEvent = { findMany: jest.fn() };
-  const mockDecisionEvent = { findMany: jest.fn() };
+  const mockTicketEvent = { findMany: vi.fn() };
+  const mockAgentEvent = { findMany: vi.fn() };
+  const mockDecisionEvent = { findMany: vi.fn() };
 
   const mockPrismaService = {
     client: {
@@ -27,7 +27,7 @@ describe('PrismaTimelineRepository', () => {
 
     repository = module.get<PrismaTimelineRepository>(PrismaTimelineRepository);
 
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('findTicketEvents', () => {

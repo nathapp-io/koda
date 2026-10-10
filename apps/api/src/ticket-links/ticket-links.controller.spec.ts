@@ -1,3 +1,4 @@
+import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { TicketLinksController } from './ticket-links.controller';
@@ -20,7 +21,7 @@ const makeUserPrincipal = (): UserPrincipal => ({
 describe('TicketLinksController', () => {
   let controller: TicketLinksController;
   let service: TicketLinksService;
-  let projectsService: jest.Mocked<Partial<ProjectsService>>;
+  let projectsService: Mocked<Partial<ProjectsService>>;
 
   const mockLink = {
     id: 'link-123',
@@ -32,17 +33,17 @@ describe('TicketLinksController', () => {
   };
 
   const mockTicketLinksService = {
-    create: jest.fn(),
-    findByTicket: jest.fn(),
-    remove: jest.fn(),
+    create: vi.fn(),
+    findByTicket: vi.fn(),
+    remove: vi.fn(),
   };
 
   const principal: KodaPrincipal = makeUserPrincipal();
 
   beforeEach(async () => {
     projectsService = {
-      findProjectIdBySlug: jest.fn().mockResolvedValue('project-1'),
-      assertProjectMembership: jest.fn().mockResolvedValue(undefined),
+      findProjectIdBySlug: vi.fn().mockResolvedValue('project-1'),
+      assertProjectMembership: vi.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -58,31 +59,31 @@ describe('TicketLinksController', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('membership check', () => {
     it('rejects POST when caller is not a project member', async () => {
-      (projectsService.assertProjectMembership as jest.Mock).mockRejectedValue(new ForbiddenAppException({}, 'projects'));
+      (projectsService.assertProjectMembership as Mock).mockRejectedValue(new ForbiddenAppException({}, 'projects'));
       const dto: CreateTicketLinkDto = { url: 'https://github.com/owner/repo/pull/1' };
       await expect(controller.create('koda', 'KODA-1', dto, principal)).rejects.toThrow(ForbiddenAppException);
       expect(service.create).not.toHaveBeenCalled();
     });
 
     it('rejects GET when caller is not a project member', async () => {
-      (projectsService.assertProjectMembership as jest.Mock).mockRejectedValue(new ForbiddenAppException({}, 'projects'));
+      (projectsService.assertProjectMembership as Mock).mockRejectedValue(new ForbiddenAppException({}, 'projects'));
       await expect(controller.findAll('koda', 'KODA-1', principal)).rejects.toThrow(ForbiddenAppException);
       expect(service.findByTicket).not.toHaveBeenCalled();
     });
 
     it('rejects DELETE when caller is not a project member', async () => {
-      (projectsService.assertProjectMembership as jest.Mock).mockRejectedValue(new ForbiddenAppException({}, 'projects'));
+      (projectsService.assertProjectMembership as Mock).mockRejectedValue(new ForbiddenAppException({}, 'projects'));
       await expect(controller.remove('koda', 'KODA-1', 'link-123', principal)).rejects.toThrow(ForbiddenAppException);
       expect(service.remove).not.toHaveBeenCalled();
     });
 
     it('rejects all routes when the project slug is not found', async () => {
-      (projectsService.findProjectIdBySlug as jest.Mock).mockRejectedValue(new NotFoundAppException({}, 'projects'));
+      (projectsService.findProjectIdBySlug as Mock).mockRejectedValue(new NotFoundAppException({}, 'projects'));
       const dto: CreateTicketLinkDto = { url: 'https://github.com/owner/repo/pull/1' };
       await expect(controller.create('missing', 'KODA-1', dto, principal)).rejects.toThrow(NotFoundAppException);
       await expect(controller.findAll('missing', 'KODA-1', principal)).rejects.toThrow(NotFoundAppException);

@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * KodaDomainWriter Integration Tests
  *
@@ -93,41 +94,41 @@ describe('KodaDomainWriter Integration Tests', () => {
   const mockPrismaService = {
     client: {
       project: {
-        findUnique: jest.fn(),
-        findMany: jest.fn(),
+        findUnique: vi.fn(),
+        findMany: vi.fn(),
       },
       agent: {
-        findUnique: jest.fn(),
+        findUnique: vi.fn(),
       },
       ticket: {
-        findUnique: jest.fn(),
-        create: jest.fn(),
-        findMany: jest.fn(),
+        findUnique: vi.fn(),
+        create: vi.fn(),
+        findMany: vi.fn(),
       },
       ticketEvent: {
-        create: jest.fn(),
-        findUnique: jest.fn(),
-        findMany: jest.fn(),
+        create: vi.fn(),
+        findUnique: vi.fn(),
+        findMany: vi.fn(),
       },
       agentEvent: {
-        create: jest.fn(),
-        findUnique: jest.fn(),
-        findMany: jest.fn(),
+        create: vi.fn(),
+        findUnique: vi.fn(),
+        findMany: vi.fn(),
       },
-      $transaction: jest.fn(),
+      $transaction: vi.fn(),
     },
   };
 
   const mockRagService = {
-    indexDocument: jest.fn(),
-    importGraphify: jest.fn(),
-    validateProjectId: jest.fn(),
-    search: jest.fn(),
+    indexDocument: vi.fn(),
+    importGraphify: vi.fn(),
+    validateProjectId: vi.fn(),
+    search: vi.fn(),
   };
 
   const mockAgentsService = {
-    findById: jest.fn(),
-    generateApiKey: jest.fn(),
+    findById: vi.fn(),
+    generateApiKey: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -141,40 +142,40 @@ describe('KodaDomainWriter Integration Tests', () => {
         {
           provide: NathappOutboxService,
           useValue: {
-            record: jest.fn().mockResolvedValue(undefined),
+            record: vi.fn().mockResolvedValue(undefined),
           },
         },
         {
           // Transactions run inline; the writer's two writes hit the same mocked Prisma client.
           provide: TRANSACTION_MANAGER,
           useValue: {
-            run: jest.fn((fn: () => Promise<unknown>) => fn()),
-            getClient: jest.fn(),
-            isInTransaction: jest.fn(() => false),
+            run: vi.fn((fn: () => Promise<unknown>) => fn()),
+            getClient: vi.fn(),
+            isInTransaction: vi.fn(() => false),
           },
         },
         {
           provide: AgentAuthProvider,
           useValue: {
-            loadAgentRoles: jest.fn().mockResolvedValue(['AGENT']),
+            loadAgentRoles: vi.fn().mockResolvedValue(['AGENT']),
           },
         },
         {
           provide: TicketEventService,
           useValue: {
-            create: jest.fn().mockResolvedValue({ id: 'event-ticket-001' }),
+            create: vi.fn().mockResolvedValue({ id: 'event-ticket-001' }),
           },
         },
         {
           provide: AgentEventService,
           useValue: {
-            create: jest.fn().mockResolvedValue({ id: 'event-agent-001' }),
+            create: vi.fn().mockResolvedValue({ id: 'event-agent-001' }),
           },
         },
         {
           provide: DecisionEventService,
           useValue: {
-            create: jest.fn().mockResolvedValue({ id: 'event-decision-001' }),
+            create: vi.fn().mockResolvedValue({ id: 'event-decision-001' }),
           },
         },
       ],
@@ -189,7 +190,7 @@ describe('KodaDomainWriter Integration Tests', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   // ── AC-1: writeTicketEvent writes to ticket_events and returns WriteResult ────
@@ -222,7 +223,7 @@ describe('KodaDomainWriter Integration Tests', () => {
       const result = await kodaDomainWriter.writeTicketEvent(ticketEventData);
 
       // TicketEventService is mocked in this test module; verify KodaDomainWriter delegates to it
-      expect(ticketEventService.create as jest.Mock).toHaveBeenCalledWith(
+      expect(ticketEventService.create as Mock).toHaveBeenCalledWith(
         expect.objectContaining({
           ticketId: ticketEventData.ticketId,
           projectId: ticketEventData.projectId,
@@ -327,7 +328,7 @@ describe('KodaDomainWriter Integration Tests', () => {
       const result = await kodaDomainWriter.writeAgentAction(agentActionData);
 
       // AgentEventService is mocked in this test module; verify KodaDomainWriter delegates to it
-      expect(agentEventService.create as jest.Mock).toHaveBeenCalledWith(
+      expect(agentEventService.create as Mock).toHaveBeenCalledWith(
         expect.objectContaining({
           agentId: agentActionData.agentId,
           projectId: agentActionData.projectId,
@@ -733,7 +734,7 @@ describe('KodaDomainWriter Integration Tests', () => {
       };
 
       // Project check happens inside the mocked TicketEventService; simulate it throwing
-      (ticketEventService.create as jest.Mock).mockRejectedValue(new ForbiddenAppException({}, 'koda-domain-writer'));
+      (ticketEventService.create as Mock).mockRejectedValue(new ForbiddenAppException({}, 'koda-domain-writer'));
 
       await expect(kodaDomainWriter.writeTicketEvent(ticketEventData)).rejects.toThrow(
         ForbiddenAppException,
@@ -752,7 +753,7 @@ describe('KodaDomainWriter Integration Tests', () => {
       };
 
       // TicketEventService validates project existence and throws when not found
-      (ticketEventService.create as jest.Mock).mockRejectedValue(new ForbiddenAppException({}, 'koda-domain-writer'));
+      (ticketEventService.create as Mock).mockRejectedValue(new ForbiddenAppException({}, 'koda-domain-writer'));
 
       await expect(kodaDomainWriter.writeTicketEvent(ticketEventData)).rejects.toThrow();
     });
@@ -768,7 +769,7 @@ describe('KodaDomainWriter Integration Tests', () => {
       };
 
       // AgentEventService validates project existence and throws when not found
-      (agentEventService.create as jest.Mock).mockRejectedValue(new ForbiddenAppException({}, 'koda-domain-writer'));
+      (agentEventService.create as Mock).mockRejectedValue(new ForbiddenAppException({}, 'koda-domain-writer'));
 
       await expect(kodaDomainWriter.writeAgentAction(agentActionData)).rejects.toThrow(
         ForbiddenAppException,
@@ -787,7 +788,7 @@ describe('KodaDomainWriter Integration Tests', () => {
       };
 
       // TicketEventService validates project existence and throws when not found
-      (ticketEventService.create as jest.Mock).mockRejectedValue(new ForbiddenAppException({}, 'koda-domain-writer'));
+      (ticketEventService.create as Mock).mockRejectedValue(new ForbiddenAppException({}, 'koda-domain-writer'));
 
       await expect(kodaDomainWriter.indexDocument(indexDocData)).rejects.toThrow(
         ForbiddenAppException,

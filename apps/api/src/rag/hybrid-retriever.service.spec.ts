@@ -1,26 +1,27 @@
+import type { Mocked } from 'vitest';
 // Prevent LanceDB native module from loading — it holds open handles in tests
-jest.mock('@lancedb/lancedb', () => ({
-  connect: jest.fn().mockResolvedValue({
-    tableNames: jest.fn().mockResolvedValue([]),
-    createTable: jest.fn().mockResolvedValue({
-      delete: jest.fn().mockResolvedValue(undefined),
-      createIndex: jest.fn().mockResolvedValue(undefined),
-      add: jest.fn().mockResolvedValue(undefined),
-      query: jest.fn().mockReturnValue({ limit: jest.fn().mockReturnThis(), toArray: jest.fn().mockResolvedValue([]) }),
-      countRows: jest.fn().mockResolvedValue(0),
+vi.mock('@lancedb/lancedb', () => ({
+  connect: vi.fn().mockResolvedValue({
+    tableNames: vi.fn().mockResolvedValue([]),
+    createTable: vi.fn().mockResolvedValue({
+      delete: vi.fn().mockResolvedValue(undefined),
+      createIndex: vi.fn().mockResolvedValue(undefined),
+      add: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue([]) }),
+      countRows: vi.fn().mockResolvedValue(0),
     }),
-    openTable: jest.fn().mockResolvedValue({
-      delete: jest.fn().mockResolvedValue(undefined),
-      createIndex: jest.fn().mockResolvedValue(undefined),
-      add: jest.fn().mockResolvedValue(undefined),
-      query: jest.fn().mockReturnValue({ limit: jest.fn().mockReturnThis(), toArray: jest.fn().mockResolvedValue([]) }),
-      countRows: jest.fn().mockResolvedValue(0),
-      search: jest.fn().mockResolvedValue([]),
-      vectorSearch: jest.fn().mockReturnValue({ distanceType: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(), toArray: jest.fn().mockResolvedValue([]) }),
-      optimize: jest.fn().mockResolvedValue(undefined),
+    openTable: vi.fn().mockResolvedValue({
+      delete: vi.fn().mockResolvedValue(undefined),
+      createIndex: vi.fn().mockResolvedValue(undefined),
+      add: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue([]) }),
+      countRows: vi.fn().mockResolvedValue(0),
+      search: vi.fn().mockResolvedValue([]),
+      vectorSearch: vi.fn().mockReturnValue({ distanceType: vi.fn().mockReturnThis(), limit: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue([]) }),
+      optimize: vi.fn().mockResolvedValue(undefined),
     }),
   }),
-  Index: { fts: jest.fn().mockReturnValue({}) },
+  Index: { fts: vi.fn().mockReturnValue({}) },
 }));
 
 import { HybridRetrieverService } from './hybrid-retriever.service';
@@ -49,34 +50,34 @@ function makeRagConfig(overrides: Partial<IRagConfig> = {}): IRagConfig {
   };
 }
 
-function makeEmbeddingService(): jest.Mocked<EmbeddingService> {
+function makeEmbeddingService(): Mocked<EmbeddingService> {
   return {
-    embed: jest.fn().mockResolvedValue(Array(8).fill(0.1)),
+    embed: vi.fn().mockResolvedValue(Array(8).fill(0.1)),
     providerName: 'ollama',
     modelName: 'nomic-embed-text',
     dimensions: 8,
-  } as unknown as jest.Mocked<EmbeddingService>;
+  } as unknown as Mocked<EmbeddingService>;
 }
 
-function makeEntityStore(): jest.Mocked<EntityStore> {
+function makeEntityStore(): Mocked<EntityStore> {
   return {
-    searchEntities: jest.fn().mockReturnValue([]),
-    computeEntityScore: jest.fn().mockReturnValue(0),
-  } as unknown as jest.Mocked<EntityStore>;
+    searchEntities: vi.fn().mockReturnValue([]),
+    computeEntityScore: vi.fn().mockReturnValue(0),
+  } as unknown as Mocked<EntityStore>;
 }
 
-function makeRagRepo(): jest.Mocked<PrismaRagRepository> {
+function makeRagRepo(): Mocked<PrismaRagRepository> {
   return {
-    findProjectGraphifyEnabled: jest.fn().mockResolvedValue({ graphifyEnabled: false }),
-  } as unknown as jest.Mocked<PrismaRagRepository>;
+    findProjectGraphifyEnabled: vi.fn().mockResolvedValue({ graphifyEnabled: false }),
+  } as unknown as Mocked<PrismaRagRepository>;
 }
 
 function buildService(configOverrides: Partial<IRagConfig> = {}): {
   service: HybridRetrieverService;
   ragConfig: IRagConfig;
-  embeddingService: jest.Mocked<EmbeddingService>;
-  entityStore: jest.Mocked<EntityStore>;
-  ragRepo: jest.Mocked<PrismaRagRepository>;
+  embeddingService: Mocked<EmbeddingService>;
+  entityStore: Mocked<EntityStore>;
+  ragRepo: Mocked<PrismaRagRepository>;
 } {
   const ragConfig = makeRagConfig(configOverrides);
   const embeddingService = makeEmbeddingService();
@@ -88,7 +89,7 @@ function buildService(configOverrides: Partial<IRagConfig> = {}): {
 
 describe('HybridRetrieverService', () => {
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('constructor / onModuleInit', () => {

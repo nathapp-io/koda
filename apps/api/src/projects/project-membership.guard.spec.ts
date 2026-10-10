@@ -1,3 +1,4 @@
+import type { Mock, MockInstance } from 'vitest';
 /**
  * US-001 — ProjectMembershipGuard unit behaviour.
  *
@@ -24,9 +25,9 @@ import {
 } from '../auth/principal/koda-principal.types';
 
 interface MembershipRepoStub {
-  findBySlug: jest.Mock;
-  findMembershipRole: jest.Mock;
-  isAgentOnRoster: jest.Mock;
+  findBySlug: Mock;
+  findMembershipRole: Mock;
+  isAgentOnRoster: Mock;
 }
 
 /**
@@ -145,19 +146,19 @@ describe('ProjectMembershipGuard (US-001)', () => {
   let guard: ProjectMembershipGuard;
   let access: ProjectAccessService;
   let membershipRepo: MembershipRepoStub;
-  let findMembershipRoleSpy: jest.SpyInstance;
+  let findMembershipRoleSpy: MockInstance;
 
   const activeProject = { id: 'proj-1', slug: 'alpha', deletedAt: null };
 
   beforeEach(() => {
-    membershipRepo = { findBySlug: jest.fn(), findMembershipRole: jest.fn(), isAgentOnRoster: jest.fn() };
+    membershipRepo = { findBySlug: vi.fn(), findMembershipRole: vi.fn(), isAgentOnRoster: vi.fn() };
     access = new ProjectAccessService(membershipRepo as unknown as PrismaProjectRepository);
-    findMembershipRoleSpy = jest.spyOn(access, 'findMembershipRole');
+    findMembershipRoleSpy = vi.spyOn(access, 'findMembershipRole');
     guard = new ProjectMembershipGuard(access, new Reflector());
   });
 
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   // ---------------------------------------------------------------------------
@@ -300,8 +301,8 @@ describe('ProjectMembershipGuard (US-001)', () => {
   // ---------------------------------------------------------------------------
 
   it('AC6: returns true without calling ProjectAccessService when params.slug is absent', async () => {
-    const findProjectIdBySlugSpy = jest.spyOn(access, 'findProjectIdBySlug');
-    const assertProjectMembershipSpy = jest.spyOn(access, 'assertProjectMembership');
+    const findProjectIdBySlugSpy = vi.spyOn(access, 'findProjectIdBySlug');
+    const assertProjectMembershipSpy = vi.spyOn(access, 'assertProjectMembership');
 
     const result = await guard.canActivate(
       makeExecutionContext({ params: { id: 'ticket-1' }, user: memberUser }),
@@ -314,7 +315,7 @@ describe('ProjectMembershipGuard (US-001)', () => {
   });
 
   it('AC6 boundary: returns true when the request has no params object at all', async () => {
-    const findProjectIdBySlugSpy = jest.spyOn(access, 'findProjectIdBySlug');
+    const findProjectIdBySlugSpy = vi.spyOn(access, 'findProjectIdBySlug');
 
     const result = await guard.canActivate(makeExecutionContext({ user: memberUser }));
 

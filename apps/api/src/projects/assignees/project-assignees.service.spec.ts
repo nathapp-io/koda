@@ -3,7 +3,7 @@ import { AssigneeQuery } from './dto/assignee.query';
 import { IProjectAssigneesRepository } from './domain/project-assignee.domain';
 
 const repositoryWith = (rows: Awaited<ReturnType<IProjectAssigneesRepository['search']>>) => {
-  const search = jest.fn().mockResolvedValue(rows);
+  const search = vi.fn().mockResolvedValue(rows);
   const service = new ProjectAssigneesService({ search } as unknown as IProjectAssigneesRepository);
   return { service, search };
 };

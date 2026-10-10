@@ -47,8 +47,8 @@ const deadEvent = {
 
 function createMockOutboxAdminService() {
   return {
-    list: jest.fn().mockResolvedValue({ items: [], total: 0 }),
-    retry: jest.fn().mockResolvedValue(undefined),
+    list: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+    retry: vi.fn().mockResolvedValue(undefined),
   };
 }
 

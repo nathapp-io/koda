@@ -1,18 +1,19 @@
+import type { Mock } from 'vitest';
 import { FanOutPublisher, OutboxFanOutError, OUTBOX_LAST_ERROR_MAX_LENGTH } from './fan-out-publisher';
 import { outboxRecord } from '../../test/helpers/outbox-record';
 
 describe('FanOutPublisher', () => {
-  let recordLastError: jest.Mock;
+  let recordLastError: Mock;
   let publisher: FanOutPublisher;
 
   beforeEach(() => {
-    recordLastError = jest.fn().mockResolvedValue(undefined);
+    recordLastError = vi.fn().mockResolvedValue(undefined);
     publisher = new FanOutPublisher({ recordLastError });
   });
 
   it('calls every handler for the record type with the payload, in registration order', async () => {
-    const first = jest.fn();
-    const second = jest.fn();
+    const first = vi.fn();
+    const second = vi.fn();
     publisher.register('ticket_event', first);
     publisher.register('ticket_event', second);
 
@@ -25,7 +26,7 @@ describe('FanOutPublisher', () => {
   });
 
   it('ignores handlers registered for other types', async () => {
-    const other = jest.fn();
+    const other = vi.fn();
     publisher.register('agent_event', other);
 
     await publisher.publish(outboxRecord('ticket_event', {}));
@@ -38,8 +39,8 @@ describe('FanOutPublisher', () => {
   });
 
   it('runs the remaining handlers after one fails, then rejects with one aggregate error', async () => {
-    const failing = jest.fn().mockRejectedValue(new Error('boom'));
-    const after = jest.fn();
+    const failing = vi.fn().mockRejectedValue(new Error('boom'));
+    const after = vi.fn();
     publisher.register('ticket_event', failing);
     publisher.register('ticket_event', after);
 
@@ -103,7 +104,7 @@ describe('FanOutPublisher', () => {
   });
 
   it('registers a given handler only once per type and unregisters it', async () => {
-    const handler = jest.fn();
+    const handler = vi.fn();
     publisher.register('ticket_event', handler);
     publisher.register('ticket_event', handler);
     expect(publisher.getHandlers('ticket_event')).toHaveLength(1);

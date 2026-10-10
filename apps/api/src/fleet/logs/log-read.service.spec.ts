@@ -17,7 +17,7 @@ describe('LogReadService', () => {
   let job: { id: string; projectId: string; leaseEpoch: number };
   let logs: MemoryLogRepo;
   let n = 0;
-  const jobs = { findById: jest.fn(async (id: string) => (id === job.id ? job : null)) };
+  const jobs = { findById: vi.fn(async (id: string) => (id === job.id ? job : null)) };
   const svc = (scanBytes = 1024) => new LogReadService(jobs as never, logs as never, store, { logScanBytes: scanBytes });
   const write = (stream: LogStreamName, text: string, epoch = 1) => {
     const path = join(root, logKey(job.id, epoch, stream));

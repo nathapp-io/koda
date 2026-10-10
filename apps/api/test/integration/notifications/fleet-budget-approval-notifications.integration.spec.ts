@@ -16,7 +16,7 @@ import { FleetJobsService } from '../../../src/fleet/jobs/fleet-jobs.service';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
-jest.setTimeout(20_000);
+vi.setConfig({ testTimeout: 20_000 });
 
 describeIntegration('fleet budget and approval notifications (PG)', () => {
   let app: NathApplication;
@@ -94,7 +94,7 @@ describeIntegration('fleet budget and approval notifications (PG)', () => {
   it('hard stop: the incident event rolls back with the evaluate transaction', async () => {
     const p = await policy({ hardStop: true });
     await spent(12);
-    jest.spyOn(app.get(FleetJobsService), 'cancelForBudget').mockRejectedValueOnce(new Error('cancel failed'));
+    vi.spyOn(app.get(FleetJobsService), 'cancelForBudget').mockRejectedValueOnce(new Error('cancel failed'));
     await expect(evaluator.evaluate(p.id)).rejects.toThrow('cancel failed');
     expect(await prisma.budgetIncident.count({ where: { policyId: p.id } })).toBe(0);
     expect(await events('fleet_budget_incident')).toHaveLength(0);

@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { GitHubProvider } from './github.provider';
 import type { HttpClient } from '../factory';
 
@@ -22,12 +23,12 @@ function page(items: unknown[], next?: string) {
 }
 
 describe('GitHubProvider.fetchIssues pagination (M10)', () => {
-  let get: jest.Mock;
+  let get: Mock;
   let provider: GitHubProvider;
 
   beforeEach(() => {
-    get = jest.fn();
-    provider = new GitHubProvider('o', 'r', 'tok', { get, post: jest.fn() } as unknown as HttpClient, API);
+    get = vi.fn();
+    provider = new GitHubProvider('o', 'r', 'tok', { get, post: vi.fn() } as unknown as HttpClient, API);
   });
 
   it('asks for 100 per page in update order, since the cursor', async () => {

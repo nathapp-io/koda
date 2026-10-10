@@ -5,7 +5,7 @@ import { Prisma } from '../generated/prisma/client';
 describe('PrismaLabelRepository', () => {
   describe('createLabel', () => {
     it('throws ValidationAppException on P2002 unique-constraint violation', async () => {
-      const createMock = jest.fn().mockRejectedValue(
+      const createMock = vi.fn().mockRejectedValue(
         Object.assign(new Prisma.PrismaClientKnownRequestError('unique', { code: 'P2002', clientVersion: '0' }), {})
       );
 

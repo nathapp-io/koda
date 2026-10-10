@@ -14,7 +14,7 @@ import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
-jest.setTimeout(30_000);
+vi.setConfig({ testTimeout: 30_000 });
 
 interface Row {
   id: string; name: string; cron: string; timezone: string; feature: string; ref: string; enabled: boolean; nextFireAt: string | null;

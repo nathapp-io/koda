@@ -15,7 +15,7 @@ import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('code-intel project-role gate (Slice 4)', () => {
-  jest.setTimeout(60000);
+  vi.setConfig({ testTimeout: 60000 });
   let app: NathApplication;
   let server: Parameters<typeof request>[0];
   const tokens: Record<string, string> = {};

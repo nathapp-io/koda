@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * S4c US-003 — the roster write rules live in AgentsService: who may be added
  * (existing, not OFFLINE, not already rostered) and when a removal is refused
@@ -27,8 +28,8 @@ const record = (over: Partial<ProjectAgentRecord> = {}): ProjectAgentRecord => (
 });
 
 describe('AgentsService project roster writes (S4c US-003)', () => {
-  let repo: Record<string, jest.Mock>;
-  let txManager: { run: jest.Mock; isInTransaction: jest.Mock };
+  let repo: Record<string, Mock>;
+  let txManager: { run: Mock; isInTransaction: Mock };
   let service: AgentsService;
 
   const authConfig: IAuthConfig = { apiKeySecret: 'test-secret', agentProjectScoping: true } as IAuthConfig;
@@ -36,16 +37,16 @@ describe('AgentsService project roster writes (S4c US-003)', () => {
 
   beforeEach(() => {
     repo = {
-      findProjectBySlug: jest.fn(),
-      findBySlugScalar: jest.fn(),
-      findProjectRoster: jest.fn(),
-      addToProjectRoster: jest.fn(),
-      countOpenProjectTickets: jest.fn(),
-      removeFromProjectRoster: jest.fn(),
-      lockProjectAgents: jest.fn(),
-      isOnProjectRoster: jest.fn(),
+      findProjectBySlug: vi.fn(),
+      findBySlugScalar: vi.fn(),
+      findProjectRoster: vi.fn(),
+      addToProjectRoster: vi.fn(),
+      countOpenProjectTickets: vi.fn(),
+      removeFromProjectRoster: vi.fn(),
+      lockProjectAgents: vi.fn(),
+      isOnProjectRoster: vi.fn(),
     };
-    txManager = { run: jest.fn((fn: () => Promise<unknown>) => fn()), isInTransaction: jest.fn(() => false) };
+    txManager = { run: vi.fn((fn: () => Promise<unknown>) => fn()), isInTransaction: vi.fn(() => false) };
     service = new AgentsService(
       repo as unknown as PrismaAgentRepository,
       authConfig,

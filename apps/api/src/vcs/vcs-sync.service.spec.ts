@@ -1,15 +1,16 @@
+import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { VcsSyncService } from './vcs-sync.service';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VcsIssue } from './types';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
 
-jest.mock('./factory', () => ({
-  createVcsProvider: jest.fn(),
+vi.mock('./factory', () => ({
+  createVcsProvider: vi.fn(),
 }));
 
-jest.mock('../common/utils/encryption.util', () => ({
-  decryptToken: jest.fn().mockReturnValue('decrypted-token'),
+vi.mock('../common/utils/encryption.util', () => ({
+  decryptToken: vi.fn().mockReturnValue('decrypted-token'),
 }));
 
 import { createVcsProvider } from './factory';
@@ -55,32 +56,32 @@ function makeConnection(overrides?: Partial<VcsConnectionDomain>): VcsConnection
   };
 }
 
-function createMockRepo(): jest.Mocked<IVcsRepository> {
+function createMockRepo(): Mocked<IVcsRepository> {
   return {
-    findExistingTicketByExternalId: jest.fn().mockResolvedValue(null),
-    createTicketFromIssue: jest.fn().mockResolvedValue({ id: 't-1', number: 1, title: 'Test issue' }),
-    findActiveTicketLinksWithPrs: jest.fn().mockResolvedValue([]),
-    findTicketLinkForConnectionPr: jest.fn().mockResolvedValue(null),
-    updateTicketLinkWithPrState: jest.fn().mockResolvedValue('updated'),
-    applyMergedPrTransition: jest.fn().mockResolvedValue(undefined),
-    findTicketWithProject: jest.fn().mockResolvedValue(null),
-    findProjectById: jest.fn().mockResolvedValue(null),
-    findVcsConnectionByProjectId: jest.fn().mockResolvedValue(null),
-    findVcsConnectionById: jest.fn().mockResolvedValue(null),
-    findVcsConnectionByProjectSlug: jest.fn().mockResolvedValue(null),
-    findPollingConnections: jest.fn().mockResolvedValue([]),
-    createVcsConnection: jest.fn(),
-    updateVcsConnection: jest.fn(),
-    updateVcsConnectionLastSynced: jest.fn().mockResolvedValue(undefined),
-    deleteVcsConnection: jest.fn().mockResolvedValue(undefined),
-    createVcsSyncLog: jest.fn().mockResolvedValue({} as never),
-    findPendingOutboxEvents: jest.fn().mockResolvedValue([]),
-  } as jest.Mocked<IVcsRepository>;
+    findExistingTicketByExternalId: vi.fn().mockResolvedValue(null),
+    createTicketFromIssue: vi.fn().mockResolvedValue({ id: 't-1', number: 1, title: 'Test issue' }),
+    findActiveTicketLinksWithPrs: vi.fn().mockResolvedValue([]),
+    findTicketLinkForConnectionPr: vi.fn().mockResolvedValue(null),
+    updateTicketLinkWithPrState: vi.fn().mockResolvedValue('updated'),
+    applyMergedPrTransition: vi.fn().mockResolvedValue(undefined),
+    findTicketWithProject: vi.fn().mockResolvedValue(null),
+    findProjectById: vi.fn().mockResolvedValue(null),
+    findVcsConnectionByProjectId: vi.fn().mockResolvedValue(null),
+    findVcsConnectionById: vi.fn().mockResolvedValue(null),
+    findVcsConnectionByProjectSlug: vi.fn().mockResolvedValue(null),
+    findPollingConnections: vi.fn().mockResolvedValue([]),
+    createVcsConnection: vi.fn(),
+    updateVcsConnection: vi.fn(),
+    updateVcsConnectionLastSynced: vi.fn().mockResolvedValue(undefined),
+    deleteVcsConnection: vi.fn().mockResolvedValue(undefined),
+    createVcsSyncLog: vi.fn().mockResolvedValue({} as never),
+    findPendingOutboxEvents: vi.fn().mockResolvedValue([]),
+  } as Mocked<IVcsRepository>;
 }
 
 describe('VcsSyncService', () => {
   let service: VcsSyncService;
-  let mockRepo: jest.Mocked<IVcsRepository>;
+  let mockRepo: Mocked<IVcsRepository>;
 
   beforeEach(async () => {
     mockRepo = createMockRepo();
@@ -140,8 +141,8 @@ describe('VcsSyncService', () => {
   describe('M11: repo-qualified external ids', () => {
     it('dedups and creates with owner/repo#N', async () => {
       const repo = {
-        findExistingTicketByExternalId: jest.fn().mockResolvedValue(null),
-        createTicketFromIssue: jest.fn().mockResolvedValue({ id: 't1', number: 1, title: 'Issue' }),
+        findExistingTicketByExternalId: vi.fn().mockResolvedValue(null),
+        createTicketFromIssue: vi.fn().mockResolvedValue({ id: 't1', number: 1, title: 'Issue' }),
       };
       const service = new VcsSyncService(repo as unknown as IVcsRepository);
       const issue = { number: 5, title: 'Issue', body: null, authorLogin: 'a', url: 'u', labels: [], createdAt: new Date() };
@@ -191,7 +192,7 @@ describe('VcsSyncService', () => {
       const encryptionKey = 'test-key-32-chars-exactly-padded!!';
 
       const mockProvider = {
-        fetchIssues: jest.fn().mockResolvedValue({
+        fetchIssues: vi.fn().mockResolvedValue({
           issues: [
             makeIssue({ number: 1, title: 'Issue 1' }),
             makeIssue({ number: 2, title: 'Issue 2' }),
@@ -199,12 +200,12 @@ describe('VcsSyncService', () => {
           cursor: null,
           capped: false,
         }),
-        testConnection: jest.fn(),
-        fetchIssue: jest.fn(),
-        getPullRequestStatus: jest.fn(),
-        listPrCommits: jest.fn(),
+        testConnection: vi.fn(),
+        fetchIssue: vi.fn(),
+        getPullRequestStatus: vi.fn(),
+        listPrCommits: vi.fn(),
       };
-      (createVcsProvider as jest.Mock).mockReturnValue(mockProvider);
+      (createVcsProvider as Mock).mockReturnValue(mockProvider);
 
       mockRepo.findExistingTicketByExternalId.mockResolvedValue(null);
       mockRepo.createTicketFromIssue
@@ -225,13 +226,13 @@ describe('VcsSyncService', () => {
       const encryptionKey = 'test-key-32-chars-exactly-padded!!';
 
       const mockProvider = {
-        fetchIssues: jest.fn().mockResolvedValue({ issues: [makeIssue({ number: 1 })], cursor: null, capped: false }),
-        testConnection: jest.fn(),
-        fetchIssue: jest.fn(),
-        getPullRequestStatus: jest.fn(),
-        listPrCommits: jest.fn(),
+        fetchIssues: vi.fn().mockResolvedValue({ issues: [makeIssue({ number: 1 })], cursor: null, capped: false }),
+        testConnection: vi.fn(),
+        fetchIssue: vi.fn(),
+        getPullRequestStatus: vi.fn(),
+        listPrCommits: vi.fn(),
       };
-      (createVcsProvider as jest.Mock).mockReturnValue(mockProvider);
+      (createVcsProvider as Mock).mockReturnValue(mockProvider);
 
       mockRepo.findExistingTicketByExternalId.mockResolvedValue({ id: 'existing' } as any);
 
@@ -247,7 +248,7 @@ describe('VcsSyncService', () => {
       const encryptionKey = 'test-key-32-chars-exactly-padded!!';
 
       const mockProvider = {
-        fetchIssues: jest.fn().mockResolvedValue({
+        fetchIssues: vi.fn().mockResolvedValue({
           issues: [
             makeIssue({ number: 1 }),
             makeIssue({ number: 2 }),
@@ -255,12 +256,12 @@ describe('VcsSyncService', () => {
           cursor: null,
           capped: false,
         }),
-        testConnection: jest.fn(),
-        fetchIssue: jest.fn(),
-        getPullRequestStatus: jest.fn(),
-        listPrCommits: jest.fn(),
+        testConnection: vi.fn(),
+        fetchIssue: vi.fn(),
+        getPullRequestStatus: vi.fn(),
+        listPrCommits: vi.fn(),
       };
-      (createVcsProvider as jest.Mock).mockReturnValue(mockProvider);
+      (createVcsProvider as Mock).mockReturnValue(mockProvider);
 
       mockRepo.findExistingTicketByExternalId.mockResolvedValue(null);
       mockRepo.createTicketFromIssue
@@ -280,13 +281,13 @@ describe('VcsSyncService', () => {
       const encryptionKey = 'test-key-32-chars-exactly-padded!!';
 
       const mockProvider = {
-        fetchIssues: jest.fn().mockRejectedValue(new Error('Network error')),
-        testConnection: jest.fn(),
-        fetchIssue: jest.fn(),
-        getPullRequestStatus: jest.fn(),
-        listPrCommits: jest.fn(),
+        fetchIssues: vi.fn().mockRejectedValue(new Error('Network error')),
+        testConnection: vi.fn(),
+        fetchIssue: vi.fn(),
+        getPullRequestStatus: vi.fn(),
+        listPrCommits: vi.fn(),
       };
-      (createVcsProvider as jest.Mock).mockReturnValue(mockProvider);
+      (createVcsProvider as Mock).mockReturnValue(mockProvider);
 
       const result = await service.fullSync(project, connection, encryptionKey);
 

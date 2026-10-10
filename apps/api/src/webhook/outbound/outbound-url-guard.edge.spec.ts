@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * Adversarial-review regressions for US-002 `OutboundUrlGuard`.
  *
@@ -19,7 +20,7 @@ import { OutboundUrlGuard, OutboundUrlRejection } from './outbound-url-guard';
 
 const PUBLIC_IPV4 = '93.184.215.14';
 
-type ResolveMock = jest.Mock<Promise<string[]>, [string]>;
+type ResolveMock = Mock<(...args: [string]) => Promise<string[]>>;
 
 interface GuardHarness {
   guard: OutboundUrlGuard;
@@ -36,7 +37,7 @@ function makeGuard(
   config: Partial<IWebhookConfig> = {},
   addresses: readonly string[] = [PUBLIC_IPV4],
 ): GuardHarness {
-  const resolve = jest.fn<Promise<string[]>, [string]>(
+  const resolve = vi.fn<(...args: [string]) => Promise<string[]>>(
     (): Promise<string[]> => Promise.resolve([...addresses]),
   );
   const guard = new OutboundUrlGuard({ ...EMPTY_ALLOWLISTS, ...config }, { resolve });

@@ -8,7 +8,7 @@ const draft = (userId: string, over: Partial<NotificationDraft> = {}): Notificat
 
 function setup() {
   const user = {
-    findMany: jest.fn().mockImplementation(async ({ where }: { where: { id?: { in: string[] }; role?: string } }) => {
+    findMany: vi.fn().mockImplementation(async ({ where }: { where: { id?: { in: string[] }; role?: string } }) => {
       if (where.role === 'ADMIN') return [{ id: 'admin' }];
       return [
         { id: 'member', role: 'MEMBER' },
@@ -18,7 +18,7 @@ function setup() {
       ].filter((u) => where.id?.in.includes(u.id));
     }),
   };
-  const projectMember = { findMany: jest.fn().mockResolvedValue([{ projectId: 'p1', userId: 'member' }, { projectId: 'p1', userId: 'actor' }]) };
+  const projectMember = { findMany: vi.fn().mockResolvedValue([{ projectId: 'p1', userId: 'member' }, { projectId: 'p1', userId: 'actor' }]) };
   const eligibility = new NotificationEligibility({ client: { user, projectMember } } as never);
   return { eligibility, user, projectMember };
 }

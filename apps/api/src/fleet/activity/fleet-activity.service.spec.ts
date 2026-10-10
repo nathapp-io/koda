@@ -1,10 +1,10 @@
 import { FleetActivityService } from './fleet-activity.service';
 
 describe('FleetActivityService', () => {
-  const repo = { create: jest.fn(), findPage: jest.fn() };
+  const repo = { create: vi.fn(), findPage: vi.fn() };
   const service = new FleetActivityService(repo as never);
 
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => vi.clearAllMocks());
 
   it('records an entry with defaults for optional fields', async () => {
     await service.record({ actorType: 'USER', actorId: 'u1', action: 'runner.deleted', entityType: 'runner', entityId: 'r1' });

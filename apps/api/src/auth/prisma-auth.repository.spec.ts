@@ -1,4 +1,5 @@
-import { createMock } from '@golevelup/ts-jest';
+import type { Mock } from 'vitest';
+import { createMock } from '@golevelup/ts-vitest';
 import { ITransactionManager } from '@nathapp/nestjs-data';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaAuthRepository } from './prisma-auth.repository';
@@ -7,9 +8,9 @@ describe('PrismaAuthRepository agent methods', () => {
   const mockAgent = { id: 'a1', slug: 'bot', status: 'ACTIVE', apiKeyHash: 'hash123' };
   const prisma = createMock<PrismaService>({
     client: {
-      agent: { findFirst: jest.fn().mockResolvedValue(mockAgent) },
-      agentRoleEntry: { findMany: jest.fn().mockResolvedValue([{ role: 'DEVELOPER' }]) },
-      agentCapabilityEntry: { findMany: jest.fn().mockResolvedValue([{ capability: 'read:tickets' }]) },
+      agent: { findFirst: vi.fn().mockResolvedValue(mockAgent) },
+      agentRoleEntry: { findMany: vi.fn().mockResolvedValue([{ role: 'DEVELOPER' }]) },
+      agentCapabilityEntry: { findMany: vi.fn().mockResolvedValue([{ capability: 'read:tickets' }]) },
     } as any,
   });
 
@@ -38,13 +39,13 @@ describe('PrismaAuthRepository.findAnyUserAndCreate bootstrap race', () => {
 
   const makePrisma = (): {
     prisma: PrismaService;
-    findFirst: jest.Mock;
-    create: jest.Mock;
-    queryRaw: jest.Mock;
+    findFirst: Mock;
+    create: Mock;
+    queryRaw: Mock;
   } => {
-    const findFirst = jest.fn();
-    const create = jest.fn();
-    const queryRaw = jest.fn().mockResolvedValue([{ locked: 1 }]);
+    const findFirst = vi.fn();
+    const create = vi.fn();
+    const queryRaw = vi.fn().mockResolvedValue([{ locked: 1 }]);
     const prisma = createMock<PrismaService>({
       client: {
         $queryRaw: queryRaw,
@@ -112,7 +113,7 @@ describe('PrismaAuthRepository.findAnyUserAndCreate bootstrap race', () => {
       id: 'u3', email: 'c@example.com', name: 'C', passwordHash: 'h',
       role: 'ADMIN', tokenVersion: 0, createdAt: new Date(), updatedAt: new Date(),
     });
-    const run = jest.fn(<T>(fn: () => Promise<T>) => fn());
+    const run = vi.fn(<T>(fn: () => Promise<T>) => fn());
     const txManager = createMock<ITransactionManager>({ run });
     const repo = new PrismaAuthRepository(prisma as any, txManager);
 

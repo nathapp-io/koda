@@ -19,7 +19,7 @@ const agent: KodaPrincipal = {
 };
 
 function setup(revoked = false) {
-  const jwtAuth = { getPrincipal: jest.fn().mockResolvedValue({ ...user, revoked }) } as unknown as JwtAuthProvider;
+  const jwtAuth = { getPrincipal: vi.fn().mockResolvedValue({ ...user, revoked }) } as unknown as JwtAuthProvider;
   const bus = new UserEventBus();
   const streams = new LiveStreamRegistry();
   const controller = new MeLiveController(bus, streams, jwtAuth, { heartbeatMs: 25000, maxStreamsPerUser: 5 });
@@ -58,17 +58,17 @@ describe('MeLiveController (S4a §4)', () => {
   });
 
   it('closes the stream when the fresh principal is revoked (disabled or logged out)', async () => {
-    jest.useFakeTimers();
+    vi.useFakeTimers();
     try {
       const { controller, req } = setup(true);
       const stream = await controller.events(user, req);
       let completed = false;
       const sub = stream.subscribe({ complete: () => { completed = true; } });
-      await jest.advanceTimersByTimeAsync(25000);
+      await vi.advanceTimersByTimeAsync(25000);
       expect(completed).toBe(true);
       sub.unsubscribe();
     } finally {
-      jest.useRealTimers();
+      vi.useRealTimers();
     }
   });
 });

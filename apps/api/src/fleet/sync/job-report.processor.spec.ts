@@ -33,17 +33,17 @@ function makeRepo() {
   let nextEventId = 0;
   return {
     seed: (j: FleetJobRecord) => { job = { ...j }; events.length = 0; },
-    lockById: jest.fn(async () => job),
-    findRunnerEvents: jest.fn(async (_jobId: string, _epoch: number, seqs: readonly number[]) =>
+    lockById: vi.fn(async () => job),
+    findRunnerEvents: vi.fn(async (_jobId: string, _epoch: number, seqs: readonly number[]) =>
       events.filter((e) => seqs.includes(e.runnerSeq as number))),
-    appendEvent: jest.fn(async (jobId: string, e: StoredEvent) => {
+    appendEvent: vi.fn(async (jobId: string, e: StoredEvent) => {
       const rec: FleetJobEventRecord = { id: `ev-${++nextEventId}`, jobId, seq: 0, ...e, createdAt: NOW };
       events.push(rec);
       return rec;
     }),
-    findRunnerEventsAfter: jest.fn(async (_jobId: string, _epoch: number, after: number) =>
+    findRunnerEventsAfter: vi.fn(async (_jobId: string, _epoch: number, after: number) =>
       events.filter((e) => (e.runnerSeq ?? 0) > after).sort((a, b) => (a.runnerSeq ?? 0) - (b.runnerSeq ?? 0))),
-    update: jest.fn(async (id: string, patch: FleetJobPatch) => {
+    update: vi.fn(async (id: string, patch: FleetJobPatch) => {
       job = { ...job, id, ...patch } as FleetJobRecord;
       return job;
     }),
@@ -51,12 +51,12 @@ function makeRepo() {
 }
 
 function makeProcessor(repo: ReturnType<typeof makeRepo>) {
-  const fence = { holds: (j: FleetJobRecord, r: string, e: number) => j.runnerId === r && j.leaseEpoch === e, abandon: jest.fn() };
-  const activity = { record: jest.fn() };
-  const budgets = { signal: jest.fn() };
-  const live = { event: jest.fn(() => ({ id: 'job-live', type: 'fleet_job', projectId: 'p1', jobId: 'job-1', state: 'RUNNING', at: NOW.toISOString() })) };
+  const fence = { holds: (j: FleetJobRecord, r: string, e: number) => j.runnerId === r && j.leaseEpoch === e, abandon: vi.fn() };
+  const activity = { record: vi.fn() };
+  const budgets = { signal: vi.fn() };
+  const live = { event: vi.fn(() => ({ id: 'job-live', type: 'fleet_job', projectId: 'p1', jobId: 'job-1', state: 'RUNNING', at: NOW.toISOString() })) };
   const tx = { run: (fn: () => unknown) => fn() };
-  const closer = { openBash: jest.fn().mockResolvedValue({ approval: { id: 'a1' }, live: [APPROVAL_LIVE] }) };
+  const closer = { openBash: vi.fn().mockResolvedValue({ approval: { id: 'a1' }, live: [APPROVAL_LIVE] }) };
   const processor = new JobReportProcessor(repo as never, {} as never, live as never, fence as never, activity as never, budgets as never, closer as never, tx as never);
   return { processor, closer, activity };
 }
@@ -100,15 +100,15 @@ describe('JobReportProcessor config job end (fleet S3 D476: UPLOADING with no bu
     const repo = makeRepo();
     repo.seed({ ...runningJob, command: 'CONFIG_EDIT', bashMode: 'raw', maxCostUsd: '0' });
     const transitions = {
-      apply: jest.fn(async ({ job, to }: { job: FleetJobRecord; to: string }) => {
+      apply: vi.fn(async ({ job, to }: { job: FleetJobRecord; to: string }) => {
         const after = await repo.update(job.id, { state: to as FleetJobRecord['state'] });
         return { job: after, live: { id: `live-${to}`, type: 'fleet_job', projectId: 'p1', jobId: job.id, state: to, at: NOW.toISOString() }, approvalLive: [] };
       }),
     };
-    const fence = { holds: () => true, abandon: jest.fn() };
-    const live = { event: jest.fn(() => ({ id: 'job-live', type: 'fleet_job', projectId: 'p1', jobId: 'job-1', state: 'RUNNING', at: NOW.toISOString() })) };
-    const processor = new JobReportProcessor(repo as never, transitions as never, live as never, fence as never, { record: jest.fn() } as never,
-      { signal: jest.fn() } as never, { openBash: jest.fn() } as never, { run: (fn: () => unknown) => fn() } as never);
+    const fence = { holds: () => true, abandon: vi.fn() };
+    const live = { event: vi.fn(() => ({ id: 'job-live', type: 'fleet_job', projectId: 'p1', jobId: 'job-1', state: 'RUNNING', at: NOW.toISOString() })) };
+    const processor = new JobReportProcessor(repo as never, transitions as never, live as never, fence as never, { record: vi.fn() } as never,
+      { signal: vi.fn() } as never, { openBash: vi.fn() } as never, { run: (fn: () => unknown) => fn() } as never);
     const configResult = { outcome: 'ok', files: ['.nax/context.md', 'AGENTS.md'] };
 
     const out = await processor.process('r1', {

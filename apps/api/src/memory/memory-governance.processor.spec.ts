@@ -6,11 +6,11 @@ import { MemoryGovernanceService } from './memory-governance.service';
 import { ProjectsService } from '../projects/projects.service';
 
 const createMockGovernanceService = () => ({
-  runCleanup: jest.fn(),
+  runCleanup: vi.fn(),
 });
 
 const createMockProjectsService = () => ({
-  findAllProjectIds: jest.fn(),
+  findAllProjectIds: vi.fn(),
 });
 
 describe('MemoryGovernanceProcessor', () => {
@@ -39,7 +39,7 @@ describe('MemoryGovernanceProcessor', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('AC-1: Scheduled cleanup runs daily at 03:00 UTC', () => {

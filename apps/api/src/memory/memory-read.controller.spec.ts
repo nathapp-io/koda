@@ -36,18 +36,18 @@ describe('MemoryReadController', () => {
   let controller: MemoryReadController;
 
   const mockGovernanceService = {
-    getProjectMemory: jest.fn(),
+    getProjectMemory: vi.fn(),
   };
 
   const mockProjectAccessService = {
-    findProjectIdBySlug: jest.fn(),
-    assertProjectMembership: jest.fn(),
+    findProjectIdBySlug: vi.fn(),
+    assertProjectMembership: vi.fn(),
   };
 
   const principal = makeUserPrincipal();
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     controller = new MemoryReadController(
       mockGovernanceService as unknown as MemoryGovernanceService,
       mockProjectAccessService as unknown as ProjectAccessService,

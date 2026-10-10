@@ -14,7 +14,7 @@ import { toDispatchDto } from '../../../src/fleet/schedules/schedule-template';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
-jest.setTimeout(30_000);
+vi.setConfig({ testTimeout: 30_000 });
 
 interface JobRow { id: string; scheduleId: string | null; coalescedCount: number }
 

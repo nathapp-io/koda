@@ -7,10 +7,10 @@ import type { TicketEventDomain } from './domain/events.domain';
 
 function createMockEventsRepo() {
   return {
-    findProject: jest.fn(),
-    createAgentEvent: jest.fn(),
-    createTicketEvent: jest.fn(),
-    createDecisionEvent: jest.fn(),
+    findProject: vi.fn(),
+    createAgentEvent: vi.fn(),
+    createTicketEvent: vi.fn(),
+    createDecisionEvent: vi.fn(),
   };
 }
 
@@ -54,7 +54,7 @@ describe('TicketEventService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('create', () => {

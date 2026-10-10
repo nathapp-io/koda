@@ -16,11 +16,11 @@ const FIXTURE_PATH = join(API_ROOT, 'src/retrieval/fixtures/eval-queries.json');
 
 function mockHybridRetriever() {
   return {
-    search: jest.fn().mockResolvedValue({
+    search: vi.fn().mockResolvedValue({
       results: [],
       retrievedAt: new Date().toISOString(),
     }),
-    indexDocument: jest.fn().mockResolvedValue(undefined),
+    indexDocument: vi.fn().mockResolvedValue(undefined),
   };
 }
 

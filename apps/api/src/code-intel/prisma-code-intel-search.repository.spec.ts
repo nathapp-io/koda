@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../generated/prisma/client';
 import { PrismaCodeIntelRepository } from './prisma-code-intel.repository';
@@ -7,11 +8,11 @@ import { PrismaCodeIntelRepository } from './prisma-code-intel.repository';
 // ---------------------------------------------------------------------------
 
 function makePrismaService(overrides: {
-  symbolFindMany?: jest.Mock;
-  symbolCount?: jest.Mock;
+  symbolFindMany?: Mock;
+  symbolCount?: Mock;
 } = {}): PrismaService<PrismaClient> {
-  const symbolFindMany = overrides.symbolFindMany ?? jest.fn().mockResolvedValue([]);
-  const symbolCount = overrides.symbolCount ?? jest.fn().mockResolvedValue(0);
+  const symbolFindMany = overrides.symbolFindMany ?? vi.fn().mockResolvedValue([]);
+  const symbolCount = overrides.symbolCount ?? vi.fn().mockResolvedValue(0);
 
   return {
     client: {
@@ -40,13 +41,13 @@ async function callSearchSymbols(
 // ---------------------------------------------------------------------------
 
 describe('PrismaCodeIntelRepository.searchSymbols()', () => {
-  let mockSymbolFindMany: jest.Mock;
-  let mockSymbolCount: jest.Mock;
+  let mockSymbolFindMany: Mock;
+  let mockSymbolCount: Mock;
   let repo: PrismaCodeIntelRepository;
 
   beforeEach(() => {
-    mockSymbolFindMany = jest.fn().mockResolvedValue([]);
-    mockSymbolCount = jest.fn().mockResolvedValue(0);
+    mockSymbolFindMany = vi.fn().mockResolvedValue([]);
+    mockSymbolCount = vi.fn().mockResolvedValue(0);
     repo = new PrismaCodeIntelRepository(makePrismaService({
       symbolFindMany: mockSymbolFindMany,
       symbolCount: mockSymbolCount,
@@ -54,7 +55,7 @@ describe('PrismaCodeIntelRepository.searchSymbols()', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   // -------------------------------------------------------------------------

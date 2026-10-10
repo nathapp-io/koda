@@ -1,3 +1,4 @@
+import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { CodeIntelController } from './code-intel.controller';
@@ -108,16 +109,16 @@ function makeDto(overrides: Partial<IndexCommitDto> = {}): IndexCommitDto {
 
 describe('CodeIntelController', () => {
   let controller: CodeIntelController;
-  let astIndexService: jest.Mocked<Pick<AstIndexService, 'indexCommit' | 'getSymbol' | 'getCallers' | 'getCallees'>>;
+  let astIndexService: Mocked<Pick<AstIndexService, 'indexCommit' | 'getSymbol' | 'getCallers' | 'getCallees'>>;
 
   // ProjectAccessService mock — provides findProjectIdBySlug and assertProjectMembership
-  let mockFindProjectIdBySlug: jest.Mock;
-  let mockAssertProjectMembership: jest.Mock;
-  let mockProjectAccessService: jest.Mocked<Pick<ProjectAccessService, 'findProjectIdBySlug' | 'assertProjectMembership'>>;
+  let mockFindProjectIdBySlug: Mock;
+  let mockAssertProjectMembership: Mock;
+  let mockProjectAccessService: Mocked<Pick<ProjectAccessService, 'findProjectIdBySlug' | 'assertProjectMembership'>>;
 
   beforeEach(async () => {
-    mockFindProjectIdBySlug = jest.fn();
-    mockAssertProjectMembership = jest.fn();
+    mockFindProjectIdBySlug = vi.fn();
+    mockAssertProjectMembership = vi.fn();
 
     mockProjectAccessService = {
       findProjectIdBySlug: mockFindProjectIdBySlug,
@@ -125,10 +126,10 @@ describe('CodeIntelController', () => {
     };
 
     astIndexService = {
-      indexCommit: jest.fn(),
-      getSymbol: jest.fn(),
-      getCallers: jest.fn(),
-      getCallees: jest.fn(),
+      indexCommit: vi.fn(),
+      getSymbol: vi.fn(),
+      getCallers: vi.fn(),
+      getCallees: vi.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -143,7 +144,7 @@ describe('CodeIntelController', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   // -------------------------------------------------------------------------

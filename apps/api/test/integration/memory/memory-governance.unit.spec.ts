@@ -14,10 +14,10 @@ describe('Memory Governance', () => {
   describe('AC-28: runCleanup invokes all four sub-job methods', () => {
     it('should call expireMemories, downrankStaleLowConfidence, deduplicate, and applySupersession', () => {
       const mockGovernanceService = {
-        expireMemories: jest.fn().mockResolvedValue({ count: 5 }),
-        downrankStaleLowConfidence: jest.fn().mockResolvedValue({ count: 3 }),
-        deduplicate: jest.fn().mockResolvedValue({ count: 2 }),
-        applySupersession: jest.fn().mockResolvedValue({ count: 1 }),
+        expireMemories: vi.fn().mockResolvedValue({ count: 5 }),
+        downrankStaleLowConfidence: vi.fn().mockResolvedValue({ count: 3 }),
+        deduplicate: vi.fn().mockResolvedValue({ count: 2 }),
+        applySupersession: vi.fn().mockResolvedValue({ count: 1 }),
       };
 
       async function runCleanup() {
@@ -45,10 +45,10 @@ describe('Memory Governance', () => {
 
     it('AC-28: should return GovernanceResult with expiredCount, downrankedCount, deduplicatedCount, supersessionCount', async () => {
       const mockGovernanceService = {
-        expireMemories: jest.fn().mockResolvedValue({ count: 5 }),
-        downrankStaleLowConfidence: jest.fn().mockResolvedValue({ count: 3 }),
-        deduplicate: jest.fn().mockResolvedValue({ count: 2 }),
-        applySupersession: jest.fn().mockResolvedValue({ count: 1 }),
+        expireMemories: vi.fn().mockResolvedValue({ count: 5 }),
+        downrankStaleLowConfidence: vi.fn().mockResolvedValue({ count: 3 }),
+        deduplicate: vi.fn().mockResolvedValue({ count: 2 }),
+        applySupersession: vi.fn().mockResolvedValue({ count: 1 }),
       };
 
       async function runCleanup() {
@@ -80,7 +80,7 @@ describe('Memory Governance', () => {
       const now = new Date();
       const pastDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
       const mockRepository = {
-        findByProject: jest.fn().mockResolvedValue({
+        findByProject: vi.fn().mockResolvedValue({
           data: [
             { id: 'mem-1', ttlAt: pastDate, status: 'active' },
             { id: 'mem-2', ttlAt: pastDate, status: 'active' },
@@ -89,7 +89,7 @@ describe('Memory Governance', () => {
           page: 1,
           limit: 100,
         }),
-        upsert: jest.fn(),
+        upsert: vi.fn(),
       };
 
       const expiredItems = [
@@ -113,7 +113,7 @@ describe('Memory Governance', () => {
       const now = new Date();
       const oldDate = new Date(now.getTime() - 100 * 24 * 60 * 60 * 1000);
       const mockRepository = {
-        findByProject: jest.fn().mockResolvedValue({
+        findByProject: vi.fn().mockResolvedValue({
           data: [
             { id: 'mem-1', createdAt: oldDate, confidence: 0.2 },
             { id: 'mem-2', createdAt: oldDate, confidence: 0.2 },
@@ -122,7 +122,7 @@ describe('Memory Governance', () => {
           page: 1,
           limit: 100,
         }),
-        upsert: jest.fn(),
+        upsert: vi.fn(),
       };
 
       const staleItems = [
@@ -145,7 +145,7 @@ describe('Memory Governance', () => {
       const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
       const recentDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
       const mockRepository = {
-        findByProject: jest.fn().mockResolvedValue({
+        findByProject: vi.fn().mockResolvedValue({
           data: [
             { id: 'mem-1', createdAt: recentDate, confidence: 0.5 },
           ],
@@ -153,7 +153,7 @@ describe('Memory Governance', () => {
           page: 1,
           limit: 100,
         }),
-        upsert: jest.fn(),
+        upsert: vi.fn(),
       };
 
       const memories = [
@@ -184,13 +184,13 @@ describe('Memory Governance', () => {
       const highest = memories.reduce((a, b) => (a.confidence > b.confidence ? a : b));
 
       const mockRepository = {
-        findByProject: jest.fn().mockResolvedValue({
+        findByProject: vi.fn().mockResolvedValue({
           data: memories,
           total: 3,
           page: 1,
           limit: 100,
         }),
-        upsert: jest.fn(),
+        upsert: vi.fn(),
       };
 
       for (const mem of memories) {
@@ -218,7 +218,7 @@ describe('Memory Governance', () => {
       const newest = decisions.reduce((a, b) => (a.createdAt > b.createdAt ? a : b));
 
       const mockRepository = {
-        upsert: jest.fn(),
+        upsert: vi.fn(),
       };
 
       for (const dec of decisions) {
@@ -260,7 +260,7 @@ describe('Memory Governance', () => {
   describe('AC-35: No DELETE statements, only status updates', () => {
     it('should only update rows, never delete them', async () => {
       const mockRepository = {
-        upsert: jest.fn(),
+        upsert: vi.fn(),
       };
 
       const item = { id: 'mem-1', status: 'active' };

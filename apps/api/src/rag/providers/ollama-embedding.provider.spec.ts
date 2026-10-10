@@ -1,17 +1,18 @@
+import type { MockInstance } from 'vitest';
 import { OllamaEmbeddingProvider } from './ollama-embedding.provider';
 
 const VECTOR = [0.1, 0.2, 0.3];
 
 function mockFetch(ok: boolean, body: unknown) {
-  return jest.fn().mockResolvedValue({
+  return vi.fn().mockResolvedValue({
     ok,
-    json: jest.fn().mockResolvedValue(body),
+    json: vi.fn().mockResolvedValue(body),
   });
 }
 
 describe('OllamaEmbeddingProvider', () => {
   let provider: OllamaEmbeddingProvider;
-  let fetchSpy: jest.SpyInstance;
+  let fetchSpy: MockInstance;
 
   beforeEach(() => {
     provider = new OllamaEmbeddingProvider('http://localhost:11434', 'nomic-embed-text');
@@ -38,13 +39,13 @@ describe('OllamaEmbeddingProvider', () => {
 
   describe('embed', () => {
     it('returns embedding vector on success', async () => {
-      fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(mockFetch(true, { embedding: VECTOR }) as never);
+      fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(mockFetch(true, { embedding: VECTOR }) as never);
       const result = await provider.embed('hello world');
       expect(result).toEqual(VECTOR);
     });
 
     it('sends correct request body and URL', async () => {
-      fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(mockFetch(true, { embedding: VECTOR }) as never);
+      fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(mockFetch(true, { embedding: VECTOR }) as never);
       await provider.embed('test text');
       expect(fetchSpy).toHaveBeenCalledWith(
         'http://localhost:11434/api/embeddings',
@@ -56,14 +57,14 @@ describe('OllamaEmbeddingProvider', () => {
     });
 
     it('throws ValidationAppException when response is not ok', async () => {
-      fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(mockFetch(false, {}) as never);
+      fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(mockFetch(false, {}) as never);
       await expect(provider.embed('fail')).rejects.toThrow();
     });
   });
 
   describe('embedBatch', () => {
     it('returns array of embeddings for each text', async () => {
-      fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(mockFetch(true, { embedding: VECTOR }) as never);
+      fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(mockFetch(true, { embedding: VECTOR }) as never);
       const result = await provider.embedBatch(['a', 'b', 'c']);
       expect(result).toHaveLength(3);
       expect(result[0]).toEqual(VECTOR);

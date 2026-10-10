@@ -172,7 +172,7 @@ describe('ExtractionService', () => {
 
   describe('AC5: extractFromEvent with incomplete payload', () => {
     it('AC5: returns empty array and logs warning when ticketId is missing', () => {
-      const loggerSpy = jest.spyOn(service['logger' as any], 'warn').mockImplementation(() => {});
+      const loggerSpy = vi.spyOn(service['logger' as any], 'warn').mockImplementation(() => {});
       const event: TicketEvent = {
         type: 'ticket_event',
         id: 'event-incomplete',
@@ -192,7 +192,7 @@ describe('ExtractionService', () => {
     });
 
     it('AC5: returns empty array when projectId is missing from agent_event with decision_made', () => {
-      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const event: AgentEvent = {
         type: 'agent_event',
         id: 'event-agent-1',
@@ -270,8 +270,8 @@ describe('ExtractionService', () => {
   describe('AC6: recordDecision creates DecisionEvent and returns WriteResult', () => {
     it('AC6: recordDecision creates DecisionEvent via repository.upsert() and returns WriteResult', async () => {
       const mockRepository = {
-        upsert: jest.fn().mockResolvedValue({ id: 'memory-123' }),
-        findActive: jest.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue({ id: 'memory-123' }),
+        findActive: vi.fn().mockResolvedValue(null),
       };
 
       const result = await service.recordDecision(
@@ -288,8 +288,8 @@ describe('ExtractionService', () => {
 
     it('AC6: recordDecision upsert includes projectId, kind=DECISION, subject, predicate, object', async () => {
       const mockRepository = {
-        upsert: jest.fn().mockResolvedValue({ id: 'memory-123' }),
-        findActive: jest.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue({ id: 'memory-123' }),
+        findActive: vi.fn().mockResolvedValue(null),
       };
 
       await service.recordDecision(
@@ -314,9 +314,9 @@ describe('ExtractionService', () => {
   describe('AC7: recordDecision with existing active decision', () => {
     it('AC7: marks old decision as superseded via updateDirect when one exists', async () => {
       const mockRepository = {
-        upsert: jest.fn().mockResolvedValue({ id: 'new-memory-123' }),
-        updateDirect: jest.fn().mockResolvedValue(undefined),
-        findActive: jest.fn().mockResolvedValue({ id: 'old-decision-456' }),
+        upsert: vi.fn().mockResolvedValue({ id: 'new-memory-123' }),
+        updateDirect: vi.fn().mockResolvedValue(undefined),
+        findActive: vi.fn().mockResolvedValue({ id: 'old-decision-456' }),
       };
       await service.recordDecision(
         { projectId: 'project-123', actorId: 'agent-456', topic: 'decision', decision: 'new_decision' },
@@ -337,8 +337,8 @@ describe('ExtractionService', () => {
   describe('AC10: recordDecision confidence', () => {
     it('AC10: items from explicit recordDecision have confidence = 1.0', async () => {
       const mockRepository = {
-        upsert: jest.fn().mockResolvedValue({ id: 'memory-123' }),
-        findActive: jest.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue({ id: 'memory-123' }),
+        findActive: vi.fn().mockResolvedValue(null),
       };
 
       await service.recordDecision(

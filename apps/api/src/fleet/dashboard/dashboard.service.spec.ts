@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 import { testFleetConfig } from '../../common/test-helpers/fleet-config';
 import { DASH_NOW, dashCaps, dashJob, secAgo } from '../../common/test-helpers/fleet-dashboard';
 import { PauseSnapshot } from '../budgets/budget-rules';
@@ -10,20 +11,20 @@ const rawRunner = (over: Partial<RawRunnerRow> = {}): RawRunnerRow => ({
   daemonVersion: '0.4.0', capabilities: dashCaps(), ...over,
 });
 
-function fakeRepo(over: Partial<IDashboardRepository> = {}): jest.Mocked<IDashboardRepository> {
+function fakeRepo(over: Partial<IDashboardRepository> = {}): Mocked<IDashboardRepository> {
   return {
-    findRunners: jest.fn().mockResolvedValue([rawRunner(), rawRunner({ id: 'r2', name: 'corrupt', capabilities: { broken: true } })]),
-    findHeldRefs: jest.fn().mockResolvedValue([{ runnerId: 'r1', repoId: 'repo1' }]),
-    findActiveJobs: jest.fn().mockResolvedValue([dashJob({ lastHeartbeatAt: secAgo(700) })]),
-    findQueuedWindow: jest.fn().mockResolvedValue([]),
-    findRecentJobs: jest.fn().mockResolvedValue([]),
-    countActiveByState: jest.fn().mockResolvedValue(new Map([['RUNNING', 1]])),
-    pendingSummaryByJob: jest.fn().mockResolvedValue([]),
+    findRunners: vi.fn().mockResolvedValue([rawRunner(), rawRunner({ id: 'r2', name: 'corrupt', capabilities: { broken: true } })]),
+    findHeldRefs: vi.fn().mockResolvedValue([{ runnerId: 'r1', repoId: 'repo1' }]),
+    findActiveJobs: vi.fn().mockResolvedValue([dashJob({ lastHeartbeatAt: secAgo(700) })]),
+    findQueuedWindow: vi.fn().mockResolvedValue([]),
+    findRecentJobs: vi.fn().mockResolvedValue([]),
+    countActiveByState: vi.fn().mockResolvedValue(new Map([['RUNNING', 1]])),
+    pendingSummaryByJob: vi.fn().mockResolvedValue([]),
     ...over,
-  } as jest.Mocked<IDashboardRepository>;
+  } as Mocked<IDashboardRepository>;
 }
 
-const budgets = { snapshot: jest.fn().mockResolvedValue(PauseSnapshot.of([], DASH_NOW)) } as unknown as BudgetGate;
+const budgets = { snapshot: vi.fn().mockResolvedValue(PauseSnapshot.of([], DASH_NOW)) } as unknown as BudgetGate;
 
 describe('FleetDashboardService (S2b (c) §1)', () => {
   it('reads with the caps and windows of the spec and tolerates a corrupt runner', async () => {
@@ -44,7 +45,7 @@ describe('FleetDashboardService (S2b (c) §1)', () => {
   it('passes the credential expiry window to the attention rules (S3 §4.4)', async () => {
     const soon = new Date(DASH_NOW.getTime() + 10 * 86_400_000).toISOString();
     const caps = dashCaps({ credentials: [{ providerId: 'deepseek', available: true, stored: { kind: 'oauth', expires: soon, expired: false }, ambient: false }] });
-    const repo = fakeRepo({ findRunners: jest.fn().mockResolvedValue([rawRunner({ capabilities: caps })]), findActiveJobs: jest.fn().mockResolvedValue([]) });
+    const repo = fakeRepo({ findRunners: vi.fn().mockResolvedValue([rawRunner({ capabilities: caps })]), findActiveJobs: vi.fn().mockResolvedValue([]) });
     const v7 = await new FleetDashboardService(repo, budgets, testFleetConfig()).snapshot({ kind: 'global' }, DASH_NOW);
     expect(v7.attention).toEqual([]);
     const v14 = await new FleetDashboardService(repo, budgets, testFleetConfig({ credentialExpiryWarnDays: 14 })).snapshot({ kind: 'global' }, DASH_NOW);
@@ -53,7 +54,7 @@ describe('FleetDashboardService (S2b (c) §1)', () => {
 
   it('asks pending approvals only for the listed (capped) jobs', async () => {
     const many = Array.from({ length: 201 }, (_, i) => dashJob({ id: `j${i}` }));
-    const repo = fakeRepo({ findActiveJobs: jest.fn().mockResolvedValue(many) });
+    const repo = fakeRepo({ findActiveJobs: vi.fn().mockResolvedValue(many) });
     await new FleetDashboardService(repo, budgets, testFleetConfig()).snapshot({ kind: 'global' }, DASH_NOW);
     expect(repo.pendingSummaryByJob.mock.calls[0][0]).toHaveLength(200);
   });

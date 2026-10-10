@@ -1,3 +1,4 @@
+import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpException } from '@nestjs/common';
 import { AuthException } from '@nathapp/nestjs-common';
@@ -71,23 +72,23 @@ async function rejectionOf(promise: Promise<unknown>): Promise<HttpException> {
 
 describe('VcsWebhookController', () => {
   let controller: VcsWebhookController;
-  let mockVcsConnectionService: jest.Mocked<Pick<VcsConnectionService, 'findInboundTarget'>>;
-  let mockWebhookService: jest.Mocked<Pick<VcsWebhookService, 'verifySignature' | 'handleWebhook'>>;
-  let mockReplayGuard: { assertFresh: jest.Mock; forget: jest.Mock };
+  let mockVcsConnectionService: Mocked<Pick<VcsConnectionService, 'findInboundTarget'>>;
+  let mockWebhookService: Mocked<Pick<VcsWebhookService, 'verifySignature' | 'handleWebhook'>>;
+  let mockReplayGuard: { assertFresh: Mock; forget: Mock };
 
   beforeEach(async () => {
     mockVcsConnectionService = {
-      findInboundTarget: jest.fn().mockResolvedValue(makeTarget()),
+      findInboundTarget: vi.fn().mockResolvedValue(makeTarget()),
     };
 
     mockWebhookService = {
-      verifySignature: jest.fn().mockReturnValue(true),
-      handleWebhook: jest.fn().mockResolvedValue({ success: true }),
+      verifySignature: vi.fn().mockReturnValue(true),
+      handleWebhook: vi.fn().mockResolvedValue({ success: true }),
     };
 
     mockReplayGuard = {
-      assertFresh: jest.fn().mockResolvedValue(undefined),
-      forget: jest.fn().mockResolvedValue(undefined),
+      assertFresh: vi.fn().mockResolvedValue(undefined),
+      forget: vi.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -103,7 +104,7 @@ describe('VcsWebhookController', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   /** The 401 a caller gets for a bad signature on an existing connection: the reference shape. */

@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * US-002 AC1–AC15: `OutboundUrlGuard` — webhook destination syntax, credentials and
  * resolved destinations.
@@ -22,7 +23,7 @@ const PUBLIC_IPV4 = '93.184.215.14';
 const PUBLIC_IPV6 = '2606:2800:21f:cb07:6820:80da:af6b:8b2e';
 const PRIVATE_IPV4 = '10.0.0.1';
 
-type ResolveMock = jest.Mock<Promise<string[]>, [string]>;
+type ResolveMock = Mock<(...args: [string]) => Promise<string[]>>;
 
 interface GuardHarness {
   guard: OutboundUrlGuard;
@@ -40,7 +41,7 @@ function makeConfig(overrides: Partial<IWebhookConfig> = {}): IWebhookConfig {
 }
 
 function makeResolveMock(addresses: readonly string[]): ResolveMock {
-  return jest.fn<Promise<string[]>, [string]>(
+  return vi.fn<(...args: [string]) => Promise<string[]>>(
     (): Promise<string[]> => Promise.resolve([...addresses]),
   );
 }

@@ -5,18 +5,14 @@ import { resolve } from 'path';
 import { Logger } from '@nestjs/common';
 config({ path: resolve(__dirname, '.env.test'), quiet: true });
 
-// @nathapp/nestjs-prisma >= 4.0.3 `createMockPrismaService` reads `globalThis.jest`, but Jest injects
-// `jest` per module and never sets it on globalThis. Remove once nathapp-nestjs#14 is fixed.
-(globalThis as { jest?: typeof jest }).jest ??= jest;
-
 // Mock NestJS Logger to no-ops to reduce test noise
-jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
-jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
-jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
-jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => {});
-jest.spyOn(Logger.prototype, 'verbose').mockImplementation(() => {});
+vi.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
+vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
+vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
+vi.spyOn(Logger.prototype, 'debug').mockImplementation(() => {});
+vi.spyOn(Logger.prototype, 'verbose').mockImplementation(() => {});
 
-// Jest asymmetric matchers (e.g. expect.objectContaining) expose an
+// Asymmetric matchers (e.g. expect.objectContaining) expose an
 // `asymmetricMatch` method; we narrow to this shape rather than using `any`.
 interface AsymmetricMatcher {
   asymmetricMatch(other: unknown): boolean;
@@ -30,7 +26,7 @@ function isAsymmetricMatcher(value: unknown): value is AsymmetricMatcher {
   );
 }
 
-// `expect` is global only inside a Jest environment; guard so this setup file
+// `expect` is global only inside the test runner; guard so this setup file
 // stays import-safe elsewhere.
 if (typeof expect !== 'undefined' && typeof expect.extend === 'function') {
   expect.extend({

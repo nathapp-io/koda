@@ -17,6 +17,7 @@
  *
  * @see HybridRetrieverService
  */
+import { HybridRetrieverService as RealHybridRetrieverService } from '../../../src/rag/hybrid-retriever.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { RAG_CFG } from '../../../src/config/rag.config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -27,7 +28,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 
-jest.setTimeout(30000);
+vi.setConfig({ testTimeout: 30000 });
 
 class FakeEmbeddingService {
   readonly providerName = 'fake';
@@ -53,13 +54,7 @@ class FakeEmbeddingService {
  * RED PHASE: HybridRetrieverService is not yet implemented.
  * Once src/rag/hybrid-retriever.service.ts is created, remove this fallback.
  */
-let HybridRetrieverService: any;
-try {
-  const mod = require('../../../src/rag/hybrid-retriever.service');
-  HybridRetrieverService = mod.HybridRetrieverService;
-} catch {
-  HybridRetrieverService = undefined;
-}
+const HybridRetrieverService: any = RealHybridRetrieverService;
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 describe('HybridRetrieverService integration', () => {
@@ -83,10 +78,10 @@ describe('HybridRetrieverService integration', () => {
     };
 
     const fakeEntityStore = {
-      searchEntities: jest.fn().mockReturnValue([]),
-      indexEntity: jest.fn(),
-      getByTag: jest.fn().mockReturnValue([]),
-      computeEntityScore: jest.fn().mockReturnValue(0),
+      searchEntities: vi.fn().mockReturnValue([]),
+      indexEntity: vi.fn(),
+      getByTag: vi.fn().mockReturnValue([]),
+      computeEntityScore: vi.fn().mockReturnValue(0),
     };
 
     module = await Test.createTestingModule({

@@ -70,11 +70,11 @@ describe('CommentsController', () => {
   };
 
   const mockCommentsService = {
-    create: jest.fn(),
-    findByTicket: jest.fn(),
-    findById: jest.fn(),
-    update: jest.fn(),
-    delete: jest.fn(),
+    create: vi.fn(),
+    findByTicket: vi.fn(),
+    findById: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -94,7 +94,7 @@ describe('CommentsController', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('POST /api/projects/:slug/tickets/:ref/comments', () => {

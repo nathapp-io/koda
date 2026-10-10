@@ -20,10 +20,10 @@ describe('LogUploadService', () => {
   const store = new LocalDiskLogStore({ artifactDir: root });
   const cfg = { logMaxBytes: 32, logChunkMaxBytes: 16, logRunnerBytesPerSec: 1_000_000 };
   let job: { id: string; projectId: string; runnerId: string | null; leaseEpoch: number; state: string };
-  const jobs = { findById: jest.fn(async () => job), lockById: jest.fn(async () => job) };
-  const fence = { holds: jest.fn((j: typeof job, r: string, e: number) => j.runnerId === r && j.leaseEpoch === e), abandon: jest.fn() };
-  const tx = { run: jest.fn((fn: () => unknown) => fn()) };
-  const live = { touch: jest.fn() };
+  const jobs = { findById: vi.fn(async () => job), lockById: vi.fn(async () => job) };
+  const fence = { holds: vi.fn((j: typeof job, r: string, e: number) => j.runnerId === r && j.leaseEpoch === e), abandon: vi.fn() };
+  const tx = { run: vi.fn((fn: () => unknown) => fn()) };
+  const live = { touch: vi.fn() };
   let logs: MemoryLogRepo;
   let svc: LogUploadService;
   let n = 0;
@@ -34,7 +34,7 @@ describe('LogUploadService', () => {
     logs = new MemoryLogRepo();
     svc = new LogUploadService(jobs as never, fence as never, tx as never, store, logs as never, live as never, cfg as never);
   });
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => vi.clearAllMocks());
 
   const up = (body: string, over: Partial<LogUpload> = {}) => {
     const bytes = Buffer.from(body);

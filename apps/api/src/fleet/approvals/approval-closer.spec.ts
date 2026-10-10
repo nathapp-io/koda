@@ -13,29 +13,29 @@ function fakes() {
   const rows = new Map<string, FleetApprovalRecord>();
   let seq = 0;
   const repo = {
-    create: jest.fn(async (d: NewFleetApproval) => {
+    create: vi.fn(async (d: NewFleetApproval) => {
       const row = { id: `a${++seq}`, status: 'pending', jobId: null, leaseEpoch: null, naxAskId: null, outcome: null, expiresAt: null,
         decision: null, decidedById: null, decidedAt: null, resolvedBy: null, comment: null, createdAt: NOW, updatedAt: NOW, ...d } as FleetApprovalRecord;
       rows.set(row.id, row);
       return row;
     }),
-    findPendingForPolicy: jest.fn(async (id: string) => [...rows.values()].find((r) => r.policyId === id && r.status === 'pending') ?? null),
-    findByAsk: jest.fn(async (jobId: string, leaseEpoch: number, naxAskId: string) =>
+    findPendingForPolicy: vi.fn(async (id: string) => [...rows.values()].find((r) => r.policyId === id && r.status === 'pending') ?? null),
+    findByAsk: vi.fn(async (jobId: string, leaseEpoch: number, naxAskId: string) =>
       [...rows.values()].find((r) => r.jobId === jobId && r.leaseEpoch === leaseEpoch && r.naxAskId === naxAskId) ?? null),
-    findPendingForJob: jest.fn(async (jobId: string) =>
+    findPendingForJob: vi.fn(async (jobId: string) =>
       [...rows.values()].filter((r) => r.jobId === jobId && r.status === 'pending')),
-    lockById: jest.fn(async (id: string) => rows.get(id) ?? null),
-    resolve: jest.fn(async (id: string, x: Partial<FleetApprovalRecord>) => {
+    lockById: vi.fn(async (id: string) => rows.get(id) ?? null),
+    resolve: vi.fn(async (id: string, x: Partial<FleetApprovalRecord>) => {
       const row = { ...(rows.get(id) as FleetApprovalRecord), ...x };
       rows.set(id, row);
       return row;
     }),
-    findProjectSlug: jest.fn(async () => 'web'),
+    findProjectSlug: vi.fn(async () => 'web'),
   };
-  const activity = { record: jest.fn(async () => undefined) };
-  const webhooks = { dispatch: jest.fn(async () => undefined) };
-  const live = { event: jest.fn((a: FleetApprovalRecord) => (a.projectId ? [{ approvalId: a.id, status: a.status }] : [])) };
-  const outbox = { record: jest.fn(async (e: { type: string }) => ({ id: 'ob1', ...e })) };
+  const activity = { record: vi.fn(async () => undefined) };
+  const webhooks = { dispatch: vi.fn(async () => undefined) };
+  const live = { event: vi.fn((a: FleetApprovalRecord) => (a.projectId ? [{ approvalId: a.id, status: a.status }] : [])) };
+  const outbox = { record: vi.fn(async (e: { type: string }) => ({ id: 'ob1', ...e })) };
   const closer = new ApprovalCloser(repo as never, activity as never, webhooks as never, live as never, outbox as never);
   return { closer, repo, activity, webhooks, outbox, rows };
 }

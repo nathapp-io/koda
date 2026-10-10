@@ -1,26 +1,27 @@
+import type { Mock } from 'vitest';
 import { AstIndexService } from './ast-index.service';
 import type { CodeGraphService } from './code-graph.service';
 import type { SymbolStore, SymbolData } from './symbol-store';
 import type { ITransactionManager } from '@nathapp/nestjs-data';
 
 describe('AstIndexService project-scoped ids (M13)', () => {
-  let store: { upsertSymbol: jest.Mock; deleteByFile: jest.Mock };
-  let graph: { parseSourceFile: jest.Mock; extractSymbols: jest.Mock; resolveRelationships: jest.Mock };
+  let store: { upsertSymbol: Mock; deleteByFile: Mock };
+  let graph: { parseSourceFile: Mock; extractSymbols: Mock; resolveRelationships: Mock };
   let service: AstIndexService;
   const calls: string[] = [];
 
   beforeEach(() => {
     calls.length = 0;
     store = {
-      upsertSymbol: jest.fn(async (s: SymbolData) => { calls.push(`upsert:${s.file}`); return s; }),
-      deleteByFile: jest.fn(async (_p: string, _r: string, file: string) => { calls.push(`delete:${file}`); }),
+      upsertSymbol: vi.fn(async (s: SymbolData) => { calls.push(`upsert:${s.file}`); return s; }),
+      deleteByFile: vi.fn(async (_p: string, _r: string, file: string) => { calls.push(`delete:${file}`); }),
     };
     graph = {
-      parseSourceFile: jest.fn((path: string) => ({ path })),
-      extractSymbols: jest.fn(({ path }: { path: string }) => [
+      parseSourceFile: vi.fn((path: string) => ({ path })),
+      extractSymbols: vi.fn(({ path }: { path: string }) => [
         { name: 'alpha', kind: 'function', file: path, startLine: 1, endLine: 2, callers: [], callees: [], symbolId: '' },
       ]),
-      resolveRelationships: jest.fn(),
+      resolveRelationships: vi.fn(),
     };
     const tx = { run: <T>(fn: () => Promise<T>) => fn() } as unknown as ITransactionManager;
     service = new AstIndexService(graph as unknown as CodeGraphService, store as unknown as SymbolStore, tx);

@@ -16,7 +16,7 @@ import { resetDb } from '../../helpers/reset-db';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
-jest.setTimeout(20_000); // idle syncs here (no commands, no acks) wait the full FLEET_SYNC_WAIT_MS
+vi.setConfig({ testTimeout: 20_000 }); // idle syncs here (no commands, no acks) wait the full FLEET_SYNC_WAIT_MS
 
 const ask = (naxAskId: string, deadlineMs = 300_000): ApprovalRequestEventPayload => ({
   naxAskId, deadlineAt: new Date(Date.now() + deadlineMs).toISOString(), command: 'bun run test', commandTruncated: false,

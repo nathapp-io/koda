@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { NotifyException, NotifyExceptionCode } from '@nathapp/nestjs-notify';
 import { EmailDispatcher } from './email-dispatcher';
 import { PermanentNotificationError } from './permanent-notification.error';
@@ -13,19 +14,19 @@ const row = (over: Partial<EmailScheduleRow> = {}): EmailScheduleRow => ({
 
 function setup() {
   const schedule = {
-    closeAbandonedInvites: jest.fn(async () => 0),
-    claimDue: jest.fn(async () => [] as EmailScheduleRow[]),
-    markSent: jest.fn(async () => undefined),
-    markSkipped: jest.fn(async () => undefined),
-    markFailed: jest.fn(async () => undefined),
-    retryAt: jest.fn(async () => undefined),
+    closeAbandonedInvites: vi.fn(async () => 0),
+    claimDue: vi.fn(async () => [] as EmailScheduleRow[]),
+    markSent: vi.fn(async () => undefined),
+    markSkipped: vi.fn(async () => undefined),
+    markFailed: vi.fn(async () => undefined),
+    retryAt: vi.fn(async () => undefined),
   };
-  const builder = { build: jest.fn() };
-  const notify = { send: jest.fn(async (_req?: { recipient?: string }) => undefined) };
+  const builder = { build: vi.fn() };
+  const notify = { send: vi.fn(async (_req?: { recipient?: string }) => undefined) };
   const email = { configured: true, config: () => ({ maxAttempts: 5 }) };
   const dispatcher = new EmailDispatcher(schedule as never, builder as never, notify as never, email as never);
-  const logger = (dispatcher as unknown as { logger: { warn: jest.Mock } }).logger;
-  const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+  const logger = (dispatcher as unknown as { logger: { warn: Mock } }).logger;
+  const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
   return { dispatcher, schedule, builder, notify, email, warn };
 }
 
@@ -163,18 +164,18 @@ describe('EmailDispatcher (S4b US-002)', () => {
 
 describe('EmailDispatcher scheduled ticks (S4b US-002)', () => {
   afterEach(() => {
-    jest.useRealTimers();
+    vi.useRealTimers();
   });
 
   it('starts a ~30 second interval on init and stops it on destroy', async () => {
-    jest.useFakeTimers();
+    vi.useFakeTimers();
     const { dispatcher, schedule } = setup();
     dispatcher.onModuleInit();
-    await jest.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(schedule.claimDue).toHaveBeenCalledTimes(1);
     dispatcher.onModuleDestroy();
     schedule.claimDue.mockClear();
-    await jest.advanceTimersByTimeAsync(120_000);
+    await vi.advanceTimersByTimeAsync(120_000);
     expect(schedule.claimDue).not.toHaveBeenCalled();
   });
 

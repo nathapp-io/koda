@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { ForbiddenAppException, ThrottleAppException } from '@nathapp/nestjs-common';
 import { firstValueFrom, take, toArray } from 'rxjs';
 import type { ProjectAccessService } from '../projects/project-access.service';
@@ -19,13 +20,13 @@ const agent: KodaPrincipal = {
   name: 'bot', blacklisted: false, revoked: false, authorities: [],
 };
 
-function setup(overrides: { membership?: jest.Mock; revoked?: boolean } = {}) {
+function setup(overrides: { membership?: Mock; revoked?: boolean } = {}) {
   const access = {
-    findProjectIdBySlug: jest.fn().mockResolvedValue('p1'),
-    assertProjectMembership: overrides.membership ?? jest.fn().mockResolvedValue(undefined),
+    findProjectIdBySlug: vi.fn().mockResolvedValue('p1'),
+    assertProjectMembership: overrides.membership ?? vi.fn().mockResolvedValue(undefined),
   } as unknown as ProjectAccessService;
   const jwtAuth = {
-    getPrincipal: jest.fn().mockResolvedValue({ ...user, revoked: overrides.revoked ?? false }),
+    getPrincipal: vi.fn().mockResolvedValue({ ...user, revoked: overrides.revoked ?? false }),
   } as unknown as JwtAuthProvider;
   const bus = new ProjectEventBus();
   const streams = new LiveStreamRegistry();
@@ -41,7 +42,7 @@ describe('LiveController', () => {
   });
 
   it('propagates the membership refusal and takes no stream slot', async () => {
-    const denied = jest.fn().mockRejectedValue(new ForbiddenAppException({}, 'projects'));
+    const denied = vi.fn().mockRejectedValue(new ForbiddenAppException({}, 'projects'));
     const { controller, streams, req } = setup({ membership: denied });
     await expect(controller.events('proj', user, req)).rejects.toBeInstanceOf(ForbiddenAppException);
     expect(streams.activeFor('u1')).toBe(0);
@@ -67,33 +68,33 @@ describe('LiveController', () => {
   });
 
   it('re-validates with the fresh principal: a revoked user loses access', async () => {
-    jest.useFakeTimers();
+    vi.useFakeTimers();
     const { controller, jwtAuth, req } = setup({ revoked: true });
     const stream = await controller.events('proj', user, req);
     let completed = false;
     const sub = stream.subscribe({ complete: () => { completed = true; } });
 
-    await jest.advanceTimersByTimeAsync(25000);
+    await vi.advanceTimersByTimeAsync(25000);
 
     expect(jwtAuth.getPrincipal).toHaveBeenCalledWith(expect.objectContaining({ sub: 'u1', tokenVersion: 0 }));
     expect(completed).toBe(true);
     sub.unsubscribe();
-    jest.useRealTimers();
+    vi.useRealTimers();
   });
 
   it('re-validates membership live: removal loses access', async () => {
-    jest.useFakeTimers();
-    const membership = jest.fn().mockResolvedValueOnce(undefined).mockRejectedValue(new ForbiddenAppException({}, 'projects'));
+    vi.useFakeTimers();
+    const membership = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValue(new ForbiddenAppException({}, 'projects'));
     const { controller, req } = setup({ membership });
     const stream = await controller.events('proj', user, req);
     let completed = false;
     const sub = stream.subscribe({ complete: () => { completed = true; } });
 
-    await jest.advanceTimersByTimeAsync(25000);
+    await vi.advanceTimersByTimeAsync(25000);
 
     expect(completed).toBe(true);
     sub.unsubscribe();
-    jest.useRealTimers();
+    vi.useRealTimers();
   });
 
   it('skips the global throttler', () => {

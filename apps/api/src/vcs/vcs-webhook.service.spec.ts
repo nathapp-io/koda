@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { VcsWebhookService, GitHubWebhookPayload, WebhookHandleResult } from './vcs-webhook.service';
 import { VcsSyncService } from './vcs-sync.service';
@@ -20,24 +21,24 @@ interface SharedEnqueuedEvent {
 
 function createMockVcsRepository(sharedEnqueuedEvents?: SharedEnqueuedEvent[]): IVcsRepository {
   return {
-    findProjectById: jest.fn().mockResolvedValue(null),
-    findVcsConnectionByProjectId: jest.fn().mockResolvedValue(null),
-    findVcsConnectionById: jest.fn().mockResolvedValue(null),
-    findVcsConnectionByProjectSlug: jest.fn().mockResolvedValue(null),
-    findPollingConnections: jest.fn().mockResolvedValue([]),
-    createVcsConnection: jest.fn(),
-    updateVcsConnection: jest.fn(),
-    updateVcsConnectionLastSynced: jest.fn(),
-    deleteVcsConnection: jest.fn(),
-    createVcsSyncLog: jest.fn(),
-    findExistingTicketByExternalId: jest.fn().mockResolvedValue(null),
-    createTicketFromIssue: jest.fn(),
-    findTicketWithProject: jest.fn().mockResolvedValue(null),
-    findActiveTicketLinksWithPrs: jest.fn().mockResolvedValue([]),
-    findTicketLinkForConnectionPr: jest.fn().mockResolvedValue(null),
-    updateTicketLinkWithPrState: jest.fn().mockResolvedValue('updated'),
-    applyMergedPrTransition: jest.fn(),
-    findPendingOutboxEvents: jest.fn().mockImplementation((query: OutboxDedupQuery) => {
+    findProjectById: vi.fn().mockResolvedValue(null),
+    findVcsConnectionByProjectId: vi.fn().mockResolvedValue(null),
+    findVcsConnectionById: vi.fn().mockResolvedValue(null),
+    findVcsConnectionByProjectSlug: vi.fn().mockResolvedValue(null),
+    findPollingConnections: vi.fn().mockResolvedValue([]),
+    createVcsConnection: vi.fn(),
+    updateVcsConnection: vi.fn(),
+    updateVcsConnectionLastSynced: vi.fn(),
+    deleteVcsConnection: vi.fn(),
+    createVcsSyncLog: vi.fn(),
+    findExistingTicketByExternalId: vi.fn().mockResolvedValue(null),
+    createTicketFromIssue: vi.fn(),
+    findTicketWithProject: vi.fn().mockResolvedValue(null),
+    findActiveTicketLinksWithPrs: vi.fn().mockResolvedValue([]),
+    findTicketLinkForConnectionPr: vi.fn().mockResolvedValue(null),
+    updateTicketLinkWithPrState: vi.fn().mockResolvedValue('updated'),
+    applyMergedPrTransition: vi.fn(),
+    findPendingOutboxEvents: vi.fn().mockImplementation((query: OutboxDedupQuery) => {
       if (!sharedEnqueuedEvents) return Promise.resolve([]);
       const dedupWindowMs = 5 * 60 * 1000;
       const now = Date.now();
@@ -53,7 +54,7 @@ function createMockVcsRepository(sharedEnqueuedEvents?: SharedEnqueuedEvent[]): 
   };
 }
 
-function createMockOutboxService(recordMock: jest.Mock) {
+function createMockOutboxService(recordMock: Mock) {
   return {
     record: recordMock,
   };
@@ -61,13 +62,13 @@ function createMockOutboxService(recordMock: jest.Mock) {
 
 function createMockSyncService() {
   return {
-    filterByAllowedAuthors: jest.fn().mockReturnValue([]),
+    filterByAllowedAuthors: vi.fn().mockReturnValue([]),
   };
 }
 
 function createMockPrSyncService() {
   return {
-    applyMergedPr: jest.fn().mockResolvedValue('updated'),
+    applyMergedPr: vi.fn().mockResolvedValue('updated'),
   };
 }
 
@@ -143,7 +144,7 @@ function resolveOutboxEvent(overrides?: Partial<OutboxEventDomain>): OutboxEvent
 }
 
 function buildTestingModule(
-  recordMock: jest.Mock,
+  recordMock: Mock,
   sharedEnqueuedEvents?: SharedEnqueuedEvent[],
 ) {
   return Test.createTestingModule({
@@ -154,7 +155,7 @@ function buildTestingModule(
       { provide: VcsPrSyncService, useValue: createMockPrSyncService() },
       { provide: NathappOutboxService, useValue: createMockOutboxService(recordMock) },
       { provide: VCS_CFG, useValue: { encryptionKey: 'test-key', defaultPollingIntervalMs: 600000, githubApiUrl: 'https://api.github.com' } },
-      { provide: VcsLinkExtractorService, useValue: { extractLinksFromPr: jest.fn() } },
+      { provide: VcsLinkExtractorService, useValue: { extractLinksFromPr: vi.fn() } },
     ],
   }).compile();
 }
@@ -162,10 +163,10 @@ function buildTestingModule(
 describe('VcsWebhookService', () => {
   describe('handlePush (via handleWebhook)', () => {
     let service: VcsWebhookService;
-    let mockRecord: jest.Mock<Promise<OutboxEventDomain>, [OutboxEventInput]>;
+    let mockRecord: Mock<(...args: [OutboxEventInput]) => Promise<OutboxEventDomain>>;
 
     beforeEach(async () => {
-      mockRecord = jest.fn().mockResolvedValue(resolveOutboxEvent());
+      mockRecord = vi.fn().mockResolvedValue(resolveOutboxEvent());
       const module: TestingModule = await buildTestingModule(mockRecord);
       service = module.get<VcsWebhookService>(VcsWebhookService);
     });
@@ -257,7 +258,7 @@ describe('VcsWebhookService', () => {
       });
 
       // Simulate DB dedup check failure — findPendingOutboxEvents throws
-      const repo = (service as unknown as { vcsRepo: { findPendingOutboxEvents: jest.Mock } }).vcsRepo;
+      const repo = (service as unknown as { vcsRepo: { findPendingOutboxEvents: Mock } }).vcsRepo;
       repo.findPendingOutboxEvents.mockRejectedValueOnce(new Error('DB connection timeout'));
 
       // SPEC: when DB dedup check fails, the handler must NOT fall through to enqueue.
@@ -276,7 +277,7 @@ describe('VcsWebhookService', () => {
       if (!thrownError) {
         // If no error was thrown, we expect the result to indicate failure
         // (non-2xx response so provider retries)
-        fail('Expected HttpException or failure result when DB dedup check throws, but got neither');
+        assert.fail('Expected HttpException or failure result when DB dedup check throws, but got neither');
       }
     });
 
@@ -291,7 +292,7 @@ describe('VcsWebhookService', () => {
       const commit3 = { id: 'commit-3', message: 'm', timestamp: 't', author: { name: 'n', email: 'e' }, added: [], removed: [], modified: [] };
 
       let currentTime = 1700000000000;
-      const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => currentTime);
+      const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => currentTime);
 
       // Enqueue two different commits at T0
       await service.handleWebhook(connection, 'push', createPushPayload({ commits: [commit1] }));
@@ -330,7 +331,7 @@ describe('VcsWebhookService — cross-instance deduplication', () => {
     const sharedEvents: SharedEnqueuedEvent[] = [];
 
     // Instance 1 — simulates pod A
-    const record1 = jest.fn<Promise<OutboxEventDomain>, [OutboxEventInput]>().mockImplementation((event: OutboxEventInput) => {
+    const record1 = vi.fn<(...args: [OutboxEventInput]) => Promise<OutboxEventDomain>>().mockImplementation((event: OutboxEventInput) => {
       const metadata = (event.metadata ?? {}) as { projectId: string; eventId: string };
       sharedEvents.push({
         type: event.type,
@@ -345,7 +346,7 @@ describe('VcsWebhookService — cross-instance deduplication', () => {
     const service1 = module1.get<VcsWebhookService>(VcsWebhookService);
 
     // Instance 2 — simulates pod B (fresh instance with its own in-memory Map)
-    const record2 = jest.fn<Promise<OutboxEventDomain>, [OutboxEventInput]>().mockResolvedValue(resolveOutboxEvent());
+    const record2 = vi.fn<(...args: [OutboxEventInput]) => Promise<OutboxEventDomain>>().mockResolvedValue(resolveOutboxEvent());
     const module2 = await buildTestingModule(record2, sharedEvents);
     const service2 = module2.get<VcsWebhookService>(VcsWebhookService);
 
@@ -376,7 +377,7 @@ describe('VcsWebhookService — cross-instance deduplication', () => {
     // Shared DB state simulating the outboxEvent table
     const sharedEvents: SharedEnqueuedEvent[] = [];
 
-    const recordWithTracking = jest.fn<Promise<OutboxEventDomain>, [OutboxEventInput]>()
+    const recordWithTracking = vi.fn<(...args: [OutboxEventInput]) => Promise<OutboxEventDomain>>()
       .mockImplementation((event: OutboxEventInput) => {
         const metadata = (event.metadata ?? {}) as { projectId: string; eventId: string };
         sharedEvents.push({
@@ -427,16 +428,16 @@ describe('VcsWebhookService — cross-instance deduplication', () => {
     // Verify the spec-correct flow: instance 1 records, time passes > 5 min,
     // instance 2 is allowed to record the same commitHash again.
 
-    const record1 = jest.fn<Promise<OutboxEventDomain>, [OutboxEventInput]>().mockResolvedValue(resolveOutboxEvent());
+    const record1 = vi.fn<(...args: [OutboxEventInput]) => Promise<OutboxEventDomain>>().mockResolvedValue(resolveOutboxEvent());
     const module1 = await buildTestingModule(record1);
     const service1 = module1.get<VcsWebhookService>(VcsWebhookService);
 
-    const record2 = jest.fn<Promise<OutboxEventDomain>, [OutboxEventInput]>().mockResolvedValue(resolveOutboxEvent());
+    const record2 = vi.fn<(...args: [OutboxEventInput]) => Promise<OutboxEventDomain>>().mockResolvedValue(resolveOutboxEvent());
     const module2 = await buildTestingModule(record2);
     const service2 = module2.get<VcsWebhookService>(VcsWebhookService);
 
     let currentTime = 1700000000000;
-    const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => currentTime);
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => currentTime);
 
     const payload = createPushPayload({ commits: [sharedCommit] });
 

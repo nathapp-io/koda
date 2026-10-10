@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { Prisma } from '../../generated/prisma/client';
 import { ProjectMembersService } from './project-members.service';
@@ -10,28 +11,28 @@ const member = (userId: string, role: string, disabled = false) =>
   ({ userId, email: `${userId}@k.t`, name: userId, role, disabled, joinedAt: new Date(0) });
 
 describe('ProjectMembersService', () => {
-  let repo: Record<string, jest.Mock>;
-  let access: Record<string, jest.Mock>;
+  let repo: Record<string, Mock>;
+  let access: Record<string, Mock>;
   let service: ProjectMembersService;
 
   beforeEach(() => {
     repo = {
-      findMemberPage: jest.fn(),
-      findMember: jest.fn(),
-      findUserByEmail: jest.fn(),
-      findUserIdByEmail: jest.fn(),
-      createMember: jest.fn(async (_p: string, userId: string, role: string) => member(userId, role)),
-      updateMemberRole: jest.fn(async (_p: string, userId: string, role: string) => member(userId, role)),
-      deleteMember: jest.fn(),
-      countProjectAdmins: jest.fn(),
-      lockMembers: jest.fn(),
+      findMemberPage: vi.fn(),
+      findMember: vi.fn(),
+      findUserByEmail: vi.fn(),
+      findUserIdByEmail: vi.fn(),
+      createMember: vi.fn(async (_p: string, userId: string, role: string) => member(userId, role)),
+      updateMemberRole: vi.fn(async (_p: string, userId: string, role: string) => member(userId, role)),
+      deleteMember: vi.fn(),
+      countProjectAdmins: vi.fn(),
+      lockMembers: vi.fn(),
     };
     access = {
-      findProjectIdBySlug: jest.fn().mockResolvedValue('p1'),
-      assertProjectMembership: jest.fn(),
-      assertProjectAdmin: jest.fn(),
-      canManageMembers: jest.fn(),
-      resolveMembership: jest.fn(),
+      findProjectIdBySlug: vi.fn().mockResolvedValue('p1'),
+      assertProjectMembership: vi.fn(),
+      assertProjectAdmin: vi.fn(),
+      canManageMembers: vi.fn(),
+      resolveMembership: vi.fn(),
     };
     const txManager = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
     service = new ProjectMembersService(repo as never, access as never, txManager as never);

@@ -10,7 +10,7 @@ const raw = (over: Partial<RawRunnerRow> = {}): RawRunnerRow => ({
 
 describe('CredentialBoardService (S3 §4.4)', () => {
   it('derives the board from every runner, re-validating capabilities and computing online on the server clock', async () => {
-    const repo = { findRunners: jest.fn().mockResolvedValue([raw(), raw({ id: 'r2', name: 'old', lastSeenAt: secAgo(500), capabilities: { broken: true } })]) };
+    const repo = { findRunners: vi.fn().mockResolvedValue([raw(), raw({ id: 'r2', name: 'old', lastSeenAt: secAgo(500), capabilities: { broken: true } })]) };
     const service = new CredentialBoardService(repo as unknown as IDashboardRepository, testFleetConfig({ credentialExpiryWarnDays: 5 }));
     const board = await service.board(DASH_NOW);
     expect(board.warnDays).toBe(5);

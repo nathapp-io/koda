@@ -167,27 +167,27 @@ describe('MemoryController', () => {
   const mockProject = { id: 'project-123', name: 'Test Project', slug: 'test-project', key: 'TEST' };
 
   const mockExtractionService = {
-    extractFromEvent: jest.fn(),
-    recordDecision: jest.fn(),
+    extractFromEvent: vi.fn(),
+    recordDecision: vi.fn(),
   };
 
   const mockRepository = {
-    findByProject: jest.fn(),
-    upsert: jest.fn(),
-    findActive: jest.fn(),
-    reject: jest.fn(),
-    softDelete: jest.fn(),
+    findByProject: vi.fn(),
+    upsert: vi.fn(),
+    findActive: vi.fn(),
+    reject: vi.fn(),
+    softDelete: vi.fn(),
   };
 
   const mockPrismaService = {
     client: {
-      project: { findUnique: jest.fn() },
+      project: { findUnique: vi.fn() },
     },
   };
 
   beforeEach(() => {
     controller = new MemoryController(mockExtractionService, mockRepository, mockPrismaService);
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('Role-based access control', () => {

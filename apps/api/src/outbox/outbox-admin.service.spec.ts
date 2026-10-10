@@ -5,14 +5,14 @@ import { OutboxAdminService } from './outbox-admin.service';
 
 describe('OutboxAdminService', () => {
   const repo = {
-    findByStatus: jest.fn().mockResolvedValue([]),
-    countByStatus: jest.fn().mockResolvedValue(0),
-    findById: jest.fn(),
-    resetForRetry: jest.fn().mockResolvedValue(1),
+    findByStatus: vi.fn().mockResolvedValue([]),
+    countByStatus: vi.fn().mockResolvedValue(0),
+    findById: vi.fn(),
+    resetForRetry: vi.fn().mockResolvedValue(1),
   };
   const service = new OutboxAdminService(repo as never);
 
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => vi.clearAllMocks());
 
   it('lists pending events by default, 100 at most, with a real total', async () => {
     repo.countByStatus.mockResolvedValueOnce(3);

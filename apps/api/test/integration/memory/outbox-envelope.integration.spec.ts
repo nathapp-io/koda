@@ -51,7 +51,7 @@ const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('H13: outbox ticket_event envelope drives memory extraction (real DB)', () => {
-  jest.setTimeout(30000);
+  vi.setConfig({ testTimeout: 30000 });
 
   let prismaService: PrismaService<PrismaClient>;
   let prisma: PrismaClient;

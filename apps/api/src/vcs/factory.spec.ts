@@ -232,8 +232,8 @@ describe('createVcsProvider factory', () => {
   describe('GitHub provider with custom HTTP client', () => {
     it('should accept and use a custom HTTP client in config', () => {
       const mockHttpClient = {
-        get: jest.fn(),
-        post: jest.fn(),
+        get: vi.fn(),
+        post: vi.fn(),
       };
 
       const configWithClient: VcsProviderConfig = {

@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * Failing tests for adversarial review findings on ContextBuilderService.
  *
@@ -77,21 +78,21 @@ import { CONTEXT_REPOSITORY } from '../../../src/context/domain/context.domain';
 const PROJECT_ID = 'p-adversarial-1';
 
 interface ModuleOverrides {
-  contextRepo?: { projectExistsAndNotDeleted: jest.Mock };
-  canonical?: { getSnapshot: jest.Mock };
-  memoryRepo?: { findByProjectMemory: jest.Mock };
-  hybridRetriever?: { search: jest.Mock };
-  entityGraph?: { getRelatedEntities: jest.Mock };
-  impactAnalysis?: { getChangeImpact: jest.Mock };
+  contextRepo?: { projectExistsAndNotDeleted: Mock };
+  canonical?: { getSnapshot: Mock };
+  memoryRepo?: { findByProjectMemory: Mock };
+  hybridRetriever?: { search: Mock };
+  entityGraph?: { getRelatedEntities: Mock };
+  impactAnalysis?: { getChangeImpact: Mock };
 }
 
 function makeModule(overrides: ModuleOverrides = {}) {
   const mockContextRepo = overrides.contextRepo ?? {
-    projectExistsAndNotDeleted: jest.fn().mockResolvedValue(true),
+    projectExistsAndNotDeleted: vi.fn().mockResolvedValue(true),
   };
 
   const mockCanonical = overrides.canonical ?? {
-    getSnapshot: jest.fn().mockResolvedValue({
+    getSnapshot: vi.fn().mockResolvedValue({
       tickets: [],
       recentEvents: [],
       activeDecisions: [],
@@ -100,11 +101,11 @@ function makeModule(overrides: ModuleOverrides = {}) {
   };
 
   const mockMemoryRepo = overrides.memoryRepo ?? {
-    findByProjectMemory: jest.fn().mockResolvedValue({ records: [], total: 0, current: 1, size: 10, hasNext: false, hasPrev: false }),
+    findByProjectMemory: vi.fn().mockResolvedValue({ records: [], total: 0, current: 1, size: 10, hasNext: false, hasPrev: false }),
   };
 
   const mockHybridRetriever = overrides.hybridRetriever ?? {
-    search: jest.fn().mockResolvedValue({
+    search: vi.fn().mockResolvedValue({
       results: [],
       scores: [],
       retrievedAt: new Date().toISOString(),
@@ -112,11 +113,11 @@ function makeModule(overrides: ModuleOverrides = {}) {
   };
 
   const mockEntityGraph = overrides.entityGraph ?? {
-    getRelatedEntities: jest.fn().mockResolvedValue([]),
+    getRelatedEntities: vi.fn().mockResolvedValue([]),
   };
 
   const mockImpactAnalysis = overrides.impactAnalysis ?? {
-    getChangeImpact: jest.fn().mockResolvedValue(null),
+    getChangeImpact: vi.fn().mockResolvedValue(null),
   };
 
   return Test.createTestingModule({
@@ -156,7 +157,7 @@ describe('ContextBuilderService — AC-7 adversarial: meta.tokensUsed includes c
   beforeEach(async () => {
     const module: TestingModule = await makeModule({
       canonical: {
-        getSnapshot: jest.fn().mockResolvedValue({
+        getSnapshot: vi.fn().mockResolvedValue({
           tickets: heavyTickets,
           recentEvents: [] as unknown[],
           activeDecisions: heavyDecisions,
@@ -230,7 +231,7 @@ describe('ContextBuilderService — AC-9 adversarial: ProjectNotFoundError has c
     const module: TestingModule = await makeModule({
       contextRepo: {
         // Simulate a non-existent project
-        projectExistsAndNotDeleted: jest.fn().mockResolvedValue(false),
+        projectExistsAndNotDeleted: vi.fn().mockResolvedValue(false),
       },
     });
     service = module.get(ContextBuilderService);
@@ -349,7 +350,7 @@ describe('ContextBuilderService — AC-10 adversarial: non-AppException errors f
 
     const service = await buildService({
       canonical: {
-        getSnapshot: jest.fn().mockRejectedValue(prismaError),
+        getSnapshot: vi.fn().mockRejectedValue(prismaError),
       },
     });
 
@@ -380,7 +381,7 @@ describe('ContextBuilderService — AC-10 adversarial: non-AppException errors f
 
     const service = await buildService({
       memoryRepo: {
-        findByProjectMemory: jest.fn().mockRejectedValue(prismaError),
+        findByProjectMemory: vi.fn().mockRejectedValue(prismaError),
       },
     });
 
@@ -410,7 +411,7 @@ describe('ContextBuilderService — AC-10 adversarial: non-AppException errors f
 
     const service = await buildService({
       canonical: {
-        getSnapshot: jest.fn().mockRejectedValue(prismaError),
+        getSnapshot: vi.fn().mockRejectedValue(prismaError),
       },
     });
 
@@ -462,7 +463,7 @@ describe('ContextBuilderService — AC-10 adversarial: AppException subclasses f
 
     const service = await buildService({
       canonical: {
-        getSnapshot: jest.fn().mockRejectedValue(forbiddenError),
+        getSnapshot: vi.fn().mockRejectedValue(forbiddenError),
       },
     });
 
@@ -493,7 +494,7 @@ describe('ContextBuilderService — AC-10 adversarial: AppException subclasses f
 
     const service = await buildService({
       memoryRepo: {
-        findByProjectMemory: jest.fn().mockRejectedValue(validationError),
+        findByProjectMemory: vi.fn().mockRejectedValue(validationError),
       },
     });
 
@@ -524,7 +525,7 @@ describe('ContextBuilderService — AC-10 adversarial: AppException subclasses f
 
     const service = await buildService({
       canonical: {
-        getSnapshot: jest.fn().mockRejectedValue(forbiddenError),
+        getSnapshot: vi.fn().mockRejectedValue(forbiddenError),
       },
     });
 

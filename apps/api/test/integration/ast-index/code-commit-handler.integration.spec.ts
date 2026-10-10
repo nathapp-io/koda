@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
 import { PrismaOutboxRepository } from '../../../src/outbox/prisma-outbox.repository';
@@ -9,30 +10,30 @@ import { CodeIntelOutboxSubscriber } from '../../../src/code-intel/code-intel-ou
 
 describe('code_commit outbox handler', () => {
   let registry: FanOutPublisher;
-  let astIndexService: jest.Mocked<AstIndexService>;
-  let symbolStore: jest.Mocked<SymbolStore>;
-  let codeGraph: jest.Mocked<CodeGraphService>;
+  let astIndexService: Mocked<AstIndexService>;
+  let symbolStore: Mocked<SymbolStore>;
+  let codeGraph: Mocked<CodeGraphService>;
 
   const mockCodeGraph = {
-    parseSourceFile: jest.fn(),
-    extractSymbols: jest.fn(),
-    extractCallers: jest.fn(),
-    extractCallees: jest.fn(),
+    parseSourceFile: vi.fn(),
+    extractSymbols: vi.fn(),
+    extractCallers: vi.fn(),
+    extractCallees: vi.fn(),
   };
 
   const mockSymbolStore = {
-    upsertSymbol: jest.fn(),
-    findBySymbolId: jest.fn(),
-    findCallers: jest.fn(),
-    findCallees: jest.fn(),
-    deleteByFile: jest.fn(),
+    upsertSymbol: vi.fn(),
+    findBySymbolId: vi.fn(),
+    findCallers: vi.fn(),
+    findCallees: vi.fn(),
+    deleteByFile: vi.fn(),
   };
 
   const mockAstIndexService = {
-    indexCommit: jest.fn(),
-    getSymbol: jest.fn(),
-    getCallers: jest.fn(),
-    getCallees: jest.fn(),
+    indexCommit: vi.fn(),
+    getSymbol: vi.fn(),
+    getCallers: vi.fn(),
+    getCallees: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -58,7 +59,7 @@ describe('code_commit outbox handler', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('AC-7: indexing triggered by code_commit outbox event', () => {

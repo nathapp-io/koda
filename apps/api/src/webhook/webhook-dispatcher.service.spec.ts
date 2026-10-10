@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { WebhookDispatcherService } from './webhook-dispatcher.service';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { WebhookDomain } from './domain/webhook.domain';
@@ -6,15 +7,15 @@ type Fetch = typeof fetch;
 
 describe('WebhookDispatcherService', () => {
   const webhookRepo = {
-    findActiveByProject: jest.fn(),
+    findActiveByProject: vi.fn(),
   };
 
   const outbox = {
-    record: jest.fn(),
+    record: vi.fn(),
   };
 
   let originalFetch: Fetch | undefined;
-  let mockFetch: jest.Mock;
+  let mockFetch: Mock;
 
   const buildWebhook = (overrides: Partial<WebhookDomain> = {}): WebhookDomain => ({
     id: 'w1',
@@ -35,7 +36,7 @@ describe('WebhookDispatcherService', () => {
     outbox.record.mockResolvedValue(undefined);
 
     originalFetch = global.fetch;
-    mockFetch = jest.fn();
+    mockFetch = vi.fn();
     global.fetch = mockFetch as unknown as Fetch;
 
     service = new WebhookDispatcherService(
