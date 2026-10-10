@@ -58,6 +58,8 @@ export interface IFleetConfig {
   prRefreshMs: number;
   /** S3 §4.4 (D473): an OAuth credential expiring within this many days shows as `expiring` on the board and dashboard. */
   credentialExpiryWarnDays: number;
+  /** S5a kill switch: FLEET_THREADS_ENABLED=true turns chat threads on; any other value keeps them off. */
+  threadsEnabled: boolean;
 }
 
 export class FleetConfigSchema {
@@ -91,6 +93,7 @@ export class FleetConfigSchema {
   @IsOptional() @IsString() FLEET_JOB_QUEUED_WARN_SEC: string;
   @IsOptional() @IsString() FLEET_PR_REFRESH_MS: string;
   @IsOptional() @IsString() FLEET_CREDENTIAL_EXPIRY_WARN_DAYS: string;
+  @IsOptional() @IsString() FLEET_THREADS_ENABLED: string;
 }
 
 const int = (key: string, fallback: number): number => Number.parseInt(process.env[key] ?? String(fallback), 10);
@@ -138,6 +141,7 @@ export const fleetConfig = registerAs(FLEET_CFG, (): IFleetConfig => {
     jobQueuedWarnSec: int('FLEET_JOB_QUEUED_WARN_SEC', 60),
     prRefreshMs: int('FLEET_PR_REFRESH_MS', 600_000),
     credentialExpiryWarnDays: int('FLEET_CREDENTIAL_EXPIRY_WARN_DAYS', 7),
+    threadsEnabled: process.env['FLEET_THREADS_ENABLED'] === 'true',
   };
 });
 

@@ -8,7 +8,7 @@ import { ACTIVE_STATES } from '../jobs/job-state';
 import type { EnrollmentRecord, IRunnerRepository, NewRunner, RunnerPatch, RunnerRecord } from './domain/runner.domain';
 
 const RUNNER_SELECT = {
-  id: true, name: true, os: true, arch: true, labels: true, capacity: true, capabilities: true,
+  id: true, name: true, os: true, arch: true, labels: true, capacity: true, threadCapacity: true, capabilities: true,
   daemonVersion: true, protocolVersion: true, bootId: true, bootedAt: true, enabled: true, lastSeenAt: true,
   createdById: true, createdAt: true, updatedAt: true,
 } as const; // never selects apiKeyHash

@@ -49,6 +49,14 @@ describe('RunnersService', () => {
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ actorId: 'u9', action: 'runner.updated', entityId: 'r1', payload: { enabled: false, labels: ['a', 'b'], capacity: 2 } }));
   });
 
+  it('carries threadCapacity through update to the repository and the response (US-002 AC5)', async () => {
+    repo.findRunnerById.mockResolvedValue(row());
+    repo.updateRunner.mockResolvedValue(row({ threadCapacity: 3 }));
+    const dto = await service.update('u9', 'r1', { threadCapacity: 3 });
+    expect(repo.updateRunner).toHaveBeenCalledWith('r1', { threadCapacity: 3 });
+    expect(dto.threadCapacity).toBe(3);
+  });
+
   it('deletes and records', async () => {
     repo.findRunnerById.mockResolvedValue(row());
     repo.countUnfinishedJobs.mockResolvedValue(0);

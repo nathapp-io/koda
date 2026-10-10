@@ -15,6 +15,10 @@ describe('RunnerDto.from', () => {
     expect(dto).toEqual(expect.objectContaining({ bootId: 'boot-7', bootedAt: '2026-10-01T11:00:00.000Z', online: true }));
   });
 
+  it('exposes the server-set threadCapacity (US-002 AC4)', () => {
+    expect(RunnerDto.from(record({ threadCapacity: 2 }), { now, offlineSec: 90 }).threadCapacity).toBe(2);
+  });
+
   it('keeps bootedAt null for a runner that has not booted since the migration', () => {
     expect(RunnerDto.from(record({ bootedAt: null }), { now, offlineSec: 90 }).bootedAt).toBeNull();
   });

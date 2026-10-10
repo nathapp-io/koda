@@ -97,6 +97,29 @@ describeIntegration('fleet runner admin (PG)', () => {
     expect(await read()).toBe(3);
   });
 
+  it('defaults a runner threadCapacity to 2 and reads it on GET (US-002 AC4)', async () => {
+    const read = data<{ threadCapacity: number }>(await request(server).get(`/api/fleet/runners/${runner.runnerId}`).set(auth(admin)).expect(200));
+    expect(read.threadCapacity).toBe(2);
+  });
+
+  it('sets threadCapacity to 3 and returns it (US-002 AC5)', async () => {
+    const updated = data<{ threadCapacity: number }>(
+      await request(server).patch(`/api/fleet/runners/${runner.runnerId}`).set(auth(admin)).send({ threadCapacity: 3 }).expect(200),
+    );
+    expect(updated.threadCapacity).toBe(3);
+  });
+
+  it('sets threadCapacity to 0 and returns it (US-002 AC6)', async () => {
+    const updated = data<{ threadCapacity: number }>(
+      await request(server).patch(`/api/fleet/runners/${runner.runnerId}`).set(auth(admin)).send({ threadCapacity: 0 }).expect(200),
+    );
+    expect(updated.threadCapacity).toBe(0);
+  });
+
+  it('rejects threadCapacity above 16 (US-002 AC7)', async () => {
+    await request(server).patch(`/api/fleet/runners/${runner.runnerId}`).set(auth(admin)).send({ threadCapacity: 17 }).expect(400);
+  });
+
   it('revokes the key on delete', async () => {
     await request(server).delete(`/api/fleet/runners/${runner.runnerId}`).set(auth(admin)).expect(204);
     await request(server).get('/api/fleet/runner/me').set(auth(runner.apiKey)).expect(401);

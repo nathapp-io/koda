@@ -44,6 +44,8 @@ model User {
   notificationCategoryPreferences NotificationCategoryPreference[]
   sentProjectInvites              ProjectInvite[]                  @relation("ProjectInviteInvitedBy")
   addedAgentProjects              AgentProject[]                   @relation("AgentProjectAddedBy")
+  chatThreadsCreated              ChatThread[]                     @relation("ChatThreadCreatedBy")
+  chatMessagesAuthored            ChatMessage[]                    @relation("ChatMessageAuthor")
 }
 
 model Agent {
@@ -187,6 +189,7 @@ model Project {
   fleetRepos         FleetRepo[]
   fleetJobs          FleetJob[]
   jobSchedules       JobSchedule[]
+  chatThreads        ChatThread[]
   notifications      Notification[]
   invites            ProjectInvite[]
   agents             AgentProject[]
@@ -751,6 +754,7 @@ model Runner {
   arch            String // arm64 | x64
   labels          String[]
   capacity        Int       @default(1)
+  threadCapacity  Int       @default(2) // S5a: thread sessions this runner hosts; server-only, set by admins
   capabilities    Json // RunnerCapabilities (packages/fleet-protocol)
   daemonVersion   String
   protocolVersion Int
@@ -765,6 +769,7 @@ model Runner {
   jobs       FleetJob[]     @relation("FleetJobRunner")
   pinnedJobs FleetJob[]     @relation("FleetJobPinnedRunner")
   commands   FleetCommand[]
+  threads    ChatThread[]   @relation("ChatThreadRunner")
 }
 
 /// Fleet S4a §1 (D507): one runner-offline or credential-expiring episode. At most one open row per (kind, subjectKey)
@@ -806,7 +811,8 @@ model FleetRepo {
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  jobs FleetJob[]
+  jobs        FleetJob[]
+  chatThreads ChatThread[]
 
   @@unique([provider, owner, name])
   @@index([projectId])
@@ -996,6 +1002,7 @@ model FleetJob {
   ackedRunnerSeq     Int       @default(0) // cumulative runner ack for leaseEpoch (plan D2)
   attributedAt       DateTime? // PR/MR attribution comment posted (plan D19)
   configResult       Json? // S3 §3 (D475): ConfigJobResult mirrored from snapshots; null for nax jobs
+  threadId           String? // S5a: the ChatThread a THREAD job serves
   updatedAt          DateTime  @updatedAt
 
   project       Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -1004,6 +1011,8 @@ model FleetJob {
   pinnedRunner  Runner?             @relation("FleetJobPinnedRunner", fields: [pinnedRunnerId], references: [id], onDelete: SetNull)
   requestedBy   User                @relation("FleetJobRequestedBy", fields: [requestedById], references: [id])
   schedule      JobSchedule?        @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  thread        ChatThread?         @relation(fields: [threadId], references: [id], onDelete: SetNull)
+  threadTurn    FleetThreadTurn?
   events        FleetJobEvent[]
   commands      FleetCommand[]
   artifacts     FleetJobArtifact[]
@@ -1024,6 +1033,7 @@ model FleetJob {
   @@index([repoId, firstStartedAt])
   @@index([runnerId, firstStartedAt])
   @@index([scheduleId, queuedAt])
+  @@index([threadId])
 }
 
 /// Fleet S3 §1: the edit set of a CONFIG_EDIT / CONFIG_DRIFT job (D466). 1:1 with FleetJob.
@@ -1039,6 +1049,83 @@ model FleetConfigEdit {
   createdAt DateTime @default(now())
 
   job FleetJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+}
+
+/// Fleet S5a §1: a chat thread on a repo's nax feature. At most one ACTIVE thread per (repoId, feature) (partial unique
+/// index in the migration). runnerId is pinned at the first THREAD assignment and never changed; SetNull on runner delete.
+model ChatThread {
+  id              String    @id @default(cuid())
+  projectId       String
+  repoId          String
+  baseRef         String
+  feature         String // nax feature; branch feat/<feature>
+  title           String
+  createdById     String
+  runnerId        String?
+  backend         Json // ThreadBackend; immutable
+  status          String    @default("ACTIVE") // ACTIVE | ARCHIVED
+  archivedAt      DateTime?
+  skills          Json // ThreadSkillSource[] snapshot taken at creation
+  maxCostUsd      Decimal   @default(5) @db.Decimal(12, 4)
+  costUsd         Decimal   @default(0) @db.Decimal(12, 4)
+  tokens          Json? // { input, output, cacheRead, cacheWrite }; written by B2
+  specPath        String // .nax/features/<feature>/spec.md
+  pendingQuestion Json? // { requestId, text, expiresAt }; written by B2
+  nextSeq         Int       @default(1)
+  lastActivityAt  DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+
+  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repo      FleetRepo         @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  createdBy User              @relation("ChatThreadCreatedBy", fields: [createdById], references: [id])
+  runner    Runner?           @relation("ChatThreadRunner", fields: [runnerId], references: [id], onDelete: SetNull)
+  messages  ChatMessage[]
+  turns     FleetThreadTurn[]
+  jobs      FleetJob[]
+
+  @@index([projectId, lastActivityAt])
+  @@index([runnerId, status])
+}
+
+/// Fleet S5a §1: one message in a chat thread. seq orders the transcript; clientMessageId dedups a retried send.
+model ChatMessage {
+  id              String   @id @default(cuid())
+  threadId        String
+  seq             Int
+  jobId           String?
+  turnId          String?
+  role            String // user | assistant
+  authorUserId    String?
+  clientMessageId String?
+  content         String   @db.Text
+  toolSummary     Json?
+  status          String // pending | streaming | complete | cancelled | errored | timed_out | interrupted
+  errorReason     String? // set with status errored, at most 200 chars
+  usage           Json?
+  costUsd         Decimal? @db.Decimal(12, 4)
+  costSource      String?
+  createdAt       DateTime @default(now())
+
+  thread ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  author User?      @relation("ChatMessageAuthor", fields: [authorUserId], references: [id])
+
+  @@unique([threadId, seq])
+  @@unique([threadId, clientMessageId])
+}
+
+/// Fleet S5a §1: one THREAD job's input (1:1, like FleetConfigEdit for config jobs).
+model FleetThreadTurn {
+  jobId            String  @id
+  threadId         String
+  action           String // SESSION | PUBLISH
+  initialMessageId String?
+  instructions     String  @db.Text
+  backend          Json
+  skills           Json
+  resume           Boolean
+
+  job    FleetJob   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  thread ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
 }
 
 /// Fleet C9 §1 (D448): a job dispatched for one or more tickets.

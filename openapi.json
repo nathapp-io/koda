@@ -13880,6 +13880,10 @@
           "capacity": {
             "type": "number"
           },
+          "threadCapacity": {
+            "type": "number",
+            "description": "Most thread sessions this runner hosts (S5a); set by admins"
+          },
           "capabilities": {
             "type": "object",
             "additionalProperties": true
@@ -13920,6 +13924,7 @@
           "arch",
           "labels",
           "capacity",
+          "threadCapacity",
           "capabilities",
           "daemonVersion",
           "protocolVersion",
@@ -13947,6 +13952,11 @@
           "capacity": {
             "type": "number",
             "minimum": 1,
+            "maximum": 16
+          },
+          "threadCapacity": {
+            "type": "number",
+            "minimum": 0,
             "maximum": 16
           }
         }

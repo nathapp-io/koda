@@ -149,4 +149,21 @@ describe('fleet config', () => {
   it.each(['0', '91', '1.5', 'abc'])('refuses boot on FLEET_CREDENTIAL_EXPIRY_WARN_DAYS=%s', (value) => {
     expect(() => validate({ ...BASE, FLEET_CREDENTIAL_EXPIRY_WARN_DAYS: value })).toThrow();
   });
+
+  it('turns threads off when FLEET_THREADS_ENABLED is unset (US-002 AC1)', () => {
+    delete process.env.FLEET_THREADS_ENABLED;
+    expect(fleetConfig().threadsEnabled).toBe(false);
+  });
+
+  it('turns threads on only for FLEET_THREADS_ENABLED=true (US-002 AC2)', () => {
+    process.env.FLEET_THREADS_ENABLED = 'true';
+    expect(fleetConfig().threadsEnabled).toBe(true);
+    delete process.env.FLEET_THREADS_ENABLED;
+  });
+
+  it('treats any other FLEET_THREADS_ENABLED value as off (US-002 AC3)', () => {
+    process.env.FLEET_THREADS_ENABLED = 'yes';
+    expect(fleetConfig().threadsEnabled).toBe(false);
+    delete process.env.FLEET_THREADS_ENABLED;
+  });
 });
