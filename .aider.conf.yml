@@ -12,7 +12,9 @@ instructions: |
   
   **Language:** TypeScript
   
-  **Key dependencies:** @prisma/client, @typescript-eslint/eslint-plugin, @typescript-eslint/parser, typescript
+  **Key dependencies:** @typescript-eslint/eslint-plugin, @typescript-eslint/parser, typescript
+  
+  **Commands:** test: `npx turbo test` | lint: `bunx turbo lint` | typecheck: `bunx turbo type-check`
   
   ---
   # Koda — Dev Ticket Tracker
@@ -36,6 +38,7 @@ instructions: |
   ├── apps/
   │   ├── api/     # NestJS API, system of record
   │   ├── cli/     # Commander.js API client for agents/terminals
+  │   ├── runner/  # Bun fleet runner daemon (executes nax jobs)
   │   └── web/     # Nuxt SSR app for humans
   ├── packages/
   │   ├── eslint-config/
@@ -43,7 +46,7 @@ instructions: |
   ├── docs/
   ├── .nax/
   │   ├── context.md
-  │   └── mono/apps/{api,cli,web}/context.md
+  │   └── mono/apps/{api,cli,runner,web}/context.md
   ├── openapi.json
   ├── package.json
   ├── turbo.json
@@ -56,7 +59,7 @@ instructions: |
   - `apps/api` owns persistence, auth, domain rules, workflow transitions, RAG, and integrations
   - `apps/web` is a Nuxt 3 SSR client that proxies `/api/**` to the API service
   - `apps/cli` is a thin CLI client that calls the API through a generated OpenAPI client
-  - shared TypeScript and ESLint config live in `packages/*`
+  - shared TypeScript and ESLint config live in `packages/*`; `apps/api` lints with oxlint (`apps/api/.oxlintrc.json`) instead of ESLint
   
   The detailed architecture reference lives in `docs/architecture.md`.
   
@@ -67,11 +70,13 @@ instructions: |
   | Runtime | Node.js 22+ and Bun workspaces |
   | Language | TypeScript strict |
   | Monorepo | Turborepo |
-  | API | NestJS 11 + Fastify + Prisma |
+  | API | NestJS 12 + Fastify + Prisma |
   | Web | Nuxt 3 + Shadcn-nuxt + Tailwind CSS |
   | CLI | Commander.js 12 |
+  | Runner | Bun-only ESM (`bun:sqlite`, `bun build --compile`), Commander.js 12 |
   | Database | Prisma on PostgreSQL 16 |
-  | Test | Jest; Playwright in web |
+  | Test | Vitest in api; Jest in cli and web; Playwright in web |
+  | Lint | oxlint in api; ESLint in cli, web, runner |
   | i18n | API and web maintain separate translation systems |
   
   ## Workspace Responsibilities
@@ -87,6 +92,11 @@ instructions: |
   - should use generated client code in `apps/cli/src/generated/`
   - should not reimplement API business rules locally
   - resolves auth and project context from flags, env, user config, and local project config
+  
+  ### `apps/runner`
+  - fleet runner daemon: runs nax jobs dispatched by the API on a host checkout
+  - talks only to `/fleet/runner/*` and the bundle upload; never embeds business rules
+  - Bun-only; see `.nax/mono/apps/runner/context.md`
   
   ### `apps/web`
   - remains a UI client over the API
@@ -124,7 +134,7 @@ instructions: |
   | `bun run build` | Build all workspaces through Turbo |
   | `bun run dev` | Run workspace dev tasks |
   | `bun run test` | Run tests across workspaces |
-  | `bun run lint` | Run ESLint across workspaces |
+  | `bun run lint` | Run linters across workspaces (oxlint in api, ESLint elsewhere) |
   | `bun run type-check` | Run type checks across workspaces |
   | `bun run db:generate` | Regenerate Prisma client in `apps/api` |
   | `bun run db:migrate` | Apply/create Prisma migrations in `apps/api` |
@@ -142,6 +152,26 @@ instructions: |
   - never manually edit generated `AGENTS.md`; edit the matching `context.md` source instead
   - when changing app-specific guidance, update the file under `.nax/mono/apps/<app>/context.md`
   
+  ## Code Navigation (codebase-memory MCP)
+  
+  Use `codebase-memory-mcp` for graph-first code navigation. In nax, the server ID is `codebase-memory` and its tools are named `codebase-memory__<tool>`; use the equivalent exposed names in other hosts. Availability depends on the host's MCP configuration and session stage.
+  
+  Before discovering symbols, callers, dependencies, routes or architecture, call `codebase-memory__list_projects`. Select the entry whose `root_path` matches the absolute **Execution repository/worktree root** supplied in the nax prompt, and reuse its returned project identifier. If the host does not supply a root, obtain it with `git rev-parse --show-toplevel` (nax Git tool: `{"subcommand":"rev-parse"}`). Never derive or guess the identifier, or select a different repository. If results are truncated, read the tool's spill file or paginate until the matching entry is found.
+  
+  Then call the appropriate MCP tool before structural exploration with directory listings, whole-file reads or grep:
+  - `search_graph` to find symbols or routes
+  - `trace_path` for callers and callees
+  - `get_code_snippet` to read a symbol's exact source
+  - `get_architecture` for a module or package overview
+  - `search_code` for literal text across indexed code
+  - `detect_changes` for symbols touched by the diff
+  - `check_index_coverage` to verify the relevant files are indexed and current
+  
+  Rules:
+  - fall back to direct reads or text search for structural discovery only when the MCP server is unavailable, no matching project is indexed, or a graph query returns insufficient results; explain the fallback
+  - the index can lag behind recent edits: read the known file before editing; this does not replace graph-first discovery
+  - use text search directly for config files, JSON, Markdown, i18n keys and Prisma schema
+  
   ## Tests
   
   Default organization rules:
@@ -152,6 +182,8 @@ instructions: |
   Repository rules:
   - do not create `us-XXX` folders under app `test/` directories
   - nax acceptance material belongs under `.nax/features/<feature>/`
+  - each package's generated acceptance file is `apps/<app>/.nax/features/<feature>/.nax-acceptance.test.ts`; how to run it for one story (api: vitest with `vitest.nax.config.ts`, web: `bun test`) is in that app's `.nax/mono/apps/<app>/context.md`
+  - nax runs that touch `apps/api` need the compose test Postgres up (`bun run test:db:up` in `apps/api`): the agent shell has no Docker access, so its integration/e2e and PG-backed acceptance runs fail loudly without it instead of skipping. Outside the sandbox, DB-mode vitest falls back to a Testcontainers Postgres
   - app-specific test guidance belongs in `.nax/mono/apps/<app>/context.md`
   
   ## i18n
@@ -168,6 +200,7 @@ instructions: |
   Read the matching app context before making app-local changes:
   - `.nax/mono/apps/api/context.md`
   - `.nax/mono/apps/cli/context.md`
+  - `.nax/mono/apps/runner/context.md`
   - `.nax/mono/apps/web/context.md`
   
   If a new app is added to this monorepo, create its context file under `.nax/mono/apps/<new-app>/context.md`.

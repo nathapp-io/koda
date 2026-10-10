@@ -25,13 +25,14 @@ Other apps should stay thin and call this API instead of reimplementing business
 
 ## Stack
 
-- NestJS 11 + Fastify via `@nathapp/nestjs-app`
+- NestJS 12 + Fastify via `@nathapp/nestjs-app` (Nest packages are ESM-only; the API stays CommonJS and loads them through `require(esm)`)
 - Prisma 7 via `@nathapp/nestjs-prisma` 4.1 (driver adapter `@prisma/adapter-pg`)
 - `@nathapp/nestjs-auth` v3 for auth
 - `@nathapp/nestjs-common` for JSON envelope, exceptions, i18n helpers
 - `@nathapp/nestjs-logging`
 - `@nathapp/nestjs-throttler`
-- Jest for unit, integration, and e2e tests
+- Vitest for unit, integration, and e2e tests (`vitest.config.ts`; specs compile through `unplugin-swc` so Nest decorator metadata is emitted). Test globals are on: use `vi.*`, not `jest.*`; mock factories that reference outer variables need `vi.hoisted`; load `.ts` modules lazily with `await import()`, never `require()`
+- oxlint for linting (`.oxlintrc.json`; `bun run lint`, `bun run lint:fix`; nax uses `bun run lint:report`, unix format). Existing `eslint-disable` comments are honoured
 - no Redis at runtime: `@nathapp/nestjs-cache` runs with `CacheStrategy.MEMORY` (single API instance; `@keyv/redis` and `@qified/redis` are installed but unused), so tests need Postgres only. Introducing Redis is an architecture change: it needs its own logical DB index (and key prefix) on the shared dev Redis, plus a test-tier Redis in `test/helpers/test-database.ts`
 
 ## Architecture
@@ -73,7 +74,7 @@ Cross-cutting modules:
 - API responses should use the Nathapp JSON envelope pattern
 - Prisma 7: import `PrismaClient`, `Prisma` and model types from the generated client
   (`src/generated/prisma/client`; gitignored, rebuilt by `bun install` or `bun run db:generate`), never from
-  `@prisma/client` (ESLint blocks it). Build every client through `createPgAdapter(url)` (`src/prisma/pg-adapter.ts`);
+  `@prisma/client` (oxlint blocks it via `no-restricted-imports` in `.oxlintrc.json`). Build every client through `createPgAdapter(url)` (`src/prisma/pg-adapter.ts`);
   tests use `createTestPrismaClient()` (`test/helpers/test-prisma.ts`). The datasource URL lives in `prisma.config.ts`.
 - Unique violations: driver adapters drop `meta.target`. Match fields with `isUniqueViolation` (backed by
   `getUniqueConstraintTarget`), never by reading `error.meta` yourself.
@@ -175,21 +176,21 @@ Rationale: `bun run test` runs without a database, so DI/module-registration bre
 
 - integration and e2e specs only run under `KODA_DB_TESTS=1`; without it they are `describe.skip` and pass as zero tests
 - nax's scoped test command (`bun run test:scoped <files>`) sets `KODA_DB_TESTS=1` whenever a targeted path matches `integration` or `e2e`, and the acceptance command always sets it
-- jest globalSetup picks the database in this order (`test/helpers/test-database.ts`): `KODA_TEST_DATABASE_URL` when set (CI); else the compose test database named in `.env.test` (localhost:5433) when it answers; else a throwaway Postgres 16 started with Testcontainers (needs Docker) and stopped after the run. An inherited `DATABASE_URL` is never used
+- the Vitest globalSetup (`test/vitest-global-setup.ts`) picks the database in this order (`test/helpers/test-database.ts`): `KODA_TEST_DATABASE_URL` when set (CI); else the compose test database named in `.env.test` (localhost:5433) when it answers; else a throwaway Postgres 16 started with Testcontainers (needs Docker) and stopped after the run. An inherited `DATABASE_URL` is never used
 - nax's agent shell is sandboxed without Docker access, so agent-run DB tests need the compose database: run `bun run test:db:up` before a nax run that touches `apps/api`. nax's own quality and acceptance commands run outside the sandbox and fall back to Testcontainers
 - a story that writes a `test/integration/**` spec must see it run and pass under `test:scoped`, not just compile
-- every DB-mode run force-resets the test database (only a local `*_test` database is accepted), so do not run two DB-mode jest runs against the same database at once. A second checkout (worktree, clone) sets `KODA_TEST_DB_CONTAINER=1` to skip the compose database and use a private container
+- every DB-mode run force-resets the test database (only a local `*_test` database is accepted), so do not run two DB-mode test runs against the same database at once. A second checkout (worktree, clone) sets `KODA_TEST_DB_CONTAINER=1` to skip the compose database and use a private container
 
 ### nax acceptance tests
 
-- One generated file per feature, `apps/api/.nax/features/<feature>/.nax-acceptance.test.ts`, holds every story's ACs as `it('AC-<n>: ...')`. The default jest config (`testRegex` `.*\.spec\.ts`) does not pick it up.
-- Run it from `apps/api` with the compose test Postgres up (`bun run test:db:up`): `KODA_DB_TESTS=1 npx jest --config jest.nax.config.js .nax/features/<feature>/.nax-acceptance.test.ts -t "AC-<a>:|AC-<b>:"`, filtered to your story's AC ids (listed per `storyId` in the repo-root `.nax/features/<feature>/acceptance-refined.json`). Keep the trailing colon so `AC-1` does not also match `AC-10`.
+- One generated file per feature, `apps/api/.nax/features/<feature>/.nax-acceptance.test.ts`, holds every story's ACs as `it('AC-<n>: ...')`. The default vitest config (`include` `**/*.spec.ts`) does not pick it up.
+- Run it from `apps/api` with the compose test Postgres up (`bun run test:db:up`): `KODA_DB_TESTS=1 npx vitest run --config vitest.nax.config.ts .nax/features/<feature>/.nax-acceptance.test.ts -t "AC-<a>:|AC-<b>:"`, filtered to your story's AC ids (listed per `storyId` in the repo-root `.nax/features/<feature>/acceptance-refined.json`). Keep the trailing colon so `AC-1` does not also match `AC-10`.
 - This is the same config nax's acceptance stage runs (`.nax/mono/apps/api/config.json` `acceptance.command`). `KODA_DB_TESTS=1` is required: without it the PG-backed ACs get no database.
 - Never copy the file into `src/` or `test/`, never edit it, and never override `--testRegex`/`--testPathIgnorePatterns` to run it.
 
 Useful scripts (run from `apps/api`):
 - `bun run test`
-- `bun run test:scoped <files>` (jest on the given files; DB mode when any is an integration/e2e spec)
+- `bun run test:scoped <files>` (vitest on the given files; DB mode when any is an integration/e2e spec)
 - `bun run test:db:up` (start the compose test Postgres on 5433; `test:db:down` stops it; optional when Docker is available)
 - `bun run test:integration`
 - `bun run db:generate`
