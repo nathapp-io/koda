@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-core",
   "branchName": "feat/fleet-s5a-thread-core",
   "createdAt": "2026-10-10T00:00:00.000Z",
-  "updatedAt": "2026-10-10T09:28:13.405Z",
+  "updatedAt": "2026-10-10T09:35:51.996Z",
   "userStories": [
     {
       "id": "US-001",
@@ -30,8 +30,8 @@
         "api"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -110,7 +110,10 @@
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Schema + migration + small config/DTO plumbing; standard patterns, but touches several files and a raw-SQL partial index."
+        "reasoning": "Schema + migration + small config/DTO plumbing; standard patterns, but touches several files and a raw-SQL partial index.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/config/fleet.config.ts",
@@ -152,7 +155,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "8e726d4e1e9ac72822ca3dcb3ba90293a043fb48"
     },
     {
       "id": "US-003",
