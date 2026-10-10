@@ -9436,6 +9436,86 @@
           "skills"
         ]
       }
+    },
+    "/api/admin/skills/sources/{id}/update": {
+      "post": {
+        "operationId": "AdminSkillsController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillSourceDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Global admin required"
+          },
+          "404": {
+            "description": "Skill source not found"
+          },
+          "409": {
+            "description": "Skill name already registered by another source"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Re-resolve a registered skill source (global admin)",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/api/admin/skills/sources/{id}": {
+      "delete": {
+        "operationId": "AdminSkillsController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Skill source deleted"
+          },
+          "403": {
+            "description": "Global admin required"
+          },
+          "404": {
+            "description": "Skill source not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a registered skill source (global admin)",
+        "tags": [
+          "skills"
+        ]
+      }
     }
   },
   "info": {
@@ -16117,7 +16197,8 @@
         "type": "object",
         "properties": {
           "gitUrl": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 500
           },
           "ref": {
             "type": "string",

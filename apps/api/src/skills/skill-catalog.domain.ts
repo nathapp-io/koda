@@ -27,7 +27,11 @@ export interface SkillSourceDomain {
 
 export interface SkillCatalogRepository {
   findSource(owner: string, repo: string, ref: string, path: string): Promise<SkillSourceDomain | null>;
+  findSourceById(id: string): Promise<SkillSourceDomain | null>;
   findSkillOwner(name: string): Promise<SkillSourceDomain | null>;
+  replaceSourceSkills(id: string, input: { resolvedSha: string; resolvedAt: Date; skills: Array<Omit<SkillDomain, 'id'>> }): Promise<SkillSourceDomain>;
+  markResolveFailed(id: string, statusReason: string): Promise<SkillSourceDomain>;
+  deleteSource(id: string): Promise<boolean>;
   createSource(input: Omit<SkillSourceDomain, 'id' | 'createdAt' | 'skills'> & { createdById: string; skills: Array<Omit<SkillDomain, 'id'>> }): Promise<SkillSourceDomain>;
   listSources(): Promise<SkillSourceDomain[]>;
 }

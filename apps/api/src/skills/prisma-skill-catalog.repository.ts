@@ -36,6 +36,14 @@ export class PrismaSkillCatalogRepository extends AbstractPrismaRepository<Skill
     return source ? this.toDomain(source) : null;
   }
 
+  async findSourceById(id: string): Promise<SkillSourceDomain | null> {
+    const source = await this.prisma.client.skillSource.findUnique({
+      where: { id },
+      include: { skills: { orderBy: { name: 'asc' } } },
+    });
+    return source ? { ...this.toDomain(source), skills: source.skills } : null;
+  }
+
   async findSkillOwner(name: string): Promise<SkillSourceDomain | null> {
     const skill = await this.prisma.client.skill.findUnique({ where: { name }, include: { source: true } });
     return skill ? this.toDomain(skill.source) : null;
@@ -52,6 +60,42 @@ export class PrismaSkillCatalogRepository extends AbstractPrismaRepository<Skill
       include: { skills: { orderBy: { name: 'asc' } } },
     });
     return { ...this.toDomain(source), skills: source.skills };
+  }
+
+  async replaceSourceSkills(
+    id: string,
+    input: { resolvedSha: string; resolvedAt: Date; skills: Array<Omit<SkillDomain, 'id'>> },
+  ): Promise<SkillSourceDomain> {
+    const existing = await this.prisma.client.skill.findMany({ where: { sourceId: id }, take: 201 });
+    const resolvedNames = new Set(input.skills.map((skill) => skill.name));
+    await this.prisma.client.skill.deleteMany({ where: { sourceId: id, name: { notIn: [...resolvedNames] } } });
+    for (const skill of input.skills) {
+      const current = existing.find((row) => row.name === skill.name);
+      if (current) {
+        await this.prisma.client.skill.update({ where: { id: current.id }, data: { description: skill.description, dir: skill.dir } });
+      } else {
+        await this.prisma.client.skill.create({ data: { sourceId: id, ...skill } });
+      }
+    }
+    const source = await this.prisma.client.skillSource.update({
+      where: { id },
+      data: { status: 'OK', statusReason: null, resolvedSha: input.resolvedSha, resolvedAt: input.resolvedAt },
+      include: { skills: { orderBy: { name: 'asc' } } },
+    });
+    return { ...this.toDomain(source), skills: source.skills };
+  }
+
+  async markResolveFailed(id: string, statusReason: string): Promise<SkillSourceDomain> {
+    const source = await this.prisma.client.skillSource.update({
+      where: { id }, data: { status: 'RESOLVE_FAILED', statusReason },
+      include: { skills: { orderBy: { name: 'asc' } } },
+    });
+    return { ...this.toDomain(source), skills: source.skills };
+  }
+
+  async deleteSource(id: string): Promise<boolean> {
+    const result = await this.prisma.client.skillSource.deleteMany({ where: { id } });
+    return result.count > 0;
   }
 
   async listSources(): Promise<SkillSourceDomain[]> {
