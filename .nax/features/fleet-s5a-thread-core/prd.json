@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-core",
   "branchName": "feat/fleet-s5a-thread-core",
   "createdAt": "2026-10-10T00:00:00.000Z",
-  "updatedAt": "2026-10-10T12:30:42.954Z",
+  "updatedAt": "2026-10-10T13:41:16.247Z",
   "userStories": [
     {
       "id": "US-001",
@@ -491,8 +491,8 @@
       "dependencies": [
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
