@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -61,6 +62,12 @@ describe('KodaDomainWriter Unit Tests', () => {
 
   beforeEach(async () => {
     depth = 0;
+    // Sticky per-test implementations (mockRejectedValue etc.) must not leak across tests.
+    for (const group of [mockWriterRepo, mockRagService, mockTicketEventService, mockAgentEventService, mockDecisionEventService]) {
+      Object.values(group).forEach((m) => (m as Mock).mockReset());
+    }
+    outbox.record.mockReset().mockResolvedValue(undefined);
+    mockAgentAuthProvider.loadAgentRoles.mockReset().mockResolvedValue(['AGENT']);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         KodaDomainWriter,

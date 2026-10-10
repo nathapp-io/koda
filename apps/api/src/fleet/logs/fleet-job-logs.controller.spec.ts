@@ -10,6 +10,8 @@ describe('FleetJobLogsController', () => {
   const agent = { actorType: 'agent', id: 'a1' } as never;
   const user = { actorType: 'user', id: 'u1' } as never;
 
+  beforeEach(() => vi.clearAllMocks());
+
   it('refuses agent principals on every route (R10)', async () => {
     await expect(statusOf(controller.list('j1', ctx, agent))).resolves.toBe(403);
     await expect(statusOf(controller.entries('j1', 'run', {} as never, ctx, agent))).resolves.toBe(403);

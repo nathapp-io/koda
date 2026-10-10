@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { mkdtempSync, readFileSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { Readable } from 'stream';
@@ -17,6 +17,7 @@ const statusOf = (p: Promise<unknown>) => p.then(() => 0, (e: { getStatus(): num
 
 describe('LogUploadService', () => {
   const root = mkdtempSync(join(tmpdir(), 'koda-log-upload-'));
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
   const store = new LocalDiskLogStore({ artifactDir: root });
   const cfg = { logMaxBytes: 32, logChunkMaxBytes: 16, logRunnerBytesPerSec: 1_000_000 };
   let job: { id: string; projectId: string; runnerId: string | null; leaseEpoch: number; state: string };

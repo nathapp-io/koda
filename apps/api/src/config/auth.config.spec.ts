@@ -1,8 +1,9 @@
-/// <reference types="jest" />
+import { restoreEnvAfterEach } from '../common/test-helpers/restore-env';
 
 import { IAuthConfig, authConfig } from './auth.config';
 
 describe('authConfig defaults', () => {
+  restoreEnvAfterEach();
   it('uses hardened defaults when expiry env vars are unset', () => {
     const prevJwtExpiresIn = process.env['JWT_EXPIRES_IN'];
     const prevJwtRefreshExpiresIn = process.env['JWT_REFRESH_EXPIRES_IN'];
@@ -90,6 +91,7 @@ describe('authConfig defaults', () => {
 });
 
 describe('authConfig registrationEnabled', () => {
+  restoreEnvAfterEach();
   const prev = process.env['REGISTRATION_ENABLED'];
 
   afterEach(() => {

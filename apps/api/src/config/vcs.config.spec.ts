@@ -1,8 +1,9 @@
-/// <reference types="jest" />
+import { restoreEnvAfterEach } from '../common/test-helpers/restore-env';
 
 import { IVcsConfig, vcsConfig } from './vcs.config';
 
 describe('vcsConfig', () => {
+  restoreEnvAfterEach();
   describe('namespace registration', () => {
     it('registers with namespace "vcs"', () => {
       const config = vcsConfig();

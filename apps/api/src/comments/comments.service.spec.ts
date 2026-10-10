@@ -223,13 +223,14 @@ describe('CommentsService', () => {
   // Mirrors ProjectAccessService.resolveMembership: agents and global ADMINs
   // resolve without a lookup, a member gets their raw ProjectMember.role, a
   // user without a ProjectMember row is refused.
+  const defaultResolveMembership = async (_projectId: string, principal: KodaPrincipal) => {
+    if (!principal || principal.actorType !== 'user') return null;
+    if (principal.role === 'ADMIN') return 'ADMIN';
+    if (memberUserIds.has(principal.id)) return 'DEVELOPER';
+    throw new ForbiddenAppException({}, 'projects');
+  };
   const mockAccessService = {
-    resolveMembership: vi.fn(async (_projectId: string, principal: KodaPrincipal) => {
-      if (!principal || principal.actorType !== 'user') return null;
-      if (principal.role === 'ADMIN') return 'ADMIN';
-      if (memberUserIds.has(principal.id)) return 'DEVELOPER';
-      throw new ForbiddenAppException({}, 'projects');
-    }),
+    resolveMembership: vi.fn(defaultResolveMembership),
     findMembershipRole: vi.fn(async (_projectId: string, userId: string) =>
       memberUserIds.has(userId) ? 'DEVELOPER' : null
     ),
@@ -263,6 +264,8 @@ describe('CommentsService', () => {
   };
 
   beforeEach(async () => {
+    // Tests below override this per case; reset so order cannot matter.
+    mockAccessService.resolveMembership.mockReset().mockImplementation(defaultResolveMembership);
     mockCaslCan = vi.fn().mockReturnValue(true);
     mockCaslFactory = { createForUser: vi.fn().mockResolvedValue({ can: mockCaslCan }) };
 

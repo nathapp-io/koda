@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { LogStreamName } from './domain/fleet-job-log.domain';
@@ -13,6 +13,7 @@ const line = (level: string, message: string, extra: object = {}) => `${JSON.str
 
 describe('LogReadService', () => {
   const root = mkdtempSync(join(tmpdir(), 'koda-log-read-'));
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
   const store = new LocalDiskLogStore({ artifactDir: root });
   let job: { id: string; projectId: string; leaseEpoch: number };
   let logs: MemoryLogRepo;

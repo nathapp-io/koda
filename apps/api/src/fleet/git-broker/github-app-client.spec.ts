@@ -1,5 +1,5 @@
 import { createVerify, generateKeyPairSync } from 'crypto';
-import { mkdtempSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { GitHubAppClient } from './github-app-client';
@@ -10,7 +10,9 @@ import type { FleetRepoRef } from '../jobs/domain/fleet-job.domain';
 import { FakeForge, startFakeForge } from '../../../test/helpers/fake-forge';
 
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
-const keyFile = join(mkdtempSync(join(tmpdir(), 'gh-app-')), 'app.pem');
+const keyDir = mkdtempSync(join(tmpdir(), 'gh-app-'));
+const keyFile = join(keyDir, 'app.pem');
+afterAll(() => rmSync(keyDir, { recursive: true, force: true }));
 writeFileSync(keyFile, privateKey.export({ type: 'pkcs1', format: 'pem' }));
 
 const b64json = (s: string) => JSON.parse(Buffer.from(s, 'base64url').toString('utf8'));

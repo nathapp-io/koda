@@ -140,6 +140,13 @@ describe('TicketsService', () => {
   };
 
   beforeEach(async () => {
+    // Per-test implementations (mockResolvedValue etc.) must not leak across tests.
+    Object.values(mockTicketRepo).forEach((m) => m.mockReset());
+    Object.values(mockTransitionsService).forEach((m) => m.mockReset());
+    mockTicketEventService.create.mockReset().mockResolvedValue({ id: 'evt-mock' });
+    mockOutbox.record.mockReset().mockResolvedValue(undefined);
+    inTx = false;
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TicketsService,

@@ -13,6 +13,8 @@ describe('LocalDiskArtifactStore', () => {
   const store = new LocalDiskArtifactStore({ artifactDir: root });
   const good = Buffer.from('bundle-v1');
 
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
   it('stores, stats, reads and deletes', async () => {
     await expect(store.put('jobs/j1/1.tar.gz', Readable.from([good]), { maxBytes: 100, expectedSha256: sha(good) })).resolves.toEqual({ sizeBytes: good.length, sha256: sha(good) });
     expect(readFileSync(join(root, 'jobs/j1/1.tar.gz'))).toEqual(good);
@@ -24,6 +26,7 @@ describe('LocalDiskArtifactStore', () => {
 
   it('keeps the previous file when a replacement is too large or has the wrong hash', async () => {
     const big = Buffer.alloc(200);
+    await store.put('jobs/j1/1.tar.gz', Readable.from([good]), { maxBytes: 100, expectedSha256: sha(good) });
     await expect(store.put('jobs/j1/1.tar.gz', Readable.from([big]), { maxBytes: 100, expectedSha256: sha(big) })).rejects.toBeInstanceOf(ArtifactTooLargeError);
     await expect(store.put('jobs/j1/1.tar.gz', Readable.from([Buffer.from('x')]), { maxBytes: 100, expectedSha256: sha(good) })).rejects.toBeInstanceOf(ArtifactHashMismatchError);
     expect(readFileSync(join(root, 'jobs/j1/1.tar.gz'))).toEqual(good);

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { Readable } from 'stream';
@@ -11,6 +11,7 @@ import { MemoryLogRepo } from './test-helpers/memory-log-repo';
 
 describe('LogFallbackService', () => {
   const root = mkdtempSync(join(tmpdir(), 'koda-fallback-'));
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
   const store = new LocalDiskLogStore({ artifactDir: root });
   const live = { touch: vi.fn() };
   let repo: MemoryLogRepo;

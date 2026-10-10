@@ -27,6 +27,10 @@ describe('SymbolStore', () => {
   };
 
   beforeEach(async () => {
+    // Per-test implementations must not leak across tests (order independence).
+    Object.values(mockPrismaClient.symbol).forEach((m) => m.mockReset());
+    mockPrismaClient.$queryRawUnsafe.mockReset();
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SymbolStore,
@@ -255,6 +259,7 @@ describe('SymbolStore', () => {
       const projectId = 'proj-123';
       const repoId = 'repo-123';
       const commitHash = 'newcommit';
+      mockPrismaClient.symbol.upsert.mockResolvedValue({ callers: [], callees: [] });
 
       await store.upsertSymbol({
         id: `${projectId}:${repoId}:src/new.ts::newFunc`,

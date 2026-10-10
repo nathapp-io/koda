@@ -23,8 +23,15 @@ vi.mock('@lancedb/lancedb', () => ({
   Index: { fts: vi.fn().mockReturnValue({}) },
 }));
 
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { IRagConfig } from '../config/rag.config';
 import { VectorStore } from './vector-store.service';
+
+// Per-file unique dir: LanceTableManager mkdirs lancedbPath even with a mocked connect().
+const lancedbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'koda-vector-store-'));
+afterAll(() => fs.rmSync(lancedbDir, { recursive: true, force: true }));
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyRecord = Record<string, any>;
@@ -35,7 +42,7 @@ function makeRagConfig(overrides: Partial<IRagConfig> = {}): IRagConfig {
     embeddingModel: 'nomic-embed-text',
     ollamaBaseUrl: 'http://localhost:11434',
     openaiApiKey: '',
-    lancedbPath: './lancedb',
+    lancedbPath: lancedbDir,
     inMemoryOnly: false,
     ftsIndexMode: 'simple',
     similarityHigh: 0.85,
@@ -137,6 +144,8 @@ describe('VectorStore.getOrCreateTable — FTS index creation', () => {
   it('logs warning and does not throw when createIndex rejects', async () => {
     const vectorStore = new VectorStore(mockRagConfig);
     const loggerSpy = vi.spyOn(vectorStore['logger'], 'warn');
+    // test-setup mocks Logger.prototype.warn globally, so this spy shares calls from other tests.
+    loggerSpy.mockClear();
     const createIndexError = new Error('Index already exists');
     const createIndexSpy = vi.fn().mockRejectedValue(createIndexError);
     const deleteSpy = vi.fn().mockResolvedValue(undefined);

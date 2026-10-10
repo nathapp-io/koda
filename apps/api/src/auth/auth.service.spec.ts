@@ -58,6 +58,13 @@ describe('AuthService', () => {
   };
 
   beforeEach(async () => {
+    // Drop queued once-values and per-test implementations so test order cannot matter.
+    Object.values(mockAuthRepository).forEach((m) => m.mockReset());
+    mockConfigService.get.mockReset();
+    mockJwtStrategyProvider.sign.mockReset();
+    mockJwtRefreshStrategyProvider.sign.mockReset();
+    mockCacheManager.invalidate.mockReset();
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
