@@ -8,14 +8,23 @@ import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-com
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FleetCommandType } from '../../common/enums';
 import { DEFAULT_APPROVAL_TIMEOUT_SEC } from '../common/protocol';
+import { isRunnerOnline } from '../common/runner-online';
 import { DuplicateActiveJobError, FLEET_JOB_REPOSITORY, type IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { PlacementService } from '../jobs/placement.service';
 import { RunnerNotifier } from '../jobs/runner-notifier';
+import { BudgetGate } from '../budgets/budget-gate';
+import { jobGateKeys } from '../budgets/budget-rules';
+import { BudgetPausedException } from '../budgets/budget.exceptions';
+import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
 import { buildThreadInstructions } from './thread-instructions';
+import { sendRefusal, type ThreadSendRefusal } from './thread-send-rules';
 import type { ChatMessageRecord, ChatThreadRecord, ChatThreadRepository } from './domain/chat-thread.domain';
 import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
 import type { ThreadBackend } from '../common/thread-jobs';
+
+/** A budget refusal carries the paused policy so the 409 names its scope. */
+type SendRefusalResult = { refusal: 'budgetPaused'; pausedPolicy: BudgetPolicyRecord } | { refusal: Exclude<ThreadSendRefusal, 'budgetPaused'> | null; pausedPolicy: null };
 
 @Injectable()
 export class PrismaChatThreadRepository implements ChatThreadRepository {
@@ -26,6 +35,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     private readonly activity: FleetActivityService,
     private readonly placement: PlacementService,
     private readonly notifier: RunnerNotifier,
+    private readonly budgets: BudgetGate,
     @Inject(FLEET_CFG) private readonly config: ConfigType<typeof fleetConfig>,
   ) {}
 
@@ -79,6 +89,10 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
         const duplicateAfterLock = await this.prisma.client.chatMessage.findUnique({ where: { threadId_clientMessageId: { threadId: input.threadId, clientMessageId: input.clientMessageId } } });
         if (duplicateAfterLock) return { kind: 'done' as const, result: { message: this.mapMessage(duplicateAfterLock), jobId: null, deduplicated: true } };
 
+        const refused = await this.sendRefusalFor(thread, currentAfterLock);
+        if (refused.refusal === 'budgetPaused') throw new BudgetPausedException(refused.pausedPolicy);
+        if (refused.refusal) throw this.refusalException(refused.refusal);
+
         const seqResult = await this.prisma.client.$queryRaw<Array<{ nextSeq: number }>>`UPDATE "ChatThread" SET "nextSeq" = "nextSeq" + 1 WHERE "id" = ${thread.id} RETURNING "nextSeq" - 1 AS "nextSeq"`;
         const seq = seqResult[0]?.nextSeq;
         if (seq === undefined) throw new Error(`failed to allocate message sequence for thread ${thread.id}`);
@@ -91,12 +105,8 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
         const repo = await this.prisma.client.fleetRepo.findUnique({ where: { id: thread.repoId }, select: { owner: true, name: true } });
         if (!repo) throw new NotFoundAppException({}, 'fleet.repos');
 
-        const runnerRow = thread.runnerId ? await this.prisma.client.runner.findUnique({ where: { id: thread.runnerId }, select: { id: true, enabled: true, lastSeenAt: true, protocolVersion: true } }) : null;
-        const hasPendingMessage = await this.prisma.client.chatMessage.findFirst({ where: { threadId: thread.id, status: 'pending', id: { not: message.id } }, select: { id: true } });
-        const closeCommand = currentAfterLock ? await this.prisma.client.fleetCommand.findFirst({ where: { jobId: currentAfterLock.id, type: FleetCommandType.THREAD_CLOSE, leaseEpoch: currentAfterLock.leaseEpoch }, select: { id: true } }) : null;
-        const runnerOnline = runnerRow?.enabled === true && runnerRow.lastSeenAt.getTime() >= Date.now() - this.config.runnerOfflineSec * 1000;
-        const liveSession = currentAfterLock?.state === 'RUNNING' && runnerOnline && runnerRow.protocolVersion >= 4 && !hasPendingMessage && !closeCommand;
-        if (liveSession && currentAfterLock?.runnerId) {
+        // The refusal gate passed, so a RUNNING job here is a live session with no turn in flight.
+        if (currentAfterLock?.state === 'RUNNING' && currentAfterLock.runnerId) {
           await this.jobs.createCommand({ runnerId: currentAfterLock.runnerId, jobId: currentAfterLock.id, type: FleetCommandType.THREAD_INPUT, leaseEpoch: currentAfterLock.leaseEpoch, payload: { messageId: message.id, text: input.text } });
           return { kind: 'done' as const, result: { message, jobId: null, deduplicated: false }, notifyRunnerId: currentAfterLock.runnerId };
         }
@@ -136,6 +146,36 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       return outcome.result;
     }
     throw new ConflictAppException({}, 'threads.turnRunning');
+  }
+
+  /** The facts `sendRefusal` judges, read under the thread and job locks. Writes nothing. */
+  private async sendRefusalFor(thread: { id: string; status: string; costUsd: Prisma.Decimal; maxCostUsd: Prisma.Decimal; runnerId: string | null; projectId: string; repoId: string }, job: { id: string; state: string; leaseEpoch: number } | null): Promise<SendRefusalResult> {
+    const pauses = await this.budgets.snapshot(new Date());
+    const pausedPolicy = pauses.match(jobGateKeys({ projectId: thread.projectId, repoId: thread.repoId, pinnedRunnerId: thread.runnerId }));
+    const runnerRow = thread.runnerId ? await this.prisma.client.runner.findUnique({ where: { id: thread.runnerId }, select: { lastSeenAt: true, protocolVersion: true } }) : null;
+    const closeCommand = job ? await this.prisma.client.fleetCommand.findFirst({ where: { jobId: job.id, type: FleetCommandType.THREAD_CLOSE, leaseEpoch: job.leaseEpoch }, select: { id: true } }) : null;
+    const turnInFlight = await this.prisma.client.chatMessage.findFirst({ where: { threadId: thread.id, status: { in: ['pending', 'streaming'] } }, select: { id: true } });
+    const refusal = sendRefusal({
+      status: thread.status, costUsd: thread.costUsd, maxCostUsd: thread.maxCostUsd,
+      pausedPolicy,
+      runner: runnerRow ? { online: isRunnerOnline(runnerRow.lastSeenAt, new Date(), this.config.runnerOfflineSec), protocolVersion: runnerRow.protocolVersion } : null,
+      job: job ? { state: job.state, closeRequested: closeCommand !== null } : null,
+      turnInFlight: turnInFlight !== null,
+    });
+    if (refusal === 'budgetPaused' && pausedPolicy) return { refusal: 'budgetPaused', pausedPolicy };
+    return { refusal, pausedPolicy: null };
+  }
+
+  private refusalException(refusal: Exclude<ThreadSendRefusal, 'budgetPaused'>): Error {
+    switch (refusal) {
+      case 'disabled': return new ConflictAppException({}, 'threads.disabled');
+      case 'archived': return new ConflictAppException({}, 'threads.archived');
+      case 'costCap': return new ConflictAppException({}, 'threads.costCap');
+      case 'runnerOffline': return new ConflictAppException({}, 'threads.runnerOffline');
+      case 'runnerOutdated': return new ConflictAppException({}, 'threads.runnerOutdated');
+      case 'closing': return new ConflictAppException({}, 'threads.closing');
+      case 'turnRunning': return new ConflictAppException({}, 'threads.turnRunning');
+    }
   }
 
   private async currentThreadJob(threadId: string) {
