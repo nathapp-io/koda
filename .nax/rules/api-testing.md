@@ -27,7 +27,7 @@ priority: 80
 - Controller-level fallback paths (event-type detection, header absence, unknown payload routing) need integration or e2e coverage — service unit tests alone are insufficient
 
 ## Testing Anti-Patterns
-- Do not create `Test.createTestingModule(...).compile()` inline inside `it(...)` bodies without `beforeEach`/`afterEach` cleanup. NestJS DI containers retain reflector metadata, module compiler caches, and injector graphs even after the test returns; ~30+ uncleaned modules per file is enough to OOM Jest
+- Do not create `Test.createTestingModule(...).compile()` inline inside `it(...)` bodies without `beforeEach`/`afterEach` cleanup. NestJS DI containers retain reflector metadata, module compiler caches, and injector graphs even after the test returns; ~30+ uncleaned modules per file is enough to OOM the test runner
 - If a service has only constructor-injected dependencies and no Nest lifecycle (no `OnModuleInit`, no decorator metadata under test), prefer **direct instantiation** (`new ServiceClass(mockDep)`) over `Test.createTestingModule`. It is faster, allocates orders of magnitude less, and avoids the cleanup requirement entirely
 - If `Test.createTestingModule` is genuinely needed, store the module and close it: declare `let module: TestingModule` at `describe` scope, assign in `beforeEach`/`beforeAll`, and `await module.close()` in the matching `afterEach`/`afterAll`
 - Do not stub paginated repository methods with `mockResolvedValue(items)` when `items.length >= PAGE_SIZE`; use a pagination-aware `mockImplementation` that honors `skip`
