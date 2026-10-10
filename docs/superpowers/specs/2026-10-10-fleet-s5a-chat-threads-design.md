@@ -202,8 +202,8 @@ model ProjectSkill {
   2. the recursive tree at the SHA (`getTree`); every directory directly under `path` that contains `SKILL.md` is a
      skill (at most 50);
   3. each `SKILL.md` blob (≤ 256 KiB): YAML frontmatter `name` and `description`, bounded as in §1.1.
-- **Public repos only (D546).** Calls use an App installation token when the App happens to be installed on the repo
-  (better rate limit), else anonymous. A 404 or a private repo → `RESOLVE_FAILED` with reason `not_public_or_missing`.
+- **Public repos only (D546).** Calls are anonymous (feature spec `fleet-s5a-skill-catalog`; using an App or personal
+  token for a higher rate limit is out of scope). A 404 or a private repo → `RESOLVE_FAILED` with reason `not_public_or_missing`.
   Anonymous calls are limited by GitHub (60/h per IP), acceptable because resolves only run on an admin click.
 - Only `https://github.com/<owner>/<repo>` URLs are accepted (400 `skills.unsupportedHost`).
 - A name already owned by another source → 409 `skills.nameConflict` (naming the source); nothing is written. Update

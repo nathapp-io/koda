@@ -147,9 +147,10 @@ export const SKILL_RESOLVER = Symbol('SKILL_RESOLVER');
 3. A skill = a `tree` entry whose parent directory equals `path` (repo root when `path` is `""`) and for which a
    `blob` entry `<dir>/SKILL.md` exists. Zero skills → `no_skills`; more than 50 → `too_many_skills`. Skills are
    ordered by `dir`.
-4. For each skill, `GET {api}/repos/{owner}/{repo}/contents/{dir}/SKILL.md?ref={sha}` (`dir` URL-encoded per path
-   segment) (base64 `content`, `size` ≤
-   262144, else `invalid_skill` with detail `<dir>`), decoded as UTF-8 and passed to `parseSkillFrontmatter`.
+4. A `SKILL.md` whose tree entry `size` exceeds 262144 → `invalid_skill` with detail `<dir>`, before any contents
+   call. For each remaining skill, `GET {api}/repos/{owner}/{repo}/contents/{dir}/SKILL.md?ref={sha}` (`dir`
+   URL-encoded per path segment); a response whose `type` is not `file` (for example a symlink) or whose `size`
+   exceeds 262144 → `invalid_skill` with detail `<dir>`; otherwise its base64 `content`, decoded as UTF-8 and passed to `parseSkillFrontmatter`.
 5. Two skills in one source with the same `name` → `duplicate_name` (detail: the name).
 6. `statusReason` is stored as `reason` or `reason:detail`, truncated to 300 characters.
 
@@ -167,7 +168,9 @@ is truncated to 1024. No YAML dependency is added.
 
 `parseGitHubUrl(url): { owner, repo, gitUrl }` (`apps/api/src/skills/github-url.ts`): accepts only
 `https://github.com/<owner>/<repo>` with an optional trailing `.git` or `/`; owner and repo match
-`^[A-Za-z0-9_.-]{1,100}$` and are not `.` or `..` (a repo of only `.git` is rejected); returns them lowercased and `gitUrl = https://github.com/<owner>/<repo>`. Anything else
+`^[A-Za-z0-9_.-]{1,100}$` and are not `.` or `..` (a repo of only `.git` is rejected); returns them lowercased and `gitUrl = https://github.com/<owner>/<repo>`, built by concatenating a
+`GITHUB_WEB_BASE = 'https://github.com/'` constant with `owner + '/' + repo` — never a template literal containing
+`github.com/${`, which the existing tripwire `apps/api/src/vcs/provider-construction-sites.spec.ts` forbids in `src/`. Anything else
 throws `ValidationAppException({}, 'skills.unsupportedHost')`.
 
 `path` validation (in the create DTO): `""` or 1-200 characters of `/`-separated segments, each matching
@@ -177,8 +180,12 @@ throws `ValidationAppException({}, 'skills.unsupportedHost')`.
 
 `SkillsModule` (`apps/api/src/skills/`) follows repository → service → public (rule api-data):
 `PrismaSkillCatalogRepository` (module-private), `SkillsService` (exported), `AdminSkillsController`,
-`ProjectSkillsController` (US-005). It imports `GitBrokerModule` (for `FleetHttpClient`), `ProjectsModule` (for
-`ProjectMembershipGuard` and `ProjectsService`) and binds `SKILL_RESOLVER` to `GitHubSkillResolver`. Controllers carry
+`ProjectSkillsController` (US-005). It imports `GitBrokerModule` (for `FleetHttpClient`) and `ProjectAccessModule` (for
+`ProjectMembershipGuard` and `ProjectAccessService.assertProjectAdmin`, as `fleet-repos.module.ts` does), binds
+`SKILL_RESOLVER` to `GitHubSkillResolver`, and keeps the repository behind a module-private
+`SKILL_CATALOG_REPOSITORY` token returning service-owned domain types from `skill-catalog.domain.ts` (rule api-data).
+Multi-row writes (create insert, update replacement) run inside `txManager.run()` (rule api-data). `SkillsModule` is
+added to `AppModule.imports`. Controllers carry
 `@ApiTags('skills')`, `@ApiBearerAuth()`, and `@ApiOperation({ summary })` plus `@ApiResponse` per status on every route
 (rule api-controllers; `spec-integrity.integration.spec.ts`).
 List queries are bounded (rule api-data): sources `take: 200` ordered by `createdAt`; project skills `take: 10000`
@@ -220,11 +227,14 @@ are module-private.
 - `composables/useSkillCatalog.ts`: `list()`, `create({ gitUrl, ref, path })`, `update(id)`, `remove(id)` via
   `useApi()` on the admin routes; `composables/useProjectSkills.ts`: `list(slug)`, `enable(slug, skillId)`,
   `disable(slug, skillId)`.
-- `pages/admin/skills.vue` (global admins; others see the existing forbidden state): table of sources (URL, ref,
+- `pages/admin/skills.vue` (global admins; a 403 from `list()` sets `adminOnly` and renders the `skills.adminOnly`
+  note, as `pages/admin/fleet/repos.vue` does): table of sources (URL, ref,
   short SHA or `—` when `resolvedSha` is null, path, status badge with reason, skill count) with Add (dialog, vee-validate + zod: `gitUrl` must match
   `https://github.com/<owner>/<repo>`, `ref` required, `path` optional), Update, Remove (confirm), and an expandable
   row listing each skill's name and description.
-- `components/ProjectSkillsPanel.vue` in the new settings tab: one row per catalog skill (name, description, source
+- `components/ui/switch/` (new, `Switch.vue` + `index.ts`): the shadcn-vue Switch, hand-written over radix-vue's
+  `SwitchRoot` / `SwitchThumb` following the existing `components/ui/*` layout (no shadcn CLI, no network).
+- `components/ProjectSkillsPanel.vue` in the new settings tab (trigger label key `skills.project.tab`): one row per catalog skill (name, description, source
   URL + short SHA or `—` when `resolvedSha` is null, status warning when the source is `RESOLVE_FAILED`) with a switch; switches are disabled unless `useProjectViewerRole(slug)` reports `canManage`
   (project ADMIN or global ADMIN); toggling calls enable/disable and shows a toast on failure
   (reverting the switch).
@@ -257,13 +267,14 @@ A failed create still stores the source (`RESOLVE_FAILED`), so re-posting the sa
 Tests never call GitHub: integration and e2e suites spy on the booted app's resolver
 (`jest.spyOn(app.get(SKILL_RESOLVER), 'resolve')`, the pattern of `fleet-pr-refresher.integration.spec.ts:57`).
 
-After the API contract changes, `bun run generate` regenerates `openapi.json` and the CLI client; the CLI gains no
-commands.
+After the API contract changes, `bun run generate` (which runs `api:export-spec`) regenerates `openapi.json` and the
+untracked CLI client; the CLI gains no commands.
 
 ## Out of Scope
 
-- US-003 only: two concurrent creates of the same source may return 500 to the losing request instead of 409; the
-  `(owner, repo, ref, path)` unique index still guarantees a single row.
+- US-003 only: two concurrent creates of the same source, or two concurrent writes that both introduce the same skill
+  name, may return 500 to the losing request instead of 409; the
+  `(owner, repo, ref, path)` and `Skill.name` unique indexes still guarantee consistent rows.
 - US-001 only: a `git@github.com:` SSH URL and a URL with extra path segments are rejected by the same validation as
   any non-matching URL; only the GitLab case is pinned by an acceptance criterion.
 - US-001 only: frontmatter keys other than `name` and `description`, duplicate keys and trailing `#` comments are not
@@ -288,7 +299,8 @@ commands.
 2. **US-002: GitHub skill resolver** — `Workdir: apps/api` — depends on US-001.
 3. **US-003: Skill source create and list routes** — `Workdir: apps/api` — depends on US-002.
 4. **US-004: Skill source update and delete routes** — `Workdir: apps/api` — depends on US-003.
-5. **US-005: Project skill enablement routes** — `Workdir: apps/api` — depends on US-003.
+5. **US-005: Project skill enablement routes** — `Workdir: apps/api` — depends on US-004 (both edit
+   `skills.service.ts`, `endpoint.e2e.spec.ts` and `openapi.json`).
 6. **US-006: Web skill catalog admin page** — `Workdir: apps/web` — depends on US-004.
 7. **US-007: Web project Skills tab and admin navigation** — `Workdir: apps/web` — depends on US-005 and US-006 (both
    edit the web locale files).
@@ -302,6 +314,7 @@ commands.
 - `apps/api/src/common/enums.ts` — string constants pattern for `SkillSourceStatus`
 - `apps/api/src/webhook/webhook.service.ts` — `ValidationAppException(args, prefix)` usage (`:53`)
 - `apps/api/test/helpers/test-prisma.ts` — `createTestPrismaClient()` for the PG schema tests
+- `apps/api/test/helpers/migration-schema.ts` — `scratchSchemaBefore`, `applyMigration`
 
 **US-002**
 
@@ -313,7 +326,7 @@ commands.
 
 **US-003**
 
-- `apps/api/src/fleet/repos/fleet-repos.controller.ts` — global-admin controller pattern
+- `apps/api/src/app.module.ts` — gains `SkillsModule` in `imports`
 - `apps/api/src/fleet/repos/prisma-fleet-repo.repository.ts` — `AbstractPrismaRepository` pattern
 - `apps/api/src/common/test-helpers/global-stubs.module.ts` — `GlobalStubsModule` for the DI spec
 - `apps/api/test/integration/fleet/fleet-pr-refresher.integration.spec.ts` — spying on a booted app's provider
@@ -328,7 +341,7 @@ commands.
 **US-005**
 
 - `apps/api/src/projects/projects.controller.ts` — `addProjectAgent` project-admin pattern
-- `apps/api/src/projects/projects.service.ts` — `assertProjectAdmin`
+- `apps/api/src/projects/project-access.service.ts` — `assertProjectAdmin`
 - `apps/api/src/projects/project-membership.guard.ts` — `ProjectMembershipGuard`
 - `apps/api/src/auth/principal/koda-principal.types.ts` — `isUserPrincipal`
 - `apps/api/src/skills/skills.service.ts` — created by US-003, gains the project methods
@@ -359,7 +372,7 @@ commands.
 - `apps/api/src/skills/github-url.ts` — `parseGitHubUrl`
 - `apps/api/src/skills/skill-frontmatter.spec.ts`
 - `apps/api/src/skills/github-url.spec.ts`
-- `apps/api/test/integration/skills/skill-catalog-schema.integration.spec.ts` — constraints and cascades on PG
+- `apps/api/test/integration/skills/skill-catalog-schema.integration.spec.ts` — constraints and the migration on PG
 
 **US-002**
 
@@ -370,7 +383,8 @@ commands.
 
 - `apps/api/src/skills/skills.module.ts` — `SkillsModule`
 - `apps/api/src/skills/skills.module.spec.ts` — DI wiring (unit, no DB)
-- `apps/api/src/skills/prisma-skill-catalog.repository.ts` — module-private repository
+- `apps/api/src/skills/prisma-skill-catalog.repository.ts` — module-private repository (`SKILL_CATALOG_REPOSITORY`)
+- `apps/api/src/skills/skill-catalog.domain.ts` — domain types and the repository token
 - `apps/api/src/skills/skills.service.ts` — `SkillsService`
 - `apps/api/src/skills/admin-skills.controller.ts` — `AdminSkillsController`
 - `apps/api/src/skills/dto/skill-source.dto.ts` — `SkillSourceDto`, `SkillSourceListDto`, `SkillDto`, `CreateSkillSourceDto`
@@ -400,6 +414,8 @@ commands.
 **US-007**
 
 - `apps/web/composables/useProjectSkills.ts`
+- `apps/web/components/ui/switch/Switch.vue`
+- `apps/web/components/ui/switch/index.ts`
 - `apps/web/components/ProjectSkillsPanel.vue`
 - `apps/web/tests/components/ProjectSkillsPanel.spec.ts`
 - `apps/web/tests/layouts/default-skills-nav.spec.ts`
@@ -470,7 +486,7 @@ None. The story adds `FleetHttpClient` to `GitBrokerModule.exports` (a read Cont
 12. [unit] `parseSkillFrontmatter` with `description:` followed by no value throws `SkillResolveError` with `reason` `invalid_skill`.
 13. [integration] Inserting a second `SkillSource` row with the same `owner`, `repo`, `ref` and `path` as an existing row fails with a unique-constraint violation.
 14. [integration] Inserting a `Skill` row whose `name` equals the `name` of a `Skill` under another source fails with a unique-constraint violation.
-15. [integration] Deleting a `SkillSource` row deletes its `Skill` rows and the `ProjectSkill` rows that reference those skills.
+15. [integration] Applying the `20261012090000_skill_catalog` migration with `applyMigration` to a scratch schema from `scratchSchemaBefore` creates the `SkillSource`, `Skill` and `ProjectSkill` tables, after which inserting two `SkillSource` rows with the same `owner`, `repo`, `ref` and `path` fails with a unique-constraint violation.
 
 ### US-002: GitHub skill resolver (`Workdir: apps/api`)
 
@@ -478,15 +494,15 @@ None. The story adds `FleetHttpClient` to `GitBrokerModule.exports` (a read Cont
 2. [unit] Every `FleetHttpClient.request` the resolver sends carries headers with no `authorization` key.
 3. [unit] With the commits call returning `{ sha: 'abc' }` and the tree for `abc` (requested with `recursive=1`) holding `skills/a` (tree), `skills/a/SKILL.md` (blob), `skills/b` (tree without `SKILL.md`) and `other/c/SKILL.md` (blob), `resolve` deep-equals `{ sha: 'abc', skills: [{ name: 'alpha', description: 'First', dir: 'skills/a' }] }` when `skills/a/SKILL.md` carries `name: alpha` and `description: First`.
 4. [unit] For a skill directory `skills/my skill`, the resolver fetches `GET <githubApiUrl>/repos/o/r/contents/skills/my%20skill/SKILL.md?ref=abc`.
-5. [unit] For path `""` and a tree listing `b/SKILL.md`, `a/SKILL.md` and `x/y/SKILL.md` in that order, `resolve` returns skills whose `dir` values are exactly `['a', 'b']`.
+5. [unit] For path `""` and a tree listing tree entries `b`, `a`, `x`, `x/y` and blobs `b/SKILL.md`, `a/SKILL.md`, `x/y/SKILL.md` in that order, with each `SKILL.md` carrying a distinct valid `name`, `resolve` returns skills whose `dir` values are exactly `['a', 'b']`.
 6. [unit] A 404 from the commits call rejects with `SkillResolveError` whose `reason` is `not_public_or_missing`.
 7. [unit] A 422 from the commits call rejects with `SkillResolveError` whose `reason` is `ref_not_found`.
 8. [unit] A 403 from the tree call rejects with `SkillResolveError` whose `reason` is `rate_limited`.
 9. [unit] A tree response with `truncated: true` rejects with `SkillResolveError` whose `reason` is `tree_truncated`.
 10. [unit] A tree with no directory under `path` holding a `SKILL.md` rejects with `SkillResolveError` whose `reason` is `no_skills`.
-11. [unit] A tree with 51 skill directories under `path` rejects with `SkillResolveError` whose `reason` is `too_many_skills` before any contents call is made.
-12. [unit] Two skill directories whose `SKILL.md` frontmatter carries the same `name` reject with `SkillResolveError` whose `reason` is `duplicate_name` and whose `detail` is that name.
-13. [unit] A contents response with `size` 262145 rejects with `SkillResolveError` whose `reason` is `invalid_skill` and whose `detail` is the skill's `dir`.
+11. [unit] A tree with 51 skill directories under `path` rejects with `SkillResolveError` whose `reason` is `too_many_skills`.
+12. [unit] Two skill directories whose `SKILL.md` frontmatter carries the same `name` `dup` reject with an error deep-equal to `new SkillResolveError('duplicate_name', 'dup')`.
+13. [unit] A tree whose `skills/a/SKILL.md` entry has `size` 262145 rejects with an error deep-equal to `new SkillResolveError('invalid_skill', 'skills/a')`.
 14. [unit] When `FleetHttpClient.request` throws `RepoCheckException('provider_unreachable')`, `resolve` rejects with `SkillResolveError` whose `reason` is `provider_unreachable`.
 15. [unit] A 500 from the commits call rejects with `SkillResolveError` whose `reason` is `provider_error`.
 
@@ -505,6 +521,8 @@ None. The story adds `FleetHttpClient` to `GitBrokerModule.exports` (a read Cont
 11. [integration] `GET /api/admin/skills/sources` with an agent API key returns 403.
 12. [integration] `GET /api/admin/skills/sources` by a global ADMIN returns `{ items }` holding every source ordered by `createdAt`.
 13. [integration] Each source in `GET /api/admin/skills/sources` carries its `skills` ordered by `name`.
+14. [integration] `POST /api/admin/skills/sources` with `path: '../x'` returns 400 without calling the spied `resolve`.
+15. [integration] `POST /api/admin/skills/sources` with `ref: 'a..b'` returns 400 without calling the spied `resolve`.
 
 ### US-004: Skill source update and delete routes (`Workdir: apps/api`)
 
@@ -519,6 +537,10 @@ None. The story adds `FleetHttpClient` to `GitBrokerModule.exports` (a read Cont
 9. [integration] After `DELETE /api/admin/skills/sources/:id`, no `Skill` row and no `ProjectSkill` row of that source remains.
 10. [integration] `DELETE /api/admin/skills/sources/:id` with an id that does not exist returns 404.
 11. [integration] `DELETE /api/admin/skills/sources/:id` by an authenticated user who is not a global ADMIN returns 403.
+12. [integration] `POST /api/admin/skills/sources/:id/update` by an authenticated user who is not a global ADMIN returns 403.
+13. [integration] `POST /api/admin/skills/sources/:id/update` with an agent API key returns 403.
+14. [integration] `POST /api/admin/skills/sources/:id/update` with the spied `resolve` rejecting `new SkillResolveError('invalid_skill', 'skills/x')` stores `statusReason` `invalid_skill:skills/x`.
+15. [integration] `POST /api/admin/skills/sources/:id/update` with the spied `resolve` rejecting a `SkillResolveError('invalid_skill', <a 400-character detail>)` stores a `statusReason` of exactly 300 characters.
 
 ### US-005: Project skill enablement routes (`Workdir: apps/api`)
 
@@ -544,13 +566,13 @@ None. The story adds `FleetHttpClient` to `GitBrokerModule.exports` (a read Cont
 2. [unit] `useSkillCatalog().list()` sends `GET /admin/skills/sources` and returns the response's `items` array.
 3. [unit] `useSkillCatalog().update('src1')` sends `POST /admin/skills/sources/src1/update`.
 4. [unit] `useSkillCatalog().remove('src1')` sends `DELETE /admin/skills/sources/src1`.
-5. [unit] `pages/admin/skills.vue` with two sources renders two rows, each showing the source's `ref`, the first 7 characters of `resolvedSha`, its `path` and its skill count.
+5. [unit] `pages/admin/skills.vue` with a source whose `resolvedSha` is `0123456789abcdef` renders `0123456` in that source's row.
 6. [unit] A row for a source whose `resolvedSha` is null renders `—` in the SHA column.
 7. [unit] A row for a source with `status: 'RESOLVE_FAILED'` and `statusReason: 'rate_limited'` renders a failure badge whose text includes `rate_limited`.
 8. [unit] Expanding a source row renders each of its skills' `name` and `description`.
 9. [unit] Clicking Update on a row calls `useSkillCatalog().update` with that row's id and re-renders the row from the returned `SkillSourceDto`.
 10. [unit] Clicking Remove calls `useSkillCatalog().remove` after the confirmation is accepted.
-11. [unit] Dismissing the Remove confirmation does not call `useSkillCatalog().remove`.
+11. [unit] When `useSkillCatalog().list()` rejects with a 403 API error, `pages/admin/skills.vue` renders the `skills.adminOnly` note and no Add button.
 12. [unit] On `pages/admin/skills.vue`, clicking Add opens `AddSkillSourceDialog`, and a successful `create` closes the dialog and renders a row for the returned `SkillSourceDto`.
 13. [unit] `AddSkillSourceDialog` submitted with `gitUrl` `https://gitlab.com/a/b` shows the validation message for the `skills.form.gitUrlInvalid` key and does not call `create`.
 14. [unit] `AddSkillSourceDialog` submitted with a valid `gitUrl`, `ref` `main` and an empty path field calls `create` with `path: ''`.
@@ -564,7 +586,7 @@ None. The story adds `FleetHttpClient` to `GitBrokerModule.exports` (a read Cont
 4. [unit] When `canManage` is true, switching on a disabled skill calls `useProjectSkills().enable`, which sends `PUT /projects/<slug>/skills/<skillId>`.
 5. [unit] When `canManage` is true, switching off an enabled skill calls `useProjectSkills().disable`, which sends `DELETE /projects/<slug>/skills/<skillId>`.
 6. [unit] When `enable` rejects, the panel shows a toast with the message from `extractApiError` and the switch shows off again.
-7. [unit] When `useProjectViewerRole(slug)` reports `canManage: false`, every switch is disabled.
+7. [unit] When `useProjectViewerRole(slug)` resolves `data.value.canManage` to false, every switch is disabled.
 8. [unit] A row whose `source.status` is `RESOLVE_FAILED` renders the warning text for the `skills.project.sourceFailed` key.
 9. [unit] The default layout rendered for a global admin contains a link to `/admin/skills` labelled with the `nav.skills` key.
 10. [unit] The default layout rendered for a user who is not a global admin contains no link to `/admin/skills`.
