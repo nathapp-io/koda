@@ -1931,7 +1931,7 @@
       "hint": "Register a public GitHub repository that holds skills. The commit is pinned when the source is added.",
       "gitUrl": "Repository URL",
       "gitUrlPlaceholder": "https://github.com/owner/repo",
-      "gitUrlInvalid": "Use https://github.com/<owner>/<repo>",
+      "gitUrlInvalid": "Enter a URL like https://github.com/owner/repo",
       "ref": "Ref",
       "refRequired": "Enter a branch, tag or commit",
       "path": "Path",
@@ -1949,7 +1949,7 @@
       "tab": "Skills",
       "title": "Skills",
       "description": "Enable catalog skills for this project.",
-      "sourceRef": "{url} @ {ref}",
+      "sourceRef": "{url} · {ref}",
       "sourceFailed": "The skill source failed to resolve; its pinned commit may be stale."
     }
   },
