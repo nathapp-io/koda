@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
+import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { parseGitHubUrl } from './github-url';
@@ -15,6 +16,7 @@ export class SkillsService {
   ) {}
 
   async createSource(input: { gitUrl: string; ref: string; path: string }, principal: KodaPrincipal): Promise<SkillSourceDomain> {
+    if (principal.actorType !== 'user') throw new ForbiddenAppException({}, 'skills.principal');
     const parsed = parseGitHubUrl(input.gitUrl);
     if (await this.catalog.findSource(parsed.owner, parsed.repo, input.ref, input.path)) {
       throw new ConflictAppException({}, 'skills.sourceExists');

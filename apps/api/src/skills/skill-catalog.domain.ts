@@ -16,6 +16,7 @@ export interface SkillSourceDomain {
   repo: string;
   ref: string;
   path: string;
+  createdById: string;
   resolvedSha: string | null;
   resolvedAt: Date | null;
   status: 'OK' | 'RESOLVE_FAILED';

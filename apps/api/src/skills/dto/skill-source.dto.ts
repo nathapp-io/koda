@@ -42,8 +42,8 @@ export class SkillSourceListDto {
 }
 
 export class CreateSkillSourceDto {
-  @ApiProperty() @IsString() declare gitUrl: string;
-  @ApiProperty() @IsString() @MinLength(1) @MaxLength(200) @Matches(/^[^\s]+$/) @Matches(/^(?!.*\.\.).*$/) declare ref: string;
+  @ApiProperty({ maxLength: 500 }) @IsString() @MaxLength(500) declare gitUrl: string;
+  @ApiProperty() @IsString() @MinLength(1) @MaxLength(200) @Matches(/^[^\s\u0000-\u001F\u007F-\u009F]+$/) @Matches(/^(?!.*\.\.).*$/) declare ref: string;
   @ApiProperty({ description: 'Empty string or slash-separated safe directory path', maxLength: 200 })
   @IsString() @MaxLength(200) @Matches(/^(?:[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*)?$/) @Matches(/^(?!.*(?:^|\/)\.\.?($|\/)).*$/)
   declare path: string;

@@ -23,7 +23,7 @@ export class PrismaSkillCatalogRepository extends AbstractPrismaRepository<Skill
     return {
       gitUrl: domain.gitUrl, owner: domain.owner, repo: domain.repo, ref: domain.ref, path: domain.path,
       resolvedSha: domain.resolvedSha, resolvedAt: domain.resolvedAt, status: domain.status,
-      statusReason: domain.statusReason, createdById: '',
+      statusReason: domain.statusReason, createdById: domain.createdById,
     };
   }
 
