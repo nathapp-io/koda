@@ -79,6 +79,7 @@
     "fleetApprovals": "审批",
     "fleetAnalytics": "集群分析",
     "fleetOverview": "集群概览",
+    "skills": "技能",
     "skipToContent": "跳到主要内容",
     "primary": "主导航",
     "sectionWorkspace": "工作区",
@@ -1943,6 +1944,12 @@
     },
     "toast": {
       "removed": "技能来源已移除"
+    },
+    "project": {
+      "tab": "技能",
+      "title": "技能",
+      "description": "为此项目启用目录中的技能。",
+      "sourceFailed": "技能来源解析失败；其固定的提交可能已过期。"
     }
   },
   "notifications": {

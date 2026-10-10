@@ -79,6 +79,7 @@
     "fleetApprovals": "Approvals",
     "fleetAnalytics": "Fleet analytics",
     "fleetOverview": "Fleet overview",
+    "skills": "Skills",
     "skipToContent": "Skip to content",
     "primary": "Primary",
     "sectionWorkspace": "Workspace",
@@ -1943,6 +1944,12 @@
     },
     "toast": {
       "removed": "Skill source removed"
+    },
+    "project": {
+      "tab": "Skills",
+      "title": "Skills",
+      "description": "Enable catalog skills for this project.",
+      "sourceFailed": "The skill source failed to resolve; its pinned commit may be stale."
     }
   },
   "notifications": {

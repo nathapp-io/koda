@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users, Server, FolderGit2, Rocket, Wallet, Inbox, BarChart3, Gauge, Settings, Search, Menu } from 'lucide-vue-next'
+import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users, Server, FolderGit2, Rocket, Wallet, Inbox, BarChart3, Gauge, Settings, Search, Menu, Sparkles } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const auth = useAuth()
@@ -186,6 +186,8 @@ const backTo = computed(() => {
         <NuxtLink v-if="isGlobalAdmin" to="/admin/fleet/approvals" :class="navLinkClass" :active-class="activeClass"><Inbox class="h-4 w-4 shrink-0" />{{ t('nav.fleetApprovals') }}</NuxtLink>
 
         <NuxtLink v-if="isGlobalAdmin" to="/admin/fleet/analytics" :class="navLinkClass" :active-class="activeClass"><BarChart3 class="h-4 w-4 shrink-0" />{{ t('nav.fleetAnalytics') }}</NuxtLink>
+
+        <NuxtLink v-if="isGlobalAdmin" to="/admin/skills" :class="navLinkClass" :active-class="activeClass"><Sparkles class="h-4 w-4 shrink-0" />{{ t('nav.skills') }}</NuxtLink>
 
         <!-- Project-scoped links: rendered after the global block in source, shown first via flex order -->
         <template v-if="projectSlug">
