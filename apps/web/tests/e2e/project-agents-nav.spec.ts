@@ -37,8 +37,11 @@ test.describe('Project agents nav (issue #252)', () => {
     await waitForHydration(page)
 
     const aside = page.getByRole('complementary', { name: 'Primary' })
-    await expect(aside.locator(`a[href="/${slug}/agents"]`)).toHaveClass(/bg-accent/)
-    await expect(aside.locator('a[href="/agents"]')).not.toHaveClass(/bg-accent/)
+    // navLinkClass carries hover:bg-accent on every link, so the active state has to
+    // be matched as a standalone token, not as a substring.
+    const active = /(?:^|\s)bg-accent(?=\s|$)/
+    await expect(aside.locator(`a[href="/${slug}/agents"]`)).toHaveClass(active)
+    await expect(aside.locator('a[href="/agents"]')).not.toHaveClass(active)
   })
 
   test('the roster page breadcrumb reads Koda > project > Agents', async ({ page }) => {

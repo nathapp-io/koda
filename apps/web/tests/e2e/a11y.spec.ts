@@ -47,6 +47,7 @@ test.describe('a11y (axe, serious+critical)', () => {
     { name: 'ticket detail', path: () => `/${slug}/tickets/${ticketRef}` },
     { name: 'labels', path: () => `/${slug}/labels` },
     { name: 'agents', path: () => '/agents' },
+    { name: 'project agents roster', path: () => `/${slug}/agents` },
   ];
 
   async function expectNoSeriousViolations(page: Page) {

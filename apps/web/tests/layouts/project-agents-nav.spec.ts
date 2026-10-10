@@ -22,9 +22,11 @@ function iconStub(): VueFull.Component {
 }
 
 function render(ctx: Record<string, unknown>) {
+  // Bindings the template reads but the tests do not vary.
+  const bindings = { isGlobalAdmin: false, sectionLabelClass: 'section-label', paletteOpen: false, ...ctx }
   return VueFull.createSSRApp({
     template,
-    setup: () => ctx,
+    setup: () => bindings,
     components: {
       NuxtLink: {
         name: 'NuxtLink',
