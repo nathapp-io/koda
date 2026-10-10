@@ -24,10 +24,10 @@ describe('US-006 AC9: Agents navigation link exists in layouts/default.vue sideb
 
   test('Agents link navigates to the agents page under project context', () => {
     const source = readFileSync(layoutPath, 'utf-8')
-    // The href/to should reference /agents within the project context
-    const hasAgentsLink =
-      source.includes('/agents') ||
-      source.includes('agents')
-    expect(hasAgentsLink).toBe(true)
+    // The project block must link to the project roster, not only the global registry.
+    const projectBlock = source.slice(source.indexOf('<template v-if="projectSlug">'))
+    expect(projectBlock).toContain(':to="`/${projectSlug}/agents`"')
+    // The global registry link is unchanged and stays outside the project block.
+    expect(source.indexOf('<NuxtLink to="/agents"')).toBeLessThan(source.indexOf('<template v-if="projectSlug">'))
   })
 })

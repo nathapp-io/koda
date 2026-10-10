@@ -34,6 +34,19 @@ test.describe('Command palette', () => {
     await expect(page.getByRole('dialog')).toBeHidden()
   })
 
+  test('the project agents entry opens the project roster (issue #252)', async ({ page }) => {
+    await webLogin(page)
+    await page.goto(`/${slug}`)
+    await page.keyboard.press('Control+K')
+    const dialog = page.getByRole('dialog')
+    const input = dialog.getByRole('combobox')
+    await input.fill('agents')
+    await expect(dialog.getByRole('option', { name: `Agents ${slug}` })).toBeVisible()
+    await page.keyboard.press('Enter')
+    await expect(page).toHaveURL(new RegExp(`/${slug}/agents$`))
+    await expect(page.getByRole('dialog')).toBeHidden()
+  })
+
   test('header search button opens the palette', async ({ page }) => {
     await webLogin(page)
     await page.getByRole('button', { name: 'Search or jump to…' }).click()

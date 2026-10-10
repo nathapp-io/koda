@@ -84,6 +84,9 @@ const breadcrumbItems = computed(() => {
   if (path === `/${project}`) {
     return [{ label: 'Koda', to: '/' }, { label: project }]
   }
+  if (path === `/${project}/agents`) {
+    return [{ label: 'Koda', to: '/' }, projectBase, { label: t('nav.agents') }]
+  }
   if (path === `/${project}/labels`) {
     return [{ label: 'Koda', to: '/' }, projectBase, { label: t('nav.labels') }]
   }
@@ -208,6 +211,14 @@ const backTo = computed(() => {
             >
               <Tag class="h-4 w-4 shrink-0" />
               {{ t('nav.labels') }}
+            </NuxtLink>
+            <NuxtLink
+              :to="`/${projectSlug}/agents`"
+              :class="navLinkClass"
+              :active-class="activeClass"
+            >
+              <Bot class="h-4 w-4 shrink-0" />
+              {{ t('nav.agents') }}
             </NuxtLink>
             <p :class="sectionLabelClass">{{ t('nav.sectionKnowledge') }}</p>
             <NuxtLink
