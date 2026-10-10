@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-core",
   "branchName": "feat/fleet-s5a-thread-core",
   "createdAt": "2026-10-10T00:00:00.000Z",
-  "updatedAt": "2026-10-10T10:40:53.452Z",
+  "updatedAt": "2026-10-10T11:12:54.091Z",
   "userStories": [
     {
       "id": "US-001",
@@ -275,8 +275,8 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -362,7 +362,10 @@
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Pure ordered-guard function plus service wiring in an existing service; includes creator-only access control and budget/archive refusals, so the security override applies."
+        "reasoning": "Pure ordered-guard function plus service wiring in an existing service; includes creator-only access control and budget/archive refusals, so the security override applies.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/threads/thread-session.service.ts",
@@ -385,7 +388,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "4baabcb2f6d03d7aea70123a06eed95f087bf97f"
     },
     {
       "id": "US-006",
