@@ -44,11 +44,6 @@ export class PrismaSkillCatalogRepository extends AbstractPrismaRepository<Skill
     return source ? { ...this.toDomain(source), skills: source.skills } : null;
   }
 
-  async findSkillOwner(name: string): Promise<SkillSourceDomain | null> {
-    const skill = await this.prisma.client.skill.findUnique({ where: { name }, include: { source: true } });
-    return skill ? this.toDomain(skill.source) : null;
-  }
-
   async findSkillOwners(names: string[]): Promise<Array<{ name: string; source: SkillSourceDomain }>> {
     if (names.length === 0) return [];
     const skills = await this.prisma.client.skill.findMany({
@@ -175,7 +170,7 @@ export class PrismaSkillCatalogRepository extends AbstractPrismaRepository<Skill
     };
   }
 
-  async disableProjectSkill(skillId: string, projectId: string): Promise<boolean> {
+  async disableProjectSkill(projectId: string, skillId: string): Promise<boolean> {
     const skill = await this.prisma.client.skill.findUnique({ where: { id: skillId } });
     if (!skill) return false;
     await this.prisma.client.projectSkill.deleteMany({ where: { projectId, skillId } });

@@ -36,7 +36,6 @@ export interface SkillSourceDomain {
 export interface SkillCatalogRepository {
   findSource(owner: string, repo: string, ref: string, path: string): Promise<SkillSourceDomain | null>;
   findSourceById(id: string): Promise<SkillSourceDomain | null>;
-  findSkillOwner(name: string): Promise<SkillSourceDomain | null>;
   findSkillOwners(names: string[]): Promise<Array<{ name: string; source: SkillSourceDomain }>>;
   replaceSourceSkills(id: string, input: { resolvedSha: string; resolvedAt: Date; skills: Array<Omit<SkillDomain, 'id'>> }): Promise<SkillSourceDomain | null>;
   markResolveFailed(id: string, statusReason: string): Promise<SkillSourceDomain | null>;
@@ -45,7 +44,7 @@ export interface SkillCatalogRepository {
   listSources(): Promise<SkillSourceDomain[]>;
   listProjectSkills(projectId: string): Promise<ProjectSkillDomain[]>;
   enableProjectSkill(projectId: string, skillId: string, userId: string): Promise<ProjectSkillDomain | null>;
-  disableProjectSkill(skillId: string, projectId: string): Promise<boolean>;
+  disableProjectSkill(projectId: string, skillId: string): Promise<boolean>;
 }
 
 export function formatSkillResolveReason(reason: SkillResolveReason, detail?: string): string {

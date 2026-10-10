@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { extractApiError } from '~/composables/useApi'
+import { shortSha } from '~/lib/fleet-ticket-links'
 import type { ProjectSkillDto } from '~/composables/useProjectSkills'
 
 const props = defineProps<{ slug: string }>()
@@ -20,10 +21,6 @@ const skills = ref<ProjectSkillDto[]>([])
 const loading = ref(true)
 /** Skill ids with a toggle in flight; a switch is locked until its request settles. */
 const pending = ref<Set<string>>(new Set())
-
-function shortSha(sha: string | null): string {
-  return sha ? sha.slice(0, 7) : '—'
-}
 
 /** Flip one skill optimistically; put the switch back and toast the API message if the call fails. */
 async function onToggle(skill: ProjectSkillDto, next: boolean): Promise<void> {
@@ -76,7 +73,7 @@ onMounted(async () => {
             <span
               class="font-mono text-xs text-muted-foreground"
               :data-testid="`skill-sha-${skill.id}`"
-            >{{ shortSha(skill.source.resolvedSha) }}</span>
+            >{{ shortSha(skill.source.resolvedSha) ?? '—' }}</span>
           </div>
           <p class="text-sm text-muted-foreground">{{ skill.description }}</p>
           <p class="text-xs text-muted-foreground break-all">
@@ -88,6 +85,7 @@ onMounted(async () => {
         </div>
         <Switch
           :data-testid="`skill-switch-${skill.id}`"
+          :aria-label="skill.name"
           :checked="skill.enabled"
           :disabled="!canManage || pending.has(skill.id)"
           @update:checked="onToggle(skill, $event)"

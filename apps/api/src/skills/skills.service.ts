@@ -27,10 +27,9 @@ export class SkillsService {
     let statusReason: string | null = null;
     try {
       resolution = await this.resolver.resolve({ owner: parsed.owner, repo: parsed.repo, ref: input.ref, path: input.path });
-      for (const skill of resolution.skills) {
-        const owner = await this.catalog.findSkillOwner(skill.name);
-        if (owner) throw new ConflictAppException({ name: skill.name, gitUrl: owner.gitUrl }, 'skills.nameConflict');
-      }
+      const owners = await this.catalog.findSkillOwners(resolution.skills.map((skill) => skill.name));
+      const taken = owners[0];
+      if (taken) throw new ConflictAppException({ name: taken.name, gitUrl: taken.source.gitUrl }, 'skills.nameConflict');
     } catch (error) {
       if (error instanceof ConflictAppException) throw error;
       if (!(error instanceof SkillResolveError)) throw error;
@@ -110,7 +109,7 @@ export class SkillsService {
   }
 
   async disableProjectSkill(projectId: string, skillId: string): Promise<void> {
-    if (!await this.catalog.disableProjectSkill(skillId, projectId)) {
+    if (!await this.catalog.disableProjectSkill(projectId, skillId)) {
       throw new NotFoundAppException({}, 'skills.notFound');
     }
   }
