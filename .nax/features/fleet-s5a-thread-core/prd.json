@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-core",
   "branchName": "feat/fleet-s5a-thread-core",
   "createdAt": "2026-10-10T00:00:00.000Z",
-  "updatedAt": "2026-10-10T11:12:54.091Z",
+  "updatedAt": "2026-10-10T12:12:11.144Z",
   "userStories": [
     {
       "id": "US-001",
@@ -355,8 +355,8 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -428,7 +428,10 @@
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Cross-module changes to placement rules, service, repository, sync and dashboard with a new load class and transactional pinning."
+        "reasoning": "Cross-module changes to placement rules, service, repository, sync and dashboard with a new load class and transactional pinning.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/placement-rules.ts",
@@ -454,7 +457,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "608e342af39d8767479306422cfa82eabc7cdb39"
     },
     {
       "id": "US-007",
