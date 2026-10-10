@@ -1900,6 +1900,51 @@
       }
     }
   },
+  "skills": {
+    "page": {
+      "title": "Skill catalog",
+      "subtitle": "Skill sources registered from GitHub and the skills they provide."
+    },
+    "adminOnly": "Only global administrators can manage skill sources.",
+    "empty": "No skill sources yet.",
+    "table": {
+      "url": "Repository",
+      "ref": "Ref",
+      "sha": "Commit",
+      "path": "Path",
+      "status": "Status",
+      "skills": "Skills"
+    },
+    "status": {
+      "ok": "Resolved",
+      "failed": "Failed"
+    },
+    "actions": {
+      "add": "Add source",
+      "update": "Update",
+      "remove": "Remove",
+      "showSkills": "Skills"
+    },
+    "form": {
+      "title": "Add skill source",
+      "hint": "Register a public GitHub repository that holds skills. The commit is pinned when the source is added.",
+      "gitUrl": "Repository URL",
+      "gitUrlPlaceholder": "https://github.com/owner/repo",
+      "gitUrlInvalid": "Use https://github.com/<owner>/<repo>",
+      "ref": "Ref",
+      "refRequired": "Enter a branch, tag or commit",
+      "path": "Path",
+      "pathPlaceholder": "skills (optional)",
+      "submit": "Add source",
+      "submitting": "Adding…"
+    },
+    "confirm": {
+      "remove": "Remove skill source {url}?"
+    },
+    "toast": {
+      "removed": "Skill source removed"
+    }
+  },
   "notifications": {
     "mentions": { "pickerLabel": "Mention a project member" },
     "title": "Notifications",
