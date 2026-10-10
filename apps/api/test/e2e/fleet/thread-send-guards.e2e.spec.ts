@@ -95,13 +95,18 @@ describeDb('US-005 thread send HTTP guards', () => {
 
   it('US-005 AC7: refuses sends under a paused project budget policy', async () => {
     const now = new Date();
-    await db.budgetPolicy.create({ data: {
+    const policy = await db.budgetPolicy.create({ data: {
       scopeType: 'project', scopeId: world.projectId, scopeKey: `project:${world.projectId}`, projectId: world.projectId,
       windowKind: 'lifetime', amountUsd: 10, hardStop: true, pausedAt: now, pausedWindowStart: new Date(0),
       createdById: world.ids.root, updatedById: world.ids.root,
     } });
-    const res = await send((await makeThread()).id).expect(409);
-    expect(res.body.message).toContain('budget');
+    try {
+      const res = await send((await makeThread()).id).expect(409);
+      expect(res.body.message).toContain('budget');
+    } finally {
+      // Lifetime project pause would otherwise gate every later send in this project (AC8-AC15).
+      await db.budgetPolicy.delete({ where: { id: policy.id } });
+    }
   });
 
   it('US-005 AC8: refuses an offline pinned runner without inserting a message', async () => {
