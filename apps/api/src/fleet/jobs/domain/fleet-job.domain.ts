@@ -90,6 +90,7 @@ export interface FleetJobRecord {
   postRun: FleetJobPostRun | null;
   /** S3 §3 (D475): a config job's result from its snapshots; cleared on requeue. Null for nax jobs. */
   configResult: ConfigJobResult | null;
+  threadId: string | null;
   eventSeq: number;
   ackedRunnerSeq: number;
   attributedAt: Date | null;
@@ -110,6 +111,7 @@ export interface NewFleetJob {
   selectorLabels: string[];
   pinnedRunnerId: string | null;
   requestedById: string;
+  threadId?: string | null;
   scheduleId?: string | null;
 }
 

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { CaslPermissionAction, Principal } from '@nathapp/nestjs-auth';
 import { ForbiddenAppException, JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
@@ -10,7 +10,7 @@ import { ProjectMembershipGuard } from '../../projects/project-membership.guard'
 import type { ProjectContext } from '../../projects/project-context';
 import { withProjectRole } from '../../projects/project-context';
 import { ThreadsService } from './threads.service';
-import { ChatMessageDto, CreateThreadDto, ThreadDto } from './dto/thread.dto';
+import { ChatMessageDto, CreateThreadDto, SendMessageDto, SendMessageResultDto, ThreadDto } from './dto/thread.dto';
 
 @ApiTags('fleet threads')
 @ApiBearerAuth()
@@ -54,6 +54,24 @@ export class ThreadsController {
   async get(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
     this.assertUser(principal);
     return JsonResponse.Ok(await this.threads.get(ctx.project.id, id));
+  }
+
+  @Post(':id/messages')
+  @HttpCode(201)
+  @ApiOperation({ summary: 'Send a message to a chat thread' })
+  @ApiResponse({ status: 201, type: SendMessageResultDto })
+  @ApiResponse({ status: 200, type: SendMessageResultDto })
+  async sendMessage(
+    @Param('id') id: string,
+    @Body() dto: SendMessageDto,
+    @CurrentProject() ctx: ProjectContext,
+    @Principal() principal: KodaPrincipal,
+    @Res({ passthrough: true }) response: { status: (code: number) => unknown },
+  ) {
+    this.assertUser(principal);
+    const result = await this.threads.sendMessage(ctx.project.id, id, principal.id, dto);
+    if (result.deduplicated) response.status(200);
+    return JsonResponse.Ok({ message: result.message, jobId: result.jobId });
   }
 
   @Get(':id/messages')

@@ -43,6 +43,16 @@ export class ChatMessageDto {
   @ApiProperty() createdAt: Date;
 }
 
+export class SendMessageDto {
+  @Allow() @ApiProperty({ minLength: 1, maxLength: 32768 }) text: string;
+  @Allow() @ApiProperty({ pattern: '^[A-Za-z0-9_-]{1,64}$' }) clientMessageId: string;
+}
+
+export class SendMessageResultDto {
+  @ApiProperty({ type: ChatMessageDto }) message: ChatMessageDto;
+  @ApiProperty({ nullable: true }) jobId: string | null;
+}
+
 export class CreateThreadDto {
   @Allow() @ApiProperty() repoId: string;
   @Allow() @ApiProperty() feature: string;

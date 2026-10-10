@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
-import { NotFoundAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FLEET_CFG, fleetConfig } from '../../config/fleet.config';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
@@ -8,6 +8,7 @@ import { SkillsService } from '../../skills/skills.service';
 import { FLEET_REPO_REPOSITORY, type IFleetRepoRepository } from '../repos/domain/fleet-repo.domain';
 import { CHAT_THREAD_REPOSITORY, type ChatMessageRecord, type ChatThreadRecord, type ChatThreadRepository } from './domain/chat-thread.domain';
 import { validateCreateThread, type CreateThreadInput } from './thread-input';
+import type { SendMessageDto } from './dto/thread.dto';
 
 @Injectable()
 export class ThreadsService {
@@ -42,5 +43,14 @@ export class ThreadsService {
   async messages(projectId: string, id: string, afterSeq: number, limit: number): Promise<{ items: ChatMessageRecord[] }> {
     const thread = await this.get(projectId, id);
     return { items: await this.threads.messages(thread.id, afterSeq, limit) };
+  }
+
+  async sendMessage(projectId: string, threadId: string, userId: string, input: SendMessageDto): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }> {
+    if (!this.config.threadsEnabled) throw new ConflictAppException({}, 'threads.disabled');
+    if (typeof input.text !== 'string' || input.text.length === 0 || Buffer.byteLength(input.text, 'utf8') > 32768 ||
+        typeof input.clientMessageId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(input.clientMessageId)) {
+      throw new ValidationAppException({ reason: 'message' }, 'threads.input');
+    }
+    return this.threads.sendMessage({ projectId, threadId, userId, text: input.text, clientMessageId: input.clientMessageId });
   }
 }

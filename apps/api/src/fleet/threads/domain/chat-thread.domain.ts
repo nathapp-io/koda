@@ -22,4 +22,5 @@ export interface ChatThreadRepository {
   list(projectId: string, status: string | undefined, skip: number, take: number): Promise<ChatThreadRecord[]>;
   get(projectId: string, id: string): Promise<ChatThreadRecord | null>;
   messages(threadId: string, afterSeq: number, limit: number): Promise<ChatMessageRecord[]>;
+  sendMessage(input: { projectId: string; threadId: string; userId: string; text: string; clientMessageId: string }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }>;
 }
