@@ -2882,16 +2882,8 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('POST /api/admin/skills/sources — 201 with the booted app resolver spied', async () => {
-      // In RED the token is not registered yet: fall back to a plain mock so the status
-      // assertion, not a setup crash, documents what is missing.
-      const resolver = (() => {
-        try {
-          return app.get<SkillResolver>(SKILL_RESOLVER, { strict: false });
-        } catch {
-          return undefined;
-        }
-      })();
-      const resolve = resolver ? jest.spyOn(resolver, 'resolve') : jest.fn();
+      const resolver = app.get<SkillResolver>(SKILL_RESOLVER, { strict: false });
+      const resolve = jest.spyOn(resolver, 'resolve');
       resolve.mockResolvedValue({ sha: 's1', skills: [{ name: 'spec-review', description: 'd', dir: 'skills/spec-review' }] });
 
       try {

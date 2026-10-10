@@ -1,52 +1,19 @@
 /**
  * US-003 — admin skill source create + list routes (PG).
  *
- * SkillsModule is NOT available in the app yet, so every assertion in this file
- * is expected to fail (the routes 404) until it is implemented. GitHub is never
- * called: the resolve method of the booted app's SKILL_RESOLVER is spied.
+ * GitHub is never called: the resolve method of the booted app's SKILL_RESOLVER is spied.
  *
  * Run: cd apps/api && bun run test:db:up && KODA_DB_TESTS=1 npx jest --forceExit test/integration/skills/skills-routes.integration.spec.ts
  */
 import request from 'supertest';
-import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
+import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { AppModule } from '../../../src/app.module';
-import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
-import { data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
+import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 import { SKILL_RESOLVER, SkillResolveError, SkillResolver } from '../../../src/skills/skill-resolver';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
-
-/**
- * Same wiring as `bootHttpApp`, but with `abortOnError: false`: a lookup of a token the
- * app does not register (SKILL_RESOLVER before this story lands) then rethrows instead of
- * calling `process.exit(1)`, so the route assertions — not the setup — are what fails.
- */
-async function bootTestApp(): Promise<NathApplication> {
-  const previous = process.env.REGISTRATION_ENABLED;
-  process.env.REGISTRATION_ENABLED = 'false';
-  try {
-    const app = await AppFactory.create(AppModule, { abortOnError: false });
-    app.setJwtAuthGuard(app.get(CombinedAuthGuard));
-    app.useAppGlobalPrefix().useAppGlobalPipes().useAppGlobalFilters().useAppGlobalGuards();
-    await app.init();
-    return app;
-  } finally {
-    if (previous === undefined) delete process.env.REGISTRATION_ENABLED;
-    else process.env.REGISTRATION_ENABLED = previous;
-  }
-}
-
-/** The booted app's SKILL_RESOLVER, or undefined while SkillsModule is not registered. */
-function resolverOrUndefined(app: NathApplication): SkillResolver | undefined {
-  try {
-    return app.get<SkillResolver>(SKILL_RESOLVER, { strict: false });
-  } catch {
-    return undefined;
-  }
-}
 
 describeIntegration('US-003 admin skill sources (PG)', () => {
   let app: NathApplication;
@@ -70,7 +37,7 @@ describeIntegration('US-003 admin skill sources (PG)', () => {
 
   beforeAll(async () => {
     await resetDb();
-    app = await bootTestApp();
+    app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
     prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
 
@@ -96,11 +63,8 @@ describeIntegration('US-003 admin skill sources (PG)', () => {
       .expect(201);
     agentApiKey = data<{ apiKey: string }>(agentRes).apiKey;
 
-    // Bind the spy to the app's resolver when SkillsModule is present; in the RED state the
-    // token is not registered yet, so fall back to a plain mock and let the route
-    // assertions — not the setup — document what is missing.
-    const resolver = resolverOrUndefined(app);
-    resolve = resolver ? jest.spyOn(resolver, 'resolve') : jest.fn();
+    const resolver = app.get<SkillResolver>(SKILL_RESOLVER, { strict: false });
+    resolve = jest.spyOn(resolver, 'resolve');
   }, 30_000);
 
   afterAll(async () => {
