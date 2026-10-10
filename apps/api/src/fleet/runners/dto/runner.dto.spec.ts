@@ -3,7 +3,7 @@ import type { RunnerRecord } from '../domain/runner.domain';
 
 const now = new Date('2026-10-01T12:00:00.000Z');
 const record = (over: Partial<RunnerRecord> = {}): RunnerRecord => ({
-  id: 'r1', name: 'box', os: 'linux', arch: 'x64', labels: ['linux'], capacity: 1, capabilities: { executors: ['host'] },
+  id: 'r1', name: 'box', os: 'linux', arch: 'x64', labels: ['linux'], capacity: 1, threadCapacity: 2, capabilities: { executors: ['host'] },
   daemonVersion: '0.1.0', protocolVersion: 1, bootId: 'boot-7', bootedAt: new Date('2026-10-01T11:00:00.000Z'),
   enabled: true, lastSeenAt: new Date(now.getTime() - 30_000), createdById: 'u1',
   createdAt: new Date('2026-09-30T00:00:00.000Z'), updatedAt: now, ...over,

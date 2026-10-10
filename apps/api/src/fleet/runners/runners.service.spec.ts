@@ -4,7 +4,7 @@ import { testFleetConfig } from '../../common/test-helpers/fleet-config';
 import { RunnersService } from './runners.service';
 
 const row = (over = {}) => ({
-  id: 'r1', name: 'box', os: 'linux', arch: 'x64', labels: ['linux'], capacity: 1, capabilities: {},
+  id: 'r1', name: 'box', os: 'linux', arch: 'x64', labels: ['linux'], capacity: 1, threadCapacity: 2, capabilities: {},
   daemonVersion: '0.1.0', protocolVersion: 1, bootId: 'b', bootedAt: null, enabled: true, lastSeenAt: new Date(0),
   createdById: 'u1', createdAt: new Date(0), updatedAt: new Date(0), ...over,
 });
