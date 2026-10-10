@@ -1,0 +1,37 @@
+{
+  "generatedAt": "2026-10-10T04:27:44.216Z",
+  "acFingerprint": "sha256:1cf3f43efdf18067c604fe7dd0d4557646b309c96ecfad4c57b534f12ee20229",
+  "layoutFingerprint": "sha256:1adf142e6f7fb2e9e48fe7280339bc69c2df30b2b469e2b600f41d11f9d76146",
+  "storyCount": 7,
+  "acCount": 102,
+  "generator": "nax",
+  "coverage": [
+    {
+      "testPath": "apps/api/.nax/features/fleet-s5a-skill-catalog/.nax-acceptance.test.ts",
+      "expected": 75,
+      "found": 61,
+      "missing": [
+        "AC-2",
+        "AC-3",
+        "AC-4",
+        "AC-5",
+        "AC-6",
+        "AC-8",
+        "AC-9",
+        "AC-10",
+        "AC-11",
+        "AC-12",
+        "AC-21",
+        "AC-22",
+        "AC-23",
+        "AC-30"
+      ]
+    },
+    {
+      "testPath": "apps/web/.nax/features/fleet-s5a-skill-catalog/.nax-acceptance.test.ts",
+      "expected": 27,
+      "found": 27,
+      "missing": []
+    }
+  ]
+}

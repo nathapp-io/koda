@@ -75,12 +75,15 @@ const { data: projectData, pending: loadingProject, error: projectError, refresh
 
     <!-- Tabs Container -->
     <Tabs default-value="project" class="w-full">
-      <TabsList class="grid w-full max-w-md grid-cols-2">
+      <TabsList class="grid w-full max-w-md grid-cols-3">
         <TabsTrigger value="project">
           {{ t('projects.title') }}
         </TabsTrigger>
         <TabsTrigger value="vcs">
           {{ t('vcs.tab') }}
+        </TabsTrigger>
+        <TabsTrigger value="skills">
+          {{ t('skills.project.tab') }}
         </TabsTrigger>
       </TabsList>
 
@@ -140,6 +143,11 @@ const { data: projectData, pending: loadingProject, error: projectError, refresh
             </div>
           </div>
         </div>
+      </TabsContent>
+
+      <!-- Skills Tab: project admins enable catalog skills for this project -->
+      <TabsContent value="skills" class="space-y-4">
+        <ProjectSkillsPanel :slug="slug" />
       </TabsContent>
     </Tabs>
   </div>

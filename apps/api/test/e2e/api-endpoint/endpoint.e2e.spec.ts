@@ -20,6 +20,7 @@ import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient, ProjectMember } from '../../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
+import { SKILL_RESOLVER, SkillResolver } from '../../../src/skills/skill-resolver';
 import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -104,7 +105,10 @@ describeIntegration('API Integration Tests', () => {
     // Global guards MUST be registered BEFORE init() — NestJS compiles route
     // handlers during init() and captures guards at that point. Guards set after
     // init() are invisible to the compiled handlers.
-    app = await AppFactory.create(AppModule);
+    // `abortOnError: false` makes the Nest factory rethrow instead of process.exit(1) when a
+    // token is looked up before its module registers — the US-003 skills tests rely on it so a
+    // missing SKILL_RESOLVER fails its own test instead of the whole suite.
+    app = await AppFactory.create(AppModule, { abortOnError: false });
 
     // Get CombinedAuthGuard from DI before init() — DI container is ready
     const combinedGuard = app.get(CombinedAuthGuard);
@@ -2860,6 +2864,220 @@ describeIntegration('API Integration Tests', () => {
         where: { projectId_userId: { projectId: project.id, userId: disabledUser.id } },
       });
       expect(membership).toBeNull();
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // US-003 Skill sources — admin routes
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('US-003 Skill sources', () => {
+    it('GET /api/admin/skills/sources — 200 for a global admin', async () => {
+      const res = await request(httpServer)
+        .get('/api/admin/skills/sources')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      expect(body<{ items: unknown[] }>(res)).toHaveProperty('items');
+    });
+
+    it('POST /api/admin/skills/sources — 201 with the booted app resolver spied', async () => {
+      const resolver = app.get<SkillResolver>(SKILL_RESOLVER, { strict: false });
+      const resolve = jest.spyOn(resolver, 'resolve');
+      resolve.mockResolvedValue({ sha: 's1', skills: [{ name: 'spec-review', description: 'd', dir: 'skills/spec-review' }] });
+
+      try {
+        const res = await request(httpServer)
+          .post('/api/admin/skills/sources')
+          .set('Authorization', `Bearer ${userAccessToken}`)
+          .send({ gitUrl: 'https://github.com/NathApp-IO/nax-spec-kit-skills.git', ref: 'main', path: 'skills' })
+          .expect(201);
+
+        expect(body<{ status: string; resolvedSha: string }>(res)).toMatchObject({ status: 'OK', resolvedSha: 's1' });
+      } finally {
+        if (resolver) resolve.mockRestore();
+      }
+    });
+
+    it('POST /api/admin/skills/sources — 400 for a GitLab URL', async () => {
+      await request(httpServer)
+        .post('/api/admin/skills/sources')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ gitUrl: 'https://gitlab.com/a/b', ref: 'main', path: '' })
+        .expect(400);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // US-004 Skill source update + delete — admin routes
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('US-004 Skill source update & delete', () => {
+    it('POST /api/admin/skills/sources/:id/update — 200 with the booted app resolver spied', async () => {
+      const resolver = app.get<SkillResolver>(SKILL_RESOLVER, { strict: false });
+      const resolve = jest.spyOn(resolver, 'resolve');
+      try {
+        resolve.mockResolvedValueOnce({ sha: 's1', skills: [{ name: 'e2e-update-skill', description: 'old', dir: 'skills/a' }] });
+        const created = body<{ id: string }>(
+          await request(httpServer)
+            .post('/api/admin/skills/sources')
+            .set('Authorization', `Bearer ${userAccessToken}`)
+            .send({ gitUrl: 'https://github.com/NathApp-IO/e2e-update-skills.git', ref: 'main', path: '' })
+            .expect(201),
+        );
+
+        resolve.mockResolvedValueOnce({ sha: 's2', skills: [{ name: 'e2e-update-skill', description: 'new', dir: 'skills/a' }] });
+        const res = await request(httpServer)
+          .post(`/api/admin/skills/sources/${created.id}/update`)
+          .set('Authorization', `Bearer ${userAccessToken}`)
+          .expect(200);
+
+        expect(body<{ status: string; resolvedSha: string }>(res)).toMatchObject({ status: 'OK', resolvedSha: 's2' });
+      } finally {
+        if (resolver) resolve.mockRestore();
+      }
+    });
+
+    it('POST /api/admin/skills/sources/:id/update — 404 for an unknown id', async () => {
+      const res = await request(httpServer)
+        .post('/api/admin/skills/sources/e2e-unknown-source-id/update')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(404);
+
+      refusal(res, 'skills.sourceNotFound.404');
+    });
+
+    it('DELETE /api/admin/skills/sources/:id — 204 for a global admin', async () => {
+      const resolver = app.get<SkillResolver>(SKILL_RESOLVER, { strict: false });
+      const resolve = jest.spyOn(resolver, 'resolve');
+      try {
+        resolve.mockResolvedValueOnce({ sha: 's1', skills: [{ name: 'e2e-delete-skill', description: 'd', dir: 'skills/a' }] });
+        const created = body<{ id: string }>(
+          await request(httpServer)
+            .post('/api/admin/skills/sources')
+            .set('Authorization', `Bearer ${userAccessToken}`)
+            .send({ gitUrl: 'https://github.com/NathApp-IO/e2e-delete-skills.git', ref: 'main', path: '' })
+            .expect(201),
+        );
+
+        await request(httpServer)
+          .delete(`/api/admin/skills/sources/${created.id}`)
+          .set('Authorization', `Bearer ${userAccessToken}`)
+          .expect(204);
+      } finally {
+        if (resolver) resolve.mockRestore();
+      }
+    });
+
+    it('DELETE /api/admin/skills/sources/:id — 404 for an unknown id', async () => {
+      const res = await request(httpServer)
+        .delete('/api/admin/skills/sources/e2e-unknown-source-id')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(404);
+
+      refusal(res, 'skills.sourceNotFound.404');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // US-005 Project skill enablement routes
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('US-005 Project skill enablement routes', () => {
+    let serial = 0;
+    const uniqueName = () => `e2e-project-skill-${++serial}`;
+
+    async function seedSkill(name: string): Promise<string> {
+      const db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+      const admin = await db.user.findUniqueOrThrow({ where: { email: 'admin@koda.test' } });
+      const source = await db.skillSource.create({
+        data: {
+          gitUrl: `https://github.com/nathapp-io/${name}`,
+          owner: 'nathapp-io',
+          repo: name,
+          ref: 'main',
+          path: '',
+          status: 'OK',
+          resolvedSha: 'sha-e2e',
+          createdById: admin.id,
+        },
+      });
+      const skill = await db.skill.create({
+        data: { sourceId: source.id, name, description: `${name} description`, dir: name },
+      });
+      return skill.id;
+    }
+
+    it('GET /api/projects/:slug/skills — 200 for a global admin', async () => {
+      const name = uniqueName();
+      const skillId = await seedSkill(name);
+
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/skills`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const items = body<{ items: Array<{ id: string; name: string; enabled: boolean }> }>(res).items;
+      expect(items.find((candidate) => candidate.id === skillId)).toMatchObject({ id: skillId, name, enabled: false });
+    });
+
+    it('GET /api/projects/:slug/skills — 403 for a non-member', async () => {
+      const db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+      const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const user = await db.user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
+      await db.projectMember.deleteMany({ where: { projectId: project.id, userId: user.id } });
+
+      await request(httpServer)
+        .get(`/api/projects/${projectSlug}/skills`)
+        .set('Authorization', `Bearer ${nonAdminUserAccessToken}`)
+        .expect(403);
+    });
+
+    it('PUT /api/projects/:slug/skills/:skillId — 200 enables the skill', async () => {
+      const name = uniqueName();
+      const skillId = await seedSkill(name);
+
+      const res = await request(httpServer)
+        .put(`/api/projects/${projectSlug}/skills/${skillId}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({})
+        .expect(200);
+
+      expect(body<{ id: string; enabled: boolean }>(res)).toMatchObject({ id: skillId, enabled: true });
+    });
+
+    it('PUT /api/projects/:slug/skills/:skillId — 404 for an unknown skill', async () => {
+      const res = await request(httpServer)
+        .put(`/api/projects/${projectSlug}/skills/e2e-unknown-skill-id`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({})
+        .expect(404);
+
+      refusal(res, 'skills.notFound.404');
+    });
+
+    it('DELETE /api/projects/:slug/skills/:skillId — 204 for an enabled skill', async () => {
+      const name = uniqueName();
+      const skillId = await seedSkill(name);
+      await request(httpServer)
+        .put(`/api/projects/${projectSlug}/skills/${skillId}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({})
+        .expect(200);
+
+      await request(httpServer)
+        .delete(`/api/projects/${projectSlug}/skills/${skillId}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(204);
+    });
+
+    it('DELETE /api/projects/:slug/skills/:skillId — 404 for an unknown skill', async () => {
+      const res = await request(httpServer)
+        .delete(`/api/projects/${projectSlug}/skills/e2e-unknown-skill-id`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(404);
+
+      refusal(res, 'skills.notFound.404');
     });
   });
 });

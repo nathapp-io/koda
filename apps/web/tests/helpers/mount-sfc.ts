@@ -120,11 +120,11 @@ const VUE_HELPERS = ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount',
 
 /** Nuxt auto-import names injected as undefined unless the test supplies them (see MountOptions.globals). */
 const NUXT_AUTO_IMPORTS = [
-  'useI18n', 'useAppToast', 'useState', 'useHead', 'navigateTo', 'useApi', 'useRuntimeConfig', 'definePageMeta',
+  'useI18n', 'useAppToast', 'useState', 'useHead', 'navigateTo', 'useApi', 'useColorMode', 'useRuntimeConfig', 'definePageMeta',
   'useAsyncData', 'useVisiblePolling', 'useFleetRunners', 'useFleetRepos', 'useRoute', 'useRouter',
   'useFleetDispatchOptions', 'useFleetJobs', 'useProjectViewerRole', 'useProjectMembers',
   'useAdminUsers', 'useProjectEvents', 'useAuth', 'useProjectMemberNames', 'useFleetJobLogs',
-  'useFleetRepoConfig', 'onBeforeRouteLeave',
+  'useFleetRepoConfig', 'useSkillCatalog', 'useProjectSkills', 'onBeforeRouteLeave',
 ] as const
 
 /** Defaults for auto-imports a test did not supply; `definePageMeta` is a compile-time no-op macro. */
@@ -283,6 +283,10 @@ const FLEET_COMPONENT_FILES: Record<FleetComponentName, string> = {
   FleetDashboardOverview: 'dashboard/Overview.vue',
   FleetCredentialsCredentialGrid: 'credentials/CredentialGrid.vue',
   FleetCredentialsProfileInventory: 'credentials/ProfileInventory.vue',
+}
+
+export function loadSfc(file: string, globals: Record<string, unknown> = {}, alias: Record<string, unknown> = {}): Component {
+  return instantiate(file, globals, { 'lucide-vue-next': vueIconStubs(), ...alias }).default as Component
 }
 
 export function mountSfc(file: string, options: MountOptions = {}): Mounted {

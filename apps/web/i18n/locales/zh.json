@@ -79,6 +79,7 @@
     "fleetApprovals": "审批",
     "fleetAnalytics": "集群分析",
     "fleetOverview": "集群概览",
+    "skills": "技能",
     "skipToContent": "跳到主要内容",
     "primary": "主导航",
     "sectionWorkspace": "工作区",
@@ -1898,6 +1899,58 @@
         "reopen": "重新打开修改",
         "regenerate": "创建重新生成 PR"
       }
+    }
+  },
+  "skills": {
+    "page": {
+      "title": "技能目录",
+      "subtitle": "从 GitHub 登记的技能来源及其提供的技能。"
+    },
+    "adminOnly": "只有全局管理员可以管理技能来源。",
+    "empty": "暂无技能来源。",
+    "table": {
+      "url": "仓库",
+      "ref": "引用",
+      "sha": "提交",
+      "path": "路径",
+      "status": "状态",
+      "skills": "技能"
+    },
+    "status": {
+      "ok": "已解析",
+      "failed": "失败"
+    },
+    "actions": {
+      "add": "添加来源",
+      "update": "更新",
+      "remove": "移除",
+      "showSkills": "技能"
+    },
+    "form": {
+      "title": "添加技能来源",
+      "hint": "登记一个包含技能的公开 GitHub 仓库。添加时会固定其提交。",
+      "gitUrl": "仓库 URL",
+      "gitUrlPlaceholder": "https://github.com/owner/repo",
+      "gitUrlInvalid": "请输入形如 https://github.com/owner/repo 的地址",
+      "ref": "引用",
+      "refRequired": "请输入分支、标签或提交",
+      "path": "路径",
+      "pathPlaceholder": "skills（可选）",
+      "submit": "添加来源",
+      "submitting": "添加中…"
+    },
+    "confirm": {
+      "remove": "确定移除技能来源 {url}？"
+    },
+    "toast": {
+      "removed": "技能来源已移除"
+    },
+    "project": {
+      "tab": "技能",
+      "title": "技能",
+      "description": "为此项目启用目录中的技能。",
+      "sourceRef": "{url} · {ref}",
+      "sourceFailed": "技能来源解析失败；其固定的提交可能已过期。"
     }
   },
   "notifications": {

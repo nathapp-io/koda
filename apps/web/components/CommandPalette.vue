@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Search, LayoutDashboard, Bot, Activity, Kanban, Tag, BookOpen, Clock, Brain, Code2, Rocket, Gauge, BarChart3, Settings, FolderKanban, SunMoon } from 'lucide-vue-next'
+import { Search, LayoutDashboard, Bot, Activity, Kanban, Tag, BookOpen, Clock, Brain, Code2, Rocket, Gauge, BarChart3, Settings, FolderKanban, SunMoon, Sparkles } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
 interface Project { id: number; name: string; slug: string }
@@ -10,7 +10,9 @@ const emit = defineEmits<{ (e: 'update:open', value: boolean): void }>()
 
 const { t } = useI18n()
 const { $api } = useApi()
+const auth = useAuth()
 const colorMode = useColorMode()
+const isGlobalAdmin = computed(() => auth.user.value?.role === 'ADMIN')
 
 const query = ref('')
 const active = ref(0)
@@ -26,6 +28,9 @@ const commands = computed<Command[]>(() => {
     { id: 'agents', label: t('nav.agents'), icon: Bot, run: go('/agents') },
     { id: 'slos', label: t('nav.slos'), icon: Activity, run: go('/admin/slos') },
   ]
+  if (isGlobalAdmin.value) {
+    list.push({ id: 'skills', label: t('nav.skills'), icon: Sparkles, run: go('/admin/skills') })
+  }
   const slug = props.projectSlug
   if (slug) {
     const hint = slug
