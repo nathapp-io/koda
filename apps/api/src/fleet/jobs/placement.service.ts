@@ -130,7 +130,7 @@ export class PlacementService {
         events.push(done.live);
         count += 1;
         slots -= 1;
-        load = { active: load.active + 1, repoIds: new Set([...load.repoIds, job.repoId]) };
+        load = { ...load, active: load.active + 1, repoIds: new Set([...load.repoIds, job.repoId]) };
       }
       return { live: events, assigned: count };
     });
@@ -158,7 +158,8 @@ export class PlacementService {
         const paused = jobScopePause(job, (keys) => pauses.match(keys));
         if (paused) { events.push(await this.cancelForPause(job, paused.id, now)); continue; }
         const [repo, thread] = await Promise.all([this.repo.findRepo(job.repoId), this.repo.findThreadAssign(job.id)]);
-        if (!repo || !thread) continue;
+        if (!repo) throw new Error(`THREAD job ${job.id} references missing repo ${job.repoId}`);
+        if (!thread) throw new Error(`THREAD job ${job.id} is missing its thread turn`);
         const placementJob = toPlacementJob(job, repo, { backend: thread.backend, enabled: this.fleetConfig.threadsEnabled });
         const currentLoad = { ...load, threads: (runner.threadCapacity ?? 0) - slots };
         if (firstMisfit(placementJob, candidate, currentLoad, now, this.fleetConfig.runnerOfflineSec) !== null) continue;
@@ -182,11 +183,12 @@ export class PlacementService {
   }
 
   private async assign(job: FleetJobRecord, repo: FleetRepoRef, runner: PlacementRunnerRow, now: Date): Promise<{ leaseEpoch: number; live: LiveFleetJobEvent } | null> {
+    const thread = isThreadKind(job.command) ? await this.repo.findThreadAssign(job.id) : undefined;
+    if (isThreadKind(job.command) && !thread) throw new Error(`THREAD job ${job.id} is missing its thread turn`);
     const leaseEpoch = await this.repo.casAssign(job.id, runner.id, runner.bootId, now);
     if (leaseEpoch === null) return null; // another placement won (spec §6.1)
     const after = await this.repo.findById(job.id);
     if (!after) return null;
-    const thread = isThreadKind(job.command) ? await this.repo.findThreadAssign(job.id) : undefined;
     const payload = buildAssignPayload(after, repo, cloneUrlFor(repo, this.vcsConfig), gitIdentityFor(repo.provider, this.fleetConfig), thread ?? undefined);
     if (thread) await this.repo.pinThreadRunner(thread.threadId, runner.id);
     await this.repo.createCommand({ runnerId: runner.id, jobId: job.id, type: FleetCommandType.ASSIGN, leaseEpoch, payload });
