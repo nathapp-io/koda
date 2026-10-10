@@ -7,6 +7,9 @@ export interface SkillDto {
   dir: string
 }
 
+/** Set by the API's resolver: a source is OK at its pinned commit or failed to resolve. */
+export type SkillSourceStatus = 'OK' | 'RESOLVE_FAILED'
+
 export interface SkillSourceDto {
   id: string
   gitUrl: string
@@ -14,7 +17,7 @@ export interface SkillSourceDto {
   path: string
   resolvedSha: string | null
   resolvedAt: string | null
-  status: string
+  status: SkillSourceStatus
   statusReason: string | null
   createdAt: string
   skills: SkillDto[]
@@ -34,7 +37,7 @@ export function useSkillCatalog() {
 
   async function list(): Promise<SkillSourceDto[]> {
     const res = await $api.get<{ items: SkillSourceDto[] }>(SOURCES)
-    return res.items ?? []
+    return Array.isArray(res?.items) ? res.items : []
   }
 
   async function create(input: NewSkillSource): Promise<SkillSourceDto> {

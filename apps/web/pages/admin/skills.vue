@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Plus } from 'lucide-vue-next'
 import { ApiError, extractApiError } from '~/composables/useApi'
+import { shortSha } from '~/lib/fleet-ticket-links'
 import type { SkillSourceDto } from '~/composables/useSkillCatalog'
 
 definePageMeta({ layout: 'default' })
@@ -14,6 +15,8 @@ const pending = ref(false)
 const adminOnly = ref(false)
 const addOpen = ref(false)
 const expanded = ref<Record<string, boolean>>({})
+/** Sources whose Update or Remove is in flight; only those rows' buttons are disabled. */
+const busy = ref<ReadonlySet<string>>(new Set())
 
 // ApiError.code is the envelope `ret`: a 403 arrives as ret 40003 (see pages/admin/users.vue).
 function isForbidden(err: unknown): boolean {
@@ -32,32 +35,34 @@ async function load(): Promise<void> {
   }
 }
 
-/** The short sha shown in the table; an unresolved source has none. */
-function shortSha(sha: string | null): string {
-  return sha ? sha.slice(0, 7) : '—'
-}
-
 function replaceSource(next: SkillSourceDto): void {
   sources.value = sources.value.map((s) => (s.id === next.id ? next : s))
 }
 
-async function onUpdate(source: SkillSourceDto): Promise<void> {
+/** Runs one row action unless that row already has one in flight (a double click must not re-resolve twice). */
+async function guarded(source: SkillSourceDto, action: () => Promise<void>): Promise<void> {
+  if (busy.value.has(source.id)) return
+  busy.value = new Set([...busy.value, source.id])
   try {
-    replaceSource(await update(source.id))
+    await action()
   } catch (err: unknown) {
     toast.error(extractApiError(err))
+  } finally {
+    busy.value = new Set([...busy.value].filter((id) => id !== source.id))
   }
 }
 
-async function onRemove(source: SkillSourceDto): Promise<void> {
-  if (!window.confirm(t('skills.confirm.remove', { url: source.gitUrl }))) return
-  try {
+function onUpdate(source: SkillSourceDto): Promise<void> {
+  return guarded(source, async () => replaceSource(await update(source.id)))
+}
+
+function onRemove(source: SkillSourceDto): Promise<void> {
+  if (!window.confirm(t('skills.confirm.remove', { url: source.gitUrl }))) return Promise.resolve()
+  return guarded(source, async () => {
     await remove(source.id)
     sources.value = sources.value.filter((s) => s.id !== source.id)
     toast.success(t('skills.toast.removed'))
-  } catch (err: unknown) {
-    toast.error(extractApiError(err))
-  }
+  })
 }
 
 function onCreated(source: SkillSourceDto): void {
@@ -103,19 +108,20 @@ onMounted(() => load())
             <TableRow :data-testid="`skill-source-${source.id}`">
               <TableCell class="font-medium">{{ source.gitUrl }}</TableCell>
               <TableCell>{{ source.ref }}</TableCell>
-              <TableCell class="font-mono text-xs">{{ shortSha(source.resolvedSha) }}</TableCell>
+              <TableCell class="font-mono text-xs">{{ shortSha(source.resolvedSha) ?? '—' }}</TableCell>
               <TableCell>{{ source.path }}</TableCell>
               <TableCell>
-                <Badge v-if="source.status === 'RESOLVE_FAILED'" variant="destructive">
-                  {{ t('skills.status.failed') }}: {{ source.statusReason }}
+                <Badge v-if="source.status === 'OK'" variant="secondary">{{ t('skills.status.ok') }}</Badge>
+                <Badge v-else-if="source.status === 'RESOLVE_FAILED'" variant="destructive">
+                  {{ source.statusReason ? `${t('skills.status.failed')}: ${source.statusReason}` : t('skills.status.failed') }}
                 </Badge>
-                <Badge v-else variant="secondary">{{ t('skills.status.ok') }}</Badge>
+                <Badge v-else variant="outline">{{ source.status }}</Badge>
               </TableCell>
               <TableCell>{{ source.skills.length }}</TableCell>
               <TableCell class="space-x-1 whitespace-nowrap text-right">
                 <Button size="sm" variant="outline" @click="toggleSkills(source)">{{ t('skills.actions.showSkills') }}</Button>
-                <Button size="sm" variant="outline" @click="onUpdate(source)">{{ t('skills.actions.update') }}</Button>
-                <Button size="sm" variant="destructive" @click="onRemove(source)">{{ t('skills.actions.remove') }}</Button>
+                <Button size="sm" variant="outline" :disabled="busy.has(source.id)" @click="onUpdate(source)">{{ t('skills.actions.update') }}</Button>
+                <Button size="sm" variant="destructive" :disabled="busy.has(source.id)" @click="onRemove(source)">{{ t('skills.actions.remove') }}</Button>
               </TableCell>
             </TableRow>
             <TableRow v-if="expanded[source.id]">

@@ -54,6 +54,18 @@ describe('useSkillCatalog (US-006)', () => {
     expect(del).toHaveBeenCalledWith('/admin/skills/sources/src1')
   })
 
+  test('US-006 AC2 (guard): list returns an empty array when the envelope data is null', async () => {
+    withApi({ get: jest.fn(async () => null) })
+
+    await expect(useSkillCatalog().list()).resolves.toEqual([])
+  })
+
+  test('US-006 AC2 (guard): list returns an empty array when items is not an array', async () => {
+    withApi({ get: jest.fn(async () => ({ items: 'oops' })) })
+
+    await expect(useSkillCatalog().list()).resolves.toEqual([])
+  })
+
   test('US-006: a rejected create propagates the API error to the caller', async () => {
     const { ApiError } = await import('../../composables/useApi')
     const conflict = new ApiError(409, 'Skill source already registered')

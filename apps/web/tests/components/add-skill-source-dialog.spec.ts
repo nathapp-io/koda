@@ -84,6 +84,47 @@ describe('AddSkillSourceDialog (US-006)', () => {
     app.unmount()
   })
 
+  test.each([
+    ['a trailing slash', 'https://github.com/o/r/'],
+    ['a trailing slash after .git', 'https://github.com/o/r.git/'],
+    ['an uppercase host', 'https://GITHUB.com/o/r'],
+    ['uppercase owner and repo', 'https://github.com/Owner/Repo'],
+  ])('US-006 AC13 (URL parity): the form accepts %s, which the API also accepts', async (_label, gitUrl) => {
+    const { app, create, flush } = mountAddDialog()
+    await flush()
+    typeInto(app, 'skill-source-git-url', gitUrl)
+    typeInto(app, 'skill-source-ref', 'main')
+    await flush()
+
+    await submit(app)
+    await flush()
+
+    expect(create).toHaveBeenCalledWith({ gitUrl, ref: 'main', path: '' })
+    app.unmount()
+  })
+
+  test.each([
+    ['a dot segment', 'https://github.com/acme/..'],
+    ['a dot owner', 'https://github.com/./repo'],
+    ['a .git repo name', 'https://github.com/acme/.git'],
+    ['a query string', 'https://github.com/o/r?x=1'],
+    ['a character outside the API set', 'https://github.com/o/r!'],
+    ['a repo name over 100 characters', `https://github.com/o/${'a'.repeat(101)}`],
+  ])('US-006 AC13 (URL parity): the form refuses %s, which the API also refuses', async (_label, gitUrl) => {
+    const { app, create, flush } = mountAddDialog()
+    await flush()
+    typeInto(app, 'skill-source-git-url', gitUrl)
+    typeInto(app, 'skill-source-ref', 'main')
+    await flush()
+
+    await submit(app)
+    await flush()
+
+    expect(app.text()).toContain(enI18n().t('skills.form.gitUrlInvalid'))
+    expect(create).not.toHaveBeenCalled()
+    app.unmount()
+  })
+
   test('US-006 AC14: a valid submit with an empty path calls create with path empty string', async () => {
     const { app, create, flush } = mountAddDialog()
     await flush()

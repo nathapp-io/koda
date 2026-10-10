@@ -132,6 +132,49 @@ describe('Admin skills page (US-006)', () => {
     unmount()
   })
 
+  test('US-006 AC7 (null reason): a RESOLVE_FAILED source with no reason shows Failed with no dangling colon', async () => {
+    const { app, rowOf, settle, unmount } = mountSkills({
+      sources: [source('alpha', { status: 'RESOLVE_FAILED', statusReason: null })],
+    })
+    await settle()
+
+    const badges = app.find('[data-stub="badge"]', rowOf('alpha')).map((b) => app.textOf(b))
+    expect(badges).toContain(enI18n().t('skills.status.failed'))
+    expect(badges.some((text) => text.endsWith(':'))).toBe(false)
+    unmount()
+  })
+
+  test('US-006 (unknown status): a status the page does not know renders its raw value, not Resolved', async () => {
+    const { app, rowOf, settle, unmount } = mountSkills({
+      sources: [source('alpha', { status: 'PENDING' as never })],
+    })
+    await settle()
+
+    const badges = app.find('[data-stub="badge"]', rowOf('alpha')).map((b) => app.textOf(b))
+    expect(badges).toContain('PENDING')
+    expect(badges).not.toContain(enI18n().t('skills.status.ok'))
+    unmount()
+  })
+
+  test('US-006 (in-flight): a second Update click on a row while its first is pending does not call update again', async () => {
+    let release: (s: SourceDto) => void = () => undefined
+    const update = jest.fn(() => new Promise<SourceDto>((resolve) => { release = resolve }))
+    const { rowOf, buttonIn, click, settle, unmount } = mountSkills({ update })
+    await settle()
+
+    void click(buttonIn(enI18n().t('skills.actions.update'), rowOf('alpha')))
+    await settle()
+    expect(buttonIn(enI18n().t('skills.actions.update'), rowOf('alpha')).props.disabled).toBe(true)
+    await click(buttonIn(enI18n().t('skills.actions.update'), rowOf('alpha')))
+    await settle()
+
+    expect(update).toHaveBeenCalledTimes(1)
+    release(source('alpha'))
+    await settle()
+    expect(buttonIn(enI18n().t('skills.actions.update'), rowOf('alpha')).props.disabled).toBe(false)
+    unmount()
+  })
+
   test('US-006 AC8: expanding a source row lists each skill name and description', async () => {
     const skills: SkillDto[] = [
       { id: 's1', name: 'spec-review', description: 'Review a spec', dir: 'skills/spec-review' },

@@ -61,11 +61,23 @@ const { t } = useI18n()
 const toast = useAppToast()
 const { create } = useSkillCatalog()
 
-/** Only github.com repositories are supported; the path after the repo name is not part of the URL. */
-const GITHUB_REPO_URL = /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+$/
+/**
+ * Mirrors the API's parseGitHubUrl (apps/api/src/skills/github-url.ts) so a URL the form accepts is one
+ * the API accepts: case-insensitive host, an optional trailing `.git` and `/`, owner and repo of
+ * [a-z0-9_.-] up to 100 characters, and never `.`, `..` or `.git`. The API stays the authority.
+ */
+const GITHUB_REPO_URL = /^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/i
+const GITHUB_SEGMENT = /^[a-z0-9_.-]{1,100}$/i
+const DOT_SEGMENTS = new Set(['.', '..', '.git'])
+
+function isGitHubRepoUrl(value: string): boolean {
+  const match = GITHUB_REPO_URL.exec(value)
+  if (!match) return false
+  return [match[1], match[2]].every((segment) => GITHUB_SEGMENT.test(segment) && !DOT_SEGMENTS.has(segment.toLowerCase()))
+}
 
 const formSchema = toTypedSchema(z.object({
-  gitUrl: z.string().trim().regex(GITHUB_REPO_URL, t('skills.form.gitUrlInvalid')),
+  gitUrl: z.string().trim().refine(isGitHubRepoUrl, t('skills.form.gitUrlInvalid')),
   ref: z.string().trim().min(1, t('skills.form.refRequired')),
   path: z.string().trim(),
 }))
