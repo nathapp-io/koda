@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-skill-catalog",
   "branchName": "feat/fleet-s5a-skill-catalog",
   "createdAt": "2026-10-10T00:00:00.000Z",
-  "updatedAt": "2026-10-10T05:46:54.064Z",
+  "updatedAt": "2026-10-10T06:14:20.469Z",
   "userStories": [
     {
       "id": "US-001",
@@ -340,8 +340,8 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -424,7 +424,10 @@
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "UI page, dialog and composable following existing admin-table patterns; the 403 note is cosmetic (authorization is enforced by the API)."
+        "reasoning": "UI page, dialog and composable following existing admin-table patterns; the 403 note is cosmetic (authorization is enforced by the API).",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/pages/admin/fleet/repos.vue",
@@ -460,7 +463,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "64456a918e91435bd1f00ac5333e356e08cbd0b5"
     },
     {
       "id": "US-007",
