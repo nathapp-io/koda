@@ -28,6 +28,10 @@ import { resetDb } from '../../helpers/reset-db';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { SkillsService } from '../../../src/skills/skills.service';
 import { FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { buildThreadInstructions } from '../../../src/fleet/threads/thread-instructions';
+import type { ThreadSkillSource } from '../../../src/skills/skill-catalog.domain';
+import { PlacementService } from '../../../src/fleet/jobs/placement.service';
+import { RunnerNotifier } from '../../../src/fleet/jobs/runner-notifier';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -3277,6 +3281,124 @@ describeIntegration('API Integration Tests', () => {
     it('US-003 AC15: returns not found for messages on an unknown thread', async () => {
       const res = await request(httpServer).get(`/api/projects/${projectSlug}/threads/no-such-thread/messages`).set('Authorization', `Bearer ${world.tokens.dev}`).expect(404);
       threadMessage(res, 'threads.notFound.404');
+    });
+
+    const sendMessage = (id: string, token = world.tokens.dev, payload = { text: 'hello', clientMessageId: `send-${id}` }) =>
+      request(httpServer).post(`/api/projects/${projectSlug}/threads/${id}/messages`)
+        .set('Authorization', `Bearer ${token}`).send(payload);
+
+    const newThread = async (feature: string, over: Record<string, unknown> = {}) => db().chatThread.create({
+      data: {
+        projectId: world.projectId, repoId: world.repoId, baseRef: 'trunk', feature, title: feature,
+        createdById: world.ids.dev, backend: { kind: 'native', model: 'm1' }, skills: [],
+        specPath: `.nax/features/${feature}/spec.md`, ...over,
+      },
+    });
+
+    it('US-004 AC5: creator send inserts a pending user message at sequence 1', async () => {
+      const thread = await newThread('send-first');
+      const res = await sendMessage(thread.id).expect(201);
+      expect(body<{ message: { role: string; status: string; seq: number; authorUserId: string } }>(res).message)
+        .toMatchObject({ role: 'user', status: 'pending', seq: 1, authorUserId: world.ids.dev });
+    });
+
+    it('US-004 AC6-10: first send creates a THREAD job and SESSION turn then places it', async () => {
+      const thread = await newThread('send-session');
+      const placement = jest.spyOn(app.get(PlacementService), 'placeJob');
+      try {
+        const res = await sendMessage(thread.id).expect(201);
+        const result = body<{ message: { id: string }; jobId: string }>(res);
+        const jobs = await db().fleetJob.findMany({ where: { threadId: thread.id }, take: 2 });
+        expect(jobs).toHaveLength(1);
+        expect(jobs[0]).toMatchObject({ command: 'THREAD', threadId: thread.id, feature: `thread-${thread.id}`, ref: thread.baseRef, profiles: [], bashMode: 'raw', pinnedRunnerId: null });
+        const turn = await db().fleetThreadTurn.findUniqueOrThrow({ where: { jobId: result.jobId } });
+        expect(turn).toMatchObject({ action: 'SESSION', initialMessageId: result.message.id, resume: false, backend: thread.backend, skills: thread.skills });
+        const repo = await db().fleetRepo.findUniqueOrThrow({ where: { id: thread.repoId } });
+        expect(turn.instructions).toBe(buildThreadInstructions({
+          repo: `${repo.owner}/${repo.name}`, baseRef: thread.baseRef, feature: thread.feature,
+          specPath: thread.specPath, skills: thread.skills as ThreadSkillSource[],
+        }));
+        expect(placement).toHaveBeenCalledTimes(1);
+        expect(placement).toHaveBeenCalledWith(result.jobId);
+      } finally {
+        placement.mockRestore();
+      }
+    });
+
+    it('US-004 AC7: first send subtracts existing thread cost from its session budget', async () => {
+      const thread = await newThread('send-budget', { maxCostUsd: '5', costUsd: '1.25' });
+      const result = body<{ jobId: string }>(await sendMessage(thread.id).expect(201));
+      const job = await db().fleetJob.findUniqueOrThrow({ where: { id: result.jobId } });
+      expect(job.maxCostUsd.toString()).toBe('3.75');
+    });
+
+    it('US-004 AC11: a completed prior THREAD job resumes on the thread runner', async () => {
+      const thread = await newThread('send-resume');
+      const runner = await db().runner.create({ data: {
+        name: `thread-runner-${thread.id}`, apiKeyHash: `thread-hash-${thread.id}`, os: 'linux', arch: 'x64', labels: ['linux'],
+        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, threadBackends: { native: ['m1'], acp: [] } },
+        daemonVersion: '0.1.0', protocolVersion: 4, bootId: 'thread-boot', lastSeenAt: new Date(), createdById: world.ids.root,
+      } });
+      await db().chatThread.update({ where: { id: thread.id }, data: { runnerId: runner.id } });
+      await db().fleetJob.create({ data: {
+        projectId: thread.projectId, repoId: thread.repoId, ref: thread.baseRef, command: 'THREAD', feature: `old-${thread.id}`,
+        profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, threadId: thread.id, state: 'COMPLETED',
+      } });
+      const result = body<{ jobId: string }>(await sendMessage(thread.id).expect(201));
+      const job = await db().fleetJob.findUniqueOrThrow({ where: { id: result.jobId } });
+      const turn = await db().fleetThreadTurn.findUniqueOrThrow({ where: { jobId: result.jobId } });
+      expect(job.pinnedRunnerId).toBe(runner.id);
+      expect(turn.resume).toBe(true);
+    });
+
+    it('US-004 AC12: live session send creates a THREAD_INPUT command instead of another job', async () => {
+      const thread = await newThread('send-live');
+      const runner = await db().runner.create({ data: {
+        name: `live-runner-${thread.id}`, apiKeyHash: `live-hash-${thread.id}`, os: 'linux', arch: 'x64', labels: ['linux'],
+        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, threadBackends: { native: ['m1'], acp: [] } },
+        daemonVersion: '0.1.0', protocolVersion: 4, bootId: 'live-boot', lastSeenAt: new Date(), createdById: world.ids.root,
+      } });
+      await db().chatThread.update({ where: { id: thread.id }, data: { runnerId: runner.id } });
+      const job = await db().fleetJob.create({ data: {
+        projectId: thread.projectId, repoId: thread.repoId, ref: thread.baseRef, command: 'THREAD', feature: `thread-${thread.id}`,
+        profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, threadId: thread.id,
+        runnerId: runner.id, state: 'RUNNING', leaseEpoch: 7,
+      } });
+      const notifier = jest.spyOn(app.get(RunnerNotifier), 'notify');
+      try {
+        const res = await sendMessage(thread.id).expect(201);
+        const message = body<{ message: { id: string } }>(res).message;
+        expect(await db().fleetJob.count({ where: { threadId: thread.id } })).toBe(1);
+        const command = await db().fleetCommand.findFirstOrThrow({ where: { jobId: job.id, type: 'THREAD_INPUT' } });
+        expect(command).toMatchObject({ runnerId: runner.id, leaseEpoch: 7, payload: { messageId: message.id, text: 'hello' } });
+        expect(notifier).toHaveBeenCalledWith(runner.id);
+      } finally {
+        notifier.mockRestore();
+      }
+    });
+
+    it('US-004 AC14: retrying a clientMessageId returns its existing message without new work', async () => {
+      const thread = await newThread('send-dedupe');
+      const payload = { text: 'hello', clientMessageId: 'retry-1' };
+      const first = body<{ message: { id: string } }>(await sendMessage(thread.id, world.tokens.dev, payload).expect(201));
+      const jobsBefore = await db().fleetJob.count({ where: { threadId: thread.id } });
+      const commandsBefore = await db().fleetCommand.count({ where: { job: { threadId: thread.id } } });
+      const retry = body<{ message: { id: string }; jobId: string | null }>(await sendMessage(thread.id, world.tokens.dev, payload).expect(200));
+      expect(retry).toMatchObject({ message: { id: first.message.id }, jobId: null });
+      expect(await db().fleetJob.count({ where: { threadId: thread.id } })).toBe(jobsBefore);
+      expect(await db().fleetCommand.count({ where: { job: { threadId: thread.id } } })).toBe(commandsBefore);
+    });
+
+    it('US-004 AC15: message sequence follows the existing completed message', async () => {
+      const thread = await newThread('send-next-seq', { nextSeq: 2 });
+      await db().chatMessage.create({ data: { threadId: thread.id, seq: 1, role: 'user', content: 'previous', status: 'complete' } });
+      const result = body<{ message: { seq: number } }>(await sendMessage(thread.id).expect(201));
+      expect(result.message.seq).toBe(2);
+    });
+
+    it('US-004 access: refuses a message from a non-creator', async () => {
+      const thread = await newThread('send-noncreator', { createdById: world.ids.root });
+      await sendMessage(thread.id).expect(403);
     });
   });
 });
