@@ -27,7 +27,10 @@ const skill = (id: string, over: Partial<ProjectSkill> = {}): ProjectSkill => ({
   ...over,
 })
 
-/** Stands in for the shadcn Switch; the radix wrapper itself is covered by tests/components/ui-switch.spec.ts. */
+/**
+ * Stands in for the shadcn Switch so the panel's own logic is tested alone. The real wrapper's
+ * forwarding (checked, disabled, update:checked) is exercised by tests/components/ui-switch.spec.ts.
+ */
 const switchStub = {
   name: 'StubSwitch',
   inheritAttrs: false,
