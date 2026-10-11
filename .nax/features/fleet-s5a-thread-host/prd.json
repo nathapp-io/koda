@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-host",
   "branchName": "feat/fleet-s5a-thread-host",
   "createdAt": "2026-10-11T00:00:00.000Z",
-  "updatedAt": "2026-10-11T11:35:49.508Z",
+  "updatedAt": "2026-10-11T11:55:31.533Z",
   "userStories": [
     {
       "id": "US-001",
@@ -39,7 +39,10 @@
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Single parser branch and tests with existing validation helpers; no new concurrency or auth implementation."
+        "reasoning": "Single parser branch and tests with existing validation helpers; no new concurrency or auth implementation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/supervisor/assign-parser.ts",
@@ -50,7 +53,11 @@
         "apps/runner/src/supervisor/assign-parser-thread.spec.ts"
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "fb52ee59bfeebb76ecceb853640f5891fe4de95f"
     },
     {
       "id": "US-002",
@@ -102,7 +109,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -164,7 +174,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -216,7 +229,10 @@
         "apps/runner/src/thread/thread-job-run-close.spec.ts"
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -268,7 +284,10 @@
         "apps/runner/src/thread/thread-job-run-commands.spec.ts"
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -323,7 +342,10 @@
         "apps/runner/src/supervisor/supervisor-thread.spec.ts"
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -386,7 +408,10 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "Graph-first codebase-memory MCP is not exposed in this session, so navigation fell back to targeted direct reads of spec-named files; line citations below refer to current worktree. Existing Bun/TypeScript runner is the sole session host; apps/api is the system of record, and @nathapp/fleet-protocol is the shared wire contract. B3a is already present: native tier discovery/readNativeModels and provider extraction (apps/runner/src/thread/native-models.ts:10-52), the read-only native session factory with ACP refused, model allowlist, carryHistoryAcrossModels, resume and persistent transcript (apps/runner/src/thread/session-factory.ts:70-145), redacting/capped thread event writer with held deltas and paced shipper wake (apps/runner/src/thread/thread-event-writer.ts:70-80,158-213,337-408), credential config (apps/runner/src/thread/nax-credentials.ts:18-32), worktree preparation and pruning (apps/runner/src/thread/thread-worktree.ts:22-43), and safe skill cache (apps/runner/src/thread/skill-fetch.ts:9-49). Contract types, command names and limits already exist (packages/fleet-protocol/src/threads.ts:1-58); capabilities already permit optional threadBackends while FLEET_PROTOCOL_VERSION is 3 (packages/fleet-protocol/src/index.ts:1-8,65-75). US-001: parseAssign currently rejects THREAD, validates base fields then copies a whitelisted AssignPayload (apps/runner/src/supervisor/assign-parser.ts:34-82); add strict THREAD-specific validation at the appropriate point, and reject a thread key on all other kinds; paths must use assertSegment/assertFeature, byte-length not character count for initialMessage. US-002: LogJob currently requires nax sources and LogStreamName only includes old events (apps/runner/src/logs/types.ts:1-60); LogShipper.register and lacksRun/discover unconditionally dereference sources (apps/runner/src/logs/log-shipper.ts:76-91,140-149,180-199); narrow discriminated union for thread-only registration while preserving upload/offset/refusal/drain behavior. NaxCapabilityProbe auth list currently uses profile providers only and bounds full capability report (apps/runner/src/capabilities/nax-probe.ts:118-158,166-188,222-240); union native tier providers for the auth call, filter available credentials for threadBackends, keep 64 KiB bound. StaticCapabilityProbe just clones config (apps/runner/src/capabilities/capability-probe.ts:24-32) and must not advertise threads. US-003–005: implement ThreadJobRun independently of JobRun, with a long-lived start promise, synchronous commands, guarded asynchronous turns/close, first-close-wins, cancellable sleep timers, no shared repo mutex except inside prepareThreadWorktree and no executor reaping. JobRunDeps/RunStart are defined in apps/runner/src/supervisor/job-run.ts:33-69; its normal run holds a repo mutex (line 105-123), so do not reuse it. JobEvents enforces legal transition sequences and bounds payloads (apps/runner/src/supervisor/job-events.ts:17-52), heartbeat helper uses abortable sleep (apps/runner/src/supervisor/heartbeat.ts:1-17), real journal stores ASSIGN JSON and contiguous event seq (apps/runner/src/journal/journal.ts:119-194), and credential broker returns a helper and releases epoch sockets (apps/runner/src/credentials/broker.ts:11-32,73-100). Preserve no post-halt journal/stream writes even if held turn/open resolves later, close a late-opened session, bound abandon close and free credentials; new stream file must be reset per epoch. Tuning currently has thread idle/wake/search/skill timeouts but not heartbeat/close (apps/runner/src/daemon/tuning.ts:1-77). US-006: Supervisor maps only JobRun and readopt rejection kills/reaps/cleans (apps/runner/src/supervisor/supervisor.ts:20-42,58-122), which is dangerous for THREAD; route all THREAD branches before executor/repo-mutex paths, including no-in-memory abandon/readopt and bounded close. CommandHandler.apply currently falls through for thread commands and persists acks by command id (apps/runner/src/supervisor/command-handler.ts:23-98); route synchronously to supervisor and record once. US-007: daemon currently probes, initializes broker/shipper/supervisor, computes freeSlots from all active rows, and runs only job prune (apps/runner/src/daemon/daemon.ts:101-206); introduce credential configuration and session factory before first sync, thread-aware active count, archived-thread callback/prune and skill-cache prune, preserving crash/stop behavior (line 209-237). SyncLoop.apply processes response and awaits handleCommands inline (apps/runner/src/sync/sync-loop.ts:132-161), making synchronous thread-command application and non-mutex ABANDON vital. CapabilityReporter.latest is bounded probe result (apps/runner/src/capabilities/capability-probe.ts:54-86). Tests use bun:test, real :memory: SQLite and files; existing fake shipping/clock support deterministic drain and abort (apps/runner/test/helpers/fake-log-shipping.ts:1-62, apps/runner/test/helpers/manual-clock.ts:1-31). Existing RUN/PLAN parser regression assertions already live in apps/runner/src/supervisor/assign-parser.spec.ts:9-21; existing probe's exact capability-object test (apps/runner/src/capabilities/nax-probe.spec.ts), tuning frozen-object test (apps/runner/src/daemon/tuning.spec.ts), sync version assertion (apps/runner/src/sync/batch.spec.ts), and daemon version assertion (apps/runner/test/unit/daemon.spec.ts) need updates to their changed fields/expected 4, without losing other fields. Enrollment also reads the same protocol constant (apps/runner/src/commands/enroll.ts:123) while sync request builds it in apps/runner/src/sync/batch.ts:68. New test double should record ordered operations, holds, cancel and close; daemon integration uses fake fleet server, FakeNaxCli, real file:// git. Dependency order: 001 and 002 independently, 003 -> 004 -> 005 -> 006, then 007; 007 also changes fleet-protocol. Backward compatibility: preserve RUN/PLAN/config parse, log sources, normal JobRun readopt and sync acks, bounded capability reports and static-override no-host behavior; v4 is an incompatible fleet handshake and B2 thread ingest is not shipped, so leave FLEET_THREADS_ENABLED off. Build gates: bun run type-check and bun run lint in apps/runner for each story, plus root bun run type-check for 007; do not modify generated clients or AGENTS/context files.",
