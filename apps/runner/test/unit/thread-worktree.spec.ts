@@ -60,20 +60,39 @@ function fakeGit(): FakeGit {
 }
 
 const noOpMutex = { acquire: async (_key: string) => () => undefined };
+const repoIdentity = { owner: 'owner', repo: 'repo' };
+const gitIdentity = { name: 'koda-fleet[bot]', email: 'koda-fleet[bot]@users.noreply.github.com' };
+/** A thread's `identity` is the job's git identity when it has one, else the repository it belongs to. */
+type ThreadIdentity = typeof repoIdentity | typeof gitIdentity;
 
 async function setupExistingClone(): Promise<void> {
   await mkdir(join(repoDir, '.git'), { recursive: true });
   await mkdir(homeDir, { recursive: true });
 }
 
-async function prepare(git: Git, mutex = noOpMutex) {
+/** A fake git whose `clone` really creates the `.git` directory the next `isClone` check looks for. */
+function cloningGit(): FakeGit {
+  const git = fakeGit();
+  git.run = async (args, options) => {
+    git.calls.push({ args, options });
+    if (args[0] === 'clone') await mkdir(join(repoDir, '.git'), { recursive: true });
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  return git;
+}
+
+/** `ensureClone` writes the commit author as `git config user.name` / `user.email` in the clone. */
+const configCalls = (git: FakeGit, key: string): { args: readonly string[]; options: GitOptions }[] =>
+  git.calls.filter(({ args }) => args[0] === 'config' && args[1] === key);
+
+async function prepare(git: Git, mutex = noOpMutex, identity: ThreadIdentity = repoIdentity) {
   return worktreeModule?.prepareThreadWorktree({
     git,
     mutex,
     repoKey,
     repoDir,
     cloneUrl: 'https://example.invalid/repo.git',
-    identity: { owner: 'owner', repo: 'repo' },
+    identity,
     credentialHelper: '/job/git-cred',
     homeDir,
     threadId,
@@ -179,13 +198,7 @@ describe('thread worktree preparation (US-005)', () => {
     await rm(repoDir, { recursive: true, force: true });
     const keys: string[] = [];
     const mutex = { acquire: async (key: string) => { keys.push(key); return () => undefined; } };
-    const git = fakeGit();
-    git.run = async (args, options) => {
-      git.calls.push({ args, options });
-      if (args[0] === 'clone') await mkdir(join(repoDir, '.git'), { recursive: true });
-      return { code: 0, stdout: '', stderr: '' };
-    };
-    await prepare(git, mutex);
+    await prepare(cloningGit(), mutex);
     expect(keys).toEqual([repoKey]);
   });
 
@@ -194,6 +207,25 @@ describe('thread worktree preparation (US-005)', () => {
     const result = await prepare(git);
     expect(result?.ok).toBe(true);
     expect(git.calls.some(({ args }) => args.includes('config') && args.includes('credential.helper'))).toBe(false);
+  });
+
+  test('US-005 identity: writes the job git identity into a clone it creates', async () => {
+    await rm(repoDir, { recursive: true, force: true });
+    const git = cloningGit();
+    const result = await prepare(git, noOpMutex, gitIdentity);
+    expect(result?.ok).toBe(true);
+    expect(configCalls(git, 'user.name').map(({ args, options }) => [args[2], options.cwd])).toEqual([[gitIdentity.name, repoDir]]);
+    expect(configCalls(git, 'user.email').map(({ args, options }) => [args[2], options.cwd])).toEqual([[gitIdentity.email, repoDir]]);
+  });
+
+  test('US-005 identity: invents no commit author from a repository-only identity', async () => {
+    await rm(repoDir, { recursive: true, force: true });
+    const git = cloningGit();
+    const result = await prepare(git);
+    expect(result?.ok).toBe(true);
+    expect(git.calls.some(({ args }) => args[0] === 'clone')).toBe(true);
+    expect(configCalls(git, 'user.name')).toEqual([]);
+    expect(configCalls(git, 'user.email')).toEqual([]);
   });
 });
 
