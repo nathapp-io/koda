@@ -10,7 +10,7 @@ import { assignFor } from '../helpers/assign';
 import { waitFor } from '../helpers/wait';
 
 // Keep the RED state an assertion failure while the implementation module is not present yet.
-const threadRunModule = await import('../../src/supervisor/thread-job-run').catch(() => undefined);
+const threadRunModule = await import('../../src/thread/thread-job-run').catch(() => undefined);
 const root = join(import.meta.dir, `.thread-job-run-${crypto.randomUUID()}`);
 const homeDir = join(root, 'runner-home');
 const workspaceRoot = join(root, 'workspace');

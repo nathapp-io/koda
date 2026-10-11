@@ -166,31 +166,15 @@ export class ThreadJobRun {
   /** Cost is the sum of `usage.costUsd` over the whole job (a `turn_end.costUsd` repeats its turn's usage). */
   private spent = 0;
   private maxCostUsd = Number.POSITIVE_INFINITY;
-  private readonly legacyStartReturnsAfterSetup: boolean;
 
   private readonly deps: ThreadRunDeps;
   readonly jobId: string;
   readonly leaseEpoch: number;
 
-  constructor(deps: ThreadRunDeps, jobId?: string, leaseEpoch?: number) {
-    // Accept the original one-object test/integration seam as well as the supervisor's split arguments. Keeping
-    // this adapter here avoids making callers duplicate the runner's dependency assembly.
-    const legacy = deps as ThreadRunDeps & {
-      jobId?: string; leaseEpoch?: number; sessions?: ThreadSessionOpener;
-      logs?: ThreadLogShipping; tuning?: ThreadRunTuning;
-    };
-    this.legacyStartReturnsAfterSetup = jobId === undefined || leaseEpoch === undefined;
-    this.jobId = jobId ?? legacy.jobId!;
-    this.leaseEpoch = leaseEpoch ?? legacy.leaseEpoch!;
-    this.deps = jobId === undefined || leaseEpoch === undefined
-      ? {
-          ...deps,
-          host: { ...deps.host, sessions: legacy.sessions ?? (deps.host as ThreadHostDeps).sessions },
-          mutex: (deps as ThreadRunDeps).mutex ?? { acquire: async () => () => {} },
-          logs: legacy.logs ?? deps.logs,
-          tuning: legacy.tuning ?? deps.tuning,
-        }
-      : deps;
+  constructor(deps: ThreadRunDeps, jobId: string, leaseEpoch: number) {
+    this.deps = deps;
+    this.jobId = jobId;
+    this.leaseEpoch = leaseEpoch;
     this.events = new JobEvents(this.deps.journal, this.jobId, this.leaseEpoch, this.deps.log);
   }
 
@@ -236,11 +220,7 @@ export class ThreadJobRun {
     // halt, so an abandon does not sit out the token timeout. A refusal holds the socket, the wanted token and
     // the shims the broker opened before it waited, so it gives them back too — as the RUN path's cleanup does.
     const acquisition = await this.deps.host.credentials.acquire(row, { wait: true, isCancelled: () => this.cancelRequested() || this.halted });
-    // Keep the host seam compatible with lightweight integrations that supply the helper directly. The production
-    // CredentialBroker returns AcquireResult; accepting a string here is safe because it is only passed to git.
-    const acquired = typeof acquisition === 'string'
-      ? { ok: true as const, credentials: { helper: acquisition, binDir: null } }
-      : acquisition;
+    const acquired = acquisition;
     if (this.halted) {
       await this.releaseCredentials(row);
       return;
@@ -312,7 +292,7 @@ export class ThreadJobRun {
     await this.openStream(thread, opened.resumed);
     this.startHeartbeat();
     this.startInitialTurn(thread);
-    if (!this.legacyStartReturnsAfterSetup) await this.waitForEnd();
+    await this.waitForEnd();
   }
 
   /** Every start step begins here: a halt ends the run silently, a cancel request ends it CANCELLED. */

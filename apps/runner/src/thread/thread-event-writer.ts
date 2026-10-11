@@ -292,15 +292,13 @@ export class ThreadEventWriter {
       // B3-R11: the message is redacted whole; the rest of the error line is kept as produced.
       full.error = { ...error, message: redactSecrets(error.message) };
     }
-    const wrapped: Record<string, unknown> = { type: 'session_event', event: full };
-    if (lineBytes(wrapped) <= LINE_MAX_BYTES) {
-      this.writeSessionObject(wrapped);
+    if (lineBytes(full) <= LINE_MAX_BYTES) {
+      this.writeSessionObject(full);
       return;
     }
     const truncated: Record<string, unknown> = { ...full, output: '', outputTruncated: true };
-    const wrappedTruncated: Record<string, unknown> = { type: 'session_event', event: truncated };
-    if (lineBytes(wrappedTruncated) <= LINE_MAX_BYTES) {
-      this.writeSessionObject(wrappedTruncated);
+    if (lineBytes(truncated) <= LINE_MAX_BYTES) {
+      this.writeSessionObject(truncated);
       return;
     }
     this.onWarn(`dropped an oversized turn_end line (${LINE_MAX_BYTES}-byte line limit)`);

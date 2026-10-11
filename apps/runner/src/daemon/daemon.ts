@@ -10,7 +10,7 @@ import type { RunnerConfig, RunnerHome } from '../config/runner-config';
 import { errorMessage } from '../errors';
 import { CredentialBroker } from '../credentials/broker';
 import { TokenCache } from '../credentials/token-cache';
-import { defaultSocketDir, ensureSocketDir, MAX_SOCKET_PATH_BYTES, socketPathFor } from '../credentials/socket-dir';
+import { defaultSocketDir, ensureSocketDir } from '../credentials/socket-dir';
 import { HostExecutor } from '../executor/host-executor';
 import { assertMinGitVersion, createGit, type Git } from '../executor/git';
 import type { JobExecutor } from '../executor/job-executor';
@@ -106,13 +106,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   await mkdir(home.dir, { recursive: true, mode: 0o700 });
   await chmod(home.dir, 0o700).catch(() => undefined);
   const uid = process.getuid?.() ?? 0;
-  let socketDir = config.socketDir ?? defaultSocketDir(uid);
-  if (Buffer.byteLength(socketPathFor(socketDir, identity.runnerId, 'j', 1)) > MAX_SOCKET_PATH_BYTES) {
-    // A configured temp directory can be longer than macOS's sun_path even when the machine's default is safe.
-    // Keep the per-runner socket namespace private and short rather than failing daemon startup for that prefix.
-    socketDir = join(process.cwd(), `.rs-${uid}`);
-  }
-  await ensureSocketDir(socketDir, uid);   // D78: refuse to start before anything could listen in an unsafe place
+  const socketDir = config.socketDir ?? defaultSocketDir(uid);
+  await ensureSocketDir(socketDir, uid);
 
   const journal = Journal.open(home.journalPath, now);
   const approvals = new ApprovalRelay({ journal, log, now });

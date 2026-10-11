@@ -4,7 +4,7 @@ import { JobRun, type JobRunDeps, type RunStart } from './job-run';
 import { JobEvents } from './job-events';
 import { killIfOurs } from './kill-if-ours';
 import { isTerminalState } from './transitions';
-import { ThreadJobRun, type ThreadCommandOutcome, type ThreadRunDeps, type ThreadRunSetup } from './thread-job-run';
+import { ThreadJobRun, type ThreadCommandOutcome, type ThreadRunDeps, type ThreadRunSetup } from '../thread/thread-job-run';
 import type { JobRow } from '../journal/types';
 import { errorMessage } from '../errors';
 
@@ -25,7 +25,6 @@ type ActiveRun = JobRun | ThreadJobRun;
 export class Supervisor {
   private readonly runs = new Map<string, ActiveRun>();
   private readonly pending = new Set<Promise<void>>();
-  private readonly threadPending = new Set<Promise<void>>();
 
   constructor(private readonly deps: SupervisorDeps) {}
 
@@ -35,21 +34,18 @@ export class Supervisor {
 
   private track(key: string, run: ActiveRun, from: RunStart): void {
     this.runs.set(key, run);
-    const isThread = run instanceof ThreadJobRun;
     const promise: Promise<void> = run.start(from).finally(() => {
       this.runs.delete(key);
       this.pending.delete(promise);
-      this.threadPending.delete(promise);
     });
     this.pending.add(promise);
-    if (isThread) this.threadPending.add(promise);
   }
 
   private threadDeps(threads: ThreadRunSetup): ThreadRunDeps {
     return {
       journal: this.deps.journal, log: this.deps.log, now: this.deps.now, sleep: this.deps.sleep,
       mutex: this.deps.mutex, logs: this.deps.logs,
-      host: { ...threads.host, sessions: (threads as ThreadRunSetup & { sessions?: ThreadRunSetup['host']['sessions'] }).sessions ?? threads.host.sessions }, tuning: threads.tuning,
+      host: threads.host, tuning: threads.tuning,
     };
   }
 
@@ -207,11 +203,6 @@ export class Supervisor {
   }
 
   async idle(): Promise<void> {
-    // Thread sessions intentionally remain live after setup; idle waits for their ASSIGNED startup to settle,
-    // but not for the session itself to close.
-    while (this.threadPending.size > 0 && this.deps.journal.activeJobs().some((row) => row.command === 'THREAD' && row.state === 'ASSIGNED')) {
-      await new Promise((resolve) => setTimeout(resolve, 1));
-    }
-    await Promise.allSettled([...this.pending].filter((promise) => !this.threadPending.has(promise)));
+    await Promise.allSettled([...this.pending]);
   }
 }
