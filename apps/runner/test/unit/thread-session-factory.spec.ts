@@ -41,8 +41,9 @@ function setup(overrides: {
     create: Array<{ options: CreateAgentSessionOptions }>;
     resume: Array<{ sessionId: string; options: CreateAgentSessionOptions }>;
     native: NativeBackendOptions[];
+    backendResults: CreateAgentSessionOptions['backend'][];
     transcript: string[];
-  } = { create: [], resume: [], native: [], transcript: [] };
+  } = { create: [], resume: [], native: [], backendResults: [], transcript: [] };
   const agent = {
     createAgentSession: async (options: CreateAgentSessionOptions) => {
       calls.create.push({ options });
@@ -56,7 +57,9 @@ function setup(overrides: {
     },
     nativeBackend: (options: NativeBackendOptions) => {
       calls.native.push(options);
-      return nativeBackend(options);
+      const backend = nativeBackend(options);
+      calls.backendResults.push(backend);
+      return backend;
     },
     createFileTranscriptStore: (directory: string) => {
       calls.transcript.push(directory);
@@ -108,7 +111,7 @@ test('US-006 AC-5: creates the session with the assigned thread id', async () =>
 test('US-006 AC-6: passes the injected native backend to session creation', async () => {
   const h = setup();
   await h.open();
-  expect(h.calls.create[0]?.options.backend).toEqual(h.calls.native[0]);
+  expect(h.calls.create[0]?.options.backend).toBe(h.calls.backendResults[0]);
 });
 
 test('US-006 AC-7: includes the selected effort in the native model identifier', async () => {
