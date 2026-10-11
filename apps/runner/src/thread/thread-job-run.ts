@@ -394,11 +394,19 @@ export class ThreadJobRun {
     this.armIdle();
   }
 
-  /** Every event of a turn is streamed; the cost of a `usage` event is added to the job's spend and may close it. */
+  /**
+   * Every event of a turn is streamed; the cost of a `usage` event is added to the job's spend and may close it.
+   * The writer drops a malformed chunk (a null or non-object event) with a warning, and the cost read must not
+   * take the job down in its place.
+   */
   private consume(event: SessionEvent, writer: ThreadEventWriter): void {
     writer.event(event);
-    if (event.type !== 'usage') return;
-    this.spent += event.costUsd;
+    if (typeof event !== 'object' || event === null || event.type !== 'usage') return;
+    // External nax-agent data: a cost that is not a finite, non-negative number is not a cost. A NaN would disable
+    // the cap for the rest of the job and a negative value would un-count spend.
+    const costUsd: unknown = event.costUsd;
+    if (typeof costUsd !== 'number' || !Number.isFinite(costUsd) || costUsd < 0) return;
+    this.spent += costUsd;
     if (this.spent >= this.maxCostUsd) this.requestClose('cost_cap');
   }
 
@@ -450,7 +458,13 @@ export class ThreadJobRun {
       // heartbeat, and re-arming it would spin.
       if (signal.aborted || this.deps.now().getTime() < dueAtMs) return;
       if (this.halted || this.closing) return;
-      this.events.snapshot({ heartbeatAt: this.deps.now().toISOString() });
+      try {
+        this.events.snapshot({ heartbeatAt: this.deps.now().toISOString() });
+      } catch (error) {
+        // A journal that refuses one snapshot (a closed or failing database) must not reach this void-fired loop
+        // as an unhandled rejection, and must not kill the liveness signal: the next interval tries again.
+        this.deps.log.warn('thread heartbeat snapshot failed', { jobId: this.jobId, error: errorMessage(error) });
+      }
     }
   }
 
@@ -481,7 +495,12 @@ export class ThreadJobRun {
     try {
       this.stopIdle();
       if (this.turnRunning) {
-        this.session?.cancel(reason);
+        // A cancel that throws must not abandon the close: the stream still gets sealed and the row still ends.
+        try {
+          this.session?.cancel(reason);
+        } catch (error) {
+          this.deps.log.warn('thread session cancel failed', { jobId: this.jobId, error: errorMessage(error) });
+        }
         await this.turnSettled;
       }
       await this.closeHeldSession();
