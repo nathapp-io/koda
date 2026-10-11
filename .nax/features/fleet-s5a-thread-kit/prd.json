@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-kit",
   "branchName": "feat/fleet-s5a-thread-kit",
   "createdAt": "2026-10-11T00:00:00.000Z",
-  "updatedAt": "2026-10-11T06:39:59.722Z",
+  "updatedAt": "2026-10-11T06:56:45.464Z",
   "userStories": [
     {
       "id": "US-001",
@@ -105,8 +105,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -171,7 +171,10 @@
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Untrusted server identifiers plus git credential isolation and external-source access require security-isolated TDD; caching and concurrent rename raise risk."
+        "reasoning": "Untrusted server identifiers plus git credential isolation and external-source access require security-isolated TDD; caching and concurrent rename raise risk.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/runner/src/thread/thread-paths.ts",
@@ -186,7 +189,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "404e6b6b620da80d31729e9c876a05b4b8f6e3c0"
     },
     {
       "id": "US-004",
