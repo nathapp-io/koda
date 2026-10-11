@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-host",
   "branchName": "feat/fleet-s5a-thread-host",
   "createdAt": "2026-10-11T00:00:00.000Z",
-  "updatedAt": "2026-10-11T11:55:31.533Z",
+  "updatedAt": "2026-10-11T12:07:42.742Z",
   "userStories": [
     {
       "id": "US-001",
@@ -32,8 +32,8 @@
         "validation"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -89,7 +89,10 @@
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Log shipper union/nax auth-provider integration crosses modules; probing credential availability for session placement is security-sensitive and requires isolated tests."
+        "reasoning": "Log shipper union/nax auth-provider integration crosses modules; probing credential availability for session placement is security-sensitive and requires isolated tests.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/runner/src/logs/types.ts",
@@ -112,7 +115,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "5451e66a129f5aa6059313fd47d3e1c39769bc9b"
     },
     {
       "id": "US-003",
