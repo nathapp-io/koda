@@ -1,3 +1,5 @@
+import { afterEach } from 'vitest';
+
 /**
  * Snapshots `process.env` when called (at describe/module level) and restores it
  * after every test, so env mutations (including deletes of values loaded from
