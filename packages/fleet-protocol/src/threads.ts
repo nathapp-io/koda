@@ -40,3 +40,19 @@ export interface ThreadInputPayload { messageId: string; text: string }
 export interface ThreadAnswerPayload { requestId: string; text: string }
 
 export const THREAD_LIMITS = { messageMaxBytes: 32_768, maxNativeModels: 32, maxAcpAgents: 8, maxArchivedThreadIds: 100 } as const;
+
+/** The log stream a THREAD job writes (PUT /fleet/runner/jobs/:jobId/logs/thread). */
+export const THREAD_STREAM = 'thread' as const;
+export const THREAD_STREAM_LIMITS = { lineMaxBytes: 65_536, streamMaxBytes: 209_715_200 } as const;
+/** Same rule as the API's MODEL_ID_RE (apps/api/src/fleet/common/thread-jobs.ts). */
+export const THREAD_MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:\/@-]{0,127}$/;
+
+export type ThreadCloseReason = 'idle' | 'closed' | 'cost_cap' | 'stream_cap' | 'cancelled';
+export type ThreadFailReason = 'backend_unavailable' | 'agent_not_logged_in' | 'model_unknown' | 'skill_fetch_failed' | 'worktree_conflict' | 'session_error';
+
+/** Lines the runner writes itself; other stream lines are nax-agent SessionEvents. */
+export type ThreadRunnerLine =
+  | { type: 'session_started'; at: string; resumed: boolean; backend: ThreadBackend; skillShas: string[] }
+  | { type: 'session_closed'; at: string; reason: ThreadCloseReason }
+  | { type: 'input_consumed'; at: string; messageId: string }
+  | { type: 'session_failed'; at: string; reason: ThreadFailReason };
