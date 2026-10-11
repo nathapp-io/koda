@@ -37,12 +37,20 @@ function makeContext(files: FileEntry[], options: { nowMs?: () => number; search
       const fixed = args.includes('-F');
       const globIndex = args.findIndex((arg) => arg.startsWith(':(glob)'));
       const glob = globIndex >= 0 ? args[globIndex].slice(':(glob)'.length) : undefined;
+      const lineMatches = (line: string): boolean => (fixed ? line.includes(pattern) : new RegExp(pattern).test(line));
+      const skipBinary = args.includes('-I');
+      const withLineNumbers = args.includes('-n');
+      const hitLine = (path: string, index: number, line: string): string =>
+        (withLineNumbers ? `${path}:${index + 1}:${line}` : `${path}:${line}`);
       const matching = files.flatMap((file) => {
-        if (file.tracked === false || file.ignored === true || file.binary || (glob && glob.endsWith('*.md') && !file.path.endsWith('.md'))) return [];
-        return file.content.split('\n').flatMap((line, index) => {
-          const matches = fixed ? line.includes(pattern) : new RegExp(pattern).test(line);
-          return matches ? [`${file.path}:${index + 1}:${line}`] : [];
-        });
+        if (file.tracked === false || file.ignored === true || (glob && glob.endsWith('*.md') && !file.path.endsWith('.md'))) return [];
+        const fileLines = file.content.split('\n');
+        if (file.binary) {
+          // git grep -I skips binary files; without it git reports a match as a single summary line.
+          if (skipBinary) return [];
+          return fileLines.some(lineMatches) ? [`Binary file ${file.path} matches`] : [];
+        }
+        return fileLines.flatMap((line, index) => (lineMatches(line) ? [hitLine(file.path, index, line)] : []));
       });
       return matching.length
         ? { code: 0, stdout: `${matching.join('\n')}\n`, stderr: '' }
