@@ -16,7 +16,6 @@ CREATE TABLE IF NOT EXISTS jobs (
   cancel_requested_at TEXT,
   result_branch TEXT,
   result_sha TEXT,
-  cost_spent_usd TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   done_at TEXT,

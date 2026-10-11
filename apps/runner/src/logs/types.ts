@@ -1,6 +1,4 @@
-import type { LogEventPayload } from '@nathapp/fleet-protocol';
-
-export const THREAD_STREAM = 'thread' as const;
+import { THREAD_STREAM, type LogEventPayload } from '@nathapp/fleet-protocol';
 
 /** S2a streams plus the thread session JSONL stream. */
 export type LogStreamName = LogEventPayload['stream'] | typeof THREAD_STREAM;

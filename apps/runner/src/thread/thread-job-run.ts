@@ -151,6 +151,7 @@ export class ThreadJobRun {
   private session: AgentSession | null = null;
   private halted = false;
   private readonly endWaiters: Array<() => void> = [];
+  private ended = false;
   /** A turn's iteration is in flight: the idle timer is stopped and a close waits for it to end. */
   private turnRunning = false;
   private turnSettled: Promise<void> = Promise.resolve();
@@ -459,7 +460,6 @@ export class ThreadJobRun {
     const costUsd: unknown = event.costUsd;
     if (typeof costUsd !== 'number' || !Number.isFinite(costUsd) || costUsd < 0) return;
     this.spent += costUsd;
-    this.deps.journal.updateJob(this.jobId, this.leaseEpoch, { costSpentUsd: String(this.spent) });
     if (this.spent >= this.maxCostUsd) this.requestClose('cost_cap');
   }
 
@@ -591,11 +591,12 @@ export class ThreadJobRun {
 
   /** The promise `start` resolves on covers the whole run: it resolves on a halt, an abandon or a terminal end. */
   private async waitForEnd(): Promise<void> {
-    if (this.halted) return;
+    if (this.halted || this.ended) return;
     await new Promise<void>((resolve) => this.endWaiters.push(resolve));
   }
 
   private releaseEnd(): void {
+    this.ended = true;
     for (const resolve of this.endWaiters.splice(0)) resolve();
   }
 

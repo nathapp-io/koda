@@ -222,7 +222,7 @@ describe('startDaemon thread wiring (US-007)', () => {
 
   test('AC-9: the prune pass removes a skill snapshot older than thirty days', async () => {
     const f = await fixture();
-    const snapshot = join(f.home.dir, 'skills', 's1', 'abc');
+    const snapshot = join(f.home.dir, 'skills', 's1', 'a'.repeat(40));
     await mkdir(snapshot, { recursive: true });
     const old = new Date(Date.now() - 31 * 86_400_000);
     await utimes(snapshot, old, old);

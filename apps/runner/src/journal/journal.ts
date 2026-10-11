@@ -10,7 +10,7 @@ const SKIP_FILEMODE = process.platform === 'win32' || (typeof process.getuid ===
 
 const PATCH_COLUMNS: Readonly<Record<keyof JobPatch, string>> = {
   state: 'state', branch: 'branch', pid: 'pid', pgid: 'pgid', naxRunId: 'nax_run_id', logPath: 'log_path',
-  cancelRequestedAt: 'cancel_requested_at', resultBranch: 'result_branch', resultSha: 'result_sha', costSpentUsd: 'cost_spent_usd',
+  cancelRequestedAt: 'cancel_requested_at', resultBranch: 'result_branch', resultSha: 'result_sha',
 };
 
 const toJob = (r: Row): JobRow => ({
@@ -19,7 +19,6 @@ const toJob = (r: Row): JobRow => ({
   naxRunId: r['nax_run_id'] as string | null, logPath: r['log_path'] as string | null, jobDir: r['job_dir'] as string,
   assign: JSON.parse(r['assign_json'] as string), cancelRequestedAt: r['cancel_requested_at'] as string | null,
   resultBranch: r['result_branch'] as string | null, resultSha: r['result_sha'] as string | null,
-  costSpentUsd: r['cost_spent_usd'] as string | null,
   createdAt: r['created_at'] as string, updatedAt: r['updated_at'] as string, doneAt: r['done_at'] as string | null,
 });
 
@@ -48,9 +47,6 @@ export class Journal {
     // would keep the first one (its ack is the highest contiguous stored seq).
     db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;');
     db.exec(SCHEMA_SQL);
-    // B3b: existing runner journals gain the thread cost accumulator without losing active jobs.
-    const jobColumns = db.query('PRAGMA table_info(jobs)').all() as Array<{ name: string }>;
-    if (!jobColumns.some((column) => column.name === 'cost_spent_usd')) db.exec('ALTER TABLE jobs ADD COLUMN cost_spent_usd TEXT');
     // SEC-1: the journal carries ASSIGN payloads (clone URLs, identity), event sequences and runner metadata;
     // match identity.json's 0o600 so a local user on a multi-tenant host cannot read it. bun:sqlite creates the
     // file using the process umask, and the WAL/SHM siblings are created lazily — best-effort, no throw on EACCES.
