@@ -3,6 +3,7 @@ import { THREAD_STREAM_LIMITS, type ThreadBackend } from '@nathapp/fleet-protoco
 import { redactSecrets, type SessionEvent } from '@nathapp/nax-agent';
 import { TUNING } from '../daemon/tuning';
 import { errorMessage } from '../errors';
+import { PathError } from '../paths/safe-segment';
 import { systemNow, systemSleep, type Now, type Sleep } from '../time';
 
 const LINE_MAX_BYTES = THREAD_STREAM_LIMITS.lineMaxBytes;
@@ -152,7 +153,7 @@ export class ThreadEventWriter {
 
   constructor(options: ThreadEventWriterOptions) {
     const path = options.path ?? options.filePath;
-    if (path === undefined) throw new Error('ThreadEventWriter needs a stream path');
+    if (path === undefined) throw new PathError('invalid thread stream path');
     this.path = path;
     this.jobId = options.jobId;
     this.leaseEpoch = options.leaseEpoch;
@@ -163,7 +164,7 @@ export class ThreadEventWriter {
     this.streamMaxBytes = options.streamMaxBytes ?? DEFAULT_STREAM_MAX_BYTES;
     this.onCap = options.onCap ?? (() => undefined);
     this.onWarn = options.onWarn ?? (() => undefined);
-    this.written = fileSizeOf(path);
+    this.written = fileSizeOf(path, this.onWarn);
   }
 
   /** The stream file's size, including whatever a previous writer left in it. */
@@ -172,6 +173,11 @@ export class ThreadEventWriter {
   }
 
   event(e: ThreadSessionEvent): void {
+    if (typeof e !== 'object' || e === null) {
+      // A session iterator that yields junk must not take the job down with it.
+      this.onWarn('dropped a malformed session event');
+      return;
+    }
     const line = e as ThreadSessionRecord;
     if (line.type === 'text_delta') this.onTextDelta(line);
     else if (line.type === 'stream_reset') this.onStreamReset(line);
@@ -181,12 +187,12 @@ export class ThreadEventWriter {
   }
 
   started(start: ThreadSessionStart): void {
-    this.releasePrefixes();
+    this.releaseAll();
     this.appendRunner({ type: 'session_started', at: this.now().toISOString(), resumed: start.resumed, backend: start.backend, skillShas: start.skillShas });
   }
 
   inputConsumed(messageId: string): void {
-    this.releasePrefixes();
+    this.releaseAll();
     this.appendRunner({ type: 'input_consumed', at: this.now().toISOString(), messageId });
   }
 
@@ -210,12 +216,14 @@ export class ThreadEventWriter {
   private onTextDelta(line: ThreadSessionRecord): void {
     const text: unknown = line.text;
     if (typeof text !== 'string') {
-      // A delta without text is not a delta: stream the line as it came rather than drop it.
+      // A delta without text is not a delta: held text goes out first, then the line as it came.
+      this.releasePrefixes();
       this.writeSessionObject(line);
       return;
     }
     if (text === '') return;
     const key = roundKey(line);
+    this.releasePrefixes(key);   // B3-R11: another round's held text goes out before this round's line
     const held = this.held.get(key);
     this.held.set(key, { line, text: `${held?.text ?? ''}${text}` });
     this.releasePrefix(key, false);
@@ -253,12 +261,21 @@ export class ThreadEventWriter {
     this.writeChunks(held.line, 'text', redactSecrets(held.text.slice(0, end)));
   }
 
-  /** B3-R11: before any other line, each round's held text goes out ahead of it. */
-  private releasePrefixes(): void {
-    for (const key of [...this.held.keys()]) this.releasePrefix(key, true);
+  /**
+   * B3-R11: before any other line, each round's held text goes out ahead of it. `keep` skips one
+   * round — the one whose own `text_delta` is arriving, which releases its prefix right after.
+   */
+  private releasePrefixes(keep?: string): void {
+    for (const key of [...this.held.keys()]) {
+      if (key !== keep) this.releasePrefix(key, true);
+    }
   }
 
-  /** Writes every held delta whole — the point at which a secret split across deltas is redacted at once. */
+  /**
+   * Writes every held delta whole — the point at which a secret split across deltas is redacted at once.
+   * A line the stream cap refuses, or a write that fails, is dropped and reported through `onWarn`: the
+   * cap is permanent and the bundle carries the full text, so the writer keeps no retry buffer.
+   */
   private releaseAll(): void {
     const held = [...this.held.values()];
     this.held.clear();
@@ -268,10 +285,13 @@ export class ThreadEventWriter {
   }
 
   private writeTurnEnd(line: ThreadSessionRecord): void {
-    const output = typeof line.output === 'string' ? redactSecrets(line.output) : '';
+    const full: Record<string, unknown> = { ...line };
+    if (typeof line.output === 'string') full.output = redactSecrets(line.output);
     const error = errorValue(line.error);
-    const full: Record<string, unknown> = { ...line, output };
-    if (error !== undefined) full.error = redactSecrets(error);
+    if (error !== undefined && typeof error.message === 'string') {
+      // B3-R11: the message is redacted whole; the rest of the error line is kept as produced.
+      full.error = { ...error, message: redactSecrets(error.message) };
+    }
     if (lineBytes(full) <= LINE_MAX_BYTES) {
       this.writeSessionObject(full);
       return;
@@ -368,19 +388,34 @@ export class ThreadEventWriter {
     }
     if (this.trailingWake) return;
     this.trailingWake = true;
-    void this.sleep(this.wakeGapMs).then(() => {
-      this.trailingWake = false;
-      this.lastWakeAt = this.now().getTime();
-      this.logs.wake(this.jobId, this.leaseEpoch);
-    });
+    void this.sleep(this.wakeGapMs).then(
+      () => this.trailingWakeFired(),
+      (error: unknown) => {
+        // A sleep that rejects must not strand the flag: every later wake would be suppressed.
+        this.onWarn(`thread wake sleep failed: ${errorMessage(error)}`);
+        this.trailingWakeFired();
+      },
+    );
+  }
+
+  /** The gap elapsed: the appends that arrived inside it are reported now. */
+  private trailingWakeFired(): void {
+    this.trailingWake = false;
+    this.lastWakeAt = this.now().getTime();
+    this.logs.wake(this.jobId, this.leaseEpoch);
   }
 }
 
-function fileSizeOf(path: string): number {
+function fileSizeOf(path: string, onWarn: (message: string) => void): number {
   try {
     return statSync(path).size;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
-    throw error;
+    // A file that is absent is empty; any other failure (EACCES, ENOTDIR) is reported and read the
+    // same way, because a stream the runner cannot size must not take the job down — the appends that
+    // follow report their own failure through the same warning.
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      onWarn(`cannot read the thread stream size: ${errorMessage(error)}`);
+    }
+    return 0;
   }
 }
