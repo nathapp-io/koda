@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-host",
   "branchName": "feat/fleet-s5a-thread-host",
   "createdAt": "2026-10-11T00:00:00.000Z",
-  "updatedAt": "2026-10-11T13:18:32.903Z",
+  "updatedAt": "2026-10-11T14:16:05.554Z",
   "userStories": [
     {
       "id": "US-001",
@@ -217,8 +217,8 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -284,7 +284,10 @@
       "routing": {
         "complexity": "expert",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Security-sensitive session commands plus racing halt, close, cancel, held iterations and bounded abandon."
+        "reasoning": "Security-sensitive session commands plus racing halt, close, cancel, held iterations and bounded abandon.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
       },
       "contextFiles": [
         "apps/runner/src/thread/thread-job-run.ts",
@@ -299,7 +302,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "3460b208d389e41f773b8d8f9dc2c53189fc5d60"
     },
     {
       "id": "US-006",
