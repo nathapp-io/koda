@@ -23,10 +23,10 @@ const tuning = {
   threadSearchTimeoutMs: 1_000, threadSkillFetchTimeoutMs: 1_000,
   logDrainTimeoutMs: 1_000, threadCloseTimeoutMs: 10,
 };
-const completed: SessionEvent = {
+const completed = {
   type: 'turn_end', sessionId: 'thread-1', turnId: 'turn-1',
   at: new Date(0).toISOString(), status: 'completed',
-};
+} as never;
 
 function deferred<T = void>() {
   let resolve!: (value: T) => void;
@@ -78,7 +78,7 @@ function setup(options: {
     },
     answer: (requestId, answer) => {
       calls.push('answer');
-      answers.push({ requestId, answer });
+      answers.push({ requestId, answer: answer as { text: string } });
       return options.answer?.(requestId, answer) ?? 'accepted';
     },
     cancel: () => { calls.push('cancel'); },
