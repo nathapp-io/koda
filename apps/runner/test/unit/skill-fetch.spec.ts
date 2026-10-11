@@ -1,12 +1,14 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdir, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const skillFetchModule = await import('../../src/thread/skill-fetch').catch(() => undefined);
 
 const root = join(import.meta.dir, `.skill-fetch-${crypto.randomUUID()}`);
 const skillsRoot = join(root, 'skills-cache');
 const repositoryRoot = join(root, 'origin-repository');
+const fileOrigin = pathToFileURL(repositoryRoot).href;
 const sha = 'a'.repeat(40);
 const sourceId = 'public-skills';
 const skillDir = 'skills/demo';
@@ -23,7 +25,10 @@ interface GitCall {
   options: GitRunOptions;
 }
 
-function fakeGit(sourceExists = true): { run: (args: string[], options: GitRunOptions) => Promise<void>; calls: GitCall[] } {
+function fakeGit(
+  sourceExists = true,
+  origin = 'https://github.com',
+): { run: (args: string[], options: GitRunOptions) => Promise<void>; calls: GitCall[] } {
   const calls: GitCall[] = [];
   return {
     calls,
@@ -33,11 +38,12 @@ function fakeGit(sourceExists = true): { run: (args: string[], options: GitRunOp
         await mkdir(join(options.cwd, '.git'), { recursive: true });
       }
       if (args.includes('fetch')) {
+        const expectedUrl = `${origin}/example-owner/skills`;
+        if (!args.includes(expectedUrl)) throw new Error(`unexpected fetch URL: ${args.join(' ')}`);
         if (!sourceExists || !args.includes(sha)) throw new Error('missing source SHA');
         await mkdir(options.cwd, { recursive: true });
+        await cp(repositoryRoot, options.cwd, { recursive: true });
         await writeFile(join(options.cwd, '.git', 'HEAD'), 'ref: refs/heads/main\n');
-        await mkdir(join(options.cwd, skillDir), { recursive: true });
-        await writeFile(join(options.cwd, skillDir, 'SKILL.md'), '# Demo skill\n', 'utf8');
       }
     },
   };
@@ -83,11 +89,15 @@ afterAll(async () => {
 describe('SHA-pinned public skill fetch and cache (US-003)', () => {
   test('US-003 AC-1: returns success when fetching a source from a file origin', async () => {
     if (!(await ensureModule())) return;
-    const git = fakeGit();
+    const git = fakeGit(true, fileOrigin);
     const result = await getSkillFetchModule().ensureSkills({
-      skills: [skill()], skillsRoot, git, timeoutMs: 10_000, origin: `file://${repositoryRoot}`,
+      skills: [skill()], skillsRoot, git, timeoutMs: 10_000, origin: fileOrigin,
     });
-    expect(result).toEqual({ ok: true });
+    const fetch = git.calls.find(({ args }) => args.includes('fetch'));
+    expect({ result, fetchUrl: fetch?.args.find((arg) => arg.startsWith('file://')) }).toEqual({
+      result: { ok: true },
+      fetchUrl: `${fileOrigin}/example-owner/skills`,
+    });
   });
 
   test('US-003 AC-2: materializes the requested skill file beneath the cache snapshot', async () => {
