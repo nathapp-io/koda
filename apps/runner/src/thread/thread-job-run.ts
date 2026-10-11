@@ -361,11 +361,14 @@ export class ThreadJobRun {
     }
   }
 
-  /** The session does not outlive the run: a failure after RUNNING must not leave an agent session alive. */
+  /** The session does not outlive the run: use the same bounded close as abandon. */
   private async closeHeldSession(): Promise<void> {
     const session = this.session;
     this.session = null;
-    if (session !== null) await this.closeSession(session);
+    if (session !== null) {
+      this.startSessionClose(session);
+      await this.awaitSessionClose();
+    }
   }
 
   /**
@@ -635,7 +638,6 @@ export class ThreadJobRun {
    * the turn slot, so a second one in the same batch sees `turn_running` (B3-R5, no input queue).
    */
   command(type: 'THREAD_INPUT' | 'THREAD_STOP_TURN' | 'THREAD_CLOSE' | 'THREAD_PUBLISH', payload: unknown): ThreadCommandOutcome;
-  command(type: 'THREAD_ANSWER', payload: unknown): ThreadCommandOutcome;
   command(type: ThreadCommandType, payload: unknown): ThreadCommandOutcome | Promise<ThreadCommandOutcome>;
   command(type: ThreadCommandType, payload: unknown): ThreadCommandOutcome | Promise<ThreadCommandOutcome> {
     if (type === 'THREAD_PUBLISH') return { result: 'rejected', detail: 'unsupported' };

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { mkdir, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentSession } from '@nathapp/nax-agent';
@@ -18,7 +18,10 @@ import { waitFor } from '../helpers/wait';
 
 beforeAll(() => isolateGit());
 const tmp = makeTempDirs();
-afterAll(() => tmp.cleanup());
+const socketDirs: string[] = [];
+afterAll(async () => {
+  await Promise.all([tmp.cleanup(), ...socketDirs.map((path) => rm(path, { recursive: true, force: true }))]);
+});
 
 /**
  * Fleet S5a US-007 integration: `startDaemon` in nax mode over an injected fetch (never a listening server),
@@ -26,7 +29,7 @@ afterAll(() => tmp.cleanup());
  * the runner refuses a socket path longer than a unix `sun_path`, and a per-test directory under a long TMPDIR
  * would cross that bound.
  */
-const SOCKET_DIR = join(tmpdir(), 'k7sock');
+const SOCKET_DIR = (): Promise<string> => mkdtemp(`${tmpdir()}/`);
 
 interface FakeFleet {
   readonly fetchFn: FetchFn;
@@ -98,7 +101,9 @@ async function fixture() {
   await writeFile(join(naxHome, 'config.json'), JSON.stringify({ models: { native: { balanced: 'minimax/MiniMax-M3' } } }));
   const origin = await makeOrigin(base, 'origin', { files: { 'README.md': 'hello\n' } });
   const home = resolveHome({}, join(base, 'home'));
-  const config = parseRunnerConfig({ serverUrl: 'http://127.0.0.1:9', workspaceRoot, naxHome, socketDir: SOCKET_DIR, jobRetentionDays: 1 }, {});
+  const socketDir = await SOCKET_DIR();
+  socketDirs.push(socketDir);
+  const config = parseRunnerConfig({ serverUrl: 'http://127.0.0.1:9', workspaceRoot, naxHome, socketDir, jobRetentionDays: 1 }, {});
   const fleet = fakeFleet();
   const executor = new FakeExecutor();
   const sessions: NonNullable<DaemonOptions['threadSessions']> = { open: async () => ({ ok: true, session: fakeSession(), resumed: false }) };

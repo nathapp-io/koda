@@ -36,6 +36,7 @@ function setup(options: {
   holdDrain?: boolean;
   streamMaxBytes?: number;
   maxCostUsd?: string;
+  hangClose?: boolean;
 } = {}) {
   const root = join(import.meta.dir, `.thread-job-run-turns-${crypto.randomUUID()}`);
   roots.push(root);
@@ -74,7 +75,7 @@ function setup(options: {
       yield* options.send(text) as AsyncIterable<never>;
     },
     answer: () => 'accepted', cancel: () => { cancelCalls += 1; },
-    close: async () => { closeCalls += 1; },
+    close: async () => { closeCalls += 1; if (options.hangClose) await new Promise<void>(() => {}); },
   };
   const host = {
     sessions: { async open() { return { ok: true as const, session, resumed: false }; } },
@@ -133,6 +134,19 @@ describe('ThreadJobRun turns, idle, caps and failure (US-004)', () => {
     context.clock.advance(tuning.threadIdleMs);
     expect(await eventually(() => context.journal.getJob(jobId, leaseEpoch)?.state === 'COMPLETED')).toBe(true);
     expect(stateEvents(context.journal)).toEqual([{ to: 'RUNNING' }, { to: 'UPLOADING' }, { to: 'COMPLETED', reason: 'idle' }]);
+    await started; context.journal.close();
+  });
+
+  test('run close timeout still seals the stream and completes the row', async () => {
+    const context = setup({ hangClose: true });
+    const { started } = await running(context);
+    await Bun.sleep(25);
+    context.clock.advance(tuning.threadIdleMs);
+    expect(await eventually(() => context.closeCalls() === 1)).toBe(true);
+    context.clock.advance(tuning.threadCloseTimeoutMs);
+    expect(await eventually(() => context.journal.getJob(jobId, leaseEpoch)?.state === 'COMPLETED')).toBe(true);
+    expect(stateEvents(context.journal).at(-1)).toEqual({ to: 'COMPLETED', reason: 'idle' });
+    expect((await streamLines(context)).at(-1)).toMatchObject({ type: 'session_closed', reason: 'idle' });
     await started; context.journal.close();
   });
 
