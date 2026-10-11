@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { GitIdentity } from '@nathapp/fleet-protocol';
 import { GitError, reasonFromError, type Git } from '../executor/git';
@@ -171,18 +171,10 @@ async function registeredRepoDir(homeDir: string, threadId: string): Promise<str
   return repoDir;
 }
 
-/** Remove everything a thread left behind, keeping its directory: a caller may still hold that path. */
-async function emptyThreadDir(dir: string): Promise<void> {
-  for (const entry of await readdir(dir).catch(() => [])) {
-    await rm(join(dir, entry), { recursive: true, force: true });
-  }
-}
-
 /**
- * Design §2 cleanup: an archived thread keeps no worktree registration and no local file. A directory
- * with no `thread.json` never registered a worktree — a crashed or never-started thread — and is
- * removed whole; a registered thread's directory is emptied in place, so a caller that prepared it
- * still finds the path it was handed.
+ * Design §2 cleanup: a thread the server no longer reports keeps no worktree registration and no
+ * directory — its `thread.json` names the clone to withdraw the registration from, and the whole
+ * `<homeDir>/threads/<id>` tree goes.
  */
 export async function pruneArchivedThreads(input: PruneArchivedThreadsInput): Promise<void> {
   const active = new Set(input.activeThreadIds);
@@ -194,13 +186,10 @@ export async function pruneArchivedThreads(input: PruneArchivedThreadsInput): Pr
     } catch {
       continue;
     }
-    const dir = threadDirFor(input.homeDir, threadId);
     const repoDir = await registeredRepoDir(input.homeDir, threadId);
-    if (!repoDir) {
-      await rm(dir, { recursive: true, force: true });
-      continue;
+    if (repoDir) {
+      await input.git.run(['worktree', 'remove', '--force', '--force', threadWorktreeDir(input.homeDir, threadId)], { cwd: repoDir });
     }
-    await input.git.run(['worktree', 'remove', '--force', '--force', threadWorktreeDir(input.homeDir, threadId)], { cwd: repoDir });
-    await emptyThreadDir(dir);
+    await rm(threadDirFor(input.homeDir, threadId), { recursive: true, force: true });
   }
 }
