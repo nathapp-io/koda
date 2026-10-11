@@ -46,6 +46,7 @@ export class RunnersService {
       ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
       ...(patch.labels !== undefined ? { labels: [...new Set(patch.labels)].sort() } : {}),
       ...(patch.capacity !== undefined ? { capacity: patch.capacity } : {}),
+      ...(patch.threadCapacity !== undefined ? { threadCapacity: patch.threadCapacity } : {}),
     };
     return this.txManager.run(async () => {
       if (!(await this.repo.findRunnerById(id))) throw new NotFoundAppException({}, 'fleet.runners');

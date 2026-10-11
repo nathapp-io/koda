@@ -33,7 +33,16 @@ export interface SkillSourceDomain {
   skills: SkillDomain[];
 }
 
+export interface ThreadSkillSource {
+  sourceId: string;
+  owner: string;
+  repo: string;
+  sha: string;
+  skills: Array<{ name: string; dir: string; description: string }>;
+}
+
 export interface SkillCatalogRepository {
+  listEnabledSnapshot(projectId: string): Promise<ThreadSkillSource[]>;
   findSource(owner: string, repo: string, ref: string, path: string): Promise<SkillSourceDomain | null>;
   findSourceById(id: string): Promise<SkillSourceDomain | null>;
   findSkillOwners(names: string[]): Promise<Array<{ name: string; source: SkillSourceDomain }>>;

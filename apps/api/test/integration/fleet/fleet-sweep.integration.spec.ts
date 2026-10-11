@@ -25,6 +25,45 @@ describeIntegration('fleet silence sweep (PG)', () => {
     await app.close();
   });
 
+  const crashedThread = async (feature: string) => {
+    const base = await seedFleetBase(prisma);
+    const now = new Date('2026-10-01T12:00:00.000Z');
+    const silent = await insertRunner(prisma, { lastSeenAt: new Date(now.getTime() - 301_000) });
+    const thread = await prisma.chatThread.create({ data: {
+      projectId: base.projectId, repoId: base.repoId, baseRef: 'main', feature, title: feature,
+      createdById: base.adminId, backend: { kind: 'native' }, skills: [], specPath: `.nax/features/${feature}/spec.md`,
+      runnerId: silent.id, pendingQuestion: { requestId: 'q1' },
+    } });
+    const job = await prisma.fleetJob.create({ data: {
+      projectId: base.projectId, repoId: base.repoId, ref: 'main', command: 'THREAD', feature: `thread-${thread.id}`, profiles: [],
+      selectorLabels: [], maxCostUsd: new Prisma.Decimal(5), requestedById: base.adminId, state: 'RUNNING', runnerId: silent.id,
+      leaseEpoch: 1, threadId: thread.id,
+    } });
+    const message = await prisma.chatMessage.create({ data: {
+      threadId: thread.id, seq: 1, role: 'user', content: 'hi', status: 'pending', authorUserId: base.adminId,
+    } });
+    await app.get(FleetSweeper).sweep(now);
+    return { job, thread, message };
+  };
+
+  it('US-007 AC14: silence sweep crashes a THREAD job and errors its pending message without losing content', async () => {
+    const { job, message } = await crashedThread('sweeper-thread-message');
+    expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: job.id } })).state).toBe('CRASHED');
+    expect(await prisma.chatMessage.findUniqueOrThrow({ where: { id: message.id } })).toEqual(expect.objectContaining({
+      status: 'errored', content: 'hi', errorReason: 'crashed',
+    }));
+  });
+
+  it('US-007 AC14: silence sweep clears the thread pending question', async () => {
+    const { thread } = await crashedThread('sweeper-thread-question');
+    expect((await prisma.chatThread.findUniqueOrThrow({ where: { id: thread.id } })).pendingQuestion).toBeNull();
+  });
+
+  it('US-007 AC15: silence sweep does not enqueue a thread outcome event', async () => {
+    const { job } = await crashedThread('sweeper-thread-outcome');
+    expect(await prisma.outboxEvent.count({ where: { type: 'fleet_job_outcome', eventId: job.id } })).toBe(0);
+  });
+
   it('crashes held jobs of a silent runner only, bumping the epoch and withdrawing commands', async () => {
     const base = await seedFleetBase(prisma);
     const now = new Date('2026-10-01T12:00:00.000Z');

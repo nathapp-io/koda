@@ -10,4 +10,6 @@ export class UpdateRunnerDto {
   labels?: string[];
 
   @ApiPropertyOptional({ minimum: 1, maximum: 16 }) @IsOptional() @IsInt() @Min(1) @Max(16) capacity?: number;
+
+  @ApiPropertyOptional({ minimum: 0, maximum: 16 }) @IsOptional() @IsInt() @Min(0) @Max(16) threadCapacity?: number;
 }

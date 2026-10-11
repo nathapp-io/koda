@@ -20,7 +20,7 @@ describe('fleet protocol', () => {
     expect(SUPPORTED_FLEET_PROTOCOL_VERSIONS).toContain(FLEET_PROTOCOL_VERSION);
   });
 
-  it.each([[1, true], [2, true], [3, true], [0, false], [4, false], ['2', false], [1.5, false], [undefined, false]])(
+  it.each([[1, true], [2, true], [3, true], [4, true], [0, false], [5, false], ['2', false], [1.5, false], [undefined, false]])(
     'isSupportedProtocolVersion(%p) is %p', (value, expected) => {
       expect(isSupportedProtocolVersion(value)).toBe(expected);
     },
@@ -47,8 +47,11 @@ describe('API enums match the protocol unions', () => {
     QUEUED: true, ASSIGNED: true, RUNNING: true, UPLOADING: true, COMPLETED: true,
     FAILED: true, ESCALATED: true, CRASHED: true, CANCELLED: true,
   };
-  const kinds: Record<FleetJobKindName, true> = { RUN: true, PLAN: true, CONFIG_EDIT: true, CONFIG_DRIFT: true };
-  const commands: Record<FleetCommandTypeName, true> = { ASSIGN: true, CANCEL: true, READOPT: true, ABANDON: true, APPROVAL_ANSWER: true };
+  const kinds: Record<FleetJobKindName, true> = { RUN: true, PLAN: true, CONFIG_EDIT: true, CONFIG_DRIFT: true, THREAD: true };
+  const commands: Record<FleetCommandTypeName, true> = {
+    ASSIGN: true, CANCEL: true, READOPT: true, ABANDON: true, APPROVAL_ANSWER: true,
+    THREAD_INPUT: true, THREAD_ANSWER: true, THREAD_STOP_TURN: true, THREAD_CLOSE: true, THREAD_PUBLISH: true,
+  };
 
   it.each([
     ['FleetJobState', FleetJobState, states],

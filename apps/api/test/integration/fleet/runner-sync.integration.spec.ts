@@ -9,7 +9,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
-import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld, syncBody } from '../../helpers/fleet-fixtures';
+import { enrollRunner, FleetHttpWorld, insertRunner, seedFleetHttpWorld, syncBody } from '../../helpers/fleet-fixtures';
 import type { SyncRequest, SyncResponse } from '../../../src/fleet/common/protocol';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -23,7 +23,26 @@ describeIntegration('runner sync (PG)', () => {
   const saved = process.env.FLEET_SYNC_WAIT_MS;
 
   const sync = async (over: Partial<SyncRequest> = {}, key = runner.apiKey) =>
-    data<SyncResponse>(await request(server).post('/api/fleet/runner/sync').set({ Authorization: `Bearer ${key}` }).send(syncBody(over)).expect(200));
+    data<SyncResponse & { archivedThreadIds: string[] }>(await request(server).post('/api/fleet/runner/sync').set({ Authorization: `Bearer ${key}` }).send(syncBody(over)).expect(200));
+  const threadInput = async (feature: string) => {
+    const thread = await prisma.chatThread.create({ data: {
+      projectId: world.projectId, repoId: world.repoId, baseRef: 'trunk', feature, title: feature,
+      createdById: world.ids.dev, backend: { kind: 'native' }, skills: [], specPath: `.nax/features/${feature}/spec.md`, runnerId: runner.runnerId,
+    } });
+    const job = await prisma.fleetJob.create({ data: {
+      projectId: world.projectId, repoId: world.repoId, ref: 'trunk', command: 'THREAD', feature: `thread-${thread.id}`,
+      profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, threadId: thread.id,
+      runnerId: runner.runnerId, state: 'RUNNING', leaseEpoch: 9,
+    } });
+    const message = await prisma.chatMessage.create({ data: {
+      threadId: thread.id, seq: 1, role: 'user', authorUserId: world.ids.dev, content: 'hello', status: 'pending',
+    } });
+    const command = await prisma.fleetCommand.create({ data: {
+      runnerId: runner.runnerId, jobId: job.id, type: 'THREAD_INPUT', leaseEpoch: 9,
+      payload: { messageId: message.id, text: 'hello' },
+    } });
+    return { thread, job, message, command };
+  };
   const dispatch = async (feature: string) =>
     data<{ job: { id: string; state: string; leaseEpoch: number } }>(
       await request(server).post('/api/projects/web/fleet/jobs').set({ Authorization: `Bearer ${world.tokens.dev}` })
@@ -143,6 +162,33 @@ describeIntegration('runner sync (PG)', () => {
     await prisma.runner.update({ where: { id: runner.runnerId }, data: { enabled: true } });
     await prisma.fleetJob.updateMany({ where: { runnerId: runner.runnerId, state: { in: ['ASSIGNED', 'RUNNING', 'UPLOADING'] } }, data: { state: 'FAILED' } });
     expect((await sync({ freeSlots: 1 })).commands.filter((c) => c.jobId === j.id && c.type === 'ASSIGN')).toHaveLength(1);
+  });
+
+  it('US-007 AC11: sync returns only archived thread ids assigned to this runner', async () => {
+    const thread = (feature: string, status: string, runnerId: string) => prisma.chatThread.create({ data: {
+      projectId: world.projectId, repoId: world.repoId, baseRef: 'trunk', feature, title: feature,
+      createdById: world.ids.dev, backend: { kind: 'native' }, skills: [], specPath: `.nax/features/${feature}/spec.md`,
+      status, runnerId, archivedAt: status === 'ARCHIVED' ? new Date() : null,
+    } });
+    const t1 = await thread('archived-for-runner', 'ARCHIVED', runner.runnerId);
+    await thread('active-for-runner', 'ACTIVE', runner.runnerId);
+    const otherRunner = await insertRunner(prisma);
+    await thread('archived-elsewhere', 'ARCHIVED', otherRunner.id);
+    expect((await sync()).archivedThreadIds).toEqual([t1.id]);
+  });
+
+  it('US-007 AC12: rejected THREAD_INPUT ack errors its message with the runner detail', async () => {
+    const { command, message } = await threadInput('thread-input-rejected');
+    await sync({ commandAcks: [{ commandId: command.id, leaseEpoch: 9, result: 'rejected', detail: 'stale_input' }] });
+    expect(await prisma.chatMessage.findUniqueOrThrow({ where: { id: message.id } })).toEqual(expect.objectContaining({
+      status: 'errored', errorReason: 'stale_input',
+    }));
+  });
+
+  it('US-007 AC13: successful THREAD_INPUT ack replaces its payload with the message id', async () => {
+    const { command, message } = await threadInput('thread-input-acked');
+    await sync({ commandAcks: [{ commandId: command.id, leaseEpoch: 9, result: 'ok' }] });
+    expect((await prisma.fleetCommand.findUniqueOrThrow({ where: { id: command.id } })).payload).toEqual({ messageId: message.id });
   });
 
   it('mirrors postRun from snapshots: present replaces, absent and all-invalid leave it (S2b (j) D428)', async () => {

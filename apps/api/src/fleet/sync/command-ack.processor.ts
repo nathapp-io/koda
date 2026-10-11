@@ -9,6 +9,7 @@ import { canTransition } from '../jobs/job-state';
 import { JobTransitionsService } from '../jobs/job-transitions.service';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { FenceService } from './fence.service';
+import { ThreadJobEffects } from '../threads/thread-job-effects';
 
 /** An ack either changed the job (live event plus the approval events of any exit from RUNNING) or did nothing (plan D263). */
 interface Applied { live: LiveFleetJobEvent | null; approvalLive: LiveFleetApprovalEvent[] }
@@ -26,6 +27,7 @@ export class CommandAckProcessor {
     private readonly activity: FleetActivityService,
     @Inject(APPROVAL_REPOSITORY) private readonly approvals: Pick<IApprovalRepository, 'lockById' | 'setOutcome'>,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly threadEffects?: ThreadJobEffects,
   ) {}
 
   /** One transaction per ack, and a failing ack is logged and skipped, so one bad ack never blocks the rest. */
@@ -63,6 +65,10 @@ export class CommandAckProcessor {
       return NO_CHANGE;
     }
     await this.repo.ackCommand(command.id, ack.result, now);
+    if (command.type === FleetCommandType.THREAD_INPUT || command.type === FleetCommandType.THREAD_ANSWER) {
+      await this.threadEffects?.onInputAck(command, ack.result, (ack.detail ?? '').slice(0, 200));
+      return NO_CHANGE;
+    }
     const actor = { type: 'RUNNER' as const, id: runnerId };
     const detail = (ack.detail ?? '').slice(0, 200);
 

@@ -10,6 +10,8 @@ import { FLEET_JOB_REPOSITORY, FleetJobPatch, FleetJobRecord, IFleetJobRepositor
 import { ScheduleProgressService } from '../schedules/schedule-progress.service';
 import { SYSTEM_ACTOR, type TransitionActorRef } from '../common/system-actor';
 import { FleetJobOutcomeRecorder } from './job-outcome.recorder';
+import { ThreadJobEffects } from '../threads/thread-job-effects';
+import { isThreadKind } from '../common/thread-jobs';
 
 // The actor of an automatic action lives in a leaf module so budgets, jobs and approvals can all name it
 // without importing each other's services (§2.4 closes an approval from the jobs side — now via
@@ -37,6 +39,7 @@ export class JobTransitionsService {
     private readonly schedules: ScheduleProgressService,
     private readonly approvals: ApprovalCloser,
     private readonly outcomes: FleetJobOutcomeRecorder,
+    private readonly threadEffects?: ThreadJobEffects,
   ) {}
 
   async apply(input: {
@@ -60,6 +63,7 @@ export class JobTransitionsService {
     // Fleet S3 D475: the config job's last reported result becomes its edit row's record, in this transaction.
     if (terminal && isConfigKind(after.command)) await this.repo.copyConfigResult(after.id);
     // Fleet S4a §2.4 (D513): the requester's notification, in this same transaction.
+    if (terminal && isThreadKind(after.command) && after.threadId) await this.threadEffects?.onJobEnded(after);
     if (terminal) await this.outcomes.onTerminal(after);
     const live = await this.record({ before: job, after, by, now, actor: input.actor, reason: input.reason });
     // Spec §1.4 / plan D263: nax has exited or is exiting, so its asks are moot and an unsent answer must not go out.

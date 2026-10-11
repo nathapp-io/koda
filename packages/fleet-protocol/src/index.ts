@@ -8,7 +8,9 @@ export const FLEET_PROTOCOL_VERSION = 3 as const;
 
 export * from './nax-config-paths';
 export * from './config-jobs';
+export * from './threads';
 import type { ConfigJobKind, ConfigJobResult } from './config-jobs';
+import type { ThreadAnswerPayload, ThreadAssign, ThreadBackends, ThreadCommandType, ThreadInputPayload } from './threads';
 
 /** S1.5 §1.6: `gated` and `escalate` relay nax bash asks to the approvals inbox (protocol v2 runners only). */
 export type BashMode = 'raw' | 'gated' | 'escalate';
@@ -69,6 +71,8 @@ export interface RunnerCapabilities {
   interaction?: InteractionCheck;
   /** Fleet S3 §3: the runner executes CONFIG_EDIT / CONFIG_DRIFT jobs. Absent on older runners (permanent misfit `config_jobs`). */
   configJobs?: true;
+  /** Fleet S5a §3: native models and ACP agents the runner can serve a thread with. Absent on older runners. */
+  threadBackends?: ThreadBackends;
 }
 
 export interface EnrollRequest {
@@ -101,8 +105,8 @@ export interface RunnerIdentity {
 export type FleetJobStateName =
   | 'QUEUED' | 'ASSIGNED' | 'RUNNING' | 'UPLOADING'
   | 'COMPLETED' | 'FAILED' | 'ESCALATED' | 'CRASHED' | 'CANCELLED';
-export type FleetJobKindName = 'RUN' | 'PLAN' | ConfigJobKind;
-export type FleetCommandTypeName = 'ASSIGN' | 'CANCEL' | 'READOPT' | 'ABANDON' | 'APPROVAL_ANSWER';
+export type FleetJobKindName = 'RUN' | 'PLAN' | ConfigJobKind | 'THREAD';
+export type FleetCommandTypeName = 'ASSIGN' | 'CANCEL' | 'READOPT' | 'ABANDON' | 'APPROVAL_ANSWER' | ThreadCommandType;
 export type RunnerEventType = 'state' | 'snapshot' | 'lifecycle' | 'log' | 'approval_request';
 
 /** A runner-reported transition (§5.4 runner-owned rows only). */
@@ -232,6 +236,8 @@ export interface AssignPayload {
   /** S1.5 §1.6: seconds nax waits on a bash ask; 30..3600. Used only when bashMode is not raw. */
   approvalTimeoutSec: number;
   gitIdentity: GitIdentity;
+  /** Fleet S5a: present only for THREAD jobs. */
+  thread?: ThreadAssign;
 }
 export interface ReadoptPayload { naxRunId: string | null }
 export interface AbandonPayload { reason: 'stale_lease' | 'job_terminal' }
@@ -241,7 +247,7 @@ export interface FleetCommandOut {
   type: FleetCommandTypeName;
   jobId: string;
   leaseEpoch: number;
-  payload: AssignPayload | ReadoptPayload | AbandonPayload | ApprovalAnswerPayload | Record<string, never>;
+  payload: AssignPayload | ReadoptPayload | AbandonPayload | ApprovalAnswerPayload | ThreadInputPayload | ThreadAnswerPayload | Record<string, never>;
 }
 
 export interface GitToken { jobId: string; token: string; expiresAt: string; username: 'x-access-token' | 'oauth2' }
@@ -256,6 +262,8 @@ export interface SyncResponse {
   gitTokenErrors: GitTokenError[];
   /** Plan D7: reported jobs the server does not know; the runner abandons them. */
   unknownJobIds: string[];
+  /** Fleet S5a: archived thread ids the runner should close; at most THREAD_LIMITS.maxArchivedThreadIds. */
+  archivedThreadIds?: string[];
   nextPollAfterMs?: number;
 }
 

@@ -21,6 +21,8 @@ import { CommandAckProcessor } from './command-ack.processor';
 import { JobReportProcessor } from './job-report.processor';
 import { PrAttributionService } from './pr-attribution.service';
 import { parseSyncRequest } from './sync-request.parser';
+import { ThreadJobEffects } from '../threads/thread-job-effects';
+import { CHAT_THREAD_REPOSITORY, type ChatThreadRepository } from '../threads/domain/chat-thread.domain';
 
 /**
  * POST /fleet/runner/sync (spec §3.2). Step 1 is several short transactions (plan D5):
@@ -45,6 +47,8 @@ export class SyncService {
     private readonly attribution: PrAttributionService,
     private readonly ticketEffects: FleetJobTicketEffects,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly threadEffects: ThreadJobEffects,
+    @Inject(CHAT_THREAD_REPOSITORY) private readonly threads: ChatThreadRepository,
   ) {}
 
   async sync(runnerId: string, raw: unknown): Promise<SyncResponse> {
@@ -86,6 +90,7 @@ export class SyncService {
     this.live.publish(live);
     this.approvalLive.publish(approvalLive);
     if (req.freeSlots > 0) await this.placement.fillRunner(runnerId, req.freeSlots, now);
+    if (req.protocolVersion >= 4) await this.placement.fillRunnerThreads(runnerId, now);
     await this.afterTerminal(live.filter((e) => isTerminal(e.state)).map((e) => e.jobId));
 
     const tokens = await this.grantTokens(runnerId, req.tokenRequests, now);
@@ -99,6 +104,7 @@ export class SyncService {
     return {
       jobAcks, commands, gitTokens: tokens.gitTokens, gitTokenErrors: tokens.gitTokenErrors,
       unknownJobIds: [...new Set([...unknownJobIds, ...tokens.unknownJobIds])],
+      archivedThreadIds: await this.threads.archivedThreadIds(runnerId),
     };
   }
 

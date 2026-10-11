@@ -2,6 +2,7 @@ import {
   evaluateRunners, jobScopePause, MisfitReason, PERMANENT_MISFITS, PlacementRunner, RunnerLoad, toPlacementJob,
 } from '../jobs/placement-rules';
 import { jobItem } from './attention-jobs';
+import { isThreadKind } from '../common/thread-jobs';
 import {
   AttentionItem, AttentionReason, AttentionThresholds, DASHBOARD_LIMITS, DashboardJobRow, DashboardRunnerRow, secondsSince, Severity,
   UnplaceableVerdict,
@@ -58,7 +59,7 @@ export function jobUnplaceableItems(input: DryRunInput, now: Date, t: AttentionT
   const candidates = input.runners.map(toCandidate).filter((r): r is PlacementRunner => r !== null);
   const blocked = new Set<string>();
   const items = input.queued.flatMap((job): ScopedItem[] => {
-    if (job.projectDeleted || secondsSince(now, job.queuedAt) <= t.jobQueuedWarnSec) return [];
+    if (job.projectDeleted || isThreadKind(job.command) || secondsSince(now, job.queuedAt) <= t.jobQueuedWarnSec) return [];
     const emit = (verdict: UnplaceableVerdict, severity: Severity, reasons: AttentionReason[], reasonsTotal: number): ScopedItem[] => [{
       projectId: job.projectId,
       item: jobItem('job_unplaceable', job, severity, job.queuedAt, { verdict, reasons: reasons.slice(0, DASHBOARD_LIMITS.reasonsShown), reasonsTotal }),

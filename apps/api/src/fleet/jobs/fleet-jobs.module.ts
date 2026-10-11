@@ -17,6 +17,7 @@ import { PrismaFleetJobRepository } from './prisma-fleet-job.repository';
 import { FLEET_JOB_REPOSITORY } from './domain/fleet-job.domain';
 import { PlacementService } from './placement.service';
 import { RunnerNotifier } from './runner-notifier';
+import { ThreadJobEffects } from '../threads/thread-job-effects';
 
 /** Fleet jobs (spec §4-§6). Tasks 11-12 add dispatch and the controller. */
 @Module({
@@ -31,7 +32,8 @@ import { RunnerNotifier } from './runner-notifier';
     RunnerNotifier,
     PlacementService,
     FleetJobsService,
+    ThreadJobEffects,
   ],
-  exports: [FLEET_JOB_REPOSITORY, FleetJobLivePublisher, FleetJobOutcomeRecorder, JobTransitionsService, RunnerNotifier, PlacementService, FleetJobsService],
+  exports: [FLEET_JOB_REPOSITORY, FleetJobLivePublisher, FleetJobOutcomeRecorder, JobTransitionsService, RunnerNotifier, PlacementService, FleetJobsService, ThreadJobEffects],
 })
 export class FleetJobsModule {}

@@ -1,0 +1,21 @@
+{
+  "generatedAt": "2026-10-10T09:28:05.847Z",
+  "acFingerprint": "sha256:a12165b1fee947ff7343611f23205dc68fa1883f2d578ee505a7268d4f1808fb",
+  "layoutFingerprint": "sha256:8c7723c87affb0796c867e51ba2b8fc309959e2c8ccd2a3c534d56cf1a37ce9d",
+  "storyCount": 7,
+  "acCount": 102,
+  "generator": "nax",
+  "coverage": [
+    {
+      "testPath": "apps/api/.nax/features/fleet-s5a-thread-core/.nax-acceptance.test.ts",
+      "expected": 102,
+      "found": 98,
+      "missing": [
+        "AC-10",
+        "AC-11",
+        "AC-12",
+        "AC-13"
+      ]
+    }
+  ]
+}

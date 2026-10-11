@@ -1,4 +1,5 @@
 import type { InteractionCheck, NaxProtocol, ProfileNeeds, RunnerCapabilities, RunnerCredential } from './protocol';
+import { MODEL_ID_RE, THREAD_LIMITS, type ThreadAgent, type ThreadBackends } from './thread-jobs';
 
 export const MAX_CAPABILITIES_BYTES = 65_536;
 /** #161: bounded names (same rule as dispatch profiles, Task 11) and bounded collections. */
@@ -60,6 +61,24 @@ function parseProfile(name: string, v: unknown): ProfileNeeds {
   };
 }
 
+const THREAD_AGENTS: readonly ThreadAgent[] = ['claude', 'codex'];
+
+/** Fleet S5a §3: strict like approvals and configJobs. Exactly the keys native and acp; both arrays unique and bounded. */
+function parseThreadBackends(v: unknown): ThreadBackends {
+  if (!isObj(v) || Object.keys(v).length !== 2 || !Array.isArray(v.native) || !Array.isArray(v.acp)) fail('threadBackends');
+  const native = v.native as unknown[];
+  const acp = v.acp as unknown[];
+  if (
+    native.length > THREAD_LIMITS.maxNativeModels || new Set(native).size !== native.length ||
+    !native.every((id) => typeof id === 'string' && MODEL_ID_RE.test(id))
+  ) fail('threadBackends');
+  if (
+    acp.length > THREAD_LIMITS.maxAcpAgents || new Set(acp).size !== acp.length ||
+    !acp.every((agent) => THREAD_AGENTS.includes(agent as ThreadAgent))
+  ) fail('threadBackends');
+  return { native: [...(native as string[])], acp: [...(acp as ThreadAgent[])] };
+}
+
 const CREDENTIAL_KEYS = new Set(['providerId', 'available', 'stored', 'exec', 'ambient']);
 const STORED_KEYS = new Set(['kind', 'expires', 'expired']);
 const STORED_KINDS: readonly string[] = ['api-key', 'oauth'];
@@ -99,7 +118,7 @@ function parseCredential(c: unknown, i: number): RunnerCredential {
 export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
   if (!isObj(raw)) fail('not an object');
   if (Buffer.byteLength(JSON.stringify(raw), 'utf8') > MAX_CAPABILITIES_BYTES) fail('too large');
-  const { nax, sandbox, profiles, credentials, tools, executors, approvals, interaction, configJobs } = raw;
+  const { nax, sandbox, profiles, credentials, tools, executors, approvals, interaction, configJobs, threadBackends } = raw;
 
   if (
     !isObj(nax) || !isStr(nax.version) || !Array.isArray(nax.protocols) || nax.protocols.length === 0 ||
@@ -133,5 +152,6 @@ export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
     ...(approvals !== undefined ? { approvals: { relay: true as const } } : {}),
     ...(interaction !== undefined ? { interaction: parseInteraction(interaction, 'interaction') } : {}),
     ...(configJobs === true ? { configJobs: true as const } : {}),
+    ...(threadBackends !== undefined ? { threadBackends: parseThreadBackends(threadBackends) } : {}),
   };
 }

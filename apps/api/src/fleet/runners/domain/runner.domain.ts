@@ -21,6 +21,8 @@ export interface RunnerRecord {
   arch: string;
   labels: string[];
   capacity: number;
+  /** S5a: most thread sessions this runner hosts; server-only, the runner never reads it. */
+  threadCapacity: number;
   capabilities: unknown;
   daemonVersion: string;
   protocolVersion: number;
@@ -52,6 +54,7 @@ export interface RunnerPatch {
   enabled?: boolean;
   labels?: string[];
   capacity?: number;
+  threadCapacity?: number;
 }
 
 export interface IRunnerRepository {

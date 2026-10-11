@@ -9039,6 +9039,739 @@
         ]
       }
     },
+    "/api/projects/{slug}/threads": {
+      "post": {
+        "operationId": "ThreadsController_create",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateThreadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a chat thread (project DEVELOPER+)",
+        "tags": [
+          "fleet threads"
+        ]
+      },
+      "get": {
+        "operationId": "ThreadsController_list",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadListDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List project chat threads",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/projects/{slug}/threads/{id}": {
+      "get": {
+        "operationId": "ThreadsController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a chat thread",
+        "tags": [
+          "fleet threads"
+        ]
+      },
+      "patch": {
+        "operationId": "ThreadsController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateThreadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update a chat thread cost cap",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/projects/{slug}/threads/{id}/stop": {
+      "post": {
+        "operationId": "ThreadsController_stop",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Stop the live turn of a chat thread (creator)",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/projects/{slug}/threads/{id}/end-session": {
+      "post": {
+        "operationId": "ThreadsController_endSession",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Close the live session of a chat thread (creator)",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/projects/{slug}/threads/{id}/answer": {
+      "post": {
+        "operationId": "ThreadsController_answer",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerQuestionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Answer a pending question of a chat thread (creator)",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/projects/{slug}/threads/{id}/archive": {
+      "post": {
+        "operationId": "ThreadsController_archive",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Archive a chat thread (creator or project admin)",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/projects/{slug}/threads/{id}/messages": {
+      "post": {
+        "operationId": "ThreadsController_sendMessage",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendMessageResultDto"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendMessageResultDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Send a message to a chat thread",
+        "tags": [
+          "fleet threads"
+        ]
+      },
+      "get": {
+        "operationId": "ThreadsController_messages",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatMessageListDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List chat thread messages",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/admin/skills/sources": {
+      "get": {
+        "operationId": "AdminSkillsController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillSourceListDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Global admin required"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List registered skill sources (global admin)",
+        "tags": [
+          "skills"
+        ]
+      },
+      "post": {
+        "operationId": "AdminSkillsController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSkillSourceDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillSourceDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid source URL or request"
+          },
+          "403": {
+            "description": "Global admin required"
+          },
+          "409": {
+            "description": "Source or skill name already registered"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Register and resolve a public GitHub skill source (global admin)",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/api/admin/skills/sources/{id}/update": {
+      "post": {
+        "operationId": "AdminSkillsController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillSourceDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Global admin required"
+          },
+          "404": {
+            "description": "Skill source not found"
+          },
+          "409": {
+            "description": "Skill name already registered by another source"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Re-resolve a registered skill source (global admin)",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/api/admin/skills/sources/{id}": {
+      "delete": {
+        "operationId": "AdminSkillsController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Skill source deleted"
+          },
+          "403": {
+            "description": "Global admin required"
+          },
+          "404": {
+            "description": "Skill source not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a registered skill source (global admin)",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/api/projects/{slug}/skills": {
+      "get": {
+        "operationId": "ProjectSkillsController_list",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "description": "Project slug",
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectSkillListDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Project membership required"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List catalog skills and their project enablement",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/api/projects/{slug}/skills/{skillId}": {
+      "put": {
+        "operationId": "ProjectSkillsController_enable",
+        "parameters": [
+          {
+            "name": "skillId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "description": "Project slug",
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectSkillDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Project admin required"
+          },
+          "404": {
+            "description": "Project or skill not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Enable a catalog skill for this project",
+        "tags": [
+          "skills"
+        ]
+      },
+      "delete": {
+        "operationId": "ProjectSkillsController_disable",
+        "parameters": [
+          {
+            "name": "skillId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "description": "Project slug",
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Skill disabled"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Project admin required"
+          },
+          "404": {
+            "description": "Project or skill not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Disable a catalog skill for this project",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
     "/api/home": {
       "get": {
         "operationId": "HomeController_get",
@@ -9360,299 +10093,6 @@
         "summary": "Accept an invite, creating the account and issuing a session (anonymous)",
         "tags": [
           "invites"
-        ]
-      }
-    },
-    "/api/admin/skills/sources": {
-      "get": {
-        "operationId": "AdminSkillsController_list",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SkillSourceListDto"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Global admin required"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "List registered skill sources (global admin)",
-        "tags": [
-          "skills"
-        ]
-      },
-      "post": {
-        "operationId": "AdminSkillsController_create",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateSkillSourceDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SkillSourceDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid source URL or request"
-          },
-          "403": {
-            "description": "Global admin required"
-          },
-          "409": {
-            "description": "Source or skill name already registered"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Register and resolve a public GitHub skill source (global admin)",
-        "tags": [
-          "skills"
-        ]
-      }
-    },
-    "/api/admin/skills/sources/{id}/update": {
-      "post": {
-        "operationId": "AdminSkillsController_update",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SkillSourceDto"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Global admin required"
-          },
-          "404": {
-            "description": "Skill source not found"
-          },
-          "409": {
-            "description": "Skill name already registered by another source"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Re-resolve a registered skill source (global admin)",
-        "tags": [
-          "skills"
-        ]
-      }
-    },
-    "/api/admin/skills/sources/{id}": {
-      "delete": {
-        "operationId": "AdminSkillsController_remove",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Skill source deleted"
-          },
-          "403": {
-            "description": "Global admin required"
-          },
-          "404": {
-            "description": "Skill source not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Delete a registered skill source (global admin)",
-        "tags": [
-          "skills"
-        ]
-      }
-    },
-    "/api/projects/{slug}/skills": {
-      "get": {
-        "operationId": "ProjectSkillsController_list",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "description": "Project slug",
-            "schema": {}
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectSkillListDto"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Project membership required"
-          },
-          "404": {
-            "description": "Project not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "List catalog skills and their project enablement",
-        "tags": [
-          "skills"
-        ]
-      }
-    },
-    "/api/projects/{slug}/skills/{skillId}": {
-      "put": {
-        "operationId": "ProjectSkillsController_enable",
-        "parameters": [
-          {
-            "name": "skillId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "description": "Project slug",
-            "schema": {}
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectSkillDto"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Project admin required"
-          },
-          "404": {
-            "description": "Project or skill not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Enable a catalog skill for this project",
-        "tags": [
-          "skills"
-        ]
-      },
-      "delete": {
-        "operationId": "ProjectSkillsController_disable",
-        "parameters": [
-          {
-            "name": "skillId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "description": "Project slug",
-            "schema": {}
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Skill disabled"
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Project admin required"
-          },
-          "404": {
-            "description": "Project or skill not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Disable a catalog skill for this project",
-        "tags": [
-          "skills"
         ]
       }
     }
@@ -12540,7 +12980,8 @@
               "RUN",
               "PLAN",
               "CONFIG_EDIT",
-              "CONFIG_DRIFT"
+              "CONFIG_DRIFT",
+              "THREAD"
             ],
             "type": "string"
           },
@@ -12794,7 +13235,10 @@
               "approvals_relay",
               "busy_repo",
               "capacity",
-              "config_jobs"
+              "config_jobs",
+              "thread_capacity",
+              "thread_backend",
+              "threads_disabled"
             ],
             "type": "string"
           }
@@ -13879,6 +14323,10 @@
           "capacity": {
             "type": "number"
           },
+          "threadCapacity": {
+            "type": "number",
+            "description": "Most thread sessions this runner hosts (S5a); set by admins"
+          },
           "capabilities": {
             "type": "object",
             "additionalProperties": true
@@ -13919,6 +14367,7 @@
           "arch",
           "labels",
           "capacity",
+          "threadCapacity",
           "capabilities",
           "daemonVersion",
           "protocolVersion",
@@ -13946,6 +14395,11 @@
           "capacity": {
             "type": "number",
             "minimum": 1,
+            "maximum": 16
+          },
+          "threadCapacity": {
+            "type": "number",
+            "minimum": 0,
             "maximum": 16
           }
         }
@@ -14955,7 +15409,10 @@
               "tools",
               "approvals_relay",
               "busy_repo",
-              "capacity"
+              "capacity",
+              "thread_capacity",
+              "thread_backend",
+              "threads_disabled"
             ],
             "type": "string"
           }
@@ -15598,7 +16055,10 @@
               "tools",
               "approvals_relay",
               "busy_repo",
-              "capacity"
+              "capacity",
+              "thread_capacity",
+              "thread_backend",
+              "threads_disabled"
             ],
             "type": "string"
           }
@@ -15710,6 +16170,488 @@
           "runners",
           "providers",
           "profiles"
+        ]
+      },
+      "CreateThreadDto": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string"
+          },
+          "feature": {
+            "type": "string"
+          },
+          "baseRef": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "maxCostUsd": {
+            "type": "number"
+          },
+          "backend": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "repoId",
+          "feature",
+          "title",
+          "backend"
+        ]
+      },
+      "ThreadDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "repoId": {
+            "type": "string"
+          },
+          "baseRef": {
+            "type": "string"
+          },
+          "feature": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "createdById": {
+            "type": "string"
+          },
+          "runnerId": {
+            "type": "string",
+            "nullable": true
+          },
+          "backend": {
+            "type": "object"
+          },
+          "status": {
+            "type": "string"
+          },
+          "archivedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "maxCostUsd": {
+            "type": "string"
+          },
+          "costUsd": {
+            "type": "string"
+          },
+          "tokens": {
+            "type": "object",
+            "nullable": true
+          },
+          "specPath": {
+            "type": "string"
+          },
+          "pendingQuestion": {
+            "type": "object",
+            "nullable": true
+          },
+          "lastActivityAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "activeJob": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "required": [
+          "id",
+          "repoId",
+          "baseRef",
+          "feature",
+          "title",
+          "createdById",
+          "runnerId",
+          "backend",
+          "status",
+          "archivedAt",
+          "skills",
+          "maxCostUsd",
+          "costUsd",
+          "tokens",
+          "specPath",
+          "pendingQuestion",
+          "lastActivityAt",
+          "createdAt",
+          "activeJob"
+        ]
+      },
+      "ThreadListDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ThreadDto"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "UpdateThreadDto": {
+        "type": "object",
+        "properties": {
+          "maxCostUsd": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "maxCostUsd"
+        ]
+      },
+      "AnswerQuestionDto": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32768
+          }
+        },
+        "required": [
+          "requestId",
+          "text"
+        ]
+      },
+      "SendMessageDto": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32768
+          },
+          "clientMessageId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          }
+        },
+        "required": [
+          "text",
+          "clientMessageId"
+        ]
+      },
+      "ChatMessageDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "seq": {
+            "type": "number"
+          },
+          "jobId": {
+            "type": "string",
+            "nullable": true
+          },
+          "turnId": {
+            "type": "string",
+            "nullable": true
+          },
+          "role": {
+            "type": "string"
+          },
+          "authorUserId": {
+            "type": "string",
+            "nullable": true
+          },
+          "clientMessageId": {
+            "type": "string",
+            "nullable": true
+          },
+          "content": {
+            "type": "string"
+          },
+          "toolSummary": {
+            "type": "object",
+            "nullable": true
+          },
+          "status": {
+            "type": "string"
+          },
+          "errorReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "usage": {
+            "type": "object",
+            "nullable": true
+          },
+          "costUsd": {
+            "type": "string",
+            "nullable": true
+          },
+          "costSource": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "seq",
+          "jobId",
+          "turnId",
+          "role",
+          "authorUserId",
+          "clientMessageId",
+          "content",
+          "toolSummary",
+          "status",
+          "errorReason",
+          "usage",
+          "costUsd",
+          "costSource",
+          "createdAt"
+        ]
+      },
+      "SendMessageResultDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "$ref": "#/components/schemas/ChatMessageDto"
+          },
+          "jobId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "message",
+          "jobId"
+        ]
+      },
+      "ChatMessageListDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatMessageDto"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SkillDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "dir": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "dir"
+        ]
+      },
+      "SkillSourceDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "gitUrl": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "resolvedSha": {
+            "type": "string",
+            "nullable": true
+          },
+          "resolvedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "OK",
+              "RESOLVE_FAILED"
+            ]
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkillDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "gitUrl",
+          "ref",
+          "path",
+          "resolvedSha",
+          "resolvedAt",
+          "status",
+          "statusReason",
+          "createdAt",
+          "skills"
+        ]
+      },
+      "SkillSourceListDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkillSourceDto"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "CreateSkillSourceDto": {
+        "type": "object",
+        "properties": {
+          "gitUrl": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[^\\s]+$"
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 200,
+            "pattern": "^(?:[A-Za-z0-9_.-]+(?:\\/[A-Za-z0-9_.-]+)*)?$",
+            "description": "Empty string or slash-separated safe directory path"
+          }
+        },
+        "required": [
+          "gitUrl",
+          "ref",
+          "path"
+        ]
+      },
+      "ProjectSkillDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "gitUrl": {
+                "type": "string"
+              },
+              "ref": {
+                "type": "string"
+              },
+              "resolvedSha": {
+                "type": "string",
+                "nullable": true
+              },
+              "status": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "enabled",
+          "source"
+        ]
+      },
+      "ProjectSkillListDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProjectSkillDto"
+            }
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "HomeActivityDto": {
@@ -16234,187 +17176,6 @@
         },
         "required": [
           "password"
-        ]
-      },
-      "SkillDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "dir": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "description",
-          "dir"
-        ]
-      },
-      "SkillSourceDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "gitUrl": {
-            "type": "string"
-          },
-          "ref": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string"
-          },
-          "resolvedSha": {
-            "type": "string",
-            "nullable": true
-          },
-          "resolvedAt": {
-            "format": "date-time",
-            "type": "string",
-            "nullable": true
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "OK",
-              "RESOLVE_FAILED"
-            ]
-          },
-          "statusReason": {
-            "type": "string",
-            "nullable": true
-          },
-          "createdAt": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "skills": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SkillDto"
-            }
-          }
-        },
-        "required": [
-          "id",
-          "gitUrl",
-          "ref",
-          "path",
-          "resolvedSha",
-          "resolvedAt",
-          "status",
-          "statusReason",
-          "createdAt",
-          "skills"
-        ]
-      },
-      "SkillSourceListDto": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SkillSourceDto"
-            }
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
-      "CreateSkillSourceDto": {
-        "type": "object",
-        "properties": {
-          "gitUrl": {
-            "type": "string",
-            "maxLength": 500
-          },
-          "ref": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200,
-            "pattern": "^[^\\s]+$"
-          },
-          "path": {
-            "type": "string",
-            "maxLength": 200,
-            "pattern": "^(?:[A-Za-z0-9_.-]+(?:\\/[A-Za-z0-9_.-]+)*)?$",
-            "description": "Empty string or slash-separated safe directory path"
-          }
-        },
-        "required": [
-          "gitUrl",
-          "ref",
-          "path"
-        ]
-      },
-      "ProjectSkillDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "enabled": {
-            "type": "boolean"
-          },
-          "source": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "gitUrl": {
-                "type": "string"
-              },
-              "ref": {
-                "type": "string"
-              },
-              "resolvedSha": {
-                "type": "string",
-                "nullable": true
-              },
-              "status": {
-                "type": "string"
-              }
-            }
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "description",
-          "enabled",
-          "source"
-        ]
-      },
-      "ProjectSkillListDto": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ProjectSkillDto"
-            }
-          }
-        },
-        "required": [
-          "items"
         ]
       }
     }

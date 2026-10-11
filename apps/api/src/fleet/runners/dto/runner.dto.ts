@@ -15,6 +15,7 @@ export class RunnerDto {
   @ApiProperty({ enum: ['arm64', 'x64'] }) declare arch: string;
   @ApiProperty({ type: [String] }) declare labels: string[];
   @ApiProperty() declare capacity: number;
+  @ApiProperty({ description: 'Most thread sessions this runner hosts (S5a); set by admins' }) declare threadCapacity: number;
   @ApiProperty({ type: Object }) declare capabilities: Record<string, unknown>;
   @ApiProperty() declare daemonVersion: string;
   @ApiProperty() declare protocolVersion: number;
@@ -28,7 +29,7 @@ export class RunnerDto {
 
   static from(r: RunnerRecord, view: RunnerView): RunnerDto {
     return Object.assign(new RunnerDto(), {
-      id: r.id, name: r.name, os: r.os, arch: r.arch, labels: r.labels, capacity: r.capacity,
+      id: r.id, name: r.name, os: r.os, arch: r.arch, labels: r.labels, capacity: r.capacity, threadCapacity: r.threadCapacity,
       capabilities: (r.capabilities ?? {}) as Record<string, unknown>, daemonVersion: r.daemonVersion,
       protocolVersion: r.protocolVersion, bootId: r.bootId, bootedAt: r.bootedAt ? r.bootedAt.toISOString() : null,
       online: isRunnerOnline(r.lastSeenAt, view.now, view.offlineSec), enabled: r.enabled,

@@ -15,6 +15,10 @@ const only = (over: Partial<DryRunInput> = {}) => {
 };
 
 describe('job_unplaceable (S2b (c) §2.3)', () => {
+  it('US-006: does not emit unplaceable attention for an old queued THREAD job', () => {
+    expect(run({ queued: [{ ...QUEUED, command: 'THREAD' }] }).items).toEqual([]);
+  });
+
   it('ignores a job younger than FLEET_JOB_QUEUED_WARN_SEC and a job of a soft-deleted project', () => {
     expect(run({ queued: [{ ...QUEUED, queuedAt: secAgo(59) }] }).items).toEqual([]);
     expect(run({ queued: [{ ...QUEUED, projectDeleted: true }], runners: [] }).items).toEqual([]);

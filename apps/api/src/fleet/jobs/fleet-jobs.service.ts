@@ -17,6 +17,7 @@ import type { FleetJobConfigEditDto } from '../repo-config/dto/config-edit.dto';
 import { FleetDispatchException } from './fleet-dispatch.exception';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import type { LiveFleetJobEvent } from '../../live/live-event';
+import { isThreadKind } from '../common/thread-jobs';
 import { canTransition, isTerminal } from './job-state';
 import { JobTransitionsService, SYSTEM_ACTOR } from './job-transitions.service';
 import { RunnerNotifier } from './runner-notifier';
@@ -242,6 +243,8 @@ export class FleetJobsService {
         feature = current.feature;
         repoId = current.repoId;
         if (!canTransition(current.state, FleetJobState.QUEUED, 'server')) throw new ConflictAppException({ state: current.state }, 'fleet.jobState');
+        // S5a: a THREAD job is never requeued; a new session goes through the send route, which applies the cost cap and runner checks.
+        if (isThreadKind(current.command)) throw new ConflictAppException({ state: current.state }, 'fleet.jobState');
         // S3 D495: a budget pause never holds a config job, so only nax jobs are gate-checked here.
         if (!isConfigKind(current.command)) await this.budgets.assertNotPaused(jobGateKeys(current), now);
         // Plan D4: a requeue is a fresh lease (the transition carries `bumpEpoch: true`).

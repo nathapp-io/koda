@@ -4,7 +4,7 @@ import { testFleetConfig } from '../../common/test-helpers/fleet-config';
 import { RunnersService } from './runners.service';
 
 const row = (over = {}) => ({
-  id: 'r1', name: 'box', os: 'linux', arch: 'x64', labels: ['linux'], capacity: 1, capabilities: {},
+  id: 'r1', name: 'box', os: 'linux', arch: 'x64', labels: ['linux'], capacity: 1, threadCapacity: 2, capabilities: {},
   daemonVersion: '0.1.0', protocolVersion: 1, bootId: 'b', bootedAt: null, enabled: true, lastSeenAt: new Date(0),
   createdById: 'u1', createdAt: new Date(0), updatedAt: new Date(0), ...over,
 });
@@ -47,6 +47,14 @@ describe('RunnersService', () => {
     expect(repo.updateRunner).toHaveBeenCalledWith('r1', { enabled: false, labels: ['a', 'b'], capacity: 2 });
     expect(dto.enabled).toBe(false);
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ actorId: 'u9', action: 'runner.updated', entityId: 'r1', payload: { enabled: false, labels: ['a', 'b'], capacity: 2 } }));
+  });
+
+  it('carries threadCapacity through update to the repository and the response (US-002 AC5)', async () => {
+    repo.findRunnerById.mockResolvedValue(row());
+    repo.updateRunner.mockResolvedValue(row({ threadCapacity: 3 }));
+    const dto = await service.update('u9', 'r1', { threadCapacity: 3 });
+    expect(repo.updateRunner).toHaveBeenCalledWith('r1', { threadCapacity: 3 });
+    expect(dto.threadCapacity).toBe(3);
   });
 
   it('deletes and records', async () => {

@@ -123,6 +123,27 @@ export class PrismaSkillCatalogRepository extends AbstractPrismaRepository<Skill
     return sources.map((source) => ({ ...this.toDomain(source), skills: source.skills }));
   }
 
+  async listEnabledSnapshot(projectId: string): Promise<import('./skill-catalog.domain').ThreadSkillSource[]> {
+    const enabled = await this.prisma.client.projectSkill.findMany({
+      where: { projectId, skill: { source: { resolvedSha: { not: null } } } },
+      take: 10000,
+      orderBy: [{ skill: { source: { owner: 'asc' } } }, { skill: { source: { repo: 'asc' } } }, { skill: { sourceId: 'asc' } }, { skill: { name: 'asc' } }],
+      include: { skill: { include: { source: true } } },
+    });
+    const grouped = new Map<string, import('./skill-catalog.domain').ThreadSkillSource>();
+    for (const { skill } of enabled) {
+      const source = skill.source;
+      if (!source.resolvedSha) continue;
+      let entry = grouped.get(source.id);
+      if (!entry) {
+        entry = { sourceId: source.id, owner: source.owner, repo: source.repo, sha: source.resolvedSha, skills: [] };
+        grouped.set(source.id, entry);
+      }
+      entry.skills.push({ name: skill.name, dir: skill.dir, description: skill.description });
+    }
+    return [...grouped.values()];
+  }
+
   async listProjectSkills(projectId: string): Promise<ProjectSkillDomain[]> {
     const skills = await this.prisma.client.skill.findMany({
       take: 10000,
