@@ -38,6 +38,10 @@ export interface Tuning {
   readonly configJobTimeoutMs: number;
   /** S3 §3, D483: the RUNNING config job's heartbeat snapshot interval. */
   readonly configHeartbeatMs: number;
+  readonly threadIdleMs: number;
+  readonly threadWakeGapMs: number;
+  readonly threadSearchTimeoutMs: number;
+  readonly threadSkillFetchTimeoutMs: number;
 }
 
 /** D42: the design's constants in one place; only `startDaemon` options (tests) override them, runner.json cannot. */
@@ -66,4 +70,8 @@ export const TUNING: Tuning = Object.freeze({
   logDrainTimeoutMs: 120_000,
   configJobTimeoutMs: 600_000,
   configHeartbeatMs: 30_000,
+  threadIdleMs: 900_000,
+  threadWakeGapMs: 250,
+  threadSearchTimeoutMs: 10_000,
+  threadSkillFetchTimeoutMs: 120_000,
 });

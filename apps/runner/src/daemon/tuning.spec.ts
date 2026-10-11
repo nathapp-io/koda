@@ -11,6 +11,7 @@ describe('TUNING (D42, slice 3 design)', () => {
       capabilityProbeMs: 600_000, naxCallTimeoutMs: 30_000, jobCheckTimeoutMs: 10_000,
       logChunkBytes: 1_048_576, logMaxInFlight: 2, logPutTimeoutMs: 30_000, logBackoffMaxMs: 30_000, logDrainTimeoutMs: 120_000,
       configJobTimeoutMs: 600_000, configHeartbeatMs: 30_000,
+      threadIdleMs: 900_000, threadWakeGapMs: 250, threadSearchTimeoutMs: 10_000, threadSkillFetchTimeoutMs: 120_000,
     });
     expect(Object.isFrozen(TUNING)).toBe(true);
   });

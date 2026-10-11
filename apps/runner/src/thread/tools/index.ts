@@ -1,0 +1,11 @@
+import type { EmbedderTool } from '@nathapp/nax-agent';
+import { listFilesTool } from './list-files';
+import { loadSkillTool } from './load-skill';
+import { readSkillFileTool } from './read-skill-file';
+import { searchRepoTool } from './search-repo';
+import type { ThreadToolContext } from './types';
+
+/** The thread agent's read-only tools, in the order the agent sees them, as nax-agent embedder tools. */
+export function buildThreadTools(ctx: ThreadToolContext): EmbedderTool[] {
+  return [listFilesTool(ctx), searchRepoTool(ctx), loadSkillTool(ctx), readSkillFileTool(ctx)];
+}
