@@ -83,14 +83,21 @@ export class LogShipper implements LogShipping {
   register(spec: LogJob): void {
     const key = jobKey(spec.jobId, spec.leaseEpoch);
     if (this.closed || this.jobs.has(key)) return;
+    const isThreadJob = 'threadPath' in spec;
     const job: JobEntry = {
-      key, spec, streams: [], draining: false, runSearch: spec.sources.runLog, runResolved: !spec.sources.runLog, waiters: [], drainTimer: null,
+      key, spec, streams: [], draining: false,
+      runSearch: !isThreadJob && spec.sources.runLog,
+      runResolved: isThreadJob || !spec.sources.runLog,
+      waiters: [], drainTimer: null,
     };
     this.jobs.set(key, job);
-    this.addStream(job, 'stdout', spec.sources.stdoutPath);
-    this.addStream(job, 'stderr', spec.sources.stderrPath);
-    this.startWorkers();
+    if (isThreadJob) this.addStream(job, 'thread', spec.threadPath);
+    else {
+      this.addStream(job, 'stdout', spec.sources.stdoutPath);
+      this.addStream(job, 'stderr', spec.sources.stderrPath);
+    }
     this.kick();
+    this.startWorkers();
   }
 
   wake(jobId: string, leaseEpoch: number): void {
@@ -138,7 +145,7 @@ export class LogShipper implements LogShipping {
   }
 
   private lacksRun(job: JobEntry): boolean {
-    return job.spec.sources.runLog && !job.streams.some((s) => s.stream === 'run');
+    return !('threadPath' in job.spec) && job.spec.sources.runLog && !job.streams.some((s) => s.stream === 'run');
   }
 
   private addStream(job: JobEntry, stream: LogStreamName, path: string): void {
@@ -168,7 +175,7 @@ export class LogShipper implements LogShipping {
         const now = this.deps.nowMs();   // one clock read for pick and idleMs, so a due retry is never slept past
         const next = this.pick(now);
         if (next) await this.ship(next);
-        else if (this.closed || [...this.jobs.values()].some((job) => job.runSearch)) continue;
+        else if (signal.aborted || this.closed || [...this.jobs.values()].some((job) => job.runSearch)) continue;
         else await this.deps.sleep(this.idleMs(now), signal);
       } catch (error) {
         this.deps.log.warn('log shipper error', { error: errorMessage(error) });
@@ -184,6 +191,7 @@ export class LogShipper implements LogShipping {
       job.runSearch = false;
       const searchedWhileDraining = job.draining;
       let path: string | null;
+      if ('threadPath' in job.spec) continue;
       try {
         path = await findRunLog(job.spec.sources.outDir, job.spec.sources.feature);
       } catch (error) {

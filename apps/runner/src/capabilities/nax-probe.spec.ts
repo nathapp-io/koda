@@ -85,6 +85,7 @@ describe('NaxCapabilityProbe (design §3.2, D98-D101)', () => {
         { providerId: 'openrouter', available: true, stored: { kind: 'api-key', expired: false }, ambient: false },
         { providerId: 'anthropic', available: true, stored: { kind: 'api-key', expired: false }, ambient: false },
       ],
+      threadBackends: { native: [], acp: [] },
       tools: { git: true, gh: true, glab: false },
       executors: ['host'],
       configJobs: true,
