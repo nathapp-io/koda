@@ -7,7 +7,7 @@ const factoryModule = await import('../../src/thread/session-factory').catch(() 
 
 const session: AgentSession = {
   id: 'thread-1',
-  backend: { kind: 'native', model: 'm/x' },
+  backend: { kind: 'native', capabilities: {} },
   lastTurn: undefined,
   async *send() {},
   answer: () => 'unknown',
@@ -74,7 +74,8 @@ function setup(overrides: {
   });
   return { calls, open: (jobId = 'job-1', value = thread()) => {
     expect(factoryModule).toBeDefined();
-    return factory!.open({ jobId, thread: value, worktree: '/work/tree', tools: [], approvalTimeoutSec: 60 });
+    if (factory === undefined) throw new Error('ThreadSessionFactory is unavailable');
+    return factory.open({ jobId, thread: value, worktree: '/work/tree', tools: [], approvalTimeoutSec: 60 });
   } };
 }
 
