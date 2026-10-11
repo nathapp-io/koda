@@ -3166,7 +3166,7 @@ describeIntegration('API Integration Tests', () => {
     it('US-003 AC3: requests the project skill snapshot once for thread creation', async () => {
       const skills = app.get(SkillsService);
       expect(typeof skills.snapshotForProject).toBe('function');
-      const snapshot = jest.spyOn(skills, 'snapshotForProject');
+      const snapshot = vi.spyOn(skills, 'snapshotForProject');
       try {
         await createThread('snapshot-call').expect(201);
         expect(snapshot).toHaveBeenCalledTimes(1);
@@ -3320,7 +3320,7 @@ describeIntegration('API Integration Tests', () => {
 
     it('US-004 AC6-10: first send creates a THREAD job and SESSION turn then places it', async () => {
       const thread = await newThread('send-session');
-      const placement = jest.spyOn(app.get(PlacementService), 'placeJob');
+      const placement = vi.spyOn(app.get(PlacementService), 'placeJob');
       try {
         const res = await sendMessage(thread.id).expect(201);
         const result = body<{ message: { id: string }; jobId: string }>(res);
@@ -3332,7 +3332,7 @@ describeIntegration('API Integration Tests', () => {
         const repo = await db().fleetRepo.findUniqueOrThrow({ where: { id: thread.repoId } });
         expect(turn.instructions).toBe(buildThreadInstructions({
           repo: `${repo.owner}/${repo.name}`, baseRef: thread.baseRef, feature: thread.feature,
-          specPath: thread.specPath, skills: thread.skills as ThreadSkillSource[],
+          specPath: thread.specPath, skills: thread.skills as unknown as ThreadSkillSource[],
         }));
         expect(placement).toHaveBeenCalledTimes(1);
         expect(placement).toHaveBeenCalledWith(result.jobId);
@@ -3380,7 +3380,7 @@ describeIntegration('API Integration Tests', () => {
         profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, threadId: thread.id,
         runnerId: runner.id, state: 'RUNNING', leaseEpoch: 7,
       } });
-      const notifier = jest.spyOn(app.get(RunnerNotifier), 'notify');
+      const notifier = vi.spyOn(app.get(RunnerNotifier), 'notify');
       try {
         const res = await sendMessage(thread.id).expect(201);
         const message = body<{ message: { id: string } }>(res).message;

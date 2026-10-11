@@ -10,7 +10,7 @@ const SHA = 'a'.repeat(40);
 const REPO: FleetRepoRef = { id: 'repo-1', projectId: 'p1', provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'trunk', githubInstallationId: BigInt(77) };
 
 const record = (over: Partial<FleetJobRecord> = {}): FleetJobRecord => ({
-  id: 'job-1', projectId: 'p1', repoId: 'repo-1', ref: 'trunk', command: 'CONFIG_EDIT', feature: CONFIG_JOB_FEATURE, planFrom: null, profiles: [],
+  id: 'job-1', projectId: 'p1', repoId: 'repo-1', ref: 'trunk', command: 'CONFIG_EDIT', feature: CONFIG_JOB_FEATURE, planFrom: null, threadId: null, profiles: [],
   maxCostUsd: '0', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null, runnerId: null, runnerBootId: null,
   leaseEpoch: 0, state: 'QUEUED', stateReason: null, requestedById: 'u1', queuedAt: NOW, assignedAt: null, startedAt: null, finishedAt: null,
   cancelRequestedAt: null, naxRunId: null, naxLogRunId: null, naxCostRunId: null, progress: null, currentStoryId: null, currentPhase: null,

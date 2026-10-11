@@ -6,7 +6,7 @@ const NOW = new Date('2026-10-01T00:00:00.000Z');
 
 const APPROVAL_LIVE: LiveFleetApprovalEvent = { id: 'lv-1', type: 'fleet_approval', projectId: 'p1', approvalId: 'a1', status: 'cancelled', at: NOW.toISOString() };
 const job = (over: Partial<FleetJobRecord> = {}): FleetJobRecord => ({
-  id: 'j1', projectId: 'p1', repoId: 'r1', ref: 'main', command: 'RUN', feature: 'f', planFrom: null, profiles: [],
+  id: 'j1', projectId: 'p1', repoId: 'r1', ref: 'main', command: 'RUN', feature: 'f', planFrom: null, threadId: null, profiles: [],
   maxCostUsd: '5', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null, runnerId: 'run-1', runnerBootId: 'b1',
   leaseEpoch: 2, state: 'ASSIGNED', stateReason: null, requestedById: 'u1', queuedAt: NOW, assignedAt: NOW,
   startedAt: null, finishedAt: null, cancelRequestedAt: null, naxRunId: null, naxLogRunId: null, naxCostRunId: null,

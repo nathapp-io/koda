@@ -195,7 +195,7 @@ describe('THREAD placement (US-006)', () => {
     [{ kind: 'native', model: 'm2' }, { native: ['m1'], acp: [] }],
     [{ kind: 'acp', agent: 'claude' }, { native: [], acp: [] }],
   ] as const)('reports unsupported thread backend', (backend, threadBackends) => {
-    expect(misfit(threadJob({ thread: { backend, enabled: true } }), threadRunner({ capabilities: caps({ threadBackends }) }))).toBe('thread_backend');
+    expect(misfit(threadJob({ thread: { backend, enabled: true } }), threadRunner({ capabilities: caps({ threadBackends: { native: [...threadBackends.native], acp: [...threadBackends.acp] } }) }))).toBe('thread_backend');
   });
   it('requires protocol v4 and enabled thread placement', () => {
     expect(misfit(threadJob(), threadRunner({ protocolVersion: 3 }))).toBe('protocol');

@@ -19,14 +19,14 @@ describe('fleet jobs service requeue refuses a THREAD job (S5a)', () => {
   }) as FleetJobRecord;
 
   const build = (current: FleetJobRecord) => {
-    const repo = { lockById: jest.fn().mockResolvedValue(current), withdrawPendingCommands: jest.fn() };
-    const transitions = { apply: jest.fn() };
-    const budgets = { assertNotPaused: jest.fn() };
-    const placement = { placeJob: jest.fn() };
-    const txManager = { run: jest.fn((fn: () => Promise<unknown>) => fn()) };
+    const repo = { lockById: vi.fn().mockResolvedValue(current), withdrawPendingCommands: vi.fn() };
+    const transitions = { apply: vi.fn() };
+    const budgets = { assertNotPaused: vi.fn() };
+    const placement = { placeJob: vi.fn() };
+    const txManager = { run: vi.fn((fn: () => Promise<unknown>) => fn()) };
     const service = new FleetJobsService(
       repo as never, placement as never, {} as never, {} as never, transitions as never, {} as never,
-      budgets as never, txManager as never, { countPendingByJob: jest.fn() } as never, {} as never, {} as never, { findByJobId: jest.fn() } as never,
+      budgets as never, txManager as never, { countPendingByJob: vi.fn() } as never, {} as never, {} as never, { findByJobId: vi.fn() } as never,
     );
     return { service, repo, transitions, budgets, placement };
   };

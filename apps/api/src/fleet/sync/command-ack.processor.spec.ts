@@ -8,7 +8,7 @@ const APPROVAL_LIVE: LiveFleetApprovalEvent = { id: 'lv-1', type: 'fleet_approva
 const JOB_LIVE: LiveFleetJobEvent = { id: 'e1', type: 'fleet_job', projectId: 'p1', jobId: 'job-1', state: 'CRASHED', at: NOW.toISOString() };
 
 const runningJob: FleetJobRecord = {
-  id: 'job-1', projectId: 'p1', repoId: 'repo-1', ref: 'main', command: 'RUN', feature: 'demo', planFrom: null,
+  id: 'job-1', projectId: 'p1', repoId: 'repo-1', ref: 'main', command: 'RUN', feature: 'demo', planFrom: null, threadId: null,
   profiles: [], maxCostUsd: '10', bashMode: 'escalate', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null,
   runnerId: 'r1', runnerBootId: 'boot-1', leaseEpoch: 1, state: 'RUNNING', stateReason: null, requestedById: 'u1',
   queuedAt: NOW, assignedAt: NOW, startedAt: NOW, finishedAt: null, cancelRequestedAt: null, naxRunId: null,

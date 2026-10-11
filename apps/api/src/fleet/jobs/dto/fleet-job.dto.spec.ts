@@ -5,7 +5,7 @@ describe('fleet job DTOs', () => {
   const now = new Date('2026-10-01T00:00:00.000Z');
   it('serialise with decimals and dates as strings and hide internal columns', () => {
     const dto = FleetJobDto.from({
-      id: 'j', projectId: 'p', repoId: 'r', ref: 'main', command: 'RUN', feature: 'f', planFrom: null, profiles: [],
+      id: 'j', projectId: 'p', repoId: 'r', ref: 'main', command: 'RUN', feature: 'f', planFrom: null, threadId: null, profiles: [],
       maxCostUsd: '5.5', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null, runnerId: null, runnerBootId: 'boot',
       leaseEpoch: 1, state: 'QUEUED', stateReason: null, requestedById: 'u', queuedAt: now, assignedAt: null,
       startedAt: null, finishedAt: null, cancelRequestedAt: null, naxRunId: null, naxLogRunId: null, naxCostRunId: null,
