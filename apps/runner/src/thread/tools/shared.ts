@@ -1,4 +1,5 @@
-import { PathError } from '../../paths/safe-segment';
+import { sanitizeDiagnostic } from '../../diagnostics';
+import { errorMessage } from '../../errors';
 import type { ThreadToolResult } from './types';
 
 /** nax-agent's glob rule for list_files and search_repo; `..` is refused separately. */
@@ -28,13 +29,12 @@ export function refused(content: string): ThreadToolResult {
   return { content, isError: true };
 }
 
-/** Turns a refused input into an error result; any other failure is rethrown. */
+/** Turns any failure of a tool call into an error result, so the agent sees it rather than a rejected run(). */
 export async function refuseInvalidInput(run: () => Promise<ThreadToolResult>): Promise<ThreadToolResult> {
   try {
     return await run();
   } catch (error) {
-    if (error instanceof PathError || error instanceof InvalidToolInput) return refused(error.message);
-    throw error;
+    return refused(sanitizeDiagnostic(errorMessage(error)));
   }
 }
 

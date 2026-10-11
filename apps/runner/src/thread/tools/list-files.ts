@@ -20,7 +20,7 @@ async function list(ctx: ThreadToolContext, input: unknown): Promise<ThreadToolR
   const glob = rawGlob === undefined ? undefined : checkGlob(rawGlob);
   const pathspec = pathspecFor(dir, glob);
   const args = pathspec === undefined ? ['ls-files', '-z'] : ['ls-files', '-z', '--', pathspec];
-  const result = await ctx.git.run(args, { cwd: ctx.worktree });
+  const result = await ctx.git.run(args, { cwd: ctx.worktree, timeoutMs: ctx.searchTimeoutMs });
   if (result.code !== 0) return refused(firstLine(result.stderr) || `git ls-files exited ${result.code}`);
 
   const entries = result.stdout.split('\0').filter((entry) => entry.length > 0);
