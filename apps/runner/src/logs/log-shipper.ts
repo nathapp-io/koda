@@ -187,11 +187,10 @@ export class LogShipper implements LogShipping {
   /** The run log appears once nax starts its run (spec §2.4); a drain searches once more before it can finish. */
   private async discover(): Promise<void> {
     for (const job of [...this.jobs.values()]) {
-      if (!job.runSearch) continue;
+      if (!job.runSearch || !('sources' in job.spec)) continue;
       job.runSearch = false;
       const searchedWhileDraining = job.draining;
       let path: string | null;
-      if ('threadPath' in job.spec) continue;
       try {
         path = await findRunLog(job.spec.sources.outDir, job.spec.sources.feature);
       } catch (error) {

@@ -4,20 +4,33 @@ import { THREAD_LIMITS, THREAD_MODEL_ID_RE } from '@nathapp/fleet-protocol';
 
 export interface NativeModelSet { models: string[]; defaultModel: string | null }
 
-type NativeTier = { key: string; model: string; provider: string };
+interface NativeTier { key: string; model: string; provider: string }
 
-async function nativeTiers(naxHome: string): Promise<NativeTier[]> {
+export interface NativeModelConfig {
+  readonly tiers: readonly NativeTier[];
+  readonly providers: readonly string[];
+}
+
+export async function readNativeModelConfig(naxHome: string): Promise<NativeModelConfig> {
+  let text: string;
+  try {
+    text = await readFile(join(naxHome, 'config.json'), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { tiers: [], providers: [] };
+    throw error;
+  }
+
   let config: unknown;
   try {
-    config = JSON.parse(await readFile(join(naxHome, 'config.json'), 'utf8')) as unknown;
+    config = JSON.parse(text) as unknown;
   } catch {
-    return [];
+    return { tiers: [], providers: [] };
   }
-  if (typeof config !== 'object' || config === null || Array.isArray(config)) return [];
+  if (typeof config !== 'object' || config === null || Array.isArray(config)) return { tiers: [], providers: [] };
   const models = (config as Record<string, unknown>).models;
-  if (typeof models !== 'object' || models === null || Array.isArray(models)) return [];
+  if (typeof models !== 'object' || models === null || Array.isArray(models)) return { tiers: [], providers: [] };
   const native = (models as Record<string, unknown>).native;
-  if (typeof native !== 'object' || native === null || Array.isArray(native)) return [];
+  if (typeof native !== 'object' || native === null || Array.isArray(native)) return { tiers: [], providers: [] };
 
   const tiers: NativeTier[] = [];
   for (const [key, value] of Object.entries(native as Record<string, unknown>)) {
@@ -32,21 +45,24 @@ async function nativeTiers(naxHome: string): Promise<NativeTier[]> {
     if (separator <= 0 || !THREAD_MODEL_ID_RE.test(model)) continue;
     tiers.push({ key, model, provider: model.slice(0, separator) });
   }
-  return tiers;
+  return { tiers, providers: [...new Set(tiers.map((tier) => tier.provider))].sort() };
 }
 
-export async function readNativeModels(naxHome: string, available: ReadonlySet<string>): Promise<NativeModelSet> {
-  const tiers = await nativeTiers(naxHome);
+export function nativeModelsForProviders(config: NativeModelConfig, available: ReadonlySet<string>): NativeModelSet {
   const models: string[] = [];
-  for (const tier of tiers) {
+  for (const tier of config.tiers) {
     if (!available.has(tier.provider) || models.includes(tier.model)) continue;
     if (models.length >= THREAD_LIMITS.maxNativeModels) break;
     models.push(tier.model);
   }
-  const balanced = tiers.find((tier) => tier.key === 'balanced' && available.has(tier.provider) && models.includes(tier.model));
+  const balanced = config.tiers.find((tier) => tier.key === 'balanced' && available.has(tier.provider) && models.includes(tier.model));
   return { models, defaultModel: balanced?.model ?? models[0] ?? null };
 }
 
+export async function readNativeModels(naxHome: string, available: ReadonlySet<string>): Promise<NativeModelSet> {
+  return nativeModelsForProviders(await readNativeModelConfig(naxHome), available);
+}
+
 export async function nativeModelProviders(naxHome: string): Promise<string[]> {
-  return [...new Set((await nativeTiers(naxHome)).map((tier) => tier.provider))].sort();
+  return [...(await readNativeModelConfig(naxHome)).providers];
 }
