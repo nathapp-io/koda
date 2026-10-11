@@ -26,11 +26,11 @@ function makeGit(): Git {
   };
 }
 
-async function makeContext(skillNames: string[] = ['spec-writing', 'code-review']): Promise<{ ctx: ThreadToolContext; skillDir: string }> {
+async function makeContext(skillNames: string[] = ['spec-writing', 'code-review']): Promise<{ ctx: ThreadToolContext; skillDir: string; skillDirFor: (name: string) => string }> {
   const root = await mkdtemp(join(tmpdir(), 'koda-thread-skills-'));
   temporaryDirectories.push(root);
   const skillsRoot = join(root, 'skills');
-  const skillDir = join(skillsRoot, 'source-a', 'a'.repeat(40), 'skills', 'spec-writing');
+  const skillDirs: Record<string, string> = {};
   const skillSources: ThreadSkillSource[] = [{
     sourceId: 'source-a',
     owner: 'owner',
@@ -38,9 +38,21 @@ async function makeContext(skillNames: string[] = ['spec-writing', 'code-review'
     sha: 'a'.repeat(40),
     skills: skillNames.map((name) => ({ name, dir: `skills/${name}`, description: `${name} skill` })),
   }];
-  await mkdir(join(skillDir, 'references'), { recursive: true });
-  await writeFile(join(skillDir, 'SKILL.md'), '# Spec writing\nUse clear requirements.\n');
-  await writeFile(join(skillDir, 'references', 'guide.md'), '# Guide\nRead safely.\n');
+  const skillFixtures: Record<string, { skillMd: string; guide: string }> = {
+    'spec-writing': { skillMd: '# Spec writing\nUse clear requirements.\n', guide: '# Guide\nRead safely.\n' },
+    'code-review': { skillMd: '# Code review\nCheck every diff.\n', guide: '# Review guide\nLook for regressions.\n' },
+  };
+  for (const name of skillNames) {
+    const fixture = skillFixtures[name];
+    if (!fixture) {
+      throw new Error(`no fixture for skill ${name}`);
+    }
+    const dir = join(skillsRoot, 'source-a', 'a'.repeat(40), 'skills', name);
+    await mkdir(join(dir, 'references'), { recursive: true });
+    await writeFile(join(dir, 'SKILL.md'), fixture.skillMd);
+    await writeFile(join(dir, 'references', 'guide.md'), fixture.guide);
+    skillDirs[name] = dir;
+  }
   return {
     ctx: {
       worktree: root,
@@ -50,11 +62,18 @@ async function makeContext(skillNames: string[] = ['spec-writing', 'code-review'
       searchTimeoutMs: 1_000,
       nowMs: () => 0,
     },
-    skillDir,
+    skillDir: skillDirFor(skillDirs, 'spec-writing'),
+    skillDirFor: (name: string) => skillDirFor(skillDirs, name),
   };
 }
 
-const contentLines = (content: string | undefined): string[] => content?.split('\n') ?? [];
+function skillDirFor(skillDirs: Record<string, string>, name: string): string {
+  const dir = skillDirs[name];
+  if (!dir) {
+    throw new Error(`no fixture directory for skill ${name}`);
+  }
+  return dir;
+}
 
 describe('jailed skill tools and assembled tool set (US-004)', () => {
   test('US-004 AC-1: load_skill returns the selected skill SKILL.md text', async () => {
@@ -62,6 +81,15 @@ describe('jailed skill tools and assembled tool set (US-004)', () => {
     const expected = await Bun.file(join(skillDir, 'SKILL.md')).text();
     const result = await loadSkillModule?.loadSkillTool(ctx).run({ name: 'spec-writing' });
     expect(result?.content).toBe(expected);
+  });
+
+  test('US-004 AC-1: load_skill discriminates between two valid skills by name', async () => {
+    const { ctx, skillDirFor } = await makeContext();
+    const expected = await Bun.file(join(skillDirFor('code-review'), 'SKILL.md')).text();
+    const otherSkill = await Bun.file(join(skillDirFor('spec-writing'), 'SKILL.md')).text();
+    const result = await loadSkillModule?.loadSkillTool(ctx).run({ name: 'code-review' });
+    expect(result?.content).toBe(expected);
+    expect(result?.content).not.toBe(otherSkill);
   });
 
   test('US-004 AC-2: unknown skill refusal names every available skill', async () => {
