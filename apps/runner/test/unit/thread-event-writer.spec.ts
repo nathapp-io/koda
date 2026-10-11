@@ -32,7 +32,7 @@ async function makeWriter(options: { path?: string; streamMaxBytes?: number; wak
   return { path, writer };
 }
 
-const base = { sessionId: 'session-1', turnId: 'turn-1', at: '2026-01-02T03:04:05.000Z' };
+const base = { sessionId: 'session-1', turnId: 'turn-1', at: '2026-01-02T03:04:05.000Z', metadata: {} };
 const readLines = async (path: string): Promise<Record<string, unknown>[]> => {
   const content = await readFile(path, 'utf8');
   return content.trimEnd().split('\n').filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
