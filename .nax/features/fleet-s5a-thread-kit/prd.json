@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-kit",
   "branchName": "feat/fleet-s5a-thread-kit",
   "createdAt": "2026-10-11T00:00:00.000Z",
-  "updatedAt": "2026-10-11T06:56:45.464Z",
+  "updatedAt": "2026-10-11T07:14:26.527Z",
   "userStories": [
     {
       "id": "US-001",
@@ -164,8 +164,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -224,7 +224,10 @@
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Three small tool modules assemble upstream helpers, but the skill-file realpath/symlink jail is an access-control boundary requiring security-isolated TDD."
+        "reasoning": "Three small tool modules assemble upstream helpers, but the skill-file realpath/symlink jail is an access-control boundary requiring security-isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/thread/tools/types.ts",
@@ -243,7 +246,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "3f319d3d6c30c48123bf14c395ca1e6d7f71a00a"
     },
     {
       "id": "US-005",
