@@ -45,6 +45,20 @@ const ragConfig = { lancedbPath: './lancedb', inMemoryOnly: false };
 - `test-setup.ts` spies on `Logger.prototype` globally. Call `spy.mockClear()` before asserting on
   `calls[0]` of a logger spy
 
+## DB specs share a module cache
+- In DB mode (`KODA_DB_TESTS=1`), integration and e2e specs run in the `db-shared` Vitest project
+  with `isolate: false`: modules load once and stay loaded for the following files. A spec that calls
+  `vi.mock`, `vi.doMock`, `vi.unmock` or `vi.resetModules` is detected and moved to `db-isolated`
+  automatically (`test/vitest-db-projects.ts`)
+- So module-level state in a DB spec, or in code it imports, outlives the file: close every Nest app
+  and Prisma client in `afterAll`, restore spies, and do not mutate exported singletons or config objects
+- To check a DB spec for leaks between files, shuffle files only. `--sequence.shuffle` also reorders
+  tests inside a file and breaks intentionally sequential lifecycle specs such as `endpoint.e2e.spec.ts`:
+
+```bash
+cd apps/api && KODA_DB_TESTS=1 bunx vitest run test/integration test/e2e --sequence.shuffle.files --sequence.seed=42
+```
+
 ## Verification
 Run a story's unit specs shuffled before declaring them done; a failure only under shuffle is an
 order dependency to fix, not flakiness to retry:
