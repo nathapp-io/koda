@@ -18,11 +18,24 @@ export interface PruneThreadsInput {
 /**
  * Fleet S5a §3: one prune pass over the thread assets — the archived threads that are not active, and the
  * skill-cache snapshots no run has touched in a month. Called at start and every `pruneIntervalMs`.
+ *
+ * Both phases always run: one thread directory that cannot be withdrawn must not starve the skill cache for
+ * every pass that follows. The first failure is re-raised, so the caller still reports the pass as failed.
  */
 export async function pruneThreads(input: PruneThreadsInput): Promise<void> {
-  await pruneArchivedThreads({
-    homeDir: input.homeDir, threadIds: input.archivedThreadIds, activeThreadIds: input.activeThreadIds,
-    ...(input.git ? { git: input.git } : {}),
-  });
-  await pruneSkillCache(join(input.homeDir, 'skills'), (input.now ?? systemNow)());
+  const failures: unknown[] = [];
+  try {
+    await pruneArchivedThreads({
+      homeDir: input.homeDir, threadIds: input.archivedThreadIds, activeThreadIds: input.activeThreadIds,
+      ...(input.git ? { git: input.git } : {}),
+    });
+  } catch (error) {
+    failures.push(error);
+  }
+  try {
+    await pruneSkillCache(join(input.homeDir, 'skills'), (input.now ?? systemNow)());
+  } catch (error) {
+    failures.push(error);
+  }
+  if (failures.length > 0) throw failures[0];
 }

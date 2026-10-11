@@ -42,6 +42,8 @@ export interface PruneArchivedThreadsInput {
 }
 
 const LOCK_REASON = 'koda-thread';
+/** `placeWorktree` locks every worktree, and git withdraws a locked worktree only with `--force` twice. */
+const FORCE_LOCKED = ['--force', '--force'] as const;
 const REF_LOCK_ERROR = /cannot lock ref|unable to lock/;
 
 async function exists(path: string): Promise<boolean> {
@@ -126,7 +128,7 @@ async function placeWorktree(git: Git, repoDir: string, wt: string, tipSha: stri
   const registered = await listWorktrees(git, repoDir);
   const key = await normalizeWorktreePath(wt);
   const present = await exists(wt);
-  if (registered.has(key) && !present) await git.ok(['worktree', 'remove', '--force', '--force', wt], { cwd: repoDir });
+  if (registered.has(key) && !present) await git.ok(['worktree', 'remove', ...FORCE_LOCKED, wt], { cwd: repoDir });
   if (!registered.has(key) || !present) {
     await rm(wt, { recursive: true, force: true });
     await git.ok(['worktree', 'add', '--detach', '--lock', '--reason', LOCK_REASON, wt, tipSha], { cwd: repoDir });
@@ -189,12 +191,32 @@ async function registeredRepoDir(homeDir: string, threadId: string): Promise<str
 }
 
 /**
+ * Withdraw one thread's worktree registration from the clone its `thread.json` names. A worktree that is not
+ * registered has nothing to withdraw; one that is goes before its directory, because git cannot remove a
+ * worktree whose path is already gone. A git refusal is a verdict about the clone and is raised, never
+ * discarded: the caller keeps the thread for the next pass instead of deleting a directory git still claims.
+ */
+async function withdrawWorktree(git: Git, homeDir: string, threadId: string): Promise<void> {
+  const repoDir = await registeredRepoDir(homeDir, threadId);
+  if (repoDir === null) return;
+  const worktree = threadWorktreeDir(homeDir, threadId);
+  if (!(await listWorktrees(git, repoDir)).has(await normalizeWorktreePath(worktree))) return;
+  const args = ['worktree', 'remove', ...FORCE_LOCKED, worktree];
+  const result = await git.run(args, { cwd: repoDir });
+  if (result.code !== 0) throw new GitError(args, result);
+}
+
+/**
  * Design §2 cleanup: a thread the server no longer reports keeps no worktree registration and no
  * directory — its `thread.json` names the clone to withdraw the registration from, and the whole
  * `<homeDir>/threads/<id>` tree goes.
+ *
+ * Every id is attempted: one thread whose registration or directory cannot be withdrawn is kept for the next
+ * pass and must not skip the ids after it, so the loop collects failures and re-raises the first at the end.
  */
 export async function pruneArchivedThreads(input: PruneArchivedThreadsInput): Promise<void> {
   const active = new Set(input.activeThreadIds);
+  const failures: unknown[] = [];
   for (const candidate of input.threadIds) {
     if (active.has(candidate)) continue;
     let threadId: string;
@@ -203,10 +225,12 @@ export async function pruneArchivedThreads(input: PruneArchivedThreadsInput): Pr
     } catch {
       continue;
     }
-    const repoDir = await registeredRepoDir(input.homeDir, threadId);
-    if (repoDir && input.git) {
-      await input.git.run(['worktree', 'remove', '--force', '--force', threadWorktreeDir(input.homeDir, threadId)], { cwd: repoDir });
+    try {
+      if (input.git) await withdrawWorktree(input.git, input.homeDir, threadId);
+      await rm(threadDirFor(input.homeDir, threadId), { recursive: true, force: true });
+    } catch (error) {
+      failures.push(error);
     }
-    await rm(threadDirFor(input.homeDir, threadId), { recursive: true, force: true });
   }
+  if (failures.length > 0) throw failures[0];
 }
