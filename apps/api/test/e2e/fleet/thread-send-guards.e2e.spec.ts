@@ -73,7 +73,7 @@ describeDb('US-005 thread send HTTP guards', () => {
   it('US-005 AC3: refuses a send by a project developer who is not the creator', async () => {
     const thread = await makeThread({ createdById: world.ids.root });
     const res = await send(thread.id).expect(403);
-    expect(res.body.message).toBe('threads.notCreator.40003');
+    expect(res.body.message).toBe('Only the thread creator can perform this action');
   });
 
   it('US-005 AC4: refuses creator send while threads are disabled', async () => {

@@ -25,6 +25,10 @@ export class ThreadDto {
   @ApiProperty({ nullable: true, type: 'object', properties: { id: { type: 'string' }, state: { type: 'string' } } }) activeJob: { id: string; state: string } | null;
 }
 
+export class ThreadListDto {
+  @ApiProperty({ type: [ThreadDto] }) items: ThreadDto[];
+}
+
 export class ChatMessageDto {
   @ApiProperty() id: string;
   @ApiProperty() seq: number;
@@ -41,6 +45,10 @@ export class ChatMessageDto {
   @ApiProperty({ nullable: true }) costUsd: string | null;
   @ApiProperty({ nullable: true }) costSource: string | null;
   @ApiProperty() createdAt: Date;
+}
+
+export class ChatMessageListDto {
+  @ApiProperty({ type: [ChatMessageDto] }) items: ChatMessageDto[];
 }
 
 export class SendMessageDto {

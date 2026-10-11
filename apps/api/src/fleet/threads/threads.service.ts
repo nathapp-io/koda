@@ -7,7 +7,7 @@ import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { SkillsService } from '../../skills/skills.service';
 import { FLEET_REPO_REPOSITORY, type IFleetRepoRepository } from '../repos/domain/fleet-repo.domain';
 import { CHAT_THREAD_REPOSITORY, type ChatMessageRecord, type ChatThreadRecord, type ChatThreadRepository } from './domain/chat-thread.domain';
-import { validateCreateThread, type CreateThreadInput } from './thread-input';
+import { isMaxCostUsd, validateCreateThread, type CreateThreadInput } from './thread-input';
 import type { AnswerQuestionDto, SendMessageDto } from './dto/thread.dto';
 import { FleetCommandType } from '../../common/enums';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
@@ -37,7 +37,9 @@ export class ThreadsService {
     }
   }
 
-  list(projectId: string, status: string | undefined, skip: number, take: number): Promise<ChatThreadRecord[]> { return this.threads.list(projectId, status, skip, take); }
+  async list(projectId: string, status: string | undefined, skip: number, take: number): Promise<{ items: ChatThreadRecord[] }> {
+    return { items: await this.threads.list(projectId, status, skip, take) };
+  }
   async get(projectId: string, id: string): Promise<ChatThreadRecord> {
     const result = await this.threads.get(projectId, id);
     if (!result) throw new NotFoundAppException({}, 'threads.notFound');
@@ -49,7 +51,7 @@ export class ThreadsService {
   }
 
   async updateCap(projectId: string, threadId: string, userId: string, value: unknown): Promise<ChatThreadRecord> {
-    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0.0001 || value > 10000 || !/^\d+(?:\.\d{1,4})?$/.test(String(value))) throw new ValidationAppException({ reason: 'maxCostUsd' }, 'threads.input');
+    if (!isMaxCostUsd(value)) throw new ValidationAppException({ reason: 'maxCostUsd' }, 'threads.input');
     return this.threads.updateCap(projectId, threadId, userId, String(value));
   }
 
@@ -76,10 +78,7 @@ export class ThreadsService {
     }
   }
 
-  archivedThreadIds(runnerId: string): Promise<string[]> { return this.threads.archivedThreadIds(runnerId); }
-
   async sendMessage(projectId: string, threadId: string, userId: string, input: SendMessageDto): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }> {
-    if (!this.config.threadsEnabled) throw new ConflictAppException({}, 'threads.disabled');
     if (typeof input.text !== 'string' || input.text.length === 0 || Buffer.byteLength(input.text, 'utf8') > 32768 ||
         typeof input.clientMessageId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(input.clientMessageId)) {
       throw new ValidationAppException({ reason: 'message' }, 'threads.input');

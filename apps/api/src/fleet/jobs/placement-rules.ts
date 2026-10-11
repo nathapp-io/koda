@@ -55,7 +55,8 @@ export interface RunnerLoad {
   threads?: number;
 }
 
-export const EMPTY_LOAD: RunnerLoad = Object.freeze({ active: 0, repoIds: new Set<string>() });
+/** A runner with no held jobs. `threads` is always present so readers never need a `?? 0`. */
+export const EMPTY_LOAD: RunnerLoad = Object.freeze({ active: 0, repoIds: new Set<string>(), threads: 0 });
 
 const own = (obj: object, key: string): boolean => Object.prototype.hasOwnProperty.call(obj, key);
 
@@ -123,7 +124,11 @@ export function firstMisfit(job: PlacementJob, runner: PlacementRunner, load: Ru
   return null;
 }
 
-/** Spec §4 step 4: fewest active jobs, then observed boots, protocol, oldest lastSeenAt, and id. */
+/**
+ * Spec §4 step 4 ordering: fewest active jobs, then a runner that has reported a boot, then the
+ * oldest `lastSeenAt`, then id. Protocol, thread capacity and the other rules are not sort terms —
+ * they are hard misfits in `firstMisfit`, so an unfit runner never reaches this sort.
+ */
 export function orderCandidates<T extends { runner: PlacementRunner; load: RunnerLoad }>(fits: readonly T[]): T[] {
   return [...fits].sort(
     (a, b) =>

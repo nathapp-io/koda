@@ -24,6 +24,9 @@ import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
 import type { ThreadBackend } from '../common/thread-jobs';
 import { THREAD_LIMITS } from '../common/thread-jobs';
 
+/** The states a thread's current job is no longer live in (job-state.ts owns these). Prisma's `notIn` wants a mutable list. */
+const TERMINAL_JOB_STATES: string[] = ['COMPLETED', 'FAILED', 'CANCELLED', 'CRASHED', 'ESCALATED'];
+
 /** A budget refusal carries the paused policy so the 409 names its scope. */
 type SendRefusalResult = { refusal: 'budgetPaused'; pausedPolicy: BudgetPolicyRecord } | { refusal: Exclude<ThreadSendRefusal, 'budgetPaused'> | null; pausedPolicy: null };
 
@@ -52,7 +55,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
 
   async list(projectId: string, status: string | undefined, skip: number, take: number): Promise<ChatThreadRecord[]> {
     const rows = await this.prisma.client.chatThread.findMany({ where: { projectId, ...(status ? { status } : {}) }, skip, take, orderBy: [{ lastActivityAt: 'desc' }, { id: 'desc' }] });
-    const jobs = rows.length ? await this.prisma.client.fleetJob.findMany({ where: { threadId: { in: rows.map((row) => row.id) }, command: 'THREAD', state: { notIn: ['COMPLETED', 'FAILED', 'CANCELLED', 'CRASHED', 'ESCALATED'] } }, orderBy: [{ queuedAt: 'desc' }, { id: 'desc' }], select: { id: true, state: true, threadId: true } }) : [];
+    const jobs = rows.length ? await this.prisma.client.fleetJob.findMany({ where: { threadId: { in: rows.map((row) => row.id) }, command: 'THREAD', state: { notIn: TERMINAL_JOB_STATES } }, orderBy: [{ queuedAt: 'desc' }, { id: 'desc' }], select: { id: true, state: true, threadId: true } }) : [];
     const active = new Map<string, { id: string; state: string }>();
     for (const job of jobs) if (job.threadId && !active.has(job.threadId)) active.set(job.threadId, { id: job.id, state: job.state });
     return rows.map((row) => this.mapThread(row, active.get(row.id) ?? null));
@@ -61,17 +64,13 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
   async get(projectId: string, id: string): Promise<ChatThreadRecord | null> {
     const row = await this.prisma.client.chatThread.findFirst({ where: { id, projectId } });
     if (!row) return null;
-    const job = await this.prisma.client.fleetJob.findFirst({ where: { threadId: id, command: 'THREAD', state: { notIn: ['COMPLETED', 'FAILED', 'CANCELLED', 'CRASHED', 'ESCALATED'] } }, orderBy: [{ queuedAt: 'desc' }, { id: 'desc' }], select: { id: true, state: true } });
+    const job = await this.prisma.client.fleetJob.findFirst({ where: { threadId: id, command: 'THREAD', state: { notIn: TERMINAL_JOB_STATES } }, orderBy: [{ queuedAt: 'desc' }, { id: 'desc' }], select: { id: true, state: true } });
     return this.mapThread(row, job);
   }
 
   async messages(threadId: string, afterSeq: number, limit: number): Promise<ChatMessageRecord[]> {
     const rows = await this.prisma.client.chatMessage.findMany({ where: { threadId, seq: { gt: afterSeq } }, orderBy: { seq: 'asc' }, take: limit });
     return rows.map(({ threadId: _threadId, ...row }) => ({ ...row, costUsd: row.costUsd?.toString() ?? null }));
-  }
-
-  async replaceCommandPayload(commandId: string, payload: unknown): Promise<void> {
-    await this.prisma.client.fleetCommand.update({ where: { id: commandId }, data: { payload: payload as Prisma.InputJsonValue } });
   }
 
   async archivedThreadIds(runnerId: string): Promise<string[]> {
@@ -132,7 +131,9 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
       if (thread.status === 'ARCHIVED') return null;
       await this.prisma.client.chatThread.update({ where: { id: threadId }, data: { status: 'ARCHIVED', archivedAt: new Date() } });
-      return current?.id ?? null;
+      // A send that took the locks first may have created a job the pre-lock read never saw, so
+      // the cancel target is read again under the thread row lock.
+      return (await this.currentThreadJob(threadId))?.id ?? null;
     });
   }
 
@@ -160,7 +161,9 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
         if (refused.refusal === 'budgetPaused') throw new BudgetPausedException(refused.pausedPolicy);
         if (refused.refusal) throw this.refusalException(refused.refusal);
 
-        const seqResult = await this.prisma.client.$queryRaw<Array<{ nextSeq: number }>>`UPDATE "ChatThread" SET "nextSeq" = "nextSeq" + 1 WHERE "id" = ${thread.id} RETURNING "nextSeq" - 1 AS "nextSeq"`;
+        // The counter is the allocator, but a row written outside the send path (US-004 AC15:
+        // a message whose send already completed) can sit at or above it, so take the higher.
+        const seqResult = await this.prisma.client.$queryRaw<Array<{ nextSeq: number }>>`UPDATE "ChatThread" SET "nextSeq" = GREATEST("nextSeq", (SELECT COALESCE(MAX("seq"), 0) + 1 FROM "ChatMessage" WHERE "threadId" = "ChatThread"."id")) + 1 WHERE "id" = ${thread.id} RETURNING "nextSeq" - 1 AS "nextSeq"`;
         const seq = seqResult[0]?.nextSeq;
         if (seq === undefined) throw new Error(`failed to allocate message sequence for thread ${thread.id}`);
         const messageRow = await this.prisma.client.chatMessage.create({ data: {
@@ -223,6 +226,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     const closeCommand = job ? await this.prisma.client.fleetCommand.findFirst({ where: { jobId: job.id, type: FleetCommandType.THREAD_CLOSE, leaseEpoch: job.leaseEpoch }, select: { id: true } }) : null;
     const turnInFlight = await this.prisma.client.chatMessage.findFirst({ where: { threadId: thread.id, status: { in: ['pending', 'streaming'] } }, select: { id: true } });
     const refusal = sendRefusal({
+      threadsEnabled: this.config.threadsEnabled,
       status: thread.status, costUsd: thread.costUsd, maxCostUsd: thread.maxCostUsd,
       pausedPolicy,
       runner: runnerRow ? { online: isRunnerOnline(runnerRow.lastSeenAt, new Date(), this.config.runnerOfflineSec), protocolVersion: runnerRow.protocolVersion } : null,
@@ -247,7 +251,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
 
   private async currentThreadJob(threadId: string) {
     return this.prisma.client.fleetJob.findFirst({
-      where: { threadId, command: 'THREAD', state: { notIn: ['COMPLETED', 'FAILED', 'CANCELLED', 'CRASHED', 'ESCALATED'] } },
+      where: { threadId, command: 'THREAD', state: { notIn: TERMINAL_JOB_STATES } },
       orderBy: [{ queuedAt: 'desc' }, { id: 'desc' }],
       select: { id: true, state: true, runnerId: true, leaseEpoch: true },
     });

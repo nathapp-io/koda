@@ -10,7 +10,7 @@ import { ProjectMembershipGuard } from '../../projects/project-membership.guard'
 import type { ProjectContext } from '../../projects/project-context';
 import { withProjectRole } from '../../projects/project-context';
 import { ThreadsService } from './threads.service';
-import { AnswerQuestionDto, ChatMessageDto, CreateThreadDto, SendMessageDto, SendMessageResultDto, ThreadDto, UpdateThreadDto } from './dto/thread.dto';
+import { AnswerQuestionDto, ChatMessageListDto, ChatMessageDto, CreateThreadDto, SendMessageDto, SendMessageResultDto, ThreadDto, ThreadListDto, UpdateThreadDto } from './dto/thread.dto';
 
 @ApiTags('fleet threads')
 @ApiBearerAuth()
@@ -37,15 +37,23 @@ export class ThreadsController {
 
   @Get()
   @ApiOperation({ summary: 'List project chat threads' })
-  @ApiResponse({ status: 200, type: ThreadDto, isArray: true })
+  @ApiResponse({ status: 200, type: ThreadListDto })
   async list(@Query() query: Record<string, string | undefined>, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
     this.assertUser(principal);
     const status = query.status;
     if (status !== undefined && status !== 'ACTIVE' && status !== 'ARCHIVED') throw new ValidationAppException({ reason: 'status' }, 'threads.input');
-    const current = query.page === undefined ? 1 : Number(query.page);
-    const size = query.size === undefined ? 20 : Number(query.size);
-    if (!Number.isInteger(current) || current < 1 || !Number.isInteger(size) || size < 1 || size > 100) throw new ValidationAppException({ reason: 'page' }, 'threads.input');
-    return JsonResponse.Ok(await this.threads.list(ctx.project.id, status, (current - 1) * size, size));
+    // A query string is only digits here, so `Number('1e3')` or `Number('')` never become a page.
+    const intParam = (raw: string | undefined, min: number, max: number): number | null => {
+      if (raw === undefined || !/^\d+$/.test(raw)) return null;
+      const value = Number(raw);
+      return value >= min && value <= max ? value : null;
+    };
+    const page = intParam(query.page, 1, Number.MAX_SAFE_INTEGER);
+    const size = intParam(query.size, 1, 100);
+    if ((query.page !== undefined && page === null) || (query.size !== undefined && size === null)) throw new ValidationAppException({ reason: query.page !== undefined && page === null ? 'page' : 'size' }, 'threads.input');
+    const current = page ?? 1;
+    const take = size ?? 20;
+    return JsonResponse.Ok(await this.threads.list(ctx.project.id, status, (current - 1) * take, take));
   }
 
   @Get(':id')
@@ -66,6 +74,7 @@ export class ThreadsController {
 
   @Post(':id/stop')
   @HttpCode(200)
+  @ApiOperation({ summary: 'Stop the live turn of a chat thread (creator)' })
   async stop(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
     this.assertUser(principal);
     await this.threads.stop(ctx.project.id, id, principal.id);
@@ -74,6 +83,7 @@ export class ThreadsController {
 
   @Post(':id/end-session')
   @HttpCode(200)
+  @ApiOperation({ summary: 'Close the live session of a chat thread (creator)' })
   async endSession(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
     this.assertUser(principal);
     await this.threads.endSession(ctx.project.id, id, principal.id);
@@ -82,6 +92,7 @@ export class ThreadsController {
 
   @Post(':id/answer')
   @HttpCode(200)
+  @ApiOperation({ summary: 'Answer a pending question of a chat thread (creator)' })
   async answer(@Param('id') id: string, @Body() dto: AnswerQuestionDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
     this.assertUser(principal);
     await this.threads.answer(ctx.project.id, id, principal.id, dto);
@@ -90,6 +101,7 @@ export class ThreadsController {
 
   @Post(':id/archive')
   @HttpCode(200)
+  @ApiOperation({ summary: 'Archive a chat thread (creator or project admin)' })
   async archive(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
     this.assertUser(principal);
     await this.threads.archive(ctx.project.id, id, principal.id, ctx.role === 'ADMIN');
@@ -101,8 +113,7 @@ export class ThreadsController {
   @ApiOperation({ summary: 'Send a message to a chat thread' })
   @ApiResponse({ status: 201, type: SendMessageResultDto })
   @ApiResponse({ status: 200, type: SendMessageResultDto })
-  async sendMessage(
-    @Param('id') id: string,
+  async sendMessage(    @Param('id') id: string,
     @Body() dto: SendMessageDto,
     @CurrentProject() ctx: ProjectContext,
     @Principal() principal: KodaPrincipal,
@@ -116,12 +127,17 @@ export class ThreadsController {
 
   @Get(':id/messages')
   @ApiOperation({ summary: 'List chat thread messages' })
-  @ApiResponse({ status: 200, type: ChatMessageDto, isArray: true })
+  @ApiResponse({ status: 200, type: ChatMessageListDto })
   async messages(@Param('id') id: string, @Query() query: Record<string, string | undefined>, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
     this.assertUser(principal);
-    const afterSeq = query.afterSeq === undefined ? 0 : Number(query.afterSeq);
-    const limit = query.limit === undefined ? 100 : Number(query.limit);
-    if (!Number.isInteger(afterSeq) || afterSeq < 0 || !Number.isInteger(limit) || limit < 1 || limit > 200) throw new ValidationAppException({ reason: 'messages' }, 'threads.input');
-    return JsonResponse.Ok(await this.threads.messages(ctx.project.id, id, afterSeq, limit));
+    const intParam = (raw: string | undefined, min: number, max: number): number | null => {
+      if (raw === undefined || !/^\d+$/.test(raw)) return null;
+      const value = Number(raw);
+      return value >= min && value <= max ? value : null;
+    };
+    const after = intParam(query.afterSeq, 0, Number.MAX_SAFE_INTEGER);
+    const limit = intParam(query.limit, 1, 200);
+    if ((query.afterSeq !== undefined && after === null) || (query.limit !== undefined && limit === null)) throw new ValidationAppException({ reason: 'messages' }, 'threads.input');
+    return JsonResponse.Ok(await this.threads.messages(ctx.project.id, id, after ?? 0, limit ?? 100));
   }
 }

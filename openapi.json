@@ -9102,10 +9102,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ThreadDto"
-                  }
+                  "$ref": "#/components/schemas/ThreadListDto"
                 }
               }
             }
@@ -9161,6 +9158,216 @@
           }
         ],
         "summary": "Get a chat thread",
+        "tags": [
+          "fleet threads"
+        ]
+      },
+      "patch": {
+        "operationId": "ThreadsController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateThreadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update a chat thread cost cap",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/projects/{slug}/threads/{id}/stop": {
+      "post": {
+        "operationId": "ThreadsController_stop",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Stop the live turn of a chat thread (creator)",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/projects/{slug}/threads/{id}/end-session": {
+      "post": {
+        "operationId": "ThreadsController_endSession",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Close the live session of a chat thread (creator)",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/projects/{slug}/threads/{id}/answer": {
+      "post": {
+        "operationId": "ThreadsController_answer",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerQuestionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Answer a pending question of a chat thread (creator)",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/projects/{slug}/threads/{id}/archive": {
+      "post": {
+        "operationId": "ThreadsController_archive",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Archive a chat thread (creator or project admin)",
         "tags": [
           "fleet threads"
         ]
@@ -9255,10 +9462,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ChatMessageDto"
-                  }
+                  "$ref": "#/components/schemas/ChatMessageListDto"
                 }
               }
             }
@@ -16100,6 +16304,50 @@
           "activeJob"
         ]
       },
+      "ThreadListDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ThreadDto"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "UpdateThreadDto": {
+        "type": "object",
+        "properties": {
+          "maxCostUsd": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "maxCostUsd"
+        ]
+      },
+      "AnswerQuestionDto": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32768
+          }
+        },
+        "required": [
+          "requestId",
+          "text"
+        ]
+      },
       "SendMessageDto": {
         "type": "object",
         "properties": {
@@ -16209,6 +16457,20 @@
         "required": [
           "message",
           "jobId"
+        ]
+      },
+      "ChatMessageListDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatMessageDto"
+            }
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "SkillDto": {

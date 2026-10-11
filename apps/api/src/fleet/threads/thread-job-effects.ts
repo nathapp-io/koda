@@ -2,9 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, PrismaClient } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { FleetCommandType } from '../../common/enums';
-import { isThreadKind, THREAD_LIMITS } from '../common/thread-jobs';
+import { isThreadKind } from '../common/thread-jobs';
 import type { FleetCommandRecord, FleetJobRecord } from '../jobs/domain/fleet-job.domain';
 
+/**
+ * The effects of a THREAD command ack and of a THREAD job ending, run inside the ack and the
+ * terminal-transition transaction. `archivedThreadIds` is a read, so it stays on
+ * `CHAT_THREAD_REPOSITORY`, which SyncModule already imports through ThreadStoreModule.
+ */
 @Injectable()
 export class ThreadJobEffects {
   constructor(private readonly prisma: PrismaService<PrismaClient>) {}
@@ -26,12 +31,7 @@ export class ThreadJobEffects {
     await this.prisma.client.chatThread.updateMany({ where: { id: job.threadId }, data: { pendingQuestion: Prisma.DbNull } });
   }
 
-  async replaceCommandPayload(commandId: string, payload: unknown): Promise<void> {
+  private async replaceCommandPayload(commandId: string, payload: unknown): Promise<void> {
     await this.prisma.client.fleetCommand.update({ where: { id: commandId }, data: { payload: payload as Prisma.InputJsonValue } });
-  }
-
-  async archivedThreadIds(runnerId: string): Promise<string[]> {
-    const rows = await this.prisma.client.chatThread.findMany({ where: { runnerId, status: 'ARCHIVED' }, orderBy: [{ archivedAt: 'desc' }, { id: 'desc' }], take: THREAD_LIMITS.maxArchivedThreadIds, select: { id: true } });
-    return rows.map((row) => row.id);
   }
 }

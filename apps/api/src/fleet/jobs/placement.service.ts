@@ -158,8 +158,10 @@ export class PlacementService {
         const paused = jobScopePause(job, (keys) => pauses.match(keys));
         if (paused) { events.push(await this.cancelForPause(job, paused.id, now)); continue; }
         const [repo, thread] = await Promise.all([this.repo.findRepo(job.repoId), this.repo.findThreadAssign(job.id)]);
-        if (!repo) throw new Error(`THREAD job ${job.id} references missing repo ${job.repoId}`);
-        if (!thread) throw new Error(`THREAD job ${job.id} is missing its thread turn`);
+        // A THREAD job without its turn (or repo) is a broken row, not a reason to fail the whole
+        // sync: skip it the way fillRunner skips a missing repo (one failing job in a sync is
+        // logged and skipped, never allowed to fail the request).
+        if (!repo || !thread) continue;
         const placementJob = toPlacementJob(job, repo, { backend: thread.backend, enabled: this.fleetConfig.threadsEnabled });
         const currentLoad = { ...load, threads: (runner.threadCapacity ?? 0) - slots };
         if (firstMisfit(placementJob, candidate, currentLoad, now, this.fleetConfig.runnerOfflineSec) !== null) continue;
@@ -184,7 +186,8 @@ export class PlacementService {
 
   private async assign(job: FleetJobRecord, repo: FleetRepoRef, runner: PlacementRunnerRow, now: Date): Promise<{ leaseEpoch: number; live: LiveFleetJobEvent } | null> {
     const thread = isThreadKind(job.command) ? await this.repo.findThreadAssign(job.id) : undefined;
-    if (isThreadKind(job.command) && !thread) throw new Error(`THREAD job ${job.id} is missing its thread turn`);
+    // The caller guarantees a thread job has its turn; a broken row is a no-op, never a 500.
+    if (isThreadKind(job.command) && !thread) return null;
     const leaseEpoch = await this.repo.casAssign(job.id, runner.id, runner.bootId, now);
     if (leaseEpoch === null) return null; // another placement won (spec §6.1)
     const after = await this.repo.findById(job.id);

@@ -4,6 +4,15 @@ import { MODEL_ID_RE, type ThreadBackend } from '../common/thread-jobs';
 
 export interface CreateThreadInput { repoId: string; feature: string; baseRef?: string; title: string; maxCostUsd?: number; backend: ThreadBackend }
 
+/** 0.0001..10000 with at most 4 decimals (shared by create and the cap PATCH). */
+export const MAX_COST_USD_MIN = 0.0001;
+export const MAX_COST_USD_MAX = 10000;
+const COST_DECIMALS_RE = /^\d+(?:\.\d{1,4})?$/;
+
+export function isMaxCostUsd(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= MAX_COST_USD_MIN && value <= MAX_COST_USD_MAX && COST_DECIMALS_RE.test(String(value));
+}
+
 function fail(reason: string): never { throw new ValidationAppException({ reason }, 'threads.input'); }
 
 export function validateCreateThread(value: CreateThreadInput, defaultBranch: string): Omit<CreateThreadInput, 'baseRef' | 'maxCostUsd'> & { baseRef: string; maxCostUsd: string } {
@@ -12,7 +21,7 @@ export function validateCreateThread(value: CreateThreadInput, defaultBranch: st
   if (typeof baseRef !== 'string' || !GIT_REF_RE.test(baseRef)) fail('baseRef');
   if (typeof value.title !== 'string' || value.title.length < 1 || value.title.length > 200 || [...value.title].some((character) => { const code = character.charCodeAt(0); return code < 32 || code === 127; })) fail('title');
   const max = value.maxCostUsd ?? 5;
-  if (typeof max !== 'number' || !Number.isFinite(max) || max < 0.0001 || max > 10000 || !/^\d+(?:\.\d{1,4})?$/.test(String(max))) fail('maxCostUsd');
+  if (!isMaxCostUsd(max)) fail('maxCostUsd');
   const backend = value.backend as unknown;
   if (!backend || typeof backend !== 'object' || Array.isArray(backend)) fail('backend');
   const b = backend as Record<string, unknown>;

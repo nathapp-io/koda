@@ -3237,7 +3237,7 @@ describeIntegration('API Integration Tests', () => {
       await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.viewer } }, data: { role: 'VIEWER' } });
       try {
         const res = await request(httpServer).get(`/api/projects/${projectSlug}/threads`).set('Authorization', `Bearer ${world.tokens.viewer}`).expect(200);
-        const items = body<Array<{ id: string }>>(res);
+        const items = body<{ items: Array<{ id: string }> }>(res).items;
         expect(items.findIndex((item) => item.id === newer.id)).toBeLessThan(items.findIndex((item) => item.id === older.id));
       } finally {
         await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.dev } }, data: { role: 'DEVELOPER' } });
