@@ -157,7 +157,9 @@ export async function pruneSkillCache(skillsRoot: string, now: Date, maxAgeDays 
     const sourcePath = join(skillsRoot, sourceEntry.name);
     const snapshots = await readdir(sourcePath, { withFileTypes: true }).catch(() => []);
     for (const snapshot of snapshots) {
-      if (!snapshot.isDirectory() || !SHA_RE.test(snapshot.name)) continue;
+      // Fleet S5a §3: the prune pass drops a stale entry of a source, whatever the snapshot directory is
+      // named — the cache is the runner's own, and no entry is worth keeping past the age bound.
+      if (!snapshot.isDirectory()) continue;
       const snapshotPath = join(sourcePath, snapshot.name);
       const modified = await lstat(snapshotPath).then((item) => item.mtimeMs, () => now.getTime());
       if (modified < cutoff) await rm(snapshotPath, { recursive: true, force: true });

@@ -34,7 +34,8 @@ export interface PrepareThreadWorktreeInput {
 }
 
 export interface PruneArchivedThreadsInput {
-  readonly git: Git;
+  /** The clone a pruned thread's worktree is registered in; absent, the thread directory still goes. */
+  readonly git?: Git;
   readonly homeDir: string;
   readonly threadIds: readonly string[];
   readonly activeThreadIds: readonly string[];
@@ -203,7 +204,7 @@ export async function pruneArchivedThreads(input: PruneArchivedThreadsInput): Pr
       continue;
     }
     const repoDir = await registeredRepoDir(input.homeDir, threadId);
-    if (repoDir) {
+    if (repoDir && input.git) {
       await input.git.run(['worktree', 'remove', '--force', '--force', threadWorktreeDir(input.homeDir, threadId)], { cwd: repoDir });
     }
     await rm(threadDirFor(input.homeDir, threadId), { recursive: true, force: true });

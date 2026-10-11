@@ -41,6 +41,8 @@ export interface SyncLoopDeps {
   readonly tokenRequests: () => readonly TokenRequest[];
   /** The server's answer to this request's token requests (TokenCache.apply). */
   readonly onTokens: (requested: readonly TokenRequest[], tokens: readonly GitToken[], errors: readonly GitTokenError[]) => void;
+  /** Fleet S5a §3: the thread ids the server has archived. An absent field keeps the previous list. */
+  readonly onArchivedThreads?: (ids: readonly string[]) => void;
   readonly onStop: (reason: StopReason) => void;
   readonly log: Logger;
   readonly sleep: Sleep;
@@ -152,6 +154,8 @@ export class SyncLoop {
     this.failures = 0;
     this.scale = doubleScale(this.scale);
     this.deps.onTokens(request.tokenRequests, response.gitTokens ?? [], response.gitTokenErrors ?? []);
+    // Fleet S5a §3: the prune pass keeps the latest list; a response without the field keeps the previous one.
+    if (response.archivedThreadIds !== undefined) this.deps.onArchivedThreads?.(response.archivedThreadIds);
     const unknown = response.unknownJobIds ?? [];
     if (unknown.length > 0) await this.deps.abandonUnknown(unknown);
     const commands = response.commands ?? [];
