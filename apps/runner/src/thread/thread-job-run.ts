@@ -1,4 +1,4 @@
-import { mkdir, rm } from 'node:fs/promises';
+import { chmod, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentSession } from '@nathapp/nax-agent';
 import type { ThreadAssign, ThreadCommandType } from '@nathapp/fleet-protocol';
@@ -156,15 +156,24 @@ export class ThreadJobRun {
     }
     if (this.stopped()) return;
 
-    // Step 1: the git credentials, waiting for the job's first token; the wait polls the cancel request.
-    const acquired = await this.deps.host.credentials.acquire(row, { wait: true, isCancelled: () => this.cancelRequested() });
-    if (this.halted) return;
+    // Step 1: the git credentials, waiting for the job's first token. The wait polls the cancel request and a
+    // halt, so an abandon does not sit out the token timeout. A refusal holds the socket, the wanted token and
+    // the shims the broker opened before it waited, so it gives them back too — as the RUN path's cleanup does.
+    const acquired = await this.deps.host.credentials.acquire(row, { wait: true, isCancelled: () => this.cancelRequested() || this.halted });
+    if (this.halted) {
+      await this.releaseCredentials(row);
+      return;
+    }
     if (!acquired.ok) {
+      await this.releaseCredentials(row);
       if (acquired.cancelled) this.endBeforeRunning('CANCELLED', 'cancelled before start');
       else this.endBeforeRunning('FAILED', acquired.reason);
       return;
     }
-    if (this.stopped()) return;
+    if (this.stopped()) {
+      await this.releaseCredentials(row);
+      return;
+    }
 
     // Steps 2-4: the thread's worktree, with the credentials released whatever it returns.
     const prepared = await this.prepare(row, thread, acquired.credentials.helper);
@@ -199,11 +208,11 @@ export class ThreadJobRun {
       approvalTimeoutSec: row.assign.approvalTimeoutSec,
     });
     if (this.halted) {
-      await this.closeSession(opened);
+      if (opened.ok) await this.closeSession(opened.session);
       return;
     }
     if (this.cancelRequested()) {
-      await this.closeSession(opened);
+      if (opened.ok) await this.closeSession(opened.session);
       this.endBeforeRunning('CANCELLED', 'cancelled before start');
       return;
     }
@@ -249,7 +258,18 @@ export class ThreadJobRun {
         feature: thread.feature,
       });
     } finally {
+      // Step 3: the socket and the shims go whatever the worktree step returned. A release that fails must not
+      // mask a clean refusal — a `worktree_conflict` stays that, not a `runner error`.
+      await this.releaseCredentials(row);
+    }
+  }
+
+  /** D90: the job's socket, token and shims go. A release that fails is reported and never changes the outcome. */
+  private async releaseCredentials(row: JobRow): Promise<void> {
+    try {
       await this.deps.host.credentials.release(row);
+    } catch (error) {
+      this.deps.log.warn('credential release failed', { jobId: this.jobId, error: errorMessage(error) });
     }
   }
 
@@ -265,14 +285,20 @@ export class ThreadJobRun {
     });
   }
 
-  /** A session `open` resolved after a cancel or a halt is closed; a throwing `close` is logged, never fatal. */
-  private async closeSession(opened: ThreadOpenResult): Promise<void> {
-    if (!opened.ok) return;
+  /** A session the run no longer needs is closed; a throwing `close` is logged, never fatal. */
+  private async closeSession(session: AgentSession): Promise<void> {
     try {
-      await opened.session.close();
+      await session.close();
     } catch (error) {
       this.deps.log.warn('thread session close failed', { jobId: this.jobId, error: errorMessage(error) });
     }
+  }
+
+  /** The session does not outlive the run: a failure after RUNNING must not leave an agent session alive. */
+  private async closeHeldSession(): Promise<void> {
+    const session = this.session;
+    this.session = null;
+    if (session !== null) await this.closeSession(session);
   }
 
   /**
@@ -283,6 +309,7 @@ export class ThreadJobRun {
     const jobDir = jobDirFor(this.deps.host.workspaceRoot, this.jobId);
     const threadPath = join(jobDir, THREAD_EVENTS_FILE);
     await mkdir(jobDir, { recursive: true, mode: 0o700 });
+    await chmod(jobDir, 0o700);   // D93: a requeued epoch reuses the directory, which keeps its old mode
     await rm(threadPath, { force: true });
     const writer = new ThreadEventWriter({
       filePath: threadPath,
@@ -356,6 +383,7 @@ export class ThreadJobRun {
     } catch (inner) {
       this.deps.log.error('thread failure could not be recorded', { jobId: this.jobId, error: errorMessage(inner) });
     } finally {
+      await this.closeHeldSession();
       this.releaseEnd();
     }
   }
