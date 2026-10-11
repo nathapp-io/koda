@@ -39,9 +39,12 @@ export interface Tuning {
   /** S3 §3, D483: the RUNNING config job's heartbeat snapshot interval. */
   readonly configHeartbeatMs: number;
   readonly threadIdleMs: number;
+  readonly threadHeartbeatMs: number;
   readonly threadWakeGapMs: number;
   readonly threadSearchTimeoutMs: number;
   readonly threadSkillFetchTimeoutMs: number;
+  /** B3b: how long an abandon waits for a hung `session.close()` before it gives up on it. */
+  readonly threadCloseTimeoutMs: number;
 }
 
 /** D42: the design's constants in one place; only `startDaemon` options (tests) override them, runner.json cannot. */
@@ -71,7 +74,9 @@ export const TUNING: Tuning = Object.freeze({
   configJobTimeoutMs: 600_000,
   configHeartbeatMs: 30_000,
   threadIdleMs: 900_000,
+  threadHeartbeatMs: 30_000,
   threadWakeGapMs: 250,
   threadSearchTimeoutMs: 10_000,
   threadSkillFetchTimeoutMs: 120_000,
+  threadCloseTimeoutMs: 10_000,
 });
