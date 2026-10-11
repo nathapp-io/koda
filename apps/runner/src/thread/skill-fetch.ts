@@ -38,6 +38,17 @@ function validateSource(source: SkillSource): void {
   assertRelativePath('skill dir', source.dir);
 }
 
+function normalizeOrigin(origin: string): string {
+  const parsed = new URL(origin);
+  if (!['http:', 'https:', 'file:'].includes(parsed.protocol) ||
+      (parsed.protocol !== 'file:' && parsed.hostname.length === 0) ||
+      parsed.username.length > 0 || parsed.password.length > 0 || parsed.search.length > 0 || parsed.hash.length > 0) {
+    throw new Error('invalid origin');
+  }
+  const normalized = origin.replace(/\/+$/, '');
+  return normalized || (parsed.protocol === 'file:' ? 'file://' : '');
+}
+
 async function treeBytes(path: string): Promise<number> {
   let total = 0;
   const entries = await readdir(path, { withFileTypes: true });
@@ -45,6 +56,7 @@ async function treeBytes(path: string): Promise<number> {
     const child = join(path, entry.name);
     if (entry.isDirectory()) total += await treeBytes(child);
     else if (entry.isFile()) total += (await stat(child)).size;
+    else throw new Error('unsupported skill tree entry');
   }
   return total;
 }
@@ -57,8 +69,16 @@ export async function ensureSkills(options: EnsureSkillsOptions): Promise<Ensure
     return { ok: false, reason: 'skill_fetch_failed' };
   }
 
-  const origin = options.origin ?? 'https://github.com';
+  let origin: string;
+  try {
+    origin = normalizeOrigin(options.origin ?? 'https://github.com');
+  } catch {
+    return { ok: false, reason: 'skill_fetch_failed' };
+  }
   const maxTreeBytes = options.maxTreeBytes ?? 52_428_800;
+  if (!Number.isFinite(maxTreeBytes) || maxTreeBytes < 0) {
+    return { ok: false, reason: 'skill_fetch_failed' };
+  }
   try {
     for (const source of skills) {
       const target = skillCacheDirFor(skillsRoot, source.sourceId, source.sha);
@@ -76,17 +96,17 @@ export async function ensureSkills(options: EnsureSkillsOptions): Promise<Ensure
         await git.run(['init'], { cwd: temporary, env: GIT_ENV, timeoutMs });
         await git.run([
           '-c', 'credential.helper=', '-c', 'core.hooksPath=/dev/null', 'fetch', '--depth', '1',
-          '--no-recurse-submodules', `${origin.replace(/\/$/, '')}/${source.owner}/${source.repo}`, source.sha,
+          '--no-recurse-submodules', `${origin}/${source.owner}/${source.repo}`, source.sha,
         ], { cwd: temporary, env: GIT_ENV, timeoutMs });
         await git.run(['checkout', '--detach', source.sha], { cwd: temporary, env: GIT_ENV, timeoutMs });
         await rm(join(temporary, '.git'), { recursive: true, force: true });
         if (await treeBytes(temporary) > maxTreeBytes) throw new Error('skill tree too large');
-        await writeFile(join(temporary, COMPLETE_MARKER), '', { flag: 'wx' });
+        await writeFile(join(temporary, COMPLETE_MARKER), '');
 
         try {
           await rename(temporary, target);
         } catch (error) {
-          if (await lstat(target).then((item) => item.isDirectory(), () => false)) {
+          if (await lstat(join(target, COMPLETE_MARKER)).then((item) => item.isFile(), () => false)) {
             await rm(temporary, { recursive: true, force: true });
           } else {
             throw error;
@@ -116,10 +136,11 @@ export async function pruneSkillCache(skillsRoot: string, now: Date, maxAgeDays 
     const sourcePath = join(skillsRoot, sourceEntry.name);
     const snapshots = await readdir(sourcePath, { withFileTypes: true }).catch(() => []);
     for (const snapshot of snapshots) {
-      if (!snapshot.isDirectory()) continue;
+      if (!snapshot.isDirectory() || !SHA_RE.test(snapshot.name)) continue;
       const snapshotPath = join(sourcePath, snapshot.name);
       const modified = await lstat(snapshotPath).then((item) => item.mtimeMs, () => now.getTime());
       if (modified < cutoff) await rm(snapshotPath, { recursive: true, force: true });
     }
+    await rmdir(sourcePath).catch(() => undefined);
   }
 }
