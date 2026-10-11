@@ -57,6 +57,19 @@ function normalizeOrigin(origin: string): string {
   return normalized || (parsed.protocol === 'file:' ? 'file://' : '');
 }
 
+/**
+ * Deletes every symbolic link in a fetched tree, so nothing that later reads the cache can follow one out of it.
+ * readdir does not follow links, so a linked directory is deleted rather than descended into.
+ */
+async function removeSymlinks(path: string): Promise<void> {
+  const entries = await readdir(path, { withFileTypes: true });
+  for (const entry of entries) {
+    const child = join(path, entry.name);
+    if (entry.isSymbolicLink()) await rm(child, { force: true });
+    else if (entry.isDirectory()) await removeSymlinks(child);
+  }
+}
+
 async function treeBytes(path: string): Promise<number> {
   let total = 0;
   const entries = await readdir(path, { withFileTypes: true });
@@ -64,7 +77,6 @@ async function treeBytes(path: string): Promise<number> {
     const child = join(path, entry.name);
     if (entry.isDirectory()) total += await treeBytes(child);
     else if (entry.isFile()) total += (await stat(child)).size;
-    else throw new Error('unsupported skill tree entry');
   }
   return total;
 }
@@ -108,6 +120,7 @@ export async function ensureSkills(options: EnsureSkillsOptions): Promise<Ensure
         ], { cwd: temporary, env: GIT_ENV, timeoutMs });
         await runGit(git, ['checkout', '--detach', source.sha], { cwd: temporary, env: GIT_ENV, timeoutMs });
         await rm(join(temporary, '.git'), { recursive: true, force: true });
+        await removeSymlinks(temporary);
         if (await treeBytes(temporary) > maxTreeBytes) throw new Error('skill tree too large');
         await writeFile(join(temporary, COMPLETE_MARKER), '');
 

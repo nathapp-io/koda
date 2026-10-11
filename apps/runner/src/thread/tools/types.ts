@@ -1,3 +1,4 @@
+import type { EmbedderTool } from '@nathapp/nax-agent';
 import type { ThreadSkillSource } from '@nathapp/fleet-protocol';
 import type { Git } from '../../executor/git';
 
@@ -15,9 +16,14 @@ export interface ThreadToolResult {
   isError?: boolean;
 }
 
-/** Thread tools are read-only, so nax-agent never asks for approval before running one. */
+/**
+ * A read-only thread tool. Assignable to nax-agent's EmbedderTool (its run ignores the session context),
+ * so buildThreadTools hands the set straight to a session. Approval is always 'never'.
+ */
 export interface ThreadTool {
   readonly name: string;
+  readonly description: string;
+  readonly inputSchema: EmbedderTool['inputSchema'];
   readonly approval: 'never';
   run(input: unknown): Promise<ThreadToolResult>;
 }

@@ -10,6 +10,13 @@ async function load(ctx: ThreadToolContext, input: unknown): Promise<ThreadToolR
 export function loadSkillTool(ctx: ThreadToolContext): ThreadTool {
   return {
     name: 'load_skill',
+    description: 'Load the SKILL.md text of a named skill from the thread skill set.',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'The skill name.' } },
+      required: ['name'],
+      additionalProperties: false,
+    },
     approval: 'never',
     run: (input) => refuseInvalidInput(() => load(ctx, input)),
   };

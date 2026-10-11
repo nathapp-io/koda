@@ -10,6 +10,16 @@ async function read(ctx: ThreadToolContext, input: unknown): Promise<ThreadToolR
 export function readSkillFileTool(ctx: ThreadToolContext): ThreadTool {
   return {
     name: 'read_skill_file',
+    description: 'Read a text file inside a named skill directory, by path relative to that directory.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'The skill name.' },
+        relPath: { type: 'string', description: 'Path of the file relative to the skill directory.' },
+      },
+      required: ['name', 'relPath'],
+      additionalProperties: false,
+    },
     approval: 'never',
     run: (input) => refuseInvalidInput(() => read(ctx, input)),
   };

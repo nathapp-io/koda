@@ -53,6 +53,18 @@ async function search(ctx: ThreadToolContext, input: unknown): Promise<ThreadToo
 export function searchRepoTool(ctx: ThreadToolContext): ThreadTool {
   return {
     name: 'search_repo',
+    description: 'Search tracked text files in the repository for a pattern. Returns path:line:text hits.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: 'Pattern to search for (extended regex unless fixed is true).' },
+        glob: { type: 'string', description: 'Restrict the search to paths matching this glob.' },
+        max: { type: 'integer', minimum: 1, maximum: 200, description: 'Maximum hit lines to return; default 200.' },
+        fixed: { type: 'boolean', description: 'Treat pattern as a fixed string.' },
+      },
+      required: ['pattern'],
+      additionalProperties: false,
+    },
     approval: 'never',
     run: (input) => refuseInvalidInput(() => search(ctx, input)),
   };

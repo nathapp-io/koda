@@ -33,6 +33,15 @@ async function list(ctx: ThreadToolContext, input: unknown): Promise<ThreadToolR
 export function listFilesTool(ctx: ThreadToolContext): ThreadTool {
   return {
     name: 'list_files',
+    description: 'List tracked files in the repository, optionally under a directory or matching a glob. Ignored and untracked files are not listed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        dir: { type: 'string', description: 'Repository-relative directory to list under.' },
+        glob: { type: 'string', description: 'Glob pattern for file paths, for example **/*.md.' },
+      },
+      additionalProperties: false,
+    },
     approval: 'never',
     run: (input) => refuseInvalidInput(() => list(ctx, input)),
   };
