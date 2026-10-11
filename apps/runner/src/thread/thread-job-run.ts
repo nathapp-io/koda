@@ -1,13 +1,13 @@
 import { chmod, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentSession, SessionEvent } from '@nathapp/nax-agent';
-import type { ThreadAssign, ThreadCommandType } from '@nathapp/fleet-protocol';
+import { THREAD_LIMITS, type ThreadAssign, type ThreadCommandType } from '@nathapp/fleet-protocol';
 import type { CredentialProvider } from '../credentials/broker';
 import { errorMessage } from '../errors';
 import type { Git } from '../executor/git';
 import type { JobRow } from '../journal/types';
 import type { DrainResult, LogShipping, ThreadLogJob } from '../logs/types';
-import { jobDirFor, repoDirFor } from '../paths/safe-segment';
+import { assertSegment, jobDirFor, repoDirFor } from '../paths/safe-segment';
 import { JobEvents } from '../supervisor/job-events';
 import type { JobRunDeps, RunStart } from '../supervisor/job-run';
 import type { RepoMutex } from '../supervisor/repo-mutex';
@@ -106,6 +106,38 @@ type ThreadCloseReason = 'idle' | 'closed' | 'cost_cap' | 'stream_cap' | 'cancel
 /** The one reason a turn's own failure ends the run with. */
 const SESSION_ERROR = 'session_error';
 
+/** The ask transport's request-id rule: 1..200 printable ASCII characters. */
+const REQUEST_ID_RE = /^[\x20-\x7e]{1,200}$/;
+
+/** A string of at most `messageMaxBytes` UTF-8 bytes — the bound the API applies to a message and an answer. */
+function isMessageText(value: unknown): value is string {
+  return typeof value === 'string' && Buffer.byteLength(value, 'utf8') <= THREAD_LIMITS.messageMaxBytes;
+}
+
+/** A safe path segment: the same rule every path built from server data goes through. */
+function isSafeSegment(value: unknown): value is string {
+  try {
+    assertSegment('messageId', value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The `THREAD_INPUT` payload, or null when it is not exactly `{ messageId, text }` with a usable id and text. */
+function readInput(payload: unknown): { messageId: string; text: string } | null {
+  if (typeof payload !== 'object' || payload === null) return null;
+  const { messageId, text } = payload as { messageId?: unknown; text?: unknown };
+  return isSafeSegment(messageId) && isMessageText(text) ? { messageId, text } : null;
+}
+
+/** The `THREAD_ANSWER` payload, or null when it is not exactly `{ requestId, text }` with a usable id and text. */
+function readAnswer(payload: unknown): { requestId: string; text: string } | null {
+  if (typeof payload !== 'object' || payload === null) return null;
+  const { requestId, text } = payload as { requestId?: unknown; text?: unknown };
+  return typeof requestId === 'string' && REQUEST_ID_RE.test(requestId) && isMessageText(text) ? { requestId, text } : null;
+}
+
 /**
  * Fleet S5a slice B3b: one THREAD job, from ASSIGN to cleanup. It is deliberately not a `JobRun` — a thread
  * spawns no nax, uploads no bundle and owns a worktree of its own, so it takes no repo mutex and reaps no
@@ -127,6 +159,8 @@ export class ThreadJobRun {
   private idleAbort: AbortController | null = null;
   /** The heartbeat's abort, while it is armed. */
   private heartbeatAbort: AbortController | null = null;
+  /** The session close `halt` started, kept so `abandon` may bound its wait; `session.close()` runs once per run. */
+  private sessionClose: Promise<void> | null = null;
   /** B3b-R3: set synchronously when a close or a fail is requested; a later reason is ignored. */
   private closing = false;
   /** Cost is the sum of `usage.costUsd` over the whole job (a `turn_end.costUsd` repeats its turn's usage). */
@@ -368,7 +402,8 @@ export class ThreadJobRun {
   /**
    * One turn: the flag goes up and the idle timer stops before anything is written, every session event reaches
    * the writer, and the flag comes down only once the iteration has ended. An iteration that throws while the run
-   * is neither closing nor halted is the run's own failure.
+   * is neither closing nor halted is the run's own failure. After a halt the turn is abandoned where it stands:
+   * its tail writes no stream line, no journal event and no transition.
    */
   private async runTurn(messageId: string, text: string): Promise<void> {
     const session = this.session;
@@ -380,15 +415,19 @@ export class ThreadJobRun {
     let failure: unknown = null;
     try {
       writer.inputConsumed(messageId);
-      for await (const event of session.send(text)) this.consume(event, writer);
-      writer.flush();
+      for await (const event of session.send(text)) {
+        if (this.halted) break;
+        this.consume(event, writer);
+      }
+      if (!this.halted) writer.flush();
     } catch (error) {
       failure = error;
     } finally {
       this.releaseTurn();
     }
+    if (this.halted) return;
     if (failure !== null) {
-      if (!this.closing && !this.halted) await this.failSession();
+      if (!this.closing) await this.failSession();
       return;
     }
     this.armIdle();
@@ -494,6 +533,8 @@ export class ThreadJobRun {
   private async finishRun(reason: ThreadCloseReason | typeof SESSION_ERROR, failed: boolean): Promise<void> {
     try {
       this.stopIdle();
+      // A halt that lands before the close does: the row is left as it stands and nothing more is written.
+      if (this.halted) return;
       if (this.turnRunning) {
         // A cancel that throws must not abandon the close: the stream still gets sealed and the row still ends.
         try {
@@ -571,30 +612,133 @@ export class ThreadJobRun {
     }
   }
 
-  /** B3b-R2: the answer is synchronous — a command never waits on the session before it is acknowledged. */
-  command(_type: ThreadCommandType, _payload: unknown): ThreadCommandOutcome {
-    return { result: 'rejected', detail: 'unsupported' };
+  /**
+   * B3b-R2: a thread command is applied synchronously — `CommandHandler.handle` is awaited inline by the sync loop,
+   * so a command never waits on a turn, a close or a drain. A `THREAD_INPUT` that returns `ok` has already claimed
+   * the turn slot, so a second one in the same batch sees `turn_running` (B3-R5, no input queue).
+   */
+  command(type: ThreadCommandType, payload: unknown): ThreadCommandOutcome {
+    if (type === 'THREAD_PUBLISH') return { result: 'rejected', detail: 'unsupported' };
+    if (this.closing || this.halted) return { result: 'rejected', detail: 'session_closed' };
+    if (this.events.currentState() !== 'RUNNING') return { result: 'rejected', detail: 'session_not_ready' };
+    switch (type) {
+      case 'THREAD_INPUT': return this.applyInput(payload);
+      case 'THREAD_ANSWER': return this.applyAnswer(payload);
+      case 'THREAD_STOP_TURN': return this.applyStopTurn();
+      case 'THREAD_CLOSE': return this.applyClose();
+      default: return { result: 'rejected', detail: 'unsupported' };
+    }
   }
 
+  /** The turn starts in the background; the ack does not wait for it. */
+  private applyInput(payload: unknown): ThreadCommandOutcome {
+    const message = readInput(payload);
+    if (message === null) return { result: 'rejected', detail: 'invalid payload' };
+    if (this.turnRunning) return { result: 'rejected', detail: 'turn_running' };
+    void this.runTurn(message.messageId, message.text);
+    return { result: 'ok' };
+  }
+
+  /** nax-agent decides whether the ask is still answerable; its status is the ack's detail when it is not. */
+  private applyAnswer(payload: unknown): ThreadCommandOutcome {
+    const answer = readAnswer(payload);
+    if (answer === null) return { result: 'rejected', detail: 'invalid payload' };
+    const session = this.session;
+    if (session === null) return { result: 'rejected', detail: 'session_not_ready' };
+    const status = session.answer(answer.requestId, { text: answer.text });
+    return status === 'accepted' ? { result: 'ok' } : { result: 'rejected', detail: status };
+  }
+
+  /** `THREAD_STOP_TURN` stops the turn, never the session: the row stays RUNNING and may run another turn. */
+  private applyStopTurn(): ThreadCommandOutcome {
+    if (this.turnRunning) this.session?.cancel('stopped');
+    return { result: 'ok' };
+  }
+
+  /** B3b-R2: the close runs in the background; the ack does not wait for it. */
+  private applyClose(): ThreadCommandOutcome {
+    this.requestClose('closed');
+    return { result: 'ok' };
+  }
+
+  /**
+   * B3b-R3: before RUNNING the request only records `cancelRequestedAt` — the next start step ends CANCELLED; while
+   * RUNNING it closes the run with `cancelled`; while it is already closing it changes nothing. Only a terminal row
+   * answers false.
+   */
   requestCancel(): boolean {
     const row = this.row();
     if (row === null || isTerminalState(row.state)) return false;
     if (row.cancelRequestedAt === null) {
       this.deps.journal.updateJob(this.jobId, this.leaseEpoch, { cancelRequestedAt: this.deps.now().toISOString() });
     }
+    if (this.events.currentState() === 'RUNNING') this.requestClose('cancelled');
     return true;
   }
 
+  /**
+   * Daemon stop: the run's background tasks stop writing, the session is closed without waiting, and `start`
+   * resolves without waiting for the turn. The close promise is kept for `abandon`, the only caller that waits.
+   */
   halt(): void {
     this.halted = true;
     this.stopIdle();
     this.stopHeartbeat();
+    if (this.turnRunning) {
+      try {
+        this.session?.cancel('halted');
+      } catch (error) {
+        this.deps.log.warn('thread session cancel failed', { jobId: this.jobId, error: errorMessage(error) });
+      }
+    }
+    const session = this.session;
+    this.session = null;
+    if (session !== null) this.startSessionClose(session);
     this.deps.logs.stopJob(this.jobId, this.leaseEpoch);
     this.releaseEnd();
   }
 
+  /** `session.close()` is called once per run; a throw is logged and the stored promise still resolves. */
+  private startSessionClose(session: AgentSession): void {
+    if (this.sessionClose !== null) return;
+    this.sessionClose = session.close().catch((error: unknown) => {
+      this.deps.log.warn('thread session close failed', { jobId: this.jobId, error: errorMessage(error) });
+    });
+  }
+
+  /**
+   * B3b-R1: no mutex, and the only wait is the session close `halt` started — never longer than
+   * `threadCloseTimeoutMs`. A refused release is logged and never held against a row that is already gone.
+   */
   async abandon(): Promise<void> {
     this.halt();
+    const row = this.row();
     this.deps.journal.abandon(this.jobId, this.leaseEpoch);
+    if (row !== null) {
+      try {
+        await this.deps.host.credentials.release(row);
+      } catch (error) {
+        this.deps.log.warn('credential release failed', { jobId: this.jobId, error: errorMessage(error) });
+      }
+    }
+    await this.awaitSessionClose();
+  }
+
+  /**
+   * Waits for the close `halt` started, for at most `threadCloseTimeoutMs`; a timeout is reported and never fatal.
+   * With `open` still pending there is no close to await — the session `open` resolves is closed then, unawaited.
+   */
+  private async awaitSessionClose(): Promise<void> {
+    const close = this.sessionClose;
+    if (close === null) return;
+    const abort = new AbortController();
+    const timedOut = this.deps.sleep(this.deps.tuning.threadCloseTimeoutMs, abort.signal).then(() => true);
+    try {
+      if (await Promise.race([close.then(() => false), timedOut])) {
+        this.deps.log.warn('thread session close timed out', { jobId: this.jobId, leaseEpoch: this.leaseEpoch });
+      }
+    } finally {
+      abort.abort();
+    }
   }
 }
