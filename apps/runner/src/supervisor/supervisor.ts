@@ -44,7 +44,8 @@ export class Supervisor {
   private threadDeps(threads: ThreadRunSetup): ThreadRunDeps {
     return {
       journal: this.deps.journal, log: this.deps.log, now: this.deps.now, sleep: this.deps.sleep,
-      mutex: this.deps.mutex, logs: this.deps.logs, host: threads.host, tuning: threads.tuning,
+      mutex: this.deps.mutex, logs: this.deps.logs,
+      host: { ...threads.host, sessions: (threads as ThreadRunSetup & { sessions?: ThreadRunSetup['host']['sessions'] }).sessions ?? threads.host.sessions }, tuning: threads.tuning,
     };
   }
 
