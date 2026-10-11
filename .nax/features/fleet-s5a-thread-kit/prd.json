@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-kit",
   "branchName": "feat/fleet-s5a-thread-kit",
   "createdAt": "2026-10-11T00:00:00.000Z",
-  "updatedAt": "2026-10-11T08:26:18.802Z",
+  "updatedAt": "2026-10-11T08:45:32.279Z",
   "userStories": [
     {
       "id": "US-001",
@@ -339,8 +339,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [
         {
@@ -425,7 +425,10 @@
       "routing": {
         "complexity": "expert",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Secret redaction across asynchronous deltas, UTF-8 byte caps, append ordering and wake timing are high-risk data-security behaviors."
+        "reasoning": "Secret redaction across asynchronous deltas, UTF-8 byte caps, append ordering and wake timing are high-risk data-security behaviors.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
       },
       "contextFiles": [
         "apps/runner/src/logs/types.ts",
@@ -440,7 +443,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "b7e47eb50d29e89071d5ea68e8124129b51565fb"
     }
   ],
   "analysis": "Graph-first navigation could not be used: codebase-memory MCP/list_projects and Git/shell tools are not exposed in this session, so navigation fell back to repository Read/Glob (the execution root was supplied). This is an additive, intentionally unintegrated runner kit: packages/fleet-protocol/src/threads.ts:1-42 already exports B1's ThreadAssign, ThreadBackend, ThreadSkillSource and THREAD_LIMITS; packages/fleet-protocol/src/index.ts:1-12 re-exports threads and fixes FLEET_PROTOCOL_VERSION at 3. Preserve the v3 constant and existing wire behavior; add stream constants, types and regex without enabling a thread log PUT. apps/api/src/fleet/common/thread-jobs.ts:1-20 mirrors protocol types/constants and defines MODEL_ID_RE, but API changes/parity testing belong to B2. apps/runner/src/thread/ does not yet exist. US-001 changes apps/runner/src/daemon/tuning.ts:1-69 and its exact-object frozen-value test at apps/runner/src/daemon/tuning.spec.ts:1-17, and pins @nathapp/nax-agent exactly 0.86.0 in apps/runner/package.json:1-29 with bun.lock regeneration. apps/runner/src/paths/safe-segment.ts:10-60 provides assertSegment (100-character segment), assertOwner, assertFeature, assertRelativePath and assertInside; validate all server-supplied path/ref components before use. apps/runner/src/config/runner-config.ts:28-46 defines RunnerHome.dir and RunnerConfig.naxHome for the path and credentials helpers. apps/runner/src/executor/git.ts:5-26 defines async Git.run/ok; createGit at :84-100 clears inherited credential helpers, disables interactive prompts, and reports timeout via exit 137; reasonFromError at :52-57 maps auth failures to 'git auth failed'. apps/runner/src/executor/workspace.ts:35-59 shows ensureClone rewrites clone configuration; thread worktree must invoke it only when the clone is missing, with apps/runner/src/supervisor/repo-mutex.ts:1-23 scoped only to this initialization. apps/runner/src/executor/refs.ts:4-20 resolves remote branches, tags and commits and distinguishes invalid and absent refs. apps/runner/src/logs/types.ts:51-60 exposes LogShipping.wake but LogStreamName is currently restricted by LogEventPayload at packages/fleet-protocol/src/index.ts:166-167 to run/stdout/stderr: the writer only calls wake; B3b changes shipper/transport and stream registration. Native tools' jailed skill-file paths and tracked-only repo search are separate from nax-agent's own read-profile built-ins; credential configuration must be re-read and secrets must never be persisted or emitted in plain text. Unit tests should use bun:test, real temp files and git where possible: apps/runner/test/helpers/git-fixture.ts:1-80 isolates git and creates file:// origins; apps/runner/test/helpers/tmp.ts:1-17 manages temp directories; apps/runner/test/helpers/manual-clock.ts:1-31 controls wake timers. Apps/runner's scripts at apps/runner/package.json:7-17 run bun test src test/unit, tsc --noEmit and ESLint; do not put unit specs in uncollected locations. Migration is additive: the runner continues to report protocol v3, never hosts or uploads threads until B3b/B2, and this kit's exported seams can be consumed later without changing current job execution. Risks are shared clone mutation/races, path escapes or symlink traversal, credential leakage, agent API compatibility, UTF-8 byte rather than character caps, delta-secret boundaries, and timer/stream-cap ordering. US-001 is explicitly scoped to apps/runner by the binding structure despite also changing the shared protocol package and root bun.lock; verify protocol typechecking at the root in addition to runner gates. Dependency order: US-001 first; US-002/003/005/006/007 independently afterwards; US-004 last after US-002 and US-003. Read apps/runner-specific guidance before writing app code; never edit generated clients or guidance.",
