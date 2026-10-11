@@ -1,12 +1,12 @@
 import { chmod, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { AgentSession } from '@nathapp/nax-agent';
+import type { AgentSession, SessionEvent } from '@nathapp/nax-agent';
 import type { ThreadAssign, ThreadCommandType } from '@nathapp/fleet-protocol';
 import type { CredentialProvider } from '../credentials/broker';
 import { errorMessage } from '../errors';
 import type { Git } from '../executor/git';
 import type { JobRow } from '../journal/types';
-import type { LogShipping, ThreadLogJob } from '../logs/types';
+import type { DrainResult, LogShipping, ThreadLogJob } from '../logs/types';
 import { jobDirFor, repoDirFor } from '../paths/safe-segment';
 import { JobEvents } from '../supervisor/job-events';
 import type { JobRunDeps, RunStart } from '../supervisor/job-run';
@@ -100,6 +100,12 @@ export type ThreadRunDeps =
 
 export type ThreadCommandOutcome = { result: 'ok' | 'rejected'; detail?: string };
 
+/** B3b-R3: the reasons a live thread run closes itself with; the first one that arrives wins. */
+type ThreadCloseReason = 'idle' | 'closed' | 'cost_cap' | 'stream_cap' | 'cancelled';
+
+/** The one reason a turn's own failure ends the run with. */
+const SESSION_ERROR = 'session_error';
+
 /**
  * Fleet S5a slice B3b: one THREAD job, from ASSIGN to cleanup. It is deliberately not a `JobRun` — a thread
  * spawns no nax, uploads no bundle and owns a worktree of its own, so it takes no repo mutex and reaps no
@@ -113,6 +119,19 @@ export class ThreadJobRun {
   private session: AgentSession | null = null;
   private halted = false;
   private readonly endWaiters: Array<() => void> = [];
+  /** A turn's iteration is in flight: the idle timer is stopped and a close waits for it to end. */
+  private turnRunning = false;
+  private turnSettled: Promise<void> = Promise.resolve();
+  private turnDone: (() => void) | null = null;
+  /** The one-shot idle timer's abort, while it is armed. */
+  private idleAbort: AbortController | null = null;
+  /** The heartbeat's abort, while it is armed. */
+  private heartbeatAbort: AbortController | null = null;
+  /** B3b-R3: set synchronously when a close or a fail is requested; a later reason is ignored. */
+  private closing = false;
+  /** Cost is the sum of `usage.costUsd` over the whole job (a `turn_end.costUsd` repeats its turn's usage). */
+  private spent = 0;
+  private maxCostUsd = Number.POSITIVE_INFINITY;
 
   constructor(private readonly deps: ThreadRunDeps, readonly jobId: string, readonly leaseEpoch: number) {
     this.events = new JobEvents(deps.journal, jobId, leaseEpoch, deps.log);
@@ -221,10 +240,13 @@ export class ThreadJobRun {
       return;
     }
 
-    // Steps 7-8: the row goes RUNNING, the stream is created and announced, and the first turn starts.
+    // Steps 7-8: the row goes RUNNING, the stream is created and announced, the heartbeat starts and the first
+    // turn (or, with no initial message, the idle timer) begins.
     this.session = opened.session;
+    this.maxCostUsd = Number(row.assign.maxCostUsd);
     this.events.transition('RUNNING', undefined, { pid: null, pgid: null, branch: null });
     await this.openStream(thread, opened.resumed);
+    this.startHeartbeat();
     this.startInitialTurn(thread);
     await this.waitForEnd();
   }
@@ -320,6 +342,7 @@ export class ThreadJobRun {
       now: this.deps.now,
       sleep: this.deps.sleep,
       streamMaxBytes: this.deps.tuning.streamMaxBytes,
+      onCap: () => this.requestClose('stream_cap'),
       onWarn: (message) => this.events.lifecycle('warn', message),
     });
     this.writer = writer;
@@ -332,23 +355,162 @@ export class ThreadJobRun {
     writer.started({ resumed, backend: thread.backend, skillShas: thread.skills.map((source) => source.sha) });
   }
 
-  /** Step 8: the initial message's turn, off the `start` path; with no initial message the run only waits. */
+  /** Step 8: the initial message's turn, off the `start` path; with no initial message the run only idles. */
   private startInitialTurn(thread: ThreadAssign): void {
     const message = thread.initialMessage;
-    if (message === null) return;
+    if (message === null) {
+      this.armIdle();
+      return;
+    }
     void this.runTurn(message.messageId, message.text);
   }
 
+  /**
+   * One turn: the flag goes up and the idle timer stops before anything is written, every session event reaches
+   * the writer, and the flag comes down only once the iteration has ended. An iteration that throws while the run
+   * is neither closing nor halted is the run's own failure.
+   */
   private async runTurn(messageId: string, text: string): Promise<void> {
     const session = this.session;
     const writer = this.writer;
     if (session === null || writer === null) return;
+    this.turnRunning = true;
+    this.stopIdle();
+    this.turnSettled = new Promise<void>((resolve) => { this.turnDone = resolve; });
+    let failure: unknown = null;
     try {
       writer.inputConsumed(messageId);
-      for await (const event of session.send(text)) writer.event(event);
+      for await (const event of session.send(text)) this.consume(event, writer);
+      writer.flush();
     } catch (error) {
-      await this.failSafe(error);
+      failure = error;
+    } finally {
+      this.releaseTurn();
     }
+    if (failure !== null) {
+      if (!this.closing && !this.halted) await this.failSession();
+      return;
+    }
+    this.armIdle();
+  }
+
+  /** Every event of a turn is streamed; the cost of a `usage` event is added to the job's spend and may close it. */
+  private consume(event: SessionEvent, writer: ThreadEventWriter): void {
+    writer.event(event);
+    if (event.type !== 'usage') return;
+    this.spent += event.costUsd;
+    if (this.spent >= this.maxCostUsd) this.requestClose('cost_cap');
+  }
+
+  private releaseTurn(): void {
+    this.turnRunning = false;
+    const done = this.turnDone;
+    this.turnDone = null;
+    done?.();
+  }
+
+  /** The idle timer runs only while no turn does; its expiry closes the run. */
+  private armIdle(): void {
+    this.stopIdle();
+    if (this.halted || this.closing) return;
+    const abort = new AbortController();
+    this.idleAbort = abort;
+    const dueAtMs = this.deps.now().getTime() + this.deps.tuning.threadIdleMs;
+    void this.deps.sleep(this.deps.tuning.threadIdleMs, abort.signal).then(() => {
+      // A sleeper that returns before the injected clock reaches the deadline cannot pace the timer: it neither
+      // expires now nor re-arms, because either would busy-loop instead of waiting out `threadIdleMs`.
+      if (abort.signal.aborted || this.deps.now().getTime() < dueAtMs) return;
+      this.requestClose('idle');
+    }, (error: unknown) => this.deps.log.warn('thread idle wait failed', { jobId: this.jobId, error: errorMessage(error) }));
+  }
+
+  private stopIdle(): void {
+    this.idleAbort?.abort();
+    this.idleAbort = null;
+  }
+
+  /** A RUNNING run stamps `heartbeatAt` every `threadHeartbeatMs`, until the close stops it. */
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    const abort = new AbortController();
+    this.heartbeatAbort = abort;
+    void this.heartbeat(abort.signal);
+  }
+
+  private async heartbeat(signal: AbortSignal): Promise<void> {
+    for (;;) {
+      const dueAtMs = this.deps.now().getTime() + this.deps.tuning.threadHeartbeatMs;
+      try {
+        await this.deps.sleep(this.deps.tuning.threadHeartbeatMs, signal);
+      } catch (error) {
+        this.deps.log.warn('thread heartbeat wait failed', { jobId: this.jobId, error: errorMessage(error) });
+        return;
+      }
+      // Same rule as the idle timer: a wait that returns before the clock reaches its deadline cannot pace the
+      // heartbeat, and re-arming it would spin.
+      if (signal.aborted || this.deps.now().getTime() < dueAtMs) return;
+      if (this.halted || this.closing) return;
+      this.events.snapshot({ heartbeatAt: this.deps.now().toISOString() });
+    }
+  }
+
+  private stopHeartbeat(): void {
+    this.heartbeatAbort?.abort();
+    this.heartbeatAbort = null;
+  }
+
+  /** B3b-R3: the first close reason wins, and the turn check is made before the close's first await. */
+  private requestClose(reason: ThreadCloseReason): void {
+    if (this.closing || this.halted) return;
+    this.closing = true;
+    void this.finishRun(reason, false);
+  }
+
+  private async failSession(): Promise<void> {
+    if (this.closing) return;
+    this.closing = true;
+    await this.finishRun(SESSION_ERROR, true);
+  }
+
+  /**
+   * The one close and the one fail: the idle timer stops, a running turn is cancelled and waited out, the session
+   * is closed, the stream is sealed, the logs drain under the transition, the heartbeat stops, and the row ends
+   * `UPLOADING` → the terminal state. `failed` seals the stream with `session_failed` and ends `FAILED`.
+   */
+  private async finishRun(reason: ThreadCloseReason | typeof SESSION_ERROR, failed: boolean): Promise<void> {
+    try {
+      this.stopIdle();
+      if (this.turnRunning) {
+        this.session?.cancel(reason);
+        await this.turnSettled;
+      }
+      await this.closeHeldSession();
+      const writer = this.writer;
+      if (writer !== null) {
+        writer.flush();
+        if (failed) writer.failed(reason);
+        else writer.closed(reason);
+      }
+      await this.awaitLogs(this.deps.logs.drain(this.jobId, this.leaseEpoch, this.deps.tuning.logDrainTimeoutMs));
+      this.stopHeartbeat();
+      if (this.halted) return;
+      this.events.transition('UPLOADING');
+      if (failed) this.events.transition('FAILED', reason);
+      else this.events.transition(reason === 'cancelled' ? 'CANCELLED' : 'COMPLETED', reason);
+      this.deps.logs.stopJob(this.jobId, this.leaseEpoch);
+      this.deps.journal.markDone(this.jobId, this.leaseEpoch);
+    } catch (error) {
+      this.deps.log.error('thread run could not be finished', { jobId: this.jobId, error: errorMessage(error) });
+    } finally {
+      this.releaseEnd();
+    }
+  }
+
+  /** A drain that times out is reported; the bundle the API builds carries the rest of the stream. */
+  private async awaitLogs(drained: Promise<DrainResult>): Promise<void> {
+    if ((await drained) !== 'timeout') return;
+    const seconds = Math.max(1, Math.round(this.deps.tuning.logDrainTimeoutMs / 1000));
+    this.events.lifecycle('warn', `log upload did not finish within ${seconds} s; the bundle fills the rest`);
   }
 
   /** The promise `start` resolves on covers the whole run: it resolves on a halt, an abandon or a terminal end. */
@@ -372,10 +534,12 @@ export class ThreadJobRun {
     if (this.halted) return;
     this.deps.log.error('thread run failed', { jobId: this.jobId, error: errorMessage(error) });
     try {
+      this.stopIdle();
+      this.stopHeartbeat();
       if (this.events.currentState() === 'RUNNING') {
         this.events.lifecycle('error', `runner error: ${errorMessage(error)}`);
         this.events.transition('UPLOADING');
-        this.events.transition('FAILED', 'session_error');
+        this.events.transition('FAILED', SESSION_ERROR);
       } else {
         this.events.transition('FAILED', `runner error: ${errorMessage(error)}`);
       }
@@ -404,6 +568,8 @@ export class ThreadJobRun {
 
   halt(): void {
     this.halted = true;
+    this.stopIdle();
+    this.stopHeartbeat();
     this.deps.logs.stopJob(this.jobId, this.leaseEpoch);
     this.releaseEnd();
   }
