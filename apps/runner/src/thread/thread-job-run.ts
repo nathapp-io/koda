@@ -465,14 +465,10 @@ export class ThreadJobRun {
     const abort = new AbortController();
     this.idleAbort = abort;
     const dueAtMs = this.deps.now().getTime() + this.deps.tuning.threadIdleMs;
-    const waited = this.deps.sleep(this.deps.tuning.threadIdleMs, abort.signal);
-    // The timer expires the run only for a wait that observed the injected clock reach the deadline. A sleeper
-    // that has already carried the clock to it the moment it was called (a fast-forwarding clock), like one that
-    // returns before the clock gets there, cannot pace the timer: it neither expires now nor re-arms, because
-    // either would busy-loop instead of waiting out `threadIdleMs`.
-    const alreadyAtDeadline = this.deps.now().getTime() >= dueAtMs;
-    void waited.then(() => {
-      if (abort.signal.aborted || alreadyAtDeadline || this.deps.now().getTime() < dueAtMs) return;
+    void this.deps.sleep(this.deps.tuning.threadIdleMs, abort.signal).then(() => {
+      // A sleeper that returns before the injected clock reaches the deadline cannot pace the timer: it neither
+      // expires now nor re-arms, because either would busy-loop instead of waiting out `threadIdleMs`.
+      if (abort.signal.aborted || this.deps.now().getTime() < dueAtMs) return;
       this.requestClose('idle');
     }, (error: unknown) => this.deps.log.warn('thread idle wait failed', { jobId: this.jobId, error: errorMessage(error) }));
   }
@@ -638,14 +634,6 @@ export class ThreadJobRun {
       case 'THREAD_CLOSE': return this.applyClose();
       default: return { result: 'rejected', detail: 'unsupported' };
     }
-  }
-
-  /**
-   * Fleet S5a §5: whether this run still takes commands. A closing or halted run does not, so the Supervisor stops
-   * holding the job for it and answers a later command `does not hold job` without waiting for the close (B3b-R2).
-   */
-  acceptsCommands(): boolean {
-    return !this.closing && !this.halted;
   }
 
   /** The turn starts in the background; the ack does not wait for it. */

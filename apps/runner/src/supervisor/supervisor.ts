@@ -68,7 +68,7 @@ export class Supervisor {
   /** Fleet S5a §5: a THREAD command reaches the run that holds the (job, epoch); any other row is not held. */
   threadCommand(command: FleetCommandOut): ThreadCommandOutcome {
     const run = this.runs.get(this.key(command.jobId, command.leaseEpoch));
-    if (!(run instanceof ThreadJobRun) || !run.acceptsCommands()) return { result: 'rejected', detail: 'does not hold job' };
+    if (!(run instanceof ThreadJobRun)) return { result: 'rejected', detail: 'does not hold job' };
     return run.command(command.type as ThreadCommandType, command.payload);
   }
 
