@@ -647,8 +647,16 @@ export class ThreadJobRun {
     if (answer === null) return { result: 'rejected', detail: 'invalid payload' };
     const session = this.session;
     if (session === null) return { result: 'rejected', detail: 'session_not_ready' };
-    const status = session.answer(answer.requestId, { text: answer.text });
-    return status === 'accepted' ? { result: 'ok' } : { result: 'rejected', detail: status };
+    try {
+      const status = session.answer(answer.requestId, { text: answer.text });
+      return status === 'accepted' ? { result: 'ok' } : { result: 'rejected', detail: status };
+    } catch (error) {
+      // A throwing answer must not escape `command`: the sync loop awaits `CommandHandler.handle` inline. nax-agent
+      // throws `AGENT_SESSION_INVALID_ANSWER` for a request id it never issued, so the ask is gone either way — the
+      // same `unknown` its non-throwing path answers for a request that is no longer pending.
+      this.deps.log.warn('thread session answer failed', { jobId: this.jobId, error: errorMessage(error) });
+      return { result: 'rejected', detail: 'unknown' };
+    }
   }
 
   /** `THREAD_STOP_TURN` stops the turn, never the session: the row stays RUNNING and may run another turn. */
