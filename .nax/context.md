@@ -137,20 +137,23 @@ Rules:
 
 Use `codebase-memory-mcp` for graph-first code navigation. In nax, the server ID is `codebase-memory` and its tools are named `codebase-memory__<tool>`; use the equivalent exposed names in other hosts. Availability depends on the host's MCP configuration and session stage.
 
-Before discovering symbols, callers, dependencies, routes or architecture, call `codebase-memory__list_projects`. Select the entry whose `root_path` matches the absolute **Execution repository/worktree root** supplied in the nax prompt, and reuse its returned project identifier. If the host does not supply a root, obtain it with `git rev-parse --show-toplevel` (nax Git tool: `{"subcommand":"rev-parse"}`). Never derive or guess the identifier, or select a different repository. If results are truncated, read the tool's spill file or paginate until the matching entry is found.
+Pass the absolute **Execution repository/worktree root** supplied in the nax prompt directly as the `project` argument (for example `"project": "/Users/alice/src/koda"`); the server resolves a repository root path to its index. If the host does not supply a root, obtain it with `git rev-parse --show-toplevel` (nax Git tool: `{"subcommand":"rev-parse"}`). The path must be the repository root, not a package directory such as `apps/api`.
+
+Do not start with `codebase-memory__list_projects`: it returns every repository indexed on the machine (no name or path filter), and nax truncates the result, which costs several paging calls. Call it only when a tool fails with `project not found or not indexed`: call it once with `{"limit": 100}` (no `include_details`) and use the entry whose `root_path` equals the repository root. If no entry matches, the repository is not indexed; fall back to direct reads and text search. Never select a different repository's project.
 
 Then call the appropriate MCP tool before structural exploration with directory listings, whole-file reads or grep:
 - `search_graph` to find symbols or routes
 - `trace_path` for callers and callees
 - `get_code_snippet` to read a symbol's exact source
 - `get_architecture` for a module or package overview
-- `search_code` for literal text across indexed code
+- `search_code` for text across indexed code (see the regex rule below)
 - `detect_changes` for symbols touched by the diff
 - `check_index_coverage` to verify the relevant files are indexed and current
 
 Rules:
 - fall back to direct reads or text search for structural discovery only when the MCP server is unavailable, no matching project is indexed, or a graph query returns insufficient results; explain the fallback
 - the index can lag behind recent edits: read the known file before editing; this does not replace graph-first discovery
+- `search_code` matches `pattern` as a literal string unless you pass `"regex": true`. An alternation such as `interface Foo|type Foo` or a call such as `git.run(` without it silently returns zero matches. For any pattern with `|`, `(`, `.` or other regex syntax, pass `"regex": true` and escape literal characters (`git\.run\(`). Treat a zero-match `search_code` result as unconfirmed until a text search agrees
 - use text search directly for config files, JSON, Markdown, i18n keys and Prisma schema
 
 ## Tests
