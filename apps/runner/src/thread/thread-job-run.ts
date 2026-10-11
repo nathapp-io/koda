@@ -620,7 +620,9 @@ export class ThreadJobRun {
   command(type: ThreadCommandType, payload: unknown): ThreadCommandOutcome {
     if (type === 'THREAD_PUBLISH') return { result: 'rejected', detail: 'unsupported' };
     if (this.closing || this.halted) return { result: 'rejected', detail: 'session_closed' };
-    if (this.events.currentState() !== 'RUNNING') return { result: 'rejected', detail: 'session_not_ready' };
+    // A command only applies once the run can actually keep it: the row goes RUNNING before `openStream` awaits
+    // its way to the writer, and in that window a turn could not be streamed — so the run is not ready yet.
+    if (this.events.currentState() !== 'RUNNING' || this.writer === null) return { result: 'rejected', detail: 'session_not_ready' };
     switch (type) {
       case 'THREAD_INPUT': return this.applyInput(payload);
       case 'THREAD_ANSWER': return this.applyAnswer(payload);
@@ -651,7 +653,14 @@ export class ThreadJobRun {
 
   /** `THREAD_STOP_TURN` stops the turn, never the session: the row stays RUNNING and may run another turn. */
   private applyStopTurn(): ThreadCommandOutcome {
-    if (this.turnRunning) this.session?.cancel('stopped');
+    if (this.turnRunning) {
+      // A cancel that throws must not escape `command`: the sync loop awaits `CommandHandler.handle` inline.
+      try {
+        this.session?.cancel('stopped');
+      } catch (error) {
+        this.deps.log.warn('thread session cancel failed', { jobId: this.jobId, error: errorMessage(error) });
+      }
+    }
     return { result: 'ok' };
   }
 
