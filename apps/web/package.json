@@ -52,6 +52,7 @@
     "tar-stream": "^3.2.2",
     "ts-jest": "^29.2.5",
     "typescript": "^5.9.3",
+    "vite": "7.3.6",
     "vue-eslint-parser": "^9.4.3",
     "vue-tsc": "^2.2.12"
   },
