@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-host",
   "branchName": "feat/fleet-s5a-thread-host",
   "createdAt": "2026-10-11T00:00:00.000Z",
-  "updatedAt": "2026-10-11T14:16:05.554Z",
+  "updatedAt": "2026-10-11T15:09:14.489Z",
   "userStories": [
     {
       "id": "US-001",
@@ -277,8 +277,8 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -345,7 +345,10 @@
       "routing": {
         "complexity": "expert",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Cross-cutting synchronization and credential release with high-risk mutex/reap and session command routing."
+        "reasoning": "Cross-cutting synchronization and credential release with high-risk mutex/reap and session command routing.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
       },
       "contextFiles": [
         "apps/runner/src/supervisor/supervisor.ts",
@@ -361,7 +364,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "31c2e468aaed1832b65f7eff2d68d4f8eb60cbd6"
     },
     {
       "id": "US-007",
