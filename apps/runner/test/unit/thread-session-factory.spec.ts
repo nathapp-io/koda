@@ -72,7 +72,13 @@ function setup(overrides: {
     nativeModels: async () => ({ models: overrides.models ?? ['m/x', 'm/b'], defaultModel: overrides.defaultModel === undefined ? 'm/b' : overrides.defaultModel }),
     agent,
   });
-  return { calls, open: (jobId = 'job-1', value = thread()) => {
+  // `resume` and `backend` seed the thread handed to open(), so a test can vary the assign either
+  // here or, for a single call, through open()'s second argument.
+  const assigned = thread({
+    resume: overrides.resume ?? false,
+    backend: overrides.backend ?? { kind: 'native', model: 'm/x' },
+  });
+  return { calls, open: (jobId = 'job-1', value = assigned) => {
     expect(factoryModule).toBeDefined();
     if (factory === undefined) throw new Error('ThreadSessionFactory is unavailable');
     return factory.open({ jobId, thread: value, worktree: '/work/tree', tools: [], approvalTimeoutSec: 60 });
@@ -81,56 +87,66 @@ function setup(overrides: {
 
 test('US-006 AC-1: creates a non-resumed session with the read profile', async () => {
   const h = setup();
-  await h.open();
+  const result = await h.open();
   expect(h.calls.create[0]?.options.profile).toBe('read');
+  expect(result).toEqual({ ok: true, session, resumed: false });
 });
 
 test('US-006 AC-2: resumes a requested session with the read profile', async () => {
   const h = setup({ resume: true });
-  await h.open('job-1', thread({ resume: true }));
+  const result = await h.open();
+  expect(h.calls.create).toHaveLength(0);
   expect(h.calls.resume[0]?.options.profile).toBe('read');
+  expect(result).toEqual({ ok: true, session, resumed: true });
 });
 
 test('US-006 AC-3: supplies the requested worktree when creating a session', async () => {
   const h = setup();
-  await h.open();
+  const result = await h.open();
   expect(h.calls.create[0]?.options.workdir).toBe('/work/tree');
+  expect(result).toEqual({ ok: true, session, resumed: false });
 });
 
 test('US-006 AC-4: stores the transcript below the thread home directory', async () => {
   const h = setup();
-  await h.open();
+  const result = await h.open();
   expect(h.calls.transcript).toEqual([join('/runner-home', 'threads', 'thread-1', 'transcript')]);
+  expect(result).toEqual({ ok: true, session, resumed: false });
 });
 
 test('US-006 AC-5: creates the session with the assigned thread id', async () => {
   const h = setup();
-  await h.open();
+  const result = await h.open();
   expect(h.calls.create[0]?.options.sessionId).toBe('thread-1');
+  expect(result).toEqual({ ok: true, session, resumed: false });
 });
 
 test('US-006 AC-6: passes the injected native backend to session creation', async () => {
   const h = setup();
-  await h.open();
+  const result = await h.open();
   expect(h.calls.create[0]?.options.backend).toBe(h.calls.backendResults[0]);
+  expect(result).toEqual({ ok: true, session, resumed: false });
 });
 
 test('US-006 AC-7: includes the selected effort in the native model identifier', async () => {
   const h = setup();
-  await h.open('job-1', thread({ backend: { kind: 'native', model: 'm/x', effort: 'high' } }));
+  const result = await h.open('job-1', thread({ backend: { kind: 'native', model: 'm/x', effort: 'high' } }));
   expect(h.calls.native[0]?.model).toBe('m/x[high]');
+  expect(result).toEqual({ ok: true, session, resumed: false });
 });
 
 test('US-006 AC-8: chooses the default model when the backend omits a model', async () => {
-  const h = setup({ defaultModel: 'm/b' });
-  await h.open('job-1', thread({ backend: { kind: 'native' } }));
+  const h = setup({ backend: { kind: 'native' }, defaultModel: 'm/b' });
+  const result = await h.open();
   expect(h.calls.native[0]?.model).toBe('m/b');
+  expect(result).toEqual({ ok: true, session, resumed: false });
 });
 
 test('US-006 AC-9: preserves conversation history across native models', async () => {
   const h = setup();
-  await h.open();
+  const result = await h.open();
   expect(h.calls.native[0]?.carryHistoryAcrossModels).toBe(true);
+  expect(result).toEqual({ ok: true, session, resumed: false });
 });
 
 test('US-006 AC-10: rejects a model absent from the advertised model set', async () => {
