@@ -88,6 +88,17 @@ export class CommandHandler {
         this.record(command, outcome);
         return outcome;
       }
+      // Fleet S5a §4: every THREAD command reaches the thread run that holds the (job, epoch); the ack is
+      // recorded, so a re-sent command id is answered from the record and never applied twice.
+      case 'THREAD_INPUT':
+      case 'THREAD_ANSWER':
+      case 'THREAD_STOP_TURN':
+      case 'THREAD_CLOSE':
+      case 'THREAD_PUBLISH': {
+        const outcome: Outcome = supervisor.threadCommand(command);
+        this.record(command, outcome);
+        return outcome;
+      }
       default: {
         const outcome: Outcome = { result: 'rejected', detail: 'unknown command type' };
         this.recordAs(command, UNKNOWN_COMMAND_TYPE, outcome);

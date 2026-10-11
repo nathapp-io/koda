@@ -105,7 +105,7 @@ describe('US-006 Supervisor and CommandHandler THREAD routing', () => {
 
   test('US-006 AC-4: replayed input command sends its text only once', async () => {
     let sends = 0;
-    const s = session({ async *send() { sends += 1; await new Promise<void>(() => undefined); } });
+    const s = session({ async *send() { sends += 1; await new Promise<void>(() => undefined); yield undefined as never; } });
     const b = setup({ liveSession: s }); await b.handler.handle([assignCommand()]);
     await waitFor(() => b.journal.getJob('j1', 1)?.state === 'RUNNING');
     const input = cmd('THREAD_INPUT', 'same-input', 'j1', { messageId: 'm2', text: 'once' });
