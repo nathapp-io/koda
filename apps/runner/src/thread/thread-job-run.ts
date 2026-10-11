@@ -261,7 +261,9 @@ export class ThreadJobRun {
       approvalTimeoutSec: row.assign.approvalTimeoutSec,
     });
     if (this.halted) {
-      if (opened.ok) await this.closeSession(opened.session);
+      // There is no close of the run's own to await: the session `open` resolved is closed then, unawaited, so a
+      // hung `close()` cannot block `start` — the `abandon` that halted this run has already returned.
+      if (opened.ok) this.startSessionClose(opened.session);
       return;
     }
     if (this.cancelRequested()) {
@@ -545,6 +547,8 @@ export class ThreadJobRun {
         await this.turnSettled;
       }
       await this.closeHeldSession();
+      // A halt that landed while the turn settled or the session closed: nothing after this writes a stream line.
+      if (this.halted) return;
       const writer = this.writer;
       if (writer !== null) {
         writer.flush();
