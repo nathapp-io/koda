@@ -1,22 +1,16 @@
 import { lstat, mkdir, mkdtemp, readdir, rename, rm, rmdir, stat, utimes, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import type { ThreadSkillSource } from '@nathapp/fleet-protocol';
+import type { GitResult } from '../executor/git';
 import { assertOwner, assertRelativePath, assertSegment } from '../paths/safe-segment';
 import { skillCacheDirFor } from './thread-paths';
 
-export interface SkillSource {
-  sourceId: string;
-  owner: string;
-  repo: string;
-  sha: string;
-  dir: string;
-}
-
 export interface SkillGit {
-  run(args: string[], options: { cwd: string; env?: Record<string, string>; timeoutMs: number }): Promise<void>;
+  run(args: string[], options: { cwd: string; env?: Record<string, string>; timeoutMs: number }): Promise<GitResult>;
 }
 
 export interface EnsureSkillsOptions {
-  skills: SkillSource[];
+  skills: ThreadSkillSource[];
   skillsRoot: string;
   git: SkillGit;
   timeoutMs: number;
@@ -30,12 +24,17 @@ const COMPLETE_MARKER = '.koda-complete';
 const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_LFS_SKIP_SMUDGE: '1' };
 const SHA_RE = /^[0-9a-f]{40}$/;
 
-function validateSource(source: SkillSource): void {
+function validateSource(source: ThreadSkillSource): void {
   assertSegment('sourceId', source.sourceId);
   assertOwner(source.owner);
   assertSegment('repo', source.repo);
   if (!SHA_RE.test(source.sha)) throw new Error('invalid sha');
-  assertRelativePath('skill dir', source.dir);
+  for (const skill of source.skills) assertRelativePath('skill dir', skill.dir);
+}
+
+async function runGit(git: SkillGit, args: string[], options: { cwd: string; env?: Record<string, string>; timeoutMs: number }): Promise<void> {
+  const result = await git.run(args, options);
+  if (result.code !== 0) throw new Error(`git ${args[0] ?? ''} failed with exit ${result.code}`);
 }
 
 function normalizeOrigin(origin: string): string {
@@ -93,12 +92,12 @@ export async function ensureSkills(options: EnsureSkillsOptions): Promise<Ensure
       await mkdir(parent, { recursive: true });
       const temporary = await mkdtemp(join(parent, `.${source.sha}-`));
       try {
-        await git.run(['init'], { cwd: temporary, env: GIT_ENV, timeoutMs });
-        await git.run([
+        await runGit(git, ['init'], { cwd: temporary, env: GIT_ENV, timeoutMs });
+        await runGit(git, [
           '-c', 'credential.helper=', '-c', 'core.hooksPath=/dev/null', 'fetch', '--depth', '1',
           '--no-recurse-submodules', `${origin}/${source.owner}/${source.repo}`, source.sha,
         ], { cwd: temporary, env: GIT_ENV, timeoutMs });
-        await git.run(['checkout', '--detach', source.sha], { cwd: temporary, env: GIT_ENV, timeoutMs });
+        await runGit(git, ['checkout', '--detach', source.sha], { cwd: temporary, env: GIT_ENV, timeoutMs });
         await rm(join(temporary, '.git'), { recursive: true, force: true });
         if (await treeBytes(temporary) > maxTreeBytes) throw new Error('skill tree too large');
         await writeFile(join(temporary, COMPLETE_MARKER), '');

@@ -2,6 +2,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:tes
 import { cp, mkdir, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import type { ThreadSkillSource } from '@nathapp/fleet-protocol';
+import type { GitResult } from '../../src/executor/git';
 
 const skillFetchModule = await import('../../src/thread/skill-fetch').catch(() => undefined);
 
@@ -28,7 +30,7 @@ interface GitCall {
 function fakeGit(
   sourceExists = true,
   origin = 'https://github.com',
-): { run: (args: string[], options: GitRunOptions) => Promise<void>; calls: GitCall[] } {
+): { run: (args: string[], options: GitRunOptions) => Promise<GitResult>; calls: GitCall[] } {
   const calls: GitCall[] = [];
   return {
     calls,
@@ -40,24 +42,25 @@ function fakeGit(
       if (args.includes('fetch')) {
         const expectedUrl = `${origin}/example-owner/skills`;
         if (!args.includes(expectedUrl)) throw new Error(`unexpected fetch URL: ${args.join(' ')}`);
-        if (!sourceExists || !args.includes(sha)) throw new Error('missing source SHA');
+        if (!sourceExists || !args.includes(sha)) return { code: 128, stdout: '', stderr: 'missing source SHA' };
         await mkdir(options.cwd, { recursive: true });
         await cp(repositoryRoot, options.cwd, { recursive: true });
         await writeFile(join(options.cwd, '.git', 'HEAD'), 'ref: refs/heads/main\n');
       }
+      return { code: 0, stdout: '', stderr: '' };
     },
   };
 }
 
-function skill(override: Record<string, unknown> = {}) {
+function skill(override: Record<string, unknown> = {}): ThreadSkillSource {
   return {
     sourceId,
     owner: 'example-owner',
     repo: 'skills',
     sha,
-    dir: skillDir,
+    skills: [{ name: 'Demo', dir: skillDir, description: 'Demo skill' }],
     ...override,
-  };
+  } as ThreadSkillSource;
 }
 
 async function ensureModule(): Promise<boolean> {
@@ -185,7 +188,19 @@ describe('SHA-pinned public skill fetch and cache (US-003)', () => {
     if (!(await ensureModule())) return;
     const git = fakeGit();
     const result = await getSkillFetchModule().ensureSkills({
-      skills: [skill({ dir: '../escape' })], skillsRoot, git, timeoutMs: 10_000,
+      skills: [skill({ skills: [{ name: 'Demo', dir: '../escape', description: 'Demo skill' }] })], skillsRoot, git, timeoutMs: 10_000,
+    });
+    expect(result.ok === false && git.calls).toEqual([]);
+  });
+
+  test('validates every skill directory in a source before invoking git', async () => {
+    if (!(await ensureModule())) return;
+    const git = fakeGit();
+    const result = await getSkillFetchModule().ensureSkills({
+      skills: [skill({ skills: [
+        { name: 'Demo', dir: skillDir, description: 'Demo skill' },
+        { name: 'Escape', dir: '../escape', description: 'Invalid skill' },
+      ] })], skillsRoot, git, timeoutMs: 10_000,
     });
     expect(result.ok === false && git.calls).toEqual([]);
   });
