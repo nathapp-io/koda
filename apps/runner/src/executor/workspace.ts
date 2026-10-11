@@ -30,8 +30,11 @@ export async function configureRepoHelper(git: Git, repoDir: string, helper: str
   await git.ok(['config', '--local', '--add', 'credential.helper', helper], { cwd: repoDir });
 }
 
-/** Design §2 step 1 with D46: clone on first use, repoint a drifted origin, rebuild a crashed clone. */
-export async function ensureClone(git: Git, input: { repoDir: string; cloneUrl: string; identity: GitIdentity; credentialHelper?: string | null }): Promise<void> {
+/**
+ * Design §2 step 1 with D46: clone on first use, repoint a drifted origin, rebuild a crashed clone.
+ * The commit identity is written when the caller has one; without it git's own configuration answers.
+ */
+export async function ensureClone(git: Git, input: { repoDir: string; cloneUrl: string; identity?: GitIdentity; credentialHelper?: string | null }): Promise<void> {
   assertCloneUrl(input.cloneUrl);
   const credentialHelper = input.credentialHelper ?? null;
   const parent = dirname(input.repoDir);
@@ -43,8 +46,10 @@ export async function ensureClone(git: Git, input: { repoDir: string; cloneUrl: 
     await rm(input.repoDir, { recursive: true, force: true });
     await git.ok(['clone', '--', input.cloneUrl, input.repoDir], { cwd: parent, credentialHelper });
   }
-  await git.ok(['config', 'user.name', input.identity.name], { cwd: input.repoDir });
-  await git.ok(['config', 'user.email', input.identity.email], { cwd: input.repoDir });
+  if (input.identity) {
+    await git.ok(['config', 'user.name', input.identity.name], { cwd: input.repoDir });
+    await git.ok(['config', 'user.email', input.identity.email], { cwd: input.repoDir });
+  }
   if (credentialHelper) await configureRepoHelper(git, input.repoDir, credentialHelper);
 }
 
