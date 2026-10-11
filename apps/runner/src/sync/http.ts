@@ -142,7 +142,8 @@ export class ServerClient {
   /** S2a §2.4, plan D322: one exact-offset append. Protocol outcomes come back as data; only the network throws. */
   async putLog(args: PutLogArgs): Promise<PutLogAnswer> {
     const query = `leaseEpoch=${args.leaseEpoch}&offset=${args.offset}${args.final ? '&final=1' : ''}`;
-    const url = `${this.url(`/fleet/runner/jobs/${encodeURIComponent(args.jobId)}/logs/${args.stream}`)}?${query}`;
+    const baseUrl = this.options.serverUrl.replace(/\/$/, '');
+    const url = `${baseUrl}/fleet/runner/jobs/${encodeURIComponent(args.jobId)}/logs/${args.stream}?${query}`;
     const headers = {
       ...this.bearer(),
       'content-type': 'application/octet-stream',

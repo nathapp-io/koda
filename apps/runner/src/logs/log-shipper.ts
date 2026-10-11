@@ -176,7 +176,7 @@ export class LogShipper implements LogShipping {
         const next = this.pick(now);
         if (next) await this.ship(next);
         else if (signal.aborted || this.closed || [...this.jobs.values()].some((job) => job.runSearch)) continue;
-        else await this.deps.sleep(this.idleMs(now), signal);
+        else await this.waitForWake(this.idleMs(now), signal);
       } catch (error) {
         this.deps.log.warn('log shipper error', { error: errorMessage(error) });
         if (!this.closed) await this.deps.sleep(ERROR_PAUSE_MS, signal);
@@ -222,6 +222,21 @@ export class LogShipper implements LogShipping {
     const waits = [this.pausedUntil - now, ...this.order.filter((s) => s.status === 'active' && !s.busy && s.dirty).map((s) => s.retryAt - now)]
       .filter((ms) => ms > 0);
     return waits.length > 0 ? Math.min(...waits) : IDLE_MS;
+  }
+
+  /** A wake must release an idle worker even when an injected sleeper ignores AbortSignal. */
+  private async waitForWake(ms: number, signal: AbortSignal): Promise<void> {
+    if (signal.aborted) return;
+    let onAbort: (() => void) | null = null;
+    const wake = new Promise<void>((resolve) => {
+      onAbort = () => resolve();
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+    try {
+      await Promise.race([this.deps.sleep(ms, signal), wake]);
+    } finally {
+      if (onAbort !== null) signal.removeEventListener('abort', onAbort);
+    }
   }
 
   private async ship(entry: StreamEntry): Promise<void> {
