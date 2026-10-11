@@ -1,0 +1,401 @@
+{
+  "project": "koda",
+  "feature": "fleet-s5a-thread-kit",
+  "branchName": "feat/fleet-s5a-thread-kit",
+  "createdAt": "2026-10-11T00:00:00.000Z",
+  "updatedAt": "2026-10-11T06:07:54.881Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Thread protocol constants, paths, native models and nax credentials",
+      "description": "**Goal** — Add the shared thread stream contract, path layout, native-model discovery, nax credentials reader, pinned agent dependency and thread timing constants.\n\n**Motivation** — B1 lets the API create threads and place `THREAD` jobs on a v4 runner, but the runner has nothing that can host one.\n\n**Approach** — Paths (`apps/runner/src/thread/thread-paths.ts`): `threadDirFor(homeDir, threadId)` = `<homeDir>/threads/<threadId>` (`threadId` through `assertSegment`), with `threadWorktreeDir`, `threadTranscriptDir` and `threadMetaPath` for its children `wt`, `transcript` and `thread.json`; `skillCacheDirFor(skillsRoot, sourceId, sha)` = `<skillsRoot>/<sourceId>/<sha>`.\n\n`readNativeModels(naxHome, available: ReadonlySet<string>): Promise<NativeModelSet>` (`apps/runner/src/thread/native-models.ts`), `NativeModelSet = { models: string[]; defaultModel: string | null }`. It reads `<naxHome>/config.json`; a missing, unreadable or non-JSON file, or no `models.native` object, gives `{ models: [], defaultModel: null }`. Each value of `models.native` is a model string or an object with a string `model`. The bare id is the model string with a trailing `[...]` removed; its provider is the text before its first `/`. A tier is kept when its bare id contains a `/`, matches `THREAD_MODEL_ID_RE`, and its provider is in `available`. `models` keeps the tiers' order, without duplicates, at most `THREAD_LIMITS.maxNativeModels`. `defaultModel` is the `balanced` tier's bare id when kept, else `models[0]`, else null. `nativeModelProviders(naxHome): Promise<string[]>` returns the distinct providers of those tiers, sorted, so B3b can ask `nax auth list` for them (a provider with only an ambient credential is listed only when asked for).\n\n`naxCredentialsConfig(naxHome): CredentialsConfig` (`apps/runner/src/thread/nax-credentials.ts`) returns `{ configDir: () => naxHome, readAuthConfig }`; `readAuthConfig` re-reads `<naxHome>/config.json` on every call and returns its `auth` block when it is `{ source: 'file' | 'exec', exec?: { command: string[]; timeoutMs: number }, onChange: 'warn' | 'refuse' }`, else `{ source: 'file', onChange: 'warn' }`.\n\nProtocol additions (`packages/fleet-protocol/src/threads.ts`):\n```ts\n/** The log stream a THREAD job writes (PUT /fleet/runner/jobs/:jobId/logs/thread). */\nexport const THREAD_STREAM = 'thread' as const;\nexport const THREAD_STREAM_LIMITS = { lineMaxBytes: 65_536, streamMaxBytes: 209_715_200 } as const;\n/** Same rule as the API's MODEL_ID_RE (apps/api/src/fleet/common/thread-jobs.ts). */\nexport const THREAD_MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:\\/@-]{0,127}$/;\n\nexport type ThreadCloseReason = 'idle' | 'closed' | 'cost_cap' | 'stream_cap' | 'cancelled';\nexport type ThreadFailReason = 'backend_unavailable' | 'agent_not_logged_in' | 'model_unknown' | 'skill_fetch_failed' | 'worktree_conflict' | 'session_error';\n\n/** Lines the runner writes itself. Every other line of the stream is a nax-agent SessionEvent serialized as JSON. */\nexport type ThreadRunnerLine =\n  | { type: 'session_started'; at: string; resumed: boolean; backend: ThreadBackend; skillShas: string[] }\n  | { type: 'session_closed'; at: string; reason: ThreadCloseReason }\n  | { type: 'input_consumed'; at: string; messageId: string }\n  | { type: 'session_failed'; at: string; reason: ThreadFailReason };\n```\nStream contract (for B2): one JSON object per line, UTF-8, `\\n`-terminated; a line's size is the byte length of its serialized JSON plus the newline, at most `THREAD_STREAM_LIMITS.lineMaxBytes`. Session lines keep nax-agent's `SessionEvent` fields (`type`, `sessionId`, `turnId`, `at`, `metadata`, body), in the order the session produced them. `text_delta.text`, `thinking_delta.text`, `turn_end.output` and `turn_end.error.message` are redacted as below; `tool_call.input`, `tool_result.preview`, `question.text` and approval summaries carry nax-agent's own best-effort redaction. A `text_delta` too long for one line becomes several `text_delta` lines with the same `turnId` and `round`, in order. A `turn_end` too long for one line is written with `output: \"\"` and `outputTruncated: true`. Any other session line too long for one line is dropped and reported through the writer's `onWarn`. `stream_reset` lines are written.\n\n**Scope** — In: shared protocol addition, runner-local foundation modules, frozen `TUNING` additions `threadIdleMs: 900_000`, `threadWakeGapMs: 250`, `threadSearchTimeoutMs: 10_000`, `threadSkillFetchTimeoutMs: 120_000`, exact `@nathapp/nax-agent` 0.86.0 pin and bun.lock. Out: repo tools (US-002), skill fetch (US-003), skill tools (US-004), worktree (US-005), session factory (US-006), event writer (US-007); keep `THREAD_LIMITS` and `FLEET_PROTOCOL_VERSION` (3) unchanged. Wiring these blocks into the daemon (protocol v4, `THREAD` ASSIGN parsing, the `threadBackends` capability report, the thread job run, thread commands, Supervisor READOPT and ABANDON for `THREAD` rows, free slots, the heartbeat, `configureCredentials`, registering the `thread` stream with `LogShipper`, running `pruneArchivedThreads` and `pruneSkillCache`) belongs to feature `fleet-s5a-thread-host` (B3b). The API accepting and folding the `thread` stream, and an API parity test pinning `THREAD_MODEL_ID_RE` to the API's `MODEL_ID_RE`, belong to feature `fleet-s5a-thread-ingest` (B2).\n\n**Interface** — `threadDirFor(homeDir, threadId)`, `threadWorktreeDir`, `threadTranscriptDir`, `threadMetaPath`, `skillCacheDirFor(skillsRoot, sourceId, sha)`; `readNativeModels(naxHome, available: ReadonlySet<string>): Promise<NativeModelSet>`; `NativeModelSet = { models: string[]; defaultModel: string | null }`; `nativeModelProviders(naxHome): Promise<string[]>`; `naxCredentialsConfig(naxHome): CredentialsConfig`.\n\nBuild gate: also run `bun run type-check` at the repo root (this story edits packages/fleet-protocol/src/threads.ts).",
+      "acceptanceCriteria": [
+        "AC-1: When THREAD_STREAM_LIMITS is imported from @nathapp/fleet-protocol, then it equals { lineMaxBytes: 65536, streamMaxBytes: 209715200 }.",
+        "AC-2: When THREAD_MODEL_ID_RE is imported from @nathapp/fleet-protocol, then it accepts 'minimax/MiniMax-M3'.",
+        "AC-3: When THREAD_MODEL_ID_RE is imported from @nathapp/fleet-protocol, then it rejects 'opencode-go/deepseek-v4.1-flash[high]'.",
+        "AC-4: Given config.json models.native { fast: 'minimax/MiniMax-M2.7', balanced: { model: 'minimax/MiniMax-M3' }, powerful: 'opencode-go/deepseek-v4.1-flash[high]' } and available {'minimax'}, readNativeModels returns models ['minimax/MiniMax-M2.7', 'minimax/MiniMax-M3'].",
+        "AC-5: Given the AC-4 config and available {'minimax'}, readNativeModels returns defaultModel 'minimax/MiniMax-M3'.",
+        "AC-6: Given the AC-4 config and available {'opencode-go'}, readNativeModels returns models ['opencode-go/deepseek-v4.1-flash'].",
+        "AC-7: Given the AC-4 config and available {'opencode-go'}, readNativeModels returns defaultModel 'opencode-go/deepseek-v4.1-flash'.",
+        "AC-8: When config.json is missing from naxHome, readNativeModels returns { models: [], defaultModel: null }.",
+        "AC-9: When config.json is invalid JSON, readNativeModels returns { models: [], defaultModel: null }.",
+        "AC-10: Given config.json with two tiers naming the same bare id, readNativeModels returns models containing that id once.",
+        "AC-11: Given config.json with only tier 'MiniMax-M3' (no '/') and available {'MiniMax-M3'}, readNativeModels returns models [].",
+        "AC-12: Given the AC-4 config, nativeModelProviders returns ['minimax', 'opencode-go'].",
+        "AC-13: When config.json is missing, naxCredentialsConfig(naxHome).readAuthConfig() resolves to { source: 'file', onChange: 'warn' }.",
+        "AC-14: Given config.json auth { source: 'file', onChange: 'refuse' }, naxCredentialsConfig(naxHome).readAuthConfig() resolves to { source: 'file', onChange: 'refuse' }.",
+        "AC-15: When config.json auth.onChange changes from 'warn' to 'refuse' between calls, naxCredentialsConfig(naxHome).readAuthConfig() resolves to onChange 'refuse' on the second call."
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "protocol",
+        "credentials"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Shared protocol plus dependency/lockfile, local model/path and credentials configuration; credentials trigger security override."
+      },
+      "contextFiles": [
+        "packages/fleet-protocol/src/threads.ts",
+        "apps/runner/src/daemon/tuning.ts",
+        "apps/runner/src/daemon/tuning.spec.ts",
+        "apps/runner/src/paths/safe-segment.ts",
+        "apps/runner/package.json"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/thread/thread-paths.ts",
+        "apps/runner/src/thread/native-models.ts",
+        "apps/runner/src/thread/nax-credentials.ts",
+        "apps/runner/src/thread/thread-kit-foundation.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/daemon/tuning.spec.ts",
+          "reason": "the exact `TUNING` object gains `threadIdleMs: 900_000`, `threadWakeGapMs: 250`, `threadSearchTimeoutMs: 10_000` and `threadSkillFetchTimeoutMs: 120_000`, because this story adds the thread timing constants; it stays frozen."
+        },
+        {
+          "path": "bun.lock",
+          "reason": "gains `@nathapp/nax-agent` 0.86.0 and its dependencies, because this story adds the runner dependency."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Tracked repository list and search tools",
+      "description": "**Goal** — Implement safe, bounded tracked-file listing and git grep tools for thread sessions.\n\n**Motivation** — Claude's `read` mode has no Grep or Glob, D544, so the agent needs code-search tools without disturbing PLAN and RUN jobs.\n\n**Approach** — `ThreadToolContext = { worktree: string; skillsRoot: string; skills: ThreadSkillSource[]; git: Git; searchTimeoutMs: number; nowMs: () => number }` (`apps/runner/src/thread/tools/types.ts`). A refused call returns `{ content: <reason>, isError: true }`; every tool has `approval: 'never'`.\n\n`listFilesTool(ctx)` → `list_files({ dir?, glob? })` (`tools/list-files.ts`): `git ls-files -z` in the worktree with one pathspec: `:(glob)<dir>/<glob>` when both are given, `:(glob)<dir>/**` for `dir` alone, `:(glob)<glob>` for `glob` alone, none for neither. `dir` passes `assertRelativePath`; `glob` matches `/^[A-Za-z0-9._*?\\/\\[\\]{},-]{1,200}$/` and holds no `..`; a failing value is refused. Content: one path per line; above 2000 entries, the first 2000 and a last line `[truncated: <n> more]`; at most 262144 bytes (a cut list ends with `[truncated]`).\n\n`searchRepoTool(ctx)` → `search_repo({ pattern, glob?, max?, fixed? })` (`tools/search-repo.ts`): `pattern` 1..1000 characters; `glob` the `list_files` rule; `max` an integer 1..200, default 200; another value of either is refused. `git -c core.quotePath=false grep -n -I --no-color` with `-F` when `fixed` is true, else `-E`, then `-e <pattern>`, then `-- :(glob)<glob>` when given; `env` `GIT_CONFIG_NOSYSTEM=1`; `timeoutMs` `searchTimeoutMs`. Exit 0: hit lines `path:line:text`, at most `max` lines and at most 65536 bytes, a cut list ending with `[truncated]`. Exit 1: content `no matches`, no `isError`. Any other result: when `nowMs()` after the call is at least `searchTimeoutMs` past `nowMs()` before it, `isError` with content `search timed out`; else `isError` with git's first stderr line.\n\n**Scope** — In: tool context and two read-only tracked-file tools over Git.run. Out: skill fetch (US-003), load_skill/read_skill_file and buildThreadTools (US-004). `write_doc`, Publish, untracked docs in `list_files` and `search_repo`, a stale session start and Discard belong to phase C. Note that nax-agent's own Read/Glob/Grep can see untracked files and its read-only Git can inspect history; the tracked-only rule applies to these two new tools, not to the agent.\n\n**Interface** — `listFilesTool(ctx)` → `list_files({ dir?, glob? })`; `searchRepoTool(ctx)` → `search_repo({ pattern, glob?, max?, fixed? })`.",
+      "acceptanceCriteria": [
+        "AC-1: Given tracked a.ts, untracked b.ts and ignored c.log in a temp repository, listFilesTool(ctx).run({}) returns content whose lines are exactly ['a.ts'].",
+        "AC-2: Given tracked src/x.ts and docs/y.md, listFilesTool(ctx).run({ dir: 'src' }) returns content whose lines are exactly ['src/x.ts'].",
+        "AC-3: Given tracked src/x.ts and docs/y.md, listFilesTool(ctx).run({ glob: '**/*.md' }) returns content whose lines are exactly ['docs/y.md'].",
+        "AC-4: When listFilesTool(ctx).run({ dir: '../outside' }) is called, then it returns isError true.",
+        "AC-5: When listFilesTool(ctx).run({ glob: 'src/../..' }) is called, then it returns isError true.",
+        "AC-6: Given 2005 tracked files, listFilesTool(ctx).run({}) returns 2001 lines with last line '[truncated: 5 more]'.",
+        "AC-7: Given tracked src/a.ts with 'needle' on line 3, searchRepoTool(ctx).run({ pattern: 'needle' }) returns content whose first line starts 'src/a.ts:3:'.",
+        "AC-8: Given tracked lines 'a.b' and 'axb', searchRepoTool(ctx).run({ pattern: 'a.b', fixed: true }) returns exactly one hit line.",
+        "AC-9: Given 20 matching lines, searchRepoTool(ctx).run({ pattern: 'x', max: 5 }) returns exactly 5 hit lines followed by '[truncated]'.",
+        "AC-10: Given 300 matching lines, searchRepoTool(ctx).run({ pattern: 'x' }) returns exactly 200 hit lines followed by '[truncated]'.",
+        "AC-11: Given 150 matching lines of 1000 characters, searchRepoTool(ctx).run({ pattern: 'x' }) returns content of at most 65536 bytes.",
+        "AC-12: Given 150 matching lines of 1000 characters, searchRepoTool(ctx).run({ pattern: 'x' }) returns content whose last line is '[truncated]'.",
+        "AC-13: When no tracked file matches 'absent', searchRepoTool(ctx).run({ pattern: 'absent' }) returns content 'no matches' with isError not true.",
+        "AC-14: Given ctx.git.run resolves { code: 137 } and ctx.nowMs advances by searchTimeoutMs, searchRepoTool(ctx).run({ pattern: 'x' }) returns isError true with content 'search timed out'.",
+        "AC-15: When only a tracked binary file contains 'needle', searchRepoTool(ctx).run({ pattern: 'needle' }) returns content 'no matches'."
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "tools",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two conventional git-backed read tools and a context type fit four files, but rejection of unsafe pathspecs is an access-control boundary requiring security-isolated TDD."
+      },
+      "contextFiles": [
+        "apps/runner/src/executor/git.ts",
+        "apps/runner/src/paths/safe-segment.ts",
+        "apps/runner/test/helpers/git-fixture.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/thread/tools/types.ts",
+        "apps/runner/src/thread/tools/list-files.ts",
+        "apps/runner/src/thread/tools/search-repo.ts",
+        "apps/runner/test/unit/thread-repo-tools.spec.ts"
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "SHA-pinned public skill fetch and cache",
+      "description": "**Goal** — Fetch validated SHA-pinned public GitHub skill sources to reusable isolated cache trees and prune old snapshots.\n\n**Motivation** — The runner lacks skill tools and a safe way to supply reusable skill content to agent sessions.\n\n**Approach** — `ensureSkills({ skills, skillsRoot, git, timeoutMs, origin?, maxTreeBytes? }): Promise<{ ok: true } | { ok: false; reason: 'skill_fetch_failed' }>` (`apps/runner/src/thread/skill-fetch.ts`). `skillsRoot` is `<RunnerHome.dir>/skills`; `origin` defaults to `https://github.com` (tests pass a `file://` origin); `maxTreeBytes` defaults to 52428800. First every source is validated: `sourceId` `assertSegment`, `owner` `assertOwner`, `repo` `assertSegment`, `sha` `/^[0-9a-f]{40}$/`, each skill `dir` `assertRelativePath`; a failure returns `skill_fetch_failed` before any git call. Then for each source, `skillCacheDirFor(...)` holding a `.koda-complete` marker is reused and its mtime set to now. Otherwise, in a sibling temporary directory: `git init`; `git -c credential.helper= -c core.hooksPath=/dev/null fetch --depth 1 --no-recurse-submodules <origin>/<owner>/<repo> <sha>`; `git checkout --detach <sha>`; every call with `env` `{ GIT_TERMINAL_PROMPT: '0', GIT_LFS_SKIP_SMUDGE: '1' }` and `timeoutMs`; then the `.git` directory is deleted, the tree's total file size is checked against `maxTreeBytes` (after the fetch, not during it), the marker is written, and the directory is renamed into place (a target that appeared meanwhile wins; the temporary directory is deleted). Any failure deletes the temporary directory and returns `skill_fetch_failed`.\n\n`pruneSkillCache(skillsRoot, now, maxAgeDays = 30)` deletes `<sourceId>/<sha>` directories whose mtime is more than `maxAgeDays` days before `now`.\n\n**Scope** — In: fetch, marker-based reuse and age prune. Out: skill reading/tool set (US-004), daemon scheduling of prune (B3b); no git token is persisted in cache.\n\n**Interface** — `ensureSkills({ skills, skillsRoot, git, timeoutMs, origin?, maxTreeBytes? }): Promise<{ ok: true } | { ok: false; reason: 'skill_fetch_failed' }>`; `pruneSkillCache(skillsRoot, now, maxAgeDays = 30)`.",
+      "acceptanceCriteria": [
+        "AC-1: Given one source at a SHA of a file:// origin repository, ensureSkills returns { ok: true }.",
+        "AC-2: Given a successful ensureSkills for one source, then <skillsRoot>/<sourceId>/<sha>/<dir>/SKILL.md exists.",
+        "AC-3: When ensureSkills runs a second time for the same source, then it makes no git.run call whose arguments include 'fetch'.",
+        "AC-4: When ensureSkills runs a second time for a source whose cache directory mtime is 10 days old, then it sets that mtime to the current time.",
+        "AC-5: When ensureSkills fetches a source, then the fetch git.run call receives env.GIT_TERMINAL_PROMPT '0'.",
+        "AC-6: When ensureSkills fetches a source, then the fetch git.run call receives arguments containing 'credential.helper=' after '-c'.",
+        "AC-7: Given successful ensureSkills, then <skillsRoot>/<sourceId>/<sha>/.git does not exist.",
+        "AC-8: Given a SHA absent from the origin, ensureSkills returns { ok: false, reason: 'skill_fetch_failed' }.",
+        "AC-9: Given a SHA absent from the origin, when ensureSkills completes, then <skillsRoot>/<sourceId> holds no entry.",
+        "AC-10: Given maxTreeBytes 10 and a skill tree larger than 10 bytes, ensureSkills returns { ok: false, reason: 'skill_fetch_failed' }.",
+        "AC-11: Given a source whose sha is '--upload-pack=x', ensureSkills returns { ok: false, reason: 'skill_fetch_failed' } without any git.run call.",
+        "AC-12: Given a source whose skill dir is '../escape', ensureSkills returns { ok: false, reason: 'skill_fetch_failed' } without any git.run call.",
+        "AC-13: Given a <sourceId>/<sha> cache directory whose mtime is 31 days before now, pruneSkillCache(skillsRoot, now) deletes it.",
+        "AC-14: Given a <sourceId>/<sha> cache directory whose mtime is 1 day before now, pruneSkillCache(skillsRoot, now) keeps it."
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "git",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Untrusted server identifiers plus git credential isolation and external-source access require security-isolated TDD; caching and concurrent rename raise risk."
+      },
+      "contextFiles": [
+        "apps/runner/src/thread/thread-paths.ts",
+        "apps/runner/src/paths/safe-segment.ts",
+        "apps/runner/test/helpers/git-fixture.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/thread/skill-fetch.ts",
+        "apps/runner/test/unit/thread-skill-fetch.spec.ts"
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Jailed skill tools and assembled tool set",
+      "description": "**Goal** — Add two safe skill-reading tools and assemble the four agent tools in a stable order.\n\n**Motivation** — The runner has no code-search or skill tools for a brainstorm-thread agent.\n\n**Approach** — `loadSkillTool(ctx)` → `load_skill({ name })` (`tools/load-skill.ts`): `name` must be a skill of `ctx.skills` (the first source listing it, in snapshot order), else `isError` with content `unknown skill <name>; available: <names, comma-separated>`. Returns the text of `<skill directory>/SKILL.md` under the `read_skill_file` file rules.\n\n`readSkillFileTool(ctx)` → `read_skill_file({ name, relPath })` (`tools/read-skill-file.ts`): `relPath` passes `assertRelativePath`; the file's realpath is inside the skill directory's realpath; a symbolic link (`lstat`) is refused; above 262144 bytes is refused; a NUL byte or invalid UTF-8 is refused as binary. Each refusal is `isError` with a reason naming the rule.\n\n`buildThreadTools(ctx): EmbedderTool[]` (`tools/index.ts`) returns, in order, `list_files`, `search_repo`, `load_skill`, `read_skill_file`. Each criterion runs over a skill directory laid out as `ensureSkills` leaves it (`<skillsRoot>/<sourceId>/<sha>/<dir>`). A refused call returns `{ content: <reason>, isError: true }`; every tool has `approval: 'never'`. The nax-agent built-in native read tools use a realpath jail to `workdir` (the worktree), keeping `~/.nax`, `~/.ssh` and `~/.koda-runner` outside it unreachable; these separate skill-file tools use the skill-directory realpath jail above.\n\n**Scope** — In: skill file jail, tool approval settings and assembly of US-002 repo tools. Out: downloading/pruning cache (US-003), thread session construction (US-006). `write_doc`, Publish, untracked docs in `list_files` and `search_repo`, a stale session start and Discard belong to phase C.\n\n**Interface** — `loadSkillTool(ctx)` → `load_skill({ name })`; `readSkillFileTool(ctx)` → `read_skill_file({ name, relPath })`; `buildThreadTools(ctx): EmbedderTool[]`.",
+      "acceptanceCriteria": [
+        "AC-1: Given a prepared skill directory, loadSkillTool(ctx).run({ name: 'spec-writing' }) returns content equal to its SKILL.md text.",
+        "AC-2: When loadSkillTool(ctx).run({ name: 'missing' }) is called, then it returns isError true with content naming every skill of ctx.skills.",
+        "AC-3: Given a prepared skill directory, readSkillFileTool(ctx).run({ name, relPath: 'references/guide.md' }) returns content equal to that file's text.",
+        "AC-4: When readSkillFileTool(ctx).run({ name, relPath: '../other/SKILL.md' }) is called, then it returns isError true.",
+        "AC-5: When readSkillFileTool(ctx).run(...) targets a symbolic link inside the skill directory, then it returns isError true.",
+        "AC-6: When readSkillFileTool(ctx).run(...) targets a file containing a NUL byte, then it returns isError true.",
+        "AC-7: When readSkillFileTool(ctx).run(...) targets a 262145-byte text file, then it returns isError true.",
+        "AC-8: When buildThreadTools(ctx) is called, then its tool names in order are ['list_files', 'search_repo', 'load_skill', 'read_skill_file'].",
+        "AC-9: When buildThreadTools(ctx) is called, then every returned tool has approval 'never'."
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "tools",
+        "security"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three small tool modules assemble upstream helpers, but the skill-file realpath/symlink jail is an access-control boundary requiring security-isolated TDD."
+      },
+      "contextFiles": [
+        "apps/runner/src/thread/tools/types.ts",
+        "apps/runner/src/thread/tools/list-files.ts",
+        "apps/runner/src/thread/tools/search-repo.ts",
+        "apps/runner/src/thread/thread-paths.ts",
+        "apps/runner/src/paths/safe-segment.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/thread/tools/load-skill.ts",
+        "apps/runner/src/thread/tools/read-skill-file.ts",
+        "apps/runner/src/thread/tools/index.ts",
+        "apps/runner/src/thread/tools/skill-tools.spec.ts"
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Locked detached thread worktree and archive prune",
+      "description": "**Goal** — Create and refresh isolated per-thread worktrees without rewriting existing-clone configuration or blocking existing-clone jobs on the mutex, and remove archived registrations.\n\n**Motivation** — The runner has no way to keep the agent inside a repo checkout without disturbing PLAN and RUN jobs that share the clone.\n\n**Approach** — `prepareThreadWorktree({ git, mutex, repoKey, repoDir, cloneUrl, identity, credentialHelper, homeDir, threadId, baseRef, feature }): Promise<{ ok: true; worktree: string; tipSha: string } | { ok: false; reason: string }>` (`apps/runner/src/thread/thread-worktree.ts`); `feature` passes `assertFeature`. In order:\n\n1. Clone missing (no `<repoDir>/.git`): acquire `mutex` for `repoKey`, check again, `ensureClone(...)`, release. Clone present: neither the mutex nor `ensureClone`.\n2. `git fetch origin` in `repoDir` with `credentialHelper` passed on the command; a failure whose stderr contains `cannot lock ref` or `unable to lock` is retried once.\n3. Tip: `refs/heads/feat/<feature>` when it exists in the clone, else `resolveRef(git, repoDir, baseRef)`; not found → `checkout: ref not found`; invalid → `checkout: invalid ref`.\n4. Write `thread.json` `{ repoDir }` (before the worktree exists, so a crash never leaves a registration prune cannot find).\n5. `git worktree list --porcelain`; an entry matches when `realpath(dirname(entry)) + '/' + basename(entry)` equals the same form of `wt` (a deleted directory cannot be realpathed itself):\n   - registered and directory present → `git checkout --detach <tipSha>` inside it; git refusing → `worktree_conflict`;\n   - registered and directory missing → `git worktree remove --force --force <wt>`, then add as below;\n   - not registered → remove any leftover directory, then `git worktree add --detach --lock --reason koda-thread <wt> <tipSha>`.\n\nOther git failures map through `reasonFromError`.\n\n`pruneArchivedThreads({ git, homeDir, threadIds, activeThreadIds })` handles each id not in `activeThreadIds` (an id that fails `assertSegment` is skipped): it reads `thread.json`, and when `repoDir` is an absolute path with a `.git` it runs `git worktree remove --force --force <wt>` there (a failure ignored); then it deletes the thread directory.\n\n**Scope** — In: mutex-only-for-clone initialization, per-command credential helper on fetch, unchanged helper configuration of an existing clone, detached locked worktree and prune function. Out: Wiring these blocks into the daemon (protocol v4, `THREAD` ASSIGN parsing, the `threadBackends` capability report, the thread job run, thread commands, Supervisor READOPT and ABANDON for `THREAD` rows, free slots, the heartbeat, `configureCredentials`, registering the `thread` stream with `LogShipper`, running `pruneArchivedThreads` and `pruneSkillCache`) belongs to feature `fleet-s5a-thread-host` (B3b).\n\n**Interface** — `prepareThreadWorktree({ git, mutex, repoKey, repoDir, cloneUrl, identity, credentialHelper, homeDir, threadId, baseRef, feature }): Promise<{ ok: true; worktree: string; tipSha: string } | { ok: false; reason: string }>`; `pruneArchivedThreads({ git, homeDir, threadIds, activeThreadIds })`.",
+      "acceptanceCriteria": [
+        "AC-1: Given a temp clone without feat/<feature>, prepareThreadWorktree returns ok true with tipSha equal to the SHA of origin/<baseRef>.",
+        "AC-2: After prepareThreadWorktree, git worktree list --porcelain in the clone marks the wt entry 'locked'.",
+        "AC-3: After prepareThreadWorktree, git symbolic-ref -q HEAD in the worktree exits non-zero.",
+        "AC-4: Given a temp clone with local refs/heads/feat/<feature>, prepareThreadWorktree returns tipSha equal to that branch's SHA.",
+        "AC-5: When prepareThreadWorktree is called a second time after origin/<baseRef> moves, then it returns tipSha equal to the new SHA.",
+        "AC-6: When prepareThreadWorktree is called a second time after origin/<baseRef> moves, then the worktree HEAD equals the new SHA.",
+        "AC-7: Given a wt registered as a worktree but deleted from disk, prepareThreadWorktree returns ok true.",
+        "AC-8: Given a baseRef missing from the clone, prepareThreadWorktree returns { ok: false, reason: 'checkout: ref not found' }.",
+        "AC-9: Given an untracked file in the worktree that the new tip tracks with other content, prepareThreadWorktree returns { ok: false, reason: 'worktree_conflict' }.",
+        "AC-10: Given an existing clone, prepareThreadWorktree never calls mutex.acquire.",
+        "AC-11: Given no clone, prepareThreadWorktree calls mutex.acquire with repoKey.",
+        "AC-12: Given an existing clone and a credentialHelper, prepareThreadWorktree leaves the clone's git config --get-all credential.helper output unchanged.",
+        "AC-13: Given threadIds ['t1'] and no activeThreadIds, pruneArchivedThreads deletes <homeDir>/threads/t1.",
+        "AC-14: Given threadIds ['t1'] and no activeThreadIds, after pruneArchivedThreads git worktree list --porcelain in the clone lists no entry for t1's wt.",
+        "AC-15: Given threadIds ['t1'] and activeThreadIds ['t1'], pruneArchivedThreads keeps <homeDir>/threads/t1."
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "git",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Concurrent shared-clone operations, durable worktree registration and credential-helper isolation make this high-risk and security-critical."
+      },
+      "contextFiles": [
+        "apps/runner/src/executor/workspace.ts",
+        "apps/runner/src/executor/refs.ts",
+        "apps/runner/src/supervisor/repo-mutex.ts",
+        "apps/runner/src/thread/thread-paths.ts",
+        "apps/runner/src/executor/git.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/thread/thread-worktree.ts",
+        "apps/runner/test/unit/thread-worktree.spec.ts"
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Read-profile native agent session factory",
+      "description": "**Goal** — Open or resume only native read-profile agent sessions with verified model choices, tools and file transcripts.\n\n**Motivation** — The runner has no agent session library or way to host a brainstorm-thread session yet.\n\n**Approach** — `ThreadSessionFactory` (`apps/runner/src/thread/session-factory.ts`), constructed with `{ homeDir, naxHome, nativeModels: () => Promise<NativeModelSet>, agent? }`; `agent` defaults to nax-agent's `{ createAgentSession, resumeAgentSession, nativeBackend, createFileTranscriptStore }`. `open({ jobId, thread: ThreadAssign, worktree, tools, approvalTimeoutSec }): Promise<{ ok: true; session: AgentSession; resumed: boolean } | { ok: false; reason: ThreadFailReason }>`:\n\n1. `backend.kind === 'acp'` → `backend_unavailable` (B3-R9); nothing else is called.\n2. Model: `backend.model ?? defaultModel`; null, not in `models`, or a `backend.effort` that fails `/^[a-z]{1,16}$/` → `model_unknown`.\n3. `threadId` must match `/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/` (nax-agent's session id rule), else `session_error`.\n4. `backend = nativeBackend({ model: effort ? '<model>[<effort>]' : model, carryHistoryAcrossModels: true, hostPorts: { protectedPaths: { gitExcludePathspecs: [], gitIgnorePatterns: [], credentialDir: naxHome } } })`.\n5. Options: `backend`, `profile: 'read'` (no input changes it), `workdir: worktree`, `instructions: thread.instructions`, `tools`, `transcriptStore: createFileTranscriptStore(threadTranscriptDir(homeDir, threadId))`, `approvalTimeoutMs` = `approvalTimeoutSec * 1000` clamped to 30000..3600000, `turnTimeoutSeconds: 900`, `metadata: { threadId, jobId }`.\n6. `resume: false` → `createAgentSession({ ...options, sessionId: threadId })`; `AGENT_SESSION_EXISTS` → `resumeAgentSession(threadId, options)`, `resumed: true`. `resume: true` → `resumeAgentSession(threadId, options)`; `AGENT_SESSION_NOT_FOUND` (runner home wiped) → `createAgentSession`, `resumed: false`.\n7. Errors from steps 4-6 (including a throw from `nativeBackend`): `AGENT_SESSION_AUTH_REQUIRED` → `agent_not_logged_in`; `AGENT_SESSION_BACKEND_UNAVAILABLE` → `backend_unavailable`; any other → `session_error`.\n\n**Scope** — In: injected agent seam, native-only model resolution, protected paths settings, persisted transcripts and resume fallbacks. Out: daemon host/session lifecycle and configuring credentials (B3b). ACP session backends belong to phase D. A runtime nax-agent version-floor constant is not added (B3-R3); raising the pin is a manual dependency change.\n\n**Interface** — `ThreadSessionFactory({ homeDir, naxHome, nativeModels: () => Promise<NativeModelSet>, agent? })`; `open({ jobId, thread: ThreadAssign, worktree, tools, approvalTimeoutSec }): Promise<{ ok: true; session: AgentSession; resumed: boolean } | { ok: false; reason: ThreadFailReason }>`.",
+      "acceptanceCriteria": [
+        "AC-1: Given resume false, ThreadSessionFactory.open calls injected createAgentSession with profile 'read'.",
+        "AC-2: Given resume true, ThreadSessionFactory.open calls injected resumeAgentSession with profile 'read'.",
+        "AC-3: When ThreadSessionFactory.open creates a session, then createAgentSession receives workdir equal to the given worktree.",
+        "AC-4: When ThreadSessionFactory.open creates a session, then injected createFileTranscriptStore receives <homeDir>/threads/<threadId>/transcript.",
+        "AC-5: Given resume false, ThreadSessionFactory.open calls createAgentSession with sessionId equal to thread.threadId.",
+        "AC-6: When ThreadSessionFactory.open creates a session, then createAgentSession receives backend equal to the injected nativeBackend return value.",
+        "AC-7: Given backend { kind: 'native', model: 'm/x', effort: 'high' } and models containing 'm/x', ThreadSessionFactory.open calls nativeBackend with model 'm/x[high]'.",
+        "AC-8: Given backend { kind: 'native' } and defaultModel 'm/b', ThreadSessionFactory.open calls nativeBackend with model 'm/b'.",
+        "AC-9: When ThreadSessionFactory.open constructs a native backend, then nativeBackend receives carryHistoryAcrossModels true.",
+        "AC-10: Given backend model 'm/z' absent from models, ThreadSessionFactory.open returns { ok: false, reason: 'model_unknown' } without calling createAgentSession.",
+        "AC-11: Given backend { kind: 'native' } and defaultModel null, ThreadSessionFactory.open returns { ok: false, reason: 'model_unknown' }.",
+        "AC-12: Given backend { kind: 'acp', agent: 'claude' }, ThreadSessionFactory.open returns { ok: false, reason: 'backend_unavailable' } without calling nativeBackend.",
+        "AC-13: Given resume true and resumeAgentSession throws AgentSessionError with code AGENT_SESSION_NOT_FOUND, ThreadSessionFactory.open returns ok true with resumed false.",
+        "AC-14: Given resume false and createAgentSession throws AgentSessionError with code AGENT_SESSION_EXISTS, ThreadSessionFactory.open returns ok true with resumed true.",
+        "AC-15: Given createAgentSession throws AgentSessionError with code AGENT_SESSION_AUTH_REQUIRED, ThreadSessionFactory.open returns { ok: false, reason: 'agent_not_logged_in' }."
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "sessions",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Agent sessions, credentials/auth mapping and mandatory read-only profile are security-critical, with injection and transcript fallback complexity."
+      },
+      "contextFiles": [
+        "apps/runner/src/thread/native-models.ts",
+        "apps/runner/src/thread/thread-paths.ts",
+        "apps/runner/src/config/runner-config.ts",
+        "packages/fleet-protocol/src/threads.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/thread/session-factory.ts",
+        "apps/runner/src/thread/session-factory.spec.ts"
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Redacted capped thread event stream writer",
+      "description": "**Goal** — Serialize native agent session events and runner lifecycle lines to an append-only redacted, byte-bounded thread stream with paced log wakes.\n\n**Motivation** — The runner has no safe way to report what the agent says, and redacting each small delta alone misses secrets split across deltas.\n\n**Approach** — `new ThreadEventWriter({ path, jobId, leaseEpoch, logs, wakeGapMs, now, sleep, streamMaxBytes?, onCap, onWarn })` (`apps/runner/src/thread/thread-event-writer.ts`); `path` is the stream file, created with mode 0600 if absent and appended to otherwise; `streamMaxBytes` defaults to `THREAD_STREAM_LIMITS.streamMaxBytes`; `bytes()` is the file's size. Methods, all returning `void`: `event(e: SessionEvent)`, `started({ resumed, backend, skillShas })`, `inputConsumed(messageId)`, `closed(reason)`, `failed(reason)`, `flush()`.\n\n- Held delta text (B3-R11): `text_delta` text is appended to a raw buffer keyed by `(turnId, round)`. After each append, the writable prefix ends at the last whitespace character that sits at least 256 characters before the buffer's end (none → nothing is written yet, unless the buffer passes 4096 characters, when the prefix is all but its last 256 characters). The prefix is passed through `redactSecrets` and written as `text_delta` lines; the rest stays raw. The held text is written, redacted, before any other session line (a `text_delta` of another round, `tool_call`, `tool_result`, `usage`, `turn_end` and the rest), and on `flush()`; a `stream_reset` of the round drops it and is then written.\n- `thinking_delta.text`, `turn_end.output` and `turn_end.error.message` are each passed through `redactSecrets` whole. Splitting into lines happens after redaction.\n- Wake: after each append `logs.wake(jobId, leaseEpoch)`, at most once per `wakeGapMs`, plus one trailing wake after the gap for appends inside it.\n- Cap: before each session line, `bytes() + lineBytes > streamMaxBytes - 4096` → that line and the rest of its event are not written and `onCap()` is called (once per writer); runner lines (`started`, `inputConsumed`, `closed`, `failed`) are always written.\n\nStream contract (for B2): one JSON object per line, UTF-8, `\\n`-terminated; a line's size is the byte length of its serialized JSON plus the newline, at most `THREAD_STREAM_LIMITS.lineMaxBytes`. Session lines keep nax-agent's `SessionEvent` fields (`type`, `sessionId`, `turnId`, `at`, `metadata`, body), in the order the session produced them. `text_delta.text`, `thinking_delta.text`, `turn_end.output` and `turn_end.error.message` are redacted as below; `tool_call.input`, `tool_result.preview`, `question.text` and approval summaries carry nax-agent's own best-effort redaction. A `text_delta` too long for one line becomes several `text_delta` lines with the same `turnId` and `round`, in order. A `turn_end` too long for one line is written with `output: \"\"` and `outputTruncated: true`. Any other session line too long for one line is dropped and reported through the writer's `onWarn`. `stream_reset` lines are written.\n\n**Scope** — In: local file writer, session/runner JSONL, delta redaction, line/stream caps and wake pacing. Out: registering the thread log stream with LogShipper and uploads (B3b/B2); do not add sync log events or additional nax-agent field redaction. The API accepting and folding the `thread` stream, and an API parity test pinning `THREAD_MODEL_ID_RE` to the API's `MODEL_ID_RE`, belong to feature `fleet-s5a-thread-ingest` (B2). `tool_call.input`, `tool_result.preview`, `question.text` and approval summaries rely on nax-agent's best-effort redaction; this feature adds none.\n\n**Interface** — `new ThreadEventWriter({ path, jobId, leaseEpoch, logs, wakeGapMs, now, sleep, streamMaxBytes?, onCap, onWarn })`; `bytes()`; `event(e: SessionEvent)`, `started({ resumed, backend, skillShas })`, `inputConsumed(messageId)`, `closed(reason)`, `failed(reason)`, `flush()`; all methods other than `bytes()` return `void`.",
+      "acceptanceCriteria": [
+        "AC-1: Given two text_delta events of one round containing 'key: ' plus the first half of an Anthropic-style API key and then its second half, followed by turn_end, ThreadEventWriter writes text_delta lines whose texts joined in file order equal nax-agent redactSecrets of the whole text.",
+        "AC-2: Given a text_delta of 1000 characters made of 9-letter words separated by single spaces, ThreadEventWriter writes text_delta lines before any further event whose texts joined are a prefix of the original ending in a space and at most 744 characters long.",
+        "AC-3: Given a text_delta of 100 characters then a tool_call of the same turn, ThreadEventWriter writes the line carrying those 100 characters before the tool_call line.",
+        "AC-4: Given a stream_reset of a round after a 100-character text_delta of that round, ThreadEventWriter writes no line carrying those 100 characters.",
+        "AC-5: Given a turn_end whose output contains an Anthropic-style API key, ThreadEventWriter writes a line whose output equals nax-agent redactSecrets of that output.",
+        "AC-6: Given a turn_end whose error.message contains an Anthropic-style API key, ThreadEventWriter writes a line whose error.message equals nax-agent redactSecrets of that message.",
+        "AC-7: Given a thinking_delta whose text contains an Anthropic-style API key, ThreadEventWriter writes a line whose text equals nax-agent redactSecrets of that text.",
+        "AC-8: Given a 200000-character text_delta of words containing 'é' followed by turn_end, ThreadEventWriter writes only lines whose UTF-8 byte length including newline is at most 65536.",
+        "AC-9: Given a 200000-character text_delta of words separated by spaces followed by turn_end, ThreadEventWriter writes text_delta lines whose texts joined in file order equal the original text.",
+        "AC-10: Given a turn_end with output of 100000 characters, ThreadEventWriter writes one turn_end line with output '' and outputTruncated true.",
+        "AC-11: When ThreadEventWriter.started({ resumed: false, backend: { kind: 'native', model: 'm/x' }, skillShas: ['<sha>'] }) is called, then it writes an object deep-equal to { type: 'session_started', at: <now ISO>, resumed: false, backend: { kind: 'native', model: 'm/x' }, skillShas: ['<sha>'] }.",
+        "AC-12: When ThreadEventWriter.inputConsumed('msg1') is called, then it writes an object deep-equal to { type: 'input_consumed', at: <now ISO>, messageId: 'msg1' }.",
+        "AC-13: Given ten thinking_delta event calls within one wakeGapMs on a manual clock, when the clock advances past wakeGapMs, then logs.wake is called exactly twice.",
+        "AC-14: Given streamMaxBytes 8192 and a pre-seeded 4200-byte stream file, when two 100-character thinking_delta events are given, then ThreadEventWriter writes neither line and calls onCap exactly once.",
+        "AC-15: Given streamMaxBytes 8192 and a pre-seeded 4200-byte stream file, ThreadEventWriter.closed('stream_cap') writes the session_closed line."
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "logs",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Secret redaction across asynchronous deltas, UTF-8 byte caps, append ordering and wake timing are high-risk data-security behaviors."
+      },
+      "contextFiles": [
+        "apps/runner/src/logs/types.ts",
+        "apps/runner/test/helpers/manual-clock.ts",
+        "packages/fleet-protocol/src/threads.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/thread/thread-event-writer.ts",
+        "apps/runner/src/thread/thread-event-writer.spec.ts"
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Graph-first navigation could not be used: codebase-memory MCP/list_projects and Git/shell tools are not exposed in this session, so navigation fell back to repository Read/Glob (the execution root was supplied). This is an additive, intentionally unintegrated runner kit: packages/fleet-protocol/src/threads.ts:1-42 already exports B1's ThreadAssign, ThreadBackend, ThreadSkillSource and THREAD_LIMITS; packages/fleet-protocol/src/index.ts:1-12 re-exports threads and fixes FLEET_PROTOCOL_VERSION at 3. Preserve the v3 constant and existing wire behavior; add stream constants, types and regex without enabling a thread log PUT. apps/api/src/fleet/common/thread-jobs.ts:1-20 mirrors protocol types/constants and defines MODEL_ID_RE, but API changes/parity testing belong to B2. apps/runner/src/thread/ does not yet exist. US-001 changes apps/runner/src/daemon/tuning.ts:1-69 and its exact-object frozen-value test at apps/runner/src/daemon/tuning.spec.ts:1-17, and pins @nathapp/nax-agent exactly 0.86.0 in apps/runner/package.json:1-29 with bun.lock regeneration. apps/runner/src/paths/safe-segment.ts:10-60 provides assertSegment (100-character segment), assertOwner, assertFeature, assertRelativePath and assertInside; validate all server-supplied path/ref components before use. apps/runner/src/config/runner-config.ts:28-46 defines RunnerHome.dir and RunnerConfig.naxHome for the path and credentials helpers. apps/runner/src/executor/git.ts:5-26 defines async Git.run/ok; createGit at :84-100 clears inherited credential helpers, disables interactive prompts, and reports timeout via exit 137; reasonFromError at :52-57 maps auth failures to 'git auth failed'. apps/runner/src/executor/workspace.ts:35-59 shows ensureClone rewrites clone configuration; thread worktree must invoke it only when the clone is missing, with apps/runner/src/supervisor/repo-mutex.ts:1-23 scoped only to this initialization. apps/runner/src/executor/refs.ts:4-20 resolves remote branches, tags and commits and distinguishes invalid and absent refs. apps/runner/src/logs/types.ts:51-60 exposes LogShipping.wake but LogStreamName is currently restricted by LogEventPayload at packages/fleet-protocol/src/index.ts:166-167 to run/stdout/stderr: the writer only calls wake; B3b changes shipper/transport and stream registration. Native tools' jailed skill-file paths and tracked-only repo search are separate from nax-agent's own read-profile built-ins; credential configuration must be re-read and secrets must never be persisted or emitted in plain text. Unit tests should use bun:test, real temp files and git where possible: apps/runner/test/helpers/git-fixture.ts:1-80 isolates git and creates file:// origins; apps/runner/test/helpers/tmp.ts:1-17 manages temp directories; apps/runner/test/helpers/manual-clock.ts:1-31 controls wake timers. Apps/runner's scripts at apps/runner/package.json:7-17 run bun test src test/unit, tsc --noEmit and ESLint; do not put unit specs in uncollected locations. Migration is additive: the runner continues to report protocol v3, never hosts or uploads threads until B3b/B2, and this kit's exported seams can be consumed later without changing current job execution. Risks are shared clone mutation/races, path escapes or symlink traversal, credential leakage, agent API compatibility, UTF-8 byte rather than character caps, delta-secret boundaries, and timer/stream-cap ordering. US-001 is explicitly scoped to apps/runner by the binding structure despite also changing the shared protocol package and root bun.lock; verify protocol typechecking at the root in addition to runner gates. Dependency order: US-001 first; US-002/003/005/006/007 independently afterwards; US-004 last after US-002 and US-003. Read apps/runner-specific guidance before writing app code; never edit generated clients or guidance.",
+  "outOfScope": [
+    "Wiring these blocks into the daemon (protocol v4, `THREAD` ASSIGN parsing, the `threadBackends` capability report, the thread job run, thread commands, Supervisor READOPT and ABANDON for `THREAD` rows, free slots, the heartbeat, `configureCredentials`, registering the `thread` stream with `LogShipper`, running `pruneArchivedThreads` and `pruneSkillCache`) belongs to feature `fleet-s5a-thread-host` (B3b).",
+    "The API accepting and folding the `thread` stream, and an API parity test pinning `THREAD_MODEL_ID_RE` to the API's `MODEL_ID_RE`, belong to feature `fleet-s5a-thread-ingest` (B2).",
+    "`write_doc`, Publish, untracked docs in `list_files` and `search_repo`, a stale session start and Discard belong to phase C.",
+    "ACP session backends belong to phase D.",
+    "A runtime nax-agent version-floor constant is not added (B3-R3); raising the pin is a manual dependency change.",
+    "A secret that contains whitespace (a PEM block, a cookie line) or is longer than the 256-character hold-back can still be cut between two written `text_delta` lines; `turn_end.output` is redacted whole.",
+    "`tool_call.input`, `tool_result.preview`, `question.text` and approval summaries rely on nax-agent's best-effort redaction; this feature adds none.",
+    "`search_repo` reads git's whole stdout before capping it; output size is bounded only by the search timeout.",
+    "Compiling the runner binary (`bun run build:binary`) with nax-agent has no acceptance criterion; the 2026-10-11 probe compiled and loaded nax-agent 0.85.1 in a `bun build --compile` binary.",
+    "US-001 only: `threadDirFor` and the other path helpers are exercised through US-005 and US-006 without a dedicated acceptance criterion; so is an `auth` block that is present but invalid.",
+    "US-002 only: `list_files` with `dir` and `glob` together, its 262144-byte cap and symlinked entries, a `pattern` or `max` outside its range, and git failures other than no-match and timeout share the tool rules without a dedicated acceptance criterion.",
+    "US-003 only: two jobs fetching the same skill SHA at once are resolved by the rename rule without a dedicated acceptance criterion; so is `GIT_LFS_SKIP_SMUDGE`.",
+    "US-004 only: `load_skill` file rules are the `read_skill_file` rules, and a skill name listed by two sources resolves to the first; neither has a dedicated acceptance criterion; neither does invalid UTF-8.",
+    "US-005 only: `git auth failed`, `checkout: invalid ref`, the ref-lock retry and a leftover unregistered `wt` directory share `reasonFromError`, `resolveRef` and the worktree rules without a dedicated acceptance criterion; so does `pruneArchivedThreads` skipping a bad id or a `thread.json` whose `repoDir` is not a clone.",
+    "US-006 only: the `AGENT_SESSION_BACKEND_UNAVAILABLE`, invalid session id and generic `session_error` mappings, `instructions`, `approvalTimeoutMs`, `metadata`, `turnTimeoutSeconds` and `hostPorts` share the option building without a dedicated acceptance criterion.",
+    "US-007 only: the leading wake, `flush()`, `failed()`, the 4096-character forced cut and the drop of an oversized non-delta line share the writer rules without a dedicated acceptance criterion."
+  ],
+  "routingProfile": "native-haiku-luna"
+}
