@@ -113,6 +113,20 @@ describe('native thread model discovery (US-001)', () => {
     const result = await nativeModelsModule?.nativeModelProviders(homeDir);
     expect(result).toEqual(['minimax', 'opencode-go']);
   });
+
+  test('US-001 AC-12: sorts providers when config tier order is unsorted', async () => {
+    expect(nativeModelsModule).toBeDefined();
+    await writeConfig({
+      models: {
+        native: {
+          powerful: 'opencode-go/deepseek-v4.1-flash[high]',
+          fast: 'minimax/MiniMax-M2.7',
+        },
+      },
+    });
+    const result = await nativeModelsModule?.nativeModelProviders(homeDir);
+    expect(result).toEqual(['minimax', 'opencode-go']);
+  });
 });
 
 describe('nax credentials config reader (US-001)', () => {
