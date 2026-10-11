@@ -49,24 +49,31 @@ if (typeof expect !== 'undefined' && typeof expect.extend === 'function') {
     },
   });
 
-  // Patch Array.prototype.includes to support asymmetric matchers for toContain
-  const originalIncludes = Array.prototype.includes;
+  // Patch Array.prototype.includes to support asymmetric matchers for toContain.
+  // Setup re-runs per file in non-isolated (shared module cache) DB runs, so patch once
+  // instead of wrapping the previous patch again for every file.
+  const PATCHED = Symbol.for('koda.asymmetricIncludes');
+  type PatchedIncludes = typeof Array.prototype.includes & { [PATCHED]?: true };
+  if (!(Array.prototype.includes as PatchedIncludes)[PATCHED]) {
+    const originalIncludes = Array.prototype.includes;
 
-  Array.prototype.includes = function (
-    searchElement: unknown,
-    fromIndex?: number
-  ): boolean {
-    // Check if searchElement is an asymmetric matcher (has asymmetricMatch method)
-    if (isAsymmetricMatcher(searchElement)) {
-      // Find if any element matches the asymmetric matcher
-      for (let i = fromIndex || 0; i < this.length; i++) {
-        if (searchElement.asymmetricMatch(this[i])) {
-          return true;
+    Array.prototype.includes = function (
+      searchElement: unknown,
+      fromIndex?: number
+    ): boolean {
+      // Check if searchElement is an asymmetric matcher (has asymmetricMatch method)
+      if (isAsymmetricMatcher(searchElement)) {
+        // Find if any element matches the asymmetric matcher
+        for (let i = fromIndex || 0; i < this.length; i++) {
+          if (searchElement.asymmetricMatch(this[i])) {
+            return true;
+          }
         }
+        return false;
       }
-      return false;
-    }
-    // Fall back to original includes for non-matcher values
-    return originalIncludes.call(this, searchElement, fromIndex);
-  };
+      // Fall back to original includes for non-matcher values
+      return originalIncludes.call(this, searchElement, fromIndex);
+    };
+    (Array.prototype.includes as PatchedIncludes)[PATCHED] = true;
+  }
 }

@@ -12,5 +12,7 @@ export default defineConfig({
     ...baseConfig.test,
     include: ['.nax/**/*.test.ts'],
     exclude: ['**/node_modules/**', '**/dist/**'],
+    // The base config's DB-mode projects would replace this include list.
+    projects: undefined,
   },
 });
