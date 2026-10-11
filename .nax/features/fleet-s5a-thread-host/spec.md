@@ -1,4 +1,3 @@
-<!-- spec-writing: completed-through-phase-5 -->
 # SPEC: Fleet S5a-B3b — Thread Host (THREAD Jobs on the Runner: ASSIGN, Thread Job Run, Commands, Supervisor, Daemon, Protocol v4)
 
 ## Summary
@@ -170,7 +169,7 @@ promise resolved finds no run (`does not hold job`, US-006). `TUNING` gains `thr
 `threadCloseTimeoutMs: 10_000`.
 
 The stream file is `<jobDir>/thread-events.jsonl` (`jobDirFor(workspaceRoot, jobId)`, directory mode 0700). It is
-keyed by job id only, so the start deletes it before creating the writer: a requeued epoch never re-ships the lines
+keyed by job id only, so step 7 deletes it before creating the writer: a requeued epoch never re-ships the lines
 of the epoch it replaces.
 
 **Start** (`from` `'prepare'` or `'reprepare'`; `'watch'` or `'finish'` ends the job as a runner error with `a
@@ -190,8 +189,7 @@ thread job cannot be resumed`). Each step checks a cancel request (→ `CANCELLE
    skillsRoot, skills: thread.skills, git, searchTimeoutMs: threadSearchTimeoutMs, nowMs }), approvalTimeoutSec:
    assign.approvalTimeoutSec })`; not ok → `FAILED` with its `reason`. A cancel or halt that arrives while `open` is
    pending ends as above **and closes the session `open` then resolves** (a throw is logged).
-7. `RUNNING` with the patch `{ pid: null, pgid: null, branch: null }`; delete and recreate the stream file; create
-   the writer over it (`wakeGapMs` `threadWakeGapMs`, `streamMaxBytes` from tuning, `onCap` → close `stream_cap`,
+7. `RUNNING` with the patch `{ pid: null, pgid: null, branch: null }`; create the writer over the stream file (`wakeGapMs` `threadWakeGapMs`, `streamMaxBytes` from tuning, `onCap` → close `stream_cap`,
    `onWarn` → a `warn` lifecycle event); `logs.register({ jobId, leaseEpoch, threadPath, lifecycle })`;
    `writer.started({ resumed, backend: thread.backend, skillShas: thread.skills.map((s) => s.sha) })`; start the
    heartbeat (`snapshot { heartbeatAt }` every `threadHeartbeatMs` until the `UPLOADING` transition, a halt or an
@@ -214,7 +212,8 @@ with `session_error`.
 **Idle.** The idle timer runs only while no turn runs; it expires after `threadIdleMs` and closes with `idle`.
 
 **Close(reason)** — `reason` ∈ `idle`, `closed`, `cost_cap`, `stream_cap`, `cancelled`; the first one wins
-(B3b-R3): stop the idle timer → if a turn runs, `session.cancel(reason)` and wait for its iteration to end →
+(B3b-R3); the closing flag is set and the turn-running check is made synchronously when the close is requested: stop
+the idle timer → if a turn runs, `session.cancel(reason)` and wait for its iteration to end →
 `session.close()` (a throw is logged) → `writer.flush()`, `writer.closed(reason)` →
 `logs.drain(jobId, leaseEpoch, logDrainTimeoutMs)` (a timeout is a `warn` lifecycle event) → stop the heartbeat →
 `UPLOADING` → `CANCELLED` `cancelled` when the reason is `cancelled`, else `COMPLETED` with the reason →
@@ -246,13 +245,17 @@ the idle timer and the heartbeat, calls `logs.stopJob`, closes the session witho
 resolve without waiting for the turn. After a halt, every background task of the run (the turn's iteration and tail,
 the idle timer, a close in progress, the heartbeat) writes no journal event, no stream line and no transition.
 `abandon()` halts, then `journal.abandon(jobId, leaseEpoch)` (which deletes the row and its events), then
-`credentials.release(row)` (a throw is logged), then awaits `session.close()` for at most `threadCloseTimeoutMs` (a
-timeout or throw is logged) — no mutex (B3b-R1), and never longer than the close bound.
+`credentials.release(row)` (a throw is logged), then awaits the close promise `halt()` started — `session.close()` is
+called once per run — for at most `threadCloseTimeoutMs` (a timeout or throw is logged). With `open` still pending
+there is no close to await: the session `open` resolves is closed then, unawaited. No mutex (B3b-R1), never longer
+than the close bound. The idle timer, the heartbeat and the close bound all wait through `deps.sleep` with an abort
+signal, so a manual clock drives them.
 
 **Test double** (`apps/runner/test/helpers/fake-agent-session.ts`, US-003): `fakeAgentSession(script)` returns an
 `AgentSession` whose `send(message)` yields the next scripted turn's events. A scripted turn is a list of
 `SessionEvent`s plus optional `hold: true` (the iteration pauses after the events listed so far until `release()`) and
-`throwAfter` (the iteration throws after that many events). `answer` returns a scripted `AnswerStatus` (default
+`throwAfter` (the iteration throws after that many events). `cancel()` ends a held or still-pending iteration at once with a `turn_end` of status `cancelled`, as
+nax-agent does. `answer` returns a scripted `AnswerStatus` (default
 `'accepted'`); `close` resolves at once unless `hangClose: true`. Every call to `send`, `cancel`, `answer` and `close`
 is appended, in order, to a shared `calls: string[]` recorder that the recording `CredentialProvider` and the
 `prepareWorktree` / `ensureSkills` stubs write to as well. `fakeSessionFactory(session, result?)` returns an `open`
@@ -278,7 +281,7 @@ that resolves `{ ok: true, session, resumed: false }` (or the given result), wit
   `ThreadJobRun`, else `rejected` `does not hold job`.
 
 `CommandHandler.apply` routes `THREAD_INPUT`, `THREAD_ANSWER`, `THREAD_STOP_TURN`, `THREAD_CLOSE` and
-`THREAD_PUBLISH` to `supervisor.threadCommand` and records the outcome (a re-sent command id is acked from the
+`THREAD_PUBLISH` to `supervisor.threadCommand` and records the outcome with `record` (a re-sent command id is acked from the
 record, never re-applied).
 
 ### Daemon (US-007)
@@ -341,7 +344,9 @@ record, never re-applied).
   marks it CRASHED, and the next message starts a new job with `resume: true`.
 - Replaying a turn interrupted by a restart is not done; nax-agent reports it `interrupted` and the next input is a
   new turn.
-- Unpriced usage (`costSource` `unpriced`, `costUsd` 0) never moves the cost cap; the API's budget rules govern it.
+- Unpriced usage (`costSource` `unpriced`, `costUsd` 0) adds nothing to the spend; the API's budget rules govern it.
+  A `maxCostUsd` of `'0'` closes the session with `cost_cap` at its first `usage` event (`0 >= 0`); the API's send rule
+  `threads.costCap` refuses a send at that budget first.
 - A thread whose spend has overshot its cap gives a negative remaining `maxCostUsd`, which `COST_RE` rejects at
   ASSIGN (`invalid maxCostUsd`); the API's send rule `threads.costCap` refuses before that. A clamp in the API is a B1
   follow-up.
@@ -640,8 +645,8 @@ stubs.
   UPLOADING, FAILED]` with the `FAILED` reason `session_error`.
 - AC-13 [unit] A session whose turn throws after its first event writes a last stream line `session_failed` with
   `reason` `'session_error'`.
-- AC-14 [unit] A run with tuning `streamMaxBytes` 4096 ends `COMPLETED` with reason `stream_cap` after the first
-  session event of its first turn.
+- AC-14 [unit] A run with tuning `streamMaxBytes` 6000 whose first turn begins with a `thinking_delta` of 2000
+  characters ends `COMPLETED` with reason `stream_cap`.
 - AC-15 [unit] A run started on a row whose `<jobDir>/thread-events.jsonl` already holds a line `{"type":"stale"}`
   writes a stream file whose lines include no `stale` line.
 
@@ -721,7 +726,8 @@ Each `[integration]` criterion runs `startDaemon` in nax mode (a runner config w
 `FakeNaxCli` that answers the version, trust, profile, sandbox and `auth list` calls, as `test/unit/daemon.spec.ts`
 does from line 365) against the fake fleet server defined in `test/unit/daemon-thread.spec.ts` (Creates), with
 injected `threadSessions` (the fake factory from `test/helpers/fake-agent-session.ts`) and `configureCredentials`, a
-`file://` clone, and `selfCommand: [process.execPath, <src/main.ts>]`.
+`file://` clone, `selfCommand: [process.execPath, <src/main.ts>]`, tuning `pruneIntervalMs: 50`, and THREAD ASSIGN
+fixtures with `skills: []` (no skill fetch leaves the machine).
 
 - AC-1 [integration] `startDaemon` calls the injected `configureCredentials` exactly once, with a config whose
   `configDir()` returns `config.naxHome`.
