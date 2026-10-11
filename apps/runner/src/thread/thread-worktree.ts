@@ -59,9 +59,25 @@ async function readJson(path: string): Promise<unknown> {
   }
 }
 
-/** A sha, or null when the ref does not resolve. Git refusing a ref is a fact about the clone, not a failure. */
+/** `createGit` SIGKILLs a child at its timeout; 128 + SIGKILL is the exit code the result then carries. */
+const KILLED_EXIT_CODE = 137;
+
+/** Git could not start (a spawn failure) or never reached a verdict (SIGKILL at the timeout). */
+function isOperationalFailure(error: unknown): boolean {
+  if (error instanceof GitError) return error.result.code === KILLED_EXIT_CODE;
+  return typeof error === 'object' && error !== null && typeof (error as { code?: unknown }).code === 'string';
+}
+
+/**
+ * A sha, or null when git ran and refused the ref — a fact about the clone, not a failure. A git that
+ * could not run at all keeps its error, so the caller maps it through `reasonFromError`.
+ */
 async function refSha(git: Git, repoDir: string, ref: string): Promise<string | null> {
-  const sha = await git.ok(['rev-parse', '--verify', '--end-of-options', ref], { cwd: repoDir }).catch(() => null);
+  const sha = await git.ok(['rev-parse', '--verify', '--end-of-options', ref], { cwd: repoDir })
+    .catch((error: unknown): null => {
+      if (isOperationalFailure(error)) throw error;
+      return null;
+    });
   return sha?.trim() || null;
 }
 
