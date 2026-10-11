@@ -159,7 +159,7 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
     if (!isObj(rawInitial)) return bad('initialMessage');
     if (!checked(() => assertSegment('messageId', rawInitial['messageId']))) return bad('initialMessage');
     const initialText = rawInitial['text'];
-    if (typeof initialText !== 'string' || utf8Bytes(initialText) > THREAD_LIMITS.messageMaxBytes) return bad('initialMessage');
+    if (typeof initialText !== 'string' || initialText.length > THREAD_LIMITS.messageMaxBytes || utf8Bytes(initialText) > THREAD_LIMITS.messageMaxBytes) return bad('initialMessage');
     initialMessage = { messageId: rawInitial['messageId'] as string, text: initialText };
   }
   const thread: ThreadAssign = {
