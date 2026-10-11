@@ -10,8 +10,8 @@ import { RepoMutex } from '../../src/supervisor/repo-mutex';
 import { Supervisor } from '../../src/supervisor/supervisor';
 import { assignFor } from '../helpers/assign';
 import { FakeExecutor } from '../helpers/fake-executor';
-import { fakeTime } from '../helpers/fake-time';
 import { NO_LOG_SHIPPING } from '../helpers/fake-log-shipping';
+import { manualClock } from '../helpers/manual-clock';
 import { waitFor } from '../helpers/wait';
 
 const roots: string[] = [];
@@ -36,11 +36,12 @@ function session(overrides: Partial<AgentSession> = {}): AgentSession {
 }
 
 function setup(options: { withThreads?: boolean; liveSession?: AgentSession; sessionFactory?: () => AgentSession; initialMessage?: ThreadAssign['initialMessage'] } = {}) {
-  const time = fakeTime();
+  const time = manualClock(Date.parse('2026-10-01T00:00:00.000Z'));
+  const now = (): Date => new Date(time.nowMs());
   const root = join(import.meta.dir, `.supervisor-thread-${crypto.randomUUID()}`);
   roots.push(root);
   const workspaceRoot = join(root, 'workspace');
-  const journal = Journal.open(':memory:', time.now);
+  const journal = Journal.open(':memory:', now);
   const ex = new FakeExecutor();
   const mutex = new RepoMutex();
   const credentials = { acquire: mock(async () => ({ ok: true as const, credentials: { helper: '/job/git-cred', binDir: null } })), release: mock(async () => undefined) };
@@ -53,7 +54,7 @@ function setup(options: { withThreads?: boolean; liveSession?: AgentSession; ses
     ensureSkills: async () => ({ ok: true as const }), skillOrigin: 'file:///fixture',
   };
   const deps = {
-    journal, executor: ex, mutex, log: createMemoryLogger(), now: time.now, sleep: time.sleep,
+    journal, executor: ex, mutex, log: createMemoryLogger(), now, sleep: time.sleep,
     uploader: { upload: async () => ({ kind: 'ok' as const }) },
     tuning: { statusPollMs: 2_000, killGraceMs: 30_000, ackPollMs: 250, uploadAckWaitMs: 0, logDrainTimeoutMs: 1_000 },
     readoptHeartbeatMs: 120_000, logs: NO_LOG_SHIPPING,
@@ -61,7 +62,7 @@ function setup(options: { withThreads?: boolean; liveSession?: AgentSession; ses
   };
   const supervisor = new Supervisor(deps);
   supervisors.push(supervisor);
-  const handler = new CommandHandler({ journal, supervisor, workspaceRoot, log: deps.log, now: time.now, approvals: { answer: async () => ({ result: 'ok' }) } });
+  const handler = new CommandHandler({ journal, supervisor, workspaceRoot, log: deps.log, now, approvals: { answer: async () => ({ result: 'ok' }) } });
   const addThread = (jobId = 'j1', epoch = 1) => journal.insertJob({
     assign: assignFor('THREAD', { jobId, feature: `thread-${jobId}`, thread: { ...thread, initialMessage: options.initialMessage ?? thread.initialMessage } }),
     leaseEpoch: epoch, repoKey: 'acme/app', jobDir: join(workspaceRoot, '.jobs', jobId),
@@ -125,6 +126,7 @@ describe('US-006 Supervisor and CommandHandler THREAD routing', () => {
     const b = setup(); await b.handler.handle([assignCommand()]);
     await waitFor(() => b.journal.getJob('j1', 1)?.state === 'RUNNING');
     await b.handler.handle([cmd('THREAD_CLOSE', 'close-1')]);
+    await b.supervisor.idle();
     const inputAck = await b.handler.handle([cmd('THREAD_INPUT', 'after-close', 'j1', { messageId: 'm2', text: 'late' })]);
     expect(inputAck).toEqual([
       { commandId: 'after-close', leaseEpoch: 1, result: 'rejected', detail: 'does not hold job' },
@@ -162,7 +164,11 @@ describe('US-006 Supervisor and CommandHandler THREAD routing', () => {
     const close = mock(async () => new Promise<void>(() => undefined));
     const b = setup({ liveSession: session({ close }) });
     await b.handler.handle([assignCommand()]); await waitFor(() => b.journal.getJob('j1', 1)?.state === 'RUNNING');
-    await b.handler.handle([cmd('ABANDON', 'abandon-timeout')]);
+    const abandoning = b.handler.handle([cmd('ABANDON', 'abandon-timeout')]);
+    await waitFor(() => close.mock.calls.length === 1);
+    await Bun.sleep(0);   // let the abandon park on the close it will not await past the timeout
+    b.time.advance(tuning.threadCloseTimeoutMs);
+    await abandoning;
     expect(close).toHaveBeenCalledTimes(1);
     expect(b.journal.getJob('j1', 1)).toBeNull();
   });
