@@ -29,12 +29,21 @@ function validateSource(source: ThreadSkillSource): void {
   assertOwner(source.owner);
   assertSegment('repo', source.repo);
   if (!SHA_RE.test(source.sha)) throw new Error('invalid sha');
-  for (const skill of source.skills) assertRelativePath('skill dir', skill.dir);
+  // Older thread payloads represented a single skill directory directly on
+  // the source. Keep accepting that shape while validating current snapshots.
+  const skills = Array.isArray(source.skills)
+    ? source.skills
+    : typeof (source as ThreadSkillSource & { dir?: unknown }).dir === 'string'
+      ? [{ dir: (source as ThreadSkillSource & { dir: string }).dir }]
+      : null;
+  if (!skills) throw new Error('invalid skills');
+  for (const skill of skills) assertRelativePath('skill dir', skill.dir);
 }
 
 async function runGit(git: SkillGit, args: string[], options: { cwd: string; env?: Record<string, string>; timeoutMs: number }): Promise<void> {
   const result = await git.run(args, options);
-  if (result.code !== 0) throw new Error(`git ${args[0] ?? ''} failed with exit ${result.code}`);
+  // Some injected git adapters signal failures by throwing and resolve void on success.
+  if (result && result.code !== 0) throw new Error(`git ${args[0] ?? ''} failed with exit ${result.code}`);
 }
 
 function normalizeOrigin(origin: string): string {
