@@ -7,10 +7,10 @@ const job = (over: Partial<FleetJobRecord> = {}): FleetJobRecord => ({
 } as FleetJobRecord);
 
 describe('FleetJobOutcomeRecorder (S4a §2.4, D513)', () => {
-  const repo = { findRepo: jest.fn(async () => ({ owner: 'acme', name: 'app' })) };
-  const outbox = { record: jest.fn(async () => undefined) };
+  const repo = { findRepo: vi.fn(async () => ({ owner: 'acme', name: 'app' })) };
+  const outbox = { record: vi.fn(async () => undefined) };
   const recorder = new FleetJobOutcomeRecorder(repo as never, outbox as never);
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => vi.clearAllMocks());
 
   it.each([
     ['ESCALATED', null, 'escalated'],

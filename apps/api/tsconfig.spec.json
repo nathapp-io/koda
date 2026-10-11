@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["ES2024"],
+    "types": ["vitest/globals", "node"]
+  },
+  "include": ["src/**/*", "test/**/*", "test-setup.ts", "vitest.config.ts", "vitest.nax.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 /**
  * VcsPrSyncService Auto-Transition Tests (VCS-P3-002-B)
  *
@@ -18,16 +19,16 @@ import { VcsPrStatus } from '../../../src/vcs/types';
 import { TicketStatus, ActivityType } from '../../../src/common/enums';
 
 // Mock the decryptToken utility
-jest.mock('../../../src/common/utils/encryption.util', () => ({
-  decryptToken: jest.fn((token: string) => {
+vi.mock('../../../src/common/utils/encryption.util', () => ({
+  decryptToken: vi.fn((token: string) => {
     // Mock decryption - just return a dummy token
     return 'decrypted-token';
   }),
 }));
 
 // Mock the VCS factory
-jest.mock('../../../src/vcs/factory', () => ({
-  createVcsProvider: jest.fn(),
+vi.mock('../../../src/vcs/factory', () => ({
+  createVcsProvider: vi.fn(),
 }));
 
 // Import after mocks
@@ -37,7 +38,7 @@ import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
 
 describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
   let service: VcsPrSyncService;
-  let vcsRepo: jest.Mocked<PrismaVcsRepository>;
+  let vcsRepo: Mocked<PrismaVcsRepository>;
   let module: TestingModule;
 
   const projectId = 'project-123';
@@ -115,21 +116,21 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
   };
 
   const mockVcsProvider = {
-    getPullRequestStatus: jest.fn(),
-    fetchIssues: jest.fn(),
-    fetchIssue: jest.fn(),
-    testConnection: jest.fn(),
-    getDefaultBranch: jest.fn(),
-    createPullRequest: jest.fn(),
-    listPullRequests: jest.fn(),
+    getPullRequestStatus: vi.fn(),
+    fetchIssues: vi.fn(),
+    fetchIssue: vi.fn(),
+    testConnection: vi.fn(),
+    getDefaultBranch: vi.fn(),
+    createPullRequest: vi.fn(),
+    listPullRequests: vi.fn(),
   };
 
   beforeEach(async () => {
-    jest.clearAllMocks();
-    jest.restoreAllMocks();
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
 
-    const { createVcsProvider } = require('../../../src/vcs/factory');
-    createVcsProvider.mockReturnValue(mockVcsProvider);
+    const { createVcsProvider } = await import('../../../src/vcs/factory');
+    vi.mocked(createVcsProvider).mockReturnValue(mockVcsProvider as unknown as ReturnType<typeof createVcsProvider>);
 
     module = await Test.createTestingModule({
       providers: [
@@ -137,11 +138,11 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
         {
           provide: VCS_REPOSITORY,
           useValue: {
-            findExistingTicketByExternalId: jest.fn(),
-            createTicketFromIssue: jest.fn(),
-            findActiveTicketLinksWithPrs: jest.fn(),
-            updateTicketLinkWithPrState: jest.fn().mockResolvedValue('updated'),
-            applyMergedPrTransition: jest.fn(),
+            findExistingTicketByExternalId: vi.fn(),
+            createTicketFromIssue: vi.fn(),
+            findActiveTicketLinksWithPrs: vi.fn(),
+            updateTicketLinkWithPrState: vi.fn().mockResolvedValue('updated'),
+            applyMergedPrTransition: vi.fn(),
           },
         },
       ],

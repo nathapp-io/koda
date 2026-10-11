@@ -2,11 +2,11 @@ import { PERMISSION_KEY } from '@nathapp/nestjs-auth';
 import { AdminUsersController } from './admin-users.controller';
 
 describe('AdminUsersController', () => {
-  const service = { list: jest.fn(), create: jest.fn(), update: jest.fn() };
+  const service = { list: vi.fn(), create: vi.fn(), update: vi.fn() };
   const controller = new AdminUsersController(service as never);
   const page = { total: 1, current: 2, size: 5, hasNext: false, hasPrev: true, records: [{ id: 'u1' }] };
 
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => vi.clearAllMocks());
 
   it('parses paging strings and forwards the email filter', async () => {
     service.list.mockResolvedValue(page);

@@ -6,8 +6,8 @@ const event = (userId: string, id = 'n1'): UserLiveEvent => ({ type: 'notificati
 describe('UserEventBus (S4a §4)', () => {
   it('delivers only to the addressed user', () => {
     const bus = new UserEventBus();
-    const a = jest.fn();
-    const b = jest.fn();
+    const a = vi.fn();
+    const b = vi.fn();
     bus.subscribe('u1', a);
     bus.subscribe('u2', b);
     bus.publish(event('u1'));
@@ -17,8 +17,8 @@ describe('UserEventBus (S4a §4)', () => {
 
   it('unsubscribes and counts listeners per user', () => {
     const bus = new UserEventBus();
-    const off = bus.subscribe('u1', jest.fn());
-    bus.subscribe('u1', jest.fn());
+    const off = bus.subscribe('u1', vi.fn());
+    bus.subscribe('u1', vi.fn());
     expect(bus.listenerCount('u1')).toBe(2);
     off();
     expect(bus.listenerCount('u1')).toBe(1);
@@ -26,9 +26,9 @@ describe('UserEventBus (S4a §4)', () => {
   });
 
   it('never throws when a listener does, and still reaches the others', () => {
-    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     const bus = new UserEventBus();
-    const ok = jest.fn();
+    const ok = vi.fn();
     bus.subscribe('u1', () => { throw new Error('boom'); });
     bus.subscribe('u1', ok);
     expect(() => bus.publish(event('u1'))).not.toThrow();

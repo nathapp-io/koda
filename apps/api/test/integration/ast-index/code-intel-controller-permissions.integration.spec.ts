@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Reflector } from '@nestjs/core';
 import { CodeIntelController } from '../../../src/code-intel/code-intel.controller';
@@ -13,39 +14,39 @@ import type { CaslPermissionAction } from '@nathapp/nestjs-auth';
 
 describe('CodeIntelController', () => {
   let controller: CodeIntelController;
-  let astIndexService: jest.Mocked<AstIndexService>;
+  let astIndexService: Mocked<AstIndexService>;
 
   const mockAstIndexService = {
-    indexCommit: jest.fn(),
-    getSymbol: jest.fn(),
-    getCallers: jest.fn(),
-    getCallees: jest.fn(),
+    indexCommit: vi.fn(),
+    getSymbol: vi.fn(),
+    getCallers: vi.fn(),
+    getCallees: vi.fn(),
   };
 
   const mockSymbolStore = {
-    upsertSymbol: jest.fn(),
-    findBySymbolId: jest.fn(),
-    findCallers: jest.fn(),
-    findCallees: jest.fn(),
-    deleteByFile: jest.fn(),
+    upsertSymbol: vi.fn(),
+    findBySymbolId: vi.fn(),
+    findCallers: vi.fn(),
+    findCallees: vi.fn(),
+    deleteByFile: vi.fn(),
   };
 
   const mockCodeGraph = {
-    parseSourceFile: jest.fn(),
-    extractSymbols: jest.fn(),
-    extractCallers: jest.fn(),
-    extractCallees: jest.fn(),
+    parseSourceFile: vi.fn(),
+    extractSymbols: vi.fn(),
+    extractCallers: vi.fn(),
+    extractCallees: vi.fn(),
   };
 
   const mockProjectsService = {
-    findProjectIdBySlug: jest.fn(),
-    findBySlug: jest.fn(),
-    assertProjectMembership: jest.fn(),
+    findProjectIdBySlug: vi.fn(),
+    findBySlug: vi.fn(),
+    assertProjectMembership: vi.fn(),
   };
 
   const mockProjectAccessService = {
-    findProjectIdBySlug: jest.fn(),
-    assertProjectMembership: jest.fn(),
+    findProjectIdBySlug: vi.fn(),
+    assertProjectMembership: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -66,7 +67,7 @@ describe('CodeIntelController', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('AC-9: permission gating', () => {

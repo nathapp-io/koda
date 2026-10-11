@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -15,21 +16,21 @@ describe('KodaDomainWriter Unit Tests', () => {
   let service: KodaDomainWriter;
 
   const mockWriterRepo = {
-    findProjectById: jest.fn(),
+    findProjectById: vi.fn(),
   };
 
   const mockRagService = {
-    indexDocument: jest.fn(),
-    importGraphify: jest.fn(),
+    indexDocument: vi.fn(),
+    importGraphify: vi.fn(),
   };
 
   const outbox = {
-    record: jest.fn().mockResolvedValue(undefined),
+    record: vi.fn().mockResolvedValue(undefined),
   };
 
   let depth = 0;
   const mockTxManager = {
-    run: jest.fn(async <T>(fn: () => Promise<T>): Promise<T> => {
+    run: vi.fn(async <T>(fn: () => Promise<T>): Promise<T> => {
       depth += 1;
       try {
         return await fn();
@@ -37,30 +38,36 @@ describe('KodaDomainWriter Unit Tests', () => {
         depth -= 1;
       }
     }),
-    getClient: jest.fn(),
-    isInTransaction: jest.fn(() => depth > 0),
+    getClient: vi.fn(),
+    isInTransaction: vi.fn(() => depth > 0),
   };
 
   const mockAgentAuthProvider = {
-    loadAgentRoles: jest.fn().mockResolvedValue(['AGENT']),
-    buildPrincipal: jest.fn(),
-    invalidateByTag: jest.fn(),
+    loadAgentRoles: vi.fn().mockResolvedValue(['AGENT']),
+    buildPrincipal: vi.fn(),
+    invalidateByTag: vi.fn(),
   };
 
   const mockTicketEventService = {
-    create: jest.fn(),
+    create: vi.fn(),
   };
 
   const mockAgentEventService = {
-    create: jest.fn(),
+    create: vi.fn(),
   };
 
   const mockDecisionEventService = {
-    create: jest.fn(),
+    create: vi.fn(),
   };
 
   beforeEach(async () => {
     depth = 0;
+    // Sticky per-test implementations (mockRejectedValue etc.) must not leak across tests.
+    for (const group of [mockWriterRepo, mockRagService, mockTicketEventService, mockAgentEventService, mockDecisionEventService]) {
+      Object.values(group).forEach((m) => (m as Mock).mockReset());
+    }
+    outbox.record.mockReset().mockResolvedValue(undefined);
+    mockAgentAuthProvider.loadAgentRoles.mockReset().mockResolvedValue(['AGENT']);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         KodaDomainWriter,
@@ -79,7 +86,7 @@ describe('KodaDomainWriter Unit Tests', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('writeTicketEvent', () => {

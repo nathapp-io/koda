@@ -1,3 +1,4 @@
+import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { MemoryController } from './memory.controller';
@@ -57,36 +58,36 @@ describe('makeMemoryItem', () => {
   // two independent calls (the mock's resolved value and the expected value)
   // must be deep-equal, so the helper cannot read the wall clock.
   it('produces deep-equal items across calls even as time advances', () => {
-    jest.useFakeTimers();
+    vi.useFakeTimers();
     try {
       const first = makeMemoryItem();
-      jest.advanceTimersByTime(1);
+      vi.advanceTimersByTime(1);
       const second = makeMemoryItem();
       expect(second).toEqual(first);
     } finally {
-      jest.useRealTimers();
+      vi.useRealTimers();
     }
   });
 });
 
 describe('MemoryController', () => {
   let controller: MemoryController;
-  let extractionService: jest.Mocked<Partial<ExtractionService>>;
-  let repository: jest.Mocked<Partial<PrismaMemoryItemRepository>>;
-  let projectAccess: jest.Mocked<Partial<ProjectAccessService>>;
+  let extractionService: Mocked<Partial<ExtractionService>>;
+  let repository: Mocked<Partial<PrismaMemoryItemRepository>>;
+  let projectAccess: Mocked<Partial<ProjectAccessService>>;
 
   beforeEach(async () => {
     extractionService = {
-      extractFromEvent: jest.fn().mockReturnValue([]),
-      recordDecision: jest.fn(),
+      extractFromEvent: vi.fn().mockReturnValue([]),
+      recordDecision: vi.fn(),
     };
 
     repository = {
-      upsert: jest.fn(),
+      upsert: vi.fn(),
     };
 
     projectAccess = {
-      assertProjectMembership: jest.fn().mockResolvedValue(undefined),
+      assertProjectMembership: vi.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -100,8 +101,8 @@ describe('MemoryController', () => {
 
     controller = module.get<MemoryController>(MemoryController);
 
-    jest.clearAllMocks();
-    (projectAccess.assertProjectMembership as jest.Mock).mockResolvedValue(undefined);
+    vi.clearAllMocks();
+    (projectAccess.assertProjectMembership as Mock).mockResolvedValue(undefined);
   });
 
   describe('extractFromEvent', () => {
@@ -113,7 +114,7 @@ describe('MemoryController', () => {
 
     it('throws ForbiddenAppException for a MEMBER user without project membership', async () => {
       const principal = makeUserPrincipal(ActorRole.MEMBER);
-      (projectAccess.assertProjectMembership as jest.Mock).mockRejectedValue(
+      (projectAccess.assertProjectMembership as Mock).mockRejectedValue(
         new ForbiddenAppException({}, 'projects'),
       );
 
@@ -125,7 +126,7 @@ describe('MemoryController', () => {
 
     it('throws ForbiddenAppException for a VIEWER user without project membership', async () => {
       const principal = makeUserPrincipal(ActorRole.VIEWER);
-      (projectAccess.assertProjectMembership as jest.Mock).mockRejectedValue(
+      (projectAccess.assertProjectMembership as Mock).mockRejectedValue(
         new ForbiddenAppException({}, 'projects'),
       );
 
@@ -137,7 +138,7 @@ describe('MemoryController', () => {
 
     it('allows a MEMBER-role global user who holds a project membership (any role)', async () => {
       const principal = makeUserPrincipal(ActorRole.MEMBER);
-      (extractionService.extractFromEvent as jest.Mock).mockReturnValue([
+      (extractionService.extractFromEvent as Mock).mockReturnValue([
         {
           projectId: 'project-123',
           kind: MemoryKind.FACT,
@@ -146,7 +147,7 @@ describe('MemoryController', () => {
           confidence: 0.9,
         },
       ]);
-      (repository.upsert as jest.Mock).mockResolvedValue(makeMemoryItem());
+      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
 
       const result = await controller.extractFromEvent(
         { projectId: 'project-123', action: 'status_changed', data: {} },
@@ -167,8 +168,8 @@ describe('MemoryController', () => {
           confidence: 0.9,
         },
       ];
-      (extractionService.extractFromEvent as jest.Mock).mockReturnValue(extracted);
-      (repository.upsert as jest.Mock).mockResolvedValue(makeMemoryItem());
+      (extractionService.extractFromEvent as Mock).mockReturnValue(extracted);
+      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
 
       const event = {
         type: 'ticket_event',
@@ -188,7 +189,7 @@ describe('MemoryController', () => {
 
     it('extracts and upserts items for DEVELOPER user', async () => {
       const principal = makeUserPrincipal(ActorRole.DEVELOPER);
-      (extractionService.extractFromEvent as jest.Mock).mockReturnValue([
+      (extractionService.extractFromEvent as Mock).mockReturnValue([
         {
           projectId: 'project-123',
           kind: MemoryKind.FACT,
@@ -197,7 +198,7 @@ describe('MemoryController', () => {
           confidence: 0.9,
         },
       ]);
-      (repository.upsert as jest.Mock).mockResolvedValue(makeMemoryItem());
+      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
 
       const result = await controller.extractFromEvent(
         { projectId: 'project-123', action: 'status_changed', data: {} },
@@ -208,7 +209,7 @@ describe('MemoryController', () => {
 
     it('allows agent principals to extract', async () => {
       const principal = makeAgentPrincipal();
-      (extractionService.extractFromEvent as jest.Mock).mockReturnValue([
+      (extractionService.extractFromEvent as Mock).mockReturnValue([
         {
           projectId: 'project-123',
           kind: MemoryKind.FACT,
@@ -217,7 +218,7 @@ describe('MemoryController', () => {
           confidence: 0.9,
         },
       ]);
-      (repository.upsert as jest.Mock).mockResolvedValue(makeMemoryItem());
+      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
 
       const result = await controller.extractFromEvent(
         { projectId: 'project-123', action: 'status_changed', data: {} },
@@ -228,7 +229,7 @@ describe('MemoryController', () => {
 
     it('returns empty items array when extraction yields no items', async () => {
       const principal = makeUserPrincipal(ActorRole.ADMIN);
-      (extractionService.extractFromEvent as jest.Mock).mockReturnValue([]);
+      (extractionService.extractFromEvent as Mock).mockReturnValue([]);
 
       const result = await controller.extractFromEvent(
         { projectId: 'project-123', action: 'status_changed', data: {} },
@@ -240,7 +241,7 @@ describe('MemoryController', () => {
 
     it('H12 follow-up: extract with decision_event payload does not create a DECISION item via the HTTP route', async () => {
       const principal = makeUserPrincipal(ActorRole.ADMIN);
-      (extractionService.extractFromEvent as jest.Mock).mockReturnValue([
+      (extractionService.extractFromEvent as Mock).mockReturnValue([
         {
           projectId: 'project-123',
           kind: MemoryKind.DECISION,
@@ -252,7 +253,7 @@ describe('MemoryController', () => {
           confidence: 1.0,
         },
       ]);
-      (repository.upsert as jest.Mock).mockResolvedValue(makeMemoryItem());
+      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
 
       const result = await controller.extractFromEvent(
         { projectId: 'project-123', type: 'decision_event', action: 'decided', data: {}, agentId: 'victim' },
@@ -266,7 +267,7 @@ describe('MemoryController', () => {
 
     it('H12 follow-up: extract with agent_event decision_made payload does not create a DECISION item', async () => {
       const principal = makeAgentPrincipal();
-      (extractionService.extractFromEvent as jest.Mock).mockReturnValue([
+      (extractionService.extractFromEvent as Mock).mockReturnValue([
         {
           projectId: 'project-123',
           kind: MemoryKind.DECISION,
@@ -278,7 +279,7 @@ describe('MemoryController', () => {
           confidence: 0.95,
         },
       ]);
-      (repository.upsert as jest.Mock).mockResolvedValue(makeMemoryItem());
+      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
 
       const result = await controller.extractFromEvent(
         { projectId: 'project-123', type: 'agent_event', action: 'decision_made', data: { decision: 'x' }, agentId: 'victim' },
@@ -309,8 +310,8 @@ describe('MemoryController', () => {
         object: 'forged',
         confidence: 1.0,
       };
-      (extractionService.extractFromEvent as jest.Mock).mockReturnValue([decisionItem, factItem]);
-      (repository.upsert as jest.Mock).mockResolvedValue(makeMemoryItem());
+      (extractionService.extractFromEvent as Mock).mockReturnValue([decisionItem, factItem]);
+      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
 
       const result = await controller.extractFromEvent(
         { projectId: 'project-123', type: 'ticket_event', action: 'status_changed', data: {} },
@@ -326,7 +327,7 @@ describe('MemoryController', () => {
 
     it('H12: extract uses principal.id as ownerId, not event.actorId', async () => {
       const principal = makeUserPrincipal(ActorRole.ADMIN);
-      (extractionService.extractFromEvent as jest.Mock).mockReturnValue([
+      (extractionService.extractFromEvent as Mock).mockReturnValue([
         {
           projectId: 'project-123',
           kind: MemoryKind.FACT,
@@ -336,7 +337,7 @@ describe('MemoryController', () => {
           confidence: 0.9,
         },
       ]);
-      (repository.upsert as jest.Mock).mockResolvedValue(makeMemoryItem());
+      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
 
       const event = {
         type: 'ticket_event',
@@ -362,7 +363,7 @@ describe('MemoryController', () => {
     it('delegates to extractionService.recordDecision and returns the result', async () => {
       const principal = makeUserPrincipal(ActorRole.ADMIN);
       const writeResult = { canonicalId: 'src-1', memoryId: 'mem-1' };
-      (extractionService.recordDecision as jest.Mock).mockResolvedValue(writeResult);
+      (extractionService.recordDecision as Mock).mockResolvedValue(writeResult);
 
       const input = {
         projectId: 'project-123',
@@ -392,7 +393,7 @@ describe('MemoryController', () => {
 
     it('throws ForbiddenAppException for MEMBER user without project membership', async () => {
       const principal = makeUserPrincipal(ActorRole.MEMBER);
-      (projectAccess.assertProjectMembership as jest.Mock).mockRejectedValue(
+      (projectAccess.assertProjectMembership as Mock).mockRejectedValue(
         new ForbiddenAppException({}, 'projects'),
       );
 
@@ -408,7 +409,7 @@ describe('MemoryController', () => {
 
     it('throws ForbiddenAppException when the caller is not a member of the named project', async () => {
       const principal = makeUserPrincipal(ActorRole.DEVELOPER);
-      (projectAccess.assertProjectMembership as jest.Mock).mockRejectedValue(new ForbiddenAppException({}, 'projects'));
+      (projectAccess.assertProjectMembership as Mock).mockRejectedValue(new ForbiddenAppException({}, 'projects'));
 
       await expect(
         controller.recordDecision(
@@ -421,7 +422,7 @@ describe('MemoryController', () => {
 
     it('ignores a non-admin-supplied actorId and records the decision as the caller', async () => {
       const principal = makeUserPrincipal(ActorRole.DEVELOPER);
-      (extractionService.recordDecision as jest.Mock).mockResolvedValue({ canonicalId: 'x', memoryId: 'y' });
+      (extractionService.recordDecision as Mock).mockResolvedValue({ canonicalId: 'x', memoryId: 'y' });
 
       await controller.recordDecision(
         { projectId: 'project-123', actorId: 'someone-else', topic: 't', decision: 'd' },
@@ -436,7 +437,7 @@ describe('MemoryController', () => {
 
     it('honors an admin-supplied actorId', async () => {
       const principal = makeUserPrincipal(ActorRole.ADMIN);
-      (extractionService.recordDecision as jest.Mock).mockResolvedValue({ canonicalId: 'x', memoryId: 'y' });
+      (extractionService.recordDecision as Mock).mockResolvedValue({ canonicalId: 'x', memoryId: 'y' });
 
       await controller.recordDecision(
         { projectId: 'project-123', actorId: 'attributed-actor', topic: 't', decision: 'd' },
@@ -454,7 +455,7 @@ describe('MemoryController', () => {
     it('creates a memory item for ADMIN user', async () => {
       const principal = makeUserPrincipal(ActorRole.ADMIN);
       const created = makeMemoryItem();
-      (repository.upsert as jest.Mock).mockResolvedValue(created);
+      (repository.upsert as Mock).mockResolvedValue(created);
 
       const input = {
         projectId: 'project-123',
@@ -484,7 +485,7 @@ describe('MemoryController', () => {
 
     it('throws ForbiddenAppException for MEMBER user without project membership', async () => {
       const principal = makeUserPrincipal(ActorRole.MEMBER);
-      (projectAccess.assertProjectMembership as jest.Mock).mockRejectedValue(
+      (projectAccess.assertProjectMembership as Mock).mockRejectedValue(
         new ForbiddenAppException({}, 'projects'),
       );
 
@@ -505,7 +506,7 @@ describe('MemoryController', () => {
 
     it('throws ForbiddenAppException for VIEWER user without project membership', async () => {
       const principal = makeUserPrincipal(ActorRole.VIEWER);
-      (projectAccess.assertProjectMembership as jest.Mock).mockRejectedValue(
+      (projectAccess.assertProjectMembership as Mock).mockRejectedValue(
         new ForbiddenAppException({}, 'projects'),
       );
 
@@ -525,7 +526,7 @@ describe('MemoryController', () => {
 
     it('allows a MEMBER-role global user who holds a project DEVELOPER membership (resolves lockout)', async () => {
       const principal = makeUserPrincipal(ActorRole.MEMBER);
-      (repository.upsert as jest.Mock).mockResolvedValue(makeMemoryItem());
+      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
 
       // With a ProjectMember row (mock membership check passes), a user whose
       // GLOBAL role is only MEMBER may write memory to the project.
@@ -545,7 +546,7 @@ describe('MemoryController', () => {
 
     it('throws ForbiddenAppException when the caller is not a member of the named project', async () => {
       const principal = makeUserPrincipal(ActorRole.DEVELOPER);
-      (projectAccess.assertProjectMembership as jest.Mock).mockRejectedValue(new ForbiddenAppException({}, 'projects'));
+      (projectAccess.assertProjectMembership as Mock).mockRejectedValue(new ForbiddenAppException({}, 'projects'));
 
       await expect(
         controller.createMemory(
@@ -563,7 +564,7 @@ describe('MemoryController', () => {
 
     it('uses provided ownerId over principal id', async () => {
       const principal = makeUserPrincipal(ActorRole.ADMIN);
-      (repository.upsert as jest.Mock).mockResolvedValue(makeMemoryItem());
+      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
 
       await controller.createMemory(
         {
@@ -583,7 +584,7 @@ describe('MemoryController', () => {
 
     it('H12: generic POST forces ownerId to principal for non-admin users', async () => {
       const principal = makeUserPrincipal(ActorRole.DEVELOPER);
-      (repository.upsert as jest.Mock).mockResolvedValue(makeMemoryItem());
+      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
 
       await controller.createMemory(
         {
@@ -606,7 +607,7 @@ describe('MemoryController', () => {
 
     it('H12: generic POST forces ownerId to principal for agents too', async () => {
       const principal = makeAgentPrincipal();
-      (repository.upsert as jest.Mock).mockResolvedValue(makeMemoryItem());
+      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
 
       await controller.createMemory(
         {
@@ -644,7 +645,7 @@ describe('MemoryController', () => {
 
     it('uses provided confidence over default 0.8', async () => {
       const principal = makeUserPrincipal(ActorRole.ADMIN);
-      (repository.upsert as jest.Mock).mockResolvedValue(makeMemoryItem());
+      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
 
       await controller.createMemory(
         {
@@ -665,7 +666,7 @@ describe('MemoryController', () => {
     it('allows agent principals to create memory', async () => {
       const principal = makeAgentPrincipal();
       const created = makeMemoryItem();
-      (repository.upsert as jest.Mock).mockResolvedValue(created);
+      (repository.upsert as Mock).mockResolvedValue(created);
 
       const result = await controller.createMemory(
         {

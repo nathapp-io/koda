@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * US-004 — `OutboundHttpClient.post`: guarded native HTTP(S) delivery.
  *
@@ -28,7 +29,7 @@ const BASE_CONFIG: IWebhookConfig = {
   deliveryTimeoutMs: 2000,
 };
 
-type ResolveMock = jest.Mock<Promise<string[]>, [string]>;
+type ResolveMock = Mock<(...args: [string]) => Promise<string[]>>;
 
 interface ClientHarness {
   client: OutboundHttpClient;
@@ -39,7 +40,7 @@ function makeClient(
   options: { config?: Partial<IWebhookConfig>; addresses?: readonly string[] } = {},
 ): ClientHarness {
   const addresses = options.addresses ?? [LOOPBACK];
-  const resolve = jest.fn<Promise<string[]>, [string]>(
+  const resolve = vi.fn<(...args: [string]) => Promise<string[]>>(
     (): Promise<string[]> => Promise.resolve([...addresses]),
   );
   const config: IWebhookConfig = { ...BASE_CONFIG, ...options.config };
@@ -398,7 +399,7 @@ describe('US-004: OutboundHttpClient.post', () => {
     it('AC10: a refused connection logs Logger.warn once with the raw code and the URL host', async () => {
       const port = await closedPort();
       const { client } = makeClient({ config: { allowedHostnames: [ALLOWED_HOST] } });
-      const warn = Logger.prototype.warn as unknown as jest.Mock;
+      const warn = Logger.prototype.warn as unknown as Mock;
       warn.mockClear();
 
       expect(

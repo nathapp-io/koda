@@ -1,11 +1,12 @@
+import type { Mock } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
-import { createMock } from '@golevelup/ts-jest';
+import { createMock } from '@golevelup/ts-vitest';
 import { EvaluationService } from './evaluation.service';
 import { HybridRetrieverService } from '../rag/hybrid-retriever.service';
 
 const makeRetriever = (ids: string[]) =>
   createMock<HybridRetrieverService>({
-    search: jest.fn().mockResolvedValue({
+    search: vi.fn().mockResolvedValue({
       results: ids.map((id) => ({ sourceId: id, score: 0.9, content: '' })),
       retrievedAt: '2026-01-01T00:00:00.000Z',
     }),
@@ -63,7 +64,7 @@ describe('EvaluationService', () => {
 
     it('calculates correct avg, p50, p95 for multiple queries', async () => {
       const retrieverMock = createMock<HybridRetrieverService>();
-      (retrieverMock.search as unknown as jest.Mock)
+      (retrieverMock.search as unknown as Mock)
         .mockResolvedValueOnce({
           results: ['d1', 'd2', 'd3', 'd4', 'd5'].map((id) => ({ sourceId: id, score: 0.9, content: '' })),
           retrievedAt: '2026-01-01T00:00:00.000Z',

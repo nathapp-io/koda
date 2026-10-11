@@ -18,7 +18,7 @@ import { UsersModule } from './users.module';
       provide: TRANSACTION_MANAGER,
       useValue: { run: <T>(fn: () => Promise<T>) => fn(), getClient: () => ({}), isInTransaction: () => false },
     },
-    { provide: CacheManager, useValue: { get: jest.fn(), invalidate: jest.fn() } },
+    { provide: CacheManager, useValue: { get: vi.fn(), invalidate: vi.fn() } },
   ],
   exports: [PrismaService, TRANSACTION_MANAGER, CacheManager],
 })

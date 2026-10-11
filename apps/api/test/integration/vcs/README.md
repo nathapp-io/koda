@@ -28,7 +28,7 @@ Unit tests for token encryption utility:
 - Wrong key detection
 - Various input types (empty, long, special chars, unicode)
 
-**Run:** `npx jest src/common/utils/encryption.util.spec.ts`
+**Run:** `npx vitest run src/common/utils/encryption.util.spec.ts`
 
 ### 3. `vcs.config.spec.ts` (in src/config/)
 **Acceptance Criteria Covered:** AC9
@@ -112,7 +112,7 @@ End-to-end integration test simulating real usage:
 
 **Unit tests only:**
 ```bash
-npx jest src/common/utils/encryption.util.spec.ts src/config/vcs.config.spec.ts
+npx vitest run src/common/utils/encryption.util.spec.ts src/config/vcs.config.spec.ts
 ```
 
 **Integration tests only:**
@@ -123,7 +123,7 @@ cd apps/api && bun run test:db:up && bun run test:integration -- test/integratio
 **All tests:**
 ```bash
 cd apps/api && bun run test:db:up && bun run test:integration -- test/integration/vcs/
-npx jest src/common/utils/encryption.util.spec.ts src/config/vcs.config.spec.ts
+npx vitest run src/common/utils/encryption.util.spec.ts src/config/vcs.config.spec.ts
 ```
 
 ## Test Statistics

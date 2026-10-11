@@ -6,8 +6,8 @@ const DUE = new Date('2026-10-02T03:00:00.000Z');
 const RESULT = { claimed: 1, dispatched: 1, coalesced: 0, skipped: 0, disabled: 0, failed: 0 };
 
 function build(hooksEnabled: boolean, found = true, scheduleEnabled = true) {
-  const ticker = { tick: jest.fn(async () => RESULT) };
-  const repo = { findById: jest.fn(async () => (found ? { id: 's1', nextFireAt: DUE, enabled: scheduleEnabled } : null)) };
+  const ticker = { tick: vi.fn(async () => RESULT) };
+  const repo = { findById: vi.fn(async () => (found ? { id: 's1', nextFireAt: DUE, enabled: scheduleEnabled } : null)) };
   const controller = new FleetTestHooksController(ticker as never, repo as never, { testHooksEnabled: hooksEnabled });
   return { ticker, repo, controller };
 }

@@ -19,14 +19,14 @@ const view: PreferencesView = {
 
 function setup() {
   const service = {
-    list: jest.fn().mockResolvedValue({ total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] }),
-    unreadCount: jest.fn().mockResolvedValue({ count: 0 }),
-    markRead: jest.fn().mockResolvedValue(undefined),
-    markAllRead: jest.fn().mockResolvedValue(undefined),
+    list: vi.fn().mockResolvedValue({ total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] }),
+    unreadCount: vi.fn().mockResolvedValue({ count: 0 }),
+    markRead: vi.fn().mockResolvedValue(undefined),
+    markAllRead: vi.fn().mockResolvedValue(undefined),
   };
   const preferences = {
-    list: jest.fn().mockResolvedValue(view),
-    update: jest.fn().mockResolvedValue(undefined),
+    list: vi.fn().mockResolvedValue(view),
+    update: vi.fn().mockResolvedValue(undefined),
   };
   return { service, preferences, controller: new MeNotificationsController(service as never, preferences as never) };
 }

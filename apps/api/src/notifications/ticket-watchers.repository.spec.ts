@@ -2,14 +2,14 @@ import { TicketWatchersRepository } from './ticket-watchers.repository';
 
 function setup() {
   const ticketWatcher = {
-    createMany: jest.fn().mockResolvedValue({ count: 1 }),
-    findMany: jest.fn().mockResolvedValue([{ userId: 'u1' }, { userId: 'u2' }]),
-    upsert: jest.fn().mockResolvedValue({}),
-    findUnique: jest.fn().mockResolvedValue(null),
-    count: jest.fn().mockResolvedValue(2),
+    createMany: vi.fn().mockResolvedValue({ count: 1 }),
+    findMany: vi.fn().mockResolvedValue([{ userId: 'u1' }, { userId: 'u2' }]),
+    upsert: vi.fn().mockResolvedValue({}),
+    findUnique: vi.fn().mockResolvedValue(null),
+    count: vi.fn().mockResolvedValue(2),
   };
-  const project = { findUnique: jest.fn().mockResolvedValue({ key: 'PP' }) };
-  const ticket = { findFirst: jest.fn().mockResolvedValue({ id: 't1' }) };
+  const project = { findUnique: vi.fn().mockResolvedValue({ key: 'PP' }) };
+  const ticket = { findFirst: vi.fn().mockResolvedValue({ id: 't1' }) };
   const repo = new TicketWatchersRepository({ client: { ticketWatcher, project, ticket } } as never);
   return { repo, ticketWatcher, project, ticket };
 }

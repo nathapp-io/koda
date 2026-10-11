@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * US-003 — admin skill source create + list routes (PG).
  *
@@ -23,7 +24,7 @@ describeIntegration('US-003 admin skill sources (PG)', () => {
   let member: string;
   let agentApiKey: string;
   let adminId: string;
-  let resolve: jest.Mock;
+  let resolve: Mock;
 
   const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
   const sourceBody = (repo: string, path = 'skills') => ({
@@ -64,7 +65,7 @@ describeIntegration('US-003 admin skill sources (PG)', () => {
     agentApiKey = data<{ apiKey: string }>(agentRes).apiKey;
 
     const resolver = app.get<SkillResolver>(SKILL_RESOLVER, { strict: false });
-    resolve = jest.spyOn(resolver, 'resolve');
+    resolve = vi.spyOn(resolver, 'resolve');
   }, 30_000);
 
   afterAll(async () => {

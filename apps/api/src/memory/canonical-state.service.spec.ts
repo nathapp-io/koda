@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 import {
   CanonicalStateService,
   CanonicalSnapshotQuery,
@@ -9,11 +10,11 @@ import type { ICanonicalStateRepository } from './domain/canonical-state.domain'
 import { CANONICAL_STATE_REPOSITORY } from './domain/canonical-state.domain';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { Test } from '@nestjs/testing';
-import { createMock } from '@golevelup/ts-jest';
+import { createMock } from '@golevelup/ts-vitest';
 
 describe('CanonicalStateService', () => {
   let service: CanonicalStateService;
-  let repo: jest.Mocked<ICanonicalStateRepository>;
+  let repo: Mocked<ICanonicalStateRepository>;
 
   beforeEach(async () => {
     repo = createMock<ICanonicalStateRepository>();
@@ -27,7 +28,7 @@ describe('CanonicalStateService', () => {
 
     service = module.get(CanonicalStateService);
 
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   const setupValidProject = () => {

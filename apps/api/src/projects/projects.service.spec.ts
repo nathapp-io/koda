@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 import { HttpException } from '@nestjs/common';
 import { ProjectsService } from './projects.service';
 import { ProjectAccessService } from './project-access.service';
@@ -24,23 +25,23 @@ async function rejectionOf(promise: Promise<unknown>): Promise<HttpException | u
 
 describe('ProjectsService', () => {
   let service: ProjectsService;
-  let ragService: jest.Mocked<RagService>;
+  let ragService: Mocked<RagService>;
   let mockProjectRepo: any;
 
   beforeEach(() => {
     mockProjectRepo = {
-      findBySlug: jest.fn(),
-      findByKey: jest.fn(),
-      findAll: jest.fn(),
-      createProject: jest.fn(),
-      updateBySlug: jest.fn(),
-      findAllIds: jest.fn(),
-      findMembershipRole: jest.fn(),
-      isAgentOnRoster: jest.fn(),
+      findBySlug: vi.fn(),
+      findByKey: vi.fn(),
+      findAll: vi.fn(),
+      createProject: vi.fn(),
+      updateBySlug: vi.fn(),
+      findAllIds: vi.fn(),
+      findMembershipRole: vi.fn(),
+      isAgentOnRoster: vi.fn(),
     };
 
     ragService = {
-      deleteAllBySourceType: jest.fn(),
+      deleteAllBySourceType: vi.fn(),
     } as any;
 
     service = new ProjectsService(
@@ -52,7 +53,7 @@ describe('ProjectsService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('update', () => {
@@ -129,7 +130,7 @@ describe('ProjectsService', () => {
         new Error('RAG service error')
       );
 
-      const warnSpy = jest.spyOn(service['logger'], 'warn');
+      const warnSpy = vi.spyOn(service['logger'], 'warn');
 
       const result = await service.update('test-project', {
         graphifyEnabled: false,

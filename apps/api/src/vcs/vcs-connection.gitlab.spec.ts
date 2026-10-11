@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { VcsConnectionService } from './vcs-connection.service';
 import { VcsProviderType, VcsSyncModeType } from './dto/create-vcs-connection.dto';
@@ -23,17 +24,17 @@ function connectionRow(overrides: Record<string, unknown> = {}) {
 }
 
 describe('VcsConnectionService — GitLab (BUG-14)', () => {
-  let repo: Record<string, jest.Mock>;
+  let repo: Record<string, Mock>;
   let service: VcsConnectionService;
 
   beforeEach(() => {
     repo = {
-      findProjectById: jest.fn().mockResolvedValue({ id: 'p1' }),
-      findVcsConnectionByProjectId: jest.fn().mockResolvedValue(null),
-      createVcsConnection: jest.fn().mockImplementation(async (data) => connectionRow(data)),
-      updateVcsConnection: jest.fn().mockImplementation(async (_id, data) => connectionRow(data)),
+      findProjectById: vi.fn().mockResolvedValue({ id: 'p1' }),
+      findVcsConnectionByProjectId: vi.fn().mockResolvedValue(null),
+      createVcsConnection: vi.fn().mockImplementation(async (data) => connectionRow(data)),
+      updateVcsConnection: vi.fn().mockImplementation(async (_id, data) => connectionRow(data)),
     };
-    const polling = { refreshConnectionSchedule: jest.fn().mockResolvedValue(undefined) };
+    const polling = { refreshConnectionSchedule: vi.fn().mockResolvedValue(undefined) };
     service = new VcsConnectionService(repo as unknown as IVcsRepository, config, polling as unknown as VcsPollingService);
   });
 

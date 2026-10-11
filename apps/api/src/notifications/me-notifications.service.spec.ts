@@ -8,10 +8,10 @@ const row = {
 
 function setup() {
   const repo = {
-    page: jest.fn().mockResolvedValue({ items: [row], total: 21 }),
-    unreadCount: jest.fn().mockResolvedValue(3),
-    markRead: jest.fn().mockResolvedValue(true),
-    markAllRead: jest.fn().mockResolvedValue(2),
+    page: vi.fn().mockResolvedValue({ items: [row], total: 21 }),
+    unreadCount: vi.fn().mockResolvedValue(3),
+    markRead: vi.fn().mockResolvedValue(true),
+    markAllRead: vi.fn().mockResolvedValue(2),
   };
   return { repo, service: new MeNotificationsService(repo as never) };
 }

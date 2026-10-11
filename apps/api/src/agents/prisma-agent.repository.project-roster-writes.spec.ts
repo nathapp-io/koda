@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * S4c US-003 — PrismaAgentRepository's roster-write surface: the insert that
  * must report a duplicate instead of throwing, the open-ticket read that feeds
@@ -16,24 +17,24 @@ describe('PrismaAgentRepository roster writes (S4c US-003)', () => {
   let testingModule: TestingModule;
   let repository: PrismaAgentRepository;
   let prisma: MockPrismaService;
-  let agentProjectCreateMany: jest.Mock;
-  let agentProjectDeleteMany: jest.Mock;
-  let agentProjectFindUnique: jest.Mock;
-  let ticketCount: jest.Mock;
-  let ticketFindMany: jest.Mock;
-  let projectFindUnique: jest.Mock;
-  let queryRaw: jest.Mock;
+  let agentProjectCreateMany: Mock;
+  let agentProjectDeleteMany: Mock;
+  let agentProjectFindUnique: Mock;
+  let ticketCount: Mock;
+  let ticketFindMany: Mock;
+  let projectFindUnique: Mock;
+  let queryRaw: Mock;
 
   beforeEach(async () => {
-    prisma = createMockPrismaService();
+    prisma = createMockPrismaService({ fn: vi.fn });
 
-    agentProjectCreateMany = jest.fn();
-    agentProjectDeleteMany = jest.fn();
-    agentProjectFindUnique = jest.fn();
-    ticketCount = jest.fn();
-    ticketFindMany = jest.fn();
-    projectFindUnique = jest.fn();
-    queryRaw = prisma.client.$queryRaw as jest.Mock;
+    agentProjectCreateMany = vi.fn();
+    agentProjectDeleteMany = vi.fn();
+    agentProjectFindUnique = vi.fn();
+    ticketCount = vi.fn();
+    ticketFindMany = vi.fn();
+    projectFindUnique = vi.fn();
+    queryRaw = prisma.client.$queryRaw as Mock;
 
     prisma.client.agentProject = {
       createMany: agentProjectCreateMany,
@@ -52,7 +53,7 @@ describe('PrismaAgentRepository roster writes (S4c US-003)', () => {
 
   afterEach(async () => {
     await testingModule.close();
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('addToProjectRoster inserts the roster row with the adding user and reports created', async () => {

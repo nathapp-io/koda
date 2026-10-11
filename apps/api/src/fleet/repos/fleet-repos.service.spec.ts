@@ -4,11 +4,11 @@ import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { FleetReposService } from './fleet-repos.service';
 
 describe('FleetReposService', () => {
-  const repo = { findProject: jest.fn(), create: jest.fn(), findById: jest.fn(), findPage: jest.fn(), delete: jest.fn(), lockForDelete: jest.fn(), countUnfinishedJobs: jest.fn() };
-  const github = { verifyRepo: jest.fn() };
-  const gitlab = { verifyRepo: jest.fn() };
-  const gitlabTokens = { resolve: jest.fn() };
-  const activity = { record: jest.fn() };
+  const repo = { findProject: vi.fn(), create: vi.fn(), findById: vi.fn(), findPage: vi.fn(), delete: vi.fn(), lockForDelete: vi.fn(), countUnfinishedJobs: vi.fn() };
+  const github = { verifyRepo: vi.fn() };
+  const gitlab = { verifyRepo: vi.fn() };
+  const gitlabTokens = { resolve: vi.fn() };
+  const activity = { record: vi.fn() };
   const tx = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
   const make = () => new FleetReposService(repo as never, github as never, gitlab as never, gitlabTokens as never, activity as never, tx as never);
 
@@ -18,7 +18,7 @@ describe('FleetReposService', () => {
   });
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     repo.findProject.mockResolvedValue({ id: 'p1', slug: 'p' });
   });
 

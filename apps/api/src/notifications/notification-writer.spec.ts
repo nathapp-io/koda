@@ -13,28 +13,28 @@ const draft = (userId: string, over: Partial<NotificationDraft> = {}): Notificat
 
 function setup() {
   const order: string[] = [];
-  const eligibility = { filter: jest.fn(async (d: readonly NotificationDraft[]) => d.filter((x) => x.userId !== 'ineligible')) };
+  const eligibility = { filter: vi.fn(async (d: readonly NotificationDraft[]) => d.filter((x) => x.userId !== 'ineligible')) };
   const preferences = {
-    disabledUserIds: jest.fn(async () => new Set(['muted-pref'])),
-    emailAllowedUserIds: jest.fn(async (userIds: readonly string[]) => new Set(userIds)),
+    disabledUserIds: vi.fn(async () => new Set(['muted-pref'])),
+    emailAllowedUserIds: vi.fn(async (userIds: readonly string[]) => new Set(userIds)),
   };
   const repo = {
-    insertMany: jest.fn(async (d: readonly NotificationDraft[]) => {
+    insertMany: vi.fn(async (d: readonly NotificationDraft[]) => {
       order.push('insert');
       return d.map((x, i) => ({ id: `n${i}`, userId: x.userId, category: x.category, kind: x.kind, createdAt: CREATED_AT }));
     }),
   };
   const bus = new UserEventBus();
-  jest.spyOn(bus, 'publish').mockImplementation(() => { order.push('publish'); });
+  vi.spyOn(bus, 'publish').mockImplementation(() => { order.push('publish'); });
   const email = { configured: true };
   const schedule = {
-    scheduleNotifications: jest.fn(async (rows: readonly unknown[]) => { order.push('schedule'); return rows.length; }),
+    scheduleNotifications: vi.fn(async (rows: readonly unknown[]) => { order.push('schedule'); return rows.length; }),
   };
-  const recipients = { emails: jest.fn(async (ids: readonly string[]) => new Map(ids.map((id) => [id, `${id}@example.com`]))) };
+  const recipients = { emails: vi.fn(async (ids: readonly string[]) => new Map(ids.map((id) => [id, `${id}@example.com`]))) };
   const txManager = {
-    run: jest.fn(async (fn: () => Promise<unknown>) => { order.push('tx-start'); try { return await fn(); } finally { order.push('tx-end'); } }),
-    getClient: jest.fn(),
-    isInTransaction: jest.fn(() => false),
+    run: vi.fn(async (fn: () => Promise<unknown>) => { order.push('tx-start'); try { return await fn(); } finally { order.push('tx-end'); } }),
+    getClient: vi.fn(),
+    isInTransaction: vi.fn(() => false),
   };
   const writer = new NotificationWriter(
     eligibility as never, preferences as never, repo as never, bus,

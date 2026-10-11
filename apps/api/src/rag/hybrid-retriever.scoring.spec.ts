@@ -32,14 +32,14 @@ export function row(id: string, content: string, extra: Partial<LanceRecord> = {
 /** A LanceDB table stub: `scanned` is what query().limit() returns (the first 500 rows). */
 export function stubTable(opts: { scanned: LanceRecord[]; fts: LanceRecord[]; vector: LanceRecord[] }): unknown {
   return {
-    countRows: jest.fn().mockResolvedValue(opts.scanned.length + 1000),
-    query: jest.fn().mockReturnValue({
-      limit: jest.fn().mockReturnValue({ toArray: jest.fn().mockResolvedValue(opts.scanned) }),
+    countRows: vi.fn().mockResolvedValue(opts.scanned.length + 1000),
+    query: vi.fn().mockReturnValue({
+      limit: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue(opts.scanned) }),
     }),
-    search: jest.fn().mockResolvedValue(opts.fts),
-    vectorSearch: jest.fn().mockReturnValue({
-      distanceType: jest.fn().mockReturnValue({
-        limit: jest.fn().mockReturnValue({ toArray: jest.fn().mockResolvedValue(opts.vector) }),
+    search: vi.fn().mockResolvedValue(opts.fts),
+    vectorSearch: vi.fn().mockReturnValue({
+      distanceType: vi.fn().mockReturnValue({
+        limit: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue(opts.vector) }),
       }),
     }),
   };
@@ -48,17 +48,17 @@ export function stubTable(opts: { scanned: LanceRecord[]; fts: LanceRecord[]; ve
 export function stubManager(table: unknown): LanceTableManager {
   return {
     available: true,
-    ensureStorage: jest.fn(),
-    close: jest.fn().mockResolvedValue(undefined),
-    getOrCreateTable: jest.fn().mockResolvedValue(table),
-    addRecord: jest.fn().mockResolvedValue(undefined),
+    ensureStorage: vi.fn(),
+    close: vi.fn().mockResolvedValue(undefined),
+    getOrCreateTable: vi.fn().mockResolvedValue(table),
+    addRecord: vi.fn().mockResolvedValue(undefined),
   } as unknown as LanceTableManager;
 }
 
 export function buildRetriever(table: unknown): HybridRetrieverService {
-  const embedding = { embed: jest.fn().mockResolvedValue(Array(8).fill(0.1)), dimensions: 8, providerName: 'fake', modelName: 'fake-v1' };
-  const entityStore = { searchEntities: jest.fn().mockReturnValue([]), computeEntityScore: jest.fn().mockReturnValue(0) };
-  const ragRepo = { findProjectGraphifyEnabled: jest.fn().mockResolvedValue({ graphifyEnabled: false }) };
+  const embedding = { embed: vi.fn().mockResolvedValue(Array(8).fill(0.1)), dimensions: 8, providerName: 'fake', modelName: 'fake-v1' };
+  const entityStore = { searchEntities: vi.fn().mockReturnValue([]), computeEntityScore: vi.fn().mockReturnValue(0) };
+  const ragRepo = { findProjectGraphifyEnabled: vi.fn().mockResolvedValue({ graphifyEnabled: false }) };
   return new HybridRetrieverService(
     ragConfig,
     embedding as never,

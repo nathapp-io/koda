@@ -1,6 +1,8 @@
+import { restoreEnvAfterEach } from '../common/test-helpers/restore-env';
 import { ragConfig, IRagConfig } from './rag.config';
 
 describe('ragConfig', () => {
+  restoreEnvAfterEach();
   beforeEach(() => {
     Object.keys(process.env)
       .filter((k) => ['EMBEDDING_PROVIDER', 'EMBEDDING_MODEL', 'OLLAMA_BASE_URL',

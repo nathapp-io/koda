@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 /**
  * VcsController Manual Sync Endpoints Tests (VCS-P1-004-D)
  *
@@ -33,13 +34,13 @@ import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.t
 import { SyncResultDto } from '../../../src/vcs/dto/sync-result.dto';
 
 // Mock the createVcsProvider factory
-jest.mock('../../../src/vcs/factory', () => ({
-  createVcsProvider: jest.fn(),
+vi.mock('../../../src/vcs/factory', () => ({
+  createVcsProvider: vi.fn(),
 }));
 
 // Mock the decryptToken utility
-jest.mock('../../../src/common/utils/encryption.util', () => ({
-  decryptToken: jest.fn((token: string) => {
+vi.mock('../../../src/common/utils/encryption.util', () => ({
+  decryptToken: vi.fn((token: string) => {
     // Mock decryption - just return a dummy token
     return 'decrypted-token';
   }),
@@ -47,10 +48,10 @@ jest.mock('../../../src/common/utils/encryption.util', () => ({
 
 describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
   let controller: VcsController;
-  let syncService: jest.Mocked<VcsSyncService>;
-  let vcsConnectionService: jest.Mocked<VcsConnectionService>;
-  let projectsService: jest.Mocked<ProjectsService>;
-  let configService: jest.Mocked<ConfigService>;
+  let syncService: Mocked<VcsSyncService>;
+  let vcsConnectionService: Mocked<VcsConnectionService>;
+  let projectsService: Mocked<ProjectsService>;
+  let configService: Mocked<ConfigService>;
   let module: TestingModule;
 
   const mockProject: Project = {
@@ -121,22 +122,22 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
   beforeEach(async () => {
     // Create mock services
     const mockSyncServiceInstance = {
-      syncIssue: jest.fn(),
-      fullSync: jest.fn(),
-      filterByAllowedAuthors: jest.fn(),
+      syncIssue: vi.fn(),
+      fullSync: vi.fn(),
+      filterByAllowedAuthors: vi.fn(),
     };
 
     const mockVcsConnectionServiceInstance = {
-      getFullByProject: jest.fn(),
+      getFullByProject: vi.fn(),
     };
 
     const mockProjectsServiceInstance = {
-      findBySlug: jest.fn().mockResolvedValue(mockProject),
-      assertProjectMembership: jest.fn().mockResolvedValue(undefined),
+      findBySlug: vi.fn().mockResolvedValue(mockProject),
+      assertProjectMembership: vi.fn().mockResolvedValue(undefined),
     };
 
     const mockConfigServiceInstance = {
-      get: jest.fn((key: string) => {
+      get: vi.fn((key: string) => {
         if (key === 'vcs.encryptionKey') return encryptionKey;
         return undefined;
       }),
@@ -144,12 +145,12 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
 
     // Mock the VCS provider
     const mockProvider = {
-      fetchIssue: jest.fn().mockResolvedValue(mockVcsIssue),
-      fetchIssues: jest.fn().mockResolvedValue({ issues: [mockVcsIssue], cursor: null, capped: false }),
+      fetchIssue: vi.fn().mockResolvedValue(mockVcsIssue),
+      fetchIssues: vi.fn().mockResolvedValue({ issues: [mockVcsIssue], cursor: null, capped: false }),
     };
 
-    const { createVcsProvider } = require('../../../src/vcs/factory');
-    createVcsProvider.mockReturnValue(mockProvider);
+    const { createVcsProvider } = await import('../../../src/vcs/factory');
+    vi.mocked(createVcsProvider).mockReturnValue(mockProvider as unknown as ReturnType<typeof createVcsProvider>);
 
     module = await Test.createTestingModule({
       controllers: [VcsController],
@@ -166,10 +167,10 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
     }).compile();
 
     controller = module.get<VcsController>(VcsController);
-    syncService = module.get(VcsSyncService) as jest.Mocked<VcsSyncService>;
-    vcsConnectionService = module.get(VcsConnectionService) as jest.Mocked<VcsConnectionService>;
-    projectsService = module.get(ProjectsService) as jest.Mocked<ProjectsService>;
-    configService = module.get(ConfigService) as jest.Mocked<ConfigService>;
+    syncService = module.get(VcsSyncService) as Mocked<VcsSyncService>;
+    vcsConnectionService = module.get(VcsConnectionService) as Mocked<VcsConnectionService>;
+    projectsService = module.get(ProjectsService) as Mocked<ProjectsService>;
+    configService = module.get(ConfigService) as Mocked<ConfigService>;
   });
 
   afterEach(async () => {

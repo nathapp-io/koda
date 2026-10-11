@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * US-002 — PrismaAgentRepository.findProjectRoster must read the project's
  * AgentProject table (not the ticket-derived list) and group open-ticket counts
@@ -19,16 +20,16 @@ describe('PrismaAgentRepository.findProjectRoster (US-002)', () => {
   let testingModule: TestingModule;
   let repository: PrismaAgentRepository;
   let prisma: MockPrismaService;
-  let agentProjectFindMany: jest.Mock;
-  let ticketFindMany: jest.Mock;
-  let projectFindUnique: jest.Mock;
+  let agentProjectFindMany: Mock;
+  let ticketFindMany: Mock;
+  let projectFindUnique: Mock;
 
   beforeEach(async () => {
-    prisma = createMockPrismaService();
+    prisma = createMockPrismaService({ fn: vi.fn });
 
-    agentProjectFindMany = jest.fn();
-    ticketFindMany = jest.fn();
-    projectFindUnique = jest.fn();
+    agentProjectFindMany = vi.fn();
+    ticketFindMany = vi.fn();
+    projectFindUnique = vi.fn();
 
     prisma.client.agentProject = { findMany: agentProjectFindMany };
     prisma.client.ticket = { findMany: ticketFindMany };
@@ -41,9 +42,9 @@ describe('PrismaAgentRepository.findProjectRoster (US-002)', () => {
         {
           provide: TRANSACTION_MANAGER,
           useValue: {
-            run: jest.fn((fn: () => Promise<unknown>) => fn()),
-            getClient: jest.fn(),
-            isInTransaction: jest.fn(() => false),
+            run: vi.fn((fn: () => Promise<unknown>) => fn()),
+            getClient: vi.fn(),
+            isInTransaction: vi.fn(() => false),
           },
         },
       ],
@@ -54,7 +55,7 @@ describe('PrismaAgentRepository.findProjectRoster (US-002)', () => {
 
   afterEach(async () => {
     await testingModule.close();
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('US-002 AC1: returns a roster record per AgentProject row, ordered by agent name', async () => {

@@ -88,20 +88,20 @@ describe('LabelsService', () => {
   };
 
   const mockLabelRepo = {
-    findProjectBySlug: jest.fn(),
-    createLabel: jest.fn(),
-    findLabelsByProject: jest.fn(),
-    findLabelById: jest.fn(),
-    deleteLabel: jest.fn(),
-    updateLabel: jest.fn(),
-    findTicketScoped: jest.fn(),
-    findTicketLabelAssignment: jest.fn(),
-    findTicketLabelWithLabel: jest.fn(),
-    assignLabelToTicket: jest.fn(),
-    removeLabelFromTicket: jest.fn(),
-    createTicketActivity: jest.fn(),
-    findTicketWithLabels: jest.fn(),
-    runInTransaction: jest.fn((fn: () => unknown) => fn()),
+    findProjectBySlug: vi.fn(),
+    createLabel: vi.fn(),
+    findLabelsByProject: vi.fn(),
+    findLabelById: vi.fn(),
+    deleteLabel: vi.fn(),
+    updateLabel: vi.fn(),
+    findTicketScoped: vi.fn(),
+    findTicketLabelAssignment: vi.fn(),
+    findTicketLabelWithLabel: vi.fn(),
+    assignLabelToTicket: vi.fn(),
+    removeLabelFromTicket: vi.fn(),
+    createTicketActivity: vi.fn(),
+    findTicketWithLabels: vi.fn(),
+    runInTransaction: vi.fn((fn: () => unknown) => fn()),
   };
 
   beforeEach(async () => {
@@ -116,7 +116,7 @@ describe('LabelsService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('create', () => {

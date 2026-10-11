@@ -61,10 +61,9 @@ const randomKey = (): string =>
  * undefined lets the assertion fire first, so the RED failure is an assertion
  * rather than a module-resolution crash.
  */
-const loadModule = <T>(path: string): T | undefined => {
+const loadModule = async <T>(path: string): Promise<T | undefined> => {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    return require(path) as T;
+    return (await import(path)) as T;
   } catch {
     return undefined;
   }
@@ -72,8 +71,8 @@ const loadModule = <T>(path: string): T | undefined => {
 
 /** 5/min is the documented default; the real value comes from auth-throttle once US-005 lands. */
 const DEFAULT_AUTH_LOGIN_LIMIT = 5;
-const authLoginLimit = (): number =>
-  loadModule<{ AUTH_LOGIN_LIMIT: number }>('../../../src/auth/auth-throttle')?.AUTH_LOGIN_LIMIT ??
+const authLoginLimit = async (): Promise<number> =>
+  (await loadModule<{ AUTH_LOGIN_LIMIT: number }>('../../../src/auth/auth-throttle'))?.AUTH_LOGIN_LIMIT ??
   DEFAULT_AUTH_LOGIN_LIMIT;
 
 describeIntegration('US-005 public invite preview, accept, resend and cancel (PG)', () => {
@@ -422,15 +421,14 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
   });
 
   // ── US-005 AC-15 ──────────────────────────────────────────────────────────
-  it('US-005 AC-15: preview and accept are @Public and carry register\'s AUTH_LOGIN_LIMIT/60000 throttle', () => {
+  it('US-005 AC-15: preview and accept are @Public and carry register\'s AUTH_LOGIN_LIMIT/60000 throttle', async () => {
     const LIMIT_KEY = 'THROTTLER:LIMITdefault';
     const TTL_KEY = 'THROTTLER:TTLdefault';
 
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const authModule = loadModule<{ AuthController: { prototype: Record<string, unknown> } }>(
+    const authModule = await loadModule<{ AuthController: { prototype: Record<string, unknown> } }>(
       '../../../src/auth/auth.controller',
     );
-    const invitesModule = loadModule<{ PublicInvitesController: { prototype: Record<string, unknown> } }>(
+    const invitesModule = await loadModule<{ PublicInvitesController: { prototype: Record<string, unknown> } }>(
       '../../../src/projects/invites/public-invites.controller',
     );
 
@@ -444,14 +442,14 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
 
     for (const handler of [previewFn, acceptFn]) {
       expect(Reflect.getMetadata(IS_PUBLIC_KEY, handler)).toBe(true);
-      expect(Reflect.getMetadata(LIMIT_KEY, handler)).toBe(authLoginLimit());
+      expect(Reflect.getMetadata(LIMIT_KEY, handler)).toBe(await authLoginLimit());
       expect(Reflect.getMetadata(LIMIT_KEY, handler)).toBe(Reflect.getMetadata(LIMIT_KEY, register));
       expect(Reflect.getMetadata(TTL_KEY, handler)).toBe(60_000);
     }
   });
 
   it('US-005 AC-15: both public invite routes begin returning 429 after AUTH_LOGIN_LIMIT requests', async () => {
-    const limit = authLoginLimit();
+    const limit = await authLoginLimit();
     const { token } = await freshInvite();
     resetThrottle();
 

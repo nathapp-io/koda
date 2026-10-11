@@ -9,11 +9,11 @@ const draft = (over: Partial<NotificationDraft> = {}): NotificationDraft => ({
 function setup() {
   const insertedRow = { id: 'n1', userId: 'u1', category: 'ASSIGNED', kind: 'ticket_assigned', createdAt: new Date('2026-10-01T00:00:00Z') };
   const notification = {
-    createManyAndReturn: jest.fn().mockResolvedValue([insertedRow]),
-    findMany: jest.fn().mockResolvedValue([]),
-    count: jest.fn().mockResolvedValue(0),
-    updateMany: jest.fn().mockResolvedValue({ count: 0 }),
-    deleteMany: jest.fn().mockResolvedValue({ count: 3 }),
+    createManyAndReturn: vi.fn().mockResolvedValue([insertedRow]),
+    findMany: vi.fn().mockResolvedValue([]),
+    count: vi.fn().mockResolvedValue(0),
+    updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    deleteMany: vi.fn().mockResolvedValue({ count: 3 }),
   };
   const repo = new NotificationsRepository({ client: { notification } } as never);
   return { repo, notification, insertedRow };

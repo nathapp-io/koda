@@ -15,7 +15,7 @@ describe('KodaCaslAbilityFactory - CodeIntel READ permissions (AC8)', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   const mockUserPrincipal = (

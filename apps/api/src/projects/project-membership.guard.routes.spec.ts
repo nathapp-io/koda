@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * US-001 — ProjectMembershipGuard applied to the project-scoped routes.
  *
@@ -29,52 +30,52 @@ import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
 import { KodaPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
 
 interface MembershipRepoStub {
-  findBySlug: jest.Mock;
-  findMembershipRole: jest.Mock;
-  isAgentOnRoster: jest.Mock;
+  findBySlug: Mock;
+  findMembershipRole: Mock;
+  isAgentOnRoster: Mock;
 }
 
 interface TicketsServiceStub {
-  create: jest.Mock;
-  findAll: jest.Mock;
-  findByRef: jest.Mock;
-  findByRefWithActions: jest.Mock;
-  update: jest.Mock;
-  softDelete: jest.Mock;
-  assign: jest.Mock;
+  create: Mock;
+  findAll: Mock;
+  findByRef: Mock;
+  findByRefWithActions: Mock;
+  update: Mock;
+  softDelete: Mock;
+  assign: Mock;
 }
 
 interface TransitionsServiceStub {
-  verify: jest.Mock;
-  start: jest.Mock;
-  fix: jest.Mock;
-  verifyFix: jest.Mock;
-  close: jest.Mock;
-  reject: jest.Mock;
+  verify: Mock;
+  start: Mock;
+  fix: Mock;
+  verifyFix: Mock;
+  close: Mock;
+  reject: Mock;
 }
 
 interface ProjectsServiceStub {
-  findBySlug: jest.Mock;
-  findProjectIdBySlug: jest.Mock;
-  assertProjectMembership: jest.Mock;
+  findBySlug: Mock;
+  findProjectIdBySlug: Mock;
+  assertProjectMembership: Mock;
 }
 
 interface RagServiceStub {
-  indexDocument: jest.Mock;
-  listDocuments: jest.Mock;
-  deleteBySource: jest.Mock;
-  importGraphify: jest.Mock;
-  optimizeTable: jest.Mock;
+  indexDocument: Mock;
+  listDocuments: Mock;
+  deleteBySource: Mock;
+  importGraphify: Mock;
+  optimizeTable: Mock;
 }
 
 interface HybridRetrieverStub {
-  indexDocument: jest.Mock;
-  search: jest.Mock;
+  indexDocument: Mock;
+  search: Mock;
 }
 
 interface RagRepositoryStub {
-  findProjectBySlug: jest.Mock;
-  findProjectMembership: jest.Mock;
+  findProjectBySlug: Mock;
+  findProjectMembership: Mock;
 }
 
 /** A user principal with no global ADMIN role: only ProjectMember rows grant access. */
@@ -114,39 +115,39 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
   };
 
   beforeAll(async () => {
-    membershipRepo = { findBySlug: jest.fn(), findMembershipRole: jest.fn(), isAgentOnRoster: jest.fn() };
+    membershipRepo = { findBySlug: vi.fn(), findMembershipRole: vi.fn(), isAgentOnRoster: vi.fn() };
 
     ticketsService = {
-      create: jest.fn(),
-      findAll: jest.fn(),
-      findByRef: jest.fn(),
-      findByRefWithActions: jest.fn(),
-      update: jest.fn(),
-      softDelete: jest.fn(),
-      assign: jest.fn(),
+      create: vi.fn(),
+      findAll: vi.fn(),
+      findByRef: vi.fn(),
+      findByRefWithActions: vi.fn(),
+      update: vi.fn(),
+      softDelete: vi.fn(),
+      assign: vi.fn(),
     };
     transitionsService = {
-      verify: jest.fn(),
-      start: jest.fn(),
-      fix: jest.fn(),
-      verifyFix: jest.fn(),
-      close: jest.fn(),
-      reject: jest.fn(),
+      verify: vi.fn(),
+      start: vi.fn(),
+      fix: vi.fn(),
+      verifyFix: vi.fn(),
+      close: vi.fn(),
+      reject: vi.fn(),
     };
     projectsService = {
-      findBySlug: jest.fn(),
-      findProjectIdBySlug: jest.fn(),
-      assertProjectMembership: jest.fn(),
+      findBySlug: vi.fn(),
+      findProjectIdBySlug: vi.fn(),
+      assertProjectMembership: vi.fn(),
     };
     ragService = {
-      indexDocument: jest.fn(),
-      listDocuments: jest.fn(),
-      deleteBySource: jest.fn(),
-      importGraphify: jest.fn(),
-      optimizeTable: jest.fn(),
+      indexDocument: vi.fn(),
+      listDocuments: vi.fn(),
+      deleteBySource: vi.fn(),
+      importGraphify: vi.fn(),
+      optimizeTable: vi.fn(),
     };
-    hybridRetriever = { indexDocument: jest.fn(), search: jest.fn() };
-    ragRepository = { findProjectBySlug: jest.fn(), findProjectMembership: jest.fn() };
+    hybridRetriever = { indexDocument: vi.fn(), search: vi.fn() };
+    ragRepository = { findProjectBySlug: vi.fn(), findProjectMembership: vi.fn() };
 
     // The real access service over a stubbed repository: the guard's membership
     // decisions are driven by the fake ProjectMember rows below.
@@ -193,7 +194,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
   });
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     currentPrincipal = developerUser;
 

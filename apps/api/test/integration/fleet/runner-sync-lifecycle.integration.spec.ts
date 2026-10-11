@@ -14,7 +14,7 @@ import type { SyncRequest, SyncResponse } from '../../../src/fleet/common/protoc
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
-jest.setTimeout(20_000); // several syncs here return idle and wait the full FLEET_SYNC_WAIT_MS
+vi.setConfig({ testTimeout: 20_000 }); // several syncs here return idle and wait the full FLEET_SYNC_WAIT_MS
 
 describeIntegration('runner sync lifecycle (PG)', () => {
   let app: NathApplication;

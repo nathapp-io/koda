@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
 import { CacheManager } from '@nathapp/nestjs-cache';
@@ -10,7 +11,7 @@ import { AUTH_CFG } from '../config/auth.config';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import type { IPrincipal } from './types';
 // Default (not `import * as`): the interop namespace object has
-// non-configurable properties, which would make jest.spyOn(bcrypt, 'hash') throw.
+// non-configurable properties, which would make vi.spyOn(bcrypt, 'hash') throw.
 import bcrypt from 'bcrypt';
 
 describe('AuthService', () => {
@@ -30,33 +31,40 @@ describe('AuthService', () => {
   };
 
   const mockAuthRepository = {
-    findAnyUser: jest.fn(),
-    createUser: jest.fn(),
-    findAnyUserAndCreate: jest.fn(),
-    findUserByEmail: jest.fn(),
-    findUserById: jest.fn(),
-    bumpTokenVersion: jest.fn(),
+    findAnyUser: vi.fn(),
+    createUser: vi.fn(),
+    findAnyUserAndCreate: vi.fn(),
+    findUserByEmail: vi.fn(),
+    findUserById: vi.fn(),
+    bumpTokenVersion: vi.fn(),
   };
 
   const mockConfigService = {
-    get: jest.fn(),
+    get: vi.fn(),
   };
 
   const mockAuthConfig = { registrationEnabled: false };
 
   const mockJwtStrategyProvider = {
-    sign: jest.fn(),
+    sign: vi.fn(),
   };
 
   const mockJwtRefreshStrategyProvider = {
-    sign: jest.fn(),
+    sign: vi.fn(),
   };
 
   const mockCacheManager = {
-    invalidate: jest.fn(),
+    invalidate: vi.fn(),
   };
 
   beforeEach(async () => {
+    // Drop queued once-values and per-test implementations so test order cannot matter.
+    Object.values(mockAuthRepository).forEach((m) => m.mockReset());
+    mockConfigService.get.mockReset();
+    mockJwtStrategyProvider.sign.mockReset();
+    mockJwtRefreshStrategyProvider.sign.mockReset();
+    mockCacheManager.invalidate.mockReset();
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
@@ -81,7 +89,7 @@ describe('AuthService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('register', () => {
@@ -100,7 +108,7 @@ describe('AuthService', () => {
       const result = await service.register(registerDto);
 
       expect(authRepo.findAnyUserAndCreate).toHaveBeenCalled();
-      const createCall = (authRepo.findAnyUserAndCreate as jest.Mock).mock.calls[0][0];
+      const createCall = (authRepo.findAnyUserAndCreate as Mock).mock.calls[0][0];
       expect(createCall.email).toBe(registerDto.email);
       expect(createCall.name).toBe(registerDto.name);
 
@@ -164,7 +172,7 @@ describe('AuthService', () => {
 
     it('refuses before hashing when registration is closed and users exist', async () => {
       mockAuthRepository.findAnyUser.mockResolvedValueOnce({ id: 'existing' });
-      const hashSpy = jest.spyOn(bcrypt, 'hash');
+      const hashSpy = vi.spyOn(bcrypt, 'hash');
 
       await expect(service.register(dto)).rejects.toBeInstanceOf(ForbiddenAppException);
       expect(mockAuthRepository.findAnyUserAndCreate).not.toHaveBeenCalled();
@@ -400,7 +408,7 @@ describe('AuthService', () => {
       const token = service.generateAccessToken(mockUser.id, mockUser.email, 'ADMIN', 2);
 
       expect(token).toBe('mock-token');
-      const callArgs = (mockJwtStrategyProvider.sign as jest.Mock).mock.calls[0][0];
+      const callArgs = (mockJwtStrategyProvider.sign as Mock).mock.calls[0][0];
       expect(callArgs.sub).toBe(mockUser.id);
       expect(callArgs.email).toBe(mockUser.email);
       expect(callArgs.role).toBe('ADMIN');

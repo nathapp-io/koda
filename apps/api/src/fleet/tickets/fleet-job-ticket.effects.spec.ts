@@ -1,14 +1,15 @@
+import type { Mock } from 'vitest';
 import { FleetJobTicketEffects } from './fleet-job-ticket.effects';
 
 describe('FleetJobTicketEffects.onRunDispatched (C9 §3.1, D452)', () => {
   const principal = { actorType: 'user', id: 'u1', role: 'MEMBER', email: 'u@koda.test' } as never;
   const actor = { principal, projectSlug: 'web' };
   const t = (ref: string, status: string) => ({ id: ref, ref, title: ref, status });
-  let transitions: { start: jest.Mock };
+  let transitions: { start: Mock };
   let effects: FleetJobTicketEffects;
 
   beforeEach(() => {
-    transitions = { start: jest.fn().mockResolvedValue({}) };
+    transitions = { start: vi.fn().mockResolvedValue({}) };
     effects = new FleetJobTicketEffects(transitions as never, {} as never, {} as never, {} as never);
   });
 
@@ -30,20 +31,20 @@ describe('FleetJobTicketEffects.onTerminal (C9 §3.2, D453)', () => {
     stateReason: 'boom', escalationReason: null, requestedById: 'u1',
   });
   const linked = (ticketId: string) => ({ ticketId, ref: ticketId, title: ticketId, status: 'IN_PROGRESS', notifiedEpoch: null });
-  let repo: { findJobForEffects: jest.Mock; findTicketsForJob: jest.Mock; claimNotified: jest.Mock; createSystemComment: jest.Mock; findJobForPrLinks: jest.Mock; upsertFleetPrLink: jest.Mock };
-  let events: { record: jest.Mock };
+  let repo: { findJobForEffects: Mock; findTicketsForJob: Mock; claimNotified: Mock; createSystemComment: Mock; findJobForPrLinks: Mock; upsertFleetPrLink: Mock };
+  let events: { record: Mock };
   let effects: FleetJobTicketEffects;
 
   beforeEach(() => {
     repo = {
-      findJobForEffects: jest.fn(),
-      findTicketsForJob: jest.fn().mockResolvedValue([linked('t1'), linked('t2')]),
-      claimNotified: jest.fn().mockResolvedValue(true),
-      createSystemComment: jest.fn().mockImplementation(async (ticketId: string) => ({ id: `c-${ticketId}` })),
-      findJobForPrLinks: jest.fn().mockResolvedValue(null),
-      upsertFleetPrLink: jest.fn().mockResolvedValue(true),
+      findJobForEffects: vi.fn(),
+      findTicketsForJob: vi.fn().mockResolvedValue([linked('t1'), linked('t2')]),
+      claimNotified: vi.fn().mockResolvedValue(true),
+      createSystemComment: vi.fn().mockImplementation(async (ticketId: string) => ({ id: `c-${ticketId}` })),
+      findJobForPrLinks: vi.fn().mockResolvedValue(null),
+      upsertFleetPrLink: vi.fn().mockResolvedValue(true),
     };
-    events = { record: jest.fn() };
+    events = { record: vi.fn() };
     effects = new FleetJobTicketEffects({} as never, repo as never, events as never, { run: (fn: () => unknown) => fn() } as never);
   });
 
@@ -87,18 +88,18 @@ describe('FleetJobTicketEffects.upsertPrLinks (C9 §3.3, D455)', () => {
     id: 'j1', projectId: 'p', requestedById: 'u1', resultPrUrl, repo: { provider: 'github' as const, owner: 'acme', name: 'app' },
   });
   const linked = (ticketId: string) => ({ ticketId, ref: ticketId, title: ticketId, status: 'IN_PROGRESS', notifiedEpoch: null });
-  let repo: Record<string, jest.Mock>;
-  let events: { record: jest.Mock };
+  let repo: Record<string, Mock>;
+  let events: { record: Mock };
   let effects: FleetJobTicketEffects;
 
   beforeEach(() => {
     repo = {
-      findJobForEffects: jest.fn().mockResolvedValue(null),
-      findJobForPrLinks: jest.fn().mockResolvedValue(prJob('https://github.com/acme/app/pull/9')),
-      findTicketsForJob: jest.fn().mockResolvedValue([linked('t1'), linked('t2')]),
-      upsertFleetPrLink: jest.fn().mockResolvedValue(true),
+      findJobForEffects: vi.fn().mockResolvedValue(null),
+      findJobForPrLinks: vi.fn().mockResolvedValue(prJob('https://github.com/acme/app/pull/9')),
+      findTicketsForJob: vi.fn().mockResolvedValue([linked('t1'), linked('t2')]),
+      upsertFleetPrLink: vi.fn().mockResolvedValue(true),
     };
-    events = { record: jest.fn() };
+    events = { record: vi.fn() };
     effects = new FleetJobTicketEffects({} as never, repo as never, events as never, { run: (fn: () => unknown) => fn() } as never);
   });
 

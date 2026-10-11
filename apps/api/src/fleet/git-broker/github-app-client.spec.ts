@@ -1,5 +1,5 @@
 import { createVerify, generateKeyPairSync } from 'crypto';
-import { mkdtempSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { GitHubAppClient } from './github-app-client';
@@ -10,7 +10,9 @@ import type { FleetRepoRef } from '../jobs/domain/fleet-job.domain';
 import { FakeForge, startFakeForge } from '../../../test/helpers/fake-forge';
 
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
-const keyFile = join(mkdtempSync(join(tmpdir(), 'gh-app-')), 'app.pem');
+const keyDir = mkdtempSync(join(tmpdir(), 'gh-app-'));
+const keyFile = join(keyDir, 'app.pem');
+afterAll(() => rmSync(keyDir, { recursive: true, force: true }));
 writeFileSync(keyFile, privateKey.export({ type: 'pkcs1', format: 'pem' }));
 
 const b64json = (s: string) => JSON.parse(Buffer.from(s, 'base64url').toString('utf8'));
@@ -22,7 +24,7 @@ describe('GitHubAppClient', () => {
 
   beforeAll(async () => {
     forge = await startFakeForge();
-    client = new GitHubAppClient(fleetCfg as never, { githubApiUrl: forge.url } as never, new FleetHttpClient(fleetCfg as never), { mint: jest.fn() } as unknown as GitTokenBroker);
+    client = new GitHubAppClient(fleetCfg as never, { githubApiUrl: forge.url } as never, new FleetHttpClient(fleetCfg as never), { mint: vi.fn() } as unknown as GitTokenBroker);
   });
   afterAll(() => forge.close());
   beforeEach(() => {
@@ -91,12 +93,12 @@ describe('GitHubAppClient', () => {
   });
 
   it('reports github_app_not_configured when the key file is unset', async () => {
-    const bare = new GitHubAppClient({ ...fleetCfg, githubAppPrivateKeyFile: undefined } as never, { githubApiUrl: forge.url } as never, new FleetHttpClient(fleetCfg as never), { mint: jest.fn() } as unknown as GitTokenBroker);
+    const bare = new GitHubAppClient({ ...fleetCfg, githubAppPrivateKeyFile: undefined } as never, { githubApiUrl: forge.url } as never, new FleetHttpClient(fleetCfg as never), { mint: vi.fn() } as unknown as GitTokenBroker);
     await expect(bare.verifyRepo('o', 'r')).rejects.toMatchObject({ reason: 'github_app_not_configured' });
   });
 
   it('reports github_app_key_unreadable when the key file cannot be read', async () => {
-    const broken = new GitHubAppClient({ ...fleetCfg, githubAppPrivateKeyFile: join(tmpdir(), 'koda-gh-app-missing', 'app.pem') } as never, { githubApiUrl: forge.url } as never, new FleetHttpClient(fleetCfg as never), { mint: jest.fn() } as unknown as GitTokenBroker);
+    const broken = new GitHubAppClient({ ...fleetCfg, githubAppPrivateKeyFile: join(tmpdir(), 'koda-gh-app-missing', 'app.pem') } as never, { githubApiUrl: forge.url } as never, new FleetHttpClient(fleetCfg as never), { mint: vi.fn() } as unknown as GitTokenBroker);
     await expect(broken.verifyRepo('o', 'r')).rejects.toMatchObject({ reason: 'github_app_key_unreadable' });
   });
 
@@ -201,7 +203,7 @@ describe('commentOnPullRequest cache hit', () => {
 
   it('hits the broker cache instead of minting when jobId/leaseEpoch/repo are provided', async () => {
     forge.routes.set('POST /repos/acme/app/issues/7/comments', () => ({ status: 201, body: { id: 1 } }));
-    const mint = jest.fn(async () => ({ ok: true as const, token: cached }));
+    const mint = vi.fn(async () => ({ ok: true as const, token: cached }));
     const broker = { mint } as unknown as GitTokenBroker;
     const client = new GitHubAppClient(fleetCfg as never, vcsCfg as never, fleetHttp, broker);
     await client.commentOnPullRequest(42n, 'acme', 'app', 7, 'body', { jobId: 'j1', leaseEpoch: 1, repo });
@@ -214,7 +216,7 @@ describe('commentOnPullRequest cache hit', () => {
   it('falls back to a fresh mint when no job context is provided', async () => {
     forge.routes.set('POST /app/installations/42/access_tokens', () => ({ status: 201, body: { token: 'ghs_fresh', expires_at: farFuture } }));
     forge.routes.set('POST /repos/acme/app/issues/7/comments', () => ({ status: 201, body: { id: 1 } }));
-    const mint = jest.fn(async () => ({ ok: true as const, token: cached }));
+    const mint = vi.fn(async () => ({ ok: true as const, token: cached }));
     const broker = { mint } as unknown as GitTokenBroker;
     const client = new GitHubAppClient(fleetCfg as never, vcsCfg as never, fleetHttp, broker);
     await client.commentOnPullRequest(42n, 'acme', 'app', 7, 'body');
@@ -227,7 +229,7 @@ describe('commentOnPullRequest cache hit', () => {
   it('falls back to a fresh mint when only some opts are provided (no partial cache use)', async () => {
     forge.routes.set('POST /app/installations/42/access_tokens', () => ({ status: 201, body: { token: 'ghs_fresh', expires_at: farFuture } }));
     forge.routes.set('POST /repos/acme/app/issues/7/comments', () => ({ status: 201, body: { id: 1 } }));
-    const mint = jest.fn(async () => ({ ok: true as const, token: cached }));
+    const mint = vi.fn(async () => ({ ok: true as const, token: cached }));
     const broker = { mint } as unknown as GitTokenBroker;
     const client = new GitHubAppClient(fleetCfg as never, vcsCfg as never, fleetHttp, broker);
     await client.commentOnPullRequest(42n, 'acme', 'app', 7, 'body', { jobId: 'j1' });

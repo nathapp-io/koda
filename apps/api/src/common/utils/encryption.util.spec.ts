@@ -1,4 +1,3 @@
-/// <reference types="jest" />
 
 import { encryptToken, decryptToken } from './encryption.util';
 import * as crypto from 'crypto';

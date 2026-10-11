@@ -1,3 +1,4 @@
+import type { MockInstance } from 'vitest';
 import { Logger } from '@nestjs/common';
 import { FanOutPublisher, OutboxFanOutError } from '../../outbox/fan-out-publisher';
 import { noopLastErrors, outboxRecord } from '../../../test/helpers/outbox-record';
@@ -7,24 +8,24 @@ import { FleetJobOutcomeSubscriber } from './fleet-job-outcome.subscriber';
 
 describe('fleet notification subscribers (S4a §2.4)', () => {
   let registry: FanOutPublisher;
-  const writer = { deliver: jest.fn(async () => 1) };
-  const eligibility = { findGlobalAdminIds: jest.fn(async () => ['a1', 'a2']) };
+  const writer = { deliver: vi.fn(async () => 1) };
+  const eligibility = { findGlobalAdminIds: vi.fn(async () => ['a1', 'a2']) };
   const reader = {
-    projectSlug: jest.fn(async () => 'web'),
-    approvalContext: jest.fn(async () => ({ status: 'pending', repo: 'acme/app' })),
+    projectSlug: vi.fn(async () => 'web'),
+    approvalContext: vi.fn(async () => ({ status: 'pending', repo: 'acme/app' })),
   };
-  const labels = { forPolicy: jest.fn(async () => 'project KODA') };
-  let warn: jest.SpyInstance;
+  const labels = { forPolicy: vi.fn(async () => 'project KODA') };
+  let warn: MockInstance;
 
   beforeEach(() => {
     registry = new FanOutPublisher(noopLastErrors);
     new FleetJobOutcomeSubscriber(registry, reader as never, writer as never).onModuleInit();
     new FleetApprovalRequestedSubscriber(registry, reader as never, eligibility as never, labels as never, writer as never).onModuleInit();
     new FleetBudgetIncidentSubscriber(registry, eligibility as never, writer as never).onModuleInit();
-    warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
   });
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     warn.mockRestore();
   });
 
@@ -50,7 +51,7 @@ describe('fleet notification subscribers (S4a §2.4)', () => {
 
   it('a database failure throws so the outbox retries', async () => {
     writer.deliver.mockRejectedValueOnce(new Error('db down'));
-    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     await expect(registry.publish(outboxRecord('fleet_job_outcome', outcome))).rejects.toBeInstanceOf(OutboxFanOutError);
   });
 

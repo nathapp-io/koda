@@ -46,7 +46,7 @@ describe('FleetModule', () => {
 
   it('binds the fake reader only when both test flags are on (S3 plan C11)', () => {
     const build = (flags: { testHooksEnabled: boolean; testFakeNaxFiles: boolean }) => {
-      const router = { list: jest.fn(), read: jest.fn() } as unknown as FleetRepoFilesRouter;
+      const router = { list: vi.fn(), read: vi.fn() } as unknown as FleetRepoFilesRouter;
       const fake = new FakeFleetRepoFilesReader();
       return selectRepoFilesReader(flags, router, fake);
     };

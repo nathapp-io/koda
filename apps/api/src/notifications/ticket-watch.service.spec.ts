@@ -3,10 +3,10 @@ import { TicketWatchService } from './ticket-watch.service';
 
 function setup(ticketId: string | null = 't1') {
   const repo = {
-    findTicketIdByRef: jest.fn().mockResolvedValue(ticketId),
-    watch: jest.fn().mockResolvedValue(undefined),
-    unwatch: jest.fn().mockResolvedValue(undefined),
-    state: jest.fn().mockResolvedValue({ watching: true, count: 2 }),
+    findTicketIdByRef: vi.fn().mockResolvedValue(ticketId),
+    watch: vi.fn().mockResolvedValue(undefined),
+    unwatch: vi.fn().mockResolvedValue(undefined),
+    state: vi.fn().mockResolvedValue({ watching: true, count: 2 }),
   };
   return { repo, service: new TicketWatchService(repo as never) };
 }

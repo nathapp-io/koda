@@ -75,17 +75,17 @@ describe('RAG Config & Module Wiring (US-002)', () => {
   });
 
   describe('RagModule FTS_OPTIMIZE_STRATEGY provider factory', () => {
-    beforeEach(() => jest.useFakeTimers());
+    beforeEach(() => vi.useFakeTimers());
     afterEach(() => {
-      jest.runOnlyPendingTimers();
-      jest.useRealTimers();
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
     });
 
-    it('creates ScheduleModule.forRoot() in module imports', () => {
+    it('creates ScheduleModule.forRoot() in module imports', async () => {
       // This is verified by the fact that RagModule imports ScheduleModule.forRoot()
       // If this wasn't correct, the module wouldn't compile
       // The actual integration test comes from the app.module.spec.ts
-      const { RagModule } = require('./rag.module');
+      const { RagModule } = await import('./rag.module');
       expect(RagModule).toBeDefined();
     });
 
@@ -97,7 +97,7 @@ describe('RAG Config & Module Wiring (US-002)', () => {
         ragCfg = mockRagConfig();
 
         mockSchedulerRegistry = {
-          addInterval: jest.fn(),
+          addInterval: vi.fn(),
         } as unknown as SchedulerRegistry;
       });
 

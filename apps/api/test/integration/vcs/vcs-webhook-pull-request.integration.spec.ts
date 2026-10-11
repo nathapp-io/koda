@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * VcsWebhookService pull_request Event Handler Tests (VCS-P3-002-C AC2-AC8)
  *
@@ -64,10 +65,10 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
   const webhookSecret = mockVcsConnection.webhookSecret;
 
   // Module-level mock functions for access in tests
-  let mockVerifySignature: jest.Mock;
-  let mockHandleWebhook: jest.Mock;
-  let mockFindBySlug: jest.Mock;
-  let mockFindByProject: jest.Mock;
+  let mockVerifySignature: Mock;
+  let mockHandleWebhook: Mock;
+  let mockFindBySlug: Mock;
+  let mockFindByProject: Mock;
 
   /**
    * Helper: Create GitHub pull_request webhook payload
@@ -124,10 +125,10 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
   }
 
   beforeEach(async () => {
-    mockVerifySignature = jest.fn();
-    mockHandleWebhook = jest.fn();
-    mockFindBySlug = jest.fn().mockResolvedValue(mockProject);
-    mockFindByProject = jest.fn().mockResolvedValue(mockVcsConnection);
+    mockVerifySignature = vi.fn();
+    mockHandleWebhook = vi.fn();
+    mockFindBySlug = vi.fn().mockResolvedValue(mockProject);
+    mockFindByProject = vi.fn().mockResolvedValue(mockVcsConnection);
 
     module = await Test.createTestingModule({
       controllers: [VcsWebhookController],
@@ -136,8 +137,8 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
           provide: VcsConnectionService,
           useValue: {
             findByProject: mockFindByProject,
-            getFullByProject: jest.fn().mockResolvedValue(mockVcsConnection),
-            findInboundTarget: jest.fn().mockResolvedValue({
+            getFullByProject: vi.fn().mockResolvedValue(mockVcsConnection),
+            findInboundTarget: vi.fn().mockResolvedValue({
               ...mockVcsConnection,
               project: { id: mockProject.id, key: mockProject.key, slug: mockProject.slug },
             }),
@@ -146,8 +147,8 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         {
           provide: VcsSyncService,
           useValue: {
-            syncIssue: jest.fn(),
-            filterByAllowedAuthors: jest.fn((issues: unknown[]) => issues),
+            syncIssue: vi.fn(),
+            filterByAllowedAuthors: vi.fn((issues: unknown[]) => issues),
           },
         },
         {
@@ -160,7 +161,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         {
           provide: VcsPrSyncService,
           useValue: {
-            syncPrStatus: jest.fn(),
+            syncPrStatus: vi.fn(),
           },
         },
         {
@@ -172,14 +173,14 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         {
           provide: WebhookReplayGuard,
           useValue: {
-            assertFresh: jest.fn().mockResolvedValue(undefined),
-            forget: jest.fn(),
+            assertFresh: vi.fn().mockResolvedValue(undefined),
+            forget: vi.fn(),
           },
         },
         {
           provide: ConfigService,
           useValue: {
-            get: jest.fn((key: string) => {
+            get: vi.fn((key: string) => {
               if (key === 'vcs.encryptionKey') return 'test-encryption-key';
               return undefined;
             }),

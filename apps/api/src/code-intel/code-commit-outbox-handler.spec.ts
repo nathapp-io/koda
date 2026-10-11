@@ -1,45 +1,47 @@
+import type { Mock, Mocked } from 'vitest';
 import { CodeCommitOutboxHandler } from './code-commit-outbox-handler';
 import { AstIndexService } from './ast-index.service';
 import { PrismaCodeIntelRepository } from './prisma-code-intel.repository';
 import { IVcsProvider } from '../vcs/vcs-provider';
 import { IVcsConfig } from '../config/vcs.config';
 import { SourceFile } from '../vcs/types';
+import { decryptToken } from '../common/utils/encryption.util';
 
-jest.mock('../common/utils/encryption.util', () => ({
-  decryptToken: jest.fn().mockReturnValue('decrypted-token'),
+vi.mock('../common/utils/encryption.util', () => ({
+  decryptToken: vi.fn().mockReturnValue('decrypted-token'),
 }));
 
-const mockDecryptToken: jest.Mock = jest.requireMock('../common/utils/encryption.util').decryptToken;
+const mockDecryptToken = vi.mocked(decryptToken);
 
-jest.mock('../vcs/factory', () => ({
-  createVcsProvider: jest.fn(),
+vi.mock('../vcs/factory', () => ({
+  createVcsProvider: vi.fn(),
 }));
 
 import { createVcsProvider } from '../vcs/factory';
 
 function createMockVcsProvider(overrides?: Partial<IVcsProvider>): IVcsProvider {
   return {
-    fetchIssues: jest.fn().mockResolvedValue({ issues: [], cursor: null, capped: false }),
-    fetchIssue: jest.fn().mockResolvedValue(null),
-    testConnection: jest.fn().mockResolvedValue({ ok: true }),
-    getDefaultBranch: jest.fn().mockResolvedValue('main'),
-    createPullRequest: jest.fn(),
-    getPullRequestStatus: jest.fn(),
-    listPullRequests: jest.fn().mockResolvedValue([]),
-    listPrCommits: jest.fn().mockResolvedValue([]),
-    fetchCommitFiles: jest.fn().mockResolvedValue([]),
+    fetchIssues: vi.fn().mockResolvedValue({ issues: [], cursor: null, capped: false }),
+    fetchIssue: vi.fn().mockResolvedValue(null),
+    testConnection: vi.fn().mockResolvedValue({ ok: true }),
+    getDefaultBranch: vi.fn().mockResolvedValue('main'),
+    createPullRequest: vi.fn(),
+    getPullRequestStatus: vi.fn(),
+    listPullRequests: vi.fn().mockResolvedValue([]),
+    listPrCommits: vi.fn().mockResolvedValue([]),
+    fetchCommitFiles: vi.fn().mockResolvedValue([]),
     ...overrides,
   };
 }
 
 function createMockCodeIntelRepository(vcsConnection: object | null) {
   return {
-    findVcsConnectionByProjectId: jest.fn().mockResolvedValue(vcsConnection),
+    findVcsConnectionByProjectId: vi.fn().mockResolvedValue(vcsConnection),
   } as unknown as PrismaCodeIntelRepository;
 }
 
 function createMockAstIndexService() {
-  return { indexCommit: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<AstIndexService>;
+  return { indexCommit: vi.fn().mockResolvedValue(undefined) } as unknown as Mocked<AstIndexService>;
 }
 
 function createMockVcsConfig(encryptionKey?: string): IVcsConfig {
@@ -60,12 +62,12 @@ const defaultConnection = {
 
 describe('CodeCommitOutboxHandler', () => {
   let handler: CodeCommitOutboxHandler;
-  let mockAstIndex: jest.Mocked<AstIndexService>;
+  let mockAstIndex: Mocked<AstIndexService>;
   let mockProvider: IVcsProvider;
   let providerVcsConnection: object | null;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     mockDecryptToken.mockReturnValue('decrypted-token');
     providerVcsConnection = null;
   });
@@ -187,9 +189,9 @@ describe('CodeCommitOutboxHandler', () => {
 
     it('should re-throw fetchCommitFiles errors', async () => {
       mockProvider = createMockVcsProvider({
-        fetchCommitFiles: jest.fn().mockRejectedValue(new Error('API rate limit exceeded')),
+        fetchCommitFiles: vi.fn().mockRejectedValue(new Error('API rate limit exceeded')),
       });
-      (createVcsProvider as jest.Mock).mockReturnValue(mockProvider);
+      (createVcsProvider as Mock).mockReturnValue(mockProvider);
 
       handler = new CodeCommitOutboxHandler(
         createMockCodeIntelRepository(defaultConnection),
@@ -211,9 +213,9 @@ describe('CodeCommitOutboxHandler', () => {
         { path: 'src/a.ts', content: 'export const x = 1;' },
       ];
       mockProvider = createMockVcsProvider({
-        fetchCommitFiles: jest.fn().mockResolvedValue(sourceFiles),
+        fetchCommitFiles: vi.fn().mockResolvedValue(sourceFiles),
       });
-      (createVcsProvider as jest.Mock).mockReturnValue(mockProvider);
+      (createVcsProvider as Mock).mockReturnValue(mockProvider);
 
       mockAstIndex = createMockAstIndexService();
       handler = new CodeCommitOutboxHandler(

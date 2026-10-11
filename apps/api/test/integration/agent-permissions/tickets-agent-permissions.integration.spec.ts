@@ -58,15 +58,15 @@ describe('TicketsService — agent permissions', () => {
 
   const mockPrisma = {
     client: {
-      project: { findUnique: jest.fn() },
+      project: { findUnique: vi.fn() },
       ticket: {
-        findUnique: jest.fn(),
-        update: jest.fn(),
-        findFirst: jest.fn(),
-        findMany: jest.fn(),
-        count: jest.fn(),
+        findUnique: vi.fn(),
+        update: vi.fn(),
+        findFirst: vi.fn(),
+        findMany: vi.fn(),
+        count: vi.fn(),
       },
-      $transaction: jest.fn(),
+      $transaction: vi.fn(),
     },
   };
 
@@ -80,14 +80,14 @@ describe('TicketsService — agent permissions', () => {
         {
           provide: TRANSACTION_MANAGER,
           useValue: {
-            run: jest.fn((fn: () => Promise<unknown>) => fn()),
-            getClient: jest.fn(),
-            isInTransaction: jest.fn(() => false),
+            run: vi.fn((fn: () => Promise<unknown>) => fn()),
+            getClient: vi.fn(),
+            isInTransaction: vi.fn(() => false),
           },
         },
-        { provide: TicketEventService, useValue: { create: jest.fn().mockResolvedValue({ id: 'evt-1' }) } },
-        { provide: OutboxService, useValue: { record: jest.fn().mockResolvedValue(undefined) } },
-        { provide: TicketTransitionsService, useValue: { executeTransitionPublic: jest.fn() } },
+        { provide: TicketEventService, useValue: { create: vi.fn().mockResolvedValue({ id: 'evt-1' }) } },
+        { provide: OutboxService, useValue: { record: vi.fn().mockResolvedValue(undefined) } },
+        { provide: TicketTransitionsService, useValue: { executeTransitionPublic: vi.fn() } },
         KodaCaslAbilityFactory,
       ],
     }).compile();
@@ -96,7 +96,7 @@ describe('TicketsService — agent permissions', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   // ── AC-3: agent actor allowed to delete ─────────────────────────

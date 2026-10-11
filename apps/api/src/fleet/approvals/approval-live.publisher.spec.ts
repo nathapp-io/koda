@@ -8,7 +8,7 @@ import type { LiveFleetApprovalEvent } from '../../live/live-event';
  */
 describe('ApprovalLivePublisher', () => {
   const make = () => {
-    const bus = { publish: jest.fn() };
+    const bus = { publish: vi.fn() };
     return { bus, publisher: new ApprovalLivePublisher(bus as unknown as ProjectEventBus) };
   };
 

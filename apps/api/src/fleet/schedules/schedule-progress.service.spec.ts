@@ -14,12 +14,12 @@ const job = (over: Partial<FleetJobRecord> = {}): FleetJobRecord =>
 
 function harness(current: ScheduleRecord | null = schedule(), claimed = true) {
   const repo = {
-    claimCounted: jest.fn(async () => claimed),
-    lockById: jest.fn(async () => current),
-    update: jest.fn(async (_id: string, patch: Partial<ScheduleRecord>) => ({ ...(current as ScheduleRecord), ...patch })),
+    claimCounted: vi.fn(async () => claimed),
+    lockById: vi.fn(async () => current),
+    update: vi.fn(async (_id: string, patch: Partial<ScheduleRecord>) => ({ ...(current as ScheduleRecord), ...patch })),
   };
-  const activity = { record: jest.fn(async () => undefined) };
-  const webhooks = { dispatch: jest.fn(async () => undefined) };
+  const activity = { record: vi.fn(async () => undefined) };
+  const webhooks = { dispatch: vi.fn(async () => undefined) };
   return { repo, activity, webhooks, svc: new ScheduleProgressService(repo as never, activity as never, webhooks as never) };
 }
 

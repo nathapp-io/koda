@@ -53,12 +53,12 @@ const makeMemoryItemRow = (overrides: Record<string, unknown> = {}) => ({
 describe('PrismaCanonicalStateRepository', () => {
   let repository: PrismaCanonicalStateRepository;
 
-  const mockTicketEvent = { findMany: jest.fn() };
-  const mockAgentEvent = { findMany: jest.fn() };
-  const mockDecisionEvent = { findMany: jest.fn() };
-  const mockMemoryItem = { findMany: jest.fn() };
-  const mockProject = { findUnique: jest.fn() };
-  const mockTicket = { findMany: jest.fn() };
+  const mockTicketEvent = { findMany: vi.fn() };
+  const mockAgentEvent = { findMany: vi.fn() };
+  const mockDecisionEvent = { findMany: vi.fn() };
+  const mockMemoryItem = { findMany: vi.fn() };
+  const mockProject = { findUnique: vi.fn() };
+  const mockTicket = { findMany: vi.fn() };
 
   const mockPrismaClient = {
     project: mockProject,
@@ -83,7 +83,7 @@ describe('PrismaCanonicalStateRepository', () => {
 
     repository = module.get<PrismaCanonicalStateRepository>(PrismaCanonicalStateRepository);
 
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('findProject', () => {

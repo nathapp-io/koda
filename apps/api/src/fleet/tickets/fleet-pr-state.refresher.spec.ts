@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { FleetPrStateRefresher } from './fleet-pr-state.refresher';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { testFleetConfig } from '../../common/test-helpers/fleet-config';
@@ -13,21 +14,21 @@ const pr = (over: Record<string, unknown> = {}) => ({
 });
 
 describe('FleetPrStateRefresher (C9 §3.4, D456)', () => {
-  let repo: { findRefreshableFleetLinks: jest.Mock };
-  let github: { mintInstallationToken: jest.Mock; getPullRequest: jest.Mock };
-  let gitlab: { getMergeRequest: jest.Mock };
-  let gitlabTokens: { resolve: jest.Mock };
-  let vcsRepo: { updateTicketLinkWithPrState: jest.Mock };
-  let prSync: { applyMergedPr: jest.Mock };
+  let repo: { findRefreshableFleetLinks: Mock };
+  let github: { mintInstallationToken: Mock; getPullRequest: Mock };
+  let gitlab: { getMergeRequest: Mock };
+  let gitlabTokens: { resolve: Mock };
+  let vcsRepo: { updateTicketLinkWithPrState: Mock };
+  let prSync: { applyMergedPr: Mock };
   let refresher: FleetPrStateRefresher;
 
   beforeEach(() => {
-    repo = { findRefreshableFleetLinks: jest.fn().mockResolvedValue([]) };
-    github = { mintInstallationToken: jest.fn().mockResolvedValue({ token: 'ghs', expiresAt: new Date() }), getPullRequest: jest.fn().mockResolvedValue(pr()) };
-    gitlab = { getMergeRequest: jest.fn().mockResolvedValue(pr()) };
-    gitlabTokens = { resolve: jest.fn().mockResolvedValue('glpat') };
-    vcsRepo = { updateTicketLinkWithPrState: jest.fn().mockResolvedValue('updated') };
-    prSync = { applyMergedPr: jest.fn().mockResolvedValue('updated') };
+    repo = { findRefreshableFleetLinks: vi.fn().mockResolvedValue([]) };
+    github = { mintInstallationToken: vi.fn().mockResolvedValue({ token: 'ghs', expiresAt: new Date() }), getPullRequest: vi.fn().mockResolvedValue(pr()) };
+    gitlab = { getMergeRequest: vi.fn().mockResolvedValue(pr()) };
+    gitlabTokens = { resolve: vi.fn().mockResolvedValue('glpat') };
+    vcsRepo = { updateTicketLinkWithPrState: vi.fn().mockResolvedValue('updated') };
+    prSync = { applyMergedPr: vi.fn().mockResolvedValue('updated') };
     refresher = new FleetPrStateRefresher(
       repo as never, github as never, gitlab as never, gitlabTokens as never, vcsRepo as never, prSync as never, testFleetConfig(),
     );
@@ -99,7 +100,7 @@ describe('FleetPrStateRefresher (C9 §3.4, D456)', () => {
   });
 
   it('starts no timer when background work is off (plan P3)', () => {
-    const spy = jest.spyOn(global, 'setInterval');
+    const spy = vi.spyOn(global, 'setInterval');
     refresher.onModuleInit();
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();

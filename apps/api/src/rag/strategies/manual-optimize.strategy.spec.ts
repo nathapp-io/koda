@@ -2,7 +2,7 @@ import { ManualOptimizeStrategy } from './manual-optimize.strategy';
 
 function mockTable() {
   return {
-    optimize: jest.fn().mockResolvedValue(undefined),
+    optimize: vi.fn().mockResolvedValue(undefined),
   };
 }
 

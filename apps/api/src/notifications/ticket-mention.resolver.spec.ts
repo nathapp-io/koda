@@ -5,7 +5,7 @@ const token = (userId: string): string => `@[x](user:${userId})`;
 
 function resolver(visible: readonly string[]) {
   const db = {
-    user: { findMany: jest.fn(async (args: { where: { id: { in: string[] } } }) =>
+    user: { findMany: vi.fn(async (args: { where: { id: { in: string[] } } }) =>
       args.where.id.in.filter((u) => visible.includes(u)).map((u) => ({ id: u }))) },
   };
   return { db, r: new TicketMentionResolver({ client: db } as never) };

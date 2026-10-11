@@ -32,12 +32,12 @@ describe('TimelineController', () => {
   let controller: TimelineController;
 
   const mockProjectAccessService = {
-    findProjectIdBySlug: jest.fn(),
-    assertProjectMembership: jest.fn(),
+    findProjectIdBySlug: vi.fn(),
+    assertProjectMembership: vi.fn(),
   };
 
   const mockTimelineService = {
-    getProjectTimeline: jest.fn(),
+    getProjectTimeline: vi.fn(),
   };
 
   const memberPrincipal: KodaPrincipal = makeUserPrincipal('MEMBER');
@@ -55,7 +55,7 @@ describe('TimelineController', () => {
 
     mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-1');
     mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('getTimeline', () => {

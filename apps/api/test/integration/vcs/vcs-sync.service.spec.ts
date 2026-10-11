@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 /**
  * VcsSyncService.syncIssue Unit/Integration Tests
  *
@@ -20,7 +21,7 @@ import { VcsIssue } from '../../../src/vcs/types';
 
 describe('VcsSyncService.syncIssue', () => {
   let service: VcsSyncService;
-  let vcsRepo: jest.Mocked<PrismaVcsRepository>;
+  let vcsRepo: Mocked<PrismaVcsRepository>;
   let module: TestingModule;
 
   const projectId = 'project-123';
@@ -51,8 +52,8 @@ describe('VcsSyncService.syncIssue', () => {
   };
 
   beforeEach(async () => {
-    jest.clearAllMocks();
-    jest.restoreAllMocks();
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
 
     module = await Test.createTestingModule({
       providers: [
@@ -60,11 +61,11 @@ describe('VcsSyncService.syncIssue', () => {
         {
           provide: VCS_REPOSITORY,
           useValue: {
-            findExistingTicketByExternalId: jest.fn(),
-            createTicketFromIssue: jest.fn(),
-            findActiveTicketLinksWithPrs: jest.fn(),
-            updateTicketLinkWithPrState: jest.fn(),
-            applyMergedPrTransition: jest.fn(),
+            findExistingTicketByExternalId: vi.fn(),
+            createTicketFromIssue: vi.fn(),
+            findActiveTicketLinksWithPrs: vi.fn(),
+            updateTicketLinkWithPrState: vi.fn(),
+            applyMergedPrTransition: vi.fn(),
           },
         },
       ],
@@ -95,7 +96,7 @@ describe('VcsSyncService.syncIssue', () => {
 
     it('should use type from source parameter (manual/polling/webhook all use TASK)', async () => {
       for (const source of ['manual', 'polling', 'webhook'] as const) {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
 
         vcsRepo.findExistingTicketByExternalId.mockResolvedValueOnce(null);
         vcsRepo.createTicketFromIssue.mockResolvedValueOnce({
@@ -315,7 +316,7 @@ describe('VcsSyncService.syncIssue', () => {
       const issueNumbers = [1, 99, 999, 12345];
 
       for (const issueNumber of issueNumbers) {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
 
         const issue: VcsIssue = {
           ...mockVcsIssue,
@@ -346,7 +347,7 @@ describe('VcsSyncService.syncIssue', () => {
       ];
 
       for (const title of titles) {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
 
         const issue: VcsIssue = {
           ...mockVcsIssue,

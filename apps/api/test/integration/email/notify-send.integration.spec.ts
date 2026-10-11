@@ -1,3 +1,4 @@
+import type { MockInstance } from 'vitest';
 /**
  * Fleet S4b A5: booted AppModule — the seeder wrote the templates; NotifyService.send renders from the DB and records a
  * DeliveryLog through the real Prisma repositories. The registered email channel's send is spied (no SMTP).
@@ -13,13 +14,13 @@ import { bootHttpApp } from '../../helpers/http-app';
 import { resetDb } from '../../helpers/reset-db';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
-jest.setTimeout(30_000);
+vi.setConfig({ testTimeout: 30_000 });
 
 describeIntegration('nestjs-notify send on PG (S4b A5)', () => {
   let app: NathApplication;
   let prisma: PrismaClient;
   let notify: INotifyService;
-  let send: jest.SpyInstance;
+  let send: MockInstance;
 
   beforeAll(async () => {
     await resetDb();
@@ -28,7 +29,7 @@ describeIntegration('nestjs-notify send on PG (S4b A5)', () => {
     notify = app.get(NOTIFY_SERVICE);
     const channel = app.get<DeliveryChannelRegistry>(DELIVERY_CHANNEL_REGISTRY).get(NotificationChannel.EMAIL);
     if (!channel) throw new Error('email channel not registered');
-    send = jest.spyOn(channel, 'send').mockResolvedValue({ providerMessageId: 'r1' });
+    send = vi.spyOn(channel, 'send').mockResolvedValue({ providerMessageId: 'r1' });
   });
 
   afterAll(async () => {

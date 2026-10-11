@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * Auto-create PR on VERIFIED Transition Integration Tests
  *
@@ -22,23 +23,23 @@ import { VcsConnectionService } from '../../../src/vcs/vcs-connection.service';
 import { TicketStatus, ActivityType } from '../../../src/common/enums';
 import { IVcsProvider, VcsPullRequest, CreatePrParams } from '../../../src/vcs';
 import { buildBranchName } from '../../../src/vcs/branch-name.util';
+import { createVcsProvider } from '../../../src/vcs/factory';
 import enVcsMessages from '../../../src/i18n/en/vcs.json';
 import zhVcsMessages from '../../../src/i18n/zh/vcs.json';
 
 // Module-level reference for factory mock that can be updated
 let mockVcsProviderInstance: any;
 
-jest.mock('../../../src/vcs/factory', () => ({
-  createVcsProvider: jest.fn(),
+vi.mock('../../../src/vcs/factory', () => ({
+  createVcsProvider: vi.fn(),
 }));
 
-jest.mock('../../../src/common/utils/encryption.util', () => ({
-  decryptToken: jest.fn().mockReturnValue('fake-decrypted-token'),
-  encryptToken: jest.fn().mockReturnValue('fake:encrypted:token'),
+vi.mock('../../../src/common/utils/encryption.util', () => ({
+  decryptToken: vi.fn().mockReturnValue('fake-decrypted-token'),
+  encryptToken: vi.fn().mockReturnValue('fake:encrypted:token'),
 }));
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const mockCreateVcsProvider = require('../../../src/vcs/factory').createVcsProvider as jest.Mock;
+const mockCreateVcsProvider = vi.mocked(createVcsProvider) as Mock;
 
 describe('Auto-create PR on VERIFIED Transition', () => {
   let transitionsService: TicketTransitionsService;
@@ -98,52 +99,52 @@ describe('Auto-create PR on VERIFIED Transition', () => {
   beforeEach(() => {
     mockPrismaService = {
       client: {
-        $transaction: jest.fn((cb) => cb(mockPrismaService.client)),
+        $transaction: vi.fn((cb) => cb(mockPrismaService.client)),
         project: {
-          findUnique: jest.fn(),
-          findFirst: jest.fn(),
+          findUnique: vi.fn(),
+          findFirst: vi.fn(),
         },
         ticket: {
-          findUnique: jest.fn(),
-          findFirst: jest.fn(),
+          findUnique: vi.fn(),
+          findFirst: vi.fn(),
           // M3 conditional status write used by updateTicketStatusIf
-          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-          update: jest.fn(),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+          update: vi.fn(),
         },
         comment: {
-          create: jest.fn(),
+          create: vi.fn(),
         },
         ticketActivity: {
-          create: jest.fn(),
+          create: vi.fn(),
         },
         ticketLink: {
-          create: jest.fn(),
-          findFirst: jest.fn(),
+          create: vi.fn(),
+          findFirst: vi.fn(),
         },
         vcsConnection: {
-          findUnique: jest.fn(),
+          findUnique: vi.fn(),
         },
       },
     };
 
     mockTicketLinksService = {
-      create: jest.fn(),
+      create: vi.fn(),
     };
 
     mockVcsConnectionService = {
-      getFullByProject: jest.fn(),
-      findByProject: jest.fn(),
+      getFullByProject: vi.fn(),
+      findByProject: vi.fn(),
     };
 
     mockVcsProvider = {
-      fetchIssues: jest.fn(),
-      fetchIssue: jest.fn(),
-      testConnection: jest.fn(),
-      getDefaultBranch: jest.fn(),
-      createPullRequest: jest.fn(),
+      fetchIssues: vi.fn(),
+      fetchIssue: vi.fn(),
+      testConnection: vi.fn(),
+      getDefaultBranch: vi.fn(),
+      createPullRequest: vi.fn(),
     };
 
-    const mockTxManager = { run: (fn: () => Promise<unknown>) => fn(), getClient: jest.fn(), isInTransaction: jest.fn(() => false) };
+    const mockTxManager = { run: (fn: () => Promise<unknown>) => fn(), getClient: vi.fn(), isInTransaction: vi.fn(() => false) };
 
     transitionsService = new TicketTransitionsService(
       new PrismaTicketsRepository(mockPrismaService as any),
@@ -265,8 +266,8 @@ describe('Auto-create PR on VERIFIED Transition', () => {
       mockPrismaService.client.ticketActivity.create.mockResolvedValue({});
       mockVcsConnectionService.getFullByProject.mockRejectedValue(new Error('VCS connection not found'));
 
-      const createPrSpy = jest.fn();
-      jest.spyOn(mockVcsProvider, 'createPullRequest').mockImplementation(createPrSpy);
+      const createPrSpy = vi.fn();
+      vi.spyOn(mockVcsProvider, 'createPullRequest').mockImplementation(createPrSpy);
 
       await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser);
 
@@ -324,58 +325,58 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
       // Setup mocks for VCS connection which is needed by createPrForTicket
       mockPrismaService = {
         client: {
-          $transaction: jest.fn((cb: any) => cb(mockPrismaService.client)),
+          $transaction: vi.fn((cb: any) => cb(mockPrismaService.client)),
           project: {
-            findUnique: jest.fn().mockResolvedValue(testProject),
-            findFirst: jest.fn(),
+            findUnique: vi.fn().mockResolvedValue(testProject),
+            findFirst: vi.fn(),
           },
           ticket: {
-            findUnique: jest.fn().mockResolvedValue(testTicket),
-            findFirst: jest.fn(),
+            findUnique: vi.fn().mockResolvedValue(testTicket),
+            findFirst: vi.fn(),
             // M3 conditional status write used by updateTicketStatusIf
-            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-            update: jest.fn().mockResolvedValue({ ...testTicket, status: TicketStatus.VERIFIED }),
+            updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+            update: vi.fn().mockResolvedValue({ ...testTicket, status: TicketStatus.VERIFIED }),
           },
           comment: {
-            create: jest.fn().mockResolvedValue({}),
+            create: vi.fn().mockResolvedValue({}),
           },
           ticketActivity: {
-            create: jest.fn().mockResolvedValue({}),
+            create: vi.fn().mockResolvedValue({}),
           },
           ticketLink: {
-            create: jest.fn(),
-            findFirst: jest.fn(),
-            update: jest.fn(),
+            create: vi.fn(),
+            findFirst: vi.fn(),
+            update: vi.fn(),
           },
           vcsConnection: {
-            findUnique: jest.fn(),
+            findUnique: vi.fn(),
           },
         },
       };
 
       mockTicketLinksService = {
-        create: jest.fn(),
+        create: vi.fn(),
       };
 
       mockVcsConnectionService = {
-        getFullByProject: jest.fn().mockResolvedValue(testVcsConnection),
-        findByProject: jest.fn(),
+        getFullByProject: vi.fn().mockResolvedValue(testVcsConnection),
+        findByProject: vi.fn(),
       };
 
       mockVcsProvider = {
-        fetchIssues: jest.fn(),
-        fetchIssue: jest.fn(),
-        testConnection: jest.fn(),
-        getDefaultBranch: jest.fn().mockResolvedValue('main'),
-        createPullRequest: jest.fn(),
+        fetchIssues: vi.fn(),
+        fetchIssue: vi.fn(),
+        testConnection: vi.fn(),
+        getDefaultBranch: vi.fn().mockResolvedValue('main'),
+        createPullRequest: vi.fn(),
       };
 
       // Update the module-level factory mock to return our mock provider
       mockVcsProviderInstance = mockVcsProvider;
       mockCreateVcsProvider.mockReturnValue(mockVcsProvider);
 
-      const mockTxManager2 = { run: (fn: () => Promise<unknown>) => fn(), getClient: jest.fn(), isInTransaction: jest.fn(() => false) };
-      const mockVcsLinkExtractorService = { extractLinksFromPr: jest.fn().mockResolvedValue(undefined) };
+      const mockTxManager2 = { run: (fn: () => Promise<unknown>) => fn(), getClient: vi.fn(), isInTransaction: vi.fn(() => false) };
+      const mockVcsLinkExtractorService = { extractLinksFromPr: vi.fn().mockResolvedValue(undefined) };
       const mockVcsConfig = { encryptionKey: 'a'.repeat(64), defaultPollingIntervalMs: 300000, githubApiUrl: 'https://api.github.com' };
 
       transitionsService = new TicketTransitionsService(
@@ -489,8 +490,8 @@ describe('AC12: No PR creation for non-VERIFIED transitions', () => {
       });
       mockPrismaService.client.ticketActivity.create.mockResolvedValue({});
 
-      const createPrSpy = jest.fn();
-      jest.spyOn(mockVcsProvider, 'createPullRequest').mockImplementation(createPrSpy);
+      const createPrSpy = vi.fn();
+      vi.spyOn(mockVcsProvider, 'createPullRequest').mockImplementation(createPrSpy);
 
       await transitionsService.start('test-project', 'KODA-42', testUser);
 
@@ -505,8 +506,8 @@ describe('AC12: No PR creation for non-VERIFIED transitions', () => {
       });
       mockPrismaService.client.ticketActivity.create.mockResolvedValue({});
 
-      const createPrSpy = jest.fn();
-      jest.spyOn(mockVcsProvider, 'createPullRequest').mockImplementation(createPrSpy);
+      const createPrSpy = vi.fn();
+      vi.spyOn(mockVcsProvider, 'createPullRequest').mockImplementation(createPrSpy);
 
       await transitionsService.verifyFix('test-project', 'KODA-42', 'Approved', true, testUser);
 

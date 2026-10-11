@@ -16,14 +16,14 @@ import { VcsCommit, VcsPrStatus } from '../../../src/vcs/types';
 import { containsTicketRef } from '../../../src/vcs/ticket-ref-matcher.util';
 
 // Mock the VCS factory
-const mockCreateVcsProvider = jest.fn();
-jest.mock('../../../src/vcs/factory', () => ({
+const { mockCreateVcsProvider } = vi.hoisted(() => ({ mockCreateVcsProvider: vi.fn() }));
+vi.mock('../../../src/vcs/factory', () => ({
   createVcsProvider: mockCreateVcsProvider,
 }));
 
 // Mock decryptToken utility
-jest.mock('../../../src/common/utils/encryption.util', () => ({
-  decryptToken: jest.fn(() => 'decrypted-token'),
+vi.mock('../../../src/common/utils/encryption.util', () => ({
+  decryptToken: vi.fn(() => 'decrypted-token'),
 }));
 
 // Import after mocks are set up
@@ -128,14 +128,14 @@ describe('VcsLinkExtractorService', () => {
 
   beforeEach(() => {
     mockVcsProvider = {
-      fetchIssues: jest.fn(),
-      fetchIssue: jest.fn(),
-      testConnection: jest.fn(),
-      getDefaultBranch: jest.fn(),
-      createPullRequest: jest.fn(),
-      getPullRequestStatus: jest.fn(),
-      listPullRequests: jest.fn(),
-      listPrCommits: jest.fn(),
+      fetchIssues: vi.fn(),
+      fetchIssue: vi.fn(),
+      testConnection: vi.fn(),
+      getDefaultBranch: vi.fn(),
+      createPullRequest: vi.fn(),
+      getPullRequestStatus: vi.fn(),
+      listPullRequests: vi.fn(),
+      listPrCommits: vi.fn(),
     };
 
     mockCreateVcsProvider.mockReturnValue(mockVcsProvider);
@@ -143,31 +143,31 @@ describe('VcsLinkExtractorService', () => {
     mockPrismaService = {
       client: {
         ticketLink: {
-          create: jest.fn(),
-          findFirst: jest.fn(),
-          findMany: jest.fn(),
-          update: jest.fn(),
-          upsert: jest.fn(),
+          create: vi.fn(),
+          findFirst: vi.fn(),
+          findMany: vi.fn(),
+          update: vi.fn(),
+          upsert: vi.fn(),
         },
         project: {
-          findUnique: jest.fn(),
-          findFirst: jest.fn(),
+          findUnique: vi.fn(),
+          findFirst: vi.fn(),
         },
         ticket: {
-          findUnique: jest.fn(),
-          findFirst: jest.fn(),
+          findUnique: vi.fn(),
+          findFirst: vi.fn(),
         },
-        $transaction: jest.fn((cb: any) => cb(mockPrismaService.client)),
+        $transaction: vi.fn((cb: any) => cb(mockPrismaService.client)),
       },
     };
 
-    const mockTxManager = { run: jest.fn(), getClient: jest.fn(), isInTransaction: jest.fn(() => false) };
+    const mockTxManager = { run: vi.fn(), getClient: vi.fn(), isInTransaction: vi.fn(() => false) };
     const repo = new PrismaVcsRepository(mockTxManager as any, mockPrismaService as any);
     service = new VcsLinkExtractorService(repo);
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('AC1: extractLinksFromPr creates branch link', () => {
@@ -476,7 +476,7 @@ mockPrStatus.number,
     });
 
     it('logs warning when commit listing fails', async () => {
-      const loggerWarnSpy = jest.spyOn(service['logger'], 'warn');
+      const loggerWarnSpy = vi.spyOn(service['logger'], 'warn');
 
       mockVcsProvider.getPullRequestStatus.mockResolvedValue(mockPrStatus);
       mockVcsProvider.listPrCommits.mockRejectedValue(new Error('GitHub API error'));
@@ -528,7 +528,7 @@ mockPrStatus.number,
     });
 
     it('decrypts token before creating provider', async () => {
-      const decryptToken = require('../../../src/common/utils/encryption.util').decryptToken;
+      const { decryptToken } = await import('../../../src/common/utils/encryption.util');
 
       mockVcsProvider.getPullRequestStatus.mockResolvedValue(mockPrStatus);
       mockVcsProvider.listPrCommits.mockResolvedValue([]);

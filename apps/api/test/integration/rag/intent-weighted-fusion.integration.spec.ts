@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * Intent-Weighted Fusion and Reranking Integration Tests
  *
@@ -16,6 +17,7 @@
  *
  * @see HybridRetrieverService
  */
+import { HybridRetrieverService as RealHybridRetrieverService } from '../../../src/rag/hybrid-retriever.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { RAG_CFG } from '../../../src/config/rag.config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -26,7 +28,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 
-jest.setTimeout(30000);
+vi.setConfig({ testTimeout: 30000 });
 
 class FakeEmbeddingService {
   readonly providerName = 'fake';
@@ -48,13 +50,7 @@ class FakeEmbeddingService {
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-let HybridRetrieverService: any;
-try {
-  const mod = require('../../../src/rag/hybrid-retriever.service');
-  HybridRetrieverService = mod.HybridRetrieverService;
-} catch {
-  HybridRetrieverService = undefined;
-}
+const HybridRetrieverService: any = RealHybridRetrieverService;
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 describe('Intent-Weighted Fusion and Reranking', () => {
@@ -78,10 +74,10 @@ describe('Intent-Weighted Fusion and Reranking', () => {
     };
 
     const fakeEntityStore = {
-      searchEntities: jest.fn().mockReturnValue([]),
-      indexEntity: jest.fn(),
-      getByTag: jest.fn().mockReturnValue([]),
-      computeEntityScore: jest.fn().mockReturnValue(0),
+      searchEntities: vi.fn().mockReturnValue([]),
+      indexEntity: vi.fn(),
+      getByTag: vi.fn().mockReturnValue([]),
+      computeEntityScore: vi.fn().mockReturnValue(0),
     };
 
     module = await Test.createTestingModule({
@@ -307,7 +303,7 @@ describe('Intent-Weighted Fusion and Reranking', () => {
         metadata: { title: 'Plain Doc' },
       });
 
-      const fakeEntityStore = hybridService.entityStore as { searchEntities: jest.Mock; computeEntityScore: jest.Mock };
+      const fakeEntityStore = hybridService.entityStore as { searchEntities: Mock; computeEntityScore: Mock };
       fakeEntityStore.searchEntities.mockReturnValue([]);
       fakeEntityStore.computeEntityScore.mockReturnValue(0);
 
@@ -332,7 +328,7 @@ describe('Intent-Weighted Fusion and Reranking', () => {
         metadata: { title: 'Another Doc' },
       });
 
-      const fakeEntityStore = hybridService.entityStore as { searchEntities: jest.Mock; computeEntityScore: jest.Mock };
+      const fakeEntityStore = hybridService.entityStore as { searchEntities: Mock; computeEntityScore: Mock };
       fakeEntityStore.searchEntities.mockReturnValue([]);
       fakeEntityStore.computeEntityScore.mockReturnValue(0);
 
@@ -542,7 +538,7 @@ describe('Intent-Weighted Fusion and Reranking', () => {
     });
 
     it('candidate missing a source score contributes 0 for that source', async () => {
-      const fakeEntityStore = hybridService.entityStore as { searchEntities: jest.Mock; computeEntityScore: jest.Mock };
+      const fakeEntityStore = hybridService.entityStore as { searchEntities: Mock; computeEntityScore: Mock };
       fakeEntityStore.searchEntities.mockReturnValue([]);
       fakeEntityStore.computeEntityScore.mockReturnValue(0);
 

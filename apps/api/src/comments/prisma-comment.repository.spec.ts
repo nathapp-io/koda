@@ -2,12 +2,12 @@ import { PrismaCommentRepository } from './prisma-comment.repository';
 
 describe('PrismaCommentRepository', () => {
   const mockTxManager = {
-    run: jest.fn((fn: () => Promise<unknown>) => fn()),
-    getClient: jest.fn(),
-    isInTransaction: jest.fn(() => false),
+    run: vi.fn((fn: () => Promise<unknown>) => fn()),
+    getClient: vi.fn(),
+    isInTransaction: vi.fn(() => false),
   };
 
-  const mockFindMany = jest.fn();
+  const mockFindMany = vi.fn();
   const mockPrisma = {
     client: {
       comment: {
@@ -19,7 +19,7 @@ describe('PrismaCommentRepository', () => {
   let repo: PrismaCommentRepository;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     repo = new PrismaCommentRepository(mockTxManager as never, mockPrisma as never);
   });
 

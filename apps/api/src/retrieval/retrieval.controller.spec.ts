@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { RetrievalController } from './retrieval.controller';
 import { EvaluationService } from './evaluation.service';
@@ -6,10 +7,10 @@ import { NotFoundAppException } from '@nathapp/nestjs-common';
 
 describe('RetrievalController', () => {
   let controller: RetrievalController;
-  let evaluationService: jest.Mocked<EvaluationService>;
+  let evaluationService: Mocked<EvaluationService>;
 
-  const mockFindProjectIdBySlug = jest.fn();
-  const mockAssertProjectMembership = jest.fn();
+  const mockFindProjectIdBySlug = vi.fn();
+  const mockAssertProjectMembership = vi.fn();
 
   const mockProjectAccessService: Partial<ProjectAccessService> = {
     findProjectIdBySlug: mockFindProjectIdBySlug,
@@ -18,8 +19,8 @@ describe('RetrievalController', () => {
 
   beforeEach(async () => {
     evaluationService = {
-      runQueries: jest.fn().mockResolvedValue({ precisionAt5: 1 }),
-    } as unknown as jest.Mocked<EvaluationService>;
+      runQueries: vi.fn().mockResolvedValue({ precisionAt5: 1 }),
+    } as unknown as Mocked<EvaluationService>;
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [RetrievalController],
@@ -33,7 +34,7 @@ describe('RetrievalController', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('evaluateRetrieval', () => {

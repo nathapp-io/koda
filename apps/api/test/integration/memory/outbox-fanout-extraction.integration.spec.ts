@@ -18,14 +18,14 @@ describe('AC8: FanOutPublisher dispatches to ExtractionService', () => {
   beforeEach(async () => {
     const mockPrismaClient = {
       memoryItem: {
-        findMany: jest.fn().mockResolvedValue([]),
-        findUnique: jest.fn().mockResolvedValue(null),
-        findFirst: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockImplementation((args) => Promise.resolve({ id: `created-${Date.now()}`, ...args.data })),
-        update: jest.fn().mockImplementation((args) => Promise.resolve({ id: args.where.id, ...args.data })),
-        count: jest.fn().mockResolvedValue(0),
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue(null),
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockImplementation((args) => Promise.resolve({ id: `created-${Date.now()}`, ...args.data })),
+        update: vi.fn().mockImplementation((args) => Promise.resolve({ id: args.where.id, ...args.data })),
+        count: vi.fn().mockResolvedValue(0),
       },
-      $transaction: jest.fn().mockImplementation((fn) => fn(mockPrismaClient)),
+      $transaction: vi.fn().mockImplementation((fn) => fn(mockPrismaClient)),
     };
 
     mockPrismaService = {
@@ -46,9 +46,9 @@ describe('AC8: FanOutPublisher dispatches to ExtractionService', () => {
         {
           provide: TRANSACTION_MANAGER,
           useValue: {
-            run: jest.fn((fn: () => Promise<unknown>) => fn()),
-            getClient: jest.fn(),
-            isInTransaction: jest.fn(() => false),
+            run: vi.fn((fn: () => Promise<unknown>) => fn()),
+            getClient: vi.fn(),
+            isInTransaction: vi.fn(() => false),
           },
         },
       ],
@@ -75,7 +75,7 @@ describe('AC8: FanOutPublisher dispatches to ExtractionService', () => {
         timestamp: new Date().toISOString(),
       };
 
-      const repositoryUpsertSpy = jest.spyOn(memoryRepository, 'upsert').mockResolvedValue({
+      const repositoryUpsertSpy = vi.spyOn(memoryRepository, 'upsert').mockResolvedValue({
         id: 'memory-123',
         projectId: 'project-123',
         kind: MemoryKind.FACT,
@@ -106,7 +106,7 @@ describe('AC8: FanOutPublisher dispatches to ExtractionService', () => {
         timestamp: new Date().toISOString(),
       };
 
-      const repositoryUpsertSpy = jest.spyOn(memoryRepository, 'upsert').mockResolvedValue({
+      const repositoryUpsertSpy = vi.spyOn(memoryRepository, 'upsert').mockResolvedValue({
         id: 'memory-123',
         projectId: 'project-123',
         kind: MemoryKind.FACT,
@@ -133,7 +133,7 @@ describe('AC8: FanOutPublisher dispatches to ExtractionService', () => {
         timestamp: new Date().toISOString(),
       };
 
-      const repositoryUpsertSpy = jest.spyOn(memoryRepository, 'upsert').mockResolvedValue({
+      const repositoryUpsertSpy = vi.spyOn(memoryRepository, 'upsert').mockResolvedValue({
         id: 'memory-123',
         projectId: 'project-123',
         kind: MemoryKind.INCIDENT_PATTERN,
@@ -164,7 +164,7 @@ describe('AC8: FanOutPublisher dispatches to ExtractionService', () => {
         timestamp: new Date().toISOString(),
       };
 
-      const repositoryUpsertSpy = jest.spyOn(memoryRepository, 'upsert').mockResolvedValue({
+      const repositoryUpsertSpy = vi.spyOn(memoryRepository, 'upsert').mockResolvedValue({
         id: 'memory-123',
         projectId: 'project-123',
         kind: MemoryKind.DECISION,
@@ -191,7 +191,7 @@ describe('AC8: FanOutPublisher dispatches to ExtractionService', () => {
         timestamp: new Date().toISOString(),
       };
 
-      const repositoryUpsertSpy = jest.spyOn(memoryRepository, 'upsert');
+      const repositoryUpsertSpy = vi.spyOn(memoryRepository, 'upsert');
 
       await fanOutRegistry.publish(outboxRecord('agent_event', agentEventPayload));
 
@@ -201,7 +201,7 @@ describe('AC8: FanOutPublisher dispatches to ExtractionService', () => {
 
   describe('extractFromEvent wiring verification', () => {
     it('AC8: extraction service is called with canonical event from dispatch payload', async () => {
-      const extractSpy = jest.spyOn(extractionService, 'extractFromEvent');
+      const extractSpy = vi.spyOn(extractionService, 'extractFromEvent');
 
       const ticketEventPayload = {
         type: 'ticket_event',

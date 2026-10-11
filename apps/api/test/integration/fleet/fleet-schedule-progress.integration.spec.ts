@@ -16,7 +16,7 @@ import { JobTransitionsService } from '../../../src/fleet/jobs/job-transitions.s
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
-jest.setTimeout(30_000);
+vi.setConfig({ testTimeout: 30_000 });
 
 describeIntegration('schedule auto-disable (PG)', () => {
   let app: NathApplication;

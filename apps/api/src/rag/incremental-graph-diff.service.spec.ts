@@ -1,25 +1,26 @@
-jest.mock('@lancedb/lancedb', () => ({
-  connect: jest.fn().mockResolvedValue({
-    tableNames: jest.fn().mockResolvedValue([]),
-    createTable: jest.fn().mockResolvedValue({
-      delete: jest.fn().mockResolvedValue(undefined),
-      createIndex: jest.fn().mockResolvedValue(undefined),
-      add: jest.fn().mockResolvedValue(undefined),
-      query: jest.fn().mockReturnValue({ limit: jest.fn().mockReturnThis(), toArray: jest.fn().mockResolvedValue([]) }),
-      countRows: jest.fn().mockResolvedValue(0),
+import type { Mock, Mocked } from 'vitest';
+vi.mock('@lancedb/lancedb', () => ({
+  connect: vi.fn().mockResolvedValue({
+    tableNames: vi.fn().mockResolvedValue([]),
+    createTable: vi.fn().mockResolvedValue({
+      delete: vi.fn().mockResolvedValue(undefined),
+      createIndex: vi.fn().mockResolvedValue(undefined),
+      add: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue([]) }),
+      countRows: vi.fn().mockResolvedValue(0),
     }),
-    openTable: jest.fn().mockResolvedValue({
-      delete: jest.fn().mockResolvedValue(undefined),
-      createIndex: jest.fn().mockResolvedValue(undefined),
-      add: jest.fn().mockResolvedValue(undefined),
-      query: jest.fn().mockReturnValue({ limit: jest.fn().mockReturnThis(), toArray: jest.fn().mockResolvedValue([]) }),
-      countRows: jest.fn().mockResolvedValue(0),
-      search: jest.fn().mockResolvedValue([]),
-      vectorSearch: jest.fn().mockReturnValue({ distanceType: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(), toArray: jest.fn().mockResolvedValue([]) }),
-      optimize: jest.fn().mockResolvedValue(undefined),
+    openTable: vi.fn().mockResolvedValue({
+      delete: vi.fn().mockResolvedValue(undefined),
+      createIndex: vi.fn().mockResolvedValue(undefined),
+      add: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue([]) }),
+      countRows: vi.fn().mockResolvedValue(0),
+      search: vi.fn().mockResolvedValue([]),
+      vectorSearch: vi.fn().mockReturnValue({ distanceType: vi.fn().mockReturnThis(), limit: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue([]) }),
+      optimize: vi.fn().mockResolvedValue(undefined),
     }),
   }),
-  Index: { fts: jest.fn().mockReturnValue({}) },
+  Index: { fts: vi.fn().mockReturnValue({}) },
 }));
 
 import { IncrementalGraphDiffService } from './incremental-graph-diff.service';
@@ -56,26 +57,26 @@ function storedGraphFromNodes(
 
 describe('IncrementalGraphDiffService', () => {
   let service: IncrementalGraphDiffService;
-  let mockGraphStore: jest.Mocked<Pick<GraphStoreService, 'getStoredGraph' | 'applyDiff' | 'markVectorStale' | 'findVectorStaleNodeIds' | 'clearVectorStale'>>;
-  let mockVectorStore: { indexDocument: jest.Mock; deleteBySource: jest.Mock };
-  let mockTxManager: { run: jest.Mock };
+  let mockGraphStore: Mocked<Pick<GraphStoreService, 'getStoredGraph' | 'applyDiff' | 'markVectorStale' | 'findVectorStaleNodeIds' | 'clearVectorStale'>>;
+  let mockVectorStore: { indexDocument: Mock; deleteBySource: Mock };
+  let mockTxManager: { run: Mock };
 
   beforeEach(() => {
     mockTxManager = {
-      run: jest.fn((fn: () => Promise<unknown>) => fn()),
+      run: vi.fn((fn: () => Promise<unknown>) => fn()),
     };
 
     mockGraphStore = {
-      getStoredGraph: jest.fn(),
-      applyDiff: jest.fn().mockResolvedValue(undefined),
-      markVectorStale: jest.fn().mockResolvedValue(undefined),
-      findVectorStaleNodeIds: jest.fn().mockResolvedValue([]),
-      clearVectorStale: jest.fn().mockResolvedValue(undefined),
+      getStoredGraph: vi.fn(),
+      applyDiff: vi.fn().mockResolvedValue(undefined),
+      markVectorStale: vi.fn().mockResolvedValue(undefined),
+      findVectorStaleNodeIds: vi.fn().mockResolvedValue([]),
+      clearVectorStale: vi.fn().mockResolvedValue(undefined),
     };
 
     mockVectorStore = {
-      indexDocument: jest.fn().mockResolvedValue(undefined),
-      deleteBySource: jest.fn().mockResolvedValue(undefined),
+      indexDocument: vi.fn().mockResolvedValue(undefined),
+      deleteBySource: vi.fn().mockResolvedValue(undefined),
     };
 
     service = new IncrementalGraphDiffService(

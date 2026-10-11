@@ -145,32 +145,17 @@ describe('CodeIntelController', () => {
 
     it('should require repoId parameter', async () => {
       // Missing repoId should fail validation
-      try {
-        await controller.getChangeImpact('test-project', '', 'abc123', 'src/auth.ts');
-        fail('Should have thrown validation error');
-      } catch (error) {
-        expect(error).toBeDefined();
-      }
+      await expect(controller.getChangeImpact('test-project', '', 'abc123', 'src/auth.ts')).rejects.toThrow();
     });
 
     it('should require commitHash parameter', async () => {
       // Missing commitHash should fail validation
-      try {
-        await controller.getChangeImpact('test-project', 'repo-1', '', 'src/auth.ts');
-        fail('Should have thrown validation error');
-      } catch (error) {
-        expect(error).toBeDefined();
-      }
+      await expect(controller.getChangeImpact('test-project', 'repo-1', '', 'src/auth.ts')).rejects.toThrow();
     });
 
     it('should require changedFiles parameter', async () => {
       // Missing changedFiles should fail validation
-      try {
-        await controller.getChangeImpact('test-project', 'repo-1', 'abc123', '');
-        fail('Should have thrown validation error');
-      } catch (error) {
-        expect(error).toBeDefined();
-      }
+      await expect(controller.getChangeImpact('test-project', 'repo-1', 'abc123', '')).rejects.toThrow();
     });
 
     it('should parse changedFiles from comma-separated string to array', async () => {

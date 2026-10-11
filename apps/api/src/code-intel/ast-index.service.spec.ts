@@ -1,4 +1,5 @@
-import { createMock } from '@golevelup/ts-jest';
+import type { Mocked } from 'vitest';
+import { createMock } from '@golevelup/ts-vitest';
 import { ITransactionManager } from '@nathapp/nestjs-data';
 import { AstIndexService, SourceFile } from './ast-index.service';
 import { CodeGraphService, ExtractedSymbol, ParsedSourceFile, ResolvedSymbol } from './code-graph.service';
@@ -37,9 +38,9 @@ function buildSymbolData(overrides: Partial<SymbolData> = {}): SymbolData {
 
 describe('AstIndexService', () => {
   let service: AstIndexService;
-  let codeGraph: jest.Mocked<CodeGraphService>;
-  let symbolStore: jest.Mocked<SymbolStore>;
-  let txManager: jest.Mocked<ITransactionManager>;
+  let codeGraph: Mocked<CodeGraphService>;
+  let symbolStore: Mocked<SymbolStore>;
+  let txManager: Mocked<ITransactionManager>;
 
   beforeEach(() => {
     codeGraph = createMock<CodeGraphService>();

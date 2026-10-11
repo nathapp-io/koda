@@ -7,7 +7,7 @@ import { noopLastErrors, outboxRecord } from '../../test/helpers/outbox-record';
 describe('CodeIntelOutboxSubscriber', () => {
   it('registers code_commit and delegates to CodeCommitOutboxHandler when present', async () => {
     const registry = new FanOutPublisher(noopLastErrors);
-    const handler = { process: jest.fn().mockResolvedValue(undefined) } as unknown as CodeCommitOutboxHandler;
+    const handler = { process: vi.fn().mockResolvedValue(undefined) } as unknown as CodeCommitOutboxHandler;
 
     new CodeIntelOutboxSubscriber(registry, handler, undefined).onModuleInit();
     expect(registry.getHandlers('code_commit').length).toBe(1);
@@ -18,7 +18,7 @@ describe('CodeIntelOutboxSubscriber', () => {
 
   it('falls back to AstIndexService.indexCommit when no CodeCommitOutboxHandler', async () => {
     const registry = new FanOutPublisher(noopLastErrors);
-    const ast = { indexCommit: jest.fn().mockResolvedValue(undefined) } as unknown as AstIndexService;
+    const ast = { indexCommit: vi.fn().mockResolvedValue(undefined) } as unknown as AstIndexService;
 
     new CodeIntelOutboxSubscriber(registry, undefined, ast).onModuleInit();
     await registry.publish(

@@ -16,7 +16,7 @@ import type { LiveEvent } from '../../../src/live/live-event';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
-jest.setTimeout(20_000);
+vi.setConfig({ testTimeout: 20_000 });
 
 describeIntegration('budget approval wiring (PG)', () => {
   let app: NathApplication;

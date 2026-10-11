@@ -5,18 +5,14 @@ import { resolve } from 'path';
 import { Logger } from '@nestjs/common';
 config({ path: resolve(__dirname, '.env.test'), quiet: true });
 
-// @nathapp/nestjs-prisma >= 4.0.3 `createMockPrismaService` reads `globalThis.jest`, but Jest injects
-// `jest` per module and never sets it on globalThis. Remove once nathapp-nestjs#14 is fixed.
-(globalThis as { jest?: typeof jest }).jest ??= jest;
-
 // Mock NestJS Logger to no-ops to reduce test noise
-jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
-jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
-jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
-jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => {});
-jest.spyOn(Logger.prototype, 'verbose').mockImplementation(() => {});
+vi.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
+vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
+vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
+vi.spyOn(Logger.prototype, 'debug').mockImplementation(() => {});
+vi.spyOn(Logger.prototype, 'verbose').mockImplementation(() => {});
 
-// Jest asymmetric matchers (e.g. expect.objectContaining) expose an
+// Asymmetric matchers (e.g. expect.objectContaining) expose an
 // `asymmetricMatch` method; we narrow to this shape rather than using `any`.
 interface AsymmetricMatcher {
   asymmetricMatch(other: unknown): boolean;
@@ -30,7 +26,7 @@ function isAsymmetricMatcher(value: unknown): value is AsymmetricMatcher {
   );
 }
 
-// `expect` is global only inside a Jest environment; guard so this setup file
+// `expect` is global only inside the test runner; guard so this setup file
 // stays import-safe elsewhere.
 if (typeof expect !== 'undefined' && typeof expect.extend === 'function') {
   expect.extend({
@@ -53,24 +49,31 @@ if (typeof expect !== 'undefined' && typeof expect.extend === 'function') {
     },
   });
 
-  // Patch Array.prototype.includes to support asymmetric matchers for toContain
-  const originalIncludes = Array.prototype.includes;
+  // Patch Array.prototype.includes to support asymmetric matchers for toContain.
+  // Setup re-runs per file in non-isolated (shared module cache) DB runs, so patch once
+  // instead of wrapping the previous patch again for every file.
+  const PATCHED = Symbol.for('koda.asymmetricIncludes');
+  type PatchedIncludes = typeof Array.prototype.includes & { [PATCHED]?: true };
+  if (!(Array.prototype.includes as PatchedIncludes)[PATCHED]) {
+    const originalIncludes = Array.prototype.includes;
 
-  Array.prototype.includes = function (
-    searchElement: unknown,
-    fromIndex?: number
-  ): boolean {
-    // Check if searchElement is an asymmetric matcher (has asymmetricMatch method)
-    if (isAsymmetricMatcher(searchElement)) {
-      // Find if any element matches the asymmetric matcher
-      for (let i = fromIndex || 0; i < this.length; i++) {
-        if (searchElement.asymmetricMatch(this[i])) {
-          return true;
+    Array.prototype.includes = function (
+      searchElement: unknown,
+      fromIndex?: number
+    ): boolean {
+      // Check if searchElement is an asymmetric matcher (has asymmetricMatch method)
+      if (isAsymmetricMatcher(searchElement)) {
+        // Find if any element matches the asymmetric matcher
+        for (let i = fromIndex || 0; i < this.length; i++) {
+          if (searchElement.asymmetricMatch(this[i])) {
+            return true;
+          }
         }
+        return false;
       }
-      return false;
-    }
-    // Fall back to original includes for non-matcher values
-    return originalIncludes.call(this, searchElement, fromIndex);
-  };
+      // Fall back to original includes for non-matcher values
+      return originalIncludes.call(this, searchElement, fromIndex);
+    };
+    (Array.prototype.includes as PatchedIncludes)[PATCHED] = true;
+  }
 }

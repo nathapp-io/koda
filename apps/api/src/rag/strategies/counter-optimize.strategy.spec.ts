@@ -24,7 +24,7 @@ function mockRagConfig(overrides: Partial<IRagConfig> = {}): IRagConfig {
 
 function mockTable() {
   return {
-    optimize: jest.fn().mockResolvedValue(undefined),
+    optimize: vi.fn().mockResolvedValue(undefined),
   };
 }
 

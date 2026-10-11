@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { SymbolStore } from '../../src/code-intel/symbol-store';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -7,25 +8,29 @@ import { PrismaCodeIntelRepository } from '../../src/code-intel/prisma-code-inte
 
 describe('SymbolStore', () => {
   let store: SymbolStore;
-  let prismaService: jest.Mocked<PrismaService<PrismaClient>>;
+  let prismaService: Mocked<PrismaService<PrismaClient>>;
 
   const mockPrismaClient = {
     symbol: {
-      upsert: jest.fn(),
-      findUnique: jest.fn(),
-      findMany: jest.fn(),
-      deleteMany: jest.fn(),
+      upsert: vi.fn(),
+      findUnique: vi.fn(),
+      findMany: vi.fn(),
+      deleteMany: vi.fn(),
     },
-    $queryRawUnsafe: jest.fn(),
+    $queryRawUnsafe: vi.fn(),
   };
 
   const mockTxManager = {
-    run: jest.fn((fn: () => Promise<unknown>) => fn()),
-    getClient: jest.fn(),
-    isInTransaction: jest.fn(() => false),
+    run: vi.fn((fn: () => Promise<unknown>) => fn()),
+    getClient: vi.fn(),
+    isInTransaction: vi.fn(() => false),
   };
 
   beforeEach(async () => {
+    // Per-test implementations must not leak across tests (order independence).
+    Object.values(mockPrismaClient.symbol).forEach((m) => m.mockReset());
+    mockPrismaClient.$queryRawUnsafe.mockReset();
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SymbolStore,
@@ -40,7 +45,7 @@ describe('SymbolStore', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('AC-1: upsertSymbol stores symbol metadata', () => {
@@ -254,6 +259,7 @@ describe('SymbolStore', () => {
       const projectId = 'proj-123';
       const repoId = 'repo-123';
       const commitHash = 'newcommit';
+      mockPrismaClient.symbol.upsert.mockResolvedValue({ callers: [], callees: [] });
 
       await store.upsertSymbol({
         id: `${projectId}:${repoId}:src/new.ts::newFunc`,

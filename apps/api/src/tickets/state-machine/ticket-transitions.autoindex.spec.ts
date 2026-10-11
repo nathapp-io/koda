@@ -3,9 +3,9 @@ import { TicketTransitionsService } from './ticket-transitions.service';
 const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
 function build(ticketRow: Record<string, unknown> | null) {
-  const repo = { findTicketWithComments: jest.fn().mockResolvedValue(ticketRow) };
-  const ragService = { indexDocument: jest.fn().mockResolvedValue('doc-1') };
-  const service = new TicketTransitionsService(repo as never, { run: jest.fn() } as never, ragService as never);
+  const repo = { findTicketWithComments: vi.fn().mockResolvedValue(ticketRow) };
+  const ragService = { indexDocument: vi.fn().mockResolvedValue('doc-1') };
+  const service = new TicketTransitionsService(repo as never, { run: vi.fn() } as never, ragService as never);
   const autoIndex = (service as unknown as {
     autoIndexTicket: (project: { id: string; key: string; autoIndexOnClose: boolean }, ticket: { id: string }) => void;
   }).autoIndexTicket.bind(service);

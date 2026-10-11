@@ -23,12 +23,12 @@ function mockRagConfig(overrides: Partial<IRagConfig> = {}): IRagConfig {
 
 function mockTable() {
   return {
-    optimize: jest.fn().mockResolvedValue(undefined),
+    optimize: vi.fn().mockResolvedValue(undefined),
   };
 }
 
 function mockSchedulerRegistry() {
-  return { addInterval: jest.fn(), deleteInterval: jest.fn() };
+  return { addInterval: vi.fn(), deleteInterval: vi.fn() };
 }
 
 function makeStrategy(intervalMs?: number) {
@@ -39,8 +39,8 @@ function makeStrategy(intervalMs?: number) {
 }
 
 describe('CronOptimizeStrategy', () => {
-  beforeEach(() => jest.useFakeTimers());
-  afterEach(() => jest.useRealTimers());
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
 
   describe('AC-10: constructor registers interval with SchedulerRegistry', () => {
     it('calls schedulerRegistry.addInterval("fts-optimize", interval) during construction', () => {

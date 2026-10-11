@@ -14,7 +14,7 @@ import { JobReportProcessor } from '../../../src/fleet/sync/job-report.processor
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
-jest.setTimeout(20_000);
+vi.setConfig({ testTimeout: 20_000 });
 
 describeIntegration('budget evaluator (PG)', () => {
   let app: NathApplication;
@@ -198,7 +198,7 @@ describeIntegration('budget evaluator (PG)', () => {
   it('signals the job\'s scope keys after a sync that changed its cost, and only then', async () => {
     const runner = await insertRunner(prisma);
     const running = await job({ state: 'RUNNING', runnerId: runner.id, leaseEpoch: 1 });
-    const signal = jest.spyOn(evaluator, 'signal').mockImplementation(() => undefined);
+    const signal = vi.spyOn(evaluator, 'signal').mockImplementation(() => undefined);
     try {
       const snapshot = (seq: number, costSpentUsd: string) =>
         reports.process(runner.id, { jobId: running.id, leaseEpoch: 1, events: [{ seq, type: 'snapshot', payload: { costSpentUsd } }] }, new Date());

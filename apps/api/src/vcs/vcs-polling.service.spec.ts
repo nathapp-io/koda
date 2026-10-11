@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { VcsPollingService } from './vcs-polling.service';
@@ -7,12 +8,12 @@ import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import type { VcsConnectionWithProjectDomain } from './domain/vcs.domain';
 
-jest.mock('./factory', () => ({
-  createVcsProvider: jest.fn(),
+vi.mock('./factory', () => ({
+  createVcsProvider: vi.fn(),
 }));
 
-jest.mock('../common/utils/encryption.util', () => ({
-  decryptToken: jest.fn().mockReturnValue('plain-token'),
+vi.mock('../common/utils/encryption.util', () => ({
+  decryptToken: vi.fn().mockReturnValue('plain-token'),
 }));
 
 import { createVcsProvider } from './factory';
@@ -38,50 +39,50 @@ function makeConnection(overrides?: Partial<VcsConnectionWithProjectDomain>): Vc
   };
 }
 
-function createMockRepo(): jest.Mocked<IVcsRepository> {
+function createMockRepo(): Mocked<IVcsRepository> {
   return {
-    findPollingConnections: jest.fn().mockResolvedValue([]),
-    findVcsConnectionById: jest.fn().mockResolvedValue(null),
-    findVcsConnectionByProjectSlug: jest.fn().mockResolvedValue(null),
-    updateVcsConnectionLastSynced: jest.fn().mockResolvedValue(undefined),
-    createVcsSyncLog: jest.fn().mockResolvedValue({} as never),
-    findProjectById: jest.fn().mockResolvedValue(null),
-    findVcsConnectionByProjectId: jest.fn().mockResolvedValue(null),
-    createVcsConnection: jest.fn(),
-    updateVcsConnection: jest.fn(),
-    deleteVcsConnection: jest.fn(),
-    findExistingTicketByExternalId: jest.fn().mockResolvedValue(null),
-    createTicketFromIssue: jest.fn(),
-    findActiveTicketLinksWithPrs: jest.fn().mockResolvedValue([]),
-    findTicketLinkForConnectionPr: jest.fn().mockResolvedValue(null),
-    updateTicketLinkWithPrState: jest.fn().mockResolvedValue('updated'),
-    applyMergedPrTransition: jest.fn().mockResolvedValue(undefined),
-    findTicketWithProject: jest.fn().mockResolvedValue(null),
-    findPendingOutboxEvents: jest.fn().mockResolvedValue([]),
-  } as jest.Mocked<IVcsRepository>;
+    findPollingConnections: vi.fn().mockResolvedValue([]),
+    findVcsConnectionById: vi.fn().mockResolvedValue(null),
+    findVcsConnectionByProjectSlug: vi.fn().mockResolvedValue(null),
+    updateVcsConnectionLastSynced: vi.fn().mockResolvedValue(undefined),
+    createVcsSyncLog: vi.fn().mockResolvedValue({} as never),
+    findProjectById: vi.fn().mockResolvedValue(null),
+    findVcsConnectionByProjectId: vi.fn().mockResolvedValue(null),
+    createVcsConnection: vi.fn(),
+    updateVcsConnection: vi.fn(),
+    deleteVcsConnection: vi.fn(),
+    findExistingTicketByExternalId: vi.fn().mockResolvedValue(null),
+    createTicketFromIssue: vi.fn(),
+    findActiveTicketLinksWithPrs: vi.fn().mockResolvedValue([]),
+    findTicketLinkForConnectionPr: vi.fn().mockResolvedValue(null),
+    updateTicketLinkWithPrState: vi.fn().mockResolvedValue('updated'),
+    applyMergedPrTransition: vi.fn().mockResolvedValue(undefined),
+    findTicketWithProject: vi.fn().mockResolvedValue(null),
+    findPendingOutboxEvents: vi.fn().mockResolvedValue([]),
+  } as Mocked<IVcsRepository>;
 }
 
 describe('VcsPollingService', () => {
   let service: VcsPollingService;
-  let mockRepo: jest.Mocked<IVcsRepository>;
-  let mockSchedulerRegistry: jest.Mocked<Pick<SchedulerRegistry, 'addInterval' | 'deleteInterval'>>;
-  let mockSyncService: jest.Mocked<Pick<VcsSyncService, 'filterByAllowedAuthors' | 'syncIssue'>>;
-  let mockPrSyncService: jest.Mocked<Pick<VcsPrSyncService, 'syncPrStatus'>>;
+  let mockRepo: Mocked<IVcsRepository>;
+  let mockSchedulerRegistry: Mocked<Pick<SchedulerRegistry, 'addInterval' | 'deleteInterval'>>;
+  let mockSyncService: Mocked<Pick<VcsSyncService, 'filterByAllowedAuthors' | 'syncIssue'>>;
+  let mockPrSyncService: Mocked<Pick<VcsPrSyncService, 'syncPrStatus'>>;
   beforeEach(async () => {
     mockRepo = createMockRepo();
 
     mockSchedulerRegistry = {
-      addInterval: jest.fn(),
-      deleteInterval: jest.fn(),
+      addInterval: vi.fn(),
+      deleteInterval: vi.fn(),
     };
 
     mockSyncService = {
-      filterByAllowedAuthors: jest.fn().mockReturnValue([]),
-      syncIssue: jest.fn().mockResolvedValue({ action: 'created', ticketId: 't-1', ticketNumber: 1, ticketTitle: 'Issue' }),
+      filterByAllowedAuthors: vi.fn().mockReturnValue([]),
+      syncIssue: vi.fn().mockResolvedValue({ action: 'created', ticketId: 't-1', ticketNumber: 1, ticketTitle: 'Issue' }),
     };
 
     mockPrSyncService = {
-      syncPrStatus: jest.fn().mockResolvedValue({ updated: 0, skipped: 0 }),
+      syncPrStatus: vi.fn().mockResolvedValue({ updated: 0, skipped: 0 }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -99,8 +100,8 @@ describe('VcsPollingService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
-    jest.useRealTimers();
+    vi.clearAllMocks();
+    vi.useRealTimers();
   });
 
   describe('onModuleInit', () => {
@@ -157,7 +158,7 @@ describe('VcsPollingService', () => {
 
   describe('schedulePolling', () => {
     it('should register an interval in the scheduler registry', () => {
-      jest.useFakeTimers();
+      vi.useFakeTimers();
       const conn = makeConnection();
 
       service.schedulePolling(conn);
@@ -169,7 +170,7 @@ describe('VcsPollingService', () => {
     });
 
     it('should remove an existing interval before creating a new one', () => {
-      jest.useFakeTimers();
+      vi.useFakeTimers();
       const conn = makeConnection();
 
       // First call succeeds; simulate second call where deleteInterval doesn't throw
@@ -198,7 +199,7 @@ describe('VcsPollingService', () => {
 
   describe('refreshConnectionSchedule', () => {
     it('should schedule polling when connection is active and in polling mode', async () => {
-      jest.useFakeTimers();
+      vi.useFakeTimers();
       const conn = makeConnection({ syncMode: 'polling', isActive: true });
       mockRepo.findVcsConnectionById.mockResolvedValue(conn);
 

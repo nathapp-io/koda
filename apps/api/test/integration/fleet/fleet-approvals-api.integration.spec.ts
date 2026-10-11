@@ -15,7 +15,7 @@ import enFleet from '../../../src/i18n/en/fleet.json';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
-jest.setTimeout(30_000);
+vi.setConfig({ testTimeout: 30_000 });
 
 interface Approval { id: string; status: string; decision: string | null; resolvedBy: string | null; outcome: { resumedAmountUsd?: string; requeueResults?: Array<{ jobId: string; ok: boolean; error?: string }> } | null; requeueCandidates?: Array<{ jobId: string }>; requeueCandidatesTruncated?: boolean }
 interface Page<T> { total: number; records: T[] }
@@ -122,7 +122,7 @@ describeIntegration('fleet approvals API (PG)', () => {
     const decision = { decision: 'raise_budget_and_resume', amountUsd: 25, requeueJobIds: [queued.id] };
     // Agents have a null project role, so the service also returns 403. Check that the controller's
     // user-only gate rejects before delegation; otherwise deleting that gate could leave this test green.
-    const decide = jest.spyOn(approvals, 'decide');
+    const decide = vi.spyOn(approvals, 'decide');
     try {
       await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(agent.apiKey)).send(decision).expect(403);
       expect(decide).not.toHaveBeenCalled();
@@ -143,7 +143,7 @@ describeIntegration('fleet approvals API (PG)', () => {
       naxAskId: 'agent-guard-ask', requestedAt: new Date(), expiresAt: new Date(Date.now() + 300_000),
       payload: { command: 'bun run test', commandTruncated: false, options: ['allow', 'deny'] },
     } });
-    const decide = jest.spyOn(approvals, 'decide');
+    const decide = vi.spyOn(approvals, 'decide');
     try {
       await request(server).post(`${PROJECT}/${approval.id}/decide`).set(as(agent.apiKey)).send({ decision: 'allow' }).expect(403);
       expect(decide).not.toHaveBeenCalled();

@@ -6,12 +6,12 @@ const claim = (attempts: number) => ({ id: 'i1', artifactId: 'a1', jobId: 'j1', 
 
 function make(attempts: number, opts: { expired?: boolean; storeFails?: boolean } = {}) {
   const repo = {
-    claimNext: jest.fn().mockResolvedValueOnce(claim(attempts)).mockResolvedValue(null),
-    findArtifact: jest.fn(async () => ({ storageKey: 'k', expiredAt: opts.expired ? now : null })),
-    markRetry: jest.fn(), markFailed: jest.fn(), markOutcome: jest.fn(), replaceRows: jest.fn(),
+    claimNext: vi.fn().mockResolvedValueOnce(claim(attempts)).mockResolvedValue(null),
+    findArtifact: vi.fn(async () => ({ storageKey: 'k', expiredAt: opts.expired ? now : null })),
+    markRetry: vi.fn(), markFailed: vi.fn(), markOutcome: vi.fn(), replaceRows: vi.fn(),
   };
-  const store = { get: jest.fn(async () => (opts.storeFails ? Promise.reject(new Error('EIO disk')) : Readable.from([Buffer.from('not gzip')]))) };
-  const svc = new BundleIngestService(repo as never, store as never, {} as never, {} as never, {} as never, {} as never, { run: (fn: () => unknown) => fn() } as never, { upsertPrLinks: jest.fn() } as never, { onIngestCorrection: jest.fn() } as never);
+  const store = { get: vi.fn(async () => (opts.storeFails ? Promise.reject(new Error('EIO disk')) : Readable.from([Buffer.from('not gzip')]))) };
+  const svc = new BundleIngestService(repo as never, store as never, {} as never, {} as never, {} as never, {} as never, { run: (fn: () => unknown) => fn() } as never, { upsertPrLinks: vi.fn() } as never, { onIngestCorrection: vi.fn() } as never);
   return { svc, repo };
 }
 

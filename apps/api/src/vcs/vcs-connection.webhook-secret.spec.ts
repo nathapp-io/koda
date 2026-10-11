@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { VcsConnectionService } from './vcs-connection.service';
 import { VcsProviderType, VcsSyncModeType } from './dto/create-vcs-connection.dto';
@@ -17,20 +18,20 @@ function row(overrides: Record<string, unknown> = {}) {
 }
 
 describe('VcsConnectionService webhook secret (M9)', () => {
-  let repo: Record<string, jest.Mock>;
+  let repo: Record<string, Mock>;
   let service: VcsConnectionService;
 
   beforeEach(() => {
     repo = {
-      findProjectById: jest.fn().mockResolvedValue({ id: 'p1' }),
-      findVcsConnectionByProjectId: jest.fn().mockResolvedValue(null),
-      createVcsConnection: jest.fn().mockImplementation(async (data) => row(data)),
-      updateVcsConnection: jest.fn().mockImplementation(async (_p, data) => row(data)),
+      findProjectById: vi.fn().mockResolvedValue({ id: 'p1' }),
+      findVcsConnectionByProjectId: vi.fn().mockResolvedValue(null),
+      createVcsConnection: vi.fn().mockImplementation(async (data) => row(data)),
+      updateVcsConnection: vi.fn().mockImplementation(async (_p, data) => row(data)),
     };
     service = new VcsConnectionService(
       repo as unknown as IVcsRepository,
       { encryptionKey: KEY, defaultPollingIntervalMs: 600000, githubApiUrl: 'https://api.github.com', gitlabApiUrl: 'https://gitlab.com/api/v4' } as IVcsConfig,
-      { refreshConnectionSchedule: jest.fn() } as unknown as VcsPollingService,
+      { refreshConnectionSchedule: vi.fn() } as unknown as VcsPollingService,
     );
   });
 

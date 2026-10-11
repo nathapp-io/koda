@@ -67,7 +67,7 @@ describeIntegration('comment create → COMMENT_ADDED (PG)', () => {
   it('rolls the comment back when the event write fails', async () => {
     const before = await prisma.comment.count();
     const events = app.get(TicketEventService);
-    const spy = jest.spyOn(events, 'create').mockRejectedValueOnce(new Error('event write failed'));
+    const spy = vi.spyOn(events, 'create').mockRejectedValueOnce(new Error('event write failed'));
 
     try {
       await request(server).post('/api/projects/comments/tickets/CMT-1/comments')

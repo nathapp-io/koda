@@ -32,13 +32,13 @@ describe('CiWebhookController', () => {
   let controller: CiWebhookController;
 
   const mockCiWebhookService = {
-    findInboundTarget: jest.fn(),
-    processCiWebhook: jest.fn(),
+    findInboundTarget: vi.fn(),
+    processCiWebhook: vi.fn(),
   };
 
   const mockReplayGuard = {
-    assertFresh: jest.fn(),
-    forget: jest.fn(),
+    assertFresh: vi.fn(),
+    forget: vi.fn(),
   };
 
   const validPayload: CiWebhookPayloadDto = {

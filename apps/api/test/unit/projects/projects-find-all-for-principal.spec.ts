@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * US-002 — the project list is scoped to the principal's memberships.
  *
@@ -69,7 +70,7 @@ const AGENT_ROSTER: Record<string, string[]> = {
   'agent-1': ['alpha', 'bravo', 'delta'],
 };
 
-type RepoDouble = Record<string, jest.Mock>;
+type RepoDouble = Record<string, Mock>;
 
 /**
  * The rows a membership-scoped selector yields. A bare user id (or a user
@@ -103,21 +104,21 @@ function rowsForSelector(selector: unknown): ProjectDomain[] {
 
 function createRepoDouble(): RepoDouble {
   const known: RepoDouble = {
-    findAll: jest.fn(async (...args: unknown[]) => rowsForSelector(args[0])),
-    findAllIds: jest.fn(async () => NON_DELETED.map((p) => ({ id: p.id }))),
-    findBySlug: jest.fn(async (slug: string) => ALL_ROWS.find((p) => p.slug === slug) ?? null),
-    findByKey: jest.fn(async () => null),
-    findMembershipRole: jest.fn(async (projectId: string, userId: string) => {
+    findAll: vi.fn(async (...args: unknown[]) => rowsForSelector(args[0])),
+    findAllIds: vi.fn(async () => NON_DELETED.map((p) => ({ id: p.id }))),
+    findBySlug: vi.fn(async (slug: string) => ALL_ROWS.find((p) => p.slug === slug) ?? null),
+    findByKey: vi.fn(async () => null),
+    findMembershipRole: vi.fn(async (projectId: string, userId: string) => {
       const slugs = MEMBERSHIPS[userId];
       const row = ALL_ROWS.find((p) => p.id === projectId);
       return slugs && row && slugs.includes(row.slug) ? 'DEVELOPER' : null;
     }),
-    isAgentOnRoster: jest.fn(async (projectId: string, agentId: string) => {
+    isAgentOnRoster: vi.fn(async (projectId: string, agentId: string) => {
       const slugs = AGENT_ROSTER[agentId] ?? [];
       const row = ALL_ROWS.find((p) => p.id === projectId);
       return row !== undefined && slugs.includes(row.slug);
     }),
-    findAllForAgent: jest.fn(async (agentId: string) => {
+    findAllForAgent: vi.fn(async (agentId: string) => {
       const slugs = AGENT_ROSTER[agentId] ?? [];
       return NON_DELETED.filter((candidate) => slugs.includes(candidate.slug));
     }),
@@ -130,8 +131,8 @@ function createRepoDouble(): RepoDouble {
       if (prop === 'then' || prop === 'catch' || prop === 'finally') return undefined;
       if (!(prop in target)) {
         target[prop] = /deleted|include|raw|unscoped/i.test(prop)
-          ? jest.fn(async () => ALL_ROWS)
-          : jest.fn(async (...args: unknown[]) => rowsForSelector(args[0]));
+          ? vi.fn(async () => ALL_ROWS)
+          : vi.fn(async (...args: unknown[]) => rowsForSelector(args[0]));
       }
       return target[prop];
     },
@@ -193,8 +194,8 @@ describe('ProjectsService.findAllForPrincipal (US-002)', () => {
     service = new ProjectsService(
       repo as unknown as PrismaProjectRepository,
       {
-        deleteAllBySourceType: jest.fn(),
-        clearProjectCaches: jest.fn(),
+        deleteAllBySourceType: vi.fn(),
+        clearProjectCaches: vi.fn(),
       } as unknown as RagService,
       undefined,
       new ProjectAccessService(repo as unknown as PrismaProjectRepository),
@@ -202,7 +203,7 @@ describe('ProjectsService.findAllForPrincipal (US-002)', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('AC6: returns exactly the projects a user principal is a member of', async () => {
@@ -236,8 +237,8 @@ describe('ProjectsService.findAllForPrincipal (US-002)', () => {
     const unscoped = new ProjectsService(
       repo as unknown as PrismaProjectRepository,
       {
-        deleteAllBySourceType: jest.fn(),
-        clearProjectCaches: jest.fn(),
+        deleteAllBySourceType: vi.fn(),
+        clearProjectCaches: vi.fn(),
       } as unknown as RagService,
       undefined,
       new ProjectAccessService(repo as unknown as PrismaProjectRepository, {

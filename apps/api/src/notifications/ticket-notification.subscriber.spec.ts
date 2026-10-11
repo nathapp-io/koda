@@ -17,14 +17,14 @@ const TICKET = {
 function setup() {
   const registry = new FanOutPublisher(noopLastErrors);
   const reads = {
-    findTicket: jest.fn().mockResolvedValue(TICKET),
-    findComment: jest.fn().mockResolvedValue({ id: 'c1', ticketId: 't1', body: 'looks good', authorUserId: 'actor' }),
-    actorName: jest.fn().mockResolvedValue('Alice'),
-    isUser: jest.fn().mockResolvedValue(true),
+    findTicket: vi.fn().mockResolvedValue(TICKET),
+    findComment: vi.fn().mockResolvedValue({ id: 'c1', ticketId: 't1', body: 'looks good', authorUserId: 'actor' }),
+    actorName: vi.fn().mockResolvedValue('Alice'),
+    isUser: vi.fn().mockResolvedValue(true),
   };
-  const watchers = { ensure: jest.fn().mockResolvedValue(undefined), findUnmutedUserIds: jest.fn().mockResolvedValue(['reporter', 'actor', 'w1']) };
-  const mentions = { mentionedUserIds: jest.fn().mockResolvedValue([]) };
-  const writer = { deliver: jest.fn().mockResolvedValue(1) };
+  const watchers = { ensure: vi.fn().mockResolvedValue(undefined), findUnmutedUserIds: vi.fn().mockResolvedValue(['reporter', 'actor', 'w1']) };
+  const mentions = { mentionedUserIds: vi.fn().mockResolvedValue([]) };
+  const writer = { deliver: vi.fn().mockResolvedValue(1) };
   const sub = new TicketNotificationSubscriber(registry, reads as never, watchers as never, mentions as never, writer as never);
   sub.onModuleInit();
   const delivered = (): NotificationDraft[] => writer.deliver.mock.calls.flatMap((c) => c[0] as NotificationDraft[]);
@@ -33,7 +33,7 @@ function setup() {
 
 describe('TicketNotificationSubscriber (S4a §2.2)', () => {
   beforeEach(() => {
-    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
   });
 
   it('registers on ticket_event at init', () => {

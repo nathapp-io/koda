@@ -1,3 +1,4 @@
+import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
@@ -21,14 +22,14 @@ it('findVcsConnection result has no @prisma/client type — plain object shape',
 import { CreateVcsConnectionDto } from './dto/create-vcs-connection.dto';
 import { UpdateVcsConnectionDto } from './dto/update-vcs-connection.dto';
 
-jest.mock('../common/utils/encryption.util', () => ({
-  encryptToken: jest.fn().mockReturnValue('encrypted-token'),
-  decryptToken: jest.fn().mockReturnValue('plain-token'),
+vi.mock('../common/utils/encryption.util', () => ({
+  encryptToken: vi.fn().mockReturnValue('encrypted-token'),
+  decryptToken: vi.fn().mockReturnValue('plain-token'),
 }));
 
-jest.mock('./factory', () => ({
-  ...jest.requireActual('./factory'),
-  createVcsProvider: jest.fn(),
+vi.mock('./factory', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./factory')>()),
+  createVcsProvider: vi.fn(),
 }));
 
 import { createVcsProvider } from './factory';
@@ -53,39 +54,39 @@ function makeConnection(overrides?: Partial<VcsConnectionDomain>): VcsConnection
   };
 }
 
-function createMockRepo(): jest.Mocked<IVcsRepository> {
+function createMockRepo(): Mocked<IVcsRepository> {
   return {
-    findProjectById: jest.fn().mockResolvedValue({ id: 'proj-1' }),
-    findVcsConnectionByProjectId: jest.fn().mockResolvedValue(null),
-    findVcsConnectionById: jest.fn().mockResolvedValue(null),
-    findVcsConnectionByProjectSlug: jest.fn().mockResolvedValue(null),
-    findPollingConnections: jest.fn().mockResolvedValue([]),
-    createVcsConnection: jest.fn().mockResolvedValue(makeConnection()),
-    updateVcsConnection: jest.fn().mockResolvedValue(makeConnection()),
-    updateVcsConnectionLastSynced: jest.fn().mockResolvedValue(undefined),
-    deleteVcsConnection: jest.fn().mockResolvedValue(undefined),
-    createVcsSyncLog: jest.fn().mockResolvedValue({} as never),
-    findExistingTicketByExternalId: jest.fn().mockResolvedValue(null),
-    createTicketFromIssue: jest.fn(),
-    findActiveTicketLinksWithPrs: jest.fn().mockResolvedValue([]),
-    findTicketLinkForConnectionPr: jest.fn().mockResolvedValue(null),
-    updateTicketLinkWithPrState: jest.fn().mockResolvedValue('updated'),
-    applyMergedPrTransition: jest.fn().mockResolvedValue(undefined),
-    findTicketWithProject: jest.fn().mockResolvedValue(null),
-    findPendingOutboxEvents: jest.fn().mockResolvedValue([]),
-  } as jest.Mocked<IVcsRepository>;
+    findProjectById: vi.fn().mockResolvedValue({ id: 'proj-1' }),
+    findVcsConnectionByProjectId: vi.fn().mockResolvedValue(null),
+    findVcsConnectionById: vi.fn().mockResolvedValue(null),
+    findVcsConnectionByProjectSlug: vi.fn().mockResolvedValue(null),
+    findPollingConnections: vi.fn().mockResolvedValue([]),
+    createVcsConnection: vi.fn().mockResolvedValue(makeConnection()),
+    updateVcsConnection: vi.fn().mockResolvedValue(makeConnection()),
+    updateVcsConnectionLastSynced: vi.fn().mockResolvedValue(undefined),
+    deleteVcsConnection: vi.fn().mockResolvedValue(undefined),
+    createVcsSyncLog: vi.fn().mockResolvedValue({} as never),
+    findExistingTicketByExternalId: vi.fn().mockResolvedValue(null),
+    createTicketFromIssue: vi.fn(),
+    findActiveTicketLinksWithPrs: vi.fn().mockResolvedValue([]),
+    findTicketLinkForConnectionPr: vi.fn().mockResolvedValue(null),
+    updateTicketLinkWithPrState: vi.fn().mockResolvedValue('updated'),
+    applyMergedPrTransition: vi.fn().mockResolvedValue(undefined),
+    findTicketWithProject: vi.fn().mockResolvedValue(null),
+    findPendingOutboxEvents: vi.fn().mockResolvedValue([]),
+  } as Mocked<IVcsRepository>;
 }
 
-function createMockPollingService(): jest.Mocked<Pick<VcsPollingService, 'refreshConnectionSchedule' | 'unschedulePolling'>> {
+function createMockPollingService(): Mocked<Pick<VcsPollingService, 'refreshConnectionSchedule' | 'unschedulePolling'>> {
   return {
-    refreshConnectionSchedule: jest.fn().mockResolvedValue(undefined),
-    unschedulePolling: jest.fn(),
+    refreshConnectionSchedule: vi.fn().mockResolvedValue(undefined),
+    unschedulePolling: vi.fn(),
   };
 }
 
 describe('VcsConnectionService', () => {
   let service: VcsConnectionService;
-  let mockRepo: jest.Mocked<IVcsRepository>;
+  let mockRepo: Mocked<IVcsRepository>;
   let mockPolling: ReturnType<typeof createMockPollingService>;
   const ENCRYPTION_KEY = 'test-key-32-chars-exactly-padded!!';
 
@@ -325,8 +326,8 @@ describe('VcsConnectionService', () => {
   describe('testConnection', () => {
     it('should return ok: true with latency when provider test succeeds', async () => {
       mockRepo.findVcsConnectionByProjectId.mockResolvedValue(makeConnection());
-      const mockProvider = { testConnection: jest.fn().mockResolvedValue({ ok: true }) };
-      (createVcsProvider as jest.Mock).mockReturnValue(mockProvider);
+      const mockProvider = { testConnection: vi.fn().mockResolvedValue({ ok: true }) };
+      (createVcsProvider as Mock).mockReturnValue(mockProvider);
 
       const result = await service.testConnection('proj-1', ENCRYPTION_KEY);
 
@@ -336,8 +337,8 @@ describe('VcsConnectionService', () => {
 
     it('should return ok: false with error message when provider returns failure', async () => {
       mockRepo.findVcsConnectionByProjectId.mockResolvedValue(makeConnection());
-      const mockProvider = { testConnection: jest.fn().mockResolvedValue({ ok: false, error: 'Auth failed' }) };
-      (createVcsProvider as jest.Mock).mockReturnValue(mockProvider);
+      const mockProvider = { testConnection: vi.fn().mockResolvedValue({ ok: false, error: 'Auth failed' }) };
+      (createVcsProvider as Mock).mockReturnValue(mockProvider);
 
       const result = await service.testConnection('proj-1', ENCRYPTION_KEY);
 
@@ -347,8 +348,8 @@ describe('VcsConnectionService', () => {
 
     it('should return ok: false with error message when provider throws', async () => {
       mockRepo.findVcsConnectionByProjectId.mockResolvedValue(makeConnection());
-      const mockProvider = { testConnection: jest.fn().mockRejectedValue(new Error('Network timeout')) };
-      (createVcsProvider as jest.Mock).mockReturnValue(mockProvider);
+      const mockProvider = { testConnection: vi.fn().mockRejectedValue(new Error('Network timeout')) };
+      (createVcsProvider as Mock).mockReturnValue(mockProvider);
 
       const result = await service.testConnection('proj-1', ENCRYPTION_KEY);
 

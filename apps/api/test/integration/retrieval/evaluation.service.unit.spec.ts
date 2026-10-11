@@ -16,7 +16,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { EvaluationService, EvalQuery, SingleQueryResult } from '../../../src/retrieval/evaluation.service';
 import { HybridRetrieverService } from '../../../src/rag/hybrid-retriever.service';
 
-jest.setTimeout(30000);
+vi.setConfig({ testTimeout: 30000 });
 
 const fakeResultDoc = (sourceId: string) => ({
   id: `id_${sourceId}`,
@@ -42,7 +42,7 @@ describe('EvaluationService unit', () => {
 
   beforeEach(async () => {
     mockHybridRetriever = {
-      search: jest.fn(),
+      search: vi.fn(),
     };
 
     module = await Test.createTestingModule({

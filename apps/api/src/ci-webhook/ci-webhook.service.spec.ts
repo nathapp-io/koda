@@ -28,8 +28,8 @@ describe('CiWebhookService', () => {
   };
 
   const mockRepo = {
-    findProjectBySlug: jest.fn(),
-    createTicket: jest.fn(),
+    findProjectBySlug: vi.fn(),
+    createTicket: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -44,7 +44,7 @@ describe('CiWebhookService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('findInboundTarget', () => {

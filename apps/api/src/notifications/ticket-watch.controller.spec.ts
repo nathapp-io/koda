@@ -14,9 +14,9 @@ const ctx: ProjectContext = { project: { id: 'p1', slug: 'koda' }, role: 'VIEWER
 
 function setup() {
   const service = {
-    state: jest.fn().mockResolvedValue({ watching: false, count: 0 }),
-    watch: jest.fn().mockResolvedValue({ watching: true, count: 1 }),
-    unwatch: jest.fn().mockResolvedValue({ watching: false, count: 0 }),
+    state: vi.fn().mockResolvedValue({ watching: false, count: 0 }),
+    watch: vi.fn().mockResolvedValue({ watching: true, count: 1 }),
+    unwatch: vi.fn().mockResolvedValue({ watching: false, count: 0 }),
   };
   return { service, controller: new TicketWatchController(service as never) };
 }

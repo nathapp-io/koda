@@ -59,15 +59,15 @@ describe('forgeCall', () => {
 
 describe('GithubFleetRepoFilesReader', () => {
   const github = {
-    mintInstallationToken: jest.fn(async () => ({ token: 'ghs_t', expiresAt: new Date() })),
-    getBranchHead: jest.fn(async () => 'c0ffee1'),
-    getTree: jest.fn(async (_t: string, _o: string, _n: string, treeish: string) => treeish === 'c0ffee1'
+    mintInstallationToken: vi.fn(async () => ({ token: 'ghs_t', expiresAt: new Date() })),
+    getBranchHead: vi.fn(async () => 'c0ffee1'),
+    getTree: vi.fn(async (_t: string, _o: string, _n: string, treeish: string) => treeish === 'c0ffee1'
       ? { truncated: false, entries: [{ path: '.nax', type: 'tree', sha: 'naxTree', size: null }, { path: 'src', type: 'tree', sha: 'x', size: null }] }
       : { truncated: false, entries: [{ path: 'context.md', type: 'blob', sha: 'k', size: 9 }, { path: 'features/x/prd.json', type: 'blob', sha: 'f', size: 1 }] }),
-    getFile: jest.fn(async () => ({ sha: 'k', size: 2, content: Buffer.from('hi') })),
+    getFile: vi.fn(async () => ({ sha: 'k', size: 2, content: Buffer.from('hi') })),
   };
   const reader = new GithubFleetRepoFilesReader(github as never);
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => vi.clearAllMocks());
 
   it('lists .nax from the default-branch head with one mint', async () => {
     await expect(reader.list(GH)).resolves.toEqual({ baseSha: 'c0ffee1', defaultBranch: 'trunk', files: [{ path: '.nax/context.md', size: 9, blobSha: 'k', group: 'context' }] });
@@ -109,11 +109,11 @@ describe('GithubFleetRepoFilesReader', () => {
 
 describe('GitlabFleetRepoFilesReader', () => {
   const gitlab = {
-    getBranchHead: jest.fn(async () => 'c1'),
-    listTree: jest.fn(async () => [{ path: '.nax/rules/a.md', type: 'blob', sha: 'a', size: null }]),
-    getFile: jest.fn(async () => ({ sha: 'a', size: 1, content: Buffer.from('x') })),
+    getBranchHead: vi.fn(async () => 'c1'),
+    listTree: vi.fn(async () => [{ path: '.nax/rules/a.md', type: 'blob', sha: 'a', size: null }]),
+    getFile: vi.fn(async () => ({ sha: 'a', size: 1, content: Buffer.from('x') })),
   };
-  const tokens = { resolve: jest.fn(async () => 'glpat') };
+  const tokens = { resolve: vi.fn(async () => 'glpat') };
   const reader = new GitlabFleetRepoFilesReader(gitlab as never, tokens as never);
 
   it('lists with the project token and a null size', async () => {
@@ -130,8 +130,8 @@ describe('GitlabFleetRepoFilesReader', () => {
 
 describe('FleetRepoFilesRouter', () => {
   it('routes by provider', async () => {
-    const gh = { list: jest.fn(async () => 'gh'), read: jest.fn() };
-    const gl = { list: jest.fn(async () => 'gl'), read: jest.fn() };
+    const gh = { list: vi.fn(async () => 'gh'), read: vi.fn() };
+    const gl = { list: vi.fn(async () => 'gl'), read: vi.fn() };
     const router = new FleetRepoFilesRouter(gh as never, gl as never);
     await expect(router.list(GH)).resolves.toBe('gh');
     await expect(router.list(GL)).resolves.toBe('gl');

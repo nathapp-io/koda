@@ -8,11 +8,11 @@ const policy = (over: Partial<BudgetPolicyRecord> = {}): BudgetPolicyRecord => (
 });
 
 describe('BudgetIncidentRecorder (S4a §2.4, D508)', () => {
-  const labels = { forScope: jest.fn(async () => 'project KODA') };
-  const outbox = { record: jest.fn(async () => undefined) };
+  const labels = { forScope: vi.fn(async () => 'project KODA') };
+  const outbox = { record: vi.fn(async () => undefined) };
   const recorder = new BudgetIncidentRecorder(labels as never, outbox as never);
   const start = new Date('2026-10-01T00:00:00.000Z');
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => vi.clearAllMocks());
 
   it('enqueues the incident keyed by its dedupe columns', async () => {
     await recorder.record(policy(), 'warn', start, '6.0000');

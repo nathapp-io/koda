@@ -28,7 +28,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 
-jest.setTimeout(60000);
+vi.setConfig({ testTimeout: 60000 });
 
 class FakeEmbeddingService {
   readonly providerName = 'fake';
@@ -69,10 +69,10 @@ describe('EvaluationService integration with real HybridRetrieverService', () =>
     };
 
     const fakeEntityStore = {
-      searchEntities: jest.fn().mockReturnValue([]),
-      indexEntity: jest.fn(),
-      getByTag: jest.fn().mockReturnValue([]),
-      computeEntityScore: jest.fn().mockReturnValue(0),
+      searchEntities: vi.fn().mockReturnValue([]),
+      indexEntity: vi.fn(),
+      getByTag: vi.fn().mockReturnValue([]),
+      computeEntityScore: vi.fn().mockReturnValue(0),
     };
 
     module = await Test.createTestingModule({

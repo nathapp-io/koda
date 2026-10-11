@@ -1,4 +1,5 @@
-import { createMock } from '@golevelup/ts-jest';
+import type { Mocked } from 'vitest';
+import { createMock } from '@golevelup/ts-vitest';
 import { ImpactAnalysisService, ChangeImpactQuery, ChangeImpactResult } from './impact-analysis.service';
 import { SymbolStore, SymbolData } from './symbol-store';
 import { EntityGraphService } from '../entity-graph/entity-graph.service';
@@ -70,31 +71,31 @@ function makeEntityLinkRow(sourceId: string, targetId: string): EntityLinkRow {
 
 describe('ImpactAnalysisService', () => {
   let service: ImpactAnalysisService;
-  let symbolStore: jest.Mocked<SymbolStore>;
-  let entityGraph: jest.Mocked<EntityGraphService>;
-  let graphStore: jest.Mocked<GraphStoreService>;
-  let codeIntelRepo: jest.Mocked<ICodeIntelRepository>;
+  let symbolStore: Mocked<SymbolStore>;
+  let entityGraph: Mocked<EntityGraphService>;
+  let graphStore: Mocked<GraphStoreService>;
+  let codeIntelRepo: Mocked<ICodeIntelRepository>;
 
   beforeEach(() => {
     symbolStore = createMock<SymbolStore>();
     entityGraph = createMock<EntityGraphService>();
     graphStore = createMock<GraphStoreService>();
     codeIntelRepo = {
-      findSymbolsByFiles: jest.fn(),
-      findGraphNodesByType: jest.fn(),
-      findEntityNodesByIds: jest.fn(),
-      findEntityLinksByTargetIds: jest.fn(),
-      findEntityNodesByIdsAndType: jest.fn(),
-      countSymbols: jest.fn(),
-      countEntityNodesByTypes: jest.fn(),
-      countEntityNodesByType: jest.fn(),
+      findSymbolsByFiles: vi.fn(),
+      findGraphNodesByType: vi.fn(),
+      findEntityNodesByIds: vi.fn(),
+      findEntityLinksByTargetIds: vi.fn(),
+      findEntityNodesByIdsAndType: vi.fn(),
+      countSymbols: vi.fn(),
+      countEntityNodesByTypes: vi.fn(),
+      countEntityNodesByType: vi.fn(),
     };
 
     service = new ImpactAnalysisService(symbolStore, entityGraph, graphStore, codeIntelRepo);
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   // -------------------------------------------------------------------------

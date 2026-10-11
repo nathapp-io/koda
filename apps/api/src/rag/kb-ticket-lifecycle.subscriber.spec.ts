@@ -8,9 +8,9 @@ import type { PrismaRagRepository } from './prisma-rag.repository';
 const liveProject = { id: 'proj-1', deletedAt: null };
 
 function build(project: { id: string; deletedAt: Date | null } | null = liveProject) {
-  const registry = { register: jest.fn() };
-  const ragService = { deleteBySource: jest.fn().mockResolvedValue(undefined) };
-  const ragRepository = { findProjectById: jest.fn().mockResolvedValue(project) };
+  const registry = { register: vi.fn() };
+  const ragService = { deleteBySource: vi.fn().mockResolvedValue(undefined) };
+  const ragRepository = { findProjectById: vi.fn().mockResolvedValue(project) };
   const subscriber = new KbTicketLifecycleSubscriber(
     registry as unknown as FanOutPublisher,
     ragService as unknown as RagService,
@@ -64,13 +64,13 @@ describe('KbTicketLifecycleSubscriber', () => {
 
   it('handleTicketEvent removes the document through a real VectorStore', async () => {
     const ragConfig = { lancedbPath: './lancedb-kb-lifecycle-test', inMemoryOnly: true, ftsIndexMode: 'simple' } as IRagConfig;
-    const embedding = { embed: jest.fn().mockResolvedValue(Array(8).fill(0.1)), providerName: 'fake', modelName: 'fake-v1', dimensions: 8 };
+    const embedding = { embed: vi.fn().mockResolvedValue(Array(8).fill(0.1)), providerName: 'fake', modelName: 'fake-v1', dimensions: 8 };
     const ragService = new RagService(new VectorStore(ragConfig, embedding as never));
     await ragService.indexDocument('proj-1', { source: 'ticket', sourceId: 'tick-1', content: 'closed ticket', metadata: {} });
     const subscriber = new KbTicketLifecycleSubscriber(
-      { register: jest.fn() } as unknown as FanOutPublisher,
+      { register: vi.fn() } as unknown as FanOutPublisher,
       ragService,
-      { findProjectById: jest.fn().mockResolvedValue(liveProject) } as unknown as PrismaRagRepository,
+      { findProjectById: vi.fn().mockResolvedValue(liveProject) } as unknown as PrismaRagRepository,
     );
 
     await subscriber.handleTicketEvent(deleted);
@@ -82,7 +82,7 @@ describe('KbTicketLifecycleSubscriber', () => {
 describe('KB indexing is already an upsert (pin; fixed by H7, spec M15 bullet 2)', () => {
   it('re-indexing the same sourceId keeps one row', async () => {
     const ragConfig = { lancedbPath: './lancedb-kb-upsert-pin', inMemoryOnly: true, ftsIndexMode: 'simple' } as IRagConfig;
-    const embedding = { embed: jest.fn().mockResolvedValue(Array(8).fill(0.1)), providerName: 'fake', modelName: 'fake-v1', dimensions: 8 };
+    const embedding = { embed: vi.fn().mockResolvedValue(Array(8).fill(0.1)), providerName: 'fake', modelName: 'fake-v1', dimensions: 8 };
     const store = new VectorStore(ragConfig, embedding as never);
 
     await store.indexDocument('proj-1', { source: 'ticket', sourceId: 'tick-9', content: 'v1', metadata: {} });

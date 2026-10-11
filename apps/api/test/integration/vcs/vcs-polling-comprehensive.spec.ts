@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * VcsPollingService Comprehensive Behavior Tests
  *
@@ -113,23 +114,23 @@ describe('VcsPollingService - Comprehensive Behavior Tests', () => {
 
   // Mock delegates with proper type structure
   const mockVcsConnectionDelegate = {
-    findUnique: jest.fn(),
-    findMany: jest.fn(),
-    findFirst: jest.fn(),
-    create: jest.fn(),
-    update: jest.fn(),
-    delete: jest.fn(),
-    count: jest.fn(),
+    findUnique: vi.fn(),
+    findMany: vi.fn(),
+    findFirst: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+    count: vi.fn(),
   };
 
   const mockVcsSyncLogDelegate = {
-    findUnique: jest.fn(),
-    findMany: jest.fn(),
-    findFirst: jest.fn(),
-    create: jest.fn(),
-    update: jest.fn(),
-    delete: jest.fn(),
-    count: jest.fn(),
+    findUnique: vi.fn(),
+    findMany: vi.fn(),
+    findFirst: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+    count: vi.fn(),
   };
 
   const mockClient = {
@@ -139,15 +140,15 @@ describe('VcsPollingService - Comprehensive Behavior Tests', () => {
 
   // Mock VCS repository (repo-level methods used by VcsPollingService)
   const mockVcsRepository = {
-    findPollingConnections: jest.fn(),
-    findVcsConnectionById: jest.fn(),
-    updateVcsConnectionLastSynced: jest.fn(),
-    createVcsSyncLog: jest.fn(),
-    findExistingTicketByExternalId: jest.fn(),
-    createTicketFromIssue: jest.fn(),
-    findActiveTicketLinksWithPrs: jest.fn(),
-    updateTicketLinkWithPrState: jest.fn(),
-    applyMergedPrTransition: jest.fn(),
+    findPollingConnections: vi.fn(),
+    findVcsConnectionById: vi.fn(),
+    updateVcsConnectionLastSynced: vi.fn(),
+    createVcsSyncLog: vi.fn(),
+    findExistingTicketByExternalId: vi.fn(),
+    createTicketFromIssue: vi.fn(),
+    findActiveTicketLinksWithPrs: vi.fn(),
+    updateTicketLinkWithPrState: vi.fn(),
+    applyMergedPrTransition: vi.fn(),
   };
 
   const mockVcsConfig: IVcsConfig = {
@@ -163,8 +164,8 @@ describe('VcsPollingService - Comprehensive Behavior Tests', () => {
   const createdIntervals: NodeJS.Timeout[] = [];
 
   beforeEach(async () => {
-    jest.clearAllMocks();
-    jest.restoreAllMocks();
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
 
     module = await Test.createTestingModule({
       providers: [
@@ -173,7 +174,7 @@ describe('VcsPollingService - Comprehensive Behavior Tests', () => {
         {
           provide: VcsPrSyncService,
           useValue: {
-            syncPrStatus: jest.fn(),
+            syncPrStatus: vi.fn(),
           },
         },
         {
@@ -189,17 +190,17 @@ describe('VcsPollingService - Comprehensive Behavior Tests', () => {
         {
           provide: SchedulerRegistry,
           useValue: {
-            addInterval: jest.fn((_name: string, interval: NodeJS.Timeout) => {
+            addInterval: vi.fn((_name: string, interval: NodeJS.Timeout) => {
               createdIntervals.push(interval);
             }),
-            deleteInterval: jest.fn(),
-            getInterval: jest.fn(),
-            getIntervals: jest.fn(() => []),
+            deleteInterval: vi.fn(),
+            getInterval: vi.fn(),
+            getIntervals: vi.fn(() => []),
           },
         },
         {
           provide: ConfigService,
-          useValue: { get: jest.fn().mockReturnValue('test-encryption-key') },
+          useValue: { get: vi.fn().mockReturnValue('test-encryption-key') },
         },
         { provide: VCS_CFG, useValue: mockVcsConfig },
       ],
@@ -236,7 +237,7 @@ describe('VcsPollingService - Comprehensive Behavior Tests', () => {
       await service.onModuleInit();
 
       expect(schedulerRegistry.addInterval).toHaveBeenCalledTimes(1);
-      const calls = (schedulerRegistry.addInterval as jest.Mock).mock.calls;
+      const calls = (schedulerRegistry.addInterval as Mock).mock.calls;
       expect(calls[0][0]).toBe(`vcs-polling-${connectionId}`);
       expect(typeof calls[0][1]).toBe('object'); // The interval object
     });
@@ -251,7 +252,7 @@ describe('VcsPollingService - Comprehensive Behavior Tests', () => {
       await service.onModuleInit();
 
       expect(schedulerRegistry.addInterval).toHaveBeenCalledTimes(3);
-      const calls = (schedulerRegistry.addInterval as jest.Mock).mock.calls;
+      const calls = (schedulerRegistry.addInterval as Mock).mock.calls;
       expect(calls.map(c => c[0])).toEqual(['vcs-polling-conn-1', 'vcs-polling-conn-2', 'vcs-polling-conn-3']);
     });
 
@@ -265,7 +266,7 @@ describe('VcsPollingService - Comprehensive Behavior Tests', () => {
 
       // Only 1 should be registered (the active one)
       expect(schedulerRegistry.addInterval).toHaveBeenCalledTimes(1);
-      expect((schedulerRegistry.addInterval as jest.Mock).mock.calls[0][0]).toContain(connectionId);
+      expect((schedulerRegistry.addInterval as Mock).mock.calls[0][0]).toContain(connectionId);
     });
 
     it('should handle empty polling connections list', async () => {
@@ -526,7 +527,7 @@ describe('VcsPollingService - Comprehensive Behavior Tests', () => {
 
       service.schedulePolling(connWithCustomInterval);
 
-      const calls = (schedulerRegistry.addInterval as jest.Mock).mock.calls;
+      const calls = (schedulerRegistry.addInterval as Mock).mock.calls;
       expect(calls.length).toBeGreaterThan(0);
       // The interval should be registered
       expect(calls[0][0]).toContain('vcs-polling');
@@ -537,7 +538,7 @@ describe('VcsPollingService - Comprehensive Behavior Tests', () => {
 
       service.schedulePolling(connWithProject);
 
-      const calls = (schedulerRegistry.addInterval as jest.Mock).mock.calls;
+      const calls = (schedulerRegistry.addInterval as Mock).mock.calls;
       expect(calls[0][0]).toBe('vcs-polling-custom-conn-id');
     });
 
@@ -546,7 +547,7 @@ describe('VcsPollingService - Comprehensive Behavior Tests', () => {
 
       service.schedulePolling(connWithProject);
 
-      const deleteIntervalCalls = (schedulerRegistry.deleteInterval as jest.Mock).mock.calls;
+      const deleteIntervalCalls = (schedulerRegistry.deleteInterval as Mock).mock.calls;
       // Should attempt to delete the old interval
       expect(deleteIntervalCalls.length).toBeGreaterThanOrEqual(0);
     });
@@ -554,7 +555,7 @@ describe('VcsPollingService - Comprehensive Behavior Tests', () => {
     it('should handle deleteInterval error gracefully when interval does not exist', () => {
       const connWithProject = { ...mockVcsConnection, project: mockProject };
 
-      (schedulerRegistry.deleteInterval as jest.Mock).mockImplementation(() => {
+      (schedulerRegistry.deleteInterval as Mock).mockImplementation(() => {
         throw new Error('Interval not found');
       });
 
@@ -588,7 +589,7 @@ describe('VcsPollingService - Comprehensive Behavior Tests', () => {
 
     it('should log debug message when scheduling polling', () => {
       const connWithProject = { ...mockVcsConnection, project: mockProject };
-      const debugSpy = jest.spyOn(service['logger'], 'debug');
+      const debugSpy = vi.spyOn(service['logger'], 'debug');
 
       service.schedulePolling(connWithProject);
 

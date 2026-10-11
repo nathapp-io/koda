@@ -1,6 +1,8 @@
+import { restoreEnvAfterEach } from '../common/test-helpers/restore-env';
 import { databaseConfig, IDatabaseConfig } from './database.config';
 
 describe('databaseConfig', () => {
+  restoreEnvAfterEach();
   beforeEach(() => {
     process.env['DATABASE_URL'] = 'postgresql://u:p@localhost:5432/db';
   });

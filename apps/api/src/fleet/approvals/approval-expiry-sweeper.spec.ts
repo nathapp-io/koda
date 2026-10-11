@@ -4,10 +4,10 @@ const NOW = new Date('2026-10-04T10:00:00Z');
 const due = { id: 'a1', jobId: 'j1', status: 'pending', expiresAt: new Date(NOW.getTime() - 1) };
 
 function build(over: { sweepEnabled?: boolean; locked?: object | null } = {}) {
-  const repo = { findExpiredPending: jest.fn().mockResolvedValue([due]), lockById: jest.fn().mockResolvedValue(over.locked === undefined ? due : over.locked) };
-  const jobs = { lockById: jest.fn().mockResolvedValue({ id: 'j1', requestedById: 'u9' }) };
-  const closer = { expire: jest.fn().mockResolvedValue({ approval: { ...due, status: 'expired' }, live: [{ approvalId: 'a1' }] }) };
-  const live = { publish: jest.fn() };
+  const repo = { findExpiredPending: vi.fn().mockResolvedValue([due]), lockById: vi.fn().mockResolvedValue(over.locked === undefined ? due : over.locked) };
+  const jobs = { lockById: vi.fn().mockResolvedValue({ id: 'j1', requestedById: 'u9' }) };
+  const closer = { expire: vi.fn().mockResolvedValue({ approval: { ...due, status: 'expired' }, live: [{ approvalId: 'a1' }] }) };
+  const live = { publish: vi.fn() };
   const tx = { run: (fn: () => Promise<unknown>) => fn() };
   const sweeper = new ApprovalExpirySweeper(repo as never, jobs as never, closer as never, live as never, tx as never, { sweepEnabled: over.sweepEnabled ?? false, approvalSweepMs: 15_000 });
   return { sweeper, repo, jobs, closer, live };
@@ -32,15 +32,15 @@ describe('ApprovalExpirySweeper (spec §2.4)', () => {
     expect(await b.sweeper.tick(NOW)).toEqual({ expired: 0, failed: 1 });
   });
   it('starts no timer unless sweepEnabled', () => {
-    jest.useFakeTimers();
+    vi.useFakeTimers();
     const off = build();
     off.sweeper.onModuleInit();
-    expect(jest.getTimerCount()).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
     const on = build({ sweepEnabled: true });
     on.sweeper.onModuleInit();
-    expect(jest.getTimerCount()).toBe(1);
+    expect(vi.getTimerCount()).toBe(1);
     on.sweeper.onModuleDestroy();
-    expect(jest.getTimerCount()).toBe(0);
-    jest.useRealTimers();
+    expect(vi.getTimerCount()).toBe(0);
+    vi.useRealTimers();
   });
 });

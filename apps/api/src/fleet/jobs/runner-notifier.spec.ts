@@ -29,7 +29,7 @@ describe('RunnerNotifier', () => {
   });
 
   it('does not wait at all for ms <= 0', async () => {
-    const ready = jest.fn();
+    const ready = vi.fn();
     await new RunnerNotifier().wait('r1', 0, ready);
     expect(ready).not.toHaveBeenCalled();
   });

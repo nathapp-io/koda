@@ -92,7 +92,7 @@ describe('EmbeddingService', () => {
       const provider = new OllamaEmbeddingProvider('http://localhost:11434', 'nomic-embed-text');
       const mockEmbedding = Array.from({ length: 768 }, (_, i) => i * 0.001);
 
-      jest.spyOn(global, 'fetch').mockResolvedValueOnce({
+      vi.spyOn(global, 'fetch').mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({ embedding: mockEmbedding }),
       } as Response);
@@ -107,7 +107,7 @@ describe('EmbeddingService', () => {
 
     it('throws on non-ok response', async () => {
       const provider = new OllamaEmbeddingProvider('http://localhost:11434', 'nomic-embed-text');
-      jest.spyOn(global, 'fetch').mockResolvedValueOnce({
+      vi.spyOn(global, 'fetch').mockResolvedValueOnce({
         ok: false,
         status: 503,
         statusText: 'Service Unavailable',
@@ -122,7 +122,7 @@ describe('EmbeddingService', () => {
       const provider = new OpenAIEmbeddingProvider('sk-test', 'text-embedding-3-small');
       const mockEmbedding = Array.from({ length: 1536 }, () => 0.1);
 
-      jest.spyOn(global, 'fetch').mockResolvedValueOnce({
+      vi.spyOn(global, 'fetch').mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({ data: [{ embedding: mockEmbedding }] }),
       } as Response);
@@ -139,7 +139,7 @@ describe('EmbeddingService', () => {
 
     it('throws on non-ok response', async () => {
       const provider = new OpenAIEmbeddingProvider('sk-test', 'text-embedding-3-small');
-      jest.spyOn(global, 'fetch').mockResolvedValueOnce({
+      vi.spyOn(global, 'fetch').mockResolvedValueOnce({
         ok: false,
         status: 401,
         statusText: 'Unauthorized',

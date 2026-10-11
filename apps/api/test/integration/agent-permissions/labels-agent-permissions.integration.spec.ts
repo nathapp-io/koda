@@ -38,8 +38,8 @@ describe('LabelsService — agent permissions', () => {
 
   const mockPrisma = {
     client: {
-      project: { findUnique: jest.fn() },
-      label: { create: jest.fn() },
+      project: { findUnique: vi.fn() },
+      label: { create: vi.fn() },
     },
   };
 
@@ -53,9 +53,9 @@ describe('LabelsService — agent permissions', () => {
         {
           provide: TRANSACTION_MANAGER,
           useValue: {
-            run: jest.fn((fn: () => Promise<unknown>) => fn()),
-            getClient: jest.fn(),
-            isInTransaction: jest.fn(() => false),
+            run: vi.fn((fn: () => Promise<unknown>) => fn()),
+            getClient: vi.fn(),
+            isInTransaction: vi.fn(() => false),
           },
         },
       ],
@@ -65,7 +65,7 @@ describe('LabelsService — agent permissions', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   // ── AC-1: agent actor is allowed ────────────────────────────────

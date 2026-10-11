@@ -1,11 +1,11 @@
 import { ProjectMembersController } from './project-members.controller';
 
 describe('ProjectMembersController', () => {
-  const service = { list: jest.fn(), add: jest.fn(), updateRole: jest.fn(), remove: jest.fn() };
+  const service = { list: vi.fn(), add: vi.fn(), updateRole: vi.fn(), remove: vi.fn() };
   const controller = new ProjectMembersController(service as never);
   const principal = { actorType: 'user', id: 'u1' } as never;
 
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => vi.clearAllMocks());
 
   it('list parses paging strings and returns the page envelope with canManage', async () => {
     const page = { total: 0, current: 2, size: 5, hasNext: false, hasPrev: true, records: [] };

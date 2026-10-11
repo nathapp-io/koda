@@ -12,7 +12,7 @@ import { createTestPrismaClient } from '../../helpers/test-prisma';
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 // The migration block replays every committed migration before the target; see the sibling
 // fleet schema specs, which raise the hook timeout for the same reason.
-jest.setTimeout(20_000);
+vi.setConfig({ testTimeout: 20_000 });
 const MIGRATION = '20261013090000_chat_threads';
 
 describeIntegration('fleet chat threads schema (PG)', () => {

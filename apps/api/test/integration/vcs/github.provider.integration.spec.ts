@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 /**
  * GitHub Provider Integration Tests
  *
@@ -14,7 +15,7 @@ import { VcsIssue } from '../../../src/vcs/types';
 
 describe('GitHubProvider (Integration)', () => {
   let provider: GitHubProvider;
-  let mockHttpClient: jest.Mocked<HttpClient>;
+  let mockHttpClient: Mocked<HttpClient>;
 
   const testOwner = 'test-owner';
   const testRepo = 'test-repo';
@@ -22,8 +23,8 @@ describe('GitHubProvider (Integration)', () => {
 
   beforeEach(() => {
     mockHttpClient = {
-      get: jest.fn(),
-      post: jest.fn(),
+      get: vi.fn(),
+      post: vi.fn(),
     };
 
     provider = new GitHubProvider(testOwner, testRepo, testToken, mockHttpClient);

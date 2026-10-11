@@ -14,7 +14,7 @@ import { ScheduleTicker } from '../../../src/fleet/schedules/schedule-ticker';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
-jest.setTimeout(30_000);
+vi.setConfig({ testTimeout: 30_000 });
 
 describeIntegration('schedule ticker (PG)', () => {
   let app: NathApplication;
@@ -163,7 +163,7 @@ describeIntegration('schedule ticker (PG)', () => {
     const s = await schedule();
     const repo = app.get(PrismaScheduleRepository);
     const original = repo.findDue.bind(repo);
-    const spy = jest.spyOn(repo, 'findDue').mockImplementationOnce(async (now, limit) => {
+    const spy = vi.spyOn(repo, 'findDue').mockImplementationOnce(async (now, limit) => {
       const rows = await original(now, limit);
       if (change === 'deleted') await prisma.jobSchedule.delete({ where: { id: s.id } });
       else await prisma.jobSchedule.update({ where: { id: s.id }, data: { enabled: false, disabledReason: 'manual' } });
@@ -181,7 +181,7 @@ describeIntegration('schedule ticker (PG)', () => {
     const s = await schedule();
     const jobs = app.get(FleetJobsService);
     const original = jobs.dispatch.bind(jobs);
-    const spy = jest.spyOn(jobs, 'dispatch').mockImplementationOnce(async (...args) => {
+    const spy = vi.spyOn(jobs, 'dispatch').mockImplementationOnce(async (...args) => {
       await prisma.jobSchedule.delete({ where: { id: s.id } });
       return original(...args);
     });

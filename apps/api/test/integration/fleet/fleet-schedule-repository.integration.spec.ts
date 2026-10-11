@@ -13,7 +13,7 @@ import { PrismaScheduleRepository } from '../../../src/fleet/schedules/prisma-sc
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
-jest.setTimeout(20_000);
+vi.setConfig({ testTimeout: 20_000 });
 
 describeIntegration('schedule repository (PG)', () => {
   let app: NathApplication;

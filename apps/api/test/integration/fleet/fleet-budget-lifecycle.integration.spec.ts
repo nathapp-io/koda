@@ -14,7 +14,7 @@ import type { SyncRequest, SyncResponse } from '../../../src/fleet/common/protoc
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
-jest.setTimeout(20_000);
+vi.setConfig({ testTimeout: 20_000 });
 
 describeIntegration('fleet budget lifecycle fields (PG)', () => {
   let app: NathApplication;

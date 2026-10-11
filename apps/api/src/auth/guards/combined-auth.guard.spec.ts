@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 import { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '@nathapp/nestjs-auth';
@@ -8,17 +9,17 @@ import { RUNNER_ROUTE_KEY } from './runner-route.decorator';
 import type { PrismaAuthRepository } from '../prisma-auth.repository';
 import type { AgentAuthProvider } from '../agent-auth.provider';
 
-function makeReflector(isPublic = false, isRunnerRoute = false): jest.Mocked<Reflector> {
+function makeReflector(isPublic = false, isRunnerRoute = false): Mocked<Reflector> {
   return {
-    getAllAndOverride: jest.fn((key: string) => (key === IS_PUBLIC_KEY ? isPublic : key === RUNNER_ROUTE_KEY ? isRunnerRoute : undefined)),
-  } as unknown as jest.Mocked<Reflector>;
+    getAllAndOverride: vi.fn((key: string) => (key === IS_PUBLIC_KEY ? isPublic : key === RUNNER_ROUTE_KEY ? isRunnerRoute : undefined)),
+  } as unknown as Mocked<Reflector>;
 }
 
-function makeAuthRepo(agent: unknown = null, runner: unknown = null): jest.Mocked<PrismaAuthRepository> {
+function makeAuthRepo(agent: unknown = null, runner: unknown = null): Mocked<PrismaAuthRepository> {
   return {
-    findAgentByKeyHash: jest.fn().mockResolvedValue(agent),
-    findRunnerByKeyHash: jest.fn().mockResolvedValue(runner),
-  } as unknown as jest.Mocked<PrismaAuthRepository>;
+    findAgentByKeyHash: vi.fn().mockResolvedValue(agent),
+    findRunnerByKeyHash: vi.fn().mockResolvedValue(runner),
+  } as unknown as Mocked<PrismaAuthRepository>;
 }
 
 function makeConfig(apiKeySecret: string | undefined = 'super-secret'): IAuthConfig {
@@ -32,10 +33,10 @@ function makeConfig(apiKeySecret: string | undefined = 'super-secret'): IAuthCon
   };
 }
 
-function makeAgentAuthProvider(principal = { actorType: 'agent', id: 'agent-1' }): jest.Mocked<AgentAuthProvider> {
+function makeAgentAuthProvider(principal = { actorType: 'agent', id: 'agent-1' }): Mocked<AgentAuthProvider> {
   return {
-    buildPrincipal: jest.fn().mockResolvedValue(principal),
-  } as unknown as jest.Mocked<AgentAuthProvider>;
+    buildPrincipal: vi.fn().mockResolvedValue(principal),
+  } as unknown as Mocked<AgentAuthProvider>;
 }
 
 function buildRequest(authHeader: string): Record<string, unknown> {
@@ -59,8 +60,8 @@ function buildContext(request: Record<string, unknown>, isPublic = false): Execu
 
 describe('CombinedAuthGuard', () => {
   afterEach(() => {
-    jest.clearAllMocks();
-    jest.restoreAllMocks();
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
   describe('public routes', () => {
@@ -93,7 +94,7 @@ describe('CombinedAuthGuard', () => {
       const guard = new CombinedAuthGuard(reflector, authRepo, makeConfig(), agentAuth);
 
       // Patch super.canActivate so it doesn't actually run JWT logic
-      jest.spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate').mockResolvedValue(true);
+      vi.spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate').mockResolvedValue(true);
 
       const request = buildRequest('Bearer not-a-jwt-token');
       const ctx = buildContext(request);
@@ -113,7 +114,7 @@ describe('CombinedAuthGuard', () => {
       const jwtToken = 'header.payload.signature';
 
       // Mock the parent JWT canActivate to return true to avoid real JWT validation
-      jest.spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate').mockResolvedValue(true);
+      vi.spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate').mockResolvedValue(true);
 
       const request = buildRequest(`Bearer ${jwtToken}`);
       const ctx = buildContext(request);
@@ -131,7 +132,7 @@ describe('CombinedAuthGuard', () => {
       const guard = new CombinedAuthGuard(reflector, authRepo, makeConfig(), makeAgentAuthProvider());
 
       // Falls back to JWT after API key fails
-      jest.spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate').mockResolvedValue(true);
+      vi.spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate').mockResolvedValue(true);
 
       const request = buildRequest('Bearer not-a-jwt');
       const ctx = buildContext(request);
@@ -148,7 +149,7 @@ describe('CombinedAuthGuard', () => {
       const reflector = makeReflector(false);
       const guard = new CombinedAuthGuard(reflector, authRepo, makeConfig(), makeAgentAuthProvider());
 
-      const jwtCanActivate = jest
+      const jwtCanActivate = vi
         .spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate')
         .mockResolvedValue(true);
 
@@ -165,7 +166,7 @@ describe('CombinedAuthGuard', () => {
       const reflector = makeReflector(false);
       const guard = new CombinedAuthGuard(reflector, authRepo, makeConfig(), makeAgentAuthProvider());
 
-      jest.spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate').mockResolvedValue(true);
+      vi.spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate').mockResolvedValue(true);
 
       const request = buildRequest('Bearer ');
       const ctx = buildContext(request);
@@ -182,7 +183,7 @@ describe('CombinedAuthGuard', () => {
       const reflector = makeReflector(false);
       const guard = new CombinedAuthGuard(reflector, authRepo, config, makeAgentAuthProvider());
 
-      const jwtCanActivate = jest
+      const jwtCanActivate = vi
         .spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate')
         .mockResolvedValue(true);
 
@@ -200,7 +201,7 @@ describe('CombinedAuthGuard', () => {
       const guard = new CombinedAuthGuard(reflector, makeAuthRepo(null), makeConfig(), makeAgentAuthProvider());
 
       const jwtError = Object.assign(new Error('Unauthorized'), { status: 401 });
-      jest
+      vi
         .spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate')
         .mockRejectedValue(jwtError);
 
@@ -213,7 +214,7 @@ describe('CombinedAuthGuard', () => {
   describe('runner keys (fleet)', () => {
     const runnerRow = { id: 'run-1', name: 'mac-1', labels: ['darwin'], enabled: true, capacity: 3 };
     const superSpy = (guard: CombinedAuthGuard) =>
-      jest.spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate').mockResolvedValue(true);
+      vi.spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate').mockResolvedValue(true);
 
     it('authenticates a kr_ key on a runner route and sets the runner principal', async () => {
       const repo = makeAuthRepo(null, runnerRow);

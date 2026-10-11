@@ -4,8 +4,8 @@ import { PrismaClient } from '../generated/prisma/client';
 
 describe('PrismaTicketsRepository — updateTicketStatusIf (M3 hardening)', () => {
   it('keys the conditional update on id + status + deletedAt: null so soft-deleted tickets cannot be transitioned', async () => {
-    const updateMany = jest.fn().mockResolvedValue({ count: 1 });
-    const findUnique = jest.fn().mockResolvedValue(null);
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const findUnique = vi.fn().mockResolvedValue(null);
     const repo = new PrismaTicketsRepository({
       client: { ticket: { updateMany, findUnique } },
     } as unknown as PrismaService<PrismaClient>);
@@ -26,7 +26,7 @@ describe('PrismaTicketsRepository assignee mapping (M26)', () => {
     labels: [], links: [], assignedToUser: null, assignedToAgent: null, ...over,
   });
   const repoWith = (found: unknown) => {
-    const findUnique = jest.fn().mockResolvedValue(found);
+    const findUnique = vi.fn().mockResolvedValue(found);
     const prisma = { client: { ticket: { findUnique } } };
     return { repo: new PrismaTicketsRepository(prisma as never), findUnique };
   };
@@ -51,8 +51,8 @@ describe('PrismaTicketsRepository assignee mapping (M26)', () => {
 
 describe('PrismaTicketsRepository — hasFleetOwnership (#231)', () => {
   const repoWith = (fleetPrCount: number, activeJobCount: number) => {
-    const ticketLinkCount = jest.fn().mockResolvedValue(fleetPrCount);
-    const fleetJobTicketCount = jest.fn().mockResolvedValue(activeJobCount);
+    const ticketLinkCount = vi.fn().mockResolvedValue(fleetPrCount);
+    const fleetJobTicketCount = vi.fn().mockResolvedValue(activeJobCount);
     const prisma = {
       client: { ticketLink: { count: ticketLinkCount }, fleetJobTicket: { count: fleetJobTicketCount } },
     };

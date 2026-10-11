@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * US-003 — the AgentsService create path (POST /api/agents).
  *
@@ -20,17 +21,17 @@ describe('AgentsService create path (US-003)', () => {
   let service: AgentsService;
 
   let agentRepo: {
-    create: jest.Mock;
-    createRolesAndCapabilities: jest.Mock;
+    create: Mock;
+    createRolesAndCapabilities: Mock;
   };
 
   // Records which txManager.run callback was active while a repository call ran.
   let activeRunId: number | null = null;
   let runCounter = 0;
   let txManager: {
-    run: jest.Mock;
-    getClient: jest.Mock;
-    isInTransaction: jest.Mock;
+    run: Mock;
+    getClient: Mock;
+    isInTransaction: Mock;
   };
 
   const mockAgent = {
@@ -62,12 +63,12 @@ describe('AgentsService create path (US-003)', () => {
     runCounter = 0;
 
     agentRepo = {
-      create: jest.fn().mockResolvedValue(mockAgent),
-      createRolesAndCapabilities: jest.fn().mockResolvedValue(undefined),
+      create: vi.fn().mockResolvedValue(mockAgent),
+      createRolesAndCapabilities: vi.fn().mockResolvedValue(undefined),
     };
 
     txManager = {
-      run: jest.fn(async (fn: () => Promise<unknown>) => {
+      run: vi.fn(async (fn: () => Promise<unknown>) => {
         const runId = ++runCounter;
         const previousRunId = activeRunId;
         activeRunId = runId;
@@ -77,8 +78,8 @@ describe('AgentsService create path (US-003)', () => {
           activeRunId = previousRunId;
         }
       }),
-      getClient: jest.fn(),
-      isInTransaction: jest.fn(() => false),
+      getClient: vi.fn(),
+      isInTransaction: vi.fn(() => false),
     };
 
     testingModule = await Test.createTestingModule({
@@ -89,7 +90,7 @@ describe('AgentsService create path (US-003)', () => {
         { provide: TRANSACTION_MANAGER, useValue: txManager },
         {
           provide: KodaDomainWriter,
-          useValue: { writeAgentAction: jest.fn().mockResolvedValue({ canonicalId: 'evt-1' }) },
+          useValue: { writeAgentAction: vi.fn().mockResolvedValue({ canonicalId: 'evt-1' }) },
         },
       ],
     }).compile();
@@ -99,7 +100,7 @@ describe('AgentsService create path (US-003)', () => {
 
   afterEach(async () => {
     await testingModule.close();
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('AC1: passes create an object whose keys are exactly name, slug, apiKeyHash and maxConcurrentTickets', async () => {

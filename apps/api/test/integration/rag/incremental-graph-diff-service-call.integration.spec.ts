@@ -1,25 +1,26 @@
-jest.mock('@lancedb/lancedb', () => ({
-  connect: jest.fn().mockResolvedValue({
-    tableNames: jest.fn().mockResolvedValue([]),
-    createTable: jest.fn().mockResolvedValue({
-      delete: jest.fn().mockResolvedValue(undefined),
-      createIndex: jest.fn().mockResolvedValue(undefined),
-      add: jest.fn().mockResolvedValue(undefined),
-      query: jest.fn().mockReturnValue({ limit: jest.fn().mockReturnThis(), toArray: jest.fn().mockResolvedValue([]) }),
-      countRows: jest.fn().mockResolvedValue(0),
+import type { Mock } from 'vitest';
+vi.mock('@lancedb/lancedb', () => ({
+  connect: vi.fn().mockResolvedValue({
+    tableNames: vi.fn().mockResolvedValue([]),
+    createTable: vi.fn().mockResolvedValue({
+      delete: vi.fn().mockResolvedValue(undefined),
+      createIndex: vi.fn().mockResolvedValue(undefined),
+      add: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue([]) }),
+      countRows: vi.fn().mockResolvedValue(0),
     }),
-    openTable: jest.fn().mockResolvedValue({
-      delete: jest.fn().mockResolvedValue(undefined),
-      createIndex: jest.fn().mockResolvedValue(undefined),
-      add: jest.fn().mockResolvedValue(undefined),
-      query: jest.fn().mockReturnValue({ limit: jest.fn().mockReturnThis(), toArray: jest.fn().mockResolvedValue([]) }),
-      countRows: jest.fn().mockResolvedValue(0),
-      search: jest.fn().mockResolvedValue([]),
-      vectorSearch: jest.fn().mockReturnValue({ distanceType: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(), toArray: jest.fn().mockResolvedValue([]) }),
-      optimize: jest.fn().mockResolvedValue(undefined),
+    openTable: vi.fn().mockResolvedValue({
+      delete: vi.fn().mockResolvedValue(undefined),
+      createIndex: vi.fn().mockResolvedValue(undefined),
+      add: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue([]) }),
+      countRows: vi.fn().mockResolvedValue(0),
+      search: vi.fn().mockResolvedValue([]),
+      vectorSearch: vi.fn().mockReturnValue({ distanceType: vi.fn().mockReturnThis(), limit: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue([]) }),
+      optimize: vi.fn().mockResolvedValue(undefined),
     }),
   }),
-  Index: { fts: jest.fn().mockReturnValue({}) },
+  Index: { fts: vi.fn().mockReturnValue({}) },
 }));
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -57,17 +58,17 @@ const storedGraphEmpty: StoredGraph = {
 };
 
 const mockGraphStore = {
-  getStoredGraph: jest.fn().mockResolvedValue(storedGraphEmpty),
-  applyDiff: jest.fn().mockResolvedValue(undefined),
-  markVectorStale: jest.fn().mockResolvedValue(undefined),
-  findVectorStaleNodeIds: jest.fn().mockResolvedValue([]),
-  clearVectorStale: jest.fn().mockResolvedValue(undefined),
+  getStoredGraph: vi.fn().mockResolvedValue(storedGraphEmpty),
+  applyDiff: vi.fn().mockResolvedValue(undefined),
+  markVectorStale: vi.fn().mockResolvedValue(undefined),
+  findVectorStaleNodeIds: vi.fn().mockResolvedValue([]),
+  clearVectorStale: vi.fn().mockResolvedValue(undefined),
 };
 
 const mockTxManager = {
-  run: jest.fn((fn: () => Promise<unknown>) => fn()),
-  getClient: jest.fn(),
-  isInTransaction: jest.fn(() => false),
+  run: vi.fn((fn: () => Promise<unknown>) => fn()),
+  getClient: vi.fn(),
+  isInTransaction: vi.fn(() => false),
 };
 
 const mockRagConfig = {
@@ -90,10 +91,10 @@ const mockRagConfig = {
 describe('IncrementalGraphDiffService wiring (SRC-001)', () => {
   let module: TestingModule;
   let ragService: RagService;
-  let diffAndApplyMock: jest.Mock;
+  let diffAndApplyMock: Mock;
 
   beforeAll(async () => {
-    diffAndApplyMock = jest.fn().mockResolvedValue({
+    diffAndApplyMock = vi.fn().mockResolvedValue({
       added: 2,
       updated: 0,
       removed: 1,
@@ -107,7 +108,7 @@ describe('IncrementalGraphDiffService wiring (SRC-001)', () => {
         VectorStore,
         {
           provide: IncrementalGraphDiffService,
-          useValue: { diffAndApply: diffAndApplyMock, getStoredGraph: jest.fn() },
+          useValue: { diffAndApply: diffAndApplyMock, getStoredGraph: vi.fn() },
         },
         { provide: EmbeddingService, useClass: FakeEmbeddingService },
         { provide: RAG_CFG, useValue: mockRagConfig },
@@ -183,7 +184,7 @@ describe('IncrementalGraphDiffService wiring (SRC-001)', () => {
     ];
     const links: GraphifyLinkDto[] = [];
 
-    const deleteAllSpy = jest.spyOn(ragService, 'deleteAllBySourceType');
+    const deleteAllSpy = vi.spyOn(ragService, 'deleteAllBySourceType');
 
     await ragService.importGraphify(projectId, nodes, links);
 

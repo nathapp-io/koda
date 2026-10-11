@@ -52,7 +52,7 @@ describeIntegration('outbox relay end to end', () => {
   });
 
   it('delivers a committed record to its handler and marks it published', async () => {
-    const handler = jest.fn();
+    const handler = vi.fn();
     publisher.register('relay_ok', handler);
 
     const record = await txManager.run(() =>
@@ -72,7 +72,7 @@ describeIntegration('outbox relay end to end', () => {
     });
 
     // computeBackoff jitters the delay to [0.5, 1.5) x base; pin the low end so the bound is deterministic.
-    const random = jest.spyOn(Math, 'random').mockReturnValue(0);
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
     const before = Date.now();
     const record = await outbox.record({ type: 'relay_fail', payload: {}, metadata: { projectId, eventId: 'fail-1' } });
     await relay.dispatchPendingBatch();
@@ -107,7 +107,7 @@ describeIntegration('outbox relay end to end', () => {
 
   it('admin retry resets a dead event so the relay delivers it again', async () => {
     const admin = new OutboxAdminService(module.get(PrismaOutboxRepository));
-    const handler = jest.fn();
+    const handler = vi.fn();
     publisher.register('relay_revive', handler);
     const record = await outbox.record({ type: 'relay_revive', payload: {}, metadata: { projectId, eventId: 'revive-1' } });
     await prisma.client.outboxEvent.update({ where: { id: record.id }, data: { status: 'dead', attempts: 8, lastError: 'old' } });

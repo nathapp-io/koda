@@ -1,25 +1,25 @@
-jest.mock('@lancedb/lancedb', () => ({
-  connect: jest.fn().mockResolvedValue({
-    tableNames: jest.fn().mockResolvedValue([]),
-    createTable: jest.fn().mockResolvedValue({
-      delete: jest.fn().mockResolvedValue(undefined),
-      createIndex: jest.fn().mockResolvedValue(undefined),
-      add: jest.fn().mockResolvedValue(undefined),
-      query: jest.fn().mockReturnValue({ limit: jest.fn().mockReturnThis(), toArray: jest.fn().mockResolvedValue([]) }),
-      countRows: jest.fn().mockResolvedValue(0),
+vi.mock('@lancedb/lancedb', () => ({
+  connect: vi.fn().mockResolvedValue({
+    tableNames: vi.fn().mockResolvedValue([]),
+    createTable: vi.fn().mockResolvedValue({
+      delete: vi.fn().mockResolvedValue(undefined),
+      createIndex: vi.fn().mockResolvedValue(undefined),
+      add: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue([]) }),
+      countRows: vi.fn().mockResolvedValue(0),
     }),
-    openTable: jest.fn().mockResolvedValue({
-      delete: jest.fn().mockResolvedValue(undefined),
-      createIndex: jest.fn().mockResolvedValue(undefined),
-      add: jest.fn().mockResolvedValue(undefined),
-      query: jest.fn().mockReturnValue({ limit: jest.fn().mockReturnThis(), toArray: jest.fn().mockResolvedValue([]) }),
-      countRows: jest.fn().mockResolvedValue(0),
-      search: jest.fn().mockResolvedValue([]),
-      vectorSearch: jest.fn().mockReturnValue({ distanceType: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(), toArray: jest.fn().mockResolvedValue([]) }),
-      optimize: jest.fn().mockResolvedValue(undefined),
+    openTable: vi.fn().mockResolvedValue({
+      delete: vi.fn().mockResolvedValue(undefined),
+      createIndex: vi.fn().mockResolvedValue(undefined),
+      add: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue([]) }),
+      countRows: vi.fn().mockResolvedValue(0),
+      search: vi.fn().mockResolvedValue([]),
+      vectorSearch: vi.fn().mockReturnValue({ distanceType: vi.fn().mockReturnThis(), limit: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue([]) }),
+      optimize: vi.fn().mockResolvedValue(undefined),
     }),
   }),
-  Index: { fts: jest.fn().mockReturnValue({}) },
+  Index: { fts: vi.fn().mockReturnValue({}) },
 }));
 
 import { Test, TestingModule } from '@nestjs/testing';

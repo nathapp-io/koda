@@ -1,5 +1,6 @@
-jest.mock('../vcs/factory', () => ({ createVcsProvider: jest.fn() }));
-jest.mock('../common/utils/encryption.util', () => ({ decryptToken: jest.fn().mockReturnValue('plain') }));
+import type { Mock } from 'vitest';
+vi.mock('../vcs/factory', () => ({ createVcsProvider: vi.fn() }));
+vi.mock('../common/utils/encryption.util', () => ({ decryptToken: vi.fn().mockReturnValue('plain') }));
 
 import { createVcsProvider } from '../vcs/factory';
 import { CodeCommitOutboxHandler } from './code-commit-outbox-handler';
@@ -8,16 +9,16 @@ import type { AstIndexService } from './ast-index.service';
 import type { IVcsConfig } from '../config/vcs.config';
 
 describe('CodeCommitOutboxHandler removed files (VCS LOW)', () => {
-  let ast: { indexCommit: jest.Mock; removeFiles: jest.Mock };
-  let fetchCommitFiles: jest.Mock;
+  let ast: { indexCommit: Mock; removeFiles: Mock };
+  let fetchCommitFiles: Mock;
   let handler: CodeCommitOutboxHandler;
 
   beforeEach(() => {
-    ast = { indexCommit: jest.fn(), removeFiles: jest.fn() };
-    fetchCommitFiles = jest.fn().mockResolvedValue([{ path: 'src/new.ts', content: 'x' }]);
-    (createVcsProvider as jest.Mock).mockReturnValue({ fetchCommitFiles });
+    ast = { indexCommit: vi.fn(), removeFiles: vi.fn() };
+    fetchCommitFiles = vi.fn().mockResolvedValue([{ path: 'src/new.ts', content: 'x' }]);
+    (createVcsProvider as Mock).mockReturnValue({ fetchCommitFiles });
     const repo = {
-      findVcsConnectionByProjectId: jest.fn().mockResolvedValue({ provider: 'github', repoOwner: 'acme', repoName: 'widgets', encryptedToken: 'enc' }),
+      findVcsConnectionByProjectId: vi.fn().mockResolvedValue({ provider: 'github', repoOwner: 'acme', repoName: 'widgets', encryptedToken: 'enc' }),
     };
     handler = new CodeCommitOutboxHandler(
       repo as unknown as PrismaCodeIntelRepository,

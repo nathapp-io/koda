@@ -1,3 +1,4 @@
+import type { MockInstance } from 'vitest';
 import { Logger } from '@nestjs/common';
 import type { IRagConfig } from '../config/rag.config';
 import { resolveCreatedAt } from './created-at-override';
@@ -40,17 +41,17 @@ const ragConfig = {
 } as IRagConfig;
 
 const embedding = {
-  embed: jest.fn().mockResolvedValue(Array(8).fill(0.1)),
+  embed: vi.fn().mockResolvedValue(Array(8).fill(0.1)),
   providerName: 'fake',
   modelName: 'fake-v1',
   dimensions: 8,
 };
 
 describe('both KB write paths reject a bad createdAtOverride', () => {
-  let warn: jest.SpyInstance;
+  let warn: MockInstance;
 
   beforeEach(() => {
-    warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
   });
 
   afterEach(() => {

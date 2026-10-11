@@ -9,7 +9,7 @@ const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : descr
 const MIGRATION = '20261012090000_skill_catalog';
 
 describeIntegration('skill catalog migration (PG)', () => {
-  jest.setTimeout(60_000);
+  vi.setConfig({ testTimeout: 60_000 });
   let scratch: ScratchSchema;
 
   beforeAll(async () => {

@@ -9,7 +9,7 @@ const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : descr
 const TARGET = '20260929090000_vcs_external_id_repo_qualified';
 
 describeIntegration('externalVcsId repo-qualify migration (M11)', () => {
-  jest.setTimeout(60000);
+  vi.setConfig({ testTimeout: 60000 });
   let scratch: ScratchSchema;
 
   beforeAll(async () => {

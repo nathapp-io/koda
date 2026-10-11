@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import type { IRagConfig } from '../../config/rag.config';
 import { CounterOptimizeStrategy } from './counter-optimize.strategy';
 import { ManualOptimizeStrategy } from './manual-optimize.strategy';
@@ -6,8 +7,8 @@ import { optimizeInBackground } from './optimize-in-background';
 
 const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
-function rejectingTable(): { optimize: jest.Mock } {
-  return { optimize: jest.fn().mockRejectedValue(new Error('lance busy')) };
+function rejectingTable(): { optimize: Mock } {
+  return { optimize: vi.fn().mockRejectedValue(new Error('lance busy')) };
 }
 
 const ragConfig = { ftsOptimizeThreshold: 10, ftsOptimizeIntervalMs: 60_000 } as IRagConfig;
@@ -28,7 +29,7 @@ describe('background optimize() on first access', () => {
   });
 
   it('optimizeInBackground logs a rejection instead of leaking it', async () => {
-    const logger = { warn: jest.fn() };
+    const logger = { warn: vi.fn() };
     optimizeInBackground(rejectingTable(), 'proj-1', logger);
     await flush();
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('proj-1'));
@@ -37,9 +38,9 @@ describe('background optimize() on first access', () => {
   });
 
   it('optimizeInBackground also catches a synchronous throw', async () => {
-    const logger = { warn: jest.fn() };
+    const logger = { warn: vi.fn() };
     const table = {
-      optimize: jest.fn(() => {
+      optimize: vi.fn(() => {
         throw new Error('sync boom');
       }),
     };
@@ -59,7 +60,7 @@ describe('background optimize() on first access', () => {
   });
 
   it('cron strategy onFirstAccess does not leak a rejection', async () => {
-    const registry = { addInterval: jest.fn(), deleteInterval: jest.fn() };
+    const registry = { addInterval: vi.fn(), deleteInterval: vi.fn() };
     const strategy = new CronOptimizeStrategy(ragConfig, registry);
     try {
       strategy.onFirstAccess('proj-4', rejectingTable());

@@ -12,7 +12,7 @@ import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
-jest.setTimeout(30_000);
+vi.setConfig({ testTimeout: 30_000 });
 
 interface Row { id: string; nextFireAt: string; lastJobId: string | null }
 

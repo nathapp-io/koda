@@ -1,3 +1,4 @@
+import type { Mock, Mocked } from 'vitest';
 /**
  * US-004 — the delivery seam: `FanOutPublisher.publish` → `WebhookOutboxSubscriber`
  * → `WebhookDeliveryHandler` → `OutboundHttpClient` → `OutboundUrlGuard`.
@@ -24,8 +25,8 @@ import { WebhookOutboxSubscriber } from './webhook-outbox.subscriber';
 const ALLOWED_HOST = 'allowed.test';
 const REBIND_HOST = 'rebind.test';
 
-type ResolveMock = jest.Mock<Promise<string[]>, [string]>;
-type RecordLastErrorMock = jest.Mock<Promise<void>, [string, string]>;
+type ResolveMock = Mock<(...args: [string]) => Promise<string[]>>;
+type RecordLastErrorMock = Mock<(...args: [string, string]) => Promise<void>>;
 
 interface SeamHarness {
   publisher: FanOutPublisher;
@@ -33,7 +34,7 @@ interface SeamHarness {
   resolve: ResolveMock;
 }
 
-function makeWebhookRepo(url: string): jest.Mocked<PrismaWebhookRepository> {
+function makeWebhookRepo(url: string): Mocked<PrismaWebhookRepository> {
   const webhook: WebhookDomain = {
     id: 'w1',
     projectId: 'p1',
@@ -45,12 +46,12 @@ function makeWebhookRepo(url: string): jest.Mocked<PrismaWebhookRepository> {
   };
 
   return {
-    createWebhook: jest.fn(),
-    findByProject: jest.fn(),
-    findById: jest.fn().mockResolvedValue(webhook),
-    deleteWebhook: jest.fn(),
-    findProjectBySlug: jest.fn(),
-  } as unknown as jest.Mocked<PrismaWebhookRepository>;
+    createWebhook: vi.fn(),
+    findByProject: vi.fn(),
+    findById: vi.fn().mockResolvedValue(webhook),
+    deleteWebhook: vi.fn(),
+    findProjectBySlug: vi.fn(),
+  } as unknown as Mocked<PrismaWebhookRepository>;
 }
 
 /** The production chain, with the webhook url the handler looks up set to `url`. */
@@ -58,13 +59,13 @@ function makeSeam(
   url: string,
   options: { config?: Partial<IWebhookConfig>; addresses?: readonly string[] } = {},
 ): SeamHarness {
-  const recordLastError: RecordLastErrorMock = jest.fn<Promise<void>, [string, string]>(
+  const recordLastError: RecordLastErrorMock = vi.fn<(...args: [string, string]) => Promise<void>>(
     (): Promise<void> => Promise.resolve(),
   );
   const publisher = new FanOutPublisher({ recordLastError });
 
   const addresses = options.addresses ?? ['127.0.0.1'];
-  const resolve: ResolveMock = jest.fn<Promise<string[]>, [string]>(
+  const resolve: ResolveMock = vi.fn<(...args: [string]) => Promise<string[]>>(
     (): Promise<string[]> => Promise.resolve([...addresses]),
   );
   const config: IWebhookConfig = {

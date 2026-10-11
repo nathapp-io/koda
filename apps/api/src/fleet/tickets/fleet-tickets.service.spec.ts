@@ -1,14 +1,15 @@
+import type { Mock } from 'vitest';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { FleetTicketsService } from './fleet-tickets.service';
 
 describe('FleetTicketsService.resolveForDispatch (C9 D450)', () => {
   const ticket = (number: number, status = 'CREATED', deletedAt: Date | null = null) =>
     ({ id: `t${number}`, number, title: `T${number}`, status, deletedAt });
-  let repo: { findProject: jest.Mock; findTicketsByNumbers: jest.Mock };
+  let repo: { findProject: Mock; findTicketsByNumbers: Mock };
   let service: FleetTicketsService;
 
   beforeEach(() => {
-    repo = { findProject: jest.fn().mockResolvedValue({ key: 'WEB', slug: 'web' }), findTicketsByNumbers: jest.fn() };
+    repo = { findProject: vi.fn().mockResolvedValue({ key: 'WEB', slug: 'web' }), findTicketsByNumbers: vi.fn() };
     service = new FleetTicketsService(repo as never, { run: (fn: () => unknown) => fn() } as never, {} as never);
   });
 
@@ -40,8 +41,8 @@ describe('FleetTicketsService.resolveForDispatch (C9 D450)', () => {
 });
 
 describe('FleetTicketsService list and unlink (C9 §2.2-§2.3)', () => {
-  let repo: { findProject: jest.Mock; findTicketByRef: jest.Mock; findJobsForTicket: jest.Mock; unlink: jest.Mock };
-  let events: { record: jest.Mock };
+  let repo: { findProject: Mock; findTicketByRef: Mock; findJobsForTicket: Mock; unlink: Mock };
+  let events: { record: Mock };
   let service: FleetTicketsService;
   const row = {
     id: 'j1', command: 'RUN', feature: 'f', state: 'COMPLETED', stateReason: null, escalationReason: null,
@@ -51,12 +52,12 @@ describe('FleetTicketsService list and unlink (C9 §2.2-§2.3)', () => {
 
   beforeEach(() => {
     repo = {
-      findProject: jest.fn().mockResolvedValue({ key: 'WEB', slug: 'web' }),
-      findTicketByRef: jest.fn().mockResolvedValue({ id: 't1' }),
-      findJobsForTicket: jest.fn().mockResolvedValue([row]),
-      unlink: jest.fn().mockResolvedValue(true),
+      findProject: vi.fn().mockResolvedValue({ key: 'WEB', slug: 'web' }),
+      findTicketByRef: vi.fn().mockResolvedValue({ id: 't1' }),
+      findJobsForTicket: vi.fn().mockResolvedValue([row]),
+      unlink: vi.fn().mockResolvedValue(true),
     };
-    events = { record: jest.fn() };
+    events = { record: vi.fn() };
     service = new FleetTicketsService(repo as never, { run: (fn: () => unknown) => fn() } as never, events as never);
   });
 

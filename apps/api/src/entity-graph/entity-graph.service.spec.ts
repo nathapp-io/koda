@@ -167,7 +167,7 @@ describe('EntityGraphService', () => {
 
     it('AC5: Service linkage works from gitRefFile field via rebuildGraph', async () => {
       const mockRepo = {
-        findTicketsWithLabelsAndLinks: jest.fn().mockResolvedValue([
+        findTicketsWithLabelsAndLinks: vi.fn().mockResolvedValue([
           {
             id: 'ticket-1',
             title: 'Bug: Auth fails',
@@ -184,7 +184,7 @@ describe('EntityGraphService', () => {
             assignedToAgentId: null,
           },
         ]),
-        findGraphNodesByType: jest.fn().mockResolvedValue([
+        findGraphNodesByType: vi.fn().mockResolvedValue([
           {
             nodeId: 'auth-module',
             label: 'AuthService',
@@ -193,7 +193,7 @@ describe('EntityGraphService', () => {
             community: null,
           },
         ]),
-        findGraphLinksByRelation: jest.fn().mockResolvedValue([]),
+        findGraphLinksByRelation: vi.fn().mockResolvedValue([]),
       };
       const serviceWithPrisma = new EntityGraphService(entityStore, mockRepo as any);
 

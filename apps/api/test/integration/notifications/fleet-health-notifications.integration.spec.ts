@@ -15,7 +15,7 @@ import { FleetHealthDetector } from '../../../src/notifications/fleet/fleet-heal
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
-jest.setTimeout(20_000);
+vi.setConfig({ testTimeout: 20_000 });
 
 describeIntegration('fleet health notifications (PG)', () => {
   let app: NathApplication;

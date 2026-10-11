@@ -1,30 +1,37 @@
 // Prevent LanceDB native module from loading — it holds open handles in tests
-jest.mock('@lancedb/lancedb', () => ({
-  connect: jest.fn().mockResolvedValue({
-    tableNames: jest.fn().mockResolvedValue([]),
-    createTable: jest.fn().mockResolvedValue({
-      delete: jest.fn().mockResolvedValue(undefined),
-      createIndex: jest.fn().mockResolvedValue(undefined),
-      add: jest.fn().mockResolvedValue(undefined),
-      query: jest.fn().mockReturnValue({ limit: jest.fn().mockReturnThis(), toArray: jest.fn().mockResolvedValue([]) }),
-      countRows: jest.fn().mockResolvedValue(0),
+vi.mock('@lancedb/lancedb', () => ({
+  connect: vi.fn().mockResolvedValue({
+    tableNames: vi.fn().mockResolvedValue([]),
+    createTable: vi.fn().mockResolvedValue({
+      delete: vi.fn().mockResolvedValue(undefined),
+      createIndex: vi.fn().mockResolvedValue(undefined),
+      add: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue([]) }),
+      countRows: vi.fn().mockResolvedValue(0),
     }),
-    openTable: jest.fn().mockResolvedValue({
-      delete: jest.fn().mockResolvedValue(undefined),
-      createIndex: jest.fn().mockResolvedValue(undefined),
-      add: jest.fn().mockResolvedValue(undefined),
-      query: jest.fn().mockReturnValue({ limit: jest.fn().mockReturnThis(), toArray: jest.fn().mockResolvedValue([]) }),
-      countRows: jest.fn().mockResolvedValue(0),
-      search: jest.fn().mockResolvedValue([]),
-      vectorSearch: jest.fn().mockReturnValue({ distanceType: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(), toArray: jest.fn().mockResolvedValue([]) }),
-      optimize: jest.fn().mockResolvedValue(undefined),
+    openTable: vi.fn().mockResolvedValue({
+      delete: vi.fn().mockResolvedValue(undefined),
+      createIndex: vi.fn().mockResolvedValue(undefined),
+      add: vi.fn().mockResolvedValue(undefined),
+      query: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue([]) }),
+      countRows: vi.fn().mockResolvedValue(0),
+      search: vi.fn().mockResolvedValue([]),
+      vectorSearch: vi.fn().mockReturnValue({ distanceType: vi.fn().mockReturnThis(), limit: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue([]) }),
+      optimize: vi.fn().mockResolvedValue(undefined),
     }),
   }),
-  Index: { fts: jest.fn().mockReturnValue({}) },
+  Index: { fts: vi.fn().mockReturnValue({}) },
 }));
 
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { IRagConfig } from '../config/rag.config';
 import { VectorStore } from './vector-store.service';
+
+// Per-file unique dir: LanceTableManager mkdirs lancedbPath even with a mocked connect().
+const lancedbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'koda-vector-store-'));
+afterAll(() => fs.rmSync(lancedbDir, { recursive: true, force: true }));
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyRecord = Record<string, any>;
@@ -35,7 +42,7 @@ function makeRagConfig(overrides: Partial<IRagConfig> = {}): IRagConfig {
     embeddingModel: 'nomic-embed-text',
     ollamaBaseUrl: 'http://localhost:11434',
     openaiApiKey: '',
-    lancedbPath: './lancedb',
+    lancedbPath: lancedbDir,
     inMemoryOnly: false,
     ftsIndexMode: 'simple',
     similarityHigh: 0.85,
@@ -66,8 +73,8 @@ function makeMockRecord(id: string, content: string): AnyRecord {
 const mockRagConfigForSearch = makeRagConfig();
 
 const mockEmbeddingServiceForSearch = {
-  embed: jest.fn().mockResolvedValue(new Float32Array(384).fill(0)),
-  getDimensions: jest.fn().mockReturnValue(384),
+  embed: vi.fn().mockResolvedValue(new Float32Array(384).fill(0)),
+  getDimensions: vi.fn().mockReturnValue(384),
   provider: 'ollama',
   model: 'nomic-embed-text',
 };
@@ -75,7 +82,7 @@ const mockEmbeddingServiceForSearch = {
 describe('VectorStore lifecycle', () => {
   it('closes LanceDB connection on module destroy', () => {
     const vectorStore = new VectorStore(makeRagConfig());
-    const closeSpy = jest.fn();
+    const closeSpy = vi.fn();
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (vectorStore as any).db = { close: closeSpy };
@@ -93,12 +100,12 @@ describe('VectorStore.getOrCreateTable — FTS index creation', () => {
 
   it('calls table.createIndex with FTS config when lanceAvailable is true', async () => {
     const vectorStore = new VectorStore(mockRagConfig);
-    const createIndexSpy = jest.fn().mockResolvedValue(undefined);
-    const deleteSpy = jest.fn().mockResolvedValue(undefined);
+    const createIndexSpy = vi.fn().mockResolvedValue(undefined);
+    const deleteSpy = vi.fn().mockResolvedValue(undefined);
 
     const mockDb = {
-      tableNames: jest.fn().mockResolvedValue([]),
-      createTable: jest.fn().mockResolvedValue({
+      tableNames: vi.fn().mockResolvedValue([]),
+      createTable: vi.fn().mockResolvedValue({
         delete: deleteSpy,
         createIndex: createIndexSpy,
       }),
@@ -136,14 +143,16 @@ describe('VectorStore.getOrCreateTable — FTS index creation', () => {
 
   it('logs warning and does not throw when createIndex rejects', async () => {
     const vectorStore = new VectorStore(mockRagConfig);
-    const loggerSpy = jest.spyOn(vectorStore['logger'], 'warn');
+    const loggerSpy = vi.spyOn(vectorStore['logger'], 'warn');
+    // test-setup mocks Logger.prototype.warn globally, so this spy shares calls from other tests.
+    loggerSpy.mockClear();
     const createIndexError = new Error('Index already exists');
-    const createIndexSpy = jest.fn().mockRejectedValue(createIndexError);
-    const deleteSpy = jest.fn().mockResolvedValue(undefined);
+    const createIndexSpy = vi.fn().mockRejectedValue(createIndexError);
+    const deleteSpy = vi.fn().mockResolvedValue(undefined);
 
     const mockDb = {
-      tableNames: jest.fn().mockResolvedValue([]),
-      createTable: jest.fn().mockResolvedValue({
+      tableNames: vi.fn().mockResolvedValue([]),
+      createTable: vi.fn().mockResolvedValue({
         delete: deleteSpy,
         createIndex: createIndexSpy,
       }),
@@ -167,10 +176,10 @@ describe('VectorStore.getOrCreateTable — FTS index creation', () => {
     const createTablePromise = new Promise((resolve) => {
       resolveCreateTable = resolve;
     });
-    const createTableSpy = jest.fn().mockReturnValue(createTablePromise);
+    const createTableSpy = vi.fn().mockReturnValue(createTablePromise);
 
     const mockDb = {
-      tableNames: jest.fn().mockResolvedValue([]),
+      tableNames: vi.fn().mockResolvedValue([]),
       createTable: createTableSpy,
     };
 
@@ -190,8 +199,8 @@ describe('VectorStore.getOrCreateTable — FTS index creation', () => {
     expect(createTableSpy).toHaveBeenCalledTimes(1);
 
     resolveCreateTable({
-      delete: jest.fn().mockResolvedValue(undefined),
-      createIndex: jest.fn().mockResolvedValue(undefined),
+      delete: vi.fn().mockResolvedValue(undefined),
+      createIndex: vi.fn().mockResolvedValue(undefined),
     });
 
     const [firstTable, secondTable] = await Promise.all([first, second]);
@@ -204,7 +213,7 @@ describe('VectorStore — write mutex serialization (LanceDB has no built-in con
   const mockRagConfig = makeRagConfig();
 
   const mockEmbeddingService = {
-    embed: jest.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+    embed: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]),
     providerName: 'test-provider',
     modelName: 'test-model',
     dimensions: 3,
@@ -217,9 +226,9 @@ describe('VectorStore — write mutex serialization (LanceDB has no built-in con
     const firstAddPromise = new Promise<void>((resolve) => {
       resolveFirstAdd = resolve;
     });
-    const addSpy = jest.fn().mockReturnValueOnce(firstAddPromise).mockResolvedValueOnce(undefined);
+    const addSpy = vi.fn().mockReturnValueOnce(firstAddPromise).mockResolvedValueOnce(undefined);
     // indexDocument's replace-by-source_id write path issues a delete before each add.
-    const mockTable = { add: addSpy, delete: jest.fn().mockResolvedValue(undefined) };
+    const mockTable = { add: addSpy, delete: vi.fn().mockResolvedValue(undefined) };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (vectorStore as any).tableCache = new Map([['project_test-project', mockTable]]);
@@ -260,13 +269,13 @@ describe('VectorStore — write mutex serialization (LanceDB has no built-in con
     const addPromise = new Promise<void>((resolve) => {
       resolveAdd = resolve;
     });
-    const addSpy = jest.fn().mockReturnValue(addPromise);
+    const addSpy = vi.fn().mockReturnValue(addPromise);
 
     let resolveDelete: () => void = () => {};
     const deletePromiseGate = new Promise<void>((resolve) => {
       resolveDelete = resolve;
     });
-    const deleteSpy = jest.fn().mockReturnValue(deletePromiseGate);
+    const deleteSpy = vi.fn().mockReturnValue(deletePromiseGate);
 
     const mockTable = { add: addSpy, delete: deleteSpy };
 
@@ -304,13 +313,13 @@ describe('VectorStore — write mutex serialization (LanceDB has no built-in con
     const addAPromise = new Promise<void>((resolve) => {
       resolveAddA = resolve;
     });
-    const addASpy = jest.fn().mockReturnValue(addAPromise);
-    const addBSpy = jest.fn().mockResolvedValue(undefined);
+    const addASpy = vi.fn().mockReturnValue(addAPromise);
+    const addBSpy = vi.fn().mockResolvedValue(undefined);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (vectorStore as any).tableCache = new Map([
-      ['project_project-a', { add: addASpy, delete: jest.fn().mockResolvedValue(undefined) }],
-      ['project_project-b', { add: addBSpy, delete: jest.fn().mockResolvedValue(undefined) }],
+      ['project_project-a', { add: addASpy, delete: vi.fn().mockResolvedValue(undefined) }],
+      ['project_project-b', { add: addBSpy, delete: vi.fn().mockResolvedValue(undefined) }],
     ]);
 
     const pendingA = vectorStore.indexDocument('project-a', {
@@ -340,16 +349,16 @@ describe('VectorStore.search — native FTS path (US-003-2)', () => {
     vectorRows: AnyRecord[] = [],
   ) {
     return {
-      countRows: jest.fn().mockResolvedValue(allRows.length || 1),
-      query: jest.fn().mockReturnValue({
-        limit: jest.fn().mockReturnThis(),
-        toArray: jest.fn().mockResolvedValue(allRows),
+      countRows: vi.fn().mockResolvedValue(allRows.length || 1),
+      query: vi.fn().mockReturnValue({
+        limit: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue(allRows),
       }),
-      search: jest.fn().mockResolvedValue(ftsRows),
-      vectorSearch: jest.fn().mockReturnValue({
-        distanceType: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        toArray: jest.fn().mockResolvedValue(vectorRows),
+      search: vi.fn().mockResolvedValue(ftsRows),
+      vectorSearch: vi.fn().mockReturnValue({
+        distanceType: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue(vectorRows),
       }),
     };
   }
@@ -455,16 +464,16 @@ describe('VectorStore.search — native FTS path (US-003-2)', () => {
 describe('VectorStore.search — in-memory FTS fallback path (US-003-3)', () => {
   function makeTableWithRejectedSearch(allRows: AnyRecord[]) {
     return {
-      countRows: jest.fn().mockResolvedValue(allRows.length || 1),
-      query: jest.fn().mockReturnValue({
-        limit: jest.fn().mockReturnThis(),
-        toArray: jest.fn().mockResolvedValue(allRows),
+      countRows: vi.fn().mockResolvedValue(allRows.length || 1),
+      query: vi.fn().mockReturnValue({
+        limit: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue(allRows),
       }),
-      search: jest.fn().mockRejectedValue(new Error('tantivy index not ready')),
-      vectorSearch: jest.fn().mockReturnValue({
-        distanceType: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        toArray: jest.fn().mockResolvedValue([]),
+      search: vi.fn().mockRejectedValue(new Error('tantivy index not ready')),
+      vectorSearch: vi.fn().mockReturnValue({
+        distanceType: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue([]),
       }),
     };
   }
@@ -498,7 +507,7 @@ describe('VectorStore.search — in-memory FTS fallback path (US-003-3)', () => 
       mockEmbeddingServiceForSearch as never,
     );
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const loggerWarnSpy = jest.spyOn((vectorStore as any).logger, 'warn');
+    const loggerWarnSpy = vi.spyOn((vectorStore as any).logger, 'warn');
 
     const doc = makeMockRecord('doc-1', 'some matching content');
     const mockTable = makeTableWithRejectedSearch([doc]);
@@ -552,16 +561,16 @@ describe('VectorStore.search — in-memory FTS fallback path (US-003-3)', () => 
 
     const doc = makeMockRecord('doc-in-memory', 'authentication error keyword content');
     const mockTable = {
-      countRows: jest.fn().mockResolvedValue(1),
-      query: jest.fn().mockReturnValue({
-        limit: jest.fn().mockReturnThis(),
-        toArray: jest.fn().mockResolvedValue([doc]),
+      countRows: vi.fn().mockResolvedValue(1),
+      query: vi.fn().mockReturnValue({
+        limit: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue([doc]),
       }),
-      search: jest.fn().mockResolvedValue([]),
-      vectorSearch: jest.fn().mockReturnValue({
-        distanceType: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        toArray: jest.fn().mockResolvedValue([]),
+      search: vi.fn().mockResolvedValue([]),
+      vectorSearch: vi.fn().mockReturnValue({
+        distanceType: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue([]),
       }),
     };
 
@@ -583,13 +592,13 @@ describe('VectorStore — onFirstAccess and onDestroy lifecycle hooks (US-003-5)
 
   function makeMockDb(tableExists: boolean) {
     const mockTable = {
-      delete: jest.fn().mockResolvedValue(undefined),
-      createIndex: jest.fn().mockResolvedValue(undefined),
+      delete: vi.fn().mockResolvedValue(undefined),
+      createIndex: vi.fn().mockResolvedValue(undefined),
     };
     return {
-      tableNames: jest.fn().mockResolvedValue(tableExists ? ['project_test-project'] : []),
-      openTable: jest.fn().mockResolvedValue(mockTable),
-      createTable: jest.fn().mockResolvedValue(mockTable),
+      tableNames: vi.fn().mockResolvedValue(tableExists ? ['project_test-project'] : []),
+      openTable: vi.fn().mockResolvedValue(mockTable),
+      createTable: vi.fn().mockResolvedValue(mockTable),
       mockTable,
     };
   }
@@ -597,8 +606,8 @@ describe('VectorStore — onFirstAccess and onDestroy lifecycle hooks (US-003-5)
   describe('getOrCreateTable — onFirstAccess', () => {
     it('calls optimizeStrategy.onFirstAccess(projectId, table) when lanceAvailable is true', async () => {
       const vectorStore = new VectorStore(mockRagConfig);
-      const onFirstAccessSpy = jest.fn();
-      const mockStrategy = { onFirstAccess: onFirstAccessSpy, onInsert: jest.fn(), onDestroy: jest.fn() };
+      const onFirstAccessSpy = vi.fn();
+      const mockStrategy = { onFirstAccess: onFirstAccessSpy, onInsert: vi.fn(), onDestroy: vi.fn() };
       const { mockTable, ...mockDb } = makeMockDb(false);
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -615,8 +624,8 @@ describe('VectorStore — onFirstAccess and onDestroy lifecycle hooks (US-003-5)
 
     it('calls optimizeStrategy.onFirstAccess exactly once per projectId even when called multiple times', async () => {
       const vectorStore = new VectorStore(mockRagConfig);
-      const onFirstAccessSpy = jest.fn();
-      const mockStrategy = { onFirstAccess: onFirstAccessSpy, onInsert: jest.fn(), onDestroy: jest.fn() };
+      const onFirstAccessSpy = vi.fn();
+      const mockStrategy = { onFirstAccess: onFirstAccessSpy, onInsert: vi.fn(), onDestroy: vi.fn() };
       const { mockTable, ...mockDb } = makeMockDb(false);
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -635,14 +644,14 @@ describe('VectorStore — onFirstAccess and onDestroy lifecycle hooks (US-003-5)
 
     it('calls optimizeStrategy.onFirstAccess once per distinct projectId', async () => {
       const vectorStore = new VectorStore(mockRagConfig);
-      const onFirstAccessSpy = jest.fn();
-      const mockStrategy = { onFirstAccess: onFirstAccessSpy, onInsert: jest.fn(), onDestroy: jest.fn() };
+      const onFirstAccessSpy = vi.fn();
+      const mockStrategy = { onFirstAccess: onFirstAccessSpy, onInsert: vi.fn(), onDestroy: vi.fn() };
 
-      const mockTableA = { delete: jest.fn().mockResolvedValue(undefined), createIndex: jest.fn().mockResolvedValue(undefined) };
-      const mockTableB = { delete: jest.fn().mockResolvedValue(undefined), createIndex: jest.fn().mockResolvedValue(undefined) };
+      const mockTableA = { delete: vi.fn().mockResolvedValue(undefined), createIndex: vi.fn().mockResolvedValue(undefined) };
+      const mockTableB = { delete: vi.fn().mockResolvedValue(undefined), createIndex: vi.fn().mockResolvedValue(undefined) };
       const mockDb = {
-        tableNames: jest.fn().mockResolvedValue([]),
-        createTable: jest.fn()
+        tableNames: vi.fn().mockResolvedValue([]),
+        createTable: vi.fn()
           .mockResolvedValueOnce(mockTableA)
           .mockResolvedValueOnce(mockTableB),
       };
@@ -666,8 +675,8 @@ describe('VectorStore — onFirstAccess and onDestroy lifecycle hooks (US-003-5)
 
     it('does not call optimizeStrategy.onFirstAccess when lanceAvailable is false', async () => {
       const vectorStore = new VectorStore(mockRagConfig);
-      const onFirstAccessSpy = jest.fn();
-      const mockStrategy = { onFirstAccess: onFirstAccessSpy, onInsert: jest.fn(), onDestroy: jest.fn() };
+      const onFirstAccessSpy = vi.fn();
+      const mockStrategy = { onFirstAccess: onFirstAccessSpy, onInsert: vi.fn(), onDestroy: vi.fn() };
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (vectorStore as any).lanceAvailable = false;
@@ -696,8 +705,8 @@ describe('VectorStore — onFirstAccess and onDestroy lifecycle hooks (US-003-5)
   describe('onModuleDestroy — onDestroy', () => {
     it('calls optimizeStrategy.onDestroy() during onModuleDestroy', async () => {
       const vectorStore = new VectorStore(mockRagConfig);
-      const onDestroySpy = jest.fn().mockResolvedValue(undefined);
-      const mockStrategy = { onFirstAccess: jest.fn(), onInsert: jest.fn(), onDestroy: onDestroySpy };
+      const onDestroySpy = vi.fn().mockResolvedValue(undefined);
+      const mockStrategy = { onFirstAccess: vi.fn(), onInsert: vi.fn(), onDestroy: onDestroySpy };
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (vectorStore as any).optimizeStrategy = mockStrategy;
@@ -709,8 +718,8 @@ describe('VectorStore — onFirstAccess and onDestroy lifecycle hooks (US-003-5)
 
     it('calls optimizeStrategy.onDestroy() even when no LanceDB connection exists', async () => {
       const vectorStore = new VectorStore(mockRagConfig);
-      const onDestroySpy = jest.fn().mockResolvedValue(undefined);
-      const mockStrategy = { onFirstAccess: jest.fn(), onInsert: jest.fn(), onDestroy: onDestroySpy };
+      const onDestroySpy = vi.fn().mockResolvedValue(undefined);
+      const mockStrategy = { onFirstAccess: vi.fn(), onInsert: vi.fn(), onDestroy: onDestroySpy };
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (vectorStore as any).db = null;
@@ -735,7 +744,7 @@ describe('VectorStore.indexDocument — onInsert Strategy Hook (US-003-4)', () =
   const mockRagConfig = makeRagConfig();
 
   const mockEmbeddingService = {
-    embed: jest.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+    embed: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]),
     providerName: 'test-provider',
     modelName: 'test-model',
     dimensions: 3,
@@ -743,9 +752,9 @@ describe('VectorStore.indexDocument — onInsert Strategy Hook (US-003-4)', () =
 
   it('calls optimizeStrategy.onInsert(projectId, table) after table.add() when lanceAvailable is true', async () => {
     const vectorStore = new VectorStore(mockRagConfig, mockEmbeddingService as never);
-    const onInsertSpy = jest.fn().mockResolvedValue(undefined);
-    const mockStrategy = { onInsert: onInsertSpy, onFirstAccess: jest.fn() } as unknown as never;
-    const mockTable = { add: jest.fn().mockResolvedValue(undefined), delete: jest.fn().mockResolvedValue(undefined) };
+    const onInsertSpy = vi.fn().mockResolvedValue(undefined);
+    const mockStrategy = { onInsert: onInsertSpy, onFirstAccess: vi.fn() } as unknown as never;
+    const mockTable = { add: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (vectorStore as any).lanceAvailable = true;
@@ -766,9 +775,9 @@ describe('VectorStore.indexDocument — onInsert Strategy Hook (US-003-4)', () =
 
   it('does not call optimizeStrategy.onInsert() when lanceAvailable is false', async () => {
     const vectorStore = new VectorStore(mockRagConfig, mockEmbeddingService as never);
-    const onInsertSpy = jest.fn().mockResolvedValue(undefined);
-    const mockStrategy = { onInsert: onInsertSpy, onFirstAccess: jest.fn() } as unknown as never;
-    const mockTable = { add: jest.fn().mockResolvedValue(undefined), delete: jest.fn().mockResolvedValue(undefined) };
+    const onInsertSpy = vi.fn().mockResolvedValue(undefined);
+    const mockStrategy = { onInsert: onInsertSpy, onFirstAccess: vi.fn() } as unknown as never;
+    const mockTable = { add: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (vectorStore as any).lanceAvailable = false;
@@ -791,12 +800,12 @@ describe('VectorStore.indexDocument — onInsert Strategy Hook (US-003-4)', () =
 describe('VectorStore.optimizeTable (US-004)', () => {
   it('calls table.optimize() when lanceAvailable is true', async () => {
     const vectorStore = new VectorStore(makeRagConfig());
-    const mockTable = { optimize: jest.fn().mockResolvedValue(undefined) };
+    const mockTable = { optimize: vi.fn().mockResolvedValue(undefined) };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (vectorStore as any).lanceAvailable = true;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    jest.spyOn(vectorStore as any, 'getOrCreateTable').mockResolvedValue(mockTable);
+    vi.spyOn(vectorStore as any, 'getOrCreateTable').mockResolvedValue(mockTable);
 
     await vectorStore.optimizeTable('test-project');
 
@@ -805,12 +814,12 @@ describe('VectorStore.optimizeTable (US-004)', () => {
 
   it('does not call table.optimize() when lanceAvailable is false', async () => {
     const vectorStore = new VectorStore(makeRagConfig());
-    const mockTable = { optimize: jest.fn().mockResolvedValue(undefined) };
+    const mockTable = { optimize: vi.fn().mockResolvedValue(undefined) };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (vectorStore as any).lanceAvailable = false;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    jest.spyOn(vectorStore as any, 'getOrCreateTable').mockResolvedValue(mockTable);
+    vi.spyOn(vectorStore as any, 'getOrCreateTable').mockResolvedValue(mockTable);
 
     await vectorStore.optimizeTable('test-project');
 
@@ -822,12 +831,12 @@ describe('VectorStore.deleteAllBySourceType (US-002)', () => {
   it('AC1: deletes all records where source = sourceType and returns count', async () => {
     const vectorStore = new VectorStore(makeRagConfig());
     const mockTable = {
-      countRows: jest.fn().mockResolvedValueOnce(3).mockResolvedValueOnce(0),
-      delete: jest.fn().mockResolvedValue(undefined),
+      countRows: vi.fn().mockResolvedValueOnce(3).mockResolvedValueOnce(0),
+      delete: vi.fn().mockResolvedValue(undefined),
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    jest.spyOn(vectorStore as any, 'getOrCreateTable').mockResolvedValue(mockTable);
+    vi.spyOn(vectorStore as any, 'getOrCreateTable').mockResolvedValue(mockTable);
 
     const result = await vectorStore.deleteAllBySourceType('proj-1', 'code');
 
@@ -838,16 +847,16 @@ describe('VectorStore.deleteAllBySourceType (US-002)', () => {
   it('AC2: returns 0 when no records exist for the source type', async () => {
     const vectorStore = new VectorStore(makeRagConfig());
     const mockTable = {
-      countRows: jest.fn().mockResolvedValue(0),
-      query: jest.fn().mockReturnValue({
-        limit: jest.fn().mockReturnThis(),
-        toArray: jest.fn().mockResolvedValue([]),
+      countRows: vi.fn().mockResolvedValue(0),
+      query: vi.fn().mockReturnValue({
+        limit: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue([]),
       }),
-      delete: jest.fn().mockResolvedValue(undefined),
+      delete: vi.fn().mockResolvedValue(undefined),
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    jest.spyOn(vectorStore as any, 'getOrCreateTable').mockResolvedValue(mockTable);
+    vi.spyOn(vectorStore as any, 'getOrCreateTable').mockResolvedValue(mockTable);
 
     const result = await vectorStore.deleteAllBySourceType('proj-1', 'code');
 
@@ -856,7 +865,7 @@ describe('VectorStore.deleteAllBySourceType (US-002)', () => {
 
   it('supports source-based deletes for the in-memory fallback table', async () => {
     const mockEmbeddingService = {
-      embed: jest.fn().mockResolvedValue(new Float32Array(384).fill(0)),
+      embed: vi.fn().mockResolvedValue(new Float32Array(384).fill(0)),
       providerName: 'ollama',
       modelName: 'nomic-embed-text',
       dimensions: 384,
@@ -889,16 +898,16 @@ describe('VectorStore.deleteAllBySourceType (US-002)', () => {
 describe('VectorStore.search — Provenance Envelope (AC-1 through AC-6)', () => {
   function makeTableWithProvenance(allRows: AnyRecord[]) {
     return {
-      countRows: jest.fn().mockResolvedValue(allRows.length || 1),
-      query: jest.fn().mockReturnValue({
-        limit: jest.fn().mockReturnThis(),
-        toArray: jest.fn().mockResolvedValue(allRows),
+      countRows: vi.fn().mockResolvedValue(allRows.length || 1),
+      query: vi.fn().mockReturnValue({
+        limit: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue(allRows),
       }),
-      search: jest.fn().mockResolvedValue(allRows),
-      vectorSearch: jest.fn().mockReturnValue({
-        distanceType: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        toArray: jest.fn().mockResolvedValue(allRows),
+      search: vi.fn().mockResolvedValue(allRows),
+      vectorSearch: vi.fn().mockReturnValue({
+        distanceType: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue(allRows),
       }),
     };
   }

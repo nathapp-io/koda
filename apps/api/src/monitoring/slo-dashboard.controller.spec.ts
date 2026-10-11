@@ -1,12 +1,13 @@
+import type { Mocked } from 'vitest';
 import { SloDashboardController } from './slo-dashboard.controller';
 import { SloDashboardService, SloMetrics } from './slo-dashboard.service';
 
 function createMockSloDashboardService() {
   return {
-    getSloMetrics: jest.fn(),
-    recordQueryMetric: jest.fn(),
-    recordStaleHit: jest.fn(),
-  } as unknown as jest.Mocked<SloDashboardService>;
+    getSloMetrics: vi.fn(),
+    recordQueryMetric: vi.fn(),
+    recordStaleHit: vi.fn(),
+  } as unknown as Mocked<SloDashboardService>;
 }
 
 const sampleMetrics: SloMetrics = {
@@ -71,7 +72,7 @@ describe('SloDashboardController', () => {
     });
 
     it('defaults to 24-hour window when no params provided', async () => {
-      jest.useFakeTimers().setSystemTime(new Date('2026-09-28T12:00:00Z'));
+      vi.useFakeTimers().setSystemTime(new Date('2026-09-28T12:00:00Z'));
       service.getSloMetrics.mockResolvedValue(sampleMetrics);
 
       try {
@@ -83,7 +84,7 @@ describe('SloDashboardController', () => {
         expect(callArgs.to.getTime() - callArgs.from.getTime()).toBe(dayMs);
         expect(result.ret).toBe(0);
       } finally {
-        jest.useRealTimers();
+        vi.useRealTimers();
       }
     });
 

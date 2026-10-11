@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 /**
  * US-005 — AC1: POST /api/projects/:slug/kb/documents keeps returning 403 for a
  * non-member after RagController's private `checkProjectMembership` and
@@ -23,20 +24,20 @@ import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 import { KodaPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
 
 interface RagRepositoryStub {
-  findProjectBySlug: jest.Mock;
+  findProjectBySlug: Mock;
 }
 
 interface RagServiceStub {
-  indexDocument: jest.Mock;
+  indexDocument: Mock;
 }
 
 interface HybridRetrieverStub {
-  search: jest.Mock;
+  search: Mock;
 }
 
 interface ProjectRepositoryStub {
-  findBySlug: jest.Mock;
-  findMembershipRole: jest.Mock;
+  findBySlug: Mock;
+  findMembershipRole: Mock;
 }
 
 function makeUserPrincipal(id: string): UserPrincipal {
@@ -66,15 +67,15 @@ describe('RagController KB document membership gate (US-005 AC1)', () => {
 
   // Records every execution of the real guard: the guard — not a controller
   // private check — is what must decide membership on this route.
-  const guardCanActivate = jest.spyOn(ProjectMembershipGuard.prototype, 'canActivate');
+  const guardCanActivate = vi.spyOn(ProjectMembershipGuard.prototype, 'canActivate');
 
   const developerUser = makeUserPrincipal('user-dev');
 
   beforeAll(async () => {
-    ragRepository = { findProjectBySlug: jest.fn() };
-    ragService = { indexDocument: jest.fn() };
-    hybridRetriever = { search: jest.fn() };
-    projectRepo = { findBySlug: jest.fn(), findMembershipRole: jest.fn() };
+    ragRepository = { findProjectBySlug: vi.fn() };
+    ragService = { indexDocument: vi.fn() };
+    hybridRetriever = { search: vi.fn() };
+    projectRepo = { findBySlug: vi.fn(), findMembershipRole: vi.fn() };
 
     testingModule = await Test.createTestingModule({
       controllers: [RagController],
@@ -114,7 +115,7 @@ describe('RagController KB document membership gate (US-005 AC1)', () => {
   });
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     currentPrincipal = developerUser;
 

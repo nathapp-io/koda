@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { CommentsService } from './comments.service';
@@ -179,18 +180,18 @@ describe('CommentsService', () => {
   // Comment repository mock. Known methods are explicit; any resolution helper
   // US-002 adds is answered by the proxy fallback (a membership/role lookup
   // answers "no row", everything else answers with the owning ticket/project).
-  const mockCommentRepo: Record<string, jest.Mock> = new Proxy(
+  const mockCommentRepo: Record<string, Mock> = new Proxy(
     {
-      create: jest.fn(),
-      findById: jest.fn(),
-      findByTicketId: jest.fn(),
-      update: jest.fn(),
-      delete: jest.fn(),
-      findProjectBySlug: jest.fn(),
-      findTicketScoped: jest.fn(),
-    } as Record<string, jest.Mock>,
+      create: vi.fn(),
+      findById: vi.fn(),
+      findByTicketId: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      findProjectBySlug: vi.fn(),
+      findTicketScoped: vi.fn(),
+    } as Record<string, Mock>,
     {
-      get(target: Record<string, jest.Mock>, prop: string | symbol) {
+      get(target: Record<string, Mock>, prop: string | symbol) {
         // Never fabricate a thenable: `await` on the double (Nest inspects
         // provider values) would otherwise hang on a fabricated `then`.
         if (typeof prop !== 'string') return undefined;
@@ -199,12 +200,12 @@ describe('CommentsService', () => {
           if (/member|role/i.test(prop)) {
             // Membership/role lookup: answers "no row" unless the argument is a
             // user that the membership fixtures below mark as a member.
-            target[prop] = jest.fn(async (...args: unknown[]) =>
+            target[prop] = vi.fn(async (...args: unknown[]) =>
               args.some((arg) => typeof arg === 'string' && memberUserIds.has(arg)) ? 'DEVELOPER' : null
             );
           } else {
             // Ownership resolution: the comment's ticket and project.
-            target[prop] = jest.fn(async () => OWNING_RESOLUTION);
+            target[prop] = vi.fn(async () => OWNING_RESOLUTION);
           }
         }
         return target[prop];
@@ -222,48 +223,51 @@ describe('CommentsService', () => {
   // Mirrors ProjectAccessService.resolveMembership: agents and global ADMINs
   // resolve without a lookup, a member gets their raw ProjectMember.role, a
   // user without a ProjectMember row is refused.
+  const defaultResolveMembership = async (_projectId: string, principal: KodaPrincipal) => {
+    if (!principal || principal.actorType !== 'user') return null;
+    if (principal.role === 'ADMIN') return 'ADMIN';
+    if (memberUserIds.has(principal.id)) return 'DEVELOPER';
+    throw new ForbiddenAppException({}, 'projects');
+  };
   const mockAccessService = {
-    resolveMembership: jest.fn(async (_projectId: string, principal: KodaPrincipal) => {
-      if (!principal || principal.actorType !== 'user') return null;
-      if (principal.role === 'ADMIN') return 'ADMIN';
-      if (memberUserIds.has(principal.id)) return 'DEVELOPER';
-      throw new ForbiddenAppException({}, 'projects');
-    }),
-    findMembershipRole: jest.fn(async (_projectId: string, userId: string) =>
+    resolveMembership: vi.fn(defaultResolveMembership),
+    findMembershipRole: vi.fn(async (_projectId: string, userId: string) =>
       memberUserIds.has(userId) ? 'DEVELOPER' : null
     ),
-    findProjectIdBySlug: jest.fn(async () => OWNING_PROJECT.id),
+    findProjectIdBySlug: vi.fn(async () => OWNING_PROJECT.id),
   };
 
-  let mockCaslCan: jest.Mock;
-  let mockCaslFactory: { createForUser: jest.Mock };
+  let mockCaslCan: Mock;
+  let mockCaslFactory: { createForUser: Mock };
 
   const callOrder: string[] = [];
   const mockTxManager = {
-    run: jest.fn(async <T>(fn: () => Promise<T>) => {
+    run: vi.fn(async <T>(fn: () => Promise<T>) => {
       callOrder.push('tx:start');
       const result = await fn();
       callOrder.push('tx:end');
       return result;
     }),
   };
-  // Typed parameters: a zero-arg jest.fn types mock.calls as [][] and
+  // Typed parameters: a zero-arg vi.fn types mock.calls as [][] and
   // mock.calls[0][0] would not compile under ts-jest diagnostics.
   const mockTicketEventService = {
-    create: jest.fn(async (_input: unknown) => {
+    create: vi.fn(async (_input: unknown) => {
       callOrder.push('ticketEvent');
       return { id: 'tev-1', action: 'COMMENT_ADDED', timestamp: new Date('2026-09-26T00:00:00.000Z') };
     }),
   };
   const mockOutbox = {
-    record: jest.fn(async (_input: unknown) => {
+    record: vi.fn(async (_input: unknown) => {
       callOrder.push('outbox');
     }),
   };
 
   beforeEach(async () => {
-    mockCaslCan = jest.fn().mockReturnValue(true);
-    mockCaslFactory = { createForUser: jest.fn().mockResolvedValue({ can: mockCaslCan }) };
+    // Tests below override this per case; reset so order cannot matter.
+    mockAccessService.resolveMembership.mockReset().mockImplementation(defaultResolveMembership);
+    mockCaslCan = vi.fn().mockReturnValue(true);
+    mockCaslFactory = { createForUser: vi.fn().mockResolvedValue({ can: mockCaslCan }) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -279,8 +283,8 @@ describe('CommentsService', () => {
         {
           provide: PrismaProjectRepository,
           useValue: {
-            findBySlug: jest.fn(async () => OWNING_PROJECT),
-            findMembershipRole: jest.fn(async (_projectId: string, userId: string) =>
+            findBySlug: vi.fn(async () => OWNING_PROJECT),
+            findMembershipRole: vi.fn(async (_projectId: string, userId: string) =>
               memberUserIds.has(userId) ? 'DEVELOPER' : null
             ),
           },
@@ -292,7 +296,7 @@ describe('CommentsService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     callOrder.length = 0;
   });
 

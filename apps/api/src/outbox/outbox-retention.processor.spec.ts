@@ -8,11 +8,11 @@ import { PrismaOutboxRepository } from './prisma-outbox.repository';
 import { IOutboxConfig } from '../config/outbox.config';
 
 const createMockRepository = () => ({
-  deleteTerminalBefore: jest.fn(),
+  deleteTerminalBefore: vi.fn(),
 });
 
 const createMockConfig = (config: IOutboxConfig) => ({
-  get: jest.fn().mockReturnValue(config),
+  get: vi.fn().mockReturnValue(config),
 });
 
 const baseConfig = (days: number | null): IOutboxConfig => ({
@@ -50,8 +50,8 @@ describe('OutboxRetentionProcessor', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
-    jest.useRealTimers();
+    vi.clearAllMocks();
+    vi.useRealTimers();
   });
 
   it('runs daily at 04:00 (03:00 belongs to memory governance)', () => {
@@ -61,8 +61,8 @@ describe('OutboxRetentionProcessor', () => {
   });
 
   it('purges published and dead rows older than the retention window', async () => {
-    jest.useFakeTimers();
-    jest.setSystemTime(new Date('2026-09-26T04:00:00.000Z'));
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-26T04:00:00.000Z'));
     mockRepository.deleteTerminalBefore.mockResolvedValue(12);
 
     await processor.scheduledPurge();

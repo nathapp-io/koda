@@ -19,9 +19,9 @@ const makeMemoryItem = (overrides: Partial<MemoryItem> = {}): MemoryItem => ({
 });
 
 const createMockRepository = () => ({
-  findActive: jest.fn(),
-  updateDirect: jest.fn(),
-  upsert: jest.fn(),
+  findActive: vi.fn(),
+  updateDirect: vi.fn(),
+  upsert: vi.fn(),
 });
 
 describe('ExtractionService', () => {
@@ -36,7 +36,7 @@ describe('ExtractionService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('extractFromEvent', () => {

@@ -77,7 +77,7 @@ describeIntegration('M19 graph <-> vector consistency', () => {
     (await vectorStore.listDocuments(projectId)).map((d) => d.sourceId).sort();
 
   it('a crash between the graph commit and re-indexing heals on the next import', async () => {
-    const spy = jest.spyOn(vectorStore, 'indexDocument').mockRejectedValueOnce(new Error('lance down'));
+    const spy = vi.spyOn(vectorStore, 'indexDocument').mockRejectedValueOnce(new Error('lance down'));
     await expect(diff.diffAndApply(projectId, nodes, links)).rejects.toThrow('lance down');
     spy.mockRestore();
 
@@ -93,7 +93,7 @@ describeIntegration('M19 graph <-> vector consistency', () => {
     await diff.diffAndApply(projectId, nodes, links);
 
     const renamed = [{ ...nodes[0], label: 'AuthServiceV2' }, nodes[1]];
-    const spy = jest.spyOn(repo, 'applyGraphDiff').mockRejectedValueOnce(new Error('pg down'));
+    const spy = vi.spyOn(repo, 'applyGraphDiff').mockRejectedValueOnce(new Error('pg down'));
     await expect(diff.diffAndApply(projectId, renamed, links)).rejects.toThrow('pg down');
     spy.mockRestore();
 

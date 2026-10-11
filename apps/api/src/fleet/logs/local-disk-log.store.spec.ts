@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, existsSync } from 'fs';
+import { mkdtempSync, readFileSync, existsSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { Readable } from 'stream';
@@ -10,6 +10,8 @@ describe('LocalDiskLogStore', () => {
   const store = new LocalDiskLogStore({ artifactDir: root });
   const key = logKey('j1', 1, 'run');
   const b = (s: string) => Buffer.from(s);
+
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
 
   it('builds keys from validated parts', () => {
     expect(key).toBe('logs/j1/1/run.log');
@@ -49,12 +51,14 @@ describe('LocalDiskLogStore', () => {
   });
 
   it('streams a whole object and deletes a prefix (absent prefix is a no-op)', async () => {
+    const k = logKey('j4', 1, 'run');
+    await store.append(k, 0, b('abc\nde\n'));
     const chunks: Buffer[] = [];
-    for await (const c of await store.stream(key)) chunks.push(c as Buffer);
+    for await (const c of await store.stream(k)) chunks.push(c as Buffer);
     expect(Buffer.concat(chunks).toString()).toBe('abc\nde\n');
-    await store.deletePrefix('logs/j1/1/');
-    expect(existsSync(join(root, 'logs/j1/1'))).toBe(false);
+    await store.deletePrefix('logs/j4/1/');
+    expect(existsSync(join(root, 'logs/j4/1'))).toBe(false);
     await expect(store.deletePrefix('logs/nope/1/')).resolves.toBeUndefined();
-    await expect(store.size(key)).resolves.toBe(0);
+    await expect(store.size(k)).resolves.toBe(0);
   });
 });

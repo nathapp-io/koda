@@ -163,7 +163,7 @@ describe('placement rules (spec §4)', () => {
     });
 
     it('never holds a config job on a job-scope budget pause', () => {
-      const match = jest.fn(() => ({ id: 'policy-1' }));
+      const match = vi.fn(() => ({ id: 'policy-1' }));
       const scope = { projectId: 'p1', repoId: 'repo-1', pinnedRunnerId: null };
       expect(jobScopePause({ command: 'CONFIG_EDIT', ...scope }, match)).toBeNull();
       expect(match).not.toHaveBeenCalled();
@@ -195,7 +195,7 @@ describe('THREAD placement (US-006)', () => {
     [{ kind: 'native', model: 'm2' }, { native: ['m1'], acp: [] }],
     [{ kind: 'acp', agent: 'claude' }, { native: [], acp: [] }],
   ] as const)('reports unsupported thread backend', (backend, threadBackends) => {
-    expect(misfit(threadJob({ thread: { backend, enabled: true } }), threadRunner({ capabilities: caps({ threadBackends }) }))).toBe('thread_backend');
+    expect(misfit(threadJob({ thread: { backend, enabled: true } }), threadRunner({ capabilities: caps({ threadBackends: { native: [...threadBackends.native], acp: [...threadBackends.acp] } }) }))).toBe('thread_backend');
   });
   it('requires protocol v4 and enabled thread placement', () => {
     expect(misfit(threadJob(), threadRunner({ protocolVersion: 3 }))).toBe('protocol');

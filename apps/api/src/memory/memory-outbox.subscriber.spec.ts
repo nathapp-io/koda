@@ -8,11 +8,11 @@ describe('MemoryOutboxSubscriber', () => {
   it('registers ticket_event and agent_event on init and persists extracted items', async () => {
     const registry = new FanOutPublisher(noopLastErrors);
     const extraction = {
-      extractFromEvent: jest.fn().mockReturnValue([
+      extractFromEvent: vi.fn().mockReturnValue([
         { projectId: 'p1', kind: 'fact', subject: 's', predicate: 'p', object: 'o', sourceType: 'ticket', sourceId: 't1', confidence: 1 },
       ]),
     } as unknown as ExtractionService;
-    const repo = { upsert: jest.fn().mockResolvedValue(undefined) } as unknown as PrismaMemoryItemRepository;
+    const repo = { upsert: vi.fn().mockResolvedValue(undefined) } as unknown as PrismaMemoryItemRepository;
 
     const subscriber = new MemoryOutboxSubscriber(registry, extraction, repo);
     subscriber.onModuleInit();

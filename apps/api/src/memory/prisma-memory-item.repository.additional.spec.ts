@@ -36,14 +36,14 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
   let repository: PrismaMemoryItemRepository;
 
   const mockMemoryItem = {
-    findMany: jest.fn(),
-    findFirst: jest.fn(),
-    count: jest.fn(),
-    create: jest.fn(),
-    update: jest.fn(),
+    findMany: vi.fn(),
+    findFirst: vi.fn(),
+    count: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
   };
 
-  const mockTransaction = jest.fn();
+  const mockTransaction = vi.fn();
 
   const mockPrismaClient = {
     memoryItem: mockMemoryItem,
@@ -55,9 +55,9 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
   };
 
   const mockTransactionManager = {
-    run: jest.fn((fn: () => Promise<unknown>) => fn()),
-    getClient: jest.fn(),
-    isInTransaction: jest.fn(() => false),
+    run: vi.fn((fn: () => Promise<unknown>) => fn()),
+    getClient: vi.fn(),
+    isInTransaction: vi.fn(() => false),
   };
 
   beforeEach(async () => {
@@ -71,7 +71,7 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
 
     repository = module.get<PrismaMemoryItemRepository>(PrismaMemoryItemRepository);
 
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('findByProject', () => {
@@ -234,9 +234,9 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
       mockTransaction.mockImplementation((fn: (client: unknown) => Promise<unknown>) => {
         const mockClient = {
           memoryItem: {
-            findFirst: jest.fn().mockResolvedValue(null),
-            create: jest.fn().mockResolvedValue(makeModelRow()),
-            update: jest.fn(),
+            findFirst: vi.fn().mockResolvedValue(null),
+            create: vi.fn().mockResolvedValue(makeModelRow()),
+            update: vi.fn(),
           },
         };
         return fn(mockClient);
@@ -262,9 +262,9 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
       const newItem = makeModelRow({ id: 'new-mem' });
 
       const mockClientMemoryItem = {
-        findFirst: jest.fn().mockResolvedValue(existingItem),
-        create: jest.fn().mockResolvedValue(newItem),
-        update: jest.fn().mockResolvedValue({}),
+        findFirst: vi.fn().mockResolvedValue(existingItem),
+        create: vi.fn().mockResolvedValue(newItem),
+        update: vi.fn().mockResolvedValue({}),
       };
 
       mockTransaction.mockImplementation((fn: (client: unknown) => Promise<unknown>) => {
@@ -291,9 +291,9 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
 
     it('creates item with default confidence 0.8 and status active when not provided', async () => {
       const mockClientMemoryItem = {
-        findFirst: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockResolvedValue(makeModelRow()),
-        update: jest.fn(),
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue(makeModelRow()),
+        update: vi.fn(),
       };
 
       mockTransaction.mockImplementation((fn: (client: unknown) => Promise<unknown>) => {

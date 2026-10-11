@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 /**
  * VcsPrSyncService.syncPrStatus Unit/Integration Tests
  *
@@ -17,16 +18,16 @@ import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { VcsPrStatus } from '../../../src/vcs/types';
 
 // Mock the decryptToken utility
-jest.mock('../../../src/common/utils/encryption.util', () => ({
-  decryptToken: jest.fn((token: string) => {
+vi.mock('../../../src/common/utils/encryption.util', () => ({
+  decryptToken: vi.fn((token: string) => {
     // Mock decryption - just return a dummy token
     return 'decrypted-token';
   }),
 }));
 
 // Mock the VCS factory
-jest.mock('../../../src/vcs/factory', () => ({
-  createVcsProvider: jest.fn(),
+vi.mock('../../../src/vcs/factory', () => ({
+  createVcsProvider: vi.fn(),
 }));
 
 // Import the service - will fail to compile if service doesn't exist yet
@@ -36,7 +37,7 @@ import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
 
 describe('VcsPrSyncService.syncPrStatus', () => {
   let service: VcsPrSyncService;
-  let vcsRepo: jest.Mocked<PrismaVcsRepository>;
+  let vcsRepo: Mocked<PrismaVcsRepository>;
   let module: TestingModule;
 
   const projectId = 'project-123';
@@ -111,22 +112,22 @@ describe('VcsPrSyncService.syncPrStatus', () => {
   ];
 
   const mockVcsProvider = {
-    getPullRequestStatus: jest.fn(),
-    fetchIssues: jest.fn(),
-    fetchIssue: jest.fn(),
-    testConnection: jest.fn(),
-    getDefaultBranch: jest.fn(),
-    createPullRequest: jest.fn(),
-    listPullRequests: jest.fn(),
+    getPullRequestStatus: vi.fn(),
+    fetchIssues: vi.fn(),
+    fetchIssue: vi.fn(),
+    testConnection: vi.fn(),
+    getDefaultBranch: vi.fn(),
+    createPullRequest: vi.fn(),
+    listPullRequests: vi.fn(),
   };
 
   beforeEach(async () => {
-    jest.clearAllMocks();
-    jest.restoreAllMocks();
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
 
     // Set up factory mock to return mockVcsProvider
-    const { createVcsProvider } = require('../../../src/vcs/factory');
-    createVcsProvider.mockReturnValue(mockVcsProvider);
+    const { createVcsProvider } = await import('../../../src/vcs/factory');
+    vi.mocked(createVcsProvider).mockReturnValue(mockVcsProvider as unknown as ReturnType<typeof createVcsProvider>);
 
     module = await Test.createTestingModule({
       providers: [
@@ -134,11 +135,11 @@ describe('VcsPrSyncService.syncPrStatus', () => {
         {
           provide: VCS_REPOSITORY,
           useValue: {
-            findExistingTicketByExternalId: jest.fn(),
-            createTicketFromIssue: jest.fn(),
-            findActiveTicketLinksWithPrs: jest.fn(),
-            updateTicketLinkWithPrState: jest.fn().mockResolvedValue('updated'),
-            applyMergedPrTransition: jest.fn(),
+            findExistingTicketByExternalId: vi.fn(),
+            createTicketFromIssue: vi.fn(),
+            findActiveTicketLinksWithPrs: vi.fn(),
+            updateTicketLinkWithPrState: vi.fn().mockResolvedValue('updated'),
+            applyMergedPrTransition: vi.fn(),
           },
         },
       ],
@@ -208,8 +209,8 @@ describe('VcsPrSyncService.syncPrStatus', () => {
 
     it('should decrypt the VCS connection token before creating provider', async () => {
       vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([]);
-      const decryptToken = jest.requireMock('../../../src/common/utils/encryption.util').decryptToken;
-      decryptToken.mockReturnValueOnce('decrypted-token');
+      const { decryptToken } = await import('../../../src/common/utils/encryption.util');
+      vi.mocked(decryptToken).mockReturnValueOnce('decrypted-token');
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 

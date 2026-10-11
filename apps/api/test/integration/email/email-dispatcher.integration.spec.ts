@@ -18,7 +18,7 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
-jest.setTimeout(30_000);
+vi.setConfig({ testTimeout: 30_000 });
 
 const DELAY_MS = 300_000;
 
@@ -63,7 +63,7 @@ describeIntegration('EmailDispatcher end-to-end (PG) (S4b US-002)', () => {
   });
 
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   it('US-002 AC28: an assigned notification is scheduled at createdAt + EMAIL_DELAY_SEC and sent once to the member address', async () => {
@@ -72,7 +72,7 @@ describeIntegration('EmailDispatcher end-to-end (PG) (S4b US-002)', () => {
     const row = await prisma.emailSchedule.findUniqueOrThrow({ where: { notificationId: note.id } });
     expect(row.dueAt).toEqual(new Date(note.createdAt.getTime() + DELAY_MS));
 
-    const send = jest.spyOn(app.get(NOTIFY_SERVICE), 'send').mockResolvedValue({} as never);
+    const send = vi.spyOn(app.get(NOTIFY_SERVICE), 'send').mockResolvedValue({} as never);
     await dispatcher.tick(new Date(row.dueAt.getTime() + 1000));
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0][0]).toEqual(expect.objectContaining({ recipient: ids.bEmail }));
@@ -84,7 +84,7 @@ describeIntegration('EmailDispatcher end-to-end (PG) (S4b US-002)', () => {
     const note = await prisma.notification.findFirstOrThrow({ where: { userId: ids.b, kind: 'ticket_assigned' } });
     const row = await prisma.emailSchedule.findUniqueOrThrow({ where: { notificationId: note.id } });
 
-    const send = jest.spyOn(app.get(NOTIFY_SERVICE), 'send').mockResolvedValue({} as never);
+    const send = vi.spyOn(app.get(NOTIFY_SERVICE), 'send').mockResolvedValue({} as never);
     await dispatcher.tick(new Date(row.dueAt.getTime() + 1000));
     expect(send).toHaveBeenCalledTimes(1);
     await dispatcher.tick(new Date(row.dueAt.getTime() + 61_000));
@@ -100,7 +100,7 @@ describeIntegration('EmailDispatcher end-to-end (PG) (S4b US-002)', () => {
     await me.markRead(ids.b, note.id);
     expect((await prisma.notification.findUniqueOrThrow({ where: { id: note.id } })).readAt).not.toBeNull();
 
-    const send = jest.spyOn(app.get(NOTIFY_SERVICE), 'send').mockResolvedValue({} as never);
+    const send = vi.spyOn(app.get(NOTIFY_SERVICE), 'send').mockResolvedValue({} as never);
     await dispatcher.tick(new Date(row.dueAt.getTime() + 1000));
     expect(send).not.toHaveBeenCalled();
     expect(await prisma.emailSchedule.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({ status: 'SKIPPED', skipReason: 'READ' });

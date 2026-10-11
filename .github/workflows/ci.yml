@@ -238,7 +238,7 @@ jobs:
         run: bun run generate:cli
 
       - name: Test
-        run: bunx turbo run test -- --bail
+        run: bunx turbo run test -- --bail=1
 
   # ─── Integration + e2e (Postgres) ───────────────────────────────────────────
   integration:

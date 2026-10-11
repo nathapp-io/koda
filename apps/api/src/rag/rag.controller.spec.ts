@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { RagController } from './rag.controller';
 import { RagService } from './rag.service';
@@ -20,11 +21,11 @@ const mockProject = {
 
 describe('RagController', () => {
   let controller: RagController;
-  let ragService: jest.Mocked<RagService>;
-  let hybridRetrieverService: jest.Mocked<HybridRetrieverService>;
+  let ragService: Mocked<RagService>;
+  let hybridRetrieverService: Mocked<HybridRetrieverService>;
 
-  const mockFindProjectBySlug = jest.fn();
-  const mockUpdateGraphifyLastImportedAt = jest.fn();
+  const mockFindProjectBySlug = vi.fn();
+  const mockUpdateGraphifyLastImportedAt = vi.fn();
 
   // US-005: PrismaRagRepository.findProjectMembership was deleted — membership
   // is ProjectMembershipGuard's job, so the controller's repository stub no
@@ -36,17 +37,17 @@ describe('RagController', () => {
 
   beforeEach(async () => {
     ragService = {
-      indexDocument: jest.fn(),
-      listDocuments: jest.fn(),
-      deleteBySource: jest.fn(),
-      importGraphify: jest.fn(),
-      optimizeTable: jest.fn(),
-    } as unknown as jest.Mocked<RagService>;
+      indexDocument: vi.fn(),
+      listDocuments: vi.fn(),
+      deleteBySource: vi.fn(),
+      importGraphify: vi.fn(),
+      optimizeTable: vi.fn(),
+    } as unknown as Mocked<RagService>;
 
     hybridRetrieverService = {
-      indexDocument: jest.fn(),
-      search: jest.fn(),
-    } as unknown as jest.Mocked<HybridRetrieverService>;
+      indexDocument: vi.fn(),
+      search: vi.fn(),
+    } as unknown as Mocked<HybridRetrieverService>;
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [RagController],
@@ -65,7 +66,7 @@ describe('RagController', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('addDocument', () => {

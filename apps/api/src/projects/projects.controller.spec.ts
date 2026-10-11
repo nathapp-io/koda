@@ -1,3 +1,4 @@
+import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { ProjectsController } from './projects.controller';
@@ -68,32 +69,32 @@ describe('ProjectsController', () => {
   let controller: ProjectsController;
   // US-002: the list route is `findAllForPrincipal(principal)`; the mock carries
   // that member explicitly so these tests type against the finished service.
-  let projectsService: jest.Mocked<ProjectsService> & { findAllForPrincipal: jest.Mock };
-  let impactAnalysisService: jest.Mocked<ImpactAnalysisService>;
-  let agentsService: jest.Mocked<AgentsService>;
+  let projectsService: Mocked<ProjectsService> & { findAllForPrincipal: Mock };
+  let impactAnalysisService: Mocked<ImpactAnalysisService>;
+  let agentsService: Mocked<AgentsService>;
 
   beforeEach(async () => {
     projectsService = {
-      create: jest.fn(),
-      findAllForPrincipal: jest.fn(),
-      findBySlug: jest.fn(),
-      update: jest.fn(),
-      softDelete: jest.fn(),
-      assertProjectMembership: jest.fn(),
-      findMembershipRole: jest.fn(),
-      findCiWebhookToken: jest.fn(),
-    } as unknown as jest.Mocked<ProjectsService> & { findAllForPrincipal: jest.Mock };
+      create: vi.fn(),
+      findAllForPrincipal: vi.fn(),
+      findBySlug: vi.fn(),
+      update: vi.fn(),
+      softDelete: vi.fn(),
+      assertProjectMembership: vi.fn(),
+      findMembershipRole: vi.fn(),
+      findCiWebhookToken: vi.fn(),
+    } as unknown as Mocked<ProjectsService> & { findAllForPrincipal: Mock };
 
     impactAnalysisService = {
-      getChangeImpact: jest.fn(),
-    } as unknown as jest.Mocked<ImpactAnalysisService>;
+      getChangeImpact: vi.fn(),
+    } as unknown as Mocked<ImpactAnalysisService>;
 
     agentsService = {
-      findByProject: jest.fn(),
-      listProjectRoster: jest.fn(),
-      isOnProjectRosterBySlug: jest.fn(),
-      update: jest.fn(),
-    } as unknown as jest.Mocked<AgentsService>;
+      findByProject: vi.fn(),
+      listProjectRoster: vi.fn(),
+      isOnProjectRosterBySlug: vi.fn(),
+      update: vi.fn(),
+    } as unknown as Mocked<AgentsService>;
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ProjectsController],
@@ -112,7 +113,7 @@ describe('ProjectsController', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('create', () => {

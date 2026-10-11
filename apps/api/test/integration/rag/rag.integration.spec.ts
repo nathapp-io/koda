@@ -7,7 +7,7 @@ import { RagService } from '../../../src/rag/rag.service';
 import { VectorStore } from '../../../src/rag/vector-store.service';
 import { EmbeddingService } from '../../../src/rag/embedding.service';
 
-jest.setTimeout(30000);
+vi.setConfig({ testTimeout: 30000 });
 
 // Deterministic fake embeddings for testing (no real model required)
 class FakeEmbeddingService {

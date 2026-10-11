@@ -20,17 +20,17 @@ const schedule = (over: Partial<ScheduleRecord> = {}): ScheduleRecord => ({
 
 function build(due: ScheduleRecord[] = [schedule()]) {
   const repo = {
-    findDue: jest.fn(async () => due),
-    claimFire: jest.fn(async () => true),
-    findActiveJob: jest.fn(async (): Promise<ScheduleActiveJob | null> => null),
-    coalesceIntoQueued: jest.fn(async (): Promise<string | null> => null),
-    findOwnerAccess: jest.fn(async () => OWNER_OK),
-    update: jest.fn(async () => schedule()),
+    findDue: vi.fn(async () => due),
+    claimFire: vi.fn(async () => true),
+    findActiveJob: vi.fn(async (): Promise<ScheduleActiveJob | null> => null),
+    coalesceIntoQueued: vi.fn(async (): Promise<string | null> => null),
+    findOwnerAccess: vi.fn(async () => OWNER_OK),
+    update: vi.fn(async () => schedule()),
   };
-  const jobs = { dispatch: jest.fn(async () => ({ job: { id: 'job-1' } })) };
-  const progress = { disable: jest.fn(async () => true) };
-  const activity = { record: jest.fn(async () => undefined) };
-  const txManager = { run: jest.fn(async <T>(fn: () => Promise<T>) => fn()) };
+  const jobs = { dispatch: vi.fn(async () => ({ job: { id: 'job-1' } })) };
+  const progress = { disable: vi.fn(async () => true) };
+  const activity = { record: vi.fn(async () => undefined) };
+  const txManager = { run: vi.fn(async <T>(fn: () => Promise<T>) => fn()) };
   const ticker = new ScheduleTicker(repo as never, jobs as never, progress as never, activity as never, txManager as never, { sweepEnabled: false });
   const actions = () => activity.record.mock.calls.map((c) => (c as unknown as [{ action: string; payload: Record<string, unknown> }])[0]);
   return { repo, jobs, progress, activity, ticker, actions };
@@ -185,7 +185,7 @@ describe('ScheduleTicker timer', () => {
   });
 
   it('starts no timer when the sweep is disabled', () => {
-    const spy = jest.spyOn(global, 'setInterval');
+    const spy = vi.spyOn(global, 'setInterval');
     build().ticker.onModuleInit();
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();

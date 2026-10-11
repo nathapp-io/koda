@@ -13,7 +13,7 @@ import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
-jest.setTimeout(30_000);
+vi.setConfig({ testTimeout: 30_000 });
 
 interface Row { id: string; scopeType: string; scopeId: string | null; paused: boolean; spentUsd: string; warnPercent: number | null; amountUsd: string; windowStart: string; hardStop: boolean; runningJobs: string; warnReached: boolean }
 

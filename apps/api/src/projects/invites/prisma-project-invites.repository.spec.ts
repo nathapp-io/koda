@@ -45,9 +45,9 @@ const RECORD_KEYS = [
 ].sort();
 
 function setup() {
-  const findMany = jest.fn().mockResolvedValue([]);
-  const create = jest.fn().mockResolvedValue(row());
-  const updateMany = jest.fn().mockResolvedValue({ count: 0 });
+  const findMany = vi.fn().mockResolvedValue([]);
+  const create = vi.fn().mockResolvedValue(row());
+  const updateMany = vi.fn().mockResolvedValue({ count: 0 });
   const repo = new PrismaProjectInvitesRepository({
     client: { projectInvite: { findMany, create, updateMany } },
   } as never);

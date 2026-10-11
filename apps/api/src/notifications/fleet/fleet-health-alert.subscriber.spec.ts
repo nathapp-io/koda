@@ -4,15 +4,15 @@ import { noopLastErrors, outboxRecord } from '../../../test/helpers/outbox-recor
 import { FleetHealthAlertSubscriber } from './fleet-health-alert.subscriber';
 
 describe('FleetHealthAlertSubscriber (S4a §2.4)', () => {
-  const writer = { deliver: jest.fn(async () => 1) };
-  const eligibility = { findGlobalAdminIds: jest.fn(async () => ['a1']) };
+  const writer = { deliver: vi.fn(async () => 1) };
+  const eligibility = { findGlobalAdminIds: vi.fn(async () => ['a1']) };
   let registry: FanOutPublisher;
 
   beforeEach(() => {
     registry = new FanOutPublisher(noopLastErrors);
     new FleetHealthAlertSubscriber(registry, eligibility as never, writer as never).onModuleInit();
   });
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => vi.clearAllMocks());
 
   it('delivers the alert to every global admin', async () => {
     await registry.publish(outboxRecord('fleet_health_alert', { alertId: 'al1', kind: 'runner_offline', runner: 'wk-mac', provider: null, expiresAt: null }));
@@ -20,7 +20,7 @@ describe('FleetHealthAlertSubscriber (S4a §2.4)', () => {
   });
 
   it('skips a malformed payload without retrying', async () => {
-    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     await expect(registry.publish(outboxRecord('fleet_health_alert', { alertId: 'al1', kind: 'nope' }))).resolves.toBeUndefined();
     expect(writer.deliver).not.toHaveBeenCalled();
     warn.mockRestore();

@@ -1,7 +1,8 @@
-/// <reference types="jest" />
+import { restoreEnvAfterEach } from '../common/test-helpers/restore-env';
 import { appConfig, IAppConfig } from './app.config';
 
 describe('appConfig', () => {
+  restoreEnvAfterEach();
   beforeEach(() => {
     delete process.env['API_PORT'];
     delete process.env['API_HOST'];

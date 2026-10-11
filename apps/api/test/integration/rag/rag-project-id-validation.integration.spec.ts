@@ -36,14 +36,14 @@ describe('RagService — Project ID Hard Enforcement (projectIdValidation)', () 
     mockPrismaService = {
       client: {
         project: {
-          findUnique: jest.fn().mockImplementation(({ where }) => {
+          findUnique: vi.fn().mockImplementation(({ where }) => {
             // Only return a project for a specific valid test ID
             if (where.id === 'clgtz5zrp0000jvz4z6x8y9z0') {
               return Promise.resolve({ id: 'clgtz5zrp0000jvz4z6x8y9z0', deletedAt: null });
             }
             return Promise.resolve(null);
           }),
-          count: jest.fn().mockResolvedValue(0),
+          count: vi.fn().mockResolvedValue(0),
         },
       },
     };
@@ -55,7 +55,7 @@ describe('RagService — Project ID Hard Enforcement (projectIdValidation)', () 
         {
           provide: EmbeddingService,
           useValue: {
-            embed: jest.fn().mockResolvedValue(new Float32Array(8).fill(0)),
+            embed: vi.fn().mockResolvedValue(new Float32Array(8).fill(0)),
             providerName: 'test',
             modelName: 'test-v1',
             dimensions: 8,
@@ -106,7 +106,7 @@ describe('RagService — Project ID Hard Enforcement (projectIdValidation)', () 
       // AC1: Error message should indicate "Project ID is required"
       try {
         await vectorStore.getOrCreateTable('');
-        fail('Expected ForbiddenAppException to be thrown');
+        assert.fail('Expected ForbiddenAppException to be thrown');
       } catch (error) {
         expect(error).toBeInstanceOf(ForbiddenAppException);
         if (error instanceof ForbiddenAppException) {
@@ -191,7 +191,7 @@ describe('RagService — Project ID Hard Enforcement (projectIdValidation)', () 
       const validFormatButNonExistentId = 'clgtz5zrp0000jvz4z6x8y9z2';
       try {
         await vectorStore.getOrCreateTable(validFormatButNonExistentId);
-        fail('Expected ForbiddenAppException to be thrown');
+        assert.fail('Expected ForbiddenAppException to be thrown');
       } catch (error) {
         expect(error).toBeInstanceOf(ForbiddenAppException);
       }
@@ -236,7 +236,7 @@ describe('RagService — Project ID Hard Enforcement (projectIdValidation)', () 
 
     it('performs projectId validation before attempting to access getOrCreateTable', async () => {
       // AC4: Validation MUST happen synchronously/early, not after table operations
-      const getOrCreateTableSpy = jest.spyOn(vectorStore, 'getOrCreateTable');
+      const getOrCreateTableSpy = vi.spyOn(vectorStore, 'getOrCreateTable');
       try {
         await ragService.search('invalid-format', 'query');
       } catch (error) {

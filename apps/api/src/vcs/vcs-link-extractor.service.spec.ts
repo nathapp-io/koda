@@ -1,18 +1,19 @@
+import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 import { PrismaVcsRepository } from './prisma-vcs.repository';
 import type { VcsConnectionDomain, VcsTicketDomain } from './domain/vcs.domain';
 
-jest.mock('./factory', () => ({
-  createVcsProvider: jest.fn(),
+vi.mock('./factory', () => ({
+  createVcsProvider: vi.fn(),
 }));
 
-jest.mock('../common/utils/encryption.util', () => ({
-  decryptToken: jest.fn().mockReturnValue('plain-token'),
+vi.mock('../common/utils/encryption.util', () => ({
+  decryptToken: vi.fn().mockReturnValue('plain-token'),
 }));
 
-jest.mock('./ticket-ref-matcher.util', () => ({
-  containsTicketRef: jest.fn(),
+vi.mock('./ticket-ref-matcher.util', () => ({
+  containsTicketRef: vi.fn(),
 }));
 
 import { createVcsProvider } from './factory';
@@ -59,13 +60,13 @@ function makeCommit(sha: string, message: string) {
 
 describe('VcsLinkExtractorService', () => {
   let service: VcsLinkExtractorService;
-  let mockVcsRepo: jest.Mocked<Pick<PrismaVcsRepository, 'upsertTicketLink'>>;
+  let mockVcsRepo: Mocked<Pick<PrismaVcsRepository, 'upsertTicketLink'>>;
   let mockProvider: {
-    getPullRequestStatus: jest.Mock;
-    listPrCommits: jest.Mock;
-    fetchIssues: jest.Mock;
-    fetchIssue: jest.Mock;
-    testConnection: jest.Mock;
+    getPullRequestStatus: Mock;
+    listPrCommits: Mock;
+    fetchIssues: Mock;
+    fetchIssue: Mock;
+    testConnection: Mock;
   };
 
   const project = { id: 'proj-1', key: 'TEST' };
@@ -73,10 +74,10 @@ describe('VcsLinkExtractorService', () => {
   const encryptionKey = 'test-key-32-chars-exactly-padded!!';
 
   beforeEach(async () => {
-    mockVcsRepo = { upsertTicketLink: jest.fn().mockResolvedValue(undefined) };
+    mockVcsRepo = { upsertTicketLink: vi.fn().mockResolvedValue(undefined) };
 
     mockProvider = {
-      getPullRequestStatus: jest.fn().mockResolvedValue({
+      getPullRequestStatus: vi.fn().mockResolvedValue({
         number: 5,
         state: 'open',
         draft: false,
@@ -88,14 +89,14 @@ describe('VcsLinkExtractorService', () => {
         title: 'PR title',
         branchName: 'feature/branch',
       }),
-      listPrCommits: jest.fn().mockResolvedValue([]),
-      fetchIssues: jest.fn(),
-      fetchIssue: jest.fn(),
-      testConnection: jest.fn(),
+      listPrCommits: vi.fn().mockResolvedValue([]),
+      fetchIssues: vi.fn(),
+      fetchIssue: vi.fn(),
+      testConnection: vi.fn(),
     };
 
-    (createVcsProvider as jest.Mock).mockReturnValue(mockProvider);
-    (containsTicketRef as jest.Mock).mockReturnValue(false);
+    (createVcsProvider as Mock).mockReturnValue(mockProvider);
+    (containsTicketRef as Mock).mockReturnValue(false);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -108,7 +109,7 @@ describe('VcsLinkExtractorService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('extractLinksFromPr', () => {
@@ -133,7 +134,7 @@ describe('VcsLinkExtractorService', () => {
       const nonMatchingCommit = makeCommit('def456', 'chore: update deps');
 
       mockProvider.listPrCommits.mockResolvedValue([matchingCommit, nonMatchingCommit]);
-      (containsTicketRef as jest.Mock).mockImplementation((_msg: string, key: string, num: number) => {
+      (containsTicketRef as Mock).mockImplementation((_msg: string, key: string, num: number) => {
         return key === 'TEST' && num === 42 && _msg.includes('TEST-42');
       });
 
@@ -158,7 +159,7 @@ describe('VcsLinkExtractorService', () => {
       const duplicateCommit = { ...commit };
 
       mockProvider.listPrCommits.mockResolvedValue([commit, duplicateCommit]);
-      (containsTicketRef as jest.Mock).mockReturnValue(true);
+      (containsTicketRef as Mock).mockReturnValue(true);
 
       await service.extractLinksFromPr(project, ticket, connection, encryptionKey, 'feature/branch', 5);
 
@@ -189,7 +190,7 @@ describe('VcsLinkExtractorService', () => {
       mockProvider.listPrCommits.mockResolvedValue([
         makeCommit('abc123', 'chore: something unrelated'),
       ]);
-      (containsTicketRef as jest.Mock).mockReturnValue(false);
+      (containsTicketRef as Mock).mockReturnValue(false);
 
       await service.extractLinksFromPr(project, ticket, connection, encryptionKey, 'feature/branch', 5);
 

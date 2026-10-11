@@ -17,7 +17,7 @@ const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('PrismaVcsRepository.findVcsConnectionByProjectSlug (Slice 2b)', () => {
-  jest.setTimeout(20000);
+  vi.setConfig({ testTimeout: 20000 });
   let prismaService: PrismaService<PrismaClient>;
   let prisma: PrismaClient;
   let repo: PrismaVcsRepository;

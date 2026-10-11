@@ -86,7 +86,7 @@ describeIntegration('fleet bundle ingest (PG)', () => {
   });
 
   it('ingests rows, raises cost, corrects an escalated finish, and is idempotent (Review Focus 1)', async () => {
-    const signal = jest.spyOn(app.get(BudgetEvaluator), 'signal').mockImplementation(() => undefined);
+    const signal = vi.spyOn(app.get(BudgetEvaluator), 'signal').mockImplementation(() => undefined);
     const job = await seedJob();
     await attach(job.id, fullBundle('escalated'));
     expect(await ingest.drain(now)).toBe(1);
@@ -147,7 +147,7 @@ describeIntegration('fleet bundle ingest (PG)', () => {
   it('a failure halfway through the write leaves nothing and backs off (Review Focus 4)', async () => {
     const job = await seedJob();
     await attach(job.id, fullBundle(null));
-    const spy = jest.spyOn(repo, 'markOutcome').mockRejectedValueOnce(new Error('db went away'));
+    const spy = vi.spyOn(repo, 'markOutcome').mockRejectedValueOnce(new Error('db went away'));
     await ingest.drain(now);
     spy.mockRestore();
     expect(await prisma.fleetCostEvent.count({ where: { jobId: job.id } })).toBe(0);

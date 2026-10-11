@@ -25,14 +25,14 @@ const mockUser = {
   };
 
   const mockAuthService = {
-    register: jest.fn(),
-    login: jest.fn(),
-    refresh: jest.fn(),
-    validateUser: jest.fn(),
-    generateAccessToken: jest.fn(),
-    generateRefreshToken: jest.fn(),
-    logout: jest.fn(),
-    registrationStatus: jest.fn(),
+    register: vi.fn(),
+    login: vi.fn(),
+    refresh: vi.fn(),
+    validateUser: vi.fn(),
+    generateAccessToken: vi.fn(),
+    generateRefreshToken: vi.fn(),
+    logout: vi.fn(),
+    registrationStatus: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -46,7 +46,7 @@ const mockUser = {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('POST /auth/register', () => {
@@ -294,21 +294,21 @@ const mockUser = {
       }
     });
 
-    it('honours AUTH_LOGIN_THROTTLE_LIMIT at class load time', () => {
+    it('honours AUTH_LOGIN_THROTTLE_LIMIT at class load time', async () => {
       const prev = process.env['AUTH_LOGIN_THROTTLE_LIMIT'];
       process.env['AUTH_LOGIN_THROTTLE_LIMIT'] = '50';
-      // Use jest.isolateModules so the controller re-evaluates the env value
+      // Reset the module registry so the controller re-evaluates the env value
       // at module load — the limit is captured into @Throttle metadata there.
-      let captured: number | undefined;
-      jest.isolateModules(() => {
-        const reloaded = require('./auth.controller').AuthController;
+      try {
+        vi.resetModules();
+        const { AuthController: reloaded } = await import('./auth.controller');
         const proto = reloaded.prototype as unknown as Record<string, unknown>;
-        const handlerFn = proto['login'] as object;
-        captured = Reflect.getMetadata(LIMIT_KEY, handlerFn);
-      });
-      expect(captured).toBe(50);
-      if (prev === undefined) delete process.env['AUTH_LOGIN_THROTTLE_LIMIT'];
-      else process.env['AUTH_LOGIN_THROTTLE_LIMIT'] = prev;
+        const captured: number | undefined = Reflect.getMetadata(LIMIT_KEY, proto['login'] as object);
+        expect(captured).toBe(50);
+      } finally {
+        if (prev === undefined) delete process.env['AUTH_LOGIN_THROTTLE_LIMIT'];
+        else process.env['AUTH_LOGIN_THROTTLE_LIMIT'] = prev;
+      }
     });
 
     it('does not throttle refresh beyond the global default', () => {

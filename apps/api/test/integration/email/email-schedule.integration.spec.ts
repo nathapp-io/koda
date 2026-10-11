@@ -15,7 +15,7 @@ import { EmailScheduleService } from '../../../src/email/schedule/email-schedule
 import { resetDb } from '../../helpers/reset-db';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
-jest.setTimeout(30_000);
+vi.setConfig({ testTimeout: 30_000 });
 
 const T0 = new Date('2026-10-10T10:00:00Z');
 const min = (n: number): Date => new Date(T0.getTime() + n * 60_000);

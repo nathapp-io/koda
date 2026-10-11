@@ -178,7 +178,7 @@ describe('RagService.importGraphify (US-002)', () => {
   const mockRagConfig = makeRagConfig();
 
   const mockEmbeddingService = {
-    embed: jest.fn().mockResolvedValue(new Float32Array(384).fill(0)),
+    embed: vi.fn().mockResolvedValue(new Float32Array(384).fill(0)),
     providerName: 'ollama',
     modelName: 'nomic-embed-text',
     dimensions: 384,
@@ -192,11 +192,11 @@ describe('RagService.importGraphify (US-002)', () => {
   it('AC3: calls deleteAllBySourceType before indexing any nodes', async () => {
     const ragService = makeRagService();
     const callOrder: string[] = [];
-    const deleteAllBySourceTypeSpy = jest.spyOn(ragService, 'deleteAllBySourceType').mockImplementation(async () => {
+    const deleteAllBySourceTypeSpy = vi.spyOn(ragService, 'deleteAllBySourceType').mockImplementation(async () => {
       callOrder.push('deleteAllBySourceType');
       return 1;
     });
-    const indexDocumentSpy = jest.spyOn(ragService, 'indexDocument').mockImplementation(async () => {
+    const indexDocumentSpy = vi.spyOn(ragService, 'indexDocument').mockImplementation(async () => {
       callOrder.push('indexDocument');
       return 'doc-id';
     });
@@ -215,8 +215,8 @@ describe('RagService.importGraphify (US-002)', () => {
 
   it('AC4: with empty links, indexes each node with content "{type} {label} in {source_file}" (omitting source_file segment when absent)', async () => {
     const ragService = makeRagService();
-    jest.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(0);
-    const indexDocumentSpy = jest.spyOn(ragService, 'indexDocument').mockResolvedValue('doc-id');
+    vi.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(0);
+    const indexDocumentSpy = vi.spyOn(ragService, 'indexDocument').mockResolvedValue('doc-id');
 
     const nodes = [
       { id: 'node-1', label: 'MyClass', type: 'class', source_file: 'app.ts' },
@@ -246,8 +246,8 @@ describe('RagService.importGraphify (US-002)', () => {
 
   it('AC5: builds content that includes "{relation} {neighbor_label}" for each link where node is the source', async () => {
     const ragService = makeRagService();
-    jest.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(0);
-    const indexDocumentSpy = jest.spyOn(ragService, 'indexDocument').mockResolvedValue('doc-id');
+    vi.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(0);
+    const indexDocumentSpy = vi.spyOn(ragService, 'indexDocument').mockResolvedValue('doc-id');
 
     const nodes = [
       { id: 'node-1', label: 'MyClass', type: 'class', source_file: 'app.ts' },
@@ -269,8 +269,8 @@ describe('RagService.importGraphify (US-002)', () => {
 
   it('AC6: calls indexDocument with source: "code", sourceId: node.id, and metadata containing label, type, source_file, and community', async () => {
     const ragService = makeRagService();
-    jest.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(0);
-    const indexDocumentSpy = jest.spyOn(ragService, 'indexDocument').mockResolvedValue('doc-id');
+    vi.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(0);
+    const indexDocumentSpy = vi.spyOn(ragService, 'indexDocument').mockResolvedValue('doc-id');
 
     const nodes = [
       { id: 'node-1', label: 'MyClass', type: 'class', source_file: 'app.ts', community: 0 },
@@ -293,7 +293,7 @@ describe('RagService.importGraphify (US-002)', () => {
 
   it('AC7: returns { imported: 0, cleared: N } for empty nodes array', async () => {
     const ragService = makeRagService();
-    jest.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(5);
+    vi.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(5);
 
     const result = await ragService.importGraphify('proj-1', [], []);
 
@@ -302,8 +302,8 @@ describe('RagService.importGraphify (US-002)', () => {
 
   it('defaults type to "node" when absent', async () => {
     const ragService = makeRagService();
-    jest.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(0);
-    const indexDocumentSpy = jest.spyOn(ragService, 'indexDocument').mockResolvedValue('doc-id');
+    vi.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(0);
+    const indexDocumentSpy = vi.spyOn(ragService, 'indexDocument').mockResolvedValue('doc-id');
 
     const nodes = [
       { id: 'node-1', label: 'MyEntity', source_file: 'file.ts' },
@@ -321,8 +321,8 @@ describe('RagService.importGraphify (US-002)', () => {
 
   it('returns { imported: N, cleared: M } after successful import', async () => {
     const ragService = makeRagService();
-    jest.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(3);
-    jest.spyOn(ragService, 'indexDocument').mockResolvedValue('doc-id');
+    vi.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(3);
+    vi.spyOn(ragService, 'indexDocument').mockResolvedValue('doc-id');
 
     const nodes = [
       { id: 'node-1', label: 'MyClass', type: 'class', source_file: 'app.ts' },

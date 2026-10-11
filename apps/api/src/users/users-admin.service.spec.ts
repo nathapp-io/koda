@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { Prisma } from '../generated/prisma/client';
 import { UsersAdminService } from './users-admin.service';
@@ -10,21 +11,21 @@ const user = (over: Partial<UserAdminRecord> = {}): UserAdminRecord => ({
 });
 
 describe('UsersAdminService', () => {
-  let repo: Record<string, jest.Mock>;
-  let cache: { invalidate: jest.Mock };
+  let repo: Record<string, Mock>;
+  let cache: { invalidate: Mock };
   let service: UsersAdminService;
 
   beforeEach(() => {
     repo = {
-      findUserPage: jest.fn(),
-      findById: jest.fn(),
-      findByEmail: jest.fn(),
-      createUser: jest.fn(),
-      countActiveAdmins: jest.fn(),
-      updateUser: jest.fn(async (id: string, w: { role?: string; disabled?: boolean }) => user({ id, ...w })),
-      lockUserAdministration: jest.fn(),
+      findUserPage: vi.fn(),
+      findById: vi.fn(),
+      findByEmail: vi.fn(),
+      createUser: vi.fn(),
+      countActiveAdmins: vi.fn(),
+      updateUser: vi.fn(async (id: string, w: { role?: string; disabled?: boolean }) => user({ id, ...w })),
+      lockUserAdministration: vi.fn(),
     };
-    cache = { invalidate: jest.fn() };
+    cache = { invalidate: vi.fn() };
     const txManager = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
     service = new UsersAdminService(repo as never, txManager as never, cache as never);
   });

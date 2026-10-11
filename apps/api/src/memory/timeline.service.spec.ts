@@ -8,9 +8,9 @@ describe('TimelineService', () => {
   let service: TimelineService;
 
   const mockTimelineRepo = {
-    findTicketEvents: jest.fn(),
-    findAgentEvents: jest.fn(),
-    findDecisionEvents: jest.fn(),
+    findTicketEvents: vi.fn(),
+    findAgentEvents: vi.fn(),
+    findDecisionEvents: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -23,7 +23,7 @@ describe('TimelineService', () => {
 
     service = module.get<TimelineService>(TimelineService);
 
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('getProjectTimeline', () => {

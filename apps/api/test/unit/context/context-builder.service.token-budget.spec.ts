@@ -37,12 +37,12 @@ import { estimateTokenCount } from '../../../src/context/token-estimator';
 describe('ContextBuilderService — AC-7 token budget truncation priority', () => {
   let service: ContextBuilderService;
 
-  const mockCanonicalStateService = { getSnapshot: jest.fn() };
-  const mockMemoryItemRepo = { findByProjectMemory: jest.fn() };
-  const mockHybridRetriever = { search: jest.fn() };
-  const mockEntityGraph = { getRelatedEntities: jest.fn() };
-  const mockImpactAnalysis = { getChangeImpact: jest.fn() };
-  const mockContextRepo = { projectExistsAndNotDeleted: jest.fn() };
+  const mockCanonicalStateService = { getSnapshot: vi.fn() };
+  const mockMemoryItemRepo = { findByProjectMemory: vi.fn() };
+  const mockHybridRetriever = { search: vi.fn() };
+  const mockEntityGraph = { getRelatedEntities: vi.fn() };
+  const mockImpactAnalysis = { getChangeImpact: vi.fn() };
+  const mockContextRepo = { projectExistsAndNotDeleted: vi.fn() };
 
   const PROJECT_ID = 'p1';
   const TICKET_ID = 't1';
@@ -115,7 +115,7 @@ describe('ContextBuilderService — AC-7 token budget truncation priority', () =
   };
 
   beforeEach(async () => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [

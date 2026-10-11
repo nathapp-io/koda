@@ -14,40 +14,40 @@ const pendingBudget = (over: Partial<FleetApprovalRecord> = {}): FleetApprovalRe
 function build(approval: FleetApprovalRecord | null, policyScope: 'project' | 'project-orphan' | 'global' = 'project') {
   let row = approval;
   const repo = {
-    findById: jest.fn(async () => row),
-    lockById: jest.fn(async () => row),
-    resolve: jest.fn(async (_id: string, x: Partial<FleetApprovalRecord>) => (row = { ...(row as FleetApprovalRecord), ...x })),
-    setOutcome: jest.fn(async (_id: string, outcome: Record<string, unknown>) => (row = { ...(row as FleetApprovalRecord), outcome })),
-    findRequeueCandidates: jest.fn(async () => [
+    findById: vi.fn(async () => row),
+    lockById: vi.fn(async () => row),
+    resolve: vi.fn(async (_id: string, x: Partial<FleetApprovalRecord>) => (row = { ...(row as FleetApprovalRecord), ...x })),
+    setOutcome: vi.fn(async (_id: string, outcome: Record<string, unknown>) => (row = { ...(row as FleetApprovalRecord), outcome })),
+    findRequeueCandidates: vi.fn(async () => [
       { jobId: 'j1', projectId: 'p1', feature: 'f1', queuedAt: NOW },
       { jobId: 'j2', projectId: 'p2', feature: 'f2', queuedAt: NOW },
     ]),
-    countPending: jest.fn(async () => [{ projectId: 'p1', slug: 'web', pending: 2 }]),
-    countPendingUnscoped: jest.fn(async () => 3),
+    countPending: vi.fn(async () => [{ projectId: 'p1', slug: 'web', pending: 2 }]),
+    countPendingUnscoped: vi.fn(async () => 3),
   };
   const policy = policyScope === 'project'
     ? { id: 'pol', scopeType: 'project', projectId: 'p1' }
     : policyScope === 'project-orphan'
       ? { id: 'pol', scopeType: 'project', projectId: null } // not producible via the API (resolveScope always sets it)
       : { id: 'pol', scopeType: 'global', projectId: null };
-  const budgetRepo = { lockById: jest.fn(async () => policy) };
+  const budgetRepo = { lockById: vi.fn(async () => policy) };
   // The DB shape, not the request shape: `amountUsd` is `numeric(12,4)`, so a round-trip of 20.5 reads
   // back as `'20.5000'` and `String(20.5)` is `'20.5'`. A fake echoing the request number would let a
   // re-added `?? String(dto.amountUsd)` fallback pass, which is why the store value is scaled here and
   // the assertions below pin the scaled form.
-  const budgets = { resume: jest.fn(async () => ({ amountUsd: '20.5000' })) };
+  const budgets = { resume: vi.fn(async () => ({ amountUsd: '20.5000' })) };
   const jobs = {
-    requeue: jest.fn(async (_a: string, _p: string, id: string) => {
+    requeue: vi.fn(async (_a: string, _p: string, id: string) => {
       if (id === 'j2') throw new ConflictAppException({ activeJobId: 'j9' }, 'fleet.jobs');
       return {};
     }),
   };
-  const closer = { recordResolved: jest.fn(async () => []) };
-  const live = { publish: jest.fn() };
-  const activity = { memberProjectIds: jest.fn(async () => ['p1']) };
-  const tx = { run: jest.fn(async (fn: () => Promise<unknown>) => fn()) };
-  const jobRepo = { lockById: jest.fn(), createCommand: jest.fn() };
-  const notifier = { notify: jest.fn() };
+  const closer = { recordResolved: vi.fn(async () => []) };
+  const live = { publish: vi.fn() };
+  const activity = { memberProjectIds: vi.fn(async () => ['p1']) };
+  const tx = { run: vi.fn(async (fn: () => Promise<unknown>) => fn()) };
+  const jobRepo = { lockById: vi.fn(), createCommand: vi.fn() };
+  const notifier = { notify: vi.fn() };
   const service = new ApprovalsService(repo as never, budgetRepo as never, budgets as never, jobs as never, closer as never, live as never, activity as never, tx as never, jobRepo as never, notifier as never);
   return { service, repo, budgets, jobs, budgetRepo, jobRepo, notifier };
 }
@@ -60,31 +60,31 @@ function build(approval: FleetApprovalRecord | null, policyScope: 'project' | 'p
 function buildBash() {
   const rows = new Map<string, FleetApprovalRecord>();
   const repo = {
-    findById: jest.fn(async (id: string) => rows.get(id) ?? null),
-    lockById: jest.fn(async (id: string) => rows.get(id) ?? null),
-    resolve: jest.fn(async (id: string, x: Partial<FleetApprovalRecord>) => {
+    findById: vi.fn(async (id: string) => rows.get(id) ?? null),
+    lockById: vi.fn(async (id: string) => rows.get(id) ?? null),
+    resolve: vi.fn(async (id: string, x: Partial<FleetApprovalRecord>) => {
       const row = { ...(rows.get(id) as FleetApprovalRecord), ...x };
       rows.set(id, row);
       return row;
     }),
-    create: jest.fn(),
-    findPendingForPolicy: jest.fn(async () => null),
-    findByAsk: jest.fn(async () => null),
-    findPendingForJob: jest.fn(async () => []),
-    findProjectSlug: jest.fn(async () => 'web'),
+    create: vi.fn(),
+    findPendingForPolicy: vi.fn(async () => null),
+    findByAsk: vi.fn(async () => null),
+    findPendingForJob: vi.fn(async () => []),
+    findProjectSlug: vi.fn(async () => 'web'),
   };
-  const activity = { record: jest.fn(async () => undefined), memberProjectIds: jest.fn(async () => ['p1']) };
-  const webhooks = { dispatch: jest.fn(async () => undefined) };
-  const closerLive = { event: jest.fn((a: FleetApprovalRecord) => (a.projectId ? [{ approvalId: a.id, status: a.status }] : [])) };
-  const closerOutbox = { record: jest.fn(async (e: { type: string }) => ({ id: 'ob', ...e })) };
+  const activity = { record: vi.fn(async () => undefined), memberProjectIds: vi.fn(async () => ['p1']) };
+  const webhooks = { dispatch: vi.fn(async () => undefined) };
+  const closerLive = { event: vi.fn((a: FleetApprovalRecord) => (a.projectId ? [{ approvalId: a.id, status: a.status }] : [])) };
+  const closerOutbox = { record: vi.fn(async (e: { type: string }) => ({ id: 'ob', ...e })) };
   const closer = new ApprovalCloser(repo as never, activity as never, webhooks as never, closerLive as never, closerOutbox as never);
-  const live = { publish: jest.fn() };
-  const budgetRepo = { lockById: jest.fn() };
-  const budgets = { resume: jest.fn() };
-  const jobs = { requeue: jest.fn() };
-  const tx = { run: jest.fn(async (fn: () => Promise<unknown>) => fn()) };
-  const jobRepo = { lockById: jest.fn(), createCommand: jest.fn() };
-  const notifier = { notify: jest.fn() };
+  const live = { publish: vi.fn() };
+  const budgetRepo = { lockById: vi.fn() };
+  const budgets = { resume: vi.fn() };
+  const jobs = { requeue: vi.fn() };
+  const tx = { run: vi.fn(async (fn: () => Promise<unknown>) => fn()) };
+  const jobRepo = { lockById: vi.fn(), createCommand: vi.fn() };
+  const notifier = { notify: vi.fn() };
   const service = new ApprovalsService(repo as never, budgetRepo as never, budgets as never, jobs as never, closer as never, live as never, activity as never, tx as never, jobRepo as never, notifier as never);
   // Defaults the brief's row literals leave out but the service/DTO touch (e.g. requestedAt).
   const seed = (a: Record<string, unknown> & { id: string }) => {

@@ -1,11 +1,15 @@
 {
+  "project": {
+    "language": "typescript",
+    "testFramework": "vitest"
+  },
   "quality": {
     "commands": {
       "build": "bun run build:generate",
       "test": "bun run test",
       "testScoped": "bun run test:scoped {{files}}",
       "typecheck": "bun run type-check",
-      "lint": "bun run lint:json-error",
+      "lint": "bun run lint:report",
       "lintFix": "bun run lint:fix",
       "formatFix": "bun run lint:fix"
     }
@@ -37,7 +41,7 @@
     }
   },
   "acceptance": {
-    "testFramework": "jest",
-    "command": "env KODA_DB_TESTS=1 npx jest --config jest.nax.config.js {{FILE}}"
+    "testFramework": "vitest",
+    "command": "env KODA_DB_TESTS=1 npx vitest run --config vitest.nax.config.ts {{FILE}}"
   }
 }

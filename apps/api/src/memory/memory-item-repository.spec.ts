@@ -9,8 +9,8 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
 
   const mockPrismaClient = {
     memoryItem: {
-      findMany: jest.fn(),
-      count: jest.fn(),
+      findMany: vi.fn(),
+      count: vi.fn(),
     },
   };
 
@@ -19,9 +19,9 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
   };
 
   const mockTransactionManager = {
-    run: jest.fn((fn: () => Promise<unknown>) => fn()),
-    getClient: jest.fn(),
-    isInTransaction: jest.fn(() => false),
+    run: vi.fn((fn: () => Promise<unknown>) => fn()),
+    getClient: vi.fn(),
+    isInTransaction: vi.fn(() => false),
   };
 
   beforeEach(async () => {
@@ -36,7 +36,7 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
     repository = module.get<PrismaMemoryItemRepository>(PrismaMemoryItemRepository);
     prismaService = module.get<PrismaService<any>>(PrismaService);
 
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('default active filter', () => {

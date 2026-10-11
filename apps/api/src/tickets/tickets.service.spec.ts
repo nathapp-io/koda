@@ -101,25 +101,25 @@ describe('TicketsService', () => {
   };
 
   const mockTicketRepo = {
-    findProjectBySlug: jest.fn(),
-    findLastTicketInProject: jest.fn(),
-    createTicket: jest.fn(),
-    findTicketPage: jest.fn(),
-    findTicketScoped: jest.fn(),
-    updateTicket: jest.fn(),
-    assignTicket: jest.fn(),
-    softDeleteTicket: jest.fn(),
-    findTicketByRefRaw: jest.fn(),
-    findUserById: jest.fn(),
-    findAgentById: jest.fn(),
-    isAgentOnProjectRoster: jest.fn(),
-    lockProjectAgents: jest.fn(),
-    findProjectMemberRole: jest.fn(),
+    findProjectBySlug: vi.fn(),
+    findLastTicketInProject: vi.fn(),
+    createTicket: vi.fn(),
+    findTicketPage: vi.fn(),
+    findTicketScoped: vi.fn(),
+    updateTicket: vi.fn(),
+    assignTicket: vi.fn(),
+    softDeleteTicket: vi.fn(),
+    findTicketByRefRaw: vi.fn(),
+    findUserById: vi.fn(),
+    findAgentById: vi.fn(),
+    isAgentOnProjectRoster: vi.fn(),
+    lockProjectAgents: vi.fn(),
+    findProjectMemberRole: vi.fn(),
   };
 
   let inTx = false;
   const mockTxManager = {
-    run: jest.fn(async <T>(fn: () => Promise<T>): Promise<T> => {
+    run: vi.fn(async <T>(fn: () => Promise<T>): Promise<T> => {
       inTx = true;
       try {
         return await fn();
@@ -127,19 +127,26 @@ describe('TicketsService', () => {
         inTx = false;
       }
     }),
-    getClient: jest.fn(),
-    isInTransaction: jest.fn(() => inTx),
+    getClient: vi.fn(),
+    isInTransaction: vi.fn(() => inTx),
   };
 
-  const mockTicketEventService = { create: jest.fn().mockResolvedValue({ id: 'evt-mock' }) };
-  const mockOutbox = { record: jest.fn().mockResolvedValue(undefined) };
+  const mockTicketEventService = { create: vi.fn().mockResolvedValue({ id: 'evt-mock' }) };
+  const mockOutbox = { record: vi.fn().mockResolvedValue(undefined) };
 
   const mockTransitionsService = {
-    executeTransitionPublic: jest.fn(),
-    assertTransitionPermission: jest.fn(),
+    executeTransitionPublic: vi.fn(),
+    assertTransitionPermission: vi.fn(),
   };
 
   beforeEach(async () => {
+    // Per-test implementations (mockResolvedValue etc.) must not leak across tests.
+    Object.values(mockTicketRepo).forEach((m) => m.mockReset());
+    Object.values(mockTransitionsService).forEach((m) => m.mockReset());
+    mockTicketEventService.create.mockReset().mockResolvedValue({ id: 'evt-mock' });
+    mockOutbox.record.mockReset().mockResolvedValue(undefined);
+    inTx = false;
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TicketsService,
@@ -156,7 +163,7 @@ describe('TicketsService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('create', () => {

@@ -2,13 +2,13 @@ import { BudgetScopeLabels } from './budget-scope-labels';
 
 describe('BudgetScopeLabels (S4a §2.4)', () => {
   const db = {
-    project: { findUnique: jest.fn(async () => ({ key: 'KODA' })) },
-    fleetRepo: { findUnique: jest.fn(async () => ({ owner: 'acme', name: 'app' })) },
-    runner: { findUnique: jest.fn(async () => ({ name: 'wk-mac' })) },
-    budgetPolicy: { findUnique: jest.fn(async () => ({ scopeType: 'runner', scopeId: 'rn1' })) },
+    project: { findUnique: vi.fn(async () => ({ key: 'KODA' })) },
+    fleetRepo: { findUnique: vi.fn(async () => ({ owner: 'acme', name: 'app' })) },
+    runner: { findUnique: vi.fn(async () => ({ name: 'wk-mac' })) },
+    budgetPolicy: { findUnique: vi.fn(async () => ({ scopeType: 'runner', scopeId: 'rn1' })) },
   };
   const labels = new BudgetScopeLabels({ client: db } as never);
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => vi.clearAllMocks());
 
   it.each([
     [{ scopeType: 'global', scopeId: null }, 'global'],

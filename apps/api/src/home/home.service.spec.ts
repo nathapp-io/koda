@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 import { HomeService } from './home.service';
 import type { IHomeRepository } from './home.domain';
 import { HOME_LIMITS, type HomeApprovalRow, type HomeJobRow, type HomeProjectRow } from './home.types';
@@ -18,22 +19,22 @@ const job = (over: Partial<HomeJobRow> = {}): HomeJobRow => ({
   resultPrUrl: null, queuedAt: NOW, finishedAt: NOW, project: { slug: 'web' }, ...over,
 });
 
-function fakeRepo(over: Partial<IHomeRepository> = {}): jest.Mocked<IHomeRepository> {
+function fakeRepo(over: Partial<IHomeRepository> = {}): Mocked<IHomeRepository> {
   return {
-    findProjects: jest.fn().mockResolvedValue([project()]),
-    findMyTickets: jest.fn().mockResolvedValue([]),
-    countMyTickets: jest.fn().mockResolvedValue(0),
-    findPendingApprovals: jest.fn().mockResolvedValue([]),
-    countPendingApprovals: jest.fn().mockResolvedValue(0),
-    findFailedJobs: jest.fn().mockResolvedValue([]),
-    countFailedJobs: jest.fn().mockResolvedValue(0),
-    findBlockedJobs: jest.fn().mockResolvedValue([]),
-    countBlockedJobs: jest.fn().mockResolvedValue(0),
-    countOpenTicketsByProject: jest.fn().mockResolvedValue(new Map()),
-    countAttentionJobsByProject: jest.fn().mockResolvedValue(new Map()),
-    findRecentActivity: jest.fn().mockResolvedValue({ ticketEvents: [], agentEvents: [], decisionEvents: [] }),
+    findProjects: vi.fn().mockResolvedValue([project()]),
+    findMyTickets: vi.fn().mockResolvedValue([]),
+    countMyTickets: vi.fn().mockResolvedValue(0),
+    findPendingApprovals: vi.fn().mockResolvedValue([]),
+    countPendingApprovals: vi.fn().mockResolvedValue(0),
+    findFailedJobs: vi.fn().mockResolvedValue([]),
+    countFailedJobs: vi.fn().mockResolvedValue(0),
+    findBlockedJobs: vi.fn().mockResolvedValue([]),
+    countBlockedJobs: vi.fn().mockResolvedValue(0),
+    countOpenTicketsByProject: vi.fn().mockResolvedValue(new Map()),
+    countAttentionJobsByProject: vi.fn().mockResolvedValue(new Map()),
+    findRecentActivity: vi.fn().mockResolvedValue({ ticketEvents: [], agentEvents: [], decisionEvents: [] }),
     ...over,
-  } as jest.Mocked<IHomeRepository>;
+  } as Mocked<IHomeRepository>;
 }
 
 describe('HomeService', () => {
@@ -45,15 +46,15 @@ describe('HomeService', () => {
     expect(member.findMyTickets).toHaveBeenCalledWith('u1', ['p1'], HOME_LIMITS.tickets);
     expect(member.findFailedJobs).toHaveBeenCalledWith(['p1'], SINCE, HOME_LIMITS.jobs);
 
-    const admin = fakeRepo({ findProjects: jest.fn().mockResolvedValue([]) });
+    const admin = fakeRepo({ findProjects: vi.fn().mockResolvedValue([]) });
     await new HomeService(admin).snapshot({ id: 'u1', globalAdmin: true }, NOW);
     expect(admin.findPendingApprovals).toHaveBeenCalledWith({ projectIds: [], includeUnscoped: true }, HOME_LIMITS.pendingScan);
   });
 
   it('looks up blocked jobs from the pending approvals of the first wave and counts attention per project with them', async () => {
     const repo = fakeRepo({
-      findPendingApprovals: jest.fn().mockResolvedValue([approval({ jobId: 'j1' }), approval({ id: 'a2', jobId: 'j1' }), approval({ id: 'a3', jobId: null })]),
-      findBlockedJobs: jest.fn().mockResolvedValue([job({ id: 'j1', state: 'QUEUED', finishedAt: null })]),
+      findPendingApprovals: vi.fn().mockResolvedValue([approval({ jobId: 'j1' }), approval({ id: 'a2', jobId: 'j1' }), approval({ id: 'a3', jobId: null })]),
+      findBlockedJobs: vi.fn().mockResolvedValue([job({ id: 'j1', state: 'QUEUED', finishedAt: null })]),
     });
     const v = await new HomeService(repo).snapshot({ id: 'u1', globalAdmin: false }, NOW);
     expect(repo.findBlockedJobs).toHaveBeenCalledWith(['j1'], HOME_LIMITS.jobs);

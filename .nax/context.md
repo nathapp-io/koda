@@ -40,7 +40,7 @@ The architecture is client-server within a monorepo:
 - `apps/api` owns persistence, auth, domain rules, workflow transitions, RAG, and integrations
 - `apps/web` is a Nuxt 3 SSR client that proxies `/api/**` to the API service
 - `apps/cli` is a thin CLI client that calls the API through a generated OpenAPI client
-- shared TypeScript and ESLint config live in `packages/*`
+- shared TypeScript and ESLint config live in `packages/*`; `apps/api` lints with oxlint (`apps/api/.oxlintrc.json`) instead of ESLint
 
 The detailed architecture reference lives in `docs/architecture.md`.
 
@@ -51,12 +51,13 @@ The detailed architecture reference lives in `docs/architecture.md`.
 | Runtime | Node.js 22+ and Bun workspaces |
 | Language | TypeScript strict |
 | Monorepo | Turborepo |
-| API | NestJS 11 + Fastify + Prisma |
+| API | NestJS 12 + Fastify + Prisma |
 | Web | Nuxt 3 + Shadcn-nuxt + Tailwind CSS |
 | CLI | Commander.js 12 |
 | Runner | Bun-only ESM (`bun:sqlite`, `bun build --compile`), Commander.js 12 |
 | Database | Prisma on PostgreSQL 16 |
-| Test | Jest; Playwright in web |
+| Test | Vitest in api; Jest in cli and web; Playwright in web |
+| Lint | oxlint in api; ESLint in cli, web, runner |
 | i18n | API and web maintain separate translation systems |
 
 ## Workspace Responsibilities
@@ -114,7 +115,7 @@ Rules:
 | `bun run build` | Build all workspaces through Turbo |
 | `bun run dev` | Run workspace dev tasks |
 | `bun run test` | Run tests across workspaces |
-| `bun run lint` | Run ESLint across workspaces |
+| `bun run lint` | Run linters across workspaces (oxlint in api, ESLint elsewhere) |
 | `bun run type-check` | Run type checks across workspaces |
 | `bun run db:generate` | Regenerate Prisma client in `apps/api` |
 | `bun run db:migrate` | Apply/create Prisma migrations in `apps/api` |
@@ -162,8 +163,8 @@ Default organization rules:
 Repository rules:
 - do not create `us-XXX` folders under app `test/` directories
 - nax acceptance material belongs under `.nax/features/<feature>/`
-- each package's generated acceptance file is `apps/<app>/.nax/features/<feature>/.nax-acceptance.test.ts`; how to run it for one story (api: jest with `jest.nax.config.js`, web: `bun test`) is in that app's `.nax/mono/apps/<app>/context.md`
-- nax runs that touch `apps/api` need the compose test Postgres up (`bun run test:db:up` in `apps/api`): the agent shell has no Docker access, so its integration/e2e and PG-backed acceptance runs fail loudly without it instead of skipping. Outside the sandbox, DB-mode jest falls back to a Testcontainers Postgres
+- each package's generated acceptance file is `apps/<app>/.nax/features/<feature>/.nax-acceptance.test.ts`; how to run it for one story (api: vitest with `vitest.nax.config.ts`, web: `bun test`) is in that app's `.nax/mono/apps/<app>/context.md`
+- nax runs that touch `apps/api` need the compose test Postgres up (`bun run test:db:up` in `apps/api`): the agent shell has no Docker access, so its integration/e2e and PG-backed acceptance runs fail loudly without it instead of skipping. Outside the sandbox, DB-mode vitest falls back to a Testcontainers Postgres
 - app-specific test guidance belongs in `.nax/mono/apps/<app>/context.md`
 
 ## i18n

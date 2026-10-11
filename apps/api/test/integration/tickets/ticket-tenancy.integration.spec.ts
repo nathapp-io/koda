@@ -89,13 +89,13 @@ describeIntegration('H5 ticket tenancy', () => {
           // Real repositories against the real DB; transactions run inline.
           provide: TRANSACTION_MANAGER,
           useValue: {
-            run: jest.fn((fn: () => Promise<unknown>) => fn()),
-            getClient: jest.fn(),
-            isInTransaction: jest.fn(() => false),
+            run: vi.fn((fn: () => Promise<unknown>) => fn()),
+            getClient: vi.fn(),
+            isInTransaction: vi.fn(() => false),
           },
         },
-        { provide: TicketEventService, useValue: { create: jest.fn().mockResolvedValue({ id: 'evt-1' }) } },
-        { provide: OutboxService, useValue: { record: jest.fn().mockResolvedValue(undefined) } },
+        { provide: TicketEventService, useValue: { create: vi.fn().mockResolvedValue({ id: 'evt-1' }) } },
+        { provide: OutboxService, useValue: { record: vi.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 

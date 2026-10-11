@@ -1,3 +1,4 @@
+import type { Mocked } from 'vitest';
 import { KodaAgentAdapter } from './koda-agent-adapter';
 import { AgentRegistryService } from './agent-registry.service';
 import { ClaudeCodeAdapter } from './adapters/claude-code.adapter';
@@ -6,7 +7,7 @@ import type { GetProjectContextQuery, GetProjectContextResponse } from '../conte
 
 describe('KodaAgentAdapter', () => {
   let kodaAgentAdapter: KodaAgentAdapter;
-  let mockContextBuilder: jest.Mocked<ContextBuilderService>;
+  let mockContextBuilder: Mocked<ContextBuilderService>;
   let registry: AgentRegistryService;
 
   const mockQuery: GetProjectContextQuery = {
@@ -54,8 +55,8 @@ describe('KodaAgentAdapter', () => {
 
   beforeEach(() => {
     mockContextBuilder = {
-      getProjectContext: jest.fn(),
-    } as unknown as jest.Mocked<ContextBuilderService>;
+      getProjectContext: vi.fn(),
+    } as unknown as Mocked<ContextBuilderService>;
 
     registry = new AgentRegistryService();
     registry.register('claude-code', new ClaudeCodeAdapter());

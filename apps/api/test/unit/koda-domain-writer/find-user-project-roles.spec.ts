@@ -6,10 +6,10 @@ describe('#145 findUserProjectRoles', () => {
     const prismaMock = {
       client: {
         user: {
-          findUnique: jest.fn(() => new Promise((resolve) => { releaseUser = resolve; })),
+          findUnique: vi.fn(() => new Promise((resolve) => { releaseUser = resolve; })),
         },
         projectMember: {
-          findUnique: jest.fn(async () => ({ role: 'DEVELOPER' })),
+          findUnique: vi.fn(async () => ({ role: 'DEVELOPER' })),
         },
       },
     };

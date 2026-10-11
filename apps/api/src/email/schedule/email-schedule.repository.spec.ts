@@ -7,7 +7,7 @@ interface CreateArgs {
 /** Hermetic fake of the two Prisma delegates the invite paths touch. */
 function setup() {
   const emailSchedule = {
-    create: jest.fn(async ({ data }: CreateArgs) => ({
+    create: vi.fn(async ({ data }: CreateArgs) => ({
       id: 'row-1',
       kind: data['kind'] as string,
       notificationId: null,
@@ -19,7 +19,7 @@ function setup() {
       attempts: data['attempts'] as number,
       dueAt: data['dueAt'] as Date,
     })),
-    updateMany: jest.fn(async () => ({ count: 1 })),
+    updateMany: vi.fn(async () => ({ count: 1 })),
   };
   const repo = new EmailScheduleRepository({ client: { emailSchedule } } as never);
   return { repo, emailSchedule };

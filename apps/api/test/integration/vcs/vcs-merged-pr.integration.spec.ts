@@ -57,7 +57,7 @@ function makePrStatus(overrides: Partial<VcsPrStatus> = {}): VcsPrStatus {
 }
 
 describeIntegration('VCS merged-PR auto-transition (H6)', () => {
-  jest.setTimeout(20000);
+  vi.setConfig({ testTimeout: 20000 });
   let prisma: PrismaClient;
   let prismaService: PrismaService<PrismaClient>;
   let repo: PrismaVcsRepository;
@@ -146,14 +146,14 @@ describeIntegration('VCS merged-PR auto-transition (H6)', () => {
   });
 
   afterAll(async () => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
     if (prismaService) {
       await prismaService.onModuleDestroy();
     }
   });
 
   beforeEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   it('persists the FIX_REPORT comment (authorAgentId null) and advances the ticket when the PR merges', async () => {
@@ -164,8 +164,8 @@ describeIntegration('VCS merged-PR auto-transition (H6)', () => {
       mergedBy: 'alice',
       mergeSha: 'abc123',
     });
-    jest.spyOn(factory, 'createVcsProvider').mockReturnValue({
-      getPullRequestStatus: jest.fn().mockResolvedValue(mergedStatus),
+    vi.spyOn(factory, 'createVcsProvider').mockReturnValue({
+      getPullRequestStatus: vi.fn().mockResolvedValue(mergedStatus),
     } as unknown as IVcsProvider);
 
     const result = await syncService.syncPrStatus(
@@ -199,8 +199,8 @@ describeIntegration('VCS merged-PR auto-transition (H6)', () => {
     // Simulate an out-of-order/stale fetch that still returns the merged link
     // while the provider reports the PR as open (e.g. a delayed cached read).
     const staleOpenStatus = makePrStatus({ state: 'open', merged: false });
-    jest.spyOn(factory, 'createVcsProvider').mockReturnValue({
-      getPullRequestStatus: jest.fn().mockResolvedValue(staleOpenStatus),
+    vi.spyOn(factory, 'createVcsProvider').mockReturnValue({
+      getPullRequestStatus: vi.fn().mockResolvedValue(staleOpenStatus),
     } as unknown as IVcsProvider);
 
     const mergedLinkRow = await prisma.ticketLink.findUniqueOrThrow({
@@ -213,7 +213,7 @@ describeIntegration('VCS merged-PR auto-transition (H6)', () => {
     });
     expect(mergedLinkRow.prState).toBe('merged');
 
-    const findActiveSpy = jest
+    const findActiveSpy = vi
       .spyOn(repo, 'findActiveTicketLinksWithPrs')
       .mockResolvedValue([mergedLinkRow as never]);
 
@@ -244,8 +244,8 @@ describeIntegration('VCS merged-PR auto-transition (H6)', () => {
     // findActiveTicketLinksWithPrs must exclude terminal states, so polling
     // cannot retry (or regress) an already-merged link.
     const openStatus = makePrStatus();
-    jest.spyOn(factory, 'createVcsProvider').mockReturnValue({
-      getPullRequestStatus: jest.fn().mockResolvedValue(openStatus),
+    vi.spyOn(factory, 'createVcsProvider').mockReturnValue({
+      getPullRequestStatus: vi.fn().mockResolvedValue(openStatus),
     } as unknown as IVcsProvider);
 
     const activeLinks = await repo.findActiveTicketLinksWithPrs(projectId, connection);

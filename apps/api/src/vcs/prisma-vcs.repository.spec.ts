@@ -1,19 +1,19 @@
 import { PrismaVcsRepository } from './prisma-vcs.repository';
 
 describe('PrismaVcsRepository', () => {
-  const mockRun = jest.fn((fn: () => Promise<unknown>) => fn());
+  const mockRun = vi.fn((fn: () => Promise<unknown>) => fn());
   const mockTxManager = {
     run: mockRun,
-    getClient: jest.fn(),
-    isInTransaction: jest.fn(() => false),
+    getClient: vi.fn(),
+    isInTransaction: vi.fn(() => false),
   };
 
-  const mockFindFirst = jest.fn();
-  const mockCreate = jest.fn();
-  const mockFindMany = jest.fn();
-  const mockUpdate = jest.fn();
-  const mockCommentCreate = jest.fn();
-  const mockActivityCreate = jest.fn();
+  const mockFindFirst = vi.fn();
+  const mockCreate = vi.fn();
+  const mockFindMany = vi.fn();
+  const mockUpdate = vi.fn();
+  const mockCommentCreate = vi.fn();
+  const mockActivityCreate = vi.fn();
 
   const mockPrisma = {
     client: {
@@ -27,7 +27,7 @@ describe('PrismaVcsRepository', () => {
   let repo: PrismaVcsRepository;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     repo = new PrismaVcsRepository(mockTxManager as never, mockPrisma as never);
   });
 

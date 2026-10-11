@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { Readable } from 'stream'
 import { DEFAULT_RAW_BODY_LIMIT_BYTES, registerRawBodyHook } from './raw-body.hook'
 
@@ -24,8 +25,8 @@ function asPayload(buffer: Buffer): AsyncIterable<Buffer> {
   return Readable.from([buffer])
 }
 
-function replySpy(): { code: jest.Mock; send: jest.Mock } {
-  return { code: jest.fn().mockReturnThis(), send: jest.fn() }
+function replySpy(): { code: Mock; send: Mock } {
+  return { code: vi.fn().mockReturnThis(), send: vi.fn() }
 }
 
 function makeRequest(headers: Record<string, string>): HookRequest {

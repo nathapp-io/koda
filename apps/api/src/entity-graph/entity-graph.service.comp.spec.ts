@@ -10,15 +10,15 @@ describe('EntityGraphService comprehensive coverage', () => {
   beforeEach(() => {
     entityStore = new InMemoryEntityStore();
     mockEntityGraphRepo = {
-      findTicketsWithLabelsAndLinks: jest.fn().mockResolvedValue([]),
-      findGraphNodesByType: jest.fn().mockResolvedValue([]),
-      findGraphLinksByRelation: jest.fn().mockResolvedValue([]),
+      findTicketsWithLabelsAndLinks: vi.fn().mockResolvedValue([]),
+      findGraphNodesByType: vi.fn().mockResolvedValue([]),
+      findGraphLinksByRelation: vi.fn().mockResolvedValue([]),
     };
     service = new EntityGraphService(entityStore, mockEntityGraphRepo);
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('rebuildGraph with Prisma', () => {
