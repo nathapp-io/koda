@@ -10,6 +10,7 @@ import { NaxCapabilityProbe } from '../../src/capabilities/nax-probe';
 import { LogShipper } from '../../src/logs/log-shipper';
 import type { LogShipperTuning } from '../../src/logs/log-shipper';
 import { ServerClient } from '../../src/sync/http';
+import { THREAD_STREAM } from '@nathapp/fleet-protocol';
 
 const tmp = makeTempDirs();
 afterAll(() => tmp.cleanup());
@@ -74,8 +75,9 @@ describe('US-002 thread log shipping', () => {
     const contents = '{"a":1}\n';
     await writeFile(threadPath, contents);
     expect(registerThread(logs, threadPath)).toBeUndefined();
-    await waitFor(() => server.stored('j1:1:thread') === contents);
-    expect(server.stored('j1:1:thread')).toBe(contents);
+    const streamKey = `j1:1:${THREAD_STREAM}`;
+    await waitFor(() => server.stored(streamKey) === contents);
+    expect(server.stored(streamKey)).toBe(contents);
   });
 
   test('AC-1: does not create an empty thread stream when the path is missing', async () => {
@@ -92,7 +94,7 @@ describe('US-002 thread log shipping', () => {
     await writeFile(threadPath, '{"a":1}\n');
     expect(registerThread(logs, threadPath)).toBeUndefined();
     await waitFor(() => server.calls.length > 0);
-    expect(server.calls.map((call) => call.stream)).toEqual(['thread']);
+    expect(server.calls.map((call) => call.stream)).toEqual([THREAD_STREAM]);
   });
 
   test('AC-2: registering an empty thread creates no ordinary log streams', async () => {
@@ -109,10 +111,11 @@ describe('US-002 thread log shipping', () => {
     const threadPath = join(await tmp.make('thread-append'), 'thread.jsonl');
     await writeFile(threadPath, '{"a":1}\n');
     expect(registerThread(logs, threadPath)).toBeUndefined();
-    await waitFor(() => server.stored('j1:1:thread') === '{"a":1}\n');
+    const streamKey = `j1:1:${THREAD_STREAM}`;
+    await waitFor(() => server.stored(streamKey) === '{"a":1}\n');
     await appendFile(threadPath, '{"b":2}\n');
     expect(await logs.drain('j1', 1, 5_000)).toBe('drained');
-    expect(server.stored('j1:1:thread')).toBe('{"a":1}\n{"b":2}\n');
+    expect(server.stored(streamKey)).toBe('{"a":1}\n{"b":2}\n');
   });
 
   test('AC-3: draining an empty thread stream completes without inventing contents', async () => {
@@ -130,7 +133,7 @@ describe('US-002 thread log shipping', () => {
     await writeFile(threadPath, '{"a":1}\n');
     expect(registerThread(logs, threadPath)).toBeUndefined();
     expect(await logs.drain('j1', 1, 5_000)).toBe('drained');
-    expect(server.calls.filter((call) => call.stream === 'thread').at(-1)?.final).toBe(true);
+    expect(server.calls.filter((call) => call.stream === THREAD_STREAM).at(-1)?.final).toBe(true);
   });
 
   test('AC-4: an empty registered thread still receives a final PUT at drain', async () => {
@@ -139,7 +142,7 @@ describe('US-002 thread log shipping', () => {
     await writeFile(threadPath, '');
     expect(registerThread(logs, threadPath)).toBeUndefined();
     expect(await logs.drain('j1', 1, 5_000)).toBe('drained');
-    expect(server.calls.at(-1)).toMatchObject({ stream: 'thread', final: true });
+    expect(server.calls.at(-1)).toMatchObject({ stream: THREAD_STREAM, final: true });
   });
 
   test('AC-10: nax stdout continues to ship and drain as stdout', async () => {
@@ -169,7 +172,7 @@ describe('US-002 thread backends and stream transport', () => {
       },
     });
     await client.putLog({ jobId: 'j1', stream: 'thread', leaseEpoch: 1, offset: 0, bytes: Buffer.from('x'), final: false });
-    expect(requestedPath?.endsWith('/fleet/runner/jobs/j1/logs/thread')).toBe(true);
+    expect(requestedPath).toBe('/api/fleet/runner/jobs/j1/logs/thread');
   });
 
   test('AC-5: thread URL is scoped to its job and not an ordinary stream', async () => {
@@ -182,7 +185,7 @@ describe('US-002 thread backends and stream transport', () => {
       },
     });
     await client.putLog({ jobId: 'other', stream: 'thread', leaseEpoch: 1, offset: 0, bytes: new Uint8Array(), final: true });
-    expect(requestedPath?.endsWith('/fleet/runner/jobs/other/logs/thread')).toBe(true);
+    expect(requestedPath).toBe('/api/fleet/runner/jobs/other/logs/thread');
   });
 
   test('AC-6: advertises configured native models only when their provider credential is available', async () => {
