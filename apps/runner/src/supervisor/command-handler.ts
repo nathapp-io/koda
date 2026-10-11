@@ -95,7 +95,7 @@ export class CommandHandler {
       case 'THREAD_STOP_TURN':
       case 'THREAD_CLOSE':
       case 'THREAD_PUBLISH': {
-        const outcome: Outcome = supervisor.threadCommand(command);
+        const outcome: Outcome = await supervisor.threadCommand(command);
         this.record(command, outcome);
         return outcome;
       }

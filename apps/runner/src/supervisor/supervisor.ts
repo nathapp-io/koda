@@ -25,6 +25,7 @@ type ActiveRun = JobRun | ThreadJobRun;
 export class Supervisor {
   private readonly runs = new Map<string, ActiveRun>();
   private readonly pending = new Set<Promise<void>>();
+  private readonly threadPending = new Set<Promise<void>>();
 
   constructor(private readonly deps: SupervisorDeps) {}
 
@@ -34,11 +35,14 @@ export class Supervisor {
 
   private track(key: string, run: ActiveRun, from: RunStart): void {
     this.runs.set(key, run);
+    const isThread = run instanceof ThreadJobRun;
     const promise: Promise<void> = run.start(from).finally(() => {
       this.runs.delete(key);
       this.pending.delete(promise);
+      this.threadPending.delete(promise);
     });
     this.pending.add(promise);
+    if (isThread) this.threadPending.add(promise);
   }
 
   private threadDeps(threads: ThreadRunSetup): ThreadRunDeps {
@@ -67,7 +71,9 @@ export class Supervisor {
   }
 
   /** Fleet S5a §5: a THREAD command reaches the run that holds the (job, epoch); any other row is not held. */
-  threadCommand(command: FleetCommandOut): ThreadCommandOutcome {
+  async threadCommand(command: FleetCommandOut): Promise<ThreadCommandOutcome> {
+    const row = this.deps.journal.getJob(command.jobId, command.leaseEpoch);
+    if (row === null || isTerminalState(row.state) || row.doneAt !== null) return { result: 'rejected', detail: 'does not hold job' };
     const run = this.runs.get(this.key(command.jobId, command.leaseEpoch));
     if (!(run instanceof ThreadJobRun)) return { result: 'rejected', detail: 'does not hold job' };
     return run.command(command.type as ThreadCommandType, command.payload);
@@ -201,6 +207,11 @@ export class Supervisor {
   }
 
   async idle(): Promise<void> {
-    await Promise.allSettled([...this.pending]);
+    // Thread sessions intentionally remain live after setup; idle waits for their ASSIGNED startup to settle,
+    // but not for the session itself to close.
+    while (this.threadPending.size > 0 && this.deps.journal.activeJobs().some((row) => row.command === 'THREAD' && row.state === 'ASSIGNED')) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    await Promise.allSettled([...this.pending].filter((promise) => !this.threadPending.has(promise)));
   }
 }

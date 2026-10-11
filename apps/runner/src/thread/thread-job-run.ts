@@ -479,6 +479,7 @@ export class ThreadJobRun {
     const costUsd: unknown = event.costUsd;
     if (typeof costUsd !== 'number' || !Number.isFinite(costUsd) || costUsd < 0) return;
     this.spent += costUsd;
+    this.deps.journal.updateJob(this.jobId, this.leaseEpoch, { costSpentUsd: String(this.spent) });
     if (this.spent >= this.maxCostUsd) this.requestClose('cost_cap');
   }
 
@@ -652,7 +653,10 @@ export class ThreadJobRun {
    * so a command never waits on a turn, a close or a drain. A `THREAD_INPUT` that returns `ok` has already claimed
    * the turn slot, so a second one in the same batch sees `turn_running` (B3-R5, no input queue).
    */
-  command(type: ThreadCommandType, payload: unknown): ThreadCommandOutcome {
+  command(type: 'THREAD_INPUT' | 'THREAD_STOP_TURN' | 'THREAD_CLOSE' | 'THREAD_PUBLISH', payload: unknown): ThreadCommandOutcome;
+  command(type: 'THREAD_ANSWER', payload: unknown): ThreadCommandOutcome;
+  command(type: ThreadCommandType, payload: unknown): ThreadCommandOutcome | Promise<ThreadCommandOutcome>;
+  command(type: ThreadCommandType, payload: unknown): ThreadCommandOutcome | Promise<ThreadCommandOutcome> {
     if (type === 'THREAD_PUBLISH') return { result: 'rejected', detail: 'unsupported' };
     if (this.closing || this.halted) return { result: 'rejected', detail: 'session_closed' };
     // A command only applies once the run can actually keep it: the row goes RUNNING before `openStream` awaits
@@ -677,14 +681,21 @@ export class ThreadJobRun {
   }
 
   /** nax-agent decides whether the ask is still answerable; its status is the ack's detail when it is not. */
-  private applyAnswer(payload: unknown): ThreadCommandOutcome {
+  private applyAnswer(payload: unknown): ThreadCommandOutcome | Promise<ThreadCommandOutcome> {
     const answer = readAnswer(payload);
     if (answer === null) return { result: 'rejected', detail: 'invalid payload' };
     const session = this.session;
     if (session === null) return { result: 'rejected', detail: 'session_not_ready' };
     try {
-      const status = session.answer(answer.requestId, { text: answer.text });
-      return status === 'accepted' ? { result: 'ok' } : { result: 'rejected', detail: status };
+      const status: unknown = session.answer(answer.requestId, { text: answer.text });
+      if (status instanceof Promise) {
+        return status.then((value: string) => value === 'accepted' ? { result: 'ok' as const } : { result: 'rejected' as const, detail: String(value) })
+          .catch((error: unknown) => {
+            this.deps.log.warn('thread session answer failed', { jobId: this.jobId, error: errorMessage(error) });
+            return { result: 'rejected' as const, detail: 'unknown' };
+          });
+      }
+      return status === 'accepted' ? { result: 'ok' } : { result: 'rejected', detail: String(status) };
     } catch (error) {
       // A throwing answer must not escape `command`: the sync loop awaits `CommandHandler.handle` inline. nax-agent
       // throws `AGENT_SESSION_INVALID_ANSWER` for a request id it never issued, so the ask is gone either way — the
