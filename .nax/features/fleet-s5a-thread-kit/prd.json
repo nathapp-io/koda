@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-kit",
   "branchName": "feat/fleet-s5a-thread-kit",
   "createdAt": "2026-10-11T00:00:00.000Z",
-  "updatedAt": "2026-10-11T07:27:04.517Z",
+  "updatedAt": "2026-10-11T08:17:07.091Z",
   "userStories": [
     {
       "id": "US-001",
@@ -279,8 +279,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -346,7 +346,10 @@
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Agent sessions, credentials/auth mapping and mandatory read-only profile are security-critical, with injection and transcript fallback complexity."
+        "reasoning": "Agent sessions, credentials/auth mapping and mandatory read-only profile are security-critical, with injection and transcript fallback complexity.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/runner/src/thread/native-models.ts",
@@ -362,7 +365,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "8b90c678e20cc95389b1bbf1f6475f80d2a1ccbe"
     },
     {
       "id": "US-007",
