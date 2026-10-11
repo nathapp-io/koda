@@ -71,7 +71,7 @@ function setup(options: {
     id: 'thread-1', backend: { kind: 'native', capabilities: {} }, lastTurn: undefined,
     async *send(text: string) {
       if (options.send === undefined) { yield completed as never; return; }
-      yield* options.send(text);
+      yield* options.send(text) as AsyncIterable<never>;
     },
     answer: () => 'accepted', cancel: () => { cancelCalls += 1; },
     close: async () => { closeCalls += 1; },
