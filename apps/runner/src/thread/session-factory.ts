@@ -88,10 +88,10 @@ export class ThreadSessionFactory {
           },
         },
       } satisfies NativeBackendOptions;
-      this.agent.nativeBackend(backendOptions);
+      const backend = this.agent.nativeBackend(backendOptions);
       const approvalTimeoutMs = Math.min(3_600_000, Math.max(30_000, input.approvalTimeoutSec * 1000));
       const sessionOptions: CreateAgentSessionOptions = {
-        backend: backendOptions as unknown as CreateAgentSessionOptions['backend'],
+        backend,
         profile: 'read',
         workdir: input.worktree,
         instructions: thread.instructions,
