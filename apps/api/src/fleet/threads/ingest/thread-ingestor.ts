@@ -108,7 +108,7 @@ export class ThreadIngestor {
               } catch (error) {
                 this.logger.error(`Failed to fold thread line for job ${jobId} at ${entry.endOffset}`, error);
                 await this.foldAndPublish({
-                  jobId, leaseEpoch, lines: [{ line: parsed, endOffset: entry.endOffset }],
+                  jobId, leaseEpoch, lines: [{ line: { bad: true } as unknown as ThreadLine, endOffset: entry.endOffset }],
                   endOffset: entry.endOffset, badLines: 1, rejectedLine: true,
                 });
               }
