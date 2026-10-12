@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-web",
   "branchName": "feat/fleet-s5a-thread-web",
   "createdAt": "2026-10-12T00:00:00.000Z",
-  "updatedAt": "2026-10-12T11:44:40.478Z",
+  "updatedAt": "2026-10-12T12:06:08.118Z",
   "userStories": [
     {
       "id": "US-001",
@@ -33,8 +33,8 @@
         "security"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -127,7 +127,10 @@
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "New pure client/stream abstractions and nested Nitro integration involve cookie forwarding, auth recovery and untrusted route validation, invoking the security override."
+        "reasoning": "New pure client/stream abstractions and nested Nitro integration involve cookie forwarding, auth recovery and untrusted route validation, invoking the security override.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/lib/project-event-stream.ts",
@@ -149,7 +152,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "32ce0e7b579460ff03a962dc8c5f792ea542a1dc"
     },
     {
       "id": "US-003",
