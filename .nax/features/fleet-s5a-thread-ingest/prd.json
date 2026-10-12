@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-ingest",
   "branchName": "feat/fleet-s5a-thread-ingest",
   "createdAt": "2026-10-12T00:00:00.000Z",
-  "updatedAt": "2026-10-12T06:57:51.177Z",
+  "updatedAt": "2026-10-12T07:35:18.394Z",
   "userStories": [
     {
       "id": "US-001",
@@ -387,8 +387,8 @@
       "dependencies": [
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -454,7 +454,10 @@
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "One new lifecycle class with a repository query and a small additive change to a dashboard repository return shape; standard patterns."
+        "reasoning": "One new lifecycle class with a repository query and a small additive change to a dashboard repository return shape; standard patterns.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/dashboard/prisma-dashboard.repository.ts",
@@ -483,7 +486,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "0df98b978abe6a5f57d36f44fb68a8b33e3e1690"
     }
   ],
   "analysis": "Feature B2 of fleet S5a phase B. The runner (B3b, #260) ships brainstorm-thread session events as JSONL on a `thread` log stream (PUT /fleet/runner/jobs/:jobId/logs/thread); the API refuses it today (400 fleet.logInput). This feature accepts the stream, folds it durably exactly-once into ChatThread/ChatMessage/FleetCostEvent rows, adds a content SSE per thread, puts THREAD jobs under budget hard stops, and fixes dashboard load classification. All work is in apps/api (plus openapi.json regeneration in US-004). Umbrella design: docs/superpowers/specs/2026-10-10-fleet-s5a-chat-threads-design.md (§2.4, §3.2-3.4).\n\nKEY FILES (verified on main 88686af2 per spec): apps/api/src/fleet/logs/{log-upload.service.ts, log-store.ts, log-read.service.ts, logs.module.ts, domain/fleet-job-log.domain.ts}; apps/api/src/fleet/common/thread-jobs.ts (mirror of package constants; API may only `import type` from packages/fleet-protocol because the image does not ship packages/, protocol.spec.ts pins it); packages/fleet-protocol/src/threads.ts (THREAD_STREAM, THREAD_STREAM_LIMITS, ThreadRunnerLine); apps/api/src/fleet/threads/{prisma-chat-thread.repository.ts (seq allocation SQL ~:166, mapMessage ~:260, messages() ~:71), thread-job-effects.ts, threads.module.ts, threads.service.ts, domain/chat-thread.domain.ts, dto/thread.dto.ts}; apps/api/src/fleet/budgets/{prisma-budget.repository.ts:22, budget-evaluator.ts:53, budget-rules.ts:45}; apps/api/src/fleet/dashboard/{prisma-dashboard.repository.ts:67-73, domain/dashboard.domain.ts:15, dashboard.service.ts}; apps/api/src/fleet/jobs/placement-rules.ts:146-155 (toLoads); apps/api/src/live/{live.controller.ts, live-stream.ts, live-stream-registry.ts, live.module.ts}; apps/api/src/fleet/sync/command-ack.processor.ts (calls onInputAck); apps/api/src/fleet/analytics/prisma-analytics.repository.ts (spend panels read FleetCostEvent only); apps/api/prisma/schema.prisma (FleetCostEvent at ~:1248).\n\nARCHITECTURE: LogUploadService.upload -> store.withLock(logKey) append -> (lock released) -> LogAppendHooks.run({jobId,leaseEpoch,stream}) -> ThreadIngestor.catchUp (registered by ThreadIngestModule.onModuleInit via a closure that calls this.ingestor.catchUp at call time so vi.spyOn sees it). catchUp takes store.withLock(logKey(...,'thread')) itself (KeyedMutex is in-process and NOT re-entrant: the hook must run after the upload's lock is released). It reads the cursor, scans [offset, min(size, offset+logScanBytes)) up to the last newline, parses lines (thread-line.ts, untrusted), and folds a batch in ONE transaction via ThreadIngestRepository.fold(batch): lock job row then thread row (B1 lock order, job then thread), apply per-line effects (thread-fold.ts), re-derive cost, upsert cursor offset + skippedLines. On fold failure retry one line at a time; a line that still fails is folded as a bad line (B2-D8). After commit publish ThreadEventBus events and BudgetEvaluator.signal(jobSpendKeys(job)) if cost changed. A failing fold never fails the upload (B2-D1).\n\nRULINGS: B2-R1 cost = per-usage-line plus turn_end reconcile of the excess above summed usage; B2-R2 one FleetCostEvent per priced usage line and per positive reconcile (callId `<turnId>:<round>` and `<turnId>:turn_end`); B2-R3 ChatThread.session Json. B2-D2 no in-memory delta buffer; B2-D3 pendingQuestion cleared on THREAD_ANSWER ok-ack, turn_end, and job end (B1); B2-D4 informational question -> toolSummary entry ask_human; B2-D5 raw thread stream never served by job-log routes (list omits, entries/raw 404 fleet.logs, no fleet_log live event); B2-D6 money never accumulated by repeated rounding: exact sums of FleetCostEvent.costUsd (14,8) re-derived after each fold, round4 half-up once, all with Prisma.Decimal; B2-D7 SSE events carry messageId (not id) and `thread` events carry no state; B2-D8 line-by-line retry.\n\nMIGRATION: new migration apps/api/prisma/migrations/20261014090000_thread_ingest/migration.sql adds ThreadIngestCursor (PK jobId+leaseEpoch, FK to FleetJob ON DELETE CASCADE), ChatThread.session jsonb null, ChatMessage.streamRound / streamRoundStart int null. Integration suites build their schema from schema.prisma. Existing rows must be unaffected (session stays null).\n\nRISKS: (1) Non-reentrant KeyedMutex deadlock if the hook runs inside the upload lock. (2) Lock-order inversions: always job row then thread row. (3) NUL chars in strings must be replaced with U+FFFD before any DB write. (4) mapMessage must hide the fold-internal streamRound columns from list and send payloads. (5) logKey/isUploadStream widening must not leak `thread` into LogReadService/LogFallbackService/LiveFleetLogEvent (keep narrow LogStreamName; isLogStream('thread') stays false). (6) Existing fleet-dashboard-repository.integration.spec.ts held-refs assertion must gain command: 'RUN'. (7) ThreadsModule gains LiveModule and AuthModule imports; threads.module.spec.ts compiles with stubs and must keep passing. (8) Cost comparisons must use Prisma.Decimal not floats. (9) Do not edit generated files; regenerate openapi.json with `bun run api:export-spec` in US-004. (10) Test conventions: unit tests src/**/*.spec.ts, integration under apps/api/test/integration/**; do not create us-XXX folders. Integration for apps/api needs the test Postgres (`bun run test:db:up` in apps/api).\n\nSTORY ORDER: US-001 (stream acceptance, hook, schema, fixtures) -> US-002 (ingestor engine, parser, cursor) -> US-003 (assistant lifecycle) -> US-004 (tools/questions/session, ack clear, DTO) -> US-005 (cost, budgets, analytics) -> US-006 (SSE) -> US-007 (bootstrap + dashboard). The structure is binding.",
