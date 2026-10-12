@@ -164,6 +164,28 @@ describe('LogUploadService', () => {
       expect(live.touch).not.toHaveBeenCalled();
     });
 
+    it('US-001: a final thread upload (complete) calls the hook once and skips the live touch', async () => {
+      const hook = vi.fn(recorder(hookCalls));
+      svc = withHooks(hooksFor(hook));
+      await threadUp('{"a":1}\n');
+      await expect(threadUp('', { offsetRaw: '8', finalRaw: '1' })).resolves.toEqual({ outcome: 'complete', size: 8 });
+      expect(hook).toHaveBeenCalledTimes(2);
+      expect(hook).toHaveBeenLastCalledWith({ jobId: job.id, leaseEpoch: 1, stream: 'thread' });
+      expect(live.touch).not.toHaveBeenCalled();
+    });
+
+    it('US-001: a thread upload to a truncated stream (stream_cap) calls the hook once and skips the live touch', async () => {
+      // A capped stream holds its bytes on disk as well as the truncated row.
+      await store.append(logKey(job.id, 1, 'thread'), 0, Buffer.from('{"a":1}\n'));
+      await logs.upsertStream(job.id, 1, 'thread', { sizeBytes: 8, truncated: true });
+      const hook = vi.fn(recorder(hookCalls));
+      svc = withHooks(hooksFor(hook));
+      await expect(threadUp('{"b":2}\n', { offsetRaw: '8' })).resolves.toEqual({ outcome: 'stream_cap', size: 8 });
+      expect(hook).toHaveBeenCalledTimes(1);
+      expect(hook).toHaveBeenCalledWith({ jobId: job.id, leaseEpoch: 1, stream: 'thread' });
+      expect(live.touch).not.toHaveBeenCalled();
+    });
+
     it('US-001 AC10: an identical repeat of a thread upload (duplicate) does not call the hook again', async () => {
       const hook = vi.fn(recorder(hookCalls));
       svc = withHooks(hooksFor(hook));

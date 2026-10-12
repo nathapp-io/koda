@@ -95,7 +95,8 @@ describeIntegration('fleet thread log stream (PG, US-001)', () => {
   });
 
   it('US-001 AC7: an appended thread upload publishes no fleet_log, and a run upload of another job does', async () => {
-    const before = events.length;
+    // Its own THREAD job, so the thread upload below is a real `appended` at offset 0 and does not depend on AC3.
+    const liveThread = await seedThreadJob(server, prisma, world, { feature: 'live-thread' });
     const runJob = await prisma.fleetJob.create({
       data: {
         projectId: world.projectId, repoId: world.repoId, ref: 'trunk', command: 'RUN', feature: 'live-run', profiles: [],
@@ -103,11 +104,15 @@ describeIntegration('fleet thread log stream (PG, US-001)', () => {
         runnerId: thread.runnerId, leaseEpoch: 1,
       },
     });
+    const before = events.length;
+    const threadRes = await request(server).put(`/api/fleet/runner/jobs/${liveThread.jobId}/logs/thread?leaseEpoch=1&offset=0`)
+      .set({ Authorization: `Bearer ${liveThread.runnerKey}`, 'content-type': 'application/octet-stream', 'x-content-sha256': sha256Hex(Buffer.from('{"type":"turn_end"}\n')) })
+      .send(Buffer.from('{"type":"turn_end"}\n')).expect(200);
+    expect(threadRes.body.data).toEqual({ outcome: 'appended', size: 20 });
     const runBody = Buffer.from('run line\n');
     await request(server).put(`/api/fleet/runner/jobs/${runJob.id}/logs/run?leaseEpoch=1&offset=0`)
       .set({ Authorization: `Bearer ${thread.runnerKey}`, 'content-type': 'application/octet-stream', 'x-content-sha256': sha256Hex(runBody) })
       .send(runBody).expect(200);
-    await putThreadLines(server, thread.runnerKey, { id: thread.jobId }, ['{"type":"turn_end"}'], 40);
     const fresh = events.slice(before).filter((e): e is Extract<LiveEvent, { type: 'fleet_log' }> => e.type === 'fleet_log');
     expect(fresh.map((e) => e.jobId)).toEqual([runJob.id]);
   });
