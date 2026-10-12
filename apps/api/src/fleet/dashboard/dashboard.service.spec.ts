@@ -14,7 +14,7 @@ const rawRunner = (over: Partial<RawRunnerRow> = {}): RawRunnerRow => ({
 function fakeRepo(over: Partial<IDashboardRepository> = {}): Mocked<IDashboardRepository> {
   return {
     findRunners: vi.fn().mockResolvedValue([rawRunner(), rawRunner({ id: 'r2', name: 'corrupt', capabilities: { broken: true } })]),
-    findHeldRefs: vi.fn().mockResolvedValue([{ runnerId: 'r1', repoId: 'repo1' }]),
+    findHeldRefs: vi.fn().mockResolvedValue([{ runnerId: 'r1', repoId: 'repo1', command: 'RUN' }]),
     findActiveJobs: vi.fn().mockResolvedValue([dashJob({ lastHeartbeatAt: secAgo(700) })]),
     findQueuedWindow: vi.fn().mockResolvedValue([]),
     findRecentJobs: vi.fn().mockResolvedValue([]),

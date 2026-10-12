@@ -6,6 +6,7 @@ import { LogsModule } from '../../logs/logs.module';
 import { LogAppendHooks } from '../../logs/log-append-hooks';
 import { THREAD_STREAM } from '../../common/thread-jobs';
 import { ThreadIngestor, THREAD_INGEST_REPOSITORY } from './thread-ingestor';
+import { ThreadIngestBootstrap, THREAD_UNFOLDED_STREAM_SOURCE } from './thread-ingest.bootstrap';
 import { PrismaThreadIngestRepository } from './prisma-thread-ingest.repository';
 
 @Injectable()
@@ -22,8 +23,10 @@ class ThreadIngestHook implements OnModuleInit {
   providers: [
     PrismaThreadIngestRepository,
     { provide: THREAD_INGEST_REPOSITORY, useExisting: PrismaThreadIngestRepository },
+    { provide: THREAD_UNFOLDED_STREAM_SOURCE, useExisting: PrismaThreadIngestRepository },
     ThreadIngestor,
     ThreadIngestHook,
+    ThreadIngestBootstrap,
   ],
   exports: [ThreadIngestor],
 })

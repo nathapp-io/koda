@@ -8,12 +8,17 @@ import { jobSpendKeys } from '../../budgets/budget-rules';
 import { round4 } from './thread-cost';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { ThreadIngestBatch, ThreadIngestRepository, FoldResult } from './thread-ingestor';
+import type { UnfoldedStream } from './thread-ingest.bootstrap';
+import { ACTIVE_STATES } from '../../jobs/job-state';
 import type { AssistantThreadLine, QuestionThreadLine, SessionThreadLine, ThreadLine, ToolThreadLine, UsageThreadLine } from './thread-line';
 import {
   linkApprovalRequest, setApprovalDecision, setToolResult, upsertInformationalQuestion, upsertToolCall, type ToolSummaryEntry,
 } from './tool-summary';
 
 const ERROR_REASON_MAX = 200;
+
+/** Startup catch-up cap per boot (US-007). */
+const UNFOLDED_STREAM_LIMIT = 200;
 
 const QUESTION_TEXT_MAX = 2048;
 
@@ -35,6 +40,23 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly budgets: BudgetEvaluator,
   ) {}
+
+  /** Startup catch-up candidates (US-007): a THREAD attempt whose stream holds bytes past its cursor, at most 200. */
+  async findUnfolded(): Promise<UnfoldedStream[]> {
+    const rows = await this.prisma.client.$queryRaw<Array<{ jobId: string; leaseEpoch: number }>>`
+      SELECT j."id" AS "jobId", j."leaseEpoch" AS "leaseEpoch"
+      FROM "FleetJob" j
+      JOIN "FleetJobLog" l ON l."jobId" = j."id" AND l."leaseEpoch" = j."leaseEpoch" AND l."stream" = 'thread'
+      LEFT JOIN "ThreadIngestCursor" c ON c."jobId" = j."id" AND c."leaseEpoch" = j."leaseEpoch"
+      WHERE j."command" = 'THREAD'
+        AND (j."state" IN (${Prisma.join([...ACTIVE_STATES])})
+          OR j."finishedAt" >= now() - interval '24 hours')
+        AND l."sizeBytes" > COALESCE(c."offset", 0)
+      ORDER BY j."queuedAt" ASC, j."id" ASC
+      LIMIT ${UNFOLDED_STREAM_LIMIT}
+    `;
+    return rows;
+  }
 
   async readCursor(jobId: string, leaseEpoch: number): Promise<{ offset: number; skippedLines: number }> {
     const cursor = await this.prisma.client.threadIngestCursor.findUnique({

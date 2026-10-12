@@ -76,7 +76,7 @@ describeIntegration('fleet dashboard repository (PG)', () => {
   it('counts active states per scope and lists held refs across projects', async () => {
     expect(Object.fromEntries(await repo.countActiveByState({ kind: 'global' }))).toEqual({ RUNNING: 1, QUEUED: 1 });
     expect(Object.fromEntries(await repo.countActiveByState({ kind: 'project', projectId: web.projectId }))).toEqual({ RUNNING: 1 });
-    expect(await repo.findHeldRefs()).toEqual([{ runnerId, repoId: web.repoId }]);
+    expect(await repo.findHeldRefs()).toEqual([{ runnerId, repoId: web.repoId, command: 'RUN' }]);
   });
 
   it('reads recent terminal jobs inside the window, newest first, with the runner name', async () => {
@@ -101,5 +101,11 @@ describeIntegration('fleet dashboard repository (PG)', () => {
     const [summary] = await repo.pendingSummaryByJob([target.id]);
     expect(Math.round((Date.now() - summary.oldestRequestedAt.getTime()) / 60_000)).toBe(3);
     expect(await repo.pendingSummaryByJob([])).toEqual([]);
+  });
+
+  it('US-007 AC6: a held THREAD job is listed with command THREAD', async () => {
+    const threadRunnerId = (await insertRunner(prisma, { name: 'thread-holder' })).id;
+    await job(web, { command: 'THREAD', feature: 'thread-held', state: 'RUNNING', runnerId: threadRunnerId });
+    expect(await repo.findHeldRefs()).toContainEqual({ runnerId: threadRunnerId, repoId: web.repoId, command: 'THREAD' });
   });
 });

@@ -12,7 +12,7 @@ export interface IDashboardRepository {
   /** Every runner, ordered by name then id. */
   findRunners(): Promise<RawRunnerRow[]>;
   /** Every runner-held job (ASSIGNED, RUNNING, UPLOADING) across all projects. */
-  findHeldRefs(): Promise<Array<{ runnerId: string; repoId: string }>>;
+  findHeldRefs(): Promise<Array<{ runnerId: string; repoId: string; command: string }>>;
   /** Active jobs in scope, oldest queuedAt first then id; at most `limit`. */
   findActiveJobs(scope: DashboardScope, limit: number): Promise<DashboardJobRow[]>;
   /** The globally oldest QUEUED jobs (any project, soft-deleted included): the window fillRunner scans (D407). */
