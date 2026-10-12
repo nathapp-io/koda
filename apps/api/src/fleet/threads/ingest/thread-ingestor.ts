@@ -5,6 +5,7 @@ import { LOG_STORE } from '../../logs/log-store';
 import type { LogStore } from '../../logs/log-store';
 import { logKey } from '../../logs/log-store';
 import { parseThreadLine, type ThreadLine } from './thread-line';
+import { ThreadEventBus, type ThreadLiveEvent } from '../../../live/thread-event-bus';
 
 export const THREAD_INGEST_REPOSITORY: unique symbol = Symbol('THREAD_INGEST_REPOSITORY');
 
@@ -19,7 +20,7 @@ export interface ThreadIngestBatch {
 
 export interface FoldResult {
   costChanged: boolean;
-  events: readonly unknown[];
+  events: readonly ThreadLiveEvent[];
 }
 
 export interface ThreadIngestRepository {
@@ -35,10 +36,16 @@ export class ThreadIngestor {
     @Inject(LOG_STORE) private readonly store: LogStore,
     @Inject(THREAD_INGEST_REPOSITORY) private readonly repository: ThreadIngestRepository,
     @Inject(FLEET_CFG) private readonly config: ConfigType<typeof fleetConfig> | number,
+    private readonly events: ThreadEventBus = new ThreadEventBus(),
   ) {}
 
   private get logScanBytes(): number {
     return typeof this.config === 'number' ? this.config : this.config.logScanBytes;
+  }
+
+  private async foldAndPublish(batch: ThreadIngestBatch): Promise<void> {
+    const result = await this.repository.fold(batch);
+    for (const event of result.events) this.events.publish(event);
   }
 
   async catchUp(jobId: string, leaseEpoch: number): Promise<void> {
@@ -69,23 +76,23 @@ export class ThreadIngestor {
         const badLines = entries.filter(({ parsed }) => 'bad' in parsed).length;
         const endOffset = cursor.offset + complete.length;
         try {
-          await this.repository.fold({ jobId, leaseEpoch, lines, endOffset, badLines });
+          await this.foldAndPublish({ jobId, leaseEpoch, lines, endOffset, badLines });
         } catch {
           for (const entry of entries) {
             const { parsed } = entry;
             if ('bad' in parsed) {
-              await this.repository.fold({ jobId, leaseEpoch, lines: [], endOffset: entry.endOffset, badLines: 1 });
+              await this.foldAndPublish({ jobId, leaseEpoch, lines: [], endOffset: entry.endOffset, badLines: 1 });
             } else if ('ignored' in parsed) {
-              await this.repository.fold({ jobId, leaseEpoch, lines: [], endOffset: entry.endOffset, badLines: 0 });
+              await this.foldAndPublish({ jobId, leaseEpoch, lines: [], endOffset: entry.endOffset, badLines: 0 });
             } else {
               try {
-                await this.repository.fold({
+                await this.foldAndPublish({
                   jobId, leaseEpoch, lines: [{ line: parsed, endOffset: entry.endOffset }],
                   endOffset: entry.endOffset, badLines: 0,
                 });
               } catch (error) {
                 this.logger.error(`Failed to fold thread line for job ${jobId} at ${entry.endOffset}`, error);
-                await this.repository.fold({
+                await this.foldAndPublish({
                   jobId, leaseEpoch, lines: [{ line: parsed, endOffset: entry.endOffset }],
                   endOffset: entry.endOffset, badLines: 1, rejectedLine: true,
                 });
