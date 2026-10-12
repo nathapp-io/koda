@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { FleetJobLog as LogRow, PrismaClient } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { FleetJobLogRecord, IFleetJobLogRepository, LogSource, LogStreamName, LogStreamPatch } from './domain/fleet-job-log.domain';
+import type { FleetJobLogRecord, IFleetJobLogRepository, LogSource, LogStreamPatch, UploadStreamName } from './domain/fleet-job-log.domain';
 
 const toRecord = (r: LogRow): FleetJobLogRecord => ({
   ...r,
-  stream: r.stream as LogStreamName,
+  stream: r.stream as UploadStreamName,
   source: r.source as LogSource,
   sizeBytes: Number(r.sizeBytes),
 });
@@ -18,7 +18,7 @@ export class PrismaFleetJobLogRepository implements IFleetJobLogRepository {
     return this.prisma.client;
   }
 
-  async findStream(jobId: string, leaseEpoch: number, stream: LogStreamName): Promise<FleetJobLogRecord | null> {
+  async findStream(jobId: string, leaseEpoch: number, stream: UploadStreamName): Promise<FleetJobLogRecord | null> {
     const r = await this.db.fleetJobLog.findUnique({ where: { jobId_leaseEpoch_stream: { jobId, leaseEpoch, stream } } });
     return r ? toRecord(r) : null;
   }
@@ -38,7 +38,7 @@ export class PrismaFleetJobLogRepository implements IFleetJobLogRepository {
     return rows.map((r) => r.leaseEpoch);
   }
 
-  async upsertStream(jobId: string, leaseEpoch: number, stream: LogStreamName, patch: LogStreamPatch): Promise<FleetJobLogRecord> {
+  async upsertStream(jobId: string, leaseEpoch: number, stream: UploadStreamName, patch: LogStreamPatch): Promise<FleetJobLogRecord> {
     const data = {
       sizeBytes: BigInt(patch.sizeBytes),
       ...(patch.complete === undefined ? {} : { complete: patch.complete }),
@@ -51,7 +51,7 @@ export class PrismaFleetJobLogRepository implements IFleetJobLogRepository {
     }));
   }
 
-  async completeFromBundle(jobId: string, leaseEpoch: number, stream: LogStreamName, r: { sizeBytes: number; truncated: boolean }): Promise<boolean> {
+  async completeFromBundle(jobId: string, leaseEpoch: number, stream: UploadStreamName, r: { sizeBytes: number; truncated: boolean }): Promise<boolean> {
     const data = { sizeBytes: BigInt(r.sizeBytes), source: 'bundle', complete: !r.truncated, truncated: r.truncated };
     const existing = await this.db.fleetJobLog.findUnique({ where: { jobId_leaseEpoch_stream: { jobId, leaseEpoch, stream } } });
     if (!existing) {

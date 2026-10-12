@@ -1,5 +1,5 @@
 import type { Readable } from 'stream';
-import { isLogStream, LogStreamName } from './domain/fleet-job-log.domain';
+import { isUploadStream, UploadStreamName } from './domain/fleet-job-log.domain';
 
 export const LOG_STORE = Symbol('LOG_STORE');
 
@@ -25,8 +25,8 @@ export interface LogStore {
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 /** Server-built key from validated parts only (spec §1.1). */
-export function logKey(jobId: string, leaseEpoch: number, stream: LogStreamName): string {
-  if (!ID_RE.test(jobId) || !Number.isInteger(leaseEpoch) || leaseEpoch < 0 || !isLogStream(stream)) {
+export function logKey(jobId: string, leaseEpoch: number, stream: UploadStreamName): string {
+  if (!ID_RE.test(jobId) || !Number.isInteger(leaseEpoch) || leaseEpoch < 0 || !isUploadStream(stream)) {
     throw new Error(`invalid log key part: ${jobId}/${leaseEpoch}/${String(stream)}`);
   }
   return `logs/${jobId}/${leaseEpoch}/${stream}.log`;

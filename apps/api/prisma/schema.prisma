@@ -1005,25 +1005,26 @@ model FleetJob {
   threadId           String? // S5a: the ChatThread a THREAD job serves
   updatedAt          DateTime  @updatedAt
 
-  project       Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  repo          FleetRepo           @relation(fields: [repoId], references: [id], onDelete: Cascade)
-  runner        Runner?             @relation("FleetJobRunner", fields: [runnerId], references: [id], onDelete: SetNull)
-  pinnedRunner  Runner?             @relation("FleetJobPinnedRunner", fields: [pinnedRunnerId], references: [id], onDelete: SetNull)
-  requestedBy   User                @relation("FleetJobRequestedBy", fields: [requestedById], references: [id])
-  schedule      JobSchedule?        @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
-  thread        ChatThread?         @relation(fields: [threadId], references: [id], onDelete: SetNull)
-  threadTurn    FleetThreadTurn?
-  events        FleetJobEvent[]
-  commands      FleetCommand[]
-  artifacts     FleetJobArtifact[]
-  logs          FleetJobLog[]
-  ingests       FleetBundleIngest[]
-  costEvents    FleetCostEvent[]
-  tickets       FleetJobTicket[]
-  ticketLinks   TicketLink[]
-  storyResults  FleetStoryResult[]
-  reviewResults FleetReviewResult[]
-  configEdit    FleetConfigEdit?
+  project             Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repo                FleetRepo            @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  runner              Runner?              @relation("FleetJobRunner", fields: [runnerId], references: [id], onDelete: SetNull)
+  pinnedRunner        Runner?              @relation("FleetJobPinnedRunner", fields: [pinnedRunnerId], references: [id], onDelete: SetNull)
+  requestedBy         User                 @relation("FleetJobRequestedBy", fields: [requestedById], references: [id])
+  schedule            JobSchedule?         @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  thread              ChatThread?          @relation(fields: [threadId], references: [id], onDelete: SetNull)
+  threadTurn          FleetThreadTurn?
+  threadIngestCursors ThreadIngestCursor[]
+  events              FleetJobEvent[]
+  commands            FleetCommand[]
+  artifacts           FleetJobArtifact[]
+  logs                FleetJobLog[]
+  ingests             FleetBundleIngest[]
+  costEvents          FleetCostEvent[]
+  tickets             FleetJobTicket[]
+  ticketLinks         TicketLink[]
+  storyResults        FleetStoryResult[]
+  reviewResults       FleetReviewResult[]
+  configEdit          FleetConfigEdit?
 
   @@index([state])
   @@index([runnerId, state])
@@ -1071,6 +1072,7 @@ model ChatThread {
   tokens          Json? // { input, output, cacheRead, cacheWrite }; written by B2
   specPath        String // .nax/features/<feature>/spec.md
   pendingQuestion Json? // { requestId, text, expiresAt }; written by B2
+  session         Json? // S5a: the thread's session state, folded from the thread stream
   nextSeq         Int       @default(1)
   lastActivityAt  DateTime  @default(now())
   createdAt       DateTime  @default(now())
@@ -1089,22 +1091,24 @@ model ChatThread {
 
 /// Fleet S5a §1: one message in a chat thread. seq orders the transcript; clientMessageId dedups a retried send.
 model ChatMessage {
-  id              String   @id @default(cuid())
-  threadId        String
-  seq             Int
-  jobId           String?
-  turnId          String?
-  role            String // user | assistant
-  authorUserId    String?
-  clientMessageId String?
-  content         String   @db.Text
-  toolSummary     Json?
-  status          String // pending | streaming | complete | cancelled | errored | timed_out | interrupted
-  errorReason     String? // set with status errored, at most 200 chars
-  usage           Json?
-  costUsd         Decimal? @db.Decimal(12, 4)
-  costSource      String?
-  createdAt       DateTime @default(now())
+  id               String   @id @default(cuid())
+  threadId         String
+  seq              Int
+  jobId            String?
+  turnId           String?
+  role             String // user | assistant
+  authorUserId     String?
+  clientMessageId  String?
+  content          String   @db.Text
+  toolSummary      Json?
+  status           String // pending | streaming | complete | cancelled | errored | timed_out | interrupted
+  errorReason      String? // set with status errored, at most 200 chars
+  usage            Json?
+  costUsd          Decimal? @db.Decimal(12, 4)
+  costSource       String?
+  streamRound      Int? // S5a: the stream round that wrote this message
+  streamRoundStart Int? // S5a: the first stream round of this message
+  createdAt        DateTime @default(now())
 
   thread ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
   author User?      @relation("ChatMessageAuthor", fields: [authorUserId], references: [id])
@@ -1126,6 +1130,20 @@ model FleetThreadTurn {
 
   job    FleetJob   @relation(fields: [jobId], references: [id], onDelete: Cascade)
   thread ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+}
+
+/// Fleet S5a §1: durable fold position of one THREAD job attempt's `thread` stream. offset is in bytes and always at a
+/// line boundary; skippedLines counts bad or unknown lines passed over. Cascades with the job.
+model ThreadIngestCursor {
+  jobId        String
+  leaseEpoch   Int
+  offset       BigInt   @default(0)
+  skippedLines Int      @default(0)
+  updatedAt    DateTime @updatedAt
+
+  job FleetJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@id([jobId, leaseEpoch])
 }
 
 /// Fleet C9 §1 (D448): a job dispatched for one or more tickets.
@@ -1203,7 +1221,7 @@ model FleetJobLog {
   id         String    @id @default(cuid())
   jobId      String
   leaseEpoch Int
-  stream     String // run | stdout | stderr
+  stream     String // run | stdout | stderr | thread (S5a: THREAD jobs only, never read by the job-log routes)
   sizeBytes  BigInt    @default(0)
   complete   Boolean   @default(false) // final=1 accepted, or filled from the bundle
   truncated  Boolean   @default(false) // hit FLEET_LOG_MAX_BYTES; terminal, never complete

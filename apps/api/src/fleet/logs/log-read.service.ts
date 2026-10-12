@@ -4,7 +4,7 @@ import { Readable } from 'stream';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { FLEET_JOB_REPOSITORY, FleetJobRecord, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import {
-  FLEET_JOB_LOG_REPOSITORY, FleetJobLogRecord, IFleetJobLogRepository, isLogStream, LOG_STREAMS, LogSource, LogStreamName,
+  FLEET_JOB_LOG_REPOSITORY, FleetJobLogRecord, IFleetJobLogRepository, isLogStream, isUploadStream, LOG_STREAMS, LogSource, LogStreamName,
 } from './domain/fleet-job-log.domain';
 import { LogEntryView, LogFilter, toEntry } from './log-entry';
 import { backwardReadRange, backwardSpans, forwardReadRange, forwardSpans, ScanOptions, SpanWindow, visibleEnd } from './log-lines';
@@ -72,7 +72,7 @@ interface ScannedWindow extends SpanWindow {
   bufStart: number;
 }
 
-const summary = (r: FleetJobLogRecord): LogStreamSummary => ({
+const summary = (r: FleetJobLogRecord & { stream: LogStreamName }): LogStreamSummary => ({
   stream: r.stream, sizeBytes: r.sizeBytes, complete: r.complete, truncated: r.truncated, source: r.source,
   expired: Boolean(r.expiredAt), updatedAt: r.updatedAt.toISOString(),
 });
@@ -87,10 +87,11 @@ export class LogReadService {
     @Inject(FLEET_CFG) private readonly cfg: Pick<IFleetConfig, 'logScanBytes'>,
   ) {}
 
-  /** Spec §3.1: every attempt with rows or `log` events, latest first. */
+  /** Spec §3.1: every attempt with rows or `log` events, latest first. The `thread` stream is never listed (S5a). */
   async list(projectId: string, jobId: string): Promise<{ attempts: LogAttemptSummary[] }> {
     await this.job(projectId, jobId);
-    const [rows, eventEpochs] = await Promise.all([this.logs.listForJob(jobId), this.logs.findLogEventEpochs(jobId)]);
+    const [allRows, eventEpochs] = await Promise.all([this.logs.listForJob(jobId), this.logs.findLogEventEpochs(jobId)]);
+    const rows = allRows.filter((r): r is FleetJobLogRecord & { stream: LogStreamName } => isLogStream(r.stream));
     const epochs = [...new Set([...rows.map((r) => r.leaseEpoch), ...eventEpochs])].sort((a, b) => b - a);
     const order = (s: LogStreamName): number => LOG_STREAMS.indexOf(s);
     return {
@@ -145,7 +146,9 @@ export class LogReadService {
 
   private async target(projectId: string, jobId: string, streamRaw: string, leaseEpoch: number | undefined): Promise<Target> {
     const job = await this.job(projectId, jobId);
-    if (!isLogStream(streamRaw)) throw new ValidationAppException({ reason: 'stream' }, 'fleet.logQuery');
+    if (!isUploadStream(streamRaw)) throw new ValidationAppException({ reason: 'stream' }, 'fleet.logQuery');
+    // The `thread` stream is uploaded for THREAD jobs but never served by the job-log routes (S5a).
+    if (!isLogStream(streamRaw)) throw new NotFoundAppException({}, 'fleet.logs');
     const epoch = leaseEpoch ?? job.leaseEpoch;
     if (epoch > job.leaseEpoch) throw new NotFoundAppException({}, 'fleet.logs');
     const row = await this.logs.findStream(job.id, epoch, streamRaw);

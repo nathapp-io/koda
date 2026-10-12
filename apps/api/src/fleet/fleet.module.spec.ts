@@ -9,6 +9,7 @@ import { FakeFleetRepoFilesReader } from './repo-config/fake-fleet-repo-files.re
 import { FleetRepoFilesRouter } from './repo-config/fleet-repo-files.router';
 import { selectRepoFilesReader } from './repo-config/repo-config.module';
 import { LogReadService } from './logs/log-read.service';
+import { LogAppendHooks } from './logs/log-append-hooks';
 import { FleetLogRetentionProcessor } from './logs/fleet-log-retention.processor';
 import { AnalyticsService } from './analytics/analytics.service';
 import { FleetDashboardService } from './dashboard/dashboard.service';
@@ -38,6 +39,7 @@ describe('FleetModule', () => {
     expect(module.get(RunnersService)).toBeDefined();
     expect(module.get(FleetReposService)).toBeDefined();
     expect(module.get(LogReadService)).toBeDefined();
+    expect(module.get(LogAppendHooks)).toBeDefined();
     expect(module.get(FleetLogRetentionProcessor)).toBeDefined();
     expect(module.get(AnalyticsService)).toBeDefined();
     expect(module.get(FleetDashboardService)).toBeDefined();
