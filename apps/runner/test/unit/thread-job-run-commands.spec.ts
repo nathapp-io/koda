@@ -39,6 +39,7 @@ function setup(options: {
   answer?: AgentSession['answer'];
   holdDrain?: boolean;
   holdOpen?: boolean;
+  holdClose?: boolean;
 } = {}) {
   const root = join(import.meta.dir, `.thread-job-run-commands-${crypto.randomUUID()}`);
   roots.push(root);
@@ -62,6 +63,7 @@ function setup(options: {
     waitDrain: () => drainStarted.promise,
     releaseDrain() { drainHeld = false; drainGate.resolve(); },
   };
+  const closeGate = deferred<void>();
   const openGate = deferred<void>();
   const openStarted = deferred<void>();
   const opened = deferred<{ ok: true; session: AgentSession; resumed: false }>();
@@ -82,7 +84,7 @@ function setup(options: {
       return options.answer?.(requestId, answer) ?? 'accepted';
     },
     cancel: () => { calls.push('cancel'); },
-    close: async () => { calls.push('close'); },
+    close: async () => { calls.push('close'); if (options.holdClose) await closeGate.promise; },
   };
   const host = {
     sessions: {
@@ -254,6 +256,20 @@ describe('ThreadJobRun commands and cancellation (US-005)', () => {
     await context.openStarted;
     context.run.requestCancel(); context.openGate.resolve();
     context.opened.resolve({ ok: true, session: context.session, resumed: false });
+    await started;
+    expect(stateEvents(context.journal)).toEqual([{ to: 'CANCELLED', reason: 'cancelled before start' }]);
+    context.journal.close();
+  });
+
+  test('US-005 AC-16: a hung close after cancellation before start is bounded by threadCloseTimeoutMs', async () => {
+    const context = setup({ holdOpen: true, holdClose: true });
+    await mkdir(context.jobDir, { recursive: true });
+    const started = context.run.start('prepare');
+    await context.openStarted;
+    context.run.requestCancel(); context.openGate.resolve();
+    context.opened.resolve({ ok: true, session: context.session, resumed: false });
+    expect(await eventually(() => context.calls.includes('close'))).toBe(true);
+    context.clock.advance(tuning.threadCloseTimeoutMs);
     await started;
     expect(stateEvents(context.journal)).toEqual([{ to: 'CANCELLED', reason: 'cancelled before start' }]);
     context.journal.close();

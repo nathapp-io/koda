@@ -352,13 +352,10 @@ export class ThreadJobRun {
     });
   }
 
-  /** A session the run no longer needs is closed; a throwing `close` is logged, never fatal. */
+  /** A session the run no longer needs is closed, bounded by `threadCloseTimeoutMs`; a throwing `close` is logged, never fatal. */
   private async closeSession(session: AgentSession): Promise<void> {
-    try {
-      await session.close();
-    } catch (error) {
-      this.deps.log.warn('thread session close failed', { jobId: this.jobId, error: errorMessage(error) });
-    }
+    this.startSessionClose(session);
+    await this.awaitSessionClose();
   }
 
   /** The session does not outlive the run: use the same bounded close as abandon. */
