@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { extractApiError } from '~/composables/useApi'
@@ -21,6 +21,7 @@ const canWork = computed(() => canWorkOnFleet(viewer.value))
 const skills = ref<ProjectSkillDto[]>([])
 const loadFailed = ref(false)
 const submitError = ref('')
+const skillsError = ref('')
 const models = computed(() => eligibleModels(options.runners.value))
 const repoOptions = computed(() => options.repos.value.map(repo => ({ value: repo.id, label: `${repo.owner}/${repo.name}` })))
 const selectedRepo = computed(() => options.repos.value.find(repo => repo.id === values.repoId) ?? null)
@@ -30,9 +31,20 @@ const { handleSubmit, isSubmitting, values, setFieldValue } = useForm({
   keepValuesOnUnmount: true,
 })
 
+watch(models, (available) => {
+  if (!values.model || !available.includes(values.model)) {
+    setFieldValue('model', available[0] ?? '')
+  }
+}, { immediate: true })
+
 onMounted(async () => {
+  void skillsApi.list(slug).then((result) => {
+    skills.value = result.filter(skill => skill.enabled)
+  }).catch((error: unknown) => {
+    skillsError.value = extractApiError(error)
+  })
   try {
-    await Promise.all([options.load(), skillsApi.list(slug).then(result => { skills.value = result.filter(skill => skill.enabled) })])
+    await options.load()
   }
   catch (error: unknown) {
     loadFailed.value = true
@@ -57,7 +69,10 @@ const submit = handleSubmit(async (formValues: ThreadCreateFormValues) => {
   <div class="max-w-3xl space-y-6">
     <PageHeader :title="t('fleet.threads.new.title')" />
     <p v-if="!canWork" class="text-sm text-muted-foreground">{{ t('fleet.threads.new.noPermission') }}</p>
-    <ErrorState v-else-if="loadFailed" />
+    <div v-else-if="loadFailed" class="space-y-3">
+      <ErrorState />
+      <p v-if="submitError" class="text-sm" role="alert">{{ submitError }}</p>
+    </div>
     <form v-else class="space-y-5" data-testid="thread-create-form" @submit="submit">
       <FormField v-slot="{ componentField }" name="repoId">
         <FormItem>
@@ -106,6 +121,7 @@ const submit = handleSubmit(async (formValues: ThreadCreateFormValues) => {
         <ul class="space-y-1 text-sm text-muted-foreground">
           <li v-for="skill in skills" :key="skill.id">{{ skill.name }}<span v-if="skill.source.resolvedSha"> · {{ skill.source.resolvedSha.slice(0, 7) }}</span></li>
         </ul>
+        <p v-if="skillsError" class="text-sm" role="alert">{{ skillsError }}</p>
       </section>
       <p v-if="submitError" class="text-sm" role="alert">{{ submitError }}</p>
       <Button type="submit" :disabled="isSubmitting || models.length === 0">{{ t('fleet.threads.new.create') }}</Button>

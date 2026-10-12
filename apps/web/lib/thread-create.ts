@@ -62,6 +62,6 @@ export function toCreateThreadBody(values: ThreadCreateValues): CreateThreadBody
 export function eligibleModels(runners: readonly FleetRunnerSummary[]): string[] {
   return [...new Set(runners
     .filter(runner => runner.online && runner.enabled)
-    .flatMap(runner => runner.threadBackends.native))]
+    .flatMap(runner => runner.threadBackends?.native ?? []))]
     .sort((a, b) => a.localeCompare(b))
 }
