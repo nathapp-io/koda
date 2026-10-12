@@ -27,6 +27,19 @@ export interface StreamResetThreadLine {
 export const TURN_END_STATUSES = ['completed', 'cancelled', 'timed_out', 'interrupted', 'errored'] as const;
 export type TurnEndStatus = (typeof TURN_END_STATUSES)[number];
 
+export interface UsageThreadLine {
+  type: 'usage';
+  turnId: string;
+  round: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheRead: number;
+  cacheWrite: number;
+  costUsd: number;
+  costSource?: 'computed' | 'reported' | 'unpriced';
+  at?: string;
+}
+
 export interface TurnEndThreadLine {
   type: 'turn_end';
   turnId: string;
@@ -95,7 +108,7 @@ export interface SessionFailedThreadLine {
   reason: string;
 }
 
-export type AssistantThreadLine = TurnStartThreadLine | TextDeltaThreadLine | StreamResetThreadLine | TurnEndThreadLine;
+export type AssistantThreadLine = TurnStartThreadLine | TextDeltaThreadLine | StreamResetThreadLine | UsageThreadLine | TurnEndThreadLine;
 
 export type ToolThreadLine = ToolCallThreadLine | ToolResultThreadLine | ApprovalRequestedThreadLine | ApprovalResolvedThreadLine;
 
@@ -126,6 +139,25 @@ const isIsoDate = (value: unknown): value is string => isString(value) && !Numbe
 /** Keeps the runner's `at` only when it parses as a date; the fold stamps its own time otherwise. */
 function sessionLine<T extends SessionThreadLine>(line: T, at: unknown): T {
   return isIsoDate(at) ? { ...line, at } : line;
+}
+
+function parseUsage(value: Record<string, unknown>): UsageThreadLine | null {
+  if (!isTurnId(value.turnId) || !isIntegerAtLeastZero(value.round) ||
+    !isIntegerAtLeastZero(value.inputTokens) || !isIntegerAtLeastZero(value.outputTokens) ||
+    !isFiniteNonNegative(value.costUsd)) return null;
+  if (value.cacheRead !== undefined && !isIntegerAtLeastZero(value.cacheRead)) return null;
+  if (value.cacheWrite !== undefined && !isIntegerAtLeastZero(value.cacheWrite)) return null;
+  if (value.costSource !== undefined && !['computed', 'reported', 'unpriced'].includes(value.costSource as string)) return null;
+  const line: UsageThreadLine = {
+    type: 'usage', turnId: value.turnId, round: value.round,
+    inputTokens: value.inputTokens, outputTokens: value.outputTokens,
+    cacheRead: (value.cacheRead as number | undefined) ?? 0,
+    cacheWrite: (value.cacheWrite as number | undefined) ?? 0,
+    costUsd: value.costUsd,
+  };
+  if (typeof value.costSource === 'string') line.costSource = value.costSource as UsageThreadLine['costSource'];
+  if (isIsoDate(value.at)) line.at = value.at;
+  return line;
 }
 
 function parseTurnEnd(value: Record<string, unknown>): TurnEndThreadLine | null {
@@ -191,6 +223,8 @@ export function parseThreadLine(raw: Buffer | string): ParsedThreadLine {
       return isTurnId(value.turnId) && isIntegerAtLeastZero(value.round)
         ? { type: 'stream_reset', turnId: value.turnId, round: value.round }
         : { bad: true };
+    case 'usage':
+      return parseUsage(value) ?? { bad: true };
     case 'turn_end': {
       if (!isTurnId(value.turnId)) return { bad: true };
       return parseTurnEnd(value) ?? { bad: true };

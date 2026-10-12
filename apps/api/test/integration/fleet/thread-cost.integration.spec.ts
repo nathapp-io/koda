@@ -80,13 +80,17 @@ describeIntegration('fleet thread cost folding and spend (PG, US-005)', () => {
   it('US-005 AC1: folds priced usage into assistant message cost, source and token usage', async () => {
     const s = await fresh('cost-message');
     await put(s, [start(), usage()]);
-    expect(await message(s)).toMatchObject({ costUsd: '0.0123', costSource: 'computed', usage: { input: 100, output: 20, cacheRead: 5, cacheWrite: 0 } });
+    const stored = await message(s);
+    expect(stored.costUsd?.toString()).toBe('0.0123');
+    expect(stored).toMatchObject({ costSource: 'computed', usage: { input: 100, output: 20, cacheRead: 5, cacheWrite: 0 } });
   });
 
   it('US-005 AC2: adds priced usage to thread cost and tokens', async () => {
     const s = await fresh('cost-thread');
     await put(s, [start(), usage()]);
-    expect(await thread(s)).toMatchObject({ costUsd: '0.0123', tokens: { input: 100, output: 20, cacheRead: 5, cacheWrite: 0 } });
+    const stored = await thread(s);
+    expect(stored.costUsd.toString()).toBe('0.0123');
+    expect(stored.tokens).toEqual({ input: 100, output: 20, cacheRead: 5, cacheWrite: 0 });
   });
 
   it('US-005 AC3: adds priced usage to job cost', async () => {
@@ -188,9 +192,11 @@ describeIntegration('fleet thread cost folding and spend (PG, US-005)', () => {
 
   it('US-005 AC14: spend analytics includes a thread cost event', async () => {
     const s = await fresh('cost-analytics');
+    const authorization = `Bearer ${world.tokens.dev}`;
+    const before = await request(server).get('/api/projects/web/fleet/analytics/spend').set('Authorization', authorization).expect(200);
     await put(s, [start(), usage()]);
     const response = await request(server).get('/api/projects/web/fleet/analytics/spend')
-      .set('Authorization', `Bearer ${world.tokens.dev}`).expect(200);
-    expect(response.body.data.totals.costUsd).toBe('0.0123');
+      .set('Authorization', authorization).expect(200);
+    expect(new Prisma.Decimal(response.body.data.totals.costUsd).sub(before.body.data.totals.costUsd).toString()).toBe('0.0123');
   });
 });

@@ -19,7 +19,7 @@ const toPolicy = (r: PolicyRow): BudgetPolicyRecord => ({
 const ORDER: Prisma.BudgetPolicyOrderByWithRelationInput[] = [{ scopeKey: 'asc' }, { windowKind: 'asc' }];
 const OLDEST_FIRST: Prisma.FleetJobOrderByWithRelationInput[] = [{ queuedAt: 'asc' }, { id: 'asc' }];
 /** S3 D495: a budget stop never holds or cancels a config job — only nax jobs are selectable. */
-const BUDGET_STOP_COMMANDS = [FleetJobKind.RUN, FleetJobKind.PLAN];
+const BUDGET_STOP_COMMANDS = [FleetJobKind.RUN, FleetJobKind.PLAN, FleetJobKind.THREAD];
 
 /** S1b §2.1 scope filter; `runnerField` picks the pin (QUEUED) or the holder (spend, held jobs). */
 function jobScope(scope: BudgetScope, runnerField: 'runnerId' | 'pinnedRunnerId'): Prisma.FleetJobWhereInput {

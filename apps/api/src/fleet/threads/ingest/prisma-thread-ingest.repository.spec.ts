@@ -89,7 +89,7 @@ function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?
 function repoWith(client: unknown): PrismaThreadIngestRepository {
   const prisma = { client } as never;
   const txManager = { run: (fn: () => Promise<unknown>) => fn() } as never;
-  return new PrismaThreadIngestRepository(prisma, txManager);
+  return new PrismaThreadIngestRepository(prisma, txManager, { signal: vi.fn() } as never);
 }
 
 function batch(lines: ThreadLine[], overrides: Partial<ThreadIngestBatch> = {}): ThreadIngestBatch {

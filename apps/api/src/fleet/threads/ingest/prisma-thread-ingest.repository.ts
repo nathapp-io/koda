@@ -1,9 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Prisma, PrismaClient } from '../../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
+import { BudgetEvaluator } from '../../budgets/budget-evaluator';
+import { jobSpendKeys } from '../../budgets/budget-rules';
+import { round4 } from './thread-cost';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { ThreadIngestBatch, ThreadIngestRepository, FoldResult } from './thread-ingestor';
-import type { AssistantThreadLine, QuestionThreadLine, SessionThreadLine, ThreadLine, ToolThreadLine } from './thread-line';
+import type { AssistantThreadLine, QuestionThreadLine, SessionThreadLine, ThreadLine, ToolThreadLine, UsageThreadLine } from './thread-line';
 import {
   linkApprovalRequest, setApprovalDecision, setToolResult, upsertInformationalQuestion, upsertToolCall, type ToolSummaryEntry,
 } from './tool-summary';
@@ -28,6 +31,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
   constructor(
     private readonly prisma: PrismaService<PrismaClient>,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly budgets: BudgetEvaluator,
   ) {}
 
   async readCursor(jobId: string, leaseEpoch: number): Promise<{ offset: number; skippedLines: number }> {
@@ -39,33 +43,128 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
   }
 
   async fold(batch: ThreadIngestBatch): Promise<FoldResult> {
-    return this.txManager.run(async () => {
-      await this.prisma.client.$queryRaw`SELECT "id" FROM "FleetJob" WHERE "id" = ${batch.jobId} FOR UPDATE`;
-      const job = await this.prisma.client.fleetJob.findUnique({
-        where: { id: batch.jobId }, select: { id: true, command: true, threadId: true },
-      });
+    const result = await this.txManager.run(async (): Promise<FoldResult> => {
+      const db = this.prisma.client;
+      await db.$queryRaw`SELECT "id" FROM "FleetJob" WHERE "id" = ${batch.jobId} FOR UPDATE`;
+      const job = await db.fleetJob.findUnique({ where: { id: batch.jobId }, select: {
+        id: true, command: true, threadId: true, leaseEpoch: true, projectId: true, repoId: true, runnerId: true,
+      } });
       let threadId: string | null = null;
       if (job?.command === 'THREAD' && job.threadId) {
-        await this.prisma.client.$queryRaw`SELECT "id" FROM "ChatThread" WHERE "id" = ${job.threadId} FOR UPDATE`;
+        await db.$queryRaw`SELECT "id" FROM "ChatThread" WHERE "id" = ${job.threadId} FOR UPDATE`;
         threadId = job.threadId;
       }
       let skippedLines = 0;
-      if (threadId && !batch.rejectedLine) {
+      let costChanged = false;
+      if (threadId && job && !batch.rejectedLine) {
         for (const { line } of batch.lines) {
           if (line.type === 'input_consumed') await this.foldInputConsumed(threadId, line.messageId);
           else if (isToolLine(line)) skippedLines += await this.foldToolLine(threadId, line);
           else if (line.type === 'question') skippedLines += await this.foldQuestion(threadId, line);
           else if (isSessionLine(line)) await this.foldSessionLine(batch, threadId, line);
-          else skippedLines += await this.foldAssistantLine(batch, threadId, line);
+          else if (line.type === 'usage') costChanged = await this.foldUsage(batch, job, threadId, line) || costChanged;
+          else {
+            if (line.type === 'turn_end') costChanged = await this.foldTurnEnd(batch, job, threadId, line) || costChanged;
+            skippedLines += await this.foldAssistantLine(batch, threadId, line);
+          }
         }
+        if (costChanged) await this.rederiveCosts(batch, job, threadId);
       }
-      await this.prisma.client.threadIngestCursor.upsert({
+      await db.threadIngestCursor.upsert({
         where: { jobId_leaseEpoch: { jobId: batch.jobId, leaseEpoch: batch.leaseEpoch } },
         create: { jobId: batch.jobId, leaseEpoch: batch.leaseEpoch, offset: BigInt(batch.endOffset), skippedLines: batch.badLines + skippedLines },
         update: { offset: BigInt(batch.endOffset), skippedLines: { increment: batch.badLines + skippedLines } },
       });
-      return { costChanged: false, events: [] };
+      return { costChanged, events: [] };
     });
+    if (result.costChanged) {
+      const job = await this.prisma.client.fleetJob.findUniqueOrThrow({ where: { id: batch.jobId }, select: { projectId: true, repoId: true, runnerId: true } });
+      this.budgets.signal(jobSpendKeys(job));
+    }
+    return result;
+  }
+
+  private async foldUsage(batch: ThreadIngestBatch, job: { id: string; leaseEpoch: number; projectId: string; repoId: string; runnerId: string | null }, threadId: string, line: UsageThreadLine): Promise<boolean> {
+    const db = this.prisma.client;
+    const message = await db.chatMessage.findFirst({ where: { threadId, turnId: line.turnId, role: 'assistant' } });
+    if (!message) return false;
+    const source = line.costSource ?? 'computed';
+    let inserted = true;
+    if (source !== 'unpriced') {
+      const thread = await db.chatThread.findUniqueOrThrow({ where: { id: threadId }, select: { backend: true, feature: true } });
+      const backend = thread.backend as { kind?: string; agent?: string; model?: string };
+      const create = await db.fleetCostEvent.createMany({ data: [{
+        jobId: job.id, leaseEpoch: batch.leaseEpoch, projectId: job.projectId, repoId: job.repoId, runnerId: job.runnerId,
+        at: line.at ? new Date(line.at) : new Date(), agentName: backend.kind === 'native' ? 'native' : backend.agent ?? 'native',
+        model: backend.model ?? 'default', profile: 'read', stage: 'thread', featureName: thread.feature,
+        callId: `${line.turnId}:${line.round}`, inputTokens: line.inputTokens, outputTokens: line.outputTokens,
+        cacheReadTokens: line.cacheRead, cacheWriteTokens: line.cacheWrite, costUsd: new Prisma.Decimal(line.costUsd), pricingSource: source,
+      }], skipDuplicates: true });
+      inserted = create.count > 0;
+    }
+    if (!inserted) return false;
+    const previous = (message.usage as { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | null) ?? {};
+    const increments = { input: line.inputTokens, output: line.outputTokens, cacheRead: line.cacheRead, cacheWrite: line.cacheWrite };
+    await db.chatMessage.update({ where: { id: message.id }, data: {
+      usage: { input: (previous.input ?? 0) + increments.input, output: (previous.output ?? 0) + increments.output,
+        cacheRead: (previous.cacheRead ?? 0) + increments.cacheRead, cacheWrite: (previous.cacheWrite ?? 0) + increments.cacheWrite },
+      ...(source !== 'unpriced' ? { costSource: source } : {}),
+    } });
+    const thread = await db.chatThread.findUniqueOrThrow({ where: { id: threadId }, select: { tokens: true } });
+    const prior = (thread.tokens as { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | null) ?? {};
+    await db.chatThread.update({ where: { id: threadId }, data: { tokens: {
+      input: (prior.input ?? 0) + increments.input, output: (prior.output ?? 0) + increments.output,
+      cacheRead: (prior.cacheRead ?? 0) + increments.cacheRead, cacheWrite: (prior.cacheWrite ?? 0) + increments.cacheWrite,
+    } } });
+    return source !== 'unpriced';
+  }
+
+  private async foldTurnEnd(batch: ThreadIngestBatch, job: { id: string; projectId: string; repoId: string; runnerId: string | null }, threadId: string, line: Extract<AssistantThreadLine, { type: 'turn_end' }>): Promise<boolean> {
+    const db = this.prisma.client;
+    const message = await db.chatMessage.findFirst({ where: { threadId, turnId: line.turnId, role: 'assistant' } });
+    if (!message) return false;
+    const previous = (message.usage as { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | null) ?? {};
+    const totals = { input: line.usage.inputTokens, output: line.usage.outputTokens, cacheRead: line.usage.cacheReadTokens, cacheWrite: line.usage.cacheWriteTokens };
+    const additions = { input: Math.max(0, totals.input - (previous.input ?? 0)), output: Math.max(0, totals.output - (previous.output ?? 0)),
+      cacheRead: Math.max(0, totals.cacheRead - (previous.cacheRead ?? 0)), cacheWrite: Math.max(0, totals.cacheWrite - (previous.cacheWrite ?? 0)) };
+    if (Object.values(additions).some((value) => value > 0)) {
+      const usage = { input: (previous.input ?? 0) + additions.input, output: (previous.output ?? 0) + additions.output,
+        cacheRead: (previous.cacheRead ?? 0) + additions.cacheRead, cacheWrite: (previous.cacheWrite ?? 0) + additions.cacheWrite };
+      await db.chatMessage.update({ where: { id: message.id }, data: { usage } });
+      const thread = await db.chatThread.findUniqueOrThrow({ where: { id: threadId }, select: { tokens: true } });
+      const prior = (thread.tokens as typeof usage | null) ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+      await db.chatThread.update({ where: { id: threadId }, data: { tokens: {
+        input: (prior.input ?? 0) + additions.input, output: (prior.output ?? 0) + additions.output,
+        cacheRead: (prior.cacheRead ?? 0) + additions.cacheRead, cacheWrite: (prior.cacheWrite ?? 0) + additions.cacheWrite,
+      } } });
+    }
+    if (line.costSource === 'unpriced' || line.costUsd === 0) return false;
+    const sum = await db.fleetCostEvent.aggregate({ where: { jobId: job.id, leaseEpoch: batch.leaseEpoch, callId: { startsWith: `${line.turnId}:` } }, _sum: { costUsd: true } });
+    const reconcile = new Prisma.Decimal(line.costUsd).sub(sum._sum.costUsd ?? 0);
+    if (reconcile.lte(0)) return false;
+    const thread = await db.chatThread.findUniqueOrThrow({ where: { id: threadId }, select: { backend: true, feature: true } });
+    const backend = thread.backend as { kind?: string; agent?: string; model?: string };
+    const result = await db.fleetCostEvent.createMany({ data: [{
+      jobId: job.id, leaseEpoch: batch.leaseEpoch, projectId: job.projectId, repoId: job.repoId, runnerId: job.runnerId,
+      at: new Date(), agentName: backend.kind === 'native' ? 'native' : backend.agent ?? 'native', model: backend.model ?? 'default',
+      profile: 'read', stage: 'thread', featureName: thread.feature, callId: `${line.turnId}:turn_end`,
+      inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: reconcile, pricingSource: line.costSource ?? 'computed',
+    }], skipDuplicates: true });
+    return result.count > 0;
+  }
+
+  private async rederiveCosts(batch: ThreadIngestBatch, job: { id: string }, threadId: string): Promise<void> {
+    const db = this.prisma.client;
+    const jobSum = await db.fleetCostEvent.aggregate({ where: { jobId: job.id }, _sum: { costUsd: true } });
+    await db.fleetJob.update({ where: { id: job.id }, data: { costSpentUsd: round4(new Prisma.Decimal(jobSum._sum.costUsd ?? 0)) } });
+    const threadSum = await db.fleetCostEvent.aggregate({ where: { job: { threadId } }, _sum: { costUsd: true } });
+    await db.chatThread.update({ where: { id: threadId }, data: { costUsd: round4(new Prisma.Decimal(threadSum._sum.costUsd ?? 0)) } });
+    const messages = await db.chatMessage.findMany({ where: { threadId, role: 'assistant' }, select: { id: true, turnId: true, jobId: true } });
+    for (const message of messages) {
+      if (!message.turnId) continue;
+      const total = await db.fleetCostEvent.aggregate({ where: { jobId: message.jobId ?? batch.jobId, callId: { startsWith: `${message.turnId}:` } }, _sum: { costUsd: true } });
+      await db.chatMessage.update({ where: { id: message.id }, data: { costUsd: round4(new Prisma.Decimal(total._sum.costUsd ?? 0)) } });
+    }
   }
 
   private async foldInputConsumed(threadId: string, messageId: string): Promise<void> {
@@ -77,7 +176,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
   }
 
   /** Folds one assistant-side line. Returns 1 when the line is bad (unknown or duplicate turn), else 0. */
-  private async foldAssistantLine(batch: ThreadIngestBatch, threadId: string, line: AssistantThreadLine): Promise<number> {
+  private async foldAssistantLine(batch: ThreadIngestBatch, threadId: string, line: Exclude<AssistantThreadLine, UsageThreadLine>): Promise<number> {
     const db = this.prisma.client;
     if (line.type === 'turn_start') {
       const existing = await db.chatMessage.findFirst({ where: { threadId, turnId: line.turnId, role: 'assistant' }, select: { id: true } });
