@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-ingest",
   "branchName": "feat/fleet-s5a-thread-ingest",
   "createdAt": "2026-10-12T00:00:00.000Z",
-  "updatedAt": "2026-10-12T05:45:18.277Z",
+  "updatedAt": "2026-10-12T06:11:43.116Z",
   "userStories": [
     {
       "id": "US-001",
@@ -185,8 +185,8 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -256,7 +256,10 @@
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Extends the established fold with additional line types, one pure helper module, one ack-hook change and a DTO field; patterns are set by US-002/003."
+        "reasoning": "Extends the established fold with additional line types, one pure helper module, one ack-hook change and a DTO field; patterns are set by US-002/003.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/threads/thread-job-effects.ts",
@@ -286,7 +289,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "2b64d165853782f7b9f0eb88a4f08588ef9bef5e"
     },
     {
       "id": "US-005",
