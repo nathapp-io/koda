@@ -52,6 +52,8 @@ export type ThreadLiveUpstreamRequest = LiveProxyRequest & { threadId: string }
 
 /** Fleet S5a: thread events proxy core; rejects an invalid slug or thread id with 400 before fetching. */
 export async function openThreadLiveUpstream(req: ThreadLiveUpstreamRequest): Promise<LiveProxyResult> {
+  // The slug rule is the project stream's; its 400 keeps the sibling helper's body text.
+  if (!SLUG_PATTERN.test(req.slug)) return { kind: 'error', status: 400, body: 'invalid project slug' }
   const url = buildThreadLiveUpstreamUrl(req.slug, req.threadId, req.apiInternalUrl)
   if (!url) return { kind: 'error', status: 400, body: 'invalid thread id' }
   return openLiveUpstreamUrl(url, req)
