@@ -6,7 +6,7 @@ import { FLEET_CFG, fleetConfig } from '../../config/fleet.config';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { SkillsService } from '../../skills/skills.service';
 import { FLEET_REPO_REPOSITORY, type IFleetRepoRepository } from '../repos/domain/fleet-repo.domain';
-import { CHAT_THREAD_REPOSITORY, type ChatMessageRecord, type ChatThreadRecord, type ChatThreadRepository } from './domain/chat-thread.domain';
+import { CHAT_THREAD_REPOSITORY, type ChatMessageRecord, type ChatThreadDetail, type ChatThreadRecord, type ChatThreadRepository } from './domain/chat-thread.domain';
 import { isMaxCostUsd, validateCreateThread, type CreateThreadInput } from './thread-input';
 import type { AnswerQuestionDto, SendMessageDto } from './dto/thread.dto';
 import { FleetCommandType } from '../../common/enums';
@@ -37,16 +37,17 @@ export class ThreadsService {
     }
   }
 
-  async list(projectId: string, status: string | undefined, skip: number, take: number): Promise<{ items: ChatThreadRecord[] }> {
-    return { items: await this.threads.list(projectId, status, skip, take) };
+  async list(projectId: string, status: string | undefined, skip: number, take: number): Promise<{ items: ChatThreadRecord[]; threadsEnabled: boolean }> {
+    return { items: await this.threads.list(projectId, status, skip, take), threadsEnabled: this.config.threadsEnabled };
   }
-  async get(projectId: string, id: string): Promise<ChatThreadRecord> {
+  async get(projectId: string, id: string): Promise<ChatThreadDetail> {
     const result = await this.threads.get(projectId, id);
     if (!result) throw new NotFoundAppException({}, 'threads.notFound');
-    return result;
+    return { ...result, sendRefusal: await this.threads.sendRefusalOf(projectId, result) };
   }
   async messages(projectId: string, id: string, afterSeq: number, limit: number): Promise<{ items: ChatMessageRecord[] }> {
-    const thread = await this.get(projectId, id);
+    const thread = await this.threads.get(projectId, id);
+    if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
     return { items: await this.threads.messages(thread.id, afterSeq, limit) };
   }
 

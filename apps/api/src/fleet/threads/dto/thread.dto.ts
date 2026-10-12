@@ -3,6 +3,7 @@ import { Allow } from 'class-validator';
 import type { ThreadSkillSource } from '../../../skills/skill-catalog.domain';
 import type { ThreadBackend } from '../../common/thread-jobs';
 import type { ThreadSession } from '../domain/chat-thread.domain';
+import type { ThreadSendRefusal } from '../thread-send-rules';
 
 export class ThreadDto {
   @ApiProperty() id: string;
@@ -27,8 +28,13 @@ export class ThreadDto {
   @ApiProperty({ nullable: true, type: 'object', properties: { id: { type: 'string' }, state: { type: 'string' } } }) activeJob: { id: string; state: string } | null;
 }
 
+export class ThreadDetailDto extends ThreadDto {
+  @ApiProperty({ enum: ['disabled', 'archived', 'costCap', 'budgetPaused', 'runnerOffline', 'runnerOutdated', 'closing', 'turnRunning'], nullable: true }) sendRefusal: ThreadSendRefusal | null;
+}
+
 export class ThreadListDto {
   @ApiProperty({ type: [ThreadDto] }) items: ThreadDto[];
+  @ApiProperty() threadsEnabled: boolean;
 }
 
 export class ChatMessageDto {

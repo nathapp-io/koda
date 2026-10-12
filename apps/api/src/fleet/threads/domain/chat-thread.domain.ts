@@ -1,5 +1,6 @@
 import type { ThreadSkillSource } from '../../../skills/skill-catalog.domain';
 import type { ThreadBackend } from '../../common/thread-jobs';
+import type { ThreadSendRefusal } from '../thread-send-rules';
 import type { PrismaClient } from '../../../generated/prisma/client';
 
 export const CHAT_THREAD_REPOSITORY = Symbol('CHAT_THREAD_REPOSITORY');
@@ -30,6 +31,8 @@ export interface ChatThreadRecord {
   activeJob: { id: string; state: string } | null;
 }
 
+export type ChatThreadDetail = ChatThreadRecord & { sendRefusal: ThreadSendRefusal | null };
+
 export interface ChatMessageRecord {
   id: string; seq: number; jobId: string | null; turnId: string | null; role: string; authorUserId: string | null;
   clientMessageId: string | null; content: string; toolSummary: unknown; status: string; errorReason: string | null;
@@ -40,6 +43,7 @@ export interface ChatThreadRepository {
   create(input: { projectId: string; repoId: string; baseRef: string; feature: string; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord>;
   list(projectId: string, status: string | undefined, skip: number, take: number): Promise<ChatThreadRecord[]>;
   get(projectId: string, id: string): Promise<ChatThreadRecord | null>;
+  sendRefusalOf(projectId: string, thread: ChatThreadRecord): Promise<ThreadSendRefusal | null>;
   messages(threadId: string, afterSeq: number, limit: number): Promise<ChatMessageRecord[]>;
   sendMessage(input: { projectId: string; threadId: string; userId: string; text: string; clientMessageId: string }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }>;
   archivedThreadIds(runnerId: string): Promise<string[]>;

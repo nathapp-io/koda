@@ -9146,7 +9146,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ThreadDto"
+                  "$ref": "#/components/schemas/ThreadDetailDto"
                 }
               }
             }
@@ -9359,7 +9359,14 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadDetailDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -14446,6 +14453,23 @@
             "items": {
               "type": "string"
             }
+          },
+          "threadBackends": {
+            "type": "object",
+            "properties": {
+              "native": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "acp": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "required": [
@@ -14456,7 +14480,8 @@
           "labels",
           "enabled",
           "online",
-          "profiles"
+          "profiles",
+          "threadBackends"
         ]
       },
       "FleetJobLogStreamDto": {
@@ -16343,10 +16368,162 @@
             "items": {
               "$ref": "#/components/schemas/ThreadDto"
             }
+          },
+          "threadsEnabled": {
+            "type": "boolean"
           }
         },
         "required": [
-          "items"
+          "items",
+          "threadsEnabled"
+        ]
+      },
+      "ThreadDetailDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "repoId": {
+            "type": "string"
+          },
+          "baseRef": {
+            "type": "string"
+          },
+          "feature": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "createdById": {
+            "type": "string"
+          },
+          "runnerId": {
+            "type": "string",
+            "nullable": true
+          },
+          "backend": {
+            "type": "object"
+          },
+          "status": {
+            "type": "string"
+          },
+          "archivedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "maxCostUsd": {
+            "type": "string"
+          },
+          "costUsd": {
+            "type": "string"
+          },
+          "tokens": {
+            "type": "object",
+            "nullable": true
+          },
+          "specPath": {
+            "type": "string"
+          },
+          "pendingQuestion": {
+            "type": "object",
+            "nullable": true
+          },
+          "session": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "jobId": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "live",
+                  "closed",
+                  "failed"
+                ]
+              },
+              "resumed": {
+                "type": "boolean"
+              },
+              "contextReset": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "nullable": true
+              },
+              "at": {
+                "type": "string"
+              }
+            }
+          },
+          "lastActivityAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "activeJob": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            }
+          },
+          "sendRefusal": {
+            "nullable": true,
+            "enum": [
+              "disabled",
+              "archived",
+              "costCap",
+              "budgetPaused",
+              "runnerOffline",
+              "runnerOutdated",
+              "closing",
+              "turnRunning"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "repoId",
+          "baseRef",
+          "feature",
+          "title",
+          "createdById",
+          "runnerId",
+          "backend",
+          "status",
+          "archivedAt",
+          "skills",
+          "maxCostUsd",
+          "costUsd",
+          "tokens",
+          "specPath",
+          "pendingQuestion",
+          "session",
+          "lastActivityAt",
+          "createdAt",
+          "activeJob",
+          "sendRefusal"
         ]
       },
       "UpdateThreadDto": {

@@ -10,7 +10,7 @@ import { ProjectMembershipGuard } from '../../projects/project-membership.guard'
 import type { ProjectContext } from '../../projects/project-context';
 import { withProjectRole } from '../../projects/project-context';
 import { ThreadsService } from './threads.service';
-import { AnswerQuestionDto, ChatMessageListDto, ChatMessageDto, CreateThreadDto, SendMessageDto, SendMessageResultDto, ThreadDto, ThreadListDto, UpdateThreadDto } from './dto/thread.dto';
+import { AnswerQuestionDto, ChatMessageListDto, ChatMessageDto, CreateThreadDto, SendMessageDto, SendMessageResultDto, ThreadDetailDto, ThreadDto, ThreadListDto, UpdateThreadDto } from './dto/thread.dto';
 
 @ApiTags('fleet threads')
 @ApiBearerAuth()
@@ -58,7 +58,7 @@ export class ThreadsController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get a chat thread' })
-  @ApiResponse({ status: 200, type: ThreadDto })
+  @ApiResponse({ status: 200, type: ThreadDetailDto })
   async get(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
     this.assertUser(principal);
     return JsonResponse.Ok(await this.threads.get(ctx.project.id, id));
@@ -102,6 +102,7 @@ export class ThreadsController {
   @Post(':id/archive')
   @HttpCode(200)
   @ApiOperation({ summary: 'Archive a chat thread (creator or project admin)' })
+  @ApiResponse({ status: 200, type: ThreadDetailDto })
   async archive(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
     this.assertUser(principal);
     await this.threads.archive(ctx.project.id, id, principal.id, ctx.role === 'ADMIN');
