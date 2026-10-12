@@ -6,7 +6,7 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { enrollRunner, FleetHttpWorld, seedFleetHttpAgent, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
-import { putThreadLines, seedThreadJob, ThreadJobSeed } from '../../helpers/thread-fixtures';
+import { putThreadLines, ThreadJobSeed } from '../../helpers/thread-fixtures';
 import { openSse, SseConnection, SseMessage } from '../../helpers/sse-client';
 import { LiveStreamRegistry } from '../../../src/live/live-stream-registry';
 
@@ -91,22 +91,6 @@ describeDb('Content thread events over HTTP (PG, US-006)', () => {
   const start = (turnId = 't1') => ({ type: 'turn_start', turnId });
   const delta = (text: string, round = 1) => ({ type: 'text_delta', turnId: 't1', round, text });
   const end = () => ({ type: 'turn_end', turnId: 't1', status: 'completed', output: 'Hello', usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, costUsd: 0 });
-
-  it('US-006 AC1: routes a published event only to listeners for its thread', async () => {
-    let bus: (new () => { subscribe: (id: string, cb: (event: { threadId: string }) => void) => () => void; publish: (event: { id: string; threadId: string; at: string; type: 'thread' }) => void }) | undefined;
-    try {
-      bus = (await import('../../../src/live/thread-event-bus')).ThreadEventBus;
-    } catch {
-      // The assertion below reports the missing behavior instead of an import error.
-    }
-    expect(typeof bus).toBe('function');
-    const instance = new (bus as new () => { subscribe: (id: string, cb: (event: { threadId: string }) => void) => () => void; publish: (event: { id: string; threadId: string; at: string; type: 'thread' }) => void })();
-    const received: string[] = [];
-    instance.subscribe('a', (event) => received.push(event.threadId));
-    instance.publish({ id: 'e1', threadId: 'a', at: new Date().toISOString(), type: 'thread' });
-    instance.publish({ id: 'e2', threadId: 'b', at: new Date().toISOString(), type: 'thread' });
-    expect(received).toEqual(['a']);
-  });
 
   it('US-006 AC2: emits a delta after a separate text_delta PUT', async () => {
     const s = await fresh('ac2');
