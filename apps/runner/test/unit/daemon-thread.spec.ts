@@ -25,11 +25,11 @@ afterAll(async () => {
 
 /**
  * Fleet S5a US-007 integration: `startDaemon` in nax mode over an injected fetch (never a listening server),
- * a real `file://` clone, a fake session factory and a fake nax. `socketDir` sits directly under the temp root:
- * the runner refuses a socket path longer than a unix `sun_path`, and a per-test directory under a long TMPDIR
- * would cross that bound.
+ * a real `file://` clone, a fake session factory and a fake nax. `socketDir` is a fresh directory directly under
+ * `tmpdir()`: the runner refuses a socket path longer than a unix `sun_path`, and a deeper per-test directory
+ * under a long TMPDIR would cross that bound.
  */
-const SOCKET_DIR = (): Promise<string> => mkdtemp(`${tmpdir()}/`);
+const makeSocketDir = (): Promise<string> => mkdtemp(`${tmpdir()}/`);
 
 interface FakeFleet {
   readonly fetchFn: FetchFn;
@@ -101,7 +101,7 @@ async function fixture() {
   await writeFile(join(naxHome, 'config.json'), JSON.stringify({ models: { native: { balanced: 'minimax/MiniMax-M3' } } }));
   const origin = await makeOrigin(base, 'origin', { files: { 'README.md': 'hello\n' } });
   const home = resolveHome({}, join(base, 'home'));
-  const socketDir = await SOCKET_DIR();
+  const socketDir = await makeSocketDir();
   socketDirs.push(socketDir);
   const config = parseRunnerConfig({ serverUrl: 'http://127.0.0.1:9', workspaceRoot, naxHome, socketDir, jobRetentionDays: 1 }, {});
   const fleet = fakeFleet();

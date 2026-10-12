@@ -160,7 +160,10 @@ export class ThreadJobRun {
   private idleAbort: AbortController | null = null;
   /** The heartbeat's abort, while it is armed. */
   private heartbeatAbort: AbortController | null = null;
-  /** The session close `halt` started, kept so `abandon` may bound its wait; `session.close()` runs once per run. */
+  /**
+   * The session close, started once per run by `halt`, `closeSession` or `closeHeldSession`. Every wait on it is
+   * bounded by `threadCloseTimeoutMs`, so a close that timed out may still outlive the run.
+   */
   private sessionClose: Promise<void> | null = null;
   /** B3b-R3: set synchronously when a close or a fail is requested; a later reason is ignored. */
   private closing = false;
@@ -220,8 +223,7 @@ export class ThreadJobRun {
     // Step 1: the git credentials, waiting for the job's first token. The wait polls the cancel request and a
     // halt, so an abandon does not sit out the token timeout. A refusal holds the socket, the wanted token and
     // the shims the broker opened before it waited, so it gives them back too — as the RUN path's cleanup does.
-    const acquisition = await this.deps.host.credentials.acquire(row, { wait: true, isCancelled: () => this.cancelRequested() || this.halted });
-    const acquired = acquisition;
+    const acquired = await this.deps.host.credentials.acquire(row, { wait: true, isCancelled: () => this.cancelRequested() || this.halted });
     if (this.halted) {
       await this.releaseCredentials(row);
       return;
@@ -358,14 +360,11 @@ export class ThreadJobRun {
     await this.awaitSessionClose();
   }
 
-  /** The session does not outlive the run: use the same bounded close as abandon. */
+  /** The session does not outlive the run: it is closed through the same bounded path as every other exit. */
   private async closeHeldSession(): Promise<void> {
     const session = this.session;
     this.session = null;
-    if (session !== null) {
-      this.startSessionClose(session);
-      await this.awaitSessionClose();
-    }
+    if (session !== null) await this.closeSession(session);
   }
 
   /**
@@ -510,7 +509,7 @@ export class ThreadJobRun {
       // Same rule as the idle timer: a wait that returns before the clock reaches its deadline cannot pace the
       // heartbeat, and re-arming it would spin.
       if (signal.aborted || this.deps.now().getTime() < dueAtMs) return;
-      if (this.halted || this.closing) return;
+      if (this.halted) return;
       try {
         this.events.snapshot({ heartbeatAt: this.deps.now().toISOString() });
       } catch (error) {
@@ -721,7 +720,7 @@ export class ThreadJobRun {
 
   /**
    * Daemon stop: the run's background tasks stop writing, the session is closed without waiting, and `start`
-   * resolves without waiting for the turn. The close promise is kept for `abandon`, the only caller that waits.
+   * resolves without waiting for the turn. The close promise is kept so each later wait on it is bounded.
    */
   halt(): void {
     this.halted = true;
@@ -750,8 +749,7 @@ export class ThreadJobRun {
   }
 
   /**
-   * B3b-R1: no mutex, and the only wait is the session close `halt` started — never longer than
-   * `threadCloseTimeoutMs`. A refused release is logged and never held against a row that is already gone.
+   * B3b-R1: no mutex, and the only wait is the session close — never longer than `threadCloseTimeoutMs`. A refused release is logged and never held against a row that is already gone.
    */
   async abandon(): Promise<void> {
     this.halt();
@@ -768,7 +766,7 @@ export class ThreadJobRun {
   }
 
   /**
-   * Waits for the close `halt` started, for at most `threadCloseTimeoutMs`; a timeout is reported and never fatal.
+   * Waits for the stored session close, for at most `threadCloseTimeoutMs`; a timeout is reported and never fatal.
    * With `open` still pending there is no close to await — the session `open` resolves is closed then, unawaited.
    */
   private async awaitSessionClose(): Promise<void> {

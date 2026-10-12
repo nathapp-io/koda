@@ -140,9 +140,10 @@ describe('ThreadJobRun turns, idle, caps and failure (US-004)', () => {
   test('run close timeout still seals the stream and completes the row', async () => {
     const context = setup({ hangClose: true });
     const { started } = await running(context);
-    await Bun.sleep(25);
+    expect(await eventually(() => context.clock.sleepingFor(tuning.threadIdleMs))).toBe(true);
     context.clock.advance(tuning.threadIdleMs);
     expect(await eventually(() => context.closeCalls() === 1)).toBe(true);
+    expect(await eventually(() => context.clock.sleepingFor(tuning.threadCloseTimeoutMs))).toBe(true);
     context.clock.advance(tuning.threadCloseTimeoutMs);
     expect(await eventually(() => context.journal.getJob(jobId, leaseEpoch)?.state === 'COMPLETED')).toBe(true);
     expect(stateEvents(context.journal).at(-1)).toEqual({ to: 'COMPLETED', reason: 'idle' });
