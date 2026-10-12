@@ -64,7 +64,7 @@ describe('US-002 openThreadLiveUpstream', () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     })
 
-    expect(result).toEqual(expect.objectContaining({ kind: 'error', status: 400 }))
+    expect(result).toEqual({ kind: 'error', status: 400, body: 'invalid thread id' })
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 
@@ -79,7 +79,9 @@ describe('US-002 openThreadLiveUpstream', () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     })
 
-    expect(result).toEqual(expect.objectContaining({ kind: 'error', status: 400 }))
+    // The slug rule is the project stream's; its 400 keeps the sibling helper's
+    // body text ('invalid project slug') instead of being labelled a thread id error.
+    expect(result).toEqual({ kind: 'error', status: 400, body: 'invalid project slug' })
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 
