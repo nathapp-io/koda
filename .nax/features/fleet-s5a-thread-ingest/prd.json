@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-ingest",
   "branchName": "feat/fleet-s5a-thread-ingest",
   "createdAt": "2026-10-12T00:00:00.000Z",
-  "updatedAt": "2026-10-12T06:33:50.613Z",
+  "updatedAt": "2026-10-12T06:57:51.177Z",
   "userStories": [
     {
       "id": "US-001",
@@ -321,8 +321,8 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -394,7 +394,10 @@
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "New SSE endpoint with principal, membership and stream-limit access control (security-critical), plus event derivation from every fold effect."
+        "reasoning": "New SSE endpoint with principal, membership and stream-limit access control (security-critical), plus event derivation from every fold effect.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/live/live.controller.ts",
@@ -417,7 +420,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "7eda2fc0ecce38f4defaf1254b0aceec694320cc"
     },
     {
       "id": "US-007",
