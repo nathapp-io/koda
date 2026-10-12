@@ -47,7 +47,7 @@ export interface TurnEndThreadLine {
   output: string;
   usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number };
   costUsd: number;
-  costSource?: string;
+  costSource?: 'computed' | 'reported' | 'unpriced';
   error?: { code?: string; message?: string };
   outputTruncated?: boolean;
 }
@@ -119,6 +119,8 @@ export type ParsedThreadLine = ThreadLine | { bad: true } | { ignored: true };
 
 const IGNORED_TYPES = new Set(['thinking_delta', 'compaction', 'tool_progress']);
 const TURN_ID_MAX = 128;
+const MAX_TOKEN_COUNT = 2_147_483_647;
+const MAX_COST_USD = 999_999.99999999;
 
 function replaceNuls(value: unknown): unknown {
   if (typeof value === 'string') return value.replaceAll(String.fromCharCode(0), '\uFFFD');
@@ -130,7 +132,8 @@ function replaceNuls(value: unknown): unknown {
 }
 
 const isString = (value: unknown): value is string => typeof value === 'string';
-const isIntegerAtLeastZero = (value: unknown): value is number => Number.isInteger(value) && (value as number) >= 0;
+const isIntegerAtLeastZero = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+const isTokenCount = (value: unknown): value is number => isIntegerAtLeastZero(value) && value <= MAX_TOKEN_COUNT;
 const isTurnId = (value: unknown): value is string => isString(value) && value.length >= 1 && value.length <= TURN_ID_MAX;
 const isFiniteNonNegative = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
 const isNonEmptyString = (value: unknown, max: number): value is string => isString(value) && value.length >= 1 && value.length <= max;
@@ -143,10 +146,10 @@ function sessionLine<T extends SessionThreadLine>(line: T, at: unknown): T {
 
 function parseUsage(value: Record<string, unknown>): UsageThreadLine | null {
   if (!isTurnId(value.turnId) || !isIntegerAtLeastZero(value.round) ||
-    !isIntegerAtLeastZero(value.inputTokens) || !isIntegerAtLeastZero(value.outputTokens) ||
-    !isFiniteNonNegative(value.costUsd)) return null;
-  if (value.cacheRead !== undefined && !isIntegerAtLeastZero(value.cacheRead)) return null;
-  if (value.cacheWrite !== undefined && !isIntegerAtLeastZero(value.cacheWrite)) return null;
+    !isTokenCount(value.inputTokens) || !isTokenCount(value.outputTokens) ||
+    !isFiniteNonNegative(value.costUsd) || value.costUsd > MAX_COST_USD) return null;
+  if (value.cacheRead !== undefined && !isTokenCount(value.cacheRead)) return null;
+  if (value.cacheWrite !== undefined && !isTokenCount(value.cacheWrite)) return null;
   if (value.costSource !== undefined && !['computed', 'reported', 'unpriced'].includes(value.costSource as string)) return null;
   const line: UsageThreadLine = {
     type: 'usage', turnId: value.turnId, round: value.round,
@@ -164,10 +167,11 @@ function parseTurnEnd(value: Record<string, unknown>): TurnEndThreadLine | null 
   const usage = value.usage as Record<string, unknown> | null | undefined;
   if (typeof usage !== 'object' || usage === null) return null;
   if (!TURN_END_STATUSES.includes(value.status as TurnEndStatus)) return null;
-  if (!isString(value.output) || !isIntegerAtLeastZero(usage.inputTokens) || !isIntegerAtLeastZero(usage.outputTokens)) return null;
-  if (usage.cacheReadTokens !== undefined && !isIntegerAtLeastZero(usage.cacheReadTokens)) return null;
-  if (usage.cacheWriteTokens !== undefined && !isIntegerAtLeastZero(usage.cacheWriteTokens)) return null;
-  if (!isFiniteNonNegative(value.costUsd)) return null;
+  if (!isString(value.output) || !isTokenCount(usage.inputTokens) || !isTokenCount(usage.outputTokens)) return null;
+  if (usage.cacheReadTokens !== undefined && !isTokenCount(usage.cacheReadTokens)) return null;
+  if (usage.cacheWriteTokens !== undefined && !isTokenCount(usage.cacheWriteTokens)) return null;
+  if (!isFiniteNonNegative(value.costUsd) || value.costUsd > MAX_COST_USD) return null;
+  if (value.costSource !== undefined && !['computed', 'reported', 'unpriced'].includes(value.costSource as string)) return null;
   const line: TurnEndThreadLine = {
     type: 'turn_end',
     turnId: value.turnId as string,
@@ -181,7 +185,7 @@ function parseTurnEnd(value: Record<string, unknown>): TurnEndThreadLine | null 
     },
     costUsd: value.costUsd,
   };
-  if (isString(value.costSource)) line.costSource = value.costSource;
+  if (typeof value.costSource === 'string') line.costSource = value.costSource as TurnEndThreadLine['costSource'];
   if (value.outputTruncated === true) line.outputTruncated = true;
   if (typeof value.error === 'object' && value.error !== null) {
     const error = value.error as Record<string, unknown>;
