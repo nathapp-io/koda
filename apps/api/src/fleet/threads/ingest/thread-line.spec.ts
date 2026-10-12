@@ -157,6 +157,12 @@ describe('parseThreadLine (US-004)', () => {
     });
   });
 
+  it('US-004 field rule: drops a session_closed at that is not a date and keeps the line', () => {
+    expect(parseThreadLine('{"type":"session_closed","at":"garbage","reason":"idle"}')).toEqual({
+      type: 'session_closed', reason: 'idle',
+    });
+  });
+
   it('US-004 field rule: rejects a session_failed line with an empty reason', () => {
     expect(parseThreadLine('{"type":"session_failed","reason":""}')).toEqual({ bad: true });
   });

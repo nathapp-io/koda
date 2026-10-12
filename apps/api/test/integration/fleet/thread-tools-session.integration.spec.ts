@@ -96,6 +96,24 @@ describeIntegration('fleet thread tools, questions and session (PG, US-004)', ()
     ]);
   });
 
+  it('US-004 AC6: approval_requested then approval_resolved in separate PUTs set decidedBy on the call entry', async () => {
+    const s = await fresh('tools-ac6');
+    const size = await put(s, [start('t1'), { type: 'tool_call', turnId: 't1', callId: 'c1', name: 'search_repo', input: { pattern: 'foo' } }]);
+    const linked = await put(s, [{ type: 'approval_requested', requestId: 'a1', callId: 'c1' }], size);
+    await put(s, [{ type: 'approval_resolved', requestId: 'a1', decision: 'deny', decidedBy: 'profile' }], linked);
+    expect((await assistant(s)).toolSummary).toEqual([expect.objectContaining({ callId: 'c1', decidedBy: 'profile' })]);
+  });
+
+  it('US-004 AC8: an informational question adds an ask_human entry and leaves pendingQuestion null', async () => {
+    const s = await fresh('tools-ac8');
+    await put(s, [start('t1'), { type: 'question', turnId: 't1', requestId: 'q1', text: 'Which repo?', expiresAt: E, answerable: false }]);
+    expect((await assistant(s)).toolSummary).toEqual([
+      { callId: 'q1', name: 'ask_human', input: '', isError: null, preview: 'Which repo?', decidedBy: null },
+    ]);
+    const thread = await prisma.chatThread.findUniqueOrThrow({ where: { id: s.threadId } });
+    expect(thread.pendingQuestion).toBeNull();
+  });
+
   it('US-004 AC7: an answerable question sets the thread pendingQuestion', async () => {
     const s = await fresh('tools-ac7');
     await put(s, [start('t1'), { type: 'question', turnId: 't1', requestId: 'q1', text: 'Which repo?', expiresAt: E }]);

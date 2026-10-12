@@ -54,7 +54,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
         for (const { line } of batch.lines) {
           if (line.type === 'input_consumed') await this.foldInputConsumed(threadId, line.messageId);
           else if (isToolLine(line)) skippedLines += await this.foldToolLine(threadId, line);
-          else if (line.type === 'question') await this.foldQuestion(threadId, line);
+          else if (line.type === 'question') skippedLines += await this.foldQuestion(threadId, line);
           else if (isSessionLine(line)) await this.foldSessionLine(batch, threadId, line);
           else skippedLines += await this.foldAssistantLine(batch, threadId, line);
         }
@@ -122,9 +122,11 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
     if (line.type === 'approval_requested' && line.callId === undefined) return 0;
     if (line.type === 'approval_requested' || line.type === 'approval_resolved') {
       // The message whose summary holds the call (requested) or the request (resolved). Matched by containment on the JSON.
+      // Newest first, so a callId reused across turns always resolves to the same message.
       const holds = line.type === 'approval_requested' ? { callId: line.callId } : { requestId: line.requestId };
       const message = await db.chatMessage.findFirst({
         where: { threadId, role: 'assistant', toolSummary: { array_contains: [holds] } },
+        orderBy: { seq: 'desc' },
         select: { id: true, toolSummary: true },
       });
       if (!message) return 0;
@@ -145,19 +147,23 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
     return 0;
   }
 
-  /** An answerable question sets the thread's `pendingQuestion`; an informational one becomes an `ask_human` tool entry. */
-  private async foldQuestion(threadId: string, line: QuestionThreadLine): Promise<void> {
+  /**
+   * An answerable question sets the thread's `pendingQuestion`; an informational one becomes an `ask_human` tool entry.
+   * Returns 1 when an informational question names a turn with no assistant message, else 0.
+   */
+  private async foldQuestion(threadId: string, line: QuestionThreadLine): Promise<number> {
     const db = this.prisma.client;
     if (line.answerable) {
       await db.chatThread.update({ where: { id: threadId }, data: {
-        pendingQuestion: { requestId: line.requestId, text: line.text.slice(0, QUESTION_TEXT_MAX), expiresAt: line.expiresAt },
+        pendingQuestion: { requestId: line.requestId, text: [...line.text].slice(0, QUESTION_TEXT_MAX).join(''), expiresAt: line.expiresAt },
       } });
-      return;
+      return 0;
     }
     const message = await db.chatMessage.findFirst({ where: { threadId, turnId: line.turnId, role: 'assistant' }, select: { id: true, toolSummary: true } });
-    if (!message) return;
+    if (!message) return 1;
     const next = upsertInformationalQuestion(readSummary(message.toolSummary), line.requestId, line.text);
     await db.chatMessage.update({ where: { id: message.id }, data: { toolSummary: next as unknown as Prisma.InputJsonValue } });
+    return 0;
   }
 
   /**
@@ -173,10 +179,18 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
       await db.chatThread.update({ where: { id: threadId }, data: { session: session as unknown as Prisma.InputJsonValue } });
       return;
     }
-    // A close or failure with no session folded yet still records one, with resumed and contextReset false.
+    // A close or failure keeps resumed and contextReset only when the stored session belongs to this job; otherwise
+    // (no session yet, or a previous job's session) they are false, so a new job never inherits the old flags.
     const previous = (await db.chatThread.findUnique({ where: { id: threadId }, select: { session: true } }))?.session as unknown as StoredSession | null | undefined;
-    const base: StoredSession = previous ?? { jobId: batch.jobId, state: 'live', resumed: false, contextReset: false, reason: null, at };
-    const session: StoredSession = { ...base, state: line.type === 'session_closed' ? 'closed' : 'failed', reason: line.reason, at };
+    const current = previous?.jobId === batch.jobId ? previous : null;
+    const session: StoredSession = {
+      jobId: batch.jobId,
+      state: line.type === 'session_closed' ? 'closed' : 'failed',
+      resumed: current?.resumed ?? false,
+      contextReset: current?.contextReset ?? false,
+      reason: line.reason,
+      at,
+    };
     await db.chatThread.update({ where: { id: threadId }, data: { session: session as unknown as Prisma.InputJsonValue } });
     if (line.type === 'session_failed') {
       await db.chatMessage.updateMany({

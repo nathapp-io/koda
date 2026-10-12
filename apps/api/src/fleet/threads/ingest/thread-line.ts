@@ -123,9 +123,9 @@ const isFiniteNonNegative = (value: unknown): value is number => typeof value ==
 const isNonEmptyString = (value: unknown, max: number): value is string => isString(value) && value.length >= 1 && value.length <= max;
 const isIsoDate = (value: unknown): value is string => isString(value) && !Number.isNaN(Date.parse(value));
 
-/** Keeps the runner's `at` only when it is a string; the fold stamps its own time otherwise. */
+/** Keeps the runner's `at` only when it parses as a date; the fold stamps its own time otherwise. */
 function sessionLine<T extends SessionThreadLine>(line: T, at: unknown): T {
-  return isString(at) ? { ...line, at } : line;
+  return isIsoDate(at) ? { ...line, at } : line;
 }
 
 function parseTurnEnd(value: Record<string, unknown>): TurnEndThreadLine | null {

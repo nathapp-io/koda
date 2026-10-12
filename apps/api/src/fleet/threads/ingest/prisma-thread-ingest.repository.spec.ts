@@ -10,6 +10,23 @@ type Msg = {
   pendingQuestion?: unknown;
 };
 
+/**
+ * The rows a `findFirst` filter selects, newest seq first (the production approval query orders by seq desc). Honours
+ * `toolSummary: { array_contains: [{ ... }] }` as Postgres JSON containment: an entry that has every key/value given.
+ */
+function matching(messages: Msg[], where: { threadId: string; turnId?: string; role: string; toolSummary?: { array_contains: unknown[] } }): Msg[] {
+  return messages
+    .filter((m) => m.threadId === where.threadId && m.role === where.role)
+    .filter((m) => where.turnId === undefined || m.turnId === where.turnId)
+    .filter((m) => {
+      if (where.toolSummary === undefined) return true;
+      const entries = (m.toolSummary as Array<Record<string, unknown>> | undefined) ?? [];
+      return where.toolSummary.array_contains.some((probe) => entries.some((entry) =>
+        Object.entries(probe as Record<string, unknown>).every(([key, value]) => entry[key] === value)));
+    })
+    .sort((a, b) => b.seq - a.seq);
+}
+
 /** An in-memory stand-in for the Prisma calls the fold makes. Enough to pin the fold's row effects. */
 function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?: number; messages?: Msg[]; pendingQuestion?: unknown; session?: unknown; resume?: boolean } = {}) {
   const messages: Msg[] = [...(opts.messages ?? [])];
@@ -36,8 +53,8 @@ function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?
         if (where.id) return messages.find((m) => m.id === where.id) ?? null;
         return null;
       }),
-      findFirst: vi.fn(async ({ where }: { where: { threadId: string; turnId?: string; role: string } }) =>
-        messages.find((m) => m.threadId === where.threadId && (where.turnId === undefined || m.turnId === where.turnId) && m.role === where.role) ?? null),
+      findFirst: vi.fn(async ({ where }: { where: { threadId: string; turnId?: string; role: string; toolSummary?: { array_contains: unknown[] } } }) =>
+        matching(messages, where)[0] ?? null),
       findMany: vi.fn(async ({ where }: { where: { threadId: string; role: string } }) =>
         messages.filter((m) => m.threadId === where.threadId && m.role === where.role)),
       create: vi.fn(async ({ data }: { data: Partial<Msg> & { threadId: string } }) => {
@@ -306,6 +323,58 @@ describe('PrismaThreadIngestRepository.fold tools and approvals (US-004)', () =>
     const { client, thread } = fakeClient({ nextSeq: 2, session: { jobId: 'J', state: 'live', resumed: false, contextReset: false, reason: null, at: 'A' } });
     await repoWith(client).fold(batch([{ type: 'session_closed', reason: 'idle' }]));
     expect(thread.session).toMatchObject({ state: 'closed', reason: 'idle', resumed: false });
+  });
+
+  it('US-004 AC6: approval_resolved updates the newest message when two messages hold the same requestId', async () => {
+    const holds = (id: string, seq: number) => ({ id, threadId: 'T', seq, jobId: 'J', turnId: `t${seq}`, role: 'assistant', content: '', status: 'complete', errorReason: null, streamRound: null, streamRoundStart: null, toolSummary: [{ callId: 'c1', name: 'x', input: '', isError: null, preview: '', decidedBy: null, requestId: 'a1' }] });
+    const { client, messages } = fakeClient({ nextSeq: 9, messages: [holds('old', 2), holds('new', 7)] });
+    await repoWith(client).fold(batch([{ type: 'approval_resolved', requestId: 'a1', decidedBy: 'profile' }]));
+    expect(messages.find((m) => m.id === 'new')?.toolSummary).toEqual([expect.objectContaining({ decidedBy: 'profile' })]);
+    expect(messages.find((m) => m.id === 'old')?.toolSummary).toEqual([expect.objectContaining({ decidedBy: null })]);
+  });
+
+  it('US-004 AC6: approval_requested links a requestId to the message that holds the callId', async () => {
+    const { client, messages } = fakeClient({ nextSeq: 2 });
+    const repo = repoWith(client);
+    await repo.fold(batch([start('t1'), tool('c1')]));
+    await repo.fold(batch([{ type: 'approval_requested', requestId: 'a1', callId: 'c1' }]));
+    expect(messages[0]?.toolSummary).toEqual([expect.objectContaining({ callId: 'c1', requestId: 'a1' })]);
+  });
+
+  it('US-004 AC8: an informational question for an unknown turn counts one skipped line and adds no entry', async () => {
+    const { client, messages } = fakeClient({ nextSeq: 2 });
+    await repoWith(client).fold(batch([question({ turnId: 't9', answerable: false })]));
+    expect(messages).toHaveLength(0);
+    expect(client.threadIngestCursor.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({ skippedLines: { increment: 1 } }),
+    }));
+  });
+
+  it('US-004 AC15: a close for a new job does not carry the previous job resumed or contextReset flags', async () => {
+    const { client, thread } = fakeClient({
+      nextSeq: 2,
+      session: { jobId: 'OLD', state: 'live', resumed: true, contextReset: true, reason: null, at: 'A' },
+    });
+    await repoWith(client).fold(batch([{ type: 'session_closed', reason: 'idle' }]));
+    expect(thread.session).toEqual({ jobId: 'J', state: 'closed', resumed: false, contextReset: false, reason: 'idle', at: expect.any(String) });
+  });
+
+  it('US-004 AC15: a close for the same job keeps its resumed and contextReset flags', async () => {
+    const { client, thread } = fakeClient({
+      nextSeq: 2,
+      session: { jobId: 'J', state: 'live', resumed: true, contextReset: false, reason: null, at: 'A' },
+    });
+    await repoWith(client).fold(batch([{ type: 'session_closed', reason: 'idle' }]));
+    expect(thread.session).toMatchObject({ jobId: 'J', state: 'closed', resumed: true, contextReset: false });
+  });
+
+  it('US-004 AC7: an answerable question text is cut to 2048 characters, never splitting a surrogate pair', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, pendingQuestion: null });
+    const text = `${'a'.repeat(2047)}😀tail`;
+    await repoWith(client).fold(batch([question({ text })]));
+    const stored = (thread.pendingQuestion as { text: string }).text;
+    expect([...stored]).toHaveLength(2048);
+    expect(stored.endsWith('😀')).toBe(true);
   });
 
   it('US-004 AC15: session_closed with no prior session sets resumed and contextReset false', async () => {
