@@ -124,11 +124,16 @@ const NUXT_AUTO_IMPORTS = [
   'useAsyncData', 'useVisiblePolling', 'useFleetRunners', 'useFleetRepos', 'useRoute', 'useRouter',
   'useFleetDispatchOptions', 'useFleetJobs', 'useProjectViewerRole', 'useProjectMembers',
   'useAdminUsers', 'useProjectEvents', 'useAuth', 'useProjectMemberNames', 'useFleetJobLogs',
-  'useFleetRepoConfig', 'useSkillCatalog', 'useProjectSkills', 'onBeforeRouteLeave',
+  'useFleetRepoConfig', 'useSkillCatalog', 'useProjectSkills', 'useThread', 'useThreads', 'onBeforeRouteLeave',
 ] as const
 
 /** Defaults for auto-imports a test did not supply; `definePageMeta` is a compile-time no-op macro. */
-const AUTO_IMPORT_DEFAULTS: Record<string, unknown> = { definePageMeta: () => undefined }
+const AUTO_IMPORT_DEFAULTS: Record<string, unknown> = {
+  definePageMeta: () => undefined,
+  // Thread pages auto-import useThread/useThreads (US-004): tests override them through globals.
+  useThread: undefined,
+  useThreads: undefined,
+}
 
 /** Compiled JS per file: the expensive half, safe to reuse across mounts. */
 const sourceCache = new Map<string, string>()

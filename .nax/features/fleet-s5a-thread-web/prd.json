@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-web",
   "branchName": "feat/fleet-s5a-thread-web",
   "createdAt": "2026-10-12T00:00:00.000Z",
-  "updatedAt": "2026-10-12T13:15:14.672Z",
+  "updatedAt": "2026-10-12T13:46:55.436Z",
   "userStories": [
     {
       "id": "US-001",
@@ -185,8 +185,8 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -255,7 +255,10 @@
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "A standard table/list and additive navigation entries reuse the upstream composable and existing layout patterns; developer/admin/viewer creation gating retains the access-control security override."
+        "reasoning": "A standard table/list and additive navigation entries reuse the upstream composable and existing layout patterns; developer/admin/viewer creation gating retains the access-control security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/layouts/default.vue",
@@ -288,7 +291,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "958d407de635e95504d7a6c150118a7ab59d2a60"
     },
     {
       "id": "US-005",
