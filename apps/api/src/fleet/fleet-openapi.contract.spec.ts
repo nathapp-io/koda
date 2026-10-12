@@ -38,9 +38,14 @@ describe('fleet OpenAPI contract', () => {
     expect(spec.paths['/api/projects/{slug}/fleet/runners']?.['get']).toBeDefined();
     expect(spec.paths['/api/fleet/repos/{id}/check']?.['post']).toBeDefined();
     expect(Object.keys(spec.components.schemas['RunnerSummaryDto']?.properties ?? {}).sort())
-      .toEqual(['arch', 'enabled', 'id', 'labels', 'name', 'online', 'os', 'profiles']);
+      .toEqual(['arch', 'enabled', 'id', 'labels', 'name', 'online', 'os', 'profiles', 'threadBackends']);
     expect(Object.keys(spec.components.schemas['RepoCheckResultDto']?.properties ?? {}).sort())
       .toEqual(['checkedAt', 'reachable', 'reason', 'repoId']);
+  });
+
+  it('exposes the web-facing thread facts: detail refusal and the list kill-switch flag (US-001)', () => {
+    expect(Object.keys(spec.components.schemas['ThreadDetailDto']?.properties ?? {})).toContain('sendRefusal');
+    expect(Object.keys(spec.components.schemas['ThreadListDto']?.properties ?? {})).toContain('threadsEnabled');
   });
 
   it('exposes the budget routes on both prefixes and the budget_paused misfit (S1b §2.3, §2.4)', () => {

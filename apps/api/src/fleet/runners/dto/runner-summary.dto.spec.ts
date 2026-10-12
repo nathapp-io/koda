@@ -11,12 +11,27 @@ const record = (capabilities: unknown, over: Partial<RunnerRecord> = {}): Runner
 describe('RunnerSummaryDto.from', () => {
   it('lists machine profile names sorted, and nothing else from the capability report', () => {
     const dto = RunnerSummaryDto.from(record({ profiles: { zeta: {}, alpha: {} }, credentials: [{ providerId: 'x' }] }), { now, offlineSec: 90 });
-    expect(dto).toEqual({ id: 'r1', name: 'box', os: 'darwin', arch: 'arm64', labels: ['mac'], enabled: true, online: true, profiles: ['alpha', 'zeta'] });
+    expect(dto).toEqual({ id: 'r1', name: 'box', os: 'darwin', arch: 'arm64', labels: ['mac'], enabled: true, online: true, profiles: ['alpha', 'zeta'], threadBackends: { native: [], acp: [] } });
   });
 
   it('answers no profiles for a malformed or empty report instead of throwing', () => {
     for (const caps of [null, {}, { profiles: null }, { profiles: ['a'] }, 'x']) {
       expect(RunnerSummaryDto.from(record(caps), { now, offlineSec: 90 }).profiles).toEqual([]);
     }
+  });
+
+  it('US-001 AC11: reads validated threadBackends from a protocol v4 report', () => {
+    const dto = RunnerSummaryDto.from(record({ threadBackends: { native: ['m1', 'm2'], acp: [] } }, { protocolVersion: 4 }), { now, offlineSec: 90 });
+    expect(dto.threadBackends).toEqual({ native: ['m1', 'm2'], acp: [] });
+  });
+
+  it('US-001 AC12: hides stored threadBackends below the protocol floor', () => {
+    const dto = RunnerSummaryDto.from(record({ threadBackends: { native: ['m1', 'm2'], acp: [] } }, { protocolVersion: 3 }), { now, offlineSec: 90 });
+    expect(dto.threadBackends).toEqual({ native: [], acp: [] });
+  });
+
+  it('US-001 AC13: drops threadBackends whose native list holds non-strings', () => {
+    const dto = RunnerSummaryDto.from(record({ threadBackends: { native: [1], acp: [] } }, { protocolVersion: 4 }), { now, offlineSec: 90 });
+    expect(dto.threadBackends).toEqual({ native: [], acp: [] });
   });
 });

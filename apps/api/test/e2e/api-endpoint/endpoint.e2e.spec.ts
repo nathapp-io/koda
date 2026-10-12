@@ -3508,5 +3508,32 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(403);
       threadMessage(res, 'threads.notCreator.403');
     });
+
+    it('US-001 AC1: thread detail answers a sendRefusal fact (null with nothing blocking)', async () => {
+      const thread = await newThread('facts-detail');
+      const res = await request(httpServer).get(`/api/projects/${projectSlug}/threads/${thread.id}`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).expect(200);
+      expect(body<{ id: string; sendRefusal: unknown }>(res).sendRefusal).toBeNull();
+    });
+
+    it('US-001 AC9: thread list answers threadsEnabled from the kill-switch config', async () => {
+      const res = await request(httpServer).get(`/api/projects/${projectSlug}/threads`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).expect(200);
+      expect(body<{ items: unknown[]; threadsEnabled: boolean }>(res).threadsEnabled).toBe(true);
+    });
+
+    it('US-001 AC14: project runner summaries carry validated threadBackends', async () => {
+      const runner = await db().runner.create({ data: {
+        name: `facts-runner-${threadId}`, apiKeyHash: `facts-hash-${threadId}`, os: 'linux', arch: 'x64', labels: ['linux'],
+        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, threadBackends: { native: ['m1'], acp: [] } },
+        daemonVersion: '0.1.0', protocolVersion: 4, bootId: 'facts-boot', lastSeenAt: new Date(), createdById: world.ids.root,
+      } });
+      const res = await request(httpServer).get(`/api/projects/${projectSlug}/fleet/runners`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).expect(200);
+      const records = body<{ records: Array<Record<string, unknown>> }>(res).records;
+      const summary = records.find((record) => record.id === runner.id);
+      expect(summary).toBeDefined();
+      expect((summary as Record<string, unknown>).threadBackends).toEqual({ native: ['m1'], acp: [] });
+    });
   });
 });
