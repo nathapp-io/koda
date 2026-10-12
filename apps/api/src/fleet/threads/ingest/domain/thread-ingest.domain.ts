@@ -7,7 +7,7 @@ export const THREAD_UNFOLDED_STREAM_SOURCE: unique symbol = Symbol('THREAD_UNFOL
 export interface ThreadIngestBatch {
   jobId: string;
   leaseEpoch: number;
-  lines: Array<{ line: ThreadLine; endOffset: number }>;
+  lines: Array<{ line: ThreadLine | { bad: true }; endOffset: number }>;
   endOffset: number;
   badLines: number;
 }

@@ -74,23 +74,33 @@ export class ThreadIngestor {
           await this.foldAndPublish({ jobId, leaseEpoch, lines, endOffset, badLines });
         } catch (error) {
           this.logger.warn(`Thread fold batch failed for job ${jobId} at offset ${endOffset}, retrying line by line`, error);
+          let pendingBadLines = 0;
           for (const entry of entries) {
             const { parsed } = entry;
             if ('bad' in parsed) {
-              await this.foldAndPublish({ jobId, leaseEpoch, lines: [], endOffset: entry.endOffset, badLines: 1 });
+              pendingBadLines += 1;
             } else if ('ignored' in parsed) {
-              await this.foldAndPublish({ jobId, leaseEpoch, lines: [], endOffset: entry.endOffset, badLines: 0 });
+              await this.foldAndPublish({ jobId, leaseEpoch, lines: [], endOffset: entry.endOffset, badLines: pendingBadLines });
+              pendingBadLines = 0;
             } else {
               try {
                 await this.foldAndPublish({
                   jobId, leaseEpoch, lines: [{ line: parsed, endOffset: entry.endOffset }],
-                  endOffset: entry.endOffset, badLines: 0,
+                  endOffset: entry.endOffset, badLines: pendingBadLines,
                 });
+                pendingBadLines = 0;
               } catch (error) {
                 this.logger.error(`Failed to fold thread line for job ${jobId} at ${entry.endOffset}`, error);
-                await this.foldAndPublish({ jobId, leaseEpoch, lines: [], endOffset: entry.endOffset, badLines: 1 });
+                await this.foldAndPublish({
+                  jobId, leaseEpoch, lines: [{ line: { bad: true }, endOffset: entry.endOffset }],
+                  endOffset: entry.endOffset, badLines: pendingBadLines,
+                });
+                pendingBadLines = 0;
               }
             }
+          }
+          if (pendingBadLines > 0) {
+            await this.foldAndPublish({ jobId, leaseEpoch, lines: [], endOffset, badLines: pendingBadLines });
           }
         }
       }

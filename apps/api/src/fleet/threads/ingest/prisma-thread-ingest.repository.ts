@@ -92,6 +92,10 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
       let threadChanged = false;
       if (threadId && job) {
         for (const { line } of batch.lines) {
+          if ('bad' in line) {
+            skippedLines += 1;
+            continue;
+          }
           if (line.type === 'input_consumed') {
             await this.foldInputConsumed(threadId, line.messageId);
             messageIds.add(line.messageId);
