@@ -40,6 +40,7 @@ export class FleetDashboardService {
       jobStartSec: this.cfg.jobStartSec, jobQueuedWarnSec: this.cfg.jobQueuedWarnSec, credentialExpiryWarnDays: this.cfg.credentialExpiryWarnDays,
     };
     const attention = buildAttention({ scope, runners, heldByRunner, activeJobs: listed, pending, dryRun: { queued, loads, pauses } }, now, thresholds);
-    return buildDashboardView({ scope, now, offlineSec: this.cfg.runnerOfflineSec, runners, heldByRunner, active, recent, counts, pending, attention });
+    const runLoads = new Map([...loads].map(([id, load]) => [id, load.active] as const));
+    return buildDashboardView({ scope, now, offlineSec: this.cfg.runnerOfflineSec, runners, heldByRunner: runLoads, active, recent, counts, pending, attention });
   }
 }

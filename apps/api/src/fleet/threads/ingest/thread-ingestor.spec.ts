@@ -1,5 +1,6 @@
 import type { LogStore } from '../../logs/log-store';
-import { ThreadIngestor, type ThreadIngestRepository } from './thread-ingestor';
+import { ThreadIngestor } from './thread-ingestor';
+import type { ThreadIngestRepository } from './domain/thread-ingest.domain';
 
 describe('ThreadIngestor (US-002)', () => {
   it('US-002 AC10: isolates a rejected batch to its individual lines and advances past the bad line', async () => {

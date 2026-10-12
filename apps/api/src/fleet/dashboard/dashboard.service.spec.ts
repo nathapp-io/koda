@@ -42,7 +42,7 @@ describe('FleetDashboardService (S2b (c) §1)', () => {
     expect(g.runners.find((r) => r.id === 'r1')?.naxVersion).toBe('0.83.3');
   });
 
-  it('counts held THREAD jobs for runner health and runner activeJobs, but not RUN capacity', async () => {
+  it('counts held THREAD jobs for runner health but not runner activeJobs or RUN capacity', async () => {
     const offline = rawRunner({ lastSeenAt: secAgo(10_000) });
     const repo = fakeRepo({
       findRunners: vi.fn().mockResolvedValue([offline]),
@@ -53,6 +53,18 @@ describe('FleetDashboardService (S2b (c) §1)', () => {
     expect(view.attention).toEqual([expect.objectContaining({
       kind: 'runner_unhealthy', severity: 'error', conditions: [{ type: 'offline', jobsHeld: 1 }],
     })]);
+    expect(view.runners.find((runner) => runner.id === 'r1')?.activeJobs).toBe(0);
+  });
+
+  it('counts only RUN jobs as runner activeJobs when RUN and THREAD are both held', async () => {
+    const repo = fakeRepo({
+      findHeldRefs: vi.fn().mockResolvedValue([
+        { runnerId: 'r1', repoId: 'repo1', command: 'RUN' },
+        { runnerId: 'r1', repoId: 'repo1', command: 'THREAD' },
+      ]),
+      findActiveJobs: vi.fn().mockResolvedValue([]),
+    });
+    const view = await new FleetDashboardService(repo, budgets, testFleetConfig()).snapshot({ kind: 'global' }, DASH_NOW);
     expect(view.runners.find((runner) => runner.id === 'r1')?.activeJobs).toBe(1);
   });
 

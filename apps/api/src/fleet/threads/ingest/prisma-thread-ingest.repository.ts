@@ -80,6 +80,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
         await db.$queryRaw`SELECT "id" FROM "ChatThread" WHERE "id" = ${job.threadId} FOR UPDATE`;
         threadId = job.threadId;
       }
+      if (!threadId || !job) return { costChanged: false, events: [] };
       let skippedLines = 0;
       let costChanged = false;
       const changedTurns = new Set<string>();
@@ -186,14 +187,11 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
     let inserted = true;
     if (source !== 'unpriced') {
       const thread = await db.chatThread.findUniqueOrThrow({ where: { id: threadId }, select: { backend: true, feature: true } });
-      const backend = thread.backend as { kind?: string; agent?: string; model?: string };
-      const create = await db.fleetCostEvent.createMany({ data: [{
-        jobId: job.id, leaseEpoch: batch.leaseEpoch, projectId: job.projectId, repoId: job.repoId, runnerId: job.runnerId,
-        at: line.at ? new Date(line.at) : new Date(), agentName: backend.kind === 'native' ? 'native' : backend.agent ?? 'native',
-        model: backend.model ?? 'default', profile: 'read', stage: 'thread', featureName: thread.feature,
+      const create = await db.fleetCostEvent.createMany({ data: [this.costEventData(batch, job, thread, {
         callId: `${line.turnId}:${line.round}`, inputTokens: line.inputTokens, outputTokens: line.outputTokens,
-        cacheReadTokens: line.cacheRead, cacheWriteTokens: line.cacheWrite, costUsd: new Prisma.Decimal(line.costUsd), pricingSource: source,
-      }], skipDuplicates: true });
+        cacheReadTokens: line.cacheRead, cacheWriteTokens: line.cacheWrite, costUsd: line.costUsd,
+        at: line.at ? new Date(line.at) : new Date(), pricingSource: source,
+      })], skipDuplicates: true });
       inserted = create.count > 0;
     }
     if (!inserted) return { costChanged: false, skipped: false, changed: false };
@@ -234,17 +232,34 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
     }
     if (line.costSource === 'unpriced' || line.costUsd === 0) return false;
     const turnSpend = await this.sumTurnCost(job.id, line.turnId, batch.leaseEpoch);
-    const reconcile = new Prisma.Decimal(line.costUsd).sub(turnSpend);
+    const reconcile = new Prisma.Decimal(String(line.costUsd)).sub(turnSpend);
     if (reconcile.lte(0)) return false;
     const thread = await db.chatThread.findUniqueOrThrow({ where: { id: threadId }, select: { backend: true, feature: true } });
-    const backend = thread.backend as { kind?: string; agent?: string; model?: string };
-    const result = await db.fleetCostEvent.createMany({ data: [{
-      jobId: job.id, leaseEpoch: batch.leaseEpoch, projectId: job.projectId, repoId: job.repoId, runnerId: job.runnerId,
-      at: new Date(), agentName: backend.kind === 'native' ? 'native' : backend.agent ?? 'native', model: backend.model ?? 'default',
-      profile: 'read', stage: 'thread', featureName: thread.feature, callId: `${line.turnId}:turn_end`,
-      inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: reconcile, pricingSource: line.costSource ?? 'computed',
-    }], skipDuplicates: true });
+    const result = await db.fleetCostEvent.createMany({ data: [this.costEventData(batch, job, thread, {
+      callId: `${line.turnId}:turn_end`, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+      costUsd: reconcile, at: new Date(), pricingSource: line.costSource ?? 'computed',
+    })], skipDuplicates: true });
     return result.count > 0;
+  }
+
+  private costEventData(
+    batch: ThreadIngestBatch,
+    job: { id: string; projectId: string; repoId: string; runnerId: string | null },
+    thread: { backend: Prisma.JsonValue; feature: string | null },
+    fields: {
+      callId: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number;
+      costUsd: number | Prisma.Decimal; at: Date; pricingSource: string;
+    },
+  ) {
+    const backend = thread.backend as { kind?: string; agent?: string; model?: string };
+    return {
+      jobId: job.id, leaseEpoch: batch.leaseEpoch, projectId: job.projectId, repoId: job.repoId, runnerId: job.runnerId,
+      at: fields.at, agentName: backend.kind === 'native' ? 'native' : backend.agent ?? 'native',
+      model: backend.model ?? 'default', profile: 'read', stage: 'thread', featureName: thread.feature,
+      callId: fields.callId, inputTokens: fields.inputTokens, outputTokens: fields.outputTokens,
+      cacheReadTokens: fields.cacheReadTokens, cacheWriteTokens: fields.cacheWriteTokens,
+      costUsd: new Prisma.Decimal(String(fields.costUsd)), pricingSource: fields.pricingSource,
+    };
   }
 
   private async rederiveCosts(batch: ThreadIngestBatch, job: { id: string }, threadId: string, changedTurns: ReadonlySet<string>): Promise<void> {

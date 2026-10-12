@@ -1,6 +1,6 @@
 import { Prisma } from '../../../generated/prisma/client';
 import { PrismaThreadIngestRepository } from './prisma-thread-ingest.repository';
-import type { ThreadIngestBatch } from './thread-ingestor';
+import type { ThreadIngestBatch } from './domain/thread-ingest.domain';
 import type { ThreadLine } from './thread-line';
 
 type Msg = {
@@ -109,6 +109,16 @@ const end = (over: Partial<Extract<ThreadLine, { type: 'turn_end' }>> = {}): Thr
 });
 
 describe('PrismaThreadIngestRepository.fold (US-003)', () => {
+  it.each([
+    ['non-THREAD job', { command: 'RUN' }],
+    ['THREAD job without a thread id', { threadId: null }],
+  ])('skips a %s without creating an ingest cursor or events', async (_description, options) => {
+    const { client } = fakeClient(options);
+    const result = await repoWith(client).fold(batch([start('t1')]));
+    expect(client.threadIngestCursor.upsert).not.toHaveBeenCalled();
+    expect(result).toEqual({ costChanged: false, events: [] });
+  });
+
   it('US-003 AC1: turn_start inserts a streaming assistant message at the next seq with jobId and turnId', async () => {
     const { client, messages } = fakeClient({ nextSeq: 2 });
     await repoWith(client).fold(batch([start('t1')]));
