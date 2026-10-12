@@ -28,7 +28,14 @@ export class ThreadIngestBootstrap implements OnApplicationBootstrap {
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
-    for (const { jobId, leaseEpoch } of await this.source.findUnfolded()) {
+    let candidates: UnfoldedStream[];
+    try {
+      candidates = await this.source.findUnfolded();
+    } catch (error) {
+      this.logger.error('Startup catch-up could not list unfolded thread streams', error);
+      return;
+    }
+    for (const { jobId, leaseEpoch } of candidates) {
       try {
         await this.ingestor.catchUp(jobId, leaseEpoch);
       } catch (error) {

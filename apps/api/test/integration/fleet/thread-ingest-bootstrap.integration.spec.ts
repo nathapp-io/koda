@@ -2,7 +2,7 @@
  * Fleet S5a US-007 — startup catch-up of unfolded thread streams (PG).
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/thread-ingest-bootstrap.integration.spec.ts
  */
-import { mkdtempSync } from 'fs';
+import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { NathApplication } from '@nathapp/nestjs-app';
@@ -26,6 +26,7 @@ describeIntegration('fleet thread ingest startup catch-up (PG, US-007)', () => {
   let store: LogStore;
   let ingestor: ThreadIngestor;
   const saved: Record<string, string | undefined> = {};
+  let artifactDir: string;
 
   const START = { type: 'turn_start', turnId: 't1' };
   const DELTA_HI = { type: 'text_delta', turnId: 't1', round: 1, text: 'Hi' };
@@ -33,7 +34,8 @@ describeIntegration('fleet thread ingest startup catch-up (PG, US-007)', () => {
 
   beforeAll(async () => {
     for (const k of ENV) saved[k] = process.env[k];
-    process.env.FLEET_ARTIFACT_DIR = mkdtempSync(join(tmpdir(), 'koda-thread-bootstrap-'));
+    artifactDir = mkdtempSync(join(tmpdir(), 'koda-thread-bootstrap-'));
+    process.env.FLEET_ARTIFACT_DIR = artifactDir;
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
@@ -44,6 +46,7 @@ describeIntegration('fleet thread ingest startup catch-up (PG, US-007)', () => {
   });
   afterAll(async () => {
     await app.close();
+    rmSync(artifactDir, { recursive: true, force: true });
     for (const k of ENV) {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
@@ -120,6 +123,22 @@ describeIntegration('fleet thread ingest startup catch-up (PG, US-007)', () => {
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it('US-007: an unfolded stream of a requeued job\'s earlier epoch is folded at that epoch', async () => {
+    // The job moved on to epoch 2; epoch 1's stream still holds bytes its cursor never reached.
+    const s = await seedJob('prior-epoch', { leaseEpoch: 2 });
+    const key = logKey(s.jobId, 1, 'thread');
+    const bytes = Buffer.from(`${JSON.stringify(START)}\n${JSON.stringify(DELTA_HI)}\n`, 'utf8');
+    const size = await store.withLock(key, async () => {
+      await store.append(key, 0, bytes);
+      return store.size(key);
+    });
+    await prisma.fleetJobLog.create({ data: { jobId: s.jobId, leaseEpoch: 1, stream: 'thread', sizeBytes: BigInt(size) } });
+    await bootstrap();
+    expect(await assistantOf(s.threadId)).toMatchObject({ content: 'Hi', jobId: s.jobId });
+    expect(await prisma.threadIngestCursor.findUnique({ where: { jobId_leaseEpoch: { jobId: s.jobId, leaseEpoch: 1 } } }))
+      .toMatchObject({ offset: BigInt(size) });
   });
 
   it('US-007 AC5: a failing catchUp is logged and the next job in order is still folded', async () => {

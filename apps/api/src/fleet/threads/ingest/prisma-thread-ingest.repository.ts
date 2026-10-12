@@ -44,10 +44,10 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
   /** Startup catch-up candidates (US-007): a THREAD attempt whose stream holds bytes past its cursor, at most 200. */
   async findUnfolded(): Promise<UnfoldedStream[]> {
     const rows = await this.prisma.client.$queryRaw<Array<{ jobId: string; leaseEpoch: number }>>`
-      SELECT j."id" AS "jobId", j."leaseEpoch" AS "leaseEpoch"
+      SELECT j."id" AS "jobId", l."leaseEpoch" AS "leaseEpoch"
       FROM "FleetJob" j
-      JOIN "FleetJobLog" l ON l."jobId" = j."id" AND l."leaseEpoch" = j."leaseEpoch" AND l."stream" = 'thread'
-      LEFT JOIN "ThreadIngestCursor" c ON c."jobId" = j."id" AND c."leaseEpoch" = j."leaseEpoch"
+      JOIN "FleetJobLog" l ON l."jobId" = j."id" AND l."stream" = 'thread'
+      LEFT JOIN "ThreadIngestCursor" c ON c."jobId" = l."jobId" AND c."leaseEpoch" = l."leaseEpoch"
       WHERE j."command" = 'THREAD'
         AND (j."state" IN (${Prisma.join([...ACTIVE_STATES])})
           OR j."finishedAt" >= now() - interval '24 hours')

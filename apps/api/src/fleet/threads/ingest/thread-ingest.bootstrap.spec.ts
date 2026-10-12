@@ -43,6 +43,14 @@ describe('ThreadIngestBootstrap (US-007)', () => {
     expect(Logger.prototype.error).toHaveBeenCalledWith(expect.stringContaining('J1'), failure);
   });
 
+  it('US-007: a failing candidate query is logged and resolves boot without a catchUp call', async () => {
+    const failure = new Error('db down');
+    const { bootstrap, ingestor } = build({ source: { findUnfolded: vi.fn(async () => { throw failure; }) } });
+    await expect(bootstrap.onApplicationBootstrap()).resolves.toBeUndefined();
+    expect(ingestor.catchUp).not.toHaveBeenCalled();
+    expect(Logger.prototype.error).toHaveBeenCalledWith(expect.stringContaining('could not list'), failure);
+  });
+
   it('US-007: a source with no unfolded streams makes no catchUp call', async () => {
     const { bootstrap, ingestor } = build({ source: { findUnfolded: vi.fn(async () => []) } });
     await bootstrap.onApplicationBootstrap();
