@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { chmodSync } from 'node:fs';
-import type { RunnerEvent, RunnerEventType } from '@nathapp/fleet-protocol';
+import type { FleetJobKindName, RunnerEvent, RunnerEventType } from '@nathapp/fleet-protocol';
 import { systemNow, type Now } from '../time';
 import { SCHEMA_SQL } from './schema';
 import type { ApprovalReceiverRow, CommandRecord, EventRow, JobPatch, JobRow, NewJob, PendingAskRow } from './types';
@@ -139,6 +139,14 @@ export class Journal {
 
   activeCount(): number {
     return (this.db.query('SELECT COUNT(*) AS n FROM jobs WHERE done_at IS NULL').get() as Row)['n'] as number;
+  }
+
+  /**
+   * Fleet S5a B1-R1: a THREAD job holds no nax slot, so a free-slot count asks for the active rows of
+   * every other kind. The server counts thread slots itself.
+   */
+  activeCountExcluding(command: FleetJobKindName): number {
+    return (this.db.query('SELECT COUNT(*) AS n FROM jobs WHERE done_at IS NULL AND command <> ?').get(command) as Row)['n'] as number;
   }
 
   updateJob(jobId: string, leaseEpoch: number, patch: JobPatch): JobRow | null {

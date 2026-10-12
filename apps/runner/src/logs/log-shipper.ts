@@ -83,14 +83,21 @@ export class LogShipper implements LogShipping {
   register(spec: LogJob): void {
     const key = jobKey(spec.jobId, spec.leaseEpoch);
     if (this.closed || this.jobs.has(key)) return;
+    const isThreadJob = 'threadPath' in spec;
     const job: JobEntry = {
-      key, spec, streams: [], draining: false, runSearch: spec.sources.runLog, runResolved: !spec.sources.runLog, waiters: [], drainTimer: null,
+      key, spec, streams: [], draining: false,
+      runSearch: !isThreadJob && spec.sources.runLog,
+      runResolved: isThreadJob || !spec.sources.runLog,
+      waiters: [], drainTimer: null,
     };
     this.jobs.set(key, job);
-    this.addStream(job, 'stdout', spec.sources.stdoutPath);
-    this.addStream(job, 'stderr', spec.sources.stderrPath);
-    this.startWorkers();
+    if (isThreadJob) this.addStream(job, 'thread', spec.threadPath);
+    else {
+      this.addStream(job, 'stdout', spec.sources.stdoutPath);
+      this.addStream(job, 'stderr', spec.sources.stderrPath);
+    }
     this.kick();
+    this.startWorkers();
   }
 
   wake(jobId: string, leaseEpoch: number): void {
@@ -138,7 +145,7 @@ export class LogShipper implements LogShipping {
   }
 
   private lacksRun(job: JobEntry): boolean {
-    return job.spec.sources.runLog && !job.streams.some((s) => s.stream === 'run');
+    return !('threadPath' in job.spec) && job.spec.sources.runLog && !job.streams.some((s) => s.stream === 'run');
   }
 
   private addStream(job: JobEntry, stream: LogStreamName, path: string): void {
@@ -168,8 +175,8 @@ export class LogShipper implements LogShipping {
         const now = this.deps.nowMs();   // one clock read for pick and idleMs, so a due retry is never slept past
         const next = this.pick(now);
         if (next) await this.ship(next);
-        else if (this.closed || [...this.jobs.values()].some((job) => job.runSearch)) continue;
-        else await this.deps.sleep(this.idleMs(now), signal);
+        else if (signal.aborted || this.closed || [...this.jobs.values()].some((job) => job.runSearch)) continue;
+        else await this.waitForWake(this.idleMs(now), signal);
       } catch (error) {
         this.deps.log.warn('log shipper error', { error: errorMessage(error) });
         if (!this.closed) await this.deps.sleep(ERROR_PAUSE_MS, signal);
@@ -180,7 +187,7 @@ export class LogShipper implements LogShipping {
   /** The run log appears once nax starts its run (spec §2.4); a drain searches once more before it can finish. */
   private async discover(): Promise<void> {
     for (const job of [...this.jobs.values()]) {
-      if (!job.runSearch) continue;
+      if (!job.runSearch || !('sources' in job.spec)) continue;
       job.runSearch = false;
       const searchedWhileDraining = job.draining;
       let path: string | null;
@@ -215,6 +222,21 @@ export class LogShipper implements LogShipping {
     const waits = [this.pausedUntil - now, ...this.order.filter((s) => s.status === 'active' && !s.busy && s.dirty).map((s) => s.retryAt - now)]
       .filter((ms) => ms > 0);
     return waits.length > 0 ? Math.min(...waits) : IDLE_MS;
+  }
+
+  /** A wake must release an idle worker even when an injected sleeper ignores AbortSignal. */
+  private async waitForWake(ms: number, signal: AbortSignal): Promise<void> {
+    if (signal.aborted) return;
+    let onAbort: (() => void) | null = null;
+    const wake = new Promise<void>((resolve) => {
+      onAbort = () => resolve();
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+    try {
+      await Promise.race([this.deps.sleep(ms, signal), wake]);
+    } finally {
+      if (onAbort !== null) signal.removeEventListener('abort', onAbort);
+    }
   }
 
   private async ship(entry: StreamEntry): Promise<void> {

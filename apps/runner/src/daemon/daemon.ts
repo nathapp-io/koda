@@ -1,5 +1,6 @@
 import { chmod, mkdir, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { configureCredentials as defaultConfigureCredentials, type CredentialsConfig } from '@nathapp/nax-agent';
 import { uploadWithRetry } from '../bundle/upload-bundle';
 import { ApprovalRelay } from '../approvals/approval-relay';
 import { CapabilityReporter } from '../capabilities/capability-probe';
@@ -28,6 +29,11 @@ import { Supervisor } from '../supervisor/supervisor';
 import type { BundleUploader } from '../supervisor/job-run';
 import { ServerClient, type FetchFn } from '../sync/http';
 import { SyncLoop, type StopReason } from '../sync/sync-loop';
+import { naxCredentialsConfig } from '../thread/nax-credentials';
+import { ThreadSessionFactory } from '../thread/session-factory';
+import { threadNativeModels } from '../thread/thread-host';
+import type { ThreadRunSetup } from '../thread/thread-job-run';
+import { pruneThreads } from '../thread/thread-prune';
 import { systemNow, systemSleep, type Now, type Sleep } from '../time';
 import { CapacityTracker, freeSlots } from './capacity';
 import { DAEMON_VERSION } from '../version';
@@ -49,6 +55,10 @@ export interface DaemonOptions {
   readonly selfCommand?: readonly string[];
   /** D96: tests inject a scripted nax; otherwise `createNaxCli(config.naxCommand, config.naxHome)`. */
   readonly nax?: NaxCli;
+  /** Fleet S5a §3: the thread session factory's `open`; tests inject a fake. Default: `ThreadSessionFactory`. */
+  readonly threadSessions?: Pick<ThreadSessionFactory, 'open'>;
+  /** Fleet S5a §3: nax-agent's process-wide credential config; tests inject a spy. Default: nax-agent's own. */
+  readonly configureCredentials?: (config: CredentialsConfig) => void;
 }
 
 export interface DaemonHandle {
@@ -97,13 +107,16 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   await chmod(home.dir, 0o700).catch(() => undefined);
   const uid = process.getuid?.() ?? 0;
   const socketDir = config.socketDir ?? defaultSocketDir(uid);
-  await ensureSocketDir(socketDir, uid);   // D78: refuse to start before anything could listen in an unsafe place
+  await ensureSocketDir(socketDir, uid);
 
   const journal = Journal.open(home.journalPath, now);
   const approvals = new ApprovalRelay({ journal, log, now });
   const bootId = options.bootId ?? newBootId();
   journal.setMeta('boot_id', bootId);
   journal.setMeta('runner_id', identity.runnerId);
+  // Fleet S5a §3: nax-agent reads the credential store through this process-wide config, so a thread session
+  // sees the runner's nax home. Once, before the first sync — never the runner's own key or a git token.
+  (options.configureCredentials ?? defaultConfigureCredentials)(naxCredentialsConfig(config.naxHome));
   const nax = options.nax ?? createNaxCli(config.naxCommand, config.naxHome, tuning.naxCallTimeoutMs);
   const naxMode = config.capabilities === null;   // D95: this runner asks nax; runner.json carries no capabilities block
   const reporter = new CapabilityReporter(createCapabilityProbe(config, now, nax), journal, log);
@@ -118,6 +131,22 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   await sweepOrphanProfiles(config.naxHome, new Set(journal.activeJobs().map((job) => job.jobId)));
   approvals.sweepOrphans(journal.activeJobs());
   await pruneJobs(journal, config, log);
+  // Fleet S5a §3: the latest sync's archived thread ids (an absent field keeps the previous list); the prune
+  // pass runs at start and every `pruneIntervalMs`. A throw is a warning — it never stops the daemon.
+  let archivedThreadIds: readonly string[] = [];
+  const pruneThreadAssets = async (): Promise<void> => {
+    try {
+      await pruneThreads({
+        git, homeDir: home.dir, archivedThreadIds, now,
+        activeThreadIds: journal.activeJobs()
+          .filter((job) => job.command === 'THREAD')
+          .flatMap((job) => (job.assign.thread ? [job.assign.thread.threadId] : [])),
+      });
+    } catch (error) {
+      log.warn('thread prune failed', { error: errorMessage(error) });
+    }
+  };
+  await pruneThreadAssets();
 
   const client = new ServerClient({ serverUrl: config.serverUrl, apiKey: identity.apiKey, fetchFn: options.fetchFn, syncTimeoutMs: tuning.syncTimeoutMs });
   const capacity = new CapacityTracker(client, log);
@@ -146,6 +175,18 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     log, nowMs: () => now().getTime(), sleep, random: Math.random,
     tuning: { chunkBytes: tuning.logChunkBytes, maxInFlight: tuning.logMaxInFlight, putTimeoutMs: tuning.logPutTimeoutMs, backoffMaxMs: tuning.logBackoffMaxMs },
   });
+  // Fleet S5a §3: the thread host. `threadSessions` is the session factory (or a test's fake); the native
+  // models a session may name come from the nax home, filtered by the last capability report.
+  const threads: ThreadRunSetup | undefined = naxMode ? {
+    host: {
+      sessions: options.threadSessions ?? new ThreadSessionFactory({
+        homeDir: home.dir, naxHome: config.naxHome,
+        nativeModels: threadNativeModels(config.naxHome, () => reporter.latest()),
+      }),
+      credentials: broker, git, homeDir: home.dir, workspaceRoot: config.workspaceRoot,
+    },
+    tuning,
+  } : undefined;
   const supervisor = new Supervisor({
     journal, executor, mutex: new RepoMutex(), uploader, log, now, sleep,
     tuning: {
@@ -155,18 +196,23 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     readoptHeartbeatMs: tuning.readoptHeartbeatMs,
     logs: shipper,
     configEdits: { fetch: (jobId, leaseEpoch) => client.getConfigEdit(jobId, leaseEpoch) },   // S3 §3
+    // Fleet S5a §3: only a nax-mode runner hosts threads — a runner.json capabilities block cannot report
+    // threadBackends, so its THREAD rows fail `backend_unavailable` in the supervisor.
+    ...(threads ? { threads } : {}),
   });
   const handler = new CommandHandler({ journal, supervisor, workspaceRoot: config.workspaceRoot, log, now, approvals });
 
   let stopReason: StopReason | null = null;
   const loop = new SyncLoop({
     client, journal, bootId, daemonVersion: DAEMON_VERSION,
-    freeSlots: () => freeSlots(capacity.capacity, journal.activeCount()),
+    // Fleet S5a B1-R1: a THREAD job holds no nax slot; the server counts thread slots.
+    freeSlots: () => freeSlots(capacity.capacity, journal.activeCountExcluding('THREAD')),
     capabilityReport: () => reporter.report(),
     onCapabilitiesSent: (hash) => reporter.markSent(hash),
     handleCommands: (commands) => handler.handle(commands),
     abandonUnknown: async (jobIds) => { for (const id of jobIds) await supervisor.abandonAll(id); },
     tokenRequests: () => tokens.requests(Date.now()),
+    onArchivedThreads: (ids) => { archivedThreadIds = [...ids]; },
     onTokens: (requested, granted, errors) => {
       tokens.apply(requested, granted, errors, Date.now());
       for (const error of errors) log.warn('git token refused', { jobId: error.jobId, reason: error.reason });
@@ -191,7 +237,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
 
   const timers = [
     setInterval(() => { void capacity.refresh(); }, tuning.capacityRefreshMs),
-    setInterval(() => { void pruneJobs(journal, config, log); }, tuning.pruneIntervalMs),
+    setInterval(() => { void pruneJobs(journal, config, log); void pruneThreadAssets(); }, tuning.pruneIntervalMs),
     setInterval(() => { void reprobe(); }, tuning.capabilityProbeMs),
   ];
   for (const timer of timers) timer.unref();

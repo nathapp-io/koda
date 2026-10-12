@@ -10,6 +10,7 @@ import { parseNaxJson, readNaxVersion, relaySupported, type NaxCli } from '../na
 import type { Now } from '../time';
 import type { CapabilityProbe, ProbeResult } from './capability-probe';
 import { mapLimit } from './map-limit';
+import { nativeModelsForProviders, readNativeModelConfig } from '../thread/native-models';
 import {
   MAX_PROVIDERS_PER_PROFILE, parseAuthList, parseInteraction, parseRequirements, parseSandboxProbe, toProfileNeeds, unavailableCredential,
   type Interaction,
@@ -151,12 +152,17 @@ export class NaxCapabilityProbe implements CapabilityProbe {
       const [scan, base, sandbox, protocols, tools] = await Promise.all([
         this.scanProfiles(empty.dir), this.baseInteraction(empty.dir), this.sandbox(empty.dir), this.protocols(), this.tools(),
       ]);
-      const credentials = await this.credentials(empty.dir, scan.providers);
+      const nativeConfig = await readNativeModelConfig(this.deps.naxHome);
+      const providers = [...new Set([...scan.providers, ...nativeConfig.providers])].sort();
+      const credentials = await this.credentials(empty.dir, providers);
+      const availableProviders = new Set(credentials.list.filter((credential) => credential.available).map((credential) => credential.providerId));
+      const threadModels = nativeModelsForProviders(nativeConfig, availableProviders);
       const bounded = boundReport({
         nax: { version, protocols },
         sandbox: { ...sandbox, probedAt: this.deps.now().toISOString() },
         profiles: scan.profiles,
         credentials: credentials.list,
+        threadBackends: { native: threadModels.models, acp: [] },
         tools,
         executors: ['host'],
         configJobs: true,

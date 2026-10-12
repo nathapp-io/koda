@@ -1,0 +1,465 @@
+{
+  "project": "koda",
+  "feature": "fleet-s5a-thread-host",
+  "branchName": "feat/fleet-s5a-thread-host",
+  "createdAt": "2026-10-11T00:00:00.000Z",
+  "updatedAt": "2026-10-11T17:06:59.564Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "THREAD ASSIGN parsing",
+      "description": "**Goal** — Accept and validate THREAD ASSIGN payloads without weakening other job kinds.\n\n**Motivation** — B1 places `THREAD` jobs only on runners that report protocol 4, and B3a built the session host's parts without wiring them. Until a runner can run a `THREAD` job end to end, no thread can start.\n\n**Approach** — `parseAssign` accepts `command: 'THREAD'`. For a THREAD job: `profiles` must be `[]` (else `invalid profiles`), `bashMode` must be `'raw'` (else `invalid bashMode`), and `thread` must be an object (else `invalid thread`); a RUN, PLAN or config job carrying a `thread` key is `invalid thread`. The `thread` block, each field checked in this order:\n\n| Field | Rule | Detail |\n|---|---|---|\n| `threadId` | `assertSegment` | `invalid threadId` |\n| `action` | `'SESSION'` (`PUBLISH` is phase C) | `invalid thread action` |\n| `feature` | `assertFeature` | `invalid thread feature` |\n| `resume` | boolean | `invalid thread resume` |\n| `instructions` | string of at most 262144 characters | `invalid instructions` |\n| `backend` | `{ kind: 'native', model?, effort? }` or `{ kind: 'acp', agent: 'claude' \\| 'codex', model?, effort? }`; `model` matches `THREAD_MODEL_ID_RE`; `effort` matches `/^[a-z]{1,16}$/` | `invalid backend` |\n| `skills` | array of objects whose `sourceId`, `owner`, `repo`, `sha` are strings and whose `skills` is an array of `{ name, dir, description }` strings | `invalid skills` |\n| `initialMessage` | `null`, or `{ messageId, text }` with `messageId` passing `assertSegment` and `text` a string of at most `THREAD_LIMITS.messageMaxBytes` UTF-8 bytes | `invalid initialMessage` |\n\nOnly the listed fields are copied into `assign.thread` (an unknown key is dropped). The skill identifiers are validated again by `ensureSkills` before they reach a path.\n\n**Scope** — In: parseAssign and field-focused unit specs. Out: session execution (US-003–005), CommandHandler routing (US-006), protocol bump (US-007), ACP session hosting (phase D; ACP payload validation remains in scope); `THREAD_PUBLISH`, `write_doc`, a `PUBLISH` action, a stale session start and Discard belong to phase C; the runner rejects `PUBLISH` at ASSIGN and `THREAD_PUBLISH` as `unsupported`.\n\n**Interface** — `parseAssign(command: FleetCommandOut): ParsedAssign`; `ThreadAssign` and `THREAD_LIMITS` from `@nathapp/fleet-protocol`.",
+      "acceptanceCriteria": [
+        "AC-1: When `parseAssign` receives the valid THREAD fixture (`command: 'THREAD'`, job `feature: 'thread-t1'`, `profiles: []`, `bashMode: 'raw'`, `planFrom: null`, thread `threadId: 't1'`, `action: 'SESSION'`, thread `feature: 'brainstorm-x'`, `resume: false`, `instructions: 'be helpful'`, backend `{ kind: 'native', model: 'minimax/MiniMax-M3' }`, one skill source and `initialMessage: { messageId: 'm1', text: 'hi' }`), then `assign.thread` is deep-equal to the fixture's `thread` block.",
+        "AC-2: When `parseAssign` receives the fixture without `thread`, then it returns `{ ok: false, detail: 'invalid thread' }`.",
+        "AC-3: When `parseAssign` receives a RUN ASSIGN carrying the fixture's `thread` block, then it returns `{ ok: false, detail: 'invalid thread' }`.",
+        "AC-4: When `parseAssign` receives the fixture with `profiles: ['fast']`, then it returns `{ ok: false, detail: 'invalid profiles' }`.",
+        "AC-5: When `parseAssign` receives the fixture with `bashMode: 'gated'`, then it returns `{ ok: false, detail: 'invalid bashMode' }`.",
+        "AC-6: When `parseAssign` receives the fixture with `thread.threadId: '../t1'`, then it returns `{ ok: false, detail: 'invalid threadId' }`.",
+        "AC-7: When `parseAssign` receives the fixture with `thread.action: 'PUBLISH'`, then it returns `{ ok: false, detail: 'invalid thread action' }`.",
+        "AC-8: When `parseAssign` receives the fixture with `thread.feature: '../x'`, then it returns `{ ok: false, detail: 'invalid thread feature' }`.",
+        "AC-9: When `parseAssign` receives the fixture with `thread.backend: { kind: 'native', model: 'm/x[high]' }`, then it returns `{ ok: false, detail: 'invalid backend' }`.",
+        "AC-10: When `parseAssign` receives the fixture with `thread.backend: { kind: 'acp', agent: 'claude' }`, then it returns `ok: true`.",
+        "AC-11: When `parseAssign` receives the fixture with `thread.skills: 'none'`, then it returns `{ ok: false, detail: 'invalid skills' }`.",
+        "AC-12: When `parseAssign` receives the fixture with `thread.initialMessage.text` of 32769 ASCII characters, then it returns `{ ok: false, detail: 'invalid initialMessage' }`.",
+        "AC-13: When `parseAssign` receives the fixture with `thread.initialMessage: null`, then it returns an `assign.thread` whose `initialMessage` is `null`.",
+        "AC-14: When `parseAssign` receives the fixture with an extra `thread.extra: 1`, then it returns an `assign.thread` that has no `extra` key.",
+        "AC-15: When `parseAssign` receives the fixture with `thread.initialMessage.text` of 11000 characters `'中'` (33000 UTF-8 bytes), then it returns `{ ok: false, detail: 'invalid initialMessage' }`."
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "validation"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Single parser branch and tests with existing validation helpers; no new concurrency or auth implementation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/runner/src/supervisor/assign-parser.ts",
+        "apps/runner/src/paths/safe-segment.ts",
+        "packages/fleet-protocol/src/threads.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/supervisor/assign-parser-thread.spec.ts"
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "fb52ee59bfeebb76ecceb853640f5891fe4de95f"
+    },
+    {
+      "id": "US-002",
+      "title": "Thread log stream and threadBackends report",
+      "description": "**Goal** — Ship the thread JSONL stream through LogShipper and advertise only credential-backed native models.\n\n**Motivation** — B1 places `THREAD` jobs only on runners that report protocol 4, and B3a built the session host's parts without wiring them. Until a runner can run a `THREAD` job end to end, no thread can start.\n\n**Approach** — `LogStreamName` becomes `LogEventPayload['stream'] | typeof THREAD_STREAM` (the legacy `log` event payload is not widened). `LogJob` becomes `NaxLogJob | ThreadLogJob`; the shipper narrows on it wherever it reads `spec.sources` (`register`, `lacksRun`, `discover`). `register` of a `ThreadLogJob` adds a single stream `thread` at `threadPath` (no `stdout`, no `stderr`, no run-log search); `wake`, `drain`, `stopJob` and the upload rules are unchanged. `ServerClient.putLog` already builds `/fleet/runner/jobs/<jobId>/logs/<stream>`.\n\n`NaxCapabilityProbe.probe` asks `nax auth list --json` for the union of the profiles' providers and `nativeModelProviders(naxHome)`, sorted and without duplicates, then adds `threadBackends: { native: (await readNativeModels(naxHome, <providerIds whose credential is available>)).models, acp: [] }`. `StaticCapabilityProbe` reports no `threadBackends` (a runner.json capability override cannot host threads).\n\n**Scope** — In: log type union, one-stream registration, native provider auth/probe, the existing ServerClient PUT URL for `thread`, and corresponding specs. Out: ThreadJobRun stream registration (US-003), first-sync daemon capability reporting (US-007). The API accepting, folding and pricing the `thread` stream, cost accounting from `usage` lines and the content SSE belong to feature `fleet-s5a-thread-ingest` (B2); until then the API refuses `PUT .../logs/thread` and `FLEET_THREADS_ENABLED` stays off.\n\n**Interface** — `LogStreamName = LogEventPayload['stream'] | typeof THREAD_STREAM`; `LogJob = NaxLogJob | ThreadLogJob`; `ThreadLogJob { jobId; leaseEpoch; threadPath; lifecycle }`.",
+      "acceptanceCriteria": [
+        "AC-1: When `LogShipper.register({ jobId: 'j1', leaseEpoch: 1, threadPath, lifecycle })` receives a threadPath holding `'{\"a\":1}\n'` and ships against the fake log server, then that server holds `'{\"a\":1}\n'` for `j1:1:thread`.",
+        "AC-2: When `LogShipper` registers a `ThreadLogJob`, then it makes no PUT for `stdout`, `stderr` or `run`.",
+        "AC-3: When `drain('j1', 1, 5000)` runs on a registered `ThreadLogJob` whose file was appended after registration, then it resolves `'drained'` with the fake log server holding the whole file for `j1:1:thread`.",
+        "AC-4: When `drain('j1', 1, 5000)` runs on a registered `ThreadLogJob`, then the last PUT for stream `thread` has `final: true`.",
+        "AC-5: When `ServerClient.putLog` receives `stream: 'thread'`, then it requests a URL whose path is `/fleet/runner/jobs/j1/logs/thread`.",
+        "AC-6: When `NaxCapabilityProbe.probe` runs with a nax home whose `config.json` has `models.native` `{ balanced: 'minimax/MiniMax-M3' }` and fake `auth list` reports `minimax` available, then `threadBackends` equals `{ native: ['minimax/MiniMax-M3'], acp: [] }`.",
+        "AC-7: When `NaxCapabilityProbe.probe` runs with a nax home whose `config.json` has `models.native` `{ balanced: 'minimax/MiniMax-M3' }` and fake `auth list` reports `minimax` unavailable, then `threadBackends` equals `{ native: [], acp: [] }`.",
+        "AC-8: When `NaxCapabilityProbe.probe` runs with a nax home whose `config.json` has `models.native` `{ balanced: 'minimax/MiniMax-M3' }` and no profiles, then nax is called with arguments `['auth', 'list', '--json', 'minimax']`.",
+        "AC-9: When `NaxCapabilityProbe.probe` runs with a nax home without `config.json`, then `threadBackends` equals `{ native: [], acp: [] }`.",
+        "When an existing `NaxLogJob` with `sources.stdoutPath` containing `hello` is registered and drained, then the fake log server still holds `hello` for its `stdout` stream, preserving nax log shipping."
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "logging",
+        "capabilities"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Log shipper union/nax auth-provider integration crosses modules; probing credential availability for session placement is security-sensitive and requires isolated tests.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/runner/src/logs/types.ts",
+        "apps/runner/src/logs/log-shipper.ts",
+        "apps/runner/src/capabilities/nax-probe.ts",
+        "apps/runner/src/thread/native-models.ts",
+        "apps/runner/test/helpers/fake-log-server.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/logs/log-shipper-thread.spec.ts",
+        "apps/runner/src/capabilities/nax-probe-thread.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/capabilities/nax-probe.spec.ts",
+          "reason": "the exact `capabilities` object at line 76 gains `threadBackends: { native: [], acp: [] }`, because this story makes the nax probe always report thread backends; every other field stays as asserted."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "5451e66a129f5aa6059313fd47d3e1c39769bc9b"
+    },
+    {
+      "id": "US-003",
+      "title": "ThreadJobRun start and preparation",
+      "description": "**Goal** — Introduce a standalone ThreadJobRun that prepares credentials, worktree, skills and session before entering RUNNING and writing its first thread events.\n\n**Motivation** — Reusing the RUN path for thread rows would be unsafe: `Supervisor.reject` reaps the shared clone's `.nax-pids` since the job's creation (killing a concurrent RUN's nax).\n\n**Interface** —\n```ts\nexport interface ThreadHostDeps {\n  readonly sessions: Pick<ThreadSessionFactory, 'open'>;\n  readonly credentials: CredentialProvider;\n  readonly git: Git;\n  readonly homeDir: string;          // RunnerHome.dir; skills live in <homeDir>/skills\n  readonly workspaceRoot: string;\n  readonly prepareWorktree?: typeof prepareThreadWorktree;   // default: B3a prepareThreadWorktree\n  readonly ensureSkills?: typeof ensureSkills;              // default: B3a ensureSkills\n  readonly skillOrigin?: string;                            // tests: a file:// origin\n}\nexport interface ThreadRunTuning {\n  readonly threadIdleMs: number; readonly threadHeartbeatMs: number; readonly threadWakeGapMs: number;\n  readonly threadSearchTimeoutMs: number; readonly threadSkillFetchTimeoutMs: number; readonly logDrainTimeoutMs: number;\n  readonly threadCloseTimeoutMs: number;\n  /** Passed to the writer; default THREAD_STREAM_LIMITS.streamMaxBytes. Tests lower it. */\n  readonly streamMaxBytes?: number;\n}\nexport interface ThreadRunSetup { readonly host: ThreadHostDeps; readonly tuning: ThreadRunTuning }\nexport type ThreadRunDeps = Pick<JobRunDeps, 'journal' | 'log' | 'now' | 'sleep' | 'mutex' | 'logs'> & ThreadRunSetup;\nexport type ThreadCommandOutcome = { result: 'ok' | 'rejected'; detail?: string };\n\nexport class ThreadJobRun {\n  constructor(deps: ThreadRunDeps, jobId: string, leaseEpoch: number);\n  /** Resolves when the run has ended: terminal and marked done, abandoned, or halted. */\n  start(from: RunStart): Promise<void>;\n  command(type: ThreadCommandType, payload: unknown): ThreadCommandOutcome;   // synchronous (B3b-R2)\n  requestCancel(): boolean;\n  halt(): void;\n  abandon(): Promise<void>;\n}\n```\n\n**Approach** — Like `JobRun`, the promise `start()` returns covers the whole run: it resolves only after the run has ended (a terminal transition followed by `journal.markDone`, an abandon, or a halt). The Supervisor keeps the run in its map until then, so a command reaches the run while it is preparing, running or closing, and a command after the promise resolved finds no run (`does not hold job`, US-006). `TUNING` gains `threadHeartbeatMs: 30_000` and `threadCloseTimeoutMs: 10_000`. The stream file is `<jobDir>/thread-events.jsonl` (`jobDirFor(workspaceRoot, jobId)`, directory mode 0700). It is keyed by job id only, so step 7 deletes it before creating the writer: a requeued epoch never re-ships the lines of the epoch it replaces.\n\n**Start** (`from` `'prepare'` or `'reprepare'`; `'watch'` or `'finish'` ends the job as a runner error with `a thread job cannot be resumed`). Each step checks a cancel request (→ `CANCELLED` `cancelled before start`) and a halt (→ return, no transition):\n\n1. `credentials.acquire(row, { wait: true, isCancelled })`; refused with `cancelled` → `CANCELLED` `cancelled before start`; refused otherwise → `FAILED` with its reason.\n2. `prepareWorktree({ git, mutex, repoKey: row.repoKey, repoDir: repoDirFor(workspaceRoot, repo.owner, repo.name), cloneUrl: repo.cloneUrl, identity: assign.gitIdentity, credentialHelper: <acquired helper>, homeDir, threadId, baseRef: assign.ref, feature: thread.feature })` — the thread's feature, never the job's `thread-<id>`.\n3. `credentials.release(row)`, whatever step 2 returned; nothing later needs git credentials.\n4. Step 2 not ok → `FAILED` with its reason.\n5. `ensureSkills({ skills: thread.skills, skillsRoot: <homeDir>/skills, git, timeoutMs: threadSkillFetchTimeoutMs, origin: skillOrigin })`; not ok → `FAILED` `skill_fetch_failed`.\n6. `sessions.open({ jobId, thread, worktree: <the worktree step 2 returned>, tools: buildThreadTools({ worktree, skillsRoot, skills: thread.skills, git, searchTimeoutMs: threadSearchTimeoutMs, nowMs }), approvalTimeoutSec: assign.approvalTimeoutSec })`; not ok → `FAILED` with its `reason`. A cancel or halt that arrives while `open` is pending ends as above **and closes the session `open` then resolves** (a throw is logged).\n7. `RUNNING` with the patch `{ pid: null, pgid: null, branch: null }`; create the writer over the stream file (`wakeGapMs` `threadWakeGapMs`, `streamMaxBytes` from tuning, `onCap` → close `stream_cap`, `onWarn` → a `warn` lifecycle event); `logs.register({ jobId, leaseEpoch, threadPath, lifecycle })`; `writer.started({ resumed, backend: thread.backend, skillShas: thread.skills.map((s) => s.sha) })`; start the heartbeat (`snapshot { heartbeatAt }` every `threadHeartbeatMs` until the `UPLOADING` transition, a halt or an abandon).\n8. `thread.initialMessage` present → a turn with it, started before `start` awaits anything else; otherwise the idle timer starts.\n\nEvery early exit (`FAILED` or `CANCELLED` before `RUNNING`) is followed by `journal.markDone`. A failure before `RUNNING` writes no stream line (no stream is registered); the API ends the thread's pending message from the job's terminal state. A throw from any start step (not a returned failure) ends the job `FAILED` with `runner error: <message>` before `RUNNING`, or through the Fail steps with reason `session_error` after it.\n\n**Test double** — `fakeAgentSession(script)` returns an `AgentSession` whose `send(message)` yields the next scripted turn's events. A scripted turn is a list of `SessionEvent`s plus optional `hold: true` (the iteration pauses after the events listed so far until `release()`) and `throwAfter` (the iteration throws after that many events). `cancel()` ends a held or still-pending iteration at once with a `turn_end` of status `cancelled`, as nax-agent does. `answer` returns a scripted `AnswerStatus` (default `'accepted'`); `close` resolves at once unless `hangClose: true`. Every call to `send`, `cancel`, `answer` and `close` is appended, in order, to a shared `calls: string[]` recorder that the recording `CredentialProvider` and the `prepareWorktree` / `ensureSkills` stubs write to as well. `fakeSessionFactory(session, result?)` returns an `open` that resolves `{ ok: true, session, resumed: false }` (or the given result), with an optional `hold` until `releaseOpen()`.\n\n**Scope** — In: start path, writer/stream setup, tuning, scripted fake session and start tests. Out: turn/idle/caps/fail completion (US-004), commands/cancel/abandon (US-005), Supervisor (US-006). Keep the interface methods present for later stories, but do not reuse JobRun or reap a clone.",
+      "acceptanceCriteria": [
+        "AC-1: Once `ThreadJobRun` reaches RUNNING with a first turn ending `completed`, then the row's state events are exactly `[RUNNING]`.",
+        "AC-2: Once `ThreadJobRun` reaches RUNNING, then the shared recorder holds, in order, `credentials.acquire`, `prepareWorktree`, `credentials.release`, `ensureSkills`, `sessions.open`.",
+        "AC-3: When `prepareWorktree` is called during start, then its `feature` is `'brainstorm-x'`, `baseRef` equals ASSIGN's `ref`, and `credentialHelper` equals the acquired helper.",
+        "AC-4: When `ensureSkills` is called during start, then `skillsRoot` equals `<homeDir>/skills` and `skills` equals the fixture's skill sources.",
+        "AC-5: When `sessions.open` is called during start, then `worktree` equals the result of `prepareWorktree` and `approvalTimeoutSec` equals ASSIGN's timeout.",
+        "AC-6: When `start('prepare')` receives `{ ok: false, reason: 'worktree_conflict' }` from `prepareWorktree`, then state events are exactly `[FAILED]` with reason `worktree_conflict`.",
+        "AC-7: When `start('prepare')` receives `{ ok: false, reason: 'worktree_conflict' }` from `prepareWorktree`, then it calls `credentials.release`.",
+        "AC-8: When `start('prepare')` receives `{ ok: false, reason: 'worktree_conflict' }` from `prepareWorktree`, then it never calls `sessions.open`.",
+        "AC-9: When `start('prepare')` receives `{ ok: false, reason: 'worktree_conflict' }` from `prepareWorktree`, then it resolves with the row's `doneAt` set.",
+        "AC-10: When `start('prepare')` receives `{ ok: false, reason: 'skill_fetch_failed' }` from `ensureSkills`, then state events are exactly `[FAILED]` with reason `skill_fetch_failed`.",
+        "AC-11: When `start('prepare')` receives `{ ok: false, reason: 'model_unknown' }` from `sessions.open`, then state events are exactly `[FAILED]` with reason `model_unknown`.",
+        "AC-12: Once `ThreadJobRun` reaches RUNNING, then `logs.register` has `threadPath` equal to `<workspaceRoot>/.jobs/<jobId>/thread-events.jsonl`.",
+        "AC-13: Once `ThreadJobRun` reaches RUNNING, then the first line of `<jobDir>/thread-events.jsonl` has `type: 'session_started'` and `skillShas` equal to the fixture's skill source shas.",
+        "AC-14: Once `ThreadJobRun` reaches RUNNING, then the session's `send` is called with `'hi'`, the fixture's initial message text.",
+        "AC-15: Once `ThreadJobRun` reaches RUNNING, then the stream file's `input_consumed` line with `messageId: 'm1'` precedes the first session event line."
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "sessions",
+        "credentials",
+        "security"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New long-lived session lifecycle with credential acquisition/release and async cancellation across steps is security-critical.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
+      },
+      "contextFiles": [
+        "apps/runner/src/supervisor/job-run.ts",
+        "apps/runner/src/thread/session-factory.ts",
+        "apps/runner/src/thread/thread-event-writer.ts",
+        "apps/runner/src/credentials/broker.ts",
+        "apps/runner/src/daemon/tuning.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/thread/thread-job-run.ts",
+        "apps/runner/test/helpers/fake-agent-session.ts",
+        "apps/runner/src/thread/thread-job-run-start.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/daemon/tuning.spec.ts",
+          "reason": "the exact `TUNING` object gains `threadHeartbeatMs: 30_000` and `threadCloseTimeoutMs: 10_000`, because this story adds the thread heartbeat interval and the session close bound; it stays frozen."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "f6ad28747c6c447f88b562c624987ffc991331fc"
+    },
+    {
+      "id": "US-004",
+      "title": "ThreadJobRun turns, idle, caps and failure",
+      "description": "**Goal** — Drive turns and finish thread jobs on idle, cost, stream cap or session iteration failure with drain-before-transition ordering.\n\n**Motivation** — Until a runner can run a `THREAD` job end to end, no thread can start.\n\n**Approach** — **Turn.** Starting a turn sets the turn-running flag and stops the idle timer synchronously, then `writer.inputConsumed(messageId)` and every event of `session.send(text)` goes to `writer.event`. After each `usage` event, `spent >= Number(maxCostUsd)` closes with `cost_cap` (B3b-R4). After the iteration ends, `writer.flush()`, the flag clears and the idle timer restarts. A `turn_end` whose status is `errored`, `timed_out`, `cancelled` or `interrupted` leaves the session open. An iteration that throws (not during a close or after a halt) fails the run with `session_error`. Cost is counted from `usage.costUsd` only (`turn_end.costUsd` repeats the turn's usage), summed over the whole job, and compared as `spent >= Number(assign.maxCostUsd)`. The runner sends no `costSpentUsd` snapshot: the API's ingest (B2) adds usage to the job's spend.\n\n**Idle.** The idle timer runs only while no turn runs; it expires after `threadIdleMs` and closes with `idle`.\n\n**Close(reason)** — `reason` ∈ `idle`, `closed`, `cost_cap`, `stream_cap`, `cancelled`; the first one wins (B3b-R3); the closing flag is set and the turn-running check is made synchronously when the close is requested: stop the idle timer → if a turn runs, `session.cancel(reason)` and wait for its iteration to end → `session.close()` (a throw is logged) → `writer.flush()`, `writer.closed(reason)` → `logs.drain(jobId, leaseEpoch, logDrainTimeoutMs)` (a timeout is a `warn` lifecycle event) → stop the heartbeat → `UPLOADING` → `CANCELLED` `cancelled` when the reason is `cancelled`, else `COMPLETED` with the reason → `logs.stopJob`, `journal.markDone`.\n\n**Fail(`session_error`)** — the same steps with `writer.failed('session_error')` in place of `writer.closed`, ending `UPLOADING → FAILED` `session_error`.\n\n**Scope** — In: turn/idle/heartbeat/cap/failure and close internals on ThreadJobRun, fake session scripts and deterministic manual-clock tests. Out: command application and explicit cancellation (US-005), supervisor routing (US-006), API usage pricing (B2). The runner sends no `costSpentUsd` snapshot for a THREAD job (B3b-R4). Unpriced usage (`costSource` `unpriced`, `costUsd` 0) adds nothing to the spend; the API's budget rules govern it. A `maxCostUsd` of `'0'` closes the session with `cost_cap` at its first `usage` event (`0 >= 0`); the API's send rule `threads.costCap` refuses a send at that budget first.\n\n**Interface** — `ThreadJobRun.start(from: RunStart): Promise<void>` persists until terminal + done; `ThreadEventWriter.event`, `flush`, `closed`, `failed`, `startHeartbeat`, `LogShipping.drain`.",
+      "acceptanceCriteria": [
+        "AC-1: When a turn ends `completed` and the manual clock advances by `threadIdleMs`, then state events are exactly `[RUNNING, UPLOADING, COMPLETED]` with COMPLETED reason `idle`.",
+        "AC-2: When idle close completes, then the last stream file line is `session_closed` with reason `'idle'`.",
+        "AC-3: When idle timer fires with `FakeLogShipping.holdDrain()`, then the row remains `RUNNING` until drain is released.",
+        "AC-4: When the clock advances by `threadIdleMs` while a held turn is still delivering events, then no `UPLOADING` event is recorded.",
+        "AC-5: When the manual clock advances by `threadHeartbeatMs` while the run is RUNNING, then the journal contains a `snapshot` event with a `heartbeatAt` string.",
+        "AC-6: When a turn ends `timed_out`, then the row remains `RUNNING`.",
+        "AC-7: When a turn ends `errored`, then the session's `close` has not been called.",
+        "AC-8: When a turn ends `interrupted`, then the row remains `RUNNING`.",
+        "AC-9: When `maxCostUsd` is `'1.00'` and turn `usage` events have `costUsd` 0.6 then 0.5, then session `cancel` is called.",
+        "AC-10: When `maxCostUsd` is `'1.00'` and turn `usage` events have `costUsd` 0.6 then 0.5, then job ends COMPLETED with reason `cost_cap`.",
+        "AC-11: When `maxCostUsd` is `'1.00'`, a turn has one `usage` event of `costUsd` 0.6, and `turn_end` also has `costUsd` 0.6, then the row remains `RUNNING`.",
+        "AC-12: When session turn throws after its first event, then state events are exactly `[RUNNING, UPLOADING, FAILED]` with FAILED reason `session_error`.",
+        "AC-13: When session turn throws after its first event, then the last stream line is `session_failed` with reason `'session_error'`.",
+        "AC-14: When tuning `streamMaxBytes` is 6000 and the first turn begins with a `thinking_delta` of 2000 characters, then the run ends COMPLETED with reason `stream_cap`.",
+        "AC-15: When start replaces an existing `<jobDir>/thread-events.jsonl` containing `{\"type\":\"stale\"}`, then the resulting stream file includes no `stale` line."
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "sessions",
+        "logging"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Concurrent session turns, cost accounting, close/drain race and shutdown semantics across an agent session require strict isolation.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
+      },
+      "contextFiles": [
+        "apps/runner/src/thread/thread-job-run.ts",
+        "apps/runner/test/helpers/fake-agent-session.ts",
+        "apps/runner/test/helpers/fake-log-shipping.ts",
+        "apps/runner/test/helpers/manual-clock.ts",
+        "apps/runner/src/thread/thread-event-writer.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/thread/thread-job-run-close.spec.ts"
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "0c78b0823cad60fb0cc08e56cc23fa4580987047"
+    },
+    {
+      "id": "US-005",
+      "title": "ThreadJobRun commands and cancel",
+      "description": "**Goal** — Apply thread commands synchronously and add cancellation, halt and bounded abandon without blocking the fleet sync loop.\n\n**Motivation** — An ABANDON with no run in memory waits on the repo mutex while `handleCommands` is awaited inline in the sync loop, stalling the whole loop behind a running RUN. A thread job needs its own run with its own stop paths.\n\n**Approach** — B3-R5: a `THREAD_INPUT` while a turn runs is acked `rejected` with detail `turn_running`; the runner keeps no input queue. B3b-R2: a thread command is applied without awaiting a turn, a close or a drain. `CommandHandler.handle` is awaited inline by the sync loop, so `ThreadJobRun.command` is synchronous and every close runs in the background. B3b-R3: the first close reason wins. Once a run is closing or failing, a later idle expiry, cost cap, stream cap, `THREAD_CLOSE`, `CANCEL` or session error changes nothing.\n\n**Commands** (`command(type, payload)`, all synchronous; a `THREAD_INPUT` that returns `ok` has already set the turn-running flag, so a second `THREAD_INPUT` in the same `CommandHandler.handle` batch gets `turn_running`):\n\n| Situation | Outcome |\n|---|---|\n| Run not yet `RUNNING` | `rejected` `session_not_ready` |\n| Run closing or failing | `rejected` `session_closed` |\n| `THREAD_INPUT` payload not `{ messageId: <segment>, text: <string of at most messageMaxBytes UTF-8 bytes> }` | `rejected` `invalid payload` |\n| `THREAD_INPUT` while a turn runs | `rejected` `turn_running` (B3-R5) |\n| `THREAD_INPUT` otherwise | `ok`; the turn starts in the background |\n| `THREAD_ANSWER` payload not `{ requestId: <1..200 printable characters>, text: <string of at most messageMaxBytes UTF-8 bytes> }` | `rejected` `invalid payload` |\n| `THREAD_ANSWER` | `session.answer(requestId, { text })`: `accepted` → `ok`; `expired`, `cancelled`, `unknown` → `rejected` with that word |\n| `THREAD_STOP_TURN` | `ok`; `session.cancel('stopped')` when a turn runs, nothing otherwise; the session stays open |\n| `THREAD_CLOSE` | `ok`; close `closed` in the background |\n| `THREAD_PUBLISH` | `rejected` `unsupported` (phase C) |\n\n**Cancel, halt, abandon.** `requestCancel()` before `RUNNING` records `cancelRequestedAt` (the next start step ends `CANCELLED`); while `RUNNING` it closes with `cancelled`; while closing it does nothing; it returns false only for a terminal row. `halt()` (daemon stop) sets the halted flag, calls `session.cancel('halted')` when a turn runs, stops the idle timer and the heartbeat, calls `logs.stopJob`, closes the session without awaiting it, and lets `start` resolve without waiting for the turn. After a halt, every background task of the run (the turn's iteration and tail, the idle timer, a close in progress, the heartbeat) writes no journal event, no stream line and no transition. `abandon()` halts, then `journal.abandon(jobId, leaseEpoch)` (which deletes the row and its events), then `credentials.release(row)` (a throw is logged), then awaits the close promise `halt()` started — `session.close()` is called once per run — for at most `threadCloseTimeoutMs` (a timeout or throw is logged). With `open` still pending there is no close to await: the session `open` resolves is closed then, unawaited. No mutex (B3b-R1), never longer than the close bound. The idle timer, the heartbeat and the close bound all wait through `deps.sleep` with an abort signal, so a manual clock drives them.\n\n**Scope** — In: command (including `THREAD_PUBLISH` rejection), requestCancel, halt and abandon on ThreadJobRun; corresponding scripted-session tests. Out: CommandHandler/Supervisor routing (US-006), implementing phase C publish and phase D ACP. `THREAD_PUBLISH`, `write_doc`, a `PUBLISH` action, a stale session start and Discard belong to phase C; the runner rejects `PUBLISH` at ASSIGN and `THREAD_PUBLISH` as `unsupported`.\n\n**Interface** — `command(type: ThreadCommandType, payload: unknown): ThreadCommandOutcome; requestCancel(): boolean; halt(): void; abandon(): Promise<void>;`.",
+      "acceptanceCriteria": [
+        "AC-1: When `command('THREAD_INPUT', { messageId: 'm2', text: 'next' })` is called, then session `send` receives `'next'`.",
+        "AC-2: When two `command('THREAD_INPUT', ...)` calls are made back to back with no await between them, then they return `{ result: 'ok' }` followed by `{ result: 'rejected', detail: 'turn_running' }`.",
+        "AC-3: When `command('THREAD_INPUT', { messageId: '../m', text: 'x' })` is called, then it returns `{ result: 'rejected', detail: 'invalid payload' }`.",
+        "AC-4: When `command('THREAD_INPUT', ...)` starts a held turn, then it returns `{ result: 'ok' }` while the turn is still delivering events.",
+        "AC-5: When `command('THREAD_ANSWER', { requestId: 'q1', text: 'yes' })` is called, then session `answer` receives `'q1'` and `{ text: 'yes' }`.",
+        "AC-6: When `command('THREAD_ANSWER', { requestId: 'q1', text: 'yes' })` has session `answer` return `'accepted'`, then it returns `{ result: 'ok' }`.",
+        "AC-7: When `command('THREAD_ANSWER', { requestId: 'q1', text: 'yes' })` has session `answer` return `'expired'`, then it returns `{ result: 'rejected', detail: 'expired' }`.",
+        "AC-8: When `command('THREAD_STOP_TURN', {})` is called during a held turn, then session `cancel` is called.",
+        "AC-9: When `command('THREAD_STOP_TURN', {})` is called during a held turn, then the row remains `RUNNING` after that turn ends.",
+        "AC-10: When `command('THREAD_CLOSE', {})` is called, then job ends COMPLETED with reason `closed`.",
+        "AC-11: When `command('THREAD_CLOSE', {})` is called during a held turn, then the recorder places session `cancel` before session `close`.",
+        "AC-12: When `command('THREAD_INPUT', { messageId: 'm2', text: 'next' })` is called while the idle close's drain is held, then it returns `{ result: 'rejected', detail: 'session_closed' }`.",
+        "AC-13: When `requestCancel()` is called while the idle close's drain is held and drain is then released, then job ends COMPLETED with reason `idle`.",
+        "AC-14: When `requestCancel()` is called while `sessions.open` is held and the open is then released, then state events are exactly `[CANCELLED]` with reason `cancelled before start`.",
+        "AC-15: When `requestCancel()` is called while `sessions.open` is held and the open is then released, then `close` is called on the session that `open` resolved."
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "sessions",
+        "concurrency",
+        "security"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Security-sensitive session commands plus racing halt, close, cancel, held iterations and bounded abandon.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
+      },
+      "contextFiles": [
+        "apps/runner/src/thread/thread-job-run.ts",
+        "apps/runner/test/helpers/fake-agent-session.ts",
+        "apps/runner/test/helpers/manual-clock.ts",
+        "apps/runner/src/supervisor/job-events.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/thread/thread-job-run-commands.spec.ts"
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "3460b208d389e41f773b8d8f9dc2c53189fc5d60"
+    },
+    {
+      "id": "US-006",
+      "title": "Supervisor and CommandHandler for THREAD jobs",
+      "description": "**Goal** — Route THREAD ASSIGN, commands, READOPT and ABANDON via ThreadJobRun without reaping or blocking a concurrent RUN.\n\n**Motivation** — Reusing the RUN path for thread rows would be unsafe: `Supervisor.reject` reaps the shared clone's `.nax-pids` since the job's creation (killing a concurrent RUN's nax), and an ABANDON with no run in memory waits on the repo mutex while `handleCommands` is awaited inline in the sync loop, stalling the whole loop behind a running RUN.\n\n**Approach** — `SupervisorDeps` gains `threads?: ThreadRunSetup`. For a row whose `command` is `THREAD`:\n\n- `begin(row, from)` creates a `ThreadJobRun` in the same run map; with no `threads` it transitions the row `FAILED` `backend_unavailable` and marks it done.\n- `cancel` calls the run's `requestCancel` (the existing journal path when no run is in memory).\n- `abandon` with a run awaits `run.abandon()` (bounded by `threadCloseTimeoutMs`); with no run it calls `journal.abandon` and then `threads.host.credentials.release(row)` (a throw is logged) — never a `JobRun`, never the mutex.\n- The run map entry and `pending` promise are the `start()` promise, as for `JobRun`, so `idle()` waits for thread runs too; a halted thread run resolves without waiting for its turn.\n- `readopt`: terminal → `markDone`, `ok`, no executor call; `ASSIGNED` with `pid` null → `begin(row, 'reprepare')`, `ok`; any other state → `markDone`, `rejected` `thread session ended by a runner restart`, with no `killIfOurs`, `executor.reap` or `executor.cleanup`.\n- `threadCommand(command: FleetCommandOut): ThreadCommandOutcome` — the run for `(jobId, leaseEpoch)` when it is a `ThreadJobRun`, else `rejected` `does not hold job`.\n\n`CommandHandler.apply` routes `THREAD_INPUT`, `THREAD_ANSWER`, `THREAD_STOP_TURN`, `THREAD_CLOSE` and `THREAD_PUBLISH` to `supervisor.threadCommand` and records the outcome with `record` (a re-sent command id is acked from the record, never re-applied).\n\n**Scope** — In: Supervisor routing, lifecycle and CommandHandler acknowledgement/dedupe, using FakeExecutor to pin absence of cleanup. Out: daemon wiring and protocol version (US-007); no thread uses JobExecutor.reap, killIfOurs or cleanup.\n\n**Interface** — `SupervisorDeps.threads?: ThreadRunSetup; Supervisor.threadCommand(command: FleetCommandOut): ThreadCommandOutcome`.",
+      "acceptanceCriteria": [
+        "AC-1: When `CommandHandler.handle([<THREAD ASSIGN>])` runs, then the THREAD row reaches `RUNNING`.",
+        "AC-2: When `CommandHandler.handle([<THREAD ASSIGN>])` runs on a Supervisor without `threads`, then the row ends `FAILED` with reason `backend_unavailable`.",
+        "AC-3: When `CommandHandler.handle([<THREAD_INPUT for a RUNNING thread job>])` runs, then it acks `{ result: 'ok' }`.",
+        "AC-4: When `CommandHandler.handle([<THREAD_INPUT>])` is sent twice with the same command id, then session `send` receives its text once in total.",
+        "AC-5: When `CommandHandler.handle([<THREAD_INPUT for a job id the runner never assigned>])` runs, then it acks `{ result: 'rejected', detail: 'does not hold job' }`.",
+        "AC-6: When `CommandHandler.handle([<THREAD_CLOSE>])` completes, `Supervisor.idle()` resolves, and then `handle([<THREAD_INPUT>])` runs for that job, then the input is acked `{ result: 'rejected', detail: 'does not hold job' }`.",
+        "AC-7: When `CommandHandler.handle([<CANCEL for a RUNNING thread job>])` runs, then the row's state events end in `[UPLOADING, CANCELLED]`.",
+        "AC-8: Given a RUN job of the same repo holds the repo mutex with a held FakeExecutor watch, when `handle([<ABANDON for a RUNNING thread job>])` runs, then it resolves while RUN still holds the mutex.",
+        "AC-9: When `handle([<ABANDON for a RUNNING thread job>])` finishes, then `journal.getJob(jobId, leaseEpoch)` is `null`.",
+        "AC-10: When `handle([<ABANDON for a RUNNING thread job>])` encounters a session whose `close` never resolves, then it resolves once the manual clock passes `threadCloseTimeoutMs`.",
+        "AC-11: When `handle([<ABANDON for a RUNNING thread job>])` runs, then `credentials.release` is called for that row.",
+        "AC-12: When `handle([<ABANDON for a RUNNING thread job>])` runs during a held turn and the turn is subsequently released, then `journal.pendingEvents(jobId, leaseEpoch, 100)` is empty.",
+        "AC-13: Given a RUN of the same repo holds the repo mutex, when `handle([<ABANDON for a RUNNING thread row with no run in memory>])` runs, then it resolves while RUN still holds the mutex.",
+        "AC-14: When `handle([<READOPT for a RUNNING thread row with no run in memory>])` runs, then it acks `{ result: 'rejected', detail: 'thread session ended by a runner restart' }`.",
+        "AC-15: When `handle([<READOPT for a RUNNING thread row with no run in memory>])` runs, then FakeExecutor receives no `reap`, `cleanup` or `kill` call."
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "sessions",
+        "supervisor",
+        "credentials",
+        "security"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-005"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-cutting synchronization and credential release with high-risk mutex/reap and session command routing.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
+      },
+      "contextFiles": [
+        "apps/runner/src/supervisor/supervisor.ts",
+        "apps/runner/src/supervisor/command-handler.ts",
+        "apps/runner/src/thread/thread-job-run.ts",
+        "apps/runner/test/helpers/fake-executor.ts",
+        "apps/runner/test/helpers/fake-agent-session.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/supervisor/supervisor-thread.spec.ts"
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "31c2e468aaed1832b65f7eff2d68d4f8eb60cbd6"
+    },
+    {
+      "id": "US-007",
+      "title": "Daemon wiring and protocol 4",
+      "description": "**Goal** — Wire thread sessions and reporting into the fleet daemon, prune thread assets and advertise protocol v4.\n\n**Motivation** — B1 places `THREAD` jobs only on runners that report protocol 4, and B3a built the session host's parts without wiring them. Until a runner can run a `THREAD` job end to end, no thread can start.\n\n**Approach** — `DaemonOptions` gains `threadSessions?: Pick<ThreadSessionFactory, 'open'>` and `configureCredentials?: (config: CredentialsConfig) => void` (default nax-agent's). `startDaemon` calls `configureCredentials(naxCredentialsConfig(config.naxHome))` once, before the first sync.\n\n`threadNativeModels(naxHome, latest: () => RunnerCapabilities | null): () => Promise<NativeModelSet>` (`thread/thread-host.ts`) reads the native models for the providers whose credential `available` is true in `latest()` (none when `latest()` is null). `latest()` is the bounded report of the last probe (start, every `capabilityProbeMs`, SIGHUP), so a provider logged in since then is seen at the next probe. The default session factory is `new ThreadSessionFactory({ homeDir: home.dir, naxHome: config.naxHome, nativeModels: threadNativeModels(config.naxHome, () => reporter.latest()) })`.\n\nThe Supervisor gets `threads: { host: { sessions, credentials: broker, git, homeDir: home.dir, workspaceRoot }, tuning }` in nax mode; with a runner.json `capabilities` override it receives no thread host (the override does not report threadBackends and cannot host threads).\n\n`freeSlots` = `freeSlots(capacity, journal.activeCountExcluding('THREAD'))`; the server counts thread slots (B1-R1).\n\nThe sync loop's `onArchivedThreads` keeps the latest `archivedThreadIds` (an absent field keeps the previous list). The job prune (start and every `pruneIntervalMs`) also runs `pruneArchivedThreads({ git, homeDir: home.dir, threadIds: <latest list>, activeThreadIds: <thread.threadId of every active THREAD row> })` and `pruneSkillCache(<home.dir>/skills, now())`; a throw is a `warn` log.\n\n`FLEET_PROTOCOL_VERSION` becomes 4 (sync and enroll both send it).\n\n**Integration setup** — Each `[integration]` criterion runs `startDaemon` in nax mode (a runner config with no `capabilities` block and a `FakeNaxCli` that answers the version, trust, profile, sandbox and `auth list` calls, as `test/unit/daemon.spec.ts` does from line 365) against the fake fleet server defined in `test/unit/daemon-thread.spec.ts` (Creates), with injected `threadSessions` (the fake factory from `test/helpers/fake-agent-session.ts`) and `configureCredentials`, a `file://` clone, `selfCommand: [process.execPath, <src/main.ts>]`, tuning `pruneIntervalMs: 50`, and THREAD ASSIGN fixtures with `skills: []` (no skill fetch leaves the machine). The fake fleet server needs a `thread` log route and an `archivedThreadIds` knob.\n\n**Scope** — In: daemon start/probe/credentials/supervisor, sync archived callback, journal count, prune, shared protocol version for sync and enroll and corresponding unit/integration tests. Out: B2 API stream ingest/pricing, phase C publish and edits to generated agent guidance. A runner configured with a runner.json `capabilities` block reports no `threadBackends` and hosts no threads.\n\n**Interface** — `threadNativeModels(naxHome: string, latest: () => RunnerCapabilities | null): () => Promise<NativeModelSet>`; `DaemonOptions.threadSessions?: Pick<ThreadSessionFactory, 'open'>; DaemonOptions.configureCredentials?: (config: CredentialsConfig) => void`; `SyncLoopDeps.onArchivedThreads?: (ids) => void`; `Journal.activeCountExcluding(command)`.",
+      "acceptanceCriteria": [
+        "AC-1: When `startDaemon` starts in nax mode, then injected `configureCredentials` is called exactly once with a config whose `configDir()` returns `config.naxHome`.",
+        "AC-2: When nax home's `config.json` has `models.native` `{ balanced: 'minimax/MiniMax-M3' }` and `minimax` is available, then the daemon's first sync has `capabilities.threadBackends` equal to `{ native: ['minimax/MiniMax-M3'], acp: [] }`.",
+        "AC-3: When fake fleet server delivers a THREAD ASSIGN, then it receives a `thread` log PUT for that job whose first line has `type: 'session_started'`.",
+        "AC-4: Given capacity 2 and one RUNNING THREAD job, when the daemon syncs next, then it reports `freeSlots` 2.",
+        "AC-5: Given one active RUN row and one active THREAD row, when `Journal.activeCountExcluding('THREAD')` runs, then it returns 1.",
+        "AC-6: When `SyncLoop` receives a response with `archivedThreadIds: ['t1']`, then it calls `onArchivedThreads` with `['t1']`.",
+        "AC-7: When a sync responds with `archivedThreadIds: ['t9']` and the next prune pass runs, then `<home>/threads/t9` no longer exists.",
+        "AC-8: When a sync responds with `archivedThreadIds: ['t1']` while thread `t1`'s job is RUNNING and the next prune pass runs, then `<home>/threads/t1` remains.",
+        "AC-9: When a `<home>/skills/<sourceId>/<sha>` directory has mtime 31 days ago and the next prune pass runs, then the directory is gone.",
+        "AC-10: When `threadNativeModels(naxHome, () => caps)` reads `caps.credentials` with `minimax` available and `zai` unavailable over tiers `{ fast: 'minimax/MiniMax-M2.7', balanced: 'zai/glm-5' }`, then it resolves `models: ['minimax/MiniMax-M2.7']`.",
+        "AC-11: When `threadNativeModels(naxHome, () => null)` runs, then it resolves `{ models: [], defaultModel: null }`.",
+        "AC-12: When the daemon sends its first sync, then `protocolVersion` is 4."
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "daemon",
+        "protocol",
+        "credentials",
+        "security"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-006"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-package protocol handshake and daemon-wide session credential configuration, lifecycle and cleanup integration.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
+      },
+      "contextFiles": [
+        "apps/runner/src/daemon/daemon.ts",
+        "apps/runner/src/sync/sync-loop.ts",
+        "apps/runner/src/journal/journal.ts",
+        "packages/fleet-protocol/src/index.ts",
+        "apps/runner/test/unit/daemon.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/thread/thread-host.ts",
+        "apps/runner/test/unit/daemon-thread.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/sync/batch.spec.ts",
+          "reason": "line 109 `expect(FLEET_PROTOCOL_VERSION).toBe(3)` becomes `toBe(4)`, because this story bumps the package protocol version to 4 now that the runner can run THREAD jobs."
+        },
+        {
+          "path": "apps/runner/test/unit/daemon.spec.ts",
+          "reason": "line 138 `expect(server.syncs[0].protocolVersion).toBe(3)` becomes `toBe(4)`, because this story bumps the package protocol version to 4."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "2c667b80d576fb80261d0c7db653bda931f7e188"
+    }
+  ],
+  "analysis": "Graph-first codebase-memory MCP is not exposed in this session, so navigation fell back to targeted direct reads of spec-named files; line citations below refer to current worktree. Existing Bun/TypeScript runner is the sole session host; apps/api is the system of record, and @nathapp/fleet-protocol is the shared wire contract. B3a is already present: native tier discovery/readNativeModels and provider extraction (apps/runner/src/thread/native-models.ts:10-52), the read-only native session factory with ACP refused, model allowlist, carryHistoryAcrossModels, resume and persistent transcript (apps/runner/src/thread/session-factory.ts:70-145), redacting/capped thread event writer with held deltas and paced shipper wake (apps/runner/src/thread/thread-event-writer.ts:70-80,158-213,337-408), credential config (apps/runner/src/thread/nax-credentials.ts:18-32), worktree preparation and pruning (apps/runner/src/thread/thread-worktree.ts:22-43), and safe skill cache (apps/runner/src/thread/skill-fetch.ts:9-49). Contract types, command names and limits already exist (packages/fleet-protocol/src/threads.ts:1-58); capabilities already permit optional threadBackends while FLEET_PROTOCOL_VERSION is 3 (packages/fleet-protocol/src/index.ts:1-8,65-75). US-001: parseAssign currently rejects THREAD, validates base fields then copies a whitelisted AssignPayload (apps/runner/src/supervisor/assign-parser.ts:34-82); add strict THREAD-specific validation at the appropriate point, and reject a thread key on all other kinds; paths must use assertSegment/assertFeature, byte-length not character count for initialMessage. US-002: LogJob currently requires nax sources and LogStreamName only includes old events (apps/runner/src/logs/types.ts:1-60); LogShipper.register and lacksRun/discover unconditionally dereference sources (apps/runner/src/logs/log-shipper.ts:76-91,140-149,180-199); narrow discriminated union for thread-only registration while preserving upload/offset/refusal/drain behavior. NaxCapabilityProbe auth list currently uses profile providers only and bounds full capability report (apps/runner/src/capabilities/nax-probe.ts:118-158,166-188,222-240); union native tier providers for the auth call, filter available credentials for threadBackends, keep 64 KiB bound. StaticCapabilityProbe just clones config (apps/runner/src/capabilities/capability-probe.ts:24-32) and must not advertise threads. US-003–005: implement ThreadJobRun independently of JobRun, with a long-lived start promise, synchronous commands, guarded asynchronous turns/close, first-close-wins, cancellable sleep timers, no shared repo mutex except inside prepareThreadWorktree and no executor reaping. JobRunDeps/RunStart are defined in apps/runner/src/supervisor/job-run.ts:33-69; its normal run holds a repo mutex (line 105-123), so do not reuse it. JobEvents enforces legal transition sequences and bounds payloads (apps/runner/src/supervisor/job-events.ts:17-52), heartbeat helper uses abortable sleep (apps/runner/src/supervisor/heartbeat.ts:1-17), real journal stores ASSIGN JSON and contiguous event seq (apps/runner/src/journal/journal.ts:119-194), and credential broker returns a helper and releases epoch sockets (apps/runner/src/credentials/broker.ts:11-32,73-100). Preserve no post-halt journal/stream writes even if held turn/open resolves later, close a late-opened session, bound abandon close and free credentials; new stream file must be reset per epoch. Tuning currently has thread idle/wake/search/skill timeouts but not heartbeat/close (apps/runner/src/daemon/tuning.ts:1-77). US-006: Supervisor maps only JobRun and readopt rejection kills/reaps/cleans (apps/runner/src/supervisor/supervisor.ts:20-42,58-122), which is dangerous for THREAD; route all THREAD branches before executor/repo-mutex paths, including no-in-memory abandon/readopt and bounded close. CommandHandler.apply currently falls through for thread commands and persists acks by command id (apps/runner/src/supervisor/command-handler.ts:23-98); route synchronously to supervisor and record once. US-007: daemon currently probes, initializes broker/shipper/supervisor, computes freeSlots from all active rows, and runs only job prune (apps/runner/src/daemon/daemon.ts:101-206); introduce credential configuration and session factory before first sync, thread-aware active count, archived-thread callback/prune and skill-cache prune, preserving crash/stop behavior (line 209-237). SyncLoop.apply processes response and awaits handleCommands inline (apps/runner/src/sync/sync-loop.ts:132-161), making synchronous thread-command application and non-mutex ABANDON vital. CapabilityReporter.latest is bounded probe result (apps/runner/src/capabilities/capability-probe.ts:54-86). Tests use bun:test, real :memory: SQLite and files; existing fake shipping/clock support deterministic drain and abort (apps/runner/test/helpers/fake-log-shipping.ts:1-62, apps/runner/test/helpers/manual-clock.ts:1-31). Existing RUN/PLAN parser regression assertions already live in apps/runner/src/supervisor/assign-parser.spec.ts:9-21; existing probe's exact capability-object test (apps/runner/src/capabilities/nax-probe.spec.ts), tuning frozen-object test (apps/runner/src/daemon/tuning.spec.ts), sync version assertion (apps/runner/src/sync/batch.spec.ts), and daemon version assertion (apps/runner/test/unit/daemon.spec.ts) need updates to their changed fields/expected 4, without losing other fields. Enrollment also reads the same protocol constant (apps/runner/src/commands/enroll.ts:123) while sync request builds it in apps/runner/src/sync/batch.ts:68. New test double should record ordered operations, holds, cancel and close; daemon integration uses fake fleet server, FakeNaxCli, real file:// git. Dependency order: 001 and 002 independently, 003 -> 004 -> 005 -> 006, then 007; 007 also changes fleet-protocol. Backward compatibility: preserve RUN/PLAN/config parse, log sources, normal JobRun readopt and sync acks, bounded capability reports and static-override no-host behavior; v4 is an incompatible fleet handshake and B2 thread ingest is not shipped, so leave FLEET_THREADS_ENABLED off. Build gates: bun run type-check and bun run lint in apps/runner for each story, plus root bun run type-check for 007; do not modify generated clients or AGENTS/context files.",
+  "outOfScope": [
+    "The API accepting, folding and pricing the `thread` stream, cost accounting from `usage` lines and the content SSE belong to feature `fleet-s5a-thread-ingest` (B2); until then the API refuses `PUT .../logs/thread` and `FLEET_THREADS_ENABLED` stays off.",
+    "The runner sends no `costSpentUsd` snapshot for a THREAD job (B3b-R4).",
+    "`THREAD_PUBLISH`, `write_doc`, a `PUBLISH` action, a stale session start and Discard belong to phase C; the runner rejects `PUBLISH` at ASSIGN and `THREAD_PUBLISH` as `unsupported`.",
+    "ACP session backends belong to phase D; `threadBackends.acp` is always `[]`.",
+    "A runner configured with a runner.json `capabilities` block reports no `threadBackends` and hosts no threads.",
+    "A daemon stop or crash ends a live session without a `session_closed` line; READOPT then rejects the job, the API marks it CRASHED, and the next message starts a new job with `resume: true`.",
+    "Replaying a turn interrupted by a restart is not done; nax-agent reports it `interrupted` and the next input is a new turn.",
+    "Unpriced usage (`costSource` `unpriced`, `costUsd` 0) adds nothing to the spend; the API's budget rules govern it.",
+    "A `maxCostUsd` of `'0'` closes the session with `cost_cap` at its first `usage` event (`0 >= 0`); the API's send rule `threads.costCap` refuses a send at that budget first.",
+    "Unpriced usage (`costSource` `unpriced`, `costUsd` 0) adds nothing to the spend; the API's budget rules govern it. A `maxCostUsd` of `'0'` closes the session with `cost_cap` at its first `usage` event (`0 >= 0`); the API's send rule `threads.costCap` refuses a send at that budget first.",
+    "A thread whose spend has overshot its cap gives a negative remaining `maxCostUsd`, which `COST_RE` rejects at ASSIGN (`invalid maxCostUsd`); the API's send rule `threads.costCap` refuses before that. A clamp in the API is a B1 follow-up.",
+    "The runner `context.md` (`.nax/mono/apps/runner/context.md`, \"protocol v3\") is updated by hand after merge.",
+    "B3a's waived review items (`ensureClone`'s optional identity, base-ref resolution duplicating `resolveRef`, the event writer taking plain strings for reasons, the skill fetcher's unused `filePath` alias and single-`dir` branch) are not changed.",
+    "US-001 only: `instructions` length, `resume` type, `skills` element shapes, a backend `effort` and an `acp` backend's `agent` value share the field table without a dedicated acceptance criterion.",
+    "US-002 only: `wake`, `stopJob` and the shipper's refusal handling for a `thread` stream share the existing stream rules without a dedicated acceptance criterion; so does `StaticCapabilityProbe` reporting no `threadBackends` (unchanged code).",
+    "US-003 only: a cancel or halt between the start steps, a credentials refusal, a throwing start step, a start with no initial message and `'watch'` / `'finish'` starts share the step rules without a dedicated acceptance criterion; so does `onWarn`.",
+    "US-004 only: the drain timeout warning, the heartbeat stopping at `UPLOADING` and `session.close()` being called by the idle close share the close steps without a dedicated acceptance criterion.",
+    "US-005 only: `session_not_ready`, `THREAD_ANSWER` payload validation, the `cancelled` and `unknown` answer statuses `THREAD_PUBLISH` (`unsupported`) and `requestCancel()` while `RUNNING` (pinned through `CANCEL` in US-006) share the command table without a dedicated acceptance criterion; so does `halt()` (pinned through ABANDON in US-006).",
+    "US-006 only: a terminal or `ASSIGNED` thread row at READOPT, `cancel` with no run in memory, a thread command for a RUN job, and a throwing `session.close()` or `credentials.release` in `abandon()` share the existing Supervisor paths without a dedicated acceptance criterion.",
+    "US-007 only: a prune that throws and an absent `archivedThreadIds` share the prune rules without a dedicated acceptance criterion."
+  ],
+  "routingProfile": "native-codex-muse"
+}

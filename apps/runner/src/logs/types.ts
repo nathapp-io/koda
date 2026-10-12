@@ -1,7 +1,7 @@
-import type { LogEventPayload } from '@nathapp/fleet-protocol';
+import { THREAD_STREAM, type LogEventPayload } from '@nathapp/fleet-protocol';
 
-/** S2a §1.1: the three streams of a job attempt. */
-export type LogStreamName = LogEventPayload['stream'];
+/** S2a streams plus the thread session JSONL stream. */
+export type LogStreamName = LogEventPayload['stream'] | typeof THREAD_STREAM;
 
 /** Slice 1a plan D307: every protocol outcome of an upload is an HTTP 200 carrying one of these. */
 export type PutLogOutcome = 'appended' | 'duplicate' | 'offset' | 'complete' | 'stream_cap' | 'rate_limited';
@@ -40,12 +40,21 @@ export interface JobLogSources {
 
 export type LogLifecycle = (level: 'info' | 'warn' | 'error', message: string) => void;
 
-export interface LogJob {
+export interface NaxLogJob {
   readonly jobId: string;
   readonly leaseEpoch: number;
   readonly sources: JobLogSources;
   readonly lifecycle: LogLifecycle;
 }
+
+export interface ThreadLogJob {
+  readonly jobId: string;
+  readonly leaseEpoch: number;
+  readonly threadPath: string;
+  readonly lifecycle: LogLifecycle;
+}
+
+export type LogJob = NaxLogJob | ThreadLogJob;
 
 export type DrainResult = 'drained' | 'timeout' | 'stopped';
 

@@ -26,7 +26,7 @@ interface ThreadSessionFactoryOptions {
   agent?: AgentSessionFactory;
 }
 
-interface OpenThreadSessionOptions {
+export interface OpenThreadSessionOptions {
   jobId: string;
   thread: ThreadAssign;
   worktree: string;

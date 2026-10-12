@@ -93,6 +93,13 @@ describe('native thread model discovery (US-001)', () => {
     expect(result).toEqual({ models: [], defaultModel: null });
   });
 
+  test('surfaces config read errors other than a missing file', async () => {
+    expect(nativeModelsModule).toBeDefined();
+    const invalidHome = join(testRoot, 'config-is-directory');
+    await mkdir(join(invalidHome, 'config.json'), { recursive: true });
+    await expect(nativeModelsModule?.readNativeModels(invalidHome, new Set())).rejects.toMatchObject({ code: 'EISDIR' });
+  });
+
   test('US-001 AC-10: returns duplicate model ids only once', async () => {
     expect(nativeModelsModule).toBeDefined();
     await writeConfig({ models: { native: { fast: 'minimax/MiniMax-M3', balanced: 'minimax/MiniMax-M3' } } });

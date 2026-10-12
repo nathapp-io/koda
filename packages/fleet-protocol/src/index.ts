@@ -3,8 +3,10 @@
  * Shared by apps/api (type-only) and apps/runner. Bump FLEET_PROTOCOL_VERSION on any
  * incompatible wire change. v2 (S1.5): approval relay. v3 (S2a): logs stream over
  * PUT /fleet/runner/jobs/:jobId/logs/:stream; a v3 runner sends no `log` sync events.
+ * v4 (S5a): THREAD jobs, `threadBackends` and `archivedThreadIds`; the API places a THREAD
+ * job only on a v4 runner.
  */
-export const FLEET_PROTOCOL_VERSION = 3 as const;
+export const FLEET_PROTOCOL_VERSION = 4 as const;
 
 export * from './nax-config-paths';
 export * from './config-jobs';

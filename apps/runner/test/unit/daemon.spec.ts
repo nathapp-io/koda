@@ -135,7 +135,7 @@ describe('startDaemon', () => {
     const daemon = await startDaemon({ home: s.home, config: s.config, identity: s.identity, tuning, log: createMemoryLogger(), executorFactory: () => s.ex });
     try {
       await waitFor(() => server.syncs.length >= 1);
-      expect(server.syncs[0].protocolVersion).toBe(3);
+      expect(server.syncs[0].protocolVersion).toBe(4);
       server.queue.push({ commandId: 'c1', type: 'ASSIGN', jobId: 'j1', leaseEpoch: 1, payload: assignFor('RUN') });
       await waitFor(() => server.order.includes('state:COMPLETED'), { timeoutMs: 8_000 });
       expect(server.logs.get('j1:stdout')).toBe('hello\nworld\n');

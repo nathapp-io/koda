@@ -1,4 +1,4 @@
-import { isConfigKind, type AssignPayload, type BashMode, type FleetCommandOut, type FleetJobKindName } from '@nathapp/fleet-protocol';
+import { THREAD_LIMITS, THREAD_MODEL_ID_RE, isConfigKind, type AssignPayload, type BashMode, type FleetCommandOut, type FleetJobKindName, type ThreadAssign, type ThreadBackend, type ThreadSkillSource } from '@nathapp/fleet-protocol';
 import { assertCloneUrl } from '../executor/workspace';
 import { COST_RE, PROFILE_NAME, RESERVED_PREFIX } from '../executor/nax-process';
 import { PathError, assertFeature, assertOwner, assertRelativePath, assertSegment } from '../paths/safe-segment';
@@ -7,6 +7,8 @@ export type ParsedAssign = { ok: true; assign: AssignPayload } | { ok: false; de
 
 const BASH_MODES: readonly string[] = ['raw', 'gated', 'escalate'];
 const DEFAULT_APPROVAL_TIMEOUT_SEC = 600;
+const INSTRUCTIONS_MAX_CHARS = 262_144;
+const EFFORT_RE = /^[a-z]{1,16}$/;
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -29,6 +31,60 @@ function checked(fn: () => void): boolean {
  *  so it is exported under a test-only name rather than widened into the public parse surface. */
 export const __checked = checked;
 
+function cleanBackend(v: unknown): ThreadBackend | null {
+  if (!isObj(v)) return null;
+  const kind = v['kind'];
+  const model = v['model'];
+  const effort = v['effort'];
+  const modelOk = model === undefined || (typeof model === 'string' && THREAD_MODEL_ID_RE.test(model));
+  const effortOk = effort === undefined || (typeof effort === 'string' && EFFORT_RE.test(effort));
+  if (!modelOk || !effortOk) return null;
+  if (kind === 'native') {
+    if (v['agent'] !== undefined) return null;
+    return {
+      kind: 'native',
+      ...(model !== undefined ? { model: model as string } : {}),
+      ...(effort !== undefined ? { effort: effort as string } : {}),
+    };
+  }
+  if (kind === 'acp') {
+    const agent = v['agent'];
+    if (agent !== 'claude' && agent !== 'codex') return null;
+    return {
+      kind: 'acp',
+      agent,
+      ...(model !== undefined ? { model: model as string } : {}),
+      ...(effort !== undefined ? { effort: effort as string } : {}),
+    };
+  }
+  return null;
+}
+
+function cleanSkills(v: unknown): ThreadSkillSource[] | null {
+  if (!Array.isArray(v)) return null;
+  const out: ThreadSkillSource[] = [];
+  for (const entry of v) {
+    if (!isObj(entry)) return null;
+    const sourceId = entry['sourceId'];
+    const owner = entry['owner'];
+    const repo = entry['repo'];
+    const sha = entry['sha'];
+    const skills = entry['skills'];
+    if (typeof sourceId !== 'string' || typeof owner !== 'string' || typeof repo !== 'string' || typeof sha !== 'string') return null;
+    if (!Array.isArray(skills)) return null;
+    const cleaned: ThreadSkillSource['skills'] = [];
+    for (const s of skills) {
+      if (!isObj(s)) return null;
+      if (typeof s['name'] !== 'string' || typeof s['dir'] !== 'string' || typeof s['description'] !== 'string') return null;
+      cleaned.push({ name: s['name'] as string, dir: s['dir'] as string, description: s['description'] as string });
+    }
+    out.push({ sourceId: sourceId as string, owner: owner as string, repo: repo as string, sha: sha as string, skills: cleaned });
+  }
+  return out;
+}
+
+const utf8Bytes = (s: string): number => new TextEncoder().encode(s).length;
+
 /**
  * D30: the server is trusted to deliver, not to be well formed. Every field that reaches a path, an argv or git config
  * is re-validated, and only the validated fields are copied. `ref` is only bounded here: an odd ref becomes a fixed
@@ -39,8 +95,9 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   if (!isObj(p)) return bad('payload');
   if (p['jobId'] !== command.jobId || !checked(() => assertSegment('jobId', p['jobId']))) return bad('jobId');
   const kind = p['command'];
-  if (typeof kind !== 'string' || (kind !== 'RUN' && kind !== 'PLAN' && !isConfigKind(kind))) return bad('command');
+  if (typeof kind !== 'string' || (kind !== 'RUN' && kind !== 'PLAN' && kind !== 'THREAD' && !isConfigKind(kind))) return bad('command');
   const isConfig = isConfigKind(kind);
+  const isThread = kind === 'THREAD';
   const repo = p['repo'];
   if (!isObj(repo) || (repo['provider'] !== 'github' && repo['provider'] !== 'gitlab')) return bad('repo');
   if (!checked(() => assertOwner(repo['owner']))) return bad('owner');
@@ -52,31 +109,68 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   const isPlan = p['command'] === 'PLAN';
   if (isPlan ? !checked(() => assertRelativePath('planFrom', p['planFrom'])) : p['planFrom'] !== null && p['planFrom'] !== undefined) return bad('planFrom');
   const profiles = p['profiles'];
-  if (!Array.isArray(profiles) || profiles.length > 8 || (isConfig && profiles.length > 0) || !profiles.every((n) => typeof n === 'string' && PROFILE_NAME.test(n) && !n.startsWith(RESERVED_PREFIX))) return bad('profiles');
+  if (isThread) {
+    if (!Array.isArray(profiles) || profiles.length !== 0) return bad('profiles');
+  } else if (!Array.isArray(profiles) || profiles.length > 8 || (isConfig && profiles.length > 0) || !profiles.every((n) => typeof n === 'string' && PROFILE_NAME.test(n) && !n.startsWith(RESERVED_PREFIX))) return bad('profiles');
   if (typeof p['maxCostUsd'] !== 'string' || !COST_RE.test(p['maxCostUsd'])) return bad('maxCostUsd');
-  if (typeof p['bashMode'] !== 'string' || !BASH_MODES.includes(p['bashMode']) || ((isPlan || isConfig) && p['bashMode'] !== 'raw')) return bad('bashMode');
+  if (typeof p['bashMode'] !== 'string' || !BASH_MODES.includes(p['bashMode']) || ((isPlan || isConfig || isThread) && p['bashMode'] !== 'raw')) return bad('bashMode');
   // A server that predates S1.5 2a sends no timeout; it also only sends raw jobs.
   const approvalTimeoutSec = p['approvalTimeoutSec'] ?? DEFAULT_APPROVAL_TIMEOUT_SEC;
   if (typeof approvalTimeoutSec !== 'number' || !Number.isInteger(approvalTimeoutSec) || approvalTimeoutSec < 30 || approvalTimeoutSec > 3600) return bad('approvalTimeoutSec');
   const identity = p['gitIdentity'];
   if (!isObj(identity) || !plain(identity['name'], 200) || !plain(identity['email'], 200)) return bad('gitIdentity');
-  return {
-    ok: true,
-    assign: {
-      jobId: p['jobId'] as string,
-      command: kind as FleetJobKindName,
-      repo: {
-        provider: repo['provider'], owner: repo['owner'] as string, name: repo['name'] as string,
-        defaultBranch: repo['defaultBranch'] as string, cloneUrl: repo['cloneUrl'] as string,
-      },
-      ref: p['ref'] as string,
-      feature: p['feature'] as string,
-      planFrom: isPlan ? (p['planFrom'] as string) : null,
-      profiles: [...(profiles as string[])],
-      maxCostUsd: p['maxCostUsd'],
-      bashMode: p['bashMode'] as BashMode,
-      approvalTimeoutSec,
-      gitIdentity: { name: identity['name'] as string, email: identity['email'] as string },
+  const baseAssign = {
+    jobId: p['jobId'] as string,
+    command: kind as FleetJobKindName,
+    repo: {
+      provider: repo['provider'] as 'github' | 'gitlab', owner: repo['owner'] as string, name: repo['name'] as string,
+      defaultBranch: repo['defaultBranch'] as string, cloneUrl: repo['cloneUrl'] as string,
     },
+    ref: p['ref'] as string,
+    feature: p['feature'] as string,
+    planFrom: isPlan ? (p['planFrom'] as string) : null,
+    profiles: [...(profiles as string[])],
+    maxCostUsd: p['maxCostUsd'],
+    bashMode: p['bashMode'] as BashMode,
+    approvalTimeoutSec,
+    gitIdentity: { name: identity['name'] as string, email: identity['email'] as string },
   };
+  if (!isThread) {
+    if (p['thread'] !== undefined) return bad('thread');
+    return { ok: true, assign: baseAssign };
+  }
+  const t = p['thread'];
+  if (!isObj(t)) return bad('thread');
+  if (!checked(() => assertSegment('threadId', t['threadId']))) return bad('threadId');
+  if (t['action'] !== 'SESSION') return bad('thread action');
+  if (!checked(() => assertFeature(t['feature']))) return bad('thread feature');
+  if (typeof t['resume'] !== 'boolean') return bad('thread resume');
+  const instructions = t['instructions'];
+  if (typeof instructions !== 'string' || instructions.length > INSTRUCTIONS_MAX_CHARS) return bad('instructions');
+  const backend = cleanBackend(t['backend']);
+  if (!backend) return bad('backend');
+  const skills = cleanSkills(t['skills']);
+  if (!skills) return bad('skills');
+  const rawInitial = t['initialMessage'];
+  let initialMessage: ThreadAssign['initialMessage'];
+  if (rawInitial === null) {
+    initialMessage = null;
+  } else {
+    if (!isObj(rawInitial)) return bad('initialMessage');
+    if (!checked(() => assertSegment('messageId', rawInitial['messageId']))) return bad('initialMessage');
+    const initialText = rawInitial['text'];
+    if (typeof initialText !== 'string' || initialText.length > THREAD_LIMITS.messageMaxBytes || utf8Bytes(initialText) > THREAD_LIMITS.messageMaxBytes) return bad('initialMessage');
+    initialMessage = { messageId: rawInitial['messageId'] as string, text: initialText };
+  }
+  const thread: ThreadAssign = {
+    threadId: t['threadId'] as string,
+    action: 'SESSION',
+    feature: t['feature'] as string,
+    resume: t['resume'] as boolean,
+    instructions: instructions as string,
+    backend,
+    skills,
+    initialMessage,
+  };
+  return { ok: true, assign: { ...baseAssign, thread } };
 }

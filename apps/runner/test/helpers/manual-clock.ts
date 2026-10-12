@@ -20,6 +20,10 @@ export function manualClock(startMs = 0) {
   return {
     nowMs: (): number => t,
     sleep,
+    /** Whether a sleeper is waiting for exactly `ms` from now, so a test can wait for a timer before moving time. */
+    sleepingFor(ms: number): boolean {
+      return sleepers.some((s) => s.at === t + ms);
+    },
     /** Moves time forward and wakes every sleeper that is due. Callers then `waitFor` what the woken code does. */
     advance(ms: number): void {
       t += ms;
