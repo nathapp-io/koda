@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-web",
   "branchName": "feat/fleet-s5a-thread-web",
   "createdAt": "2026-10-12T00:00:00.000Z",
-  "updatedAt": "2026-10-12T12:06:08.118Z",
+  "updatedAt": "2026-10-12T13:15:14.672Z",
   "userStories": [
     {
       "id": "US-001",
@@ -120,8 +120,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -192,7 +192,10 @@
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "New reactive controller coordinates paging, SSE/refetch races, optimistic deduplication, retry deadlines and polling; useAuth refresh integration and thread session actions trigger the security override."
+        "reasoning": "New reactive controller coordinates paging, SSE/refetch races, optimistic deduplication, retry deadlines and polling; useAuth refresh integration and thread session actions trigger the security override.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/composables/useProjectEvents.ts",
@@ -211,7 +214,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f36962d2111c29637db8522fa463bb90736d4aa0"
     },
     {
       "id": "US-004",
