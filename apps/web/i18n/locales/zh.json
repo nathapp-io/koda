@@ -792,7 +792,25 @@
           "title": "标题需为 1 至 200 个字符且不能包含控制字符"
         }
       },
-      "detail": { "title": "线程" }
+      "detail": {
+        "title": "线程",
+        "contextReset": "上下文已重置",
+        "streaming": "流式生成中…",
+        "tokens": "个 token",
+        "status": {
+          "errored": "已出错",
+          "cancelled": "已取消",
+          "timed_out": "已超时",
+          "interrupted": "已中断"
+        }
+      },
+      "tool": {
+        "running": "运行中",
+        "ok": "已完成",
+        "error": "出错",
+        "denied": "已拒绝",
+        "unfinished": "未完成"
+      }
     },
     "common": {
       "online": "在线",

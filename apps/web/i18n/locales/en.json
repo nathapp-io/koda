@@ -792,7 +792,25 @@
           "title": "Title must be 1 to 200 characters without control characters"
         }
       },
-      "detail": { "title": "Thread" }
+      "detail": {
+        "title": "Thread",
+        "contextReset": "Context reset",
+        "streaming": "Streaming…",
+        "tokens": "tokens",
+        "status": {
+          "errored": "Errored",
+          "cancelled": "Cancelled",
+          "timed_out": "Timed out",
+          "interrupted": "Interrupted"
+        }
+      },
+      "tool": {
+        "running": "Running",
+        "ok": "OK",
+        "error": "Error",
+        "denied": "Denied",
+        "unfinished": "Unfinished"
+      }
     },
     "common": {
       "online": "Online",
