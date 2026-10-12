@@ -94,6 +94,48 @@ describe('parseThreadLine (US-003)', () => {
   });
 });
 
+describe('parseThreadLine (US-005 usage)', () => {
+  it('US-005: parses a usage line and defaults absent cache counts to zero', () => {
+    expect(parseThreadLine(JSON.stringify({
+      type: 'usage', turnId: 't1', round: 1, inputTokens: 100, outputTokens: 20, costUsd: 0.0123,
+    }))).toEqual({
+      type: 'usage', turnId: 't1', round: 1, inputTokens: 100, outputTokens: 20,
+      cacheRead: 0, cacheWrite: 0, costUsd: 0.0123,
+    });
+  });
+
+  it.each([
+    ['negative input token count', { inputTokens: -1, outputTokens: 0, round: 1, costUsd: 0 }],
+    ['negative output token count', { inputTokens: 0, outputTokens: -1, round: 1, costUsd: 0 }],
+    ['negative cacheRead token count', { inputTokens: 0, outputTokens: 0, cacheRead: -1, round: 1, costUsd: 0 }],
+    ['negative cacheWrite token count', { inputTokens: 0, outputTokens: 0, cacheWrite: -1, round: 1, costUsd: 0 }],
+    ['non-integer round', { inputTokens: 0, outputTokens: 0, round: 1.5, costUsd: 0 }],
+  ])('US-005: rejects a usage line with %s', (_description, fields) => {
+    expect(parseThreadLine(JSON.stringify({ type: 'usage', turnId: 't1', ...fields }))).toEqual({ bad: true });
+  });
+
+  it.each(['NaN', 'Infinity', '-Infinity', '1e999'])(
+    'US-005: rejects a usage line whose costUsd is non-finite (%s)', (costUsd) => {
+      const raw = `{"type":"usage","turnId":"t1","round":1,"inputTokens":0,"outputTokens":0,"costUsd":${costUsd}}`;
+      expect(parseThreadLine(raw)).toEqual({ bad: true });
+    },
+  );
+
+  it.each(['invalid', '', 'COMPUTED'])(
+    'US-005: rejects a usage line with unsupported costSource %j', (costSource) => {
+      expect(parseThreadLine(JSON.stringify({
+        type: 'usage', turnId: 't1', round: 1, inputTokens: 0, outputTokens: 0, costUsd: 0, costSource,
+      }))).toEqual({ bad: true });
+    },
+  );
+
+  it('US-005: rejects a usage line whose turnId exceeds the maximum length', () => {
+    expect(parseThreadLine(JSON.stringify({
+      type: 'usage', turnId: 't'.repeat(129), round: 1, inputTokens: 0, outputTokens: 0, costUsd: 0,
+    }))).toEqual({ bad: true });
+  });
+});
+
 describe('parseThreadLine (US-004)', () => {
   it('US-004 AC1: parses a tool_call line with its callId, name and any JSON input', () => {
     expect(parseThreadLine('{"type":"tool_call","turnId":"t1","callId":"c1","name":"search_repo","input":{"pattern":"foo"}}')).toEqual({
