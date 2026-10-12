@@ -24,13 +24,13 @@ export function useThreads(slug: string): ThreadList {
   const status = ref<'ACTIVE' | 'ARCHIVED'>('ACTIVE')
 
   const load = async (next: 'ACTIVE' | 'ARCHIVED' = 'ACTIVE'): Promise<void> => {
-    status.value = next
     const response = await $api.get<{ items: ThreadDto[]; threadsEnabled: boolean }>(
       apiPath`/projects/${slug}/threads`,
       { query: { status: next, size: '100' } },
     )
     threads.value = response.items
     threadsEnabled.value = response.threadsEnabled
+    status.value = next
   }
 
   return { threads, threadsEnabled, status, load }

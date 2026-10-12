@@ -90,6 +90,14 @@ const breadcrumbItems = computed(() => {
   if (path === `/${project}/threads`) {
     return [{ label: 'Koda', to: '/' }, projectBase, { label: t('nav.threads') }]
   }
+  if (path === `/${project}/threads/new`) {
+    return [
+      { label: 'Koda', to: '/' },
+      projectBase,
+      { label: t('nav.threads'), to: `/${project}/threads` },
+      { label: t('fleet.threads.new.title') },
+    ]
+  }
   if (path.startsWith(`/${project}/threads/`)) {
     return [
       { label: 'Koda', to: '/' },

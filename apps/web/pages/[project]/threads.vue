@@ -11,15 +11,31 @@ const roleRequest = useProjectViewerRole(slug)
 const members = useProjectMemberNames(slug)
 const role = computed(() => roleRequest.data.value ?? { canManage: false, viewerRole: null })
 const canCreate = computed(() => canWorkOnFleet(role.value) && threadsList.threadsEnabled.value)
+const pending = ref(true)
+const loadFailed = ref(false)
+
+async function loadPage(status: 'ACTIVE' | 'ARCHIVED' = threadsList.status.value): Promise<boolean> {
+  pending.value = true
+  loadFailed.value = false
+  try {
+    await Promise.all([threadsList.load(status), members.load()])
+    return true
+  } catch {
+    loadFailed.value = true
+    return false
+  } finally {
+    pending.value = false
+  }
+}
 
 async function selectStatus(status: 'ACTIVE' | 'ARCHIVED'): Promise<void> {
-  await threadsList.load(status)
-  await router?.replace({ query: { ...(route.query ?? {}), status: status === 'ACTIVE' ? undefined : status } })
+  if (await loadPage(status)) {
+    await router?.replace({ query: { ...(route.query ?? {}), status: status === 'ACTIVE' ? undefined : status } })
+  }
 }
 
 onMounted(() => {
-  void threadsList.load(route.query?.status === 'ARCHIVED' ? 'ARCHIVED' : 'ACTIVE')
-  void members.load()
+  void loadPage(route.query?.status === 'ARCHIVED' ? 'ARCHIVED' : 'ACTIVE')
 })
 </script>
 
@@ -50,6 +66,8 @@ onMounted(() => {
       >{{ t('fleet.threads.list.archived') }}</button>
     </div>
 
-    <ThreadListTable :threads="threadsList.threads.value" :status="threadsList.status.value" :name-of="members.nameOf" :slug="slug" />
+    <LoadingState v-if="pending" />
+    <ErrorState v-else-if="loadFailed" @retry="loadPage()" />
+    <ThreadListTable v-else :threads="threadsList.threads.value" :status="threadsList.status.value" :name-of="members.nameOf" :slug="slug" />
   </div>
 </template>

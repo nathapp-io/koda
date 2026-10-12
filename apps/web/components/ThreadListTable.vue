@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { costText, sessionLabel } from '~/lib/thread-view'
+import { timeText } from '~/lib/fleet-analytics-format'
 import type { ThreadDto } from '~/lib/thread-types'
+
+function activityText(value: string | null | undefined): string {
+  return value && Number.isFinite(new Date(value).getTime()) ? timeText(value) : '-'
+}
 
 defineProps<{
   threads: ThreadDto[]
@@ -38,7 +43,7 @@ const { t } = useI18n()
           <td class="px-3 py-2 font-mono text-xs">feat/{{ thread.feature }}</td>
           <td class="px-3 py-2">{{ thread.backend.kind }}<span v-if="thread.backend.model"> · {{ thread.backend.model }}</span></td>
           <td class="px-3 py-2"><span class="rounded bg-muted px-1.5 py-0.5 text-xs">{{ t(`fleet.threads.session.${sessionLabel(thread)}`) }}</span></td>
-          <td class="px-3 py-2 text-muted-foreground">{{ new Date(thread.lastActivityAt).toLocaleString() }}</td>
+          <td class="px-3 py-2 text-muted-foreground">{{ activityText(thread.lastActivityAt) }}</td>
           <td class="px-3 py-2 text-right font-mono text-xs">{{ costText(thread) }}</td>
         </tr>
       </tbody>
