@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-ingest",
   "branchName": "feat/fleet-s5a-thread-ingest",
   "createdAt": "2026-10-12T00:00:00.000Z",
-  "updatedAt": "2026-10-12T05:00:48.919Z",
+  "updatedAt": "2026-10-12T05:25:43.720Z",
   "userStories": [
     {
       "id": "US-001",
@@ -33,8 +33,8 @@
         "schema"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -114,7 +114,10 @@
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "New abstractions (ingestor, parser, repository, module), transactional exactly-once cursor, lock ordering, failure isolation, non-reentrant mutex constraints."
+        "reasoning": "New abstractions (ingestor, parser, repository, module), transactional exactly-once cursor, lock ordering, failure isolation, non-reentrant mutex constraints.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "packages/fleet-protocol/src/threads.ts",
@@ -150,7 +153,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "eef72aae0a9ea954afe0a3418d5a18cd7e8caa2a"
     },
     {
       "id": "US-003",
