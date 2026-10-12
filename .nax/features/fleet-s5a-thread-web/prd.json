@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-web",
   "branchName": "feat/fleet-s5a-thread-web",
   "createdAt": "2026-10-12T00:00:00.000Z",
-  "updatedAt": "2026-10-12T14:13:03.015Z",
+  "updatedAt": "2026-10-12T14:43:17.227Z",
   "userStories": [
     {
       "id": "US-001",
@@ -325,8 +325,8 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -406,7 +406,10 @@
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Multiple transcript components introduce a narrow HTML rendering exception with XSS/image-fetch defenses and creator-specific question presentation, requiring strict security TDD."
+        "reasoning": "Multiple transcript components introduce a narrow HTML rendering exception with XSS/image-fetch defenses and creator-specific question presentation, requiring strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/lib/markdown.ts",
@@ -443,7 +446,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "af0761a2775284fe7f89e0961b29f7745544cdc6"
     },
     {
       "id": "US-007",
