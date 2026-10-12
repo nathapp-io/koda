@@ -501,7 +501,11 @@
     "US-002 only: the Nitro route file `server/api/projects/[slug]/threads/[id]/events.get.ts` is a thin wrapper over `openThreadLiveUpstream` (as the project events route is) with no unit acceptance criterion; the US-007 E2E journey reaches it (the live reply appears without a reload).",
     "US-003 only: no polling while `live` is true, and the `{ ok: false, error }` result of `answer` and `raiseCap`, follow the Design without a dedicated acceptance criterion; the page toasts every `{ ok: false }` the same way.",
     "US-003 only: a refetch that lands between a fold's commit and its published `delta` can show that text twice until the next `message` event (at the latest the `turn_end`) refetches the message; accepted.",
-    "US-005 only: effort values other than `low`, `medium`, `high` and `xhigh` (the API accepts any `/^[a-z]{1,16}$/`)."
+    "US-005 only: effort values other than `low`, `medium`, `high` and `xhigh` (the API accepts any `/^[a-z]{1,16}$/`).",
+    "US-006 only: the token count text and the backend label have no dedicated acceptance criterion.",
+    "US-007 only: Raise cap with `0` showing the validation message and emitting nothing has no dedicated acceptance criterion.",
+    "THREAD jobs listed on the fleet jobs page show their raw command (`fleet.command` keeps its four pinned values); a `THREAD` label there is a later change.",
+    "US-007 only: the E2E journey covers create, send, live reply, Stop and a read-only member; closing retry, question answer, context reset and archive are covered by component and controller tests only."
   ],
   "routingProfile": "native-router"
 }
