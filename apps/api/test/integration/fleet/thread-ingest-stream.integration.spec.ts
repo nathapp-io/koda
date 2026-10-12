@@ -127,8 +127,8 @@ describeIntegration('fleet thread log stream (PG, US-001)', () => {
         VALUES ('r-mig', 'p-mig', 'github', 'acme', 'app', 'main', 'u-mig');
       `);
       await scratch.db.$executeRawUnsafe(`
-        INSERT INTO "ChatThread" ("id", "projectId", "repoId", "baseRef", "feature", "title", "createdById", "backend", "skills", "specPath", "updatedAt")
-        VALUES ('t-mig', 'p-mig', 'r-mig', 'main', 'f', 'T', 'u-mig', '{"kind":"native"}', '[]', '.nax/features/f/spec.md', CURRENT_TIMESTAMP);
+        INSERT INTO "ChatThread" ("id", "projectId", "repoId", "baseRef", "feature", "title", "createdById", "backend", "skills", "specPath")
+        VALUES ('t-mig', 'p-mig', 'r-mig', 'main', 'f', 'T', 'u-mig', '{"kind":"native"}', '[]', '.nax/features/f/spec.md');
       `);
       await applyMigration(scratch.db, MIGRATION);
     });
