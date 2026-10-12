@@ -61,6 +61,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
       let skippedLines = 0;
       let costChanged = false;
       const changedTurns = new Set<string>();
+      const messageEventTurns = new Set<string>();
       const messageIds = new Set<string>();
       const deltaText = new Map<string, string>();
       const resetTurns = new Set<string>();
@@ -73,28 +74,42 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
             messageIds.add(line.messageId);
           }
           else if (isToolLine(line)) {
-            skippedLines += await this.foldToolLine(threadId, line);
-            if ('turnId' in line) changedTurns.add(line.turnId);
+            const folded = await this.foldToolLine(threadId, line);
+            skippedLines += folded.skipped;
+            if ('turnId' in line && folded.messageId) {
+              changedTurns.add(line.turnId);
+              messageEventTurns.add(line.turnId);
+            } else if (folded.messageId) {
+              messageIds.add(folded.messageId);
+            }
           }
           else if (line.type === 'question') {
             skippedLines += await this.foldQuestion(threadId, line);
-            if (line.answerable) questions.push({ requestId: line.requestId, text: line.text });
-            else changedTurns.add(line.turnId);
+            if (line.answerable) {
+              questions.push({ requestId: line.requestId, text: line.text });
+              threadChanged = true;
+            }
+            else {
+              changedTurns.add(line.turnId);
+              messageEventTurns.add(line.turnId);
+            }
           }
           else if (isSessionLine(line)) { await this.foldSessionLine(batch, threadId, line); threadChanged = true; }
           else if (line.type === 'usage') {
             const folded = await this.foldUsage(batch, job, threadId, line);
             skippedLines += Number(folded.skipped);
             costChanged = folded.costChanged || costChanged;
-            threadChanged = !folded.skipped || threadChanged;
+            threadChanged = folded.changed || threadChanged;
           }
           else {
             if (line.type === 'turn_end') costChanged = await this.foldTurnEnd(batch, job, threadId, line) || costChanged;
             const skipped = await this.foldAssistantLine(batch, threadId, line);
             skippedLines += skipped;
             if (!skipped && 'turnId' in line) {
+              if (line.type === 'turn_end') threadChanged = true;
               changedTurns.add(line.turnId);
               if (line.type === 'text_delta') deltaText.set(line.turnId, (deltaText.get(line.turnId) ?? '') + line.text);
+              else messageEventTurns.add(line.turnId);
               if (line.type === 'stream_reset') resetTurns.add(line.turnId);
             }
           }
@@ -112,10 +127,14 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
         const messages = turns.length ? await db.chatMessage.findMany({
           where: { threadId, role: 'assistant', turnId: { in: turns } }, select: { id: true, turnId: true },
         }) : [];
-        for (const message of messages) messageIds.add(message.id);
         const at = new Date().toISOString();
         const base = { id: randomUUID(), threadId, at };
         for (const messageId of messageIds) liveEvents.push({ ...base, id: randomUUID(), type: 'message', messageId });
+        for (const message of messages) {
+          if (message.turnId && messageEventTurns.has(message.turnId)) {
+            liveEvents.push({ ...base, id: randomUUID(), type: 'message', messageId: message.id });
+          }
+        }
         for (const message of messages) {
           const text = message.turnId ? deltaText.get(message.turnId) : undefined;
           if (text && !resetTurns.has(message.turnId as string)) liveEvents.push({ ...base, id: randomUUID(), type: 'delta', messageId: message.id, text });
@@ -129,10 +148,10 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
     return result;
   }
 
-  private async foldUsage(batch: ThreadIngestBatch, job: { id: string; leaseEpoch: number; projectId: string; repoId: string; runnerId: string | null }, threadId: string, line: UsageThreadLine): Promise<{ costChanged: boolean; skipped: boolean }> {
+  private async foldUsage(batch: ThreadIngestBatch, job: { id: string; leaseEpoch: number; projectId: string; repoId: string; runnerId: string | null }, threadId: string, line: UsageThreadLine): Promise<{ costChanged: boolean; skipped: boolean; changed: boolean }> {
     const db = this.prisma.client;
     const message = await db.chatMessage.findFirst({ where: { threadId, turnId: line.turnId, role: 'assistant' } });
-    if (!message) return { costChanged: false, skipped: true };
+    if (!message) return { costChanged: false, skipped: true, changed: false };
     const source = line.costSource ?? 'computed';
     let inserted = true;
     if (source !== 'unpriced') {
@@ -147,7 +166,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
       }], skipDuplicates: true });
       inserted = create.count > 0;
     }
-    if (!inserted) return { costChanged: false, skipped: false };
+    if (!inserted) return { costChanged: false, skipped: false, changed: false };
     const previous = (message.usage as { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | null) ?? {};
     const increments = { input: line.inputTokens, output: line.outputTokens, cacheRead: line.cacheRead, cacheWrite: line.cacheWrite };
     await db.chatMessage.update({ where: { id: message.id }, data: {
@@ -161,7 +180,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
       input: (prior.input ?? 0) + increments.input, output: (prior.output ?? 0) + increments.output,
       cacheRead: (prior.cacheRead ?? 0) + increments.cacheRead, cacheWrite: (prior.cacheWrite ?? 0) + increments.cacheWrite,
     } } });
-    return { costChanged: source !== 'unpriced' && line.costUsd > 0, skipped: false };
+    return { costChanged: source !== 'unpriced' && line.costUsd > 0, skipped: false, changed: true };
   }
 
   private async foldTurnEnd(batch: ThreadIngestBatch, job: { id: string; projectId: string; repoId: string; runnerId: string | null }, threadId: string, line: Extract<AssistantThreadLine, { type: 'turn_end' }>): Promise<boolean> {
@@ -274,9 +293,9 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
    * Folds a tool or approval line into the `toolSummary` of the turn's assistant message. Approval lines carry no turnId,
    * so they match the message whose summary already holds the request. Returns 1 for a tool_* line with no message.
    */
-  private async foldToolLine(threadId: string, line: ToolThreadLine): Promise<number> {
+  private async foldToolLine(threadId: string, line: ToolThreadLine): Promise<{ skipped: number; messageId?: string }> {
     const db = this.prisma.client;
-    if (line.type === 'approval_requested' && line.callId === undefined) return 0;
+    if (line.type === 'approval_requested' && line.callId === undefined) return { skipped: 0 };
     if (line.type === 'approval_requested' || line.type === 'approval_resolved') {
       // The message whose summary holds the call (requested) or the request (resolved). Matched by containment on the JSON.
       // Newest first, so a callId reused across turns always resolves to the same message.
@@ -286,22 +305,24 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
         orderBy: { seq: 'desc' },
         select: { id: true, toolSummary: true },
       });
-      if (!message) return 0;
+      if (!message) return { skipped: 0 };
       const entries = readSummary(message.toolSummary);
       const next = line.type === 'approval_requested'
         ? linkApprovalRequest(entries, line.callId as string, line.requestId)
         : setApprovalDecision(entries, line.requestId, line.decidedBy);
+      if (JSON.stringify(entries) === JSON.stringify(next)) return { skipped: 0 };
       await db.chatMessage.update({ where: { id: message.id }, data: { toolSummary: next as unknown as Prisma.InputJsonValue } });
-      return 0;
+      return { skipped: 0, messageId: message.id };
     }
     const message = await db.chatMessage.findFirst({ where: { threadId, turnId: line.turnId, role: 'assistant' }, select: { id: true, toolSummary: true } });
-    if (!message) return 1;
+    if (!message) return { skipped: 1 };
     const entries = readSummary(message.toolSummary);
     const next = line.type === 'tool_call'
       ? upsertToolCall(entries, { callId: line.callId, name: line.name, input: line.input })
       : setToolResult(entries, line.callId, line.isError, line.preview);
+    if (JSON.stringify(entries) === JSON.stringify(next)) return { skipped: 0 };
     await db.chatMessage.update({ where: { id: message.id }, data: { toolSummary: next as unknown as Prisma.InputJsonValue } });
-    return 0;
+    return { skipped: 0, messageId: message.id };
   }
 
   /**
