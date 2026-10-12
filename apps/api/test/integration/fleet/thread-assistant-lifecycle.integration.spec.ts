@@ -12,8 +12,8 @@ import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
-import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
-import { putThreadLines, seedThreadJob, ThreadJobSeed } from '../../helpers/thread-fixtures';
+import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { putThreadLines, ThreadJobSeed } from '../../helpers/thread-fixtures';
 import { LogStore, LOG_STORE, logKey } from '../../../src/fleet/logs/log-store';
 import { ThreadIngestor } from '../../../src/fleet/threads/ingest/thread-ingestor';
 import { JobTransitionsService } from '../../../src/fleet/jobs/job-transitions.service';
@@ -28,6 +28,7 @@ describeIntegration('fleet thread assistant lifecycle (PG, US-003)', () => {
   let server: ReturnType<NathApplication['getHttpServer']>;
   let prisma: PrismaClient;
   let world: FleetHttpWorld;
+  let runner: { runnerId: string; apiKey: string };
   const saved: Record<string, string | undefined> = {};
 
   beforeAll(async () => {
@@ -39,6 +40,10 @@ describeIntegration('fleet thread assistant lifecycle (PG, US-003)', () => {
     server = app.getHttpServer();
     prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
     world = await seedFleetHttpWorld(server, prisma);
+    // POST /fleet/runner/enroll is throttled to 10 per minute per route, so one runner serves every case.
+    runner = await enrollRunner(server, world.tokens.root, 'lifecycle-runner');
+    // A send refuses an offline runner or one below protocol v4, so the shared runner is online and current.
+    await prisma.runner.update({ where: { id: runner.runnerId }, data: { protocolVersion: 4, lastSeenAt: new Date(), enabled: true, capacity: 1 } });
   });
   afterAll(async () => {
     await app.close();
@@ -48,9 +53,22 @@ describeIntegration('fleet thread assistant lifecycle (PG, US-003)', () => {
     }
   });
 
-  /** A fresh THREAD job, so each case folds into its own thread and message set. */
+  /** A fresh thread and RUNNING THREAD job held by the shared runner at lease epoch 1, so each case folds into its own thread. */
   async function fresh(name: string): Promise<ThreadJobSeed> {
-    return seedThreadJob(server, prisma, world, { feature: name });
+    const thread = await prisma.chatThread.create({ data: {
+      projectId: world.projectId, repoId: world.repoId, baseRef: 'trunk', feature: name, title: 'Lifecycle fixture',
+      createdById: world.ids.dev, runnerId: runner.runnerId, backend: { kind: 'native', model: 'm1' }, skills: [],
+      specPath: `.nax/features/${name}/spec.md`,
+    } });
+    const job = await prisma.fleetJob.create({ data: {
+      projectId: world.projectId, repoId: world.repoId, ref: 'trunk', command: 'THREAD', feature: `thread-${thread.id}`,
+      profiles: [], selectorLabels: [], maxCostUsd: 5, requestedById: world.ids.dev, state: 'RUNNING',
+      runnerId: runner.runnerId, leaseEpoch: 1, firstStartedAt: new Date(), threadId: thread.id,
+    } });
+    await prisma.fleetThreadTurn.create({ data: {
+      jobId: job.id, threadId: thread.id, action: 'SESSION', instructions: 'go', backend: { kind: 'native', model: 'm1' }, skills: [], resume: false,
+    } });
+    return { threadId: thread.id, jobId: job.id, runnerId: runner.runnerId, runnerKey: runner.apiKey, feature: name };
   }
   const put = (s: ThreadJobSeed, lines: object[], offset = 0) =>
     putThreadLines(server, s.runnerKey, { id: s.jobId }, lines.map((l) => JSON.stringify(l)), offset);
@@ -174,8 +192,13 @@ describeIntegration('fleet thread assistant lifecycle (PG, US-003)', () => {
   });
 
   it('US-003 AC14: POST messages answers with a message without streamRound or streamRoundStart keys', async () => {
-    const s = await fresh('lifecycle-ac14');
-    const res = await request(server).post(`/api/projects/web/threads/${s.threadId}/messages`)
+    // A thread with no live job: the send is accepted and creates the message without a turn in flight.
+    const thread = await prisma.chatThread.create({ data: {
+      projectId: world.projectId, repoId: world.repoId, baseRef: 'trunk', feature: 'lifecycle-ac14', title: 'Lifecycle send',
+      createdById: world.ids.dev, runnerId: runner.runnerId, backend: { kind: 'native', model: 'm1' }, skills: [],
+      specPath: '.nax/features/lifecycle-ac14/spec.md',
+    } });
+    const res = await request(server).post(`/api/projects/web/threads/${thread.id}/messages`)
       .set('Authorization', `Bearer ${world.tokens.dev}`).send({ text: 'hello', clientMessageId: 'ac14-message' }).expect(201);
     const message = (res.body.data as { message: Record<string, unknown> }).message;
     expect(Object.hasOwn(message, 'streamRound')).toBe(false);
