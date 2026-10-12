@@ -2,6 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { Allow } from 'class-validator';
 import type { ThreadSkillSource } from '../../../skills/skill-catalog.domain';
 import type { ThreadBackend } from '../../common/thread-jobs';
+import type { ThreadSession } from '../domain/chat-thread.domain';
 
 export class ThreadDto {
   @ApiProperty() id: string;
@@ -20,6 +21,7 @@ export class ThreadDto {
   @ApiProperty({ nullable: true }) tokens: unknown;
   @ApiProperty() specPath: string;
   @ApiProperty({ nullable: true }) pendingQuestion: unknown;
+  @ApiProperty({ nullable: true, type: 'object', properties: { jobId: { type: 'string' }, state: { type: 'string', enum: ['live', 'closed', 'failed'] }, resumed: { type: 'boolean' }, contextReset: { type: 'boolean' }, reason: { type: 'string', nullable: true }, at: { type: 'string' } } }) session: ThreadSession | null;
   @ApiProperty() lastActivityAt: Date;
   @ApiProperty() createdAt: Date;
   @ApiProperty({ nullable: true, type: 'object', properties: { id: { type: 'string' }, state: { type: 'string' } } }) activeJob: { id: string; state: string } | null;

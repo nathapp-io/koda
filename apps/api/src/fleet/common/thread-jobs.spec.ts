@@ -41,6 +41,18 @@ describe('thread command types (US-001)', () => {
   });
 });
 
+describe('thread stream constants (US-002)', () => {
+  it('US-002 AC13: the API stream constants deep-equal the package constants', () => {
+    const protocol = pkg as typeof pkg & {
+      THREAD_STREAM: string;
+      THREAD_STREAM_LIMITS: { lineMaxBytes: number; streamMaxBytes: number };
+    };
+    expect(apiThreads.THREAD_STREAM).toBe(protocol.THREAD_STREAM);
+    expect(apiThreads.THREAD_STREAM_LIMITS).toEqual(protocol.THREAD_STREAM_LIMITS);
+    expect(apiThreads.THREAD_STREAM_LIMITS).toEqual({ lineMaxBytes: 65_536, streamMaxBytes: 209_715_200 });
+  });
+});
+
 describe('thread limits (US-001)', () => {
   it('US-001: the API THREAD_LIMITS deep-equals the package THREAD_LIMITS', () => {
     expect(apiThreads.THREAD_LIMITS).toEqual(pkg.THREAD_LIMITS);

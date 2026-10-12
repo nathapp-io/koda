@@ -7,6 +7,7 @@ import { LiveStreamRegistry } from './live-stream-registry';
 import { MeLiveController } from './me-live.controller';
 import { ProjectEventBus } from './project-event-bus';
 import { TicketLiveSubscriber } from './ticket-live.subscriber';
+import { ThreadEventBus } from './thread-event-bus';
 import { UserEventBus } from './user-event-bus';
 
 describe('LiveModule (DI wiring, no database)', () => {
@@ -39,5 +40,9 @@ describe('LiveModule (DI wiring, no database)', () => {
   it('resolves the user bus and the /me/events controller (S4a §4)', () => {
     expect(moduleRef.get(UserEventBus)).toBeInstanceOf(UserEventBus);
     expect(moduleRef.get(MeLiveController)).toBeInstanceOf(MeLiveController);
+  });
+
+  it('resolves the thread event bus', () => {
+    expect(moduleRef.get(ThreadEventBus)).toBeInstanceOf(ThreadEventBus);
   });
 });

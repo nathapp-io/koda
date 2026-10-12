@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
-import { LogStreamName } from './domain/fleet-job-log.domain';
+import { UploadStreamName } from './domain/fleet-job-log.domain';
 import { LocalDiskLogStore } from './local-disk-log.store';
 import { logKey } from './log-store';
 import { EntriesPage, LogReadService } from './log-read.service';
@@ -20,7 +20,7 @@ describe('LogReadService', () => {
   let n = 0;
   const jobs = { findById: vi.fn(async (id: string) => (id === job.id ? job : null)) };
   const svc = (scanBytes = 1024) => new LogReadService(jobs as never, logs as never, store, { logScanBytes: scanBytes });
-  const write = (stream: LogStreamName, text: string, epoch = 1) => {
+  const write = (stream: UploadStreamName, text: string, epoch = 1) => {
     const path = join(root, logKey(job.id, epoch, stream));
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, text);
@@ -129,6 +129,27 @@ describe('LogReadService', () => {
     await expect(statusOf(forward(svc(), { leaseEpoch: 1 }))).resolves.toBe(410);
     await expect(statusOf(forward(svc(), {}, 'prompt'))).resolves.toBe(400);
     await expect(statusOf(svc().entries('p1', 'nope', 'run', { direction: 'forward', limit: 1 }))).resolves.toBe(404);
+  });
+
+  it('US-001 AC5: list hides a thread row and an epoch whose only row is thread', async () => {
+    logs.set({ jobId: job.id, leaseEpoch: 2, stream: 'run', sizeBytes: 3 });
+    logs.set({ jobId: job.id, leaseEpoch: 2, stream: 'thread', sizeBytes: 40 });
+    logs.set({ jobId: job.id, leaseEpoch: 1, stream: 'thread', sizeBytes: 40 });
+    const out = await svc().list('p1', job.id);
+    expect(out.attempts.map((a) => [a.leaseEpoch, a.streams.map((s) => s.stream)])).toEqual([[2, ['run']]]);
+  });
+
+  it('US-001 AC6: entries for the thread stream answers 404 fleet.logs, even when the thread stream has bytes', async () => {
+    write('run', line('info', 'a'), 2);
+    write('thread', '{"t":1}\n', 2);
+    await expect(statusOf(forward(svc(), {}, 'thread'))).resolves.toBe(404);
+    await expect(statusOf(backward(svc(), {}, 'thread'))).resolves.toBe(404);
+  });
+
+  it('US-001: raw and download refuse the thread stream with the same 404 as the entries route', async () => {
+    write('thread', '{"t":1}\n', 2);
+    await expect(statusOf(svc().raw('p1', job.id, 'thread', { from: 0, to: 5 }))).resolves.toBe(404);
+    await expect(statusOf(svc().download('p1', job.id, 'thread'))).resolves.toBe(404);
   });
 
   it('serves raw ranges clamped to the size and refuses more than 1 MiB', async () => {

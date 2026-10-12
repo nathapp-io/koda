@@ -5,6 +5,7 @@ import { join } from 'path';
 import { Readable } from 'stream';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FleetFenceException } from '../artifacts/bundle.exceptions';
+import { LogAppendHooks } from './log-append-hooks';
 import { LocalDiskLogStore } from './local-disk-log.store';
 import { logKey } from './log-store';
 import { MemoryLogRepo } from './test-helpers/memory-log-repo';
@@ -127,6 +128,102 @@ describe('LogUploadService', () => {
     const res = await up('a', { offsetRaw: '16', contentLength: '1' });
     expect(res.outcome).toBe('rate_limited');
     expect(res.retryAfterMs).toBeGreaterThan(0);
+  });
+
+  describe('thread stream (US-001)', () => {
+    let hookCalls: Array<{ jobId: string; leaseEpoch: number; stream: string }>;
+    let hooksFor: (hook: (e: { jobId: string; leaseEpoch: number; stream: string }) => Promise<void>) => LogAppendHooks;
+    beforeEach(() => {
+      hookCalls = [];
+      hooksFor = (hook) => {
+        const h = new LogAppendHooks();
+        h.register('thread', hook);
+        return h;
+      };
+      job = { ...job, command: 'THREAD' } as typeof job;
+    });
+
+    const threadUp = (body: string, over: Partial<LogUpload> = {}) => {
+      const bytes = Buffer.from(body);
+      return svc.upload({
+        runnerId: 'r1', jobId: job.id, streamRaw: 'thread', leaseEpochRaw: '1', offsetRaw: '0', finalRaw: undefined,
+        sha256Header: sha(bytes), contentLength: String(Math.min(bytes.length, 1)), body: Readable.from([bytes]), ...over,
+      });
+    };
+    const withHooks = (hooks: LogAppendHooks | undefined) => new LogUploadService(
+      jobs as never, fence as never, tx as never, store, logs as never, live as never, cfg as never, hooks,
+    );
+    const recorder = (hookCalls: Array<{ jobId: string; leaseEpoch: number; stream: string }>) => async (e: { jobId: string; leaseEpoch: number; stream: string }) => {
+      hookCalls.push(e);
+    };
+
+    it('US-001 AC9: an appended thread upload of a THREAD job calls the thread hook once with the upload identity', async () => {
+      svc = withHooks(hooksFor(recorder(hookCalls)));
+      await expect(threadUp('{"a":1}\n')).resolves.toEqual({ outcome: 'appended', size: 8 });
+      expect(hookCalls).toEqual([{ jobId: job.id, leaseEpoch: 1, stream: 'thread' }]);
+      expect(live.touch).not.toHaveBeenCalled();
+    });
+
+    it('US-001: a final thread upload (complete) calls the hook once and skips the live touch', async () => {
+      const hook = vi.fn(recorder(hookCalls));
+      svc = withHooks(hooksFor(hook));
+      await threadUp('{"a":1}\n');
+      await expect(threadUp('', { offsetRaw: '8', finalRaw: '1' })).resolves.toEqual({ outcome: 'complete', size: 8 });
+      expect(hook).toHaveBeenCalledTimes(2);
+      expect(hook).toHaveBeenLastCalledWith({ jobId: job.id, leaseEpoch: 1, stream: 'thread' });
+      expect(live.touch).not.toHaveBeenCalled();
+    });
+
+    it('US-001: a thread upload to a truncated stream (stream_cap) calls the hook once and skips the live touch', async () => {
+      // A capped stream holds its bytes on disk as well as the truncated row.
+      await store.append(logKey(job.id, 1, 'thread'), 0, Buffer.from('{"a":1}\n'));
+      await logs.upsertStream(job.id, 1, 'thread', { sizeBytes: 8, truncated: true });
+      const hook = vi.fn(recorder(hookCalls));
+      svc = withHooks(hooksFor(hook));
+      await expect(threadUp('{"b":2}\n', { offsetRaw: '8' })).resolves.toEqual({ outcome: 'stream_cap', size: 8 });
+      expect(hook).toHaveBeenCalledTimes(1);
+      expect(hook).toHaveBeenCalledWith({ jobId: job.id, leaseEpoch: 1, stream: 'thread' });
+      expect(live.touch).not.toHaveBeenCalled();
+    });
+
+    it('US-001 AC10: an identical repeat of a thread upload (duplicate) does not call the hook again', async () => {
+      const hook = vi.fn(recorder(hookCalls));
+      svc = withHooks(hooksFor(hook));
+      await threadUp('{"a":1}\n');
+      await expect(threadUp('{"a":1}\n')).resolves.toEqual({ outcome: 'duplicate', size: 8 });
+      expect(hook).toHaveBeenCalledTimes(1);
+    });
+
+    it('US-001 AC11: a rejecting thread hook does not change the upload result', async () => {
+      svc = withHooks(hooksFor(async () => { throw new Error('fold failed'); }));
+      await expect(threadUp('{"a":1}\n')).resolves.toEqual({ outcome: 'appended', size: 8 });
+    });
+
+    it('US-001 AC12: a thread hook that takes the stream lock resolves, because the hook runs after the write lock is released', async () => {
+      const hook = async (e: { jobId: string; leaseEpoch: number; stream: string }) => {
+        await store.withLock(logKey(e.jobId, e.leaseEpoch, 'thread'), async () => undefined);
+      };
+      svc = withHooks(hooksFor(hook));
+      await expect(threadUp('{"a":1}\n')).resolves.toEqual({ outcome: 'appended', size: 8 });
+    });
+
+    it('US-001: a thread upload to a RUN job is refused with 400 fleet.logInput before the body is read', async () => {
+      job = { ...job, command: 'RUN' } as typeof job;
+      expect(await statusOf(threadUp('{"a":1}\n'))).toBe(400);
+      expect(await logs.findStream(job.id, 1, 'thread')).toBeNull();
+    });
+
+    it('US-001: a RUN upload never calls the thread hook', async () => {
+      const hook = vi.fn(recorder(hookCalls));
+      svc = withHooks(hooksFor(hook));
+      await up('abc\n');
+      expect(hook).not.toHaveBeenCalled();
+    });
+
+    it('US-001: without a hooks provider an upload still succeeds', async () => {
+      svc = withHooks(undefined);
+      await expect(threadUp('{"a":1}\n')).resolves.toEqual({ outcome: 'appended', size: 8 });
+    });
   });
 
   it('answers 507 when the disk refuses the size read or the append; other errors stay errors (D349)', async () => {

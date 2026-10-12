@@ -71,8 +71,10 @@ export function jobUnplaceableItems(input: DryRunInput, now: Date, t: AttentionT
     const misfits = verdicts
       .flatMap((v) => (v.reason === null ? [] : [{ runnerId: v.runner.id, runnerName: v.runner.name, reason: v.reason }]))
       .sort((a, b) => a.runnerName.localeCompare(b.runnerName) || a.runnerId.localeCompare(b.runnerId));
+    // A queued job with a compatible runner is delayed, not unplaceable. Keep this
+    // attention signal for genuine placement blockers only.
+    if (misfits.length < verdicts.length) return [];
     const reasons = misfits.map(({ runnerName, reason }) => ({ runnerName, reason }));
-    if (misfits.length < verdicts.length) return emit('fits_not_placed', 'warning', reasons, reasons.length);
     misfits.filter((m) => RUNNER_FIXABLE_REASONS.has(m.reason)).forEach((m) => blocked.add(m.runnerId));
     const { verdict, severity } = classify(misfits.map((m) => m.reason));
     return emit(verdict, severity, reasons, reasons.length);

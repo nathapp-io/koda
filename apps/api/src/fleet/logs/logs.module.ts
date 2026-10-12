@@ -11,6 +11,7 @@ import { FleetJobLogsController } from './fleet-job-logs.controller';
 import { FleetLogLivePublisher } from './fleet-log-live.publisher';
 import { FleetLogRetentionProcessor } from './fleet-log-retention.processor';
 import { LocalDiskLogStore } from './local-disk-log.store';
+import { LogAppendHooks } from './log-append-hooks';
 import { LOG_STORE } from './log-store';
 import { LogFallbackService } from './log-fallback.service';
 import { LogReadService } from './log-read.service';
@@ -27,8 +28,8 @@ import { PrismaLogRetentionRepository } from './prisma-log-retention.repository'
     LocalDiskLogStore, { provide: LOG_STORE, useExisting: LocalDiskLogStore },
     PrismaFleetJobLogRepository, { provide: FLEET_JOB_LOG_REPOSITORY, useExisting: PrismaFleetJobLogRepository },
     PrismaLogRetentionRepository, { provide: LOG_RETENTION_REPOSITORY, useExisting: PrismaLogRetentionRepository },
-    FleetLogLivePublisher, LogUploadService, LogFallbackService, LogReadService, FleetLogRetentionProcessor,
+    FleetLogLivePublisher, LogUploadService, LogFallbackService, LogReadService, FleetLogRetentionProcessor, LogAppendHooks,
   ],
-  exports: [LOG_STORE, FLEET_JOB_LOG_REPOSITORY, FleetLogLivePublisher, LogFallbackService],
+  exports: [LOG_STORE, FLEET_JOB_LOG_REPOSITORY, FleetLogLivePublisher, LogFallbackService, LogAppendHooks],
 })
 export class LogsModule {}

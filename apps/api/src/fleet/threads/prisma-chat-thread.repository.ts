@@ -19,7 +19,7 @@ import { BudgetPausedException } from '../budgets/budget.exceptions';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
 import { buildThreadInstructions } from './thread-instructions';
 import { sendRefusal, type ThreadSendRefusal } from './thread-send-rules';
-import type { ChatMessageRecord, ChatThreadRecord, ChatThreadRepository } from './domain/chat-thread.domain';
+import { allocateThreadSeq, type ChatMessageRecord, type ChatThreadRecord, type ChatThreadRepository, type ThreadSession } from './domain/chat-thread.domain';
 import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
 import type { ThreadBackend } from '../common/thread-jobs';
 import { THREAD_LIMITS } from '../common/thread-jobs';
@@ -70,7 +70,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
 
   async messages(threadId: string, afterSeq: number, limit: number): Promise<ChatMessageRecord[]> {
     const rows = await this.prisma.client.chatMessage.findMany({ where: { threadId, seq: { gt: afterSeq } }, orderBy: { seq: 'asc' }, take: limit });
-    return rows.map(({ threadId: _threadId, ...row }) => ({ ...row, costUsd: row.costUsd?.toString() ?? null }));
+    return rows.map((row) => this.mapMessage(row));
   }
 
   async archivedThreadIds(runnerId: string): Promise<string[]> {
@@ -161,11 +161,8 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
         if (refused.refusal === 'budgetPaused') throw new BudgetPausedException(refused.pausedPolicy);
         if (refused.refusal) throw this.refusalException(refused.refusal);
 
-        // The counter is the allocator, but a row written outside the send path (US-004 AC15:
-        // a message whose send already completed) can sit at or above it, so take the higher.
-        const seqResult = await this.prisma.client.$queryRaw<Array<{ nextSeq: number }>>`UPDATE "ChatThread" SET "nextSeq" = GREATEST("nextSeq", (SELECT COALESCE(MAX("seq"), 0) + 1 FROM "ChatMessage" WHERE "threadId" = "ChatThread"."id")) + 1 WHERE "id" = ${thread.id} RETURNING "nextSeq" - 1 AS "nextSeq"`;
-        const seq = seqResult[0]?.nextSeq;
-        if (seq === undefined) throw new Error(`failed to allocate message sequence for thread ${thread.id}`);
+        // A completed out-of-band message can sit at or above the counter, so the shared allocator takes the higher.
+        const seq = await allocateThreadSeq(this.prisma.client, thread.id);
         const messageRow = await this.prisma.client.chatMessage.create({ data: {
           threadId: thread.id, seq, role: 'user', status: 'pending', authorUserId: input.userId,
           clientMessageId: input.clientMessageId, content: input.text,
@@ -257,8 +254,9 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     });
   }
 
+  /** Strips the fold-internal columns (`threadId`, `streamRound`, `streamRoundStart`) that never leave the API. */
   private mapMessage(row: Prisma.ChatMessageGetPayload<object>): ChatMessageRecord {
-    const { threadId: _threadId, ...message } = row;
+    const { threadId: _threadId, streamRound: _streamRound, streamRoundStart: _streamRoundStart, ...message } = row;
     return { ...message, costUsd: row.costUsd?.toString() ?? null };
   }
 
@@ -269,7 +267,8 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       backend: row.backend as unknown as ThreadBackend, status: row.status, archivedAt: row.archivedAt,
       skills: row.skills as unknown as ThreadSkillSource[], maxCostUsd: row.maxCostUsd.toString(),
       costUsd: row.costUsd.toString(), tokens: row.tokens, specPath: row.specPath,
-      pendingQuestion: row.pendingQuestion, lastActivityAt: row.lastActivityAt, createdAt: row.createdAt, activeJob,
+      pendingQuestion: row.pendingQuestion, session: (row.session as unknown as ThreadSession | null) ?? null,
+      lastActivityAt: row.lastActivityAt, createdAt: row.createdAt, activeJob,
     };
   }
 }

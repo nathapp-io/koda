@@ -1,4 +1,4 @@
-import type { FleetJobLogRecord, IFleetJobLogRepository, LogStreamName, LogStreamPatch } from '../domain/fleet-job-log.domain';
+import type { FleetJobLogRecord, IFleetJobLogRepository, UploadStreamName, LogStreamPatch } from '../domain/fleet-job-log.domain';
 
 const keyOf = (jobId: string, leaseEpoch: number, stream: string) => `${jobId}:${leaseEpoch}:${stream}`;
 
@@ -18,7 +18,7 @@ export class MemoryLogRepo
   /** Epochs with `log` events, per job; seed with `setEventEpochs`. */
   eventEpochs: ReadonlyMap<string, readonly number[]> = new Map();
 
-  async findStream(jobId: string, leaseEpoch: number, stream: LogStreamName): Promise<FleetJobLogRecord | null> {
+  async findStream(jobId: string, leaseEpoch: number, stream: UploadStreamName): Promise<FleetJobLogRecord | null> {
     return this.rows.get(keyOf(jobId, leaseEpoch, stream)) ?? null;
   }
 
@@ -38,7 +38,7 @@ export class MemoryLogRepo
     this.eventEpochs = new Map([...this.eventEpochs, [jobId, epochs]]);
   }
 
-  async upsertStream(jobId: string, leaseEpoch: number, stream: LogStreamName, patch: LogStreamPatch): Promise<FleetJobLogRecord> {
+  async upsertStream(jobId: string, leaseEpoch: number, stream: UploadStreamName, patch: LogStreamPatch): Promise<FleetJobLogRecord> {
     const prev = await this.findStream(jobId, leaseEpoch, stream);
     const row: FleetJobLogRecord = {
       id: prev?.id ?? `${jobId}-${leaseEpoch}-${stream}`,
@@ -55,7 +55,7 @@ export class MemoryLogRepo
   }
 
   async completeFromBundle(
-    jobId: string, leaseEpoch: number, stream: LogStreamName, r: { sizeBytes: number; truncated: boolean },
+    jobId: string, leaseEpoch: number, stream: UploadStreamName, r: { sizeBytes: number; truncated: boolean },
   ): Promise<boolean> {
     const prev = await this.findStream(jobId, leaseEpoch, stream);
     if (prev && (prev.complete || prev.truncated)) return false;
@@ -64,7 +64,7 @@ export class MemoryLogRepo
   }
 
   /** Seed a row directly; bypasses the service's write path. */
-  set(r: Partial<FleetJobLogRecord> & { jobId: string; leaseEpoch: number; stream: LogStreamName }): FleetJobLogRecord {
+  set(r: Partial<FleetJobLogRecord> & { jobId: string; leaseEpoch: number; stream: UploadStreamName }): FleetJobLogRecord {
     const row: FleetJobLogRecord = {
       id: 'x', sizeBytes: 0, complete: false, truncated: false, source: 'stream', expiredAt: null,
       createdAt: new Date(0), updatedAt: new Date(0),

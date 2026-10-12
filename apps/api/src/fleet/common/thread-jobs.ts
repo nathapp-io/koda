@@ -8,6 +8,9 @@ export type {
 
 export const THREAD_JOB_KIND = 'THREAD' as const;
 
+export const THREAD_STREAM = 'thread' as const;
+export const THREAD_STREAM_LIMITS = { lineMaxBytes: 65_536, streamMaxBytes: 209_715_200 } as const;
+
 export function isThreadKind(command: string): command is typeof THREAD_JOB_KIND {
   return command === THREAD_JOB_KIND;
 }

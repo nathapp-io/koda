@@ -64,13 +64,13 @@ export class PrismaDashboardRepository implements IDashboardRepository {
     });
   }
 
-  async findHeldRefs(): Promise<Array<{ runnerId: string; repoId: string }>> {
+  async findHeldRefs(): Promise<Array<{ runnerId: string; repoId: string; command: string }>> {
     const rows = await this.db.fleetJob.findMany({
       where: { state: { in: [...RUNNER_HELD_STATES] }, runnerId: { not: null } },
       orderBy: { id: 'asc' },
-      select: { runnerId: true, repoId: true },
+      select: { runnerId: true, repoId: true, command: true },
     });
-    return rows.map((r) => ({ runnerId: r.runnerId as string, repoId: r.repoId }));
+    return rows.map((r) => ({ runnerId: r.runnerId as string, repoId: r.repoId, command: r.command }));
   }
 
   async findActiveJobs(scope: DashboardScope, limit: number): Promise<DashboardJobRow[]> {

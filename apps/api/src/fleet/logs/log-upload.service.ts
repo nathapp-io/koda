@@ -1,16 +1,17 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { Readable } from 'stream';
-import { FleetJobState } from '../../common/enums';
+import { FleetJobKind, FleetJobState } from '../../common/enums';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { FleetFenceException } from '../artifacts/bundle.exceptions';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { FenceService } from '../sync/fence.service';
-import { FLEET_JOB_LOG_REPOSITORY, IFleetJobLogRepository, isLogStream, LogStreamName } from './domain/fleet-job-log.domain';
+import { FLEET_JOB_LOG_REPOSITORY, IFleetJobLogRepository, isUploadStream, UploadStreamName } from './domain/fleet-job-log.domain';
 import { FleetLogLivePublisher } from './fleet-log-live.publisher';
+import { LogAppendHooks } from './log-append-hooks';
 import { LOG_STORE, LogStore, logKey } from './log-store';
 import { FleetLogException } from './log-upload.exceptions';
 import { readCappedBody } from './read-capped-body';
@@ -43,7 +44,7 @@ const NON_NEG_INT = /^(0|[1-9][0-9]{0,15})$/;
 type Cfg = Pick<IFleetConfig, 'logMaxBytes' | 'logChunkMaxBytes' | 'logRunnerBytesPerSec'>;
 
 interface Parsed {
-  stream: LogStreamName;
+  stream: UploadStreamName;
   leaseEpoch: number;
   offset: number;
   final: boolean;
@@ -53,6 +54,7 @@ interface Parsed {
 @Injectable()
 export class LogUploadService {
   private readonly rate: RunnerByteRate;
+  private readonly logger = new Logger(LogUploadService.name);
 
   constructor(
     @Inject(FLEET_JOB_REPOSITORY) private readonly jobs: Pick<IFleetJobRepository, 'findById' | 'lockById'>,
@@ -62,6 +64,7 @@ export class LogUploadService {
     @Inject(FLEET_JOB_LOG_REPOSITORY) private readonly logs: IFleetJobLogRepository,
     private readonly live: FleetLogLivePublisher,
     @Inject(FLEET_CFG) private readonly cfg: Cfg,
+    @Optional() private readonly hooks?: LogAppendHooks,
   ) {
     this.rate = new RunnerByteRate({ bytesPerSec: cfg.logRunnerBytesPerSec, burstBytes: cfg.logChunkMaxBytes });
   }
@@ -77,6 +80,7 @@ export class LogUploadService {
       return { outcome: 'rate_limited', size: -1, retryAfterMs: allowed.retryAfterMs };
     }
     const job = await this.assertHolder(u.runnerId, u.jobId, p.leaseEpoch);
+    if (p.stream === 'thread' && job.command !== FleetJobKind.THREAD) throw new ValidationAppException({ reason: 'stream' }, 'fleet.logInput');
     const read = await readCappedBody(u.body, this.cfg.logChunkMaxBytes);
     if (read.ok === 'too_large') throw new FleetLogException(413, { maxBytes: this.cfg.logChunkMaxBytes });
     const bytes = read.bytes;
@@ -86,10 +90,23 @@ export class LogUploadService {
     const key = logKey(job.id, p.leaseEpoch, p.stream);
     const result = await this.store.withLock(key, () => this.write(job.id, key, p, bytes));
     if (result.outcome === 'appended' || result.outcome === 'complete' || result.outcome === 'stream_cap') {
-      const immediate = result.outcome !== 'appended';
-      this.live.touch({ projectId: job.projectId, jobId: job.id, leaseEpoch: p.leaseEpoch, stream: p.stream, size: result.size, complete: result.outcome === 'complete' }, immediate);
+      if (p.stream !== 'thread') {
+        const immediate = result.outcome !== 'appended';
+        this.live.touch({ projectId: job.projectId, jobId: job.id, leaseEpoch: p.leaseEpoch, stream: p.stream, size: result.size, complete: result.outcome === 'complete' }, immediate);
+      }
+      await this.runHooks(job.id, p);
     }
     return result;
+  }
+
+  /** Runs after the write lock is released (a hook may take the same key). A failing hook is logged; the upload result stands. */
+  private async runHooks(jobId: string, p: Parsed): Promise<void> {
+    if (!this.hooks) return;
+    try {
+      await this.hooks.run({ jobId, leaseEpoch: p.leaseEpoch, stream: p.stream });
+    } catch (error) {
+      this.logger.error(`log append hook failed for job ${jobId} epoch ${p.leaseEpoch} stream ${p.stream}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   private async write(jobId: string, key: string, p: Parsed, bytes: Buffer): Promise<LogUploadResult> {
@@ -124,7 +141,7 @@ export class LogUploadService {
 
   private parse(u: LogUpload): Parsed {
     const bad = (reason: string) => new ValidationAppException({ reason }, 'fleet.logInput');
-    if (!isLogStream(u.streamRaw)) throw bad('stream');
+    if (!isUploadStream(u.streamRaw)) throw bad('stream');
     if (!NON_NEG_INT.test(u.leaseEpochRaw ?? '')) throw bad('leaseEpoch');
     if (!NON_NEG_INT.test(u.offsetRaw ?? '')) throw bad('offset');
     if (u.finalRaw !== undefined && u.finalRaw !== '1') throw bad('final');

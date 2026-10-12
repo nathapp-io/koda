@@ -21,6 +21,7 @@ export class ThreadJobEffects {
       if (typeof messageId === 'string') await this.replaceCommandPayload(command.id, { messageId });
     } else if (command.type === FleetCommandType.THREAD_ANSWER) {
       const { requestId } = command.payload as { requestId?: unknown };
+      if (result === 'ok' && typeof requestId === 'string') await this.clearAnsweredQuestion(command.jobId, requestId);
       await this.replaceCommandPayload(command.id, { requestId });
     }
   }
@@ -29,6 +30,16 @@ export class ThreadJobEffects {
     if (!isThreadKind(job.command) || !job.threadId) return;
     await this.prisma.client.chatMessage.updateMany({ where: { threadId: job.threadId, status: { in: ['pending', 'streaming'] } }, data: { status: 'errored', errorReason: job.state.toLowerCase() } });
     await this.prisma.client.chatThread.updateMany({ where: { id: job.threadId }, data: { pendingQuestion: Prisma.DbNull } });
+  }
+
+  /** Clears the thread's `pendingQuestion` when the runner accepted an answer to that question (B2-D3). Caller holds the job lock. */
+  private async clearAnsweredQuestion(jobId: string, requestId: string): Promise<void> {
+    const job = await this.prisma.client.fleetJob.findUnique({ where: { id: jobId }, select: { id: true, threadId: true } });
+    if (!job?.threadId) return;
+    const thread = await this.prisma.client.chatThread.findUnique({ where: { id: job.threadId }, select: { pendingQuestion: true } });
+    const question = thread?.pendingQuestion as { requestId?: unknown } | null | undefined;
+    if (!question || question.requestId !== requestId) return;
+    await this.prisma.client.chatThread.update({ where: { id: job.threadId }, data: { pendingQuestion: Prisma.DbNull } });
   }
 
   private async replaceCommandPayload(commandId: string, payload: unknown): Promise<void> {
