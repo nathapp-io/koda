@@ -24,14 +24,8 @@ describe('job_unplaceable (S2b (c) §2.3)', () => {
     expect(run({ queued: [{ ...QUEUED, projectDeleted: true }], runners: [] }).items).toEqual([]);
   });
 
-  it('reports fits_not_placed when a runner fits (placement is not reaching the job)', () => {
-    expect(only()).toEqual({
-      projectId: 'p1',
-      item: {
-        key: 'job_unplaceable:j1', kind: 'job_unplaceable', severity: 'warning', subjectType: 'job', subjectId: 'j1', subjectName: 'add-auth',
-        projectSlug: 'web', since: secAgo(120).toISOString(), verdict: 'fits_not_placed', reasons: [], reasonsTotal: 0,
-      },
-    });
+  it('does not report a job as unplaceable when a runner fits', () => {
+    expect(run().items).toEqual([]);
   });
 
   it('reports budget_paused when the job scope itself is paused (placement will cancel it)', () => {
