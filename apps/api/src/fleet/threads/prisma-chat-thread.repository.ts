@@ -70,7 +70,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
 
   async messages(threadId: string, afterSeq: number, limit: number): Promise<ChatMessageRecord[]> {
     const rows = await this.prisma.client.chatMessage.findMany({ where: { threadId, seq: { gt: afterSeq } }, orderBy: { seq: 'asc' }, take: limit });
-    return rows.map(({ threadId: _threadId, ...row }) => ({ ...row, costUsd: row.costUsd?.toString() ?? null }));
+    return rows.map((row) => this.mapMessage(row));
   }
 
   async archivedThreadIds(runnerId: string): Promise<string[]> {
@@ -257,8 +257,9 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     });
   }
 
+  /** Strips the fold-internal columns (`threadId`, `streamRound`, `streamRoundStart`) that never leave the API. */
   private mapMessage(row: Prisma.ChatMessageGetPayload<object>): ChatMessageRecord {
-    const { threadId: _threadId, ...message } = row;
+    const { threadId: _threadId, streamRound: _streamRound, streamRoundStart: _streamRoundStart, ...message } = row;
     return { ...message, costUsd: row.costUsd?.toString() ?? null };
   }
 
