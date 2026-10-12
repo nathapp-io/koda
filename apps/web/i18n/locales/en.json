@@ -766,7 +766,32 @@
         "closed": "Closed",
         "none": "No session"
       },
-      "new": { "title": "New thread" },
+      "new": {
+        "title": "New thread",
+        "repo": "Repository",
+        "repoPlaceholder": "Select a repository",
+        "baseRef": "Base ref",
+        "feature": "Feature",
+        "threadTitle": "Title",
+        "maxCost": "Cost cap in USD",
+        "backend": "Native model",
+        "model": "Model",
+        "effortLabel": "Effort",
+        "effortDefault": "Default",
+        "effort": { "low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high" },
+        "noBackend": "No online enabled runner offers a native thread model.",
+        "noPermission": "Only project administrators and developers can create threads.",
+        "skills": "Enabled project skills",
+        "create": "Create thread",
+        "validation": {
+          "required": "Required",
+          "invalid": "Enter a valid value",
+          "repoRequired": "Choose a repository",
+          "baseRef": "Base ref must be at most 255 characters",
+          "feature": "Use a valid feature name",
+          "title": "Title must be 1 to 200 characters without control characters"
+        }
+      },
       "detail": { "title": "Thread" }
     },
     "common": {

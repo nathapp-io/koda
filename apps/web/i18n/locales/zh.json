@@ -766,7 +766,32 @@
         "closed": "已关闭",
         "none": "无会话"
       },
-      "new": { "title": "新建线程" },
+      "new": {
+        "title": "新建线程",
+        "repo": "代码库",
+        "repoPlaceholder": "选择代码库",
+        "baseRef": "基础分支",
+        "feature": "功能标识",
+        "threadTitle": "标题",
+        "maxCost": "费用上限（美元）",
+        "backend": "原生模型",
+        "model": "模型",
+        "effortLabel": "推理强度",
+        "effortDefault": "默认",
+        "effort": { "low": "低", "medium": "中", "high": "高", "xhigh": "极高" },
+        "noBackend": "没有在线且启用的执行机提供原生线程模型。",
+        "noPermission": "只有项目管理员和开发者可以创建线程。",
+        "skills": "已启用的项目技能",
+        "create": "创建线程",
+        "validation": {
+          "required": "必填",
+          "invalid": "请输入有效值",
+          "repoRequired": "请选择代码库",
+          "baseRef": "基础分支最多为 255 个字符",
+          "feature": "请输入有效的功能标识",
+          "title": "标题需为 1 至 200 个字符且不能包含控制字符"
+        }
+      },
       "detail": { "title": "线程" }
     },
     "common": {

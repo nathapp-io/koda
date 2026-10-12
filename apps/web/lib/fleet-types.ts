@@ -4,6 +4,7 @@
  */
 
 import type { FleetJobState } from '~/lib/project-event-stream'
+import type { RunnerThreadBackends } from '~/lib/thread-types'
 
 /** Page envelope of every fleet list (`toPageResult`). */
 export interface FleetPage<T> {
@@ -107,6 +108,7 @@ export interface FleetRunnerSummary {
   enabled: boolean
   online: boolean
   profiles: string[]
+  threadBackends: RunnerThreadBackends
 }
 
 export type FleetProvider = 'github' | 'gitlab'
