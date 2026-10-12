@@ -86,7 +86,8 @@
     "sectionAdmin": "管理",
     "sectionWork": "工作",
     "sectionKnowledge": "知识",
-    "sectionFleet": "机群"
+    "sectionFleet": "机群",
+    "threads": "线程"
   },
   "palette": {
     "trigger": "搜索或跳转…",
@@ -741,6 +742,33 @@
     }
   },
   "fleet": {
+    "threads": {
+      "list": {
+        "title": "线程",
+        "status": "线程状态",
+        "active": "进行中",
+        "archived": "已归档",
+        "newThread": "新建线程",
+        "emptyActive": "没有进行中的线程",
+        "emptyArchived": "没有已归档的线程",
+        "creator": "创建者",
+        "feature": "功能",
+        "backend": "后端",
+        "session": "会话",
+        "lastActivity": "最近活动",
+        "cost": "费用"
+      },
+      "session": {
+        "starting": "启动中",
+        "closing": "关闭中",
+        "live": "运行中",
+        "failed": "失败",
+        "closed": "已关闭",
+        "none": "无会话"
+      },
+      "new": { "title": "新建线程" },
+      "detail": { "title": "线程" }
+    },
     "common": {
       "online": "在线",
       "offline": "离线",

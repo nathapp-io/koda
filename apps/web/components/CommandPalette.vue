@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Search, LayoutDashboard, Bot, Activity, Kanban, Tag, BookOpen, Clock, Brain, Code2, Rocket, Gauge, BarChart3, Settings, FolderKanban, SunMoon, Sparkles } from 'lucide-vue-next'
+import { Search, LayoutDashboard, Bot, Activity, Kanban, Tag, BookOpen, Clock, Brain, Code2, Rocket, Gauge, BarChart3, Settings, FolderKanban, SunMoon, Sparkles, MessagesSquare } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
 interface Project { id: number; name: string; slug: string }
@@ -38,6 +38,7 @@ const commands = computed<Command[]>(() => {
       { id: 'board', label: t('nav.board'), hint, icon: Kanban, run: go(`/${slug}`) },
       { id: 'labels', label: t('nav.labels'), hint, icon: Tag, run: go(`/${slug}/labels`) },
       { id: 'project-agents', label: t('nav.agents'), hint, icon: Bot, run: go(`/${slug}/agents`) },
+      { id: 'threads', label: t('nav.threads'), hint, icon: MessagesSquare, run: go(`/${slug}/threads`) },
       { id: 'kb', label: t('nav.kb'), hint, icon: BookOpen, run: go(`/${slug}/kb`) },
       { id: 'timeline', label: t('nav.timeline'), hint, icon: Clock, run: go(`/${slug}/timeline`) },
       { id: 'memory', label: t('nav.memory'), hint, icon: Brain, run: go(`/${slug}/memory`) },

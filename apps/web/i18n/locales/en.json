@@ -86,7 +86,8 @@
     "sectionAdmin": "Admin",
     "sectionWork": "Work",
     "sectionKnowledge": "Knowledge",
-    "sectionFleet": "Fleet"
+    "sectionFleet": "Fleet",
+    "threads": "Threads"
   },
   "palette": {
     "trigger": "Search or jump to…",
@@ -741,6 +742,33 @@
     }
   },
   "fleet": {
+    "threads": {
+      "list": {
+        "title": "Threads",
+        "status": "Thread status",
+        "active": "Active",
+        "archived": "Archived",
+        "newThread": "New thread",
+        "emptyActive": "No active threads",
+        "emptyArchived": "No archived threads",
+        "creator": "Creator",
+        "feature": "Feature",
+        "backend": "Backend",
+        "session": "Session",
+        "lastActivity": "Last activity",
+        "cost": "Cost"
+      },
+      "session": {
+        "starting": "Starting",
+        "closing": "Closing",
+        "live": "Live",
+        "failed": "Failed",
+        "closed": "Closed",
+        "none": "No session"
+      },
+      "new": { "title": "New thread" },
+      "detail": { "title": "Thread" }
+    },
     "common": {
       "online": "Online",
       "offline": "Offline",
