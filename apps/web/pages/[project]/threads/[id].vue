@@ -26,8 +26,11 @@ useHead(() => ({
 }))
 
 onMounted(() => {
-  void Promise.all([controller.load(), options.load()])
-  controller.start()
+  // useThread owns the thread lifecycle (load then start on mount with the EventSource guard,
+  // stop on unmount); the page only loads the runner summaries the header's online dot reads.
+  // A failed summaries load degrades gracefully: the header omits the runner line, and the turn
+  // state is untouched (the stream and poll fallback are the controller's).
+  void options.load().catch(() => undefined)
 })
 </script>
 
