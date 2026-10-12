@@ -6,7 +6,7 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { enrollRunner, FleetHttpWorld, seedFleetHttpAgent, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
-import { putThreadLines, ThreadJobSeed } from '../../helpers/thread-fixtures';
+import { putThreadLines, seedThreadJobFor, ThreadJobSeed } from '../../helpers/thread-fixtures';
 import { openSse, SseConnection, SseMessage } from '../../helpers/sse-client';
 import { LiveStreamRegistry } from '../../../src/live/live-stream-registry';
 
@@ -65,27 +65,8 @@ describeDb('Content thread events over HTTP (PG, US-006)', () => {
     return conn;
   };
   const nextLiveOf = (conn: SseConnection, type: string) => conn.next((m) => m.event === type);
-  const fresh = async (name: string, pending: string[] = []): Promise<ThreadJobSeed> => {
-    const feature = `us006-${name}`;
-    const thread = await prisma.chatThread.create({ data: {
-      projectId: world.projectId, repoId: world.repoId, baseRef: 'trunk', feature, title: 'Thread events',
-      createdById: world.ids.dev, runnerId: runner.runnerId, backend: { kind: 'native', model: 'm1' }, skills: [],
-      specPath: `.nax/features/${feature}/spec.md`,
-    } });
-    const job = await prisma.fleetJob.create({ data: {
-      projectId: world.projectId, repoId: world.repoId, ref: 'trunk', command: 'THREAD', feature: `thread-${thread.id}`,
-      profiles: [], selectorLabels: [], maxCostUsd: 5, requestedById: world.ids.dev, state: 'RUNNING',
-      runnerId: runner.runnerId, leaseEpoch: 1, firstStartedAt: new Date(), threadId: thread.id,
-    } });
-    await prisma.fleetThreadTurn.create({ data: {
-      jobId: job.id, threadId: thread.id, action: 'SESSION', instructions: 'go', backend: { kind: 'native', model: 'm1' }, skills: [], resume: false,
-    } });
-    for (const [index, text] of pending.entries()) {
-      await prisma.chatMessage.create({ data: { threadId: thread.id, seq: index + 1, role: 'user', authorUserId: world.ids.dev, content: text, status: 'pending' } });
-    }
-    if (pending.length) await prisma.chatThread.update({ where: { id: thread.id }, data: { nextSeq: pending.length + 1 } });
-    return { threadId: thread.id, jobId: job.id, runnerId: runner.runnerId, runnerKey: runner.apiKey, feature };
-  };
+  const fresh = (name: string, pending: string[] = []): Promise<ThreadJobSeed> =>
+    seedThreadJobFor(prisma, world, runner, { feature: `us006-${name}`, pending });
   const put = (s: ThreadJobSeed, lines: object[], offset = 0) =>
     putThreadLines(server, s.runnerKey, { id: s.jobId }, lines.map((line) => JSON.stringify(line)), offset);
   const start = (turnId = 't1') => ({ type: 'turn_start', turnId });

@@ -1,7 +1,8 @@
 import { Module } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { GlobalStubsModule } from '../../../common/test-helpers/global-stubs.module';
-import { ThreadIngestBootstrap, THREAD_UNFOLDED_STREAM_SOURCE } from './thread-ingest.bootstrap';
+import { ThreadIngestBootstrap } from './thread-ingest.bootstrap';
+import { THREAD_UNFOLDED_STREAM_SOURCE } from './domain/thread-ingest.domain';
 import { ThreadIngestor } from './thread-ingestor';
 import { ThreadIngestModule } from './thread-ingest.module';
 import { PrismaThreadIngestRepository } from './prisma-thread-ingest.repository';

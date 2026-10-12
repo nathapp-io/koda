@@ -13,7 +13,7 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
-import { putThreadLines, ThreadJobSeed } from '../../helpers/thread-fixtures';
+import { putThreadLines, seedThreadJobFor, ThreadJobSeed } from '../../helpers/thread-fixtures';
 import { LogStore, LOG_STORE, logKey } from '../../../src/fleet/logs/log-store';
 import { ThreadIngestor } from '../../../src/fleet/threads/ingest/thread-ingestor';
 import { JobTransitionsService } from '../../../src/fleet/jobs/job-transitions.service';
@@ -53,23 +53,9 @@ describeIntegration('fleet thread assistant lifecycle (PG, US-003)', () => {
     }
   });
 
-  /** A fresh thread and RUNNING THREAD job held by the shared runner at lease epoch 1, so each case folds into its own thread. */
-  async function fresh(name: string): Promise<ThreadJobSeed> {
-    const thread = await prisma.chatThread.create({ data: {
-      projectId: world.projectId, repoId: world.repoId, baseRef: 'trunk', feature: name, title: 'Lifecycle fixture',
-      createdById: world.ids.dev, runnerId: runner.runnerId, backend: { kind: 'native', model: 'm1' }, skills: [],
-      specPath: `.nax/features/${name}/spec.md`,
-    } });
-    const job = await prisma.fleetJob.create({ data: {
-      projectId: world.projectId, repoId: world.repoId, ref: 'trunk', command: 'THREAD', feature: `thread-${thread.id}`,
-      profiles: [], selectorLabels: [], maxCostUsd: 5, requestedById: world.ids.dev, state: 'RUNNING',
-      runnerId: runner.runnerId, leaseEpoch: 1, firstStartedAt: new Date(), threadId: thread.id,
-    } });
-    await prisma.fleetThreadTurn.create({ data: {
-      jobId: job.id, threadId: thread.id, action: 'SESSION', instructions: 'go', backend: { kind: 'native', model: 'm1' }, skills: [], resume: false,
-    } });
-    return { threadId: thread.id, jobId: job.id, runnerId: runner.runnerId, runnerKey: runner.apiKey, feature: name };
-  }
+  /** A fresh thread and RUNNING THREAD job held by the shared runner at lease epoch 1. */
+  const fresh = (name: string): Promise<ThreadJobSeed> =>
+    seedThreadJobFor(prisma, world, runner, { feature: name });
   const put = (s: ThreadJobSeed, lines: object[], offset = 0) =>
     putThreadLines(server, s.runnerKey, { id: s.jobId }, lines.map((l) => JSON.stringify(l)), offset);
   const assistant = (s: ThreadJobSeed, turnId = 't1') =>

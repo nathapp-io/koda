@@ -8,7 +8,7 @@ import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
-import { putThreadLines, ThreadJobSeed } from '../../helpers/thread-fixtures';
+import { putThreadLines, seedThreadJobFor, ThreadJobSeed } from '../../helpers/thread-fixtures';
 import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -44,23 +44,8 @@ describeIntegration('fleet thread cost folding and spend (PG, US-005)', () => {
     }
   });
 
-  async function fresh(name: string): Promise<ThreadJobSeed> {
-    const feature = `${name}-${++n}`;
-    const thread = await prisma.chatThread.create({ data: {
-      projectId: world.projectId, repoId: world.repoId, baseRef: 'trunk', feature, title: 'Cost fixture',
-      createdById: world.ids.dev, runnerId: runner.runnerId, backend: { kind: 'native', model: 'm1' }, skills: [],
-      specPath: `.nax/features/${feature}/spec.md`,
-    } });
-    const job = await prisma.fleetJob.create({ data: {
-      projectId: world.projectId, repoId: world.repoId, ref: 'trunk', command: 'THREAD', feature: `thread-${thread.id}`,
-      profiles: [], selectorLabels: [], maxCostUsd: 5, requestedById: world.ids.dev, state: 'RUNNING',
-      runnerId: runner.runnerId, leaseEpoch: 1, firstStartedAt: new Date(), threadId: thread.id,
-    } });
-    await prisma.fleetThreadTurn.create({ data: {
-      jobId: job.id, threadId: thread.id, action: 'SESSION', instructions: 'go', backend: { kind: 'native', model: 'm1' }, skills: [], resume: false,
-    } });
-    return { threadId: thread.id, jobId: job.id, runnerId: runner.runnerId, runnerKey: runner.apiKey, feature };
-  }
+  const fresh = (name: string): Promise<ThreadJobSeed> =>
+    seedThreadJobFor(prisma, world, runner, { feature: `${name}-${++n}` });
   const put = (seed: ThreadJobSeed, lines: object[], offset = 0) =>
     putThreadLines(server, seed.runnerKey, { id: seed.jobId }, lines.map((line) => JSON.stringify(line)), offset);
   const usage = (over: Record<string, unknown> = {}) => ({

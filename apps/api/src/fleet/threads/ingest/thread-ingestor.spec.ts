@@ -24,7 +24,7 @@ describe('ThreadIngestor (US-002)', () => {
         if (batch.lines[0]?.line.messageId === 'm2' && batch.badLines === 0) {
           throw new Error('m2 rejected');
         }
-        if (batch.lines[0]?.line.messageId !== 'm2') folded.push(batch.lines[0]?.line.messageId ?? '');
+        if (batch.lines.length > 0 && batch.lines[0]?.line.messageId !== 'm2') folded.push(batch.lines[0].line.messageId);
         cursor = { offset: batch.endOffset, skippedLines: cursor.skippedLines + batch.badLines };
         return { costChanged: false, events: [] };
       }),

@@ -4,28 +4,9 @@ import { FLEET_CFG, fleetConfig } from '../../../config/fleet.config';
 import { LOG_STORE } from '../../logs/log-store';
 import type { LogStore } from '../../logs/log-store';
 import { logKey } from '../../logs/log-store';
-import { parseThreadLine, type ThreadLine } from './thread-line';
-import { ThreadEventBus, type ThreadLiveEvent } from '../../../live/thread-event-bus';
-
-export const THREAD_INGEST_REPOSITORY: unique symbol = Symbol('THREAD_INGEST_REPOSITORY');
-
-export interface ThreadIngestBatch {
-  jobId: string;
-  leaseEpoch: number;
-  lines: Array<{ line: ThreadLine; endOffset: number }>;
-  endOffset: number;
-  badLines: number;
-}
-
-export interface FoldResult {
-  costChanged: boolean;
-  events: readonly ThreadLiveEvent[];
-}
-
-export interface ThreadIngestRepository {
-  readCursor(jobId: string, leaseEpoch: number): Promise<{ offset: number; skippedLines: number }>;
-  fold(batch: ThreadIngestBatch): Promise<FoldResult>;
-}
+import { parseThreadLine } from './thread-line';
+import { ThreadEventBus } from '../../../live/thread-event-bus';
+import { THREAD_INGEST_REPOSITORY, type ThreadIngestBatch, type ThreadIngestRepository } from './domain/thread-ingest.domain';
 
 @Injectable()
 export class ThreadIngestor {
@@ -91,7 +72,8 @@ export class ThreadIngestor {
         const endOffset = cursor.offset + complete.length;
         try {
           await this.foldAndPublish({ jobId, leaseEpoch, lines, endOffset, badLines });
-        } catch {
+        } catch (error) {
+          this.logger.warn(`Thread fold batch failed for job ${jobId} at offset ${endOffset}, retrying line by line`, error);
           for (const entry of entries) {
             const { parsed } = entry;
             if ('bad' in parsed) {

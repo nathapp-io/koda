@@ -7,8 +7,8 @@ import { BudgetEvaluator } from '../../budgets/budget-evaluator';
 import { jobSpendKeys } from '../../budgets/budget-rules';
 import { round4 } from './thread-cost';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import type { ThreadIngestBatch, ThreadIngestRepository, FoldResult } from './thread-ingestor';
-import type { UnfoldedStream } from './thread-ingest.bootstrap';
+import type { ThreadIngestBatch, ThreadIngestRepository, FoldResult, UnfoldedStream } from './domain/thread-ingest.domain';
+import { allocateThreadSeq } from '../domain/chat-thread.domain';
 import { ACTIVE_STATES } from '../../jobs/job-state';
 import type { AssistantThreadLine, QuestionThreadLine, SessionThreadLine, ThreadLine, ToolThreadLine, UsageThreadLine } from './thread-line';
 import {
@@ -409,11 +409,8 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
     return affected.map(({ id }) => id);
   }
 
-  /** Same allocation as `PrismaChatThreadRepository.sendMessage`: the counter, or past the highest existing seq. Caller holds the thread row lock. */
-  private async allocateSeq(threadId: string): Promise<number> {
-    const rows = await this.prisma.client.$queryRaw<Array<{ nextSeq: number }>>`UPDATE "ChatThread" SET "nextSeq" = GREATEST("nextSeq", (SELECT COALESCE(MAX("seq"), 0) + 1 FROM "ChatMessage" WHERE "threadId" = "ChatThread"."id")) + 1 WHERE "id" = ${threadId} RETURNING "nextSeq" - 1 AS "nextSeq"`;
-    const seq = rows[0]?.nextSeq;
-    if (seq === undefined) throw new Error(`failed to allocate message sequence for thread ${threadId}`);
-    return seq;
+  /** Caller holds the thread row lock. */
+  private allocateSeq(threadId: string): Promise<number> {
+    return allocateThreadSeq(this.prisma.client, threadId);
   }
 }

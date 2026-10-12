@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
-import { ThreadIngestBootstrap, type UnfoldedStream, type UnfoldedStreamSource } from './thread-ingest.bootstrap';
+import { ThreadIngestBootstrap } from './thread-ingest.bootstrap';
+import type { UnfoldedStream, UnfoldedStreamSource } from './domain/thread-ingest.domain';
 import type { ThreadIngestor } from './thread-ingestor';
 
 describe('ThreadIngestBootstrap (US-007)', () => {

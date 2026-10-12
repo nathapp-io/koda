@@ -31,10 +31,10 @@ export class FleetDashboardService {
     const listed = active.slice(0, DASHBOARD_LIMITS.activeJobs);
     const pending = new Map((await this.repo.pendingSummaryByJob(listed.map((j) => j.id))).map((p) => [p.jobId, p] as const));
     const runners: DashboardRunnerRow[] = rawRunners.map((r) => ({ ...r, capabilities: readCapabilities(r.capabilities) }));
-    // Keep all held refs in the shared load projection: toLoads counts THREAD slots separately
-    // and excludes THREAD jobs from RUN capacity and repository exclusivity.
+    // THREAD jobs consume thread capacity, not RUN capacity; keep the projections separate.
     const loads = toLoads(held);
-    const heldByRunner = new Map([...loads].map(([id, load]) => [id, load.active] as const));
+    const heldByRunner = new Map<string, number>();
+    for (const ref of held) heldByRunner.set(ref.runnerId, (heldByRunner.get(ref.runnerId) ?? 0) + 1);
     const thresholds: AttentionThresholds = {
       runnerOfflineSec: this.cfg.runnerOfflineSec, jobSilentSec: this.cfg.jobSilentSec, jobSilentErrorSec: this.cfg.jobSilentErrorSec,
       jobStartSec: this.cfg.jobStartSec, jobQueuedWarnSec: this.cfg.jobQueuedWarnSec, credentialExpiryWarnDays: this.cfg.credentialExpiryWarnDays,

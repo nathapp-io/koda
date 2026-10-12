@@ -16,7 +16,11 @@ export interface SeedThreadOptions {
   pending?: string[];
   /** Thread feature, default `add-auth`. */
   feature?: string;
+  /** Whether the fixture represents a resumed thread turn. */
+  resume?: boolean;
 }
+
+export interface ThreadFixtureRunner { runnerId: string; apiKey: string }
 
 /**
  * A THREAD job for the web project's thread: a thread created by dev, a RUNNING THREAD job held by an
@@ -28,8 +32,18 @@ export async function seedThreadJob(
   world: FleetHttpWorld,
   options: SeedThreadOptions = {},
 ): Promise<ThreadJobSeed> {
-  const feature = options.feature ?? 'add-auth';
   const runner = await enrollRunner(server, world.tokens.root, `thread-runner-${Math.random().toString(36).slice(2, 8)}`);
+  return seedThreadJobFor(prisma, world, runner, options);
+}
+
+/** Seed a THREAD attempt using a runner already enrolled by the suite. */
+export async function seedThreadJobFor(
+  prisma: PrismaClient,
+  world: FleetHttpWorld,
+  runner: ThreadFixtureRunner,
+  options: SeedThreadOptions = {},
+): Promise<ThreadJobSeed> {
+  const feature = options.feature ?? 'add-auth';
   const thread = await prisma.chatThread.create({
     data: {
       projectId: world.projectId, repoId: world.repoId, baseRef: 'trunk', feature, title: 'Thread fixture',
@@ -47,7 +61,7 @@ export async function seedThreadJob(
   await prisma.fleetThreadTurn.create({
     data: {
       jobId: job.id, threadId: thread.id, action: 'SESSION', instructions: 'go', backend: { kind: 'native', model: 'm1' },
-      skills: [], resume: false,
+      skills: [], resume: options.resume ?? false,
     },
   });
   for (const [i, text] of (options.pending ?? []).entries()) {

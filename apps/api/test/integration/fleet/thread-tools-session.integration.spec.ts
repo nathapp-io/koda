@@ -12,7 +12,7 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld, syncBody } from '../../helpers/fleet-fixtures';
-import { putThreadLines, ThreadJobSeed } from '../../helpers/thread-fixtures';
+import { putThreadLines, seedThreadJobFor, ThreadJobSeed } from '../../helpers/thread-fixtures';
 import type { SyncRequest, SyncResponse } from '../../../src/fleet/common/protocol';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -48,22 +48,8 @@ describeIntegration('fleet thread tools, questions and session (PG, US-004)', ()
   });
 
   /** A fresh thread and RUNNING THREAD job held by the shared runner at lease epoch 1. */
-  async function fresh(name: string, resume = false): Promise<ThreadJobSeed> {
-    const thread = await prisma.chatThread.create({ data: {
-      projectId: world.projectId, repoId: world.repoId, baseRef: 'trunk', feature: name, title: 'Tools fixture',
-      createdById: world.ids.dev, runnerId: runner.runnerId, backend: { kind: 'native', model: 'm1' }, skills: [],
-      specPath: `.nax/features/${name}/spec.md`,
-    } });
-    const job = await prisma.fleetJob.create({ data: {
-      projectId: world.projectId, repoId: world.repoId, ref: 'trunk', command: 'THREAD', feature: `thread-${thread.id}`,
-      profiles: [], selectorLabels: [], maxCostUsd: 5, requestedById: world.ids.dev, state: 'RUNNING',
-      runnerId: runner.runnerId, leaseEpoch: 1, firstStartedAt: new Date(), threadId: thread.id,
-    } });
-    await prisma.fleetThreadTurn.create({ data: {
-      jobId: job.id, threadId: thread.id, action: 'SESSION', instructions: 'go', backend: { kind: 'native', model: 'm1' }, skills: [], resume,
-    } });
-    return { threadId: thread.id, jobId: job.id, runnerId: runner.runnerId, runnerKey: runner.apiKey, feature: name };
-  }
+  const fresh = (name: string, resume = false): Promise<ThreadJobSeed> =>
+    seedThreadJobFor(prisma, world, runner, { feature: name, resume });
   const put = (s: ThreadJobSeed, lines: object[], offset = 0) =>
     putThreadLines(server, s.runnerKey, { id: s.jobId }, lines.map((l) => JSON.stringify(l)), offset);
   const asDev = () => ({ Authorization: `Bearer ${world.tokens.dev}` });

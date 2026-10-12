@@ -1,18 +1,6 @@
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { ThreadIngestor } from './thread-ingestor';
-
-export const THREAD_UNFOLDED_STREAM_SOURCE: unique symbol = Symbol('THREAD_UNFOLDED_STREAM_SOURCE');
-
-/** One THREAD job attempt whose `thread` stream holds bytes past its fold cursor. */
-export interface UnfoldedStream {
-  jobId: string;
-  leaseEpoch: number;
-}
-
-export interface UnfoldedStreamSource {
-  /** Attempts still to fold: non-terminal or finished within 24 hours, at most 200, oldest job first. */
-  findUnfolded(): Promise<UnfoldedStream[]>;
-}
+import { THREAD_UNFOLDED_STREAM_SOURCE, type UnfoldedStream, type UnfoldedStreamSource } from './domain/thread-ingest.domain';
 
 /**
  * S5a startup catch-up: a failed fold on a stream's last append is otherwise never retried. Every stream that is
