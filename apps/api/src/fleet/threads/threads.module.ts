@@ -7,12 +7,13 @@ import { FleetReposModule } from '../repos/fleet-repos.module';
 import { ThreadStoreModule } from './thread-store.module';
 import { FleetJobsModule } from '../jobs/fleet-jobs.module';
 import { ThreadsController } from './threads.controller';
+import { ThreadEventsController, ThreadEventsGuard } from './thread-events.controller';
 import { ThreadsService } from './threads.service';
 
 @Module({
   imports: [ProjectAccessModule, SkillsModule, FleetReposModule, ThreadStoreModule, FleetJobsModule, AuthModule, LiveModule],
-  controllers: [ThreadsController],
-  providers: [ThreadsService],
+  controllers: [ThreadsController, ThreadEventsController],
+  providers: [ThreadsService, ThreadEventsGuard],
   exports: [ThreadsService],
 })
 export class ThreadsModule {}

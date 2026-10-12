@@ -55,8 +55,9 @@ function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?
       }),
       findFirst: vi.fn(async ({ where }: { where: { threadId: string; turnId?: string; role: string; toolSummary?: { array_contains: unknown[] } } }) =>
         matching(messages, where)[0] ?? null),
-      findMany: vi.fn(async ({ where }: { where: { threadId: string; role: string } }) =>
-        messages.filter((m) => m.threadId === where.threadId && m.role === where.role)),
+      findMany: vi.fn(async ({ where }: { where: { threadId: string; role?: string; status?: { in: string[] } } }) =>
+        messages.filter((m) => m.threadId === where.threadId && (!where.role || m.role === where.role)
+          && (!where.status || where.status.in.includes(m.status)))),
       create: vi.fn(async ({ data }: { data: Partial<Msg> & { threadId: string } }) => {
         const row: Msg = {
           id: `m${messages.length + 1}`, jobId: null, turnId: null, role: 'user', content: '', status: 'pending',
@@ -104,7 +105,7 @@ const start = (turnId = 't1'): ThreadLine => ({ type: 'turn_start', turnId });
 const delta = (text: string, round = 1, turnId = 't1'): ThreadLine => ({ type: 'text_delta', turnId, round, text });
 const reset = (round: number, turnId = 't1'): ThreadLine => ({ type: 'stream_reset', turnId, round });
 const end = (over: Partial<Extract<ThreadLine, { type: 'turn_end' }>> = {}): ThreadLine => ({
-  type: 'turn_end', turnId: 't1', status: 'completed', output: 'Final', usage: { inputTokens: 0, outputTokens: 0 }, costUsd: 0, ...over,
+  type: 'turn_end', turnId: 't1', status: 'completed', output: 'Final', usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, costUsd: 0, ...over,
 });
 
 describe('PrismaThreadIngestRepository.fold (US-003)', () => {
@@ -259,6 +260,16 @@ describe('PrismaThreadIngestRepository.fold tools and approvals (US-004)', () =>
     expect(messages[0]?.toolSummary).toEqual([expect.objectContaining({ callId: 'c1', decidedBy: 'profile' })]);
   });
 
+  it('US-004 AC7: an answerable question for an unknown turn is skipped without changing pendingQuestion', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, pendingQuestion: null });
+    const result = await repoWith(client).fold(batch([question({ turnId: 't9' })]));
+    expect(thread.pendingQuestion).toBeNull();
+    expect(client.threadIngestCursor.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({ skippedLines: { increment: 1 } }),
+    }));
+    expect(result.events).toEqual([]);
+  });
+
   it('US-004 AC7: an answerable question sets pendingQuestion to requestId, text and expiresAt', async () => {
     const { client, thread } = fakeClient({ nextSeq: 2, pendingQuestion: null });
     await repoWith(client).fold(batch([start('t1'), question()]));
@@ -314,9 +325,11 @@ describe('PrismaThreadIngestRepository.fold tools and approvals (US-004)', () =>
         { id: 'm2', threadId: 'T', seq: 2, jobId: 'J', turnId: 't1', role: 'assistant', content: 'partial', status: 'streaming', errorReason: null, streamRound: 1, streamRoundStart: 0 },
       ],
     });
-    await repoWith(client).fold(batch([{ type: 'session_failed', reason: 'model_unknown' }]));
+    const result = await repoWith(client).fold(batch([{ type: 'session_failed', reason: 'model_unknown' }]));
     expect(messages[0]).toMatchObject({ status: 'errored', errorReason: 'model_unknown', content: 'hi' });
     expect(messages[1]).toMatchObject({ status: 'errored', errorReason: 'model_unknown', content: 'partial' });
+    expect(result.events.filter((event) => event.type === 'message').map((event) => event.messageId)).toEqual(['m1', 'm2']);
+    expect(result.events.some((event) => event.type === 'thread')).toBe(true);
   });
 
   it('US-004 AC15: session_closed sets the session state closed with its reason', async () => {
@@ -371,7 +384,7 @@ describe('PrismaThreadIngestRepository.fold tools and approvals (US-004)', () =>
   it('US-004 AC7: an answerable question text is cut to 2048 characters, never splitting a surrogate pair', async () => {
     const { client, thread } = fakeClient({ nextSeq: 2, pendingQuestion: null });
     const text = `${'a'.repeat(2047)}😀tail`;
-    await repoWith(client).fold(batch([question({ text })]));
+    await repoWith(client).fold(batch([start('t1'), question({ text })]));
     const stored = (thread.pendingQuestion as { text: string }).text;
     expect([...stored]).toHaveLength(2048);
     expect(stored.endsWith('😀')).toBe(true);

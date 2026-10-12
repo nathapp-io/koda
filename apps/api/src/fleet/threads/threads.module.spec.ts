@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module';
 import { ThreadsController } from './threads.controller';
+import { ThreadEventsController, ThreadEventsGuard } from './thread-events.controller';
 import { ThreadsService } from './threads.service';
 import { CHAT_THREAD_REPOSITORY } from './domain/chat-thread.domain';
 import { ThreadsModule } from './threads.module';
@@ -17,6 +18,8 @@ describe('ThreadsModule', () => {
     const moduleRef = await Test.createTestingModule({ imports: [GlobalStubsModule, ThreadsModule] }).compile();
     try {
       expect(moduleRef.get(ThreadsController)).toBeDefined();
+      expect(moduleRef.get(ThreadEventsController)).toBeDefined();
+      expect(moduleRef.get(ThreadEventsGuard)).toBeDefined();
       expect(moduleRef.get(ThreadsService)).toBeDefined();
       expect(moduleRef.get(CHAT_THREAD_REPOSITORY)).toBeDefined();
     } finally {

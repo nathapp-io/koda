@@ -89,7 +89,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
       const resetTurns = new Set<string>();
       const questions: Array<{ requestId: string; text: string }> = [];
       let threadChanged = false;
-      if (threadId && job && !batch.rejectedLine) {
+      if (threadId && job) {
         for (const { line } of batch.lines) {
           if (line.type === 'input_consumed') {
             await this.foldInputConsumed(threadId, line.messageId);
@@ -106,22 +106,30 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
             }
           }
           else if (line.type === 'question') {
-            skippedLines += await this.foldQuestion(threadId, line);
-            if (line.answerable) {
-              questions.push({ requestId: line.requestId, text: line.text });
-              threadChanged = true;
-            }
-            else {
-              changedTurns.add(line.turnId);
-              messageEventTurns.add(line.turnId);
+            const skipped = await this.foldQuestion(threadId, line);
+            skippedLines += skipped;
+            if (!skipped) {
+              if (line.answerable) {
+                questions.push({ requestId: line.requestId, text: line.text });
+                threadChanged = true;
+              }
+              else {
+                changedTurns.add(line.turnId);
+                messageEventTurns.add(line.turnId);
+              }
             }
           }
-          else if (isSessionLine(line)) { await this.foldSessionLine(batch, threadId, line); threadChanged = true; }
+          else if (isSessionLine(line)) {
+            const erroredIds = await this.foldSessionLine(batch, threadId, line);
+            for (const id of erroredIds) messageIds.add(id);
+            threadChanged = true;
+          }
           else if (line.type === 'usage') {
             const folded = await this.foldUsage(batch, job, threadId, line);
             skippedLines += Number(folded.skipped);
             costChanged = folded.costChanged || costChanged;
             threadChanged = folded.changed || threadChanged;
+            if (folded.changed) changedTurns.add(line.turnId);
           }
           else {
             if (line.type === 'turn_end') costChanged = await this.foldTurnEnd(batch, job, threadId, line) || costChanged;
@@ -136,7 +144,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
             }
           }
         }
-        if (costChanged) await this.rederiveCosts(batch, job, threadId);
+        if (costChanged) await this.rederiveCosts(batch, job, threadId, changedTurns);
       }
       await db.threadIngestCursor.upsert({
         where: { jobId_leaseEpoch: { jobId: batch.jobId, leaseEpoch: batch.leaseEpoch } },
@@ -144,7 +152,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
         update: { offset: BigInt(batch.endOffset), skippedLines: { increment: batch.badLines + skippedLines } },
       });
       const liveEvents: ThreadLiveEvent[] = [];
-      if (threadId && !batch.rejectedLine) {
+      if (threadId) {
         const turns = [...changedTurns];
         const messages = turns.length ? await db.chatMessage.findMany({
           where: { threadId, role: 'assistant', turnId: { in: turns } }, select: { id: true, turnId: true },
@@ -239,13 +247,15 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
     return result.count > 0;
   }
 
-  private async rederiveCosts(batch: ThreadIngestBatch, job: { id: string }, threadId: string): Promise<void> {
+  private async rederiveCosts(batch: ThreadIngestBatch, job: { id: string }, threadId: string, changedTurns: ReadonlySet<string>): Promise<void> {
     const db = this.prisma.client;
     const jobSum = await db.fleetCostEvent.aggregate({ where: { jobId: job.id }, _sum: { costUsd: true } });
     await db.fleetJob.update({ where: { id: job.id }, data: { costSpentUsd: round4(new Prisma.Decimal(jobSum._sum.costUsd ?? 0)) } });
     const threadSum = await db.fleetCostEvent.aggregate({ where: { job: { threadId } }, _sum: { costUsd: true } });
     await db.chatThread.update({ where: { id: threadId }, data: { costUsd: round4(new Prisma.Decimal(threadSum._sum.costUsd ?? 0)) } });
-    const messages = await db.chatMessage.findMany({ where: { threadId, role: 'assistant' }, select: { id: true, turnId: true, jobId: true } });
+    const messages = changedTurns.size ? await db.chatMessage.findMany({
+      where: { threadId, role: 'assistant', turnId: { in: [...changedTurns] } }, select: { id: true, turnId: true, jobId: true },
+    }) : [];
     for (const message of messages) {
       if (!message.turnId) continue;
       const total = await this.sumTurnCost(message.jobId ?? batch.jobId, message.turnId);
@@ -345,18 +355,18 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
 
   /**
    * An answerable question sets the thread's `pendingQuestion`; an informational one becomes an `ask_human` tool entry.
-   * Returns 1 when an informational question names a turn with no assistant message, else 0.
+   * Returns 1 when the question names a turn with no assistant message.
    */
   private async foldQuestion(threadId: string, line: QuestionThreadLine): Promise<number> {
     const db = this.prisma.client;
+    const message = await db.chatMessage.findFirst({ where: { threadId, turnId: line.turnId, role: 'assistant' }, select: { id: true, toolSummary: true } });
+    if (!message) return 1;
     if (line.answerable) {
       await db.chatThread.update({ where: { id: threadId }, data: {
         pendingQuestion: { requestId: line.requestId, text: [...line.text].slice(0, QUESTION_TEXT_MAX).join(''), expiresAt: line.expiresAt },
       } });
       return 0;
     }
-    const message = await db.chatMessage.findFirst({ where: { threadId, turnId: line.turnId, role: 'assistant' }, select: { id: true, toolSummary: true } });
-    if (!message) return 1;
     const next = upsertInformationalQuestion(readSummary(message.toolSummary), line.requestId, line.text);
     await db.chatMessage.update({ where: { id: message.id }, data: { toolSummary: next as unknown as Prisma.InputJsonValue } });
     return 0;
@@ -366,14 +376,14 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
    * Folds a runner session line into `ChatThread.session`. `session_failed` also errors the thread's pending and
    * streaming messages with the reason, keeping their content (fleet S5a §8).
    */
-  private async foldSessionLine(batch: ThreadIngestBatch, threadId: string, line: SessionThreadLine): Promise<void> {
+  private async foldSessionLine(batch: ThreadIngestBatch, threadId: string, line: SessionThreadLine): Promise<string[]> {
     const db = this.prisma.client;
     const at = line.at ?? new Date().toISOString();
     if (line.type === 'session_started') {
       const turn = await db.fleetThreadTurn.findUnique({ where: { jobId: batch.jobId }, select: { resume: true } });
       const session: StoredSession = { jobId: batch.jobId, state: 'live', resumed: line.resumed, contextReset: turn?.resume === true && !line.resumed, reason: null, at };
       await db.chatThread.update({ where: { id: threadId }, data: { session: session as unknown as Prisma.InputJsonValue } });
-      return;
+      return [];
     }
     // A close or failure keeps resumed and contextReset only when the stored session belongs to this job; otherwise
     // (no session yet, or a previous job's session) they are false, so a new job never inherits the old flags.
@@ -388,12 +398,15 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
       at,
     };
     await db.chatThread.update({ where: { id: threadId }, data: { session: session as unknown as Prisma.InputJsonValue } });
-    if (line.type === 'session_failed') {
-      await db.chatMessage.updateMany({
-        where: { threadId, status: { in: ['pending', 'streaming'] } },
-        data: { status: 'errored', errorReason: line.reason.slice(0, ERROR_REASON_MAX) },
-      });
-    }
+    if (line.type !== 'session_failed') return [];
+    const affected = await db.chatMessage.findMany({
+      where: { threadId, status: { in: ['pending', 'streaming'] } }, select: { id: true },
+    });
+    await db.chatMessage.updateMany({
+      where: { threadId, status: { in: ['pending', 'streaming'] } },
+      data: { status: 'errored', errorReason: line.reason.slice(0, ERROR_REASON_MAX) },
+    });
+    return affected.map(({ id }) => id);
   }
 
   /** Same allocation as `PrismaChatThreadRepository.sendMessage`: the counter, or past the highest existing seq. Caller holds the thread row lock. */

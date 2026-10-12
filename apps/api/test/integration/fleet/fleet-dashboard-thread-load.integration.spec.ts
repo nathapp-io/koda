@@ -82,8 +82,8 @@ describeIntegration('fleet dashboard counts held THREAD jobs as no runner load (
     // Pinned to R, so the pool is R alone: the earlier cases' runners are not candidates and cannot raise a misfit.
     const queued = await job({ command: 'RUN', state: 'QUEUED', repoId: repoA, pinnedRunnerId: id, queuedAt: new Date(Date.now() - 10 * 60_000) });
     const snapshot = await admin();
-    const item = snapshot.attention.find((a) => a.kind === 'job_unplaceable' && a.subjectId === queued.id);
-    // R fits the job: the held THREAD job is not load, so no busy_repo or capacity misfit is reported for R.
-    expect(item).toMatchObject({ verdict: 'fits_not_placed', reasons: [], reasonsTotal: 0 });
+    const items = snapshot.attention.filter((a) => a.subjectId === queued.id);
+    // R fits the job: the held THREAD job is not load, so no unplaceable warning is emitted for R.
+    expect(items).toEqual([]);
   });
 });

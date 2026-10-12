@@ -5,16 +5,16 @@ import { Principal } from '@nathapp/nestjs-auth';
 import { SkipThrottle } from '@nathapp/nestjs-throttler';
 import { Observable } from 'rxjs';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '../generated/prisma/client';
-import { kodaTokenExtractor } from '../auth/auth.module';
-import { JwtAuthProvider } from '../auth/jwt-auth.provider';
-import { isUserPrincipal, KodaPrincipal } from '../auth/principal/koda-principal.types';
-import { ILiveConfig, LIVE_CFG } from '../config/live.config';
-import { ProjectAccessService } from '../projects/project-access.service';
-import { decodeJwtPayload, tokenExpiryMs } from './jwt-payload';
-import { createLiveStream } from './live-stream';
-import { LiveStreamRegistry } from './live-stream-registry';
-import { ThreadEventBus, type ThreadLiveEvent } from './thread-event-bus';
+import { PrismaClient } from '../../generated/prisma/client';
+import { kodaTokenExtractor } from '../../auth/auth.module';
+import { JwtAuthProvider } from '../../auth/jwt-auth.provider';
+import { isUserPrincipal, KodaPrincipal } from '../../auth/principal/koda-principal.types';
+import { ILiveConfig, LIVE_CFG } from '../../config/live.config';
+import { ProjectAccessService } from '../../projects/project-access.service';
+import { decodeJwtPayload, tokenExpiryMs } from '../../live/jwt-payload';
+import { createLiveStream } from '../../live/live-stream';
+import { LiveStreamRegistry } from '../../live/live-stream-registry';
+import { ThreadEventBus, type ThreadLiveEvent } from '../../live/thread-event-bus';
 
 interface ThreadEventsRequest {
   params: { slug: string; id: string };
