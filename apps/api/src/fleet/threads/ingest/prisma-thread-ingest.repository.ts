@@ -12,7 +12,7 @@ import type { UnfoldedStream } from './thread-ingest.bootstrap';
 import { ACTIVE_STATES } from '../../jobs/job-state';
 import type { AssistantThreadLine, QuestionThreadLine, SessionThreadLine, ThreadLine, ToolThreadLine, UsageThreadLine } from './thread-line';
 import {
-  linkApprovalRequest, setApprovalDecision, setToolResult, upsertInformationalQuestion, upsertToolCall, type ToolSummaryEntry,
+  upsertInformationalQuestion, upsertToolSummary, type ToolSummaryEntry,
 } from './tool-summary';
 
 const ERROR_REASON_MAX = 200;
@@ -329,9 +329,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
       });
       if (!message) return { skipped: 0 };
       const entries = readSummary(message.toolSummary);
-      const next = line.type === 'approval_requested'
-        ? linkApprovalRequest(entries, line.callId as string, line.requestId)
-        : setApprovalDecision(entries, line.requestId, line.decidedBy);
+      const next = upsertToolSummary(entries, line);
       if (JSON.stringify(entries) === JSON.stringify(next)) return { skipped: 0 };
       await db.chatMessage.update({ where: { id: message.id }, data: { toolSummary: next as unknown as Prisma.InputJsonValue } });
       return { skipped: 0, messageId: message.id };
@@ -339,9 +337,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
     const message = await db.chatMessage.findFirst({ where: { threadId, turnId: line.turnId, role: 'assistant' }, select: { id: true, toolSummary: true } });
     if (!message) return { skipped: 1 };
     const entries = readSummary(message.toolSummary);
-    const next = line.type === 'tool_call'
-      ? upsertToolCall(entries, { callId: line.callId, name: line.name, input: line.input })
-      : setToolResult(entries, line.callId, line.isError, line.preview);
+    const next = upsertToolSummary(entries, line);
     if (JSON.stringify(entries) === JSON.stringify(next)) return { skipped: 0 };
     await db.chatMessage.update({ where: { id: message.id }, data: { toolSummary: next as unknown as Prisma.InputJsonValue } });
     return { skipped: 0, messageId: message.id };

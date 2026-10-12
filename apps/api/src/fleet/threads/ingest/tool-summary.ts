@@ -3,6 +3,8 @@
  * input. `requestId` is kept on the entry only so an approval can be matched to its tool call.
  */
 
+import type { ToolThreadLine } from './thread-line';
+
 export interface ToolSummaryEntry {
   callId: string;
   name: string;
@@ -50,6 +52,20 @@ export function linkApprovalRequest(entries: readonly ToolSummaryEntry[], callId
 
 export function setApprovalDecision(entries: readonly ToolSummaryEntry[], requestId: string, decidedBy: string): ToolSummaryEntry[] {
   return entries.map((entry) => (entry.requestId === requestId ? { ...entry, decidedBy } : entry));
+}
+
+/** Applies one tool or approval stream event to a message's summary. */
+export function upsertToolSummary(entries: readonly ToolSummaryEntry[], line: ToolThreadLine): ToolSummaryEntry[] {
+  switch (line.type) {
+    case 'tool_call':
+      return upsertToolCall(entries, line);
+    case 'tool_result':
+      return setToolResult(entries, line.callId, line.isError, line.preview);
+    case 'approval_requested':
+      return line.callId === undefined ? [...entries] : linkApprovalRequest(entries, line.callId, line.requestId);
+    case 'approval_resolved':
+      return setApprovalDecision(entries, line.requestId, line.decidedBy);
+  }
 }
 
 /** An informational question is recorded as an `ask_human` entry, since `turn_end` replaces the message content. */

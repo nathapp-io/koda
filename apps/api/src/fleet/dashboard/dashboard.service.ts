@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { BudgetGate } from '../budgets/budget-gate';
 import { QUEUED_SCAN_LIMIT, toLoads } from '../jobs/placement-rules';
+import { isThreadKind } from '../common/thread-jobs';
 import { buildAttention } from './attention-rules';
 import { buildDashboardView, DashboardView, readCapabilities } from './dashboard-view';
 import { AttentionThresholds, DASHBOARD_LIMITS, DashboardRunnerRow, DashboardScope } from './dashboard.types';
@@ -31,7 +32,8 @@ export class FleetDashboardService {
     const listed = active.slice(0, DASHBOARD_LIMITS.activeJobs);
     const pending = new Map((await this.repo.pendingSummaryByJob(listed.map((j) => j.id))).map((p) => [p.jobId, p] as const));
     const runners: DashboardRunnerRow[] = rawRunners.map((r) => ({ ...r, capabilities: readCapabilities(r.capabilities) }));
-    const loads = toLoads(held);
+    // THREAD jobs occupy thread capacity, not RUN placement capacity or repository exclusivity.
+    const loads = toLoads(held.filter((job) => !isThreadKind(job.command)));
     const heldByRunner = new Map([...loads].map(([id, load]) => [id, load.active] as const));
     const thresholds: AttentionThresholds = {
       runnerOfflineSec: this.cfg.runnerOfflineSec, jobSilentSec: this.cfg.jobSilentSec, jobSilentErrorSec: this.cfg.jobSilentErrorSec,

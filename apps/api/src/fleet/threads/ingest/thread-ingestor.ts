@@ -58,7 +58,22 @@ export class ThreadIngestor {
         const scanEnd = Math.min(size, cursor.offset + this.logScanBytes);
         const bytes = await this.store.read(key, cursor.offset, scanEnd);
         const lastNewline = bytes.lastIndexOf(0x0a);
-        if (lastNewline < 0) return;
+        if (lastNewline < 0) {
+          // A line longer than the protocol limit can span multiple scan windows. Consume it
+          // through its newline as one bad line so the cursor can continue to later records.
+          if (size - cursor.offset <= this.logScanBytes || bytes.length < this.logScanBytes) return;
+          let lineEnd = -1;
+          let scanOffset = cursor.offset + bytes.length;
+          while (scanOffset < size && lineEnd < 0) {
+            const next = await this.store.read(key, scanOffset, Math.min(size, scanOffset + this.logScanBytes));
+            const newline = next.indexOf(0x0a);
+            if (newline >= 0) lineEnd = scanOffset + newline + 1;
+            else scanOffset += next.length;
+          }
+          if (lineEnd < 0) return;
+          await this.foldAndPublish({ jobId, leaseEpoch, lines: [], endOffset: lineEnd, badLines: 1 });
+          continue;
+        }
         const complete = bytes.subarray(0, lastNewline + 1);
         const entries: Array<{ parsed: ReturnType<typeof parseThreadLine>; endOffset: number }> = [];
         let start = 0;
