@@ -10,6 +10,7 @@ function makeRepository(options: { hasMessage: boolean }) {
     })) },
     chatMessage: {
       findFirst: vi.fn(async () => options.hasMessage ? message : null),
+      findMany: vi.fn(async () => []),
       update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => Object.assign(message, data)),
     },
     chatThread: {
