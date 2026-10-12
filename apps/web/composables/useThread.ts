@@ -15,6 +15,9 @@ import type { EventSourceLike } from '~/lib/project-event-stream'
 export function useThread(slug: string, threadId: string): ThreadController {
   const { $api } = useApi()
   const { refresh } = useAuth()
+  // True between onMounted and onBeforeUnmount; guards the load()/start() chain so an unmount
+  // that races the in-flight load cannot reopen the stream after stop().
+  let mounted = false
   const controller = createThreadController({
     api: $api,
     slug,
@@ -37,12 +40,18 @@ export function useThread(slug: string, threadId: string): ThreadController {
 
   onMounted(() => {
     if (typeof EventSource === 'undefined') return
-    void controller.load().then(() => {
-      controller.start()
+    mounted = true
+    // A transient mount failure must not kill live updates: swallow the load rejection and still
+    // start the stream (its own refetch/page handlers and the polling fallback cover the missing
+    // initial page). `.then` is guarded by `mounted` so an unmount that races the in-flight load
+    // cannot reopen the stream after `stop()` has closed it.
+    void controller.load().catch(() => undefined).then(() => {
+      if (mounted) controller.start()
     })
   })
 
   onBeforeUnmount(() => {
+    mounted = false
     controller.stop()
   })
 

@@ -226,7 +226,14 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
         return { ok: true }
       } catch (error: unknown) {
         if (errorCode(error) === 409) {
-          await reloadThread()
+          try {
+            await reloadThread()
+          } catch {
+            // The refusal could not be read off the thread: give up this send rather than leak the
+            // optimistic echo or reject out of send().
+            dropOptimistic(cid)
+            return { ok: false, error }
+          }
           if (thread.value?.sendRefusal === 'closing' && deps.now() - firstAttemptAt < CLOSING_RETRY_WINDOW_MS) {
             await wait(POLL_INTERVAL_MS)
             continue
