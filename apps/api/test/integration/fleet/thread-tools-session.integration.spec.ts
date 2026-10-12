@@ -3,7 +3,7 @@
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/thread-tools-session.integration.spec.ts
  */
 import request from 'supertest';
-import { mkdtempSync } from 'fs';
+import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { NathApplication } from '@nathapp/nestjs-app';
@@ -20,6 +20,7 @@ const ENV = ['FLEET_ARTIFACT_DIR', 'FLEET_THREADS_ENABLED', 'FLEET_SYNC_WAIT_MS'
 
 describeIntegration('fleet thread tools, questions and session (PG, US-004)', () => {
   let app: NathApplication;
+  let artifactDir: string | undefined;
   let server: ReturnType<NathApplication['getHttpServer']>;
   let prisma: PrismaClient;
   let world: FleetHttpWorld;
@@ -30,7 +31,8 @@ describeIntegration('fleet thread tools, questions and session (PG, US-004)', ()
     for (const k of ENV) saved[k] = process.env[k];
     process.env.FLEET_THREADS_ENABLED = 'true';
     process.env.FLEET_SYNC_WAIT_MS = '800';
-    process.env.FLEET_ARTIFACT_DIR = mkdtempSync(join(tmpdir(), 'koda-thread-tools-'));
+    artifactDir = mkdtempSync(join(tmpdir(), 'koda-thread-tools-'));
+    process.env.FLEET_ARTIFACT_DIR = artifactDir;
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
@@ -40,10 +42,14 @@ describeIntegration('fleet thread tools, questions and session (PG, US-004)', ()
     await prisma.runner.update({ where: { id: runner.runnerId }, data: { protocolVersion: 4, lastSeenAt: new Date(), enabled: true, capacity: 1 } });
   });
   afterAll(async () => {
-    await app.close();
-    for (const k of ENV) {
-      if (saved[k] === undefined) delete process.env[k];
-      else process.env[k] = saved[k];
+    try {
+      await app?.close();
+    } finally {
+      for (const k of ENV) {
+        if (saved[k] === undefined) delete process.env[k];
+        else process.env[k] = saved[k];
+      }
+      if (artifactDir) rmSync(artifactDir, { recursive: true, force: true });
     }
   });
 

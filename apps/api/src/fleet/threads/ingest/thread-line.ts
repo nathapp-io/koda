@@ -124,9 +124,16 @@ const MAX_COST_USD = 999_999.99999999;
 
 function replaceNuls(value: unknown): unknown {
   if (typeof value === 'string') return value.replaceAll(String.fromCharCode(0), '\uFFFD');
-  if (Array.isArray(value)) return value.map(replaceNuls);
-  if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, replaceNuls(child)]));
+  const pending: unknown[] = [value];
+  while (pending.length) {
+    const current = pending.pop();
+    if (current === null || typeof current !== 'object') continue;
+    const container = current as Record<string, unknown>;
+    for (const key of Object.keys(container)) {
+      const child = container[key];
+      if (typeof child === 'string') container[key] = child.replaceAll(String.fromCharCode(0), '\uFFFD');
+      else if (child !== null && typeof child === 'object') pending.push(child);
+    }
   }
   return value;
 }
@@ -202,12 +209,12 @@ export function parseThreadLine(raw: Buffer | string): ParsedThreadLine {
   if (source.length > THREAD_STREAM_LIMITS.lineMaxBytes) return { bad: true };
   let parsed: unknown;
   try {
-    parsed = JSON.parse(source.toString('utf8').replace(/\n$/, '').replace(/\r$/, '')) as unknown;
+    parsed = replaceNuls(JSON.parse(source.toString('utf8').replace(/\n$/, '').replace(/\r$/, '')) as unknown);
   } catch {
     return { bad: true };
   }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return { bad: true };
-  const value = replaceNuls(parsed) as Record<string, unknown>;
+  const value = parsed as Record<string, unknown>;
   if (typeof value.type !== 'string') return { bad: true };
   if (IGNORED_TYPES.has(value.type)) return { ignored: true };
   switch (value.type) {

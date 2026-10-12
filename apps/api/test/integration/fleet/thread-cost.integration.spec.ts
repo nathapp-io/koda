@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { mkdtempSync } from 'fs';
+import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { NathApplication } from '@nathapp/nestjs-app';
@@ -16,6 +16,7 @@ const ENV = ['FLEET_ARTIFACT_DIR', 'FLEET_THREADS_ENABLED'] as const;
 
 describeIntegration('fleet thread cost folding and spend (PG, US-005)', () => {
   let app: NathApplication;
+  let artifactDir: string | undefined;
   let server: ReturnType<NathApplication['getHttpServer']>;
   let prisma: PrismaClient;
   let world: FleetHttpWorld;
@@ -26,7 +27,8 @@ describeIntegration('fleet thread cost folding and spend (PG, US-005)', () => {
   beforeAll(async () => {
     for (const key of ENV) saved[key] = process.env[key];
     process.env.FLEET_THREADS_ENABLED = 'true';
-    process.env.FLEET_ARTIFACT_DIR = mkdtempSync(join(tmpdir(), 'koda-thread-cost-'));
+    artifactDir = mkdtempSync(join(tmpdir(), 'koda-thread-cost-'));
+    process.env.FLEET_ARTIFACT_DIR = artifactDir;
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
@@ -37,10 +39,14 @@ describeIntegration('fleet thread cost folding and spend (PG, US-005)', () => {
   });
   afterEach(() => vi.restoreAllMocks());
   afterAll(async () => {
-    await app.close();
-    for (const key of ENV) {
-      if (saved[key] === undefined) delete process.env[key];
-      else process.env[key] = saved[key];
+    try {
+      await app?.close();
+    } finally {
+      for (const key of ENV) {
+        if (saved[key] === undefined) delete process.env[key];
+        else process.env[key] = saved[key];
+      }
+      if (artifactDir) rmSync(artifactDir, { recursive: true, force: true });
     }
   });
 
@@ -60,6 +66,27 @@ describeIntegration('fleet thread cost folding and spend (PG, US-005)', () => {
   const job = (seed: ThreadJobSeed) => prisma.fleetJob.findUniqueOrThrow({ where: { id: seed.jobId } });
   const message = (seed: ThreadJobSeed) => prisma.chatMessage.findFirstOrThrow({
     where: { threadId: seed.threadId, turnId: 't1', role: 'assistant' },
+  });
+
+  it('rederives multiple touched turns with exact rounding and literal turn-id matching', async () => {
+    const s = await fresh('multi-turn-cost');
+    await put(s, [
+      { type: 'turn_start', turnId: 't1' },
+      usage({ turnId: 't1', round: 1, costUsd: 0.00004 }),
+      usage({ turnId: 't1', round: 2, costUsd: 0.00004 }),
+      { type: 'turn_start', turnId: 't1:child' },
+      usage({ turnId: 't1:child', costUsd: 0.02 }),
+      { type: 'turn_start', turnId: 't_%' },
+      usage({ turnId: 't_%', costUsd: 0.00005 }),
+    ]);
+    const messages = await prisma.chatMessage.findMany({
+      where: { threadId: s.threadId, role: 'assistant' }, orderBy: { seq: 'asc' },
+    });
+    expect(messages.map((m) => [m.turnId, m.costUsd?.toString()])).toEqual([
+      ['t1', '0.0001'], ['t1:child', '0.02'], ['t_%', '0.0001'],
+    ]);
+    expect((await thread(s)).costUsd.toString()).toBe('0.0201');
+    expect((await job(s)).costSpentUsd.toString()).toBe('0.0201');
   });
 
   it('US-005 AC1: folds priced usage into assistant message cost, source and token usage', async () => {

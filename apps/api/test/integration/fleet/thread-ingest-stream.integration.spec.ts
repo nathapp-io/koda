@@ -4,7 +4,7 @@
  */
 import request from 'supertest';
 import { createHash } from 'crypto';
-import { mkdtempSync } from 'fs';
+import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { NathApplication } from '@nathapp/nestjs-app';
@@ -25,6 +25,7 @@ const MIGRATION = '20261014090000_thread_ingest';
 
 describeIntegration('fleet thread log stream (PG, US-001)', () => {
   let app: NathApplication;
+  let artifactDir: string | undefined;
   let server: ReturnType<NathApplication['getHttpServer']>;
   let prisma: PrismaClient;
   let world: FleetHttpWorld;
@@ -34,7 +35,8 @@ describeIntegration('fleet thread log stream (PG, US-001)', () => {
 
   beforeAll(async () => {
     for (const k of ENV) saved[k] = process.env[k];
-    process.env.FLEET_ARTIFACT_DIR = mkdtempSync(join(tmpdir(), 'koda-thread-stream-'));
+    artifactDir = mkdtempSync(join(tmpdir(), 'koda-thread-stream-'));
+    process.env.FLEET_ARTIFACT_DIR = artifactDir;
     process.env.FLEET_LOG_MAX_BYTES = '4096';
     process.env.FLEET_LOG_CHUNK_MAX_BYTES = '1024';
     await resetDb();
@@ -46,10 +48,14 @@ describeIntegration('fleet thread log stream (PG, US-001)', () => {
     thread = await seedThreadJob(server, prisma, world);
   });
   afterAll(async () => {
-    await app.close();
-    for (const k of ENV) {
-      if (saved[k] === undefined) delete process.env[k];
-      else process.env[k] = saved[k];
+    try {
+      await app?.close();
+    } finally {
+      for (const k of ENV) {
+        if (saved[k] === undefined) delete process.env[k];
+        else process.env[k] = saved[k];
+      }
+      if (artifactDir) rmSync(artifactDir, { recursive: true, force: true });
     }
   });
 

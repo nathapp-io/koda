@@ -272,14 +272,23 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
     await db.fleetJob.update({ where: { id: job.id }, data: { costSpentUsd: round4(new Prisma.Decimal(jobSum._sum.costUsd ?? 0)) } });
     const threadSum = await db.fleetCostEvent.aggregate({ where: { job: { threadId } }, _sum: { costUsd: true } });
     await db.chatThread.update({ where: { id: threadId }, data: { costUsd: round4(new Prisma.Decimal(threadSum._sum.costUsd ?? 0)) } });
-    const messages = changedTurns.size ? await db.chatMessage.findMany({
-      where: { threadId, role: 'assistant', turnId: { in: [...changedTurns] } }, select: { id: true, turnId: true, jobId: true },
-    }) : [];
-    for (const message of messages) {
-      if (!message.turnId) continue;
-      const total = await this.sumTurnCost(message.jobId ?? batch.jobId, message.turnId);
-      await db.chatMessage.update({ where: { id: message.id }, data: { costUsd: round4(total) } });
-    }
+    if (!changedTurns.size) return;
+    // Re-derive all touched messages in one round trip while the fold holds the job/thread locks.
+    await db.$executeRaw`
+      WITH totals AS (
+        SELECT m."id", COALESCE(SUM(e."costUsd"), 0)::decimal AS "total"
+        FROM "ChatMessage" m
+        LEFT JOIN "FleetCostEvent" e
+          ON e."jobId" = COALESCE(m."jobId", ${batch.jobId})
+          AND left(e."callId", char_length(m."turnId") + 1) = m."turnId" || ':'
+          AND substring(e."callId" FROM char_length(m."turnId") + 2) ~ '^(turn_end|[0-9]+)$'
+        WHERE m."threadId" = ${threadId} AND m."role" = 'assistant'
+          AND m."turnId" IN (${Prisma.join([...changedTurns])})
+        GROUP BY m."id"
+      )
+      UPDATE "ChatMessage" m SET "costUsd" = ROUND(t."total", 4)
+      FROM totals t WHERE m."id" = t."id"
+    `;
   }
 
   private async sumTurnCost(jobId: string, turnId: string, leaseEpoch?: number): Promise<Prisma.Decimal> {
