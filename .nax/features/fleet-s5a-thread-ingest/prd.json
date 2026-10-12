@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-ingest",
   "branchName": "feat/fleet-s5a-thread-ingest",
   "createdAt": "2026-10-12T00:00:00.000Z",
-  "updatedAt": "2026-10-12T06:11:43.116Z",
+  "updatedAt": "2026-10-12T06:33:50.613Z",
   "userStories": [
     {
       "id": "US-001",
@@ -249,8 +249,8 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -328,7 +328,10 @@
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Exact decimal money handling, idempotent cost-event inserts inside the fold transaction, cross-module budget signalling and hard-stop wiring."
+        "reasoning": "Exact decimal money handling, idempotent cost-event inserts inside the fold transaction, cross-module budget signalling and hard-stop wiring.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/budgets/prisma-budget.repository.ts",
@@ -351,7 +354,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "b95a005e3ed2088cde99c0399ca5e3821032445f"
     },
     {
       "id": "US-006",
