@@ -6,13 +6,19 @@ import type { ThreadLine } from './thread-line';
 type Msg = {
   id: string; threadId: string; seq: number; jobId: string | null; turnId: string | null; role: string;
   content: string; status: string; errorReason: string | null; streamRound: number | null; streamRoundStart: number | null;
+  toolSummary?: unknown;
   pendingQuestion?: unknown;
 };
 
 /** An in-memory stand-in for the Prisma calls the fold makes. Enough to pin the fold's row effects. */
-function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?: number; messages?: Msg[] } = {}) {
+function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?: number; messages?: Msg[]; pendingQuestion?: unknown; session?: unknown; resume?: boolean } = {}) {
   const messages: Msg[] = [...(opts.messages ?? [])];
-  const thread = { id: 'T', nextSeq: opts.nextSeq ?? 2, lastActivityAt: new Date(0), pendingQuestion: { requestId: 'q1' } as unknown };
+  const thread = {
+    id: 'T', nextSeq: opts.nextSeq ?? 2, lastActivityAt: new Date(0),
+    pendingQuestion: (opts.pendingQuestion === undefined ? { requestId: 'q1' } : opts.pendingQuestion) as unknown,
+    session: (opts.session ?? null) as unknown,
+  };
+  const turn = { resume: opts.resume ?? false };
   const job = { id: 'J', command: opts.command ?? 'THREAD', threadId: opts.threadId === undefined ? 'T' : opts.threadId };
   const cursor = { offset: 0n, skippedLines: 0 };
   const client = {
@@ -24,13 +30,16 @@ function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?
       return [{ nextSeq: taken }];
     }),
     fleetJob: { findUnique: vi.fn(async () => job) },
+    fleetThreadTurn: { findUnique: vi.fn(async () => turn) },
     chatMessage: {
       findUnique: vi.fn(async ({ where }: { where: { id?: string; threadId_turnId_role?: unknown } }) => {
         if (where.id) return messages.find((m) => m.id === where.id) ?? null;
         return null;
       }),
-      findFirst: vi.fn(async ({ where }: { where: { threadId: string; turnId: string; role: string } }) =>
-        messages.find((m) => m.threadId === where.threadId && m.turnId === where.turnId && m.role === where.role) ?? null),
+      findFirst: vi.fn(async ({ where }: { where: { threadId: string; turnId?: string; role: string } }) =>
+        messages.find((m) => m.threadId === where.threadId && (where.turnId === undefined || m.turnId === where.turnId) && m.role === where.role) ?? null),
+      findMany: vi.fn(async ({ where }: { where: { threadId: string; role: string } }) =>
+        messages.filter((m) => m.threadId === where.threadId && m.role === where.role)),
       create: vi.fn(async ({ data }: { data: Partial<Msg> & { threadId: string } }) => {
         const row: Msg = {
           id: `m${messages.length + 1}`, jobId: null, turnId: null, role: 'user', content: '', status: 'pending',
@@ -43,6 +52,11 @@ function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?
         const row = messages.find((m) => m.id === where.id) as Msg;
         Object.assign(row, data);
         return row;
+      }),
+      updateMany: vi.fn(async ({ where, data }: { where: { threadId: string; status: { in: string[] } }; data: Partial<Msg> }) => {
+        const hit = messages.filter((m) => m.threadId === where.threadId && where.status.in.includes(m.status));
+        for (const row of hit) Object.assign(row, data);
+        return { count: hit.length };
       }),
     },
     chatThread: {
@@ -188,5 +202,115 @@ describe('PrismaThreadIngestRepository.fold (US-003)', () => {
     await repoWith(client).fold(batch([start('t1'), end()]));
     expect(thread.pendingQuestion).toBe(Prisma.DbNull);
     expect(thread.lastActivityAt.getTime()).toBeGreaterThan(before.getTime());
+  });
+});
+
+const tool = (callId: string, input: unknown = { pattern: 'foo' }, turnId = 't1'): ThreadLine => ({ type: 'tool_call', turnId, callId, name: 'search_repo', input });
+const result = (callId: string, isError: boolean, preview: string, turnId = 't1'): ThreadLine => ({ type: 'tool_result', turnId, callId, isError, preview });
+const question = (over: Partial<Extract<ThreadLine, { type: 'question' }>> = {}): ThreadLine => ({
+  type: 'question', turnId: 't1', requestId: 'q1', text: 'Which repo?', expiresAt: '2026-10-14T01:00:00.000Z', answerable: true, ...over,
+});
+const sessionStarted = (over: Partial<Extract<ThreadLine, { type: 'session_started' }>> = {}): ThreadLine => ({
+  type: 'session_started', at: '2026-10-14T00:00:00.000Z', resumed: false, ...over,
+});
+
+describe('PrismaThreadIngestRepository.fold tools and approvals (US-004)', () => {
+  it('US-004 AC1: a tool_call adds a toolSummary entry to the turn message', async () => {
+    const { client, messages } = fakeClient({ nextSeq: 2 });
+    const repo = repoWith(client);
+    await repo.fold(batch([start('t1'), tool('c1')]));
+    expect(messages[0]?.toolSummary).toEqual([
+      { callId: 'c1', name: 'search_repo', input: '{"pattern":"foo"}', isError: null, preview: '', decidedBy: null },
+    ]);
+  });
+
+  it('US-004 AC2: a tool_result sets isError and preview on that entry', async () => {
+    const { client, messages } = fakeClient({ nextSeq: 2 });
+    const repo = repoWith(client);
+    await repo.fold(batch([start('t1'), tool('c1'), result('c1', true, 'refused')]));
+    expect(messages[0]?.toolSummary).toEqual([
+      expect.objectContaining({ callId: 'c1', isError: true, preview: 'refused' }),
+    ]);
+  });
+
+  it('US-004 AC6: approval_requested then approval_resolved sets decidedBy on the entry for its callId', async () => {
+    const { client, messages } = fakeClient({ nextSeq: 2 });
+    const repo = repoWith(client);
+    await repo.fold(batch([start('t1'), tool('c1')]));
+    await repo.fold(batch([{ type: 'approval_requested', requestId: 'a1', callId: 'c1' }]));
+    await repo.fold(batch([{ type: 'approval_resolved', requestId: 'a1', decidedBy: 'profile' }]));
+    expect(messages[0]?.toolSummary).toEqual([expect.objectContaining({ callId: 'c1', decidedBy: 'profile' })]);
+  });
+
+  it('US-004 AC7: an answerable question sets pendingQuestion to requestId, text and expiresAt', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, pendingQuestion: null });
+    await repoWith(client).fold(batch([start('t1'), question()]));
+    expect(thread.pendingQuestion).toEqual({ requestId: 'q1', text: 'Which repo?', expiresAt: '2026-10-14T01:00:00.000Z' });
+  });
+
+  it('US-004 AC8: an informational question leaves pendingQuestion null and adds an ask_human entry', async () => {
+    const { client, thread, messages } = fakeClient({ nextSeq: 2, pendingQuestion: null });
+    await repoWith(client).fold(batch([start('t1'), question({ answerable: false })]));
+    expect(thread.pendingQuestion).toBeNull();
+    expect(messages[0]?.toolSummary).toEqual([
+      { callId: 'q1', name: 'ask_human', input: '', isError: null, preview: 'Which repo?', decidedBy: null },
+    ]);
+  });
+
+  it('US-004 AC9: turn_end clears an answered pendingQuestion', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, pendingQuestion: null });
+    const repo = repoWith(client);
+    await repo.fold(batch([start('t1'), question()]));
+    await repo.fold(batch([end()]));
+    expect(thread.pendingQuestion).toBe(Prisma.DbNull);
+  });
+
+  it('US-004 AC12: session_started sets the thread session to a live session with resumed and contextReset false', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2 });
+    await repoWith(client).fold(batch([sessionStarted()]));
+    expect(thread.session).toEqual({ jobId: 'J', state: 'live', resumed: false, contextReset: false, reason: null, at: '2026-10-14T00:00:00.000Z' });
+  });
+
+  it('US-004 AC13: session_started with resumed false sets contextReset when the turn was a resume', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, resume: true });
+    await repoWith(client).fold(batch([sessionStarted({ resumed: false })]));
+    expect(thread.session).toMatchObject({ resumed: false, contextReset: true });
+  });
+
+  it('US-004 AC13: session_started with resumed true on a resume turn does not set contextReset', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, resume: true });
+    await repoWith(client).fold(batch([sessionStarted({ resumed: true })]));
+    expect(thread.session).toMatchObject({ resumed: true, contextReset: false });
+  });
+
+  it('US-004 AC14: session_failed sets the session state failed and its reason', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2 });
+    await repoWith(client).fold(batch([{ type: 'session_failed', reason: 'model_unknown' }]));
+    expect(thread.session).toMatchObject({ jobId: 'J', state: 'failed', reason: 'model_unknown', resumed: false, contextReset: false });
+  });
+
+  it('US-004 AC14: session_failed errors the pending and streaming messages and keeps their content', async () => {
+    const { client, messages } = fakeClient({
+      nextSeq: 2,
+      messages: [
+        { id: 'm1', threadId: 'T', seq: 1, jobId: null, turnId: null, role: 'user', content: 'hi', status: 'pending', errorReason: null, streamRound: null, streamRoundStart: null },
+        { id: 'm2', threadId: 'T', seq: 2, jobId: 'J', turnId: 't1', role: 'assistant', content: 'partial', status: 'streaming', errorReason: null, streamRound: 1, streamRoundStart: 0 },
+      ],
+    });
+    await repoWith(client).fold(batch([{ type: 'session_failed', reason: 'model_unknown' }]));
+    expect(messages[0]).toMatchObject({ status: 'errored', errorReason: 'model_unknown', content: 'hi' });
+    expect(messages[1]).toMatchObject({ status: 'errored', errorReason: 'model_unknown', content: 'partial' });
+  });
+
+  it('US-004 AC15: session_closed sets the session state closed with its reason', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, session: { jobId: 'J', state: 'live', resumed: false, contextReset: false, reason: null, at: 'A' } });
+    await repoWith(client).fold(batch([{ type: 'session_closed', reason: 'idle' }]));
+    expect(thread.session).toMatchObject({ state: 'closed', reason: 'idle', resumed: false });
+  });
+
+  it('US-004 AC15: session_closed with no prior session sets resumed and contextReset false', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2 });
+    await repoWith(client).fold(batch([{ type: 'session_closed', reason: 'idle' }]));
+    expect(thread.session).toMatchObject({ state: 'closed', reason: 'idle', resumed: false, contextReset: false });
   });
 });

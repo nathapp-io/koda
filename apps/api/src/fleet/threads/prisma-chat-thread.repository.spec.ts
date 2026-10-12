@@ -32,6 +32,42 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
     expect(unpriced?.costUsd).toBeNull();
   });
 
+  it('US-004 AC15: get() maps the stored session JSON onto the thread record', async () => {
+    const session = { jobId: 'J', state: 'closed', resumed: false, contextReset: false, reason: 'idle', at: 'A' };
+    const threadRow = {
+      id: 'T', projectId: 'P', repoId: 'R', baseRef: 'trunk', feature: 'f', title: 'x', createdById: 'U', runnerId: null,
+      backend: { kind: 'native' }, status: 'ACTIVE', archivedAt: null, skills: [], maxCostUsd: { toString: () => '5' },
+      costUsd: { toString: () => '0' }, tokens: null, specPath: 's', pendingQuestion: null, session,
+      lastActivityAt: new Date(0), createdAt: new Date(0),
+    };
+    const prisma = {
+      client: {
+        chatThread: { findFirst: vi.fn(async () => threadRow) },
+        fleetJob: { findFirst: vi.fn(async () => null) },
+      },
+    } as never;
+    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    const thread = await repo.get('P', 'T');
+    expect(thread?.session).toEqual(session);
+  });
+
+  it('US-004 AC12: get() maps a thread with no session to a null session', async () => {
+    const threadRow = {
+      id: 'T', projectId: 'P', repoId: 'R', baseRef: 'trunk', feature: 'f', title: 'x', createdById: 'U', runnerId: null,
+      backend: { kind: 'native' }, status: 'ACTIVE', archivedAt: null, skills: [], maxCostUsd: { toString: () => '5' },
+      costUsd: { toString: () => '0' }, tokens: null, specPath: 's', pendingQuestion: null, session: null,
+      lastActivityAt: new Date(0), createdAt: new Date(0),
+    };
+    const prisma = {
+      client: {
+        chatThread: { findFirst: vi.fn(async () => threadRow) },
+        fleetJob: { findFirst: vi.fn(async () => null) },
+      },
+    } as never;
+    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    expect((await repo.get('P', 'T'))?.session).toBeNull();
+  });
+
   it('US-003 AC13: messages() passes the after-seq filter and limit to the query', async () => {
     const findMany = vi.fn(async () => []);
     const prisma = { client: { chatMessage: { findMany } } } as never;

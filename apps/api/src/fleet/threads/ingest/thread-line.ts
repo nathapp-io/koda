@@ -39,9 +39,69 @@ export interface TurnEndThreadLine {
   outputTruncated?: boolean;
 }
 
+export interface ToolCallThreadLine {
+  type: 'tool_call';
+  turnId: string;
+  callId: string;
+  name: string;
+  input: unknown;
+}
+
+export interface ToolResultThreadLine {
+  type: 'tool_result';
+  turnId: string;
+  callId: string;
+  isError: boolean;
+  preview: string;
+}
+
+export interface ApprovalRequestedThreadLine {
+  type: 'approval_requested';
+  requestId: string;
+  callId?: string;
+}
+
+export interface ApprovalResolvedThreadLine {
+  type: 'approval_resolved';
+  requestId: string;
+  decidedBy: string;
+}
+
+export interface QuestionThreadLine {
+  type: 'question';
+  turnId: string;
+  requestId: string;
+  text: string;
+  expiresAt: string;
+  answerable: boolean;
+}
+
+/** Session lines take `at` from the runner; when it is absent the fold stamps its own time. */
+export interface SessionStartedThreadLine {
+  type: 'session_started';
+  at?: string;
+  resumed: boolean;
+}
+
+export interface SessionClosedThreadLine {
+  type: 'session_closed';
+  at?: string;
+  reason: string;
+}
+
+export interface SessionFailedThreadLine {
+  type: 'session_failed';
+  at?: string;
+  reason: string;
+}
+
 export type AssistantThreadLine = TurnStartThreadLine | TextDeltaThreadLine | StreamResetThreadLine | TurnEndThreadLine;
 
-export type ThreadLine = InputConsumedThreadLine | AssistantThreadLine;
+export type ToolThreadLine = ToolCallThreadLine | ToolResultThreadLine | ApprovalRequestedThreadLine | ApprovalResolvedThreadLine;
+
+export type SessionThreadLine = SessionStartedThreadLine | SessionClosedThreadLine | SessionFailedThreadLine;
+
+export type ThreadLine = InputConsumedThreadLine | AssistantThreadLine | ToolThreadLine | QuestionThreadLine | SessionThreadLine;
 export type ParsedThreadLine = ThreadLine | { bad: true } | { ignored: true };
 
 const IGNORED_TYPES = new Set(['thinking_delta', 'compaction', 'tool_progress']);
@@ -60,6 +120,13 @@ const isString = (value: unknown): value is string => typeof value === 'string';
 const isIntegerAtLeastZero = (value: unknown): value is number => Number.isInteger(value) && (value as number) >= 0;
 const isTurnId = (value: unknown): value is string => isString(value) && value.length >= 1 && value.length <= TURN_ID_MAX;
 const isFiniteNonNegative = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+const isNonEmptyString = (value: unknown, max: number): value is string => isString(value) && value.length >= 1 && value.length <= max;
+const isIsoDate = (value: unknown): value is string => isString(value) && !Number.isNaN(Date.parse(value));
+
+/** Keeps the runner's `at` only when it is a string; the fold stamps its own time otherwise. */
+function sessionLine<T extends SessionThreadLine>(line: T, at: unknown): T {
+  return isString(at) ? { ...line, at } : line;
+}
 
 function parseTurnEnd(value: Record<string, unknown>): TurnEndThreadLine | null {
   const usage = value.usage as Record<string, unknown> | null | undefined;
@@ -128,6 +195,36 @@ export function parseThreadLine(raw: Buffer | string): ParsedThreadLine {
       if (!isTurnId(value.turnId)) return { bad: true };
       return parseTurnEnd(value) ?? { bad: true };
     }
+    case 'tool_call':
+      return isTurnId(value.turnId) && isNonEmptyString(value.callId, TURN_ID_MAX) && isNonEmptyString(value.name, TURN_ID_MAX) && value.input !== undefined
+        ? { type: 'tool_call', turnId: value.turnId, callId: value.callId, name: value.name, input: value.input }
+        : { bad: true };
+    case 'tool_result':
+      return isTurnId(value.turnId) && isNonEmptyString(value.callId, TURN_ID_MAX) && typeof value.isError === 'boolean' && isString(value.preview)
+        ? { type: 'tool_result', turnId: value.turnId, callId: value.callId, isError: value.isError, preview: value.preview }
+        : { bad: true };
+    case 'approval_requested': {
+      if (!isNonEmptyString(value.requestId, TURN_ID_MAX)) return { bad: true };
+      if (value.callId !== undefined && !isNonEmptyString(value.callId, TURN_ID_MAX)) return { bad: true };
+      const line: ApprovalRequestedThreadLine = { type: 'approval_requested', requestId: value.requestId };
+      if (value.callId !== undefined) line.callId = value.callId as string;
+      return line;
+    }
+    case 'approval_resolved':
+      return isNonEmptyString(value.requestId, TURN_ID_MAX) && isNonEmptyString(value.decidedBy, 32)
+        ? { type: 'approval_resolved', requestId: value.requestId, decidedBy: value.decidedBy }
+        : { bad: true };
+    case 'question': {
+      if (!isTurnId(value.turnId) || !isNonEmptyString(value.requestId, TURN_ID_MAX) || !isString(value.text) || !isIsoDate(value.expiresAt)) return { bad: true };
+      if (value.answerable !== undefined && typeof value.answerable !== 'boolean') return { bad: true };
+      return { type: 'question', turnId: value.turnId, requestId: value.requestId, text: value.text, expiresAt: value.expiresAt, answerable: value.answerable !== false };
+    }
+    case 'session_started':
+      return typeof value.resumed === 'boolean' ? sessionLine({ type: 'session_started', resumed: value.resumed }, value.at) : { bad: true };
+    case 'session_closed':
+      return isNonEmptyString(value.reason, 64) ? sessionLine({ type: 'session_closed', reason: value.reason }, value.at) : { bad: true };
+    case 'session_failed':
+      return isNonEmptyString(value.reason, 64) ? sessionLine({ type: 'session_failed', reason: value.reason }, value.at) : { bad: true };
     default:
       return { bad: true };
   }

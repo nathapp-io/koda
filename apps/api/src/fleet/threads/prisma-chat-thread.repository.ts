@@ -19,7 +19,7 @@ import { BudgetPausedException } from '../budgets/budget.exceptions';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
 import { buildThreadInstructions } from './thread-instructions';
 import { sendRefusal, type ThreadSendRefusal } from './thread-send-rules';
-import type { ChatMessageRecord, ChatThreadRecord, ChatThreadRepository } from './domain/chat-thread.domain';
+import type { ChatMessageRecord, ChatThreadRecord, ChatThreadRepository, ThreadSession } from './domain/chat-thread.domain';
 import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
 import type { ThreadBackend } from '../common/thread-jobs';
 import { THREAD_LIMITS } from '../common/thread-jobs';
@@ -270,7 +270,8 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       backend: row.backend as unknown as ThreadBackend, status: row.status, archivedAt: row.archivedAt,
       skills: row.skills as unknown as ThreadSkillSource[], maxCostUsd: row.maxCostUsd.toString(),
       costUsd: row.costUsd.toString(), tokens: row.tokens, specPath: row.specPath,
-      pendingQuestion: row.pendingQuestion, lastActivityAt: row.lastActivityAt, createdAt: row.createdAt, activeJob,
+      pendingQuestion: row.pendingQuestion, session: (row.session as unknown as ThreadSession | null) ?? null,
+      lastActivityAt: row.lastActivityAt, createdAt: row.createdAt, activeJob,
     };
   }
 }

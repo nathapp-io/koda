@@ -16261,6 +16261,36 @@
             "type": "object",
             "nullable": true
           },
+          "session": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "jobId": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "live",
+                  "closed",
+                  "failed"
+                ]
+              },
+              "resumed": {
+                "type": "boolean"
+              },
+              "contextReset": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "nullable": true
+              },
+              "at": {
+                "type": "string"
+              }
+            }
+          },
           "lastActivityAt": {
             "format": "date-time",
             "type": "string"
@@ -16299,6 +16329,7 @@
           "tokens",
           "specPath",
           "pendingQuestion",
+          "session",
           "lastActivityAt",
           "createdAt",
           "activeJob"

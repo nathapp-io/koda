@@ -93,3 +93,71 @@ describe('parseThreadLine (US-003)', () => {
     }))).toEqual({ bad: true });
   });
 });
+
+describe('parseThreadLine (US-004)', () => {
+  it('US-004 AC1: parses a tool_call line with its callId, name and any JSON input', () => {
+    expect(parseThreadLine('{"type":"tool_call","turnId":"t1","callId":"c1","name":"search_repo","input":{"pattern":"foo"}}')).toEqual({
+      type: 'tool_call', turnId: 't1', callId: 'c1', name: 'search_repo', input: { pattern: 'foo' },
+    });
+  });
+
+  it('US-004 AC1: rejects a tool_call line with an empty callId', () => {
+    expect(parseThreadLine('{"type":"tool_call","turnId":"t1","callId":"","name":"x","input":{}}')).toEqual({ bad: true });
+  });
+
+  it('US-004 AC2: parses a tool_result line with isError and preview', () => {
+    expect(parseThreadLine('{"type":"tool_result","turnId":"t1","callId":"c1","isError":true,"preview":"refused"}')).toEqual({
+      type: 'tool_result', turnId: 't1', callId: 'c1', isError: true, preview: 'refused',
+    });
+  });
+
+  it('US-004 AC2: rejects a tool_result line whose isError is not a boolean', () => {
+    expect(parseThreadLine('{"type":"tool_result","turnId":"t1","callId":"c1","isError":"yes","preview":""}')).toEqual({ bad: true });
+  });
+
+  it('US-004 AC6: parses approval_requested with its requestId and optional callId', () => {
+    expect(parseThreadLine('{"type":"approval_requested","requestId":"a1","callId":"c1"}')).toEqual({
+      type: 'approval_requested', requestId: 'a1', callId: 'c1',
+    });
+  });
+
+  it('US-004 AC6: parses approval_resolved with its requestId and decidedBy', () => {
+    expect(parseThreadLine('{"type":"approval_resolved","requestId":"a1","decision":"deny","decidedBy":"profile"}')).toEqual({
+      type: 'approval_resolved', requestId: 'a1', decidedBy: 'profile',
+    });
+  });
+
+  it('US-004 AC7: parses an answerable question with its requestId, text and expiresAt', () => {
+    expect(parseThreadLine('{"type":"question","turnId":"t1","requestId":"q1","text":"Which repo?","expiresAt":"2026-10-14T01:00:00.000Z"}')).toEqual({
+      type: 'question', turnId: 't1', requestId: 'q1', text: 'Which repo?', expiresAt: '2026-10-14T01:00:00.000Z', answerable: true,
+    });
+  });
+
+  it('US-004 AC8: parses an informational question with answerable false', () => {
+    expect(parseThreadLine('{"type":"question","turnId":"t1","requestId":"q1","text":"Which repo?","expiresAt":"2026-10-14T01:00:00.000Z","answerable":false}')).toMatchObject({
+      type: 'question', answerable: false,
+    });
+  });
+
+  it('US-004 AC12: parses session_started with resumed and at', () => {
+    expect(parseThreadLine('{"type":"session_started","at":"2026-10-14T00:00:00.000Z","resumed":false,"backend":{"kind":"native"},"skillShas":[]}')).toEqual({
+      type: 'session_started', at: '2026-10-14T00:00:00.000Z', resumed: false,
+    });
+  });
+
+  it('US-004 AC15: parses session_closed with its reason', () => {
+    expect(parseThreadLine('{"type":"session_closed","at":"2026-10-14T00:00:00.000Z","reason":"idle"}')).toEqual({
+      type: 'session_closed', at: '2026-10-14T00:00:00.000Z', reason: 'idle',
+    });
+  });
+
+  it('US-004 AC14: parses session_failed with its reason', () => {
+    expect(parseThreadLine('{"type":"session_failed","at":"2026-10-14T00:00:00.000Z","reason":"model_unknown"}')).toEqual({
+      type: 'session_failed', at: '2026-10-14T00:00:00.000Z', reason: 'model_unknown',
+    });
+  });
+
+  it('US-004 field rule: rejects a session_failed line with an empty reason', () => {
+    expect(parseThreadLine('{"type":"session_failed","reason":""}')).toEqual({ bad: true });
+  });
+});

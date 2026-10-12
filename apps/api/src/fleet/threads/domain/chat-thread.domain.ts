@@ -3,11 +3,21 @@ import type { ThreadBackend } from '../../common/thread-jobs';
 
 export const CHAT_THREAD_REPOSITORY = Symbol('CHAT_THREAD_REPOSITORY');
 
+/** The thread's session as the thread stream last folded it (fleet S5a §3.3). `contextReset` is set when the runner lost the transcript on a resume. */
+export interface ThreadSession {
+  jobId: string;
+  state: 'live' | 'closed' | 'failed';
+  resumed: boolean;
+  contextReset: boolean;
+  reason: string | null;
+  at: string;
+}
+
 export interface ChatThreadRecord {
   id: string; repoId: string; baseRef: string; feature: string; title: string;
   createdById: string; runnerId: string | null; backend: ThreadBackend; status: string; archivedAt: Date | null;
   skills: ThreadSkillSource[]; maxCostUsd: string; costUsd: string; tokens: unknown; specPath: string;
-  pendingQuestion: unknown; lastActivityAt: Date; createdAt: Date;
+  pendingQuestion: unknown; session: ThreadSession | null; lastActivityAt: Date; createdAt: Date;
   activeJob: { id: string; state: string } | null;
 }
 
