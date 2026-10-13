@@ -2,6 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { isRunnerOnline } from '../../common/runner-online';
 import type { RunnerRecord } from '../domain/runner.domain';
 import type { RunnerView } from './runner.dto';
+import { THREAD_MIN_PROTOCOL_VERSION } from '../../threads/thread-send-rules';
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -9,6 +10,17 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 function profileNames(capabilities: unknown): string[] {
   if (!isRecord(capabilities) || !isRecord(capabilities['profiles'])) return [];
   return Object.keys(capabilities['profiles']).sort();
+}
+
+function threadBackends(capabilities: unknown, protocolVersion: number): { native: string[]; acp: string[] } {
+  const empty = { native: [], acp: [] };
+  if (protocolVersion < THREAD_MIN_PROTOCOL_VERSION || !isRecord(capabilities) || !isRecord(capabilities['threadBackends'])) return empty;
+  const backends = capabilities['threadBackends'];
+  const native = backends['native'];
+  const acp = backends['acp'];
+  if (!Array.isArray(native) || !native.every((value): value is string => typeof value === 'string') ||
+      !Array.isArray(acp) || !acp.every((value): value is string => typeof value === 'string')) return empty;
+  return { native, acp };
 }
 
 /**
@@ -24,11 +36,13 @@ export class RunnerSummaryDto {
   @ApiProperty() declare enabled: boolean;
   @ApiProperty({ description: 'Synced within FLEET_RUNNER_OFFLINE_SEC (the placement rule)' }) declare online: boolean;
   @ApiProperty({ type: [String], description: 'Machine profile names, sorted' }) declare profiles: string[];
+  @ApiProperty({ type: 'object', properties: { native: { type: 'array', items: { type: 'string' } }, acp: { type: 'array', items: { type: 'string' } } } }) declare threadBackends: { native: string[]; acp: string[] };
 
   static from(r: RunnerRecord, view: RunnerView): RunnerSummaryDto {
     return Object.assign(new RunnerSummaryDto(), {
       id: r.id, name: r.name, os: r.os, arch: r.arch, labels: r.labels, enabled: r.enabled,
       online: isRunnerOnline(r.lastSeenAt, view.now, view.offlineSec), profiles: profileNames(r.capabilities),
+      threadBackends: threadBackends(r.capabilities, r.protocolVersion),
     });
   }
 }

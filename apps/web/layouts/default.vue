@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users, Server, FolderGit2, Rocket, Wallet, Inbox, BarChart3, Gauge, Settings, Search, Menu, Sparkles } from 'lucide-vue-next'
+import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users, Server, FolderGit2, Rocket, Wallet, Inbox, BarChart3, Gauge, Settings, Search, Menu, Sparkles, MessagesSquare } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const auth = useAuth()
@@ -86,6 +86,25 @@ const breadcrumbItems = computed(() => {
   }
   if (path === `/${project}/agents`) {
     return [{ label: 'Koda', to: '/' }, projectBase, { label: t('nav.agents') }]
+  }
+  if (path === `/${project}/threads`) {
+    return [{ label: 'Koda', to: '/' }, projectBase, { label: t('nav.threads') }]
+  }
+  if (path === `/${project}/threads/new`) {
+    return [
+      { label: 'Koda', to: '/' },
+      projectBase,
+      { label: t('nav.threads'), to: `/${project}/threads` },
+      { label: t('fleet.threads.new.title') },
+    ]
+  }
+  if (path.startsWith(`/${project}/threads/`)) {
+    return [
+      { label: 'Koda', to: '/' },
+      projectBase,
+      { label: t('nav.threads'), to: `/${project}/threads` },
+      { label: t('fleet.threads.detail.title') },
+    ]
   }
   if (path === `/${project}/labels`) {
     return [{ label: 'Koda', to: '/' }, projectBase, { label: t('nav.labels') }]
@@ -221,6 +240,14 @@ const backTo = computed(() => {
             >
               <Bot class="h-4 w-4 shrink-0" />
               {{ t('nav.agents') }}
+            </NuxtLink>
+            <NuxtLink
+              :to="`/${projectSlug}/threads`"
+              :class="navLinkClass"
+              :active-class="activeClass"
+            >
+              <MessagesSquare class="h-4 w-4 shrink-0" />
+              {{ t('nav.threads') }}
             </NuxtLink>
             <p :class="sectionLabelClass">{{ t('nav.sectionKnowledge') }}</p>
             <NuxtLink

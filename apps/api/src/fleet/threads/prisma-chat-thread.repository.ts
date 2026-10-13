@@ -68,6 +68,19 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     return this.mapThread(row, job);
   }
 
+  async sendRefusalOf(projectId: string, thread: ChatThreadRecord): Promise<ThreadSendRefusal | null> {
+    const job = await this.prisma.client.fleetJob.findFirst({
+      where: { threadId: thread.id, command: 'THREAD', state: { notIn: TERMINAL_JOB_STATES } },
+      orderBy: [{ queuedAt: 'desc' }, { id: 'desc' }],
+      select: { id: true, state: true, leaseEpoch: true },
+    });
+    const result = await this.sendRefusalFor({
+      id: thread.id, status: thread.status, runnerId: thread.runnerId, repoId: thread.repoId, projectId,
+      costUsd: new Prisma.Decimal(thread.costUsd), maxCostUsd: new Prisma.Decimal(thread.maxCostUsd),
+    }, job);
+    return result.refusal;
+  }
+
   async messages(threadId: string, afterSeq: number, limit: number): Promise<ChatMessageRecord[]> {
     const rows = await this.prisma.client.chatMessage.findMany({ where: { threadId, seq: { gt: afterSeq } }, orderBy: { seq: 'asc' }, take: limit });
     return rows.map((row) => this.mapMessage(row));

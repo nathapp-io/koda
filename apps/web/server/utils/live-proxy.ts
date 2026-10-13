@@ -38,6 +38,27 @@ export function buildUserLiveUpstreamUrl(apiInternalUrl: string): string {
   return resolveProxyTarget('/me/events', { apiInternalUrl })
 }
 
+// Same rule as the API's clientMessageId format (SendMessageDto).
+const THREAD_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
+
+/** Fleet S5a: the API thread events URL; null for an invalid slug or thread id. */
+export function buildThreadLiveUpstreamUrl(slug: string, threadId: string, apiInternalUrl: string): string | null {
+  if (!SLUG_PATTERN.test(slug)) return null
+  if (!THREAD_ID_PATTERN.test(threadId)) return null
+  return resolveProxyTarget(`/projects/${slug}/threads/${threadId}/events`, { apiInternalUrl })
+}
+
+export type ThreadLiveUpstreamRequest = LiveProxyRequest & { threadId: string }
+
+/** Fleet S5a: thread events proxy core; rejects an invalid slug or thread id with 400 before fetching. */
+export async function openThreadLiveUpstream(req: ThreadLiveUpstreamRequest): Promise<LiveProxyResult> {
+  // The slug rule is the project stream's; its 400 keeps the sibling helper's body text.
+  if (!SLUG_PATTERN.test(req.slug)) return { kind: 'error', status: 400, body: 'invalid project slug' }
+  const url = buildThreadLiveUpstreamUrl(req.slug, req.threadId, req.apiInternalUrl)
+  if (!url) return { kind: 'error', status: 400, body: 'invalid thread id' }
+  return openLiveUpstreamUrl(url, req)
+}
+
 export type LiveUpstreamRequest = Omit<LiveProxyRequest, 'slug' | 'apiInternalUrl'>
 
 export async function openLiveUpstream(req: LiveProxyRequest): Promise<LiveProxyResult> {

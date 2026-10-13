@@ -13,7 +13,7 @@
  */
 import { readFileSync } from 'fs'
 import { createRequire } from 'module'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import * as ts from 'typescript'
 import * as Vue from 'vue'
 import type { Component } from 'vue'
@@ -124,11 +124,16 @@ const NUXT_AUTO_IMPORTS = [
   'useAsyncData', 'useVisiblePolling', 'useFleetRunners', 'useFleetRepos', 'useRoute', 'useRouter',
   'useFleetDispatchOptions', 'useFleetJobs', 'useProjectViewerRole', 'useProjectMembers',
   'useAdminUsers', 'useProjectEvents', 'useAuth', 'useProjectMemberNames', 'useFleetJobLogs',
-  'useFleetRepoConfig', 'useSkillCatalog', 'useProjectSkills', 'onBeforeRouteLeave',
+  'useFleetRepoConfig', 'useSkillCatalog', 'useProjectSkills', 'useThread', 'useThreads', 'onBeforeRouteLeave',
 ] as const
 
 /** Defaults for auto-imports a test did not supply; `definePageMeta` is a compile-time no-op macro. */
-const AUTO_IMPORT_DEFAULTS: Record<string, unknown> = { definePageMeta: () => undefined }
+const AUTO_IMPORT_DEFAULTS: Record<string, unknown> = {
+  definePageMeta: () => undefined,
+  // Thread pages auto-import useThread/useThreads (US-004): tests override them through globals.
+  useThread: undefined,
+  useThreads: undefined,
+}
 
 /** Compiled JS per file: the expensive half, safe to reuse across mounts. */
 const sourceCache = new Map<string, string>()
@@ -162,13 +167,23 @@ function instantiate(file: string, globals: Record<string, unknown>, alias: Reco
     if (id === 'vue') return Vue
     if (id.startsWith('~/') || id.startsWith('@/')) {
       const base = join(webRoot, id.slice(2))
-      for (const candidate of [base, `${base}.ts`, `${base}.vue`, join(base, 'index.ts')]) {
-        if (!exists(candidate)) continue
-        return instantiate(candidate, globals, alias)
-      }
-      throw new Error(`mount-sfc: cannot resolve ${id} from ${file}`)
+      return requireRelative(base, id, file)
+    }
+    if (id.startsWith('./') || id.startsWith('../')) {
+      // Relative imports resolve against the requiring module's own file (node semantics),
+      // so a real `~/lib/*` chain with `./sibling` imports loads instead of falling to
+      // nodeRequire, which anchors at package.json and cannot see them.
+      return requireRelative(join(dirname(file), id), id, file)
     }
     return nodeRequire(id)
+  }
+  /** Resolves a concrete base path to a loadable module, or reports the same failure node would. */
+  const requireRelative = (base: string, id: string, from: string): unknown => {
+    for (const candidate of [base, `${base}.ts`, `${base}.vue`, join(base, 'index.ts')]) {
+      if (!exists(candidate)) continue
+      return instantiate(candidate, globals, alias)
+    }
+    throw new Error(`mount-sfc: cannot resolve ${id} from ${from}`)
   }
   const mod: { exports: Record<string, unknown> } = { exports: {} }
   // Auto-imports are destructured onto the module scope, but only the ones this module does not

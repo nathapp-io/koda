@@ -86,7 +86,8 @@
     "sectionAdmin": "Admin",
     "sectionWork": "Work",
     "sectionKnowledge": "Knowledge",
-    "sectionFleet": "Fleet"
+    "sectionFleet": "Fleet",
+    "threads": "Threads"
   },
   "palette": {
     "trigger": "Search or jump to…",
@@ -741,6 +742,110 @@
     }
   },
   "fleet": {
+    "threads": {
+      "list": {
+        "title": "Threads",
+        "status": "Thread status",
+        "active": "Active",
+        "archived": "Archived",
+        "newThread": "New thread",
+        "emptyActive": "No active threads",
+        "emptyArchived": "No archived threads",
+        "creator": "Creator",
+        "feature": "Feature",
+        "backend": "Backend",
+        "session": "Session",
+        "lastActivity": "Last activity",
+        "cost": "Cost"
+      },
+      "session": {
+        "starting": "Starting",
+        "closing": "Closing",
+        "live": "Live",
+        "failed": "Failed",
+        "closed": "Closed",
+        "none": "No session"
+      },
+      "new": {
+        "title": "New thread",
+        "repo": "Repository",
+        "repoPlaceholder": "Select a repository",
+        "baseRef": "Base ref",
+        "feature": "Feature",
+        "threadTitle": "Title",
+        "maxCost": "Cost cap in USD",
+        "backend": "Native model",
+        "model": "Model",
+        "effortLabel": "Effort",
+        "effortDefault": "Default",
+        "effort": { "low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high" },
+        "noBackend": "No online enabled runner offers a native thread model.",
+        "noPermission": "Only project administrators and developers can create threads.",
+        "skills": "Enabled project skills",
+        "create": "Create thread",
+        "validation": {
+          "required": "Required",
+          "invalid": "Enter a valid value",
+          "repoRequired": "Choose a repository",
+          "baseRef": "Base ref must be at most 255 characters",
+          "feature": "Use a valid feature name",
+          "title": "Title must be 1 to 200 characters without control characters"
+        }
+      },
+      "detail": {
+        "title": "Thread",
+        "contextReset": "Context reset",
+        "streaming": "Streaming…",
+        "tokens": "tokens",
+        "status": {
+          "errored": "Errored",
+          "cancelled": "Cancelled",
+          "timed_out": "Timed out",
+          "interrupted": "Interrupted"
+        }
+      },
+      "tool": {
+        "running": "Running",
+        "ok": "OK",
+        "error": "Error",
+        "denied": "Denied",
+        "unfinished": "Unfinished"
+      },
+      "composer": {
+        "placeholder": "Message the thread…",
+        "send": "Send",
+        "stop": "Stop",
+        "readOnly": "You can read this thread, but only the creator can send messages."
+      },
+      "controls": {
+        "endSession": "End session",
+        "raiseCap": "Raise cap",
+        "raiseCapTitle": "Raise the cost cap",
+        "capLabel": "New cap in USD (0.0001 to 10000, at most 4 decimals)",
+        "archive": "Archive",
+        "archiveTitle": "Archive this thread?",
+        "archiveBody": "The thread is closed to new turns. You cannot undo this.",
+        "confirm": "Confirm"
+      },
+      "question": {
+        "placeholder": "Answer the question…",
+        "send": "Send"
+      },
+      "message": {
+        "required": "Message cannot be empty.",
+        "tooLong": "Message must be 32768 bytes or fewer."
+      },
+      "refusal": {
+        "disabled": "Sending is disabled for this thread.",
+        "archived": "This thread is archived.",
+        "costCap": "The cost cap has been reached.",
+        "budgetPaused": "The project budget is paused.",
+        "runnerOffline": "The runner is offline.",
+        "runnerOutdated": "The runner is outdated.",
+        "closing": "Sending is closing the session - retrying.",
+        "turnRunning": "A turn is running. Stop it to send a new message."
+      }
+    },
     "common": {
       "online": "Online",
       "offline": "Offline",

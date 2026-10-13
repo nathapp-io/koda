@@ -137,4 +137,24 @@ describe('Fleet locale parity (en and zh)', () => {
     expect([...ENUMS['fleet.dashboard.attention.condition.credential']].sort()).toEqual([...CREDENTIAL_WHY].sort())
     expect(ENUMS['fleet.credentials.state'].filter((s) => s !== 'unknown').sort()).toEqual([...CELL_STATES].sort())
   })
+
+  // US-007: composer, session controls and the E2E journey. `fleet.threads.refusal.<reason>`
+  // is rendered through a dynamic key (composerState.reason), so used-keys-exist.spec cannot
+  // see it; the pin below locks the key set to the API's ThreadSendRefusal values, plus the
+  // composer/controls subtrees the page renders.
+  test('the thread refusal keys cover exactly the ThreadSendRefusal values in both locales (US-007)', () => {
+    const refusalKeys = ['disabled', 'archived', 'costCap', 'budgetPaused', 'runnerOffline', 'runnerOutdated', 'closing', 'turnRunning']
+    for (const locale of [en, zh]) {
+      const refusal = at(locale, 'fleet.threads.refusal') as Tree | undefined
+      expect(Object.keys(refusal ?? {}).sort()).toEqual([...refusalKeys].sort())
+      for (const key of refusalKeys) {
+        expect(String(at(locale, `fleet.threads.refusal.${key}`) ?? '').trim()).not.toBe('')
+      }
+      expect(String(at(locale, 'fleet.threads.composer.readOnly') ?? '').trim()).not.toBe('')
+      const composer = at(locale, 'fleet.threads.composer') as Tree | undefined
+      const controls = at(locale, 'fleet.threads.controls') as Tree | undefined
+      expect(Object.keys(composer ?? {}).length).toBeGreaterThan(1)
+      expect(Object.keys(controls ?? {}).length).toBeGreaterThan(0)
+    }
+  })
 })

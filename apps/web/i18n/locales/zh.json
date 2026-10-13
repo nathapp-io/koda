@@ -86,7 +86,8 @@
     "sectionAdmin": "管理",
     "sectionWork": "工作",
     "sectionKnowledge": "知识",
-    "sectionFleet": "机群"
+    "sectionFleet": "机群",
+    "threads": "线程"
   },
   "palette": {
     "trigger": "搜索或跳转…",
@@ -741,6 +742,110 @@
     }
   },
   "fleet": {
+    "threads": {
+      "list": {
+        "title": "线程",
+        "status": "线程状态",
+        "active": "进行中",
+        "archived": "已归档",
+        "newThread": "新建线程",
+        "emptyActive": "没有进行中的线程",
+        "emptyArchived": "没有已归档的线程",
+        "creator": "创建者",
+        "feature": "功能",
+        "backend": "后端",
+        "session": "会话",
+        "lastActivity": "最近活动",
+        "cost": "费用"
+      },
+      "session": {
+        "starting": "启动中",
+        "closing": "关闭中",
+        "live": "运行中",
+        "failed": "失败",
+        "closed": "已关闭",
+        "none": "无会话"
+      },
+      "new": {
+        "title": "新建线程",
+        "repo": "代码库",
+        "repoPlaceholder": "选择代码库",
+        "baseRef": "基础分支",
+        "feature": "功能标识",
+        "threadTitle": "标题",
+        "maxCost": "费用上限（美元）",
+        "backend": "原生模型",
+        "model": "模型",
+        "effortLabel": "推理强度",
+        "effortDefault": "默认",
+        "effort": { "low": "低", "medium": "中", "high": "高", "xhigh": "极高" },
+        "noBackend": "没有在线且启用的执行机提供原生线程模型。",
+        "noPermission": "只有项目管理员和开发者可以创建线程。",
+        "skills": "已启用的项目技能",
+        "create": "创建线程",
+        "validation": {
+          "required": "必填",
+          "invalid": "请输入有效值",
+          "repoRequired": "请选择代码库",
+          "baseRef": "基础分支最多为 255 个字符",
+          "feature": "请输入有效的功能标识",
+          "title": "标题需为 1 至 200 个字符且不能包含控制字符"
+        }
+      },
+      "detail": {
+        "title": "线程",
+        "contextReset": "上下文已重置",
+        "streaming": "流式生成中…",
+        "tokens": "个 token",
+        "status": {
+          "errored": "已出错",
+          "cancelled": "已取消",
+          "timed_out": "已超时",
+          "interrupted": "已中断"
+        }
+      },
+      "tool": {
+        "running": "运行中",
+        "ok": "已完成",
+        "error": "出错",
+        "denied": "已拒绝",
+        "unfinished": "未完成"
+      },
+      "composer": {
+        "placeholder": "给线程发消息…",
+        "send": "发送",
+        "stop": "停止",
+        "readOnly": "你可以阅读该线程，但只有创建者可以发送消息。"
+      },
+      "controls": {
+        "endSession": "结束会话",
+        "raiseCap": "提高上限",
+        "raiseCapTitle": "提高费用上限",
+        "capLabel": "新的上限（美元，0.0001 至 10000，最多 4 位小数）",
+        "archive": "归档",
+        "archiveTitle": "归档该线程？",
+        "archiveBody": "该线程已关闭，无法再开启新对话，且无法撤销。",
+        "confirm": "确认"
+      },
+      "question": {
+        "placeholder": "回答问题…",
+        "send": "发送"
+      },
+      "message": {
+        "required": "消息不能为空。",
+        "tooLong": "消息长度不能超过 32768 字节。"
+      },
+      "refusal": {
+        "disabled": "该线程已禁止发送。",
+        "archived": "该线程已归档。",
+        "costCap": "已达到费用上限。",
+        "budgetPaused": "项目预算已暂停。",
+        "runnerOffline": "执行机离线。",
+        "runnerOutdated": "执行机版本过旧。",
+        "closing": "正在关闭会话，正在重试。",
+        "turnRunning": "对话正在进行，请先停止再发送新消息。"
+      }
+    },
     "common": {
       "online": "在线",
       "offline": "离线",
