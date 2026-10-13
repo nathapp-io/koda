@@ -15,7 +15,7 @@ const ctx: ThreadToolContext = {
 describe('buildThreadTools as nax-agent embedder tools', () => {
   test('every tool carries a name, a description, an object input schema and approval never', () => {
     const tools = buildThreadTools(ctx);
-    expect(tools.map((tool) => tool.name)).toEqual(['list_files', 'search_repo', 'load_skill', 'read_skill_file']);
+    expect(tools.map((tool) => tool.name)).toEqual(['list_files', 'search_repo', 'load_skill', 'read_skill_file', 'write_doc']);
     for (const tool of tools) {
       expect(typeof tool.description).toBe('string');
       expect(tool.description.length).toBeGreaterThan(0);
@@ -26,6 +26,6 @@ describe('buildThreadTools as nax-agent embedder tools', () => {
 
   test('the tool set is assignable to the session options tools field', () => {
     const tools: NonNullable<CreateAgentSessionOptions['tools']> = buildThreadTools(ctx);
-    expect(tools.length).toBe(4);
+    expect(tools.length).toBe(5);
   });
 });

@@ -8,7 +8,14 @@ import { assertFeature, assertSegment } from '../paths/safe-segment';
 import type { RepoMutex } from '../supervisor/repo-mutex';
 import { threadDirFor, threadMetaPath, threadWorktreeDir } from './thread-paths';
 
-export type ThreadWorktreeResult = { ok: true; worktree: string; tipSha: string } | { ok: false; reason: string };
+/**
+ * `stale` is true when the existing worktree could not move to the branch tip because its local changes or
+ * untracked files would be overwritten: the worktree stays as it was and `tipSha` is its HEAD, the sha the
+ * session starts on until a Discard re-detaches it.
+ */
+export type ThreadWorktreeResult =
+  | { ok: true; worktree: string; tipSha: string; stale: boolean }
+  | { ok: false; reason: string };
 
 /** The repository a thread belongs to; a caller may name it instead of a commit author. */
 export interface ThreadRepoIdentity {
@@ -45,6 +52,8 @@ const LOCK_REASON = 'koda-thread';
 /** `placeWorktree` locks every worktree, and git withdraws a locked worktree only with `--force` twice. */
 const FORCE_LOCKED = ['--force', '--force'] as const;
 const REF_LOCK_ERROR = /cannot lock ref|unable to lock/;
+/** `createGit` forces `LC_ALL=C`, so git's refusal to overwrite local changes or untracked files reads the same everywhere. */
+const WOULD_BE_OVERWRITTEN = /would be overwritten/;
 
 async function exists(path: string): Promise<boolean> {
   return stat(path).then(() => true, () => false);
@@ -66,7 +75,7 @@ async function readJson(path: string): Promise<unknown> {
 const KILLED_EXIT_CODE = 137;
 
 /** Git could not start (a spawn failure) or never reached a verdict (SIGKILL at the timeout). */
-function isOperationalFailure(error: unknown): boolean {
+export function isOperationalFailure(error: unknown): boolean {
   if (error instanceof GitError) return error.result.code === KILLED_EXIT_CODE;
   return typeof error === 'object' && error !== null && typeof (error as { code?: unknown }).code === 'string';
 }
@@ -84,10 +93,10 @@ async function refSha(git: Git, repoDir: string, ref: string): Promise<string | 
   return sha?.trim() || null;
 }
 
-type Tip = { readonly ok: true; readonly sha: string } | { readonly ok: false; readonly reason: string };
+export type Tip = { readonly ok: true; readonly sha: string } | { readonly ok: false; readonly reason: string };
 
 /** Design §2 step 3, in `resolveRef`'s order: the local feature branch, then origin/<baseRef>, then the ref itself. */
-async function resolveTip(git: Git, repoDir: string, feature: string, baseRef: string): Promise<Tip> {
+export async function resolveTip(git: Git, repoDir: string, feature: string, baseRef: string): Promise<Tip> {
   const local = await refSha(git, repoDir, `refs/heads/feat/${feature}`);
   if (local) return { ok: true, sha: local };
   if (!GIT_REF_RE.test(baseRef)) return { ok: false, reason: 'checkout: invalid ref' };
@@ -123,8 +132,17 @@ async function listWorktrees(git: Git, repoDir: string): Promise<Set<string>> {
   return new Set(await Promise.all(paths.map(normalizeWorktreePath)));
 }
 
-/** Design §2 step 5: register the worktree, keep it locked, and detach it at the tip. */
-async function placeWorktree(git: Git, repoDir: string, wt: string, tipSha: string): Promise<string | null> {
+/** Where a worktree ended up: at the tip, or stale on its own HEAD because the tip would overwrite local work. */
+export type WorktreePlacement =
+  | { readonly ok: true; readonly tipSha: string; readonly stale: boolean }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * Design §2 step 5: register the worktree, keep it locked, and detach it at the tip. A checkout that git refuses
+ * because local changes or untracked files would be overwritten leaves the worktree untouched and reports its
+ * HEAD as a stale start; any other refusal is a conflict.
+ */
+async function placeWorktree(git: Git, repoDir: string, wt: string, tipSha: string): Promise<WorktreePlacement> {
   const registered = await listWorktrees(git, repoDir);
   const key = await normalizeWorktreePath(wt);
   const present = await exists(wt);
@@ -134,7 +152,10 @@ async function placeWorktree(git: Git, repoDir: string, wt: string, tipSha: stri
     await git.ok(['worktree', 'add', '--detach', '--lock', '--reason', LOCK_REASON, wt, tipSha], { cwd: repoDir });
   }
   const checkout = await git.run(['checkout', '--detach', tipSha], { cwd: wt });
-  return checkout.code === 0 ? null : 'worktree_conflict';
+  if (checkout.code === 0) return { ok: true, tipSha, stale: false };
+  if (!WOULD_BE_OVERWRITTEN.test(checkout.stderr)) return { ok: false, reason: 'worktree_conflict' };
+  const head = (await git.ok(['rev-parse', 'HEAD'], { cwd: wt })).trim();
+  return { ok: true, tipSha: head, stale: true };
 }
 
 async function writeThreadMeta(homeDir: string, threadId: string, repoDir: string): Promise<void> {
@@ -175,8 +196,8 @@ export async function prepareThreadWorktree(input: PrepareThreadWorktreeInput): 
     if (!tip.ok) return { ok: false, reason: tip.reason };
     const wt = threadWorktreeDir(input.homeDir, threadId);
     await writeThreadMeta(input.homeDir, threadId, input.repoDir);
-    const conflict = await placeWorktree(input.git, input.repoDir, wt, tip.sha);
-    return conflict === null ? { ok: true, worktree: wt, tipSha: tip.sha } : { ok: false, reason: conflict };
+    const placed = await placeWorktree(input.git, input.repoDir, wt, tip.sha);
+    return placed.ok ? { ok: true, worktree: wt, tipSha: placed.tipSha, stale: placed.stale } : { ok: false, reason: placed.reason };
   } catch (error) {
     return { ok: false, reason: reasonFromError(error) };
   }

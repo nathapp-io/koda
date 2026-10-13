@@ -65,9 +65,68 @@ describe('parseAssign THREAD (US-001)', () => {
     expect(parseAssign(cmd(assign))).toEqual({ ok: false, detail: 'invalid threadId' });
   });
 
-  test('US-001 AC-7: fixture with action PUBLISH returns invalid thread action', () => {
-    const { assign } = threadFixture({ action: 'PUBLISH' as never });
+  test('US-001 AC-7: fixture with an unknown action REVIEW returns invalid thread action', () => {
+    const { assign } = threadFixture({ action: 'REVIEW' as never });
     expect(parseAssign(cmd(assign))).toEqual({ ok: false, detail: 'invalid thread action' });
+  });
+
+  test('US-001 AC-10: fixture with action PUBLISH and initialMessage null returns assign.thread with action PUBLISH', () => {
+    const { assign } = threadFixture({ action: 'PUBLISH', initialMessage: null as never });
+    const parsed = parseAssign(cmd(assign));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.assign.thread?.action).toBe('PUBLISH');
+  });
+
+  test('US-001 AC-11: fixture with action DISCARD and initialMessage null returns assign.thread with action DISCARD', () => {
+    const { assign } = threadFixture({ action: 'DISCARD', initialMessage: null as never });
+    const parsed = parseAssign(cmd(assign));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.assign.thread?.action).toBe('DISCARD');
+  });
+
+  test('US-001 AC-12: fixture with action PUBLISH and a non-null initialMessage returns invalid initialMessage', () => {
+    const { assign } = threadFixture({ action: 'PUBLISH' });
+    expect(parseAssign(cmd(assign))).toEqual({ ok: false, detail: 'invalid initialMessage' });
+  });
+
+  test('US-001 AC-12b: fixture with action DISCARD and a non-null initialMessage returns invalid initialMessage', () => {
+    const { assign } = threadFixture({ action: 'DISCARD' });
+    expect(parseAssign(cmd(assign))).toEqual({ ok: false, detail: 'invalid initialMessage' });
+  });
+
+  test('US-001 AC-14: fixture with thread title "Divide brainstorm" returns assign.thread with that title', () => {
+    const { assign } = threadFixture({ title: 'Divide brainstorm' } as never);
+    const parsed = parseAssign(cmd(assign));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.assign.thread?.title).toBe('Divide brainstorm');
+  });
+
+  test('US-001 AC-14b: fixture without thread title returns assign.thread with no title key', () => {
+    const { assign } = threadFixture();
+    const parsed = parseAssign(cmd(assign));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.assign.thread).not.toHaveProperty('title');
+  });
+
+  test('US-001 AC-15: fixture with a 201-character thread title returns invalid thread title', () => {
+    const { assign } = threadFixture({ title: 'a'.repeat(201) } as never);
+    expect(parseAssign(cmd(assign))).toEqual({ ok: false, detail: 'invalid thread title' });
+  });
+
+  test('US-001 AC-15b: fixture with an empty thread title returns invalid thread title', () => {
+    const { assign } = threadFixture({ title: '' } as never);
+    expect(parseAssign(cmd(assign))).toEqual({ ok: false, detail: 'invalid thread title' });
+  });
+
+  test('US-001 AC-15c: fixture with a 200-character thread title is accepted', () => {
+    const { assign } = threadFixture({ title: 'a'.repeat(200) } as never);
+    const parsed = parseAssign(cmd(assign));
+    expect(parsed.ok).toBe(true);
+  });
+
+  test('US-001 AC-15d: fixture with a non-string thread title returns invalid thread title', () => {
+    const { assign } = threadFixture({ title: 42 } as never);
+    expect(parseAssign(cmd(assign))).toEqual({ ok: false, detail: 'invalid thread title' });
   });
 
   test('US-001 AC-8: fixture with thread feature ../x returns invalid thread feature', () => {

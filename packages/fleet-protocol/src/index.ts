@@ -11,6 +11,7 @@ export const FLEET_PROTOCOL_VERSION = 4 as const;
 export * from './nax-config-paths';
 export * from './config-jobs';
 export * from './threads';
+export * from './thread-doc-paths';
 import type { ConfigJobKind, ConfigJobResult } from './config-jobs';
 import type { ThreadAnswerPayload, ThreadAssign, ThreadBackends, ThreadCommandType, ThreadInputPayload } from './threads';
 
@@ -75,6 +76,8 @@ export interface RunnerCapabilities {
   configJobs?: true;
   /** Fleet S5a §3: native models and ACP agents the runner can serve a thread with. Absent on older runners. */
   threadBackends?: ThreadBackends;
+  /** Fleet S5a §4: the runner writes thread docs and runs PUBLISH / DISCARD jobs. Absent on older runners. */
+  threadWrite?: true;
 }
 
 export interface EnrollRequest {

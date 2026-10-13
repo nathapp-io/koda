@@ -23,11 +23,20 @@ export interface ThreadWakeSink {
   wake(jobId: string, leaseEpoch: number): void;
 }
 
-/** The `session_started` line's payload. */
+/** The `session_started` line's payload. `stale: true` marks a start on the worktree's old HEAD (S5a C1). */
 export interface ThreadSessionStart {
   readonly resumed: boolean;
   readonly backend: ThreadBackend;
   readonly skillShas: string[];
+  readonly stale?: boolean;
+}
+
+/** The `published` line's payload: the commit a Publish made, or the HEAD it found when nothing was staged. */
+export interface ThreadPublishedLine {
+  readonly sha: string;
+  readonly paths: string[];
+  readonly ignored: string[];
+  readonly specPresent: boolean;
 }
 
 /**
@@ -188,7 +197,9 @@ export class ThreadEventWriter {
 
   started(start: ThreadSessionStart): void {
     this.releaseAll();
-    this.appendRunner({ type: 'session_started', at: this.now().toISOString(), resumed: start.resumed, backend: start.backend, skillShas: start.skillShas });
+    // `stale` is written only when true: a fresh start keeps the B3b line exactly as it was.
+    const stale = start.stale === true ? { stale: true } : {};
+    this.appendRunner({ type: 'session_started', at: this.now().toISOString(), resumed: start.resumed, backend: start.backend, skillShas: start.skillShas, ...stale });
   }
 
   inputConsumed(messageId: string): void {
@@ -204,6 +215,55 @@ export class ThreadEventWriter {
   failed(reason: string): void {
     this.releaseAll();
     this.appendRunner({ type: 'session_failed', at: this.now().toISOString(), reason });
+  }
+
+  /** A `write_doc` call wrote `bytes` to `path`; the file stays uncommitted until Publish. */
+  docWritten(path: string, bytes: number): void {
+    this.releaseAll();
+    this.appendRunner({ type: 'write_doc', at: this.now().toISOString(), path, bytes });
+  }
+
+  /**
+   * A Publish committed (or found nothing to commit): the commit's sha, the paths it took and the ones it skipped.
+   * Returns the line type actually written, since an oversized result is persisted as `publish_failed`.
+   */
+  published(result: ThreadPublishedLine): 'published' | 'publish_failed' {
+    this.releaseAll();
+    const line = {
+      type: 'published',
+      at: this.now().toISOString(),
+      sha: result.sha,
+      paths: [...result.paths],
+      ignored: [...result.ignored],
+      specPresent: result.specPresent,
+    };
+    if (lineBytes(line) > LINE_MAX_BYTES) {
+      // Never persist a runner line the API cannot parse. The publisher checks this before
+      // committing; this is a final guard for alternate host implementations.
+      this.onWarn(`oversized publication result (${LINE_MAX_BYTES}-byte line limit)`);
+      this.appendRunner({ type: 'publish_failed', at: line.at, reason: 'git_error' });
+      return 'publish_failed';
+    }
+    this.appendRunner(line);
+    return 'published';
+  }
+
+  /** A Publish failed; `reason` is one of the `ThreadPublishFailReason` values the runner produces. */
+  publishFailed(reason: string): void {
+    this.releaseAll();
+    this.appendRunner({ type: 'publish_failed', at: this.now().toISOString(), reason });
+  }
+
+  /** A Discard re-detached the worktree at `tipSha`, the branch tip. */
+  discarded(tipSha: string): void {
+    this.releaseAll();
+    this.appendRunner({ type: 'discarded', at: this.now().toISOString(), tipSha });
+  }
+
+  /** A Discard failed; `reason` is one of the `ThreadDiscardFailReason` values the runner produces. */
+  discardFailed(reason: string): void {
+    this.releaseAll();
+    this.appendRunner({ type: 'discard_failed', at: this.now().toISOString(), reason });
   }
 
   /** Writes every held delta, so nothing raw is lost when the session ends. */

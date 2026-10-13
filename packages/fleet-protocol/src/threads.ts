@@ -21,7 +21,9 @@ export interface ThreadBackends { native: string[]; acp: ThreadAgent[] }
 export interface ThreadSkill { name: string; dir: string; description: string }
 export interface ThreadSkillSource { sourceId: string; owner: string; repo: string; sha: string; skills: ThreadSkill[] }
 
-export type ThreadAction = 'SESSION' | 'PUBLISH';
+export type ThreadAction = 'SESSION' | 'PUBLISH' | 'DISCARD';
+export type ThreadPublishFailReason = 'branch_moved' | 'repo_busy' | 'no_worktree' | 'git_error';
+export type ThreadDiscardFailReason = 'no_worktree' | 'git_error';
 
 /** ASSIGN's `thread` block, present only for THREAD jobs. */
 export interface ThreadAssign {
@@ -34,6 +36,8 @@ export interface ThreadAssign {
   backend: ThreadBackend;
   skills: ThreadSkillSource[];
   initialMessage: { messageId: string; text: string } | null;
+  /** At most 200 characters; absent when the thread has no title. */
+  title?: string;
 }
 
 export interface ThreadInputPayload { messageId: string; text: string }
@@ -52,7 +56,12 @@ export type ThreadFailReason = 'backend_unavailable' | 'agent_not_logged_in' | '
 
 /** Lines the runner writes itself; other stream lines are nax-agent SessionEvents. */
 export type ThreadRunnerLine =
-  | { type: 'session_started'; at: string; resumed: boolean; backend: ThreadBackend; skillShas: string[] }
+  | { type: 'session_started'; at: string; resumed: boolean; backend: ThreadBackend; skillShas: string[]; stale?: true }
   | { type: 'session_closed'; at: string; reason: ThreadCloseReason }
   | { type: 'input_consumed'; at: string; messageId: string }
-  | { type: 'session_failed'; at: string; reason: ThreadFailReason };
+  | { type: 'session_failed'; at: string; reason: ThreadFailReason }
+  | { type: 'write_doc'; at: string; path: string; bytes: number }
+  | { type: 'published'; at: string; sha: string; paths: string[]; ignored: string[]; specPresent: boolean }
+  | { type: 'publish_failed'; at: string; reason: ThreadPublishFailReason }
+  | { type: 'discarded'; at: string; tipSha: string }
+  | { type: 'discard_failed'; at: string; reason: ThreadDiscardFailReason };
