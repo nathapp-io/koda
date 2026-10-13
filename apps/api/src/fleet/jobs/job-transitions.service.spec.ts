@@ -160,6 +160,8 @@ describe('JobTransitionsService thread end events (#264)', () => {
     const r = await svc.apply({ job: threadJob(), to: 'CRASHED', by: 'server', now: NOW, actor: SYSTEM_ACTOR, reason: 'runner silent' });
     expect(threadEffects.onJobEnded).toHaveBeenCalledWith(expect.objectContaining({ id: 'j1', state: 'CRASHED' }));
     expect(r.live).toMatchObject({ type: 'fleet_job', jobId: 'j1', threadEvents: THREAD_EVENTS });
+    // Publishing is the caller's job after commit; apply runs inside the transaction.
+    expect(live.publish).not.toHaveBeenCalled();
   });
 
   it('a terminal THREAD transition with the idle close also carries the thread events', async () => {

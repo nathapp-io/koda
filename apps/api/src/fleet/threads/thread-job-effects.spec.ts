@@ -70,8 +70,9 @@ function endedPrisma(opts: { open?: Array<{ id: string }>; session?: unknown } =
     updateMany: vi.fn(async () => ({ count: 1 })),
     update: vi.fn(async () => thread),
   };
-  const client = { chatMessage, chatThread, fleetJob: {}, fleetCommand: {} };
-  return { prisma: { client } as never, chatMessage, chatThread };
+  const $queryRaw = vi.fn(async () => []);
+  const client = { chatMessage, chatThread, fleetJob: {}, fleetCommand: {}, $queryRaw };
+  return { prisma: { client } as never, chatMessage, chatThread, $queryRaw };
 }
 
 const liveSession = (over: Record<string, unknown> = {}) => ({
@@ -131,6 +132,24 @@ describe('ThreadJobEffects.onJobEnded (#264)', () => {
       where: { id: 'T' },
       data: { session: expect.objectContaining({ jobId: 'J', state: 'closed', reason: 'completed' }) },
     });
+  });
+
+  it('closes the snapshot with the job stateReason and finishedAt when the transition set them', async () => {
+    const { prisma, chatThread } = endedPrisma({ session: liveSession() });
+    const finishedAt = new Date('2026-10-13T07:16:09.940Z');
+    const events = await new ThreadJobEffects(prisma).onJobEnded(endedJob({ state: 'CRASHED', stateReason: 'runner silent', finishedAt }));
+    expect(chatThread.update).toHaveBeenCalledWith({
+      where: { id: 'T' },
+      data: { session: expect.objectContaining({ state: 'failed', reason: 'runner silent', at: finishedAt.toISOString() }) },
+    });
+    expect(events.every((e) => e.at === finishedAt.toISOString())).toBe(true);
+  });
+
+  it('locks the thread row before it reads or writes the messages', async () => {
+    const { prisma, chatMessage, $queryRaw } = endedPrisma({ open: [{ id: 'm1' }] });
+    await new ThreadJobEffects(prisma).onJobEnded(endedJob());
+    expect($queryRaw).toHaveBeenCalledTimes(1);
+    expect($queryRaw.mock.invocationCallOrder[0]).toBeLessThan(chatMessage.findMany.mock.invocationCallOrder[0]);
   });
 
   it('leaves a snapshot the runner already closed untouched', async () => {

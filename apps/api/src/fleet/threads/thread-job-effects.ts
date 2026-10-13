@@ -40,27 +40,29 @@ export class ThreadJobEffects {
   async onJobEnded(job: FleetJobRecord): Promise<ThreadLiveEvent[]> {
     if (!isThreadKind(job.command) || !job.threadId) return [];
     const threadId = job.threadId;
+    // Lock order job -> thread -> messages, like the ingest fold and send; it also keeps findMany and updateMany on one set.
+    await this.prisma.client.$queryRaw`SELECT "id" FROM "ChatThread" WHERE "id" = ${threadId} FOR UPDATE`;
     const where = { threadId, status: { in: ['pending', 'streaming'] } };
     const open = await this.prisma.client.chatMessage.findMany({ where, select: { id: true } });
     await this.prisma.client.chatMessage.updateMany({ where, data: { status: 'errored', errorReason: job.state.toLowerCase() } });
     await this.prisma.client.chatThread.updateMany({ where: { id: threadId }, data: { pendingQuestion: Prisma.DbNull } });
-    await this.closeSnapshot(job, threadId);
-    const at = new Date().toISOString();
+    const at = (job.finishedAt ?? new Date()).toISOString();
+    await this.closeSnapshot(job, threadId, at);
     const base = { threadId, at };
     const messageEvents: ThreadLiveEvent[] = open.map(({ id }) => ({ ...base, id: randomUUID(), type: 'message', messageId: id }));
     return [...messageEvents, { ...base, id: randomUUID(), type: 'thread' }];
   }
 
   /** Closes the session snapshot only while it is still `live` and belongs to this job; the runner's own close wins. */
-  private async closeSnapshot(job: FleetJobRecord, threadId: string): Promise<void> {
+  private async closeSnapshot(job: FleetJobRecord, threadId: string, at: string): Promise<void> {
     const thread = await this.prisma.client.chatThread.findUnique({ where: { id: threadId }, select: { session: true } });
     const session = thread?.session as unknown as ThreadSession | null | undefined;
     if (!session || session.jobId !== job.id || session.state !== 'live') return;
     const closed: ThreadSession = {
       ...session,
       state: FAILED_END_STATES.includes(job.state) ? 'failed' : 'closed',
-      reason: job.state.toLowerCase(),
-      at: new Date().toISOString(),
+      reason: job.stateReason ?? job.state.toLowerCase(),
+      at,
     };
     await this.prisma.client.chatThread.update({ where: { id: threadId }, data: { session: closed as unknown as Prisma.InputJsonValue } });
   }

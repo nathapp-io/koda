@@ -5,7 +5,7 @@ import { FleetActivityService } from '../activity/fleet-activity.service';
 import { ApprovalCloser } from '../approvals/approval-closer';
 import { canTransition, isTerminal, TransitionActor } from './job-state';
 import { isConfigKind } from '../common/config-jobs';
-import { FleetJobLiveEvent, FleetJobLivePublisher } from './fleet-job-live.publisher';
+import { type FleetJobLiveEvent, FleetJobLivePublisher } from './fleet-job-live.publisher';
 import { FLEET_JOB_REPOSITORY, FleetJobPatch, FleetJobRecord, IFleetJobRepository } from './domain/fleet-job.domain';
 import { ScheduleProgressService } from '../schedules/schedule-progress.service';
 import { SYSTEM_ACTOR, type TransitionActorRef } from '../common/system-actor';
