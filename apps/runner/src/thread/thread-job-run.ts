@@ -38,7 +38,7 @@ export type ThreadLogInput = Seam<ThreadLogJob>;
  * reports it verbatim in the row's FAILED event, and a test double that widens it (`reason: string`) fits.
  */
 export type ThreadPrepareResult =
-  | { ok: true; worktree: string; tipSha: string }
+  | { ok: true; worktree: string; tipSha: string; stale?: boolean }
   | { ok: false; reason: string };
 
 export type ThreadSkillsResult = { ok: true } | { ok: false; reason: string };

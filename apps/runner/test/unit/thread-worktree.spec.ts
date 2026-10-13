@@ -171,10 +171,11 @@ describe('thread worktree preparation (US-005)', () => {
     expect(result).toEqual({ ok: false, reason: 'checkout: ref not found' });
   });
 
-  test('US-005 AC-9: refuses a checkout that conflicts with untracked worktree content', async () => {
+  test('US-005 AC-9: a checkout refused for local changes is a stale start on the worktree HEAD', async () => {
     const git = fakeGit();
     const wt = threadWorktreeDir(homeDir, threadId);
     git.worktrees.add(wt);
+    git.refs.set('HEAD', 'worktree-head-sha');
     await mkdir(wt, { recursive: true });
     await writeFile(join(threadDirFor(homeDir, threadId), 'thread.json'), JSON.stringify({ repoDir }));
     git.run = async (args, options) => {
@@ -183,7 +184,82 @@ describe('thread worktree preparation (US-005)', () => {
       return { code: 0, stdout: '', stderr: '' };
     };
     const result = await prepare(git);
-    expect(result).toMatchObject({ ok: false, reason: 'worktree_conflict' });
+    expect(result).toEqual({ ok: true, worktree: wt, tipSha: 'worktree-head-sha', stale: true });
+  });
+
+  test('US-005 stale AC-1: a checkout refused for untracked files is a stale start, not a conflict', async () => {
+    const git = fakeGit();
+    const wt = threadWorktreeDir(homeDir, threadId);
+    git.worktrees.add(wt);
+    git.refs.set('HEAD', 'worktree-head-sha');
+    await mkdir(wt, { recursive: true });
+    git.run = async (args, options) => {
+      git.calls.push({ args, options });
+      if (args[0] === 'checkout') return { code: 1, stdout: '', stderr: 'untracked working tree files would be overwritten by checkout' };
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    const result = await prepare(git);
+    expect(result).toMatchObject({ ok: true, stale: true });
+  });
+
+  test('US-005 stale AC-2: the stale start is on the worktree HEAD, not the refused tip', async () => {
+    const git = fakeGit();
+    const wt = threadWorktreeDir(homeDir, threadId);
+    git.worktrees.add(wt);
+    git.refs.set('HEAD', 'worktree-head-sha');
+    await mkdir(wt, { recursive: true });
+    git.run = async (args, options) => {
+      git.calls.push({ args, options });
+      if (args[0] === 'checkout') return { code: 1, stdout: '', stderr: 'error: Your local changes would be overwritten by checkout' };
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    const result = await prepare(git);
+    expect(result).toMatchObject({ ok: true, tipSha: 'worktree-head-sha', stale: true });
+    expect(result).not.toMatchObject({ tipSha: 'base-sha-1' });
+    expect(git.calls.some(({ args, options }) => args[0] === 'rev-parse' && args.at(-1) === 'HEAD' && options.cwd === wt)).toBe(true);
+  });
+
+  test('US-005 stale AC-3: a checkout that succeeds in an existing worktree is not stale', async () => {
+    const git = fakeGit();
+    const wt = threadWorktreeDir(homeDir, threadId);
+    git.worktrees.add(wt);
+    await mkdir(wt, { recursive: true });
+    const result = await prepare(git);
+    expect(result).toEqual({ ok: true, worktree: wt, tipSha: 'base-sha-1', stale: false });
+  });
+
+  test('US-005 stale AC-4: a freshly added worktree is not stale', async () => {
+    const git = fakeGit();
+    const wt = threadWorktreeDir(homeDir, threadId);
+    const result = await prepare(git);
+    expect(result).toEqual({ ok: true, worktree: wt, tipSha: 'base-sha-1', stale: false });
+    expect(git.calls.some(({ args }) => args[0] === 'worktree' && args[1] === 'add' && args.includes(wt))).toBe(true);
+  });
+
+  test('US-005 stale AC-5: a checkout refused for another reason is still a worktree conflict', async () => {
+    const git = fakeGit();
+    const wt = threadWorktreeDir(homeDir, threadId);
+    git.worktrees.add(wt);
+    await mkdir(wt, { recursive: true });
+    git.run = async (args, options) => {
+      git.calls.push({ args, options });
+      if (args[0] === 'checkout') return { code: 128, stdout: '', stderr: 'fatal: reference is not a tree: base-sha-1' };
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    const result = await prepare(git);
+    expect(result).toEqual({ ok: false, reason: 'worktree_conflict' });
+  });
+
+  test('US-005 stale: a refused worktree add still fails and is not a stale start', async () => {
+    const git = fakeGit();
+    git.ok = async (args, options) => {
+      git.calls.push({ args, options });
+      if (args[0] === 'worktree' && args[1] === 'add') throw new Error('fatal: could not add worktree');
+      return '';
+    };
+    const result = await prepare(git);
+    expect(result).toMatchObject({ ok: false });
+    expect(result).not.toHaveProperty('stale');
   });
 
   test('US-005 AC-10: does not acquire the repository mutex for an existing clone', async () => {
