@@ -64,6 +64,7 @@ export interface ChatThreadRepository {
   messages(threadId: string, afterSeq: number, limit: number): Promise<ChatMessageRecord[]>;
   sendMessage(input: { projectId: string; threadId: string; userId: string; text: string; clientMessageId: string }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }>;
   publish(projectId: string, threadId: string, userId: string): Promise<{ jobId: string | null }>;
+  discard(projectId: string, threadId: string, userId: string): Promise<{ jobId: string }>;
   archivedThreadIds(runnerId: string): Promise<string[]>;
   updateCap(projectId: string, threadId: string, userId: string, maxCostUsd: string): Promise<ChatThreadRecord>;
   command(projectId: string, threadId: string, userId: string, type: string, payload: object): Promise<void>;

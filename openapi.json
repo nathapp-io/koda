@@ -9430,6 +9430,55 @@
         ]
       }
     },
+    "/api/projects/{slug}/threads/{id}/discard": {
+      "post": {
+        "operationId": "ThreadsController_discard",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jobId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Discard the thread worktree changes (creator)",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
     "/api/projects/{slug}/threads/{id}/messages": {
       "post": {
         "operationId": "ThreadsController_sendMessage",

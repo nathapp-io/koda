@@ -55,6 +55,66 @@ describe('ThreadJobEffects.onInputAck (US-004)', () => {
   });
 });
 
+const publishCommand = (over: Partial<FleetCommandRecord> = {}): FleetCommandRecord => ({
+  id: 'cmdP', runnerId: 'R', jobId: 'JP', type: FleetCommandType.THREAD_PUBLISH, leaseEpoch: 1,
+  payload: {}, createdAt: new Date(0), deliveredAt: null, ackedAt: null, ackResult: null,
+  ...over,
+});
+
+/** A fake whose thread row takes `lastWrite` writes; the job row resolves to the command's thread. */
+function publishPrisma() {
+  const chatThread = { update: vi.fn(async () => ({})), updateMany: vi.fn(async () => ({ count: 1 })) };
+  const client = { chatThread, fleetJob: { findUnique: vi.fn(async () => ({ id: 'JP', threadId: 'T' })) }, fleetCommand: { update: vi.fn(async () => ({})) }, chatMessage: {} };
+  return { prisma: { client } as never, chatThread };
+}
+
+describe('ThreadJobEffects.onInputAck for THREAD_PUBLISH (US-004)', () => {
+  it('AC-8: a rejected publish ack writes publish_failed with the ack detail to the thread lastWrite', async () => {
+    const { prisma, chatThread } = publishPrisma();
+    await new ThreadJobEffects(prisma).onInputAck(publishCommand(), 'rejected', 'turn_running');
+    expect(chatThread.update).toHaveBeenCalledWith({
+      where: { id: 'T' },
+      data: { lastWrite: { kind: 'publish_failed', jobId: 'JP', at: expect.any(String), reason: 'turn_running' } },
+    });
+  });
+
+  it('AC-8: the publish_failed lastWrite is stamped with the ack time', async () => {
+    const { prisma, chatThread } = publishPrisma();
+    const before = Date.now();
+    await new ThreadJobEffects(prisma).onInputAck(publishCommand(), 'rejected', 'turn_running');
+    const data = (chatThread.update.mock.calls[0] as unknown as [{ data: { lastWrite: { at: string } } }])[0].data;
+    const at = Date.parse(data.lastWrite.at);
+    expect(at).toBeGreaterThanOrEqual(before);
+    expect(at).toBeLessThanOrEqual(Date.now());
+  });
+
+  it('AC-8: a rejected publish ack with a detail longer than 64 characters keeps only 64', async () => {
+    const { prisma, chatThread } = publishPrisma();
+    await new ThreadJobEffects(prisma).onInputAck(publishCommand(), 'rejected', 'x'.repeat(100));
+    const data = (chatThread.update.mock.calls[0] as unknown as [{ data: { lastWrite: { reason: string } } }])[0].data;
+    expect(data.lastWrite.reason).toBe('x'.repeat(64));
+  });
+
+  it('AC-8: a rejected publish ack with the publishing detail leaves lastWrite alone (its own result line follows)', async () => {
+    const { prisma, chatThread } = publishPrisma();
+    await new ThreadJobEffects(prisma).onInputAck(publishCommand(), 'rejected', 'publishing');
+    expect(chatThread.update).not.toHaveBeenCalled();
+  });
+
+  it('AC-9: an ok publish ack writes nothing (the published line follows on the stream)', async () => {
+    const { prisma, chatThread } = publishPrisma();
+    await new ThreadJobEffects(prisma).onInputAck(publishCommand(), 'ok', '');
+    expect(chatThread.update).not.toHaveBeenCalled();
+  });
+
+  it('AC-9: an ok publish ack does not rewrite the command payload either', async () => {
+    const { prisma } = publishPrisma();
+    const fleetCommand = (prisma as unknown as { client: { fleetCommand: { update: ReturnType<typeof vi.fn> } } }).client.fleetCommand;
+    await new ThreadJobEffects(prisma).onInputAck(publishCommand(), 'ok', '');
+    expect(fleetCommand.update).not.toHaveBeenCalled();
+  });
+});
+
 const endedJob = (over: Partial<FleetJobRecord> = {}): FleetJobRecord => ({
   id: 'J', command: 'THREAD', threadId: 'T', state: 'CRASHED', ...over,
 } as FleetJobRecord);

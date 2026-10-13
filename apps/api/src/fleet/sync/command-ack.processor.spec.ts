@@ -58,6 +58,39 @@ describe('CommandAckProcessor live lists (S1.5 2a)', () => {
   });
 });
 
+describe('THREAD_PUBLISH acks (US-004)', () => {
+  const publishAck = (commandId: string, result: 'ok' | 'rejected', detail?: string) => ({ commandId, leaseEpoch: 1, result, ...(detail ? { detail } : {}) });
+  const threadPublishCommand = (): FleetCommandRecord => ({
+    id: 'cmd-p', runnerId: 'r1', jobId: 'job-1', type: 'THREAD_PUBLISH', leaseEpoch: 1, payload: {},
+    createdAt: NOW, deliveredAt: NOW, ackedAt: null, ackResult: null,
+  });
+
+  it('AC-8: routes a rejected THREAD_PUBLISH ack to the thread effects with its detail', async () => {
+    const { repo } = makeProcessor(threadPublishCommand());
+    const threadEffects = { onInputAck: vi.fn(async () => undefined) };
+    const withThreads = new CommandAckProcessor(repo as never, { apply: vi.fn() } as never, { holds: () => true, abandon: vi.fn() } as never,
+      { record: vi.fn() } as never, { lockById: vi.fn(), setOutcome: vi.fn() } as never, { run: (fn: () => unknown) => fn() } as never, threadEffects as never);
+    await withThreads.process('r1', 'boot-1', [publishAck('cmd-p', 'rejected', 'turn_running')], NOW);
+    expect(threadEffects.onInputAck).toHaveBeenCalledWith(expect.objectContaining({ type: 'THREAD_PUBLISH' }), 'rejected', 'turn_running');
+  });
+
+  it('AC-8: a rejected THREAD_PUBLISH ack does not move the job state', async () => {
+    const { processor, transitions } = makeProcessor(threadPublishCommand());
+    await processor.process('r1', 'boot-1', [publishAck('cmd-p', 'rejected', 'turn_running')], NOW);
+    expect(transitions.apply).not.toHaveBeenCalled();
+  });
+
+  it('AC-9: an ok THREAD_PUBLISH ack is routed to the thread effects and returns no live events', async () => {
+    const { repo } = makeProcessor(threadPublishCommand());
+    const threadEffects = { onInputAck: vi.fn(async () => undefined) };
+    const withThreads = new CommandAckProcessor(repo as never, { apply: vi.fn() } as never, { holds: () => true, abandon: vi.fn() } as never,
+      { record: vi.fn() } as never, { lockById: vi.fn(), setOutcome: vi.fn() } as never, { run: (fn: () => unknown) => fn() } as never, threadEffects as never);
+    const result = await withThreads.process('r1', 'boot-1', [publishAck('cmd-p', 'ok')], NOW);
+    expect(threadEffects.onInputAck).toHaveBeenCalledWith(expect.objectContaining({ type: 'THREAD_PUBLISH' }), 'ok', '');
+    expect(result).toEqual({ live: [], approvalLive: [] });
+  });
+});
+
 describe('APPROVAL_ANSWER acks (spec §3, plan D268)', () => {
   it.each([['ok', undefined], ['rejected', 'callback_failed:429']] as const)('stores %s as outcome.delivery', async (result, detail) => {
     const { processor, approvals, transitions, seedCommand, seedJob } = makeProcessor(command({ type: 'APPROVAL_ANSWER', leaseEpoch: 2, payload: { approvalId: 'a1', naxAskId: 'ask-1', choice: 'allow' } }));

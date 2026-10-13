@@ -3290,6 +3290,9 @@ describeIntegration('API Integration Tests', () => {
     const publishThread = (id: string, token = world.tokens.dev) => request(httpServer)
       .post(`/api/projects/${projectSlug}/threads/${id}/publish`).set('Authorization', `Bearer ${token}`).send({});
 
+    const discardThread = (id: string, token = world.tokens.dev) => request(httpServer)
+      .post(`/api/projects/${projectSlug}/threads/${id}/discard`).set('Authorization', `Bearer ${token}`).send({});
+
     const newThread = async (feature: string, over: Record<string, unknown> = {}) => db().chatThread.create({
       data: {
         projectId: world.projectId, repoId: world.repoId, baseRef: 'trunk', feature, title: feature,
@@ -3342,6 +3345,33 @@ describeIntegration('API Integration Tests', () => {
       expect(await db().fleetJob.count({ where: { threadId: thread.id } })).toBe(0);
     });
 
+    it('US-004 discard: queues a zero-cost DISCARD turn on a pinned runner with threadWrite', async () => {
+      const runner = await publishRunner('discard-e2e');
+      const thread = await newThread('discard-e2e', { runnerId: runner.id });
+      const result = body<{ jobId: string }>(await discardThread(thread.id).expect(200));
+      expect(result.jobId).toBeTruthy();
+      const job = await db().fleetJob.findUniqueOrThrow({ where: { id: result.jobId } });
+      expect(job).toMatchObject({ command: 'THREAD', threadId: thread.id });
+      expect(job.maxCostUsd.toString()).toBe('0');
+      expect(await db().fleetThreadTurn.findUniqueOrThrow({ where: { jobId: result.jobId } })).toMatchObject({
+        action: 'DISCARD', initialMessageId: null, resume: false,
+      });
+    });
+
+    it('US-004 discard: refuses with threads.busy while a live session job is active', async () => {
+      const { thread } = await liveSession('discard-busy');
+      const res = await discardThread(thread.id).expect(409);
+      threadMessage(res, 'threads.busy.409');
+      expect(await db().fleetJob.count({ where: { threadId: thread.id, command: 'THREAD', state: 'QUEUED' } })).toBe(0);
+    });
+
+    it('US-004 discard: refuses with threads.nothingToDiscard when the thread has no pinned runner', async () => {
+      const thread = await newThread('discard-empty');
+      const res = await discardThread(thread.id).expect(409);
+      threadMessage(res, 'threads.nothingToDiscard.409');
+      expect(await db().fleetJob.count({ where: { threadId: thread.id } })).toBe(0);
+    });
+
     it('US-004 AC5: creator send inserts a pending user message at sequence 1', async () => {
       const thread = await newThread('send-first');
       const res = await sendMessage(thread.id).expect(201);
@@ -3365,6 +3395,7 @@ describeIntegration('API Integration Tests', () => {
           repo: `${repo.owner}/${repo.name}`, baseRef: thread.baseRef, feature: thread.feature,
           specPath: thread.specPath, skills: thread.skills as unknown as ThreadSkillSource[],
         }));
+        expect(turn.instructions).toContain('write_doc');
         expect(placement).toHaveBeenCalledTimes(1);
         expect(placement).toHaveBeenCalledWith(result.jobId);
       } finally {

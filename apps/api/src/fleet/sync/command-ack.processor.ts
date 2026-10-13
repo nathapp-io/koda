@@ -65,7 +65,7 @@ export class CommandAckProcessor {
       return NO_CHANGE;
     }
     await this.repo.ackCommand(command.id, ack.result, now);
-    if (command.type === FleetCommandType.THREAD_INPUT || command.type === FleetCommandType.THREAD_ANSWER) {
+    if (command.type === FleetCommandType.THREAD_INPUT || command.type === FleetCommandType.THREAD_ANSWER || command.type === FleetCommandType.THREAD_PUBLISH) {
       await this.threadEffects?.onInputAck(command, ack.result, (ack.detail ?? '').slice(0, 200));
       return NO_CHANGE;
     }

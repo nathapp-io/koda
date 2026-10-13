@@ -6,9 +6,10 @@ export function buildThreadInstructions(input: { repo: string; baseRef: string; 
     `Goal: agree with the person on the feature's intent, then draft its spec, which belongs at ${input.specPath}.`,
     'How to work:',
     '1. Brainstorm with the person. Ask one question at a time. Read and search the code with your tools before you claim anything about it.',
-    '2. When the person agrees the intent is settled, call load_skill with "spec-writing" if it is listed below and follow it. You cannot write files in this session. Put the spec draft in your reply.',
+    `2. When the person agrees the intent is settled, call load_skill with "spec-writing" if it is listed below and follow it. Write the spec to ${input.specPath} with write_doc.`,
     '3. Then call load_skill with "spec-review" if it is listed below and review the draft against the code.',
-    'Tools: list_files and search_repo find files and text; read files with your read tool. You have no shell, no web access and no write access.',
+    'Tools: list_files and search_repo find files and text; read files with your read tool; write_doc writes docs. You have no shell and no web access.',
+    `write_doc writes Markdown (.md) files under docs/ and ${featureDir(input.feature)} only. Nothing is committed until the person presses Publish; tell them when a draft is ready to publish.`,
   ];
   if (input.skills.length === 0) return [...lines, 'Skills available: none.'].join('\n');
   lines.push('Skills available (call load_skill with the name):');
@@ -16,4 +17,9 @@ export function buildThreadInstructions(input: { repo: string; baseRef: string; 
     for (const skill of source.skills) lines.push(`- ${skill.name} — ${skill.description}`);
   }
   return lines.join('\n');
+}
+
+/** The feature folder write_doc may write under: `.nax/features/<feature>/` (spec §4). */
+function featureDir(feature: string): string {
+  return `.nax/features/${feature}/`;
 }

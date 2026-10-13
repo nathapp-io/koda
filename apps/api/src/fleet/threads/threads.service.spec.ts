@@ -35,3 +35,20 @@ describe('ThreadsService.list', () => {
     expect(closed.threadsEnabled).toBe(false);
   });
 });
+
+describe('ThreadsService.discard (US-004)', () => {
+  it('AC-1: passes the project, thread and user to the repository and returns its { jobId }', async () => {
+    const discard = vi.fn().mockResolvedValue({ jobId: 'job-d1' });
+    const threads = { discard } as unknown as ChatThreadRepository;
+    const service = new ThreadsService(
+      threads,
+      {} as unknown as IFleetRepoRepository,
+      {} as unknown as SkillsService,
+      { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
+      {} as unknown as FleetJobsService,
+    );
+
+    await expect(service.discard('p1', 't1', 'u1')).resolves.toEqual({ jobId: 'job-d1' });
+    expect(discard).toHaveBeenCalledWith('p1', 't1', 'u1');
+  });
+});
