@@ -83,7 +83,11 @@ function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?
     },
     chatThread: {
       findUnique: vi.fn(async () => thread),
-      update: vi.fn(async ({ data }: { data: Partial<typeof thread> }) => Object.assign(thread, data)),
+      update: vi.fn(async ({ data }: { data: Partial<typeof thread> }) => {
+        // Prisma rejects an update with no fields ("at least one field is required"), aborting the fold transaction.
+        if (Object.keys(data).length === 0) throw new Error('chatThread.update: empty data');
+        return Object.assign(thread, data);
+      }),
     },
     threadIngestCursor: { upsert: vi.fn(async () => cursor) },
     $executeRaw: vi.fn(async () => 0),
@@ -429,6 +433,20 @@ describe('PrismaThreadIngestRepository.fold write-path lines (US-002)', () => {
     await repo.fold(batch([writeDoc('docs/b.md')]));
     await repo.fold(batch([writeDoc('docs/a.md')]));
     expect(thread.writtenPaths).toEqual(['docs/a.md', 'docs/b.md']);
+  });
+
+  it('US-002 AC-9: a repeated write_doc for a path already held folds without an empty chatThread update', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, writtenPaths: ['docs/a.md'] });
+    await expect(repoWith(client).fold(batch([writeDoc('docs/a.md')]))).resolves.toBeDefined();
+    expect(client.chatThread.update).not.toHaveBeenCalled();
+    expect(thread.writtenPaths).toEqual(['docs/a.md']);
+  });
+
+  it('US-002 AC-9: a write_doc line that is a duplicate in one batch still emits the thread live event', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2 });
+    const result = await repoWith(client).fold(batch([writeDoc('docs/a.md'), writeDoc('docs/a.md')]));
+    expect(thread.writtenPaths).toEqual(['docs/a.md']);
+    expect(result.events.filter((event) => event.type === 'thread')).toHaveLength(1);
   });
 
   it('US-002 AC-10: a write_doc line beyond 200 distinct paths does not add its path', async () => {

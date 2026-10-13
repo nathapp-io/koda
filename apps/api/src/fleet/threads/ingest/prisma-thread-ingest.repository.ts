@@ -463,7 +463,10 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
       line,
       { jobId: batch.jobId, at: new Date().toISOString() },
     );
-    await db.chatThread.update({ where: { id: threadId }, data: this.writePatchData(patch) });
+    // A patch with no keys (a duplicate path, or a path past the cap) has nothing to write, and Prisma rejects an
+    // update with empty data. The caller still marks the thread changed, so the live event is emitted.
+    const data = this.writePatchData(patch);
+    if (Object.keys(data).length > 0) await db.chatThread.update({ where: { id: threadId }, data });
   }
 
   /** Maps a fold patch onto `ChatThread` columns. Keys the patch leaves out are not touched. */
