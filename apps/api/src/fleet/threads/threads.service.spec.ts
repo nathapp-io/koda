@@ -65,7 +65,7 @@ describe('ThreadsService.plan (US-006)', () => {
       { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
       { dispatch } as unknown as FleetJobsService,
     );
-    await expect(service.plan('p1', 't1', 'u1', {})).rejects.toMatchObject({ code: 409 });
+    await expect(service.plan('p1', 't1', 'u1', {})).rejects.toMatchObject({ code: 409, prefix: 'threads.notPublished', httpStatus: 409 });
     expect(dispatch).not.toHaveBeenCalled();
   });
 });

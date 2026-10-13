@@ -32,6 +32,7 @@ import { buildThreadInstructions } from '../../../src/fleet/threads/thread-instr
 import type { ThreadSkillSource } from '../../../src/skills/skill-catalog.domain';
 import { PlacementService } from '../../../src/fleet/jobs/placement.service';
 import { RunnerNotifier } from '../../../src/fleet/jobs/runner-notifier';
+import { PrismaThreadIngestRepository } from '../../../src/fleet/threads/ingest/prisma-thread-ingest.repository';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -3222,6 +3223,41 @@ describeIntegration('API Integration Tests', () => {
       const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
         .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(409);
       threadMessage(res, 'threads.notPublished.409');
+    });
+
+    it('US-006 AC-3: folds a published line before planning the thread spec', async () => {
+      const thread = body<{ id: string; repoId: string; specPath: string }>(await createThread('plan-folded-publish').expect(201));
+      const ingestJob = await db().fleetJob.create({ data: {
+        projectId: world.projectId, repoId: thread.repoId, ref: 'trunk', command: 'THREAD', feature: `thread-${thread.id}`,
+        profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, threadId: thread.id, state: 'COMPLETED',
+      } });
+      const line = { type: 'published' as const, sha: 'a'.repeat(40), paths: [thread.specPath], ignored: [], specPresent: true };
+      await app.get(PrismaThreadIngestRepository, { strict: false }).fold({
+        jobId: ingestJob.id, leaseEpoch: 0, lines: [{ line, endOffset: 128 }], endOffset: 128, badLines: 0,
+      });
+      expect((await db().chatThread.findUniqueOrThrow({ where: { id: thread.id } })).specPublished).toBe(true);
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(201);
+      const result = body<{ job: { id: string; ref: string; feature: string; planFrom: string } }>(res);
+      expect(result.job).toMatchObject({ ref: 'feat/plan-folded-publish', feature: 'plan-folded-publish', planFrom: thread.specPath });
+    });
+
+    it('US-006 AC-15: placing a thread plan queues ASSIGN with the expected branch', async () => {
+      const feature = 'plan-assign-payload';
+      const thread = body<{ id: string }>(await createThread(feature).expect(201));
+      const runner = await db().runner.create({ data: {
+        name: `plan-${thread.id}`, apiKeyHash: `plan-hash-${thread.id}`, os: 'linux', arch: 'x64', labels: [],
+        capabilities: {
+          nax: { version: '0.83.0', protocols: ['native'] }, sandbox: { available: true, probedAt: new Date().toISOString() },
+          profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'],
+        },
+        daemonVersion: '0.1.0', protocolVersion: 4, bootId: `plan-boot-${thread.id}`, lastSeenAt: new Date(), createdById: world.ids.root,
+      } });
+      await db().chatThread.update({ where: { id: thread.id }, data: { runnerId: runner.id, specPublished: true } });
+      const result = body<{ job: { id: string } }>(await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(201));
+      const assign = await db().fleetCommand.findFirst({ where: { jobId: result.job.id, type: 'ASSIGN' }, select: { payload: true } });
+      expect(assign?.payload).toMatchObject({ expectBranch: `feat/${feature}` });
     });
 
     it('US-006 AC-1/8: dispatches a published thread plan on its feature ref with the default cap', async () => {

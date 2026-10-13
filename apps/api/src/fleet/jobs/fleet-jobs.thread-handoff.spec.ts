@@ -20,7 +20,7 @@ describe('FleetJobsService thread handoff dispatch', () => {
 
     await expect(service.dispatch('u1', 'p1', {
       repoId: 'r1', command: 'PLAN', feature: 'auth', ref: 'feat/auth', planFrom: 'spec.md', maxCostUsd: 5,
-    } as never, { threadId: 't1' })).rejects.toMatchObject({ code: 409 });
+    } as never, { threadId: 't1' })).rejects.toMatchObject({ code: 409, prefix: 'threads.busy', httpStatus: 409 });
     expect(repo.lockIdleThread).toHaveBeenCalledWith('t1');
     expect(repo.createJob).not.toHaveBeenCalled();
   });
