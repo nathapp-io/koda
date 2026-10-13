@@ -91,7 +91,8 @@ export async function publishThreadDocs(input: PublishThreadDocsInput): Promise<
       const newSha = (await git.ok(['rev-parse', 'HEAD'], options)).trim();
       const updated = await git.run(['update-ref', ref, newSha, current ?? ZERO_SHA], options);
       if (updated.code !== 0) {
-        await git.run(['reset', '--soft', head], options);
+        const reset = await git.run(['reset', '--soft', head], options);
+        if (reset.code !== 0) throw new Error(reset.stderr || `git reset failed (exit ${reset.code})`);
         return { ok: false, reason: 'branch_moved' };
       }
       sha = newSha;

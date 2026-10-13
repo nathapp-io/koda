@@ -83,6 +83,22 @@ test('advances feat branch when it equals HEAD and refuses a moved branch', asyn
   expect(mutex.isLocked('r1')).toBe(false);
 });
 
+test('reports git_error when the soft-reset rollback fails after update-ref fails', async () => {
+  await write('docs/a.md');
+  const real = createGit();
+  const failingRollback: Git = {
+    async run(args, options) {
+      if (args[0] === 'update-ref') return { code: 1, stdout: '', stderr: 'branch compare failed' };
+      if (args[0] === 'reset') return { code: 1, stdout: '', stderr: 'rollback failed' };
+      return real.run(args, options);
+    },
+    async ok(args, options) { return real.ok(args, options); },
+  };
+  const result = await publish({ git: failingRollback });
+  expect(result).toEqual({ ok: false, reason: 'git_error', detail: 'rollback failed' });
+  expect(mutex.isLocked('r1')).toBe(false);
+});
+
 test('does not wait for a held mutex and releases the mutex after success', async () => {
   const release = await mutex.acquire('r1');
   expect(await publish()).toEqual({ ok: false, reason: 'repo_busy' });
