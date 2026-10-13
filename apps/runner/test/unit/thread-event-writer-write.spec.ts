@@ -80,6 +80,12 @@ describe('ThreadEventWriter write-path lines (US-002)', () => {
     expect(JSON.parse(line)).toMatchObject({ type: 'publish_failed', reason: 'git_error' });
   });
 
+  test('US-002: published returns the line type it actually emitted', () => {
+    const { writer } = makeWriter();
+    expect(writer.published({ sha: 'abc', paths: ['docs/a.md'], ignored: [], specPresent: false })).toBe('published');
+    expect(writer.published({ sha: 'a'.repeat(64), paths: Array.from({ length: 2_000 }, (_, index) => `docs/${index}-${'x'.repeat(40)}.md`), ignored: [], specPresent: false })).toBe('publish_failed');
+  });
+
   test('US-002 AC-5: publishFailed writes a publish_failed line deep-equal to its reason', async () => {
     const { path, writer } = makeWriter();
     writer.publishFailed('repo_busy');

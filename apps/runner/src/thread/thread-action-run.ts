@@ -38,7 +38,7 @@ export async function runThreadAction(input: {
       result = { ok: false, reason: 'git_error' };
     }
     if (input.halted()) return;
-    if (result.ok) { writer.published(result); reason = 'published'; }
+    if (result.ok) reason = writer.published(result);
     else { writer.publishFailed(result.reason); reason = 'publish_failed'; }
   } else {
     let result: ThreadDiscardResult;

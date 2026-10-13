@@ -223,8 +223,11 @@ export class ThreadEventWriter {
     this.appendRunner({ type: 'write_doc', at: this.now().toISOString(), path, bytes });
   }
 
-  /** A Publish committed (or found nothing to commit): the commit's sha, the paths it took and the ones it skipped. */
-  published(result: ThreadPublishedLine): void {
+  /**
+   * A Publish committed (or found nothing to commit): the commit's sha, the paths it took and the ones it skipped.
+   * Returns the line type actually written, since an oversized result is persisted as `publish_failed`.
+   */
+  published(result: ThreadPublishedLine): 'published' | 'publish_failed' {
     this.releaseAll();
     const line = {
       type: 'published',
@@ -239,9 +242,10 @@ export class ThreadEventWriter {
       // committing; this is a final guard for alternate host implementations.
       this.onWarn(`oversized publication result (${LINE_MAX_BYTES}-byte line limit)`);
       this.appendRunner({ type: 'publish_failed', at: line.at, reason: 'git_error' });
-      return;
+      return 'publish_failed';
     }
     this.appendRunner(line);
+    return 'published';
   }
 
   /** A Publish failed; `reason` is one of the `ThreadPublishFailReason` values the runner produces. */

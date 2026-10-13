@@ -148,6 +148,18 @@ describe('Thread action jobs (US-007)', () => {
     ctx.journal.close();
   });
 
+  test('an oversized successful alternate-host publish completes with publish_failed and one result line', async () => {
+    const oversized = { ok: true, sha: 'a'.repeat(64), paths: Array.from({ length: 2_000 }, (_, index) => `docs/${index}-${'x'.repeat(40)}.md`), ignored: [], specPresent: false };
+    const ctx = setup('PUBLISH', { publish: async () => oversized });
+    await mkdir(join(workspaceRoot, '.jobs', jobId), { recursive: true });
+    await (await ctx.run()).start('prepare');
+    const lines = (await readFile(join(workspaceRoot, '.jobs', jobId, 'thread-events.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ type: 'publish_failed', reason: 'git_error' });
+    expect(states(ctx.journal).at(-1)).toEqual({ to: 'COMPLETED', reason: 'publish_failed' });
+    ctx.journal.close();
+  });
+
   test('a failed action is still completed with its result-line reason', async () => {
     const ctx = setup('PUBLISH', { publish: async () => ({ ok: false, reason: 'repo_busy' }) });
     await mkdir(join(workspaceRoot, '.jobs', jobId), { recursive: true });
