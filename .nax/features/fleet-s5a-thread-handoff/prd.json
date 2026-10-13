@@ -3,7 +3,7 @@
   "feature": "fleet-s5a-thread-handoff",
   "branchName": "feat/fleet-s5a-thread-handoff",
   "createdAt": "2026-10-13T00:00:00.000Z",
-  "updatedAt": "2026-10-13T13:48:05.827Z",
+  "updatedAt": "2026-10-13T16:46:04.484Z",
   "userStories": [
     {
       "id": "US-001",
@@ -32,14 +32,17 @@
         "placement"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Additive migration, strict capability parser, small placement branch; 2-5 modules with standard patterns."
+        "reasoning": "Additive migration, strict capability parser, small placement branch; 2-5 modules with standard patterns.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/prisma/schema.prisma",
@@ -62,7 +65,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "0117f9c722ab6dd4331cb958b26e24e1b4d64b34"
     },
     {
       "id": "US-002",
@@ -93,14 +100,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Extends an existing parser and fold with one new pure module (writeLinePatch) under the existing locks; no new abstractions or access control, so the light strategy suffices."
+        "reasoning": "Extends an existing parser and fold with one new pure module (writeLinePatch) under the existing locks; no new abstractions or access control, so the light strategy suffices.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/threads/ingest/thread-line.ts",
@@ -117,11 +127,12 @@
         "writeLinePatch for a write_doc line whose path is already in writtenPaths returns a patch with no writtenPaths key",
         "parseThreadLine of a session_started line without stale returns a line with no stale key, unchanged from today"
       ],
-      "outOfScope": [
-        "US-002 only: an `at` that is not an ISO date on a write-path line, a `published.paths` entry over 512 characters, a 64-hex `sha`, a malformed `publish_failed` / `discarded` line, the `discard_failed` line (parsed and folded like `publish_failed`), `writtenPaths` left unchanged by `publish_failed`, and a `session_started` without `stale` storing no `stale` key (already pinned by the existing fold tests) share the Design tables without a dedicated acceptance criterion."
-      ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "075026cb65749e2dffec19d6c1ce6fd1fda3d088"
     },
     {
       "id": "US-003",
@@ -153,14 +164,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Locking, ordered refusal checks, refactor of sendMessage, creator-only access control on a new endpoint (security override)."
+        "reasoning": "Locking, ordered refusal checks, refactor of sendMessage, creator-only access control on a new endpoint (security override).",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
@@ -177,12 +191,6 @@
         "POST .../publish that is refused creates no FleetCommand and no FleetJob",
         "POST .../publish by an agent API key answers 403 threads.principal"
       ],
-      "outOfScope": [
-        "US-003 only: Publish answering `threads.runnerOffline` for an offline runner (the same `isRunnerOnline` check Send uses) has no dedicated acceptance criterion.",
-        "US-003 only: Publish answering `threads.turnRunning` for a `QUEUED` / `ASSIGNED` session job or a `pending` message, `threads.closing` for an `UPLOADING` job, `threads.disabled` / `threads.archived`, and the budget-pause refusal share the Design steps (and `sendRefusal`'s existing tests) without a dedicated acceptance criterion.",
-        "US-003 only: the `{ jobId: null }` body of a live Publish and the `{ jobId }` body of a `PUBLISH` job, the job's `threadId` and `pinnedRunnerId` (set by the extracted `createThreadJob` exactly as `sendMessage` sets them today), a refused request creating no command or job, and 403 `threads.principal` for an agent API key (the controller's existing `assertUser`) share the Design rules without a dedicated acceptance criterion.",
-        "US-003 only: the job-then-thread lock order, the retry when the current job changes between the pre-lock read and the lock (as `sendMessage` retries today), and the `job.dispatched` activity row of a `PUBLISH` job share `sendMessage`'s existing behaviour without a dedicated acceptance criterion."
-      ],
       "modifiedFiles": [
         {
           "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
@@ -190,7 +198,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "2d65b4789ae58e152fef021b48a4d17388f1c708"
     },
     {
       "id": "US-004",
@@ -222,14 +234,17 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Several modules with standard patterns; creator-only access control on a new endpoint (security override)."
+        "reasoning": "Several modules with standard patterns; creator-only access control on a new endpoint (security override).",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
@@ -244,9 +259,6 @@
       "suggestedCriteria": [
         "CommandAckProcessor handling a THREAD_PUBLISH ack with result rejected and detail 'publishing' leaves the thread's lastWrite unchanged"
       ],
-      "outOfScope": [
-        "US-004 only: `threads.disabled`, `threads.archived`, `threads.runnerOffline` and the budget pause on Discard follow Publish's Design steps, stop answering `threads.noSession` shares end-session's rule (C2-D7), and an ack `detail` longer than 64 characters is cut to 64, without a dedicated acceptance criterion."
-      ],
       "modifiedFiles": [
         {
           "path": "apps/api/src/fleet/threads/thread-instructions.spec.ts",
@@ -258,7 +270,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "f39c6822d516b23e64ee3d3d00adf613dd069262"
     },
     {
       "id": "US-005",
@@ -283,14 +299,17 @@
         "fleet-protocol"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Five files across protocol and runner with standard patterns; checkout tests use a real temp git repo."
+        "reasoning": "Five files across protocol and runner with standard patterns; checkout tests use a real temp git repo.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "packages/fleet-protocol/src/index.ts",
@@ -302,11 +321,12 @@
       "suggestedCriteria": [
         "parseAssign of a PLAN ASSIGN whose expectBranch fails the plain(..., 255) rule is rejected with 'invalid expectBranch'"
       ],
-      "outOfScope": [
-        "US-005 only: `expectBranch` failing the `plain` rule on a `PLAN`, the `.nax` check on the local commit, and `planVerdict` turning the `branch_mismatch` check into `FAILED` (its existing `!ok` path) share the rules in Design without a dedicated acceptance criterion."
-      ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "a31be201e1fe5a0bbd27a8ec7590141369750861"
     },
     {
       "id": "US-006",
@@ -341,14 +361,17 @@
         "US-003",
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Row-lock concurrency in dispatch, new repository method, ASSIGN payload change, detail field; project ability and creator access control (security override)."
+        "reasoning": "Row-lock concurrency in dispatch, new repository method, ASSIGN payload change, detail field; project ability and creator access control (security override).",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
@@ -366,9 +389,6 @@
         "FleetJobsService.dispatch without opts.threadId creates the job exactly as before and does not take the ChatThread lock",
         "FleetJobsService.dispatch with opts.threadId keeps answering 409 fleet.jobs with activeJobId when a dispatch-form job of the same feature is active"
       ],
-      "outOfScope": [
-        "US-006 only: 403 `threads.notCreator` on Plan (the same creator check as Publish, US-003 AC-13), `handoff.plan` picking the latest of several PLAN jobs (`queuedAt desc, id desc`, as `currentThreadJob` orders today), the losing request of two concurrent Plans answering 409 `threads.busy`, a `DuplicateActiveJobError` under `opts.threadId` keeping 409 `fleet.jobs`, `threads.disabled` and `threads.archived` on Plan, the `profiles` / `maxCostUsd` DTO bounds and `dispatch`'s budget gate share existing behaviour without a dedicated acceptance criterion."
-      ],
       "modifiedFiles": [
         {
           "path": "apps/api/src/fleet/fleet-openapi.contract.spec.ts",
@@ -380,7 +400,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "094ad822db01e14d9cd1d7afcad5d8156f88f80d"
     },
     {
       "id": "US-007",
@@ -405,14 +429,17 @@
       "dependencies": [
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "simple",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Small mirror of Plan, but creator-only and ability-gated endpoint (security override)."
+        "reasoning": "Small mirror of Plan, but creator-only and ability-gated endpoint (security override).",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/threads/threads.service.ts",
@@ -424,9 +451,6 @@
       "suggestedCriteria": [
         "POST .../run with {} creates a job whose maxCostUsd is 5"
       ],
-      "outOfScope": [
-        "US-007 only: the `CREATE FleetJob` ability check and the `maxCostUsd` default share Plan's rules (US-006), and Run's `bashMode` validation and `threads.disabled` / `threads.archived` share Plan's rules without a dedicated acceptance criterion."
-      ],
       "modifiedFiles": [
         {
           "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
@@ -434,7 +458,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "fb5c601d6d97b43fa27b0833a316922961beb76c"
     }
   ],
   "analysis": "Feature C2 of fleet S5a phase C. C1 (fleet-s5a-thread-write, #268) merged the runner write path (write_doc, Publish, stale start, Discard) and fleet-protocol types (ThreadAction, ThreadAssign.title?, ThreadRunnerLine, ThreadPublishFailReason, ThreadDiscardFailReason, RunnerCapabilities.threadWrite?). Nothing reaches them from the API yet. C2 wires the API: publish/discard/plan/run routes, ingest of five new runner stream lines plus session_started.stale, threadWrite capability parsing and placement, one-active-job-per-thread rule, write_doc instructions; plus one runner story (PLAN expectBranch).\n\nKey files (API): apps/api/prisma/schema.prisma (ChatThread ~L1057); fleet/common/capabilities-core.ts (parseCapabilitiesCore, configJobs strict pattern); fleet/jobs/placement-rules.ts (PlacementJob.thread, MisfitReason, firstMisfit, toPlacementJob); fleet/jobs/placement.service.ts (placeJob, fillRunnerThreads, private assign, budget-pause cancel at ~L70); fleet/jobs/prisma-fleet-job.repository.ts (findThreadAssign ~L192, createJob); fleet/jobs/assign-payload.ts (buildAssignPayload); fleet/jobs/fleet-jobs.service.ts (dispatch ~L63); fleet/jobs/domain/fleet-job.domain.ts (IFleetJobRepository ~L198, NewFleetJob.threadId ~L115); fleet/threads/* (prisma-chat-thread.repository.ts sendMessage/command/currentThreadJob/mapThread, threads.service.ts, threads.controller.ts, thread-send-rules.ts, thread-instructions.ts, thread-job-effects.ts, domain/chat-thread.domain.ts); fleet/threads/ingest/{thread-line.ts,prisma-thread-ingest.repository.ts}; fleet/sync/command-ack.processor.ts (routes THREAD_INPUT/THREAD_ANSWER at ~L68); i18n en/zh threads.json (409 key shape { key: { \"409\": text } }); DTO enums at fleet/jobs/dto/fleet-job.dto.ts:107 and dashboard/dashboard.types.ts:109 (MISFIT_REASONS) gain thread_write.\nRunner: apps/runner/src/supervisor/assign-parser.ts, verdict/plan-verdict.ts (checkPlanPrd, planVerdict), executor/checkout.ts (prepareCheckout), executor/refs.ts (resolveRef), executor/host-executor.ts (readPlan/finishPlan), supervisor/job-run.ts:412-414; packages/fleet-protocol/src/index.ts (AssignPayload ~L230).\n\nBinding rulings: C2-R1 one feature, expectBranch optional so older runners ignore it. C2-D1 write results live in ChatThread.lastWrite, stale lives on session snapshot. C2-D2 one-active-job rule counts every non-terminal FleetJob with the threadId; for PLAN/RUN checked in dispatch's transaction under a ChatThread row lock (lockIdleThread). C2-D3 PUBLISH/DISCARD skip backend check, require threadWrite; thread_write is not a PERMANENT_MISFIT; routes refuse paused budget scope with BudgetPausedException up front. C2-D4 ThreadJobEffects.onJobEnded unchanged. C2-D5 live-session Publish allowed with empty writtenPaths; no-session Publish requires non-empty. C2-D6 PLAN/RUN use ref feat/<feature>, pinnedRunnerId = thread.runnerId, PLAN planFrom = specPath, ASSIGN of thread PLAN carries expectBranch = job.ref. C2-D7 stop/end-session answer threads.noSession while the active THREAD job is PUBLISH/DISCARD.\n\nRisks: (1) Concurrency: Plan/Run lock via SELECT ... FOR UPDATE inside the dispatch txManager; sendMessage/publish use job-then-thread lock order with retry; keep lock order consistent to avoid deadlocks. (2) createThreadJob extraction from sendMessage must preserve today's behaviour (feature thread-<id>, ref baseRef, pinnedRunnerId, bashMode raw, DuplicateActiveJobError mapping) — existing tests in thread-send-guards e2e must stay valid. PUBLISH/DISCARD maxCostUsd is the string '0' (must pass runner COST_RE nax-process.ts:7). (3) Backward compat: parseThreadLine gains stale only when present so existing toEqual assertions hold; placement test fixtures omit action and must behave as SESSION; ThreadSession.stale optional. (4) Migration is additive only (4 columns with defaults). (5) Generated artifacts: stories adding routes/DTO fields must run `bun run generate` at repo root (openapi.json and apps/cli/src/generated are committed; never hand-edit generated files). (6) API DB-backed specs need `bun run test:db:up` and KODA_DB_TESTS=1; the agent shell has no docker. (7) i18n: add every new 409 key to both en and zh threads.json in the story that first throws it (busy, nothingToPublish: US-003; nothingToDiscard: US-004; notPublished: US-006; notPlanned: US-007). (8) The existing thread-instructions.spec.ts AC3 asserts text removed by US-004 and must be replaced. (9) apps/api lints with oxlint; immutability preferred (no mutating arrays/objects), small files.\nTests: unit *.spec.ts beside source, integration under apps/api/test/integration/fleet/, e2e under apps/api/test/e2e (endpoint.e2e.spec.ts must get each new endpoint's happy path and one refusal). Runner uses bun:test.\nDependency order: US-001 and US-005 first (independent); US-002 and US-003 after US-001; US-004 after US-003; US-006 after US-002, US-003, US-005; US-007 after US-006.",
