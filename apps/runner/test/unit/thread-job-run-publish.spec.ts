@@ -46,10 +46,15 @@ async function started(ctx: ReturnType<typeof setup>) { await mkdir(ctx.jobDir, 
 async function stream(ctx: ReturnType<typeof setup>) { const file = ctx.lines[0]; return (await readFile(file, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>); }
 afterAll(async () => { await Promise.all(roots.map((path) => rm(path, { recursive: true, force: true }))); });
 
-test('US-006 AC-1, AC-2: tool is provided and its successful write is announced', async () => {
+test('US-006 AC-1: opened tool set includes write_doc', async () => {
   const ctx = setup(); const { started: startedRun } = await started(ctx); const open = ctx.calls[0] as { tools?: readonly { name: string; run(input: unknown): Promise<unknown> }[] };
-  const tools = open.tools ?? []; expect(tools.map((tool) => tool.name)).toContain('write_doc');
-  await mkdir(join(ctx.root, 'worktree'), { recursive: true });
+  expect((open.tools ?? []).map((tool) => tool.name)).toContain('write_doc');
+  ctx.run.halt(); await startedRun; ctx.journal.close();
+});
+
+test('US-006 AC-2: running write_doc writes and announces docs/a.md', async () => {
+  const ctx = setup(); const { started: startedRun } = await started(ctx); const open = ctx.calls[0] as { tools?: readonly { name: string; run(input: unknown): Promise<unknown> }[] };
+  const tools = open.tools ?? []; await mkdir(join(ctx.root, 'worktree'), { recursive: true });
   const writerTool = tools.find((tool) => tool.name === 'write_doc');
   expect(writerTool).toBeDefined();
   if (writerTool === undefined) throw new Error('write_doc tool missing');
@@ -62,7 +67,7 @@ test('US-006 AC-1, AC-2: tool is provided and its successful write is announced'
 test('US-006 AC-3, AC-4, AC-5, AC-6: publish acknowledges, passes assignment and writes result', async () => {
   const ctx = setup(); const { started: startedRun } = await started(ctx);
   expect(ctx.run.command('THREAD_PUBLISH', {})).toEqual({ result: 'ok' });
-  expect(ctx.calls.at(-1)).toMatchObject({ worktree: join(ctx.root, 'worktree'), feature: 'divide', threadId: 'thread-1', title: 'Divide brainstorm', repoKey: 'acme/app', identity: expect.any(Object) });
+  expect(ctx.calls.at(-1)).toMatchObject({ worktree: join(ctx.root, 'worktree'), feature: 'divide', threadId: 'thread-1', title: 'Divide brainstorm', repoKey: 'acme/app', identity: { name: 'koda-fleet[bot]', email: 'koda-fleet[bot]@users.noreply.github.com' } });
   ctx.gate.resolve(); await Bun.sleep(10);
   expect(await stream(ctx)).toContainEqual(expect.objectContaining({ type: 'published', sha: 'bbb', paths: ['docs/a.md'], ignored: [], specPresent: false }));
   ctx.run.halt(); await startedRun; ctx.journal.close();
