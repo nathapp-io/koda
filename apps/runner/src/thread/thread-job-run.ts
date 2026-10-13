@@ -73,6 +73,7 @@ export interface ThreadHostDeps {
   readonly prepareWorktree?: (input: ThreadWorktreeInput) => Promise<ThreadPrepareResult>;
   /** B3a's `ensureSkills`; a test supplies its own. */
   readonly ensureSkills?: (input: ThreadSkillsInput) => Promise<ThreadSkillsResult>;
+  /** An alternate publisher must check `publishedLineFits` before committing; the writer's size guard only runs afterwards. */
   readonly publish?: (input: ThreadPublishInput) => Promise<ThreadPublishResult>;
   readonly discard?: (input: ThreadDiscardInput) => Promise<ThreadDiscardResult>;
   /** The skills remote's base URL; the default fetches from `https://github.com`. */
