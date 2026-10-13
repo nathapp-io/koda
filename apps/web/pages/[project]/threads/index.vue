@@ -56,12 +56,14 @@ onMounted(() => {
         type="button"
         class="rounded px-3 py-1.5 text-sm"
         :class="threadsList.status.value === 'ACTIVE' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'"
+        :aria-pressed="threadsList.status.value === 'ACTIVE'"
         @click="selectStatus('ACTIVE')"
       >{{ t('fleet.threads.list.active') }}</button>
       <button
         type="button"
         class="rounded px-3 py-1.5 text-sm"
         :class="threadsList.status.value === 'ARCHIVED' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'"
+        :aria-pressed="threadsList.status.value === 'ARCHIVED'"
         @click="selectStatus('ARCHIVED')"
       >{{ t('fleet.threads.list.archived') }}</button>
     </div>

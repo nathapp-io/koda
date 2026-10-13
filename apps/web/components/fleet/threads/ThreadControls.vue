@@ -107,8 +107,9 @@ function confirmArchive(): void {
           <DialogTitle>{{ t('fleet.threads.controls.raiseCapTitle') }}</DialogTitle>
         </DialogHeader>
         <div class="space-y-3">
-          <Label>{{ t('fleet.threads.controls.capLabel') }}</Label>
+          <Label :for="'thread-cap-input'">{{ t('fleet.threads.controls.capLabel') }}</Label>
           <Input
+            id="thread-cap-input"
             :model-value="capValue"
             type="number"
             min="0.0001"

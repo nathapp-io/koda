@@ -77,6 +77,7 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
 
   let stream: { close: () => void } | null = null
   let pollTimer: unknown = null
+  let retryTimer: unknown = null
   let started = false
 
   const messagesPage = (afterSeq: number) => ({ query: { afterSeq: String(afterSeq), limit: String(MESSAGES_PAGE_SIZE) } })
@@ -180,11 +181,15 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
     stream?.close()
     stream = null
     stopPolling()
+    if (retryTimer !== null) {
+      deps.clearTimer(retryTimer)
+      retryTimer = null
+    }
   }
 
-  /** Arm a send-retry through the injected timer; the retry continues once it fires. */
+  /** Arm a send-retry through the injected timer; the retry continues once it fires. `stop()` clears it. */
   const wait = (ms: number): Promise<void> => new Promise((resolve) => {
-    deps.setTimer(resolve, ms)
+    retryTimer = deps.setTimer(() => { retryTimer = null; resolve() }, ms)
   })
 
   const dropOptimistic = (cid: string): void => {
@@ -236,6 +241,11 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
           }
           if (thread.value?.sendRefusal === 'closing' && deps.now() - firstAttemptAt < CLOSING_RETRY_WINDOW_MS) {
             await wait(POLL_INTERVAL_MS)
+            // The controller was stopped while the retry was armed: never POST after unmount.
+            if (!started) {
+              dropOptimistic(cid)
+              return { ok: false }
+            }
             continue
           }
         }

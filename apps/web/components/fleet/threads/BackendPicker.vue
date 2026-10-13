@@ -19,14 +19,14 @@ const effortOptions = computed(() => [
     <div v-if="models.length === 0" class="text-sm text-muted-foreground">{{ t('fleet.threads.new.noBackend') }}</div>
     <div v-else class="grid gap-4 sm:grid-cols-2">
       <div class="space-y-2">
-        <Label>{{ t('fleet.threads.new.model') }}</Label>
-        <select :value="model" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="thread-new-model" @change="emit('update:model', ($event.target as HTMLSelectElement).value)">
+        <Label :for="'thread-backend-model'">{{ t('fleet.threads.new.model') }}</Label>
+        <select :id="'thread-backend-model'" :value="model" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="thread-new-model" @change="emit('update:model', ($event.target as HTMLSelectElement).value)">
           <option v-for="option in modelOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
       </div>
       <div class="space-y-2">
-        <Label>{{ t('fleet.threads.new.effortLabel') }}</Label>
-        <select :value="effort" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="thread-new-effort" @change="emit('update:effort', ($event.target as HTMLSelectElement).value)">
+        <Label :for="'thread-backend-effort'">{{ t('fleet.threads.new.effortLabel') }}</Label>
+        <select :id="'thread-backend-effort'" :value="effort" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="thread-new-effort" @change="emit('update:effort', ($event.target as HTMLSelectElement).value)">
           <option v-for="option in effortOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
       </div>

@@ -120,14 +120,14 @@ describe('US-002 thread-view', () => {
 
   test('US-002 AC7: composerState marks a non-creator as read-only even when no turn runs', () => {
     const t = thread({ sendRefusal: null })
-    expect(composerState(t, [], { userId: 'u2', isCreator: false })).toEqual({ canSend: false, reason: 'readOnly' })
+    expect(composerState(t, [], { isCreator: false })).toEqual({ canSend: false, reason: 'readOnly' })
   })
 
   test('US-002 AC8: composerState reports a running turn while a message streams', () => {
     const t = thread({ sendRefusal: null })
     const messages: ChatMessageDto[] = [message({ id: 'm1', seq: 1, role: 'assistant', status: 'streaming', content: '' })]
 
-    expect(composerState(t, messages, { userId: 'u1', isCreator: true })).toEqual({ canSend: false, reason: 'turnRunning' })
+    expect(composerState(t, messages, { isCreator: true })).toEqual({ canSend: false, reason: 'turnRunning' })
   })
 
   test('US-002 AC9: toolChipState reports unfinished for a tool entry that never resolved', () => {
@@ -135,14 +135,14 @@ describe('US-002 thread-view', () => {
   })
 
   test('US-002: composerState lets the creator send when the API refusal is null and no turn runs', () => {
-    expect(composerState(thread({ sendRefusal: null }), [], { userId: 'u1', isCreator: true })).toEqual({ canSend: true, reason: null })
+    expect(composerState(thread({ sendRefusal: null }), [], { isCreator: true })).toEqual({ canSend: true, reason: null })
   })
 
   test('US-002: composerState puts the API refusal ahead of a running turn', () => {
     const t = thread({ sendRefusal: 'costCap' })
     const messages: ChatMessageDto[] = [message({ id: 'm1', seq: 1, status: 'streaming' })]
 
-    expect(composerState(t, messages, { userId: 'u1', isCreator: true })).toEqual({ canSend: false, reason: 'costCap' })
+    expect(composerState(t, messages, { isCreator: true })).toEqual({ canSend: false, reason: 'costCap' })
   })
 
   test('US-002: sessionLabel falls through to none when there is no session and no active job', () => {

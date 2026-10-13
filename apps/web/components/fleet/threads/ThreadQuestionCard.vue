@@ -41,6 +41,7 @@ async function sendAnswer(): Promise<void> {
       <Input
         :model-value="answer"
         :placeholder="t('fleet.threads.question.placeholder')"
+        :aria-label="t('fleet.threads.question.placeholder')"
         data-testid="thread-answer-input"
         @update:model-value="answer = $event"
       />

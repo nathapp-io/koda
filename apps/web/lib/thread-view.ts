@@ -77,7 +77,6 @@ export function sessionLabel(thread: ThreadDto): SessionLabel {
 }
 
 export interface ComposerViewer {
-  userId: string
   isCreator: boolean
 }
 

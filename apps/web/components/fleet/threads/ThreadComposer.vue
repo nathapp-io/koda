@@ -78,6 +78,7 @@ function stop(): void {
       <Textarea
         :model-value="draft"
         :placeholder="t('fleet.threads.composer.placeholder')"
+        :aria-label="t('fleet.threads.composer.placeholder')"
         :disabled="!props.composerState.canSend"
         class="min-h-[80px] text-sm"
         data-testid="thread-composer-input"
