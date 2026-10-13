@@ -50,6 +50,24 @@ describe('checkPlanPrd and planVerdict', () => {
   ])('%j fails with %s', (text, reason) => {
     expect(checkPlanPrd(text)).toMatchObject({ ok: false, reason });
   });
+  test('US-005 AC-4: a PRD naming another branch than expectBranch is branch_mismatch with the PRD branch', () => {
+    const text = '{"branchName":"feat/other","userStories":[{"id":"US-001"}]}';
+    expect(checkPlanPrd(text, 'feat/add-auth')).toEqual({ ok: false, reason: 'branch_mismatch', branchName: 'feat/other' });
+  });
+  test('US-005 AC-5: a PRD naming expectBranch passes', () => {
+    const text = '{"branchName":"feat/add-auth","userStories":[{"id":"US-001"}]}';
+    expect(checkPlanPrd(text, 'feat/add-auth').ok).toBe(true);
+  });
+  test('US-005 AC-6: without expectBranch a PRD naming any branch passes', () => {
+    const text = '{"branchName":"feat/other","userStories":[{"id":"US-001"}]}';
+    expect(checkPlanPrd(text).ok).toBe(true);
+    expect(checkPlanPrd(text, undefined).ok).toBe(true);
+  });
+  test('US-005: a PRD that fails an earlier check keeps that reason even when the branch differs', () => {
+    expect(checkPlanPrd('{"branchName":"feat/other","userStories":[]}', 'feat/add-auth')).toMatchObject({ ok: false, reason: 'prd.json has no userStories' });
+    expect(checkPlanPrd('{"branchName":"feat/other"}', 'feat/add-auth')).toMatchObject({ ok: false, reason: 'prd.json has no userStories' });
+    expect(checkPlanPrd(null, 'feat/add-auth')).toMatchObject({ ok: false, reason: 'no prd.json produced' });
+  });
   test('cancel wins, then failure, then success', () => {
     const good = checkPlanPrd('{"userStories":[{"id":"a"}]}');
     const bad = checkPlanPrd(null);

@@ -136,9 +136,14 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
     approvalTimeoutSec,
     gitIdentity: { name: identity['name'] as string, email: identity['email'] as string },
   };
+  // US-005: the thread PLAN's expected branch. A PLAN-only field: any other job that carries it is refused.
+  const rawExpectBranch = p['expectBranch'];
+  if (rawExpectBranch !== undefined && !isPlan) return bad('expectBranch');
+  if (rawExpectBranch !== undefined && !plain(rawExpectBranch, 255)) return bad('expectBranch');
+  const expectBranch = rawExpectBranch === undefined ? {} : { expectBranch: rawExpectBranch as string };
   if (!isThread) {
     if (p['thread'] !== undefined) return bad('thread');
-    return { ok: true, assign: baseAssign };
+    return { ok: true, assign: { ...baseAssign, ...expectBranch } };
   }
   const t = p['thread'];
   if (!isObj(t)) return bad('thread');
@@ -180,5 +185,5 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
     initialMessage,
     ...(rawTitle !== undefined ? { title: rawTitle as string } : {}),
   };
-  return { ok: true, assign: { ...baseAssign, thread } };
+  return { ok: true, assign: { ...baseAssign, ...expectBranch, thread } };
 }

@@ -243,6 +243,8 @@ export interface AssignPayload {
   gitIdentity: GitIdentity;
   /** Fleet S5a: present only for THREAD jobs. */
   thread?: ThreadAssign;
+  /** PLAN only: the branch the PRD must name (a thread PLAN). */
+  expectBranch?: string;
 }
 export interface ReadoptPayload { naxRunId: string | null }
 export interface AbandonPayload { reason: 'stale_lease' | 'job_terminal' }

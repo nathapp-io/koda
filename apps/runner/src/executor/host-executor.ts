@@ -202,7 +202,7 @@ export class HostExecutor implements JobExecutor {
     const { repoDir, jobDir } = this.dirs(job);
     const stashed = join(jobDir, 'plan-out', 'prd.json');
     const path = (await exists(stashed)) ? stashed : join(featureDirFor(repoDir, job.assign.feature), 'prd.json');
-    return checkPlanPrd(await readFile(path, 'utf8').catch(() => null));
+    return checkPlanPrd(await readFile(path, 'utf8').catch(() => null), job.assign.expectBranch);
   }
 
   async readPlanCost(job: JobRow): Promise<string | undefined> {
