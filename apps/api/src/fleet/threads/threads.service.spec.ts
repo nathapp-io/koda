@@ -55,6 +55,15 @@ describe('ThreadsService.plan (US-006)', () => {
     }, { threadId: 't1' });
   });
 
+  it('refuses a published thread whose owning runner was deleted', async () => {
+    const dispatch = vi.fn();
+    const threads = { get: vi.fn().mockResolvedValue({ ...record, specPublished: true, runnerId: null }) } as unknown as ChatThreadRepository;
+    const service = new ThreadsService(threads, {} as unknown as IFleetRepoRepository, {} as unknown as SkillsService,
+      { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>, { dispatch } as unknown as FleetJobsService);
+    await expect(service.plan('p1', 't1', 'u1', {})).rejects.toMatchObject({ code: 409, prefix: 'threads.runnerMissing' });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it('refuses before dispatch when the thread spec is unpublished', async () => {
     const dispatch = vi.fn();
     const threads = { get: vi.fn().mockResolvedValue(record) } as unknown as ChatThreadRepository;
@@ -102,6 +111,16 @@ describe('ThreadsService.run (US-007)', () => {
     }, dispatch);
 
     await expect(service.run('p1', 't1', 'u1', {})).rejects.toMatchObject({ code: 409, prefix: 'threads.notPlanned', httpStatus: 409 });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('refuses a completed plan whose owning runner was deleted', async () => {
+    const dispatch = vi.fn();
+    const service = runService({
+      get: vi.fn().mockResolvedValue({ ...record, runnerId: null }),
+      handoff: vi.fn().mockResolvedValue(completedPlan),
+    }, dispatch);
+    await expect(service.run('p1', 't1', 'u1', {})).rejects.toMatchObject({ code: 409, prefix: 'threads.runnerMissing' });
     expect(dispatch).not.toHaveBeenCalled();
   });
 

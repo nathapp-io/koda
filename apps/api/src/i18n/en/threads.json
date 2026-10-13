@@ -7,6 +7,7 @@
   "archived": { "409": "Thread is archived" },
   "costCap": { "409": "Thread cost cap reached" },
   "runnerOffline": { "409": "Thread runner is offline" },
+  "runnerMissing": { "409": "Thread's owning runner no longer exists" },
   "runnerOutdated": { "409": "Thread runner is outdated" },
   "closing": { "409": "Thread is closing" },
   "turnRunning": { "409": "A thread turn is already running" },

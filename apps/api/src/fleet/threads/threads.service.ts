@@ -89,6 +89,7 @@ export class ThreadsService {
     if (!this.config.threadsEnabled) throw new ConflictAppException({}, 'threads.disabled');
     if (thread.status === 'ARCHIVED') throw new ConflictAppException({}, 'threads.archived');
     if (!thread.specPublished) throw new ConflictAppException({}, 'threads.notPublished');
+    if (!thread.runnerId) throw new ConflictAppException({}, 'threads.runnerMissing');
     return this.fleetJobs.dispatch(userId, projectId, {
       repoId: thread.repoId, command: 'PLAN', ref: `feat/${thread.feature}`, feature: thread.feature,
       planFrom: thread.specPath, profiles: input.profiles, maxCostUsd: input.maxCostUsd ?? THREAD_HANDOFF_DEFAULT_MAX_COST_USD,
@@ -105,6 +106,7 @@ export class ThreadsService {
     if (thread.status === 'ARCHIVED') throw new ConflictAppException({}, 'threads.archived');
     const { plan } = await this.threads.handoff(thread.id);
     if (plan?.state !== 'COMPLETED') throw new ConflictAppException({}, 'threads.notPlanned');
+    if (!thread.runnerId) throw new ConflictAppException({}, 'threads.runnerMissing');
     return this.fleetJobs.dispatch(userId, projectId, {
       repoId: thread.repoId, command: 'RUN', ref: `feat/${thread.feature}`, feature: thread.feature,
       profiles: input.profiles, maxCostUsd: input.maxCostUsd ?? THREAD_HANDOFF_DEFAULT_MAX_COST_USD,

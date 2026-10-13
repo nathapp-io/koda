@@ -1,4 +1,4 @@
-import { THREAD_STREAM_LIMITS } from '@nathapp/fleet-protocol';
+import { THREAD_PUBLICATION_LIMITS, THREAD_STREAM_LIMITS } from '@nathapp/fleet-protocol';
 
 /**
  * Whether a `published` result line for these paths is guaranteed to fit the thread stream's line limit,
@@ -7,6 +7,9 @@ import { THREAD_STREAM_LIMITS } from '@nathapp/fleet-protocol';
  * `publish_failed` for a commit that already exists.
  */
 export function publishedLineFits(paths: readonly string[], ignored: readonly string[]): boolean {
+  const { maxPaths, maxPathChars } = THREAD_PUBLICATION_LIMITS;
+  if (paths.length > maxPaths || ignored.length > maxPaths ||
+    [...paths, ...ignored].some((path) => path.length < 1 || path.length > maxPathChars)) return false;
   const worstCase = {
     type: 'published', at: '9999-12-31T23:59:59.999Z', sha: 'f'.repeat(64), paths, ignored, specPresent: false,
   };

@@ -7,6 +7,7 @@
   "archived": { "409": "线程已归档" },
   "costCap": { "409": "线程费用已达上限" },
   "runnerOffline": { "409": "线程运行器离线" },
+  "runnerMissing": { "409": "线程所属的运行器已不存在" },
   "runnerOutdated": { "409": "线程运行器版本过旧" },
   "closing": { "409": "线程正在关闭" },
   "turnRunning": { "409": "线程轮次正在运行" },
