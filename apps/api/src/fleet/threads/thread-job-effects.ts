@@ -1,9 +1,15 @@
 import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { FleetCommandType } from '../../common/enums';
+import { FleetCommandType, FleetJobState } from '../../common/enums';
+import type { ThreadLiveEvent } from '../../live/thread-event-bus';
 import { isThreadKind } from '../common/thread-jobs';
 import type { FleetCommandRecord, FleetJobRecord } from '../jobs/domain/fleet-job.domain';
+import type { ThreadSession } from './domain/chat-thread.domain';
+
+/** Job ends that mean the runner died or failed; the session snapshot shows them as `failed`, the rest as `closed`. */
+const FAILED_END_STATES: readonly string[] = [FleetJobState.CRASHED, FleetJobState.FAILED];
 
 /**
  * The effects of a THREAD command ack and of a THREAD job ending, run inside the ack and the
@@ -26,10 +32,37 @@ export class ThreadJobEffects {
     }
   }
 
-  async onJobEnded(job: FleetJobRecord): Promise<void> {
-    if (!isThreadKind(job.command) || !job.threadId) return;
-    await this.prisma.client.chatMessage.updateMany({ where: { threadId: job.threadId, status: { in: ['pending', 'streaming'] } }, data: { status: 'errored', errorReason: job.state.toLowerCase() } });
-    await this.prisma.client.chatThread.updateMany({ where: { id: job.threadId }, data: { pendingQuestion: Prisma.DbNull } });
+  /**
+   * A THREAD job ended: its pending and streaming messages become errored, its pending question clears and a live
+   * session snapshot of this job closes. Runs inside the terminal transition; the returned live events are published
+   * only after that transition commits (fleet S5a #264), so an open page refetches the messages and the thread.
+   */
+  async onJobEnded(job: FleetJobRecord): Promise<ThreadLiveEvent[]> {
+    if (!isThreadKind(job.command) || !job.threadId) return [];
+    const threadId = job.threadId;
+    const where = { threadId, status: { in: ['pending', 'streaming'] } };
+    const open = await this.prisma.client.chatMessage.findMany({ where, select: { id: true } });
+    await this.prisma.client.chatMessage.updateMany({ where, data: { status: 'errored', errorReason: job.state.toLowerCase() } });
+    await this.prisma.client.chatThread.updateMany({ where: { id: threadId }, data: { pendingQuestion: Prisma.DbNull } });
+    await this.closeSnapshot(job, threadId);
+    const at = new Date().toISOString();
+    const base = { threadId, at };
+    const messageEvents: ThreadLiveEvent[] = open.map(({ id }) => ({ ...base, id: randomUUID(), type: 'message', messageId: id }));
+    return [...messageEvents, { ...base, id: randomUUID(), type: 'thread' }];
+  }
+
+  /** Closes the session snapshot only while it is still `live` and belongs to this job; the runner's own close wins. */
+  private async closeSnapshot(job: FleetJobRecord, threadId: string): Promise<void> {
+    const thread = await this.prisma.client.chatThread.findUnique({ where: { id: threadId }, select: { session: true } });
+    const session = thread?.session as unknown as ThreadSession | null | undefined;
+    if (!session || session.jobId !== job.id || session.state !== 'live') return;
+    const closed: ThreadSession = {
+      ...session,
+      state: FAILED_END_STATES.includes(job.state) ? 'failed' : 'closed',
+      reason: job.state.toLowerCase(),
+      at: new Date().toISOString(),
+    };
+    await this.prisma.client.chatThread.update({ where: { id: threadId }, data: { session: closed as unknown as Prisma.InputJsonValue } });
   }
 
   /** Clears the thread's `pendingQuestion` when the runner accepted an answer to that question (B2-D3). Caller holds the job lock. */
