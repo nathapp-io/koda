@@ -810,6 +810,36 @@
         "error": "出错",
         "denied": "已拒绝",
         "unfinished": "未完成"
+      },
+      "composer": {
+        "placeholder": "给线程发消息…",
+        "send": "发送",
+        "stop": "停止",
+        "readOnly": "你可以阅读该线程，但只有创建者可以发送消息。"
+      },
+      "controls": {
+        "endSession": "结束会话",
+        "raiseCap": "提高上限",
+        "raiseCapTitle": "提高费用上限",
+        "capLabel": "新的上限（美元，0.0001 至 10000，最多 4 位小数）",
+        "archive": "归档",
+        "archiveTitle": "归档该线程？",
+        "archiveBody": "该线程已关闭，无法再开启新对话，且无法撤销。",
+        "confirm": "确认"
+      },
+      "question": {
+        "placeholder": "回答问题…",
+        "send": "发送"
+      },
+      "refusal": {
+        "disabled": "该线程已禁止发送。",
+        "archived": "该线程已归档。",
+        "costCap": "已达到费用上限。",
+        "budgetPaused": "项目预算已暂停。",
+        "runnerOffline": "执行机离线。",
+        "runnerOutdated": "执行机版本过旧。",
+        "closing": "正在关闭会话，正在重试。",
+        "turnRunning": "对话正在进行，请先停止再发送新消息。"
       }
     },
     "common": {

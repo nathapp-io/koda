@@ -810,6 +810,36 @@
         "error": "Error",
         "denied": "Denied",
         "unfinished": "Unfinished"
+      },
+      "composer": {
+        "placeholder": "Message the thread…",
+        "send": "Send",
+        "stop": "Stop",
+        "readOnly": "You can read this thread, but only the creator can send messages."
+      },
+      "controls": {
+        "endSession": "End session",
+        "raiseCap": "Raise cap",
+        "raiseCapTitle": "Raise the cost cap",
+        "capLabel": "New cap in USD (0.0001 to 10000, at most 4 decimals)",
+        "archive": "Archive",
+        "archiveTitle": "Archive this thread?",
+        "archiveBody": "The thread is closed to new turns. You cannot undo this.",
+        "confirm": "Confirm"
+      },
+      "question": {
+        "placeholder": "Answer the question…",
+        "send": "Send"
+      },
+      "refusal": {
+        "disabled": "Sending is disabled for this thread.",
+        "archived": "This thread is archived.",
+        "costCap": "The cost cap has been reached.",
+        "budgetPaused": "The project budget is paused.",
+        "runnerOffline": "The runner is offline.",
+        "runnerOutdated": "The runner is outdated.",
+        "closing": "Sending is closing the session - retrying.",
+        "turnRunning": "A turn is running. Stop it to send a new message."
       }
     },
     "common": {
