@@ -46,6 +46,18 @@ export function buildThreadCreateSchema(t: Translate) {
 
 export type ThreadCreateFormValues = z.infer<ReturnType<typeof buildThreadCreateSchema>>
 
+/**
+ * US-007: the shared message-input schema for the thread composer and the question-card answer.
+ * Trimmed text, non-empty, at most 32768 UTF-8 bytes (the API's limit, `THREAD_LIMITS.messageMaxBytes`).
+ * A bare `z.string()` schema (not an object wrapper): `useField` validates the field value itself.
+ */
+export function buildThreadMessageSchema(t: Translate) {
+  return z.string()
+    .trim()
+    .min(1, t('fleet.threads.message.required'))
+    .refine(value => new TextEncoder().encode(value).byteLength <= 32768, t('fleet.threads.message.tooLong'))
+}
+
 export function toCreateThreadBody(values: ThreadCreateValues): CreateThreadBody {
   const baseRef = values.baseRef.trim()
   const effort = values.effort.trim()

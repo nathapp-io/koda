@@ -14,6 +14,7 @@ definePageMeta({ layout: 'default' })
 const route = useRoute()
 const slug = route.params.project as string
 const { t } = useI18n()
+const { $api } = useApi()
 const options = useFleetDispatchOptions(slug)
 const skillsApi = useProjectSkills()
 const { data: viewer } = useProjectViewerRole(slug)
@@ -55,7 +56,6 @@ onMounted(async () => {
 const submit = handleSubmit(async (formValues: ThreadCreateFormValues) => {
   submitError.value = ''
   try {
-    const { $api } = useApi()
     const thread = await $api.post<{ id: string }>(apiPath`/projects/${slug}/threads`, { ...toCreateThreadBody(formValues) })
     await navigateTo(`/${slug}/threads/${thread.id}`)
   }
@@ -77,42 +77,48 @@ const submit = handleSubmit(async (formValues: ThreadCreateFormValues) => {
       <FormField v-slot="{ componentField }" name="repoId">
         <FormItem>
           <FormLabel>{{ t('fleet.threads.new.repo') }}</FormLabel>
-          <FormControl><FleetNativeSelect v-bind="componentField" :options="repoOptions" :placeholder="t('fleet.threads.new.repoPlaceholder')" /></FormControl>
+          <FormControl><FleetNativeSelect v-bind="componentField" :options="repoOptions" :placeholder="t('fleet.threads.new.repoPlaceholder')" testid="thread-new-repo" /></FormControl>
           <FormMessage />
         </FormItem>
       </FormField>
       <FormField v-slot="{ componentField }" name="baseRef">
         <FormItem>
           <FormLabel>{{ t('fleet.threads.new.baseRef') }}</FormLabel>
-          <FormControl><Input v-bind="componentField" :placeholder="selectedRepo?.defaultBranch ?? ''" /></FormControl>
+          <FormControl><Input v-bind="componentField" :placeholder="selectedRepo?.defaultBranch ?? ''" data-testid="thread-new-baseRef" /></FormControl>
           <FormMessage />
         </FormItem>
       </FormField>
       <FormField v-slot="{ componentField }" name="feature">
         <FormItem>
           <FormLabel>{{ t('fleet.threads.new.feature') }}</FormLabel>
-          <FormControl><Input v-bind="componentField" /></FormControl>
+          <FormControl><Input v-bind="componentField" data-testid="thread-new-feature" /></FormControl>
           <FormMessage />
         </FormItem>
       </FormField>
       <FormField v-slot="{ componentField }" name="title">
         <FormItem>
           <FormLabel>{{ t('fleet.threads.new.threadTitle') }}</FormLabel>
-          <FormControl><Input v-bind="componentField" /></FormControl>
+          <FormControl><Input v-bind="componentField" data-testid="thread-new-title" /></FormControl>
           <FormMessage />
         </FormItem>
       </FormField>
       <FormField v-slot="{ componentField }" name="maxCostUsd">
         <FormItem>
           <FormLabel>{{ t('fleet.threads.new.maxCost') }}</FormLabel>
-          <FormControl><Input v-bind="componentField" type="number" min="0.0001" max="10000" step="0.0001" /></FormControl>
+          <FormControl><Input v-bind="componentField" type="number" min="0.0001" max="10000" step="0.0001" data-testid="thread-new-cap" /></FormControl>
           <FormMessage />
         </FormItem>
       </FormField>
       <FormField name="model">
         <FormItem>
           <FormLabel>{{ t('fleet.threads.new.backend') }}</FormLabel>
-          <BackendPicker :models="models" :model="values.model" :effort="values.effort" @update:model="setFieldValue('model', $event)" @update:effort="setFieldValue('effort', $event)" />
+          <FleetThreadsBackendPicker
+            :models="models"
+            :model="values.model ?? ''"
+            :effort="values.effort ?? ''"
+            @update:model="setFieldValue('model', $event)"
+            @update:effort="setFieldValue('effort', $event as '' | 'low' | 'medium' | 'high' | 'xhigh')"
+          />
           <FormMessage />
         </FormItem>
       </FormField>

@@ -5,7 +5,7 @@ import type { FakeNode } from '../helpers/mount-sfc'
 import { uiStubs, i18nStub } from '../helpers/fleet-harness'
 import type { ThreadDto } from '~/lib/thread-types'
 
-const threadListTableFile = webFile('components', 'ThreadListTable.vue')
+const threadListTableFile = webFile('components', 'fleet', 'threads', 'ThreadListTable.vue')
 
 const listItem = (overrides: Record<string, unknown> = {}): ThreadDto => ({
   id: 'th1',

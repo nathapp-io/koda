@@ -82,6 +82,8 @@ export default defineConfig({
         // (default 15 s) so a timed-out ask is marked expired right after its deadline.
         FLEET_SWEEP_ENABLED: 'true',
         FLEET_APPROVAL_SWEEP_MS: '2000',
+        // S5a B4-R2: the thread web journey needs the thread kill switch on for the whole suite.
+        FLEET_THREADS_ENABLED: 'true',
         // S2b (c) D426: the dashboard reports a queued job no runner fits after 10 s (the env schema minimum) instead
         // of 60 s. Only the dashboard reads this threshold.
         FLEET_JOB_QUEUED_WARN_SEC: '10',

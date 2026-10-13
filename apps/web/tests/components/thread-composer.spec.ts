@@ -99,7 +99,7 @@ describe('US-007 AC1-AC4, AC6-AC7: ThreadComposer', () => {
     app.unmount()
   })
 
-  test('AC2: pressing Shift+Enter emits no send', async () => {
+  test('AC2: pressing Shift+Enter inserts a newline and emits no send', async () => {
     const app = mountComposer({ canSend: true, reason: null })
 
     typeText(app, 'hello')
@@ -107,6 +107,14 @@ describe('US-007 AC1-AC4, AC6-AC7: ThreadComposer', () => {
     await settle()
 
     expect(app.emitted('send')).toEqual([])
+    // The draft holds the newline (US-007: "Shift+Enter inserts a newline"), so a later
+    // Enter sends the multi-line text rather than nothing. The stub forwards the
+    // `model-value` attr kebab-cased (the fake renderer's patchProp key).
+    expect(textarea(app)?.props['model-value']).toBe('hello\n')
+    typeText(app, 'hello\nworld')
+    pressEnter(app)
+    await settle()
+    expect(app.emitted('send')).toEqual([['hello\nworld']])
     app.unmount()
   })
 
@@ -118,6 +126,18 @@ describe('US-007 AC1-AC4, AC6-AC7: ThreadComposer', () => {
     await settle()
 
     expect(app.emitted('send')).toEqual([])
+    app.unmount()
+  })
+
+  test('US-007: a draft over 32768 UTF-8 bytes emits no send and shows the tooLong error', async () => {
+    const app = mountComposer({ canSend: true, reason: null })
+
+    typeText(app, 'é'.repeat(16_385)) // 32_770 bytes — past the API's messageMaxBytes limit
+    pressEnter(app)
+    await settle()
+
+    expect(app.emitted('send')).toEqual([])
+    expect(app.text()).toContain('fleet.threads.message.tooLong')
     app.unmount()
   })
 

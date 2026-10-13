@@ -20,13 +20,13 @@ const effortOptions = computed(() => [
     <div v-else class="grid gap-4 sm:grid-cols-2">
       <div class="space-y-2">
         <Label>{{ t('fleet.threads.new.model') }}</Label>
-        <select :value="model" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" @change="emit('update:model', ($event.target as HTMLSelectElement).value)">
+        <select :value="model" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="thread-new-model" @change="emit('update:model', ($event.target as HTMLSelectElement).value)">
           <option v-for="option in modelOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
       </div>
       <div class="space-y-2">
         <Label>{{ t('fleet.threads.new.effortLabel') }}</Label>
-        <select :value="effort" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" @change="emit('update:effort', ($event.target as HTMLSelectElement).value)">
+        <select :value="effort" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="thread-new-effort" @change="emit('update:effort', ($event.target as HTMLSelectElement).value)">
           <option v-for="option in effortOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
       </div>

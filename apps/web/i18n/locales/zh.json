@@ -831,6 +831,10 @@
         "placeholder": "回答问题…",
         "send": "发送"
       },
+      "message": {
+        "required": "消息不能为空。",
+        "tooLong": "消息长度不能超过 32768 字节。"
+      },
       "refusal": {
         "disabled": "该线程已禁止发送。",
         "archived": "该线程已归档。",

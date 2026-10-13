@@ -68,6 +68,6 @@ onMounted(() => {
 
     <LoadingState v-if="pending" />
     <ErrorState v-else-if="loadFailed" @retry="loadPage()" />
-    <ThreadListTable v-else :threads="threadsList.threads.value" :status="threadsList.status.value" :name-of="members.nameOf" :slug="slug" />
+    <FleetThreadsThreadListTable v-else :threads="threadsList.threads.value" :status="threadsList.status.value" :name-of="members.nameOf" :slug="slug" />
   </div>
 </template>

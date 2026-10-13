@@ -831,6 +831,10 @@
         "placeholder": "Answer the question…",
         "send": "Send"
       },
+      "message": {
+        "required": "Message cannot be empty.",
+        "tooLong": "Message must be 32768 bytes or fewer."
+      },
       "refusal": {
         "disabled": "Sending is disabled for this thread.",
         "archived": "This thread is archived.",

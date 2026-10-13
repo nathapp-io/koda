@@ -30,7 +30,8 @@ export interface Lease {
 
 interface SyncCommand {
   commandId: string;
-  type: 'ASSIGN' | 'CANCEL' | 'READOPT' | 'ABANDON' | 'APPROVAL_ANSWER';
+  type: 'ASSIGN' | 'CANCEL' | 'READOPT' | 'ABANDON' | 'APPROVAL_ANSWER'
+    | 'THREAD_INPUT' | 'THREAD_ANSWER' | 'THREAD_STOP_TURN' | 'THREAD_CLOSE' | 'THREAD_PUBLISH';
   jobId: string;
   leaseEpoch: number;
   payload: Record<string, unknown>;
@@ -97,18 +98,23 @@ export class ScriptedRunner {
    * Issues a single-use enrollment token as the admin and enrolls over HTTP, like `koda-runner enroll`. With `relay`
    * the runner speaks protocol v2 and reports the approval relay (S1.5 2a D271), so gated/escalate jobs place on it.
    * With `logs` it speaks protocol v3 (S2a R1): it streams logs over `putLog` and sends no `log` sync events.
+   * With `threads` it speaks protocol v4 (S5a B4-R2): the threads branch wins over `logs` and `relay`, it reports
+   * `threadBackends: { native: [threadModel], acp: [] }` so placement matches THREAD jobs on the native model, and it
+   * streams thread lines over `putLog(lease, 'thread', …)`. `threadModel` must be unique per run so no other scripted
+   * runner of the suite matches the THREAD job.
    * With `capabilities` the runner reports that blob instead of the default.
    * S3 §3: with `configJobs` the runner reports the config-jobs capability, so placement offers it
    * CONFIG_EDIT / CONFIG_DRIFT jobs (runners without it get the permanent misfit `config_jobs`).
    */
   static async enroll(
     adminToken: string, name: string,
-    opts: { relay?: boolean; logs?: boolean; configJobs?: boolean; capabilities?: Record<string, unknown> } = {},
+    opts: { relay?: boolean; logs?: boolean; threads?: boolean; threadModel?: string; configJobs?: boolean; capabilities?: Record<string, unknown> } = {},
   ): Promise<ScriptedRunner> {
-    const protocolVersion = opts.logs ? 3 : opts.relay ? 2 : 1;
+    const protocolVersion = opts.threads ? 4 : opts.logs ? 3 : opts.relay ? 2 : 1;
     const base = opts.relay ? { ...(opts.capabilities ?? E2E_RUNNER_CAPABILITIES), approvals: { relay: true } } : opts.capabilities ?? E2E_RUNNER_CAPABILITIES;
+    const threads = opts.threads ? { threadBackends: { native: [opts.threadModel ?? 'e2e-model'], acp: [] } } : {};
     // S3 §3: only a runner reporting configJobs is offered CONFIG_EDIT / CONFIG_DRIFT jobs.
-    const capabilities = opts.configJobs ? { ...base, configJobs: true } : base;
+    const capabilities = opts.configJobs ? { ...base, ...threads, configJobs: true } : { ...base, ...threads };
     const { token } = await call<{ token: string }>('/fleet/enrollments', { method: 'POST', token: adminToken, body: { labels: ['e2e'] } });
     const { runnerId, apiKey } = await call<{ runnerId: string; apiKey: string }>('/fleet/runner/enroll', {
       method: 'POST',
@@ -216,9 +222,10 @@ export class ScriptedRunner {
 
   /**
    * S2a §2.2: append `text` to one log stream at `offset` (the bytes the server holds), like the runner's LogShipper.
-   * `final` marks the stream complete. Throws unless the server answers HTTP 200.
+   * `final` marks the stream complete. Throws unless the server answers HTTP 200. A THREAD job streams its
+   * JSON-lines to the `'thread'` stream (S5a).
    */
-  async putLog(lease: Lease, stream: 'run' | 'stdout' | 'stderr', offset: number, text: string, final = false): Promise<LogUploadAnswer> {
+  async putLog(lease: Lease, stream: 'run' | 'stdout' | 'stderr' | 'thread', offset: number, text: string, final = false): Promise<LogUploadAnswer> {
     const body = Buffer.from(text, 'utf8');
     const query = `leaseEpoch=${lease.leaseEpoch}&offset=${offset}${final ? '&final=1' : ''}`;
     const res = await fetch(`${API_URL}/api/fleet/runner/jobs/${lease.jobId}/logs/${stream}?${query}`, {

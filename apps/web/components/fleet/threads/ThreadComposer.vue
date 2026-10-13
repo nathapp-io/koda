@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { useField } from 'vee-validate'
+import { toTypedSchema } from '@vee-validate/zod'
+import { buildThreadMessageSchema } from '~/lib/thread-create'
 import type { ComposerReason } from '~/lib/thread-types'
 
 /**
@@ -8,12 +10,17 @@ import type { ComposerReason } from '~/lib/thread-types'
  *
  * Contract: props `composerState: { canSend, reason }` (`reason` is a `ComposerReason`:
  * a `ThreadSendRefusal` or `readOnly`) and `turnRunning: boolean`; emits `send(text)`
- * and `stop`. Enter sends the trimmed draft, Shift+Enter inserts a newline (never
+ * and `stop`. Enter sends the validated draft, Shift+Enter inserts a newline (never
  * sends), whitespace sends nothing, a refusing `composerState` renders the
  * `fleet.threads.refusal.<reason>` text, a readOnly state renders
  * `fleet.threads.composer.readOnly` instead of a textarea, and a running turn renders
  * a Stop control that emits `stop`. The refusal reason comes from the thread view
  * (`composerState` in `~/lib/thread-view`), never a copied server send rule.
+ *
+ * US-007: the draft is validated with vee-validate + a zod schema
+ * (`buildThreadMessageSchema`: trimmed, non-empty, at most 32768 UTF-8 bytes — the
+ * API's limit), so an over-length draft is blocked client-side instead of being
+ * rejected by the API after the fact.
  */
 const props = defineProps<{
   composerState: { canSend: boolean; reason: ComposerReason | null }
@@ -25,25 +32,33 @@ const emit = defineEmits<{
 }>()
 const { t } = useI18n()
 
-const draft = ref('')
+const { value: draft, errorMessage, validate } = useField(
+  'message',
+  toTypedSchema(buildThreadMessageSchema(t)),
+  { initialValue: '' },
+)
 
-function handleInput(event: Event): void {
-  draft.value = (event.target as HTMLTextAreaElement).value
-}
-
+/** Enter sends the validated draft; Shift+Enter inserts a newline at the cursor (never sends). */
 function handleKeydown(event: KeyboardEvent): void {
   if (event.key !== 'Enter') return
   event.preventDefault()
-  if (event.shiftKey) return
-  const text = draft.value.trim()
-  if (!props.composerState.canSend || text.length === 0) return
-  emit('send', text)
+  if (event.shiftKey) {
+    const target = event.target as HTMLTextAreaElement | null
+    const current = String(draft.value ?? '')
+    const start = target?.selectionStart ?? current.length
+    const end = target?.selectionEnd ?? current.length
+    draft.value = `${current.slice(0, start)}\n${current.slice(end)}`
+    return
+  }
+  void sendDraft()
 }
 
-function sendDraft(): void {
-  const text = draft.value.trim()
-  if (!props.composerState.canSend || text.length === 0) return
-  emit('send', text)
+/** Sends the trimmed draft when it passes the schema (non-empty, ≤32768 UTF-8 bytes). */
+async function sendDraft(): Promise<void> {
+  if (!props.composerState.canSend) return
+  const { valid } = await validate()
+  if (!valid) return
+  emit('send', String(draft.value ?? '').trim())
 }
 
 function stop(): void {
@@ -66,9 +81,10 @@ function stop(): void {
         :disabled="!props.composerState.canSend"
         class="min-h-[80px] text-sm"
         data-testid="thread-composer-input"
-        @input="handleInput"
+        @update:model-value="draft = $event"
         @keydown="handleKeydown"
       />
+      <p v-if="errorMessage" class="text-xs text-destructive" role="alert" data-testid="thread-composer-error">{{ errorMessage }}</p>
       <div class="flex justify-end gap-2">
         <Button
           v-if="props.turnRunning"
@@ -79,7 +95,7 @@ function stop(): void {
         >{{ t('fleet.threads.composer.stop') }}</Button>
         <Button
           type="button"
-          :disabled="!props.composerState.canSend || draft.trim().length === 0"
+          :disabled="!props.composerState.canSend || String(draft ?? '').trim().length === 0"
           data-testid="thread-send"
           @click="sendDraft"
         >{{ t('fleet.threads.composer.send') }}</Button>

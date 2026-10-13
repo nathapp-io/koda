@@ -7,7 +7,7 @@ import { uiStubs, i18nStub, toastRecorder } from '../helpers/fleet-harness'
 import * as apiModule from '../../composables/useApi'
 import type { ThreadDto } from '~/lib/thread-types'
 
-const pageFile = webFile('pages', '[project]', 'threads.vue')
+const pageFile = webFile('pages', '[project]', 'threads', 'index.vue')
 
 const listItem = (overrides: Record<string, unknown> = {}): ThreadDto => ({
   id: 'th1',
@@ -39,7 +39,7 @@ const ADMIN: Role = { canManage: true, viewerRole: 'ADMIN' }
 const VIEWER: Role = { canManage: false, viewerRole: 'VIEWER' }
 
 /**
- * The page under test is `pages/[project]/threads.vue` (US-004). It auto-imports useThreads,
+ * The page under test is `pages/[project]/threads/index.vue` (US-004). It auto-imports useThreads,
  * useProjectViewerRole and useProjectMemberNames; the test overrides those through mount-sfc
  * globals, exactly as mount-sfc's NUXT_AUTO_IMPORTS addition is meant to allow. The real
  * ThreadListTable is registered as a component so the row is produced by the component's own
@@ -55,7 +55,7 @@ function mountPage(over: {
   const app = mountSfc(pageFile, {
     components: {
       ...uiStubs,
-      ThreadListTable: loadSfc(webFile('components', 'ThreadListTable.vue'), { useI18n: () => i18nStub() }),
+      FleetThreadsThreadListTable: loadSfc(webFile('components', 'fleet', 'threads', 'ThreadListTable.vue'), { useI18n: () => i18nStub() }),
     },
     alias: { '~/composables/useApi': apiModule },
     globals: {

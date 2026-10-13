@@ -69,7 +69,6 @@ const Input = defineComponent({
 
 const { FleetNativeSelect: _fleetNativeStub, ...stubs } = uiStubs
 const backendPicker = loadSfc(webFile('components', 'fleet', 'threads', 'BackendPicker.vue'), { useI18n: () => i18nStub() })
-
 type PageOver = {
   /** Native models the single online enabled runner offers; undefined => none eligible. */
   models?: string[]
@@ -84,7 +83,7 @@ function mountPage(over: PageOver = {}) {
   const push = jest.fn(async () => undefined)
   const runners = over.models ? [runnerWithModels(over.models)] : []
   const app = mountSfc(pageFile, {
-    components: { ...stubs, FormField, Input, BackendPicker: backendPicker },
+    components: { ...stubs, FormField, Input, FleetThreadsBackendPicker: backendPicker },
     fleetComponents: ['FleetNativeSelect'],
     alias: { '~/composables/useApi': apiModule },
     globals: {
