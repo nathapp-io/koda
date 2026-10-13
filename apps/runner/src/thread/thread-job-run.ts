@@ -11,6 +11,8 @@ import { assertSegment, jobDirFor, repoDirFor } from '../paths/safe-segment';
 import { JobEvents } from '../supervisor/job-events';
 import type { JobRunDeps, RunStart } from '../supervisor/job-run';
 import type { RepoMutex } from '../supervisor/repo-mutex';
+import { publishThreadDocs, type PublishThreadDocsInput } from './thread-publish';
+import { ThreadLivePublish, publishInputMutex } from './thread-live-publish';
 import { isTerminalState } from '../supervisor/transitions';
 import { ensureSkills as defaultEnsureSkills, type EnsureSkillsOptions } from './skill-fetch';
 import type { OpenThreadSessionOptions } from './session-factory';
@@ -32,6 +34,8 @@ export type ThreadWorktreeInput = Seam<PrepareThreadWorktreeInput>;
 export type ThreadSkillsInput = Seam<EnsureSkillsOptions>;
 export type ThreadOpenInput = Seam<OpenThreadSessionOptions>;
 export type ThreadLogInput = Seam<ThreadLogJob>;
+export type ThreadPublishInput = Seam<PublishThreadDocsInput>;
+export type ThreadPublishResult = { ok: true; sha: string; paths: string[]; ignored: string[]; specPresent: boolean } | { ok: false; reason: string; detail?: string };
 
 /**
  * The seams answer what the B3a functions answer, except that a refusal `reason` is a plain string: the run
@@ -68,6 +72,7 @@ export interface ThreadHostDeps {
   readonly prepareWorktree?: (input: ThreadWorktreeInput) => Promise<ThreadPrepareResult>;
   /** B3a's `ensureSkills`; a test supplies its own. */
   readonly ensureSkills?: (input: ThreadSkillsInput) => Promise<ThreadSkillsResult>;
+  readonly publish?: (input: ThreadPublishInput) => Promise<ThreadPublishResult>;
   /** The skills remote's base URL; the default fetches from `https://github.com`. */
   readonly skillOrigin?: string;
 }
@@ -95,7 +100,7 @@ export interface ThreadRunSetup {
  */
 export type ThreadRunDeps =
   Pick<JobRunDeps, 'journal' | 'log' | 'now' | 'sleep'>
-  & { readonly mutex: Pick<RepoMutex, 'acquire'>; readonly logs: ThreadLogShipping }
+  & { readonly mutex: Pick<RepoMutex, 'acquire'> & Partial<Pick<RepoMutex, 'isLocked'>>; readonly logs: ThreadLogShipping }
   & ThreadRunSetup;
 
 export type ThreadCommandOutcome = { result: 'ok' | 'rejected'; detail?: string };
@@ -149,6 +154,7 @@ export class ThreadJobRun {
   private readonly events: JobEvents;
   private writer: ThreadEventWriter | null = null;
   private session: AgentSession | null = null;
+  private livePublish: ThreadLivePublish | null = null;
   private halted = false;
   private readonly endWaiters: Array<() => void> = [];
   private ended = false;
@@ -268,6 +274,8 @@ export class ThreadJobRun {
         git: this.deps.host.git,
         searchTimeoutMs: this.deps.tuning.threadSearchTimeoutMs,
         nowMs: () => this.deps.now().getTime(),
+        feature: thread.feature,
+        onDocWritten: (path, bytes) => { if (!this.halted) this.writer?.docWritten(path, bytes); },
       }),
       approvalTimeoutSec: row.assign.approvalTimeoutSec,
     });
@@ -292,7 +300,17 @@ export class ThreadJobRun {
     this.session = opened.session;
     this.maxCostUsd = Number(row.assign.maxCostUsd);
     this.events.transition('RUNNING', undefined, { pid: null, pgid: null, branch: null });
-    await this.openStream(thread, opened.resumed);
+    await this.openStream(thread, opened.resumed, prepared.stale === true);
+    this.livePublish = new ThreadLivePublish({
+      publish: this.deps.host.publish ?? publishThreadDocs,
+      input: { git: this.deps.host.git, mutex: publishInputMutex(this.deps.mutex), repoKey: row.repoKey, worktree: prepared.worktree,
+        feature: thread.feature, threadId: thread.threadId, title: thread.title ?? thread.feature, identity: row.assign.gitIdentity },
+      writer: () => this.writer,
+      turnRunning: () => this.turnRunning,
+      stopped: () => this.halted,
+      stopIdle: () => this.stopIdle(),
+      armIdle: () => this.armIdle(),
+    });
     this.startHeartbeat();
     this.startInitialTurn(thread);
     await this.waitForEnd();
@@ -371,7 +389,7 @@ export class ThreadJobRun {
    * Step 7: the stream file is recreated — it is keyed by job id only, so a requeued epoch must never re-ship
    * the lines of the epoch it replaces — then registered with the shipper and announced to the server.
    */
-  private async openStream(thread: ThreadAssign, resumed: boolean): Promise<void> {
+  private async openStream(thread: ThreadAssign, resumed: boolean, stale: boolean): Promise<void> {
     const jobDir = jobDirFor(this.deps.host.workspaceRoot, this.jobId);
     const threadPath = join(jobDir, THREAD_EVENTS_FILE);
     await mkdir(jobDir, { recursive: true, mode: 0o700 });
@@ -396,7 +414,7 @@ export class ThreadJobRun {
       threadPath,
       lifecycle: (level, message) => this.events.lifecycle(level, message),
     });
-    writer.started({ resumed, backend: thread.backend, skillShas: thread.skills.map((source) => source.sha) });
+    writer.started({ resumed, backend: thread.backend, skillShas: thread.skills.map((source) => source.sha), stale });
   }
 
   /** Step 8: the initial message's turn, off the `start` path; with no initial message the run only idles. */
@@ -548,6 +566,8 @@ export class ThreadJobRun {
       this.stopIdle();
       // A halt that lands before the close does: the row is left as it stands and nothing more is written.
       if (this.halted) return;
+      await this.livePublish?.wait();
+      if (this.halted) return;
       if (this.turnRunning) {
         // A cancel that throws must not abandon the close: the stream still gets sealed and the row still ends.
         try {
@@ -636,11 +656,11 @@ export class ThreadJobRun {
   command(type: 'THREAD_INPUT' | 'THREAD_STOP_TURN' | 'THREAD_CLOSE' | 'THREAD_PUBLISH', payload: unknown): ThreadCommandOutcome;
   command(type: ThreadCommandType, payload: unknown): ThreadCommandOutcome | Promise<ThreadCommandOutcome>;
   command(type: ThreadCommandType, payload: unknown): ThreadCommandOutcome | Promise<ThreadCommandOutcome> {
-    if (type === 'THREAD_PUBLISH') return { result: 'rejected', detail: 'unsupported' };
     if (this.closing || this.halted) return { result: 'rejected', detail: 'session_closed' };
     // A command only applies once the run can actually keep it: the row goes RUNNING before `openStream` awaits
     // its way to the writer, and in that window a turn could not be streamed — so the run is not ready yet.
     if (this.events.currentState() !== 'RUNNING' || this.writer === null) return { result: 'rejected', detail: 'session_not_ready' };
+    if (type === 'THREAD_PUBLISH') return this.livePublish?.command() ?? { result: 'rejected', detail: 'session_not_ready' };
     switch (type) {
       case 'THREAD_INPUT': return this.applyInput(payload);
       case 'THREAD_ANSWER': return this.applyAnswer(payload);
@@ -654,6 +674,7 @@ export class ThreadJobRun {
   private applyInput(payload: unknown): ThreadCommandOutcome {
     const message = readInput(payload);
     if (message === null) return { result: 'rejected', detail: 'invalid payload' };
+    if (this.livePublish?.publishing) return { result: 'rejected', detail: 'publishing' };
     if (this.turnRunning) return { result: 'rejected', detail: 'turn_running' };
     void this.runTurn(message.messageId, message.text);
     return { result: 'ok' };
