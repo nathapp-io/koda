@@ -196,7 +196,7 @@ describe('US-007 AC5, AC12, AC15: pages/[project]/threads/[id].vue', () => {
       m.app.unmount()
       return
     }
-    ;(end.props.onClick as () => void)()
+    (end.props.onClick as () => void)()
     await m.settle()
 
     expect(m.endSession).toHaveBeenCalledTimes(1)

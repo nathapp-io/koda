@@ -61,7 +61,7 @@ function actionButton(app: Mounted, key: string): FakeNode | undefined {
 }
 
 function click(node: FakeNode): void {
-  ;(node.props.onClick as () => void)()
+  (node.props.onClick as () => void)()
 }
 
 /** The first visible text field in the tree (the cap dialog input), shadcn stub or native. */
@@ -129,9 +129,9 @@ describe('US-007 AC8-AC11: ThreadControls', () => {
     const onInput = input.props.onInput
     const onUpdate = input.props['onUpdate:modelValue']
     if (typeof onInput === 'function') {
-      ;(onInput as (event: { target: { value: string } }) => void)({ target: { value: '8' } })
+      (onInput as (event: { target: { value: string } }) => void)({ target: { value: '8' } })
     } else if (typeof onUpdate === 'function') {
-      ;(onUpdate as (value: string) => void)('8')
+      (onUpdate as (value: string) => void)('8')
     }
 
     const confirm = actionButton(app, 'fleet.threads.controls.confirm') ?? actionButton(app, 'common.confirm')

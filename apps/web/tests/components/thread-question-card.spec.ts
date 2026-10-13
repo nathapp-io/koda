@@ -54,9 +54,9 @@ function typeAnswer(app: Mounted, value: string): void {
   const onInput = field.props.onInput
   const onUpdate = field.props['onUpdate:modelValue']
   if (typeof onInput === 'function') {
-    ;(onInput as (event: { target: { value: string } }) => void)({ target: { value } })
+    (onInput as (event: { target: { value: string } }) => void)({ target: { value } })
   } else if (typeof onUpdate === 'function') {
-    ;(onUpdate as (value: string) => void)(value)
+    (onUpdate as (value: string) => void)(value)
   }
 }
 

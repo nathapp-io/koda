@@ -56,9 +56,9 @@ function typeText(app: Mounted, value: string): void {
   const onInput = el.props.onInput
   const onUpdate = el.props['onUpdate:modelValue']
   if (typeof onInput === 'function') {
-    ;(onInput as (event: { target: { value: string } }) => void)({ target: { value } })
+    (onInput as (event: { target: { value: string } }) => void)({ target: { value } })
   } else if (typeof onUpdate === 'function') {
-    ;(onUpdate as (value: string) => void)(value)
+    (onUpdate as (value: string) => void)(value)
   }
 }
 
@@ -68,7 +68,7 @@ function pressEnter(app: Mounted, shift = false): void {
   if (el === undefined) return
   const onKeydown = el.props.onKeydown
   if (typeof onKeydown === 'function') {
-    ;(onKeydown as (event: { key: string; shiftKey?: boolean; preventDefault: () => void }) => void)({
+    (onKeydown as (event: { key: string; shiftKey?: boolean; preventDefault: () => void }) => void)({
       key: 'Enter',
       shiftKey: shift,
       preventDefault: () => undefined,
@@ -145,7 +145,7 @@ describe('US-007 AC1-AC4, AC6-AC7: ThreadComposer', () => {
       app.unmount()
       return
     }
-    ;(stop.props.onClick as () => void)()
+    (stop.props.onClick as () => void)()
     await settle()
 
     expect(app.emitted('stop')).toEqual([[]])
