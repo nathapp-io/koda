@@ -11,7 +11,7 @@ const record: ChatThreadRecord = {
   backend: { kind: 'native', model: 'm1' }, status: 'ACTIVE', archivedAt: null, skills: [],
   maxCostUsd: '5', costUsd: '0', tokens: null, specPath: '.nax/features/auth/spec.md', pendingQuestion: null,
   session: null, lastActivityAt: new Date('2026-10-01T00:00:00.000Z'), createdAt: new Date('2026-10-01T00:00:00.000Z'),
-  activeJob: null,
+  activeJob: null, writtenPaths: [], publishedSha: null, specPublished: false, lastWrite: null,
 };
 
 describe('ThreadsService.list', () => {

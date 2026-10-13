@@ -192,7 +192,7 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
   async findThreadAssign(jobId: string): Promise<ThreadAssign | null> {
     const turn = await this.db.fleetThreadTurn.findUnique({ where: { jobId } });
     if (!turn) return null;
-    const thread = await this.db.chatThread.findUnique({ where: { id: turn.threadId }, select: { feature: true } });
+    const thread = await this.db.chatThread.findUnique({ where: { id: turn.threadId }, select: { feature: true, title: true } });
     if (!thread) return null;
     const message = turn.initialMessageId ? await this.db.chatMessage.findUnique({ where: { id: turn.initialMessageId }, select: { id: true, content: true } }) : null;
     return {
@@ -200,6 +200,7 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
       instructions: turn.instructions, backend: turn.backend as unknown as ThreadAssign['backend'],
       skills: turn.skills as unknown as ThreadAssign['skills'],
       initialMessage: message ? { messageId: message.id, text: message.content } : null,
+      title: thread.title,
     };
   }
 

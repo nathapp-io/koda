@@ -19,7 +19,7 @@ import { BudgetPausedException } from '../budgets/budget.exceptions';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
 import { buildThreadInstructions } from './thread-instructions';
 import { sendRefusal, type ThreadSendRefusal } from './thread-send-rules';
-import { allocateThreadSeq, type ChatMessageRecord, type ChatThreadRecord, type ChatThreadRepository, type ThreadSession } from './domain/chat-thread.domain';
+import { allocateThreadSeq, type ChatMessageRecord, type ChatThreadRecord, type ChatThreadRepository, type ThreadSession, type ThreadWriteResult } from './domain/chat-thread.domain';
 import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
 import type { ThreadBackend } from '../common/thread-jobs';
 import { THREAD_LIMITS } from '../common/thread-jobs';
@@ -282,6 +282,8 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       costUsd: row.costUsd.toString(), tokens: row.tokens, specPath: row.specPath,
       pendingQuestion: row.pendingQuestion, session: (row.session as unknown as ThreadSession | null) ?? null,
       lastActivityAt: row.lastActivityAt, createdAt: row.createdAt, activeJob,
+      writtenPaths: row.writtenPaths, publishedSha: row.publishedSha, specPublished: row.specPublished,
+      lastWrite: (row.lastWrite as unknown as ThreadWriteResult | null) ?? null,
     };
   }
 }

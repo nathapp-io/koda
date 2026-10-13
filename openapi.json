@@ -13245,7 +13245,8 @@
               "config_jobs",
               "thread_capacity",
               "thread_backend",
-              "threads_disabled"
+              "threads_disabled",
+              "thread_write"
             ],
             "type": "string"
           }
@@ -15437,7 +15438,8 @@
               "capacity",
               "thread_capacity",
               "thread_backend",
-              "threads_disabled"
+              "threads_disabled",
+              "thread_write"
             ],
             "type": "string"
           }
@@ -16083,7 +16085,8 @@
               "capacity",
               "thread_capacity",
               "thread_backend",
-              "threads_disabled"
+              "threads_disabled",
+              "thread_write"
             ],
             "type": "string"
           }
@@ -16335,6 +16338,24 @@
                 "type": "string"
               }
             }
+          },
+          "writtenPaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "publishedSha": {
+            "type": "string",
+            "nullable": true
+          },
+          "specPublished": {
+            "type": "boolean"
+          },
+          "lastWrite": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true
           }
         },
         "required": [
@@ -16357,7 +16378,11 @@
           "session",
           "lastActivityAt",
           "createdAt",
-          "activeJob"
+          "activeJob",
+          "writtenPaths",
+          "publishedSha",
+          "specPublished",
+          "lastWrite"
         ]
       },
       "ThreadListDto": {
@@ -16487,6 +16512,24 @@
               }
             }
           },
+          "writtenPaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "publishedSha": {
+            "type": "string",
+            "nullable": true
+          },
+          "specPublished": {
+            "type": "boolean"
+          },
+          "lastWrite": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true
+          },
           "sendRefusal": {
             "nullable": true,
             "enum": [
@@ -16523,6 +16566,10 @@
           "lastActivityAt",
           "createdAt",
           "activeJob",
+          "writtenPaths",
+          "publishedSha",
+          "specPublished",
+          "lastWrite",
           "sendRefusal"
         ]
       },

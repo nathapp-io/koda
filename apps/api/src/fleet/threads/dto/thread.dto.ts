@@ -2,7 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { Allow } from 'class-validator';
 import type { ThreadSkillSource } from '../../../skills/skill-catalog.domain';
 import type { ThreadBackend } from '../../common/thread-jobs';
-import type { ThreadSession } from '../domain/chat-thread.domain';
+import type { ThreadSession, ThreadWriteResult } from '../domain/chat-thread.domain';
 import type { ThreadSendRefusal } from '../thread-send-rules';
 
 export class ThreadDto {
@@ -26,6 +26,10 @@ export class ThreadDto {
   @ApiProperty() lastActivityAt: Date;
   @ApiProperty() createdAt: Date;
   @ApiProperty({ nullable: true, type: 'object', properties: { id: { type: 'string' }, state: { type: 'string' } } }) activeJob: { id: string; state: string } | null;
+  @ApiProperty({ type: [String] }) writtenPaths: string[];
+  @ApiProperty({ nullable: true, type: String }) publishedSha: string | null;
+  @ApiProperty() specPublished: boolean;
+  @ApiProperty({ nullable: true, type: 'object', additionalProperties: true }) lastWrite: ThreadWriteResult | null;
 }
 
 export class ThreadDetailDto extends ThreadDto {

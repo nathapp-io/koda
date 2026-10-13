@@ -68,6 +68,40 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
     expect((await repo.get('P', 'T'))?.session).toBeNull();
   });
 
+  it('US-001 AC-14: get() maps writtenPaths, publishedSha, specPublished and lastWrite unchanged', async () => {
+    const lastWrite = { kind: 'published', jobId: 'j1', at: '2026-10-15T00:00:00.000Z', sha: 'a'.repeat(40), paths: ['docs/a.md'], ignored: [] };
+    const threadRow = {
+      id: 'T', projectId: 'P', repoId: 'R', baseRef: 'trunk', feature: 'f', title: 'x', createdById: 'U', runnerId: null,
+      backend: { kind: 'native' }, status: 'ACTIVE', archivedAt: null, skills: [], maxCostUsd: { toString: () => '5' },
+      costUsd: { toString: () => '0' }, tokens: null, specPath: 's', pendingQuestion: null, session: null,
+      writtenPaths: ['docs/a.md'], publishedSha: 'a'.repeat(40), specPublished: true, lastWrite,
+      lastActivityAt: new Date(0), createdAt: new Date(0),
+    };
+    const prisma = {
+      client: {
+        chatThread: { findFirst: vi.fn(async () => threadRow) },
+        fleetJob: { findFirst: vi.fn(async () => null) },
+      },
+    } as never;
+    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    const thread = await repo.get('P', 'T');
+    expect(thread).toMatchObject({ writtenPaths: ['docs/a.md'], publishedSha: 'a'.repeat(40), specPublished: true, lastWrite });
+  });
+
+  it('US-001 AC-1: create() reads back the write-path defaults', async () => {
+    const createdRow = {
+      id: 'T', projectId: 'P', repoId: 'R', baseRef: 'trunk', feature: 'f', title: 'x', createdById: 'U', runnerId: null,
+      backend: { kind: 'native' }, status: 'ACTIVE', archivedAt: null, skills: [], maxCostUsd: { toString: () => '5' },
+      costUsd: { toString: () => '0' }, tokens: null, specPath: 's', pendingQuestion: null, session: null,
+      writtenPaths: [], publishedSha: null, specPublished: false, lastWrite: null,
+      lastActivityAt: new Date(0), createdAt: new Date(0),
+    };
+    const prisma = { client: { chatThread: { create: vi.fn(async () => createdRow) } } } as never;
+    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    const thread = await repo.create({ projectId: 'P', repoId: 'R', baseRef: 'trunk', feature: 'f', title: 'x', createdById: 'U', backend: { kind: 'native' }, skills: [], maxCostUsd: '5' });
+    expect(thread).toMatchObject({ writtenPaths: [], publishedSha: null, specPublished: false, lastWrite: null });
+  });
+
   it('US-003 AC13: messages() passes the after-seq filter and limit to the query', async () => {
     const findMany = vi.fn(async () => []);
     const prisma = { client: { chatMessage: { findMany } } } as never;

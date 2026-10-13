@@ -146,6 +146,14 @@ describeIntegration('fleet thread facts (PG, US-001)', () => {
     }
   });
 
+  it('US-001 write-path AC-14: GET the thread returns writtenPaths, publishedSha, specPublished and lastWrite unchanged', async () => {
+    const sha = 'b'.repeat(40);
+    const lastWrite = { kind: 'published', jobId: 'j1', at: '2026-10-15T00:00:00.000Z', sha, paths: ['docs/a.md'], ignored: [] };
+    const id = await newThread({ writtenPaths: ['docs/a.md'], publishedSha: sha, specPublished: true, lastWrite });
+    const res = await getThread(id)(world.tokens.dev).expect(200);
+    expect(data<Record<string, unknown>>(res)).toMatchObject({ writtenPaths: ['docs/a.md'], publishedSha: sha, specPublished: true, lastWrite });
+  });
+
   it('US-001 AC14: project runner summaries carry a protocol-4 runner threadBackends', async () => {
     const enrolled = await enrollRunner(server, world.tokens.root, 'facts-runner');
     await prisma.runner.update({ where: { id: enrolled.runnerId }, data: {

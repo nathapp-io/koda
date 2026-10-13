@@ -267,6 +267,10 @@ describe('#207: interaction plugin checks', () => {
     expect(PERMANENT_MISFITS.has('interaction')).toBe(false);
   });
 
+  it('US-001 AC11: thread_write is a waiting reason (a runner restart or re-probe clears it), not permanent', () => {
+    expect(PERMANENT_MISFITS.has('thread_write')).toBe(false);
+  });
+
   it('reports sandbox before interaction on the same profile (placement order)', () => {
     const r = runner({ capabilities: caps({ profiles: brokenFast, sandbox: { available: false, probedAt: 'x' } }) });
     expect(misfit(job(), r)).toBe('sandbox');

@@ -83,7 +83,7 @@ export class PlacementService {
       const runners = await this.repo.findPlacementRunners(ids);
       const loads = toLoads(await this.repo.findActiveLoads(ids));
       const threadAssign = isThreadKind(job.command) ? await this.repo.findThreadAssign(job.id) : null;
-      const placementJob = toPlacementJob(job, repo, isThreadKind(job.command) && threadAssign ? { backend: threadAssign.backend, enabled: this.fleetConfig.threadsEnabled } : undefined);
+      const placementJob = toPlacementJob(job, repo, isThreadKind(job.command) && threadAssign ? { backend: threadAssign.backend, enabled: this.fleetConfig.threadsEnabled, action: threadAssign.action } : undefined);
       const evaluated = evaluateRunners(placementJob, runners, loads, (id) => pauses.runnerPaused(id), now, this.fleetConfig.runnerOfflineSec);
       const misfits = evaluated
         .filter((e) => e.reason !== null)
@@ -162,7 +162,7 @@ export class PlacementService {
         // sync: skip it the way fillRunner skips a missing repo (one failing job in a sync is
         // logged and skipped, never allowed to fail the request).
         if (!repo || !thread) continue;
-        const placementJob = toPlacementJob(job, repo, { backend: thread.backend, enabled: this.fleetConfig.threadsEnabled });
+        const placementJob = toPlacementJob(job, repo, { backend: thread.backend, enabled: this.fleetConfig.threadsEnabled, action: thread.action });
         const currentLoad = { ...load, threads: (runner.threadCapacity ?? 0) - slots };
         if (firstMisfit(placementJob, candidate, currentLoad, now, this.fleetConfig.runnerOfflineSec) !== null) continue;
         const done = await this.assign(job, repo, runner, now);

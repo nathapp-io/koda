@@ -118,7 +118,7 @@ function parseCredential(c: unknown, i: number): RunnerCredential {
 export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
   if (!isObj(raw)) fail('not an object');
   if (Buffer.byteLength(JSON.stringify(raw), 'utf8') > MAX_CAPABILITIES_BYTES) fail('too large');
-  const { nax, sandbox, profiles, credentials, tools, executors, approvals, interaction, configJobs, threadBackends } = raw;
+  const { nax, sandbox, profiles, credentials, tools, executors, approvals, interaction, configJobs, threadBackends, threadWrite } = raw;
 
   if (
     !isObj(nax) || !isStr(nax.version) || !Array.isArray(nax.protocols) || nax.protocols.length === 0 ||
@@ -135,6 +135,8 @@ export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
   if (approvals !== undefined && !(isObj(approvals) && approvals.relay === true && Object.keys(approvals).length === 1)) fail('approvals');
   // Fleet S3 §3: strict like approvals; only exactly `true` is meaningful.
   if (configJobs !== undefined && configJobs !== true) fail('configJobs');
+  // Fleet S5a §4: strict like configJobs; only exactly `true` is meaningful (Publish and Discard placement).
+  if (threadWrite !== undefined && threadWrite !== true) fail('threadWrite');
 
   const parsedCredentials = credentials.map(parseCredential);
 
@@ -153,5 +155,6 @@ export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
     ...(interaction !== undefined ? { interaction: parseInteraction(interaction, 'interaction') } : {}),
     ...(configJobs === true ? { configJobs: true as const } : {}),
     ...(threadBackends !== undefined ? { threadBackends: parseThreadBackends(threadBackends) } : {}),
+    ...(threadWrite === true ? { threadWrite: true as const } : {}),
   };
 }

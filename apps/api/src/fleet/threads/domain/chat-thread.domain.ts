@@ -23,12 +23,27 @@ export interface ThreadSession {
   at: string;
 }
 
+/**
+ * The thread's last Publish or Discard result (fleet S5a §4), also the `lastWrite` JSON shape. Publish writes
+ * `published` or `publish_failed`; Discard writes `discarded` or `discard_failed`.
+ */
+export type ThreadWriteResult =
+  | { kind: 'published'; jobId: string; at: string; sha: string; paths: string[]; ignored: string[] }
+  | { kind: 'publish_failed'; jobId: string; at: string; reason: string }
+  | { kind: 'discarded'; jobId: string; at: string; sha: string }
+  | { kind: 'discard_failed'; jobId: string; at: string; reason: string };
+
 export interface ChatThreadRecord {
   id: string; repoId: string; baseRef: string; feature: string; title: string;
   createdById: string; runnerId: string | null; backend: ThreadBackend; status: string; archivedAt: Date | null;
   skills: ThreadSkillSource[]; maxCostUsd: string; costUsd: string; tokens: unknown; specPath: string;
   pendingQuestion: unknown; session: ThreadSession | null; lastActivityAt: Date; createdAt: Date;
   activeJob: { id: string; state: string } | null;
+  /** Distinct paths write_doc touched since the last publish (capped at 200 by the ingest, US-002). */
+  writtenPaths: string[];
+  publishedSha: string | null;
+  specPublished: boolean;
+  lastWrite: ThreadWriteResult | null;
 }
 
 export type ChatThreadDetail = ChatThreadRecord & { sendRefusal: ThreadSendRefusal | null };
