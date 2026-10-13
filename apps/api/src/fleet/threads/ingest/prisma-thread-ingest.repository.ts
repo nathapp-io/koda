@@ -11,6 +11,7 @@ import type { ThreadIngestBatch, ThreadIngestRepository, FoldResult, UnfoldedStr
 import { allocateThreadSeq } from '../domain/chat-thread.domain';
 import { ACTIVE_STATES } from '../../jobs/job-state';
 import type { AssistantThreadLine, QuestionThreadLine, SessionThreadLine, ThreadLine, ToolThreadLine, UsageThreadLine } from './thread-line';
+import { writeLinePatch, type WriteFoldPatch, type WriteLine } from './thread-write-fold';
 import {
   upsertInformationalQuestion, upsertToolSummary, type ToolSummaryEntry,
 } from './tool-summary';
@@ -23,7 +24,7 @@ const UNFOLDED_STREAM_LIMIT = 200;
 const QUESTION_TEXT_MAX = 2048;
 
 /** A ThreadSession as stored in `ChatThread.session` (the API `session` JSON). */
-interface StoredSession { jobId: string; state: 'live' | 'closed' | 'failed'; resumed: boolean; contextReset: boolean; reason: string | null; at: string }
+interface StoredSession { jobId: string; state: 'live' | 'closed' | 'failed'; resumed: boolean; contextReset: boolean; reason: string | null; at: string; stale?: true }
 
 /** Reads a message's stored `toolSummary` (JSON, written only by this fold) as its typed entries. */
 const readSummary = (json: Prisma.JsonValue | null): ToolSummaryEntry[] => (json as unknown as ToolSummaryEntry[] | null) ?? [];
@@ -32,6 +33,8 @@ const isToolLine = (line: ThreadLine): line is ToolThreadLine =>
   line.type === 'tool_call' || line.type === 'tool_result' || line.type === 'approval_requested' || line.type === 'approval_resolved';
 const isSessionLine = (line: ThreadLine): line is SessionThreadLine =>
   line.type === 'session_started' || line.type === 'session_closed' || line.type === 'session_failed';
+const isWriteLine = (line: ThreadLine): line is WriteLine =>
+  line.type === 'write_doc' || line.type === 'published' || line.type === 'publish_failed' || line.type === 'discarded' || line.type === 'discard_failed';
 
 @Injectable()
 export class PrismaThreadIngestRepository implements ThreadIngestRepository {
@@ -127,6 +130,10 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
           else if (isSessionLine(line)) {
             const erroredIds = await this.foldSessionLine(batch, threadId, line);
             for (const id of erroredIds) messageIds.add(id);
+            threadChanged = true;
+          }
+          else if (isWriteLine(line)) {
+            await this.foldWriteLine(batch, threadId, line);
             threadChanged = true;
           }
           else if (line.type === 'usage') {
@@ -409,7 +416,10 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
     const at = line.at ?? new Date().toISOString();
     if (line.type === 'session_started') {
       const turn = await db.fleetThreadTurn.findUnique({ where: { jobId: batch.jobId }, select: { resume: true } });
-      const session: StoredSession = { jobId: batch.jobId, state: 'live', resumed: line.resumed, contextReset: turn?.resume === true && !line.resumed, reason: null, at };
+      const session: StoredSession = {
+        jobId: batch.jobId, state: 'live', resumed: line.resumed, contextReset: turn?.resume === true && !line.resumed, reason: null, at,
+        ...(line.stale === true ? { stale: true as const } : {}),
+      };
       await db.chatThread.update({ where: { id: threadId }, data: { session: session as unknown as Prisma.InputJsonValue } });
       return [];
     }
@@ -435,6 +445,36 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
       data: { status: 'errored', errorReason: line.reason.slice(0, ERROR_REASON_MAX) },
     });
     return affected.map(({ id }) => id);
+  }
+
+  /**
+   * Folds one write-path line (fleet S5a §4) into the thread's write columns. The caller holds the thread row lock, so
+   * the row read here is the one the single update writes back over.
+   */
+  private async foldWriteLine(batch: ThreadIngestBatch, threadId: string, line: WriteLine): Promise<void> {
+    const db = this.prisma.client;
+    const thread = await db.chatThread.findUnique({ where: { id: threadId }, select: { writtenPaths: true, session: true } });
+    if (!thread) throw new Error(`write-path line for missing thread ${threadId}`);
+    const patch: WriteFoldPatch = writeLinePatch(
+      {
+        writtenPaths: thread.writtenPaths,
+        session: (thread.session as unknown as StoredSession | null) ?? null,
+      },
+      line,
+      { jobId: batch.jobId, at: new Date().toISOString() },
+    );
+    await db.chatThread.update({ where: { id: threadId }, data: this.writePatchData(patch) });
+  }
+
+  /** Maps a fold patch onto `ChatThread` columns. Keys the patch leaves out are not touched. */
+  private writePatchData(patch: WriteFoldPatch): Prisma.ChatThreadUncheckedUpdateInput {
+    const data: Prisma.ChatThreadUncheckedUpdateInput = {};
+    if (patch.writtenPaths !== undefined) data.writtenPaths = patch.writtenPaths;
+    if (patch.publishedSha !== undefined) data.publishedSha = patch.publishedSha;
+    if (patch.specPublished !== undefined) data.specPublished = patch.specPublished;
+    if (patch.lastWrite !== undefined) data.lastWrite = patch.lastWrite as unknown as Prisma.InputJsonValue;
+    if (patch.session !== undefined) data.session = patch.session as unknown as Prisma.InputJsonValue;
+    return data;
   }
 
   /** Caller holds the thread row lock. */

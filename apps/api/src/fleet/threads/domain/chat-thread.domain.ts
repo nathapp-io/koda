@@ -21,6 +21,8 @@ export interface ThreadSession {
   contextReset: boolean;
   reason: string | null;
   at: string;
+  /** Set while the runner reports the session's worktree stale; absent otherwise (fleet S5a §4). */
+  stale?: true;
 }
 
 /**
