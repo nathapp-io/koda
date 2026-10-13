@@ -9,6 +9,7 @@ const BASH_MODES: readonly string[] = ['raw', 'gated', 'escalate'];
 const DEFAULT_APPROVAL_TIMEOUT_SEC = 600;
 const INSTRUCTIONS_MAX_CHARS = 262_144;
 const EFFORT_RE = /^[a-z]{1,16}$/;
+const THREAD_TITLE_MAX_CHARS = 200;
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -142,7 +143,8 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   const t = p['thread'];
   if (!isObj(t)) return bad('thread');
   if (!checked(() => assertSegment('threadId', t['threadId']))) return bad('threadId');
-  if (t['action'] !== 'SESSION') return bad('thread action');
+  const action = t['action'];
+  if (action !== 'SESSION' && action !== 'PUBLISH' && action !== 'DISCARD') return bad('thread action');
   if (!checked(() => assertFeature(t['feature']))) return bad('thread feature');
   if (typeof t['resume'] !== 'boolean') return bad('thread resume');
   const instructions = t['instructions'];
@@ -155,6 +157,8 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   let initialMessage: ThreadAssign['initialMessage'];
   if (rawInitial === null) {
     initialMessage = null;
+  } else if (action !== 'SESSION') {
+    return bad('initialMessage');
   } else {
     if (!isObj(rawInitial)) return bad('initialMessage');
     if (!checked(() => assertSegment('messageId', rawInitial['messageId']))) return bad('initialMessage');
@@ -162,15 +166,19 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
     if (typeof initialText !== 'string' || initialText.length > THREAD_LIMITS.messageMaxBytes || utf8Bytes(initialText) > THREAD_LIMITS.messageMaxBytes) return bad('initialMessage');
     initialMessage = { messageId: rawInitial['messageId'] as string, text: initialText };
   }
+  // The title is optional; the API bounds it at 200 characters (thread-input.ts), so it is copied only when present.
+  const rawTitle = t['title'];
+  if (rawTitle !== undefined && !text(rawTitle, THREAD_TITLE_MAX_CHARS)) return bad('thread title');
   const thread: ThreadAssign = {
     threadId: t['threadId'] as string,
-    action: 'SESSION',
+    action,
     feature: t['feature'] as string,
     resume: t['resume'] as boolean,
     instructions: instructions as string,
     backend,
     skills,
     initialMessage,
+    ...(rawTitle !== undefined ? { title: rawTitle as string } : {}),
   };
   return { ok: true, assign: { ...baseAssign, thread } };
 }
