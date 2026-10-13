@@ -36,6 +36,40 @@ describe('ThreadsService.list', () => {
   });
 });
 
+describe('ThreadsService.plan (US-006)', () => {
+  it('dispatches a published thread plan on its feature branch with default cap and thread id', async () => {
+    const dispatch = vi.fn().mockResolvedValue({ job: { id: 'j1' } });
+    const threads = { get: vi.fn().mockResolvedValue({ ...record, specPublished: true, runnerId: 'runner-1' }) } as unknown as ChatThreadRepository;
+    const service = new ThreadsService(
+      threads,
+      {} as unknown as IFleetRepoRepository,
+      {} as unknown as SkillsService,
+      { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
+      { dispatch } as unknown as FleetJobsService,
+    );
+
+    await service.plan('p1', 't1', 'u1', {});
+    expect(dispatch).toHaveBeenCalledWith('u1', 'p1', {
+      repoId: 'r1', command: 'PLAN', ref: 'feat/auth', feature: 'auth',
+      planFrom: '.nax/features/auth/spec.md', profiles: undefined, maxCostUsd: 5, pinnedRunnerId: 'runner-1',
+    }, { threadId: 't1' });
+  });
+
+  it('refuses before dispatch when the thread spec is unpublished', async () => {
+    const dispatch = vi.fn();
+    const threads = { get: vi.fn().mockResolvedValue(record) } as unknown as ChatThreadRepository;
+    const service = new ThreadsService(
+      threads,
+      {} as unknown as IFleetRepoRepository,
+      {} as unknown as SkillsService,
+      { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
+      { dispatch } as unknown as FleetJobsService,
+    );
+    await expect(service.plan('p1', 't1', 'u1', {})).rejects.toMatchObject({ code: 409 });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+});
+
 describe('ThreadsService.discard (US-004)', () => {
   it('AC-1: passes the project, thread and user to the repository and returns its { jobId }', async () => {
     const discard = vi.fn().mockResolvedValue({ jobId: 'job-d1' });

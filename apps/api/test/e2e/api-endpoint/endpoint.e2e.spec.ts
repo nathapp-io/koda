@@ -3217,6 +3217,83 @@ describeIntegration('API Integration Tests', () => {
       refusal(res, 'threads.input.400', { reason: 'backend' });
     });
 
+    it('US-006 AC-2: refuses to plan a thread before its spec is published', async () => {
+      const thread = body<{ id: string }>(await createThread('plan-unpublished').expect(201));
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(409);
+      threadMessage(res, 'threads.notPublished.409');
+    });
+
+    it('US-006 AC-1/8: dispatches a published thread plan on its feature ref with the default cap', async () => {
+      const thread = body<{ id: string; feature: string; repoId: string; specPath: string }>(await createThread('plan-happy').expect(201));
+      await db().chatThread.update({ where: { id: thread.id }, data: { specPublished: true } });
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(201);
+      const result = body<{ job: { id: string; repoId: string; command: string; ref: string; feature: string; planFrom: string; maxCostUsd: string } }>(res);
+      expect(result.job).toMatchObject({ repoId: thread.repoId, command: 'PLAN', ref: 'feat/plan-happy', feature: 'plan-happy', planFrom: thread.specPath, maxCostUsd: '5' });
+      await expect(db().fleetJob.findUniqueOrThrow({ where: { id: result.job.id } })).resolves.toMatchObject({ threadId: thread.id, pinnedRunnerId: null });
+    });
+
+    it('US-006 AC-4/5: refuses a plan while a THREAD or PLAN job for that thread is active', async () => {
+      for (const [feature, command] of [['busy-session', 'THREAD'], ['busy-plan', 'PLAN']] as const) {
+        const thread = body<{ id: string }>(await createThread(feature).expect(201));
+        await db().chatThread.update({ where: { id: thread.id }, data: { specPublished: true } });
+        await db().fleetJob.create({ data: {
+          projectId: world.projectId, repoId: world.repoId, ref: `feat/${feature}`, command, feature,
+          planFrom: command === 'PLAN' ? '.nax/features/spec.md' : null, profiles: [], maxCostUsd: '5',
+          selectorLabels: [], pinnedRunnerId: null, requestedById: world.ids.dev, threadId: thread.id, state: 'RUNNING',
+        } });
+        const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
+          .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(409);
+        threadMessage(res, 'threads.busy.409');
+      }
+    });
+
+    it('US-006 AC-7: forwards plan profiles and the requested cost cap', async () => {
+      const thread = body<{ id: string }>(await createThread('plan-options').expect(201));
+      await db().chatThread.update({ where: { id: thread.id }, data: { specPublished: true } });
+      const response = body<{ job: { id: string } }>(await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({ profiles: ['cc-plan'], maxCostUsd: 2 }).expect(201));
+      const job = await db().fleetJob.findUniqueOrThrow({ where: { id: response.job.id } });
+      expect(job.profiles).toEqual(['cc-plan']);
+      expect(job.maxCostUsd.toString()).toBe('2');
+    });
+
+    it('US-006 AC-14: denies a thread creator whose project role no longer permits FleetJob creation', async () => {
+      const thread = body<{ id: string }>(await createThread('plan-viewer').expect(201));
+      await db().chatThread.update({ where: { id: thread.id }, data: { specPublished: true } });
+      await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.dev } }, data: { role: 'VIEWER' } });
+      try {
+        await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
+          .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(403);
+      } finally {
+        await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.dev } }, data: { role: 'DEVELOPER' } });
+      }
+    });
+
+    it('US-006 AC-6: concurrent plans leave exactly one active job for the thread', async () => {
+      const thread = body<{ id: string }>(await createThread('plan-race').expect(201));
+      await db().chatThread.update({ where: { id: thread.id }, data: { specPublished: true } });
+      const postPlan = () => request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({});
+      const results = await Promise.all([postPlan(), postPlan()]);
+      expect(results.map((res) => res.status).sort()).toEqual([201, 409]);
+      const jobs = await db().fleetJob.findMany({ where: { threadId: thread.id, command: 'PLAN' } });
+      expect(jobs).toHaveLength(1);
+    });
+
+    it('US-006 AC-13: thread detail exposes the latest plan and run handoff jobs', async () => {
+      const thread = body<{ id: string; specPath: string }>(await createThread('plan-handoff').expect(201));
+      await db().chatThread.update({ where: { id: thread.id }, data: { specPublished: true } });
+      const response = body<{ job: { id: string } }>(await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(201));
+      await db().fleetJob.update({ where: { id: response.job.id }, data: { state: 'FAILED', stateReason: 'branch_mismatch' } });
+      const detail = body<{ handoff: { plan: { jobId: string; state: string; stateReason: string | null }; run: unknown } }>(
+        await request(httpServer).get(`/api/projects/${projectSlug}/threads/${thread.id}`).set('Authorization', `Bearer ${world.tokens.dev}`).expect(200),
+      );
+      expect(detail.handoff).toEqual({ plan: { jobId: response.job.id, state: 'FAILED', stateReason: 'branch_mismatch' }, run: null });
+    });
+
     it('US-003 AC10: rejects a second active thread for the same repo and feature', async () => {
       await createThread('same-active-feature').expect(201);
       const res = await createThread('same-active-feature').expect(409);

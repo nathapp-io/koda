@@ -4,6 +4,7 @@ import type { ThreadSkillSource } from '../../../skills/skill-catalog.domain';
 import type { ThreadBackend } from '../../common/thread-jobs';
 import type { ThreadSession, ThreadWriteResult } from '../domain/chat-thread.domain';
 import type { ThreadSendRefusal } from '../thread-send-rules';
+import type { ChatThreadHandoff } from '../domain/chat-thread.domain';
 
 export class ThreadDto {
   @ApiProperty() id: string;
@@ -34,6 +35,7 @@ export class ThreadDto {
 
 export class ThreadDetailDto extends ThreadDto {
   @ApiProperty({ enum: ['disabled', 'archived', 'costCap', 'budgetPaused', 'runnerOffline', 'runnerOutdated', 'closing', 'turnRunning'], nullable: true }) sendRefusal: ThreadSendRefusal | null;
+  @ApiProperty({ type: 'object', properties: { plan: { type: 'object', nullable: true, additionalProperties: true }, run: { type: 'object', nullable: true, additionalProperties: true } } }) handoff: ChatThreadHandoff;
 }
 
 export class ThreadListDto {

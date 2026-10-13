@@ -11,6 +11,8 @@ import type { ProjectContext } from '../../projects/project-context';
 import { withProjectRole } from '../../projects/project-context';
 import { ThreadsService } from './threads.service';
 import { AnswerQuestionDto, ChatMessageListDto, ChatMessageDto, CreateThreadDto, SendMessageDto, SendMessageResultDto, ThreadDetailDto, ThreadDto, ThreadListDto, UpdateThreadDto } from './dto/thread.dto';
+import { PlanThreadDto } from './dto/thread-handoff.dto';
+import { DispatchResultDto } from '../jobs/dto/fleet-job.dto';
 
 @ApiTags('fleet threads')
 @ApiBearerAuth()
@@ -70,6 +72,17 @@ export class ThreadsController {
   async update(@Param('id') id: string, @Body() dto: UpdateThreadDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
     this.assertUser(principal);
     return JsonResponse.Ok(await this.threads.updateCap(ctx.project.id, id, principal.id, dto.maxCostUsd));
+  }
+
+  @Post(':id/plan')
+  @HttpCode(201)
+  @ApiOperation({ summary: 'Plan a published thread spec (creator, project DEVELOPER+)' })
+  @ApiResponse({ status: 201, type: DispatchResultDto })
+  async plan(@Param('id') id: string, @Body() dto: PlanThreadDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    this.assertUser(principal);
+    const ability = await this.casl.createForUser(withProjectRole(principal, ctx.role));
+    if (!ability.can(CaslPermissionAction.CREATE, 'FleetJob')) throw new ForbiddenAppException({}, 'projects');
+    return JsonResponse.Ok(await this.threads.plan(ctx.project.id, id, principal.id, dto));
   }
 
   @Post(':id/stop')

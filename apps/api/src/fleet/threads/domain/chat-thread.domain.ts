@@ -48,7 +48,9 @@ export interface ChatThreadRecord {
   lastWrite: ThreadWriteResult | null;
 }
 
-export type ChatThreadDetail = ChatThreadRecord & { sendRefusal: ThreadSendRefusal | null };
+export interface ThreadHandoffJob { jobId: string; state: string; stateReason: string | null }
+export type ChatThreadHandoff = { plan: ThreadHandoffJob | null; run: ThreadHandoffJob | null };
+export type ChatThreadDetail = ChatThreadRecord & { sendRefusal: ThreadSendRefusal | null; handoff: ChatThreadHandoff };
 
 export interface ChatMessageRecord {
   id: string; seq: number; jobId: string | null; turnId: string | null; role: string; authorUserId: string | null;
@@ -60,6 +62,7 @@ export interface ChatThreadRepository {
   create(input: { projectId: string; repoId: string; baseRef: string; feature: string; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord>;
   list(projectId: string, status: string | undefined, skip: number, take: number): Promise<ChatThreadRecord[]>;
   get(projectId: string, id: string): Promise<ChatThreadRecord | null>;
+  handoff(threadId: string): Promise<ChatThreadHandoff>;
   sendRefusalOf(projectId: string, thread: ChatThreadRecord): Promise<ThreadSendRefusal | null>;
   messages(threadId: string, afterSeq: number, limit: number): Promise<ChatMessageRecord[]>;
   sendMessage(input: { projectId: string; threadId: string; userId: string; text: string; clientMessageId: string }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }>;

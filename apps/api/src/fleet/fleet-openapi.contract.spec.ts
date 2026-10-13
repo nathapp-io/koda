@@ -45,6 +45,7 @@ describe('fleet OpenAPI contract', () => {
 
   it('exposes the web-facing thread facts: detail refusal and the list kill-switch flag (US-001)', () => {
     expect(Object.keys(spec.components.schemas['ThreadDetailDto']?.properties ?? {})).toContain('sendRefusal');
+    expect(Object.keys(spec.components.schemas['ThreadDetailDto']?.properties ?? {})).toContain('handoff');
     expect(Object.keys(spec.components.schemas['ThreadListDto']?.properties ?? {})).toContain('threadsEnabled');
   });
 

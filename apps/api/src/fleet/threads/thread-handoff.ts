@@ -1,0 +1,1 @@
+export const THREAD_HANDOFF_DEFAULT_MAX_COST_USD = 5;

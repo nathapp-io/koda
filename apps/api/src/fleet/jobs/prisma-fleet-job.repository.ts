@@ -60,6 +60,13 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     }
   }
 
+  async lockIdleThread(threadId: string): Promise<boolean> {
+    const rows = await this.db.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "ChatThread" WHERE "id" = ${threadId} FOR UPDATE`;
+    if (rows.length === 0) return false;
+    const active = await this.db.fleetJob.count({ where: { threadId, state: { in: [...ACTIVE_STATES] } } });
+    return active === 0;
+  }
+
   async findActiveJobId(repoId: string, feature: string): Promise<string | null> {
     const row = await this.db.fleetJob.findFirst({
       where: { repoId, feature, state: { in: [...ACTIVE_STATES] } },
