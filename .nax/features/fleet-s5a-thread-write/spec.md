@@ -596,7 +596,7 @@ name: 'koda-fleet[bot]', email: 'bot@koda.test' }`, `repoKey` `'r1'` and a real 
   paths: ['docs/a.md'], ignored: ['src/x.ts'] }`.
 - AC-7 [unit] In the AC-6 setup, the commit at the result's `sha` changes exactly one file, `docs/a.md`.
 - AC-8 [unit] With `feat/divide` already equal to the worktree's HEAD and `docs/a.md` written, `refs/heads/feat/divide`
-  afterwards points at the result's `sha`, a new commit whose parent is the old HEAD.
+  afterwards points at the result's `sha`.
 - AC-9 [unit] With `feat/divide` pointing at a commit other than the worktree's HEAD and `docs/a.md` written, the
   result is `{ ok: false, reason: 'branch_moved' }`.
 - AC-10 [unit] In the AC-9 setup, `refs/heads/feat/divide` afterwards still points at its earlier commit.
