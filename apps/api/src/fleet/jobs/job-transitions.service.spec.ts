@@ -134,3 +134,51 @@ describe('JobTransitionsService', () => {
     });
   });
 });
+
+describe('JobTransitionsService thread end events (#264)', () => {
+  const THREAD_EVENTS = [
+    { id: 't1', threadId: 'T1', at: NOW.toISOString(), type: 'message', messageId: 'm1' },
+    { id: 't2', threadId: 'T1', at: NOW.toISOString(), type: 'thread' },
+  ];
+  const repo = {
+    update: vi.fn(async (_id: string, patch: Record<string, unknown>) => ({ ...job({ command: 'THREAD', threadId: 'T1', runnerId: 'run-1' }), ...(patch as Partial<FleetJobRecord>) })),
+    appendEvent: vi.fn(),
+    withdrawPendingCommands: vi.fn(),
+    copyConfigResult: vi.fn(),
+  };
+  const live = { event: vi.fn((j: FleetJobRecord) => ({ id: 'e', type: 'fleet_job', projectId: j.projectId, jobId: j.id, state: j.state, at: NOW.toISOString() })), publish: vi.fn() };
+  const threadEffects = { onJobEnded: vi.fn(async () => THREAD_EVENTS) };
+  const svc = new JobTransitionsService(
+    repo as never, { record: vi.fn() } as never, live as never, { onJobEnded: vi.fn() } as never,
+    { closeForJob: vi.fn().mockResolvedValue([]) } as never, { onTerminal: vi.fn() } as never, threadEffects as never,
+  );
+  afterEach(() => vi.clearAllMocks());
+
+  const threadJob = (over: Partial<FleetJobRecord> = {}) => job({ command: 'THREAD', threadId: 'T1', state: 'RUNNING', runnerId: 'run-1', ...over });
+
+  it('a terminal THREAD transition carries its thread events on the fleet live event', async () => {
+    const r = await svc.apply({ job: threadJob(), to: 'CRASHED', by: 'server', now: NOW, actor: SYSTEM_ACTOR, reason: 'runner silent' });
+    expect(threadEffects.onJobEnded).toHaveBeenCalledWith(expect.objectContaining({ id: 'j1', state: 'CRASHED' }));
+    expect(r.live).toMatchObject({ type: 'fleet_job', jobId: 'j1', threadEvents: THREAD_EVENTS });
+    // Publishing is the caller's job after commit; apply runs inside the transaction.
+    expect(live.publish).not.toHaveBeenCalled();
+  });
+
+  it('a terminal THREAD transition with the idle close also carries the thread events', async () => {
+    const r = await svc.apply({ job: threadJob({ state: 'UPLOADING' }), to: 'COMPLETED', by: 'runner', now: NOW, actor: { type: 'RUNNER', id: 'run-1' }, reason: 'idle' });
+    expect(r.live.threadEvents).toEqual(THREAD_EVENTS);
+  });
+
+  it('a non-terminal transition ends no thread and carries no thread events', async () => {
+    const r = await svc.apply({ job: threadJob({ state: 'ASSIGNED' }), to: 'RUNNING', by: 'runner', now: NOW, actor: { type: 'RUNNER', id: 'run-1' } });
+    expect(threadEffects.onJobEnded).not.toHaveBeenCalled();
+    expect(r.live).not.toHaveProperty('threadEvents');
+  });
+
+  it('a terminal non-THREAD transition carries no thread events', async () => {
+    repo.update.mockImplementationOnce(async (_id: string, patch: Record<string, unknown>) => job({ ...(patch as Partial<FleetJobRecord>) }));
+    const r = await svc.apply({ job: job({ state: 'UPLOADING' }), to: 'COMPLETED', by: 'runner', now: NOW, actor: { type: 'RUNNER', id: 'run-1' } });
+    expect(threadEffects.onJobEnded).not.toHaveBeenCalled();
+    expect(r.live).not.toHaveProperty('threadEvents');
+  });
+});

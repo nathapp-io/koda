@@ -1,5 +1,5 @@
 import { PrismaThreadIngestRepository } from './prisma-thread-ingest.repository';
-import type { ThreadIngestBatch } from './thread-ingestor';
+import type { ThreadIngestBatch } from './domain/thread-ingest.domain';
 
 function makeRepository(options: { hasMessage: boolean }) {
   const message = { id: 'M', usage: null };

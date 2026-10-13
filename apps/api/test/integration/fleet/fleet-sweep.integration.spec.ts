@@ -9,6 +9,7 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { insertRunner, seedFleetBase } from '../../helpers/fleet-fixtures';
 import { FleetSweeper } from '../../../src/fleet/sync/fleet-sweeper';
+import { ThreadEventBus, type ThreadLiveEvent } from '../../../src/live/thread-event-bus';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -25,7 +26,7 @@ describeIntegration('fleet silence sweep (PG)', () => {
     await app.close();
   });
 
-  const crashedThread = async (feature: string) => {
+  const crashedThread = async (feature: string, opts: { onEvent?: (event: ThreadLiveEvent, jobId: string) => void } = {}) => {
     const base = await seedFleetBase(prisma);
     const now = new Date('2026-10-01T12:00:00.000Z');
     const silent = await insertRunner(prisma, { lastSeenAt: new Date(now.getTime() - 301_000) });
@@ -34,15 +35,26 @@ describeIntegration('fleet silence sweep (PG)', () => {
       createdById: base.adminId, backend: { kind: 'native' }, skills: [], specPath: `.nax/features/${feature}/spec.md`,
       runnerId: silent.id, pendingQuestion: { requestId: 'q1' },
     } });
+    let jobId = '';
     const job = await prisma.fleetJob.create({ data: {
       projectId: base.projectId, repoId: base.repoId, ref: 'main', command: 'THREAD', feature: `thread-${thread.id}`, profiles: [],
       selectorLabels: [], maxCostUsd: new Prisma.Decimal(5), requestedById: base.adminId, state: 'RUNNING', runnerId: silent.id,
       leaseEpoch: 1, threadId: thread.id,
     } });
+    jobId = job.id;
+    await prisma.chatThread.update({ where: { id: thread.id }, data: { session: {
+      jobId: job.id, state: 'live', reason: null, resumed: false, contextReset: false, at: '2026-10-01T11:59:00.000Z',
+    } } });
     const message = await prisma.chatMessage.create({ data: {
       threadId: thread.id, seq: 1, role: 'user', content: 'hi', status: 'pending', authorUserId: base.adminId,
     } });
-    await app.get(FleetSweeper).sweep(now);
+    const onEvent = opts.onEvent;
+    const unsubscribe = onEvent ? app.get(ThreadEventBus).subscribe(thread.id, (event) => onEvent(event, jobId)) : () => undefined;
+    try {
+      await app.get(FleetSweeper).sweep(now);
+    } finally {
+      unsubscribe();
+    }
     return { job, thread, message };
   };
 
@@ -57,6 +69,24 @@ describeIntegration('fleet silence sweep (PG)', () => {
   it('US-007 AC14: silence sweep clears the thread pending question', async () => {
     const { thread } = await crashedThread('sweeper-thread-question');
     expect((await prisma.chatThread.findUniqueOrThrow({ where: { id: thread.id } })).pendingQuestion).toBeNull();
+  });
+
+  it('#264: silence sweep publishes message and thread events after the CRASHED transition commits', async () => {
+    const seen: Array<{ event: ThreadLiveEvent; stateAtPublish: Promise<string | undefined> }> = [];
+    const { message } = await crashedThread('sweeper-thread-live', {
+      // A separate read at publish time sees only committed rows, so CRASHED proves the publish ran after commit.
+      onEvent: (event, jobId) => seen.push({ event, stateAtPublish: prisma.fleetJob.findUnique({ where: { id: jobId } }).then((j) => j?.state) }),
+    });
+    expect(seen.map((s) => s.event.type)).toEqual(['message', 'thread']);
+    expect(seen[0].event).toMatchObject({ type: 'message', messageId: message.id });
+    expect(await Promise.all(seen.map((s) => s.stateAtPublish))).toEqual(['CRASHED', 'CRASHED']);
+  });
+
+  it('#264: silence sweep closes the live session snapshot of the crashed job as failed', async () => {
+    const { thread } = await crashedThread('sweeper-thread-session');
+    expect((await prisma.chatThread.findUniqueOrThrow({ where: { id: thread.id } })).session).toEqual(expect.objectContaining({
+      state: 'failed', reason: 'runner silent',
+    }));
   });
 
   it('US-007 AC15: silence sweep does not enqueue a thread outcome event', async () => {

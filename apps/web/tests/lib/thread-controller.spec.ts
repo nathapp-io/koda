@@ -486,3 +486,72 @@ describe('US-003 thread-controller', () => {
     expect(patch).toHaveBeenCalledWith(THREAD_PATH, { maxCostUsd: 8 })
   })
 })
+
+/**
+ * A server that holds m2 as streaming until the test flips it to errored (the job ended). Messages
+ * are served by seq, so an afterSeq GET returns every message at or after the cursor.
+ */
+function serverWithStreamingMessage(): { get: jest.Mock; finish: () => void } {
+  let m2Status: 'streaming' | 'errored' = 'streaming'
+  const get = jest.fn(async (path: string, options?: { query?: { afterSeq?: string } }) => {
+    if (path === THREAD_PATH) return thread()
+    if (path === MESSAGES_PATH) {
+      const after = Number(options?.query?.afterSeq ?? 0)
+      const all = [
+        message({ id: 'm1', seq: 1, status: 'complete' }),
+        message({ id: 'm2', seq: 2, status: m2Status, errorReason: m2Status === 'errored' ? 'crashed' : null }),
+      ]
+      return { items: all.filter(item => item.seq > after) }
+    }
+    throw new Error(`unexpected path ${path}`)
+  })
+  return { get, finish: () => { m2Status = 'errored' } }
+}
+
+describe('US-003 thread-controller: a job end leaves the streaming state', () => {
+  test('US-003 AC15: onMessage for a held streaming message that became errored refetches it as errored', async () => {
+    const server = serverWithStreamingMessage()
+    const h = makeHarness({ get: server.get })
+    await h.ctl.load()
+    h.ctl.start()
+    server.finish()
+
+    h.handlers.onMessage?.({ id: 'e2', threadId: 'th1', at: '2026-10-14T00:00:00.000Z', type: 'message', messageId: 'm2' })
+    await settle()
+
+    expect(h.ctl.messages.value.find(m => m.id === 'm2')?.status).toBe('errored')
+    expect(h.ctl.messages.value.find(m => m.id === 'm2')?.errorReason).toBe('crashed')
+  })
+
+  test('US-003 AC16: onThread while a held message is streaming refetches messages, so it becomes errored', async () => {
+    const server = serverWithStreamingMessage()
+    const h = makeHarness({ get: server.get })
+    await h.ctl.load()
+    h.ctl.start()
+    server.finish()
+
+    h.handlers.onThread?.({ id: 'e3', threadId: 'th1', at: '2026-10-14T00:00:00.000Z', type: 'thread' })
+    await settle()
+
+    expect(h.ctl.messages.value.find(m => m.id === 'm2')?.status).toBe('errored')
+    expect(h.messageCalls()).toHaveLength(2)
+    expect(h.get).toHaveBeenLastCalledWith(MESSAGES_PATH, { query: { afterSeq: '1', limit: '200' } })
+  })
+
+  test('US-003 AC17: onThread with no turn running reloads only the thread, not the messages', async () => {
+    const get = jest.fn(async (path: string) => {
+      if (path === THREAD_PATH) return thread()
+      if (path === MESSAGES_PATH) return { items: [message({ id: 'm1', seq: 1, status: 'complete' })] }
+      throw new Error(`unexpected path ${path}`)
+    })
+    const h = makeHarness({ get })
+    await h.ctl.load()
+    h.ctl.start()
+    const messageCallsBefore = h.messageCalls().length
+
+    h.handlers.onThread?.({ id: 'e4', threadId: 'th1', at: '2026-10-14T00:00:00.000Z', type: 'thread' })
+    await settle()
+
+    expect(h.messageCalls()).toHaveLength(messageCallsBefore)
+  })
+})
