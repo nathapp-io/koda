@@ -1,0 +1,482 @@
+{
+  "project": "koda",
+  "feature": "fleet-s5a-thread-write",
+  "branchName": "feat/fleet-s5a-thread-write",
+  "createdAt": "2026-10-13T00:00:00.000Z",
+  "updatedAt": "2026-10-13T09:12:49.420Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Doc-path allowlist and ASSIGN actions",
+      "description": "**Goal** \u2014 Add the pure `isAllowedThreadDocPath` allowlist, the protocol types for the thread write path, and make `parseAssign` accept `PUBLISH` / `DISCARD` actions and an optional `title`.\n\n**Motivation** \u2014 Phase B threads are read-only; the protocol and ASSIGN parser must express writing, publishing and discarding before any runner behaviour can be built, and the deployed API must keep working with a C1 runner.\n\n**Approach** \u2014 In `packages/fleet-protocol` (new file `src/thread-doc-paths.ts`, exported from `src/index.ts`):\n\n```ts\nexport const THREAD_DOC_LIMITS = { maxFileBytes: 524_288, maxPathChars: 512 } as const;\n/** Pure, no I/O. `feature` is the thread's feature slug. */\nexport function isAllowedThreadDocPath(path: string, feature: string): boolean;\n```\n\n`isAllowedThreadDocPath(path, feature)` is `true` exactly when all hold:\n\n1. `path` is a string of 1..`maxPathChars` characters with no `\\`, no NUL and no leading `/`;\n2. every `/`-separated segment matches `/^[A-Za-z0-9._-]+$/` and is not `.` or `..`, and no segment equals `.git` (any letter case);\n3. the last segment ends in `.md` and is longer than `.md`;\n4. either the first segment is `docs` and there are at least 2 segments, or the path starts with `.nax/features/<feature>/` and there are at least 4 segments.\n\nMirror the pattern of `packages/fleet-protocol/src/nax-config-paths.ts` (`naxPathGroup` / `isAllowedNaxPath`).\n\nIn `src/threads.ts`:\n\n```ts\nexport type ThreadAction = 'SESSION' | 'PUBLISH' | 'DISCARD';\nexport type ThreadPublishFailReason = 'branch_moved' | 'repo_busy' | 'no_worktree' | 'git_error';\nexport type ThreadDiscardFailReason = 'no_worktree' | 'git_error';\n// ThreadAssign gains: title?: string;\nexport type ThreadRunnerLine =\n  | { type: 'session_started'; at: string; resumed: boolean; backend: ThreadBackend; skillShas: string[]; stale?: true }\n  | { type: 'session_closed'; at: string; reason: ThreadCloseReason }\n  | { type: 'input_consumed'; at: string; messageId: string }\n  | { type: 'session_failed'; at: string; reason: ThreadFailReason }\n  | { type: 'write_doc'; at: string; path: string; bytes: number }\n  | { type: 'published'; at: string; sha: string; paths: string[]; ignored: string[]; specPresent: boolean }\n  | { type: 'publish_failed'; at: string; reason: ThreadPublishFailReason }\n  | { type: 'discarded'; at: string; tipSha: string }\n  | { type: 'discard_failed'; at: string; reason: ThreadDiscardFailReason };\n```\n\n`RunnerCapabilities` in `src/index.ts` gains `threadWrite?: true`. The `THREAD_PUBLISH` payload is `{}`; the runner ignores its content.\n\nASSIGN parsing: `parseAssign` (`apps/runner/src/supervisor/assign-parser.ts`) accepts `thread.action` `SESSION`, `PUBLISH` or `DISCARD`; any other value is `invalid thread action`. For `PUBLISH` and `DISCARD`, a non-null `initialMessage` is `invalid initialMessage`. `thread.title`, when present, must be a string of 1..200 characters (else `invalid thread title`) and is copied; when absent the parsed `ThreadAssign` has no `title` key. All other `thread` fields keep the B3b rules for every action.\n\nUpdate the existing test at `apps/runner/src/supervisor/assign-parser-thread.spec.ts:68` (asserted `PUBLISH` -> `invalid thread action`) into a test that `thread.action: 'PUBLISH'` with `initialMessage: null` returns an `assign.thread` whose `action` is `'PUBLISH'`; an unknown action such as `'REVIEW'` still returns `invalid thread action`.\n\n**Scope** \u2014 In: allowlist, protocol types, `RunnerCapabilities.threadWrite` type, `parseAssign` changes. Out: event-writer methods (US-002), the `write_doc` tool (US-003), Publish (US-004), worktree/Discard (US-005), the capability probe reporting `threadWrite: true` (US-007).\n\n**Interface** \u2014 see Approach (verbatim).",
+      "acceptanceCriteria": [
+        "isAllowedThreadDocPath('docs/specs/divide.md', 'divide') returns true",
+        "isAllowedThreadDocPath('.nax/features/divide/spec.md', 'divide') returns true",
+        "isAllowedThreadDocPath('.nax/features/other/spec.md', 'divide') returns false",
+        "isAllowedThreadDocPath('docs/../src/a.md', 'divide') returns false",
+        "isAllowedThreadDocPath('/docs/a.md', 'divide') returns false",
+        "isAllowedThreadDocPath('docs/.GIT/a.md', 'divide') returns false",
+        "isAllowedThreadDocPath('docs/a.ts', 'divide') returns false",
+        "isAllowedThreadDocPath('src/docs/a.md', 'divide') returns false",
+        "isAllowedThreadDocPath of a docs/-prefixed .md path 513 characters long returns false",
+        "parseAssign of the THREAD fixture (assign-parser-thread.spec.ts) with thread.action 'PUBLISH' and initialMessage null returns an assign.thread whose action is 'PUBLISH'",
+        "parseAssign of the fixture with thread.action 'DISCARD' and initialMessage null returns an assign.thread whose action is 'DISCARD'",
+        "parseAssign of the fixture with thread.action 'PUBLISH' and the fixture's initial message returns { ok: false, detail: 'invalid initialMessage' }",
+        "parseAssign of the fixture with thread.action 'REVIEW' returns { ok: false, detail: 'invalid thread action' }",
+        "parseAssign of the fixture with thread.title 'Divide brainstorm' returns an assign.thread whose title is 'Divide brainstorm'",
+        "parseAssign of the fixture with a thread.title of 201 characters returns { ok: false, detail: 'invalid thread title' }"
+      ],
+      "tags": [
+        "feature",
+        "protocol",
+        "runner"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Pure allowlist function plus type additions and a parser branch across two packages; clear rules, standard patterns."
+      },
+      "contextFiles": [
+        "packages/fleet-protocol/src/threads.ts",
+        "packages/fleet-protocol/src/nax-config-paths.ts",
+        "packages/fleet-protocol/src/index.ts",
+        "apps/runner/src/supervisor/assign-parser.ts",
+        "apps/runner/src/supervisor/assign-parser-thread.spec.ts"
+      ],
+      "expectedFiles": [
+        "packages/fleet-protocol/src/thread-doc-paths.ts",
+        "apps/runner/test/unit/thread-write-contract.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "isAllowedThreadDocPath('docs/a\\\\b.md', 'divide') returns false",
+        "isAllowedThreadDocPath('docs/.md', 'divide') returns false",
+        "isAllowedThreadDocPath('docs.md', 'divide') returns false",
+        "parseAssign of the fixture without thread.title returns an assign.thread with no title key",
+        "parseAssign of the fixture with thread.action 'DISCARD' and the fixture's initial message returns { ok: false, detail: 'invalid initialMessage' }"
+      ],
+      "outOfScope": [
+        "US-001 only: the allowlist's backslash, NUL, empty-stem (`docs/.md`), bare `docs.md` and 512-character boundary cases, a `title` that is absent (the parsed thread has no `title` key) and `THREAD_DOC_LIMITS` itself share the rules in Design without a dedicated acceptance criterion; `ThreadRunnerLine` and the two fail-reason unions are types, checked by `bun run type-check`. A `DISCARD` ASSIGN with a non-null `initialMessage` returns `invalid initialMessage` by the same rule as `PUBLISH` (AC-12) without its own acceptance criterion."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/supervisor/assign-parser-thread.spec.ts",
+          "reason": "the test at line 68 asserting that `thread.action: 'PUBLISH'` returns `{ ok: false, detail: 'invalid thread action' }` becomes a test that `thread.action: 'PUBLISH'` with `initialMessage: null` returns an `assign.thread` whose `action` is `'PUBLISH'`, because this story makes `PUBLISH` a valid action; an unknown action such as `'REVIEW'` still returns `invalid thread action`."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Event writer lines",
+      "description": "**Goal** \u2014 Extend `ThreadEventWriter` with the runner lines for doc writes, publish and discard results, and the optional `stale` flag on `session_started`.\n\n**Motivation** \u2014 The API learns of writes, commits and stale starts only through the thread stream, so the writer must emit the new line types.\n\n**Approach** \u2014 `ThreadEventWriter` (`apps/runner/src/thread/thread-event-writer.ts`) gains, each writing one runner line with `at` from the writer's clock after releasing held text (as `closed` does today):\n\n- `started({ resumed, backend, skillShas, stale })` writes `stale: true` only when `stale` is `true`; otherwise the line is unchanged from B3b.\n- `docWritten(path, bytes)` -> `{ type: 'write_doc', at, path, bytes }`.\n- `published({ sha, paths, ignored, specPresent })` -> `{ type: 'published', at, sha, paths, ignored, specPresent }`.\n- `publishFailed(reason: string)` -> `{ type: 'publish_failed', at, reason }`.\n- `discarded(tipSha)` -> `{ type: 'discarded', at, tipSha }`.\n- `discardFailed(reason: string)` -> `{ type: 'discard_failed', at, reason }`.\n\nReasons are plain strings, as `closed(reason: string)` and `failed(reason: string)` take today; the fail-reason unions document the values the runner produces. The new methods are additions; `started` without `stale` writes the same line as before. Prefer immutable construction of the line objects.\n\n**Scope** \u2014 In: the six writer additions. Out: calling them from `ThreadJobRun` (US-006, US-007).\n\n**Interface** \u2014 as listed in Approach.",
+      "acceptanceCriteria": [
+        "started({ resumed: false, backend: { kind: 'native' }, skillShas: [], stale: true }) writes a session_started line whose stale is true",
+        "started({ resumed: false, backend: { kind: 'native' }, skillShas: [], stale: false }) writes a session_started line that has no stale key",
+        "docWritten('docs/a.md', 12) writes a line deep-equal to { type: 'write_doc', at: '2026-10-13T00:00:00.000Z', path: 'docs/a.md', bytes: 12 }",
+        "published({ sha: 'abc', paths: ['docs/a.md'], ignored: ['src/x.ts'], specPresent: false }) writes a line deep-equal to { type: 'published', at: '2026-10-13T00:00:00.000Z', sha: 'abc', paths: ['docs/a.md'], ignored: ['src/x.ts'], specPresent: false }",
+        "publishFailed('repo_busy') writes a line deep-equal to { type: 'publish_failed', at: '2026-10-13T00:00:00.000Z', reason: 'repo_busy' }",
+        "discarded('def') writes a line deep-equal to { type: 'discarded', at: '2026-10-13T00:00:00.000Z', tipSha: 'def' }",
+        "discardFailed('no_worktree') writes a line deep-equal to { type: 'discard_failed', at: '2026-10-13T00:00:00.000Z', reason: 'no_worktree' }"
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "stream"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Single-file purely additive change following the existing closed()/failed() pattern."
+      },
+      "contextFiles": [
+        "apps/runner/src/thread/thread-event-writer.ts",
+        "apps/runner/test/unit/thread-event-writer.spec.ts",
+        "packages/fleet-protocol/src/threads.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/test/unit/thread-event-writer-write.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "started called without a stale argument writes a session_started line identical to the B3b line, with no stale key",
+        "docWritten called after held text exists releases the held text before writing the write_doc line"
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "write_doc tool and allowlisted untracked files",
+      "description": "**Goal** \u2014 Add the `write_doc` thread tool that writes allowlisted `.md` files into the worktree without committing, and make `list_files` and `search_repo` see allowlisted untracked files.\n\n**Motivation** \u2014 Phase C's goal is that the thread ends with `.nax/features/<feature>/spec.md` in the checkout; the agent needs a safe write tool and must be able to find what it wrote.\n\n**Approach** \u2014 `writeDocTool(ctx)` in new `apps/runner/src/thread/tools/write-doc.ts`, input `{ path: string, content: string }` (both required, `additionalProperties: false`), `approval: 'never'`. Steps, in order, the first failure returning an `isError: true` result and writing nothing:\n\n1. `path` must pass `isAllowedThreadDocPath(path, ctx.feature ?? '')`, else `path not allowed: <path>`;\n2. `content` must be a string, else `content must be a string`;\n3. `content` must be at most `THREAD_DOC_LIMITS.maxFileBytes` UTF-8 bytes, else `content too large`;\n4. no existing segment of `<worktree>/<path>` (each directory, then the file) may be a symlink, else `refused symlink: <relative path>`;\n5. create the parent directories; the parent's real path must be inside the worktree's real path, else `path escapes the worktree`;\n6. write `content` as UTF-8, replacing an existing file; return `wrote <path> (<bytes> bytes)`; then call `ctx.onDocWritten?.(path, bytes)`.\n\nThe tool's `run` goes through `refuseInvalidInput` (`tools/shared.ts`), so any filesystem error (the target is a directory, a parent segment is a regular file, no space, no permission) returns `isError: true` with the sanitized error message and calls no `onDocWritten`. Mirror `symlinkOnPath` / `applyEdits` in `apps/runner/src/executor/config-job/apply-edits.ts` for the symlink and real-path checks.\n\nThe tool never runs git: the file stays untracked or modified until Publish. The `ThreadTool` doc comment in `tools/types.ts` (\"A read-only thread tool\") becomes \"A thread tool\".\n\n`ThreadToolContext` (`thread/tools/types.ts`) gains optional `feature?: string` (absent: only `docs/**` is allowlisted, because no `.nax/features/<feature>/` prefix can match) and `onDocWritten?: (path: string, bytes: number) => void`; optional so the existing tool-test contexts still type-check. `buildThreadTools` returns five tools, `write_doc` last.\n\n`list_files` also lists untracked, non-ignored files (`git ls-files -z --others --exclude-standard` with the same `dir` / `glob` pathspec) that pass `isAllowedThreadDocPath(path, ctx.feature ?? '')`. The result is the tracked list followed by those untracked paths, de-duplicated in first-seen order, then cut by the same entry and byte caps.\n\n`search_repo` runs in two steps: the existing tracked `git grep`, then, when there are allowlisted untracked paths (listed as above with the search's `glob`), a second `git grep --no-index` with the same flags limited to those literal paths. Hit lines are the tracked hits followed by the untracked ones, de-duplicated in first-seen order; the `max` and byte caps apply to the combined list. Untracked files outside the allowlist and ignored files never appear in either tool. The tool descriptions say so.\n\nExisting tests to update: `apps/runner/test/unit/thread-skill-tools.spec.ts` line 136 (tool-name list gains `'write_doc'` last; order of the first four unchanged) and line 142 (approvals become five `'never'`); `apps/runner/test/unit/thread-tools-embedder.spec.ts` line 18 (names list gains `'write_doc'`) and line 29 (`tools.length` 4 -> 5); `apps/runner/test/unit/thread-tools-review.spec.ts` line 43 (recorded git timeouts `[4_321]` -> `[4_321, 4_321]`, because `list_files` now issues a second `ls-files` call).\n\n**Scope** \u2014 In: `write-doc.ts`, `ThreadToolContext` fields, `buildThreadTools`, `list_files`/`search_repo` untracked handling, the listed test updates. Out: wiring `feature`/`onDocWritten` into the session (US-006); Publish (US-004).\n\n**Interface** \u2014 `writeDocTool(ctx: ThreadToolContext): ThreadTool`; `ThreadToolContext` gains `feature?: string` and `onDocWritten?: (path: string, bytes: number) => void`.",
+      "acceptanceCriteria": [
+        "After writeDocTool(ctx).run({ path: '.nax/features/divide/spec.md', content: '# Divide' }), the file .nax/features/divide/spec.md in the worktree holds '# Divide'",
+        "writeDocTool(ctx).run({ path: '.nax/features/divide/spec.md', content: '# Divide' }) returns { content: 'wrote .nax/features/divide/spec.md (8 bytes)' } with no isError",
+        "writeDocTool(ctx).run({ path: 'src/index.md', content: 'x' }) returns { content: 'path not allowed: src/index.md', isError: true }",
+        "writeDocTool(ctx).run({ path: 'docs/a.md', content: 7 }) returns { content: 'content must be a string', isError: true }",
+        "writeDocTool(ctx).run with path 'docs/a.md' and a content of 524289 ASCII characters returns { content: 'content too large', isError: true }",
+        "With docs replaced by a symlink to a directory outside the worktree, writeDocTool(ctx).run({ path: 'docs/a.md', content: 'x' }) returns { content: 'refused symlink: docs', isError: true }",
+        "With docs/a.md an existing symlink, writeDocTool(ctx).run({ path: 'docs/a.md', content: 'x' }) returns { content: 'refused symlink: docs/a.md', isError: true }",
+        "After writeDocTool(ctx).run({ path: 'docs/guide.md', content: 'new' }), git status --porcelain in the worktree prints exactly the line ' M docs/guide.md'",
+        "writeDocTool(ctx).run({ path: 'docs/a.md', content: 'hello' }) calls onDocWritten exactly once, with ('docs/a.md', 5)",
+        "writeDocTool(ctx).run({ path: 'src/index.md', content: 'x' }) does not call onDocWritten",
+        "buildThreadTools(ctx) returns tools whose names are, in order, list_files, search_repo, load_skill, read_skill_file, write_doc",
+        "With an untracked docs/a.md in the worktree, listFilesTool(ctx).run({}) lists docs/a.md",
+        "With an untracked notes.md in the worktree, listFilesTool(ctx).run({}) does not list notes.md",
+        "With an untracked docs/a.md holding 'needle', searchRepoTool(ctx).run({ pattern: 'needle' }) returns a line starting 'docs/a.md:1:'",
+        "With an untracked notes.md holding 'needle' and no tracked file holding it, searchRepoTool(ctx).run({ pattern: 'needle' }) returns no line starting 'notes.md'"
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "tools",
+        "filesystem"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "One new tool following the existing apply-edits symlink pattern plus additive changes to two existing tools; standard patterns across about five files, so a single TDD session suffices."
+      },
+      "contextFiles": [
+        "apps/runner/src/thread/tools/list-files.ts",
+        "apps/runner/src/thread/tools/search-repo.ts",
+        "apps/runner/src/thread/tools/index.ts",
+        "apps/runner/src/thread/tools/types.ts",
+        "apps/runner/src/executor/config-job/apply-edits.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/thread/tools/write-doc.ts",
+        "apps/runner/test/unit/thread-write-doc.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "With only tracked files in the worktree, listFilesTool(ctx).run({}) returns the same tracked list as before this change",
+        "With a tracked file holding 'needle', searchRepoTool(ctx).run({ pattern: 'needle' }) still returns its hit line",
+        "writeDocTool(ctx).run with content 'x' and a path of 'docs/a.md' when docs/a.md already exists replaces the file content with 'x'",
+        "writeDocTool(ctx).run with a content of exactly 524288 ASCII characters succeeds",
+        "writeDocTool with a ctx that has no feature rejects '.nax/features/divide/spec.md' with 'path not allowed: .nax/features/divide/spec.md'",
+        "An ignored untracked file such as debug.log never appears in list_files or search_repo results"
+      ],
+      "outOfScope": [
+        "US-003 only: the exact 524288-byte boundary, `list_files`' `dir` / `glob` filter on untracked files, an ignored file in either tool, `search_repo`'s `fixed`, `max` and timeout rules for untracked files, a `write_doc` parent that resolves outside the worktree without a symlink, a filesystem error (through `refuseInvalidInput`), the absent-`feature` context and the de-duplication of tracked and untracked results (exercised by the existing `thread-tools.spec.ts` fake, which answers every `ls-files` call with the tracked list) share the rules in Design without a dedicated acceptance criterion."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/test/unit/thread-skill-tools.spec.ts",
+          "reason": "the test at line 136 asserting `buildThreadTools` returns exactly `['list_files', 'search_repo', 'load_skill', 'read_skill_file']` becomes the same list with `'write_doc'` appended, because this story adds `write_doc` as the fifth tool; the order of the first four is unchanged. Also: the test at line 142 asserting the approvals are exactly four `'never'` becomes five `'never'`, because this story adds `write_doc` with `approval: 'never'`."
+        },
+        {
+          "path": "apps/runner/test/unit/thread-tools-embedder.spec.ts",
+          "reason": "the line 18 assertion of the exact four tool names becomes the same list with `'write_doc'` appended, because this story adds `write_doc` as the fifth tool. Also: the line 29 assertion `tools.length` is `4` becomes `5`, because this story adds `write_doc` to the tool set."
+        },
+        {
+          "path": "apps/runner/test/unit/thread-tools-review.spec.ts",
+          "reason": "the test at line 43 expecting the recorded git timeouts to be exactly `[4_321]` becomes `[4_321, 4_321]`, because `list_files` now issues a second `ls-files` call for untracked files and both calls carry the search timeout."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Publish",
+      "description": "**Goal** \u2014 Add `publishThreadDocs`, which commits exactly the allowlisted files a thread changed onto `refs/heads/feat/<feature>` in the runner's clone without pushing.\n\n**Motivation** \u2014 The runner owns the checkout, git identity and repo mutex, so the commit that turns a brainstorm into `.nax/features/<feature>/spec.md` on the local feature branch belongs here.\n\n**Approach** \u2014 Rulings: C1-R4 Publish never waits on the repo mutex (if another job holds it, fail at once with `repo_busy`). C1-D1 Publish keeps `refs/heads/feat/<feature>` and the worktree's `HEAD` together: it compares the branch with the worktree `HEAD` at publish time: an absent branch is created, a branch equal to `HEAD` is advanced, any other value is `branch_moved`. No session-start state is persisted. C1-D3 the commit title is the thread title.\n\n`publishThreadDocs(input)` in new `apps/runner/src/thread/thread-publish.ts`:\n\n```ts\nexport interface PublishThreadDocsInput {\n  readonly git: Git;\n  readonly mutex: Pick<RepoMutex, 'acquire' | 'isLocked'>;\n  readonly repoKey: string;\n  readonly worktree: string;\n  readonly feature: string;\n  readonly threadId: string;\n  readonly title: string;\n  readonly identity: GitIdentity;\n}\nexport type PublishThreadDocsResult =\n  | { ok: true; sha: string; paths: string[]; ignored: string[]; specPresent: boolean }\n  | { ok: false; reason: ThreadPublishFailReason; detail?: string };\nexport async function publishThreadDocs(input: PublishThreadDocsInput): Promise<PublishThreadDocsResult>;\n```\n\nSteps, all git calls with `cwd: input.worktree`:\n\n1. `<worktree>/.git` must exist and `git rev-parse --show-toplevel` in `worktree` must equal `realpath(worktree)`, else `no_worktree` (a plain directory inside some other repository is never treated as the worktree).\n2. If `mutex.isLocked(repoKey)`: `repo_busy`, and `acquire` is not called. Otherwise acquire it (granted at once) and release it in a `finally`, so every result and every throw after this step leaves the key unlocked.\n3. Dirty set: entries of `git status --porcelain -z --untracked-files=all`, each path taken after its two-character status and space (a rename's second NUL field is skipped). `paths` = entries that pass `isAllowedThreadDocPath(entry, feature)` and exist as regular files (`lstat`, not a symlink); `ignored` = every other entry, including a deleted file. Both sorted.\n4. `head` = `git rev-parse HEAD`; `current` = the sha of `refs/heads/feat/<feature>`, or `null` when `git show-ref --verify --quiet refs/heads/feat/<feature>` exits 1 (any other non-zero exit is `git_error`). `current !== null && current !== head` -> `branch_moved`.\n5. `paths` empty: when `current === null`, `git update-ref refs/heads/feat/<feature> <head> <zero sha>` (the zero sha is 40 `0` characters: the ref must not exist yet); result `sha` = `head`.\n6. `paths` not empty: `git add -- <paths>`, then `git commit ... -- <paths>` (only `paths`, even if something else is staged) with the explicit identity (as `commitAndPushConfig` in `executor/config-job/commit-push.ts`: `-c user.name=\u2026 -c user.email=\u2026 -c commit.gpgsign=false commit --no-verify` plus the `GIT_AUTHOR_*` / `GIT_COMMITTER_*` env), message `docs(<feature>): spec from koda thread \"<title>\"`, a blank line, and the trailer `Koda-Thread: <threadId>`. `title` has CR / LF replaced by spaces and is cut to 200 characters. `newSha` = `git rev-parse HEAD`; then `git update-ref refs/heads/feat/<feature> <newSha> <current ?? zero sha>`; a non-zero exit is `branch_moved`, after `git reset --soft <head>` moves the worktree back so its HEAD again matches what the branch was compared with.\n7. `specPresent` = `git cat-file -e <sha>:.nax/features/<feature>/spec.md` exits 0.\n8. A git call that fails outside the rules above is `git_error` with `detail` passed through `sanitizeDiagnostic`. Every git call has `timeoutMs` `PUBLISH_GIT_TIMEOUT_MS` (60 000, a constant in `thread-publish.ts`). No step pushes, fetches or touches a remote.\n\n**Scope** \u2014 In: `thread-publish.ts` and its tests on real temporary git repos. Out: calling it from a live session (US-006) or a PUBLISH job (US-007); Discard (US-005). Also out for the whole feature: Publish never waits for the repo mutex, never pushes or fetches.\n\n**Interface** \u2014 see Approach (verbatim).",
+      "acceptanceCriteria": [
+        "With .nax/features/divide/spec.md written in the worktree and no feat/divide branch, publishThreadDocs resolves a result matching { ok: true, paths: ['.nax/features/divide/spec.md'], ignored: [], specPresent: true }",
+        "With .nax/features/divide/spec.md written in the worktree and no feat/divide branch, refs/heads/feat/divide in repoDir afterwards equals the result's sha",
+        "With .nax/features/divide/spec.md written in the worktree and no feat/divide branch, the commit at the result's sha has the subject 'docs(divide): spec from koda thread \"Divide brainstorm\"'",
+        "With .nax/features/divide/spec.md written in the worktree and no feat/divide branch, the last line of the commit message at the result's sha is 'Koda-Thread: t1'",
+        "With docs/a.md and an untracked src/x.ts written in the worktree, the result matches { ok: true, paths: ['docs/a.md'], ignored: ['src/x.ts'] }",
+        "With docs/a.md and an untracked src/x.ts written in the worktree, the commit at the result's sha changes exactly one file, docs/a.md",
+        "With feat/divide already equal to the worktree's HEAD and docs/a.md written, refs/heads/feat/divide afterwards points at the result's sha",
+        "With feat/divide pointing at a commit other than the worktree's HEAD and docs/a.md written, the result is { ok: false, reason: 'branch_moved' }",
+        "With feat/divide pointing at a commit other than the worktree's HEAD and docs/a.md written, refs/heads/feat/divide afterwards still points at its earlier commit",
+        "With mutex.acquire('r1') held by another caller and never released, publishThreadDocs resolves to { ok: false, reason: 'repo_busy' }",
+        "After a successful publishThreadDocs call, mutex.isLocked('r1') is false",
+        "With a worktree path that does not exist, the result is { ok: false, reason: 'no_worktree' }",
+        "With worktree a directory inside repoDir's work tree that holds only an empty .git directory, the result is { ok: false, reason: 'no_worktree' }",
+        "After a call that returns branch_moved (feat/divide at a commit other than the worktree's HEAD), mutex.isLocked('r1') is false",
+        "A recording Git wrapping createGit(), passed to a successful publishThreadDocs call, receives no call whose first argument is 'push' or 'fetch'"
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "git",
+        "concurrency"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Multi-step git state machine with mutex handling, compare-and-swap ref updates and rollback; tested on real repos."
+      },
+      "contextFiles": [
+        "apps/runner/src/executor/config-job/commit-push.ts",
+        "apps/runner/src/supervisor/repo-mutex.ts",
+        "apps/runner/src/executor/git.ts",
+        "apps/runner/test/helpers/git-fixture.ts",
+        "packages/fleet-protocol/src/thread-doc-paths.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/thread/thread-publish.ts",
+        "apps/runner/test/unit/thread-publish.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "A deleted allowlisted file is reported in ignored and not in paths",
+        "An untracked symlink at an allowlisted path is reported in ignored and not in paths",
+        "A file staged outside paths is not part of the commit",
+        "A title containing CR or LF is written into the commit subject with those characters replaced by spaces and cut to 200 characters",
+        "specPresent is false when the published commit has no .nax/features/<feature>/spec.md"
+      ],
+      "outOfScope": [
+        "US-004 only: an untracked symlink or a deleted file under the allowlist (both go to `ignored`), a staged file outside `paths`, the commit's single parent and author, nothing to commit (the branch is created at HEAD when absent, `paths: []`), `specPresent: false`, a non-zero `update-ref` exit after the compare (with its `reset --soft`), the git timeout and a failing git call (`git_error` with a sanitized `detail`) share the steps in Design without a dedicated acceptance criterion; so do the `title` CR / LF replacement, the 200-character cut and the explicit identity, which follow `commitAndPushConfig`."
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Stale start and Discard",
+      "description": "**Goal** \u2014 Make a session start 'stale' on the worktree's old commit instead of failing when the checkout would overwrite local changes, and add `discardThreadChanges` that resets the thread's unpublished files and re-detaches the worktree at the branch tip.\n\n**Motivation** \u2014 Today a PLAN or RUN that moves the feature branch under unpublished thread files makes session start fail with `worktree_conflict`; the user needs to keep their files and later discard them.\n\n**Approach** \u2014 `prepareThreadWorktree` (`apps/runner/src/thread/thread-worktree.ts`): when the existing worktree's `git checkout --detach <tipSha>` exits non-zero with stderr saying local changes or untracked files `would be overwritten` (`createGit` forces `LC_ALL=C`, so the message is stable; the same file already matches `REF_LOCK_ERROR` this way), the result is `{ ok: true, worktree, tipSha: <the worktree's HEAD sha>, stale: true }`, the worktree is left as it was, and the returned `tipSha` is what the session starts on. Any other non-zero checkout keeps `{ ok: false, reason: 'worktree_conflict' }`. A checkout that succeeds, and a freshly added worktree, give `stale: false`. Every other failure keeps its B3a reason.\n\nTypes: `ThreadWorktreeResult` becomes `{ ok: true; worktree; tipSha; stale: boolean }` (plus the existing failure arm). `ThreadPrepareResult` (`thread/thread-job-run.ts:40`) becomes `{ ok: true; worktree; tipSha; stale?: boolean }`, absent meaning `false`; optional so the existing `prepareWorktree` test stubs still type-check.\n\n`discardThreadChanges(input)` in new `apps/runner/src/thread/thread-discard.ts`:\n\n```ts\nexport interface DiscardThreadChangesInput {\n  readonly git: Git;\n  readonly homeDir: string;\n  readonly repoDir: string;\n  readonly threadId: string;\n  readonly feature: string;\n  readonly baseRef: string;\n}\nexport type DiscardThreadChangesResult =\n  | { ok: true; tipSha: string }\n  | { ok: false; reason: ThreadDiscardFailReason; detail?: string };\nexport async function discardThreadChanges(input: DiscardThreadChangesInput): Promise<DiscardThreadChangesResult>;\n```\n\nSteps, in `threadWorktreeDir(homeDir, threadId)`: `<wt>/.git` must exist and `git rev-parse --show-toplevel` there must equal `realpath(<wt>)`, else `no_worktree` (as Publish step 1); `git reset --hard HEAD`; `git clean -fd` (no `-x`, so ignored files survive); resolve the tip with `resolveTip`, now exported from `thread-worktree.ts`, in the order `prepareThreadWorktree` uses (local `refs/heads/feat/<feature>`, then `refs/remotes/origin/<baseRef>`, then `<baseRef>^{commit}`, all read in `repoDir`); `git checkout --detach <tip>`; return `tipSha`. No fetch and no repo mutex: only the thread's own worktree changes. A git failure is `git_error` with a sanitized `detail`.\n\nExisting test to update: `apps/runner/test/unit/thread-worktree.spec.ts:174` (expected `{ ok: false, reason: 'worktree_conflict' }` when the existing worktree's checkout is refused) becomes a test expecting a result matching `{ ok: true, stale: true }` with `tipSha` equal to the worktree's HEAD; a refused `worktree add` still fails.\n\n**Scope** \u2014 In: `thread-worktree.ts` changes, `thread-discard.ts`, the `ThreadPrepareResult` type. Out: no rebase of base-ref drift (a stale session stays on its old HEAD until Discard); announcing `stale` on `session_started` (US-006); the DISCARD job path and `host.discard` wiring (US-007).\n\n**Interface** \u2014 see Approach (verbatim).",
+      "acceptanceCriteria": [
+        "prepareThreadWorktree whose worktree 'checkout --detach <tip>' exits 1 with stderr 'untracked working tree files would be overwritten by checkout' returns a result matching { ok: true, stale: true }",
+        "When the existing worktree's checkout is refused with 'would be overwritten' stderr, the stale result's tipSha equals the worktree's 'rev-parse HEAD' output",
+        "prepareThreadWorktree whose worktree checkout exits 0 returns a result matching { ok: true, stale: false }",
+        "prepareThreadWorktree that adds a new worktree returns a result matching { ok: true, stale: false }",
+        "prepareThreadWorktree whose worktree 'checkout --detach <tip>' exits 1 with stderr 'fatal: reference is not a tree' returns { ok: false, reason: 'worktree_conflict' }",
+        "On a real clone where feat/divide moved to a commit that changes docs/a.md while the worktree holds an uncommitted edit to the same docs/a.md, prepareThreadWorktree returns a result matching { ok: true, stale: true }",
+        "On a real clone where feat/divide moved to a commit that changes docs/a.md while the worktree holds an uncommitted edit to the same file, the worktree's docs/a.md still holds the uncommitted edit after prepareThreadWorktree",
+        "discardThreadChanges with an untracked docs/a.md in the worktree leaves no docs/a.md in the worktree",
+        "discardThreadChanges with an uncommitted edit to the tracked README.md leaves README.md holding its committed content",
+        "discardThreadChanges with an ignored debug.log in the worktree leaves debug.log in place",
+        "discardThreadChanges with feat/divide at commit X in the clone returns { ok: true, tipSha: X }",
+        "After discardThreadChanges with feat/divide at commit X in the clone, the worktree's HEAD is X",
+        "discardThreadChanges with no feat/divide branch returns a tipSha equal to origin/main in the clone",
+        "discardThreadChanges for a threadId with no worktree directory returns { ok: false, reason: 'no_worktree' }",
+        "With threadWorktreeDir(homeDir, 't1') a directory holding only an empty .git directory inside another repository's work tree that holds an untracked keep.md, discardThreadChanges leaves keep.md in place"
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "git",
+        "worktree"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A small branch added to prepareThreadWorktree plus one new linear git module (reset, clean, checkout) with a worktree guard mirroring Publish step 1; two files and clear requirements."
+      },
+      "contextFiles": [
+        "apps/runner/src/thread/thread-worktree.ts",
+        "apps/runner/src/thread/thread-paths.ts",
+        "apps/runner/test/unit/thread-worktree.spec.ts",
+        "apps/runner/test/helpers/git-fixture.ts",
+        "apps/runner/src/thread/thread-job-run.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/thread/thread-discard.ts",
+        "apps/runner/test/unit/thread-discard.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "discardThreadChanges makes no git fetch call",
+        "discardThreadChanges falls back to <baseRef>^{commit} when neither feat/divide nor origin/<baseRef> exists"
+      ],
+      "outOfScope": [
+        "US-005 only: the tip-resolution fallbacks after the local branch reuse `prepareThreadWorktree`'s order, Discard makes no `fetch` call, and a failing git call during Discard is `git_error`, without a dedicated acceptance criterion."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/test/unit/thread-worktree.spec.ts",
+          "reason": "the test at line 174 expecting `{ ok: false, reason: 'worktree_conflict' }` when the existing worktree's checkout is refused becomes a test expecting a result matching `{ ok: true, stale: true }` with `tipSha` equal to the worktree's HEAD, because this story turns a refused checkout into a stale start; a refused `worktree add` still fails."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "ThreadJobRun live publish, write_doc lines and stale announce",
+      "description": "**Goal** \u2014 Wire `write_doc`, live-session `THREAD_PUBLISH` and the stale announce into `ThreadJobRun`, with the publish state and handlers in a new sibling module.\n\n**Motivation** \u2014 A running brainstorm must write docs, announce them on the stream, and let the user publish them from the live session without racing turns, input or close.\n\n**Approach** \u2014 `ThreadHostDeps` (`thread/thread-job-run.ts:60`) gains `publish?: (input: ThreadPublishInput) => Promise<ThreadPublishResult>` (default `publishThreadDocs`) and, for US-007, `discard?`. As the existing seams (`thread-job-run.ts:18-44`), `ThreadPublishInput` = `Seam<PublishThreadDocsInput>` and the result widens `reason` to `string`: `{ ok: true; sha; paths; ignored; specPresent } | { ok: false; reason: string; detail?: string }`.\n\n- The publish-in-flight state and the `THREAD_PUBLISH` handling live in `thread/thread-live-publish.ts`; `ThreadJobRun` calls into it, so `thread-job-run.ts` (785 lines today) gains only the wiring calls.\n- The tool context gets `feature: thread.feature` and `onDocWritten` that writes `writer.docWritten(path, bytes)` when the writer exists.\n- `openStream` passes `stale: prepared.stale` to `writer.started`.\n- `command('THREAD_PUBLISH', payload)` on a `RUNNING` session, after the existing `session_closed` / `session_not_ready` checks: a running turn -> `rejected` `turn_running`; a publish already in flight -> `rejected` `publishing`; otherwise `ok`, and the publish runs in the background through `host.publish` (default `publishThreadDocs`) with `git: host.git`, `mutex: deps.mutex`, `repoKey: row.repoKey`, the prepared worktree, `feature` and `threadId` from the ASSIGN's `thread`, `title: thread.title ?? thread.feature` and `identity: row.assign.gitIdentity`.\n- While a publish is in flight the idle timer is stopped and `THREAD_INPUT` answers `rejected` `publishing`. When it settles, the writer gets `published(...)` or `publishFailed(reason)` and the idle timer is armed again.\n- A close (idle, `THREAD_CLOSE`, cancel, cost or stream cap) that starts while a publish is in flight waits for it, so the result line comes before `session_closed`. After a halt nothing is written.\n- `ThreadRunDeps.mutex` becomes `Pick<RepoMutex, 'acquire'> & Partial<Pick<RepoMutex, 'isLocked'>>`, so the eight existing thread-run test fixtures (`mutex: { acquire }`) still type-check. The run hands `publishThreadDocs` a mutex whose `isLocked` is `(key) => deps.mutex.isLocked(key)` when `deps.mutex.isLocked` exists (called on `deps.mutex`, so `this` stays bound) and `() => false` otherwise. Production always has it: the Supervisor passes the daemon's real `RepoMutex` (`supervisor.ts:47`).\n- `ThreadJobRun.command` (`thread-job-run.ts:639`) previously rejected `THREAD_PUBLISH` as `unsupported`; routing in `CommandHandler.handle` -> `Supervisor.threadCommand` -> `ThreadJobRun.command` is unchanged. A `host.publish` that throws is treated as `{ ok: false, reason: 'git_error' }`; a `publish_failed` result leaves the row `RUNNING`.\n\n**Scope** \u2014 In: `thread-live-publish.ts`, `thread-job-run.ts` wiring, `ThreadRunDeps.mutex` type, `host.publish` seam. Out: the PUBLISH/DISCARD job path, `host.discard` default and capability flag (US-007); the unit implementations of `write_doc`, Publish and the writer (US-002..US-004, already built).\n\n**Interface** \u2014 see Approach.",
+      "acceptanceCriteria": [
+        "The tools sessions.open receives include one named 'write_doc'",
+        "Once RUNNING, running the opened write_doc tool with { path: 'docs/a.md', content: 'hi' } appends a stream line matching { type: 'write_doc', path: 'docs/a.md', bytes: 2 }",
+        "Once RUNNING, command('THREAD_PUBLISH', {}) returns { result: 'ok' }",
+        "Once RUNNING, command('THREAD_PUBLISH', {}) calls host.publish once with an input matching { worktree: <tmp>, feature: 'divide', threadId: <ASSIGN thread.threadId>, title: 'Divide brainstorm', repoKey: <row repoKey>, identity: <ASSIGN gitIdentity> }",
+        "With the ASSIGN's thread.title absent, command('THREAD_PUBLISH', {}) calls host.publish with title 'divide'",
+        "After host.publish resolves, the stream holds a line matching { type: 'published', sha: 'bbb', paths: ['docs/a.md'], ignored: [], specPresent: false }",
+        "With host.publish resolving { ok: false, reason: 'branch_moved' }, the stream holds a line matching { type: 'publish_failed', reason: 'branch_moved' }",
+        "While a turn is running, command('THREAD_PUBLISH', {}) returns { result: 'rejected', detail: 'turn_running' }",
+        "While a first host.publish is pending, a second command('THREAD_PUBLISH', {}) returns { result: 'rejected', detail: 'publishing' }",
+        "While host.publish is pending, command('THREAD_INPUT', { messageId: 'm2', text: 'x' }) returns { result: 'rejected', detail: 'publishing' }",
+        "After host.publish resolves, command('THREAD_INPUT', { messageId: 'm2', text: 'x' }) returns { result: 'ok' }",
+        "With host.publish pending, command('THREAD_CLOSE', {}) followed by resolving host.publish leaves the stream's published line before its session_closed line",
+        "With host.publish pending, advancing the manual clock past threadIdleMs leaves the row RUNNING",
+        "With prepareWorktree returning stale: true, the stream's session_started line has stale true",
+        "After host.publish resolves, advancing the manual clock past threadIdleMs ends the row COMPLETED with reason 'idle'"
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "concurrency",
+        "session"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-003",
+        "US-004",
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Concurrent state in the central session class (publish in flight vs turns, input, idle timer, close ordering) but confined to one new module plus wiring calls, so no architectural change warranting strict isolation."
+      },
+      "contextFiles": [
+        "apps/runner/src/thread/thread-job-run.ts",
+        "apps/runner/test/unit/thread-job-run-commands.spec.ts",
+        "apps/runner/src/thread/thread-publish.ts",
+        "apps/runner/src/thread/tools/write-doc.ts",
+        "apps/runner/src/thread/tools/types.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/thread/thread-live-publish.ts",
+        "apps/runner/test/unit/thread-job-run-publish.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "A host.publish that throws produces a publish_failed stream line with reason 'git_error' and leaves the row RUNNING",
+        "With prepareWorktree returning stale: false, the session_started line has no stale key",
+        "A publish that settles after the run halted writes no stream line"
+      ],
+      "outOfScope": [
+        "US-006 only: the live-session `THREAD_PUBLISH` through the unstubbed default `publishThreadDocs` (the default is run on a real repository through the action path in US-007), a `publish_failed` result leaving the row `RUNNING`, `stale: false` writing no `stale` key (pinned on the writer in US-002), a `THREAD_PUBLISH` during a turn not calling `host.publish`, a publish settling after a halt and a `host.publish` that throws (treated as `git_error`) share the rules in Design without a dedicated acceptance criterion."
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "PUBLISH and DISCARD jobs and the threadWrite capability",
+      "description": "**Goal** \u2014 Run `PUBLISH` and `DISCARD` THREAD jobs without a session through a new `thread-action-run.ts`, and report `threadWrite: true` from the nax capability probe.\n\n**Motivation** \u2014 When no session is live the API must still publish or discard a thread's files, and it must be able to tell that this runner supports the write path.\n\n**Approach** \u2014 Rulings: C1-R2 Discard is only a `THREAD` job action (`DISCARD`) that runs when no session is live; there is no `THREAD_DISCARD` command. C1-R3 the runner advertises the write path with `threadWrite: true`; `FLEET_PROTOCOL_VERSION` stays `4`. C1-D2 a `PUBLISH` or `DISCARD` job opens no session, acquires no git credentials, fetches nothing and prepares no skills. It goes `RUNNING`, writes exactly one result line to its `thread` stream (no `session_started`), drains the stream, then `UPLOADING` -> `COMPLETED` with `stateReason` equal to the result line's `type`.\n\n- `action: 'PUBLISH'` or `'DISCARD'`: after the cancel check, no `credentials.acquire`, no `prepareWorktree`, no `ensureSkills`, no `sessions.open`. The row goes `RUNNING`, the stream file is created and registered as for a session, and no `session_started` line is written.\n- `PUBLISH`: `host.publish` with the same input as US-006, `worktree: threadWorktreeDir(homeDir, threadId)`; the writer gets `published` / `publishFailed`.\n- `DISCARD`: `host.discard` (default `discardThreadChanges`) with `homeDir`, `repoDir` (as `prepare` builds it), `threadId`, `feature` and `baseRef: row.assign.ref`; the writer gets `discarded(tipSha)` / `discardFailed(reason)`. `ThreadHostDeps` gains `discard?: (input: ThreadDiscardInput) => Promise<ThreadDiscardResult>`, with `ThreadDiscardInput` = `Seam<DiscardThreadChangesInput>` and result `{ ok: true; tipSha } | { ok: false; reason: string; detail?: string }`.\n- Then the stream drains (as `finishRun`), `UPLOADING`, `COMPLETED` with `stateReason` the line type (`published`, `publish_failed`, `discarded`, `discard_failed`), `markDone`.\n- Any thread command to a `PUBLISH` / `DISCARD` job answers `rejected` `no_session`, checked before the command switch. `requestCancel` before `RUNNING` ends it `CANCELLED` as today; once the job is `RUNNING`, `requestCancel` records `cancelRequestedAt` but does not close it: the git work finishes and the job ends with its result line and `COMPLETED`, with no `session_closed` line.\n- A `host.publish` or `host.discard` that throws is treated as `{ ok: false, reason: 'git_error' }`.\n- The `PUBLISH` / `DISCARD` path lives in `thread/thread-action-run.ts`, called from `ThreadJobRun.run` (`thread-job-run.ts:208`), which previously always opened a session.\n- `NaxCapabilityProbe.probe` (`apps/runner/src/capabilities/nax-probe.ts`) adds `threadWrite: true` to the report it builds. `StaticCapabilityProbe` (runner.json capabilities) is unchanged and reports no `threadWrite`, as it reports no `threadBackends`.\n\nExisting test to update: `apps/runner/src/capabilities/nax-probe.spec.ts:76` \u2014 the exact `capabilities` object gains `threadWrite: true`; every other field stays as asserted.\n\n**Scope** \u2014 In: `thread-action-run.ts`, `run` wiring, `host.discard` seam, probe change. Out: a `THREAD_DISCARD` command or in-session discard; resuming a PUBLISH/DISCARD job after a daemon restart (it ends FAILED); the live-session publish and `write_doc` wiring (US-006); `publishThreadDocs` / `discardThreadChanges` internals (US-004, US-005).\n\n**Interface** \u2014 see Approach.",
+      "acceptanceCriteria": [
+        "A PUBLISH job's start('prepare') leaves the shared recorder with no credentials.acquire, prepareWorktree, ensureSkills or sessions.open call",
+        "A PUBLISH job's start('prepare') calls host.publish once with an input matching { worktree: threadWorktreeDir(homeDir, threadId), feature: 'divide', title: 'Divide brainstorm' }",
+        "A PUBLISH job's stream file holds exactly one line, matching { type: 'published', sha: 'bbb', paths: ['docs/a.md'], ignored: [], specPresent: true }",
+        "A PUBLISH job's state events are exactly RUNNING, UPLOADING, then COMPLETED with reason 'published'",
+        "A PUBLISH job whose requestCancel() is called while host.publish is pending ends COMPLETED with reason 'published'",
+        "A PUBLISH job whose host.publish resolves { ok: false, reason: 'repo_busy' } ends COMPLETED with reason 'publish_failed'",
+        "A DISCARD job's start('prepare') leaves the shared recorder with no credentials.acquire, prepareWorktree, ensureSkills or sessions.open call",
+        "A DISCARD job's start('prepare') calls host.discard once with an input matching { homeDir: <host homeDir>, threadId: <ASSIGN thread.threadId>, feature: 'divide', baseRef: <ASSIGN ref> }",
+        "A DISCARD job's stream file holds exactly one line, matching { type: 'discarded', tipSha: 'ccc' }",
+        "A DISCARD job ends COMPLETED with reason 'discarded'",
+        "While a PUBLISH job's host.publish is pending, command('THREAD_INPUT', { messageId: 'm2', text: 'x' }) returns { result: 'rejected', detail: 'no_session' }",
+        "NaxCapabilityProbe.probe with the fake nax of src/capabilities/nax-probe.spec.ts returns capabilities whose threadWrite is true",
+        "With no host.publish stub, a real clone at repoDirFor(workspaceRoot, owner, name) and the thread's worktree registered at threadWorktreeDir(homeDir, threadId) holding a written docs/a.md, a PUBLISH job leaves refs/heads/feat/divide in the clone pointing at a commit that adds docs/a.md",
+        "With no host.discard stub, a real clone at repoDirFor(workspaceRoot, owner, name) and the thread's worktree registered at threadWorktreeDir(homeDir, threadId) holding an untracked docs/a.md, a DISCARD job leaves no docs/a.md in the worktree",
+        "With no host.publish stub, a real clone at repoDirFor(workspaceRoot, owner, name), the thread's worktree registered at threadWorktreeDir(homeDir, threadId) holding a written docs/a.md, and the run's real RepoMutex held for the clone's repoKey by another caller, a PUBLISH job ends COMPLETED with reason 'publish_failed'"
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "jobs",
+        "capabilities"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "New job path through ThreadJobRun with state transitions, cancel semantics and unstubbed integration on real repos, but built on seams from US-006."
+      },
+      "contextFiles": [
+        "apps/runner/src/thread/thread-job-run.ts",
+        "apps/runner/test/unit/thread-job-run.spec.ts",
+        "apps/runner/src/capabilities/nax-probe.ts",
+        "apps/runner/src/thread/thread-discard.ts",
+        "apps/runner/src/thread/thread-paths.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/thread/thread-action-run.ts",
+        "apps/runner/test/unit/thread-job-run-actions.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "NaxCapabilityProbe.probe returns every capability field it returned before, unchanged, alongside threadWrite true",
+        "StaticCapabilityProbe reports no threadWrite",
+        "A THREAD_CLOSE command sent to a DISCARD job returns { result: 'rejected', detail: 'no_session' }",
+        "A DISCARD job whose host.discard resolves { ok: false, reason: 'no_worktree' } writes a discard_failed line and ends COMPLETED with reason 'discard_failed'",
+        "A PUBLISH job whose host.publish throws writes a publish_failed line with reason 'git_error' and ends COMPLETED with reason 'publish_failed'",
+        "A PUBLISH job whose requestCancel() is called before RUNNING ends CANCELLED"
+      ],
+      "outOfScope": [
+        "US-007 only: the row's `doneAt`, the stream drain before `UPLOADING` (the existing `finishRun` order), a `DISCARD` job's `discard_failed` line and stateReason, a cancel requested before `RUNNING` (the existing `stopped()` path), a throwing `host.publish` / `host.discard` (treated as `git_error`), and a halt or ABANDON while a `PUBLISH` / `DISCARD` job runs (the existing halt path: no line, no transition) share the rules in Design without a dedicated acceptance criterion."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/capabilities/nax-probe.spec.ts",
+          "reason": "the exact `capabilities` object at line 76 gains `threadWrite: true`, because this story makes the nax probe always report the thread write path; every other field stays as asserted."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Runner-only feature (apps/runner plus packages/fleet-protocol). No API or web changes (C1-R1); FLEET_PROTOCOL_VERSION stays 4 (C1-R3). Key files: packages/fleet-protocol/src/threads.ts (ThreadAction, ThreadAssign, ThreadRunnerLine), nax-config-paths.ts (allowlist pattern to mirror), index.ts (RunnerCapabilities); apps/runner/src/supervisor/assign-parser.ts (parseAssign THREAD branch, line ~145); thread/thread-event-writer.ts; thread/tools/{types,index,list-files,search-repo}.ts (+ new write-doc.ts); thread/thread-worktree.ts (prepareThreadWorktree, resolveTip must be exported); thread/thread-job-run.ts (785 lines already: add only wiring calls, new logic goes in sibling modules thread-live-publish.ts and thread-action-run.ts); executor/config-job/{apply-edits,commit-push}.ts (symlink checks and explicit-identity commit to mirror); supervisor/repo-mutex.ts (acquire, isLocked); capabilities/nax-probe.ts. Dependency order: US-001 first (allowlist + protocol types used by all), then US-002..US-005 are independent of each other, US-006 integrates them into the live session, US-007 adds the PUBLISH/DISCARD job path and capability flag. Risks: (1) existing tests that assert old behaviour must be updated as listed per story (assign-parser-thread.spec.ts PUBLISH test, thread-skill-tools.spec.ts tool lists/approvals, thread-tools-embedder.spec.ts, thread-tools-review.spec.ts timeouts [4_321,4_321], thread-worktree.spec.ts worktree_conflict test, nax-probe.spec.ts capabilities object). (2) ThreadToolContext.feature/onDocWritten, ThreadPrepareResult.stale and ThreadRunDeps.mutex.isLocked must be optional so existing test fixtures still type-check. (3) list_files/search_repo gain a second git call; the thread-tools.spec.ts fake answers every ls-files call with the tracked list, so results must be de-duplicated in first-seen order. (4) Publish must never leave the repo mutex locked (finally), never wait on it (isLocked check then acquire), and must never push/fetch. (5) Publish/Discard must verify the directory is really the thread worktree (.git exists and rev-parse --show-toplevel equals realpath) so a plain directory inside another repo is never mutated. (6) createGit forces LC_ALL=C so 'would be overwritten' stderr matching is stable. (7) Immutability and small files: keep new modules focused; thread-job-run.ts must not grow beyond wiring. Build gate per story: bun run type-check and bun run lint in apps/runner; US-001 also bun run type-check at repo root. Tests are bun:test; real temporary git repos use apps/runner/test/helpers/git-fixture.ts (git, isolateGit).",
+  "outOfScope": [
+    "The API side of phase C belongs to feature C2 `fleet-s5a-thread-handoff`: queueing `THREAD_PUBLISH`, creating `PUBLISH` / `DISCARD` jobs, sending `thread.title`, gating on `threadWrite`, the `writtenPaths` / `publishedSha` / `specPublished` columns, folding the `write_doc`, `published`, `publish_failed`, `discarded`, `discard_failed` lines and `session_started.stale`, the one-active-job rule, Plan and Run dispatch from a thread, the PLAN `branch_mismatch` verdict and the system-prompt text about `write_doc`.",
+    "The web side of phase C (action bar, Discard banner, commit markers, PLAN / RUN cards) belongs to feature C3.",
+    "The runner never pushes a published commit; the thread's PLAN pushes `feat/<feature>` later.",
+    "`write_doc` cannot delete or rename files and writes only `.md` files under the allowlist; there is no binary write.",
+    "There is no `THREAD_DISCARD` command and no in-session discard (C1-R2).",
+    "`FLEET_PROTOCOL_VERSION` stays 4 (C1-R3).",
+    "Publish does not wait for the repo mutex (C1-R4).",
+    "ACP backends belong to phase D; `write_doc` is a native-session tool only.",
+    "Base-ref drift is not rebased; a stale session stays on its old HEAD until Discard.",
+    "The runner `context.md` (`.nax/mono/apps/runner/context.md`) is updated by hand after merge.",
+    "A `PUBLISH` or `DISCARD` job re-adopted after a daemon restart ends `FAILED` (`a thread job cannot be resumed`), even if its commit landed; the user publishes again, which then finds nothing to commit.",
+    "US-001 only: the allowlist's backslash, NUL, empty-stem (`docs/.md`), bare `docs.md` and 512-character boundary cases, a `title` that is absent (the parsed thread has no `title` key) and `THREAD_DOC_LIMITS` itself share the rules in Design without a dedicated acceptance criterion; `ThreadRunnerLine` and the two fail-reason unions are types, checked by `bun run type-check`. A `DISCARD` ASSIGN with a non-null `initialMessage` returns `invalid initialMessage` by the same rule as `PUBLISH` (AC-12) without its own acceptance criterion.",
+    "US-003 only: the exact 524288-byte boundary, `list_files`' `dir` / `glob` filter on untracked files, an ignored file in either tool, `search_repo`'s `fixed`, `max` and timeout rules for untracked files, a `write_doc` parent that resolves outside the worktree without a symlink, a filesystem error (through `refuseInvalidInput`), the absent-`feature` context and the de-duplication of tracked and untracked results (exercised by the existing `thread-tools.spec.ts` fake, which answers every `ls-files` call with the tracked list) share the rules in Design without a dedicated acceptance criterion.",
+    "US-004 only: an untracked symlink or a deleted file under the allowlist (both go to `ignored`), a staged file outside `paths`, the commit's single parent and author, nothing to commit (the branch is created at HEAD when absent, `paths: []`), `specPresent: false`, a non-zero `update-ref` exit after the compare (with its `reset --soft`), the git timeout and a failing git call (`git_error` with a sanitized `detail`) share the steps in Design without a dedicated acceptance criterion; so do the `title` CR / LF replacement, the 200-character cut and the explicit identity, which follow `commitAndPushConfig`.",
+    "US-005 only: the tip-resolution fallbacks after the local branch reuse `prepareThreadWorktree`'s order, Discard makes no `fetch` call, and a failing git call during Discard is `git_error`, without a dedicated acceptance criterion.",
+    "US-006 only: the live-session `THREAD_PUBLISH` through the unstubbed default `publishThreadDocs` (the default is run on a real repository through the action path in US-007), a `publish_failed` result leaving the row `RUNNING`, `stale: false` writing no `stale` key (pinned on the writer in US-002), a `THREAD_PUBLISH` during a turn not calling `host.publish`, a publish settling after a halt and a `host.publish` that throws (treated as `git_error`) share the rules in Design without a dedicated acceptance criterion.",
+    "US-007 only: the row's `doneAt`, the stream drain before `UPLOADING` (the existing `finishRun` order), a `DISCARD` job's `discard_failed` line and stateReason, a cancel requested before `RUNNING` (the existing `stopped()` path), a throwing `host.publish` / `host.discard` (treated as `git_error`), and a halt or ABANDON while a `PUBLISH` / `DISCARD` job runs (the existing halt path: no line, no transition) share the rules in Design without a dedicated acceptance criterion."
+  ],
+  "routingProfile": "native-haiku-luna+cc-plan"
+}
