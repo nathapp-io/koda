@@ -1,4 +1,3 @@
-<!-- spec-writing: completed-through-phase-5 -->
 # SPEC: Fleet S5a-C2 — Thread Handoff on the API (Publish, Discard, Plan, Run)
 
 ## Summary
@@ -45,9 +44,9 @@ before dispatching PLAN and RUN from the dispatch form. C2 closes the loop on th
   `jobId` is the ending job, and a `PUBLISH` / `DISCARD` job never starts a session. Its other effects (erroring
   `pending` / `streaming` messages, clearing `pendingQuestion`) find nothing, because an action job is only created
   when no session job is active. US-003 pins the session part with one AC.
-- **C2-D7:** while a thread's active `THREAD` job is a `PUBLISH` or `DISCARD` job, the session commands (stop,
-  end-session, answer through `PrismaChatThreadRepository.command`) answer 409 `threads.noSession`, because there is no
-  session to act on.
+- **C2-D7:** while a thread's active `THREAD` job is a `PUBLISH` or `DISCARD` job, stop and end-session (through
+  `PrismaChatThreadRepository.command`) answer 409 `threads.noSession`, because there is no session to act on. Answer
+  keeps its existing order and answers `threads.noQuestion` (`pendingQuestion` is null while no session runs).
 - **C2-D5:** Publish on a live session sends `THREAD_PUBLISH` and is allowed with an empty `writtenPaths` (the runner
   computes the real dirty set and answers `published` with `paths: []` when nothing changed). Publish without a live
   session creates a `PUBLISH` job only when `writtenPaths` is non-empty.
@@ -176,7 +175,9 @@ the existing `thread` live event:
 `foldSessionLine` writes `stale: true` into the stored session only when the `session_started` line has it.
 
 A `THREAD_PUBLISH` ack (US-004) with result `rejected` sets `lastWrite = { kind: 'publish_failed', jobId: command.jobId, at: <now>,
-reason: <ack detail, at most 64 characters> }`; an `ok` ack writes nothing (the `published` line follows on the stream).
+reason: <ack detail, at most 64 characters> }`, except when the detail is `publishing` (a second click while the first
+publish runs; its own result line follows and must not be overwritten); an `ok` ack writes nothing (the `published`
+line follows on the stream).
 
 ### One active job per thread and Publish (US-003)
 
@@ -204,9 +205,12 @@ Inside `txManager.run`, after the same job-then-thread locks as `sendMessage`, t
    place it after commit, return `{ jobId }`.
 
 `createThreadJob(thread, action, message?)` (private, extracted from `sendMessage`) creates the `THREAD` job with the
-values `sendMessage` uses today (`feature: thread-<id>`, `ref: baseRef`, `pinnedRunnerId: thread.runnerId`, remaining cap
-as `maxCostUsd`, `bashMode: raw`), its `FleetThreadTurn` (`action`, `initialMessageId: message?.id ?? null`,
-`resume: action === 'SESSION' && <previous THREAD job exists>`, `instructions` from `buildThreadInstructions`,
+values `sendMessage` uses today (`feature: thread-<id>`, `ref: baseRef`, `pinnedRunnerId: thread.runnerId`,
+`bashMode: raw`); `maxCostUsd` is the remaining cap for `SESSION` (today's value) and the fixed string `'0'` for
+`PUBLISH` / `DISCARD`, which spend nothing and must pass the runner's `COST_RE` (`apps/runner/src/executor/nax-process.ts:7`)
+even when the thread is over its cap. Publish and Discard therefore ignore the thread cost cap (no `threads.costCap`).
+Its `FleetThreadTurn` gets `action`, `initialMessageId: message?.id ?? null`,
+`resume: action === 'SESSION' && <a previous THREAD job of the thread whose turn action is SESSION exists>`, `instructions` from `buildThreadInstructions`,
 `backend`, `skills`), the `QUEUED` state event and the `job.dispatched` activity, and maps `DuplicateActiveJobError` to
 409 `threads.busy` for `PUBLISH` / `DISCARD` and `threads.turnRunning` for `SESSION` (today's mapping).
 
@@ -226,8 +230,9 @@ locks; checks in order: 404 / 403 as Publish; `threads.disabled`; `threads.archi
 thread, including a live session -> 409 `threads.busy`; otherwise `createThreadJob(thread, 'DISCARD')`, place it after
 commit, return `{ jobId }`. The budget-pause refusal is the same as Publish step 4.
 
-`PrismaChatThreadRepository.command` (stop, end-session, answer) answers 409 `threads.noSession` when the current
-`THREAD` job's `FleetThreadTurn.action` is `PUBLISH` or `DISCARD` (C2-D7).
+`PrismaChatThreadRepository.command` answers 409 `threads.noSession` for `THREAD_STOP_TURN` and `THREAD_CLOSE` when the
+current `THREAD` job's `FleetThreadTurn.action` is `PUBLISH` or `DISCARD` (C2-D7); the check runs where the existing
+`noSession` check runs, after the `THREAD_ANSWER` question check.
 
 `buildThreadInstructions` replaces step 2's "You cannot write files in this session. Put the spec draft in your reply."
 and the tools line's "no write access" with:
@@ -278,7 +283,8 @@ input (`NewFleetJob.threadId`, `fleet-job.domain.ts:115`; `normalizeDispatch` do
 transaction, before `createJob`, the new `IFleetJobRepository.lockIdleThread(threadId): Promise<boolean>` (true when
 idle) runs `SELECT ... FROM "ChatThread" WHERE id = $1
 FOR UPDATE` and counts `FleetJob` rows with that `threadId` in `ACTIVE_STATES`; a count above 0 -> 409 `threads.busy`.
-A `DuplicateActiveJobError` with `opts.threadId` set -> 409 `threads.busy` (instead of `fleet.jobs`).
+A `DuplicateActiveJobError` (the `(repoId, feature)` index: a dispatch-form job of the same feature is active) keeps
+today's 409 `fleet.jobs` with `activeJobId`.
 
 `buildAssignPayload`: a `PLAN` job with a non-null `threadId` gets `expectBranch: job.ref`; every other job has no
 `expectBranch` key.
@@ -306,7 +312,7 @@ id desc`) job of that command. `GET /projects/:slug/threads/:id` returns it.
 | Discard with no runner | 409 `threads.nothingToDiscard` | US-004 |
 | Discard with any active job, including a live session | 409 `threads.busy` | US-004 |
 | Publish / Discard in a paused budget scope | 409 `fleet.budgetPaused` | US-003, US-004 |
-| Stop / end-session / answer while the active job is a `PUBLISH` / `DISCARD` job | 409 `threads.noSession` | US-004 |
+| Stop / end-session while the active job is a `PUBLISH` / `DISCARD` job | 409 `threads.noSession` | US-004 |
 | Plan / Run by a caller without project `CREATE FleetJob` | 403 `projects` | US-006, US-007 |
 | `expectBranch` on a non-`PLAN` ASSIGN | `invalid expectBranch` | US-005 |
 | PRD `branchName` differs from `expectBranch` | job `FAILED` `branch_mismatch`, nothing pushed | US-005 |
@@ -324,6 +330,8 @@ id desc`) job of that command. `GET /projects/:slug/threads/:id` returns it.
 - Base-ref drift is not rebased and a thread cannot move to another runner.
 - A rejected `THREAD_PUBLISH` ack writes `lastWrite` but emits no live event; the page sees it on its next thread
   refetch.
+- The thread detail's `sendRefusal` does not report `busy`; it stays `sendRefusal()`'s value, and C3 disables the
+  composer from `activeJob` / `handoff` instead.
 - `RunnerSummaryDto` does not expose `threadWrite`; the write routes answer `threads.runnerOutdated` instead.
 - Plan and Run read `specPublished`, `status` and the latest PLAN before `dispatch` takes the thread lock; a thread
   archived or re-published in that window is not re-checked under the lock.
@@ -336,6 +344,8 @@ id desc`) job of that command. `GET /projects/:slug/threads/:id` returns it.
   `publish_failed`), `writtenPaths` left unchanged by `publish_failed`, and a `session_started` without `stale` storing
   no `stale` key (already pinned by the existing fold tests) share the Design tables without a dedicated acceptance
   criterion.
+- US-003 only: Publish answering `threads.runnerOffline` for an offline runner (the same `isRunnerOnline` check Send
+  uses) has no dedicated acceptance criterion.
 - US-003 only: Publish answering `threads.turnRunning` for a `QUEUED` / `ASSIGNED` session job or a `pending` message,
   `threads.closing` for an `UPLOADING` job, `threads.disabled` / `threads.archived`, and the budget-pause refusal
   share the Design steps (and `sendRefusal`'s existing tests) without a dedicated acceptance criterion.
@@ -347,14 +357,14 @@ id desc`) job of that command. `GET /projects/:slug/threads/:id` returns it.
   lock (as `sendMessage` retries today), and the `job.dispatched` activity row of a `PUBLISH` job share `sendMessage`'s
   existing behaviour without a dedicated acceptance criterion.
 - US-004 only: `threads.disabled`, `threads.archived`, `threads.runnerOffline` and the budget pause on Discard follow
-  Publish's Design steps, stop and answer answering `threads.noSession` share end-session's rule (C2-D7), and an ack `detail` longer than 64 characters is cut to 64, without a dedicated acceptance
+  Publish's Design steps, stop answering `threads.noSession` shares end-session's rule (C2-D7), and an ack `detail` longer than 64 characters is cut to 64, without a dedicated acceptance
   criterion.
 - US-005 only: `expectBranch` failing the `plain` rule on a `PLAN`, the `.nax` check on the local commit, and
   `planVerdict` turning the `branch_mismatch` check into `FAILED` (its existing `!ok` path) share the rules in Design
   without a dedicated acceptance criterion.
 - US-006 only: 403 `threads.notCreator` on Plan (the same creator check as Publish, US-003 AC-13), `handoff.plan`
   picking the latest of several PLAN jobs (`queuedAt desc, id desc`, as `currentThreadJob` orders today), the losing request of two concurrent Plans answering 409 `threads.busy`, a `DuplicateActiveJobError`
-  under `opts.threadId` mapping to `threads.busy`, `threads.disabled` and `threads.archived` on Plan, the `profiles` / `maxCostUsd` DTO bounds and
+  under `opts.threadId` keeping 409 `fleet.jobs`, `threads.disabled` and `threads.archived` on Plan, the `profiles` / `maxCostUsd` DTO bounds and
   `dispatch`'s budget gate share existing behaviour without a dedicated acceptance criterion.
 - US-007 only: the `CREATE FleetJob` ability check and the `maxCostUsd` default share Plan's rules (US-006), and Run's `bashMode` validation and `threads.disabled` / `threads.archived` share Plan's rules without a
   dedicated acceptance criterion.
@@ -373,7 +383,7 @@ id desc`) job of that command. `GET /projects/:slug/threads/:id` returns it.
 US-005 also edits `packages/fleet-protocol/src/index.ts`. Build gate for every story: `bun run type-check` and
 `bun run lint` in its Workdir; US-001 also `bunx prisma validate` and `bun run db:generate` in `apps/api`; US-005
 also `bun run type-check` at the repo root. US-003, US-004, US-006 and US-007 add routes, so they regenerate `openapi.json` and the CLI client with
-`bun run generate` at the repo root. API DB-backed specs need `bun run test:db:up` and `KODA_DB_TESTS=1`.
+`bun run generate` at the repo root (US-001 too: `thread_write` reaches `apps/cli/src/generated/types.gen.ts`). API DB-backed specs need `bun run test:db:up` and `KODA_DB_TESTS=1`.
 
 ### Context Files
 
@@ -554,8 +564,8 @@ None. `checkPlanPrd`'s new parameter is optional and the parsed assign gains `ex
   `threads.closing`.
 - AC-6 [integration]: `POST .../publish` on a thread whose pinned runner's capabilities have no `threadWrite` answers
   409 `threads.runnerOutdated`.
-- AC-7 [integration]: `POST .../publish` on a thread whose pinned runner's `lastSeenAt` is older than the offline window
-  answers 409 `threads.runnerOffline`.
+- AC-7 [integration]: `POST .../publish` with no active job, `writtenPaths ['docs/a.md']` and `costUsd` above
+  `maxCostUsd` creates a `PUBLISH` job whose `maxCostUsd` is `0`.
 - AC-8 [integration]: `POST .../publish` with no active job and `writtenPaths ['docs/a.md']` creates a `THREAD` job
   whose `FleetThreadTurn` has `{ action: 'PUBLISH', initialMessageId: null, resume: false }`.
 - AC-9 [integration]: the ASSIGN that placement builds for the `PUBLISH` job of AC-8 has a `thread` whose `action`,
