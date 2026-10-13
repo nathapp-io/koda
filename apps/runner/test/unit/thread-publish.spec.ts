@@ -45,6 +45,15 @@ test('publishes an allowlisted spec and creates feature ref with titled trailer 
   expect((await git(repoDir, 'show', '-s', '--format=%B', result.sha)).trim().split('\n').at(-1)).toBe('Koda-Thread: t1');
 });
 
+test('refuses publication results beyond the thread line budget before committing', async () => {
+  for (let index = 0; index < 1_500; index += 1) await write(`src/${index}-${'x'.repeat(100)}.ts`);
+  await write('docs/a.md');
+  const result = await publish();
+  expect(result).toMatchObject({ ok: false, reason: 'git_error', detail: 'publication result exceeds thread stream line limit' });
+  expect(await git(repoDir, 'rev-parse', 'HEAD')).toBe(await git(repoDir, 'rev-parse', 'main'));
+  expect(await git(repoDir, 'show-ref', '--verify', '--quiet', 'refs/heads/feat/divide').then(() => true, () => false)).toBe(false);
+});
+
 test('publishes only allowlisted dirty files', async () => {
   await write('docs/a.md');
   await write('src/x.ts');

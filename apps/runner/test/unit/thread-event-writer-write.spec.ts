@@ -69,6 +69,17 @@ describe('ThreadEventWriter write-path lines (US-002)', () => {
     });
   });
 
+  test('US-002: oversized publication results write a bounded publish_failed line', async () => {
+    const { path, writer } = makeWriter();
+    writer.published({ sha: 'a'.repeat(64), paths: Array.from({ length: 2_000 }, (_, index) => `docs/${index}-${'x'.repeat(40)}.md`), ignored: [], specPresent: false });
+    const bytes = await readFile(path);
+    const lines = bytes.toString('utf8').trimEnd().split('\n');
+    expect(lines).toHaveLength(1);
+    const line = lines[0] ?? '';
+    expect(Buffer.byteLength(line) + 1).toBeLessThanOrEqual(65_536);
+    expect(JSON.parse(line)).toMatchObject({ type: 'publish_failed', reason: 'git_error' });
+  });
+
   test('US-002 AC-5: publishFailed writes a publish_failed line deep-equal to its reason', async () => {
     const { path, writer } = makeWriter();
     writer.publishFailed('repo_busy');

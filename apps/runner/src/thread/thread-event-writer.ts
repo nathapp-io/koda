@@ -226,14 +226,22 @@ export class ThreadEventWriter {
   /** A Publish committed (or found nothing to commit): the commit's sha, the paths it took and the ones it skipped. */
   published(result: ThreadPublishedLine): void {
     this.releaseAll();
-    this.appendRunner({
+    const line = {
       type: 'published',
       at: this.now().toISOString(),
       sha: result.sha,
       paths: [...result.paths],
       ignored: [...result.ignored],
       specPresent: result.specPresent,
-    });
+    };
+    if (lineBytes(line) > LINE_MAX_BYTES) {
+      // Never persist a runner line the API cannot parse. The publisher checks this before
+      // committing; this is a final guard for alternate host implementations.
+      this.onWarn(`oversized publication result (${LINE_MAX_BYTES}-byte line limit)`);
+      this.appendRunner({ type: 'publish_failed', at: line.at, reason: 'git_error' });
+      return;
+    }
+    this.appendRunner(line);
   }
 
   /** A Publish failed; `reason` is one of the `ThreadPublishFailReason` values the runner produces. */

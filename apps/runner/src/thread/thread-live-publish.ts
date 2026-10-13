@@ -21,7 +21,9 @@ export class ThreadLivePublish {
     if (this.options.turnRunning()) return { result: 'rejected', detail: 'turn_running' };
     if (this.pending !== null) return { result: 'rejected', detail: 'publishing' };
     this.options.stopIdle();
-    const pending = this.execute();
+    // Defer execute so `pending` is installed before calling host code. `publish` may throw
+    // synchronously, in which case execute's finally block must not be overwritten afterwards.
+    const pending = Promise.resolve().then(() => this.execute());
     this.pending = pending;
     return { result: 'ok' };
   }

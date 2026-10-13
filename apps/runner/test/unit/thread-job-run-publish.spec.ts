@@ -67,6 +67,7 @@ test('US-006 AC-2: running write_doc writes and announces docs/a.md', async () =
 test('US-006 AC-3, AC-4, AC-5, AC-6: publish acknowledges, passes assignment and writes result', async () => {
   const ctx = setup(); const { started: startedRun } = await started(ctx);
   expect(ctx.run.command('THREAD_PUBLISH', {})).toEqual({ result: 'ok' });
+  await Bun.sleep(0);
   expect(ctx.calls.at(-1)).toMatchObject({ worktree: join(ctx.root, 'worktree'), feature: 'divide', threadId: 'thread-1', title: 'Divide brainstorm', repoKey: 'acme/app', identity: { name: 'koda-fleet[bot]', email: 'koda-fleet[bot]@users.noreply.github.com' } });
   ctx.gate.resolve(); await Bun.sleep(10);
   expect(await stream(ctx)).toContainEqual(expect.objectContaining({ type: 'published', sha: 'bbb', paths: ['docs/a.md'], ignored: [], specPresent: false }));
@@ -84,6 +85,15 @@ test('US-006 AC-7, AC-8, AC-9, AC-10, AC-11: failure and publishing contention a
   ctx.gate.resolve(); await Bun.sleep(10);
   expect(await stream(ctx)).toContainEqual(expect.objectContaining({ type: 'publish_failed', reason: 'branch_moved' }));
   expect(ctx.run.command('THREAD_INPUT', { messageId: 'm4', text: 'x' })).toEqual({ result: 'ok' });
+  ctx.run.halt(); await startedRun; ctx.journal.close();
+});
+
+test('US-006 AC-11: synchronous publish throw writes git_error and accepts later input', async () => {
+  const ctx = setup({ publish: () => { throw new Error('sync failure'); } }); const { started: startedRun } = await started(ctx);
+  expect(ctx.run.command('THREAD_PUBLISH', {})).toEqual({ result: 'ok' });
+  ctx.gate.resolve(); await Bun.sleep(10);
+  expect(await stream(ctx)).toContainEqual(expect.objectContaining({ type: 'publish_failed', reason: 'git_error' }));
+  expect(ctx.run.command('THREAD_INPUT', { messageId: 'm5', text: 'x' })).toEqual({ result: 'ok' });
   ctx.run.halt(); await startedRun; ctx.journal.close();
 });
 
@@ -112,5 +122,6 @@ test('US-006 AC-14, AC-15: stale is announced and idle closes after publish sett
 
 test('US-006 AC-5: missing thread title falls back to feature', async () => {
   const ctx = setup({ noTitle: true }); const { started: startedRun } = await started(ctx); ctx.run.command('THREAD_PUBLISH', {});
+  await Bun.sleep(0);
   expect(ctx.calls.at(-1)).toMatchObject({ title: 'divide' }); ctx.gate.resolve(); ctx.run.halt(); await startedRun; ctx.journal.close();
 });

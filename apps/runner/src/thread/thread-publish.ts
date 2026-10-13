@@ -1,7 +1,7 @@
 import { lstat, realpath } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { GitIdentity, ThreadPublishFailReason } from '@nathapp/fleet-protocol';
-import { isAllowedThreadDocPath } from '@nathapp/fleet-protocol';
+import { isAllowedThreadDocPath, THREAD_STREAM_LIMITS } from '@nathapp/fleet-protocol';
 import { sanitizeDiagnostic } from '../diagnostics';
 import type { Git } from '../executor/git';
 import type { RepoMutex } from '../supervisor/repo-mutex';
@@ -72,6 +72,14 @@ export async function publishThreadDocs(input: PublishThreadDocsInput): Promise<
     else if (existing.code === 1) current = null;
     else throw new Error(existing.stderr || `git show-ref failed (exit ${existing.code})`);
     if (current !== null && current !== head) return { ok: false, reason: 'branch_moved' };
+    // `published` is a single protocol line. Reserve worst-case SHA/timestamp space and
+    // refuse an unreportable result before changing HEAD or its feature ref.
+    const resultLine = {
+      type: 'published', at: '9999-12-31T23:59:59.999Z', sha: 'f'.repeat(64), paths, ignored, specPresent: false,
+    };
+    if (Buffer.byteLength(`${JSON.stringify(resultLine)}\n`, 'utf8') > THREAD_STREAM_LIMITS.lineMaxBytes) {
+      return { ok: false, reason: 'git_error', detail: 'publication result exceeds thread stream line limit' };
+    }
 
     let sha = head;
     if (paths.length === 0) {
