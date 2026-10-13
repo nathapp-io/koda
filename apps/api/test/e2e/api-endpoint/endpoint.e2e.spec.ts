@@ -3359,10 +3359,18 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('US-004 discard: refuses with threads.busy while a live session job is active', async () => {
-      const { thread } = await liveSession('discard-busy');
+      const { thread, runner } = await liveSession('discard-busy');
+      // Discard needs threadWrite on the pinned runner; without it the runnerOutdated check answers first (brief order).
+      await db().runner.update({ where: { id: runner.id }, data: { capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, threadBackends: { native: ['m1'], acp: [] }, threadWrite: true } } });
       const res = await discardThread(thread.id).expect(409);
       threadMessage(res, 'threads.busy.409');
       expect(await db().fleetJob.count({ where: { threadId: thread.id, command: 'THREAD', state: 'QUEUED' } })).toBe(0);
+    });
+
+    it('US-004 discard: a pinned runner without threadWrite answers runnerOutdated before busy (brief order)', async () => {
+      const { thread } = await liveSession('discard-outdated-first');
+      const res = await discardThread(thread.id).expect(409);
+      threadMessage(res, 'threads.runnerOutdated.409');
     });
 
     it('US-004 discard: refuses with threads.nothingToDiscard when the thread has no pinned runner', async () => {
