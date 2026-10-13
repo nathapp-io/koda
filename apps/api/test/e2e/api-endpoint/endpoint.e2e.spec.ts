@@ -3287,6 +3287,9 @@ describeIntegration('API Integration Tests', () => {
       request(httpServer).post(`/api/projects/${projectSlug}/threads/${id}/messages`)
         .set('Authorization', `Bearer ${token}`).send(payload);
 
+    const publishThread = (id: string, token = world.tokens.dev) => request(httpServer)
+      .post(`/api/projects/${projectSlug}/threads/${id}/publish`).set('Authorization', `Bearer ${token}`).send({});
+
     const newThread = async (feature: string, over: Record<string, unknown> = {}) => db().chatThread.create({
       data: {
         projectId: world.projectId, repoId: world.repoId, baseRef: 'trunk', feature, title: feature,
@@ -3294,6 +3297,12 @@ describeIntegration('API Integration Tests', () => {
         specPath: `.nax/features/${feature}/spec.md`, ...over,
       },
     });
+
+    const publishRunner = async (feature: string) => db().runner.create({ data: {
+      name: `publish-${feature}`, apiKeyHash: `publish-hash-${feature}`, os: 'linux', arch: 'x64', labels: ['linux'],
+      capabilities: { threadWrite: true }, daemonVersion: '0.1.0', protocolVersion: 4, bootId: `publish-${feature}`,
+      lastSeenAt: new Date(), createdById: world.ids.root,
+    } });
 
     const liveSession = async (feature: string, over: Record<string, unknown> = {}) => {
       const thread = await newThread(feature, over);
@@ -3310,6 +3319,28 @@ describeIntegration('API Integration Tests', () => {
       } });
       return { thread, runner, job };
     };
+
+    it('US-003 publish: queues a PUBLISH turn for saved written paths', async () => {
+      const runner = await publishRunner('publish-e2e');
+      const thread = await newThread('publish-e2e', { writtenPaths: ['docs/a.md'], runnerId: runner.id });
+      const res = await publishThread(thread.id).expect(200);
+      const result = body<{ jobId: string }>(res);
+      expect(result.jobId).toBeTruthy();
+      const job = await db().fleetJob.findUniqueOrThrow({ where: { id: result.jobId } });
+      expect(job).toMatchObject({ command: 'THREAD', threadId: thread.id });
+      expect(job.maxCostUsd.toString()).toBe('0');
+      expect(await db().fleetThreadTurn.findUniqueOrThrow({ where: { jobId: result.jobId } })).toMatchObject({
+        action: 'PUBLISH', initialMessageId: null, resume: false,
+      });
+    });
+
+    it('US-003 publish: refuses when no paths are available', async () => {
+      const runner = await publishRunner('publish-empty');
+      const thread = await newThread('publish-empty', { runnerId: runner.id });
+      const res = await publishThread(thread.id).expect(409);
+      threadMessage(res, 'threads.nothingToPublish.409');
+      expect(await db().fleetJob.count({ where: { threadId: thread.id } })).toBe(0);
+    });
 
     it('US-004 AC5: creator send inserts a pending user message at sequence 1', async () => {
       const thread = await newThread('send-first');
@@ -3356,9 +3387,13 @@ describeIntegration('API Integration Tests', () => {
         daemonVersion: '0.1.0', protocolVersion: 4, bootId: 'thread-boot', lastSeenAt: new Date(), createdById: world.ids.root,
       } });
       await db().chatThread.update({ where: { id: thread.id }, data: { runnerId: runner.id } });
-      await db().fleetJob.create({ data: {
+      const previous = await db().fleetJob.create({ data: {
         projectId: thread.projectId, repoId: thread.repoId, ref: thread.baseRef, command: 'THREAD', feature: `old-${thread.id}`,
         profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, threadId: thread.id, state: 'COMPLETED',
+      } });
+      await db().fleetThreadTurn.create({ data: {
+        jobId: previous.id, threadId: thread.id, action: 'SESSION', initialMessageId: null, instructions: '',
+        backend: thread.backend as object, skills: [], resume: false,
       } });
       const result = body<{ jobId: string }>(await sendMessage(thread.id).expect(201));
       const job = await db().fleetJob.findUniqueOrThrow({ where: { id: result.jobId } });

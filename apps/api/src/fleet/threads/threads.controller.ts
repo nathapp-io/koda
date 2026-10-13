@@ -109,6 +109,15 @@ export class ThreadsController {
     return JsonResponse.Ok(await this.threads.get(ctx.project.id, id));
   }
 
+  @Post(':id/publish')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Publish thread documents (creator)' })
+  @ApiResponse({ status: 200, schema: { type: 'object', properties: { jobId: { type: 'string', nullable: true } } } })
+  async publish(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    this.assertUser(principal);
+    return JsonResponse.Ok(await this.threads.publish(ctx.project.id, id, principal.id));
+  }
+
   @Post(':id/messages')
   @HttpCode(201)
   @ApiOperation({ summary: 'Send a message to a chat thread' })

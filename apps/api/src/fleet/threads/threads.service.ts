@@ -79,6 +79,10 @@ export class ThreadsService {
     }
   }
 
+  publish(projectId: string, threadId: string, userId: string): Promise<{ jobId: string | null }> {
+    return this.threads.publish(projectId, threadId, userId);
+  }
+
   async sendMessage(projectId: string, threadId: string, userId: string, input: SendMessageDto): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }> {
     if (typeof input.text !== 'string' || input.text.length === 0 || Buffer.byteLength(input.text, 'utf8') > 32768 ||
         typeof input.clientMessageId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(input.clientMessageId)) {

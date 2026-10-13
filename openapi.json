@@ -9380,6 +9380,56 @@
         ]
       }
     },
+    "/api/projects/{slug}/threads/{id}/publish": {
+      "post": {
+        "operationId": "ThreadsController_publish",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jobId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Publish thread documents (creator)",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
     "/api/projects/{slug}/threads/{id}/messages": {
       "post": {
         "operationId": "ThreadsController_sendMessage",
