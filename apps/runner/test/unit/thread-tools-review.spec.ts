@@ -40,13 +40,13 @@ describe('thread tools: git failures and bounds (review)', () => {
     expect(result.content).toContain('spawn git ENOENT');
   });
 
-  test('list_files passes the search timeout to git so a slow ls-files cannot stall past it', async () => {
+  test('list_files passes the search timeout to git for both the tracked and the untracked ls-files calls', async () => {
     const seen: GitOptions[] = [];
     const ctx = contextWith(async (_args, options): Promise<GitResult> => {
       seen.push(options);
       return { code: 0, stdout: '', stderr: '' };
     }, { searchTimeoutMs: 4_321 });
     await listFilesTool(ctx).run({});
-    expect(seen.map((options) => options.timeoutMs)).toEqual([4_321]);
+    expect(seen.map((options) => options.timeoutMs)).toEqual([4_321, 4_321]);
   });
 });

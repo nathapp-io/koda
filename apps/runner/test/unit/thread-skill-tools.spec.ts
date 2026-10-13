@@ -133,15 +133,15 @@ describe('jailed skill tools and assembled tool set (US-004)', () => {
     expect(result?.isError).toBe(true);
   });
 
-  test('US-004 AC-8: buildThreadTools returns the four tools in their stable order', async () => {
+  test('US-004 AC-8: buildThreadTools returns the tools in their stable order, write_doc last', async () => {
     const { ctx } = await makeContext();
     const tools = toolsIndexModule?.buildThreadTools(ctx);
-    expect(tools?.map((tool) => tool.name)).toEqual(['list_files', 'search_repo', 'load_skill', 'read_skill_file']);
+    expect(tools?.map((tool) => tool.name)).toEqual(['list_files', 'search_repo', 'load_skill', 'read_skill_file', 'write_doc']);
   });
 
   test('US-004 AC-9: every assembled thread tool has approval set to never', async () => {
     const { ctx } = await makeContext();
     const tools = toolsIndexModule?.buildThreadTools(ctx);
-    expect(tools?.map((tool) => tool.approval)).toEqual(['never', 'never', 'never', 'never']);
+    expect(tools?.map((tool) => tool.approval)).toEqual(['never', 'never', 'never', 'never', 'never']);
   });
 });
