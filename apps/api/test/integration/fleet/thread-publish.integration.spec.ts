@@ -8,6 +8,9 @@ import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard'
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { resetDb } from '../../helpers/reset-db';
 import { seedFleetHttpWorld, FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { PrismaFleetJobRepository } from '../../../src/fleet/jobs/prisma-fleet-job.repository';
+import { ThreadJobEffects } from '../../../src/fleet/threads/thread-job-effects';
+import type { FleetJobRecord } from '../../../src/fleet/jobs/domain/fleet-job.domain';
 
 const describeDb = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -49,6 +52,17 @@ describeDb('US-003 thread publish', () => {
   const send = (id: string) => request(httpServer).post(`/api/projects/web/threads/${id}/messages`)
     .set('Authorization', `Bearer ${world.tokens.dev}`).send({ text: 'hello', clientMessageId: 'publish-busy' });
 
+  it('AC-2: refuses a message while a PLAN job for the thread is queued', async () => {
+    const thread = await makeThread();
+    await db.fleetJob.create({ data: {
+      projectId: world.projectId, repoId: world.repoId, ref: 'feat/plan', command: 'PLAN', feature: thread.feature,
+      profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, state: 'QUEUED', threadId: thread.id,
+    } });
+    const response = await send(thread.id).expect(409);
+    expect(response.body.message).toContain('Another job of this thread is still active');
+    expect(await db.chatMessage.count({ where: { threadId: thread.id } })).toBe(0);
+  });
+
   it('AC-10: refuses publish without written paths and creates no job', async () => {
     const thread = await makeThread();
     const response = await publish(thread.id).expect(409);
@@ -72,6 +86,44 @@ describeDb('US-003 thread publish', () => {
     const commands = await db.fleetCommand.findMany({ where: { jobId: job.id, type: 'THREAD_PUBLISH' } });
     expect(commands).toHaveLength(1);
     expect(commands[0]).toMatchObject({ leaseEpoch: 7, payload: {} });
+  });
+
+  it('AC-4: refuses publish while a thread message is streaming', async () => {
+    const runner = await makeRunner(`publish-streaming-${Math.random().toString(36).slice(2)}`);
+    const thread = await makeThread({ runnerId: runner.id });
+    const job = await db.fleetJob.create({ data: {
+      projectId: world.projectId, repoId: world.repoId, ref: 'trunk', command: 'THREAD', feature: `thread-${thread.id}`,
+      profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, state: 'RUNNING', leaseEpoch: 3,
+      runnerId: runner.id, threadId: thread.id,
+    } });
+    await db.fleetThreadTurn.create({ data: {
+      jobId: job.id, threadId: thread.id, action: 'SESSION', initialMessageId: null, instructions: '',
+      backend: { kind: 'native', model: 'm1' }, skills: [], resume: false,
+    } });
+    await db.chatMessage.create({ data: {
+      threadId: thread.id, seq: 1, role: 'assistant', content: 'streaming', status: 'streaming',
+    } });
+    const response = await publish(thread.id).expect(409);
+    expect(response.body.message).toContain('thread turn is already running');
+    expect(await db.fleetCommand.count({ where: { jobId: job.id, type: 'THREAD_PUBLISH' } })).toBe(0);
+  });
+
+  it('AC-5: refuses publish while THREAD_CLOSE is queued at the live epoch', async () => {
+    const runner = await makeRunner(`publish-closing-${Math.random().toString(36).slice(2)}`);
+    const thread = await makeThread({ runnerId: runner.id });
+    const job = await db.fleetJob.create({ data: {
+      projectId: world.projectId, repoId: world.repoId, ref: 'trunk', command: 'THREAD', feature: `thread-${thread.id}`,
+      profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, state: 'RUNNING', leaseEpoch: 5,
+      runnerId: runner.id, threadId: thread.id,
+    } });
+    await db.fleetThreadTurn.create({ data: {
+      jobId: job.id, threadId: thread.id, action: 'SESSION', initialMessageId: null, instructions: '',
+      backend: { kind: 'native', model: 'm1' }, skills: [], resume: false,
+    } });
+    await db.fleetCommand.create({ data: { jobId: job.id, runnerId: runner.id, leaseEpoch: 5, type: 'THREAD_CLOSE', payload: {} } });
+    const response = await publish(thread.id).expect(409);
+    expect(response.body.message).toContain('closing');
+    expect(await db.fleetCommand.count({ where: { jobId: job.id, type: 'THREAD_PUBLISH' } })).toBe(0);
   });
 
   it('AC-11: refuses publish when the thread has no pinned runner', async () => {
@@ -102,6 +154,14 @@ describeDb('US-003 thread publish', () => {
     expect(response.body.message).toContain('Another job of this thread is still active');
   });
 
+  it('AC-13: refuses publish by a project member who is not the creator', async () => {
+    const thread = await makeThread({ writtenPaths: ['docs/a.md'] });
+    const response = await publish(thread.id, world.tokens.viewer).expect(403);
+    expect(response.body.message).toContain('Only the thread creator');
+    expect(await db.fleetJob.count({ where: { threadId: thread.id } })).toBe(0);
+    expect(await db.fleetCommand.count({ where: { job: { threadId: thread.id } } })).toBe(0);
+  });
+
   it('AC-7/8: creates a zero-cost PUBLISH job and action turn for written paths', async () => {
     const runner = await makeRunner(`publish-job-${Math.random().toString(36).slice(2)}`);
     const thread = await makeThread({ runnerId: runner.id, writtenPaths: ['docs/a.md'], costUsd: 5, maxCostUsd: 1 });
@@ -114,6 +174,24 @@ describeDb('US-003 thread publish', () => {
     expect(await db.fleetThreadTurn.findUniqueOrThrow({ where: { jobId } })).toMatchObject({
       action: 'PUBLISH', initialMessageId: null, resume: false,
     });
+    const assign = await app.get(PrismaFleetJobRepository).findThreadAssign(jobId);
+    expect(assign).toMatchObject({ action: 'PUBLISH', initialMessage: null, title: thread.title });
+  });
+
+  it('AC-15: PUBLISH completion leaves a closed earlier session snapshot unchanged', async () => {
+    const session = {
+      jobId: 'earlier-session-job', state: 'closed', resumed: true, contextReset: false,
+      reason: 'session ended', at: '2026-10-01T00:00:00.000Z',
+    };
+    const thread = await makeThread({ session });
+    const job = await db.fleetJob.create({ data: {
+      projectId: world.projectId, repoId: world.repoId, ref: 'trunk', command: 'THREAD', feature: `thread-${thread.id}`,
+      profiles: [], maxCostUsd: 0, selectorLabels: [], requestedById: world.ids.dev, state: 'COMPLETED',
+      stateReason: 'published', threadId: thread.id, finishedAt: new Date('2026-10-02T00:00:00.000Z'),
+    } });
+    await app.get(ThreadJobEffects).onJobEnded(job as unknown as FleetJobRecord);
+    const saved = await db.chatThread.findUniqueOrThrow({ where: { id: thread.id }, select: { session: true } });
+    expect(saved.session).toEqual(session);
   });
 
   it('AC-1: refuses a send while a PUBLISH thread job is active', async () => {
