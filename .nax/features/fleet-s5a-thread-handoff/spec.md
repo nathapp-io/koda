@@ -36,10 +36,18 @@ before dispatching PLAN and RUN from the dispatch form. C2 closes the loop on th
 - **C2-D2:** the one-active-job rule (umbrella §5.1) counts every non-terminal `FleetJob` with the thread's `threadId`
   (`THREAD` of any action, `PLAN`, `RUN`). For `PLAN` / `RUN` the check runs inside `FleetJobsService.dispatch`'s
   transaction, right before `createJob`, under a `ChatThread` row lock, so two concurrent requests cannot both pass.
-- **C2-D3:** a `PUBLISH` or `DISCARD` job spends nothing and needs no model, so placement skips the backend check for it
-  and instead requires `threadWrite`. `thread_write` is not a permanent misfit (a runner restart or re-probe clears it).
+- **C2-D3:** a `PUBLISH` or `DISCARD` job needs no model, so placement skips the backend check for it and instead
+  requires `threadWrite`. `thread_write` is not a permanent misfit (a runner restart or re-probe clears it). Placement
+  still cancels a queued job whose budget scope is paused (`placement.service.ts:70`), so the Publish and Discard
+  routes refuse a paused scope up front with the same `BudgetPausedException` (409 `fleet.budgetPaused`) that Send
+  throws, instead of creating a job that placement would cancel.
 - **C2-D4:** the terminal hook (`ThreadJobEffects.onJobEnded`) is unchanged: `closeSnapshot` only touches a session whose
-  `jobId` is the ending job, and a `PUBLISH` / `DISCARD` job never starts a session. US-003 pins this with one AC.
+  `jobId` is the ending job, and a `PUBLISH` / `DISCARD` job never starts a session. Its other effects (erroring
+  `pending` / `streaming` messages, clearing `pendingQuestion`) find nothing, because an action job is only created
+  when no session job is active. US-003 pins the session part with one AC.
+- **C2-D7:** while a thread's active `THREAD` job is a `PUBLISH` or `DISCARD` job, the session commands (stop,
+  end-session, answer through `PrismaChatThreadRepository.command`) answer 409 `threads.noSession`, because there is no
+  session to act on.
 - **C2-D5:** Publish on a live session sends `THREAD_PUBLISH` and is allowed with an empty `writtenPaths` (the runner
   computes the real dirty set and answers `published` with `paths: []` when nothing changed). Publish without a live
   session creates a `PUBLISH` job only when `writtenPaths` is non-empty.
@@ -53,15 +61,16 @@ Read-only symbols (verified on `feat/fleet-s5a-thread-handoff` = main `7e6a8c38`
 
 - `ThreadAction` (`'SESSION' | 'PUBLISH' | 'DISCARD'`), `ThreadAssign.title?`, `ThreadRunnerLine`,
   `ThreadPublishFailReason`, `ThreadDiscardFailReason`, `RunnerCapabilities.threadWrite?` —
-  `packages/fleet-protocol/src/threads.ts` and `src/index.ts` (added by C1). The API re-exports them from
-  `apps/api/src/fleet/common/thread-jobs.ts` and `common/protocol.ts`.
+  `packages/fleet-protocol/src/threads.ts` and `src/index.ts` (added by C1). The API re-exports `ThreadAction` and
+  `ThreadAssign` from `apps/api/src/fleet/common/thread-jobs.ts`; the API's own parsed line types live in
+  `thread-line.ts`.
 - `FleetCommandType.THREAD_PUBLISH` exists (`thread-jobs.ts` `THREAD_COMMAND_TYPES`).
 - `ACTIVE_STATES` / `TERMINAL_STATES` — `apps/api/src/fleet/jobs/job-state.ts:8,11`.
 - `allocateThreadSeq`, `ChatThreadRepository` — `threads/domain/chat-thread.domain.ts`.
 - `ConflictAppException(params, key)` — `apps/api/src/common/exceptions/conflict-app.exception.ts`; 409 keys live in
   `apps/api/src/i18n/en/threads.json` as `{ "<key>": { "409": "<text>" } }`.
 - `isRunnerOnline` — `fleet/common/runner-online.ts`; `THREAD_MIN_PROTOCOL_VERSION = 4` — `threads/thread-send-rules.ts`.
-- `PlacementService.placeJob(jobId)` and its `assignOne` path (`jobs/placement.service.ts:85,160,188-196`), which
+- `PlacementService.placeJob(jobId)`, `fillRunnerThreads` and the private `assign` (`jobs/placement.service.ts:85,160,188-196`), which
   builds the `PlacementJob` from `findThreadAssign` and the ASSIGN with `buildAssignPayload`.
 - `CommandAckProcessor` routes `THREAD_INPUT` / `THREAD_ANSWER` acks to `ThreadJobEffects.onInputAck`
   (`fleet/sync/command-ack.processor.ts:68-69`).
@@ -79,15 +88,18 @@ Symbols this feature changes. The baseline only locates the code; implement the 
 | `ChatThreadRecord` / `ThreadDto` | no write-path fields | add `writtenPaths: string[]`, `publishedSha: string \| null`, `specPublished: boolean`, `lastWrite: ThreadWriteResult \| null` (US-001); `ChatThreadDetail` / `ThreadDetailDto` add `handoff` (US-006) |
 | `ThreadSession` (`chat-thread.domain.ts:16`) | six keys | adds optional `stale?: true` (US-002) |
 | `parseCapabilitiesCore` (`common/capabilities-core.ts:118`) | drops `threadWrite` | keeps `threadWrite: true`, rejects any other value (US-001) |
-| `PlacementJob.thread` (`jobs/placement-rules.ts:32`) | `{ backend; enabled }` | `{ backend; enabled; action: ThreadAction }` (US-001) |
-| `MisfitReason` / `firstMisfit` (`placement-rules.ts:10,101`) | thread branch checks backend for every THREAD job | adds `'thread_write'`; `PUBLISH` / `DISCARD` skip the backend check and require `threadWrite` (US-001) |
+| `PlacementJob.thread` (`jobs/placement-rules.ts:32`) and `toPlacementJob`'s third parameter (`placement-rules.ts:160`) | `{ backend; enabled }` | `{ backend; enabled; action?: ThreadAction }`; absent behaves as `SESSION` (US-001) |
+| `MisfitReason` / `firstMisfit` (`placement-rules.ts:10,101`) | thread branch checks backend for every THREAD job | adds `'thread_write'`; `PUBLISH` / `DISCARD` skip the backend check and require `threadWrite` (US-001); the reason enum lists in `jobs/dto/fleet-job.dto.ts:107` and `dashboard/dashboard.types.ts:109` (`MISFIT_REASONS`) gain `thread_write` |
 | `findThreadAssign` (`jobs/prisma-fleet-job.repository.ts:192`) | no `title` | returns `title` from `ChatThread.title` (US-001) |
-| `parseThreadLine` (`threads/ingest/thread-line.ts:78`) | five C1 line types are `{ bad: true }`; `session_started.stale` dropped | parses all five and `stale` (US-002) |
+| `parseThreadLine` (`threads/ingest/thread-line.ts:207`) | five C1 line types are `{ bad: true }`; `session_started.stale` dropped | parses all five and `stale` (US-002) |
 | `PrismaThreadIngestRepository.fold` (`ingest/prisma-thread-ingest.repository.ts:69`) | session, tool, assistant, usage lines | also folds the five write-path lines through new `ingest/thread-write-fold.ts` (US-002) |
-| `ThreadJobEffects.onInputAck` (`threads/thread-job-effects.ts:25`) | `THREAD_INPUT`, `THREAD_ANSWER` | also `THREAD_PUBLISH` (US-004); `CommandAckProcessor` routes it there |
+| `ThreadJobEffects.onInputAck` (`threads/thread-job-effects.ts:23`) | `THREAD_INPUT`, `THREAD_ANSWER` | also `THREAD_PUBLISH` (US-004); `CommandAckProcessor` routes it there |
 | `PrismaChatThreadRepository.sendMessage` (`threads/prisma-chat-thread.repository.ts:153`) | creates the THREAD job inline | job creation moves to a private `createThreadJob`; refuses `threads.busy` when a `PLAN`, `RUN`, `PUBLISH` or `DISCARD` job of the thread is active (US-003) |
 | `buildThreadInstructions` (`threads/thread-instructions.ts:3`) | "You cannot write files in this session." | describes `write_doc` and Publish (US-004) |
 | `FleetJobsService.dispatch` opts | `{ scheduleId?, ticketActor? }` | adds `threadId?: string` (US-006) |
+| `IFleetJobRepository` (`jobs/domain/fleet-job.domain.ts:198`) | no thread lock | adds `lockIdleThread(threadId): Promise<boolean>` (US-006) |
+| `ChatThreadRepository` (`threads/domain/chat-thread.domain.ts`) | send, command, archive, ... | adds `publish(projectId, threadId, userId)` (US-003), `discard(projectId, threadId, userId)` (US-004) and `handoff(threadId)` (US-006) |
+| `ThreadDto.session` OpenAPI `properties` (`threads/dto/thread.dto.ts:25`) | six properties | adds `stale` (boolean) (US-002) |
 | `buildAssignPayload` (`jobs/assign-payload.ts`) | no `expectBranch` | `PLAN` with `threadId` adds `expectBranch: job.ref` (US-006) |
 | `AssignPayload` (`packages/fleet-protocol/src/index.ts:230`) | no `expectBranch` | adds `expectBranch?: string` (US-005) |
 | `parseAssign` (`apps/runner/src/supervisor/assign-parser.ts`) | no `expectBranch` | accepts it on `PLAN` only (US-005) |
@@ -121,8 +133,9 @@ export type ThreadWriteResult =
   -> `CapabilityValidationError` with reason `threadWrite` (strict, like `configJobs`).
 - `PlacementService` passes `action: threadAssign.action` into `PlacementJob.thread` at both call sites.
 - `firstMisfit` thread branch, in order: `threads_disabled`, `protocol`, then for `action` `PUBLISH` / `DISCARD`:
-  `!runner.capabilities.threadWrite` -> `thread_write` (no backend check); for `SESSION`: the existing backend check;
-  then `thread_capacity` for every action.
+  `!runner.capabilities.threadWrite` -> `thread_write` (no backend check); for any other `action`, including an absent
+  one: the existing backend check; then `thread_capacity` for every action. The existing placement test fixtures build
+  `thread` without `action` and keep their results.
 
 ### Ingest (US-002)
 
@@ -138,7 +151,18 @@ New parsed line types in `thread-line.ts` (each with optional `at`, kept like th
 | `session_started` | as today; `stale` absent or `true` (any other value -> bad) | adds `stale: true` only when the line has it |
 
 Fold (new `ingest/thread-write-fold.ts`, called from `fold` under the existing job and thread locks; `at` = the line's
-`at` or the fold's clock, `jobId` = the batch's job). Every write-path line marks the thread changed, so the fold emits
+`at` or the fold's clock, `jobId` = the batch's job). It exports a pure function, testable without a database:
+
+```ts
+export type WriteLine = Extract<ThreadLine, { type: 'write_doc' | 'published' | 'publish_failed' | 'discarded' | 'discard_failed' }>;
+export interface WriteFoldState { writtenPaths: string[]; session: ThreadSession | null }
+export interface WriteFoldPatch { writtenPaths?: string[]; publishedSha?: string; specPublished?: boolean; lastWrite?: ThreadWriteResult; session?: ThreadSession }
+/** The `ChatThread` fields one write-path line changes; keys it does not change are absent. */
+export function writeLinePatch(state: WriteFoldState, line: WriteLine, ctx: { jobId: string; at: string }): WriteFoldPatch;
+```
+
+`fold` reads the thread's `writtenPaths` and `session`, calls `writeLinePatch`, and writes the patch with one
+`chatThread.update`. Every write-path line marks the thread changed, so the fold emits
 the existing `thread` live event:
 
 | Line | `ChatThread` update |
@@ -169,7 +193,8 @@ Inside `txManager.run`, after the same job-then-thread locks as `sendMessage`, t
 2. `threadsEnabled` false -> 409 `threads.disabled`; `status = ARCHIVED` -> 409 `threads.archived`;
 3. `thread.runnerId` null -> 409 `threads.nothingToPublish`;
 4. runner offline -> 409 `threads.runnerOffline`; runner `protocolVersion < 4` or no `capabilities.threadWrite` -> 409
-   `threads.runnerOutdated`;
+   `threads.runnerOutdated`; a paused budget scope of the thread (`jobGateKeys` with the pinned runner, as Send) ->
+   `BudgetPausedException`;
 5. active job is a `THREAD` `SESSION` job: `UPLOADING` or a `THREAD_CLOSE` queued at its epoch -> 409 `threads.closing`;
    `QUEUED` / `ASSIGNED`, or a message of the thread `pending` / `streaming` -> 409 `threads.turnRunning`; otherwise
    (`RUNNING`, idle) queue `THREAD_PUBLISH` with payload `{}` at the job's `leaseEpoch`, notify the runner after commit,
@@ -197,9 +222,12 @@ story that first throws it: `busy` and `nothingToPublish` (US-003), `nothingToDi
 
 `POST /projects/:slug/threads/:id/discard` (creator, users only, 200, body `{}`, returns `{ jobId: string }`). Same
 locks; checks in order: 404 / 403 as Publish; `threads.disabled`; `threads.archived`; `thread.runnerId` null -> 409
-`threads.nothingToDiscard`; `threads.runnerOffline`; `threads.runnerOutdated` (as Publish step 4); any active job of the
+`threads.nothingToDiscard`; `threads.runnerOffline`; `threads.runnerOutdated` and the budget pause (as Publish step 4); any active job of the
 thread, including a live session -> 409 `threads.busy`; otherwise `createThreadJob(thread, 'DISCARD')`, place it after
-commit, return `{ jobId }`.
+commit, return `{ jobId }`. The budget-pause refusal is the same as Publish step 4.
+
+`PrismaChatThreadRepository.command` (stop, end-session, answer) answers 409 `threads.noSession` when the current
+`THREAD` job's `FleetThreadTurn.action` is `PUBLISH` or `DISCARD` (C2-D7).
 
 `buildThreadInstructions` replaces step 2's "You cannot write files in this session. Put the spec draft in your reply."
 and the tools line's "no write access" with:
@@ -228,20 +256,27 @@ and the tools line's "no write access" with:
 ### Plan and Run (US-006, US-007)
 
 `POST /projects/:slug/threads/:id/plan` (creator, users only, 201, body `PlanThreadDto { profiles?: string[];
-maxCostUsd?: string }`, returns `DispatchResultDto`). `ThreadsService.plan` checks in order: 404 / 403; `threads.disabled`;
+maxCostUsd?: number }`, returns `DispatchResultDto`). The controller first checks the caller's project ability
+`CREATE FleetJob` (as thread create does, `threads.controller.ts`), else 403 `projects`. `maxCostUsd` is a number
+validated like `DispatchFleetJobDto.maxCostUsd`; when omitted it is `THREAD_HANDOFF_DEFAULT_MAX_COST_USD = 5` (the
+dispatch form's default, `apps/web/lib/fleet-dispatch.ts:69`), a constant exported from
+`threads/thread-handoff.ts`. `ThreadsService.plan` checks in order: 404 / 403; `threads.disabled`;
 `threads.archived`; `specPublished` false -> 409 `threads.notPublished`; then calls `FleetJobsService.dispatch(userId,
 projectId, { repoId, command: 'PLAN', ref: 'feat/<feature>', feature, planFrom: specPath, profiles, maxCostUsd,
 pinnedRunnerId: thread.runnerId }, { threadId })`. The DTO validation mirrors `DispatchFleetJobDto` for `profiles`
 (at most 8 strings of at most 64 characters) and `maxCostUsd`.
 
-`POST /projects/:slug/threads/:id/run` (creator, users only, 201, body `RunThreadDto { profiles?; maxCostUsd?;
-bashMode?: 'raw' | 'gated' | 'escalate' }`). `ThreadsService.run` checks in order: 404 / 403; `threads.disabled`;
+`POST /projects/:slug/threads/:id/run` (creator, users only, 201, body `RunThreadDto { profiles?; maxCostUsd?: number;
+bashMode?: 'raw' | 'gated' | 'escalate' }`), with the same `CREATE FleetJob` ability check and the same
+`maxCostUsd` default. `ThreadsService.run` checks in order: 404 / 403; `threads.disabled`;
 `threads.archived`; the thread's latest `PLAN` job is missing or not `COMPLETED` -> 409 `threads.notPlanned`; then
 `dispatch(..., { repoId, command: 'RUN', ref: 'feat/<feature>', feature, profiles, maxCostUsd, bashMode,
 pinnedRunnerId: thread.runnerId }, { threadId })`.
 
-`FleetJobsService.dispatch` with `opts.threadId`: the created job carries `threadId`; inside the existing transaction,
-before `createJob`, the repository method `lockIdleThread(threadId)` runs `SELECT ... FROM "ChatThread" WHERE id = $1
+`FleetJobsService.dispatch` with `opts.threadId`: `dispatch` spreads `threadId: opts.threadId` into the `createJob`
+input (`NewFleetJob.threadId`, `fleet-job.domain.ts:115`; `normalizeDispatch` does not carry it); inside the existing
+transaction, before `createJob`, the new `IFleetJobRepository.lockIdleThread(threadId): Promise<boolean>` (true when
+idle) runs `SELECT ... FROM "ChatThread" WHERE id = $1
 FOR UPDATE` and counts `FleetJob` rows with that `threadId` in `ACTIVE_STATES`; a count above 0 -> 409 `threads.busy`.
 A `DuplicateActiveJobError` with `opts.threadId` set -> 409 `threads.busy` (instead of `fleet.jobs`).
 
@@ -261,7 +296,7 @@ id desc`) job of that command. `GET /projects/:slug/threads/:id` returns it.
 | malformed write-path line | bad line, counted in `skippedLines`, nothing folded | US-002 |
 | `write_doc` beyond 200 distinct paths | path not added to `writtenPaths` | US-002 |
 | `THREAD_PUBLISH` acked `rejected` | `lastWrite` `publish_failed` with the ack detail | US-004 |
-| Send while a `PLAN` / `RUN` / `PUBLISH` / `DISCARD` job is active | 409 `threads.busy` | US-003 |
+| Send while a `PLAN` / `RUN` job is active, or a `PUBLISH` / `DISCARD` job is `RUNNING` | 409 `threads.busy` (a `QUEUED` / `ASSIGNED` / `UPLOADING` action job answers `sendRefusal`'s `turnRunning` / `closing` first) | US-003 |
 | Publish with no runner, or no live session and empty `writtenPaths` | 409 `threads.nothingToPublish` | US-003 |
 | Publish during a turn, or before the session is running | 409 `threads.turnRunning` | US-003 |
 | Publish while the session closes | 409 `threads.closing` | US-003 |
@@ -270,6 +305,9 @@ id desc`) job of that command. `GET /projects/:slug/threads/:id` returns it.
 | Publish while a `PLAN` / `RUN` / action job is active | 409 `threads.busy` | US-003 |
 | Discard with no runner | 409 `threads.nothingToDiscard` | US-004 |
 | Discard with any active job, including a live session | 409 `threads.busy` | US-004 |
+| Publish / Discard in a paused budget scope | 409 `fleet.budgetPaused` | US-003, US-004 |
+| Stop / end-session / answer while the active job is a `PUBLISH` / `DISCARD` job | 409 `threads.noSession` | US-004 |
+| Plan / Run by a caller without project `CREATE FleetJob` | 403 `projects` | US-006, US-007 |
 | `expectBranch` on a non-`PLAN` ASSIGN | `invalid expectBranch` | US-005 |
 | PRD `branchName` differs from `expectBranch` | job `FAILED` `branch_mismatch`, nothing pushed | US-005 |
 | Plan before a publish that contained the spec | 409 `threads.notPublished` | US-006 |
@@ -287,7 +325,10 @@ id desc`) job of that command. `GET /projects/:slug/threads/:id` returns it.
 - A rejected `THREAD_PUBLISH` ack writes `lastWrite` but emits no live event; the page sees it on its next thread
   refetch.
 - `RunnerSummaryDto` does not expose `threadWrite`; the write routes answer `threads.runnerOutdated` instead.
-- Publish and Discard spend nothing, so they pass no `BudgetGate` check; Plan and Run keep `dispatch`'s budget gate.
+- Plan and Run read `specPublished`, `status` and the latest PLAN before `dispatch` takes the thread lock; a thread
+  archived or re-published in that window is not re-checked under the lock.
+- Run does not check whether the spec was re-published after the latest PLAN completed; it runs the PRD on the branch.
+  C3 may warn about it.
 - A `PUBLISH` or `DISCARD` job re-adopted after a daemon restart ends `FAILED` (C1 behaviour); the API folds nothing for it.
 - The runner `context.md` and the API `context.md` are updated by hand after merge.
 - US-002 only: an `at` that is not an ISO date on a write-path line, a `published.paths` entry over 512 characters, a
@@ -295,6 +336,9 @@ id desc`) job of that command. `GET /projects/:slug/threads/:id` returns it.
   `publish_failed`), `writtenPaths` left unchanged by `publish_failed`, and a `session_started` without `stale` storing
   no `stale` key (already pinned by the existing fold tests) share the Design tables without a dedicated acceptance
   criterion.
+- US-003 only: Publish answering `threads.turnRunning` for a `QUEUED` / `ASSIGNED` session job or a `pending` message,
+  `threads.closing` for an `UPLOADING` job, `threads.disabled` / `threads.archived`, and the budget-pause refusal
+  share the Design steps (and `sendRefusal`'s existing tests) without a dedicated acceptance criterion.
 - US-003 only: the `{ jobId: null }` body of a live Publish and the `{ jobId }` body of a `PUBLISH` job, the job's
   `threadId` and `pinnedRunnerId` (set by the extracted `createThreadJob` exactly as `sendMessage` sets them today), a
   refused request creating no command or job, and 403 `threads.principal` for an agent API key (the controller's
@@ -302,16 +346,17 @@ id desc`) job of that command. `GET /projects/:slug/threads/:id` returns it.
 - US-003 only: the job-then-thread lock order, the retry when the current job changes between the pre-lock read and the
   lock (as `sendMessage` retries today), and the `job.dispatched` activity row of a `PUBLISH` job share `sendMessage`'s
   existing behaviour without a dedicated acceptance criterion.
-- US-004 only: `threads.disabled`, `threads.archived` and `threads.runnerOffline` on Discard follow Publish's checks
-  (pinned in US-003), and an ack `detail` longer than 64 characters is cut to 64, without a dedicated acceptance
+- US-004 only: `threads.disabled`, `threads.archived`, `threads.runnerOffline` and the budget pause on Discard follow
+  Publish's Design steps, stop and answer answering `threads.noSession` share end-session's rule (C2-D7), and an ack `detail` longer than 64 characters is cut to 64, without a dedicated acceptance
   criterion.
 - US-005 only: `expectBranch` failing the `plain` rule on a `PLAN`, the `.nax` check on the local commit, and
   `planVerdict` turning the `branch_mismatch` check into `FAILED` (its existing `!ok` path) share the rules in Design
   without a dedicated acceptance criterion.
-- US-006 only: the losing request of two concurrent Plans answering 409 `threads.busy`, a `DuplicateActiveJobError`
+- US-006 only: 403 `threads.notCreator` on Plan (the same creator check as Publish, US-003 AC-13), `handoff.plan`
+  picking the latest of several PLAN jobs (`queuedAt desc, id desc`, as `currentThreadJob` orders today), the losing request of two concurrent Plans answering 409 `threads.busy`, a `DuplicateActiveJobError`
   under `opts.threadId` mapping to `threads.busy`, `threads.disabled` and `threads.archived` on Plan, the `profiles` / `maxCostUsd` DTO bounds and
   `dispatch`'s budget gate share existing behaviour without a dedicated acceptance criterion.
-- US-007 only: Run's `bashMode` validation and `threads.disabled` / `threads.archived` share Plan's rules without a
+- US-007 only: the `CREATE FleetJob` ability check and the `maxCostUsd` default share Plan's rules (US-006), and Run's `bashMode` validation and `threads.disabled` / `threads.archived` share Plan's rules without a
   dedicated acceptance criterion.
 
 ## Stories
@@ -322,13 +367,13 @@ id desc`) job of that command. `GET /projects/:slug/threads/:id` returns it.
 3. **US-003: One active job per thread and Publish** — `Workdir: apps/api` — depends on US-001.
 4. **US-004: Discard, the publish ack and the `write_doc` instructions** — `Workdir: apps/api` — depends on US-003.
 5. **US-005: Runner PLAN `expectBranch`** — `Workdir: apps/runner` — no dependencies.
-6. **US-006: Plan from a thread** — `Workdir: apps/api` — depends on US-003, US-005.
+6. **US-006: Plan from a thread** — `Workdir: apps/api` — depends on US-002, US-003, US-005.
 7. **US-007: Run from a thread** — `Workdir: apps/api` — depends on US-006.
 
 US-005 also edits `packages/fleet-protocol/src/index.ts`. Build gate for every story: `bun run type-check` and
 `bun run lint` in its Workdir; US-001 also `bunx prisma validate` and `bun run db:generate` in `apps/api`; US-005
-also `bun run type-check` at the repo root. US-003, US-004, US-006 and US-007 add routes, so they regenerate `openapi.json` with
-`bun run api:export-spec` at the repo root. API DB-backed specs need `bun run test:db:up` and `KODA_DB_TESTS=1`.
+also `bun run type-check` at the repo root. US-003, US-004, US-006 and US-007 add routes, so they regenerate `openapi.json` and the CLI client with
+`bun run generate` at the repo root. API DB-backed specs need `bun run test:db:up` and `KODA_DB_TESTS=1`.
 
 ### Context Files
 
@@ -397,7 +442,7 @@ also `bun run type-check` at the repo root. US-003, US-004, US-006 and US-007 ad
 ### Modifies
 
 **US-001**
-- `apps/api/src/fleet/threads/threads.service.spec.ts` — its `record` fixture is a full `ChatThreadRecord` compared with `toEqual`; the fixture gains `writtenPaths: []`, `publishedSha: null`, `specPublished: false`, `lastWrite: null`, and the assertions stay.
+- `apps/api/src/fleet/threads/threads.service.spec.ts` — its `record` fixture is typed `ChatThreadRecord`; it gains `writtenPaths: []`, `publishedSha: null`, `specPublished: false` and `lastWrite: null` so it still type-checks, and every assertion stays.
 
 **US-002**
 None. The existing parser and fold tests never feed a write-path line or a `stale` key, and the parsed `session_started` line gains `stale` only when the input has it, so their `toEqual` assertions stay valid.
@@ -427,7 +472,8 @@ None. `checkPlanPrd`'s new parameter is optional and the parsed assign gains `ex
 - US-002 -> US-006: `specPublished`, set by the `published` fold, gates Plan (US-006 AC-2, AC-3).
 - US-003 -> US-004: `createThreadJob` creates the `DISCARD` job (US-004 AC-1), reached through `POST .../discard`.
 - US-003 -> US-006, US-007: `threads.busy` on Send during a thread `PLAN` / `RUN` (US-003 AC-2).
-- US-005 -> US-006: `AssignPayload.expectBranch`, set by `buildAssignPayload` for a thread PLAN (US-006 AC-9, AC-10).
+- US-005 -> US-006: `AssignPayload.expectBranch`, set by `buildAssignPayload` for a thread PLAN (US-006 AC-9, AC-10), and
+  carried by the ASSIGN that placement queues for a PLAN created through `POST .../plan` (US-006 AC-15).
 - US-006 -> US-007: `handoff.plan` and `dispatch`'s `{ threadId }` option, reused by Run (US-007 AC-2, AC-5).
 
 ## Acceptance Criteria
@@ -479,8 +525,8 @@ None. `checkPlanPrd`'s new parameter is optional and the parsed assign gains `ex
   `{ bad: true }`.
 - AC-9 [integration]: folding two `write_doc` lines for `docs/a.md` and one for `docs/b.md` leaves the thread's
   `writtenPaths` equal to `['docs/a.md', 'docs/b.md']`.
-- AC-10 [unit]: `foldWriteLine` for a `write_doc` line on a thread whose `writtenPaths` already holds 200 entries
-  leaves `writtenPaths` equal to those 200 entries.
+- AC-10 [unit]: `writeLinePatch` for a `write_doc` line with state `writtenPaths` holding 200 entries returns a patch
+  with no `writtenPaths` key.
 - AC-11 [integration]: folding a `published` line with `sha` S, `specPresent: true`, `paths: ['docs/a.md']` and
   `ignored: []` on a thread with `writtenPaths ['docs/a.md']` leaves the thread with `{ publishedSha: S, specPublished:
   true, writtenPaths: [], lastWrite: { kind: 'published', jobId: <batch job>, at: <line at>, sha: S, paths:
@@ -554,6 +600,8 @@ None. `checkPlanPrd`'s new parameter is optional and the parsed assign gains `ex
   text; read files with your read tool; write_doc writes docs. You have no shell and no web access.`
 - AC-13 [integration]: a `THREAD` `SESSION` job created by `POST .../messages` stores `FleetThreadTurn.instructions`
   equal to `buildThreadInstructions` of that thread, which names `write_doc`.
+- AC-14 [integration]: `POST /projects/:slug/threads/:id/end-session` while the thread's active `THREAD` job is a
+  `RUNNING` `PUBLISH` job answers 409 `threads.noSession`.
 
 ### US-005: Runner PLAN `expectBranch`
 
@@ -593,9 +641,9 @@ None. `checkPlanPrd`'s new parameter is optional and the parsed assign gains `ex
   `threads.busy`.
 - AC-6 [integration]: two `POST .../plan` requests for the same idle thread sent concurrently leave exactly one `PLAN`
   job with that `threadId`.
-- AC-7 [integration]: `POST .../plan` with `{ profiles: ['cc-plan'], maxCostUsd: '2' }` creates a job whose
+- AC-7 [integration]: `POST .../plan` with `{ profiles: ['cc-plan'], maxCostUsd: 2 }` creates a job whose
   `{ profiles, maxCostUsd }` equal `{ ['cc-plan'], '2' }`.
-- AC-8 [integration]: `POST .../plan` by a project member who is not the creator answers 403 `threads.notCreator`.
+- AC-8 [integration]: `POST .../plan` with `{}` creates a job whose `maxCostUsd` is `5`.
 - AC-9 [unit]: `buildAssignPayload` for a `PLAN` job with `threadId` `t1` and `ref` `feat/add-auth` returns a payload
   whose `expectBranch` is `feat/add-auth`.
 - AC-10 [unit]: `buildAssignPayload` for a `PLAN` job with `threadId` null returns a payload with no `expectBranch` key.
@@ -605,8 +653,10 @@ None. `checkPlanPrd`'s new parameter is optional and the parsed assign gains `ex
 - AC-13 [integration]: `GET /projects/:slug/threads/:id` for a thread with one `PLAN` job in state `FAILED` with
   `stateReason` `branch_mismatch` returns `handoff` equal to `{ plan: { jobId, state: 'FAILED', stateReason:
   'branch_mismatch' }, run: null }`.
-- AC-14 [integration]: `GET /projects/:slug/threads/:id` for a thread with two `PLAN` jobs returns `handoff.plan.jobId`
-  equal to the job queued last.
+- AC-14 [integration]: `POST .../plan` by the thread's creator whose project role no longer grants `CREATE FleetJob`
+  (VIEWER) answers 403.
+- AC-15 [integration]: placing the `PLAN` job created by `POST .../plan` queues an ASSIGN command whose payload's
+  `expectBranch` is `feat/<feature>`.
 
 ### US-007: Run from a thread
 
