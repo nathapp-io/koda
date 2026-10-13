@@ -13,6 +13,7 @@ import type { JobRunDeps, RunStart } from '../supervisor/job-run';
 import type { RepoMutex } from '../supervisor/repo-mutex';
 import { publishThreadDocs, type PublishThreadDocsInput } from './thread-publish';
 import { ThreadLivePublish, publishInputMutex } from './thread-live-publish';
+import { runThreadAction, type ThreadDiscardInput, type ThreadDiscardResult } from './thread-action-run';
 import { isTerminalState } from '../supervisor/transitions';
 import { ensureSkills as defaultEnsureSkills, type EnsureSkillsOptions } from './skill-fetch';
 import type { OpenThreadSessionOptions } from './session-factory';
@@ -73,6 +74,7 @@ export interface ThreadHostDeps {
   /** B3a's `ensureSkills`; a test supplies its own. */
   readonly ensureSkills?: (input: ThreadSkillsInput) => Promise<ThreadSkillsResult>;
   readonly publish?: (input: ThreadPublishInput) => Promise<ThreadPublishResult>;
+  readonly discard?: (input: ThreadDiscardInput) => Promise<ThreadDiscardResult>;
   /** The skills remote's base URL; the default fetches from `https://github.com`. */
   readonly skillOrigin?: string;
 }
@@ -225,6 +227,20 @@ export class ThreadJobRun {
       return;
     }
     if (this.stopped()) return;
+
+    if (thread.action === 'PUBLISH' || thread.action === 'DISCARD') {
+      this.events.transition('RUNNING', undefined, { pid: null, pgid: null, branch: null });
+      await this.openStream(thread, false, false, false);
+      if (this.halted) { this.releaseEnd(); return; }
+      const writer = this.writer;
+      if (writer === null) throw new Error('thread action stream was not opened');
+      await runThreadAction({
+        deps: this.deps, row, thread, writer,
+        transition: (to, reason) => this.events.transition(to, reason), halted: () => this.halted,
+      });
+      this.releaseEnd();
+      return;
+    }
 
     // Step 1: the git credentials, waiting for the job's first token. The wait polls the cancel request and a
     // halt, so an abandon does not sit out the token timeout. A refusal holds the socket, the wanted token and
@@ -389,7 +405,7 @@ export class ThreadJobRun {
    * Step 7: the stream file is recreated — it is keyed by job id only, so a requeued epoch must never re-ship
    * the lines of the epoch it replaces — then registered with the shipper and announced to the server.
    */
-  private async openStream(thread: ThreadAssign, resumed: boolean, stale: boolean): Promise<void> {
+  private async openStream(thread: ThreadAssign, resumed: boolean, stale: boolean, announce = true): Promise<void> {
     const jobDir = jobDirFor(this.deps.host.workspaceRoot, this.jobId);
     const threadPath = join(jobDir, THREAD_EVENTS_FILE);
     await mkdir(jobDir, { recursive: true, mode: 0o700 });
@@ -414,7 +430,7 @@ export class ThreadJobRun {
       threadPath,
       lifecycle: (level, message) => this.events.lifecycle(level, message),
     });
-    writer.started({ resumed, backend: thread.backend, skillShas: thread.skills.map((source) => source.sha), stale });
+    if (announce) writer.started({ resumed, backend: thread.backend, skillShas: thread.skills.map((source) => source.sha), stale });
   }
 
   /** Step 8: the initial message's turn, off the `start` path; with no initial message the run only idles. */
@@ -657,6 +673,8 @@ export class ThreadJobRun {
   command(type: ThreadCommandType, payload: unknown): ThreadCommandOutcome | Promise<ThreadCommandOutcome>;
   command(type: ThreadCommandType, payload: unknown): ThreadCommandOutcome | Promise<ThreadCommandOutcome> {
     if (this.closing || this.halted) return { result: 'rejected', detail: 'session_closed' };
+    const action = this.row()?.assign.thread?.action;
+    if (action === 'PUBLISH' || action === 'DISCARD') return { result: 'rejected', detail: 'no_session' };
     // A command only applies once the run can actually keep it: the row goes RUNNING before `openStream` awaits
     // its way to the writer, and in that window a turn could not be streamed — so the run is not ready yet.
     if (this.events.currentState() !== 'RUNNING' || this.writer === null) return { result: 'rejected', detail: 'session_not_ready' };
@@ -735,7 +753,8 @@ export class ThreadJobRun {
     if (row.cancelRequestedAt === null) {
       this.deps.journal.updateJob(this.jobId, this.leaseEpoch, { cancelRequestedAt: this.deps.now().toISOString() });
     }
-    if (this.events.currentState() === 'RUNNING') this.requestClose('cancelled');
+    const action = row.assign.thread?.action;
+    if (this.events.currentState() === 'RUNNING' && action !== 'PUBLISH' && action !== 'DISCARD') this.requestClose('cancelled');
     return true;
   }
 
