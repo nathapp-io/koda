@@ -159,8 +159,8 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
     },
     onThread: () => {
       void reloadThread()
-      // A job end errors the held streaming messages without a `message` event on this path, so a
-      // running turn also refetches its messages (the refetch cursor starts at the first in-flight one).
+      // A thread event can mean the session or its job ended (#264), so a running turn also refetches
+      // its messages; the refetch cursor starts at the first in-flight one.
       if (isTurnRunning(messages.value)) void refreshMessages()
     },
     onResync: () => {
