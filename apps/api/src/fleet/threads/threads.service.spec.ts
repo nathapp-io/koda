@@ -70,6 +70,92 @@ describe('ThreadsService.plan (US-006)', () => {
   });
 });
 
+describe('ThreadsService.run (US-007)', () => {
+  const completedPlan = { plan: { jobId: 'plan-1', state: 'COMPLETED', stateReason: null }, run: null };
+  const runService = (threads: Partial<ChatThreadRepository>, dispatch: ReturnType<typeof vi.fn>, enabled = true) => new ThreadsService(
+    threads as ChatThreadRepository,
+    {} as unknown as IFleetRepoRepository,
+    {} as unknown as SkillsService,
+    { threadsEnabled: enabled } as unknown as ConfigType<typeof fleetConfig>,
+    { dispatch } as unknown as FleetJobsService,
+  );
+
+  it('AC-1: dispatches a RUN on the feature branch pinned to the thread runner, with the default cap and thread id', async () => {
+    const dispatch = vi.fn().mockResolvedValue({ job: { id: 'j1' } });
+    const service = runService({
+      get: vi.fn().mockResolvedValue({ ...record, runnerId: 'runner-1' }),
+      handoff: vi.fn().mockResolvedValue(completedPlan),
+    }, dispatch);
+
+    await service.run('p1', 't1', 'u1', {});
+    expect(dispatch).toHaveBeenCalledWith('u1', 'p1', {
+      repoId: 'r1', command: 'RUN', ref: 'feat/auth', feature: 'auth',
+      profiles: undefined, maxCostUsd: 5, bashMode: undefined, pinnedRunnerId: 'runner-1',
+    }, { threadId: 't1' });
+  });
+
+  it('AC-2: refuses with threads.notPlanned when the thread has no PLAN job', async () => {
+    const dispatch = vi.fn();
+    const service = runService({
+      get: vi.fn().mockResolvedValue(record),
+      handoff: vi.fn().mockResolvedValue({ plan: null, run: null }),
+    }, dispatch);
+
+    await expect(service.run('p1', 't1', 'u1', {})).rejects.toMatchObject({ code: 409, prefix: 'threads.notPlanned', httpStatus: 409 });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('AC-3: refuses with threads.notPlanned when the latest PLAN job is not COMPLETED', async () => {
+    const dispatch = vi.fn();
+    const service = runService({
+      get: vi.fn().mockResolvedValue(record),
+      handoff: vi.fn().mockResolvedValue({ plan: { jobId: 'plan-2', state: 'FAILED', stateReason: 'branch_mismatch' }, run: null }),
+    }, dispatch);
+
+    await expect(service.run('p1', 't1', 'u1', {})).rejects.toMatchObject({ code: 409, prefix: 'threads.notPlanned', httpStatus: 409 });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('AC-4: forwards the bashMode and profiles the caller chose', async () => {
+    const dispatch = vi.fn().mockResolvedValue({ job: { id: 'j1' } });
+    const service = runService({
+      get: vi.fn().mockResolvedValue({ ...record, runnerId: 'runner-1' }),
+      handoff: vi.fn().mockResolvedValue(completedPlan),
+    }, dispatch);
+
+    await service.run('p1', 't1', 'u1', { bashMode: 'escalate', profiles: ['native'], maxCostUsd: 3 });
+    expect(dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({
+      command: 'RUN', profiles: ['native'], bashMode: 'escalate', maxCostUsd: 3,
+    }), { threadId: 't1' });
+  });
+
+  it('refuses with threads.disabled before reading the plan when threads are off', async () => {
+    const dispatch = vi.fn();
+    const handoff = vi.fn();
+    const service = runService({ get: vi.fn().mockResolvedValue(record), handoff }, dispatch, false);
+
+    await expect(service.run('p1', 't1', 'u1', {})).rejects.toMatchObject({ code: 409, prefix: 'threads.disabled' });
+    expect(handoff).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('refuses with threads.archived for an archived thread', async () => {
+    const dispatch = vi.fn();
+    const service = runService({ get: vi.fn().mockResolvedValue({ ...record, status: 'ARCHIVED' }), handoff: vi.fn().mockResolvedValue(completedPlan) }, dispatch);
+
+    await expect(service.run('p1', 't1', 'u1', {})).rejects.toMatchObject({ code: 409, prefix: 'threads.archived' });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('refuses a caller who is not the thread creator with threads.notCreator', async () => {
+    const dispatch = vi.fn();
+    const service = runService({ get: vi.fn().mockResolvedValue({ ...record, createdById: 'someone-else' }), handoff: vi.fn().mockResolvedValue(completedPlan) }, dispatch);
+
+    await expect(service.run('p1', 't1', 'u1', {})).rejects.toMatchObject({ status: 403, prefix: 'threads.notCreator' });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+});
+
 describe('ThreadsService.discard (US-004)', () => {
   it('AC-1: passes the project, thread and user to the repository and returns its { jobId }', async () => {
     const discard = vi.fn().mockResolvedValue({ jobId: 'job-d1' });

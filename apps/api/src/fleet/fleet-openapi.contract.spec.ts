@@ -43,6 +43,12 @@ describe('fleet OpenAPI contract', () => {
       .toEqual(['checkedAt', 'reachable', 'reason', 'repoId']);
   });
 
+  it('exposes the thread run route and its body (US-007)', () => {
+    expect(spec.paths['/api/projects/{slug}/threads/{id}/run']?.['post']).toBeDefined();
+    const schemas = spec.components.schemas as Record<string, unknown>;
+    expect(JSON.stringify(schemas['RunThreadDto'])).toContain('escalate');
+  });
+
   it('exposes the web-facing thread facts: detail refusal and the list kill-switch flag (US-001)', () => {
     expect(Object.keys(spec.components.schemas['ThreadDetailDto']?.properties ?? {})).toContain('sendRefusal');
     expect(Object.keys(spec.components.schemas['ThreadDetailDto']?.properties ?? {})).toContain('handoff');

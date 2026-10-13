@@ -40,6 +40,12 @@ describe('buildAssignPayload', () => {
     expect(run).not.toHaveProperty('expectBranch');
   });
 
+  it('US-007 AC-6: a RUN job from a thread plan has no expectBranch key, even with a threadId', () => {
+    const run = buildAssignPayload({ ...job, command: 'RUN', ref: 'feat/add-auth', planFrom: null, threadId: 't1' }, repo, 'https://x/y.git', identity);
+    expect(run).not.toHaveProperty('expectBranch');
+    expect(run.planFrom).toBeNull();
+  });
+
   it('US-006: includes the supplied THREAD assignment block', () => {
     const thread = {
       threadId: 't1', action: 'SESSION' as const, feature: 'add-auth', resume: false, instructions: 'instructions',
