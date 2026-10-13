@@ -75,7 +75,7 @@ async function readJson(path: string): Promise<unknown> {
 const KILLED_EXIT_CODE = 137;
 
 /** Git could not start (a spawn failure) or never reached a verdict (SIGKILL at the timeout). */
-function isOperationalFailure(error: unknown): boolean {
+export function isOperationalFailure(error: unknown): boolean {
   if (error instanceof GitError) return error.result.code === KILLED_EXIT_CODE;
   return typeof error === 'object' && error !== null && typeof (error as { code?: unknown }).code === 'string';
 }

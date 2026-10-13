@@ -124,6 +124,36 @@ test('US-005 discard: a failing git call is git_error with a sanitized detail', 
   expect(result.detail).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz');
 });
 
+test('US-005 discard F1: a git that cannot start while checking the worktree is git_error, not no_worktree', async () => {
+  const real = createGit();
+  const spawnFailure = Object.assign(new Error('Executable not found in $PATH: "git"'), { code: 'ENOENT', errno: -2, path: 'git' });
+  const failing: Git = {
+    run: real.run,
+    async ok(args, options) {
+      if (args[0] === 'rev-parse') throw spawnFailure;
+      return real.ok(args, options);
+    },
+  };
+  const result = await discard({ git: failing });
+  expect(result).toMatchObject({ ok: false, reason: 'git_error' });
+  if (result.ok) throw new Error('discard must fail');
+  expect(result.detail).toContain('Executable not found');
+  expect(await exists(join(worktree, '.git'))).toBe(true);
+});
+
+test('US-005 discard F1: a worktree check killed at its timeout is git_error, not no_worktree', async () => {
+  const real = createGit();
+  const failing: Git = {
+    run: real.run,
+    async ok(args, options) {
+      if (args[0] === 'rev-parse') throw new GitError(args, { code: 137, stdout: '', stderr: '' });
+      return real.ok(args, options);
+    },
+  };
+  const result = await discard({ git: failing });
+  expect(result).toMatchObject({ ok: false, reason: 'git_error' });
+});
+
 test('US-005 discard: never fetches or pushes', async () => {
   const real = createGit();
   const calls: string[][] = [];

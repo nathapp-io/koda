@@ -5,7 +5,7 @@ import { sanitizeDiagnostic } from '../diagnostics';
 import type { Git } from '../executor/git';
 import { assertFeature } from '../paths/safe-segment';
 import { threadWorktreeDir } from './thread-paths';
-import { resolveTip } from './thread-worktree';
+import { isOperationalFailure, resolveTip } from './thread-worktree';
 
 const DISCARD_GIT_TIMEOUT_MS = 60_000;
 
@@ -24,18 +24,24 @@ export type DiscardThreadChangesResult =
 
 const detailOf = (error: unknown): string => sanitizeDiagnostic(error instanceof Error ? error.message : String(error));
 
-/** Publish step 1: the directory must be a worktree of its own, not a folder inside another work tree. */
+/**
+ * Publish step 1: the directory must be a worktree of its own, not a folder inside another work tree. A
+ * directory that is not one answers `false`; a git that cannot start or never reaches a verdict is an
+ * operational failure and is raised, so the caller reports `git_error` rather than a wrong `no_worktree`.
+ */
 async function isOwnWorktree(git: Git, worktree: string): Promise<boolean> {
   try {
     await lstat(join(worktree, '.git'));
-    const [topLevel, worktreeReal] = await Promise.all([
-      git.ok(['rev-parse', '--show-toplevel'], { cwd: worktree, timeoutMs: DISCARD_GIT_TIMEOUT_MS }),
-      realpath(worktree),
-    ]);
-    return resolve(topLevel.trim()) === worktreeReal;
   } catch {
     return false;
   }
+  const topLevel = await git.ok(['rev-parse', '--show-toplevel'], { cwd: worktree, timeoutMs: DISCARD_GIT_TIMEOUT_MS }).catch((error: unknown) => {
+    if (isOperationalFailure(error)) throw error;
+    return null;
+  });
+  if (topLevel === null) return false;
+  const worktreeReal = await realpath(worktree).catch(() => null);
+  return worktreeReal !== null && resolve(topLevel.trim()) === worktreeReal;
 }
 
 /**
@@ -47,10 +53,9 @@ export async function discardThreadChanges(input: DiscardThreadChangesInput): Pr
   const feature = assertFeature(input.feature);
   const worktree = threadWorktreeDir(input.homeDir, input.threadId);
   const { git } = input;
-  if (!(await isOwnWorktree(git, worktree))) return { ok: false, reason: 'no_worktree' };
-
   const options = { cwd: worktree, timeoutMs: DISCARD_GIT_TIMEOUT_MS } as const;
   try {
+    if (!(await isOwnWorktree(git, worktree))) return { ok: false, reason: 'no_worktree' };
     await git.ok(['reset', '--hard', 'HEAD'], options);
     await git.ok(['clean', '-fd'], options);
     const tip = await resolveTip(git, input.repoDir, feature, input.baseRef);
