@@ -85,7 +85,7 @@ function stop(): void {
         @update:model-value="draft = $event"
         @keydown="handleKeydown"
       />
-      <p v-if="errorMessage" class="text-xs text-destructive" role="alert" data-testid="thread-composer-error">{{ errorMessage }}</p>
+      <p v-if="errorMessage" class="text-xs text-status-rejected" role="alert" data-testid="thread-composer-error">{{ errorMessage }}</p>
       <div class="flex justify-end gap-2">
         <Button
           v-if="props.turnRunning"
