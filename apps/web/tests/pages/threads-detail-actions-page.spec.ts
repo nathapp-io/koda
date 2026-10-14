@@ -48,6 +48,11 @@ const threadDetail = (over: Record<string, unknown> = {}): ThreadDetailDto => ({
   createdAt: '2026-10-14T00:00:00.000Z',
   activeJob: null,
   sendRefusal: null,
+  writtenPaths: [],
+  publishedSha: null,
+  specPublished: false,
+  lastWrite: null,
+  handoff: { plan: null, run: null },
   ...over,
 })
 
@@ -150,6 +155,8 @@ function mountPage(over: { send?: jest.Mock; plan?: jest.Mock; publish?: jest.Mo
       useAppToast: () => toasts,
       useRoute: () => ({ params: { project: 'web', id: 'th1' } }),
       useAuth: () => ({ user: ref({ id: 'u1', email: 'owner@k.t', role: 'MEMBER' }) }),
+      useProjectEvents: () => undefined,
+      useThreadHandoffJobs: () => ({ jobs: ref({ plan: null, run: null }), sync: jest.fn(async () => undefined), refreshJob: jest.fn(async () => undefined), isHandoffJob: () => false }),
       useThread: () => ({
         thread,
         messages,

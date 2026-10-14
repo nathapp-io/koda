@@ -20,6 +20,15 @@ const route = useRoute()
 const slug = route.params.project as string
 const threadId = route.params.id as string
 const controller = useThread(slug, threadId)
+const handoffJobs = useThreadHandoffJobs(slug, controller.thread)
+useProjectEvents(slug, {
+  onFleetJob: event => {
+    if (!handoffJobs.isHandoffJob(event.jobId)) return
+    void controller.reloadThread()
+    void handoffJobs.refreshJob(event.jobId)
+  },
+  onResync: () => { void controller.reloadThread() },
+})
 const options = useFleetDispatchOptions(slug)
 const auth = useAuth()
 const { data: viewer } = useProjectViewerRole(slug)
@@ -89,6 +98,8 @@ const onDiscard = (): Promise<void> => runAction(() => controller.discard())
         :thread="controller.thread.value"
         :messages="controller.messages.value"
         :is-creator="isCreator"
+        :jobs="handoffJobs.jobs.value"
+        :slug="slug"
         @answer="onAnswer"
       />
       <FleetThreadsThreadComposer

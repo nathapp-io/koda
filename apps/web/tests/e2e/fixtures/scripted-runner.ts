@@ -108,13 +108,18 @@ export class ScriptedRunner {
    */
   static async enroll(
     adminToken: string, name: string,
-    opts: { relay?: boolean; logs?: boolean; threads?: boolean; threadModel?: string; configJobs?: boolean; capabilities?: Record<string, unknown> } = {},
+    opts: { relay?: boolean; logs?: boolean; threads?: boolean; threadModel?: string; threadWrite?: boolean; configJobs?: boolean; capabilities?: Record<string, unknown> } = {},
   ): Promise<ScriptedRunner> {
     const protocolVersion = opts.threads ? 4 : opts.logs ? 3 : opts.relay ? 2 : 1;
     const base = opts.relay ? { ...(opts.capabilities ?? E2E_RUNNER_CAPABILITIES), approvals: { relay: true } } : opts.capabilities ?? E2E_RUNNER_CAPABILITIES;
     const threads = opts.threads ? { threadBackends: { native: [opts.threadModel ?? 'e2e-model'], acp: [] } } : {};
     // S3 §3: only a runner reporting configJobs is offered CONFIG_EDIT / CONFIG_DRIFT jobs.
-    const capabilities = opts.configJobs ? { ...base, ...threads, configJobs: true } : { ...base, ...threads };
+    const capabilities = {
+      ...base,
+      ...threads,
+      ...(opts.configJobs ? { configJobs: true } : {}),
+      ...(opts.threadWrite ? { threadWrite: true } : {}),
+    };
     const { token } = await call<{ token: string }>('/fleet/enrollments', { method: 'POST', token: adminToken, body: { labels: ['e2e'] } });
     const { runnerId, apiKey } = await call<{ runnerId: string; apiKey: string }>('/fleet/runner/enroll', {
       method: 'POST',

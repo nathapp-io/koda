@@ -157,12 +157,18 @@ function mountPage(over: {
   thread?: ThreadDetailDto
   messages?: ChatMessageDto[]
   runners?: FleetRunnerSummary[]
+  job?: Record<string, unknown> | null
 } = {}) {
   const thread = ref(over.thread ?? threadDetail())
   const messages = ref(over.messages ?? [])
   const runners = ref(over.runners ?? [])
   let head: CapturedHead = {}
   const viewer = ref({ canManage: true, viewerRole: 'DEVELOPER' })
+  const jobs = ref({ plan: null, run: over.job as never ?? null })
+  const reloadThread = jest.fn(async () => undefined)
+  const refreshJob = jest.fn(async () => undefined)
+  const useThreadHandoffJobs = jest.fn(() => ({ jobs, sync: jest.fn(async () => undefined), refreshJob, isHandoffJob: (id: string) => id === 'r1' }))
+  const useProjectEvents = jest.fn()
   // The real thread components under both the contract names (explicit imports) and the Nuxt
   // auto-import names a sub-directory component receives, so the page's wiring is what a test sees.
   const header = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadHeader.vue'), { useI18n: () => i18nStub() })
@@ -170,6 +176,7 @@ function mountPage(over: {
   const threadMessage = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadMessage.vue'), { useI18n: () => i18nStub() })
   const toolChip = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadToolChip.vue'), { useI18n: () => i18nStub() })
   const questionCard = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadQuestionCard.vue'), { useI18n: () => i18nStub() })
+  const jobCard = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadJobCard.vue'), { useI18n: () => i18nStub() })
   const app = mountSfc(pageFile, {
     components: {
       ...uiStubs,
@@ -183,6 +190,8 @@ function mountPage(over: {
       FleetThreadsThreadToolChip: toolChip,
       ThreadQuestionCard: questionCard,
       FleetThreadsThreadQuestionCard: questionCard,
+      ThreadJobCard: jobCard,
+      FleetThreadsThreadJobCard: jobCard,
     },
     globals: {
       definePageMeta: () => undefined,
@@ -197,7 +206,10 @@ function mountPage(over: {
         load: jest.fn(async () => undefined),
         start: jest.fn(),
         stop: jest.fn(),
+        reloadThread,
       }),
+      useThreadHandoffJobs,
+      useProjectEvents,
       useHead: (value: unknown) => {
         Vue.watchEffect(() => {
           head = (typeof value === 'function' ? value() : value) as CapturedHead
@@ -223,7 +235,7 @@ function mountPage(over: {
       await Vue.nextTick()
     }
   }
-  return { app, settle, head: (): CapturedHead => head }
+  return { app, settle, head: (): CapturedHead => head, useProjectEvents, reloadThread, refreshJob, jobs, useThreadHandoffJobs }
 }
 
 /** The resolved title useHead received: `title` may be a value or a function. */
@@ -238,6 +250,44 @@ describe('US-006 AC14-AC15: pages/[project]/threads/[id].vue', () => {
 
     expect(m.app.text()).toContain('Auth spec')
     expect(renderedHtmlText(m.app)).toContain('Hi there')
+    m.app.unmount()
+  })
+
+  test('US-005 AC-11: a fleet event for a handoff job reloads the thread', async () => {
+    const m = mountPage()
+    const handlers = m.useProjectEvents.mock.calls[0]?.[1] as { onFleetJob: (event: { jobId: string }) => void }
+    handlers.onFleetJob({ jobId: 'r1' })
+    expect(m.reloadThread).toHaveBeenCalledTimes(1)
+    expect(m.refreshJob).toHaveBeenCalledWith('r1')
+    m.app.unmount()
+  })
+
+  test('US-005 AC-12: an unrelated fleet event is ignored', async () => {
+    const m = mountPage()
+    const handlers = m.useProjectEvents.mock.calls[0]?.[1] as { onFleetJob: (event: { jobId: string }) => void }
+    handlers.onFleetJob({ jobId: 'zz' })
+    expect(m.reloadThread).not.toHaveBeenCalled()
+    expect(m.refreshJob).not.toHaveBeenCalled()
+    m.app.unmount()
+  })
+
+  test('US-005 AC-13: project stream resync reloads the thread', async () => {
+    const m = mountPage()
+    const handlers = m.useProjectEvents.mock.calls[0]?.[1] as { onResync: () => void }
+    handlers.onResync()
+    expect(m.reloadThread).toHaveBeenCalledTimes(1)
+    m.app.unmount()
+  })
+
+  test('US-005 AC-14: the loaded RUN detail renders its workflow outcome in the thread card', async () => {
+    const run = { id: 'r1', state: 'RUNNING', queuedAt: '2026-10-14T00:00:00.000Z', costSpentUsd: '0', workflow: { runId: 'n1', outcome: 'draft', workflowPassed: false, reasons: [], openItems: [] } }
+    const m = mountPage({
+      thread: threadDetail({ handoff: { plan: null, run: { jobId: 'r1', state: 'RUNNING', stateReason: null } } }),
+      job: run,
+    })
+    await m.settle()
+    expect(m.app.one('[data-testid="thread-job-card-outcome"]')).toBeDefined()
+    expect(m.app.text()).toContain('fleet.jobs.workflow.outcome.draft')
     m.app.unmount()
   })
 

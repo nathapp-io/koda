@@ -124,7 +124,7 @@ const NUXT_AUTO_IMPORTS = [
   'useAsyncData', 'useVisiblePolling', 'useFleetRunners', 'useFleetRepos', 'useRoute', 'useRouter',
   'useFleetDispatchOptions', 'useFleetJobs', 'useProjectViewerRole', 'useProjectMembers',
   'useAdminUsers', 'useProjectEvents', 'useAuth', 'useProjectMemberNames', 'useFleetJobLogs',
-  'useFleetRepoConfig', 'useSkillCatalog', 'useProjectSkills', 'useThread', 'useThreads', 'onBeforeRouteLeave',
+  'useFleetRepoConfig', 'useSkillCatalog', 'useProjectSkills', 'useThread', 'useThreads', 'useThreadHandoffJobs', 'onBeforeRouteLeave',
 ] as const
 
 /** Defaults for auto-imports a test did not supply; `definePageMeta` is a compile-time no-op macro. */
