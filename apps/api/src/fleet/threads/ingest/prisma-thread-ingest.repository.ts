@@ -439,6 +439,8 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
       state: line.type === 'session_closed' ? 'closed' : 'failed',
       resumed: current?.resumed ?? false,
       contextReset: current?.contextReset ?? false,
+      // Closing a stale session must leave Discard available; only a successful discard clears it.
+      ...(current?.stale === true ? { stale: true as const } : {}),
       reason: line.reason,
       at,
     };

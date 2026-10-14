@@ -68,20 +68,36 @@ async function tarGz(members: Readonly<Record<string, string>>): Promise<Buffer>
   return gzipSync(Buffer.concat(chunks));
 }
 
-async function call<T>(path: string, init: { method: string; token?: string; body?: unknown }): Promise<T> {
-  const res = await fetch(`${API_URL}/api${path}`, {
-    method: init.method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init.token ? { Authorization: `Bearer ${init.token}` } : {}),
-    },
-    body: init.body === undefined ? undefined : JSON.stringify(init.body),
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`${init.method} ${path} failed: ${res.status} ${text}`);
-  const body = JSON.parse(text) as { ret?: number; data?: T };
-  if (body.ret !== 0) throw new Error(`${init.method} ${path} answered ret ${String(body.ret)}: ${text}`);
-  return body.data as T;
+async function call<T>(path: string, init: { method: string; token?: string; body?: unknown }, retryEnrollment = false): Promise<T> {
+  const deadline = Date.now() + 65_000;
+  for (;;) {
+    const res = await fetch(`${API_URL}/api${path}`, {
+      method: init.method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init.token ? { Authorization: `Bearer ${init.token}` } : {}),
+      },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    });
+    const text = await res.text();
+    // Enrollment has a fixed 10/minute limit shared by every test's client IP.
+    // A throttled request has not consumed the single-use enrollment token.
+    if (retryEnrollment && res.status === 429) {
+      const header = res.headers.get('Retry-After');
+      const seconds = header === null ? NaN : Number(header);
+      const delay = header === null ? 60_000 : Number.isFinite(seconds)
+        ? seconds * 1000 : Date.parse(header) - Date.now();
+      const waitMs = Number.isFinite(delay) ? Math.max(1000, delay) : 60_000;
+      if (Date.now() + waitMs < deadline) {
+        await new Promise(resolve => setTimeout(resolve, waitMs));
+        continue;
+      }
+    }
+    if (!res.ok) throw new Error(`${init.method} ${path} failed: ${res.status} ${text}`);
+    const body = JSON.parse(text) as { ret?: number; data?: T };
+    if (body.ret !== 0) throw new Error(`${init.method} ${path} answered ret ${String(body.ret)}: ${text}`);
+    return body.data as T;
+  }
 }
 
 export class ScriptedRunner {
@@ -127,7 +143,7 @@ export class ScriptedRunner {
         enrollmentToken: token, name, os: 'linux', arch: 'x64', daemonVersion: DAEMON_VERSION,
         protocolVersion, bootId: BOOT_ID, labels: [], capabilities,
       },
-    });
+    }, true);
     return new ScriptedRunner(runnerId, name, apiKey, protocolVersion);
   }
 
