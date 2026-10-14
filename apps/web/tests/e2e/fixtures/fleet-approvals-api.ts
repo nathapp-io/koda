@@ -35,8 +35,23 @@ export async function jobState(token: string, slug: string, jobId: string): Prom
   return job.state;
 }
 
-/** A real-shaped relayed ask (2a ApprovalRequestEventPayload); `deadlineAt` 10 minutes out unless overridden. */
-export function bashAsk(over: Record<string, unknown> = {}): Record<string, unknown> & { naxAskId: string; command: string } {
+/** The relayed ask fields (2a ApprovalRequestEventPayload) the E2E specs send. */
+export type BashAskFields = {
+  naxAskId: string;
+  deadlineAt: string;
+  command: string;
+  commandTruncated: boolean;
+  maskedCount: number;
+  root: string;
+  stage: string;
+  storyId: string;
+  featureName: string;
+  reason: string;
+  options: string[];
+};
+
+/** A real-shaped relayed ask; `deadlineAt` 10 minutes out unless overridden. A misspelled override key is a type error. */
+export function bashAsk(over: Partial<BashAskFields> = {}): BashAskFields {
   return {
     naxAskId: `ask-${randomBytes(4).toString('hex')}`,
     deadlineAt: new Date(Date.now() + 10 * 60_000).toISOString(),
@@ -50,7 +65,7 @@ export function bashAsk(over: Record<string, unknown> = {}): Record<string, unkn
     reason: 'not covered by the stage grants',
     options: ['allow', 'allow-remember', 'deny'],
     ...over,
-  } as Record<string, unknown> & { naxAskId: string; command: string };
+  };
 }
 
 /** Every approval of one job (2a `jobId` filter). */

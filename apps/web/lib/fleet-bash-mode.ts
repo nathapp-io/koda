@@ -2,7 +2,7 @@ import type { TranslateNamed } from '~/lib/fleet-budgets'
 import type { BashMode } from '~/lib/fleet-types'
 
 /** apps/api dispatch-fleet-job.dto and create-schedule.dto (S1.5 §1.6). */
-export const BASH_MODES = ['raw', 'gated', 'escalate'] as const
+export const BASH_MODES = ['raw', 'gated', 'escalate'] as const satisfies readonly BashMode[]
 export const DEFAULT_APPROVAL_TIMEOUT_SEC = 600
 export const MIN_APPROVAL_TIMEOUT_SEC = 30
 export const MAX_APPROVAL_TIMEOUT_SEC = 3600

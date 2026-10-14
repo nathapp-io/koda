@@ -1955,6 +1955,7 @@
       }
     },
     "config": {
+      "title": "nax 配置",
       "repos": { "title": "仓库", "open": "nax 配置" },
       "tree": { "label": "nax 文件" },
       "group": { "rules": "规则", "context": "上下文", "config": "配置", "profiles": "配置档", "constitution": "章程" },

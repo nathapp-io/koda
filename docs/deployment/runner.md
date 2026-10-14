@@ -174,8 +174,8 @@ A job dispatched with `bashMode: gated` or `escalate` relays nax's bash approval
 - Answer asks in the project's approvals inbox (`/<project>/fleet/approvals`) or with
   `koda fleet approval decide <approvalId> --decision allow|allow_for_job|deny --project <slug>` (find ids with
   `koda fleet approval list --project <slug>`; without `--project` the CLI uses the global-admin routes). Project
-  developers and admins may answer; the job page
-  shows "Waiting for approval" while an ask is open, and the inbox shows whether the runner delivered the answer.
+  developers and admins may answer; the job page shows "Waiting for approval" while an ask is open, and the inbox
+  shows whether the runner delivered the answer.
 - An answer that reaches the runner after nax's deadline is not sent (`ask_expired`): nax has already denied it.
 
 ## Run logs (S2a)
