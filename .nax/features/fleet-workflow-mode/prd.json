@@ -3,7 +3,7 @@
   "feature": "fleet-workflow-mode",
   "branchName": "feat/fleet-workflow-mode",
   "createdAt": "2026-10-14T00:00:00.000Z",
-  "updatedAt": "2026-10-14T04:14:58.200Z",
+  "updatedAt": "2026-10-14T05:36:20.311Z",
   "userStories": [
     {
       "id": "US-001",
@@ -32,14 +32,17 @@
         "verdict"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Four files plus a new module with filesystem guards (lstat, symlinks, size cap); standard patterns, pure functions, no new abstractions across modules."
+        "reasoning": "Four files plus a new module with filesystem guards (lstat, symlinks, size cap); standard patterns, pure functions, no new abstractions across modules.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/verdict/run-verdict.ts",
@@ -60,10 +63,6 @@
         "runVerdict over a parsed status whose raw `workflow.outcome` was `\"failed\"` returns `{ state: \"FAILED\", reason: \"workflow ended at step <step>\" }`",
         "runVerdict over a status without a `workflow` block and with `postRun.finish` returns the same verdict as before this change (existing finish rows unchanged)"
       ],
-      "outOfScope": [
-        "JobExecutor/HostExecutor/FakeExecutor readWorkflowResult/readHead and JobRun.judge/finish changes belong to US-002.",
-        "Stashing workflow files into the bundle belongs to US-003."
-      ],
       "modifiedFiles": [
         {
           "path": "apps/runner/src/verdict/verdict.spec.ts",
@@ -71,7 +70,15 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "895b128c3f4173bdfaaf0c6c7e463c528f903fec",
+      "outOfScope": [
+        "JobExecutor/HostExecutor/FakeExecutor readWorkflowResult/readHead and JobRun.judge/finish changes belong to US-002.",
+        "Stashing workflow files into the bundle belongs to US-003."
+      ]
     },
     {
       "id": "US-002",
@@ -100,14 +107,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Five existing files with a single new branch in JobRun.finish and two small executor methods; patterns are established (FakeExecutor scripting, journal.updateJob), so one TDD session suffices despite the resume-guard subtlety."
+        "reasoning": "Five existing files with a single new branch in JobRun.finish and two small executor methods; patterns are established (FakeExecutor scripting, journal.updateJob), so one TDD session suffices despite the resume-guard subtlety.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/supervisor/job-run.ts",
@@ -120,9 +130,6 @@
         "A RUN JobRun `start('finish')` with `workflow.outcome` `\"draft\"` reports `resultBranch` equal to `row.branch` and `resultSha` equal to `FakeExecutor.head`",
         "A RUN JobRun `start('finish')` with `workflow.outcome` `\"local-only\"` records zero `readFinishLedger` calls",
         "HostExecutor.readWorkflowResult returns null when the feature directory does not exist"
-      ],
-      "outOfScope": [
-        "Stashing workflow files and changing the bundle entry list belong to US-003."
       ],
       "modifiedFiles": [
         {
@@ -147,7 +154,14 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "e30520f5f0ed399a1dedf20dc4dea67843ff3cba",
+      "outOfScope": [
+        "Stashing workflow files and changing the bundle entry list belong to US-003."
+      ]
     },
     {
       "id": "US-003",
@@ -173,14 +187,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "One new module mirroring stashPlanOutputs plus small edits in HostExecutor and build-bundle; filesystem guards but a clear, established pattern."
+        "reasoning": "One new module mirroring stashPlanOutputs plus small edits in HostExecutor and build-bundle; filesystem guards but a clear, established pattern.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/runner/src/executor/host-executor.ts",
@@ -197,10 +214,6 @@
         "collectBundleEntries(jobDir, \"RUN\") for a job dir with no `workflow` folder returns the same list as before this change",
         "stashWorkflowOutputs copies `result.json` from the run dir that findWorkflowResult selected, not from an older run dir"
       ],
-      "outOfScope": [
-        "JobRun.finish and readWorkflowResult/readHead changes belong to US-002.",
-        "Parsing feature-report.md or decisions.jsonl: they are only carried in the bundle."
-      ],
       "modifiedFiles": [
         {
           "path": "apps/runner/src/bundle/build-bundle.spec.ts",
@@ -212,7 +225,15 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "f54c2a7b0da5336b26b3a5468434eb6cc20a41d1",
+      "outOfScope": [
+        "JobRun.finish and readWorkflowResult/readHead changes belong to US-002.",
+        "Parsing feature-report.md or decisions.jsonl: they are only carried in the bundle."
+      ]
     },
     {
       "id": "US-004",
@@ -242,14 +263,17 @@
         "dto"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Schema migration plus a column threaded through domain, repository, DTO, service, a new parser, bundle reader and generated OpenAPI/CLI artifacts spans many modules, though each step follows the postRun precedent; lite three-session TDD keeps the DB-backed and parser tests isolated."
+        "reasoning": "Schema migration plus a column threaded through domain, repository, DTO, service, a new parser, bundle reader and generated OpenAPI/CLI artifacts spans many modules, though each step follows the postRun precedent; lite three-session TDD keeps the DB-backed and parser tests isolated.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
@@ -268,10 +292,6 @@
         "parseWorkflowResult returns null when `verdict.workflowPassed` is not a boolean",
         "parseStatus of a status file with no `workflow` block returns `workflowOutcome` null and `workflowUrl` null",
         "readBundleFiles stores `workflow/result.json` in the `workflowResult` field rather than an array"
-      ],
-      "outOfScope": [
-        "Wiring parseWorkflowResult/parseStatus fields into parseBundle, computeCorrection and BundleIngestService belongs to US-005.",
-        "Web types and rendering belong to US-006."
       ],
       "modifiedFiles": [
         {
@@ -292,7 +312,15 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "ebffdff23e450fce8857c5e192f438ef25247771",
+      "outOfScope": [
+        "Wiring parseWorkflowResult/parseStatus fields into parseBundle, computeCorrection and BundleIngestService belongs to US-005.",
+        "Web types and rendering belong to US-006."
+      ]
     },
     {
       "id": "US-005",
@@ -322,14 +350,17 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Three-to-four files extending a pure computeCorrection function with explicit rules and a spec'd service input change; the DB integration ACs reuse existing bundle-ingest spec patterns, so no new abstraction justifies three sessions."
+        "reasoning": "Three-to-four files extending a pure computeCorrection function with explicit rules and a spec'd service input change; the DB integration ACs reuse existing bundle-ingest spec patterns, so no new abstraction justifies three sessions.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/ingest/parse-bundle.ts",
@@ -342,10 +373,6 @@
         "computeCorrection for a RUN with a non-null `workflowOutcome` never sets the NOTHING_PUSHED state reason",
         "computeCorrection for a RUN whose `job.resultPrUrl` is already set does not overwrite it from `workflowUrl`"
       ],
-      "outOfScope": [
-        "The API creating or adopting a pull request for a workflow run: the existing hasFleetOwnership guard handles it once resultPrUrl is set.",
-        "Backfilling the workflow column for already-ingested jobs beyond what rerun-outdated does."
-      ],
       "modifiedFiles": [
         {
           "path": "apps/api/src/fleet/ingest/ingest-corrections.spec.ts",
@@ -357,7 +384,14 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "0c3263792f8084d5f37a321983adbe1ad233933e",
+      "outOfScope": [
+        "The API creating or adopting a pull request for a workflow run: the existing hasFleetOwnership guard handles it once resultPrUrl is set."
+      ]
     },
     {
       "id": "US-006",
@@ -383,14 +417,17 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "One new presentational component, a page insertion, type and i18n additions, following an established page-test pattern."
+        "reasoning": "One new presentational component, a page insertion, type and i18n additions, following an established page-test pattern.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
@@ -407,10 +444,6 @@
       "suggestedCriteria": [
         "FleetJobWorkflow with `workflow.outcome` `\"ready\"` renders `fleet-job-workflow-outcome` with the text of `fleet.jobs.workflow.outcome.ready`",
         "FleetJobWorkflow with an open item whose `severity` is null renders no severity text for that row"
-      ],
-      "outOfScope": [
-        "The C3 thread page (action bar, RUN card) reuses FleetJobWorkflow.vue later.",
-        "Any change to the API DTO, which belongs to US-004."
       ],
       "modifiedFiles": [
         {
@@ -435,7 +468,15 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "227bc9890f15952d8e255beb6428d71def09b800",
+      "outOfScope": [
+        "The C3 thread page (action bar, RUN card) reuses FleetJobWorkflow.vue later.",
+        "Any change to the API DTO, which belongs to US-004."
+      ]
     }
   ],
   "analysis": "Koda fleet must read nax workflow-mode output (execution.mode 'workflow', nax >= 0.88.0-canary.1). In workflow mode nax pushes the branch and opens/promotes the PR itself, writes a `workflow` block ({step, stories, outcome, url}) into status.json instead of postRun.finish, and writes the verdict to <repo>/.nax/features/<feature>/workflow/<workflowRunId>/result.json. Today the runner mis-reports these: runVerdict (apps/runner/src/verdict/run-verdict.ts) returns COMPLETED for run.status 'completed' with no postRun.finish (nax#2508: status is 'completed' even for a draft); JobRun.finish (apps/runner/src/supervisor/job-run.ts) runs the #204 progress push when there is no finish ledger, committing the untracked decisions.jsonl (nax#2507) on top of nax's push; resultPrUrl only comes from postRun.finish.url (apps/runner/src/watcher/status-snapshot.ts); the bundle carries no workflow files.\n\nRulings binding every story: R1 draft->ESCALATED, ready->COMPLETED, local-only or workflow block without outcome->FAILED. R2 no profile injection / no toggle; detect by presence of the status.json `workflow` block, keep today's behaviour when absent. R3 nax owns push and PR; koda never creates a second PR: once resultPrUrl is set, FleetJobTicketEffects.upsertPrLinks writes the fleet PR link and hasFleetOwnership makes createPrForTicket return early (unchanged). D1: status.json run.id is NOT the workflow run id (the dir name is a runtime UUID), so never build a path from naxRunId; locate result.json as the newest regular file workflow/*/result.json with mtime >= job row createdAt. D2: run-level report is <runDir>/feature-report.md. D3: API parses only result.json; feature-report.md and decisions.jsonl only travel in the bundle. D4: server keeps at most 500 chars of a runner state reason (apps/api/src/fleet/sync/event-payloads.ts), so the runner clips the whole reason, prefix included, to 500.\n\nRUNNER (apps/runner, bun:test, Bun-only ESM): StatusView/parseStatusView (src/verdict/status-view.ts) gains optional WorkflowView {step, outcome?, url?} (outcome outside ready|draft|local-only dropped; url kept only if it starts with https://). New src/verdict/workflow-result.ts with parseWorkflowResult and findWorkflowResult (readdir withFileTypes, real dirs only, lstat regular file <= 1 MiB, mtime >= sinceMs, newest first, first that parses wins; a newer verdict-less file is passed over). runVerdict gains workflowReasons and a workflow table that ignores run.status/postRun; cancel row stays first. mapStatusToSnapshot: resultPrUrl = finish?.url ?? workflow?.url. JobExecutor (src/executor/job-executor.ts), HostExecutor (src/executor/host-executor.ts) and FakeExecutor (test/helpers/fake-executor.ts) gain readWorkflowResult(job) and readHead(job); FakeExecutor gets scriptable workflowResult/head and a readFinishLedger call counter. JobRun.judge returns {verdict, snapshot, workflow}; JobRun.finish for a non-cancelled RUN with a workflow block: ready/draft -> reuse row.resultBranch/resultSha if both non-null (resumed finish), else resultBranch=row.branch and sha=readHead (journal both via journal.updateJob(jobId, leaseEpoch, {resultBranch, resultSha}) only when sha non-null), no pushRunProgress, no ledger read; local-only/no outcome -> no ledger read, progress push as today; cancelled RUN and RUN without workflow block keep today's path. New src/executor/workflow-stash.ts (mirrors stashPlanOutputs in plan-commit.ts: copy into jobDir, never write in repoDir, never run git, lstat each source, skip non-regular or > 1 MiB, decisions.jsonl only if mtime >= sinceMs); HostExecutor.collectBundle calls it for RUN before buildBundle; ATTEMPT_FILES gains 'workflow'; collectBundleEntries (src/bundle/build-bundle.ts) adds workflow/result.json, workflow/feature-report.md, workflow/decisions.jsonl for RUN when present. Existing tests: verdict.spec.ts, job-run.spec.ts, status-snapshot.spec.ts, test/unit/host-executor.spec.ts, build-bundle.spec.ts must keep passing for statuses without a workflow block.\n\nAPI (apps/api, NestJS + Prisma, vitest; DB-backed specs need `bun run test:db:up` + KODA_DB_TESTS=1): new nullable JSONB column FleetJob.workflow (migration 20261016090000_fleet_job_workflow, sorts after 20261015090000_thread_handoff). Follow the postRun precedent end to end: domain field (fleet-job.domain.ts), Mutable key, repository JSON mapping with Prisma.DbNull (prisma-fleet-job.repository.ts), DTO field (null in FleetJobDto.summary), reset to null in FleetJobsService.requeue. New parsers/workflow.parser.ts using fields.ts readers. bundle-reader.ts gets slot workflowResult for the exact name workflow/result.json (single file like metrics/status; feature-report.md and decisions.jsonl stay unallowlisted -> slotOf null). parseStatus (parsers/finish.parser.ts) additionally returns workflowOutcome and workflowUrl (https only, <= INGEST_LIMITS.reasonText); existing parsers.spec.ts exact-object assertions gain two null fields. parseBundle adds workflow/workflowOutcome/workflowUrl and files.workflow (absent|invalid|done; invalid does not make ingest partial). computeCorrection (ingest-corrections.ts): after the lease-epoch guard, for RUN: fill-only workflow patch, fill-only resultPrUrl from workflowUrl, COMPLETED + workflowOutcome 'draft' -> ESCALATED with stateReason ESCALATED_FROM_WORKFLOW ('workflow draft (from status)'), escalated true, Correction.escalatedFrom 'finish-audit'|'workflow'|null; NOTHING_PUSHED never applied when workflowOutcome non-null; finish-based rules unchanged when workflowOutcome null. BundleIngestService records the escalation activity with payload.source = escalatedFrom (today literal 'finish-audit'). INGEST_PARSER_VERSION 1 -> 2. openapi.json is regenerated via `bun run generate` at repo root (also regenerates CLI client; never hand-edit generated files). API i18n not needed (no new API strings).\n\nWEB (apps/web, Nuxt 3, Jest per package config; tests use mountSfc from tests/helpers/mount-sfc.ts, which has no Nuxt auto-import so components must be imported explicitly and added to FLEET_COMPONENT_FILES): FleetJobDto in lib/fleet-types.ts gains workflow + FleetJobWorkflowDto/FleetJobWorkflowItemDto; new components/fleet/FleetJobWorkflow.vue rendered by pages/[project]/fleet/jobs/[id]/index.vue below the state row when job.workflow is non-null; i18n keys in en.json and zh.json (parity enforced by tests/i18n/fleet-locale-parity.spec.ts and used-keys-exist.spec.ts). Page tests follow fleet-job-logs-page.spec.ts (alias stubs for useApi, useFleetApprovals, JobAnalytics.vue, ConfigPrDialog.vue; globals for other composables).\n\nRisks: (1) the spec's AC set is authoritative over prose; (2) US-002's finish branch must key on status.workflow.outcome, not on the verdict, because a finish-ledger ESCALATED must still push; (3) lstat/symlink handling and the 1 MiB cap are security-relevant filesystem guards (runner reads untrusted checkout content) - keep them in findWorkflowResult and stashWorkflowOutputs; (4) reason prefixes must never start with the budget-stop text the web page parses (budgetStopPolicyId); (5) mutations: follow the repo's immutable style, no console.log; (6) migration ordering and openapi.json/CLI regeneration in US-004 or CI drift checks fail. Story dependency graph: US-001 -> US-002, US-003; US-004 -> US-005, US-006. Build gate per story: bun run type-check and bun run lint in its workdir; US-004 additionally bunx prisma validate, bun run db:generate in apps/api and bun run generate at repo root.",
