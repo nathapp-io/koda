@@ -1955,6 +1955,7 @@
       }
     },
     "config": {
+      "title": "nax config",
       "repos": { "title": "Repos", "open": "nax config" },
       "tree": { "label": "nax files" },
       "group": { "rules": "Rules", "context": "Context", "config": "Config", "profiles": "Profiles", "constitution": "Constitution" },

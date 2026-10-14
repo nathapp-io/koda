@@ -25,7 +25,7 @@ import { reasonFromError, type Git } from './git';
 import type { ConfigJobContext, ConfigJobRun, JobExecutor, JobWatcher, FinishPlanOptions, PlanPushOutcome, PrepareOptions, PrepareOutcome, PushProgressOptions, SpawnHandle, WatchOptions } from './job-executor';
 import { deleteJobProfile, jobProfileName, projectNameFor, writeJobProfile } from './job-profile';
 import { buildNaxArgv, isProcessAlive, signalGroup, spawnNax } from './nax-process';
-import { readProcessCommand, reapNaxPids } from './pid-registry';
+import { PS_PROCESS_INFO, reapNaxPids, type ProcessInfo } from './pid-registry';
 import { commitAndPushPlan, stashPlanOutputs } from './plan-commit';
 import { stashWorkflowOutputs } from './workflow-stash';
 import { pushProgress, type ProgressPushOutcome } from './progress-push';
@@ -44,6 +44,8 @@ export interface HostExecutorDeps {
   readonly approvals: Pick<ApprovalRelay, 'open' | 'close' | 'resume'>;
   /** D104: nax mode only. Absent: no post-checkout check (static capabilities, unit specs). */
   readonly jobCheck?: JobCheck;
+  /** The process lookups for the identity check and the reap; unset reads `ps` (PS_PROCESS_INFO). Unit specs inject fakes. */
+  readonly processInfo?: ProcessInfo;
 }
 
 // D53: a new attempt (including a requeue, which is a new lease epoch over the same job dir, D77) starts from none of these.
@@ -66,6 +68,11 @@ async function moveAside(from: string, to: string): Promise<void> {
 /** Design §2, run on the machine that owns the checkout. Every step is idempotent, so a resumed job may repeat it. */
 export class HostExecutor implements JobExecutor {
   constructor(private readonly deps: HostExecutorDeps) {}
+
+  /** Unset means `ps` (PS_PROCESS_INFO); a spec injects its own lookups and never spawns `ps`. */
+  private processInfo(): ProcessInfo {
+    return this.deps.processInfo ?? PS_PROCESS_INFO;
+  }
 
   private dirs(job: JobRow): { repoDir: string; jobDir: string; outDir: string } {
     const { workspaceRoot } = this.deps.config;
@@ -163,7 +170,7 @@ export class HostExecutor implements JobExecutor {
 
   async matchesProcess(job: JobRow): Promise<boolean> {
     if (job.pid === null) return false;
-    const command = await readProcessCommand(job.pid);
+    const command = await this.processInfo().command(job.pid);
     if (command === null) return false;
     // D486: a config job's nax calls carry `-d <clone>`; its gh / glab calls carry the job branch.
     if (isConfigKind(job.command)) return command.includes(this.dirs(job).repoDir) || command.includes(configBranchName(job.jobId));
@@ -175,7 +182,8 @@ export class HostExecutor implements JobExecutor {
   }
 
   async reap(job: JobRow, since: Date): Promise<void> {
-    const killed = await reapNaxPids({ repoDir: this.dirs(job).repoDir, since });
+    const info = this.processInfo();
+    const killed = await reapNaxPids({ repoDir: this.dirs(job).repoDir, since, startedAt: (pid) => info.start(pid) });
     if (killed.length > 0) this.deps.log.info('reaped registered pids', { jobId: job.jobId, killed });
   }
 

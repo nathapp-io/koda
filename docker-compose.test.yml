@@ -3,6 +3,8 @@
 services:
   postgres-test:
     image: postgres:16
+    # Comes back after a Docker restart; tmpfs means an empty DB, which global-setup re-creates (db push --force-reset).
+    restart: unless-stopped
     environment:
       POSTGRES_USER: koda
       POSTGRES_PASSWORD: koda

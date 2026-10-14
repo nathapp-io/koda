@@ -24,6 +24,17 @@ describe('fleet bash mode (D298)', () => {
     expect(parseTimeoutMinutes(input)).toBeNull()
   })
 
+  // The integer part is 0 or has no leading zero.
+  test('a leading zero in the integer part is refused (AC-6, AC-7)', () => {
+    expect(parseTimeoutMinutes('05')).toBeNull()
+    expect(parseTimeoutMinutes('00.5')).toBeNull()
+  })
+
+  test('a single zero integer part keeps its decimal (AC-8, AC-9)', () => {
+    expect(parseTimeoutMinutes('0.5')).toBe(30)
+    expect(parseTimeoutMinutes('10')).toBe(600)
+  })
+
   test('every whole second in range survives the minutes round trip (Review Focus 5)', () => {
     for (let sec = 30; sec <= 3600; sec += 1) expect(parseTimeoutMinutes(minutesText(sec))).toBe(sec)
   })

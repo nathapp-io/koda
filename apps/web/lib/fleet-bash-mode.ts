@@ -2,13 +2,16 @@ import type { TranslateNamed } from '~/lib/fleet-budgets'
 import type { BashMode } from '~/lib/fleet-types'
 
 /** apps/api dispatch-fleet-job.dto and create-schedule.dto (S1.5 §1.6). */
-export const BASH_MODES = ['raw', 'gated', 'escalate'] as const
+export const BASH_MODES = ['raw', 'gated', 'escalate'] as const satisfies readonly BashMode[]
 export const DEFAULT_APPROVAL_TIMEOUT_SEC = 600
 export const MIN_APPROVAL_TIMEOUT_SEC = 30
 export const MAX_APPROVAL_TIMEOUT_SEC = 3600
 
-/** Plain decimal minutes, at most 2 decimals: no sign, exponent or comma. */
-const MINUTES_RE = /^\d{1,2}(?:\.\d{1,2})?$/
+/**
+ * Plain decimal minutes, at most 2 decimals: no sign, exponent or comma. The integer part is `0` or has no leading
+ * zero, so `05` and `00.5` are refused while `0.5` and `10` stay valid.
+ */
+const MINUTES_RE = /^(?:0|[1-9]\d?)(?:\.\d{1,2})?$/
 
 export const usesRelay = (mode: BashMode): boolean => mode !== 'raw'
 

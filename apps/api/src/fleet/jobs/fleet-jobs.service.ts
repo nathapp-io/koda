@@ -194,7 +194,7 @@ export class FleetJobsService {
     if (!isConfigKind(r.command)) return null;
     const edit = await this.configEdits.findByJobId(r.id);
     if (!edit) return null;
-    return { mode: edit.mode, files: edit.edits.map((e) => e.path), prTitle: edit.prTitle, result: isTerminal(r.state) ? edit.result : r.configResult };
+    return { mode: edit.mode, files: edit.edits.map((e) => e.path), prTitle: edit.prTitle, result: isTerminal(r.state) ? (edit.result ?? r.configResult) : r.configResult };
   }
 
   /**
@@ -247,6 +247,9 @@ export class FleetJobsService {
         if (!canTransition(current.state, FleetJobState.QUEUED, 'server')) throw new ConflictAppException({ state: current.state }, 'fleet.jobState');
         // S5a: a THREAD job is never requeued; a new session goes through the send route, which applies the cost cap and runner checks.
         if (isThreadKind(current.command)) throw new ConflictAppException({ state: current.state }, 'fleet.jobState');
+        // US-003 R1: a config edit that ended in conflict or invalid repeats the same failure on requeue (its baseSha is pinned),
+        // so the job is refused before any transition. Only mode 'edit'; regenerate and drift stay requeueable.
+        if (isConfigKind(current.command)) await this.refuseUnrecoverableConfigEdit(jobId, current);
         // S3 D495: a budget pause never holds a config job, so only nax jobs are gate-checked here.
         if (!isConfigKind(current.command)) await this.budgets.assertNotPaused(jobGateKeys(current), now);
         // Plan D4: a requeue is a fresh lease (the transition carries `bumpEpoch: true`).
@@ -281,6 +284,14 @@ export class FleetJobsService {
       job: await this.withDetail(fresh),
       placement: { assigned: outcome.assigned, runnerId: outcome.runnerId, misfits: outcome.misfits },
     });
+  }
+
+  /** US-003 R1: throws 409 `fleet.configRequeue` when the job's edit ended in conflict or invalid. The outcome is the edit's stored result, else the job's. */
+  private async refuseUnrecoverableConfigEdit(jobId: string, current: FleetJobRecord): Promise<void> {
+    const edit = await this.configEdits.findByJobId(jobId);
+    if (!edit || edit.mode !== 'edit') return;
+    const outcome = edit.result?.outcome ?? current.configResult?.outcome;
+    if (outcome === 'conflict' || outcome === 'invalid') throw new ConflictAppException({ outcome }, 'fleet.configRequeue');
   }
 
   async get(projectId: string, id: string): Promise<FleetJobDto> {

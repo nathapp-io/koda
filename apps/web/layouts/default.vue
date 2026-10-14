@@ -59,13 +59,14 @@ const activeClass = 'bg-accent text-accent-foreground'
 // fails WCAG AA (4.13:1 over the card in light); the solid token clears it.
 const sectionLabelClass = 'px-2.5 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'
 
-/** The last crumb under `/:project/fleet/*`: overview, dispatch, budgets, approvals, analytics, or (anything else) a job. */
+/** The last crumb under `/:project/fleet/*`: overview, dispatch, budgets, approvals, analytics, a repo's nax config, or (anything else) a job. */
 function fleetLeaf(project: string, path: string): string {
   if (path === `/${project}/fleet/overview`) return t('fleet.dashboard.title')
   if (path === `/${project}/fleet/dispatch`) return t('fleet.jobs.dispatch')
   if (path === `/${project}/fleet/budgets`) return t('fleet.budgets.title')
   if (path === `/${project}/fleet/approvals`) return t('fleet.approvals.title')
   if (path === `/${project}/fleet/analytics`) return t('fleet.analytics.title')
+  if (path.startsWith(`/${project}/fleet/repos/`) && path.endsWith('/config')) return t('fleet.config.title')
   return t('fleet.jobs.detail.title')
 }
 

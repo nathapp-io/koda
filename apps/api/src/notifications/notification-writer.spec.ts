@@ -1,7 +1,10 @@
+import { ConfigService } from '@nestjs/config';
 import { NotificationWriter } from './notification-writer';
 import { ticketDraft } from './ticket-notification-text';
 import type { NotificationDraft } from './notification.types';
 import { UserEventBus } from '../live/user-event-bus';
+import { EmailAvailability } from '../email/email-availability';
+import { EMAIL_CFG, emailConfig } from '../config/email.config';
 
 const CREATED_AT = new Date('2026-10-10T12:00:00.000Z');
 const plusSec = (base: Date, sec: number) => new Date(base.getTime() + sec * 1000);
@@ -11,7 +14,16 @@ const draft = (userId: string, over: Partial<NotificationDraft> = {}): Notificat
   params: {}, sourceType: 'ticket_event', sourceId: 'e1', actorId: 'actor', ...over,
 });
 
-function setup() {
+interface SetupOptions {
+  /** Delays the stub `EmailAvailability.config()` returns (defaults match the config defaults: 300 / 60). */
+  delaySec?: number;
+  approvalDelaySec?: number;
+  configured?: boolean;
+  /** Replaces the stub with a real `EmailAvailability` (AC-3). */
+  email?: EmailAvailability;
+}
+
+function setup(options: SetupOptions = {}) {
   const order: string[] = [];
   const eligibility = { filter: vi.fn(async (d: readonly NotificationDraft[]) => d.filter((x) => x.userId !== 'ineligible')) };
   const preferences = {
@@ -26,7 +38,10 @@ function setup() {
   };
   const bus = new UserEventBus();
   vi.spyOn(bus, 'publish').mockImplementation(() => { order.push('publish'); });
-  const email = { configured: true };
+  const email = options.email ?? {
+    configured: options.configured ?? true,
+    config: vi.fn(() => ({ delaySec: options.delaySec ?? 300, approvalDelaySec: options.approvalDelaySec ?? 60 })),
+  };
   const schedule = {
     scheduleNotifications: vi.fn(async (rows: readonly unknown[]) => { order.push('schedule'); return rows.length; }),
   };
@@ -106,8 +121,7 @@ describe('NotificationWriter email scheduling (S4b US-002)', () => {
   });
 
   it('US-002 AC18: unconfigured email still inserts notifications (inside the transaction) and never schedules', async () => {
-    const { writer, repo, schedule, email, txManager } = setup();
-    email.configured = false;
+    const { writer, repo, schedule, txManager } = setup({ configured: false });
     await writer.deliver([draft('a', { category: 'ASSIGNED' })]);
     expect(repo.insertMany).toHaveBeenCalledTimes(1);
     expect(txManager.run).toHaveBeenCalled();
@@ -157,5 +171,39 @@ describe('NotificationWriter email scheduling (S4b US-002)', () => {
     expect(order.indexOf('schedule')).toBeGreaterThan(order.indexOf('insert'));
     expect(order.indexOf('schedule')).toBeLessThan(txEnd);
     expect(order.indexOf('publish')).toBeGreaterThan(txEnd);
+  });
+});
+
+describe('NotificationWriter email delays come from config (US-003)', () => {
+  it('AC-1: a non-approval notification is due delaySec from config after createdAt', async () => {
+    const { writer, schedule } = setup({ delaySec: 30 });
+    await writer.deliver([draft('a', { category: 'ASSIGNED', kind: 'ticket_assigned' })]);
+    const [row] = schedule.scheduleNotifications.mock.calls[0][0] as Array<{ dueAt: Date }>;
+    expect(row.dueAt).toEqual(plusSec(CREATED_AT, 30));
+  });
+
+  it('AC-2: an approval_requested notification is due approvalDelaySec from config after createdAt', async () => {
+    const { writer, schedule } = setup({ approvalDelaySec: 5 });
+    await writer.deliver([draft('a', { category: 'FLEET_NEEDS_YOU', kind: 'approval_requested' })]);
+    const [row] = schedule.scheduleNotifications.mock.calls[0][0] as Array<{ dueAt: Date }>;
+    expect(row.dueAt).toEqual(plusSec(CREATED_AT, 5));
+  });
+
+  describe('AC-3: EMAIL_DELAY_SEC reaches the writer through a real EmailAvailability', () => {
+    beforeEach(() => {
+      vi.stubEnv('SMTP_URL', 'smtp://h:25');
+      vi.stubEnv('EMAIL_FROM', 'koda@example.com');
+      vi.stubEnv('WEB_PUBLIC_URL', 'https://koda.example.com');
+      vi.stubEnv('EMAIL_DELAY_SEC', '45');
+    });
+    afterEach(() => { vi.unstubAllEnvs(); });
+
+    it('schedules a non-approval email at createdAt plus 45 seconds', async () => {
+      const config = new ConfigService({ [EMAIL_CFG]: emailConfig() });
+      const { writer, schedule } = setup({ email: new EmailAvailability(config) });
+      await writer.deliver([draft('a', { category: 'ASSIGNED', kind: 'ticket_assigned' })]);
+      const [row] = schedule.scheduleNotifications.mock.calls[0][0] as Array<{ dueAt: Date }>;
+      expect(row.dueAt).toEqual(plusSec(CREATED_AT, 45));
+    });
   });
 });

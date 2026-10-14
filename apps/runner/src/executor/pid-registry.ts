@@ -72,6 +72,14 @@ export async function readProcessCommand(pid: number): Promise<string | null> {
   return text === '' ? null : text;
 }
 
+/** The two process lookups the executor needs; production reads them from `ps`. */
+export interface ProcessInfo {
+  start(pid: number): Promise<Date | null>;
+  command(pid: number): Promise<string | null>;
+}
+
+export const PS_PROCESS_INFO: ProcessInfo = { start: readProcessStart, command: readProcessCommand };
+
 export async function reapNaxPids(input: {
   repoDir: string;
   since: Date;

@@ -24,7 +24,16 @@ type Handlers = { onFleetApproval?: () => void; onResync: () => void }
 afterEach(() => {
   delete (globalThis as Record<string, unknown>).useApi
   jest.useRealTimers()
+  jest.restoreAllMocks()
 })
+
+/** The browser moment an open ask is first seen waiting for delivery; decidedAt in these fixtures is deliberately not this clock. */
+const DELIVERY_T0 = Date.parse('2026-10-03T10:05:00.000Z')
+/** D295 window (DELIVERY_WATCH_MS in ApprovalInbox.vue). */
+const WINDOW_MS = 600_000
+
+/** GET :id calls for one approval; collection polls (`/approvals`) are not counted. */
+const detailGets = (get: jest.Mock, id: string): number => get.mock.calls.filter(([p]) => String(p).endsWith(`/${id}`)).length
 
 function mount(opts: {
   get: jest.Mock
@@ -32,6 +41,8 @@ function mount(opts: {
   query?: Record<string, string>
   props?: Record<string, unknown>
   now?: Date
+  /** The browser clock the D295 delivery watch reads (Date.now); unset keeps the real clock. */
+  wallNow?: number
 }) {
   const api = { get: opts.get, post: opts.post ?? jest.fn() }
   ;(globalThis as Record<string, unknown>).useApi = () => ({ $api: api })
@@ -41,6 +52,10 @@ function mount(opts: {
   let live: Handlers | null = null
   const forbidden: unknown[] = []
   const clock = Vue.ref(opts.now ?? new Date('2026-10-03T10:05:00.000Z'))
+  // Independent of the countdown ref above: only the delivery watch reads Date.now().
+  const wall = { ms: opts.wallNow ?? 0 }
+  if (opts.wallNow !== undefined) jest.spyOn(Date, 'now').mockImplementation(() => wall.ms)
+  const setWall = (ms: number): void => { wall.ms = ms }
   const app = mountSfc(inbox, {
     components: uiStubs,
     fleetComponents: ['FleetApprovalBudgetPanel', 'FleetApprovalBashPanel', 'FleetApprovalOutcome', 'FleetNativeSelect', 'FleetAge'],
@@ -87,7 +102,7 @@ function mount(opts: {
     ;(button.props.onClick as () => void)()
     await settle()
   }
-  return { app, api, toast, replace, forbidden, settle, byId, rowEl, toggle, poll: () => pollTask(), live: () => live }
+  return { app, api, toast, replace, forbidden, settle, byId, rowEl, toggle, poll: () => pollTask(), live: () => live, setWall }
 }
 
 describe('FleetApprovalInbox', () => {
@@ -301,16 +316,136 @@ describe('FleetApprovalInbox', () => {
     m.app.unmount()
   })
 
-  test('a decided ask whose decidedAt is ahead of the clock is not re-fetched forever (D295 clock guard)', async () => {
+  test('a decided ask whose decidedAt is ahead of the clock is re-fetched only inside the browser window (D295 clock guard, US-004 R2)', async () => {
     const decidedFuture = bashRow('b1', { status: 'approved', decision: 'allow', resolvedBy: 'user', decidedById: 'u1', decidedAt: '2099-01-01T00:00:00.000Z', outcome: null })
     const get = jest.fn(async (path: string) => (path.endsWith('/b1') ? decidedFuture : page([])))
-    const m = mount({ get, query: { id: 'b1' } })
+    const m = mount({ get, query: { id: 'b1' }, wallNow: DELIVERY_T0 })
     await m.settle()
-    const detailCalls = get.mock.calls.filter(([p]) => String(p).endsWith('/b1')).length
+    const loaded = detailGets(get, 'b1')
+    // decidedAt is ignored: the far-future ask is re-fetched while the browser watch is open.
     await m.poll()
     await m.settle()
-    expect(get.mock.calls.filter(([p]) => String(p).endsWith('/b1')).length).toBe(detailCalls)
+    expect(detailGets(get, 'b1')).toBe(loaded + 1)
+    // Once 10 minutes have passed since the browser first saw it waiting, the watch stops.
+    m.setWall(DELIVERY_T0 + 600_000)
+    await m.poll()
+    await m.settle()
+    expect(detailGets(get, 'b1')).toBe(loaded + 1)
     m.app.unmount()
+  })
+
+  describe('delivery watch on the browser clock (US-004 R2)', () => {
+    const waiting = (id: string, over: Partial<FleetApprovalDto> = {}): FleetApprovalDto =>
+      bashRow(id, { status: 'approved', decision: 'allow', resolvedBy: 'user', decidedById: 'u1', outcome: null, ...over })
+
+    test('a decided ask waiting for delivery with decidedAt in 2099 is fetched again on the next poll (AC-10)', async () => {
+      const ask = waiting('b1', { decidedAt: '2099-01-01T00:00:00.000Z' })
+      const get = jest.fn(async (path: string) => (path.endsWith('/b1') ? ask : page([])))
+      const m = mount({ get, query: { id: 'b1' }, wallNow: DELIVERY_T0 })
+      await m.settle()
+      const loaded = detailGets(get, 'b1')
+      await m.poll()
+      await m.settle()
+      expect(detailGets(get, 'b1')).toBe(loaded + 1)
+      m.app.unmount()
+    })
+
+    test('a decided ask waiting for delivery with decidedAt one year ago is fetched again on the next poll (AC-11)', async () => {
+      const ask = waiting('b1', { decidedAt: '2025-10-03T10:05:00.000Z' })
+      const get = jest.fn(async (path: string) => (path.endsWith('/b1') ? ask : page([])))
+      const m = mount({ get, query: { id: 'b1' }, wallNow: DELIVERY_T0 })
+      await m.settle()
+      const loaded = detailGets(get, 'b1')
+      await m.poll()
+      await m.settle()
+      expect(detailGets(get, 'b1')).toBe(loaded + 1)
+      m.app.unmount()
+    })
+
+    test('once the browser clock is 600000 ms past the first waiting load, the next poll stops fetching it (AC-12)', async () => {
+      const ask = waiting('b1', { decidedAt: '2026-10-03T10:00:00.000Z' })
+      const get = jest.fn(async (path: string) => (path.endsWith('/b1') ? ask : page([])))
+      const m = mount({ get, query: { id: 'b1' }, wallNow: DELIVERY_T0 })
+      await m.settle()
+      const loaded = detailGets(get, 'b1')
+      m.setWall(DELIVERY_T0 + WINDOW_MS - 1)
+      await m.poll()
+      await m.settle()
+      expect(detailGets(get, 'b1')).toBe(loaded + 1)
+      m.setWall(DELIVERY_T0 + WINDOW_MS)
+      await m.poll()
+      await m.settle()
+      expect(detailGets(get, 'b1')).toBe(loaded + 1)
+      m.app.unmount()
+    })
+
+    test('after ask A\'s window has passed, opening ask B that is waiting starts B\'s window (AC-13)', async () => {
+      const a = waiting('a1', { decidedAt: '2026-10-03T10:00:00.000Z' })
+      const b = waiting('b1', { decidedAt: '2026-10-03T10:00:00.000Z' })
+      const get = jest.fn(async (path: string) => {
+        if (path.endsWith('/a1')) return a
+        if (path.endsWith('/b1')) return b
+        return page([a, b])
+      })
+      const m = mount({ get, wallNow: DELIVERY_T0 })
+      await m.settle()
+      await m.toggle('a1')
+      m.setWall(DELIVERY_T0 + WINDOW_MS)
+      await m.toggle('a1')
+      await m.toggle('b1')
+      const loadedB = detailGets(get, 'b1')
+      await m.poll()
+      await m.settle()
+      expect(detailGets(get, 'b1')).toBe(loadedB + 1)
+      m.app.unmount()
+    })
+
+    test('closing and reopening the same ask keeps its window: the reopen does not renew it', async () => {
+      const a = waiting('a1', { decidedAt: '2026-10-03T10:00:00.000Z' })
+      const get = jest.fn(async (path: string) => (path.endsWith('/a1') ? a : page([a])))
+      const m = mount({ get, wallNow: DELIVERY_T0 })
+      await m.settle()
+      await m.toggle('a1')
+      m.setWall(DELIVERY_T0 + WINDOW_MS)
+      await m.toggle('a1')
+      await m.toggle('a1')
+      const loaded = detailGets(get, 'a1')
+      await m.poll()
+      await m.settle()
+      expect(detailGets(get, 'a1')).toBe(loaded)
+      m.app.unmount()
+    })
+
+    test('after the user allows an ask, the decided detail waiting for delivery is fetched again on the next poll (AC-14)', async () => {
+      const pending = bashRow('b1')
+      const decided = waiting('b1', { decidedAt: '2026-10-03T10:05:00.000Z' })
+      let stored: FleetApprovalDto = pending
+      const get = jest.fn(async (path: string) => (path.endsWith('/b1') ? stored : page(stored.status === 'pending' ? [stored] : [])))
+      const post = jest.fn(async () => { stored = decided; return decided })
+      const m = mount({ get, post, wallNow: Date.parse('2026-10-04T12:00:00.000Z'), props: { viewer: { kind: 'project', canManage: false, canWork: true } } })
+      await m.settle()
+      await m.toggle('b1')
+      ;(m.byId('fleet-approval-bash-allow')[0].props.onClick as () => void)()
+      await m.settle()
+      expect(m.byId('fleet-approval-outcome-delivery')[0].props['data-delivery']).toBe('waiting')
+      const loaded = detailGets(get, 'b1')
+      await m.poll()
+      await m.settle()
+      expect(detailGets(get, 'b1')).toBe(loaded + 1)
+      m.app.unmount()
+    })
+
+    test('a delivered ask (outcome.delivery.result ok) is not fetched again on the next poll (AC-15)', async () => {
+      const delivered = waiting('b1', { decidedAt: '2026-10-03T10:00:00.000Z', outcome: { delivery: { result: 'ok', detail: null, at: '2026-10-03T10:00:10.000Z' } } })
+      const get = jest.fn(async (path: string) => (path.endsWith('/b1') ? delivered : page([])))
+      const m = mount({ get, query: { id: 'b1' }, wallNow: DELIVERY_T0 })
+      await m.settle()
+      const loaded = detailGets(get, 'b1')
+      await m.poll()
+      await m.settle()
+      expect(detailGets(get, 'b1')).toBe(loaded)
+      m.app.unmount()
+    })
   })
 
   test('a decided ask with a recent decidedAt is still re-fetched on the next reload (D295)', async () => {

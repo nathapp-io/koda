@@ -6,7 +6,8 @@ const composablePath = join(__dirname, '../..', 'composables', 'useFleetSchedule
 
 const row = (id: string, name: string, over: Partial<ScheduleDto> = {}): ScheduleDto => ({
   id, projectId: 'p1', repoId: 'r1', name, cron: '0 9 * * 1-5', timezone: 'UTC', feature: 'login', ref: 'main', profiles: [],
-  maxCostUsd: '5.0000', selectorLabels: [], pinnedRunnerId: null, enabled: true, nextFireAt: '2026-10-05T09:00:00.000Z',
+  maxCostUsd: '5.0000', selectorLabels: [], pinnedRunnerId: null, bashMode: 'raw', approvalTimeoutSec: 600, enabled: true,
+  nextFireAt: '2026-10-05T09:00:00.000Z',
   lastFiredAt: null, lastJobId: null, lastPassedCount: 0, noProgressTicks: 0, noProgressLimit: 3, disabledReason: null,
   totalCostUsd: '0.0000', createdById: 'u1', updatedById: 'u1', createdAt: '2026-10-02T00:00:00.000Z',
   updatedAt: '2026-10-02T00:00:00.000Z', ...over,

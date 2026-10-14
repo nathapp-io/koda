@@ -29,8 +29,21 @@ export function canCancelJob(job: Pick<FleetJobDto, 'state' | 'requestedById'>, 
   return viewer.canWork || (viewer.userId !== null && viewer.userId === job.requestedById)
 }
 
-export function canRequeueJob(job: Pick<FleetJobDto, 'state'>, viewer: JobViewer): boolean {
-  return viewer.canWork && (REQUEUEABLE_JOB_STATES as readonly string[]).includes(job.state)
+/**
+ * US-004 R1: an edit whose result is a conflict or an invalid config repeats the same failure when requeued, so
+ * Requeue is hidden and the edits are reopened instead. Only `mode === 'edit'`: a regenerate or drift job keeps it,
+ * since a newer default branch can change its result. The API refuses the same requeue (US-003).
+ */
+const isUnrecoverableConfigEdit = (configEdit: FleetJobDto['configEdit']): boolean => {
+  if (configEdit?.mode !== 'edit') return false
+  const outcome = configEdit.result?.outcome
+  return outcome === 'conflict' || outcome === 'invalid'
+}
+
+export function canRequeueJob(job: Pick<FleetJobDto, 'state' | 'configEdit'>, viewer: JobViewer): boolean {
+  return viewer.canWork
+    && (REQUEUEABLE_JOB_STATES as readonly string[]).includes(job.state)
+    && !isUnrecoverableConfigEdit(job.configEdit)
 }
 
 /** "$0.42" from the API's decimal string; sub-cent values keep 4 decimals; garbage is shown raw. */

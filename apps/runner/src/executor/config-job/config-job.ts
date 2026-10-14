@@ -7,6 +7,7 @@ import type { JobRow } from '../../journal/types';
 import { reasonFromError, type Git } from '../git';
 import type { ConfigJobContext, ConfigJobRun } from '../job-executor';
 import { applyEdits } from './apply-edits';
+import { restoreConfigClone } from './cleanup';
 import { commitAndPushConfig } from './commit-push';
 import { changedFiles } from './drift';
 import { openPullRequest } from './open-pr';
@@ -46,10 +47,20 @@ async function logCall(dirs: ConfigJobDirs, argv: readonly string[], result: Pro
 const resolveTool = (argv: readonly string[], path: string): string[] => [Bun.which(argv[0] ?? '', { PATH: path }) ?? argv[0] ?? '', ...argv.slice(1)];
 
 /**
- * S3 spec §5 steps 2-8 on a clone `prepareConfigJob` left detached at origin/<defaultBranch>. Never throws: a stop is
- * `stopped`, the deadline is outcome `timeout`, any other error is `failed` with a fixed-vocabulary reason.
+ * S3 spec §5 steps 2-8 on a clone `prepareConfigJob` left detached at origin/<defaultBranch>, then US-002's restoration:
+ * the clone goes back to origin/<defaultBranch> with the job's local branch and remote-tracking ref removed, whatever
+ * the outcome. Never throws: a stop is `stopped`, the deadline is outcome `timeout`, any other error is `failed` with a
+ * fixed-vocabulary reason. A cleanup failure is reported as a step and never changes the returned run.
  */
 export async function runConfigJob(deps: ConfigJobDeps, job: JobRow, dirs: ConfigJobDirs, ctx: ConfigJobContext): Promise<ConfigJobRun> {
+  const run = await decideConfigJob(deps, job, dirs, ctx);
+  const cleanupFailure = await restoreConfigClone(deps.git, dirs.repoDir, job.assign.repo.defaultBranch, job.jobId);
+  if (cleanupFailure !== null) ctx.step(`cleanup failed: ${cleanupFailure}`);
+  return run;
+}
+
+/** The outcome of the job itself (before the clone is restored). */
+async function decideConfigJob(deps: ConfigJobDeps, job: JobRow, dirs: ConfigJobDirs, ctx: ConfigJobContext): Promise<ConfigJobRun> {
   const clock: StepClock = { nowMs: deps.nowMs, deadlineMs: ctx.deadlineMs, isStopped: ctx.isStopped };
   const { payload } = ctx;
   const { repoDir } = dirs;

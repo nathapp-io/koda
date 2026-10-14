@@ -7,8 +7,10 @@ import type { ApprovalRelay } from '../../src/approvals/approval-relay';
 import type { CredentialProvider } from '../../src/credentials/broker';
 import { HostExecutor } from '../../src/executor/host-executor';
 import { createGit } from '../../src/executor/git';
-import { jobProfilePath } from '../../src/executor/job-profile';
+import { configBranchName } from '../../src/executor/config-job/commit-push';
+import { jobProfileName, jobProfilePath } from '../../src/executor/job-profile';
 import { isProcessAlive } from '../../src/executor/nax-process';
+import type { ProcessInfo } from '../../src/executor/pid-registry';
 import { Journal } from '../../src/journal/journal';
 import type { JobRow } from '../../src/journal/types';
 import { createMemoryLogger } from '../../src/logger';
@@ -26,7 +28,10 @@ const PRD = JSON.stringify({ branchName: 'feat/feat', userStories: [{ id: 'OLD-1
 beforeAll(() => { isolateGit(); process.env['FAKE_NAX_STEP_MS'] = '10'; });
 afterAll(() => { delete process.env['FAKE_NAX_STEP_MS']; delete process.env['FAKE_NAX_SCENARIO']; return tmp.cleanup(); });
 
-async function world(command: 'RUN' | 'PLAN' = 'RUN', over: Partial<AssignPayload> = {}, extraFiles: Record<string, string> = {}, approvals: Pick<ApprovalRelay, 'open' | 'close' | 'resume'> = NO_APPROVALS) {
+/** A `ProcessInfo` with no processes: `ps` is never spawned (nax#2520). Tests override the lookups they need. */
+const NO_PROCESSES: ProcessInfo = { start: async () => null, command: async () => null };
+
+async function world(command: 'RUN' | 'PLAN' = 'RUN', over: Partial<AssignPayload> = {}, extraFiles: Record<string, string> = {}, approvals: Pick<ApprovalRelay, 'open' | 'close' | 'resume'> = NO_APPROVALS, processInfo: ProcessInfo = NO_PROCESSES) {
   const base = await tmp.make('host');
   const origin = await makeOrigin(base, 'origin', { files: { 'README.md': 'x', 'docs/spec.md': '# spec from repo\n', '.nax/features/feat/prd.json': PRD, ...extraFiles } });
   const workspaceRoot = join(base, 'ws');
@@ -39,9 +44,104 @@ async function world(command: 'RUN' | 'PLAN' = 'RUN', over: Partial<AssignPayloa
   const journal = Journal.open(':memory:');
   const row: JobRow = journal.insertJob({ assign, leaseEpoch: 1, repoKey: 'acme/app', jobDir: jobDirFor(workspaceRoot, assign.jobId) }).row;
   const log = createMemoryLogger();
-  const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log, nowMs: () => Date.now(), sleep: async () => undefined, credentials: NO_CREDENTIALS, approvals });
+  const ex = new HostExecutor({ config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome }, git: createGit(), log, nowMs: () => Date.now(), sleep: async () => undefined, credentials: NO_CREDENTIALS, approvals, processInfo });
   return { base, origin, workspaceRoot, naxHome, assign, row, ex, journal, log };
 }
+
+describe('HostExecutor process lookups are injected (US-001)', () => {
+  /** A registry entry for this job's clone, written where `reap` reads it. */
+  async function registerPid(w: { workspaceRoot: string }, pid: number, registered: Date): Promise<void> {
+    const repoDir = join(w.workspaceRoot, 'acme', 'app');
+    await mkdir(repoDir, { recursive: true });
+    await writeFile(join(repoDir, '.nax-pids'), `${JSON.stringify({ pid, spawnedAt: registered.toISOString(), workdir: repoDir })}\n`);
+  }
+
+  test('AC-1: matchesProcess for a RUN job calls the injected command with its pid and matches its profile', async () => {
+    const pids: number[] = [];
+    const processInfo: ProcessInfo = {
+      start: async () => null,
+      command: async (pid) => { pids.push(pid); return `nax run --headless --profile ${jobProfileName('cjob1')}`; },
+    };
+    const w = await world('RUN', {}, {}, NO_APPROVALS, processInfo);
+    expect(await w.ex.matchesProcess({ ...w.row, pid: 4242, pgid: 4242 })).toBe(true);
+    expect(pids).toEqual([4242]);
+  });
+
+  test('AC-2: matchesProcess for a RUN job is false when the command is the profile of another job', async () => {
+    const processInfo: ProcessInfo = { start: async () => null, command: async () => 'nax run --profile koda-job-other' };
+    const w = await world('RUN', {}, {}, NO_APPROVALS, processInfo);
+    expect(await w.ex.matchesProcess({ ...w.row, pid: 4242, pgid: 4242 })).toBe(false);
+  });
+
+  test('AC-3: matchesProcess is false when the injected command is null', async () => {
+    const processInfo: ProcessInfo = { start: async () => null, command: async () => null };
+    const w = await world('RUN', {}, {}, NO_APPROVALS, processInfo);
+    expect(await w.ex.matchesProcess({ ...w.row, pid: 4242, pgid: 4242 })).toBe(false);
+  });
+
+  test('AC-4: matchesProcess for a null pid is false without calling the injected command', async () => {
+    let calls = 0;
+    const processInfo: ProcessInfo = { start: async () => null, command: async () => { calls += 1; return 'anything'; } };
+    const w = await world('RUN', {}, {}, NO_APPROVALS, processInfo);
+    expect(await w.ex.matchesProcess({ ...w.row, pid: null, pgid: null })).toBe(false);
+    expect(calls).toBe(0);
+  });
+
+  test('AC-5: matchesProcess for a CONFIG_EDIT job matches its clone directory or its config branch', async () => {
+    let commandLine = '';
+    const processInfo: ProcessInfo = { start: async () => null, command: async () => commandLine };
+    const w = await world('RUN', {}, {}, NO_APPROVALS, processInfo);
+    const cloneDir = join(w.workspaceRoot, 'acme', 'app');
+    const config = { ...w.row, command: 'CONFIG_EDIT' as const, pid: 4242, pgid: 4242 };
+
+    commandLine = `nax config -d ${cloneDir}`;
+    expect(await w.ex.matchesProcess(config)).toBe(true);
+
+    commandLine = `gh pr create --head ${configBranchName('cjob1')}`;
+    expect(await w.ex.matchesProcess(config)).toBe(true);
+
+    commandLine = `nax run --profile ${jobProfileName('cjob1')}`;
+    expect(await w.ex.matchesProcess(config)).toBe(false);
+  });
+
+  test('AC-6: reap calls the injected start lookup with the pid registered for the job clone', async () => {
+    const started: number[] = [];
+    const processInfo: ProcessInfo = { start: async (pid) => { started.push(pid); return null; }, command: async () => null };
+    const w = await world('RUN', {}, {}, NO_APPROVALS, processInfo);
+    const registered = new Date();
+    await registerPid(w, 5151, registered);
+    await w.ex.reap(w.row, new Date(registered.getTime() - 60_000));
+    expect(started).toEqual([5151]);
+  });
+
+  test('AC-7: reap does not kill a registered pid whose injected start lookup returns null', async () => {
+    const child = Bun.spawn(['sleep', '60'], { stdout: 'ignore', stderr: 'ignore' });
+    try {
+      const processInfo: ProcessInfo = { start: async () => null, command: async () => null };
+      const w = await world('RUN', {}, {}, NO_APPROVALS, processInfo);
+      const registered = new Date();
+      await registerPid(w, child.pid, registered);
+      await w.ex.reap(w.row, new Date(registered.getTime() - 60_000));
+      expect(isProcessAlive(child.pid)).toBe(true);
+    } finally {
+      child.kill();
+    }
+  });
+
+  test('AC-8: reap kills a registered child whose injected start lookup returns its registration time', async () => {
+    const child = Bun.spawn(['sleep', '60'], { stdout: 'ignore', stderr: 'ignore' });
+    try {
+      const registered = new Date();
+      const processInfo: ProcessInfo = { start: async () => registered, command: async () => null };
+      const w = await world('RUN', {}, {}, NO_APPROVALS, processInfo);
+      await registerPid(w, child.pid, registered);
+      await w.ex.reap(w.row, new Date(registered.getTime() - 60_000));
+      await waitFor(() => !isProcessAlive(child.pid));
+    } finally {
+      child.kill();
+    }
+  });
+});
 
 describe('HostExecutor RUN', () => {
   test('wires the production logger into progress commit failures (#186)', async () => {
@@ -54,13 +154,17 @@ describe('HostExecutor RUN', () => {
     expect(w.log.lines).toContainEqual(expect.objectContaining({ level: 'warn', message: 'progress commit failed', fields: expect.objectContaining({ jobId: 'cjob1', exitCode: 128, stderr: expect.stringContaining('index.lock') }) }));
   });
   test('prepare, spawn, watch the files, verdict, ledger, bundle, cleanup', async () => {
-    const w = await world();
+    // The fake lookup reports the job's own argv for its pid (the nax child carries its profile), never `ps`.
+    const spawned = new Map<number, string>();
+    const processInfo: ProcessInfo = { start: async () => null, command: async (pid) => spawned.get(pid) ?? null };
+    const w = await world('RUN', {}, {}, NO_APPROVALS, processInfo);
     expect(await w.ex.prepare(w.row)).toEqual({ ok: true, branch: 'feat/feat' });
     const profile = JSON.parse(await readFile(jobProfilePath(w.naxHome, 'cjob1'), 'utf8'));
     expect(profile.outputDir).toBe(join(w.row.jobDir, 'nax-out'));
     expect(profile.name).toMatch(/^acme-app-[0-9a-f]{8}$/);
     const handle = await w.ex.spawn(w.row);
     expect(w.ex.isAlive(handle.pid)).toBe(true);
+    spawned.set(handle.pid, `nax run --headless --profile ${jobProfileName('cjob1')}`);
     const running = w.journal.updateJob('cjob1', 1, { pid: handle.pid, pgid: handle.pgid }) as JobRow;
     expect(await w.ex.matchesProcess(running)).toBe(true);
     expect(await w.ex.matchesProcess({ ...running, jobId: 'other' })).toBe(false);
