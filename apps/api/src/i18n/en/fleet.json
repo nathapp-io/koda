@@ -10,6 +10,7 @@
   "repoCheck": { "422": "Repository check failed: {reason}" },
   "jobs": { "404": "Fleet job not found", "409": "An active job already runs this feature: {activeJobId}" },
   "jobState": { "409": "The job is {state}; this action is not allowed" },
+  "configRequeue": { "409": "This config edit failed with {outcome}; reopen the edits instead of requeueing" },
   "dispatch": { "422": "The pinned runner can never run this job: {reason}" },
   "dispatchOpenPr": { "409": "Ticket(s) already have an open pull request: {refs}" },
   "dispatchInput": { "-2": "Invalid dispatch: {reason}" },

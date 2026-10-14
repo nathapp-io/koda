@@ -1,4 +1,5 @@
 import { registerAs } from '@nestjs/config';
+import { EMAIL_APPROVAL_DELAY_SEC, EMAIL_DELAY_SEC } from '../email/email.constants';
 
 export const EMAIL_CFG = 'email';
 
@@ -56,8 +57,8 @@ export const emailConfig = registerAs(EMAIL_CFG, (): IEmailConfig => {
     smtpUrl,
     from,
     webPublicUrl,
-    delaySec: intEnv('EMAIL_DELAY_SEC', 300, 0, 86_400),
-    approvalDelaySec: intEnv('EMAIL_APPROVAL_DELAY_SEC', 60, 0, 86_400),
+    delaySec: intEnv('EMAIL_DELAY_SEC', EMAIL_DELAY_SEC, 0, 86_400),
+    approvalDelaySec: intEnv('EMAIL_APPROVAL_DELAY_SEC', EMAIL_APPROVAL_DELAY_SEC, 0, 86_400),
     maxAttempts: intEnv('EMAIL_MAX_ATTEMPTS', 5, 1, 20),
     inviteTtlDays: intEnv('INVITE_TTL_DAYS', 7, 1, 30),
   };

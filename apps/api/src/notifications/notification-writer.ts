@@ -3,7 +3,7 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { NotificationChannel } from '@nathapp/nestjs-notify';
 import { UserEventBus } from '../live/user-event-bus';
 import { EmailAvailability } from '../email/email-availability';
-import { APPROVAL_REQUESTED_KIND, EMAIL_APPROVAL_DELAY_SEC, EMAIL_DELAY_SEC } from '../email/email.constants';
+import { APPROVAL_REQUESTED_KIND } from '../email/email.constants';
 import { EmailScheduleService } from '../email/schedule/email-schedule.service';
 import { NewNotificationEmail } from '../email/schedule/email-schedule.types';
 import { NotificationEmailRecipients } from '../email/notification-email-recipients';
@@ -64,7 +64,7 @@ export class NotificationWriter {
 
   /**
    * D518/D519: one email row per inserted notification whose user opted into email for its category, due
-   * `EMAIL_DELAY_SEC` after the notification (or `EMAIL_APPROVAL_DELAY_SEC` for an approval request).
+   * `delaySec` after the notification (or `approvalDelaySec` for an approval request), from config.
    */
   private async scheduleEmails(rows: readonly NotificationInserted[]): Promise<void> {
     if (rows.length === 0) return;
@@ -86,8 +86,10 @@ export class NotificationWriter {
     })));
   }
 
+  /** US-003: the delays come from the configured `EMAIL_DELAY_SEC` / `EMAIL_APPROVAL_DELAY_SEC`, not the defaults. */
   private delayMs(kind: string): number {
-    const seconds = kind === APPROVAL_REQUESTED_KIND ? EMAIL_APPROVAL_DELAY_SEC : EMAIL_DELAY_SEC;
+    const config = this.email.config();
+    const seconds = kind === APPROVAL_REQUESTED_KIND ? config.approvalDelaySec : config.delaySec;
     return seconds * 1000;
   }
 }
