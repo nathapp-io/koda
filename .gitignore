@@ -68,6 +68,8 @@ apps/api/smoke-result.txt
 .nax/metrics.json
 .nax/**/status.json
 .nax/**/*.jsonl
+# Advisor ledger: nax commits it so the PR branch carries the rulings it cites.
+!.nax/features/*/decisions.jsonl
 .nax/**/runs/
 .nax/**/acp-sessions.json
 .nax/**/progress.txt
