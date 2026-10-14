@@ -18,6 +18,7 @@ import { tarGz } from '../../helpers/tar-gz';
 import { BundleService } from '../../../src/fleet/artifacts/bundle.service';
 import { FleetFenceException } from '../../../src/fleet/artifacts/bundle.exceptions';
 import { BundleIngestService } from '../../../src/fleet/ingest/bundle-ingest.service';
+import { INGEST_PARSER_VERSION } from '../../../src/fleet/ingest/domain/bundle-ingest.domain';
 import { ConflictAppException } from '../../../src/common/exceptions/conflict-app.exception';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -151,7 +152,7 @@ describeIntegration('fleet bundles (PG)', () => {
     await upload(j.id, gz).expect(201);
     const first = await prisma.fleetBundleIngest.findMany({ where: { jobId: j.id } });
     expect(first).toHaveLength(1);
-    expect(first[0]).toMatchObject({ status: 'pending', leaseEpoch: 1, parserVersion: 1 });
+    expect(first[0]).toMatchObject({ status: 'pending', leaseEpoch: 1, parserVersion: INGEST_PARSER_VERSION });
     await upload(j.id, gz).expect(201);
     const second = await prisma.fleetBundleIngest.findMany({ where: { jobId: j.id } });
     expect(second.map((r) => r.id)).toEqual([first[0].id]);
