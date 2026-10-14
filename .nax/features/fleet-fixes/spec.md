@@ -1,4 +1,3 @@
-<!-- spec-writing: completed-through-phase-5 -->
 # SPEC: Fleet Fixes — Runner Test Isolation, Config Clone Cleanup, Email Delays, Requeue Guard, Approvals Polish
 
 ## Summary
@@ -230,7 +229,7 @@ same D295 bound.
 
 **US-001**
 
-- `apps/runner/test/integration/process-info.integration.spec.ts` — the real-`ps` checks, including the describes moved from `src/executor/pid-registry.spec.ts`
+- `apps/runner/test/integration/process-info.integration.spec.ts` — the real-`ps` checks, including the describes moved from `src/executor/pid-registry.spec.ts` together with the helpers they use (`entry`, `tmp`, `waitFor`, `isProcessAlive`)
 
 **US-002**
 
@@ -254,7 +253,7 @@ None.
 
 **US-002**
 
-None. The cleanup only adds behaviour after the outcome is decided; US-002's tests are additive (new tests in `test/unit/config-job.spec.ts`), and the existing assertions there and in `test/integration/config-jobs.integration.spec.ts` on outcomes, pushed branches and PRs stay valid.
+- `apps/runner/test/unit/config-job.spec.ts` — `world()` builds the `HostExecutor` with a fixed `git: createGit()`; it gains an optional `git` override so a test can pass a `Git` that fails one call, and the new cleanup tests are added. The existing assertions in this file and in the config-jobs integration spec on outcomes, pushed branches and PRs stay valid.
 
 **US-003**
 
@@ -286,7 +285,7 @@ inside their own story, each through the production entry point named in its ACs
 10. [integration] `readProcessCommand(process.pid)` returns a non-empty string, and `readProcessStart(process.pid)` returns a `Date` that is not later than now.
 11. [integration] `readProcessCommand` and `readProcessStart` return null for a pid that does not exist.
 
-Verification note: the runner's default unit run (`bun test src test/unit`, including `src/executor/pid-registry.spec.ts`, `test/unit/host-executor.spec.ts` and `test/unit/config-job.spec.ts`) passes with `PATH` set to a directory that has no `ps`; the real-`ps` checks run in `bun run test:integration`.
+Verification note: the runner's default unit run (`bun test src test/unit`, including `src/executor/pid-registry.spec.ts`, `test/unit/host-executor.spec.ts` and `test/unit/config-job.spec.ts`) passes with a failing `ps` stub (exits non-zero) first on `PATH`; the real-`ps` checks run in `bun run test:integration`.
 
 ### US-002: Config jobs return the runner clone to the default branch
 
@@ -299,7 +298,7 @@ Verification note: the runner's default unit run (`bun test src test/unit`, incl
 7. [unit] An untracked file written into the clone after `prepareConfigJob` and before an edit job that ends `conflict` is absent after the job, and the clone's HEAD is detached at `origin/<defaultBranch>`.
 8. [unit] An edit job stopped during its slow nax `generate` call, after its edits were applied, ends `stopped`, and afterwards the edited file in the clone has its `origin/<defaultBranch>` content.
 9. [unit] A gitignored file present in the clone before an `invalid` edit job is still present after it.
-10. [unit] An `ok` edit job run through `HostExecutor.runConfigJob` with a `Git` that fails only the call `checkout -f --detach <sha of origin/<defaultBranch>>` still returns outcome `ok` with the same `resultPrUrl`.
+10. [unit] An `ok` edit job run through `HostExecutor.runConfigJob` with a `Git` that, armed after `prepareConfigJob` returns, fails only the call `checkout -f --detach <sha of origin/<defaultBranch>>` still returns outcome `ok` with the same `resultPrUrl`.
 11. [unit] The same run (the `checkout -f --detach <sha>` call failing) reports a step starting with `cleanup failed:` through `ctx.step`.
 12. [unit] The same run (the `checkout -f --detach <sha>` call failing) leaves the clone's HEAD detached and the local branch `nax-config/<jobId>` deleted.
 13. [unit] `restoreConfigClone`, on a clone whose HEAD is on `nax-config/<jobId>` and where `refs/remotes/origin/<defaultBranch>` was deleted, returns a non-null reason, leaves HEAD detached and deletes the local branch `nax-config/<jobId>`.
@@ -332,5 +331,5 @@ Verification note: `email.config.ts` taking its 300 / 60 fallbacks from the `ema
 9. [unit] The approvals inbox, opened on a decided escalate ask waiting for delivery whose `decidedAt` is one year in the past, fetches that approval's detail again on the next poll.
 10. [unit] Once the browser clock is 600 000 ms past the moment the inbox first loaded a waiting detail, the next poll does not fetch that approval's detail again.
 11. [unit] After the window of ask A has passed, opening a different ask B that is waiting for delivery makes the next poll fetch B's detail again.
-12. [unit] After the user allows an escalate ask in the inbox and the decided detail is waiting for delivery, the next poll fetches that approval's detail again.
+12. [unit] After the user allows an escalate ask in the inbox and the decided detail returned by the decide call is waiting for delivery with `decidedAt` `2026-10-03T10:05:00.000Z` (long before the test clock), the next poll fetches that approval's detail again.
 13. [unit] An opened escalate ask whose delivery is `delivered` is not fetched again on the next poll.
