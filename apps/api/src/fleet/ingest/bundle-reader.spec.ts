@@ -1,10 +1,17 @@
 import { Readable } from 'stream';
 import { tarGz } from '../../../test/helpers/tar-gz';
-import { readBundleFiles } from './bundle-reader';
+import { readBundleFiles, slotOf } from './bundle-reader';
 
 const stream = (b: Buffer) => Readable.from([b]);
 
 describe('readBundleFiles (spec §2.3)', () => {
+  it('AC-7 assigns the exact result path to its own slot', () => {
+    expect(slotOf('workflow/result.json')).toBe('workflowResult');
+  });
+  it('AC-8 keeps workflow reports and decisions unallowlisted', () => {
+    expect(slotOf('workflow/feature-report.md')).toBeNull();
+    expect(slotOf('workflow/decisions.jsonl')).toBeNull();
+  });
   it('collects only allowlisted paths, normalising a leading ./', async () => {
     const gz = await tarGz([
       { name: './nax-out/cost/a.jsonl', body: '{"x":1}\n' },
@@ -15,6 +22,7 @@ describe('readBundleFiles (spec §2.3)', () => {
       { name: 'nax-out/finish-audit/f/last.json', body: '{}' },
       { name: 'nax-out/finish-audit/f/run-1.jsonl', body: 'ignored' },
       { name: 'nax-out/status.json', body: '{}' },
+      { name: 'workflow/result.json', body: '{"schemaVersion":1}' },
       { name: 'nax-out/tool-audit/f/x.json', body: 'ignored' },
       { name: 'nax.stdout', body: 'ignored' },
     ]);
@@ -25,6 +33,7 @@ describe('readBundleFiles (spec §2.3)', () => {
     expect(files.finishResults.map((f) => f.name)).toEqual(['nax-out/finish-audit/f/run-1.result.json']);
     expect(files.finishLast.map((f) => f.name)).toEqual(['nax-out/finish-audit/f/last.json']);
     expect(files.status?.text).toBe('{}');
+    expect(files.workflowResult).toEqual({ name: 'workflow/result.json', text: '{"schemaVersion":1}' });
     expect(files.oversized).toEqual([]);
   });
 

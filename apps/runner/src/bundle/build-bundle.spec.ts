@@ -54,6 +54,21 @@ describe('listBundleEntries (D27)', () => {
   test('missing pieces are simply absent', async () => {
     expect(await listBundleEntries(await tmp.make('empty'), 'RUN')).toEqual([]);
   });
+  test('US-003 AC-7: RUN with workflow files includes them', async () => {
+    const jobDir = await jobDirWith();
+    await mkdir(join(jobDir, 'workflow'), { recursive: true });
+    await writeFile(join(jobDir, 'workflow', 'result.json'), '{}');
+    await writeFile(join(jobDir, 'workflow', 'feature-report.md'), '# r\n');
+    const entries = await listBundleEntries(jobDir, 'RUN');
+    expect(entries).toContain('workflow/result.json');
+    expect(entries).toContain('workflow/feature-report.md');
+  });
+  test('US-003 AC-8: PLAN never includes workflow files', async () => {
+    const jobDir = await jobDirWith();
+    await mkdir(join(jobDir, 'workflow'), { recursive: true });
+    await writeFile(join(jobDir, 'workflow', 'result.json'), '{}');
+    expect(await listBundleEntries(jobDir, 'PLAN')).not.toContain('workflow/result.json');
+  });
   test('a name with a newline or a backslash cannot go in the -T list: it is skipped and reported (D68)', async () => {
     const jobDir = await jobDirWith();
     await writeFile(join(jobDir, 'nax-out', 'two\nlines.txt'), 'x');

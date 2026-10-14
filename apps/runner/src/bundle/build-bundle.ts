@@ -45,6 +45,11 @@ export async function collectBundleEntries(jobDir: string, command: FleetJobKind
     const logs = (await readdir(join(jobDir, 'plan-logs')).catch(() => [] as string[])).filter((n) => n.endsWith('.jsonl'));
     all.push(...logs.map((n) => `plan-logs/${n}`));
   }
+  if (command === 'RUN') {
+    for (const name of ['result.json', 'feature-report.md', 'decisions.jsonl']) {
+      if (await exists(join(jobDir, 'workflow', name))) all.push(`workflow/${name}`);
+    }
+  }
   return { entries: all.filter(isListSafe).sort(), skipped: all.filter((name) => !isListSafe(name)).sort() };
 }
 

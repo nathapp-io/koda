@@ -279,6 +279,7 @@ const FLEET_COMPONENT_FILES: Record<FleetComponentName, string> = {
   FleetApprovalInbox: 'ApprovalInbox.vue',
   FleetApprovalBashPanel: 'ApprovalBashPanel.vue',
   FleetJobApprovals: 'JobApprovals.vue',
+  FleetJobWorkflow: 'FleetJobWorkflow.vue',
   FleetAnalyticsPanel: 'analytics/Panel.vue',
   FleetAnalyticsBarList: 'analytics/BarList.vue',
   FleetAnalyticsSeriesLegend: 'analytics/SeriesLegend.vue',
@@ -404,7 +405,7 @@ export type FleetComponentName =
   | 'FleetAge' | 'FleetRunnerCapabilityChips' | 'FleetRepoReachabilityBadge' | 'FleetNativeSelect' | 'FleetBudgetTable'
   | 'FleetScheduleTable' | 'FleetScheduleHistory'
   | 'FleetApprovalBudgetPanel' | 'FleetApprovalOutcome' | 'FleetApprovalInbox' | 'FleetApprovalBashPanel'
-  | 'FleetJobApprovals'
+  | 'FleetJobApprovals' | 'FleetJobWorkflow'
   | 'FleetAnalyticsPanel' | 'FleetAnalyticsBarList' | 'FleetAnalyticsSeriesLegend' | 'FleetAnalyticsChartDataTable'
   | 'FleetAnalyticsSummaryTiles' | 'FleetAnalyticsRangePicker' | 'FleetAnalyticsStoryTable' | 'FleetAnalyticsJobTable'
   | 'FleetAnalyticsIngestNotice' | 'FleetAnalyticsIngestTable'

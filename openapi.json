@@ -13086,6 +13086,83 @@
           }
         }
       },
+      "FleetJobWorkflowItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "issue": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "nullable": true
+          },
+          "file": {
+            "type": "string",
+            "nullable": true
+          },
+          "line": {
+            "type": "number",
+            "nullable": true
+          },
+          "suggestion": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "issue",
+          "severity",
+          "file",
+          "line",
+          "suggestion"
+        ]
+      },
+      "FleetJobWorkflowDto": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "ready",
+              "draft",
+              "local-only"
+            ],
+            "type": "string"
+          },
+          "workflowPassed": {
+            "type": "boolean"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "openItems": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetJobWorkflowItemDto"
+            }
+          }
+        },
+        "required": [
+          "runId",
+          "outcome",
+          "workflowPassed",
+          "reasons",
+          "openItems"
+        ]
+      },
       "FleetJobTicketDto": {
         "type": "object",
         "properties": {
@@ -13371,6 +13448,16 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/FleetJobPostRunDto"
+              }
+            ]
+          },
+          "workflow": {
+            "nullable": true,
+            "description": "nax workflow result. Null on list pages.",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FleetJobWorkflowDto"
               }
             ]
           },

@@ -31,6 +31,24 @@ export interface FleetJobPostRun {
   finish?: string;
 }
 
+export interface FleetJobWorkflowItem {
+  id: string;
+  kind: string;
+  issue: string;
+  severity: string | null;
+  file: string | null;
+  line: number | null;
+  suggestion: string | null;
+}
+
+export interface FleetJobWorkflow {
+  runId: string;
+  outcome: 'ready' | 'draft' | 'local-only';
+  workflowPassed: boolean;
+  reasons: string[];
+  openItems: FleetJobWorkflowItem[];
+}
+
 export interface FleetJobRecord {
   id: string;
   projectId: string;
@@ -89,6 +107,7 @@ export interface FleetJobRecord {
   storiesTruncated: boolean;
   /** S2b (j): replaced by each snapshot that carries it; cleared on requeue (D427). */
   postRun: FleetJobPostRun | null;
+  workflow: FleetJobWorkflow | null;
   /** S3 §3 (D475): a config job's result from its snapshots; cleared on requeue. Null for nax jobs. */
   configResult: ConfigJobResult | null;
   threadId: string | null;
@@ -120,7 +139,7 @@ type Mutable =
   | 'state' | 'stateReason' | 'runnerId' | 'runnerBootId' | 'assignedAt' | 'startedAt' | 'finishedAt'
   | 'cancelRequestedAt' | 'naxRunId' | 'naxLogRunId' | 'naxCostRunId' | 'progress' | 'currentStoryId'
   | 'currentPhase' | 'costSpentUsd' | 'costCarriedUsd' | 'firstStartedAt' | 'cancelReason' | 'lastHeartbeatAt'
-  | 'finishResult' | 'escalationReason' | 'exitCode'
+  | 'finishResult' | 'escalationReason' | 'exitCode' | 'workflow'
   | 'resultBranch' | 'resultSha' | 'resultPrUrl' | 'wipPush' | 'stories' | 'storiesTruncated' | 'postRun' | 'ackedRunnerSeq'
   | 'configResult';
 

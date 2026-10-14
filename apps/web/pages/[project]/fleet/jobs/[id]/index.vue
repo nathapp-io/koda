@@ -10,6 +10,7 @@ import FleetJobProgress from '~/components/fleet/FleetJobProgress.vue'
 import FleetJobPipeline from '~/components/fleet/story-graph/FleetJobPipeline.vue'
 import FleetJobStateBadge from '~/components/fleet/FleetJobStateBadge.vue'
 import FleetJobTimeline from '~/components/fleet/FleetJobTimeline.vue'
+import FleetJobWorkflow from '~/components/fleet/FleetJobWorkflow.vue'
 import FleetPlacementResult from '~/components/fleet/FleetPlacementResult.vue'
 import { useApprovalCountdown } from '~/composables/useApprovalCountdown'
 import { useFleetApprovals } from '~/composables/useFleetApprovals'
@@ -286,6 +287,8 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
           {{ t('fleet.jobs.detail.coalesced', { count: job.coalescedCount }) }}
         </span>
       </div>
+
+      <FleetJobWorkflow v-if="job.workflow" :workflow="job.workflow" />
 
       <ConfigJobPanel v-if="configJob" :job="job" :slug="slug" :can-work="viewer.canWork" @regenerate="regenOpen = true" />
 

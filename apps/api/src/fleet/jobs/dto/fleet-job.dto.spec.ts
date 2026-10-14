@@ -2,6 +2,24 @@ import { FleetJobDto } from './fleet-job.dto';
 import { FleetJobEventDto } from './fleet-job-event.dto';
 
 describe('fleet job DTOs', () => {
+  const workflow = { runId: 'run-1', outcome: 'draft' as const, workflowPassed: true, reasons: [], openItems: [] };
+  const workflowRecord = () => ({
+    workflow, queuedAt: new Date(), assignedAt: null, startedAt: null, finishedAt: null, cancelRequestedAt: null,
+    lastHeartbeatAt: null, stories: null, postRun: null, progress: null,
+    id: 'j', projectId: 'p', repoId: 'r', ref: 'main', command: 'RUN', feature: 'f', planFrom: null, profiles: [],
+    maxCostUsd: '1', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null, runnerId: null,
+    leaseEpoch: 0, state: 'FAILED', stateReason: null, requestedById: 'u', naxRunId: null, naxLogRunId: null, naxCostRunId: null,
+    currentStoryId: null, currentPhase: null, costSpentUsd: '0', finishResult: null, escalationReason: null, exitCode: null,
+    resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null, storiesTruncated: false, scheduleId: null,
+    coalescedCount: 0, configEdit: null,
+  }) as never;
+  it('AC-11 maps workflow on a detail DTO', () => {
+    expect(FleetJobDto.from(workflowRecord()).workflow).toEqual(workflow);
+  });
+  it('AC-12 clears workflow from a summary DTO', () => {
+    expect(FleetJobDto.summary(workflowRecord()).workflow).toBeNull();
+  });
+
   const now = new Date('2026-10-01T00:00:00.000Z');
   it('serialise with decimals and dates as strings and hide internal columns', () => {
     const dto = FleetJobDto.from({

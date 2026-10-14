@@ -6,6 +6,8 @@ import { obj, parseJson, str } from './fields';
 export interface StatusInfo {
   runId: string | null;
   runStatus: string | null;
+  workflowOutcome: 'ready' | 'draft' | 'local-only' | null;
+  workflowUrl: string | null;
 }
 
 export interface FinishInfo {
@@ -17,8 +19,17 @@ export interface FinishInfo {
 }
 
 export function parseStatus(file: BundleFile | null): StatusInfo {
-  const run = obj(obj(file ? parseJson(file.text) : null)?.run);
-  return { runId: str(run?.id, INGEST_LIMITS.idText), runStatus: str(run?.status, INGEST_LIMITS.shortText) };
+  const root = obj(file ? parseJson(file.text) : null);
+  const run = obj(root?.run);
+  const workflow = obj(root?.workflow);
+  const candidate = workflow?.outcome;
+  const workflowOutcome = candidate === 'ready' || candidate === 'draft' || candidate === 'local-only' ? candidate : null;
+  return {
+    runId: str(run?.id, INGEST_LIMITS.idText),
+    runStatus: str(run?.status, INGEST_LIMITS.shortText),
+    workflowOutcome,
+    workflowUrl: https(workflow?.url),
+  };
 }
 
 const https = (v: unknown): string | null => {

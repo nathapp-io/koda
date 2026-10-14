@@ -4,7 +4,7 @@ import type { IPageResult } from '@nathapp/nestjs-data';
 export const BUNDLE_INGEST_REPOSITORY = Symbol('BUNDLE_INGEST_REPOSITORY');
 
 /** Bump when a parser changes what it writes; `rerun-outdated` re-ingests older rows (spec §2.6). */
-export const INGEST_PARSER_VERSION = 1;
+export const INGEST_PARSER_VERSION = 2;
 export const INGEST_MAX_ATTEMPTS = 5;
 /** Delay after failure n (1-based), spec §2.5. */
 export const INGEST_BACKOFF_MS: readonly number[] = [60_000, 300_000, 1_800_000, 7_200_000];

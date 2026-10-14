@@ -60,6 +60,10 @@ describe('mapStatusToSnapshot (slice 3 design §1.3)', () => {
     const pair = mapStatusToSnapshot({ run: { id: 'r', status: 'completed' }, postRun: { finish: { result: 'escalated', escalationReason: `${'y'.repeat(1_999)}\u{1F600}` } } });
     expect(pair.escalationReason).toBe('y'.repeat(1_999));
   });
+  test('US-002 AC-13: resultPrUrl falls back to the workflow url when there is no finish', () => {
+    const snap = mapStatusToSnapshot({ run: { id: 'r', status: 'completed' }, workflow: { step: 'done', outcome: 'ready', url: 'https://github.com/o/r/pull/1' } });
+    expect(snap.resultPrUrl).toBe('https://github.com/o/r/pull/1');
+  });
 });
 
 describe('formatCost', () => {

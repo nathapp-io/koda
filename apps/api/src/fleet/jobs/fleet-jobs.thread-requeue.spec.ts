@@ -14,22 +14,37 @@ describe('fleet jobs service requeue refuses a THREAD job (S5a)', () => {
     costSpentUsd: '0', costCarriedUsd: '0', firstStartedAt: null, cancelReason: null, scheduleId: null,
     coalescedCount: 0, scheduleCountedAt: null, lastHeartbeatAt: null, finishResult: null, escalationReason: null,
     exitCode: null, resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null,
-    stories: null, storiesTruncated: false, postRun: null, configResult: null, eventSeq: 0, ackedRunnerSeq: 0, attributedAt: null, updatedAt: now,
+    stories: null, storiesTruncated: false, postRun: null, workflow: null, configResult: null, eventSeq: 0, ackedRunnerSeq: 0, attributedAt: null, updatedAt: now,
     ...over,
   }) as FleetJobRecord;
 
   const build = (current: FleetJobRecord) => {
-    const repo = { lockById: vi.fn().mockResolvedValue(current), withdrawPendingCommands: vi.fn() };
+    const repo = { lockById: vi.fn().mockResolvedValue(current), withdrawPendingCommands: vi.fn(), findById: vi.fn().mockResolvedValue(current) };
     const transitions = { apply: vi.fn() };
     const budgets = { assertNotPaused: vi.fn() };
     const placement = { placeJob: vi.fn() };
     const txManager = { run: vi.fn((fn: () => Promise<unknown>) => fn()) };
     const service = new FleetJobsService(
-      repo as never, placement as never, {} as never, {} as never, transitions as never, {} as never,
-      budgets as never, txManager as never, { countPendingByJob: vi.fn() } as never, {} as never, {} as never, { findByJobId: vi.fn() } as never,
+      repo as never, placement as never, {} as never, { publish: vi.fn() } as never, transitions as never, {} as never,
+      budgets as never, txManager as never, { countPendingByJob: vi.fn().mockResolvedValue(new Map()) } as never, { forJob: vi.fn().mockResolvedValue([]) } as never, {} as never, { findByJobId: vi.fn() } as never,
     );
     return { service, repo, transitions, budgets, placement };
   };
+
+  it('AC-14 resets workflow while requeueing a failed RUN job', async () => {
+    const workflow = { runId: 'run-1', outcome: 'draft' as const, workflowPassed: false, reasons: [], openItems: [] };
+    const failed = job({ command: 'RUN', state: 'FAILED', workflow });
+    const { service, repo, transitions, placement } = build(failed);
+    vi.mocked(repo.findById).mockResolvedValue({ ...failed, state: 'QUEUED', workflow: null });
+    vi.mocked(transitions.apply).mockImplementation(async (input: never) => {
+      const args = input as unknown as { job: FleetJobRecord; extra: Partial<FleetJobRecord> };
+      return { job: { ...args.job, ...args.extra, state: 'QUEUED' } as FleetJobRecord, live: {} as never };
+    });
+    vi.mocked(placement.placeJob).mockResolvedValue({ assigned: false, runnerId: null, misfits: [] } as never);
+    const result = await service.requeue('u', 'p', 'jt');
+    expect(result.job.state).toBe('QUEUED');
+    expect(transitions.apply).toHaveBeenCalledWith(expect.objectContaining({ extra: expect.objectContaining({ workflow: null }) }));
+  });
 
   it('answers 409 fleet.jobState for a CRASHED THREAD job and changes nothing', async () => {
     const { service, repo, transitions, budgets, placement } = build(job({ state: 'CRASHED' }));

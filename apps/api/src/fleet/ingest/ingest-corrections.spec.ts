@@ -1,13 +1,14 @@
-import { computeCorrection, ESCALATED_FROM_AUDIT, NOTHING_PUSHED } from './ingest-corrections';
+import { computeCorrection, ESCALATED_FROM_AUDIT, ESCALATED_FROM_WORKFLOW, NOTHING_PUSHED } from './ingest-corrections';
 import type { CorrectionInput } from './ingest-corrections';
 import type { FinishInfo } from './parsers/finish.parser';
 
+const draftWorkflow = { runId: 'fab5b9af-d3a3-41f2-91ed-62372a733c03', outcome: 'draft' as const, workflowPassed: true, reasons: ['CI failed: test'], openItems: [] };
 const job = (over: Partial<CorrectionInput['job']> = {}): CorrectionInput['job'] => ({
   state: 'COMPLETED', command: 'RUN', leaseEpoch: 1, costSpentUsd: '0.0745', stateReason: null, finishResult: null,
-  escalationReason: null, resultPrUrl: null, resultBranch: null, resultSha: null, ...over,
+  escalationReason: null, resultPrUrl: null, resultBranch: null, resultSha: null, workflow: null, ...over,
 });
 const finish = (over = {}): FinishInfo => ({ status: 'escalated', escalationReason: 'why', prUrl: 'https://x/pull/1', branch: 'feat/a', headSha: 'abc', ...over });
-const input = (over: Partial<CorrectionInput> = {}): CorrectionInput => ({ job: job(), leaseEpoch: 1, ledgerCostUsd: '0.15730000', runStatus: 'completed', finish: null, ...over });
+const input = (over: Partial<CorrectionInput> = {}): CorrectionInput => ({ job: job(), leaseEpoch: 1, ledgerCostUsd: '0.15730000', runStatus: 'completed', finish: null, workflow: null, workflowOutcome: null, workflowUrl: null, ...over });
 
 describe('computeCorrection (spec §3)', () => {
   it('raises cost to the rounded ledger total (#203, nax#2348)', () => {
@@ -65,6 +66,80 @@ describe('computeCorrection (spec §3)', () => {
 
   it('changes nothing on the job for an earlier attempt (D367, Review Focus 2)', () => {
     const c = computeCorrection(input({ job: job({ leaseEpoch: 2 }), leaseEpoch: 1, finish: finish() }));
-    expect(c).toEqual({ patch: {}, costRaised: false, escalated: false, liveCostUsd: null });
+    expect(c).toEqual({ patch: {}, costRaised: false, escalated: false, escalatedFrom: null, liveCostUsd: null });
+  });
+
+  it('AC-4 escalates a COMPLETED RUN whose workflow outcome is draft', () => {
+    const c = computeCorrection(input({ workflow: draftWorkflow, workflowOutcome: 'draft', workflowUrl: 'https://github.com/o/r/pull/5' }));
+    expect(c.patch).toMatchObject({ state: 'ESCALATED', stateReason: ESCALATED_FROM_WORKFLOW });
+    expect(ESCALATED_FROM_WORKFLOW).toBe('workflow draft (from status)');
+    expect(c.escalated).toBe(true);
+    expect(c.escalatedFrom).toBe('workflow');
+  });
+
+  it('AC-5 leaves an ESCALATED RUN alone for a draft outcome', () => {
+    const c = computeCorrection(input({ job: job({ state: 'ESCALATED' }), workflow: draftWorkflow, workflowOutcome: 'draft', workflowUrl: 'https://github.com/o/r/pull/5' }));
+    expect(c.patch.state).toBeUndefined();
+    expect(c.escalated).toBe(false);
+    expect(c.escalatedFrom).toBeNull();
+  });
+
+  it('AC-6 fills workflow when the job has none', () => {
+    const c = computeCorrection(input({ workflow: draftWorkflow, workflowOutcome: 'ready', workflowUrl: null }));
+    expect(c.patch.workflow).toEqual(draftWorkflow);
+  });
+
+  it('AC-7 never overwrites an existing workflow', () => {
+    const c = computeCorrection(input({ job: job({ workflow: draftWorkflow }), workflow: draftWorkflow, workflowOutcome: 'ready', workflowUrl: null }));
+    expect(c.patch.workflow).toBeUndefined();
+  });
+
+  it('AC-8 fills resultPrUrl from the workflow url', () => {
+    const c = computeCorrection(input({ workflowOutcome: 'ready', workflowUrl: 'https://github.com/o/r/pull/3' }));
+    expect(c.patch.resultPrUrl).toBe('https://github.com/o/r/pull/3');
+  });
+
+  it('AC-9 never marks nothing-pushed when a workflow outcome is present', () => {
+    const c = computeCorrection(input({ job: job({ costSpentUsd: '0.1573' }), ledgerCostUsd: '0.1573', workflowOutcome: 'ready', workflow: draftWorkflow }));
+    expect(c.patch.stateReason).toBeUndefined();
+  });
+
+  it('AC-10 ignores a bundle from an older lease epoch even with a draft outcome', () => {
+    const c = computeCorrection(input({ job: job({ leaseEpoch: 2 }), leaseEpoch: 1, workflow: draftWorkflow, workflowOutcome: 'draft', workflowUrl: 'https://github.com/o/r/pull/5' }));
+    expect(c.patch).toEqual({});
+  });
+
+  it('AC-11 leaves a PLAN job alone for a draft outcome', () => {
+    const c = computeCorrection(input({ job: job({ command: 'PLAN' }), workflow: draftWorkflow, workflowOutcome: 'draft', workflowUrl: 'https://github.com/o/r/pull/5' }));
+    expect(c.patch.state).toBeUndefined();
+    expect(c.patch.workflow).toBeUndefined();
+  });
+
+  it('AC-12 reports finish-audit when the finish record escalates without workflow inputs', () => {
+    const c = computeCorrection(input({ finish: finish() }));
+    expect(c.escalatedFrom).toBe('finish-audit');
+  });
+
+  it('gives a present ready workflow precedence over escalated finish fields and PR url', () => {
+    const c = computeCorrection(input({
+      finish: finish(), workflow: { ...draftWorkflow, outcome: 'ready' }, workflowOutcome: 'ready',
+      workflowUrl: 'https://github.com/o/r/pull/workflow',
+    }));
+    expect(c.patch).not.toHaveProperty('state');
+    expect(c.patch).not.toHaveProperty('finishResult');
+    expect(c.patch).not.toHaveProperty('escalationReason');
+    expect(c.patch).toMatchObject({ resultPrUrl: 'https://github.com/o/r/pull/workflow' });
+    expect(c.escalated).toBe(false);
+    expect(c.escalatedFrom).toBeNull();
+  });
+
+  it('keeps workflow draft escalation rather than applying finish-audit correction', () => {
+    const c = computeCorrection(input({
+      finish: finish(), workflow: draftWorkflow, workflowOutcome: 'draft',
+      workflowUrl: 'https://github.com/o/r/pull/workflow',
+    }));
+    expect(c.patch).toMatchObject({ state: 'ESCALATED', stateReason: ESCALATED_FROM_WORKFLOW, resultPrUrl: 'https://github.com/o/r/pull/workflow' });
+    expect(c.patch.finishResult).toBeUndefined();
+    expect(c.escalatedFrom).toBe('workflow');
   });
 });
