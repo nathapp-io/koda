@@ -18,7 +18,7 @@ import {
   visibleTimelineEvents,
   wipPushStatus,
 } from '~/lib/fleet-jobs'
-import type { FleetJobDto, FleetJobEventDto } from '~/lib/fleet-types'
+import type { ConfigJobOutcomeDto, FleetJobConfigEditDto, FleetJobDto, FleetJobEventDto } from '~/lib/fleet-types'
 
 const job = (over: Partial<FleetJobDto> = {}): FleetJobDto => ({
   id: 'j1', projectId: 'p1', repoId: 'r1', ref: 'main', command: 'RUN', feature: 'f', planFrom: null, profiles: [],
@@ -67,6 +67,39 @@ describe('permissions', () => {
     expect(canRequeueJob(job({ state: 'ESCALATED' }), dev)).toBe(false)
     expect(canRequeueJob(job({ state: 'COMPLETED' }), dev)).toBe(false)
     expect(canRequeueJob(job({ state: 'FAILED' }), requester)).toBe(false)
+  })
+
+  describe('requeue of config edits (US-004 R1)', () => {
+    const configEdit = (mode: FleetJobConfigEditDto['mode'], outcome: ConfigJobOutcomeDto | null): FleetJobConfigEditDto => ({
+      mode,
+      files: [],
+      prTitle: null,
+      result: outcome === null ? null : { outcome },
+    })
+
+    test('an edit whose result is a conflict cannot be requeued (AC-1)', () => {
+      expect(canRequeueJob(job({ state: 'FAILED', configEdit: configEdit('edit', 'conflict') }), dev)).toBe(false)
+    })
+
+    test('an edit whose result is invalid cannot be requeued (AC-2)', () => {
+      expect(canRequeueJob(job({ state: 'FAILED', configEdit: configEdit('edit', 'invalid') }), dev)).toBe(false)
+    })
+
+    test('an edit that failed to push can still be requeued (AC-3)', () => {
+      expect(canRequeueJob(job({ state: 'FAILED', configEdit: configEdit('edit', 'push_failed') }), dev)).toBe(true)
+    })
+
+    test('a drift job keeps Requeue even when its result is invalid (AC-4)', () => {
+      expect(canRequeueJob(job({ state: 'FAILED', configEdit: configEdit('drift', 'invalid') }), dev)).toBe(true)
+    })
+
+    test('a job without a config edit keeps Requeue (AC-5)', () => {
+      expect(canRequeueJob(job({ state: 'FAILED', configEdit: null }), dev)).toBe(true)
+    })
+
+    test('the config restriction does not widen the permission rule: a non-worker still cannot requeue', () => {
+      expect(canRequeueJob(job({ state: 'FAILED', configEdit: configEdit('edit', 'push_failed') }), requester)).toBe(false)
+    })
   })
 })
 

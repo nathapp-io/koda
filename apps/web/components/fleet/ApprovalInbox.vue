@@ -185,6 +185,7 @@ async function loadDetail(id: string): Promise<void> {
     const fetched = await api.get(id)
     if (expandedId.value !== id) return
     detail.value = fetched
+    noteDelivery(fetched)
     detailVersion.value += 1
   } catch (err: unknown) {
     if (expandedId.value !== id) return
@@ -207,16 +208,28 @@ function statusChanged(): boolean {
   return open.status === 'pending' && tab.value === 'pending' && !api.hasNext.value
 }
 
-/** D295: acks have no live event, so a decided ask still waiting for one is re-fetched on reload, for 10 minutes at most. */
+/**
+ * D295: acks have no live event, so a decided ask still waiting for one is re-fetched on reload, for 10 minutes at most.
+ * US-004 R2: the window starts when this browser first sees the open ask waiting, on the browser clock only; decidedAt
+ * is never read, so client/server skew cannot widen or narrow it.
+ */
 const DELIVERY_WATCH_MS = 600_000
+/** The one watch record: the approval being watched and when this browser first saw it waiting. */
+let deliveryWatch: { id: string; startedAt: number } | null = null
+
+/** Called at every assignment of `detail`. A waiting detail with no record, or one naming another id, starts a new window. */
+function noteDelivery(open: FleetApprovalDto | null): void {
+  if (open === null || deliveryView(open)?.state !== 'waiting') return
+  if (deliveryWatch?.id === open.id) return
+  deliveryWatch = { id: open.id, startedAt: Date.now() }
+}
+
 const awaitingDelivery = (): boolean => {
   const open = detail.value
   if (open === null || deliveryView(open)?.state !== 'waiting') return false
-  const decidedAt = Date.parse(open.decidedAt ?? '')
-  if (Number.isNaN(decidedAt)) return true
-  const elapsed = Date.now() - decidedAt
-  // Stop watching once the window has passed; a negative elapsed (a client clock behind the server) counts as past it.
-  return elapsed >= 0 && elapsed < DELIVERY_WATCH_MS
+  noteDelivery(open)
+  if (deliveryWatch === null) return false
+  return Date.now() - deliveryWatch.startedAt < DELIVERY_WATCH_MS
 }
 
 async function reload(): Promise<void> {
@@ -264,7 +277,10 @@ async function onDecide(body: DecideApprovalBody): Promise<void> {
   deciding.value = true
   try {
     const decided = await api.decide(id, body)
-    if (expandedId.value === id) detail.value = decided
+    if (expandedId.value === id) {
+      detail.value = decided
+      noteDelivery(decided)
+    }
     toast.success(t(`fleet.approvals.toast.${body.decision}`))
     const failed = (requeueResults(decided) ?? []).filter((r) => !r.ok).length
     if (failed > 0) toast.error(t('fleet.approvals.toast.requeueFailed', { count: failed }))
