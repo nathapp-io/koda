@@ -5,6 +5,7 @@ import type { AssignPayload, ConfigEditPayload } from '@nathapp/fleet-protocol';
 import type { ConfigJobContext } from '../../src/executor/job-executor';
 import { HostExecutor } from '../../src/executor/host-executor';
 import { createGit } from '../../src/executor/git';
+import type { ProcessInfo } from '../../src/executor/pid-registry';
 import { Journal } from '../../src/journal/journal';
 import type { JobRow } from '../../src/journal/types';
 import { createMemoryLogger } from '../../src/logger';
@@ -34,7 +35,10 @@ afterAll(async () => {
   await tmp.cleanup();
 });
 
-async function world(command: 'CONFIG_EDIT' | 'CONFIG_DRIFT', files: Record<string, string> = SEED) {
+/** The process lookups for a world: built from its clone directory, so a fake can report the clone path in argv. */
+type ProcessInfoFor = (repoDir: string) => ProcessInfo;
+
+async function world(command: 'CONFIG_EDIT' | 'CONFIG_DRIFT', files: Record<string, string> = SEED, processInfo?: ProcessInfoFor) {
   const base = await tmp.make('cfg-host');
   const origin = await makeOrigin(base, 'origin', { files });
   const workspaceRoot = join(base, 'ws');
@@ -44,6 +48,7 @@ async function world(command: 'CONFIG_EDIT' | 'CONFIG_DRIFT', files: Record<stri
   const ex = new HostExecutor({
     config: { workspaceRoot, naxCommand: ['bun', FAKE], naxHome: join(base, 'naxhome') }, git: createGit(), log: createMemoryLogger(),
     nowMs: () => Date.now(), sleep: async () => undefined, credentials: NO_CREDENTIALS, approvals: NO_APPROVALS,
+    ...(processInfo ? { processInfo: processInfo(join(workspaceRoot, 'acme', 'app')) } : {}),
   });
   const repoDir = join(workspaceRoot, 'acme', 'app');
   const blob = (path: string) => sh(origin.dir, 'rev-parse', `main:${path}`);
@@ -155,15 +160,17 @@ describe('HostExecutor config jobs (S3 §5)', () => {
     expect(await w.ex.prepareConfigJob(row)).toEqual({ ok: false, reason: 'checkout: default branch not found' });
   });
   test('matchesProcess (D486): the clone path or the job branch in argv', async () => {
-    const w = await world('CONFIG_EDIT');
+    // The injected lookup reports the clone path in the config job's argv for its pid; no `ps` is spawned.
+    const pids: number[] = [];
+    const w = await world('CONFIG_EDIT', SEED, (repoDir) => ({
+      start: async () => null,
+      command: async (pid) => { pids.push(pid); return `sh -c sleep 30 ${repoDir}`; },
+    }));
     await w.ex.prepareConfigJob(w.row);
-    const proc = Bun.spawn(['sh', '-c', 'sleep 30', w.repoDir], { stdout: 'ignore', stderr: 'ignore' });
-    try {
-      expect(await w.ex.matchesProcess({ ...w.row, pid: proc.pid, pgid: proc.pid })).toBe(true);
-      expect(await w.ex.matchesProcess({ ...w.row, jobId: 'other', jobDir: w.row.jobDir, pid: proc.pid, pgid: proc.pid, assign: { ...w.row.assign, repo: { ...w.row.assign.repo, name: 'other' } } })).toBe(false);
-      expect(await w.ex.matchesProcess({ ...w.row, pid: null })).toBe(false);
-    } finally {
-      proc.kill('SIGKILL');
-    }
+    const pid = 4242;
+    expect(await w.ex.matchesProcess({ ...w.row, pid, pgid: pid })).toBe(true);
+    expect(await w.ex.matchesProcess({ ...w.row, jobId: 'other', jobDir: w.row.jobDir, pid, pgid: pid, assign: { ...w.row.assign, repo: { ...w.row.assign.repo, name: 'other' } } })).toBe(false);
+    expect(await w.ex.matchesProcess({ ...w.row, pid: null })).toBe(false);
+    expect(pids).toEqual([pid, pid]);
   });
 });
