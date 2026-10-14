@@ -1,4 +1,3 @@
-<!-- spec-writing: completed-through-phase-5 -->
 # SPEC: Fleet S5a-C3 — Thread Handoff Web (Action Bar, Stale Banner, Commit Markers, PLAN/RUN Cards)
 
 ## Summary
@@ -34,7 +33,8 @@ only has unit and integration coverage.
   are not shown.
 - **C3-R2 (action rules):** the action bar is shown only to the thread creator, only when the thread is not archived
   and threads are enabled. Each button is disabled with a visible reason, following the rules in "Action rules" below,
-  which mirror the API's refusals plus one web-only rule: Run is also disabled while a THREAD job is active (symmetric with Plan). Discard is
+  which mirror the API's refusals. The API refuses Plan and Run with `threads.busy` while any job of the thread is
+  active; the web disables both while a THREAD job is active (`sessionActive`). Discard is
   offered only in the stale banner, not in the action bar.
 - **C3-R3 (RUN outcome):** the RUN card reads `workflow`, `resultPrUrl`, `costSpentUsd` and `escalationReason` from the
   job detail (`GET /projects/:slug/fleet/jobs/:id`). A failed detail fetch degrades the card to the state in
@@ -123,6 +123,7 @@ Changed by this feature — the baseline exists only to locate the code; impleme
   it renders `buildThreadTimeline(messages, thread, jobs)` (US-004).
 - `apps/web/pages/[project]/threads/[id].vue` — gains `ThreadActionBar` and `ThreadStaleBanner` (US-003), the
   `useThreadHandoffJobs` loader, the `fleet_job` subscription and the timeline's `jobs` / `slug` (US-005).
+- `apps/web/tests/pages/threads-detail-handoff-page.spec.ts` — created by US-003 for its page ACs; once the page calls `useThreadHandoffJobs` and `useProjectEvents`, its mounts supply both through `globals`, and it gains the US-005 page tests (the `onFleetJob` / `onResync` handlers and the RUN card from the loader's jobs); the US-003 assertions stay as they are.
 - `apps/web/tests/helpers/mount-sfc.ts` — `NUXT_AUTO_IMPORTS` gains `'useThreadHandoffJobs'` so page tests can supply
   it through `globals` (US-005).
 - `apps/web/tests/e2e/fixtures/scripted-runner.ts` — `ScriptedRunner.enroll` merges `threadWrite: true` into the
@@ -229,7 +230,8 @@ Components in `components/fleet/threads/`:
   `publish` / `plan` / `run` / `discard` to the matching controller methods through the existing `runAction` (a
   `{ ok: false, error }` result is toasted with `extractApiError(error)`).
 - Test harness: component tests register `FleetTokenListInput` with `loadSfc` in `components`, and the real
-  `NativeSelect` through `mountSfc`'s `fleetComponents: ['FleetNativeSelect']` (the `uiStubs` select is inert).
+  `NativeSelect` through `mountSfc`'s `fleetComponents: ['FleetNativeSelect']` (the `uiStubs` select is inert); the dialog primitives come from `uiStubs`, which render their content when `open` is
+  true.
 
 ### Timeline markers and job cards (US-004)
 
@@ -462,6 +464,7 @@ US-003 to US-005 each edit `pages/[project]/threads/[id].vue` or `ThreadTimeline
 - `apps/web/tests/components/thread-action-bar.spec.ts`
 - `apps/web/tests/components/thread-stale-banner.spec.ts`
 - `apps/web/tests/i18n/thread-handoff-keys.spec.ts`
+- `apps/web/tests/pages/threads-detail-handoff-page.spec.ts`
 
 **US-004**
 
@@ -470,6 +473,7 @@ US-003 to US-005 each edit `pages/[project]/threads/[id].vue` or `ThreadTimeline
 - `apps/web/components/fleet/threads/ThreadJobCard.vue`
 - `apps/web/tests/lib/thread-timeline.spec.ts`
 - `apps/web/tests/components/thread-job-card.spec.ts`
+- `apps/web/tests/components/thread-write-marker.spec.ts`
 - `apps/web/tests/i18n/thread-handoff-marker-keys.spec.ts`
 
 **US-005**
@@ -477,7 +481,6 @@ US-003 to US-005 each edit `pages/[project]/threads/[id].vue` or `ThreadTimeline
 - `apps/web/lib/thread-handoff-jobs.ts`
 - `apps/web/composables/useThreadHandoffJobs.ts`
 - `apps/web/tests/lib/thread-handoff-jobs.spec.ts`
-- `apps/web/tests/pages/threads-detail-handoff-page.spec.ts`
 - `apps/web/tests/composables/useThreadHandoffJobs.spec.ts`
 
 ### Modifies
@@ -485,11 +488,11 @@ US-003 to US-005 each edit `pages/[project]/threads/[id].vue` or `ThreadTimeline
 **US-003**
 
 None. The two existing page tests register no `ThreadActionBar` or `ThreadStaleBanner`, so those render as
-unresolved elements and read no C2 field; the page wiring is tested in the new `threads-detail-handoff-page.spec.ts`.
+unresolved elements and read no C2 field; the page wiring is tested in `threads-detail-handoff-page.spec.ts`, which this story creates.
 
 **US-004**
 
-- `apps/web/tests/components/thread-timeline.spec.ts` — its `threadDetail()` fixture lacks `lastWrite` and `handoff`; once `ThreadTimeline` builds its entries with `buildThreadTimeline`, which reads `thread.handoff.plan`, the fixture gains `writtenPaths: []`, `publishedSha: null`, `specPublished: false`, `lastWrite: null` and `handoff: { plan: null, run: null }`, and the existing message-order assertions stay as they are.
+- `apps/web/tests/components/thread-timeline.spec.ts` — its `threadDetail()` fixture lacks `lastWrite` and `handoff`; once `ThreadTimeline` builds its entries with `buildThreadTimeline`, which reads `thread.handoff.plan`, the fixture gains `writtenPaths: []`, `publishedSha: null`, `specPublished: false`, `lastWrite: null` and `handoff: { plan: null, run: null }`, and the existing message-order assertions stay as they are; the new US-004 timeline test goes in its own `describe` block so its AC number does not collide with the file's US-006 names.
 - `apps/web/tests/pages/threads-detail-page.spec.ts` — it mounts the real `ThreadTimeline`, which now reads `thread.handoff.plan` through `buildThreadTimeline`; its `threadDetail()` fixture gains `writtenPaths: []`, `publishedSha: null`, `specPublished: false`, `lastWrite: null` and `handoff: { plan: null, run: null }`, and the existing assertions stay as they are.
 
 **US-005**
