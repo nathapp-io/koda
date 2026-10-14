@@ -57,11 +57,11 @@ export class GitHubAppClient {
     }
   }
 
-  /** Repo-scoped installation token (spec §7.1): contents + pull_requests write, metadata read. */
+  /** Repo-scoped installation token (spec §7.1): contents + pull_requests write, metadata read; checks + statuses read so nax can see CI (#276). */
   async mintInstallationToken(installationId: bigint, repoName: string): Promise<{ token: string; expiresAt: Date }> {
     const minted = await this.http.request('POST', `${this.api}/app/installations/${installationId.toString()}/access_tokens`, this.headers(this.createAppJwt()), {
       repositories: [repoName],
-      permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' },
+      permissions: { contents: 'write', pull_requests: 'write', metadata: 'read', checks: 'read', statuses: 'read' },
     });
     if (minted.status === 404) throw new RepoCheckException('app_not_installed');
     if (minted.status === 422 || minted.status === 403) throw new RepoCheckException('app_permissions_insufficient');
