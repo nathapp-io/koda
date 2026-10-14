@@ -34,7 +34,7 @@ only has unit and integration coverage.
   are not shown.
 - **C3-R2 (action rules):** the action bar is shown only to the thread creator, only when the thread is not archived
   and threads are enabled. Each button is disabled with a visible reason, following the rules in "Action rules" below,
-  which mirror the API's refusals. Run is also disabled while a THREAD job is active (symmetric with Plan). Discard is
+  which mirror the API's refusals plus one web-only rule: Run is also disabled while a THREAD job is active (symmetric with Plan). Discard is
   offered only in the stale banner, not in the action bar.
 - **C3-R3 (RUN outcome):** the RUN card reads `workflow`, `resultPrUrl`, `costSpentUsd` and `escalationReason` from the
   job detail (`GET /projects/:slug/fleet/jobs/:id`). A failed detail fetch degrades the card to the state in
@@ -54,7 +54,8 @@ Design decisions recorded with this spec:
 - **C3-D3:** the marker and card texts live under `fleet.threads.handoff.*` in `en.json` and `zh.json`. The existing
   `tests/i18n/fleet-locale-parity.spec.ts` checks the `fleet` tree's en/zh parity and bans `|` and `@` in every
   `fleet` message, so no new text may contain either (no vue-i18n plural forms). The disabled reasons and marker
-  kinds render through dynamic keys, so `used-keys-exist.spec.ts` cannot see them; new parity tests pin those key sets.
+  kinds render through dynamic keys, so `used-keys-exist.spec.ts` cannot see them; `tests/i18n/thread-handoff-keys.spec.ts`
+  (US-003) and `tests/i18n/thread-handoff-marker-keys.spec.ts` (US-004) pin those key sets.
 - **C3-D4:** money stays a string shown with `usd()` (web context A7). The Plan/Run dialogs send `maxCostUsd` as a
   number, as the dispatch form does.
 - **C3-D5:** the job page does not link back to the thread, and the fleet jobs list stays unchanged.
@@ -215,7 +216,7 @@ Components in `components/fleet/threads/`:
   `fleet.threads.handoff.planDialog.title` / `runDialog.title`). It is a vee-validate form over
   `buildThreadHandoffSchema(t)` with initial values `THREAD_HANDOFF_DEFAULTS`: profiles (`FleetTokenListInput`,
   `testId` `thread-handoff-profiles`), max cost (`thread-handoff-max-cost`) and, for `RUN` only, bash mode
-  (`NativeSelect`, `data-testid="thread-handoff-bash-mode"`, labels `fleet.bash.mode.*`). A valid submit
+  (`NativeSelect` with the prop `testid="thread-handoff-bash-mode"`, labels `fleet.bash.mode.*`). A valid submit
   (`thread-handoff-submit`) emits `submit(toThreadHandoffBody(values, command))`; the bar re-emits it as `plan` or
   `run` and closes the dialog.
 - `ThreadStaleBanner` (`data-testid="thread-stale-banner"`) renders only when `showStaleBanner(thread)`: the title
@@ -227,6 +228,8 @@ Components in `components/fleet/threads/`:
 - The page renders `ThreadStaleBanner` and `ThreadActionBar` between `ThreadControls` and `ThreadTimeline`, and binds
   `publish` / `plan` / `run` / `discard` to the matching controller methods through the existing `runAction` (a
   `{ ok: false, error }` result is toasted with `extractApiError(error)`).
+- Test harness: component tests register `FleetTokenListInput` with `loadSfc` in `components`, and the real
+  `NativeSelect` through `mountSfc`'s `fleetComponents: ['FleetNativeSelect']` (the `uiStubs` select is inert).
 
 ### Timeline markers and job cards (US-004)
 
@@ -275,7 +278,7 @@ Components:
 - `ThreadWriteMarker` (`data-testid="thread-write-marker"`) renders `t(view.key, view.params)`, and, when
   `view.paths` is non-empty, a collapsible list of the paths (`thread-write-marker-path`) plus the ignored paths under
   `fleet.threads.handoff.markerIgnored`. Every value renders through `{{ }}` interpolation, never `v-html`.
-- `ThreadJobCard` (`data-testid="thread-job-card"`, `data-command` = the command) shows the title
+- `ThreadJobCard` (tests register `FleetJobStateBadge` with `loadSfc` in `components`; `data-testid="thread-job-card"`, `data-command` = the command) shows the title
   `fleet.threads.handoff.card.plan` or `card.run`, a `FleetJobStateBadge` of `job?.state ?? handoff.state`, the
   `handoff.stateReason` when non-null (`thread-job-card-reason`), `usd(job.costSpentUsd)` when `job` is non-null, and a
   link to `/<slug>/fleet/jobs/<handoff.jobId>` (`thread-job-card-link`, `fleet.threads.handoff.card.openJob`). A RUN
@@ -320,7 +323,7 @@ export function createHandoffJobs(deps: HandoffJobsDeps): HandoffJobsController
 
 ### E2E journeys (US-005, C3-R4)
 
-`tests/e2e/fleet-threads.e2e.spec.ts` gains three tests against the scripted v4 runner, each on its own thread and
+`tests/e2e/fleet-threads.e2e.spec.ts` gains four tests against the scripted v4 runner, each on its own thread and
 feature. They are verified with `bun run test:e2e -- fleet-threads` in `apps/web`; Playwright specs are not nax
 acceptance criteria.
 
@@ -329,7 +332,7 @@ acceptance criteria.
    streaming indicator disappears, the message shows its errored marker, and `thread-stop` is gone.
 2. **Idle close (#266):** after a completed turn, the runner uploads `session_closed { reason: 'idle' }` and reports
    `COMPLETED`. Without a reload, the session label leaves Live and `thread-end-session` is gone.
-3. **Handoff:** the runner enrolls with `threadWrite: true`. During a session it uploads `write_doc` lines for
+3. **Handoff:** the runner enrolls with `threadWrite: true`. During a session it uploads a `write_doc { path, bytes }` line for
    `.nax/features/<feature>/spec.md`; Publish becomes enabled and its dialog lists the path. Confirming delivers a
    `THREAD_PUBLISH` command; the runner uploads `published { sha, paths, ignored: [], specPresent: true }` and the
    write marker shows the short sha. After End session (the runner uploads `session_closed` and reports `COMPLETED`),
@@ -339,7 +342,7 @@ acceptance criteria.
    `ESCALATED`; the RUN card shows the Draft outcome without a reload.
 4. **Stale:** a session's `session_started` line carries `stale: true`; the banner shows, its Discard button is
    disabled with the `sessionActive` reason; after End session, Discard creates a DISCARD job; the runner uploads
-   `discarded { sha }` and completes it, and the banner is gone.
+   `discarded { tipSha }` and completes it, and the banner is gone.
 
 ### Failure Handling
 
@@ -369,11 +372,14 @@ acceptance criteria.
   without a dedicated acceptance criterion.
 - US-002 only: the schema's `profilesMax` failure, a non-number max cost and a max cost above 10000 follow the
   dispatch rules without a dedicated acceptance criterion.
-- US-003 only: the disabled state of `thread-action-publish` beside its reason, the banner's
+- US-003 only: the action bar's absence for an archived thread and for `sendRefusal` `disabled` (AC1 pins the
+  non-creator case of `showActionBar`), the page bindings of `run` and `discard` (they follow the `publish` and `plan`
+  bindings), the disabled state of `thread-action-publish` beside its reason, the banner's
   `fleet.threads.handoff.blocked.<reason>` text beside a disabled Discard, the stale banner's absence when `session.stale` is absent, a read-only member seeing the banner without
   a Discard button, the Run button's disabled reasons, and closing a dialog without emitting follow the Design without
   a dedicated acceptance criterion.
-- US-004 only: the job card's `thread-job-card-reason` line, the `discarded` and `discard_failed` marker views, the ESCALATED `needsYou` text, the PLAN card title,
+- US-004 only: a thread with no write result and no handoff yielding only message entries, the PR link's
+  `target="_blank"`, the job card's `thread-job-card-reason` line, the `discarded` and `discard_failed` marker views, the ESCALATED `needsYou` text, the PLAN card title,
   the cost text, the ignored-paths list and tie ordering between markers at one position follow the Design tables
   without a dedicated acceptance criterion.
 - US-005 only: `refreshJob` failure keeping the slot, and `sync` setting a slot to `null` for a null handoff entry
@@ -412,9 +418,9 @@ US-003 to US-005 each edit `pages/[project]/threads/[id].vue` or `ThreadTimeline
 
 **US-003**
 
-- `apps/web/components/fleet/threads/ThreadControls.vue` — dialog pattern
 - `apps/web/pages/[project]/threads/[id].vue` — `runAction` and the component layout
-- `apps/web/components/fleet/FleetTokenListInput.vue` — profiles input
+- `apps/web/i18n/locales/en.json` — gains `fleet.threads.handoff` (actions, blocked, dialogs, stale)
+- `apps/web/i18n/locales/zh.json` — the same keys in Chinese
 - `apps/web/lib/thread-handoff.ts` — created by US-001, gains `showActionBar` and `showStaleBanner` here
 - `apps/web/lib/thread-handoff-form.ts` — created by US-002
 
@@ -422,9 +428,9 @@ US-003 to US-005 each edit `pages/[project]/threads/[id].vue` or `ThreadTimeline
 
 - `apps/web/components/fleet/threads/ThreadTimeline.vue` — renders the timeline entries
 - `apps/web/components/fleet/FleetJobStateBadge.vue` — the state badge
-- `apps/web/components/fleet/FleetJobWorkflow.vue` — outcome key mapping to mirror
 - `apps/web/tests/components/thread-timeline.spec.ts` — mount pattern
-- `apps/web/lib/thread-types.ts` — extended by US-001
+- `apps/web/i18n/locales/en.json` — gains `fleet.threads.handoff.marker`, `markerIgnored` and `card`
+- `apps/web/i18n/locales/zh.json` — the same keys in Chinese
 
 **US-005**
 
@@ -455,6 +461,7 @@ US-003 to US-005 each edit `pages/[project]/threads/[id].vue` or `ThreadTimeline
 - `apps/web/components/fleet/threads/ThreadStaleBanner.vue`
 - `apps/web/tests/components/thread-action-bar.spec.ts`
 - `apps/web/tests/components/thread-stale-banner.spec.ts`
+- `apps/web/tests/i18n/thread-handoff-keys.spec.ts`
 
 **US-004**
 
@@ -463,6 +470,7 @@ US-003 to US-005 each edit `pages/[project]/threads/[id].vue` or `ThreadTimeline
 - `apps/web/components/fleet/threads/ThreadJobCard.vue`
 - `apps/web/tests/lib/thread-timeline.spec.ts`
 - `apps/web/tests/components/thread-job-card.spec.ts`
+- `apps/web/tests/i18n/thread-handoff-marker-keys.spec.ts`
 
 **US-005**
 
@@ -470,32 +478,38 @@ US-003 to US-005 each edit `pages/[project]/threads/[id].vue` or `ThreadTimeline
 - `apps/web/composables/useThreadHandoffJobs.ts`
 - `apps/web/tests/lib/thread-handoff-jobs.spec.ts`
 - `apps/web/tests/pages/threads-detail-handoff-page.spec.ts`
+- `apps/web/tests/composables/useThreadHandoffJobs.spec.ts`
 
 ### Modifies
 
 **US-003**
 
-- `apps/web/tests/pages/threads-detail-page.spec.ts` — its `threadDetail()` fixture builds a `ThreadDetailDto` without `writtenPaths`, `publishedSha`, `specPublished`, `lastWrite` and `handoff`; once the page renders `ThreadActionBar` and `ThreadStaleBanner`, which read those fields, the fixture gains `writtenPaths: []`, `publishedSha: null`, `specPublished: false`, `lastWrite: null` and `handoff: { plan: null, run: null }`, and the existing assertions stay as they are.
-- `apps/web/tests/pages/threads-detail-actions-page.spec.ts` — its `threadDetail()` fixture builds a `ThreadDetailDto` without the C2 fields; once the page renders `ThreadActionBar` and `ThreadStaleBanner`, the fixture gains `writtenPaths: []`, `publishedSha: null`, `specPublished: false`, `lastWrite: null` and `handoff: { plan: null, run: null }`, and the existing assertions stay as they are.
+None. The two existing page tests register no `ThreadActionBar` or `ThreadStaleBanner`, so those render as
+unresolved elements and read no C2 field; the page wiring is tested in the new `threads-detail-handoff-page.spec.ts`.
 
 **US-004**
 
-- `apps/web/tests/components/thread-timeline.spec.ts` — its `threadDetail()` fixture lacks `lastWrite` and `handoff`; once `ThreadTimeline` builds its entries with `buildThreadTimeline`, the fixture gains `writtenPaths: []`, `publishedSha: null`, `specPublished: false`, `lastWrite: null` and `handoff: { plan: null, run: null }`, and the existing message-order assertions stay as they are.
+- `apps/web/tests/components/thread-timeline.spec.ts` — its `threadDetail()` fixture lacks `lastWrite` and `handoff`; once `ThreadTimeline` builds its entries with `buildThreadTimeline`, which reads `thread.handoff.plan`, the fixture gains `writtenPaths: []`, `publishedSha: null`, `specPublished: false`, `lastWrite: null` and `handoff: { plan: null, run: null }`, and the existing message-order assertions stay as they are.
+- `apps/web/tests/pages/threads-detail-page.spec.ts` — it mounts the real `ThreadTimeline`, which now reads `thread.handoff.plan` through `buildThreadTimeline`; its `threadDetail()` fixture gains `writtenPaths: []`, `publishedSha: null`, `specPublished: false`, `lastWrite: null` and `handoff: { plan: null, run: null }`, and the existing assertions stay as they are.
 
 **US-005**
 
 - `apps/web/tests/pages/threads-detail-page.spec.ts` — the page now calls `useProjectEvents` and `useThreadHandoffJobs`, which the harness injects as undefined; the mount's `globals` gain `useProjectEvents: () => undefined` and a `useThreadHandoffJobs` stub returning `{ jobs: ref({ plan: null, run: null }), sync, refreshJob, isHandoffJob: () => false }`, and the existing assertions stay as they are.
 - `apps/web/tests/pages/threads-detail-actions-page.spec.ts` — the page now calls `useProjectEvents` and `useThreadHandoffJobs`, which the harness injects as undefined; the mount's `globals` gain `useProjectEvents: () => undefined` and the same `useThreadHandoffJobs` stub, and the existing assertions stay as they are.
+- `apps/web/tests/helpers/mount-sfc.ts` — `NUXT_AUTO_IMPORTS` gains `'useThreadHandoffJobs'`; without it the harness never binds a test's `useThreadHandoffJobs` global and every thread page mount throws; no existing behaviour changes.
+- `apps/web/tests/e2e/fixtures/scripted-runner.ts` — `ScriptedRunner.enroll` gains `opts.threadWrite`, which adds `threadWrite: true` to the thread capabilities; enrolments without it keep today's capabilities.
 - `apps/web/tests/e2e/fleet-threads.e2e.spec.ts` — gains the four journeys of "E2E journeys"; the existing create/send/Stop/read-only test stays as it is.
 
 ### Seams
 
 - US-001 → US-003: `handoffActionState` and `isHandoffBusy` are consumed by `ThreadActionBar` and
-  `ThreadStaleBanner`; US-003 AC4, AC5 and AC12 mount the real components over thread fixtures and assert the reason text or disabled state
-  text the real function produces.
+  `ThreadStaleBanner`; US-003 AC2, AC3 and AC10 mount the real components over thread fixtures and assert the reason
+  text or the disabled state the real function produces.
 - US-002 → US-003: `toThreadHandoffBody` and `THREAD_HANDOFF_DEFAULTS` are consumed by `ThreadHandoffDialog`; US-003
-  AC8 and AC9 assert the emitted body. The controller's `publish` is consumed by the page; US-003 AC15 drives the
-  page's `publish` binding.
+  AC6 and AC7 assert the emitted body. The controller's `publish` and `plan` are consumed by the page; US-003 AC14 and
+  AC15 drive the page's `plan` and `publish` bindings.
+- US-005 composable: `useThreadHandoffJobs`'s watch is the only link from the thread to the loader; US-005 AC15 drives
+  it with a real `thread` ref.
 - US-004 → US-005: `HandoffJobs` and the `ThreadTimeline` `jobs` prop are consumed by the page; US-005 AC14 asserts the
   page renders the RUN card from the loader's jobs.
 - US-002 → US-005: `reloadThread` is consumed by the page's `onFleetJob` handler; US-005 AC11 and AC12 drive that
@@ -568,34 +582,34 @@ US-003 to US-005 each edit `pages/[project]/threads/[id].vue` or `ThreadTimeline
 
 - AC-1 [unit]: `ThreadActionBar` mounted with `isCreator: false` over a thread with written paths renders no element
   with `data-testid="thread-action-bar"`.
-- AC-2 [unit]: `ThreadActionBar` mounted with `isCreator: true` over a thread whose `archivedAt` is set renders no
-  element with `data-testid="thread-action-bar"`.
-- AC-3 [unit]: `ThreadActionBar` mounted with `isCreator: true` over a thread whose `sendRefusal` is `disabled` renders
-  no element with `data-testid="thread-action-bar"`.
-- AC-4 [unit]: `ThreadActionBar` mounted with `isCreator: true` over a thread with `writtenPaths: []` renders
+- AC-2 [unit]: `ThreadActionBar` mounted with `isCreator: true` over a thread with `writtenPaths: []` renders
   `thread-action-publish-reason` with the text of `fleet.threads.handoff.blocked.nothingToPublish`.
-- AC-5 [unit]: `ThreadActionBar` mounted with `isCreator: true` over a thread with `specPublished: false` renders
+- AC-3 [unit]: `ThreadActionBar` mounted with `isCreator: true` over a thread with `specPublished: false` renders
   `thread-action-plan-reason` with the text of `fleet.threads.handoff.blocked.notPublished`.
-- AC-6 [unit]: clicking an enabled `thread-action-publish` over a thread with `writtenPaths: ['a.md', 'b.md']` renders
+- AC-4 [unit]: clicking an enabled `thread-action-publish` over a thread with `writtenPaths: ['a.md', 'b.md']` renders
   two `thread-publish-path` items with the texts `a.md` and `b.md`.
-- AC-7 [unit]: clicking `thread-publish-confirm` in the open publish dialog makes `ThreadActionBar` emit `publish`
+- AC-5 [unit]: clicking `thread-publish-confirm` in the open publish dialog makes `ThreadActionBar` emit `publish`
   exactly once.
-- AC-8 [unit]: opening the Plan dialog from an enabled `thread-action-plan` and clicking `thread-handoff-submit` with
+- AC-6 [unit]: opening the Plan dialog from an enabled `thread-action-plan` and clicking `thread-handoff-submit` with
   the default values makes `ThreadActionBar` emit `plan` with `{ maxCostUsd: 5 }`.
-- AC-9 [unit]: opening the Run dialog from an enabled `thread-action-run`, selecting `gated` in
+- AC-7 [unit]: opening the Run dialog from an enabled `thread-action-run`, selecting `gated` in
   `thread-handoff-bash-mode` and submitting makes `ThreadActionBar` emit `run` with
   `{ maxCostUsd: 5, bashMode: 'gated' }`.
-- AC-10 [unit]: `ThreadHandoffDialog` mounted open with `command: 'PLAN'` renders no element with
+- AC-8 [unit]: `ThreadHandoffDialog` mounted open with `command: 'PLAN'` renders no element with
   `data-testid="thread-handoff-bash-mode"`.
-- AC-11 [unit]: `ThreadStaleBanner` mounted over a thread whose `session.stale` is `true` renders an element with
+- AC-9 [unit]: `ThreadStaleBanner` mounted over a thread whose `session.stale` is `true` renders an element with
   `data-testid="thread-stale-banner"` containing the text of `fleet.threads.handoff.stale.title`.
-- AC-12 [unit]: `ThreadStaleBanner` mounted with `isCreator: true` over a stale thread with a non-null `activeJob`
+- AC-10 [unit]: `ThreadStaleBanner` mounted with `isCreator: true` over a stale thread with a non-null `activeJob`
   renders the `thread-stale-discard` button with the `disabled` attribute set.
-- AC-13 [unit]: `ThreadStaleBanner` mounted with `isCreator: true` over a stale thread with `activeJob: null` and an
+- AC-11 [unit]: `ThreadStaleBanner` mounted with `isCreator: true` over a stale thread with `activeJob: null` and an
   idle handoff emits `discard` exactly once after `thread-stale-discard` then `thread-discard-confirm` are clicked.
-- AC-14 [unit]: in both `en.json` and `zh.json`, the keys under `fleet.threads.handoff.blocked` are exactly
+- AC-12 [unit]: in both `en.json` and `zh.json`, the keys under `fleet.threads.handoff.blocked` are exactly
   `nothingToPublish`, `turnRunning`, `handoffBusy`, `notPublished`, `sessionActive`, `notPlanned` and
   `planNotCompleted`, each with a non-empty text.
+- AC-13 [unit]: `ThreadHandoffDialog` mounted open with `command: 'RUN'`, max cost set to `0` and
+  `thread-handoff-submit` clicked emits no `submit` event.
+- AC-14 [unit]: on the thread page mounted with a stubbed `useThread`, the action bar's `plan` emit with
+  `{ maxCostUsd: 5 }` calls the stubbed controller's `plan` with `{ maxCostUsd: 5 }`.
 - AC-15 [unit]: on the thread page mounted with a stubbed `useThread` whose `publish` resolves
   `{ ok: false, error: new ApiError(409, 'Runner offline') }`, the action bar's `publish` emit makes the toast recorder
   receive the error `Runner offline`.
@@ -611,18 +625,18 @@ US-003 to US-005 each edit `pages/[project]/threads/[id].vue` or `ThreadTimeline
   entry with `kind` `job`, `command` `RUN` and `job` `null`.
 - AC-4 [unit]: `buildThreadTimeline` of a thread whose `handoff.plan.jobId` is `p2` and `jobs.plan` with `id` `p1`
   returns the PLAN entry with `job` `null`.
-- AC-5 [unit]: `buildThreadTimeline` of two messages and a thread with `lastWrite: null` and `handoff:
-  { plan: null, run: null }` returns two entries, both of `kind` `message`, keyed by the message ids.
-- AC-6 [unit]: `writeMarkerView` of `{ kind: 'published', sha: 'abcdef1234567', paths: ['a.md', 'b.md'], ignored: [],
+- AC-5 [unit]: `writeMarkerView` of `{ kind: 'published', sha: 'abcdef1234567', paths: ['a.md', 'b.md'], ignored: [],
   ... }` returns `key` `fleet.threads.handoff.marker.published` and `params` `{ sha: 'abcdef1', count: 2 }`.
-- AC-7 [unit]: `writeMarkerView` of `{ kind: 'publish_failed', reason: 'branch_moved', ... }` returns `key`
+- AC-6 [unit]: `writeMarkerView` of `{ kind: 'publish_failed', reason: 'branch_moved', ... }` returns `key`
   `fleet.threads.handoff.marker.publishFailedBranchMoved`.
-- AC-8 [unit]: `writeMarkerView` of `{ kind: 'publish_failed', reason: 'repo_busy', ... }` returns `key`
+- AC-7 [unit]: `writeMarkerView` of `{ kind: 'publish_failed', reason: 'repo_busy', ... }` returns `key`
   `fleet.threads.handoff.marker.publishFailed` and `params` `{ reason: 'repo_busy' }`.
-- AC-9 [unit]: `ThreadJobCard` mounted with `command: 'RUN'` and a `job` whose `workflow.outcome` is `draft` renders
+- AC-8 [unit]: `ThreadJobCard` mounted with `command: 'RUN'` and a `job` whose `workflow.outcome` is `draft` renders
   `thread-job-card-outcome` with the text of `fleet.jobs.workflow.outcome.draft`.
-- AC-10 [unit]: `ThreadJobCard` mounted with `command: 'RUN'` and a `job` whose `resultPrUrl` is
+- AC-9 [unit]: `ThreadJobCard` mounted with `command: 'RUN'` and a `job` whose `resultPrUrl` is
   `https://github.com/acme/app/pull/9` renders `thread-job-card-pr` with that `href`.
+- AC-10 [unit]: `ThreadJobCard` mounted with `command: 'RUN'` and a non-null `resultPrUrl` renders
+  `thread-job-card-pr` with `rel` `noopener noreferrer`.
 - AC-11 [unit]: `ThreadJobCard` mounted with `job: null` and `handoff: { jobId: 'r1', state: 'FAILED', stateReason:
   'no prd.json produced' }` renders the text of `fleet.state.FAILED`.
 - AC-12 [unit]: `ThreadJobCard` mounted with `slug: 'web'` and `handoff.jobId` `r1` renders `thread-job-card-link`
@@ -630,8 +644,9 @@ US-003 to US-005 each edit `pages/[project]/threads/[id].vue` or `ThreadTimeline
 - AC-13 [unit]: `ThreadTimeline` mounted with two messages at `10:00` and `10:05` and a thread whose `lastWrite` is a
   `published` result at `10:02` renders the `thread-write-marker` element after the first `thread-message` and before
   the second in document order.
-- AC-14 [unit]: `ThreadWriteMarker` mounted with a `published` result whose `paths` are `['a.md']` renders one
-  `thread-write-marker-path` item with the text `a.md`.
+- AC-14 [unit]: `ThreadWriteMarker` mounted with a `published` result whose `paths` are `['<b>a.md</b>']` renders one
+  `thread-write-marker-path` item whose text content is the literal string `<b>a.md</b>` (interpolated, not parsed as
+  HTML).
 - AC-15 [unit]: in both `en.json` and `zh.json`, the keys under `fleet.threads.handoff.marker` are exactly
   `published`, `publishFailed`, `publishFailedBranchMoved`, `discarded` and `discardFailed`, each with a non-empty
   text.
@@ -663,6 +678,10 @@ US-003 to US-005 each edit `pages/[project]/threads/[id].vue` or `ThreadTimeline
 - AC-14 [unit]: the thread page mounted with a thread whose `handoff.run.jobId` is `r1` and a `useThreadHandoffJobs`
   stub whose `jobs.value.run` is a job `r1` with `workflow.outcome` `draft` renders `thread-job-card-outcome` with the
   text of `fleet.jobs.workflow.outcome.draft`.
+
+- AC-15 [unit]: `useThreadHandoffJobs('web', thread)` loaded with a stubbed `useApi` global, then `thread.value` set to
+  a detail whose `handoff.run` is `{ jobId: 'r1', state: 'RUNNING', stateReason: null }`, calls the stubbed `$api.get`
+  with `/projects/web/fleet/jobs/r1`.
 
 Verification note: the four Playwright journeys in "E2E journeys" run with `bun run test:e2e -- fleet-threads` in
 `apps/web` (needs the e2e Postgres on port 5433); they are not nax acceptance criteria.
