@@ -1,0 +1,455 @@
+{
+  "project": "koda",
+  "feature": "fleet-workflow-mode",
+  "branchName": "feat/fleet-workflow-mode",
+  "createdAt": "2026-10-14T00:00:00.000Z",
+  "updatedAt": "2026-10-14T04:14:58.200Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Runner reads the workflow block and result and judges a workflow RUN",
+      "description": "**Goal** — The runner parses the status.json `workflow` block and nax's `result.json`, judges a workflow RUN from the workflow outcome, and falls back to the workflow PR url for `resultPrUrl`.\n\n**Motivation** — runVerdict returns COMPLETED for `run.status === 'completed'` with no `postRun.finish`, but nax writes `run.status: \"completed\"` even when the workflow ends as a draft (nax#2508), so a draft run reads as COMPLETED and no human is told; `resultPrUrl` comes only from `postRun.finish.url`, so the job never gets nax's PR link.\n\n**Approach**\nRulings: R1 a `draft` outcome maps to ESCALATED (existing needs-a-human state and notification); `ready` -> COMPLETED; `local-only`, or a `workflow` block with no outcome -> FAILED. R2 koda adds no profile injection or toggle; it reads workflow output whenever nax produces it and keeps today's behaviour when it does not. D1: nax's status.json `run.id` (e.g. `run-cb319c9d-2026-10-13T15-08-43.285`) is NOT the workflow run id that names the `workflow/<id>/` directory (runtime UUID, e.g. `fab5b9af-d3a3-41f2-91ed-62372a733c03`). The runner detects a workflow run from the status.json `workflow` block, never from a path built from `naxRunId`, and locates `result.json` as the newest regular file `workflow/*/result.json` whose modification time is at or after the job row's `createdAt`. D4: the server keeps at most 500 characters of a runner state reason, so the runner clips the whole workflow reason, prefix included, to 500 characters.\n\nnax input `status.json` (present only in workflow mode):\n```json\n{ \"run\": { \"id\": \"run-cb319c9d-2026-10-13T15-08-43.285\", \"status\": \"completed\" },\n  \"workflow\": { \"step\": \"done\", \"stories\": { \"US-001\": { \"state\": \"complete\", \"round\": 1 } },\n                \"outcome\": \"draft\", \"url\": \"https://github.com/nathapp-io/koda/pull/269\" } }\n```\nnax input `result.json` (`schemaVersion: 1`); `verdict` is absent until the feature workflow publishes:\n```json\n{ \"schemaVersion\": 1, \"runId\": \"fab5b9af-d3a3-41f2-91ed-62372a733c03\", \"feature\": \"fleet-s5a-thread-handoff\",\n  \"stories\": {},\n  \"verdict\": { \"workflowPassed\": true, \"outcome\": \"draft\", \"reasons\": [\"CI failed: test\"], \"openItems\": [] } }\n```\n`FeatureOutcome` is `ready | draft | local-only`.\n\n`StatusView` (apps/runner/src/verdict/status-view.ts): baseline `{ run, progress?, cost?, current?, lastHeartbeat?, updatedAt?, postRun? }`, `parseStatusView` drops `workflow`. Target adds `readonly workflow?: WorkflowView`. `parseStatusView` sets it only when `raw.workflow` is an object with a string `step`; an `outcome` outside the three values is dropped (absent); `url` is kept only when it starts with `https://`.\n\n`runVerdict` (apps/runner/src/verdict/run-verdict.ts): baseline `runVerdict(input: { cancelRequested: boolean; status: StatusView | null }): Verdict`. Target adds optional `workflowReasons`. Rows in order: cancel -> CANCELLED; no status -> FAILED `no status.json`; **`status.workflow` present** -> the workflow table below; otherwise today's finish rows unchanged.\n\nWorkflow rows (reasons = `workflowReasons` joined with `; `; the whole reason, prefix included, is clipped to 500 characters):\n| `status.workflow` | Verdict state | Reason |\n|---|---|---|\n| `outcome: 'ready'` | COMPLETED | null |\n| `outcome: 'draft'` | ESCALATED | `workflow draft: <reasons>`, or `workflow draft` when there are no reasons |\n| `outcome: 'local-only'` | FAILED | `workflow local-only: <reasons>`, or `workflow local-only` |\n| no `outcome` | FAILED | `workflow ended at step <step>` |\n\n`run.status` and `postRun` are not consulted for a workflow run. The reason prefixes never start with the budget-stop text the web page parses (`budgetStopPolicyId`).\n\n`findWorkflowResult` lists `workflow/` with `readdir(..., { withFileTypes: true })` and keeps only real directories (a symlinked directory is skipped), checks each `result.json` with `lstat` (only a regular file of at most 1 MiB is read; a symlink is skipped), orders the candidates by mtime newest first, and returns the first that `parseWorkflowResult` accepts. nax writes `result.json` before the verdict exists, so a newer verdict-less file is passed over for an older one that has a verdict. Non-string reasons are dropped.\n\n`mapStatusToSnapshot` (apps/runner/src/watcher/status-snapshot.ts): baseline `resultPrUrl` = `status.postRun?.finish?.url`; target `status.postRun?.finish?.url ?? status.workflow?.url`.\n\n**Scope** — In: StatusView.workflow and parsing, workflow-result.ts, workflow rows of runVerdict, snapshot resultPrUrl fallback. Out: JobExecutor/HostExecutor/FakeExecutor methods and JobRun changes (US-002), the stash and bundle (US-003), any API/web work. PLAN jobs unchanged. Existing finish-row verdict tests stay unchanged.\n\n**Interface**\n```ts\n// apps/runner/src/verdict/status-view.ts\ninterface WorkflowView { readonly step: string; readonly outcome?: 'ready' | 'draft' | 'local-only'; readonly url?: string }\n// StatusView gains: readonly workflow?: WorkflowView\n\n// apps/runner/src/verdict/run-verdict.ts\nrunVerdict(input: { cancelRequested: boolean; status: StatusView | null; workflowReasons?: readonly string[] }): Verdict\n\n// apps/runner/src/verdict/workflow-result.ts (new)\nexport interface WorkflowResult {\n  readonly runId: string;\n  readonly outcome: 'ready' | 'draft' | 'local-only';\n  readonly reasons: readonly string[];   // at most 20, each at most 500 characters\n}\n/** null unless raw is a schemaVersion 1 result with a verdict whose outcome is one of the three values. */\nexport function parseWorkflowResult(raw: unknown): WorkflowResult | null;\n/** Newest-first over `<featureDir>/workflow/<id>/result.json` (real directories, regular files, at most 1 MiB, mtime >= sinceMs): the first that parses, with its run dir. */\nexport async function findWorkflowResult(featureDir: string, sinceMs: number): Promise<{ result: WorkflowResult; runDir: string } | null>;\n```",
+      "acceptanceCriteria": [
+        "parseStatusView of a status whose `workflow` is `{ step: \"done\", outcome: \"draft\", url: \"https://github.com/o/r/pull/1\" }` returns `workflow` equal to `{ step: \"done\", outcome: \"draft\", url: \"https://github.com/o/r/pull/1\" }`",
+        "parseStatusView of a status whose `workflow.outcome` is `\"failed\"` returns a `workflow` with `step` and no `outcome` key",
+        "parseStatusView of a status whose `workflow.url` is `\"http://x/pull/1\"` returns a `workflow` with no `url` key",
+        "parseStatusView of a status with no `workflow` key returns a view with no `workflow` key",
+        "runVerdict with `status.workflow.outcome` `\"ready\"` and `run.status` `\"completed\"` returns `{ state: \"COMPLETED\", reason: null }`",
+        "runVerdict with `status.workflow.outcome` `\"draft\"`, `run.status` `\"completed\"` and `workflowReasons` `[\"CI failed: test\", \"1 open finding\"]` returns `{ state: \"ESCALATED\", reason: \"workflow draft: CI failed: test; 1 open finding\" }`",
+        "runVerdict with `status.workflow.outcome` `\"draft\"` and no `workflowReasons` returns reason `\"workflow draft\"`",
+        "runVerdict with `status.workflow.outcome` `\"local-only\"` and `workflowReasons` `[\"push failed\"]` returns `{ state: \"FAILED\", reason: \"workflow local-only: push failed\" }`",
+        "runVerdict with `status.workflow` `{ step: \"final-gates\" }` (no outcome) returns `{ state: \"FAILED\", reason: \"workflow ended at step final-gates\" }`",
+        "runVerdict with `cancelRequested` true and `status.workflow.outcome` `\"ready\"` returns `{ state: \"CANCELLED\", reason: null }`",
+        "runVerdict with `status.workflow.outcome` `\"draft\"` and 30 reasons of 50 characters returns a reason of exactly 500 characters that starts with `\"workflow draft: \"`",
+        "parseWorkflowResult of a schemaVersion 1 object with `verdict.outcome` `\"draft\"`, 25 string reasons and one reason of 600 characters returns 20 reasons, none longer than 500 characters",
+        "parseWorkflowResult of an object with `schemaVersion` 2, or with no `verdict`, or with `verdict.outcome` `\"failed\"`, returns null",
+        "findWorkflowResult over a feature dir holding `workflow/a/result.json` (mtime before `sinceMs`), `workflow/b/result.json` (mtime after `sinceMs`) and `workflow/c/result.json` (a symlink, mtime after `sinceMs`) returns the result from `b` with `runDir` ending in `workflow/b`; with only `a` and `c` present it returns null",
+        "findWorkflowResult over `workflow/new/result.json` (newest, no `verdict`), `workflow/old/result.json` (older, valid draft verdict, both after `sinceMs`), `workflow/big/result.json` (newest of all, larger than 1 MiB) and `workflow/link` (a symlinked directory holding a valid result) returns the result from `old`"
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "verdict"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Four files plus a new module with filesystem guards (lstat, symlinks, size cap); standard patterns, pure functions, no new abstractions across modules."
+      },
+      "contextFiles": [
+        "apps/runner/src/verdict/run-verdict.ts",
+        "apps/runner/src/verdict/status-view.ts",
+        "apps/runner/src/watcher/status-snapshot.ts",
+        "apps/runner/src/verdict/verdict.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/verdict/workflow-result.ts",
+        "apps/runner/src/verdict/workflow-result.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "runVerdict with `status.workflow` having `outcome: \"ready\"` and `run.status` `\"failed\"` returns state COMPLETED (run.status is not consulted for a workflow run)",
+        "runVerdict with `status.workflow.outcome` `\"local-only\"` and no `workflowReasons` returns reason `\"workflow local-only\"`",
+        "parseWorkflowResult drops non-string entries from `verdict.reasons`",
+        "findWorkflowResult returns null when the feature dir has no `workflow/` folder",
+        "mapStatusToSnapshot prefers `postRun.finish.url` over `workflow.url` when both are present",
+        "runVerdict over a parsed status whose raw `workflow.outcome` was `\"failed\"` returns `{ state: \"FAILED\", reason: \"workflow ended at step <step>\" }`",
+        "runVerdict over a status without a `workflow` block and with `postRun.finish` returns the same verdict as before this change (existing finish rows unchanged)"
+      ],
+      "outOfScope": [
+        "JobExecutor/HostExecutor/FakeExecutor readWorkflowResult/readHead and JobRun.judge/finish changes belong to US-002.",
+        "Stashing workflow files into the bundle belongs to US-003."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/verdict/verdict.spec.ts",
+          "reason": "add the workflow rows; existing finish-row tests stay unchanged and must keep passing, since a status without a workflow block keeps today's verdict."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Runner finish: result fields and no stray push for a workflow RUN",
+      "description": "**Goal** — JobRun.judge feeds workflow reasons into the verdict, and JobRun.finish reports nax's branch/sha for a workflow RUN without running the progress push or reading the finish ledger.\n\n**Motivation** — With no finish ledger, `JobRun.finish` runs the #204 progress push, which commits the dirty tree (including the untracked `decisions.jsonl`, nax#2507) and pushes it onto the branch nax just published, adding a stray commit to nax's PR; and `resultPrUrl` never carries nax's PR link.\n\n**Approach**\nR3 (design, approved 2026-10-14): nax owns the push and the PR. koda never creates a second PR for a workflow run. The existing guard already holds once `resultPrUrl` is set: `FleetJobTicketEffects.upsertPrLinks` writes the fleet PR link on the job's tickets, and `hasFleetOwnership` then makes `createPrForTicket` return early.\n\n`JobExecutor` (apps/runner/src/executor/job-executor.ts), `HostExecutor` and `FakeExecutor` target: add `readWorkflowResult(job: JobRow): Promise<WorkflowResult | null>` and `readHead(job: JobRow): Promise<string | null>` (the checkout's `HEAD` sha, null when git fails). `HostExecutor.readWorkflowResult(job)` = `findWorkflowResult(featureDirFor(repoDir, feature), Date.parse(job.createdAt))`, null on any filesystem error (feature from `job.assign.feature`; `HostExecutor.dirs(job)` gives `{ repoDir, jobDir, outDir }`). `FakeExecutor` target: scriptable `workflowResult` and `head` fields, and a recorded count of `readFinishLedger` calls.\n\n`JobRun.judge(row)` reads `status`; when `row.command === 'RUN'` and `status.workflow` is present it also calls `executor.readWorkflowResult(row)` and passes its `reasons` (or none) as `workflowReasons` to `runVerdict`. `judge` returns `{ verdict, snapshot, workflow }`, where `workflow` is `status.workflow` (or undefined), so `finish` can branch on the workflow outcome rather than on the verdict (a finish-ledger ESCALATED must still push).\n\n`JobRun.finish()` for a `RUN` whose status carries a `workflow` block and whose verdict is not CANCELLED (a cancelled RUN keeps today's path):\n- outcome `ready` or `draft`: when `row.resultBranch` and `row.resultSha` are both non-null (a resumed finish), they are reused and `readHead` / `updateJob` are not called. Otherwise result branch = `row.branch`, result sha = `executor.readHead(row)`; when the sha is non-null both are journaled with `journal.updateJob(jobId, leaseEpoch, { resultBranch, resultSha })`; when it is null the report carries `resultBranch` = `row.branch` and no `resultSha`. **No progress push** (`pushRunProgress` is not called; `wipPush` stays unset). The finish ledger is not read.\n- outcome `local-only` or no outcome: the finish ledger is not read and the progress push runs exactly as today (`pushRunProgress` owns journaling, so its resumed-finish guard keeps working).\n- A RUN without a `workflow` block keeps today's path unchanged (finish ledger, then progress push when not COMPLETED or no ledger).\n\n`mapStatusToSnapshot` resultPrUrl fallback to `status.workflow?.url` is implemented in US-001; this story only asserts it through the snapshot (AC-13).\n\n**Scope** — In: JobExecutor/HostExecutor/FakeExecutor additions, JobRun.judge reasons, JobRun.finish workflow branch. Out: StatusView/runVerdict/findWorkflowResult (US-001, consumed here), stash and bundle (US-003), API and web. PLAN jobs unchanged. Existing finish cases (status without a workflow block) keep their expected snapshots.\n\n**Interface**\n```ts\n// JobExecutor additions\nreadWorkflowResult(job: JobRow): Promise<WorkflowResult | null>;\nreadHead(job: JobRow): Promise<string | null>;\n\n// JobRun.judge(row) returns\n{ verdict, snapshot, workflow }   // workflow = status.workflow | undefined\n\n// journal write used on a fresh finish when sha is non-null\njournal.updateJob(jobId, leaseEpoch, { resultBranch, resultSha })\n```",
+      "acceptanceCriteria": [
+        "HostExecutor.readWorkflowResult for a job whose checkout holds `.nax/features/<feature>/workflow/<id>/result.json` written after the job row's `createdAt` returns that result's `outcome` and `reasons`",
+        "HostExecutor.readHead for a job whose repo dir is not a git checkout returns null",
+        "A RUN JobRun started with `start('finish')` over a FakeExecutor whose status has `workflow.outcome` `\"draft\"` and whose `workflowResult` has reasons `[\"CI failed: test\"]` reports the terminal state ESCALATED with reason `\"workflow draft: CI failed: test\"`",
+        "A RUN JobRun `start('finish')` with `workflow.outcome` `\"ready\"` and no finish ledger never calls `FakeExecutor.pushProgress`, and its last snapshot carries no `wipPush`",
+        "A RUN JobRun `start('finish')` with `workflow.outcome` `\"draft\"` never calls `FakeExecutor.pushProgress`",
+        "A RUN JobRun `start('finish')` with `workflow.outcome` `\"local-only\"` calls `FakeExecutor.pushProgress` once",
+        "A RUN JobRun `start('finish')` with `workflow.outcome` `\"ready\"`, `row.branch` `\"feat/x\"` and `FakeExecutor.head` `\"abc123\"` reports `resultBranch` `\"feat/x\"` and `resultSha` `\"abc123\"` and the fake records zero `readFinishLedger` calls",
+        "A RUN JobRun `start('finish')` with `workflow.outcome` `\"ready\"` and `FakeExecutor.head` `\"abc123\"` journals the row with `resultSha` `\"abc123\"`",
+        "A RUN JobRun `start('finish')` with a status that has no `workflow` block and a finish ledger `{ branch: \"feat/y\", headSha: \"def456\" }` reports `resultBranch` `\"feat/y\"` and `resultSha` `\"def456\"` (today's path)",
+        "A RUN JobRun `start('finish')` with `workflow.outcome` `\"ready\"`, `row.branch` `\"feat/x\"` and `FakeExecutor.head` null reports the state COMPLETED, `resultBranch` `\"feat/x\"` and no `resultSha`",
+        "A resumed RUN JobRun `start('finish')` whose journal row already holds `resultBranch` `\"feat/x\"` and `resultSha` `\"aaa111\"`, with `workflow.outcome` `\"ready\"` and `FakeExecutor.head` `\"bbb222\"`, reports `resultSha` `\"aaa111\"`",
+        "A RUN JobRun `start('finish')` with a cancel requested and `workflow.outcome` `\"ready\"` reports CANCELLED and calls `FakeExecutor.pushProgress` once (today's cancelled path)",
+        "mapStatusToSnapshot of a status with no `postRun.finish` and `workflow.url` `\"https://github.com/o/r/pull/1\"` returns `resultPrUrl` `\"https://github.com/o/r/pull/1\"`"
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "supervisor"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Five existing files with a single new branch in JobRun.finish and two small executor methods; patterns are established (FakeExecutor scripting, journal.updateJob), so one TDD session suffices despite the resume-guard subtlety."
+      },
+      "contextFiles": [
+        "apps/runner/src/supervisor/job-run.ts",
+        "apps/runner/src/supervisor/job-run.spec.ts",
+        "apps/runner/src/executor/host-executor.ts",
+        "apps/runner/src/executor/job-executor.ts",
+        "apps/runner/test/helpers/fake-executor.ts"
+      ],
+      "suggestedCriteria": [
+        "A RUN JobRun `start('finish')` with `workflow.outcome` `\"draft\"` reports `resultBranch` equal to `row.branch` and `resultSha` equal to `FakeExecutor.head`",
+        "A RUN JobRun `start('finish')` with `workflow.outcome` `\"local-only\"` records zero `readFinishLedger` calls",
+        "HostExecutor.readWorkflowResult returns null when the feature directory does not exist"
+      ],
+      "outOfScope": [
+        "Stashing workflow files and changing the bundle entry list belong to US-003."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/executor/job-executor.ts",
+          "reason": "the JobExecutor interface gains readWorkflowResult and readHead."
+        },
+        {
+          "path": "apps/runner/test/helpers/fake-executor.ts",
+          "reason": "implements the two new JobExecutor methods with scriptable workflowResult and head fields, and records how many times readFinishLedger is called, so job-run tests can script a workflow RUN and assert the ledger is not read."
+        },
+        {
+          "path": "apps/runner/src/supervisor/job-run.spec.ts",
+          "reason": "add the workflow finish cases; existing finish cases (status without a workflow block) keep their expected snapshots."
+        },
+        {
+          "path": "apps/runner/test/unit/host-executor.spec.ts",
+          "reason": "add the readWorkflowResult and readHead cases; existing cases keep their expectations."
+        },
+        {
+          "path": "apps/runner/src/watcher/status-snapshot.spec.ts",
+          "reason": "add the case where resultPrUrl falls back to the workflow url; existing cases keep their expected snapshots."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Runner stashes the workflow files into the job bundle",
+      "description": "**Goal** — The runner copies nax's workflow result, feature report and decisions log into the job dir and ships them in the RUN bundle, and clears them on requeue.\n\n**Motivation** — The bundle carries none of the workflow files, so reasons and open items are lost when the runner clone is reused.\n\n**Approach**\nD2 (grounding): the run-level report nax writes is `<runDir>/feature-report.md` (per-story reports live under `<runDir>/US-00N/`). The bundle carries it under its real name. D3: `feature-report.md` and `decisions.jsonl` travel in the bundle (kept with the job's bundle artifact) and are not parsed by the API.\n\n`stashWorkflowOutputs(repoDir, jobDir, feature, sinceMs)` (new, apps/runner/src/executor/workflow-stash.ts): when `findWorkflowResult(featureDirFor(repoDir, feature), sinceMs)` (US-001, apps/runner/src/verdict/workflow-result.ts) finds a result, copies that run dir's `result.json` and `feature-report.md` (when present), and `<featureDir>/decisions.jsonl` (when present and its mtime is at or after `sinceMs`), to `<jobDir>/workflow/` under the same three names. Each source is checked with `lstat`: anything that is not a regular file, or is larger than 1 MiB, is skipped. It never writes inside `repoDir`, never runs git, and returns the names it copied (empty, and no folder created, when there is no result). It mirrors `stashPlanOutputs(repoDir, jobDir, feature)` in apps/runner/src/executor/plan-commit.ts (copy into the job dir, never commit). `featureDirFor(repoDir, feature)` (apps/runner/src/paths/safe-segment.ts) -> `<repoDir>/.nax/features/<feature>`.\n\n`HostExecutor.collectBundle(job)` target: for a `RUN` it first calls `stashWorkflowOutputs(repoDir, jobDir, feature, sinceMs)` with `sinceMs = Date.parse(job.createdAt)` before `buildBundle`.\n\n`ATTEMPT_FILES` (apps/runner/src/executor/host-executor.ts) baseline: `['nax-out', 'nax.stdout', 'nax.stderr', 'pre-plan', 'plan-out', 'plan-out.tmp', 'plan-logs', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json']`. Target: the same list plus `'workflow'`, so a requeued attempt never bundles the previous attempt's workflow files.\n\n`collectBundleEntries(jobDir, command)` (apps/runner/src/bundle/build-bundle.ts) baseline: `nax-out/**` minus prompt-audit, `nax.stdout`, `nax.stderr`, PLAN `plan-logs/*.jsonl`. Target: additionally, for `RUN`, each of `workflow/result.json`, `workflow/feature-report.md`, `workflow/decisions.jsonl` that exists in `jobDir`. A RUN job dir without a workflow folder keeps today's exact list; PLAN never includes them.\n\n**Scope** — In: workflow-stash.ts, HostExecutor.collectBundle call, collectBundleEntries, ATTEMPT_FILES. Out: findWorkflowResult itself (US-001), JobRun finish and readWorkflowResult/readHead (US-002), API ingest of the bundle (US-004/US-005). Per-story reports and other run-dir files are not bundled.\n\n**Interface**\n```ts\n// apps/runner/src/executor/workflow-stash.ts (new)\nexport async function stashWorkflowOutputs(repoDir: string, jobDir: string, feature: string, sinceMs: number): Promise<readonly string[]>; // names copied: 'result.json' | 'feature-report.md' | 'decisions.jsonl'\n```",
+      "acceptanceCriteria": [
+        "stashWorkflowOutputs over a checkout holding `workflow/<id>/result.json` and `workflow/<id>/feature-report.md` (both after `sinceMs`) and `decisions.jsonl` (after `sinceMs`) copies all three to `<jobDir>/workflow/` and returns the names `result.json`, `feature-report.md` and `decisions.jsonl` in any order",
+        "stashWorkflowOutputs with a `feature-report.md` larger than 1 MiB copies `result.json` and `decisions.jsonl` and not `feature-report.md`",
+        "stashWorkflowOutputs with `decisions.jsonl` whose mtime is before `sinceMs` copies `result.json` and not `decisions.jsonl`",
+        "stashWorkflowOutputs with `feature-report.md` being a symlink to a file outside the checkout does not copy `feature-report.md`",
+        "stashWorkflowOutputs creates, modifies or deletes no file inside `repoDir`",
+        "stashWorkflowOutputs over a feature dir with no `workflow/` folder returns an empty list and creates no `<jobDir>/workflow/` folder",
+        "collectBundleEntries(jobDir, \"RUN\") for a job dir holding `workflow/result.json` and `workflow/feature-report.md` includes both names",
+        "collectBundleEntries(jobDir, \"PLAN\") for a job dir holding `workflow/result.json` does not include it",
+        "HostExecutor.collectBundle of a RUN job whose checkout holds a workflow `result.json` written after `createdAt` produces a bundle whose manifest `entries` include `workflow/result.json`",
+        "HostExecutor preparing a requeued attempt (a new lease epoch over a job dir that holds `workflow/result.json`) leaves no `workflow` folder in the job dir before nax starts"
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "bundle"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "One new module mirroring stashPlanOutputs plus small edits in HostExecutor and build-bundle; filesystem guards but a clear, established pattern."
+      },
+      "contextFiles": [
+        "apps/runner/src/executor/host-executor.ts",
+        "apps/runner/src/bundle/build-bundle.ts",
+        "apps/runner/src/executor/plan-commit.ts",
+        "apps/runner/test/unit/host-executor.spec.ts",
+        "apps/runner/src/verdict/workflow-result.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/src/executor/workflow-stash.ts",
+        "apps/runner/src/executor/workflow-stash.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "collectBundleEntries(jobDir, \"RUN\") for a job dir with no `workflow` folder returns the same list as before this change",
+        "stashWorkflowOutputs copies `result.json` from the run dir that findWorkflowResult selected, not from an older run dir"
+      ],
+      "outOfScope": [
+        "JobRun.finish and readWorkflowResult/readHead changes belong to US-002.",
+        "Parsing feature-report.md or decisions.jsonl: they are only carried in the bundle."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/bundle/build-bundle.spec.ts",
+          "reason": "a test asserting the exact RUN entry list may need the three workflow file names when the job dir holds them; a RUN job dir without a workflow folder keeps today's exact list."
+        },
+        {
+          "path": "apps/runner/test/unit/host-executor.spec.ts",
+          "reason": "add the collectBundle stash case and the requeue case that removes the workflow folder; existing cases keep their expectations."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "API: FleetJob.workflow column, DTO and result.json parser",
+      "description": "**Goal** — Add a nullable `FleetJob.workflow` JSONB column carried through domain, repository, DTO and requeue, plus the `result.json` parser, the `workflowResult` bundle slot, and the `parseStatus` workflow fields.\n\n**Motivation** — The API has nowhere to store or expose nax's workflow verdict (reasons and open items), so a human cannot see why a workflow run was a draft.\n\n**Approach**\nD3: the API parses only `result.json`; `feature-report.md` and `decisions.jsonl` travel in the bundle and are not parsed. nax input `result.json` (`WorkflowResultFile`, `schemaVersion: 1`); `verdict` is absent until the feature workflow publishes:\n```json\n{ \"schemaVersion\": 1, \"runId\": \"fab5b9af-d3a3-41f2-91ed-62372a733c03\", \"feature\": \"fleet-s5a-thread-handoff\",\n  \"stories\": {},\n  \"verdict\": { \"workflowPassed\": true, \"outcome\": \"draft\",\n               \"reasons\": [\"CI failed: test\"],\n               \"openItems\": [ { \"id\": \"_run:cv1\", \"kind\": \"cannot-verify\", \"severity\": \"minor\",\n                                \"file\": \"apps/api/src/x.ts\", \"line\": 12, \"issue\": \"DB-backed specs not run\",\n                                \"suggestion\": \"run test:integration\" } ] } }\n```\n`OpenItem.kind` is one of `finding | ruling | cannot-verify | gate`; `severity`, `file`, `line`, `suggestion` and `ruling` are optional. `FeatureOutcome` is `ready | draft | local-only`.\n\nMigration `20261016090000_fleet_job_workflow` (sorts after `20261015090000_thread_handoff`): `ALTER TABLE \"FleetJob\" ADD COLUMN \"workflow\" JSONB;` (nullable, no default). Add a nullable Json `workflow` field to the FleetJob model in apps/api/prisma/schema.prisma next to `postRun`.\n\nThe new `workflow` column follows the `FleetJobPostRun` / `postRun` precedent (`fleet-job.domain.ts`, `prisma-fleet-job.repository.ts`, `fleet-job.dto.ts`): domain field, `Mutable` key, repository JSON mapping with `Prisma.DbNull`, DTO field null in `FleetJobDto.summary`, reset to null on requeue. `FleetJobRecord`, `Mutable`, `FleetJobPatch` (fleet-job.domain.ts): add `workflow: FleetJobWorkflow | null` and `'workflow'` to `Mutable`. `FleetJobsService.requeue` (fleet-jobs.service.ts): the requeue patch that resets the per-attempt fields (`resultPrUrl`, `postRun`, ...) also sets `workflow: null`. `FleetJobDto.from` maps `workflow: r.workflow ?? null`; `summary` sets it to null (list pages). `FleetJobWorkflowDto` / `FleetJobWorkflowItemDto` mirror the domain types with Swagger decorators; `openapi.json` is regenerated (`bun run generate` at the repo root; never hand-edit generated CLI client files).\n\n`parseWorkflowResult(file: BundleFile | null): FleetJobWorkflow | null` (new, apps/api/src/fleet/ingest/parsers/workflow.parser.ts) uses the `fields.ts` readers: `schemaVersion` must be `1`, `runId` a string (at most `INGEST_LIMITS.idText`), `verdict.outcome` one of the three values, `verdict.workflowPassed` a boolean; `reasons` keeps at most 20 strings of at most 500 characters; `openItems` keeps at most 50 entries whose `id`, `kind`, `issue` are strings (`id`/`kind`/`severity` at most `shortText`, `issue`/`suggestion` at most `reasonText`, `file` at most 512, `line` via `nonNegInt`); missing optional fields become `null`; an item whose `id`, `kind` or `issue` is missing or empty after trimming is dropped (the `str` reader returns null for an empty string). Anything else -> `null`.\n\n`BundleFiles` / `slotOf` (apps/api/src/fleet/ingest/bundle-reader.ts): target adds slot `workflowResult` for the exact name `workflow/result.json` and field `workflowResult: BundleFile | null`; `readBundleFiles` stores it as a single file (like `metrics` and `status`), not by appending to an array. `workflow/feature-report.md` and `workflow/decisions.jsonl` stay unallowlisted (slotOf returns null).\n\n`parseStatus` (apps/api/src/fleet/ingest/parsers/finish.parser.ts): baseline returns `{ runId, runStatus }`; target returns `{ runId, runStatus, workflowOutcome: 'ready' | 'draft' | 'local-only' | null, workflowUrl: string | null }` (`workflowUrl` https only, at most `INGEST_LIMITS.reasonText`; both null when the status has no workflow block). `INGEST_PARSER_VERSION` (apps/api/src/fleet/ingest/domain/bundle-ingest.domain.ts): `1` -> `2`.\n\n**Scope** — In: migration, schema.prisma, domain/repository/DTO/requeue, workflow.parser.ts, bundle-reader slot, parseStatus fields, INGEST_PARSER_VERSION, openapi.json and CLI client regeneration. Out: wiring into parseBundle/computeCorrection/BundleIngestService and the ESCALATED correction (US-005); web rendering (US-006). Existing parsers.spec.ts exact-object expectations gain `workflowOutcome: null, workflowUrl: null`; bundle-reader.spec.ts slot list gains workflowResult.\n\n**Interface**\n```ts\n// apps/api/src/fleet/jobs/domain/fleet-job.domain.ts\nexport interface FleetJobWorkflowItem { id: string; kind: string; issue: string; severity: string | null; file: string | null; line: number | null; suggestion: string | null }\nexport interface FleetJobWorkflow { runId: string; outcome: 'ready' | 'draft' | 'local-only'; workflowPassed: boolean; reasons: string[]; openItems: FleetJobWorkflowItem[] }\n// FleetJobRecord gains: workflow: FleetJobWorkflow | null ; Mutable gains 'workflow'\n\n// apps/api/src/fleet/ingest/parsers/workflow.parser.ts\nexport function parseWorkflowResult(file: BundleFile | null): FleetJobWorkflow | null;\n\n// finish.parser.ts parseStatus returns\n{ runId, runStatus, workflowOutcome: 'ready' | 'draft' | 'local-only' | null, workflowUrl: string | null }\n```",
+      "acceptanceCriteria": [
+        "parseWorkflowResult of a bundle file holding the Design's example `result.json` returns `{ runId: \"fab5b9af-d3a3-41f2-91ed-62372a733c03\", outcome: \"draft\", workflowPassed: true, reasons: [\"CI failed: test\"], openItems: [{ id: \"_run:cv1\", kind: \"cannot-verify\", issue: \"DB-backed specs not run\", severity: \"minor\", file: \"apps/api/src/x.ts\", line: 12, suggestion: \"run test:integration\" }] }`",
+        "parseWorkflowResult of an open item with only `id`, `kind` and `issue` returns that item with `severity`, `file`, `line` and `suggestion` all `null`",
+        "parseWorkflowResult of a result with 60 open items returns 50 items",
+        "parseWorkflowResult of a result whose `verdict.outcome` is `\"failed\"` returns null",
+        "parseWorkflowResult of a result whose `schemaVersion` is `2` returns null",
+        "parseWorkflowResult of a file whose text is not JSON returns null, and `parseWorkflowResult(null)` returns null",
+        "slotOf(\"workflow/result.json\") returns `\"workflowResult\"`",
+        "slotOf(\"workflow/feature-report.md\") and slotOf(\"workflow/decisions.jsonl\") return null",
+        "parseStatus of a status file whose `workflow` is `{ step: \"done\", outcome: \"ready\", url: \"https://github.com/o/r/pull/2\" }` returns `workflowOutcome` `\"ready\"` and `workflowUrl` `\"https://github.com/o/r/pull/2\"`",
+        "parseStatus of a status file whose `workflow.url` is `\"http://x\"` returns `workflowUrl` null",
+        "FleetJobDto.from of a record whose `workflow` is non-null returns a DTO whose `workflow` equals that value",
+        "FleetJobDto.summary of a record whose `workflow` is non-null returns a DTO whose `workflow` is null",
+        "Updating a FleetJob through PrismaFleetJobRepository with a `workflow` patch and reading it back returns the same `workflow` object; a patch with `workflow: null` reads back null",
+        "Requeuing a FAILED RUN job whose `workflow` is set, through FleetJobsService.requeue, leaves the job QUEUED with `workflow` null",
+        "INGEST_PARSER_VERSION equals 2"
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "prisma",
+        "dto"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Schema migration plus a column threaded through domain, repository, DTO, service, a new parser, bundle reader and generated OpenAPI/CLI artifacts spans many modules, though each step follows the postRun precedent; lite three-session TDD keeps the DB-backed and parser tests isolated."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+        "apps/api/src/fleet/jobs/dto/fleet-job.dto.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/src/fleet/ingest/bundle-reader.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261016090000_fleet_job_workflow/migration.sql",
+        "apps/api/src/fleet/ingest/parsers/workflow.parser.ts",
+        "apps/api/src/fleet/ingest/parsers/workflow.parser.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "parseWorkflowResult drops an open item whose `issue` is an empty string",
+        "parseWorkflowResult returns null when `verdict.workflowPassed` is not a boolean",
+        "parseStatus of a status file with no `workflow` block returns `workflowOutcome` null and `workflowUrl` null",
+        "readBundleFiles stores `workflow/result.json` in the `workflowResult` field rather than an array"
+      ],
+      "outOfScope": [
+        "Wiring parseWorkflowResult/parseStatus fields into parseBundle, computeCorrection and BundleIngestService belongs to US-005.",
+        "Web types and rendering belong to US-006."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "add a nullable Json workflow field to the FleetJob model next to postRun."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated for the new FleetJobDto workflow field."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/parsers/parsers.spec.ts",
+          "reason": "the parseStatus test asserts the exact object with only runId and runStatus; parseStatus now also returns workflowOutcome and workflowUrl (null when the status has no workflow block), so the expected objects gain those two null fields."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-reader.spec.ts",
+          "reason": "a test listing every slot gains the workflowResult slot for the bundle's workflow result file; other names stay unallowlisted."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "API: ingest stores the workflow result and corrects a draft to ESCALATED",
+      "description": "**Goal** — Bundle ingest stores the parsed workflow result on the job, fills `resultPrUrl` from nax's PR url, and corrects a COMPLETED RUN whose workflow outcome is `draft` to ESCALATED.\n\n**Motivation** — nax writes `run.status: \"completed\"` even when the workflow ends as a draft (nax#2508), so a draft run reads as COMPLETED and no human is told; the job and its tickets never get nax's PR link.\n\n**Approach**\nR1: a `draft` outcome maps to ESCALATED (existing needs-a-human state and notification; no new notification kinds). R3: nax owns the PR; once `resultPrUrl` is set, `FleetJobTicketEffects.upsertPrLinks` (apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts, called by `BundleIngestService` after ingest, unchanged) writes the fleet PR link on the job's tickets and `hasFleetOwnership` makes `createPrForTicket` return early.\n\n`ParsedBundle` / `parseBundle` (apps/api/src/fleet/ingest/parse-bundle.ts) target adds `workflow: FleetJobWorkflow | null` (from `parseWorkflowResult`, US-004), `workflowOutcome` and `workflowUrl` (from `parseStatus`, US-004), and the `files.workflow` outcome: `absent` when no `workflow/result.json`, `invalid` when present but `parseWorkflowResult` returns null, else `done`; `invalid` does not make the ingest partial.\n\n`computeCorrection` gains `workflow: FleetJobWorkflow | null`, `workflowOutcome` and `workflowUrl` inputs and `job.workflow` in `CorrectionInput['job']`; `BundleIngestService` passes them from the parsed bundle. With the existing lease-epoch guard first (a bundle of an older lease epoch yields an empty patch), for a `RUN` job:\n1. `workflow` patch: set when `job.workflow` is null and the parsed `workflow` is non-null (fill-only, like `fill`).\n2. `resultPrUrl`: filled from `workflowUrl` when `job.resultPrUrl` is null (fill-only).\n3. State: when `workflowOutcome === 'draft'` and `job.state` is COMPLETED -> `{ state: ESCALATED, stateReason: 'workflow draft (from status)' }` and `escalated: true`; `Correction` gains `escalatedFrom: 'finish-audit' | 'workflow' | null`.\n4. The `NOTHING_PUSHED` reason is never applied when `workflowOutcome` is non-null.\n5. The finish-based fields and escalation keep today's rules when `workflowOutcome` is null.\n\n`BundleIngestService` records the escalation activity with `payload.source` equal to `escalatedFrom` (today the literal `'finish-audit'`). Exported constant `ESCALATED_FROM_WORKFLOW = 'workflow draft (from status)'`. `INGEST_PARSER_VERSION` is 2 (set in US-004) so `rerun-outdated` can re-ingest older bundles.\n\n**Scope** — In: parseBundle wiring, computeCorrection workflow rules, BundleIngestService inputs and activity source, ESCALATED_FROM_WORKFLOW. Out: the column/DTO/parsers (US-004), runner work, web. PLAN jobs get no workflow patch and no state change. Existing ingest-corrections.spec.ts cases pass null workflow inputs and keep their patches; parse-bundle.spec.ts expected files map gains `workflow: 'absent'`.\n\n**Interface**\n```ts\n// ingest-corrections.ts\nexport const ESCALATED_FROM_WORKFLOW = 'workflow draft (from status)';\n// CorrectionInput gains: workflow: FleetJobWorkflow | null; workflowOutcome: 'ready' | 'draft' | 'local-only' | null; workflowUrl: string | null; job.workflow: FleetJobWorkflow | null\n// Correction gains: escalatedFrom: 'finish-audit' | 'workflow' | null\n\n// parse-bundle.ts ParsedBundle gains\nworkflow: FleetJobWorkflow | null; workflowOutcome: ...; workflowUrl: string | null; files.workflow: 'done' | 'absent' | 'invalid'\n```",
+      "acceptanceCriteria": [
+        "parseBundle of bundle files whose `workflowResult` holds a valid draft result and whose status has `workflow.outcome` `\"draft\"` and `workflow.url` `\"https://github.com/o/r/pull/5\"` returns `workflow.outcome` `\"draft\"`, `workflowOutcome` `\"draft\"`, `workflowUrl` `\"https://github.com/o/r/pull/5\"` and `files.workflow` `\"done\"`",
+        "parseBundle of bundle files with no `workflowResult` returns `workflow` null and `files.workflow` `\"absent\"`",
+        "parseBundle of bundle files whose `workflowResult` text is invalid returns `workflow` null, `files.workflow` `\"invalid\"` and `partial` false when every other outcome is `done` or `absent`",
+        "computeCorrection for a COMPLETED RUN with `workflowOutcome` `\"draft\"` returns a patch with `state` `ESCALATED` and `stateReason` equal to `ESCALATED_FROM_WORKFLOW` (`\"workflow draft (from status)\"`), `escalated` true and `escalatedFrom` `\"workflow\"`",
+        "computeCorrection for an ESCALATED RUN with `workflowOutcome` `\"draft\"` returns a patch without `state`, `escalated` false and `escalatedFrom` null",
+        "computeCorrection for a RUN whose `job.workflow` is null and parsed `workflow` is non-null returns a patch whose `workflow` equals the parsed value",
+        "computeCorrection for a RUN whose `job.workflow` is already set returns a patch without `workflow`",
+        "computeCorrection for a RUN with `job.resultPrUrl` null and `workflowUrl` `\"https://github.com/o/r/pull/3\"` returns a patch with `resultPrUrl` `\"https://github.com/o/r/pull/3\"`",
+        "computeCorrection for a COMPLETED RUN with `workflowOutcome` `\"ready\"`, no finish record and `resultBranch` null returns a patch without `stateReason`",
+        "computeCorrection with `leaseEpoch` different from `job.leaseEpoch` and `workflowOutcome` `\"draft\"` returns an empty patch",
+        "computeCorrection for a PLAN job with `workflowOutcome` `\"draft\"` returns a patch without `state` and without `workflow`",
+        "computeCorrection for a COMPLETED RUN with no workflow inputs and a finish record whose status is `\"escalated\"` returns `escalatedFrom` `\"finish-audit\"`",
+        "Ingesting a real bundle whose `status.json` has `workflow.outcome` `\"draft\"` and `workflow.url` `\"https://github.com/o/r/pull/4\"` and whose `workflow/result.json` is a valid draft result, for a COMPLETED RUN job linked to one ticket, through BundleIngestService, leaves the job ESCALATED with `workflow.outcome` `\"draft\"` and `resultPrUrl` `\"https://github.com/o/r/pull/4\"`, and the ticket holds a fleet `pr` link to that URL",
+        "The same ingest records one job activity whose `payload.source` is `\"workflow\"`"
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "ingest"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Three-to-four files extending a pure computeCorrection function with explicit rules and a spec'd service input change; the DB integration ACs reuse existing bundle-ingest spec patterns, so no new abstraction justifies three sessions."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/ingest/parse-bundle.ts",
+        "apps/api/src/fleet/ingest/ingest-corrections.ts",
+        "apps/api/src/fleet/ingest/bundle-ingest.service.ts",
+        "apps/api/src/fleet/ingest/domain/bundle-ingest.domain.ts",
+        "apps/api/src/fleet/ingest/parsers/workflow.parser.ts"
+      ],
+      "suggestedCriteria": [
+        "computeCorrection for a RUN with a non-null `workflowOutcome` never sets the NOTHING_PUSHED state reason",
+        "computeCorrection for a RUN whose `job.resultPrUrl` is already set does not overwrite it from `workflowUrl`"
+      ],
+      "outOfScope": [
+        "The API creating or adopting a pull request for a workflow run: the existing hasFleetOwnership guard handles it once resultPrUrl is set.",
+        "Backfilling the workflow column for already-ingested jobs beyond what rerun-outdated does."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/ingest/ingest-corrections.spec.ts",
+          "reason": "CorrectionInput gains workflow inputs; existing cases pass a null workflow, workflowOutcome and workflowUrl and keep their expected patches."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/parse-bundle.spec.ts",
+          "reason": "the expected files outcome map gains workflow 'absent' for bundles without a workflow result file."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Web: job page shows the workflow outcome, reasons and open items",
+      "description": "**Goal** — The fleet job page renders the workflow outcome, reasons and open items from the job's `workflow` field.\n\n**Motivation** — Reasons and open items are otherwise lost, so a human cannot see why a workflow run ended as a draft.\n\n**Approach**\nThe wire shape from the API (US-004) is `{ runId, outcome, workflowPassed, reasons: string[], openItems: { id, kind, issue, severity|null, file|null, line|null, suggestion|null }[] }`. `FleetJobDto` (apps/web/lib/fleet-types.ts): add `workflow: FleetJobWorkflowDto | null`, with web types `FleetJobWorkflowDto` and `FleetJobWorkflowItemDto` mirroring the API DTO.\n\nNew component `apps/web/components/fleet/FleetJobWorkflow.vue` (prop `workflow: FleetJobWorkflowDto`), rendered by the job page `apps/web/pages/[project]/fleet/jobs/[id]/index.vue` below the state row when `job.workflow` is non-null:\n- outcome badge `data-testid=\"fleet-job-workflow-outcome\"` with the text of `fleet.jobs.workflow.outcome.<ready|draft|localOnly>`;\n- reasons list `data-testid=\"fleet-job-workflow-reasons\"` (one `li` per reason), hidden when there are none;\n- open items list `data-testid=\"fleet-job-workflow-open-items\"`: one row per item showing `kind`, `severity` when present, `file:line` when `file` is present (`file` alone when `line` is null), and `issue`; hidden when empty.\n\nThe page imports `~/components/fleet/FleetJobWorkflow.vue` explicitly, as it does every sibling component (the test mount helper has no Nuxt auto-import); the component is also added to `FLEET_COMPONENT_FILES` in `apps/web/tests/helpers/mount-sfc.ts`. The page-level tests follow `fleet-job-logs-page.spec.ts`: they alias `~/composables/useApi`, `~/composables/useFleetApprovals`, `~/components/fleet/JobAnalytics.vue` and `~/components/fleet/config/ConfigPrDialog.vue` to stubs, provide the page's remaining composables (`useRoute`, `useI18n`, `useAppToast`, `useAuth`, `useFleetJobs`, `useFleetDispatchOptions`, `useProjectMemberNames`, `useFleetRepoConfig`, `useProjectViewerRole`, `useFleetJobLogs`, `useProjectEvents`) as globals, and load a full `FleetJobDto` fixture.\n\ni18n keys in `apps/web/i18n/locales/en.json` and `zh.json` (parity is enforced by the existing `tests/i18n/fleet-locale-parity.spec.ts` and `used-keys-exist.spec.ts`): `fleet.jobs.workflow.title`, `fleet.jobs.workflow.outcome.ready`, `.draft`, `.localOnly`, `fleet.jobs.workflow.reasons`, `fleet.jobs.workflow.openItems`. No new API calls: the page already loads the job with `GET` by id. Web strings live only in web i18n files (not API i18n); the web uses Nuxt-native composables, no generated client.\n\n**Scope** — In: FleetJobDto type additions, FleetJobWorkflow.vue, page wiring, mount-sfc registration, en/zh i18n keys. Out: API column/DTO (US-004), the C3 thread page (reuses this component later), any new API call.\n\n**Interface**\n```ts\n// apps/web/lib/fleet-types.ts\nexport interface FleetJobWorkflowItemDto { id: string; kind: string; issue: string; severity: string | null; file: string | null; line: number | null; suggestion: string | null }\nexport interface FleetJobWorkflowDto { runId: string; outcome: 'ready' | 'draft' | 'local-only'; workflowPassed: boolean; reasons: string[]; openItems: FleetJobWorkflowItemDto[] }\n// FleetJobDto gains: workflow: FleetJobWorkflowDto | null\n```",
+      "acceptanceCriteria": [
+        "FleetJobWorkflow with `workflow.outcome` `\"draft\"` renders `fleet-job-workflow-outcome` with the text of `fleet.jobs.workflow.outcome.draft`",
+        "FleetJobWorkflow with `workflow.outcome` `\"local-only\"` renders `fleet-job-workflow-outcome` with the text of `fleet.jobs.workflow.outcome.localOnly`",
+        "FleetJobWorkflow with reasons `[\"CI failed: test\", \"1 open finding\"]` renders two items in `fleet-job-workflow-reasons`",
+        "FleetJobWorkflow with empty reasons renders no `fleet-job-workflow-reasons` element",
+        "FleetJobWorkflow with an open item `{ kind: \"finding\", severity: \"major\", file: \"src/a.ts\", line: 7, issue: \"unchecked null\" }` renders a row in `fleet-job-workflow-open-items` containing `finding`, `major`, `src/a.ts:7` and `unchecked null`",
+        "FleetJobWorkflow with an open item whose `file` is `\"src/b.ts\"` and `line` null renders `src/b.ts` and not `src/b.ts:`",
+        "FleetJobWorkflow with empty open items renders no `fleet-job-workflow-open-items` element",
+        "The job detail page mounted with `mountSfc` (as `fleet-job-logs-page.spec.ts` mounts the logs page), with the job request resolving to a job whose `workflow` is non-null, renders `fleet-job-workflow-outcome`",
+        "The job detail page mounted the same way with a job whose `workflow` is null renders no `fleet-job-workflow-outcome`"
+      ],
+      "tags": [
+        "feature",
+        "web",
+        "ui",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "One new presentational component, a page insertion, type and i18n additions, following an established page-test pattern."
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
+        "apps/web/lib/fleet-types.ts",
+        "apps/web/tests/pages/fleet-job-logs-page.spec.ts",
+        "apps/web/tests/helpers/mount-sfc.ts",
+        "apps/web/components/fleet/FleetJobStories.vue"
+      ],
+      "expectedFiles": [
+        "apps/web/components/fleet/FleetJobWorkflow.vue",
+        "apps/web/tests/components/FleetJobWorkflow.spec.ts",
+        "apps/web/tests/pages/fleet-job-detail-workflow.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "FleetJobWorkflow with `workflow.outcome` `\"ready\"` renders `fleet-job-workflow-outcome` with the text of `fleet.jobs.workflow.outcome.ready`",
+        "FleetJobWorkflow with an open item whose `severity` is null renders no severity text for that row"
+      ],
+      "outOfScope": [
+        "The C3 thread page (action bar, RUN card) reuses FleetJobWorkflow.vue later.",
+        "Any change to the API DTO, which belongs to US-004."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/pages/[project]/fleet/jobs/[id]/index.vue",
+          "reason": "import and render FleetJobWorkflow below the state row when the job has a workflow result."
+        },
+        {
+          "path": "apps/web/lib/fleet-types.ts",
+          "reason": "FleetJobDto gains the workflow field with the FleetJobWorkflowDto and FleetJobWorkflowItemDto types."
+        },
+        {
+          "path": "apps/web/tests/helpers/mount-sfc.ts",
+          "reason": "FLEET_COMPONENT_FILES gains FleetJobWorkflow so a mounted page resolves it."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "add the fleet.jobs.workflow keys."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "add the fleet.jobs.workflow keys."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Koda fleet must read nax workflow-mode output (execution.mode 'workflow', nax >= 0.88.0-canary.1). In workflow mode nax pushes the branch and opens/promotes the PR itself, writes a `workflow` block ({step, stories, outcome, url}) into status.json instead of postRun.finish, and writes the verdict to <repo>/.nax/features/<feature>/workflow/<workflowRunId>/result.json. Today the runner mis-reports these: runVerdict (apps/runner/src/verdict/run-verdict.ts) returns COMPLETED for run.status 'completed' with no postRun.finish (nax#2508: status is 'completed' even for a draft); JobRun.finish (apps/runner/src/supervisor/job-run.ts) runs the #204 progress push when there is no finish ledger, committing the untracked decisions.jsonl (nax#2507) on top of nax's push; resultPrUrl only comes from postRun.finish.url (apps/runner/src/watcher/status-snapshot.ts); the bundle carries no workflow files.\n\nRulings binding every story: R1 draft->ESCALATED, ready->COMPLETED, local-only or workflow block without outcome->FAILED. R2 no profile injection / no toggle; detect by presence of the status.json `workflow` block, keep today's behaviour when absent. R3 nax owns push and PR; koda never creates a second PR: once resultPrUrl is set, FleetJobTicketEffects.upsertPrLinks writes the fleet PR link and hasFleetOwnership makes createPrForTicket return early (unchanged). D1: status.json run.id is NOT the workflow run id (the dir name is a runtime UUID), so never build a path from naxRunId; locate result.json as the newest regular file workflow/*/result.json with mtime >= job row createdAt. D2: run-level report is <runDir>/feature-report.md. D3: API parses only result.json; feature-report.md and decisions.jsonl only travel in the bundle. D4: server keeps at most 500 chars of a runner state reason (apps/api/src/fleet/sync/event-payloads.ts), so the runner clips the whole reason, prefix included, to 500.\n\nRUNNER (apps/runner, bun:test, Bun-only ESM): StatusView/parseStatusView (src/verdict/status-view.ts) gains optional WorkflowView {step, outcome?, url?} (outcome outside ready|draft|local-only dropped; url kept only if it starts with https://). New src/verdict/workflow-result.ts with parseWorkflowResult and findWorkflowResult (readdir withFileTypes, real dirs only, lstat regular file <= 1 MiB, mtime >= sinceMs, newest first, first that parses wins; a newer verdict-less file is passed over). runVerdict gains workflowReasons and a workflow table that ignores run.status/postRun; cancel row stays first. mapStatusToSnapshot: resultPrUrl = finish?.url ?? workflow?.url. JobExecutor (src/executor/job-executor.ts), HostExecutor (src/executor/host-executor.ts) and FakeExecutor (test/helpers/fake-executor.ts) gain readWorkflowResult(job) and readHead(job); FakeExecutor gets scriptable workflowResult/head and a readFinishLedger call counter. JobRun.judge returns {verdict, snapshot, workflow}; JobRun.finish for a non-cancelled RUN with a workflow block: ready/draft -> reuse row.resultBranch/resultSha if both non-null (resumed finish), else resultBranch=row.branch and sha=readHead (journal both via journal.updateJob(jobId, leaseEpoch, {resultBranch, resultSha}) only when sha non-null), no pushRunProgress, no ledger read; local-only/no outcome -> no ledger read, progress push as today; cancelled RUN and RUN without workflow block keep today's path. New src/executor/workflow-stash.ts (mirrors stashPlanOutputs in plan-commit.ts: copy into jobDir, never write in repoDir, never run git, lstat each source, skip non-regular or > 1 MiB, decisions.jsonl only if mtime >= sinceMs); HostExecutor.collectBundle calls it for RUN before buildBundle; ATTEMPT_FILES gains 'workflow'; collectBundleEntries (src/bundle/build-bundle.ts) adds workflow/result.json, workflow/feature-report.md, workflow/decisions.jsonl for RUN when present. Existing tests: verdict.spec.ts, job-run.spec.ts, status-snapshot.spec.ts, test/unit/host-executor.spec.ts, build-bundle.spec.ts must keep passing for statuses without a workflow block.\n\nAPI (apps/api, NestJS + Prisma, vitest; DB-backed specs need `bun run test:db:up` + KODA_DB_TESTS=1): new nullable JSONB column FleetJob.workflow (migration 20261016090000_fleet_job_workflow, sorts after 20261015090000_thread_handoff). Follow the postRun precedent end to end: domain field (fleet-job.domain.ts), Mutable key, repository JSON mapping with Prisma.DbNull (prisma-fleet-job.repository.ts), DTO field (null in FleetJobDto.summary), reset to null in FleetJobsService.requeue. New parsers/workflow.parser.ts using fields.ts readers. bundle-reader.ts gets slot workflowResult for the exact name workflow/result.json (single file like metrics/status; feature-report.md and decisions.jsonl stay unallowlisted -> slotOf null). parseStatus (parsers/finish.parser.ts) additionally returns workflowOutcome and workflowUrl (https only, <= INGEST_LIMITS.reasonText); existing parsers.spec.ts exact-object assertions gain two null fields. parseBundle adds workflow/workflowOutcome/workflowUrl and files.workflow (absent|invalid|done; invalid does not make ingest partial). computeCorrection (ingest-corrections.ts): after the lease-epoch guard, for RUN: fill-only workflow patch, fill-only resultPrUrl from workflowUrl, COMPLETED + workflowOutcome 'draft' -> ESCALATED with stateReason ESCALATED_FROM_WORKFLOW ('workflow draft (from status)'), escalated true, Correction.escalatedFrom 'finish-audit'|'workflow'|null; NOTHING_PUSHED never applied when workflowOutcome non-null; finish-based rules unchanged when workflowOutcome null. BundleIngestService records the escalation activity with payload.source = escalatedFrom (today literal 'finish-audit'). INGEST_PARSER_VERSION 1 -> 2. openapi.json is regenerated via `bun run generate` at repo root (also regenerates CLI client; never hand-edit generated files). API i18n not needed (no new API strings).\n\nWEB (apps/web, Nuxt 3, Jest per package config; tests use mountSfc from tests/helpers/mount-sfc.ts, which has no Nuxt auto-import so components must be imported explicitly and added to FLEET_COMPONENT_FILES): FleetJobDto in lib/fleet-types.ts gains workflow + FleetJobWorkflowDto/FleetJobWorkflowItemDto; new components/fleet/FleetJobWorkflow.vue rendered by pages/[project]/fleet/jobs/[id]/index.vue below the state row when job.workflow is non-null; i18n keys in en.json and zh.json (parity enforced by tests/i18n/fleet-locale-parity.spec.ts and used-keys-exist.spec.ts). Page tests follow fleet-job-logs-page.spec.ts (alias stubs for useApi, useFleetApprovals, JobAnalytics.vue, ConfigPrDialog.vue; globals for other composables).\n\nRisks: (1) the spec's AC set is authoritative over prose; (2) US-002's finish branch must key on status.workflow.outcome, not on the verdict, because a finish-ledger ESCALATED must still push; (3) lstat/symlink handling and the 1 MiB cap are security-relevant filesystem guards (runner reads untrusted checkout content) - keep them in findWorkflowResult and stashWorkflowOutputs; (4) reason prefixes must never start with the budget-stop text the web page parses (budgetStopPolicyId); (5) mutations: follow the repo's immutable style, no console.log; (6) migration ordering and openapi.json/CLI regeneration in US-004 or CI drift checks fail. Story dependency graph: US-001 -> US-002, US-003; US-004 -> US-005, US-006. Build gate per story: bun run type-check and bun run lint in its workdir; US-004 additionally bunx prisma validate, bun run db:generate in apps/api and bun run generate at repo root.",
+  "outOfScope": [
+    "The API creating or adopting a pull request for a workflow run (no find-or-create): nax owns the PR, and the existing `hasFleetOwnership` guard prevents a second PR once `resultPrUrl` is set.",
+    "A per-project or per-job toggle, or the API/runner adding a `workflow` profile to a job: nax decides the mode.",
+    "Parsing `feature-report.md` or `decisions.jsonl` on the API: they are only carried in the bundle.",
+    "Fixing nax#2507 (untracked decisions.jsonl) or nax#2508 (run.status completed for a draft): koda works around both.",
+    "PLAN jobs: their verdict, push and bundle are unchanged.",
+    "The C3 thread page (action bar, RUN card): it reuses `FleetJobWorkflow.vue` later.",
+    "New notification kinds: a draft uses the existing ESCALATED outcome notification.",
+    "A runner nax-version gate: detection is by the presence of the `status.json` `workflow` block.",
+    "Backfilling the `workflow` column for already-ingested jobs beyond what `rerun-outdated` does.",
+    "Per-story workflow reports (`<runDir>/US-00N/report.md`) and the other run-dir files (`ledger.md`, `*.diff`, `branch-review.json`): not bundled."
+  ],
+  "routingProfile": "native-haiku-luna+cc-plan"
+}
