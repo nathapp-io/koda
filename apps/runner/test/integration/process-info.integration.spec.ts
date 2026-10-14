@@ -30,6 +30,12 @@ describe('readProcessCommand', () => {
     expect(command).not.toBeNull();
     expect((command ?? '').length).toBeGreaterThan(0);
   });
+  test('AC-11: a pid that does not exist has no command line, and a pid that has exited has none either', async () => {
+    expect(await readProcessCommand(2 ** 22 + 12345)).toBeNull();
+    const exited = Bun.spawn(['sh', '-c', 'true'], { stdout: 'ignore', stderr: 'ignore' });
+    await exited.exited;
+    expect(await readProcessCommand(exited.pid)).toBeNull();
+  });
 });
 
 describe('readProcessStart (BUG-5a: TZ-independent)', () => {
@@ -48,6 +54,11 @@ describe('readProcessStart (BUG-5a: TZ-independent)', () => {
   });
   test('an absent pid has no start time', async () => {
     expect(await readProcessStart(2 ** 22 + 12345)).toBeNull();
+  });
+  test('AC-11: a pid that has exited has no start time', async () => {
+    const exited = Bun.spawn(['sh', '-c', 'true'], { stdout: 'ignore', stderr: 'ignore' });
+    await exited.exited;
+    expect(await readProcessStart(exited.pid)).toBeNull();
   });
   test('AC-10: the running test process starts at a Date not later than now', async () => {
     const started = await readProcessStart(process.pid);
