@@ -1549,6 +1549,16 @@
         "waitingApproval": "等待审批（{count}）",
         "reviewApproval": "查看"
       },
+      "workflow": {
+        "title": "工作流结果",
+        "outcome": {
+          "ready": "就绪",
+          "draft": "草稿",
+          "localOnly": "仅本地"
+        },
+        "reasons": "原因",
+        "openItems": "待处理项"
+      },
       "actions": {
         "cancel": "取消任务",
         "requeue": "重新排队",

@@ -1549,6 +1549,16 @@
         "waitingApproval": "Waiting for approval ({count})",
         "reviewApproval": "Review"
       },
+      "workflow": {
+        "title": "Workflow outcome",
+        "outcome": {
+          "ready": "Ready",
+          "draft": "Draft",
+          "localOnly": "Local only"
+        },
+        "reasons": "Reasons",
+        "openItems": "Open items"
+      },
       "actions": {
         "cancel": "Cancel job",
         "requeue": "Requeue",

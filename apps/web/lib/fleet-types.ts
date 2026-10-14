@@ -178,6 +178,27 @@ export interface FleetJobStoryDto {
   dependsOn: string[]
 }
 
+/** US-006: the workflow result of one RUN (US-004 wire shape), null when the job has none. */
+export type FleetJobWorkflowOutcome = 'ready' | 'draft' | 'local-only'
+
+export interface FleetJobWorkflowItemDto {
+  id: string
+  kind: string
+  issue: string
+  severity: string | null
+  file: string | null
+  line: number | null
+  suggestion: string | null
+}
+
+export interface FleetJobWorkflowDto {
+  runId: string
+  outcome: FleetJobWorkflowOutcome
+  workflowPassed: boolean
+  reasons: string[]
+  openItems: FleetJobWorkflowItemDto[]
+}
+
 /** S2b (j): nax post-run stage statuses (`postRun.<stage>.status`), each at most 32 printable ASCII; null when unknown. */
 export interface FleetJobPostRunDto {
   acceptance?: string
@@ -265,6 +286,8 @@ export interface FleetJobDto {
   tickets?: FleetJobTicketDto[] | null
   /** S3 §4.3: present on config jobs (CONFIG_EDIT, CONFIG_DRIFT); absent or null otherwise. */
   configEdit?: FleetJobConfigEditDto | null
+  /** US-006 (US-004 wire shape): the workflow result, null when the job has none. */
+  workflow: FleetJobWorkflowDto | null
 }
 
 export interface FleetJobEventDto {
