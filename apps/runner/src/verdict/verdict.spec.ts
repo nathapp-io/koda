@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { mapStatusToSnapshot } from '../watcher/status-snapshot';
 import { checkPlanPrd, planVerdict } from './plan-verdict';
 import { runVerdict } from './run-verdict';
 import { isFinalStatus, parseStatusView, type StatusView } from './status-view';
@@ -113,5 +114,87 @@ describe('parseStatusView', () => {
   test('isFinalStatus is everything but running', () => {
     expect(isFinalStatus({ run: { id: 'r', status: 'running' } })).toBe(false);
     expect(isFinalStatus({ run: { id: 'r', status: 'crashed' } })).toBe(true);
+  });
+});
+
+describe('workflow verdict (US-001)', () => {
+  test('AC-1: parseStatusView keeps step, outcome and https url', () => {
+    const view = parseStatusView({
+      run: { id: 'r', status: 'completed' },
+      workflow: { step: 'done', outcome: 'draft', url: 'https://github.com/o/r/pull/1' },
+    });
+    expect(view?.workflow).toEqual({ step: 'done', outcome: 'draft', url: 'https://github.com/o/r/pull/1' });
+  });
+  test('AC-2: parseStatusView drops an outcome outside the three values', () => {
+    const view = parseStatusView({ run: { id: 'r', status: 'completed' }, workflow: { step: 'done', outcome: 'failed' } });
+    expect(view?.workflow?.step).toBe('done');
+    expect(view?.workflow).not.toHaveProperty('outcome');
+  });
+  test('AC-3: parseStatusView drops a non-https url', () => {
+    const view = parseStatusView({ run: { id: 'r', status: 'completed' }, workflow: { step: 'done', outcome: 'draft', url: 'http://x/pull/1' } });
+    expect(view?.workflow?.step).toBe('done');
+    expect(view?.workflow).not.toHaveProperty('url');
+  });
+  test('AC-4: parseStatusView with no workflow key has no workflow key', () => {
+    const view = parseStatusView({ run: { id: 'r', status: 'completed' } });
+    expect(view?.run.id).toBe('r');
+    expect(view).not.toHaveProperty('workflow');
+  });
+  test('AC-5: workflow ready with run completed is COMPLETED', () => {
+    expect(runVerdict({ cancelRequested: false, status: { run: { id: 'r', status: 'completed' }, workflow: { step: 'done', outcome: 'ready' } } })).toEqual({
+      state: 'COMPLETED',
+      reason: null,
+    });
+  });
+  test('AC-6: workflow draft with reasons is ESCALATED with joined reasons', () => {
+    expect(
+      runVerdict({
+        cancelRequested: false,
+        status: { run: { id: 'r', status: 'completed' }, workflow: { step: 'done', outcome: 'draft' } },
+        workflowReasons: ['CI failed: test', '1 open finding'],
+      }),
+    ).toEqual({ state: 'ESCALATED', reason: 'workflow draft: CI failed: test; 1 open finding' });
+  });
+  test('AC-7: workflow draft with no reasons is ESCALATED with bare reason', () => {
+    expect(runVerdict({ cancelRequested: false, status: { run: { id: 'r', status: 'completed' }, workflow: { step: 'done', outcome: 'draft' } } })).toEqual({
+      state: 'ESCALATED',
+      reason: 'workflow draft',
+    });
+  });
+  test('AC-8: workflow local-only with reasons is FAILED', () => {
+    expect(
+      runVerdict({
+        cancelRequested: false,
+        status: { run: { id: 'r', status: 'completed' }, workflow: { step: 'done', outcome: 'local-only' } },
+        workflowReasons: ['push failed'],
+      }),
+    ).toEqual({ state: 'FAILED', reason: 'workflow local-only: push failed' });
+  });
+  test('AC-9: workflow with no outcome is FAILED with the step', () => {
+    expect(runVerdict({ cancelRequested: false, status: { run: { id: 'r', status: 'completed' }, workflow: { step: 'final-gates' } } })).toEqual({
+      state: 'FAILED',
+      reason: 'workflow ended at step final-gates',
+    });
+  });
+  test('AC-10: cancel wins over a ready workflow', () => {
+    expect(runVerdict({ cancelRequested: true, status: { run: { id: 'r', status: 'completed' }, workflow: { step: 'done', outcome: 'ready' } } })).toEqual({
+      state: 'CANCELLED',
+      reason: null,
+    });
+  });
+  test('AC-11: 30 reasons of 50 chars clip to exactly 500 starting with the prefix', () => {
+    const reasons = Array.from({ length: 30 }, () => 'x'.repeat(50));
+    const verdict = runVerdict({
+      cancelRequested: false,
+      status: { run: { id: 'r', status: 'completed' }, workflow: { step: 'done', outcome: 'draft' } },
+      workflowReasons: reasons,
+    });
+    expect(verdict.state).toBe('ESCALATED');
+    expect(verdict.reason).toHaveLength(500);
+    expect((verdict.reason ?? '').startsWith('workflow draft: ')).toBe(true);
+  });
+  test('US-001 snapshot: resultPrUrl falls back to the workflow url', () => {
+    const snap = mapStatusToSnapshot({ run: { id: 'r', status: 'completed' }, workflow: { step: 'done', outcome: 'draft', url: 'https://github.com/o/r/pull/1' } });
+    expect(snap.resultPrUrl).toBe('https://github.com/o/r/pull/1');
   });
 });

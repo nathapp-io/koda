@@ -10,6 +10,13 @@ export interface StageView {
   readonly status?: string;
 }
 
+/** Workflow mode block (nax `WorkflowStatusBlock`); present only in workflow mode. */
+export interface WorkflowView {
+  readonly step: string;
+  readonly outcome?: 'ready' | 'draft' | 'local-only';
+  readonly url?: string;
+}
+
 export interface StatusView {
   readonly run: { readonly id: string; readonly status: string; readonly pid?: number };
   readonly progress?: Readonly<Record<string, number>>;
@@ -18,6 +25,7 @@ export interface StatusView {
   readonly lastHeartbeat?: string;
   readonly updatedAt?: string;
   readonly postRun?: { readonly acceptance?: StageView; readonly regression?: StageView; readonly finish?: FinishView };
+  readonly workflow?: WorkflowView;
 }
 
 type Obj = Record<string, unknown>;
@@ -40,9 +48,21 @@ export function parseStatusView(raw: unknown): StatusView | null {
   const finishRaw = postRunRaw && isObj(postRunRaw['finish']) ? postRunRaw['finish'] : undefined;
   const finish = finishRaw ? defined({ status: str(finishRaw['status']), result: str(finishRaw['result']), url: str(finishRaw['url']), escalationReason: str(finishRaw['escalationReason']) }) : undefined;
   const postRunView = defined({ acceptance: stage('acceptance'), regression: stage('regression'), finish });
+  const workflowRaw = isObj(raw['workflow']) ? raw['workflow'] : undefined;
+  const workflow =
+    workflowRaw && typeof workflowRaw['step'] === 'string'
+      ? (defined({
+          step: workflowRaw['step'] as string,
+          outcome:
+            workflowRaw['outcome'] === 'ready' || workflowRaw['outcome'] === 'draft' || workflowRaw['outcome'] === 'local-only'
+              ? (workflowRaw['outcome'] as 'ready' | 'draft' | 'local-only')
+              : undefined,
+          url: typeof workflowRaw['url'] === 'string' && workflowRaw['url'].startsWith('https://') ? (workflowRaw['url'] as string) : undefined,
+        }) as WorkflowView)
+      : undefined;
   return defined({
     run: defined({ id: run['id'] as string, status: run['status'] as string, pid: typeof run['pid'] === 'number' ? run['pid'] : undefined }),
-    progress, cost, current, lastHeartbeat: str(raw['lastHeartbeat']), updatedAt: str(raw['updatedAt']), postRun: Object.keys(postRunView).length > 0 ? postRunView : undefined,
+    progress, cost, current, lastHeartbeat: str(raw['lastHeartbeat']), updatedAt: str(raw['updatedAt']), postRun: Object.keys(postRunView).length > 0 ? postRunView : undefined, workflow,
   }) as StatusView;
 }
 

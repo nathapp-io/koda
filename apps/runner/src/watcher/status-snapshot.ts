@@ -53,7 +53,7 @@ export function mapStatusToSnapshot(status: StatusView, extras: SnapshotExtras =
     ['costSpentUsd', cost],
     ['heartbeatAt', heartbeat],
     ['finishResult', finish?.result],
-    ['resultPrUrl', finish?.url],
+    ['resultPrUrl', finish?.url ?? status.workflow?.url],
     ['escalationReason', clip(finish?.escalationReason, ESCALATION_REASON_MAX)],
     ['resultBranch', extras.resultBranch],
     ['resultSha', extras.resultSha],
