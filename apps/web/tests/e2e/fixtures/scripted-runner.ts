@@ -68,20 +68,36 @@ async function tarGz(members: Readonly<Record<string, string>>): Promise<Buffer>
   return gzipSync(Buffer.concat(chunks));
 }
 
-async function call<T>(path: string, init: { method: string; token?: string; body?: unknown }): Promise<T> {
-  const res = await fetch(`${API_URL}/api${path}`, {
-    method: init.method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init.token ? { Authorization: `Bearer ${init.token}` } : {}),
-    },
-    body: init.body === undefined ? undefined : JSON.stringify(init.body),
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`${init.method} ${path} failed: ${res.status} ${text}`);
-  const body = JSON.parse(text) as { ret?: number; data?: T };
-  if (body.ret !== 0) throw new Error(`${init.method} ${path} answered ret ${String(body.ret)}: ${text}`);
-  return body.data as T;
+async function call<T>(path: string, init: { method: string; token?: string; body?: unknown }, retryEnrollment = false): Promise<T> {
+  const deadline = Date.now() + 65_000;
+  for (;;) {
+    const res = await fetch(`${API_URL}/api${path}`, {
+      method: init.method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init.token ? { Authorization: `Bearer ${init.token}` } : {}),
+      },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    });
+    const text = await res.text();
+    // Enrollment has a fixed 10/minute limit shared by every test's client IP.
+    // A throttled request has not consumed the single-use enrollment token.
+    if (retryEnrollment && res.status === 429) {
+      const header = res.headers.get('Retry-After');
+      const seconds = header === null ? NaN : Number(header);
+      const delay = header === null ? 60_000 : Number.isFinite(seconds)
+        ? seconds * 1000 : Date.parse(header) - Date.now();
+      const waitMs = Number.isFinite(delay) ? Math.max(1000, delay) : 60_000;
+      if (Date.now() + waitMs < deadline) {
+        await new Promise(resolve => setTimeout(resolve, waitMs));
+        continue;
+      }
+    }
+    if (!res.ok) throw new Error(`${init.method} ${path} failed: ${res.status} ${text}`);
+    const body = JSON.parse(text) as { ret?: number; data?: T };
+    if (body.ret !== 0) throw new Error(`${init.method} ${path} answered ret ${String(body.ret)}: ${text}`);
+    return body.data as T;
+  }
 }
 
 export class ScriptedRunner {
@@ -108,13 +124,18 @@ export class ScriptedRunner {
    */
   static async enroll(
     adminToken: string, name: string,
-    opts: { relay?: boolean; logs?: boolean; threads?: boolean; threadModel?: string; configJobs?: boolean; capabilities?: Record<string, unknown> } = {},
+    opts: { relay?: boolean; logs?: boolean; threads?: boolean; threadModel?: string; threadWrite?: boolean; configJobs?: boolean; capabilities?: Record<string, unknown> } = {},
   ): Promise<ScriptedRunner> {
     const protocolVersion = opts.threads ? 4 : opts.logs ? 3 : opts.relay ? 2 : 1;
     const base = opts.relay ? { ...(opts.capabilities ?? E2E_RUNNER_CAPABILITIES), approvals: { relay: true } } : opts.capabilities ?? E2E_RUNNER_CAPABILITIES;
     const threads = opts.threads ? { threadBackends: { native: [opts.threadModel ?? 'e2e-model'], acp: [] } } : {};
     // S3 §3: only a runner reporting configJobs is offered CONFIG_EDIT / CONFIG_DRIFT jobs.
-    const capabilities = opts.configJobs ? { ...base, ...threads, configJobs: true } : { ...base, ...threads };
+    const capabilities = {
+      ...base,
+      ...threads,
+      ...(opts.configJobs ? { configJobs: true } : {}),
+      ...(opts.threadWrite ? { threadWrite: true } : {}),
+    };
     const { token } = await call<{ token: string }>('/fleet/enrollments', { method: 'POST', token: adminToken, body: { labels: ['e2e'] } });
     const { runnerId, apiKey } = await call<{ runnerId: string; apiKey: string }>('/fleet/runner/enroll', {
       method: 'POST',
@@ -122,7 +143,7 @@ export class ScriptedRunner {
         enrollmentToken: token, name, os: 'linux', arch: 'x64', daemonVersion: DAEMON_VERSION,
         protocolVersion, bootId: BOOT_ID, labels: [], capabilities,
       },
-    });
+    }, true);
     return new ScriptedRunner(runnerId, name, apiKey, protocolVersion);
   }
 

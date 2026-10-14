@@ -544,6 +544,26 @@ describe('PrismaThreadIngestRepository.fold write-path lines (US-002)', () => {
     expect(thread.session).toEqual({ jobId: 'J', state: 'live', resumed: false, contextReset: false, reason: null, at: '2026-10-14T00:00:00.000Z', stale: true });
   });
 
+  it.each(['session_closed', 'session_failed'] as const)('%s preserves stale until a successful discard', async (type) => {
+    const { client, thread } = fakeClient({ nextSeq: 2 });
+    const repo = repoWith(client);
+    await repo.fold(batch([sessionStarted({ stale: true })]));
+    await repo.fold(batch([{ type, reason: 'idle' }]));
+    expect(thread.session).toMatchObject({ jobId: 'J', stale: true, state: type === 'session_closed' ? 'closed' : 'failed' });
+    await repo.fold(batch([{ type: 'discarded', tipSha: 'd'.repeat(40) }]));
+    expect(thread.session).not.toHaveProperty('stale');
+  });
+
+  it('a close for another job does not inherit the old session stale flag', async () => {
+    const { client, thread } = fakeClient({
+      nextSeq: 2,
+      session: { jobId: 'old-job', state: 'closed', resumed: false, contextReset: false, reason: 'idle', at: 'A', stale: true },
+    });
+    await repoWith(client).fold(batch([{ type: 'session_closed', reason: 'idle' }]));
+    expect(thread.session).toMatchObject({ jobId: 'J', state: 'closed' });
+    expect(thread.session).not.toHaveProperty('stale');
+  });
+
   it('US-002 AC-14: a session_started line without stale stores a session with no stale key', async () => {
     const { client, thread } = fakeClient({ nextSeq: 2 });
     await repoWith(client).fold(batch([sessionStarted()]));

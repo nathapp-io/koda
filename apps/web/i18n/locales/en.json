@@ -844,6 +844,25 @@
         "runnerOutdated": "The runner is outdated.",
         "closing": "Sending is closing the session - retrying.",
         "turnRunning": "A turn is running. Stop it to send a new message."
+      },
+      "handoff": {
+        "actions": { "publish": "Publish", "plan": "Plan", "run": "Run", "discard": "Discard", "submit": "Submit" },
+        "blocked": { "nothingToPublish": "Nothing to publish", "turnRunning": "A turn is running", "handoffBusy": "A handoff is already running", "notPublished": "Publish the spec first", "sessionActive": "A thread job is active", "notPlanned": "Plan the spec first", "planNotCompleted": "The plan has not completed" },
+        "publishDialog": { "title": "Publish thread changes", "confirm": "Publish" },
+        "planDialog": { "title": "Plan this thread" },
+        "runDialog": { "title": "Run this thread" },
+        "discardDialog": { "title": "Discard unpublished changes?", "body": "Discard the unpublished changes from this stale session?", "confirm": "Discard" },
+        "stale": { "title": "This session is stale", "body": "The repository changed since this session started." },
+        "marker": {
+          "published": "Published {count} paths as {sha}",
+          "publishFailed": "Publish failed: {reason}",
+          "publishFailedBranchMoved": "Publish failed: the branch moved",
+          "discarded": "Discarded the changes at {sha}",
+          "discardFailed": "Discard failed: {reason}"
+        },
+        "markerPaths": "Paths",
+        "markerIgnored": "Ignored",
+        "card": { "plan": "Plan", "run": "Run", "openJob": "Open job", "pr": "View pull request", "needsYou": "Needs you" }
       }
     },
     "common": {

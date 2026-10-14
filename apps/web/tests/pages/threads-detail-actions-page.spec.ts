@@ -5,7 +5,7 @@ import type { VNodeChild } from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import type { FakeNode } from '../helpers/mount-sfc'
 import { i18nStub, toastRecorder, uiStubs, type ToastRecorder } from '../helpers/fleet-harness'
-import { extractApiError } from '../../composables/useApi'
+import { ApiError, extractApiError } from '../../composables/useApi'
 import type { ChatMessageDto, ThreadDetailDto } from '~/lib/thread-types'
 
 /**
@@ -48,6 +48,11 @@ const threadDetail = (over: Record<string, unknown> = {}): ThreadDetailDto => ({
   createdAt: '2026-10-14T00:00:00.000Z',
   activeJob: null,
   sendRefusal: null,
+  writtenPaths: [],
+  publishedSha: null,
+  specPublished: false,
+  lastWrite: null,
+  handoff: { plan: null, run: null },
   ...over,
 })
 
@@ -82,6 +87,15 @@ const ComposerStub = defineComponent({
 })
 
 /** A ThreadControls double: buttons that emit the three actions. */
+const ActionBarStub = defineComponent({
+  name: 'ThreadActionBarStub',
+  emits: ['publish', 'plan', 'run'],
+  setup(_props, { attrs, emit }) { return () => h('div', { ...attrs }, [
+    h('button', { 'data-testid': 'handoff-plan', onClick: () => emit('plan', { maxCostUsd: 5 }) }),
+    h('button', { 'data-testid': 'handoff-publish', onClick: () => emit('publish') }),
+  ]) },
+})
+
 const ControlsStub = defineComponent({
   name: 'ThreadControlsStub',
   props: ['isCreator', 'canManage', 'sessionLabel', 'archived'],
@@ -98,17 +112,21 @@ const ControlsStub = defineComponent({
 interface MountedPage {
   app: ReturnType<typeof mountSfc>
   send: jest.Mock
+  plan: jest.Mock
+  publish: jest.Mock
   endSession: jest.Mock
   toasts: ToastRecorder
   settle: () => Promise<void>
 }
 
-function mountPage(over: { send?: jest.Mock } = {}): MountedPage {
+function mountPage(over: { send?: jest.Mock; plan?: jest.Mock; publish?: jest.Mock } = {}): MountedPage {
   const thread = ref<ThreadDetailDto | null>(threadDetail())
   const messages = ref<ChatMessageDto[]>([])
   const toasts = toastRecorder()
   const send = over.send ?? jest.fn(async () => ({ ok: true }))
   const endSession = jest.fn(async () => ({ ok: true }))
+  const plan = over.plan ?? jest.fn(async () => ({ ok: true }))
+  const publish = over.publish ?? jest.fn(async () => ({ ok: true }))
   const app = mountSfc(pageFile, {
     components: {
       ...uiStubs,
@@ -126,6 +144,10 @@ function mountPage(over: { send?: jest.Mock } = {}): MountedPage {
       FleetThreadsThreadComposer: ComposerStub,
       ThreadControls: ControlsStub,
       FleetThreadsThreadControls: ControlsStub,
+      ThreadActionBar: ActionBarStub,
+      FleetThreadsThreadActionBar: ActionBarStub,
+      ThreadStaleBanner: inertThreadStub,
+      FleetThreadsThreadStaleBanner: inertThreadStub,
     },
     globals: {
       definePageMeta: () => undefined,
@@ -133,6 +155,8 @@ function mountPage(over: { send?: jest.Mock } = {}): MountedPage {
       useAppToast: () => toasts,
       useRoute: () => ({ params: { project: 'web', id: 'th1' } }),
       useAuth: () => ({ user: ref({ id: 'u1', email: 'owner@k.t', role: 'MEMBER' }) }),
+      useProjectEvents: () => undefined,
+      useThreadHandoffJobs: () => ({ jobs: ref({ plan: null, run: null }), sync: jest.fn(async () => undefined), refreshJob: jest.fn(async () => undefined), isHandoffJob: () => false }),
       useThread: () => ({
         thread,
         messages,
@@ -146,6 +170,10 @@ function mountPage(over: { send?: jest.Mock } = {}): MountedPage {
         answer: jest.fn(async () => ({ ok: true })),
         raiseCap: jest.fn(async () => ({ ok: true })),
         archive: jest.fn(async () => ({ ok: true })),
+        plan,
+        publish,
+        run: jest.fn(async () => ({ ok: true })),
+        discard: jest.fn(async () => ({ ok: true })),
       }),
       useHead: () => undefined,
       useFleetDispatchOptions: () => ({
@@ -168,7 +196,7 @@ function mountPage(over: { send?: jest.Mock } = {}): MountedPage {
       await Vue.nextTick()
     }
   }
-  return { app, send, endSession, toasts, settle }
+  return { app, send, plan, publish, endSession, toasts, settle }
 }
 
 /** Types into the page's composer textarea and presses Enter, exactly as a user would. */
@@ -223,6 +251,30 @@ describe('US-007 AC5, AC12, AC15: pages/[project]/threads/[id].vue', () => {
     expect(typeAndEnter(m.app, 'hello')).toBe(true)
     await m.settle()
 
+    expect(m.toasts.errors).toEqual([extractApiError(error)])
+    m.app.unmount()
+  })
+
+  test('US-003 AC-14: action bar Plan calls the controller with its body', async () => {
+    const m = mountPage()
+    await m.settle()
+    const button = m.app.one('[data-testid="handoff-plan"]')
+    expect(button).toBeDefined()
+    if (button?.props.onClick) (button.props.onClick as () => void)()
+    await m.settle()
+    expect(m.plan).toHaveBeenCalledWith({ maxCostUsd: 5 })
+    m.app.unmount()
+  })
+
+  test('US-003 AC-15: a failed publish surfaces the API error via toast', async () => {
+    const error = new ApiError(409, 'Runner offline')
+    const publish = jest.fn(async () => ({ ok: false as const, error }))
+    const m = mountPage({ publish })
+    await m.settle()
+    const button = m.app.one('[data-testid="handoff-publish"]')
+    expect(button).toBeDefined()
+    if (button?.props.onClick) (button.props.onClick as () => void)()
+    await m.settle()
     expect(m.toasts.errors).toEqual([extractApiError(error)])
     m.app.unmount()
   })

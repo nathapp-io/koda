@@ -10,6 +10,7 @@
 import { ref, type Ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
 import type { ThreadEventHandlers } from '~/lib/thread-event-stream'
+import type { ThreadHandoffBody } from '~/lib/thread-handoff-form'
 import type { ChatMessageDto, ThreadDetailDto } from '~/lib/thread-types'
 import { applyDelta, isTurnRunning, mergeMessages, newClientMessageId, refetchAfterSeq } from '~/lib/thread-view'
 
@@ -58,6 +59,12 @@ export interface ThreadController {
   answer: (requestId: string, text: string) => Promise<ThreadActionResult>
   raiseCap: (maxCostUsd: number) => Promise<ThreadActionResult>
   archive: () => Promise<ThreadActionResult>
+  publish: () => Promise<ThreadActionResult>
+  discard: () => Promise<ThreadActionResult>
+  plan: (body: ThreadHandoffBody) => Promise<ThreadActionResult>
+  run: (body: ThreadHandoffBody) => Promise<ThreadActionResult>
+  /** Re-GET the thread (the page calls it on a `fleet_job` event). */
+  reloadThread: () => Promise<void>
 }
 
 /** The API envelope `ret` as a number, when the error carries one (ApiError); undefined otherwise. */
@@ -286,6 +293,12 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
 
   const archive = (): Promise<ThreadActionResult> => postAction(`${threadPath}/archive`)
 
+  /** Fleet S5a handoff (US-002): Publish and Discard post an empty body; Plan and Run post their form body. */
+  const publish = (): Promise<ThreadActionResult> => postAction(`${threadPath}/publish`, {})
+  const discard = (): Promise<ThreadActionResult> => postAction(`${threadPath}/discard`, {})
+  const plan = (body: ThreadHandoffBody): Promise<ThreadActionResult> => postAction(`${threadPath}/plan`, { ...body })
+  const run = (body: ThreadHandoffBody): Promise<ThreadActionResult> => postAction(`${threadPath}/run`, { ...body })
+
   return {
     thread,
     messages,
@@ -299,5 +312,10 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
     answer,
     raiseCap,
     archive,
+    publish,
+    discard,
+    plan,
+    run,
+    reloadThread,
   }
 }
