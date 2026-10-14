@@ -25,11 +25,19 @@ export function createHandoffJobs(deps: HandoffJobsDeps): HandoffJobsController 
     jobs.value = { ...jobs.value, [slot]: job }
   }
 
+  // Latest request per slot; a response only applies while it is still the newest for a job still in the handoff.
+  const tickets: Record<keyof HandoffJobs, number> = { plan: 0, run: 0 }
+  const isCurrent = (slot: keyof HandoffJobs, ticket: number, jobId: string): boolean =>
+    tickets[slot] === ticket && handoff[slot]?.jobId === jobId
+
   const fetchSlot = async (slot: keyof HandoffJobs, jobId: string): Promise<void> => {
+    tickets[slot] += 1
+    const ticket = tickets[slot]
     try {
-      setSlot(slot, await deps.api.get<FleetJobDto>(apiPath`/projects/${deps.slug}/fleet/jobs/${jobId}`))
+      const job = await deps.api.get<FleetJobDto>(apiPath`/projects/${deps.slug}/fleet/jobs/${jobId}`)
+      if (isCurrent(slot, ticket, jobId)) setSlot(slot, job)
     } catch {
-      if (jobs.value[slot]?.id !== jobId) setSlot(slot, null)
+      if (isCurrent(slot, ticket, jobId) && jobs.value[slot]?.id !== jobId) setSlot(slot, null)
     }
   }
 
@@ -38,6 +46,7 @@ export function createHandoffJobs(deps: HandoffJobsDeps): HandoffJobsController 
     await Promise.all((['plan', 'run'] as const).map(async slot => {
       const entry = next[slot]
       if (entry === null) {
+        tickets[slot] += 1
         setSlot(slot, null)
         return
       }

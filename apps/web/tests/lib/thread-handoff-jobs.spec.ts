@@ -42,6 +42,28 @@ describe('createHandoffJobs', () => {
     await expect(controller.sync({ plan: { jobId: 'p9', state: 'QUEUED', stateReason: null }, run: null })).resolves.toBeUndefined()
     expect(controller.jobs.value.plan).toBeNull()
   })
+  test('F2: an older response resolving after a newer one does not overwrite it', async () => {
+    const resolvers: Array<(value: unknown) => void> = []
+    const get = jest.fn(() => new Promise<unknown>(resolve => { resolvers.push(resolve) }))
+    const controller = createHandoffJobs({ slug: 'web', api: { get: get as never } })
+    const first = controller.sync(running)
+    const second = controller.refreshJob('p1')
+    resolvers[1]?.({ id: 'p1', state: 'ESCALATED' })
+    await second
+    resolvers[0]?.({ id: 'p1', state: 'RUNNING' })
+    await first
+    expect(controller.jobs.value.plan).toEqual({ id: 'p1', state: 'ESCALATED' })
+  })
+  test('F2: a response for a job no longer in the handoff is dropped', async () => {
+    const resolvers: Array<(value: unknown) => void> = []
+    const get = jest.fn(() => new Promise<unknown>(resolve => { resolvers.push(resolve) }))
+    const controller = createHandoffJobs({ slug: 'web', api: { get: get as never } })
+    const pending = controller.sync(running)
+    void controller.sync({ plan: null, run: null })
+    resolvers[0]?.(detail)
+    await pending
+    expect(controller.jobs.value.plan).toBeNull()
+  })
   test('AC-7: identifies the last synced handoff job', async () => {
     const controller = createHandoffJobs({ slug: 'web', api: { get: async () => detail } })
     await controller.sync(running)
