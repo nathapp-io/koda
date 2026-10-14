@@ -156,6 +156,13 @@ export type WriteThreadLine = WriteDocThreadLine | PublishedThreadLine | Publish
 export type ThreadLine = InputConsumedThreadLine | AssistantThreadLine | ToolThreadLine | QuestionThreadLine | SessionThreadLine | WriteThreadLine;
 export type ParsedThreadLine = ThreadLine | { bad: true } | { ignored: true };
 
+/**
+ * The parser's skip-silently sentinel. Tested by shape, never by `'ignored' in`: a `published` line has its own
+ * `ignored` field (the paths Publish skipped), so a key test would drop every published line (#271).
+ */
+export const isIgnoredLine = (parsed: ParsedThreadLine): parsed is { ignored: true } =>
+  !('type' in parsed) && 'ignored' in parsed;
+
 const IGNORED_TYPES = new Set(['thinking_delta', 'compaction', 'tool_progress']);
 const TURN_ID_MAX = 128;
 const MAX_TOKEN_COUNT = 2_147_483_647;

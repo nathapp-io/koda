@@ -4,7 +4,7 @@ import { FLEET_CFG, fleetConfig } from '../../../config/fleet.config';
 import { LOG_STORE } from '../../logs/log-store';
 import type { LogStore } from '../../logs/log-store';
 import { logKey } from '../../logs/log-store';
-import { parseThreadLine } from './thread-line';
+import { isIgnoredLine, parseThreadLine } from './thread-line';
 import { ThreadEventBus } from '../../../live/thread-event-bus';
 import { THREAD_INGEST_REPOSITORY, type ThreadIngestBatch, type ThreadIngestRepository } from './domain/thread-ingest.domain';
 
@@ -66,7 +66,7 @@ export class ThreadIngestor {
           start = index + 1;
         }
         const lines = entries.flatMap(({ parsed, endOffset }) =>
-          'bad' in parsed || 'ignored' in parsed ? [] : [{ line: parsed, endOffset }],
+          'bad' in parsed || isIgnoredLine(parsed) ? [] : [{ line: parsed, endOffset }],
         );
         const badLines = entries.filter(({ parsed }) => 'bad' in parsed).length;
         const endOffset = cursor.offset + complete.length;
@@ -79,7 +79,7 @@ export class ThreadIngestor {
             const { parsed } = entry;
             if ('bad' in parsed) {
               pendingBadLines += 1;
-            } else if ('ignored' in parsed) {
+            } else if (isIgnoredLine(parsed)) {
               await this.foldAndPublish({ jobId, leaseEpoch, lines: [], endOffset: entry.endOffset, badLines: pendingBadLines });
               pendingBadLines = 0;
             } else {
