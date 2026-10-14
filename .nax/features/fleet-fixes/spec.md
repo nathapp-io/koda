@@ -130,10 +130,14 @@ A new module `apps/runner/src/executor/config-job/cleanup.ts` exports
 every outcome (`ok`, `no_changes`, `push_failed`, `pr_failed`, `conflict`, `invalid`, `drift`, `timeout`, `failed`,
 `stopped`). In order:
 
-1. Resolve `refs/remotes/origin/<defaultBranch>`; when it resolves, `checkout -f --detach <that sha>`.
-2. `clean -ffd` (no `-x`: gitignored files stay).
-3. `branch -D nax-config/<jobId>` when that local branch exists.
-4. `update-ref -d refs/remotes/origin/nax-config/<jobId>` when that ref exists.
+1. Resolve `origin/<defaultBranch>` with `resolveRef` (`apps/runner/src/executor/refs.ts`, as `prepareConfigCheckout`
+   does); only `kind: 'remote-branch'` counts as resolved. When it resolves, `checkout -f --detach <that sha>`.
+2. When step 1 did not resolve, or its checkout failed, `checkout -f --detach HEAD` (detach at the current commit,
+   dropping local changes), so the job branch is never left checked out. Either case is reported as a cleanup failure.
+3. `clean -ffd` (no `-x`: gitignored files stay).
+4. `branch -D nax-config/<jobId>` when that local branch exists (git refuses this while the branch is checked out,
+   which step 2 prevents).
+5. `update-ref -d refs/remotes/origin/nax-config/<jobId>` when that ref exists.
 
 Each git call uses a fixed timeout `CLEANUP_TIMEOUT_MS = 30_000` (the job's own budget may be spent, as on `timeout`).
 The branch on origin is never touched: it is the PR head. A failing step does not stop the later steps; any failure
@@ -141,19 +145,26 @@ is reported to `ctx.step` as `cleanup failed: <reason>` and never changes the re
 
 ### Delivery watch (US-004)
 
-`ApprovalInbox.vue` keeps one watch record `{ id: string; startedAt: number } | null`. When a fetched detail is
-waiting for delivery (`deliveryView(detail)?.state === 'waiting'`) and the record is null or names another approval id,
-the record becomes `{ id: detail.id, startedAt: Date.now() }`. `awaitingDelivery()` is true when the open detail is
-waiting and `Date.now() - record.startedAt < DELIVERY_WATCH_MS`. Opening a different approval replaces the record when
-that approval is seen waiting. `decidedAt` is not read. The window therefore restarts after a page reload, which costs at
-most a few extra GETs (D295 bound unchanged otherwise).
+`ApprovalInbox.vue` keeps one watch record `{ id: string; startedAt: number } | null`. `detail` is assigned in two
+places, `loadDetail` (a fetched detail) and `onDecide` (the decided approval returned by the decide call); both go
+through the record rule, for example through one `watch(detail)` or one helper called at both sites:
+
+- When the new detail is waiting for delivery (`deliveryView(detail)?.state === 'waiting'`) and the record is null or
+  names another approval id, the record becomes `{ id: detail.id, startedAt: Date.now() }`.
+- `awaitingDelivery()` is true when the open detail is waiting and `Date.now() - record.startedAt < DELIVERY_WATCH_MS`.
+  If the open detail is waiting but the record is null or names another id, it starts the record now and returns true.
+- `decidedAt` is not read.
+
+Intentional consequences: closing and reopening the same approval keeps its record (no new window); opening another
+approval and coming back starts a new window, and so does a page reload. Each costs at most a few extra GETs, the
+same D295 bound.
 
 ### Failure Handling
 
 | Case | Behaviour | Story |
 |---|---|---|
 | A cleanup git step fails | Later steps still run; `ctx.step('cleanup failed: <reason>')`; the job's result is unchanged | US-002 |
-| `origin/<defaultBranch>` does not resolve at cleanup | Checkout is skipped and reported as a cleanup failure; branch and ref deletion still run | US-002 |
+| `origin/<defaultBranch>` does not resolve at cleanup, or its checkout fails | Fallback `checkout -f --detach HEAD`; reported as a cleanup failure; branch and ref deletion still run | US-002 |
 | Requeue of a config job with no `FleetConfigEdit` row, or a row with no result | Requeued as today | US-003 |
 | A `ProcessInfo.command` lookup returns null | `matchesProcess` is false (unchanged) | US-001 |
 
@@ -195,6 +206,7 @@ most a few extra GETs (D295 bound unchanged otherwise).
 - `apps/runner/src/executor/config-job/config-job.ts` — `runConfigJob`, `ConfigJobDeps`
 - `apps/runner/src/executor/config-job/commit-push.ts` — `configBranchName`, `commitAndPushConfig`
 - `apps/runner/src/executor/config-job/checkout.ts` — `prepareConfigCheckout`, the pattern for resolving origin's default branch
+- `apps/runner/src/executor/refs.ts` — `resolveRef` and its `kind` values
 - `apps/runner/test/unit/config-job.spec.ts` — `world()`, fake nax and fake gh setup for config jobs
 - `apps/runner/test/helpers/git-fixture.ts` — `makeOrigin`, `pushCommit`, `git`
 
@@ -218,7 +230,7 @@ most a few extra GETs (D295 bound unchanged otherwise).
 
 **US-001**
 
-- `apps/runner/test/integration/process-info.integration.spec.ts` — the real-`ps` checks
+- `apps/runner/test/integration/process-info.integration.spec.ts` — the real-`ps` checks, including the describes moved from `src/executor/pid-registry.spec.ts`
 
 **US-002**
 
@@ -238,10 +250,11 @@ None.
 
 - `apps/runner/test/unit/host-executor.spec.ts` — the lifecycle test `prepare, spawn, watch the files, verdict, ledger, bundle, cleanup` asserts `matchesProcess` against the real `ps`; it now builds the executor with a fake `processInfo` whose `command(pid)` returns the spawned command, keeping the same three expectations (true for the job, false for another job id, false for a null pid).
 - `apps/runner/test/unit/config-job.spec.ts` — the test `matchesProcess (D486): the clone path or the job branch in argv` spawns `sh` and reads its command with the real `ps`; it now injects a fake `processInfo.command` that returns a command containing the clone path, keeping its three expectations.
+- `apps/runner/src/executor/pid-registry.spec.ts` — the describes `readProcessCommand`, `readProcessStart (BUG-5a: TZ-independent)` and `reapNaxPids with real processes` spawn the real `ps` inside the runner's default unit run; they move unchanged into the new integration spec process-info.integration.spec.ts (Creates), and the pure `parsePidEntries` and `selectReapable` describes stay in this file.
 
 **US-002**
 
-None. The cleanup only adds behaviour after the outcome is decided; existing `test/unit/config-job.spec.ts` and `test/integration/config-jobs.integration.spec.ts` assertions on outcomes, pushed branches and PRs stay valid.
+None. The cleanup only adds behaviour after the outcome is decided; US-002's tests are additive (new tests in `test/unit/config-job.spec.ts`), and the existing assertions there and in `test/integration/config-jobs.integration.spec.ts` on outcomes, pushed branches and PRs stay valid.
 
 **US-003**
 
@@ -273,7 +286,7 @@ inside their own story, each through the production entry point named in its ACs
 10. [integration] `readProcessCommand(process.pid)` returns a non-empty string, and `readProcessStart(process.pid)` returns a `Date` that is not later than now.
 11. [integration] `readProcessCommand` and `readProcessStart` return null for a pid that does not exist.
 
-Verification note: `test/unit/host-executor.spec.ts` and `test/unit/config-job.spec.ts` pass with `PATH` set to a directory that has no `ps` (the runner's `bun test src test/unit`); the real-`ps` checks run in `bun run test:integration`.
+Verification note: the runner's default unit run (`bun test src test/unit`, including `src/executor/pid-registry.spec.ts`, `test/unit/host-executor.spec.ts` and `test/unit/config-job.spec.ts`) passes with `PATH` set to a directory that has no `ps`; the real-`ps` checks run in `bun run test:integration`.
 
 ### US-002: Config jobs return the runner clone to the default branch
 
@@ -283,27 +296,28 @@ Verification note: `test/unit/host-executor.spec.ts` and `test/unit/config-job.s
 4. [unit] After an `ok` edit job, the origin repository still has the branch `nax-config/<jobId>` at the job's `resultSha`.
 5. [unit] After an edit job ends `pr_failed`, the clone has no local `nax-config/<jobId>` branch, and the returned result still carries `resultBranch: nax-config/<jobId>`.
 6. [unit] After an edit job ends `invalid` because nax lint rejects a new rule file, the clone's HEAD is detached at `origin/<defaultBranch>` and the rejected file is absent from the working tree.
-7. [unit] After an edit job ends `conflict`, the clone's HEAD is detached at `origin/<defaultBranch>` and the clone's working tree has no modified or untracked files.
-8. [unit] After a config job is stopped during a slow nax call, the run is `stopped` and the clone's HEAD is detached at `origin/<defaultBranch>`.
+7. [unit] An untracked file written into the clone after `prepareConfigJob` and before an edit job that ends `conflict` is absent after the job, and the clone's HEAD is detached at `origin/<defaultBranch>`.
+8. [unit] An edit job stopped during its slow nax `generate` call, after its edits were applied, ends `stopped`, and afterwards the edited file in the clone has its `origin/<defaultBranch>` content.
 9. [unit] A gitignored file present in the clone before an `invalid` edit job is still present after it.
-10. [unit] `runConfigJob` with a `Git` whose cleanup `checkout` fails returns the same `ConfigJobRun` outcome it decided before cleanup.
-11. [unit] `runConfigJob` with a `Git` whose cleanup `checkout` fails reports a step starting with `cleanup failed:` through `ctx.step`.
-12. [unit] `runConfigJob` with a `Git` whose cleanup `checkout` fails still deletes the local branch `nax-config/<jobId>`.
-13. [unit] `restoreConfigClone` on a clone where `refs/remotes/origin/<defaultBranch>` does not resolve returns a non-null reason and still deletes the local branch `nax-config/<jobId>`.
+10. [unit] An `ok` edit job run through `HostExecutor.runConfigJob` with a `Git` that fails only the call `checkout -f --detach <sha of origin/<defaultBranch>>` still returns outcome `ok` with the same `resultPrUrl`.
+11. [unit] The same run (the `checkout -f --detach <sha>` call failing) reports a step starting with `cleanup failed:` through `ctx.step`.
+12. [unit] The same run (the `checkout -f --detach <sha>` call failing) leaves the clone's HEAD detached and the local branch `nax-config/<jobId>` deleted.
+13. [unit] `restoreConfigClone`, on a clone whose HEAD is on `nax-config/<jobId>` and where `refs/remotes/origin/<defaultBranch>` was deleted, returns a non-null reason, leaves HEAD detached and deletes the local branch `nax-config/<jobId>`.
 
 ### US-003: Email delays come from config; config requeue guard
 
 1. [unit] `NotificationWriter`, with `EmailAvailability.config()` returning `delaySec: 30`, schedules the email of a non-approval notification with `dueAt` equal to its `createdAt` plus 30 seconds.
 2. [unit] `NotificationWriter`, with `EmailAvailability.config()` returning `approvalDelaySec: 5`, schedules the email of an `APPROVAL_REQUESTED_KIND` notification with `dueAt` equal to its `createdAt` plus 5 seconds.
-3. [unit] `emailConfig()` with `EMAIL_DELAY_SEC` and `EMAIL_APPROVAL_DELAY_SEC` unset yields `delaySec` equal to the constant `EMAIL_DELAY_SEC` (300) and `approvalDelaySec` equal to `EMAIL_APPROVAL_DELAY_SEC` (60).
-4. [unit] With `EMAIL_DELAY_SEC=45` in the environment, a `NotificationWriter` built on an `EmailAvailability` backed by `emailConfig()` schedules a non-approval notification's email with `dueAt` equal to `createdAt` plus 45 seconds.
-5. [unit] `FleetJobsService.requeue` for a FAILED `CONFIG_EDIT` job whose config edit has `mode: 'edit'` and result outcome `conflict` throws `ConflictAppException` with key `fleet.configRequeue` and params `{ outcome: 'conflict' }`.
-6. [unit] `FleetJobsService.requeue` for a FAILED `CONFIG_EDIT` job whose edit has `mode: 'edit'` and result outcome `invalid` throws `ConflictAppException` with key `fleet.configRequeue` and params `{ outcome: 'invalid' }`.
-7. [unit] A requeue refused with `fleet.configRequeue` performs no job state transition and no placement.
-8. [unit] `FleetJobsService.requeue` for a FAILED `CONFIG_EDIT` job whose edit has `mode: 'edit'` and outcome `push_failed` moves the job to QUEUED.
-9. [unit] `FleetJobsService.requeue` for a FAILED config job whose edit has `mode: 'drift'` and outcome `invalid` moves the job to QUEUED.
-10. [unit] `FleetJobsService.requeue` for a FAILED config job whose edit row is missing, or whose edit has no result and no `configResult` on the job, moves the job to QUEUED.
-11. [unit] `FleetJobsService.requeue` reads the outcome from the job's `configResult` when the edit's `result` is null.
+3. [unit] With `EMAIL_DELAY_SEC=45` in the environment, a `NotificationWriter` built on an `EmailAvailability` backed by `emailConfig()` schedules a non-approval notification's email with `dueAt` equal to `createdAt` plus 45 seconds.
+4. [unit] `FleetJobsService.requeue` for a FAILED `CONFIG_EDIT` job whose config edit has `mode: 'edit'` and result outcome `conflict` throws `ConflictAppException` with key `fleet.configRequeue` and params `{ outcome: 'conflict' }`.
+5. [unit] `FleetJobsService.requeue` for a FAILED `CONFIG_EDIT` job whose edit has `mode: 'edit'` and result outcome `invalid` throws `ConflictAppException` with key `fleet.configRequeue` and params `{ outcome: 'invalid' }`.
+6. [unit] A requeue refused with `fleet.configRequeue` performs no job state transition and no placement.
+7. [unit] `FleetJobsService.requeue` for a FAILED `CONFIG_EDIT` job whose edit has `mode: 'edit'` and outcome `push_failed` moves the job to QUEUED.
+8. [unit] `FleetJobsService.requeue` for a FAILED config job whose edit has `mode: 'drift'` and outcome `invalid` moves the job to QUEUED.
+9. [unit] `FleetJobsService.requeue` for a FAILED config job whose edit row is missing, or whose edit has no result and no `configResult` on the job, moves the job to QUEUED.
+10. [unit] `FleetJobsService.requeue` reads the outcome from the job's `configResult` when the edit's `result` is null.
+
+Verification note: `email.config.ts` taking its 300 / 60 fallbacks from the `email.constants.ts` constants is a refactor with no behaviour change; it is covered by `bun run type-check` and the existing `email.config.spec.ts` defaults test.
 
 ### US-004: Requeue hidden for unrecoverable config edits; approvals polish
 
@@ -318,4 +332,5 @@ Verification note: `test/unit/host-executor.spec.ts` and `test/unit/config-job.s
 9. [unit] The approvals inbox, opened on a decided escalate ask waiting for delivery whose `decidedAt` is one year in the past, fetches that approval's detail again on the next poll.
 10. [unit] Once the browser clock is 600 000 ms past the moment the inbox first loaded a waiting detail, the next poll does not fetch that approval's detail again.
 11. [unit] After the window of ask A has passed, opening a different ask B that is waiting for delivery makes the next poll fetch B's detail again.
-12. [unit] An opened escalate ask whose delivery is `delivered` is not fetched again on the next poll.
+12. [unit] After the user allows an escalate ask in the inbox and the decided detail is waiting for delivery, the next poll fetches that approval's detail again.
+13. [unit] An opened escalate ask whose delivery is `delivered` is not fetched again on the next poll.
