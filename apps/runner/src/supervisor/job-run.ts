@@ -13,6 +13,7 @@ import type { DrainResult, LogShipping } from '../logs/types';
 import type { Now, Sleep } from '../time';
 import { planVerdict } from '../verdict/plan-verdict';
 import { runVerdict, type Verdict } from '../verdict/run-verdict';
+import type { WorkflowView } from '../verdict/status-view';
 import { mapStatusToSnapshot } from '../watcher/status-snapshot';
 import { fetchConfigEdit, type ConfigEditSource } from './config-edit-fetch';
 import { CONFIG_HEARTBEAT_MS, startHeartbeat } from './heartbeat';
@@ -406,15 +407,28 @@ export class JobRun {
     await this.reapQuietly(this.mustRow());
   }
 
-  private async judge(row: JobRow): Promise<{ verdict: Verdict; snapshot: SnapshotEventPayload }> {
+  private async judge(row: JobRow): Promise<{ verdict: Verdict; snapshot: SnapshotEventPayload; workflow: WorkflowView | undefined }> {
     const cancelled = row.cancelRequestedAt !== null;
     if (row.command === 'PLAN') {
       const check = await this.deps.executor.readPlan(row);
       const costSpentUsd = await this.deps.executor.readPlanCost(row);
-      return { verdict: planVerdict({ cancelRequested: cancelled, check }), snapshot: costSpentUsd === undefined ? {} : { costSpentUsd } };
+      return { verdict: planVerdict({ cancelRequested: cancelled, check }), snapshot: costSpentUsd === undefined ? {} : { costSpentUsd }, workflow: undefined };
     }
     const status = await this.deps.executor.readStatus(row);
-    return { verdict: runVerdict({ cancelRequested: cancelled, status }), snapshot: status ? mapStatusToSnapshot(status) : {} };
+    if (row.command === 'RUN' && status?.workflow) {
+      let reasons: readonly string[] | undefined;
+      try {
+        reasons = (await this.deps.executor.readWorkflowResult(row))?.reasons;
+      } catch {
+        reasons = undefined;
+      }
+      return {
+        verdict: runVerdict({ cancelRequested: cancelled, status, ...(reasons !== undefined ? { workflowReasons: reasons } : {}) }),
+        snapshot: status ? mapStatusToSnapshot(status) : {},
+        workflow: status.workflow,
+      };
+    }
+    return { verdict: runVerdict({ cancelRequested: cancelled, status }), snapshot: status ? mapStatusToSnapshot(status) : {}, workflow: status?.workflow };
   }
 
   /**
@@ -466,14 +480,45 @@ export class JobRun {
         verdict = { state: 'FAILED', reason: pushed.reason };
       }
     } else if (row.command === 'RUN') {
-      const ledger = await this.deps.executor.readFinishLedger(row);
-      if (ledger) result = { branch: ledger.branch, sha: ledger.headSha };
-      // A completed run with finish disabled has no ledger: preserve its commits on origin too (#204).
-      if (verdict.state !== 'COMPLETED' || ledger === null) {
-        const progress = await this.pushRunProgress(row);
-        if (progress === null) return;   // halted: ABANDON owns the job now
-        wipPush = progress.value;
-        if (progress.result) result = progress.result;
+      const workflow = judged.workflow;
+      // US-002: a workflow RUN that was not cancelled branches on the workflow outcome, never on the verdict
+      // (a finish-ledger ESCALATED must still push). No workflow block, or a cancelled RUN, keeps today's path.
+      if (workflow !== undefined && verdict.state !== 'CANCELLED') {
+        if (workflow.outcome === 'ready' || workflow.outcome === 'draft') {
+          // nax owns the push and the PR: no progress push, no finish ledger. A resumed finish reuses its row.
+          if (row.resultBranch !== null && row.resultSha !== null) {
+            result = { branch: row.resultBranch, sha: row.resultSha };
+          } else {
+            let head: string | null;
+            try {
+              head = await this.deps.executor.readHead(row);
+            } catch {
+              head = null;
+            }
+            if (head !== null) {
+              this.deps.journal.updateJob(this.jobId, this.leaseEpoch, { resultBranch: row.branch, resultSha: head });
+              result = { branch: row.branch, sha: head };
+            } else {
+              result = { branch: row.branch, sha: null };
+            }
+          }
+        } else {
+          // local-only or no outcome: the finish ledger is not read; the progress push runs exactly as today.
+          const progress = await this.pushRunProgress(row);
+          if (progress === null) return;   // halted: ABANDON owns the job now
+          wipPush = progress.value;
+          if (progress.result) result = progress.result;
+        }
+      } else {
+        const ledger = await this.deps.executor.readFinishLedger(row);
+        if (ledger) result = { branch: ledger.branch, sha: ledger.headSha };
+        // A completed run with finish disabled has no ledger: preserve its commits on origin too (#204).
+        if (verdict.state !== 'COMPLETED' || ledger === null) {
+          const progress = await this.pushRunProgress(row);
+          if (progress === null) return;   // halted: ABANDON owns the job now
+          wipPush = progress.value;
+          if (progress.result) result = progress.result;
+        }
       }
     }
     if (this.halted) return;

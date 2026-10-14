@@ -14,6 +14,7 @@ import { assertInside, featureDirFor, repoDirFor } from '../paths/safe-segment';
 import { checkPlanPrd, type PlanCheck } from '../verdict/plan-verdict';
 import { readPlanCost } from '../verdict/plan-cost';
 import type { StatusView } from '../verdict/status-view';
+import { findWorkflowResult, type WorkflowResult } from '../verdict/workflow-result';
 import { Watcher, type WatcherSink } from '../watcher/watcher';
 import { readStatusFile } from '../watcher/status-snapshot';
 import { prepareConfigCheckout } from './config-job/checkout';
@@ -250,6 +251,26 @@ export class HostExecutor implements JobExecutor {
     try {
       const ledger = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
       return typeof ledger['branch'] === 'string' && typeof ledger['headSha'] === 'string' ? { branch: ledger['branch'], headSha: ledger['headSha'] } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async readWorkflowResult(job: JobRow): Promise<WorkflowResult | null> {
+    try {
+      const { repoDir } = this.dirs(job);
+      const found = await findWorkflowResult(featureDirFor(repoDir, job.assign.feature), Date.parse(job.createdAt));
+      return found?.result ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async readHead(job: JobRow): Promise<string | null> {
+    try {
+      const { repoDir } = this.dirs(job);
+      const sha = (await this.deps.git.ok(['rev-parse', 'HEAD'], { cwd: repoDir })).trim();
+      return sha === '' ? null : sha;
     } catch {
       return null;
     }

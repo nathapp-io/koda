@@ -993,3 +993,104 @@ describe('log shipping (S2a §2.4, plan D327)', () => {
     }
   });
 });
+
+describe('RUN workflow finish (US-002)', () => {
+  test('AC-3: workflow draft with reasons reports ESCALATED with the joined reason', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', branch: 'feat/x', pid: 1, pgid: 1 });
+    b.ex.status = { run: { id: 'r', status: 'completed' }, workflow: { step: 'done', outcome: 'draft' } };
+    (b.ex as unknown as Record<string, unknown>)['workflowResult'] = { runId: 'w1', outcome: 'draft', reasons: ['CI failed: test'] };
+    (b.ex as unknown as Record<string, unknown>)['head'] = null;
+    await b.run.start('finish');
+    expect(states(b).at(-1)).toEqual({ to: 'ESCALATED', reason: 'workflow draft: CI failed: test' });
+  });
+  test('AC-4: workflow ready with no ledger never pushes and carries no wipPush', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', branch: 'feat/x', pid: 1, pgid: 1 });
+    b.ex.status = { run: { id: 'r', status: 'completed' }, workflow: { step: 'done', outcome: 'ready' } };
+    (b.ex as unknown as Record<string, unknown>)['workflowResult'] = null;
+    (b.ex as unknown as Record<string, unknown>)['head'] = 'abc123';
+    b.ex.ledger = null;
+    await b.run.start('finish');
+    expect(b.ex.calls).not.toContain('pushProgress:j1');
+    expect(lastSnapshot(b)?.wipPush).toBeUndefined();
+  });
+  test('AC-5: workflow draft never pushes', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', branch: 'feat/x', pid: 1, pgid: 1 });
+    b.ex.status = { run: { id: 'r', status: 'completed' }, workflow: { step: 'done', outcome: 'draft' } };
+    (b.ex as unknown as Record<string, unknown>)['workflowResult'] = { runId: 'w1', outcome: 'draft', reasons: ['CI failed: test'] };
+    (b.ex as unknown as Record<string, unknown>)['head'] = 'abc123';
+    await b.run.start('finish');
+    expect(b.ex.calls).not.toContain('pushProgress:j1');
+  });
+  test('AC-6: workflow local-only pushes once and never reads the ledger', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', branch: 'feat/x', pid: 1, pgid: 1 });
+    b.ex.status = { run: { id: 'r', status: 'completed' }, workflow: { step: 'done', outcome: 'local-only' } };
+    (b.ex as unknown as Record<string, unknown>)['workflowResult'] = { runId: 'w1', outcome: 'local-only', reasons: ['push failed'] };
+    b.ex.ledger = null;
+    await b.run.start('finish');
+    expect(b.ex.calls.filter((c) => c === 'pushProgress:j1')).toHaveLength(1);
+    expect((b.ex as unknown as Record<string, unknown>)['readFinishLedgerCalls'] ?? b.ex.calls.filter((c) => c === 'readFinishLedger:j1').length).toBe(0);
+  });
+  test('AC-7: workflow ready reports the branch and head sha without reading the ledger', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', branch: 'feat/x', pid: 1, pgid: 1 });
+    b.ex.status = { run: { id: 'r', status: 'completed' }, workflow: { step: 'done', outcome: 'ready' } };
+    (b.ex as unknown as Record<string, unknown>)['workflowResult'] = null;
+    (b.ex as unknown as Record<string, unknown>)['head'] = 'abc123';
+    await b.run.start('finish');
+    expect(lastSnapshot(b)).toMatchObject({ resultBranch: 'feat/x', resultSha: 'abc123' });
+    expect((b.ex as unknown as Record<string, unknown>)['readFinishLedgerCalls'] ?? b.ex.calls.filter((c) => c === 'readFinishLedger:j1').length).toBe(0);
+  });
+  test('AC-8: workflow ready journals the head sha', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', branch: 'feat/x', pid: 1, pgid: 1 });
+    b.ex.status = { run: { id: 'r', status: 'completed' }, workflow: { step: 'done', outcome: 'ready' } };
+    (b.ex as unknown as Record<string, unknown>)['workflowResult'] = null;
+    (b.ex as unknown as Record<string, unknown>)['head'] = 'abc123';
+    await b.run.start('finish');
+    expect(b.journal.getJob('j1', 1)).toMatchObject({ resultBranch: 'feat/x', resultSha: 'abc123' });
+  });
+  test('AC-9: no workflow block keeps the ledger path', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', branch: 'feat/x', pid: 1, pgid: 1 });
+    b.ex.status = { run: { id: 'r', status: 'completed' } };
+    b.ex.ledger = { branch: 'feat/y', headSha: 'def456' };
+    await b.run.start('finish');
+    expect(lastSnapshot(b)).toMatchObject({ resultBranch: 'feat/y', resultSha: 'def456' });
+  });
+  test('AC-10: workflow ready with no head reports COMPLETED with the branch and no sha', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', branch: 'feat/x', pid: 1, pgid: 1 });
+    b.ex.status = { run: { id: 'r', status: 'completed' }, workflow: { step: 'done', outcome: 'ready' } };
+    (b.ex as unknown as Record<string, unknown>)['workflowResult'] = null;
+    (b.ex as unknown as Record<string, unknown>)['head'] = null;
+    b.ex.ledger = null;
+    await b.run.start('finish');
+    expect(states(b).at(-1)?.to).toBe('COMPLETED');
+    expect(lastSnapshot(b)).toMatchObject({ resultBranch: 'feat/x' });
+    expect(lastSnapshot(b)).not.toHaveProperty('resultSha');
+  });
+  test('AC-11: resumed workflow ready reuses the journalled sha without reading the head', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'UPLOADING', branch: 'feat/x', resultBranch: 'feat/x', resultSha: 'aaa111', pid: 1, pgid: 1 });
+    b.ex.status = { run: { id: 'r', status: 'completed' }, workflow: { step: 'done', outcome: 'ready' } };
+    (b.ex as unknown as Record<string, unknown>)['workflowResult'] = null;
+    (b.ex as unknown as Record<string, unknown>)['head'] = 'bbb222';
+    await b.run.start('finish');
+    expect(lastSnapshot(b)).toMatchObject({ resultSha: 'aaa111' });
+    expect(b.journal.getJob('j1', 1)?.resultSha).toBe('aaa111');
+  });
+  test('AC-12: cancelled workflow ready keeps the cancelled path with one push', async () => {
+    const b = build();
+    b.journal.updateJob('j1', 1, { state: 'RUNNING', branch: 'feat/x', pid: 1, pgid: 1, cancelRequestedAt: '2026-10-01T00:00:00.000Z' });
+    b.ex.status = { run: { id: 'r', status: 'completed' }, workflow: { step: 'done', outcome: 'ready' } };
+    (b.ex as unknown as Record<string, unknown>)['workflowResult'] = null;
+    (b.ex as unknown as Record<string, unknown>)['head'] = 'abc123';
+    await b.run.start('finish');
+    expect(states(b).at(-1)?.to).toBe('CANCELLED');
+    expect(b.ex.calls.filter((c) => c === 'pushProgress:j1')).toHaveLength(1);
+  });
+});

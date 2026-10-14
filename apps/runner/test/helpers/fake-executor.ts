@@ -5,6 +5,7 @@ import type { JobRow } from '../../src/journal/types';
 import type { JobLogSources } from '../../src/logs/types';
 import type { PlanCheck } from '../../src/verdict/plan-verdict';
 import type { StatusView } from '../../src/verdict/status-view';
+import type { WorkflowResult } from '../../src/verdict/workflow-result';
 import type { WatcherSink } from '../../src/watcher/watcher';
 
 /** A scriptable JobExecutor: every call is recorded as `<name>:<jobId>`; nothing touches disk, git or a process. */
@@ -28,6 +29,11 @@ export class FakeExecutor implements JobExecutor {
   planCost: string | undefined = '0.0000';
   planPush: PlanPushOutcome = { ok: true, branch: 'feat/x', sha: 'a'.repeat(40) };
   ledger: { branch: string; headSha: string } | null = { branch: 'feat/x', headSha: 'b'.repeat(40) };
+  readFinishLedgerCalls = 0;
+  /** US-002: scriptable workflow result.json content; null means no result. */
+  workflowResult: WorkflowResult | null = null;
+  /** US-002: scriptable checkout HEAD; null means git failed. */
+  head: string | null = null;
   bundle: BundleFile = { path: '/b.tgz', size: 1, sha256: 'c'.repeat(64) };
   bundleError: Error | null = null;
   resumeError: Error | null = null;
@@ -117,8 +123,20 @@ export class FakeExecutor implements JobExecutor {
     return this.progressPush;
   }
 
-  async readFinishLedger(): Promise<{ branch: string; headSha: string } | null> {
+  async readFinishLedger(job: JobRow): Promise<{ branch: string; headSha: string } | null> {
+    this.note('readFinishLedger', job);
+    this.readFinishLedgerCalls += 1;
     return this.ledger;
+  }
+
+  async readWorkflowResult(job: JobRow): Promise<WorkflowResult | null> {
+    this.note('readWorkflowResult', job);
+    return this.workflowResult;
+  }
+
+  async readHead(job: JobRow): Promise<string | null> {
+    this.note('readHead', job);
+    return this.head;
   }
 
   async collectBundle(job: JobRow): Promise<BundleFile> {

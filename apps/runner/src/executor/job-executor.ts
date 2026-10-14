@@ -4,6 +4,7 @@ import type { JobLogSources } from '../logs/types';
 import type { JobRow } from '../journal/types';
 import type { PlanCheck } from '../verdict/plan-verdict';
 import type { StatusView } from '../verdict/status-view';
+import type { WorkflowResult } from '../verdict/workflow-result';
 import type { WatcherSink } from '../watcher/watcher';
 import type { ProgressPushOutcome } from './progress-push';
 
@@ -80,6 +81,10 @@ export interface JobExecutor {
   /** S1b §1.1 (B5): after an unfinished RUN, commit the PRD and fast-forward the feature branch on origin. */
   pushProgress(job: JobRow, options?: PushProgressOptions): Promise<ProgressPushOutcome>;
   readFinishLedger(job: JobRow): Promise<{ branch: string; headSha: string } | null>;
+  /** US-002: newest workflow result.json at or after the job's createdAt, null on any filesystem error. */
+  readWorkflowResult(job: JobRow): Promise<WorkflowResult | null>;
+  /** US-002: the checkout's HEAD sha, null when git fails. */
+  readHead(job: JobRow): Promise<string | null>;
   collectBundle(job: JobRow): Promise<BundleFile>;
   cleanup(job: JobRow): Promise<void>;
   /** D90: after a daemon restart, re-open this job's credential socket (a readopted nax may still push). */

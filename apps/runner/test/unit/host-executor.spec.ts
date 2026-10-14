@@ -401,3 +401,22 @@ describe('HostExecutor approval relay (plan D273, D285)', () => {
     expect(approvals.resume).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('HostExecutor workflow result and head (US-002)', () => {
+  test('AC-1: readWorkflowResult returns the outcome and reasons written after createdAt', async () => {
+    const w = await world();
+    expect((await w.ex.prepare(w.row)).ok).toBe(true);
+    const repoDir = join(w.workspaceRoot, 'acme', 'app');
+    const runDir = join(repoDir, '.nax', 'features', 'feat', 'workflow', 'run-1');
+    await mkdir(runDir, { recursive: true });
+    await writeFile(join(runDir, 'result.json'), JSON.stringify({ schemaVersion: 1, runId: 'r1', verdict: { outcome: 'ready', reasons: ['a', 'b'] } }));
+    const found = await (w.ex as unknown as { readWorkflowResult(job: JobRow): Promise<{ outcome: string; reasons: readonly string[] } | null> }).readWorkflowResult(w.row);
+    expect(found?.outcome).toBe('ready');
+    expect([...(found?.reasons ?? [])]).toEqual(['a', 'b']);
+  });
+  test('AC-2: readHead of a non-checkout returns null', async () => {
+    const w = await world();
+    const missing = await (w.ex as unknown as { readHead(job: JobRow): Promise<string | null> }).readHead(w.row);
+    expect(missing).toBeNull();
+  });
+});
