@@ -28,7 +28,7 @@ describe('createHandoffJobs', () => {
     const get = jest.fn(async () => detail)
     const controller = createHandoffJobs({ slug: 'web', api: { get } })
     await controller.sync(running)
-    await controller.sync({ plan: { ...running.plan!, state: 'COMPLETED' }, run: null })
+    await controller.sync({ plan: { jobId: 'p1', state: 'COMPLETED', stateReason: null }, run: null })
     expect(get).toHaveBeenNthCalledWith(2, '/projects/web/fleet/jobs/p1')
   })
   test('AC-5: a null run clears cached detail', async () => {
