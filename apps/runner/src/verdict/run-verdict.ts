@@ -36,7 +36,7 @@ export function runVerdict(input: { cancelRequested: boolean; status: StatusView
       if (reasons.length === 0) return { state: 'FAILED', reason: 'workflow local-only' };
       return { state: 'FAILED', reason: clipReason(`workflow local-only: ${reasons.join('; ')}`) };
     }
-    return { state: 'FAILED', reason: `workflow ended at step ${status.workflow.step}` };
+    return { state: 'FAILED', reason: clipReason(`workflow ended at step ${status.workflow.step}`) };
   }
   const finish = status.postRun?.finish;
   if (finish?.result === 'escalated') return { state: 'ESCALATED', reason: finish.escalationReason ?? 'escalated' };

@@ -176,6 +176,15 @@ describe('workflow verdict (US-001)', () => {
       reason: 'workflow ended at step final-gates',
     });
   });
+  test('F1: workflow with no outcome and an oversized step clips to 500 chars', () => {
+    const verdict = runVerdict({
+      cancelRequested: false,
+      status: { run: { id: 'r', status: 'completed' }, workflow: { step: 's'.repeat(600) } },
+    });
+    expect(verdict.state).toBe('FAILED');
+    expect(verdict.reason).toHaveLength(500);
+    expect((verdict.reason ?? '').startsWith('workflow ended at step ')).toBe(true);
+  });
   test('AC-10: cancel wins over a ready workflow', () => {
     expect(runVerdict({ cancelRequested: true, status: { run: { id: 'r', status: 'completed' }, workflow: { step: 'done', outcome: 'ready' } } })).toEqual({
       state: 'CANCELLED',
