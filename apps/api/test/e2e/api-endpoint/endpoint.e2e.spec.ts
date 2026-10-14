@@ -3112,16 +3112,16 @@ describeIntegration('API Integration Tests', () => {
       .post(`/api/projects/${projectSlug}/threads`)
       .set('Authorization', `Bearer ${token}`)
       .send({ repoId: world.repoId, feature, title: feature, backend: { kind: 'native' } });
-    const createThreadRunner = (threadId: string) => db().runner.create({ data: {
+    const createThreadRunner = (threadId: string, extraCapabilities: Record<string, unknown> = {}) => db().runner.create({ data: {
       name: `thread-handoff-${threadId}`, apiKeyHash: `thread-handoff-${threadId}`, os: 'linux', arch: 'x64', labels: [],
       capacity: 2, capabilities: {
         nax: { version: '0.83.0', protocols: ['native'] }, sandbox: { available: true, probedAt: new Date().toISOString() },
-        profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'],
+        profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'], ...extraCapabilities,
       }, daemonVersion: '0.1.0', protocolVersion: 4,
       bootId: `thread-handoff-${threadId}`, lastSeenAt: new Date(), createdById: world.ids.root,
     } });
-    const attachThreadRunner = async (threadId: string) => {
-      const runner = await createThreadRunner(threadId);
+    const attachThreadRunner = async (threadId: string, extraCapabilities: Record<string, unknown> = {}) => {
+      const runner = await createThreadRunner(threadId, extraCapabilities);
       await db().chatThread.update({ where: { id: threadId }, data: { runnerId: runner.id } });
       return runner;
     };
@@ -3330,7 +3330,7 @@ describeIntegration('API Integration Tests', () => {
       try {
         const denied = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
           .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(403);
-        expect(denied.body.message).toBe('projects');
+        expect(denied.body.message).toBe('projects.40003');
       } finally {
         await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.dev } }, data: { role: 'DEVELOPER' } });
       }
@@ -3429,7 +3429,7 @@ describeIntegration('API Integration Tests', () => {
 
     it('US-007 AC-4: forwards the run bash mode and profiles', async () => {
       const thread = body<{ id: string }>(await createThread('run-options').expect(201));
-      await attachThreadRunner(thread.id);
+      await attachThreadRunner(thread.id, { approvals: { relay: true } });
       await db().chatThread.update({ where: { id: thread.id }, data: { specPublished: true } });
       await db().fleetJob.create({ data: {
         projectId: world.projectId, repoId: world.repoId, ref: 'feat/run-options', command: 'PLAN', feature: 'run-options',
