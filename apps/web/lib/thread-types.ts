@@ -46,6 +46,32 @@ export interface ThreadSession {
   contextReset: boolean
   reason: string | null
   at: string
+  /** Set while the runner reports the session's worktree stale; absent otherwise (fleet S5a §4). */
+  stale?: true
+}
+
+/**
+ * The thread's last Publish or Discard result (chat-thread.domain.ts `ThreadWriteResult`, also the
+ * `lastWrite` wire shape). Publish writes `published` or `publish_failed`; Discard writes `discarded`
+ * or `discard_failed`.
+ */
+export type ThreadWriteResult =
+  | { kind: 'published'; jobId: string; at: string; sha: string; paths: string[]; ignored: string[] }
+  | { kind: 'publish_failed'; jobId: string; at: string; reason: string }
+  | { kind: 'discarded'; jobId: string; at: string; sha: string }
+  | { kind: 'discard_failed'; jobId: string; at: string; reason: string }
+
+/** The latest PLAN or RUN job of a thread, by `queuedAt` (chat-thread.domain.ts `ThreadHandoffJob`). */
+export interface ThreadHandoffJob {
+  jobId: string
+  state: string
+  stateReason: string | null
+}
+
+/** The thread's latest PLAN and RUN (chat-thread.domain.ts `ChatThreadHandoff`). */
+export interface ThreadHandoff {
+  plan: ThreadHandoffJob | null
+  run: ThreadHandoffJob | null
 }
 
 export interface ThreadDto {
@@ -70,10 +96,16 @@ export interface ThreadDto {
   createdAt: string
   /** The thread's current THREAD job, when one is not terminal. */
   activeJob: { id: string; state: string } | null
+  /** Distinct paths write_doc touched since the last publish. */
+  writtenPaths: string[]
+  publishedSha: string | null
+  specPublished: boolean
+  lastWrite: ThreadWriteResult | null
 }
 
 export interface ThreadDetailDto extends ThreadDto {
   sendRefusal: ThreadSendRefusal | null
+  handoff: ThreadHandoff
 }
 
 /** One tool/approval entry of a message's folded `toolSummary` (tool-summary.ts `ToolSummaryEntry`). */
