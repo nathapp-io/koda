@@ -119,4 +119,27 @@ describe('computeCorrection (spec §3)', () => {
     const c = computeCorrection(input({ finish: finish() }));
     expect(c.escalatedFrom).toBe('finish-audit');
   });
+
+  it('gives a present ready workflow precedence over escalated finish fields and PR url', () => {
+    const c = computeCorrection(input({
+      finish: finish(), workflow: { ...draftWorkflow, outcome: 'ready' }, workflowOutcome: 'ready',
+      workflowUrl: 'https://github.com/o/r/pull/workflow',
+    }));
+    expect(c.patch).not.toHaveProperty('state');
+    expect(c.patch).not.toHaveProperty('finishResult');
+    expect(c.patch).not.toHaveProperty('escalationReason');
+    expect(c.patch).toMatchObject({ resultPrUrl: 'https://github.com/o/r/pull/workflow' });
+    expect(c.escalated).toBe(false);
+    expect(c.escalatedFrom).toBeNull();
+  });
+
+  it('keeps workflow draft escalation rather than applying finish-audit correction', () => {
+    const c = computeCorrection(input({
+      finish: finish(), workflow: draftWorkflow, workflowOutcome: 'draft',
+      workflowUrl: 'https://github.com/o/r/pull/workflow',
+    }));
+    expect(c.patch).toMatchObject({ state: 'ESCALATED', stateReason: ESCALATED_FROM_WORKFLOW, resultPrUrl: 'https://github.com/o/r/pull/workflow' });
+    expect(c.patch.finishResult).toBeUndefined();
+    expect(c.escalatedFrom).toBe('workflow');
+  });
 });

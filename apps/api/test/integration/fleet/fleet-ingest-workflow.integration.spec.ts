@@ -3,7 +3,7 @@
  * Run: cd apps/api && KODA_DB_TESTS=1 bun run test:scoped test/integration/fleet/fleet-ingest-workflow.integration.spec.ts
  */
 import { createHash } from 'crypto';
-import { mkdtempSync } from 'fs';
+import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { Readable } from 'stream';
@@ -22,10 +22,11 @@ import { ESCALATED_FROM_WORKFLOW } from '../../../src/fleet/ingest/ingest-correc
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 
+const boundaryReason = `${'a'.repeat(499)}😀`;
 const workflowResult = JSON.stringify({
   schemaVersion: 1,
   runId: 'fab5b9af-d3a3-41f2-91ed-62372a733c03',
-  verdict: { workflowPassed: true, outcome: 'draft', reasons: ['CI failed: test'], openItems: [] },
+  verdict: { workflowPassed: true, outcome: 'draft', reasons: [boundaryReason], openItems: [] },
 });
 const statusText = JSON.stringify({
   run: { id: 'run-1', status: 'completed' },
@@ -39,11 +40,13 @@ describeIntegration('fleet workflow draft ingest (PG, US-005 AC-13/AC-14)', () =
   let store: ArtifactStore;
   let ingest: BundleIngestService;
   let repo: IBundleIngestRepository;
+  let artifactDir: string;
   const savedDir = process.env.FLEET_ARTIFACT_DIR;
   const now = new Date('2026-10-06T10:00:00Z');
 
   beforeAll(async () => {
-    process.env.FLEET_ARTIFACT_DIR = mkdtempSync(join(tmpdir(), 'koda-ingest-workflow-'));
+    artifactDir = mkdtempSync(join(tmpdir(), 'koda-ingest-workflow-'));
+    process.env.FLEET_ARTIFACT_DIR = artifactDir;
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
@@ -54,6 +57,7 @@ describeIntegration('fleet workflow draft ingest (PG, US-005 AC-13/AC-14)', () =
   });
   afterAll(async () => {
     await app.close();
+    rmSync(artifactDir, { recursive: true, force: true });
     if (savedDir === undefined) delete process.env.FLEET_ARTIFACT_DIR;
     else process.env.FLEET_ARTIFACT_DIR = savedDir;
   });
@@ -91,7 +95,7 @@ describeIntegration('fleet workflow draft ingest (PG, US-005 AC-13/AC-14)', () =
 
     const after = await prisma.fleetJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(after).toMatchObject({ state: 'ESCALATED', stateReason: ESCALATED_FROM_WORKFLOW, resultPrUrl: 'https://github.com/o/r/pull/4' });
-    expect((after.workflow as { outcome?: unknown } | null)?.outcome).toBe('draft');
+    expect(after.workflow).toMatchObject({ outcome: 'draft', reasons: ['a'.repeat(499)] });
 
     // BundleIngestService fires upsertPrLinks without awaiting it; poll briefly for the link.
     let links: Array<{ url: string }> = [];

@@ -46,6 +46,18 @@ describe('parseWorkflowResult', () => {
     expect(parseWorkflowResult({ name: 'workflow/result.json', text: 'not JSON' })).toBeNull();
     expect(parseWorkflowResult(null)).toBeNull();
   });
+
+  it('clips bounded workflow strings without splitting a surrogate pair', () => {
+    const reason = `${'a'.repeat(499)}😀`;
+    const itemText = `${'b'.repeat(1_999)}😀`;
+    const parsed = parseWorkflowResult(file({
+      ...example,
+      verdict: { ...example.verdict, reasons: [reason], openItems: [{ id: 'i', kind: 'finding', issue: itemText, suggestion: itemText }] },
+    }));
+    expect(parsed?.reasons).toEqual(['a'.repeat(499)]);
+    expect(parsed?.openItems[0]).toMatchObject({ issue: 'b'.repeat(1_999), suggestion: 'b'.repeat(1_999) });
+    expect(parsed?.reasons[0]).not.toMatch(/[\uD800-\uDBFF]$/);
+  });
 });
 
 describe('workflow ingest version', () => {

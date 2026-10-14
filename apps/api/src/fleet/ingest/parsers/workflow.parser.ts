@@ -1,7 +1,7 @@
 import type { BundleFile } from '../bundle-reader';
 import type { FleetJobWorkflow, FleetJobWorkflowItem } from '../../jobs/domain/fleet-job.domain';
 import { INGEST_LIMITS } from '../domain/bundle-ingest.domain';
-import { bool, nonNegInt, obj, parseJson, str } from './fields';
+import { bool, clipString, nonNegInt, obj, parseJson, str } from './fields';
 
 const OUTCOMES = ['ready', 'draft', 'local-only'] as const;
 
@@ -33,7 +33,7 @@ export function parseWorkflowResult(file: BundleFile | null): FleetJobWorkflow |
   const workflowPassed = bool(verdict.workflowPassed);
   if (workflowPassed === null) return null;
   const reasons = Array.isArray(verdict.reasons)
-    ? verdict.reasons.filter((reason): reason is string => typeof reason === 'string').slice(0, 20).map((reason) => reason.slice(0, 500))
+    ? verdict.reasons.filter((reason): reason is string => typeof reason === 'string').slice(0, 20).map((reason) => clipString(reason, 500))
     : [];
   const openItems = Array.isArray(verdict.openItems)
     ? verdict.openItems.map(parseItem).filter((item): item is FleetJobWorkflowItem => item !== null).slice(0, 50)

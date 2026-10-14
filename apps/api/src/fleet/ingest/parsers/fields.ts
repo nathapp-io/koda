@@ -1,10 +1,16 @@
 import { Prisma } from '../../../generated/prisma/client';
 
 /** D365: typed readers for untrusted bundle JSON. Every reader returns null for anything it does not accept. */
+export function clipString(value: string, max: number): string {
+  const clipped = value.slice(0, max);
+  const last = clipped.charCodeAt(clipped.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? clipped.slice(0, -1) : clipped;
+}
+
 export function str(v: unknown, max: number): string | null {
   if (typeof v !== 'string') return null;
   const t = v.trim();
-  return t.length === 0 ? null : t.slice(0, max);
+  return t.length === 0 ? null : clipString(t, max);
 }
 
 export function nonNegInt(v: unknown): number | null {

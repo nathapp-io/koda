@@ -43,7 +43,8 @@ export function computeCorrection(input: CorrectionInput): Correction {
   const costRaised = ledger.gt(new Prisma.Decimal(job.costSpentUsd));
   const cost: FleetJobPatch = costRaised ? { costSpentUsd: ledger.toFixed(4) } : {};
 
-  const usable = job.command === 'RUN' && input.runStatus === 'completed' && finish !== null ? finish : null;
+  // A status workflow outcome is authoritative; finish-audit data is legacy fallback only.
+  const usable = job.command === 'RUN' && workflowOutcome === null && input.runStatus === 'completed' && finish !== null ? finish : null;
   const fields: FleetJobPatch = usable
     ? {
       ...fill(job.finishResult, usable.status, 'finishResult'),
