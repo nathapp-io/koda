@@ -9,7 +9,7 @@ import { round4 } from './thread-cost';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { ThreadIngestBatch, ThreadIngestRepository, FoldResult, UnfoldedStream } from './domain/thread-ingest.domain';
 import { allocateThreadSeq } from '../domain/chat-thread.domain';
-import { ACTIVE_STATES } from '../../jobs/job-state';
+import { ACTIVE_STATES, isTerminal } from '../../jobs/job-state';
 import type { AssistantThreadLine, QuestionThreadLine, SessionThreadLine, ThreadLine, ToolThreadLine, UsageThreadLine } from './thread-line';
 import { writeLinePatch, type WriteFoldPatch, type WriteLine } from './thread-write-fold';
 import {
@@ -75,7 +75,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
       const db = this.prisma.client;
       await db.$queryRaw`SELECT "id" FROM "FleetJob" WHERE "id" = ${batch.jobId} FOR UPDATE`;
       const job = await db.fleetJob.findUnique({ where: { id: batch.jobId }, select: {
-        id: true, command: true, threadId: true, leaseEpoch: true, projectId: true, repoId: true, runnerId: true,
+        id: true, command: true, threadId: true, leaseEpoch: true, projectId: true, repoId: true, runnerId: true, state: true,
       } });
       let threadId: string | null = null;
       if (job) spendKeys = jobSpendKeys(job);
@@ -128,7 +128,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
             }
           }
           else if (isSessionLine(line)) {
-            const erroredIds = await this.foldSessionLine(batch, threadId, line);
+            const erroredIds = await this.foldSessionLine(batch, threadId, line, isTerminal(job.state) || batch.leaseEpoch !== job.leaseEpoch);
             for (const id of erroredIds) messageIds.add(id);
             threadChanged = true;
           }
@@ -411,10 +411,14 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
    * Folds a runner session line into `ChatThread.session`. `session_failed` also errors the thread's pending and
    * streaming messages with the reason, keeping their content (fleet S5a §8).
    */
-  private async foldSessionLine(batch: ThreadIngestBatch, threadId: string, line: SessionThreadLine): Promise<string[]> {
+  private async foldSessionLine(batch: ThreadIngestBatch, threadId: string, line: SessionThreadLine, stale: boolean): Promise<string[]> {
     const db = this.prisma.client;
     const at = line.at ?? new Date().toISOString();
     if (line.type === 'session_started') {
+      // A start folded after its attempt is over (the job ended, or was requeued under a new leaseEpoch) is a boot
+      // catch-up replay: it must not re-open the snapshot ThreadJobEffects.onJobEnded closed (#265). The caller holds
+      // the job row lock, so the state and epoch are current.
+      if (stale) return [];
       const turn = await db.fleetThreadTurn.findUnique({ where: { jobId: batch.jobId }, select: { resume: true } });
       const session: StoredSession = {
         jobId: batch.jobId, state: 'live', resumed: line.resumed, contextReset: turn?.resume === true && !line.resumed, reason: null, at,
@@ -426,6 +430,9 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
     // A close or failure keeps resumed and contextReset only when the stored session belongs to this job; otherwise
     // (no session yet, or a previous job's session) they are false, so a new job never inherits the old flags.
     const previous = (await db.chatThread.findUnique({ where: { id: threadId }, select: { session: true } }))?.session as unknown as StoredSession | null | undefined;
+    // A replayed close of an attempt that is over never touches another job's live session or its messages (#265);
+    // the one-active-job rule makes that session the newer one. A current job's close still replaces it (US-004 AC15).
+    if (stale && previous && previous.jobId !== batch.jobId && previous.state === 'live') return [];
     const current = previous?.jobId === batch.jobId ? previous : null;
     const session: StoredSession = {
       jobId: batch.jobId,

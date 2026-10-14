@@ -28,7 +28,7 @@ function matching(messages: Msg[], where: { threadId: string; turnId?: string; r
 }
 
 /** An in-memory stand-in for the Prisma calls the fold makes. Enough to pin the fold's row effects. */
-function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?: number; messages?: Msg[]; pendingQuestion?: unknown; session?: unknown; resume?: boolean; writtenPaths?: string[] } = {}) {
+function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?: number; messages?: Msg[]; pendingQuestion?: unknown; session?: unknown; resume?: boolean; writtenPaths?: string[]; jobState?: string; leaseEpoch?: number } = {}) {
   const messages: Msg[] = [...(opts.messages ?? [])];
   const thread = {
     id: 'T', nextSeq: opts.nextSeq ?? 2, lastActivityAt: new Date(0),
@@ -40,7 +40,7 @@ function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?
     lastWrite: null as unknown,
   };
   const turn = { resume: opts.resume ?? false };
-  const job = { id: 'J', command: opts.command ?? 'THREAD', threadId: opts.threadId === undefined ? 'T' : opts.threadId };
+  const job = { id: 'J', command: opts.command ?? 'THREAD', threadId: opts.threadId === undefined ? 'T' : opts.threadId, state: opts.jobState ?? 'RUNNING', leaseEpoch: opts.leaseEpoch ?? 1 };
   const cursor = { offset: 0n, skippedLines: 0 };
   const client = {
     // Row locks (SELECT ... FOR UPDATE) return nothing; the seq UPDATE returns the seq it took and advances the counter.
@@ -327,6 +327,41 @@ describe('PrismaThreadIngestRepository.fold tools and approvals (US-004)', () =>
     const { client, thread } = fakeClient({ nextSeq: 2, resume: true });
     await repoWith(client).fold(batch([sessionStarted({ resumed: true })]));
     expect(thread.session).toMatchObject({ resumed: true, contextReset: false });
+  });
+
+  it('#265: a session_started folded after its job ended keeps the closed session snapshot', async () => {
+    const closed = { jobId: 'J', state: 'failed', resumed: false, contextReset: false, reason: 'runner silent', at: '2026-10-14T00:01:00.000Z' };
+    const { client, thread } = fakeClient({ nextSeq: 2, jobState: 'CRASHED', session: closed });
+    await repoWith(client).fold(batch([sessionStarted()]));
+    expect(thread.session).toEqual(closed);
+  });
+
+  it('#265: a session_started folded after its job ended still advances the cursor', async () => {
+    const { client } = fakeClient({ nextSeq: 2, jobState: 'COMPLETED' });
+    await repoWith(client).fold(batch([sessionStarted()], { endOffset: 42 }));
+    expect(client.threadIngestCursor.upsert).toHaveBeenCalledWith(expect.objectContaining({ update: expect.objectContaining({ offset: 42n }) }));
+  });
+
+  it('#265: a session_started from an earlier lease of a requeued job keeps the stored session', async () => {
+    const closed = { jobId: 'J', state: 'failed', resumed: false, contextReset: false, reason: 'runner silent', at: '2026-10-14T00:01:00.000Z' };
+    const { client, thread } = fakeClient({ nextSeq: 2, jobState: 'QUEUED', leaseEpoch: 2, session: closed });
+    await repoWith(client).fold(batch([sessionStarted()], { leaseEpoch: 1 }));
+    expect(thread.session).toEqual(closed);
+  });
+
+  it('#265: a late session_closed of an older job keeps a newer job\'s live session', async () => {
+    const live = { jobId: 'J2', state: 'live', resumed: true, contextReset: false, reason: null, at: '2026-10-14T00:02:00.000Z' };
+    const { client, thread } = fakeClient({ nextSeq: 2, jobState: 'COMPLETED', session: live });
+    await repoWith(client).fold(batch([{ type: 'session_closed', reason: 'idle' }]));
+    expect(thread.session).toEqual(live);
+  });
+
+  it('#265: a late session_failed of an older job leaves a newer job\'s pending messages alone', async () => {
+    const live = { jobId: 'J2', state: 'live', resumed: false, contextReset: false, reason: null, at: '2026-10-14T00:02:00.000Z' };
+    const { client, thread } = fakeClient({ nextSeq: 2, jobState: 'CRASHED', session: live });
+    await repoWith(client).fold(batch([{ type: 'session_failed', reason: 'runner_restart' }]));
+    expect(thread.session).toEqual(live);
+    expect(client.chatMessage.updateMany).not.toHaveBeenCalled();
   });
 
   it('US-004 AC14: session_failed sets the session state failed and its reason', async () => {
