@@ -194,7 +194,7 @@ export class FleetJobsService {
     if (!isConfigKind(r.command)) return null;
     const edit = await this.configEdits.findByJobId(r.id);
     if (!edit) return null;
-    return { mode: edit.mode, files: edit.edits.map((e) => e.path), prTitle: edit.prTitle, result: isTerminal(r.state) ? edit.result : r.configResult };
+    return { mode: edit.mode, files: edit.edits.map((e) => e.path), prTitle: edit.prTitle, result: isTerminal(r.state) ? (edit.result ?? r.configResult) : r.configResult };
   }
 
   /**

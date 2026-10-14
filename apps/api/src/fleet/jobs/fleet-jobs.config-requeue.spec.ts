@@ -126,6 +126,13 @@ describe('fleet jobs service requeue of a config job (US-003)', () => {
     expect(response.job.state).toBe('QUEUED');
   });
 
+  it('returns the job configResult in terminal detail when the edit result is null, so web requeue eligibility can reject it', async () => {
+    const current = job({ state: 'FAILED', configResult: result('conflict') });
+    const { service } = build(current, edit({ result: null }));
+    const detail = await service.get('p', 'jc');
+    expect(detail.configEdit?.result?.outcome).toBe('conflict');
+  });
+
   it('AC-12: with edit.result null, the outcome is read from the job configResult and refused when it is conflict', async () => {
     const current = job({ state: 'FAILED', configResult: result('conflict') });
     const { service, transitions } = build(current, edit({ result: null }));

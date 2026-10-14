@@ -77,6 +77,12 @@ describe('permissions', () => {
       result: outcome === null ? null : { outcome },
     })
 
+    test('a terminal detail carrying the fallback conflict result keeps Requeue hidden', () => {
+      // The API populates this result from job.configResult when the edit row has no stored result.
+      const terminalDetail = job({ state: 'FAILED', configEdit: configEdit('edit', 'conflict') })
+      expect(canRequeueJob(terminalDetail, dev)).toBe(false)
+    })
+
     test('an edit whose result is a conflict cannot be requeued (AC-1)', () => {
       expect(canRequeueJob(job({ state: 'FAILED', configEdit: configEdit('edit', 'conflict') }), dev)).toBe(false)
     })
