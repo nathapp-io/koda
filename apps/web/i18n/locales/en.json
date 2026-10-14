@@ -852,7 +852,17 @@
         "planDialog": { "title": "Plan this thread" },
         "runDialog": { "title": "Run this thread" },
         "discardDialog": { "title": "Discard unpublished changes?", "body": "Discard the unpublished changes from this stale session?", "confirm": "Discard" },
-        "stale": { "title": "This session is stale", "body": "The repository changed since this session started." }
+        "stale": { "title": "This session is stale", "body": "The repository changed since this session started." },
+        "marker": {
+          "published": "Published {count} paths as {sha}",
+          "publishFailed": "Publish failed: {reason}",
+          "publishFailedBranchMoved": "Publish failed: the branch moved",
+          "discarded": "Discarded the changes at {sha}",
+          "discardFailed": "Discard failed: {reason}"
+        },
+        "markerPaths": "Paths",
+        "markerIgnored": "Ignored",
+        "card": { "plan": "Plan", "run": "Run", "openJob": "Open job", "pr": "View pull request", "needsYou": "Needs you" }
       }
     },
     "common": {

@@ -852,7 +852,17 @@
         "planDialog": { "title": "规划此线程" },
         "runDialog": { "title": "运行此线程" },
         "discardDialog": { "title": "丢弃未发布的更改？", "body": "丢弃此过期会话中的未发布更改？", "confirm": "丢弃" },
-        "stale": { "title": "此会话已过期", "body": "此会话启动后仓库已发生变化。" }
+        "stale": { "title": "此会话已过期", "body": "此会话启动后仓库已发生变化。" },
+        "marker": {
+          "published": "已发布 {count} 个路径，版本 {sha}",
+          "publishFailed": "发布失败：{reason}",
+          "publishFailedBranchMoved": "发布失败：分支已移动",
+          "discarded": "已丢弃 {sha} 处的更改",
+          "discardFailed": "丢弃失败：{reason}"
+        },
+        "markerPaths": "路径",
+        "markerIgnored": "已忽略",
+        "card": { "plan": "规划", "run": "运行", "openJob": "打开任务", "pr": "查看拉取请求", "needsYou": "需要你处理" }
       }
     },
     "common": {

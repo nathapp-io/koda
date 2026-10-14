@@ -117,6 +117,11 @@ const threadDetail = (over: Record<string, unknown> = {}): ThreadDetailDto => ({
   createdAt: '2026-10-14T00:00:00.000Z',
   activeJob: null,
   sendRefusal: null,
+  writtenPaths: [],
+  publishedSha: null,
+  specPublished: false,
+  lastWrite: null,
+  handoff: { plan: null, run: null },
   ...over,
 })
 

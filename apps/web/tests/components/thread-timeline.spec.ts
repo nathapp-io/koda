@@ -9,7 +9,7 @@ import type {
   ThreadDetailDto,
   ToolSummaryEntry,
 } from '~/lib/thread-types'
-import type { FleetRunnerSummary } from '~/lib/fleet-types'
+import type { FleetJobDto, FleetRunnerSummary } from '~/lib/fleet-types'
 
 /**
  * US-006 AC1-AC13: the thread transcript components under components/fleet/threads/.
@@ -165,6 +165,9 @@ const timelineFile = webFile('components', 'fleet', 'threads', 'ThreadTimeline.v
 const messageFile = webFile('components', 'fleet', 'threads', 'ThreadMessage.vue')
 const toolChipFile = webFile('components', 'fleet', 'threads', 'ThreadToolChip.vue')
 const questionCardFile = webFile('components', 'fleet', 'threads', 'ThreadQuestionCard.vue')
+const writeMarkerFile = webFile('components', 'fleet', 'threads', 'ThreadWriteMarker.vue')
+const jobCardFile = webFile('components', 'fleet', 'threads', 'ThreadJobCard.vue')
+const badgeFile = webFile('components', 'fleet', 'FleetJobStateBadge.vue')
 
 const threadDetail = (over: Record<string, unknown> = {}): ThreadDetailDto => ({
   id: 'th1',
@@ -188,6 +191,11 @@ const threadDetail = (over: Record<string, unknown> = {}): ThreadDetailDto => ({
   createdAt: '2026-10-14T00:00:00.000Z',
   activeJob: null,
   sendRefusal: null,
+  writtenPaths: [],
+  publishedSha: null,
+  specPublished: false,
+  lastWrite: null,
+  handoff: { plan: null, run: null },
   ...over,
 })
 
@@ -251,19 +259,31 @@ function mountToolChip(entry: ToolSummaryEntry, messageStatus: string): Mounted 
   })
 }
 
-function mountTimeline(thread: ThreadDetailDto, messages: ChatMessageDto[]): Mounted {
+function mountTimeline(
+  thread: ThreadDetailDto,
+  messages: ChatMessageDto[],
+  extra: { jobs?: { plan: FleetJobDto | null; run: FleetJobDto | null }; slug?: string } = {},
+): Mounted {
   // The timeline's children resolve under either the contract names (explicit imports) or the
   // Nuxt auto-import names a sub-directory component receives; register the real files for both.
   const realMessage = loadSfc(messageFile, { useI18n: () => i18nStub() })
   const realCard = loadSfc(questionCardFile, { useI18n: () => i18nStub() })
+  const realWrite = loadSfc(writeMarkerFile, { useI18n: () => i18nStub() })
+  const realJob = loadSfc(jobCardFile, { useI18n: () => i18nStub() })
   return mountSfc(timelineFile, {
-    props: { thread, messages, isCreator: true },
+    props: { thread, messages, isCreator: true, jobs: extra.jobs ?? { plan: null, run: null }, slug: extra.slug ?? 'web' },
     components: {
       ...uiStubs,
       ThreadMessage: realMessage,
       FleetThreadsThreadMessage: realMessage,
       ThreadQuestionCard: realCard,
       FleetThreadsThreadQuestionCard: realCard,
+      ThreadWriteMarker: realWrite,
+      FleetThreadsThreadWriteMarker: realWrite,
+      ThreadJobCard: realJob,
+      FleetThreadsThreadJobCard: realJob,
+      FleetJobStateBadge: loadSfc(badgeFile, { useI18n: () => i18nStub() }),
+      NuxtLink: { name: 'StubNuxtLink', props: ['to'], setup: (p: { to: string }, { slots }: { slots: Record<string, () => unknown> }) => () => Vue.h('a', { href: p.to }, slots.default?.()) },
     },
     globals: { useI18n: () => i18nStub() },
   })
@@ -396,5 +416,81 @@ describe('US-006 AC1-AC13: components/fleet/threads transcript components', () =
 
     expect(app.text()).toContain('spec-review')
     expect(app.text()).toContain('spec-writing')
+  })
+})
+// ── US-004: the timeline shows the latest write and the latest PLAN and RUN ────────────────
+
+describe('US-004 AC-13: ThreadTimeline places the write marker and the job card among the messages', () => {
+  test('AC-13: a thread with messages at 10:00 and 10:05, a published write at 10:02 and a PLAN queued at 10:06 renders the markers in order between the messages', () => {
+    const planJob: FleetJobDto = {
+      id: 'p1',
+      projectId: 'p',
+      repoId: 'r1',
+      ref: 'feat/add-auth',
+      command: 'PLAN',
+      feature: 'add-auth',
+      planFrom: null,
+      profiles: [],
+      maxCostUsd: '5',
+      bashMode: 'raw',
+      approvalTimeoutSec: 600,
+      pendingApprovals: 0,
+      selectorLabels: [],
+      pinnedRunnerId: null,
+      runnerId: null,
+      leaseEpoch: 0,
+      state: 'COMPLETED',
+      stateReason: null,
+      requestedById: 'u1',
+      queuedAt: '2026-10-14T10:06:00.000Z',
+      assignedAt: null,
+      startedAt: null,
+      finishedAt: null,
+      cancelRequestedAt: null,
+      naxRunId: null,
+      naxLogRunId: null,
+      naxCostRunId: null,
+      progress: null,
+      currentStoryId: null,
+      currentPhase: null,
+      costSpentUsd: '0.1200',
+      lastHeartbeatAt: null,
+      finishResult: null,
+      escalationReason: null,
+      exitCode: null,
+      resultBranch: null,
+      resultSha: null,
+      resultPrUrl: null,
+      wipPush: null,
+      stories: null,
+      storiesTruncated: false,
+      postRun: null,
+      scheduleId: null,
+      coalescedCount: 0,
+      workflow: null,
+    }
+    const app = mountTimeline(
+      threadDetail({
+        lastWrite: { kind: 'published', jobId: 'w1', at: '2026-10-14T10:02:00.000Z', sha: 'abcdef1234567', paths: ['a.md'], ignored: [] },
+        handoff: { plan: { jobId: 'p1', state: 'COMPLETED', stateReason: null }, run: null },
+      }),
+      [
+        message({ id: 'm1', role: 'user', content: 'first', createdAt: '2026-10-14T10:00:00.000Z' }),
+        message({ id: 'm2', role: 'user', content: 'second', createdAt: '2026-10-14T10:05:00.000Z' }),
+      ],
+      { jobs: { plan: planJob, run: null }, slug: 'web' },
+    )
+
+    // The rendered order of the messages (`thread-message`) and the two markers, in document order.
+    const order: string[] = []
+    const walk = (node: FakeNode): void => {
+      const id = node.props['data-testid']
+      if (id === 'thread-message') order.push('thread-message')
+      else if (id === 'thread-write-marker') order.push('thread-write-marker')
+      else if (id === 'thread-job-card') order.push('thread-job-card')
+      node.children.forEach(walk)
+    }
+    walk(app.root)
+    expect(order).toEqual(['thread-message', 'thread-write-marker', 'thread-message', 'thread-job-card'])
   })
 })
