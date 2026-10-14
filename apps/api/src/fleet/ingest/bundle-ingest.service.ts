@@ -81,7 +81,7 @@ export class BundleIngestService {
         { jobId: job.id, leaseEpoch: claim.leaseEpoch, projectId: job.projectId, repoId: job.repoId, runnerId: job.runnerId, naxRunId: parsed.naxRunId },
         parsed.rows,
       );
-      const correction = computeCorrection({ job, leaseEpoch: claim.leaseEpoch, ledgerCostUsd: parsed.ledgerCostUsd, runStatus: parsed.runStatus, finish: parsed.finish });
+      const correction = computeCorrection({ job, leaseEpoch: claim.leaseEpoch, ledgerCostUsd: parsed.ledgerCostUsd, runStatus: parsed.runStatus, finish: parsed.finish, workflow: parsed.workflow ?? null, workflowOutcome: parsed.workflowOutcome ?? null, workflowUrl: parsed.workflowUrl ?? null });
       const changed = Object.keys(correction.patch).length > 0;
       const updated = changed ? await this.jobs.update(job.id, correction.patch) : job;
       const prFilled = 'resultPrUrl' in correction.patch;
@@ -90,7 +90,7 @@ export class BundleIngestService {
         await this.jobs.appendEvent(job.id, { leaseEpoch: claim.leaseEpoch, runnerSeq: null, type: 'state', payload: { from: job.state, to: updated.state, by: 'server', reason: updated.stateReason } });
         await this.activity.record({
           actorType: 'SYSTEM', actorId: 'system', action: 'job.verdict_corrected', entityType: 'job', entityId: job.id, jobId: job.id,
-          projectId: job.projectId, responsibleUserId: job.requestedById, payload: { from: job.state, to: updated.state, source: 'finish-audit' },
+          projectId: job.projectId, responsibleUserId: job.requestedById, payload: { from: job.state, to: updated.state, source: correction.escalatedFrom ?? 'finish-audit' },
         });
       }
       await this.repo.markOutcome(claim.id, {
