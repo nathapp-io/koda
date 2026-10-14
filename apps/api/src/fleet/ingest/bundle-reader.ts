@@ -15,10 +15,11 @@ export interface BundleFiles {
   finishResults: BundleFile[];
   finishLast: BundleFile[];
   status: BundleFile | null;
+  workflowResult: BundleFile | null;
   oversized: string[];
 }
 
-type Slot = 'cost' | 'metrics' | 'reviews' | 'finishResults' | 'finishLast' | 'status';
+type Slot = 'cost' | 'metrics' | 'reviews' | 'finishResults' | 'finishLast' | 'status' | 'workflowResult';
 
 const SLOTS: ReadonlyArray<[RegExp, Slot]> = [
   [/^nax-out\/cost\/[^/]+\.jsonl$/, 'cost'],
@@ -27,6 +28,7 @@ const SLOTS: ReadonlyArray<[RegExp, Slot]> = [
   [/^nax-out\/finish-audit\/[^/]+\/[^/]+\.result\.json$/, 'finishResults'],
   [/^nax-out\/finish-audit\/[^/]+\/last\.json$/, 'finishLast'],
   [/^nax-out\/status\.json$/, 'status'],
+  [/^workflow\/result\.json$/, 'workflowResult'],
 ];
 
 /** Spec §2.3: the allowlisted slot of a tar entry name, or null for anything else (including unsafe names). */
@@ -53,7 +55,7 @@ function readEntry(entry: Readable): Promise<string> {
  */
 export function readBundleFiles(bundle: Readable): Promise<BundleFiles> {
   return new Promise((resolve, reject) => {
-    const acc = { cost: [] as BundleFile[], metrics: null as BundleFile | null, reviews: [] as BundleFile[], finishResults: [] as BundleFile[], finishLast: [] as BundleFile[], status: null as BundleFile | null, oversized: [] as string[] };
+    const acc = { cost: [] as BundleFile[], metrics: null as BundleFile | null, reviews: [] as BundleFile[], finishResults: [] as BundleFile[], finishLast: [] as BundleFile[], status: null as BundleFile | null, workflowResult: null as BundleFile | null, oversized: [] as string[] };
     const x = extract();
     const fail = (error: Error) => {
       bundle.destroy();
@@ -77,6 +79,7 @@ export function readBundleFiles(bundle: Readable): Promise<BundleFiles> {
         const file = { name, text };
         if (slot === 'metrics') acc.metrics = file;
         else if (slot === 'status') acc.status = file;
+        else if (slot === 'workflowResult') acc.workflowResult = file;
         else acc[slot] = [...acc[slot], file];
       }, (error: unknown) => x.destroy(error as Error));
     });

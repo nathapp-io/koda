@@ -2,7 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { BashMode } from '../../common/protocol';
 import { FleetJobTicketDto } from '../../tickets/dto/ticket-fleet-job.dto';
 import { FleetJobConfigEditDto } from '../../repo-config/dto/config-edit.dto';
-import type { FleetJobRecord } from '../domain/fleet-job.domain';
+import type { FleetJobRecord, FleetJobWorkflow, FleetJobWorkflowItem } from '../domain/fleet-job.domain';
 import type { MisfitReason } from '../placement-rules';
 
 const iso = (d: Date | null): string | null => (d ? d.toISOString() : null);
@@ -21,6 +21,24 @@ export class FleetJobPostRunDto {
   @ApiPropertyOptional({ maxLength: 32 }) declare acceptance?: string;
   @ApiPropertyOptional({ maxLength: 32 }) declare regression?: string;
   @ApiPropertyOptional({ maxLength: 32 }) declare finish?: string;
+}
+
+export class FleetJobWorkflowItemDto implements FleetJobWorkflowItem {
+  @ApiProperty() declare id: string;
+  @ApiProperty() declare kind: string;
+  @ApiProperty() declare issue: string;
+  @ApiProperty({ type: String, nullable: true }) declare severity: string | null;
+  @ApiProperty({ type: String, nullable: true }) declare file: string | null;
+  @ApiProperty({ type: Number, nullable: true }) declare line: number | null;
+  @ApiProperty({ type: String, nullable: true }) declare suggestion: string | null;
+}
+
+export class FleetJobWorkflowDto implements FleetJobWorkflow {
+  @ApiProperty() declare runId: string;
+  @ApiProperty({ enum: ['ready', 'draft', 'local-only'] }) declare outcome: FleetJobWorkflow['outcome'];
+  @ApiProperty() declare workflowPassed: boolean;
+  @ApiProperty({ type: [String] }) declare reasons: string[];
+  @ApiProperty({ type: [FleetJobWorkflowItemDto] }) declare openItems: FleetJobWorkflowItemDto[];
 }
 
 export class FleetJobDto {
@@ -69,6 +87,8 @@ export class FleetJobDto {
   @ApiProperty({ description: 'True when the runner cut the story list to fit (S1b §1.2)' }) declare storiesTruncated: boolean;
   @ApiPropertyOptional({ type: FleetJobPostRunDto, nullable: true, description: 'nax post-run stage statuses (S2b (j)). Null when unknown and on list pages (D433).' })
   declare postRun: FleetJobPostRunDto | null;
+  @ApiPropertyOptional({ type: FleetJobWorkflowDto, nullable: true, description: 'nax workflow result. Null on list pages.' })
+  declare workflow: FleetJobWorkflowDto | null;
   @ApiPropertyOptional({ type: String, nullable: true, description: 'The schedule that dispatched the job (S1b §3.1)' }) declare scheduleId: string | null;
   @ApiProperty({ description: 'Schedule ticks absorbed into this job while it sat queued (S1b §3.2)' }) declare coalescedCount: number;
   @ApiPropertyOptional({ type: [FleetJobTicketDto], nullable: true, description: 'Linked tickets (fleet C9 §2.2). Null on list pages (D460).' })
@@ -90,14 +110,14 @@ export class FleetJobDto {
       currentPhase: r.currentPhase, costSpentUsd: r.costSpentUsd, lastHeartbeatAt: iso(r.lastHeartbeatAt),
       finishResult: r.finishResult, escalationReason: r.escalationReason, exitCode: r.exitCode,
       resultBranch: r.resultBranch, resultSha: r.resultSha, resultPrUrl: r.resultPrUrl, wipPush: r.wipPush,
-      stories: r.stories, storiesTruncated: r.storiesTruncated, postRun: r.postRun,
+      stories: r.stories, storiesTruncated: r.storiesTruncated, postRun: r.postRun, workflow: r.workflow ?? null,
       scheduleId: r.scheduleId, coalescedCount: r.coalescedCount, tickets: null, configEdit: null,
     });
   }
 
   /** D149, D433: a list page leaves the story list and post-run stages out; `GET :id` carries them. */
   static summary(r: FleetJobRecord, pendingApprovals = 0): FleetJobDto {
-    return Object.assign(FleetJobDto.from(r, pendingApprovals), { stories: null, storiesTruncated: false, postRun: null });
+    return Object.assign(FleetJobDto.from(r, pendingApprovals), { stories: null, storiesTruncated: false, postRun: null, workflow: null });
   }
 }
 

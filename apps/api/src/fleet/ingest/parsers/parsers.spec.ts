@@ -122,8 +122,16 @@ describe('parseStatus / parseFinish', () => {
   const last = (runId: string) => JSON.stringify({ branch: 'feat/b', headSha: 'abc', status: 'opened', prUrl: 'https://github.com/o/r/pull/2', runId });
 
   it('reads run id and status', () => {
-    expect(parseStatus(file('s', JSON.stringify({ run: { id: 'run-1', status: 'completed' } })))).toEqual({ runId: 'run-1', runStatus: 'completed' });
-    expect(parseStatus(null)).toEqual({ runId: null, runStatus: null });
+    expect(parseStatus(file('s', JSON.stringify({ run: { id: 'run-1', status: 'completed' } })))).toEqual({ runId: 'run-1', runStatus: 'completed', workflowOutcome: null, workflowUrl: null });
+    expect(parseStatus(null)).toEqual({ runId: null, runStatus: null, workflowOutcome: null, workflowUrl: null });
+  });
+
+  it('AC-9 parses workflow outcome and HTTPS URL', () => {
+    expect(parseStatus(file('s', JSON.stringify({ workflow: { step: 'done', outcome: 'ready', url: 'https://github.com/o/r/pull/2' } })))).toMatchObject({ workflowOutcome: 'ready', workflowUrl: 'https://github.com/o/r/pull/2' });
+  });
+
+  it('AC-10 rejects a non-HTTPS workflow URL', () => {
+    expect(parseStatus(file('s', JSON.stringify({ workflow: { outcome: 'draft', url: 'http://x' } })))).toMatchObject({ workflowOutcome: 'draft', workflowUrl: null });
   });
 
   it('prefers <runId>.result.json, falls back to a matching last.json, ignores a foreign one', () => {

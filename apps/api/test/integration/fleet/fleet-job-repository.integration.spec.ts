@@ -62,6 +62,13 @@ describeIntegration('PrismaFleetJobRepository (PG)', () => {
     expect(cleared.postRun).toBeNull();
   });
 
+  it('AC-13 stores, reads and clears workflow JSON', async () => {
+    const job = await repo.createJob({ ...base, feature: 'workflow-json' });
+    const workflow = { runId: 'run-1', outcome: 'draft' as const, workflowPassed: true, reasons: ['reason'], openItems: [] };
+    expect((await repo.update(job.id, { workflow })).workflow).toEqual(workflow);
+    expect((await repo.update(job.id, { workflow: null })).workflow).toBeNull();
+  });
+
   it('assigns with compare-and-set: two racing assignments, one winner, epoch moves once', async () => {
     const job = await repo.createJob({ ...base, feature: 'race' });
     const now = new Date('2026-10-01T12:34:56.789Z');
