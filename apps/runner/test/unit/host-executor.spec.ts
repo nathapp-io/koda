@@ -420,3 +420,27 @@ describe('HostExecutor workflow result and head (US-002)', () => {
     expect(missing).toBeNull();
   });
 });
+
+describe('HostExecutor workflow stash and bundle (US-003)', () => {
+  test('AC-9: collectBundle of a RUN with a fresh workflow result stashes it into the manifest', async () => {
+    const w = await world();
+    expect((await w.ex.prepare(w.row)).ok).toBe(true);
+    const repoDir = join(w.workspaceRoot, 'acme', 'app');
+    const runDir = join(repoDir, '.nax', 'features', 'feat', 'workflow', 'run-9');
+    await mkdir(runDir, { recursive: true });
+    await writeFile(join(runDir, 'result.json'), JSON.stringify({ schemaVersion: 1, runId: 'r9', verdict: { outcome: 'ready', reasons: [] } }));
+    await w.ex.collectBundle(w.row);
+    const manifest = JSON.parse(await readFile(join(w.row.jobDir, 'bundle-manifest.json'), 'utf8')) as { entries: string[] };
+    expect(manifest.entries).toContain('workflow/result.json');
+  });
+  test('AC-10: preparing a requeued attempt removes the previous workflow folder', async () => {
+    const w = await world();
+    expect((await w.ex.prepare(w.row)).ok).toBe(true);
+    await mkdir(join(w.row.jobDir, 'workflow'), { recursive: true });
+    await writeFile(join(w.row.jobDir, 'workflow', 'result.json'), '{}');
+    const requeued = w.journal.insertJob({ assign: w.assign, leaseEpoch: 2, repoKey: 'acme/app', jobDir: w.row.jobDir }).row;
+    expect((await w.ex.prepare(requeued)).ok).toBe(true);
+    await expect(stat(join(w.row.jobDir, 'workflow'))).rejects.toThrow();
+    await expect(stat(join(w.row.jobDir, 'workflow', 'result.json'))).rejects.toThrow();
+  });
+});

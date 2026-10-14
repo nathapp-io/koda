@@ -27,6 +27,7 @@ import { deleteJobProfile, jobProfileName, projectNameFor, writeJobProfile } fro
 import { buildNaxArgv, isProcessAlive, signalGroup, spawnNax } from './nax-process';
 import { readProcessCommand, reapNaxPids } from './pid-registry';
 import { commitAndPushPlan, stashPlanOutputs } from './plan-commit';
+import { stashWorkflowOutputs } from './workflow-stash';
 import { pushProgress, type ProgressPushOutcome } from './progress-push';
 import { cleanWorkspace, ensureClone } from './workspace';
 
@@ -46,7 +47,7 @@ export interface HostExecutorDeps {
 }
 
 // D53: a new attempt (including a requeue, which is a new lease epoch over the same job dir, D77) starts from none of these.
-const ATTEMPT_FILES = ['nax-out', 'nax.stdout', 'nax.stderr', 'pre-plan', 'plan-out', 'plan-out.tmp', 'plan-logs', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json'];
+const ATTEMPT_FILES = ['nax-out', 'nax.stdout', 'nax.stderr', 'pre-plan', 'plan-out', 'plan-out.tmp', 'plan-logs', 'plan-logs.tmp', 'bundle.tar.gz', 'bundle.list', 'bundle-manifest.json', 'workflow'];
 const CANCELLED = { ok: false, reason: 'cancelled', cancelled: true } as const satisfies PrepareOutcome;
 const exists = (path: string): Promise<boolean> => stat(path).then(() => true, () => false);
 
@@ -279,6 +280,7 @@ export class HostExecutor implements JobExecutor {
   async collectBundle(job: JobRow): Promise<BundleFile> {
     const { repoDir, jobDir } = this.dirs(job);
     if (job.command === 'PLAN') await stashPlanOutputs(repoDir, jobDir, job.assign.feature);
+    if (job.command === 'RUN') await stashWorkflowOutputs(repoDir, jobDir, job.assign.feature, Date.parse(job.createdAt));
     return buildBundle({ jobDir, command: job.command });
   }
 
