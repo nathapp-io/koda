@@ -574,7 +574,7 @@ machines at once.
   `GITHUB_APP_SLUG`. Unset means GitHub repos cannot be registered; the app still boots. `FLEET_GITLAB_BOT_NAME`
   and `FLEET_GITLAB_BOT_EMAIL` set the GitLab commit identity.
 - **GitHub:** sign an App JWT (RS256, 10 min), `POST /app/installations/{id}/access_tokens` with
-  `repositories: [name]` and `permissions: {contents: write, pull_requests: write, metadata: read, checks: read, statuses: read}` (checks + statuses added by #276 so nax can read CI; the App installation must grant both). Cached in
+  `repositories: [name]` and `permissions: {contents: write, pull_requests: write, metadata: read, checks: read, statuses: read, actions: read}` (checks, statuses and actions added by #276 so nax can read CI; `gh pr checks` reads each check's workflow run; the App installation must grant all three). Cached in
   memory per `(jobId, leaseEpoch)` until 5 minutes before expiry.
 - **GitLab:** decrypt the project's `VcsConnection.encryptedToken` (`common/utils/encryption.util`). The
   FleetRepo must equal that connection's `repoOwner`/`repoName`. `VcsConnection.projectId` is unique, so S1

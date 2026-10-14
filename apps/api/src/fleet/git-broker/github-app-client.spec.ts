@@ -49,7 +49,7 @@ describe('GitHubAppClient', () => {
 
     await expect(client.verifyRepo('Acme', 'App')).resolves.toEqual({ owner: 'acme', name: 'app', defaultBranch: 'trunk', installationId: BigInt(77) });
     const mint = forge.requests.find((r) => r.path === '/app/installations/77/access_tokens');
-    expect(mint?.body).toEqual({ repositories: ['App'], permissions: { contents: 'write', pull_requests: 'write', metadata: 'read', checks: 'read', statuses: 'read' } });
+    expect(mint?.body).toEqual({ repositories: ['App'], permissions: { contents: 'write', pull_requests: 'write', metadata: 'read', checks: 'read', statuses: 'read', actions: 'read' } });
     expect(forge.requests.find((r) => r.path === '/repos/Acme/App')?.headers.authorization).toBe('Bearer ghs_x');
   });
 
@@ -84,7 +84,7 @@ describe('GitHubAppClient', () => {
 
   it('mints a repo-scoped installation token with its expiry', async () => {
     forge.routes.set('POST /app/installations/77/access_tokens', (req) => {
-      expect(req.body).toEqual({ repositories: ['app'], permissions: { contents: 'write', pull_requests: 'write', metadata: 'read', checks: 'read', statuses: 'read' } });
+      expect(req.body).toEqual({ repositories: ['app'], permissions: { contents: 'write', pull_requests: 'write', metadata: 'read', checks: 'read', statuses: 'read', actions: 'read' } });
       return { status: 201, body: { token: 'ghs_x', expires_at: '2026-10-01T01:00:00Z' } };
     });
     await expect(client.mintInstallationToken(BigInt(77), 'app')).resolves.toEqual({ token: 'ghs_x', expiresAt: new Date('2026-10-01T01:00:00Z') });
