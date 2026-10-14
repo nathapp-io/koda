@@ -48,6 +48,8 @@ export const THREAD_LIMITS = { messageMaxBytes: 32_768, maxNativeModels: 32, max
 /** The log stream a THREAD job writes (PUT /fleet/runner/jobs/:jobId/logs/thread). */
 export const THREAD_STREAM = 'thread' as const;
 export const THREAD_STREAM_LIMITS = { lineMaxBytes: 65_536, streamMaxBytes: 209_715_200 } as const;
+/** Field-level limits enforced by the API parser for a `published` thread line. */
+export const THREAD_PUBLICATION_LIMITS = { maxPaths: 200, maxPathChars: 512 } as const;
 /** Same rule as the API's MODEL_ID_RE (apps/api/src/fleet/common/thread-jobs.ts). */
 export const THREAD_MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:\/@-]{0,127}$/;
 

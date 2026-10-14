@@ -21,7 +21,19 @@ export interface ThreadSession {
   contextReset: boolean;
   reason: string | null;
   at: string;
+  /** Set while the runner reports the session's worktree stale; absent otherwise (fleet S5a §4). */
+  stale?: true;
 }
+
+/**
+ * The thread's last Publish or Discard result (fleet S5a §4), also the `lastWrite` JSON shape. Publish writes
+ * `published` or `publish_failed`; Discard writes `discarded` or `discard_failed`.
+ */
+export type ThreadWriteResult =
+  | { kind: 'published'; jobId: string; at: string; sha: string; paths: string[]; ignored: string[] }
+  | { kind: 'publish_failed'; jobId: string; at: string; reason: string }
+  | { kind: 'discarded'; jobId: string; at: string; sha: string }
+  | { kind: 'discard_failed'; jobId: string; at: string; reason: string };
 
 export interface ChatThreadRecord {
   id: string; repoId: string; baseRef: string; feature: string; title: string;
@@ -29,9 +41,16 @@ export interface ChatThreadRecord {
   skills: ThreadSkillSource[]; maxCostUsd: string; costUsd: string; tokens: unknown; specPath: string;
   pendingQuestion: unknown; session: ThreadSession | null; lastActivityAt: Date; createdAt: Date;
   activeJob: { id: string; state: string } | null;
+  /** Distinct paths write_doc touched since the last publish (capped at 200 by the ingest, US-002). */
+  writtenPaths: string[];
+  publishedSha: string | null;
+  specPublished: boolean;
+  lastWrite: ThreadWriteResult | null;
 }
 
-export type ChatThreadDetail = ChatThreadRecord & { sendRefusal: ThreadSendRefusal | null };
+export interface ThreadHandoffJob { jobId: string; state: string; stateReason: string | null }
+export type ChatThreadHandoff = { plan: ThreadHandoffJob | null; run: ThreadHandoffJob | null };
+export type ChatThreadDetail = ChatThreadRecord & { sendRefusal: ThreadSendRefusal | null; handoff: ChatThreadHandoff };
 
 export interface ChatMessageRecord {
   id: string; seq: number; jobId: string | null; turnId: string | null; role: string; authorUserId: string | null;
@@ -43,9 +62,12 @@ export interface ChatThreadRepository {
   create(input: { projectId: string; repoId: string; baseRef: string; feature: string; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord>;
   list(projectId: string, status: string | undefined, skip: number, take: number): Promise<ChatThreadRecord[]>;
   get(projectId: string, id: string): Promise<ChatThreadRecord | null>;
+  handoff(threadId: string): Promise<ChatThreadHandoff>;
   sendRefusalOf(projectId: string, thread: ChatThreadRecord): Promise<ThreadSendRefusal | null>;
   messages(threadId: string, afterSeq: number, limit: number): Promise<ChatMessageRecord[]>;
   sendMessage(input: { projectId: string; threadId: string; userId: string; text: string; clientMessageId: string }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }>;
+  publish(projectId: string, threadId: string, userId: string): Promise<{ jobId: string | null }>;
+  discard(projectId: string, threadId: string, userId: string): Promise<{ jobId: string }>;
   archivedThreadIds(runnerId: string): Promise<string[]>;
   updateCap(projectId: string, threadId: string, userId: string, maxCostUsd: string): Promise<ChatThreadRecord>;
   command(projectId: string, threadId: string, userId: string, type: string, payload: object): Promise<void>;

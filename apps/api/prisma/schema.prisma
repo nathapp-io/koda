@@ -1073,6 +1073,10 @@ model ChatThread {
   specPath        String // .nax/features/<feature>/spec.md
   pendingQuestion Json? // { requestId, text, expiresAt }; written by B2
   session         Json? // S5a: the thread's session state, folded from the thread stream
+  writtenPaths    String[] @default([]) // S5a write path: distinct paths write_doc touched (capped at 200)
+  publishedSha    String? // S5a write path: the sha of the last publish
+  specPublished   Boolean   @default(false) // S5a write path: a publish has carried the feature spec
+  lastWrite       Json? // S5a write path: ThreadWriteResult of the last Publish or Discard
   nextSeq         Int       @default(1)
   lastActivityAt  DateTime  @default(now())
   createdAt       DateTime  @default(now())

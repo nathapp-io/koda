@@ -2,6 +2,7 @@ import { appendFileSync, statSync } from 'node:fs';
 import { THREAD_STREAM_LIMITS, type ThreadBackend } from '@nathapp/fleet-protocol';
 import { redactSecrets, type SessionEvent } from '@nathapp/nax-agent';
 import { TUNING } from '../daemon/tuning';
+import { publishedLineFits } from './thread-published-line';
 import { errorMessage } from '../errors';
 import { PathError } from '../paths/safe-segment';
 import { systemNow, systemSleep, type Now, type Sleep } from '../time';
@@ -237,7 +238,7 @@ export class ThreadEventWriter {
       ignored: [...result.ignored],
       specPresent: result.specPresent,
     };
-    if (lineBytes(line) > LINE_MAX_BYTES) {
+    if (!publishedLineFits(line.paths, line.ignored) || lineBytes(line) > LINE_MAX_BYTES) {
       // Never persist a runner line the API cannot parse. The publisher checks this before
       // committing; this is a final guard for alternate host implementations.
       this.onWarn(`oversized publication result (${LINE_MAX_BYTES}-byte line limit)`);

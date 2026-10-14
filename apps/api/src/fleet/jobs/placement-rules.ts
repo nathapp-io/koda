@@ -3,14 +3,14 @@ import { isRunnerOnline } from '../common/runner-online';
 import { isConfigKind } from '../common/config-jobs';
 import { jobGateKeys } from '../budgets/budget-rules';
 import { isThreadKind } from '../common/thread-jobs';
-import type { ThreadBackend } from '../common/thread-jobs';
+import type { ThreadAction, ThreadBackend } from '../common/thread-jobs';
 import type { FleetJobRecord, FleetRepoRef } from './domain/fleet-job.domain';
 
 /** The first placement rule a runner fails (spec §4), reported per runner at dispatch. */
 export type MisfitReason =
   | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
   | 'provider_unavailable' | 'sandbox' | 'interaction' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity'
-  | 'config_jobs' | 'thread_capacity' | 'thread_backend' | 'threads_disabled';
+  | 'config_jobs' | 'thread_capacity' | 'thread_backend' | 'threads_disabled' | 'thread_write';
 
 // budget_paused is not permanent either: it clears on resume or month rollover (S1b §2.3).
 // provider_unavailable is not permanent: a later probe may fix it, so the job queues and a
@@ -29,7 +29,7 @@ export interface PlacementJob {
   selectorLabels: readonly string[];
   pinnedRunnerId: string | null;
   bashMode: BashMode;
-  thread?: { backend: ThreadBackend; enabled: boolean };
+  thread?: { backend: ThreadBackend; enabled: boolean; action?: ThreadAction };
 }
 
 export interface PlacementRunner {
@@ -108,12 +108,18 @@ export function firstMisfit(job: PlacementJob, runner: PlacementRunner, load: Ru
   if (isThreadKind(job.command)) {
     if (!job.thread?.enabled) return 'threads_disabled';
     if ((runner.protocolVersion ?? 0) < 4) return 'protocol';
-    const backends = runner.capabilities.threadBackends;
-    const backend = job.thread.backend;
-    if (backend.kind === 'native') {
-      const models = backends?.native;
-      if (!models?.length || (backend.model !== undefined && !models.includes(backend.model))) return 'thread_backend';
-    } else if (!backends?.acp.includes(backend.agent)) return 'thread_backend';
+    // Fleet S5a §4: Publish and Discard run in the worktree, not on an agent, so they need threadWrite and no backend.
+    const action = job.thread.action ?? 'SESSION';
+    if (action === 'SESSION') {
+      const backends = runner.capabilities.threadBackends;
+      const backend = job.thread.backend;
+      if (backend.kind === 'native') {
+        const models = backends?.native;
+        if (!models?.length || (backend.model !== undefined && !models.includes(backend.model))) return 'thread_backend';
+      } else if (!backends?.acp.includes(backend.agent)) return 'thread_backend';
+    } else if (runner.capabilities.threadWrite !== true) {
+      return 'thread_write';
+    }
     if ((load.threads ?? 0) >= (runner.threadCapacity ?? 0)) return 'thread_capacity';
     return null;
   }
@@ -157,7 +163,7 @@ export const toLoads = (refs: readonly { runnerId: string; repoId: string; comma
 export const toPlacementJob = (
   job: Pick<FleetJobRecord, 'command' | 'repoId' | 'profiles' | 'selectorLabels' | 'pinnedRunnerId' | 'bashMode'>,
   repo: Pick<FleetRepoRef, 'provider'>,
-  thread?: { backend: ThreadBackend; enabled: boolean },
+  thread?: { backend: ThreadBackend; enabled: boolean; action?: ThreadAction },
 ): PlacementJob => ({
   command: job.command, repoId: job.repoId, provider: repo.provider, profiles: job.profiles, selectorLabels: job.selectorLabels, pinnedRunnerId: job.pinnedRunnerId, bashMode: job.bashMode,
   ...(thread ? { thread } : {}),

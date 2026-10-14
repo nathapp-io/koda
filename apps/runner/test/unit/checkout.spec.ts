@@ -155,3 +155,52 @@ describe('prepareCheckout PLAN', () => {
     expect(await prepareCheckout({ git: g, repoDir, assign: plan() })).toEqual({ ok: false, reason: 'no .nax dir' });
   });
 });
+
+describe('prepareCheckout PLAN with expectBranch (US-005)', () => {
+  const plan = (over: Partial<AssignPayload> = {}) => assign({ command: 'PLAN', planFrom: 'docs/spec.md', ref: 'feat/add-auth', ...over });
+  /** Origin has feat/add-auth; the clone's local feat/add-auth is one commit ahead of origin/feat/add-auth (a re-published PLAN). */
+  async function aheadLocally() {
+    const { repoDir, origin, base } = await setup(undefined, { branches: [{ name: 'feat/add-auth', files: { 'docs/a.md': '1' } }] });
+    await sh(repoDir, 'branch', 'feat/add-auth', 'origin/feat/add-auth');
+    await sh(repoDir, 'checkout', '-q', 'feat/add-auth');
+    await sh(repoDir, 'commit', '-q', '--allow-empty', '-m', 'local re-publish');
+    const local = await head(repoDir);
+    await sh(repoDir, 'checkout', '-q', '--detach', 'origin/main');
+    await cleanWorkspace(g, repoDir);
+    return { repoDir, origin, base, local, remote: await sh(repoDir, 'rev-parse', 'origin/feat/add-auth') };
+  }
+
+  test('US-005 AC-9: detaches at the local expectBranch commit when it is ahead of origin', async () => {
+    const { repoDir, local, remote } = await aheadLocally();
+    expect(local).not.toBe(remote);
+    expect(await prepareCheckout({ git: g, repoDir, assign: plan({ expectBranch: 'feat/add-auth' }) })).toMatchObject({ ok: true, branch: null });
+    expect(await sh(repoDir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('HEAD');
+    expect(await head(repoDir)).toBe(local);
+  });
+
+  test('US-005 AC-10: without expectBranch the same repo detaches at origin/<ref>', async () => {
+    const { repoDir, local, remote } = await aheadLocally();
+    expect(await prepareCheckout({ git: g, repoDir, assign: plan() })).toMatchObject({ ok: true, branch: null });
+    expect(await sh(repoDir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('HEAD');
+    expect(await head(repoDir)).toBe(remote);
+    expect(await head(repoDir)).not.toBe(local);
+  });
+
+  test('US-005 AC-11: with no local expectBranch it detaches at origin/<ref>', async () => {
+    const { repoDir } = await setup(undefined, { branches: [{ name: 'feat/add-auth', files: { 'docs/a.md': '1' } }] });
+    const remote = await sh(repoDir, 'rev-parse', 'origin/feat/add-auth');
+    expect((await g.run(['show-ref', '--verify', '--quiet', 'refs/heads/feat/add-auth'], { cwd: repoDir })).code).not.toBe(0);
+    expect(await prepareCheckout({ git: g, repoDir, assign: plan({ expectBranch: 'feat/add-auth' }) })).toMatchObject({ ok: true, branch: null });
+    expect(await sh(repoDir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('HEAD');
+    expect(await head(repoDir)).toBe(remote);
+  });
+
+  test('the .nax check applies to the local commit that is chosen', async () => {
+    const { repoDir } = await aheadLocally();
+    await sh(repoDir, 'checkout', '-q', 'feat/add-auth');
+    await sh(repoDir, 'rm', '-q', '-r', '.nax');
+    await sh(repoDir, 'commit', '-q', '-m', 'drop .nax locally');
+    await sh(repoDir, 'checkout', '-q', '--detach', 'origin/main');
+    expect(await prepareCheckout({ git: g, repoDir, assign: plan({ expectBranch: 'feat/add-auth' }) })).toEqual({ ok: false, reason: 'no .nax dir' });
+  });
+});

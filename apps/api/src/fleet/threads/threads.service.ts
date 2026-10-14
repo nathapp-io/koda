@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
-import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FLEET_CFG, fleetConfig } from '../../config/fleet.config';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
@@ -9,6 +9,8 @@ import { FLEET_REPO_REPOSITORY, type IFleetRepoRepository } from '../repos/domai
 import { CHAT_THREAD_REPOSITORY, type ChatMessageRecord, type ChatThreadDetail, type ChatThreadRecord, type ChatThreadRepository } from './domain/chat-thread.domain';
 import { isMaxCostUsd, validateCreateThread, type CreateThreadInput } from './thread-input';
 import type { AnswerQuestionDto, SendMessageDto } from './dto/thread.dto';
+import type { PlanThreadDto, RunThreadDto } from './dto/thread-handoff.dto';
+import { THREAD_HANDOFF_DEFAULT_MAX_COST_USD } from './thread-handoff';
 import { FleetCommandType } from '../../common/enums';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
 
@@ -43,7 +45,8 @@ export class ThreadsService {
   async get(projectId: string, id: string): Promise<ChatThreadDetail> {
     const result = await this.threads.get(projectId, id);
     if (!result) throw new NotFoundAppException({}, 'threads.notFound');
-    return { ...result, sendRefusal: await this.threads.sendRefusalOf(projectId, result) };
+    const [sendRefusal, handoff] = await Promise.all([this.threads.sendRefusalOf(projectId, result), this.threads.handoff(result.id)]);
+    return { ...result, sendRefusal, handoff };
   }
   async messages(projectId: string, id: string, afterSeq: number, limit: number): Promise<{ items: ChatMessageRecord[] }> {
     const thread = await this.threads.get(projectId, id);
@@ -77,6 +80,46 @@ export class ThreadsService {
       if (!(error instanceof ConflictAppException)) throw error;
       // The terminal transition may win after archive commits.
     }
+  }
+
+  async plan(projectId: string, threadId: string, userId: string, input: PlanThreadDto): Promise<import('../jobs/dto/fleet-job.dto').DispatchResultDto> {
+    const thread = await this.threads.get(projectId, threadId);
+    if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
+    if (thread.createdById !== userId) throw new ForbiddenAppException({}, 'threads.notCreator');
+    if (!this.config.threadsEnabled) throw new ConflictAppException({}, 'threads.disabled');
+    if (thread.status === 'ARCHIVED') throw new ConflictAppException({}, 'threads.archived');
+    if (!thread.specPublished) throw new ConflictAppException({}, 'threads.notPublished');
+    if (!thread.runnerId) throw new ConflictAppException({}, 'threads.runnerMissing');
+    return this.fleetJobs.dispatch(userId, projectId, {
+      repoId: thread.repoId, command: 'PLAN', ref: `feat/${thread.feature}`, feature: thread.feature,
+      planFrom: thread.specPath, profiles: input.profiles, maxCostUsd: input.maxCostUsd ?? THREAD_HANDOFF_DEFAULT_MAX_COST_USD,
+      pinnedRunnerId: thread.runnerId ?? undefined,
+    }, { threadId });
+  }
+
+  /** US-007: dispatches the thread's RUN after its latest PLAN completed. Same gates and cap default as Plan. */
+  async run(projectId: string, threadId: string, userId: string, input: RunThreadDto): Promise<import('../jobs/dto/fleet-job.dto').DispatchResultDto> {
+    const thread = await this.threads.get(projectId, threadId);
+    if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
+    if (thread.createdById !== userId) throw new ForbiddenAppException({}, 'threads.notCreator');
+    if (!this.config.threadsEnabled) throw new ConflictAppException({}, 'threads.disabled');
+    if (thread.status === 'ARCHIVED') throw new ConflictAppException({}, 'threads.archived');
+    const { plan } = await this.threads.handoff(thread.id);
+    if (plan?.state !== 'COMPLETED') throw new ConflictAppException({}, 'threads.notPlanned');
+    if (!thread.runnerId) throw new ConflictAppException({}, 'threads.runnerMissing');
+    return this.fleetJobs.dispatch(userId, projectId, {
+      repoId: thread.repoId, command: 'RUN', ref: `feat/${thread.feature}`, feature: thread.feature,
+      profiles: input.profiles, maxCostUsd: input.maxCostUsd ?? THREAD_HANDOFF_DEFAULT_MAX_COST_USD,
+      bashMode: input.bashMode, pinnedRunnerId: thread.runnerId ?? undefined,
+    }, { threadId });
+  }
+
+  publish(projectId: string, threadId: string, userId: string): Promise<{ jobId: string | null }> {
+    return this.threads.publish(projectId, threadId, userId);
+  }
+
+  discard(projectId: string, threadId: string, userId: string): Promise<{ jobId: string }> {
+    return this.threads.discard(projectId, threadId, userId);
   }
 
   async sendMessage(projectId: string, threadId: string, userId: string, input: SendMessageDto): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }> {

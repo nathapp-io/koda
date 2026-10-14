@@ -45,6 +45,19 @@ describeIntegration('fleet chat threads schema (PG)', () => {
     await expect(thread({ feature: 'after-archive' })).resolves.toMatchObject({ status: 'ACTIVE' });
   });
 
+  it('US-001 AC-1: a new thread reads back the write-path defaults', async () => {
+    const t = await thread({ feature: 'write-defaults' });
+    const row = await prisma.chatThread.findUniqueOrThrow({ where: { id: t.id } });
+    expect(row).toMatchObject({ writtenPaths: [], publishedSha: null, specPublished: false, lastWrite: null });
+  });
+
+  it('US-001 AC-2: lastWrite round-trips the published JSON shape', async () => {
+    const lastWrite = { kind: 'published', jobId: 'j1', at: '2026-10-15T00:00:00.000Z', sha: 'a'.repeat(40), paths: ['docs/a.md'], ignored: [] };
+    const t = await thread({ feature: 'last-write', lastWrite, writtenPaths: ['docs/a.md'], publishedSha: 'a'.repeat(40), specPublished: true });
+    const row = await prisma.chatThread.findUniqueOrThrow({ where: { id: t.id } });
+    expect(row.lastWrite).toEqual(lastWrite);
+  });
+
   it('rejects a second message with the same thread and seq (US-002 AC10)', async () => {
     const t = await thread({ feature: 'seq-dup' });
     await prisma.chatMessage.create({ data: { threadId: t.id, seq: 1, role: 'user', content: 'a', status: 'complete' } });

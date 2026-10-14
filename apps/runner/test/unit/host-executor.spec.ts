@@ -278,6 +278,37 @@ describe('HostExecutor PLAN', () => {
   });
 });
 
+describe('HostExecutor PLAN expectBranch (US-005)', () => {
+  const OTHER_PRD = JSON.stringify({ branchName: 'feat/other', userStories: [{ id: 'US-001' }] });
+  /** A PLAN whose stashed PRD names `feat/other`, while its assign expects `feat/add-auth`. */
+  async function mismatched() {
+    const w = await world('PLAN', { expectBranch: 'feat/add-auth' });
+    expect((await w.ex.prepare(w.row)).ok).toBe(true);
+    await mkdir(join(w.row.jobDir, 'plan-out'), { recursive: true });
+    await writeFile(join(w.row.jobDir, 'plan-out', 'prd.json'), OTHER_PRD);
+    return w;
+  }
+
+  test('US-005 AC-7: readPlan names branch_mismatch when the stashed PRD names another branch', async () => {
+    const w = await mismatched();
+    expect(await w.ex.readPlan(w.row)).toMatchObject({ ok: false, reason: 'branch_mismatch', branchName: 'feat/other' });
+  });
+
+  test('US-005 AC-8: finishPlan with a mismatched PRD makes no git push call', async () => {
+    const w = await mismatched();
+    const real = createGit();
+    const calls: string[][] = [];
+    const recording = {
+      run: (args: readonly string[], options: Parameters<typeof real.run>[1]) => { calls.push([...args]); return real.run(args, options); },
+      ok: (args: readonly string[], options: Parameters<typeof real.ok>[1]) => { calls.push([...args]); return real.ok(args, options); },
+    };
+    const ex = new HostExecutor({ config: { workspaceRoot: w.workspaceRoot, naxCommand: ['bun', FAKE], naxHome: w.naxHome }, git: recording, log: createMemoryLogger(), nowMs: () => Date.now(), sleep: async () => undefined, credentials: NO_CREDENTIALS, approvals: NO_APPROVALS });
+    expect(await ex.finishPlan(w.row)).toEqual({ ok: false, reason: 'plan output missing' });
+    expect(calls.filter((args) => args.includes('push'))).toEqual([]);
+    expect(calls.filter((args) => args[0] === 'commit')).toEqual([]);
+  });
+});
+
 describe('HostExecutor credentials wiring (review minors 2, 7)', () => {
   test('D88: forge-token variables from the daemon environment never reach nax', async () => {
     const w = await world();

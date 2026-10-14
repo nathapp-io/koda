@@ -38,5 +38,6 @@ export function buildAssignPayload(job: FleetJobRecord, repo: FleetRepoRef, clon
     approvalTimeoutSec: job.approvalTimeoutSec,
     gitIdentity,
     ...(thread ? { thread } : {}),
+    ...(job.command === 'PLAN' && job.threadId ? { expectBranch: job.ref } : {}),
   };
 }

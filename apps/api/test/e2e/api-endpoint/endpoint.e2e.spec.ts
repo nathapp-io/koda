@@ -32,6 +32,7 @@ import { buildThreadInstructions } from '../../../src/fleet/threads/thread-instr
 import type { ThreadSkillSource } from '../../../src/skills/skill-catalog.domain';
 import { PlacementService } from '../../../src/fleet/jobs/placement.service';
 import { RunnerNotifier } from '../../../src/fleet/jobs/runner-notifier';
+import { PrismaThreadIngestRepository } from '../../../src/fleet/threads/ingest/prisma-thread-ingest.repository';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -3111,6 +3112,19 @@ describeIntegration('API Integration Tests', () => {
       .post(`/api/projects/${projectSlug}/threads`)
       .set('Authorization', `Bearer ${token}`)
       .send({ repoId: world.repoId, feature, title: feature, backend: { kind: 'native' } });
+    const createThreadRunner = (threadId: string, extraCapabilities: Record<string, unknown> = {}) => db().runner.create({ data: {
+      name: `thread-handoff-${threadId}`, apiKeyHash: `thread-handoff-${threadId}`, os: 'linux', arch: 'x64', labels: [],
+      capacity: 2, capabilities: {
+        nax: { version: '0.83.0', protocols: ['native'] }, sandbox: { available: true, probedAt: new Date().toISOString() },
+        profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'], ...extraCapabilities,
+      }, daemonVersion: '0.1.0', protocolVersion: 4,
+      bootId: `thread-handoff-${threadId}`, lastSeenAt: new Date(), createdById: world.ids.root,
+    } });
+    const attachThreadRunner = async (threadId: string, extraCapabilities: Record<string, unknown> = {}) => {
+      const runner = await createThreadRunner(threadId, extraCapabilities);
+      await db().chatThread.update({ where: { id: threadId }, data: { runnerId: runner.id } });
+      return runner;
+    };
 
     beforeAll(async () => {
       const prisma = db();
@@ -3217,6 +3231,280 @@ describeIntegration('API Integration Tests', () => {
       refusal(res, 'threads.input.400', { reason: 'backend' });
     });
 
+    it('US-006 AC-2: refuses to plan a thread before its spec is published', async () => {
+      const thread = body<{ id: string }>(await createThread('plan-unpublished').expect(201));
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(409);
+      threadMessage(res, 'threads.notPublished.409');
+    });
+
+    it('refuses to plan when the thread owning runner was deleted after Publish', async () => {
+      const thread = body<{ id: string }>(await createThread('plan-runner-deleted').expect(201));
+      const runner = await createThreadRunner(thread.id);
+      await db().chatThread.update({ where: { id: thread.id }, data: { runnerId: runner.id, specPublished: true } });
+      await db().runner.delete({ where: { id: runner.id } });
+      const response = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(409);
+      threadMessage(response, 'threads.runnerMissing.409');
+      expect(await db().fleetJob.count({ where: { threadId: thread.id, command: 'PLAN' } })).toBe(0);
+    });
+
+    it('US-006 AC-3: folds a published line before planning the thread spec', async () => {
+      const thread = body<{ id: string; repoId: string; specPath: string }>(await createThread('plan-folded-publish').expect(201));
+      const ingestJob = await db().fleetJob.create({ data: {
+        projectId: world.projectId, repoId: thread.repoId, ref: 'trunk', command: 'THREAD', feature: `thread-${thread.id}`,
+        profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, threadId: thread.id, state: 'COMPLETED',
+      } });
+      const line = { type: 'published' as const, sha: 'a'.repeat(40), paths: [thread.specPath], ignored: [], specPresent: true };
+      await app.get(PrismaThreadIngestRepository, { strict: false }).fold({
+        jobId: ingestJob.id, leaseEpoch: 0, lines: [{ line, endOffset: 128 }], endOffset: 128, badLines: 0,
+      });
+      expect((await db().chatThread.findUniqueOrThrow({ where: { id: thread.id } })).specPublished).toBe(true);
+      await attachThreadRunner(thread.id);
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(201);
+      const result = body<{ job: { id: string; ref: string; feature: string; planFrom: string } }>(res);
+      expect(result.job).toMatchObject({ ref: 'feat/plan-folded-publish', feature: 'plan-folded-publish', planFrom: thread.specPath });
+    });
+
+    it('US-006 AC-15: placing a thread plan queues ASSIGN with the expected branch', async () => {
+      const feature = 'plan-assign-payload';
+      const thread = body<{ id: string }>(await createThread(feature).expect(201));
+      const runner = await db().runner.create({ data: {
+        name: `plan-${thread.id}`, apiKeyHash: `plan-hash-${thread.id}`, os: 'linux', arch: 'x64', labels: [],
+        capabilities: {
+          nax: { version: '0.83.0', protocols: ['native'] }, sandbox: { available: true, probedAt: new Date().toISOString() },
+          profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'],
+        },
+        daemonVersion: '0.1.0', protocolVersion: 4, bootId: `plan-boot-${thread.id}`, lastSeenAt: new Date(), createdById: world.ids.root,
+      } });
+      await db().chatThread.update({ where: { id: thread.id }, data: { runnerId: runner.id, specPublished: true } });
+      const result = body<{ job: { id: string } }>(await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(201));
+      const assign = await db().fleetCommand.findFirst({ where: { jobId: result.job.id, type: 'ASSIGN' }, select: { payload: true } });
+      expect(assign?.payload).toMatchObject({ expectBranch: `feat/${feature}` });
+    });
+
+    it('US-006 AC-1/8: dispatches a published thread plan on its feature ref with the default cap', async () => {
+      const thread = body<{ id: string; feature: string; repoId: string; specPath: string }>(await createThread('plan-happy').expect(201));
+      const runner = await attachThreadRunner(thread.id);
+      await db().chatThread.update({ where: { id: thread.id }, data: { specPublished: true } });
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(201);
+      const result = body<{ job: { id: string; repoId: string; command: string; ref: string; feature: string; planFrom: string; maxCostUsd: string } }>(res);
+      expect(result.job).toMatchObject({ repoId: thread.repoId, command: 'PLAN', ref: 'feat/plan-happy', feature: 'plan-happy', planFrom: thread.specPath, maxCostUsd: '5' });
+      await expect(db().fleetJob.findUniqueOrThrow({ where: { id: result.job.id } })).resolves.toMatchObject({ threadId: thread.id, pinnedRunnerId: runner.id });
+    });
+
+    it('US-006 AC-4/5: refuses a plan while a THREAD or PLAN job for that thread is active', async () => {
+      for (const [feature, command] of [['busy-session', 'THREAD'], ['busy-plan', 'PLAN']] as const) {
+        const thread = body<{ id: string }>(await createThread(feature).expect(201));
+        await attachThreadRunner(thread.id);
+        await db().chatThread.update({ where: { id: thread.id }, data: { specPublished: true } });
+        await db().fleetJob.create({ data: {
+          projectId: world.projectId, repoId: world.repoId, ref: `feat/${feature}`, command, feature,
+          planFrom: command === 'PLAN' ? '.nax/features/spec.md' : null, profiles: [], maxCostUsd: '5',
+          selectorLabels: [], pinnedRunnerId: null, requestedById: world.ids.dev, threadId: thread.id, state: 'RUNNING',
+        } });
+        const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
+          .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(409);
+        threadMessage(res, 'threads.busy.409');
+      }
+    });
+
+    it('US-006 AC-7: forwards plan profiles and the requested cost cap', async () => {
+      const thread = body<{ id: string }>(await createThread('plan-options').expect(201));
+      await attachThreadRunner(thread.id);
+      await db().chatThread.update({ where: { id: thread.id }, data: { specPublished: true } });
+      const response = body<{ job: { id: string } }>(await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({ profiles: ['cc-plan'], maxCostUsd: 2 }).expect(201));
+      const job = await db().fleetJob.findUniqueOrThrow({ where: { id: response.job.id } });
+      expect(job.profiles).toEqual(['cc-plan']);
+      expect(job.maxCostUsd.toString()).toBe('2');
+    });
+
+    it('US-006 AC-14: denies a thread creator whose project role no longer permits FleetJob creation', async () => {
+      const thread = body<{ id: string }>(await createThread('plan-viewer').expect(201));
+      await db().chatThread.update({ where: { id: thread.id }, data: { specPublished: true } });
+      await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.dev } }, data: { role: 'VIEWER' } });
+      try {
+        const denied = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
+          .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(403);
+        expect(denied.body.message).toBe('projects.40003');
+      } finally {
+        await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.dev } }, data: { role: 'DEVELOPER' } });
+      }
+    });
+
+    it('US-006 AC-6: concurrent plans leave exactly one active job for the thread', async () => {
+      const thread = body<{ id: string }>(await createThread('plan-race').expect(201));
+      await attachThreadRunner(thread.id);
+      await db().chatThread.update({ where: { id: thread.id }, data: { specPublished: true } });
+      const postPlan = () => request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({});
+      const results = await Promise.all([postPlan(), postPlan()]);
+      expect(results.map((res) => res.status).sort()).toEqual([201, 409]);
+      const conflict = results.find((res) => res.status === 409);
+      expect(conflict).toBeDefined();
+      if (!conflict) throw new Error('expected one conflicting plan request');
+      threadMessage(conflict, 'threads.busy.409');
+      const jobs = await db().fleetJob.findMany({ where: { threadId: thread.id, command: 'PLAN' } });
+      expect(jobs).toHaveLength(1);
+    });
+
+    it('US-006 AC-13: thread detail exposes the latest plan and run handoff jobs', async () => {
+      const thread = body<{ id: string; specPath: string }>(await createThread('plan-handoff').expect(201));
+      await attachThreadRunner(thread.id);
+      await db().chatThread.update({ where: { id: thread.id }, data: { specPublished: true } });
+      const response = body<{ job: { id: string } }>(await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(201));
+      await db().fleetJob.update({ where: { id: response.job.id }, data: { state: 'FAILED', stateReason: 'branch_mismatch' } });
+      const detail = body<{ handoff: { plan: { jobId: string; state: string; stateReason: string | null }; run: unknown } }>(
+        await request(httpServer).get(`/api/projects/${projectSlug}/threads/${thread.id}`).set('Authorization', `Bearer ${world.tokens.dev}`).expect(200),
+      );
+      expect(detail.handoff).toEqual({ plan: { jobId: response.job.id, state: 'FAILED', stateReason: 'branch_mismatch' }, run: null });
+    });
+
+    it('US-007 AC-2: refuses to run a thread that has no plan', async () => {
+      const thread = body<{ id: string }>(await createThread('run-no-plan').expect(201));
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/run`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(409);
+      threadMessage(res, 'threads.notPlanned.409');
+    });
+
+    it('refuses to run when the owning runner was deleted after a completed PLAN', async () => {
+      const thread = body<{ id: string; repoId: string; specPath: string; feature: string }>(await createThread('run-runner-deleted').expect(201));
+      const runner = await attachThreadRunner(thread.id);
+      await db().fleetJob.create({ data: {
+        projectId: world.projectId, repoId: thread.repoId, ref: `feat/${thread.feature}`, command: 'PLAN', feature: thread.feature,
+        planFrom: thread.specPath, profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev,
+        threadId: thread.id, state: 'COMPLETED', pinnedRunnerId: runner.id,
+      } });
+      await db().runner.delete({ where: { id: runner.id } });
+      const response = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/run`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(409);
+      threadMessage(response, 'threads.runnerMissing.409');
+      expect(await db().fleetJob.count({ where: { threadId: thread.id, command: 'RUN' } })).toBe(0);
+    });
+
+    it('US-007 AC-3: refuses to run when the latest plan failed, even after an earlier completed plan', async () => {
+      const thread = body<{ id: string; specPath: string }>(await createThread('run-failed-plan').expect(201));
+      await db().chatThread.update({ where: { id: thread.id }, data: { specPublished: true } });
+      await db().fleetJob.create({ data: {
+        projectId: world.projectId, repoId: thread.repoId, ref: 'feat/run-failed-plan', command: 'PLAN', feature: 'run-failed-plan',
+        planFrom: thread.specPath, profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, threadId: thread.id,
+        state: 'COMPLETED', queuedAt: new Date('2020-01-01T00:00:00Z'),
+      } });
+      await db().fleetJob.create({ data: {
+        projectId: world.projectId, repoId: thread.repoId, ref: 'feat/run-failed-plan', command: 'PLAN', feature: 'run-failed-plan',
+        planFrom: thread.specPath, profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, threadId: thread.id,
+        state: 'FAILED', stateReason: 'branch_mismatch', queuedAt: new Date('2021-01-01T00:00:00Z'),
+      } });
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/run`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(409);
+      threadMessage(res, 'threads.notPlanned.409');
+    });
+
+    it('US-007 AC-1: runs a thread whose latest plan completed on its feature ref, pinned to the thread runner', async () => {
+      const feature = 'run-happy';
+      const thread = body<{ id: string; repoId: string; feature: string; specPath: string }>(await createThread(feature).expect(201));
+      const runner = await db().runner.create({ data: {
+        name: `run-${thread.id}`, apiKeyHash: `run-hash-${thread.id}`, os: 'linux', arch: 'x64', labels: [],
+        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, sandbox: { available: true, probedAt: new Date().toISOString() }, profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'] },
+        daemonVersion: '0.1.0', protocolVersion: 4, bootId: `run-boot-${thread.id}`, lastSeenAt: new Date(), createdById: world.ids.root,
+      } });
+      await db().chatThread.update({ where: { id: thread.id }, data: { runnerId: runner.id, specPublished: true } });
+      await db().fleetJob.create({ data: {
+        projectId: world.projectId, repoId: thread.repoId, ref: `feat/${feature}`, command: 'PLAN', feature,
+        planFrom: thread.specPath, profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, threadId: thread.id,
+        state: 'COMPLETED',
+      } });
+      const result = body<{ job: { id: string; command: string; ref: string; feature: string; planFrom: string | null; pinnedRunnerId: string | null } }>(
+        await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/run`)
+          .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(201),
+      );
+      expect(result.job).toMatchObject({ command: 'RUN', ref: `feat/${feature}`, feature, planFrom: null, pinnedRunnerId: runner.id });
+      await expect(db().fleetJob.findUniqueOrThrow({ where: { id: result.job.id } })).resolves.toMatchObject({ threadId: thread.id, pinnedRunnerId: runner.id });
+    });
+
+    it('US-007 AC-4: forwards the run bash mode and profiles', async () => {
+      const thread = body<{ id: string }>(await createThread('run-options').expect(201));
+      await attachThreadRunner(thread.id, { approvals: { relay: true } });
+      await db().chatThread.update({ where: { id: thread.id }, data: { specPublished: true } });
+      await db().fleetJob.create({ data: {
+        projectId: world.projectId, repoId: world.repoId, ref: 'feat/run-options', command: 'PLAN', feature: 'run-options',
+        planFrom: '.nax/features/run-options/spec.md', profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, threadId: thread.id,
+        state: 'COMPLETED',
+      } });
+      const response = body<{ job: { id: string } }>(await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/run`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({ bashMode: 'escalate', profiles: ['native'] }).expect(201));
+      const job = await db().fleetJob.findUniqueOrThrow({ where: { id: response.job.id } });
+      expect({ bashMode: job.bashMode, profiles: job.profiles }).toEqual({ bashMode: 'escalate', profiles: ['native'] });
+    });
+
+    it('US-007 AC-5: refuses a run while a RUN job of the thread is active', async () => {
+      const thread = body<{ id: string }>(await createThread('run-busy').expect(201));
+      await attachThreadRunner(thread.id);
+      await db().chatThread.update({ where: { id: thread.id }, data: { specPublished: true } });
+      await db().fleetJob.create({ data: {
+        projectId: world.projectId, repoId: world.repoId, ref: 'feat/run-busy', command: 'PLAN', feature: 'run-busy',
+        planFrom: '.nax/features/run-busy/spec.md', profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, threadId: thread.id,
+        state: 'COMPLETED',
+      } });
+      await db().fleetJob.create({ data: {
+        projectId: world.projectId, repoId: world.repoId, ref: 'feat/run-busy', command: 'RUN', feature: 'run-busy',
+        planFrom: null, profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, threadId: thread.id, state: 'RUNNING',
+      } });
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/run`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(409);
+      threadMessage(res, 'threads.busy.409');
+    });
+
+    it('US-007 AC-6: the ASSIGN for a thread run carries no expectBranch', async () => {
+      const feature = 'run-assign-payload';
+      const thread = body<{ id: string }>(await createThread(feature).expect(201));
+      const runner = await db().runner.create({ data: {
+        name: `run-assign-${thread.id}`, apiKeyHash: `run-assign-hash-${thread.id}`, os: 'linux', arch: 'x64', labels: [],
+        capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, sandbox: { available: true, probedAt: new Date().toISOString() }, profiles: {}, credentials: [], tools: { git: true, gh: true, glab: true }, executors: ['host'] },
+        daemonVersion: '0.1.0', protocolVersion: 4, bootId: `run-assign-boot-${thread.id}`, lastSeenAt: new Date(), createdById: world.ids.root,
+      } });
+      await db().chatThread.update({ where: { id: thread.id }, data: { runnerId: runner.id, specPublished: true } });
+      await db().fleetJob.create({ data: {
+        projectId: world.projectId, repoId: world.repoId, ref: `feat/${feature}`, command: 'PLAN', feature,
+        planFrom: `.nax/features/${feature}/spec.md`, profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, threadId: thread.id,
+        state: 'COMPLETED',
+      } });
+      const result = body<{ job: { id: string } }>(await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/run`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(201));
+      const assign = await db().fleetCommand.findFirst({ where: { jobId: result.job.id, type: 'ASSIGN' }, select: { payload: true } });
+      expect(assign).not.toBeNull();
+      expect(assign?.payload).not.toHaveProperty('expectBranch');
+    });
+
+    it('US-007 AC-7: refuses a run by a project member who is not the thread creator', async () => {
+      const thread = await newThread('run-noncreator', { createdById: world.ids.root });
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/run`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(403);
+      threadMessage(res, 'threads.notCreator.403');
+    });
+
+    it('US-007 AC-8: thread detail reports the run job after a run was created', async () => {
+      const thread = body<{ id: string }>(await createThread('run-handoff').expect(201));
+      await attachThreadRunner(thread.id);
+      await db().chatThread.update({ where: { id: thread.id }, data: { specPublished: true } });
+      await db().fleetJob.create({ data: {
+        projectId: world.projectId, repoId: world.repoId, ref: 'feat/run-handoff', command: 'PLAN', feature: 'run-handoff',
+        planFrom: '.nax/features/run-handoff/spec.md', profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, threadId: thread.id,
+        state: 'COMPLETED',
+      } });
+      const response = body<{ job: { id: string } }>(await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/run`)
+        .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(201));
+      const detail = body<{ handoff: { run: { jobId: string } | null } }>(
+        await request(httpServer).get(`/api/projects/${projectSlug}/threads/${thread.id}`).set('Authorization', `Bearer ${world.tokens.dev}`).expect(200),
+      );
+      expect(detail.handoff.run?.jobId).toBe(response.job.id);
+    });
+
     it('US-003 AC10: rejects a second active thread for the same repo and feature', async () => {
       await createThread('same-active-feature').expect(201);
       const res = await createThread('same-active-feature').expect(409);
@@ -3236,8 +3524,10 @@ describeIntegration('API Integration Tests', () => {
       await db().chatThread.update({ where: { id: newer.id }, data: { lastActivityAt: new Date('2021-01-01T00:00:00Z') } });
       await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.viewer } }, data: { role: 'VIEWER' } });
       try {
-        const res = await request(httpServer).get(`/api/projects/${projectSlug}/threads`).set('Authorization', `Bearer ${world.tokens.viewer}`).expect(200);
+        // size=100: the US-007 block adds threads to this project, so the default page of 20 can drop both.
+        const res = await request(httpServer).get(`/api/projects/${projectSlug}/threads?size=100`).set('Authorization', `Bearer ${world.tokens.viewer}`).expect(200);
         const items = body<{ items: Array<{ id: string }> }>(res).items;
+        expect(items.findIndex((item) => item.id === newer.id)).toBeGreaterThanOrEqual(0);
         expect(items.findIndex((item) => item.id === newer.id)).toBeLessThan(items.findIndex((item) => item.id === older.id));
       } finally {
         await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.dev } }, data: { role: 'DEVELOPER' } });
@@ -3287,6 +3577,12 @@ describeIntegration('API Integration Tests', () => {
       request(httpServer).post(`/api/projects/${projectSlug}/threads/${id}/messages`)
         .set('Authorization', `Bearer ${token}`).send(payload);
 
+    const publishThread = (id: string, token = world.tokens.dev) => request(httpServer)
+      .post(`/api/projects/${projectSlug}/threads/${id}/publish`).set('Authorization', `Bearer ${token}`).send({});
+
+    const discardThread = (id: string, token = world.tokens.dev) => request(httpServer)
+      .post(`/api/projects/${projectSlug}/threads/${id}/discard`).set('Authorization', `Bearer ${token}`).send({});
+
     const newThread = async (feature: string, over: Record<string, unknown> = {}) => db().chatThread.create({
       data: {
         projectId: world.projectId, repoId: world.repoId, baseRef: 'trunk', feature, title: feature,
@@ -3294,6 +3590,12 @@ describeIntegration('API Integration Tests', () => {
         specPath: `.nax/features/${feature}/spec.md`, ...over,
       },
     });
+
+    const publishRunner = async (feature: string) => db().runner.create({ data: {
+      name: `publish-${feature}`, apiKeyHash: `publish-hash-${feature}`, os: 'linux', arch: 'x64', labels: ['linux'],
+      capabilities: { threadWrite: true }, daemonVersion: '0.1.0', protocolVersion: 4, bootId: `publish-${feature}`,
+      lastSeenAt: new Date(), createdById: world.ids.root,
+    } });
 
     const liveSession = async (feature: string, over: Record<string, unknown> = {}) => {
       const thread = await newThread(feature, over);
@@ -3310,6 +3612,63 @@ describeIntegration('API Integration Tests', () => {
       } });
       return { thread, runner, job };
     };
+
+    it('US-003 publish: queues a PUBLISH turn for saved written paths', async () => {
+      const runner = await publishRunner('publish-e2e');
+      const thread = await newThread('publish-e2e', { writtenPaths: ['docs/a.md'], runnerId: runner.id });
+      const res = await publishThread(thread.id).expect(200);
+      const result = body<{ jobId: string }>(res);
+      expect(result.jobId).toBeTruthy();
+      const job = await db().fleetJob.findUniqueOrThrow({ where: { id: result.jobId } });
+      expect(job).toMatchObject({ command: 'THREAD', threadId: thread.id });
+      expect(job.maxCostUsd.toString()).toBe('0');
+      expect(await db().fleetThreadTurn.findUniqueOrThrow({ where: { jobId: result.jobId } })).toMatchObject({
+        action: 'PUBLISH', initialMessageId: null, resume: false,
+      });
+    });
+
+    it('US-003 publish: refuses when no paths are available', async () => {
+      const runner = await publishRunner('publish-empty');
+      const thread = await newThread('publish-empty', { runnerId: runner.id });
+      const res = await publishThread(thread.id).expect(409);
+      threadMessage(res, 'threads.nothingToPublish.409');
+      expect(await db().fleetJob.count({ where: { threadId: thread.id } })).toBe(0);
+    });
+
+    it('US-004 discard: queues a zero-cost DISCARD turn on a pinned runner with threadWrite', async () => {
+      const runner = await publishRunner('discard-e2e');
+      const thread = await newThread('discard-e2e', { runnerId: runner.id });
+      const result = body<{ jobId: string }>(await discardThread(thread.id).expect(200));
+      expect(result.jobId).toBeTruthy();
+      const job = await db().fleetJob.findUniqueOrThrow({ where: { id: result.jobId } });
+      expect(job).toMatchObject({ command: 'THREAD', threadId: thread.id });
+      expect(job.maxCostUsd.toString()).toBe('0');
+      expect(await db().fleetThreadTurn.findUniqueOrThrow({ where: { jobId: result.jobId } })).toMatchObject({
+        action: 'DISCARD', initialMessageId: null, resume: false,
+      });
+    });
+
+    it('US-004 discard: refuses with threads.busy while a live session job is active', async () => {
+      const { thread, runner } = await liveSession('discard-busy');
+      // Discard needs threadWrite on the pinned runner; without it the runnerOutdated check answers first (brief order).
+      await db().runner.update({ where: { id: runner.id }, data: { capabilities: { nax: { version: '0.83.0', protocols: ['native'] }, threadBackends: { native: ['m1'], acp: [] }, threadWrite: true } } });
+      const res = await discardThread(thread.id).expect(409);
+      threadMessage(res, 'threads.busy.409');
+      expect(await db().fleetJob.count({ where: { threadId: thread.id, command: 'THREAD', state: 'QUEUED' } })).toBe(0);
+    });
+
+    it('US-004 discard: a pinned runner without threadWrite answers runnerOutdated before busy (brief order)', async () => {
+      const { thread } = await liveSession('discard-outdated-first');
+      const res = await discardThread(thread.id).expect(409);
+      threadMessage(res, 'threads.runnerOutdated.409');
+    });
+
+    it('US-004 discard: refuses with threads.nothingToDiscard when the thread has no pinned runner', async () => {
+      const thread = await newThread('discard-empty');
+      const res = await discardThread(thread.id).expect(409);
+      threadMessage(res, 'threads.nothingToDiscard.409');
+      expect(await db().fleetJob.count({ where: { threadId: thread.id } })).toBe(0);
+    });
 
     it('US-004 AC5: creator send inserts a pending user message at sequence 1', async () => {
       const thread = await newThread('send-first');
@@ -3334,6 +3693,7 @@ describeIntegration('API Integration Tests', () => {
           repo: `${repo.owner}/${repo.name}`, baseRef: thread.baseRef, feature: thread.feature,
           specPath: thread.specPath, skills: thread.skills as unknown as ThreadSkillSource[],
         }));
+        expect(turn.instructions).toContain('write_doc');
         expect(placement).toHaveBeenCalledTimes(1);
         expect(placement).toHaveBeenCalledWith(result.jobId);
       } finally {
@@ -3356,9 +3716,13 @@ describeIntegration('API Integration Tests', () => {
         daemonVersion: '0.1.0', protocolVersion: 4, bootId: 'thread-boot', lastSeenAt: new Date(), createdById: world.ids.root,
       } });
       await db().chatThread.update({ where: { id: thread.id }, data: { runnerId: runner.id } });
-      await db().fleetJob.create({ data: {
+      const previous = await db().fleetJob.create({ data: {
         projectId: thread.projectId, repoId: thread.repoId, ref: thread.baseRef, command: 'THREAD', feature: `old-${thread.id}`,
         profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, threadId: thread.id, state: 'COMPLETED',
+      } });
+      await db().fleetThreadTurn.create({ data: {
+        jobId: previous.id, threadId: thread.id, action: 'SESSION', initialMessageId: null, instructions: '',
+        backend: thread.backend as object, skills: [], resume: false,
       } });
       const result = body<{ jobId: string }>(await sendMessage(thread.id).expect(201));
       const job = await db().fleetJob.findUniqueOrThrow({ where: { id: result.jobId } });

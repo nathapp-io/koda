@@ -60,7 +60,7 @@ export class FleetJobsService {
   ) {}
 
   /** Spec §5.1: validate, insert QUEUED (409 on an active duplicate), record, place. */
-  async dispatch(actorId: string, projectId: string, dto: DispatchFleetJobDto, opts: { scheduleId?: string; ticketActor?: TicketActor } = {}): Promise<DispatchResultDto> {
+  async dispatch(actorId: string, projectId: string, dto: DispatchFleetJobDto, opts: { scheduleId?: string; ticketActor?: TicketActor; threadId?: string } = {}): Promise<DispatchResultDto> {
     const repo = await this.repo.findRepo(dto.repoId);
     if (!repo || repo.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.repos');
     const input = normalizeDispatch(dto, repo.defaultBranch);
@@ -89,8 +89,10 @@ export class FleetJobsService {
     let job: FleetJobRecord;
     try {
       job = await this.txManager.run(async () => {
+        if (opts.threadId && !(await this.repo.lockIdleThread(opts.threadId))) throw new ConflictAppException({}, 'threads.busy');
         const created = await this.repo.createJob({
           ...input, projectId, requestedById: actorId, ...(opts.scheduleId ? { scheduleId: opts.scheduleId } : {}),
+          ...(opts.threadId ? { threadId: opts.threadId } : {}),
         });
         await this.fleetTickets.link(created.id, tickets); // C9 D450: same transaction
         await this.repo.appendEvent(created.id, { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });

@@ -73,6 +73,35 @@ describe('US-006 THREAD placement rules', () => {
     expect(misfit(threadJob({ thread: { backend: { kind: 'native' }, enabled: false } }), r)).toBe('threads_disabled');
   });
 
+  it('US-001 AC7: a PUBLISH job on a runner without threadWrite is thread_write, not a backend miss', () => {
+    const r = runner({ protocolVersion: 4, threadCapacity: 2, capabilities: threadCaps({ native: ['m1'], acp: [] }) });
+    expect(misfit(threadJob({ thread: { backend: { kind: 'native' }, enabled: true, action: 'PUBLISH' } }), r)).toBe('thread_write');
+  });
+
+  it('US-001 AC8: a DISCARD job on a threadWrite runner with no native models fits (no backend check)', () => {
+    const r = runner({
+      protocolVersion: 4, threadCapacity: 2,
+      capabilities: capabilities({ threadBackends: { native: [], acp: [] }, threadWrite: true }),
+    });
+    expect(misfit(threadJob({ thread: { backend: { kind: 'native' }, enabled: true, action: 'DISCARD' } }), r, load({ threads: 0 }))).toBeNull();
+  });
+
+  it('US-001 AC9: a SESSION job on a threadWrite runner with no native models is still thread_backend', () => {
+    const r = runner({
+      protocolVersion: 4, threadCapacity: 2,
+      capabilities: capabilities({ threadBackends: { native: [], acp: [] }, threadWrite: true }),
+    });
+    expect(misfit(threadJob({ thread: { backend: { kind: 'native' }, enabled: true, action: 'SESSION' } }), r)).toBe('thread_backend');
+  });
+
+  it('US-001 AC10: a PUBLISH job at full thread load is thread_capacity', () => {
+    const r = runner({
+      protocolVersion: 4, threadCapacity: 2,
+      capabilities: capabilities({ threadBackends: { native: ['m1'], acp: [] }, threadWrite: true }),
+    });
+    expect(misfit(threadJob({ thread: { backend: { kind: 'native' }, enabled: true, action: 'PUBLISH' } }), r, load({ threads: 2 }))).toBe('thread_capacity');
+  });
+
   it('US-006 AC9: THREAD placement skips unrelated interaction and sandbox restrictions', () => {
     const r = runner({
       protocolVersion: 4, threadCapacity: 2,

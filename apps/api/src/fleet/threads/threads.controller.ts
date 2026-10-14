@@ -11,6 +11,8 @@ import type { ProjectContext } from '../../projects/project-context';
 import { withProjectRole } from '../../projects/project-context';
 import { ThreadsService } from './threads.service';
 import { AnswerQuestionDto, ChatMessageListDto, ChatMessageDto, CreateThreadDto, SendMessageDto, SendMessageResultDto, ThreadDetailDto, ThreadDto, ThreadListDto, UpdateThreadDto } from './dto/thread.dto';
+import { PlanThreadDto, RunThreadDto } from './dto/thread-handoff.dto';
+import { DispatchResultDto } from '../jobs/dto/fleet-job.dto';
 
 @ApiTags('fleet threads')
 @ApiBearerAuth()
@@ -72,6 +74,28 @@ export class ThreadsController {
     return JsonResponse.Ok(await this.threads.updateCap(ctx.project.id, id, principal.id, dto.maxCostUsd));
   }
 
+  @Post(':id/plan')
+  @HttpCode(201)
+  @ApiOperation({ summary: 'Plan a published thread spec (creator, project DEVELOPER+)' })
+  @ApiResponse({ status: 201, type: DispatchResultDto })
+  async plan(@Param('id') id: string, @Body() dto: PlanThreadDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    this.assertUser(principal);
+    const ability = await this.casl.createForUser(withProjectRole(principal, ctx.role));
+    if (!ability.can(CaslPermissionAction.CREATE, 'FleetJob')) throw new ForbiddenAppException({}, 'projects');
+    return JsonResponse.Ok(await this.threads.plan(ctx.project.id, id, principal.id, dto));
+  }
+
+  @Post(':id/run')
+  @HttpCode(201)
+  @ApiOperation({ summary: 'Run a thread after its latest plan completed (creator, project DEVELOPER+)' })
+  @ApiResponse({ status: 201, type: DispatchResultDto })
+  async run(@Param('id') id: string, @Body() dto: RunThreadDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    this.assertUser(principal);
+    const ability = await this.casl.createForUser(withProjectRole(principal, ctx.role));
+    if (!ability.can(CaslPermissionAction.CREATE, 'FleetJob')) throw new ForbiddenAppException({}, 'projects');
+    return JsonResponse.Ok(await this.threads.run(ctx.project.id, id, principal.id, dto));
+  }
+
   @Post(':id/stop')
   @HttpCode(200)
   @ApiOperation({ summary: 'Stop the live turn of a chat thread (creator)' })
@@ -107,6 +131,24 @@ export class ThreadsController {
     this.assertUser(principal);
     await this.threads.archive(ctx.project.id, id, principal.id, ctx.role === 'ADMIN');
     return JsonResponse.Ok(await this.threads.get(ctx.project.id, id));
+  }
+
+  @Post(':id/publish')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Publish thread documents (creator)' })
+  @ApiResponse({ status: 200, schema: { type: 'object', properties: { jobId: { type: 'string', nullable: true } } } })
+  async publish(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    this.assertUser(principal);
+    return JsonResponse.Ok(await this.threads.publish(ctx.project.id, id, principal.id));
+  }
+
+  @Post(':id/discard')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Discard the thread worktree changes (creator)' })
+  @ApiResponse({ status: 200, schema: { type: 'object', properties: { jobId: { type: 'string' } } } })
+  async discard(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
+    this.assertUser(principal);
+    return JsonResponse.Ok(await this.threads.discard(ctx.project.id, id, principal.id));
   }
 
   @Post(':id/messages')

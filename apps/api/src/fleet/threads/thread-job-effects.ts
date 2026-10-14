@@ -6,7 +6,7 @@ import { FleetCommandType, FleetJobState } from '../../common/enums';
 import type { ThreadLiveEvent } from '../../live/thread-event-bus';
 import { isThreadKind } from '../common/thread-jobs';
 import type { FleetCommandRecord, FleetJobRecord } from '../jobs/domain/fleet-job.domain';
-import type { ThreadSession } from './domain/chat-thread.domain';
+import type { ThreadSession, ThreadWriteResult } from './domain/chat-thread.domain';
 
 /** Job ends that mean the runner died or failed; the session snapshot shows them as `failed`, the rest as `closed`. */
 const FAILED_END_STATES: readonly string[] = [FleetJobState.CRASHED, FleetJobState.FAILED];
@@ -21,7 +21,9 @@ export class ThreadJobEffects {
   constructor(private readonly prisma: PrismaService<PrismaClient>) {}
 
   async onInputAck(command: FleetCommandRecord, result: string, detail: string): Promise<void> {
-    if (command.type === FleetCommandType.THREAD_INPUT) {
+    if (command.type === FleetCommandType.THREAD_PUBLISH) {
+      await this.onPublishAck(command, result, detail);
+    } else if (command.type === FleetCommandType.THREAD_INPUT) {
       const { messageId } = command.payload as { messageId?: unknown };
       if (typeof messageId === 'string' && result === 'rejected') await this.prisma.client.chatMessage.updateMany({ where: { id: messageId }, data: { status: 'errored', errorReason: detail.slice(0, 200) } });
       if (typeof messageId === 'string') await this.replaceCommandPayload(command.id, { messageId });
@@ -65,6 +67,19 @@ export class ThreadJobEffects {
       at,
     };
     await this.prisma.client.chatThread.update({ where: { id: threadId }, data: { session: closed as unknown as Prisma.InputJsonValue } });
+  }
+
+  /**
+   * A rejected Publish ack records `publish_failed` on the thread so the page can show why. A `publishing` detail is
+   * a second click while the first publish runs; its own result line follows and must not be overwritten. An ok ack
+   * writes nothing: the `published` line follows on the stream (fleet S5a §4). Caller holds the job lock.
+   */
+  private async onPublishAck(command: FleetCommandRecord, result: string, detail: string): Promise<void> {
+    if (result !== 'rejected' || detail === 'publishing') return;
+    const job = await this.prisma.client.fleetJob.findUnique({ where: { id: command.jobId }, select: { id: true, threadId: true } });
+    if (!job?.threadId) return;
+    const lastWrite: ThreadWriteResult = { kind: 'publish_failed', jobId: command.jobId, at: new Date().toISOString(), reason: detail.slice(0, 64) };
+    await this.prisma.client.chatThread.update({ where: { id: job.threadId }, data: { lastWrite: lastWrite as unknown as Prisma.InputJsonValue } });
   }
 
   /** Clears the thread's `pendingQuestion` when the runner accepted an answer to that question (B2-D3). Caller holds the job lock. */

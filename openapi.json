@@ -9215,6 +9215,114 @@
         ]
       }
     },
+    "/api/projects/{slug}/threads/{id}/plan": {
+      "post": {
+        "operationId": "ThreadsController_plan",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanThreadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchResultDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Plan a published thread spec (creator, project DEVELOPER+)",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/projects/{slug}/threads/{id}/run": {
+      "post": {
+        "operationId": "ThreadsController_run",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunThreadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchResultDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Run a thread after its latest plan completed (creator, project DEVELOPER+)",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
     "/api/projects/{slug}/threads/{id}/stop": {
       "post": {
         "operationId": "ThreadsController_stop",
@@ -9375,6 +9483,105 @@
           }
         ],
         "summary": "Archive a chat thread (creator or project admin)",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/projects/{slug}/threads/{id}/publish": {
+      "post": {
+        "operationId": "ThreadsController_publish",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jobId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Publish thread documents (creator)",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/projects/{slug}/threads/{id}/discard": {
+      "post": {
+        "operationId": "ThreadsController_discard",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jobId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Discard the thread worktree changes (creator)",
         "tags": [
           "fleet threads"
         ]
@@ -13245,7 +13452,8 @@
               "config_jobs",
               "thread_capacity",
               "thread_backend",
-              "threads_disabled"
+              "threads_disabled",
+              "thread_write"
             ],
             "type": "string"
           }
@@ -15437,7 +15645,8 @@
               "capacity",
               "thread_capacity",
               "thread_backend",
-              "threads_disabled"
+              "threads_disabled",
+              "thread_write"
             ],
             "type": "string"
           }
@@ -16083,7 +16292,8 @@
               "capacity",
               "thread_capacity",
               "thread_backend",
-              "threads_disabled"
+              "threads_disabled",
+              "thread_write"
             ],
             "type": "string"
           }
@@ -16313,6 +16523,9 @@
               },
               "at": {
                 "type": "string"
+              },
+              "stale": {
+                "type": "boolean"
               }
             }
           },
@@ -16335,6 +16548,24 @@
                 "type": "string"
               }
             }
+          },
+          "writtenPaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "publishedSha": {
+            "type": "string",
+            "nullable": true
+          },
+          "specPublished": {
+            "type": "boolean"
+          },
+          "lastWrite": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true
           }
         },
         "required": [
@@ -16357,7 +16588,11 @@
           "session",
           "lastActivityAt",
           "createdAt",
-          "activeJob"
+          "activeJob",
+          "writtenPaths",
+          "publishedSha",
+          "specPublished",
+          "lastWrite"
         ]
       },
       "ThreadListDto": {
@@ -16464,6 +16699,9 @@
               },
               "at": {
                 "type": "string"
+              },
+              "stale": {
+                "type": "boolean"
               }
             }
           },
@@ -16487,6 +16725,24 @@
               }
             }
           },
+          "writtenPaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "publishedSha": {
+            "type": "string",
+            "nullable": true
+          },
+          "specPublished": {
+            "type": "boolean"
+          },
+          "lastWrite": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true
+          },
           "sendRefusal": {
             "nullable": true,
             "enum": [
@@ -16500,6 +16756,21 @@
               "turnRunning"
             ],
             "type": "string"
+          },
+          "handoff": {
+            "type": "object",
+            "properties": {
+              "plan": {
+                "type": "object",
+                "nullable": true,
+                "additionalProperties": true
+              },
+              "run": {
+                "type": "object",
+                "nullable": true,
+                "additionalProperties": true
+              }
+            }
           }
         },
         "required": [
@@ -16523,7 +16794,12 @@
           "lastActivityAt",
           "createdAt",
           "activeJob",
-          "sendRefusal"
+          "writtenPaths",
+          "publishedSha",
+          "specPublished",
+          "lastWrite",
+          "sendRefusal",
+          "handoff"
         ]
       },
       "UpdateThreadDto": {
@@ -16536,6 +16812,54 @@
         "required": [
           "maxCostUsd"
         ]
+      },
+      "PlanThreadDto": {
+        "type": "object",
+        "properties": {
+          "profiles": {
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "maxCostUsd": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 10000,
+            "description": "USD, > 0, at most 4 decimals"
+          }
+        }
+      },
+      "RunThreadDto": {
+        "type": "object",
+        "properties": {
+          "profiles": {
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "maxCostUsd": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 10000,
+            "description": "USD, > 0, at most 4 decimals"
+          },
+          "bashMode": {
+            "enum": [
+              "raw",
+              "gated",
+              "escalate"
+            ],
+            "type": "string",
+            "default": "raw",
+            "description": "gated/escalate relay bash asks to the approvals inbox. Needs a runner with the approval relay."
+          }
+        }
       },
       "AnswerQuestionDto": {
         "type": "object",

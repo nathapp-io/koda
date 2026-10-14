@@ -8,6 +8,67 @@ const row = {
   createdAt: new Date('2026-10-14T00:00:00.000Z'),
 };
 
+/**
+ * A `command` fake: the thread row, the current THREAD job (state RUNNING, action `action`), and no close command.
+ * `txManager.run` calls through; `createCommand` records what it queues.
+ */
+function commandRepo(opts: { action: 'SESSION' | 'PUBLISH' | 'DISCARD'; pendingQuestion?: unknown }) {
+  const threadRow = {
+    id: 'T', projectId: 'P', createdById: 'U', pendingQuestion: opts.pendingQuestion ?? null, status: 'ACTIVE',
+  };
+  const job = { id: 'J', state: 'RUNNING', runnerId: 'R', leaseEpoch: 4, command: 'THREAD' };
+  const prisma = {
+    client: {
+      chatThread: { findFirst: vi.fn(async () => threadRow) },
+      fleetJob: { findFirst: vi.fn(async () => ({ ...job, threadTurn: { action: opts.action } })) },
+      fleetThreadTurn: { findUnique: vi.fn(async () => ({ action: opts.action })) },
+      fleetCommand: { findFirst: vi.fn(async () => null) },
+      $queryRaw: vi.fn(async () => []),
+    },
+  };
+  const jobs = { lockById: vi.fn(async () => undefined), createCommand: vi.fn(async () => ({})) };
+  const txManager = { run: vi.fn(async (fn: () => Promise<unknown>) => fn()) };
+  const notifier = { notify: vi.fn() };
+  const repo = new PrismaChatThreadRepository(
+    prisma as never, jobs as never, txManager as never, {} as never, {} as never, notifier as never, {} as never,
+    { threadsEnabled: true } as never,
+  );
+  return { repo, jobs, notifier };
+}
+
+describe('PrismaChatThreadRepository.command while a PUBLISH or DISCARD job is active (US-004)', () => {
+  it('AC-14: answers threads.noSession for an end-session on a live PUBLISH job', async () => {
+    const { repo, jobs } = commandRepo({ action: 'PUBLISH' });
+    await expect(repo.command('P', 'T', 'U', 'THREAD_CLOSE', {})).rejects.toMatchObject({ prefix: 'threads.noSession' });
+    expect(jobs.createCommand).not.toHaveBeenCalled();
+  });
+
+  it('AC-14: answers threads.noSession for a stop on a live DISCARD job', async () => {
+    const { repo, jobs } = commandRepo({ action: 'DISCARD' });
+    await expect(repo.command('P', 'T', 'U', 'THREAD_STOP_TURN', {})).rejects.toMatchObject({ prefix: 'threads.noSession' });
+    expect(jobs.createCommand).not.toHaveBeenCalled();
+  });
+
+  it('AC-15: an answer on a live PUBLISH job with no pending question answers threads.noQuestion first', async () => {
+    const { repo, jobs } = commandRepo({ action: 'PUBLISH' });
+    await expect(repo.command('P', 'T', 'U', 'THREAD_ANSWER', { requestId: 'q1', text: 'yes' })).rejects.toMatchObject({ prefix: 'threads.noQuestion' });
+    expect(jobs.createCommand).not.toHaveBeenCalled();
+  });
+
+  it('AC-15: C2-D7 covers only stop and end-session, so an answer with a matching question still reaches the job', async () => {
+    const { repo, jobs } = commandRepo({ action: 'PUBLISH', pendingQuestion: { requestId: 'q1' } });
+    await repo.command('P', 'T', 'U', 'THREAD_ANSWER', { requestId: 'q1', text: 'yes' });
+    expect(jobs.createCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'THREAD_ANSWER', jobId: 'J' }));
+  });
+
+  it('a stop on a live SESSION job still queues the command', async () => {
+    const { repo, jobs, notifier } = commandRepo({ action: 'SESSION' });
+    await repo.command('P', 'T', 'U', 'THREAD_STOP_TURN', {});
+    expect(jobs.createCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'THREAD_STOP_TURN', jobId: 'J', leaseEpoch: 4 }));
+    expect(notifier.notify).toHaveBeenCalledWith('R');
+  });
+});
+
 describe('PrismaChatThreadRepository message mapping (US-003)', () => {
   function repoWith(findMany: (args: unknown) => Promise<unknown[]>): PrismaChatThreadRepository {
     const prisma = { client: { chatMessage: { findMany: vi.fn(findMany) } } } as never;
@@ -66,6 +127,40 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
     } as never;
     const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
     expect((await repo.get('P', 'T'))?.session).toBeNull();
+  });
+
+  it('US-001 AC-14: get() maps writtenPaths, publishedSha, specPublished and lastWrite unchanged', async () => {
+    const lastWrite = { kind: 'published', jobId: 'j1', at: '2026-10-15T00:00:00.000Z', sha: 'a'.repeat(40), paths: ['docs/a.md'], ignored: [] };
+    const threadRow = {
+      id: 'T', projectId: 'P', repoId: 'R', baseRef: 'trunk', feature: 'f', title: 'x', createdById: 'U', runnerId: null,
+      backend: { kind: 'native' }, status: 'ACTIVE', archivedAt: null, skills: [], maxCostUsd: { toString: () => '5' },
+      costUsd: { toString: () => '0' }, tokens: null, specPath: 's', pendingQuestion: null, session: null,
+      writtenPaths: ['docs/a.md'], publishedSha: 'a'.repeat(40), specPublished: true, lastWrite,
+      lastActivityAt: new Date(0), createdAt: new Date(0),
+    };
+    const prisma = {
+      client: {
+        chatThread: { findFirst: vi.fn(async () => threadRow) },
+        fleetJob: { findFirst: vi.fn(async () => null) },
+      },
+    } as never;
+    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    const thread = await repo.get('P', 'T');
+    expect(thread).toMatchObject({ writtenPaths: ['docs/a.md'], publishedSha: 'a'.repeat(40), specPublished: true, lastWrite });
+  });
+
+  it('US-001 AC-1: create() reads back the write-path defaults', async () => {
+    const createdRow = {
+      id: 'T', projectId: 'P', repoId: 'R', baseRef: 'trunk', feature: 'f', title: 'x', createdById: 'U', runnerId: null,
+      backend: { kind: 'native' }, status: 'ACTIVE', archivedAt: null, skills: [], maxCostUsd: { toString: () => '5' },
+      costUsd: { toString: () => '0' }, tokens: null, specPath: 's', pendingQuestion: null, session: null,
+      writtenPaths: [], publishedSha: null, specPublished: false, lastWrite: null,
+      lastActivityAt: new Date(0), createdAt: new Date(0),
+    };
+    const prisma = { client: { chatThread: { create: vi.fn(async () => createdRow) } } } as never;
+    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    const thread = await repo.create({ projectId: 'P', repoId: 'R', baseRef: 'trunk', feature: 'f', title: 'x', createdById: 'U', backend: { kind: 'native' }, skills: [], maxCostUsd: '5' });
+    expect(thread).toMatchObject({ writtenPaths: [], publishedSha: null, specPublished: false, lastWrite: null });
   });
 
   it('US-003 AC13: messages() passes the after-seq filter and limit to the query', async () => {

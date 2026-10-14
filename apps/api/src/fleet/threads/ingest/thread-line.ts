@@ -94,6 +94,8 @@ export interface SessionStartedThreadLine {
   type: 'session_started';
   at?: string;
   resumed: boolean;
+  /** Present only when the runner marks the session's worktree stale (fleet S5a §4). */
+  stale?: true;
 }
 
 export interface SessionClosedThreadLine {
@@ -114,7 +116,44 @@ export type ToolThreadLine = ToolCallThreadLine | ToolResultThreadLine | Approva
 
 export type SessionThreadLine = SessionStartedThreadLine | SessionClosedThreadLine | SessionFailedThreadLine;
 
-export type ThreadLine = InputConsumedThreadLine | AssistantThreadLine | ToolThreadLine | QuestionThreadLine | SessionThreadLine;
+/** Write-path lines (fleet S5a §4): the runner's own writes to the thread's worktree and its Publish or Discard results. */
+export interface WriteDocThreadLine {
+  type: 'write_doc';
+  at?: string;
+  path: string;
+  bytes: number;
+}
+
+export interface PublishedThreadLine {
+  type: 'published';
+  at?: string;
+  sha: string;
+  paths: string[];
+  ignored: string[];
+  specPresent: boolean;
+}
+
+export interface PublishFailedThreadLine {
+  type: 'publish_failed';
+  at?: string;
+  reason: string;
+}
+
+export interface DiscardedThreadLine {
+  type: 'discarded';
+  at?: string;
+  tipSha: string;
+}
+
+export interface DiscardFailedThreadLine {
+  type: 'discard_failed';
+  at?: string;
+  reason: string;
+}
+
+export type WriteThreadLine = WriteDocThreadLine | PublishedThreadLine | PublishFailedThreadLine | DiscardedThreadLine | DiscardFailedThreadLine;
+
+export type ThreadLine = InputConsumedThreadLine | AssistantThreadLine | ToolThreadLine | QuestionThreadLine | SessionThreadLine | WriteThreadLine;
 export type ParsedThreadLine = ThreadLine | { bad: true } | { ignored: true };
 
 const IGNORED_TYPES = new Set(['thinking_delta', 'compaction', 'tool_progress']);
@@ -145,9 +184,16 @@ const isTurnId = (value: unknown): value is string => isString(value) && value.l
 const isFiniteNonNegative = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
 const isNonEmptyString = (value: unknown, max: number): value is string => isString(value) && value.length >= 1 && value.length <= max;
 const isIsoDate = (value: unknown): value is string => isString(value) && !Number.isNaN(Date.parse(value));
+const PATH_MAX = 512;
+const REASON_MAX = 64;
+const PATHS_MAX = 200;
+/** A commit sha as git writes it: 40 (SHA-1) or 64 (SHA-256) lowercase hex characters. */
+const isCommitSha = (value: unknown): value is string => isString(value) && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value);
+const isPathList = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.length <= PATHS_MAX && value.every((entry) => isNonEmptyString(entry, PATH_MAX));
 
 /** Keeps the runner's `at` only when it parses as a date; the fold stamps its own time otherwise. */
-function sessionLine<T extends SessionThreadLine>(line: T, at: unknown): T {
+function withRunnerAt<T extends SessionThreadLine | WriteThreadLine>(line: T, at: unknown): T {
   return isIsoDate(at) ? { ...line, at } : line;
 }
 
@@ -264,12 +310,30 @@ export function parseThreadLine(raw: Buffer | string): ParsedThreadLine {
       if (value.answerable !== undefined && typeof value.answerable !== 'boolean') return { bad: true };
       return { type: 'question', turnId: value.turnId, requestId: value.requestId, text: value.text, expiresAt: value.expiresAt, answerable: value.answerable !== false };
     }
-    case 'session_started':
-      return typeof value.resumed === 'boolean' ? sessionLine({ type: 'session_started', resumed: value.resumed }, value.at) : { bad: true };
+    case 'session_started': {
+      if (typeof value.resumed !== 'boolean' || (value.stale !== undefined && value.stale !== true)) return { bad: true };
+      const line: SessionStartedThreadLine = { type: 'session_started', resumed: value.resumed };
+      if (value.stale === true) line.stale = true;
+      return withRunnerAt(line, value.at);
+    }
     case 'session_closed':
-      return isNonEmptyString(value.reason, 64) ? sessionLine({ type: 'session_closed', reason: value.reason }, value.at) : { bad: true };
+      return isNonEmptyString(value.reason, 64) ? withRunnerAt({ type: 'session_closed', reason: value.reason }, value.at) : { bad: true };
     case 'session_failed':
-      return isNonEmptyString(value.reason, 64) ? sessionLine({ type: 'session_failed', reason: value.reason }, value.at) : { bad: true };
+      return isNonEmptyString(value.reason, 64) ? withRunnerAt({ type: 'session_failed', reason: value.reason }, value.at) : { bad: true };
+    case 'write_doc':
+      return isNonEmptyString(value.path, PATH_MAX) && isIntegerAtLeastZero(value.bytes)
+        ? withRunnerAt({ type: 'write_doc', path: value.path, bytes: value.bytes }, value.at)
+        : { bad: true };
+    case 'published':
+      return isCommitSha(value.sha) && isPathList(value.paths) && isPathList(value.ignored) && typeof value.specPresent === 'boolean'
+        ? withRunnerAt({ type: 'published', sha: value.sha, paths: value.paths, ignored: value.ignored, specPresent: value.specPresent }, value.at)
+        : { bad: true };
+    case 'publish_failed':
+      return isNonEmptyString(value.reason, REASON_MAX) ? withRunnerAt({ type: 'publish_failed', reason: value.reason }, value.at) : { bad: true };
+    case 'discarded':
+      return isCommitSha(value.tipSha) ? withRunnerAt({ type: 'discarded', tipSha: value.tipSha }, value.at) : { bad: true };
+    case 'discard_failed':
+      return isNonEmptyString(value.reason, REASON_MAX) ? withRunnerAt({ type: 'discard_failed', reason: value.reason }, value.at) : { bad: true };
     default:
       return { bad: true };
   }

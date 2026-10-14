@@ -28,12 +28,16 @@ function matching(messages: Msg[], where: { threadId: string; turnId?: string; r
 }
 
 /** An in-memory stand-in for the Prisma calls the fold makes. Enough to pin the fold's row effects. */
-function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?: number; messages?: Msg[]; pendingQuestion?: unknown; session?: unknown; resume?: boolean } = {}) {
+function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?: number; messages?: Msg[]; pendingQuestion?: unknown; session?: unknown; resume?: boolean; writtenPaths?: string[] } = {}) {
   const messages: Msg[] = [...(opts.messages ?? [])];
   const thread = {
     id: 'T', nextSeq: opts.nextSeq ?? 2, lastActivityAt: new Date(0),
     pendingQuestion: (opts.pendingQuestion === undefined ? { requestId: 'q1' } : opts.pendingQuestion) as unknown,
     session: (opts.session ?? null) as unknown,
+    writtenPaths: [...(opts.writtenPaths ?? [])] as string[],
+    publishedSha: null as string | null,
+    specPublished: false,
+    lastWrite: null as unknown,
   };
   const turn = { resume: opts.resume ?? false };
   const job = { id: 'J', command: opts.command ?? 'THREAD', threadId: opts.threadId === undefined ? 'T' : opts.threadId };
@@ -79,7 +83,11 @@ function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?
     },
     chatThread: {
       findUnique: vi.fn(async () => thread),
-      update: vi.fn(async ({ data }: { data: Partial<typeof thread> }) => Object.assign(thread, data)),
+      update: vi.fn(async ({ data }: { data: Partial<typeof thread> }) => {
+        // Prisma rejects an update with no fields ("at least one field is required"), aborting the fold transaction.
+        if (Object.keys(data).length === 0) throw new Error('chatThread.update: empty data');
+        return Object.assign(thread, data);
+      }),
     },
     threadIngestCursor: { upsert: vi.fn(async () => cursor) },
     $executeRaw: vi.fn(async () => 0),
@@ -404,5 +412,118 @@ describe('PrismaThreadIngestRepository.fold tools and approvals (US-004)', () =>
     const { client, thread } = fakeClient({ nextSeq: 2 });
     await repoWith(client).fold(batch([{ type: 'session_closed', reason: 'idle' }]));
     expect(thread.session).toMatchObject({ state: 'closed', reason: 'idle', resumed: false, contextReset: false });
+  });
+});
+
+const writeDoc = (path: string, at?: string): ThreadLine => ({ type: 'write_doc', path, bytes: 1, ...(at ? { at } : {}) });
+const published = (over: Partial<Extract<ThreadLine, { type: 'published' }>> = {}): ThreadLine => ({
+  type: 'published', sha: 'a'.repeat(40), paths: ['docs/a.md'], ignored: [], specPresent: true, ...over,
+});
+
+describe('PrismaThreadIngestRepository.fold write-path lines (US-002)', () => {
+  it('US-002 AC-9: two write_doc lines for one path and one for another leave writtenPaths in first-seen order', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2 });
+    await repoWith(client).fold(batch([writeDoc('docs/a.md'), writeDoc('docs/a.md'), writeDoc('docs/b.md')]));
+    expect(thread.writtenPaths).toEqual(['docs/a.md', 'docs/b.md']);
+  });
+
+  it('US-002 AC-9: write_doc lines append to the paths already on the thread across folds', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, writtenPaths: ['docs/a.md'] });
+    const repo = repoWith(client);
+    await repo.fold(batch([writeDoc('docs/b.md')]));
+    await repo.fold(batch([writeDoc('docs/a.md')]));
+    expect(thread.writtenPaths).toEqual(['docs/a.md', 'docs/b.md']);
+  });
+
+  it('US-002 AC-9: a repeated write_doc for a path already held folds without an empty chatThread update', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, writtenPaths: ['docs/a.md'] });
+    await expect(repoWith(client).fold(batch([writeDoc('docs/a.md')]))).resolves.toBeDefined();
+    expect(client.chatThread.update).not.toHaveBeenCalled();
+    expect(thread.writtenPaths).toEqual(['docs/a.md']);
+  });
+
+  it('US-002 AC-9: a write_doc line that is a duplicate in one batch still emits the thread live event', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2 });
+    const result = await repoWith(client).fold(batch([writeDoc('docs/a.md'), writeDoc('docs/a.md')]));
+    expect(thread.writtenPaths).toEqual(['docs/a.md']);
+    expect(result.events.filter((event) => event.type === 'thread')).toHaveLength(1);
+  });
+
+  it('US-002 AC-10: a write_doc line beyond 200 distinct paths does not add its path', async () => {
+    const full = Array.from({ length: 200 }, (_, i) => `d${i}.md`);
+    const { client, thread } = fakeClient({ nextSeq: 2, writtenPaths: full });
+    await repoWith(client).fold(batch([writeDoc('overflow.md')]));
+    expect(thread.writtenPaths).toHaveLength(200);
+    expect(thread.writtenPaths).not.toContain('overflow.md');
+  });
+
+  it('US-002 AC-11: a published line sets publishedSha, specPublished, empties writtenPaths and records lastWrite', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, writtenPaths: ['docs/a.md'] });
+    await repoWith(client).fold(batch([published({ at: '2026-10-15T00:00:00.000Z' })]));
+    expect(thread).toMatchObject({
+      publishedSha: 'a'.repeat(40),
+      specPublished: true,
+      writtenPaths: [],
+      lastWrite: { kind: 'published', jobId: 'J', at: '2026-10-15T00:00:00.000Z', sha: 'a'.repeat(40), paths: ['docs/a.md'], ignored: [] },
+    });
+  });
+
+  it('US-002 AC-11: a published line without at stamps lastWrite.at with the fold clock', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2 });
+    await repoWith(client).fold(batch([published()]));
+    expect((thread.lastWrite as { at: string }).at).toEqual(expect.any(String));
+    expect(Number.isNaN(Date.parse((thread.lastWrite as { at: string }).at))).toBe(false);
+  });
+
+  it('US-002 AC-12: a publish_failed line sets lastWrite to publish_failed with the reason and the line at', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, writtenPaths: ['docs/a.md'] });
+    await repoWith(client).fold(batch([{ type: 'publish_failed', at: '2026-10-15T02:00:00.000Z', reason: 'branch_moved' }]));
+    expect(thread.lastWrite).toEqual({ kind: 'publish_failed', jobId: 'J', at: '2026-10-15T02:00:00.000Z', reason: 'branch_moved' });
+    expect(thread.writtenPaths).toEqual(['docs/a.md']);
+  });
+
+  it('US-002 AC-13: a discarded line empties writtenPaths, records the tip and drops stale from the stored session', async () => {
+    const tip = 'd'.repeat(40);
+    const { client, thread } = fakeClient({
+      nextSeq: 2,
+      writtenPaths: ['docs/a.md'],
+      session: { jobId: 'J', state: 'live', resumed: false, contextReset: false, reason: null, at: 'A', stale: true },
+    });
+    await repoWith(client).fold(batch([{ type: 'discarded', tipSha: tip }]));
+    expect(thread.writtenPaths).toEqual([]);
+    expect(thread.lastWrite).toMatchObject({ kind: 'discarded', sha: tip });
+    expect(thread.session).not.toHaveProperty('stale');
+    expect(thread.session).toMatchObject({ jobId: 'J', state: 'live' });
+  });
+
+  it('US-002 AC-13: discard_failed sets lastWrite to discard_failed and leaves writtenPaths', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, writtenPaths: ['docs/a.md'] });
+    await repoWith(client).fold(batch([{ type: 'discard_failed', reason: 'git_error' }]));
+    expect(thread.lastWrite).toMatchObject({ kind: 'discard_failed', reason: 'git_error', jobId: 'J' });
+    expect(thread.writtenPaths).toEqual(['docs/a.md']);
+  });
+
+  it('US-002 AC-14: a session_started line with stale true stores a live session with stale true', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2 });
+    await repoWith(client).fold(batch([sessionStarted({ stale: true })]));
+    expect(thread.session).toEqual({ jobId: 'J', state: 'live', resumed: false, contextReset: false, reason: null, at: '2026-10-14T00:00:00.000Z', stale: true });
+  });
+
+  it('US-002 AC-14: a session_started line without stale stores a session with no stale key', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2 });
+    await repoWith(client).fold(batch([sessionStarted()]));
+    expect(thread.session).not.toHaveProperty('stale');
+  });
+
+  it('US-002 AC-15: a batch holding only a published line emits exactly one thread live event', async () => {
+    const { client } = fakeClient({ nextSeq: 2 });
+    const result = await repoWith(client).fold(batch([published()]));
+    expect(result.events.filter((event) => event.type === 'thread')).toHaveLength(1);
+  });
+
+  it('US-002 AC-15: a batch holding two write-path lines still emits exactly one thread live event', async () => {
+    const { client } = fakeClient({ nextSeq: 2 });
+    const result = await repoWith(client).fold(batch([writeDoc('a.md'), writeDoc('b.md')]));
+    expect(result.events.filter((event) => event.type === 'thread')).toHaveLength(1);
   });
 });

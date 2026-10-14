@@ -81,3 +81,27 @@ describe('parseCapabilitiesCore threadBackends (US-001)', () => {
     expect(err).toMatchObject({ reason: 'threadBackends' });
   });
 });
+
+describe('parseCapabilitiesCore threadWrite (US-001 AC3-AC6)', () => {
+  it('US-001 AC3: keeps threadWrite: true', () => {
+    const parsed = parseCapabilitiesCore({ ...valid, threadWrite: true });
+    expect(parsed.threadWrite).toBe(true);
+  });
+
+  it('US-001 AC4: omits the threadWrite key when the report has none', () => {
+    const parsed = parseCapabilitiesCore(valid);
+    expect(parsed).not.toHaveProperty('threadWrite');
+  });
+
+  it('US-001 AC5: refuses threadWrite: false with reason threadWrite', () => {
+    const err = rejection({ ...valid, threadWrite: false });
+    expect(err).toBeInstanceOf(CapabilityValidationError);
+    expect(err).toMatchObject({ reason: 'threadWrite' });
+  });
+
+  it("US-001 AC6: refuses threadWrite: 'yes' with reason threadWrite", () => {
+    const err = rejection({ ...valid, threadWrite: 'yes' });
+    expect(err).toBeInstanceOf(CapabilityValidationError);
+    expect(err).toMatchObject({ reason: 'threadWrite' });
+  });
+});

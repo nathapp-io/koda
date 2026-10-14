@@ -2,8 +2,9 @@ import { ApiProperty } from '@nestjs/swagger';
 import { Allow } from 'class-validator';
 import type { ThreadSkillSource } from '../../../skills/skill-catalog.domain';
 import type { ThreadBackend } from '../../common/thread-jobs';
-import type { ThreadSession } from '../domain/chat-thread.domain';
+import type { ThreadSession, ThreadWriteResult } from '../domain/chat-thread.domain';
 import type { ThreadSendRefusal } from '../thread-send-rules';
+import type { ChatThreadHandoff } from '../domain/chat-thread.domain';
 
 export class ThreadDto {
   @ApiProperty() id: string;
@@ -22,14 +23,19 @@ export class ThreadDto {
   @ApiProperty({ nullable: true }) tokens: unknown;
   @ApiProperty() specPath: string;
   @ApiProperty({ nullable: true }) pendingQuestion: unknown;
-  @ApiProperty({ nullable: true, type: 'object', properties: { jobId: { type: 'string' }, state: { type: 'string', enum: ['live', 'closed', 'failed'] }, resumed: { type: 'boolean' }, contextReset: { type: 'boolean' }, reason: { type: 'string', nullable: true }, at: { type: 'string' } } }) session: ThreadSession | null;
+  @ApiProperty({ nullable: true, type: 'object', properties: { jobId: { type: 'string' }, state: { type: 'string', enum: ['live', 'closed', 'failed'] }, resumed: { type: 'boolean' }, contextReset: { type: 'boolean' }, reason: { type: 'string', nullable: true }, at: { type: 'string' }, stale: { type: 'boolean' } } }) session: ThreadSession | null;
   @ApiProperty() lastActivityAt: Date;
   @ApiProperty() createdAt: Date;
   @ApiProperty({ nullable: true, type: 'object', properties: { id: { type: 'string' }, state: { type: 'string' } } }) activeJob: { id: string; state: string } | null;
+  @ApiProperty({ type: [String] }) writtenPaths: string[];
+  @ApiProperty({ nullable: true, type: String }) publishedSha: string | null;
+  @ApiProperty() specPublished: boolean;
+  @ApiProperty({ nullable: true, type: 'object', additionalProperties: true }) lastWrite: ThreadWriteResult | null;
 }
 
 export class ThreadDetailDto extends ThreadDto {
   @ApiProperty({ enum: ['disabled', 'archived', 'costCap', 'budgetPaused', 'runnerOffline', 'runnerOutdated', 'closing', 'turnRunning'], nullable: true }) sendRefusal: ThreadSendRefusal | null;
+  @ApiProperty({ type: 'object', properties: { plan: { type: 'object', nullable: true, additionalProperties: true }, run: { type: 'object', nullable: true, additionalProperties: true } } }) handoff: ChatThreadHandoff;
 }
 
 export class ThreadListDto {

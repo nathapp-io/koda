@@ -197,6 +197,8 @@ export interface IFleetJobRepository {
   /** @throws DuplicateActiveJobError */
   createJob(data: NewFleetJob): Promise<FleetJobRecord>;
   findActiveJobId(repoId: string, feature: string): Promise<string | null>;
+  /** Lock a thread row and return whether it has no active jobs; call inside the dispatch transaction. */
+  lockIdleThread(threadId: string): Promise<boolean>;
   findById(id: string): Promise<FleetJobRecord | null>;
   /** SELECT … FOR UPDATE (inside txManager.run). With skipLocked, null when another transaction holds the row. */
   lockById(id: string, opts?: { skipLocked?: boolean }): Promise<FleetJobRecord | null>;

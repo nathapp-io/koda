@@ -60,6 +60,13 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     }
   }
 
+  async lockIdleThread(threadId: string): Promise<boolean> {
+    const rows = await this.db.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "ChatThread" WHERE "id" = ${threadId} FOR UPDATE`;
+    if (rows.length === 0) return false;
+    const active = await this.db.fleetJob.count({ where: { threadId, state: { in: [...ACTIVE_STATES] } } });
+    return active === 0;
+  }
+
   async findActiveJobId(repoId: string, feature: string): Promise<string | null> {
     const row = await this.db.fleetJob.findFirst({
       where: { repoId, feature, state: { in: [...ACTIVE_STATES] } },
@@ -192,7 +199,7 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
   async findThreadAssign(jobId: string): Promise<ThreadAssign | null> {
     const turn = await this.db.fleetThreadTurn.findUnique({ where: { jobId } });
     if (!turn) return null;
-    const thread = await this.db.chatThread.findUnique({ where: { id: turn.threadId }, select: { feature: true } });
+    const thread = await this.db.chatThread.findUnique({ where: { id: turn.threadId }, select: { feature: true, title: true } });
     if (!thread) return null;
     const message = turn.initialMessageId ? await this.db.chatMessage.findUnique({ where: { id: turn.initialMessageId }, select: { id: true, content: true } }) : null;
     return {
@@ -200,6 +207,7 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
       instructions: turn.instructions, backend: turn.backend as unknown as ThreadAssign['backend'],
       skills: turn.skills as unknown as ThreadAssign['skills'],
       initialMessage: message ? { messageId: message.id, text: message.content } : null,
+      title: thread.title,
     };
   }
 
