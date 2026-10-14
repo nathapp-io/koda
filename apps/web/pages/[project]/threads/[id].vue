@@ -52,6 +52,10 @@ const onEndSession = (): Promise<void> => runAction(() => controller.endSession(
 const onAnswer = (requestId: string, text: string): Promise<void> => runAction(() => controller.answer(requestId, text))
 const onRaiseCap = (value: number): Promise<void> => runAction(() => controller.raiseCap(value))
 const onArchive = (): Promise<void> => runAction(() => controller.archive())
+const onPublish = (): Promise<void> => runAction(() => controller.publish())
+const onPlan = (body: import('~/lib/thread-handoff-form').ThreadHandoffBody): Promise<void> => runAction(() => controller.plan(body))
+const onRun = (body: import('~/lib/thread-handoff-form').ThreadHandoffBody): Promise<void> => runAction(() => controller.run(body))
+const onDiscard = (): Promise<void> => runAction(() => controller.discard())
 </script>
 
 <template>
@@ -66,6 +70,20 @@ const onArchive = (): Promise<void> => runAction(() => controller.archive())
         @end-session="onEndSession"
         @raise-cap="onRaiseCap"
         @archive="onArchive"
+      />
+      <FleetThreadsThreadStaleBanner
+        :thread="controller.thread.value"
+        :messages="controller.messages.value"
+        :is-creator="isCreator"
+        @discard="onDiscard"
+      />
+      <FleetThreadsThreadActionBar
+        :thread="controller.thread.value"
+        :messages="controller.messages.value"
+        :is-creator="isCreator"
+        @publish="onPublish"
+        @plan="onPlan"
+        @run="onRun"
       />
       <FleetThreadsThreadTimeline
         :thread="controller.thread.value"

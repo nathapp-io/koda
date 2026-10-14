@@ -844,6 +844,15 @@
         "runnerOutdated": "执行机版本过旧。",
         "closing": "正在关闭会话，正在重试。",
         "turnRunning": "对话正在进行，请先停止再发送新消息。"
+      },
+      "handoff": {
+        "actions": { "publish": "发布", "plan": "规划", "run": "运行", "discard": "丢弃", "submit": "提交" },
+        "blocked": { "nothingToPublish": "没有可发布的内容", "turnRunning": "有一轮正在运行", "handoffBusy": "交接任务正在运行", "notPublished": "请先发布规格", "sessionActive": "线程任务正在运行", "notPlanned": "请先规划规格", "planNotCompleted": "规划尚未完成" },
+        "publishDialog": { "title": "发布线程更改", "confirm": "发布" },
+        "planDialog": { "title": "规划此线程" },
+        "runDialog": { "title": "运行此线程" },
+        "discardDialog": { "title": "丢弃未发布的更改？", "body": "丢弃此过期会话中的未发布更改？", "confirm": "丢弃" },
+        "stale": { "title": "此会话已过期", "body": "此会话启动后仓库已发生变化。" }
       }
     },
     "common": {

@@ -24,6 +24,14 @@ export interface HandoffActionState {
   reason: HandoffBlock | null
 }
 
+export function showActionBar(thread: ThreadDetailDto, isCreator: boolean): boolean {
+  return isCreator && thread.archivedAt === null && thread.sendRefusal !== 'disabled'
+}
+
+export function showStaleBanner(thread: ThreadDetailDto): boolean {
+  return thread.session?.stale === true
+}
+
 const COMPLETED = 'COMPLETED'
 
 const blocked = (reason: HandoffBlock): HandoffActionState => ({ enabled: false, reason })
