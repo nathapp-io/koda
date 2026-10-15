@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-koda-read-core",
   "branchName": "feat/fleet-s5b-koda-read-core",
   "createdAt": "2026-10-15T00:00:00.000Z",
-  "updatedAt": "2026-10-15T09:47:46.982Z",
+  "updatedAt": "2026-10-15T09:59:33.028Z",
   "userStories": [
     {
       "id": "US-001",
@@ -565,8 +565,8 @@
       "dependencies": [
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
