@@ -1,4 +1,4 @@
-import { IsString, MinLength, Matches, IsOptional, IsUrl, IsBoolean, IsIn } from 'class-validator';
+import { IsString, MinLength, Matches, IsOptional, IsUrl, IsBoolean, IsIn, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateProjectDto {
@@ -46,6 +46,17 @@ export class UpdateProjectDto {
   @IsOptional()
   @IsString({ message: '$t(common.validation.isString)' })
   description?: string;
+
+  @ApiPropertyOptional({
+    description: 'Curated short project brief rendered into thread instructions (at most 3000 characters)',
+    example: 'Koda is a fleet platform that tracks tickets for humans and agents.',
+    nullable: true,
+    required: false,
+  })
+  @IsOptional()
+  @IsString({ message: '$t(common.validation.isString)' })
+  @MaxLength(3000, { message: '$t(common.validation.maxLength)' })
+  brief?: string | null;
 
   @ApiProperty({
     description: 'Git remote repository URL',

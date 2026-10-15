@@ -60,6 +60,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
     name: 'Test Project',
     key: 'TEST',
     description: null,
+    brief: null,
     gitRemoteUrl: null,
     autoIndexOnClose: true,
     autoAssign: 'OFF',

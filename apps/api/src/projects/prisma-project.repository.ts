@@ -14,6 +14,7 @@ export class PrismaProjectRepository {
       slug: m.slug,
       key: m.key,
       description: m.description,
+      brief: m.brief,
       gitRemoteUrl: m.gitRemoteUrl,
       autoIndexOnClose: m.autoIndexOnClose,
       autoAssign: m.autoAssign,

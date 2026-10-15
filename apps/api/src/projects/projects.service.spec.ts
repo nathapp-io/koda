@@ -153,6 +153,46 @@ describe('ProjectsService', () => {
         service.update('non-existent', { name: 'Updated' })
       ).rejects.toThrow(NotFoundAppException);
     });
+
+    // US-001 (fleet S5b): `brief` rides the existing PATCH. An empty string is
+    // stored as given, and `null` clears the column; a request that omits the
+    // field must leave it untouched (undefined, so Prisma skips the column).
+    it('forwards a brief — including the empty string — to updateBySlug and returns it', async () => {
+      mockProjectRepo.findBySlug.mockResolvedValueOnce({ ...mockProject, brief: 'old' });
+      mockProjectRepo.updateBySlug.mockResolvedValueOnce({ ...mockProject, brief: '' });
+
+      const result = await service.update('test-project', { brief: '' });
+
+      expect(mockProjectRepo.updateBySlug).toHaveBeenCalledWith(
+        'test-project',
+        expect.objectContaining({ brief: '' })
+      );
+      expect(result.brief).toBe('');
+    });
+
+    it('forwards a null brief and returns null, clearing the column', async () => {
+      mockProjectRepo.findBySlug.mockResolvedValueOnce({ ...mockProject, brief: 'old' });
+      mockProjectRepo.updateBySlug.mockResolvedValueOnce({ ...mockProject, brief: null });
+
+      const result = await service.update('test-project', { brief: null });
+
+      expect(mockProjectRepo.updateBySlug).toHaveBeenCalledWith(
+        'test-project',
+        expect.objectContaining({ brief: null })
+      );
+      expect(result.brief).toBeNull();
+    });
+
+    it('leaves the brief undefined when the request omits it', async () => {
+      mockProjectRepo.findBySlug.mockResolvedValueOnce({ ...mockProject, brief: 'kept' });
+      mockProjectRepo.updateBySlug.mockResolvedValueOnce({ ...mockProject, brief: 'kept' });
+
+      const result = await service.update('test-project', { name: 'Renamed' });
+
+      const [, data] = mockProjectRepo.updateBySlug.mock.calls[0];
+      expect(data.brief).toBeUndefined();
+      expect(result.brief).toBe('kept');
+    });
   });
 
   describe('findProjectIdBySlug', () => {

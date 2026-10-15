@@ -159,6 +159,7 @@ model Project {
   slug                   String    @unique
   key                    String    @unique // e.g. KODA — used in ticket refs
   description            String?
+  brief                  String?   @db.Text // S5b US-001: curated grounding for threads
   gitRemoteUrl           String?
   autoIndexOnClose       Boolean   @default(true)
   autoAssign             String    @default("OFF")

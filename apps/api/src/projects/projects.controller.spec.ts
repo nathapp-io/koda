@@ -17,6 +17,9 @@ const mockProject = {
   name: 'Alpha',
   key: 'ALP',
   description: 'Alpha project',
+  // US-001: the response DTO carries the brief; the literal lists every field
+  // the controller returns so an added field cannot go unnoticed here.
+  brief: null,
   gitRemoteUrl: null,
   autoIndexOnClose: true,
   autoAssign: 'OFF',

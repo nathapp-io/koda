@@ -452,6 +452,118 @@ describeIntegration('API Integration Tests', () => {
       expect(data.description).toBe('Updated description');
     });
 
+    // ── US-001: the project brief ──────────────────────────────────────
+    it('US-001 AC-1: PATCH /api/projects/:slug — sets the brief and echoes it', async () => {
+      const res = await request(httpServer)
+        .patch(`/api/projects/${projectSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ brief: 'Koda is a fleet platform.' })
+        .expect(200);
+
+      expect(body<{ brief: string | null }>(res).brief).toBe('Koda is a fleet platform.');
+    });
+
+    it('US-001 AC-2: GET /api/projects/:slug — returns the brief stored by the PATCH', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      expect(body<{ brief: string | null }>(res).brief).toBe('Koda is a fleet platform.');
+    });
+
+    it('US-001 AC-4: PATCH /api/projects/:slug — a 3001-character brief is refused and the stored one is kept', async () => {
+      await request(httpServer)
+        .patch(`/api/projects/${projectSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ brief: 'k'.repeat(3001) })
+        .expect(400);
+
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      expect(body<{ brief: string | null }>(res).brief).toBe('Koda is a fleet platform.');
+    });
+
+    it('US-001 AC-5: PATCH /api/projects/:slug — a brief of exactly 3000 characters is accepted', async () => {
+      const brief = 'x'.repeat(3000);
+
+      const res = await request(httpServer)
+        .patch(`/api/projects/${projectSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ brief })
+        .expect(200);
+
+      const data = body<{ brief: string | null }>(res);
+      expect(data.brief).toHaveLength(3000);
+      expect(data.brief).toBe(brief);
+    });
+
+    it('US-001 AC-6: PATCH /api/projects/:slug — a non-string brief is refused', async () => {
+      await request(httpServer)
+        .patch(`/api/projects/${projectSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ brief: 42 })
+        .expect(400);
+    });
+
+    it('US-001 AC-7: PATCH /api/projects/:slug — 403 for a project member who is not a global ADMIN', async () => {
+      // A dedicated project: adding `member@koda.test` to `projectSlug` here
+      // would break the non-member 403 assertions later in this suite.
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      const created = await request(httpServer)
+        .post('/api/projects')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'Brief Guard Project', slug: 'brief-guard-project', key: 'BGP' })
+        .expect(201);
+      const guardSlug = body<{ slug: string }>(created).slug;
+      const member = await prisma.client.user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
+      const guardProject = await prisma.client.project.findUniqueOrThrow({ where: { slug: guardSlug } });
+      await prisma.client.projectMember.create({
+        data: { projectId: guardProject.id, userId: member.id, role: 'DEVELOPER' },
+      });
+
+      const previous = 'Koda is a fleet platform.';
+      await request(httpServer)
+        .patch(`/api/projects/${guardSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ brief: previous })
+        .expect(200);
+
+      await request(httpServer)
+        .patch(`/api/projects/${guardSlug}`)
+        .set('Authorization', `Bearer ${nonAdminUserAccessToken}`)
+        .send({ brief: 'x' })
+        .expect(403);
+
+      // The member can read the project, and the refused update changed nothing.
+      const res = await request(httpServer)
+        .get(`/api/projects/${guardSlug}`)
+        .set('Authorization', `Bearer ${nonAdminUserAccessToken}`)
+        .expect(200);
+
+      expect(body<{ brief: string | null }>(res).brief).toBe(previous);
+    });
+
+    it('US-001 AC-3: PATCH /api/projects/:slug — a null brief clears the column', async () => {
+      const res = await request(httpServer)
+        .patch(`/api/projects/${projectSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ brief: null })
+        .expect(200);
+
+      expect(body<{ brief: string | null }>(res).brief).toBeNull();
+
+      const get = await request(httpServer)
+        .get(`/api/projects/${projectSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      expect(body<{ brief: string | null }>(get).brief).toBeNull();
+    });
+
     it('PATCH /api/projects/:slug — 400 for ciWebhookToken shorter than 32 chars', async () => {
       await request(httpServer)
         .patch(`/api/projects/${projectSlug}`)
