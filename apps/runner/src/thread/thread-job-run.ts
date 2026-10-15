@@ -97,7 +97,8 @@ export interface ThreadRunTuning {
   readonly threadCloseTimeoutMs: number;
   /**
    * Fleet S5b US-006 (review B3): how often, and for how long, a proxied koda tool call waits for the server to
-   * ack the job's RUNNING event before it calls the API. 0 waits for nothing. `src/daemon/tuning.ts` carries the
+   * ack the job's RUNNING event before it calls the API; a call still unacked when the wait ends is not sent (review
+   * B3, D-6). 0 waits for nothing and forwards every call. `src/daemon/tuning.ts` carries the
    * daemon's values; only tests override them.
    */
   readonly threadRunningAckPollMs: number;
@@ -133,6 +134,9 @@ const REQUEST_ID_RE = /^[\x20-\x7e]{1,200}$/;
 
 /** Review B3: the same generous scan bound `JobRun` uses for its ack waits — the RUNNING event is never far from the tail. */
 const PENDING_SCAN_LIMIT = 100_000;
+
+/** Review B3 (D-6): the unavailable answer for a proxied call that was not sent because RUNNING was never acked. Same shape as the proxy layer's own unavailable answers. */
+const UNAVAILABLE_NOT_RUNNING = 'koda tool unavailable: job is not running yet';
 
 /** A string of at most `messageMaxBytes` UTF-8 bytes — the bound the API applies to a message and an answer. */
 function isMessageText(value: unknown): value is string {
@@ -464,12 +468,17 @@ export class ThreadJobRun {
     const descriptors = thread.kodaTools;
     const caller = this.deps.host.kodaTools;
     if (descriptors === undefined || caller === undefined) return [];
-    // Review B3: the proxies are attached while the row is still ASSIGNED — only this journal knows RUNNING yet.
-    // Every proxied call therefore waits for the server's ack of the RUNNING event first; a call that reaches the
-    // API too early is refused `fleet.jobState` and is never retried, so the first tool call of a session would
-    // fail whenever the sync that reports the transition is slow.
+    // Review B3 (D-6): the proxies are attached while the row is still ASSIGNED — only this journal knows RUNNING
+    // yet. Every proxied call therefore waits for the server's ack of the RUNNING event first, and is forwarded only
+    // once that ack is confirmed. A call that reaches the API too early is refused `fleet.jobState` and is never
+    // retried, so it is never sent at all when the ack does not arrive: a timed-out wait, a halt or an aborted turn
+    // answers the unavailable result the proxy layer uses for a failed call, and the model sees the job is not
+    // running yet.
     const gated: KodaToolCaller = {
-      call: async (args) => { await this.awaitRunningAck(args.signal); return caller.call(args); },
+      call: async (args) => {
+        if (!(await this.awaitRunningAck(args.signal))) return { content: UNAVAILABLE_NOT_RUNNING, isError: true };
+        return caller.call(args);
+      },
     };
     return buildKodaToolProxies(descriptors, { jobId: this.jobId, leaseEpoch: this.leaseEpoch, caller: gated });
   }
@@ -481,22 +490,24 @@ export class ThreadJobRun {
   }
 
   /**
-   * Review B3: waits until the server has acked the RUNNING transition, so a session's first tool call does not
-   * race the sync that reports it. The wait is bounded twice over — by the injected clock and by the number of
-   * polls that bound can hold, so neither a standing clock nor a sleeper that returns early can spin it — and it
-   * ends early on a halt or the turn's own abort signal. A wait that runs out (an unreachable server, a hung sync)
-   * lets the one call through anyway instead of hanging the turn: that call fails like any other unreachable-server
-   * call, and it is never retried.
+   * Review B3 (D-6): waits until the server has acked the RUNNING transition, so a session's first tool call does not
+   * race the sync that reports it. Resolves `true` when the call may go out: no RUNNING event is pending, the wait is
+   * disabled (`threadRunningAckWaitMs <= 0`), or the ack arrived in time. The wait is bounded twice over — by the
+   * injected clock and by the number of polls that bound can hold, so neither a standing clock nor a sleeper that
+   * returns early can spin it — and it ends early on a halt or the turn's own abort signal. Resolves `false` when the
+   * wait ends without the ack (it ran out, the run halted or the turn aborted); the caller then sends nothing, since
+   * a call that reaches the API before RUNNING is applied is refused and never retried.
    */
-  private async awaitRunningAck(signal: AbortSignal | undefined): Promise<void> {
+  private async awaitRunningAck(signal: AbortSignal | undefined): Promise<boolean> {
     const { threadRunningAckPollMs: pollMs, threadRunningAckWaitMs: waitMs } = this.deps.tuning;
-    if (waitMs <= 0 || !this.runningAckPending()) return;
+    if (waitMs <= 0 || !this.runningAckPending()) return true;
     const interval = Math.max(1, pollMs);
     const deadline = this.deps.now().getTime() + waitMs;
     for (let polls = 0; polls < Math.ceil(waitMs / interval) && this.runningAckPending(); polls += 1) {
-      if (this.halted || signal?.aborted || this.deps.now().getTime() >= deadline) return;
+      if (this.halted || signal?.aborted || this.deps.now().getTime() >= deadline) return false;
       await this.deps.sleep(interval, signal);
     }
+    return !this.runningAckPending();
   }
 
   /** Step 5: the assigned skill sources, fetched into the runner's own skill cache. */

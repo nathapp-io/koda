@@ -27,6 +27,9 @@ const DESCRIPTORS: KodaToolDescriptor[] = [
   { name: 'koda_search_tickets', description: 'searches the project tickets', inputSchema: { type: 'object', properties: { query: { type: 'string' } } } },
 ];
 
+/** Review B3 (D-6): the answer a proxied call gets when the RUNNING ack did not arrive in time, or the run halted or aborted first. */
+const UNAVAILABLE_NOT_RUNNING = 'koda tool unavailable: job is not running yet';
+
 const context = (toolCallId: string, signal: AbortSignal = new AbortController().signal): EmbedderToolContext => ({ sessionId: 'session-1', toolCallId, signal });
 
 /** A caller that records every call and answers (or rejects) as scripted. */
@@ -376,9 +379,9 @@ describe('ThreadJobRun gates proxied koda calls on the RUNNING ack (review B3)',
     await stop();
   });
 
-  test('B3: a wait that runs out still lets its single call through, so a broken sync cannot hang a turn', async () => {
+  test('B3: a wait that runs out never sends the call; the model gets the unavailable answer, and it is not retried', async () => {
     const seen = { polls: 0, elapsedMs: 0 };
-    const { calls, caller } = recordingCaller(async () => ({ content: 'answered once', isError: false }));
+    const { calls, caller } = recordingCaller(async () => ({ content: 'must not be reached', isError: false }));
     const sleep = async (ms: number): Promise<void> => {
       if (ms !== tuning.threadRunningAckPollMs) return;
       seen.polls += 1;
@@ -392,15 +395,35 @@ describe('ThreadJobRun gates proxied koda calls on the RUNNING ack (review B3)',
 
     const answer = await tools[2]?.run({ ref: 'WEB-1' }, context('c9'));
 
-    expect(seen.polls).toBe(4);                            // 250 ms x 4 = the 1 s bound, then the one call goes out
-    expect(calls).toHaveLength(1);
-    expect(answer).toEqual({ content: 'answered once', isError: false });
+    expect(seen.polls).toBe(4);                            // 250 ms x 4 = the 1 s bound
+    expect(calls).toHaveLength(0);                         // the call never reaches the API before RUNNING is acked
+    expect(answer).toEqual({ content: UNAVAILABLE_NOT_RUNNING, isError: true });
     await stop();
   });
 
-  test('B3: a turn that is already aborted does not sit in the wait', async () => {
+  test('B3: a halt during the wait never sends the call', async () => {
     const seen = { polls: 0 };
-    const { calls, caller } = recordingCaller(async () => ({ content: 'answered', isError: false }));
+    const { calls, caller } = recordingCaller(async () => ({ content: 'must not be reached', isError: false }));
+    const holder: { run?: { halt(): void } } = {};
+    const sleep = async (ms: number): Promise<void> => {
+      if (ms !== tuning.threadRunningAckPollMs) return;
+      seen.polls += 1;
+      holder.run?.halt();                                  // the run is halted while the call waits for the ack
+    };
+    const { run, tools, stop } = await startRun(caller, { tuning: { threadRunningAckWaitMs: 60_000 }, sleep });
+    holder.run = run;
+
+    const answer = await tools[2]?.run({ ref: 'WEB-1' }, context('c9'));
+
+    expect(seen.polls).toBe(1);                            // the halt ends the wait on its next check
+    expect(calls).toHaveLength(0);
+    expect(answer).toEqual({ content: UNAVAILABLE_NOT_RUNNING, isError: true });
+    await stop();
+  });
+
+  test('B3: a turn that is already aborted does not sit in the wait and never sends the call', async () => {
+    const seen = { polls: 0 };
+    const { calls, caller } = recordingCaller(async () => ({ content: 'must not be reached', isError: false }));
     const sleep = async (ms: number): Promise<void> => { if (ms === tuning.threadRunningAckPollMs) seen.polls += 1; };
     const { journal, tools, stop } = await startRun(caller, { tuning: { threadRunningAckWaitMs: 60_000 }, sleep });
     const controller = new AbortController();
@@ -409,12 +432,10 @@ describe('ThreadJobRun gates proxied koda calls on the RUNNING ack (review B3)',
     const answer = await tools[2]?.run({ ref: 'WEB-1' }, context('c9', controller.signal));
 
     expect(seen.polls).toBe(0);                            // the wait ends on the turn's own signal, not on the clock
-    expect(calls).toHaveLength(1);
-    // The call carries the aborted signal: the transport refuses it and the proxy answers the network result.
-    expect(calls[0]?.signal?.aborted).toBe(true);
-    // And it went out without the ack — the signal, not a sync, ended the wait.
+    expect(calls).toHaveLength(0);                         // and the aborted turn sends nothing to the API
+    // The ack was never seen: RUNNING is still pending in the journal.
     expect(pendingStateNames(journal)).toContain('RUNNING');
-    expect(answer).toEqual({ content: 'answered', isError: false });
+    expect(answer).toEqual({ content: UNAVAILABLE_NOT_RUNNING, isError: true });
     await stop();
   });
 });
