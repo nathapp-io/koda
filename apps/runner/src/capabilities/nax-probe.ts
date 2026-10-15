@@ -167,6 +167,7 @@ export class NaxCapabilityProbe implements CapabilityProbe {
         executors: ['host'],
         configJobs: true,
         threadWrite: true,
+        projectThreads: true,
         ...(relaySupported(version) ? { approvals: { relay: true as const } } : {}),
         ...(base.check ? { interaction: base.check } : {}),
       });

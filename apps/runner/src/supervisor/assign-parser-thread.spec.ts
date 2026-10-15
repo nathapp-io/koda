@@ -175,4 +175,27 @@ describe('parseAssign THREAD (US-001)', () => {
     const { assign } = threadFixture({ initialMessage: { messageId: 'm1', text: '中'.repeat(11000) } });
     expect(parseAssign(cmd(assign))).toEqual({ ok: false, detail: 'invalid initialMessage' });
   });
+  test('US-006 AC-1: PROJECT SESSION thread parses with kind PROJECT', () => {
+    const { assign } = threadFixture({ kind: 'PROJECT' });
+    const parsed = parseAssign(cmd(assign));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.assign.thread?.kind).toBe('PROJECT');
+  });
+
+  test('US-006 AC-2: PROJECT PUBLISH thread returns invalid thread action', () => {
+    const { assign } = threadFixture({ kind: 'PROJECT', action: 'PUBLISH', initialMessage: null as never });
+    expect(parseAssign(cmd(assign))).toEqual({ ok: false, detail: 'invalid thread action' });
+  });
+
+  test('US-006 AC-3: unknown kind returns invalid thread kind', () => {
+    const { assign } = threadFixture({ kind: 'OTHER' as never });
+    expect(parseAssign(cmd(assign))).toEqual({ ok: false, detail: 'invalid thread kind' });
+  });
+
+  test('US-006 AC-4: absent kind stays absent on assign.thread', () => {
+    const { assign } = threadFixture();
+    const parsed = parseAssign(cmd(assign));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.assign.thread).not.toHaveProperty('kind');
+  });
 });

@@ -150,6 +150,10 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   if (!checked(() => assertSegment('threadId', t['threadId']))) return bad('threadId');
   const action = t['action'];
   if (action !== 'SESSION' && action !== 'PUBLISH' && action !== 'DISCARD') return bad('thread action');
+  // Fleet S5b: `kind` is optional (absent means REPO); a PROJECT thread only ever runs a SESSION.
+  const rawKind = t['kind'];
+  if (rawKind !== undefined && rawKind !== 'REPO' && rawKind !== 'PROJECT') return bad('thread kind');
+  if (rawKind === 'PROJECT' && action !== 'SESSION') return bad('thread action');
   if (!checked(() => assertFeature(t['feature']))) return bad('thread feature');
   if (typeof t['resume'] !== 'boolean') return bad('thread resume');
   const instructions = t['instructions'];
@@ -177,6 +181,7 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   const thread: ThreadAssign = {
     threadId: t['threadId'] as string,
     action,
+    ...(rawKind !== undefined ? { kind: rawKind } : {}),
     feature: t['feature'] as string,
     resume: t['resume'] as boolean,
     instructions: instructions as string,
