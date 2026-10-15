@@ -260,9 +260,11 @@ describeIntegration('fleet assistant timeline tool (PG, US-005)', () => {
     const cursor = first.content.split('\n').at(-1) ?? '';
     expect(cursor).toMatch(/^more: call koda_timeline with cursor \S+$/);
 
-    const second = await call('ac8b', { cursor: cursor.replace('more: call koda_timeline with cursor ', '') });
+    // The same scope, the cursor it just handed back: a cursor of another project's page would answer `no events`.
+    const second = await call('ac8b', { cursor: cursor.replace('more: call koda_timeline with cursor ', '') }, pagJobId);
 
     expect(second.isError).toBe(false);
+    expect(second.content).not.toBe('no events');
     expect(headers(second.content)).toEqual([`${bulk[0]?.createdAt.toISOString()} ticket_event PAG-1 /pag/tickets/PAG-1`]);
     expect(second.content).not.toContain('more:');
   });
@@ -284,6 +286,10 @@ describeIntegration('fleet assistant timeline tool (PG, US-005)', () => {
   it('AC-11: a project with no event in the window answers the single line no events', async () => {
     // Every `pag` event is roughly six days old, so a one-day window is empty.
     expect(await prisma.ticketEvent.count({ where: { action: { startsWith: 'PAG_EVENT_' } } })).toBe(21);
+    // The scope is not empty — it is the window: the same scope over the default week answers a full page.
+    const wide = await call('ac11-wide', {}, pagJobId);
+    expect(wide.isError).toBe(false);
+    expect(headers(wide.content)).toHaveLength(20);
 
     const result = await call('ac11', { days: 1 }, pagJobId);
 
