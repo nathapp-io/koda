@@ -134,9 +134,9 @@ Units and their single purpose:
 ## 5. Thread kinds and job shape
 
 `ChatThread` gains `kind` (`REPO` | `PROJECT` | `WORKSPACE`, default `REPO`; existing rows backfill to `REPO`).
-`repoId`, `baseRef`, `feature` and `specPath` become nullable (`schema.prisma:1058-1095`). A check constraint, added in
-raw SQL in the migration as the existing partial indexes are, enforces: `REPO` has all four set; `PROJECT` and
-`WORKSPACE` have none set. `projectId` stays required: the thread's project for REPO / PROJECT, the home project for
+`repoId`, `baseRef`, `feature` and `specPath` become nullable (`schema.prisma:1058-1095`). The create path, the only
+writer of these columns, enforces: `REPO` has all four set; `PROJECT` and `WORKSPACE` have none set. No database check
+constraint (integration schemas come from `prisma db push`, which cannot create one; S5b-1a ruling 1a-R4). `projectId` stays required: the thread's project for REPO / PROJECT, the home project for
 WORKSPACE (S5b-R13). The existing partial unique index on active `(repoId, feature)` admits many rows with a null
 `repoId`, so it needs no change.
 
