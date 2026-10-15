@@ -1,7 +1,8 @@
 # Fleet S5b: koda assistant in threads (design)
 
-Status: design approved in brainstorming 2026-10-15; awaiting written-spec review.
-Umbrella design. Delivery is three nax features, each with its own spec, PRD and run (section 9).
+Status: design approved in brainstorming 2026-10-15; revised after one read-only codebase review (2 BLOCKER, 9 MAJOR,
+6 MINOR, all addressed below; revision 1). Umbrella design: delivery is six nax features, each with its own spec, PRD
+and run (section 10). File:line references are against koda main `22c825c5`.
 
 ## 1. Goal
 
@@ -17,7 +18,9 @@ Example asks:
 - "Re-run the lc198 feature with native-ds, cap $1." (proposes a dispatch, the user confirms)
 - "Record this decision as an ADR."
 
-## 2. Rulings (user, 2026-10-15)
+## 2. Rulings
+
+User, 2026-10-15:
 
 - **S5b-R1 Threads are the surface.** The assistant is a thread capability; no separate assistant page.
 - **S5b-R2 Scope = all of:** read Q&A over koda data, confirmed write actions, fleet-ops help, brainstorming, and an
@@ -28,6 +31,27 @@ Example asks:
 - **S5b-R5 Approach B.** Tools are defined and executed on the koda API; the runner session only proxies tool calls;
   confirmed writes are executed by the server. No user token and no write capability leave the server. LLM
   credentials stay on runners (fleet design §3 (e), unchanged).
+
+Design decisions taken in the review revision (revision 1):
+
+- **S5b-R6 Permissions are CASL, per tool.** Each tool names the exact CASL tuple or `@ProjectRoles` its REST route
+  enforces (section 7 table); the executor evaluates it with `KodaCaslAbilityFactory` for the acting user's principal.
+  No role-string comparison.
+- **S5b-R7 Project id is never taken from tool input.** The executor sets `projectId` from the thread (or the MCP
+  key's project) and checks that every referenced id (repo, job, ticket, approval, KB doc, memory item) belongs to that
+  project before the permission check.
+- **S5b-R8 Approvals get an `assistant_action` branch, not the budget branch.** Own decisions (`approve` | `reject`),
+  own permission function, own expiry sweep, notification to the thread creator only (section 8).
+- **S5b-R9 Placement capability `threadKoda`.** A protocol-v5 runner advertises `threadKoda: true`. PROJECT threads are
+  placed only on such runners; REPO threads may run on a runner without it and then show a thread notice
+  "koda tools unavailable on runner <name>". PROJECT threads with an ACP backend are refused at creation (ACP sessions
+  get no tools, nax#2444).
+- **S5b-R10 Action outcomes reach the agent through the next user message.** No new server-to-session command.
+  Undelivered outcome notes are attached to the next THREAD_INPUT the user sends (rendered before the user's text),
+  and `koda_get_action` lets the agent check an action on demand. Notes are stored as thread messages of a new
+  `system` role so the transcript and resume carry them.
+- **S5b-R11 Split into six nax features** (section 10), because the story-size gate is 15 ACs per story
+  (`.nax/config.json:63-67`) and S5b-1 as first drafted could not fit one feature.
 
 ## 3. Research summary (2026-10-15)
 
@@ -59,14 +83,14 @@ makes (C) a later swap of the transport, not a rewrite.
                  |  AssistantToolRegistry              |
                  |   tool = {name, description, schema,|
                  |           kind: read|write,         |
-                 |           permission, execute}      |
+                 |           ability, execute}         |
                  |  AssistantToolExecutor (as creator) |
-                 |  PendingAction -> confirmation      |
+                 |  PendingAction -> assistant_action  |
                  +------^------------------------------+
-   POST /fleet/runner/threads/:threadId/tools/:name  (runner key + active THREAD job lease)
+   POST /fleet/runner/threads/:threadId/tools/:name  (@RunnerRoute + RUNNING THREAD job lease)
                  +------+-----------+
                  | runner            | nax-agent session, profile `read`
-                 |  koda tool proxies (from the job's tool descriptors)
+                 |  koda tool proxies (from the ASSIGN's tool descriptors)
                  |  + repo tools only for REPO threads
                  +-------------------+
 ```
@@ -74,151 +98,201 @@ makes (C) a later swap of the transport, not a rewrite.
 Units and their single purpose:
 
 - **AssistantToolRegistry** (api): the list of koda tools. Each tool declares its name (`koda_*`), description, JSON
-  input schema, kind (`read` | `write`), required project permission, and an `execute(ctx, input)` that calls existing
-  domain services. Pure data plus functions; no transport.
-- **AssistantToolExecutor** (api): resolves the caller (thread creator for runner calls; key owner for MCP), re-checks
-  project membership and the tool's permission on every call, validates input against the schema, applies output caps
-  and masking, writes the audit row, and for `write` tools creates a PendingAction instead of executing.
-- **Runner tool route** (api): `POST /fleet/runner/threads/:threadId/tools/:name`. Authenticated by the runner API key;
-  authorised only when the runner holds the thread's active THREAD job lease. Thin: delegates to the executor.
-- **PendingAction service** (api): state machine for proposed writes; integrates with the approvals inbox as approval
-  type `assistant_action`; on approval re-checks the approver's permission and executes via the registry.
-- **Runner koda tool proxies** (runner): one `EmbedderTool` per descriptor received in the THREAD job payload; posts the
-  input to the tool route and returns the result text. No business logic.
-- **Project-thread session path** (runner): starts a nax-agent session with no worktree.
-- **Web**: scope picker on the new-thread form, citation links, inline PendingAction cards, inbox rows.
+  input schema, kind (`read` | `write`), the CASL ability or project roles it needs (section 7), the ids in its input
+  that must belong to the project, and `execute(ctx, input)` that calls existing domain services. No transport.
+- **AssistantToolExecutor** (api): resolves the actor, sets the project from the thread, validates input, checks
+  referenced ids and the ability, applies output caps, masking and fencing, writes the audit row, and for `write`
+  tools creates a PendingAction instead of executing.
+- **Runner tool route** (api): `POST /fleet/runner/threads/:threadId/tools/:name` under `@RunnerRoute()` (as
+  `runner-sync.controller.ts:12`). Delegates to the executor after the lease check (section 6).
+- **PendingAction service** (api): state machine for proposed writes, mirrored as an `assistant_action` approval
+  (section 8).
+- **Runner koda tool proxies** (runner): one `EmbedderTool` per descriptor received in the ASSIGN; posts the input to
+  the tool route and returns the result text. No business logic.
+- **PROJECT-thread job path** (api, protocol, runner): a THREAD job with no repo (section 5).
+- **Web**: scope picker on the new-thread form, citation links, PendingAction cards, inbox rows.
 
-## 5. Thread kinds and data model
+## 5. Thread kinds and PROJECT job shape
 
 `ChatThread` gains `kind` (`REPO` | `PROJECT`, default `REPO`; existing rows backfill to `REPO`). `repoId`, `baseRef`,
-`feature` and `specPath` become nullable. A database check constraint enforces: `REPO` has all four set, `PROJECT`
-has none set.
+`feature` and `specPath` become nullable (`schema.prisma:1058-1095`). A check constraint, added in raw SQL in the
+migration as the existing partial indexes are, enforces: `REPO` has all four set, `PROJECT` has none set.
 
-PROJECT threads:
+A PROJECT thread still runs as a THREAD fleet job. The repo-shaped job plumbing changes as follows:
 
-- run on a runner like any thread (placement needs a protocol v5 runner with a thread backend), in a per-thread
-  scratch directory under the runner home, with no git checkout;
-- get the koda tools and `load_skill` / `read_skill_file`; no `list_files`, `search_repo` or `write_doc`;
-- have no Publish, Discard, Plan or Run (those stay REPO-only; the web hides them and the API answers 409
-  `fleet.threadNotRepo`).
-
-REPO threads keep all S5a behaviour and additionally get the koda tools.
-
-New models:
-
-- **AssistantToolCall** (audit): `id`, `threadId?`, `jobId?`, `apiKeyId?` (MCP), `actorUserId`, `tool`, `inputHash`,
-  `outcome` (`ok` | `error` | `forbidden` | `pending`), `errorCode?`, `durationMs`, `resultBytes`, `createdAt`.
-  Input itself is not stored (it can carry user text); the hash supports dedupe and debugging.
-- **PendingAction**: `id`, `projectId`, `threadId?`, `tool`, `input` (JSON), `preview` (rendered text shown to the
-  approver), `status` (`PENDING` | `APPROVED` | `REJECTED` | `EXPIRED` | `EXECUTED` | `FAILED`), `requestedById`,
-  `decidedById?`, `decidedAt?`, `result` (JSON: created ids / links, or the failure reason), `expiresAt`, `createdAt`.
-  Each PendingAction has one approvals-inbox row of type `assistant_action`, so inbox counts, toasts and
-  notifications work unchanged.
-
-## 6. Tool catalog
-
-All tools are scoped to the thread's project. Every read result carries citations (section 7).
-
-| Group | Read (S5b-1) | Write (S5b-2, always confirmed) |
+| Place | Today | Change |
 |---|---|---|
-| Tickets | `koda_search_tickets` (status, label, assignee, text; paginated), `koda_get_ticket` (fields, links, last 10 comments, linked PRs) | `koda_create_tickets` (batch, max 20), `koda_update_ticket` (status, labels, assignee, title/body), `koda_link_tickets` |
-| Comments | (in `koda_get_ticket`) | `koda_add_comment` |
-| Fleet | `koda_list_jobs` (state, window, feature, command), `koda_get_job` (stories, phase, escalation reason, PR, cost), `koda_job_log_excerpt` (error-level lines and their surroundings, capped), `koda_fleet_spend` (period, feature, model), `koda_list_approvals`, `koda_runner_status` | `koda_dispatch_job` (PLAN / RUN; `maxCostUsd` required), `koda_requeue_job`, `koda_cancel_job` |
-| Knowledge | `koda_kb_search` (existing hybrid retriever), `koda_context_query`, `koda_memory_search`, `koda_timeline` | `koda_add_kb_doc`, `koda_add_memory`, `koda_record_decision` (ADR) |
+| `FleetJob.repoId`, `ref` (`schema.prisma:955-958`) | non-null | nullable; non-null for every command except a PROJECT THREAD job (service-level invariant + check constraint) |
+| `FleetJob.feature` | non-null | PROJECT THREAD job stores the literal `project-thread` |
+| Thread job creation (`prisma-chat-thread.repository.ts:356-367`) | `repoId: thread.repoId, ref: thread.baseRef` | PROJECT: both null |
+| Budget keys (`budgets/budget-rules.ts:40-47`) | always `repo:<id>` | omit the `repo:` key when repoId is null; project and global keys still apply |
+| ASSIGN payload (`fleet-protocol/src/index.ts:233`, builder `jobs/assign-payload.ts:27-44`) | `repo` required | v5: `repo` and `feature` optional; present iff the thread is REPO; adds `kodaTools: ToolDescriptor[]` |
+| Runner ASSIGN parser (`supervisor/assign-parser.ts:102-103`) | rejects a missing repo | v5: accepts a missing repo for THREAD only |
+| Runner thread run (`thread/thread-job-run.ts:265`, `:323`, `:355`) | always prepares a worktree; mutex key `repoKey` | PROJECT: no worktree, cwd = `<runner home>/threads/<threadId>/scratch`, mutex key `project:<threadId>` |
+| Runner tools (`thread/tools/index.ts:9-11`) | always the five repo tools | REPO: repo tools + koda proxies; PROJECT: `load_skill`, `read_skill_file` + koda proxies |
+| Thread activity payloads (`prisma-chat-thread.repository.ts:210`) and thread instructions (`:361`) | assume repo and feature | PROJECT variants (no repo, no feature, no spec path) |
+| Placement (`placement-rules.ts:108-123`) | thread backends only | PROJECT requires `threadKoda`; PROJECT + ACP backend refused at thread creation |
 
-Fleet ops is a subset of these tools, plus an optional "diagnose a run" skill in the skill catalog; no extra
-mechanism.
+PROJECT threads have no Publish, Discard, Plan or Run: the web hides them and the API answers 409 with a new i18n key
+`fleet.threadNotRepo` (en + zh). REPO threads keep all S5a behaviour.
 
-## 7. Permissions and safety
+Protocol: `FLEET_PROTOCOL_VERSION` 4 -> 5 (`fleet-protocol/src/index.ts:9`); `SUPPORTED_FLEET_PROTOCOL_VERSIONS` gains 5
+(`fleet/common/protocol.ts:56`); `threadKoda` is parsed in `capabilities-core.ts:121-158`.
 
-Permissions:
+## 6. Tool route and executor contract
 
-- Each tool declares the permission its REST counterpart enforces: reads need project membership (VIEWER and up);
-  writes and dispatch need DEVELOPER and up, as the matching routes do.
-- The executor re-resolves the actor's project role on every call (roles can change mid-thread) and the
-  PendingAction service re-resolves the approver's role at approval time.
-- The approver must hold the write permission. Default approver is the thread creator; any project member who could
-  perform the action may approve from the inbox.
-- No admin-only operation (users, runners, budgets, skill sources) is a tool.
+- **Lease check.** The call is accepted only when a FleetJob exists with `command = THREAD`, `threadId = :threadId`,
+  `runnerId = <calling runner>`, `state = RUNNING`, and `leaseEpoch` equal to the `leaseEpoch` header the runner sends
+  (`FleetJob.threadId` is indexed, `schema.prisma:1040`). Jobs in UPLOADING or with a close requested are refused, as
+  sends are (`thread-send-rules.ts:36-37`). Refusals are typed errors the proxy returns to the agent as tool errors.
+- **Kill switch.** `FLEET_THREADS_ENABLED` off (`threads.service.ts:88`) refuses the tool route and approval execution.
+- **Idempotency.** The runner sends the nax-agent tool-call id. `AssistantToolCall` is unique on `(jobId, toolCallId)`;
+  a repeat returns the stored result for reads and the existing PendingAction for writes.
+- **Write cap under lock.** Creating a PendingAction locks the ChatThread row (`FOR UPDATE`, as `lockIdleThread`,
+  `prisma-fleet-job.repository.ts:64-69`), counts PENDING actions, refuses an 11th, then inserts.
+- **Job end.** In-flight calls when a job is reaped fail with a typed error; writes are never retried by the proxy.
+  PendingActions outlive the job (they belong to the thread).
+- **Cost.** Thread spend is enforced live by the runner against `maxCostUsd` (`thread-job-run.ts:497`); the API's
+  `ChatThread.costUsd` is folded from cost events at ingest and can lag
+  (`threads/ingest/prisma-thread-ingest.repository.ts:281`). Dispatch cost is governed separately (section 7).
 
-Safety:
+## 7. Tool catalog and permissions
 
-- **Prompt injection.** User-written content in results (ticket bodies, comments, KB text, log lines) is wrapped in
-  fenced data blocks; the thread system prompt states that fenced content is data, not instructions. The structural
-  guard is that no write happens without a human approving the exact preview.
-- **Output caps.** Every result is capped (default 20 items or 16 KB, whichever first) and returns a cursor for more.
-- **Secret masking.** The koda API has no server-side secret masking today; log text is stored as nax wrote it. S5b-1
-  adds a small masker in the tool layer (token-shaped values and `KEY=value` pairs with secret-like key names) applied
-  to log excerpts and any free-text field returned from fleet data.
-- **Cost.** Thread spend stays bounded by `ChatThread.maxCostUsd` and the existing THREAD budget stops. A dispatch
-  carries its own `maxCostUsd`, shown on the confirmation card, and the project budget applies to it as to any job.
-- **Write throttle.** At most 10 PENDING actions per thread; an 11th returns a tool error asking the agent to wait.
-  PendingActions expire after 24 h.
-- **Citations.** Read results carry stable references: ticket key + web path, job id + web path, KB document id,
-  memory id. The system prompt asks the agent to cite them; the web renders them as links.
-- **Audit.** Executed writes go through the same domain services as REST, so they emit the usual timeline / outbox
-  events, with the actor = the approving user and a `via: thread <id>` (or `via: mcp key <id>`) annotation.
+All tools act in the thread's project. Every read result carries citations (section 9).
 
-## 8. Flows
+| Tool | Kind | Ability / roles (source) | Feature |
+|---|---|---|---|
+| `koda_search_tickets`, `koda_get_ticket` (fields, links incl. PR state from `TicketLink`, last 10 comments) | read | project member (read Ticket) | S5b-1b |
+| `koda_list_jobs`, `koda_get_job`, `koda_fleet_spend`, `koda_list_approvals`, `koda_runner_status` | read | project member (read FleetJob) | S5b-1b |
+| `koda_job_log_excerpt` | read | project member (read FleetJob) | S5b-1b |
+| `koda_get_action` | read | project member | S5b-2a |
+| `koda_kb_search` (`HybridRetrieverService.search`, `rag/hybrid-retriever.service.ts:129`), `koda_context_query` (`ContextBuilderService`), `koda_memory_search`, `koda_timeline` (`TimelineService`) | read | project member | S5b-1c |
+| `koda_create_tickets` (batch, max 20), `koda_update_ticket`, `koda_link_tickets` | write | CASL create/update Ticket (DEVELOPER+; `koda-casl-ability.factory.ts:82-95`) | S5b-2b |
+| `koda_add_comment` | write | CASL create Comment (every member; `factory.ts:96-99`) | S5b-2b |
+| `koda_add_kb_doc` | write | `@ProjectRoles('ADMIN','DEVELOPER','AGENT')` (`rag.controller.ts:47`) | S5b-2b |
+| `koda_add_memory`, `koda_record_decision` | write | project member (`memory.controller.ts:31-46`) | S5b-2b |
+| `koda_dispatch_job` (PLAN / RUN, `maxCostUsd` required), `koda_requeue_job`, `koda_cancel_job` | write | CASL create/update FleetJob (DEVELOPER+) | S5b-2b |
 
-Read call:
+Rules:
 
-1. The agent calls `koda_search_tickets`. The runner proxy posts `{ input }` to the tool route.
-2. The API checks the lease, resolves the thread creator, checks membership and permission, validates input,
-   executes, masks and caps, writes the audit row.
-3. The result (text with citations) returns to the session and is ingested into the thread like any tool summary.
+- The executor evaluates the ability with `KodaCaslAbilityFactory` for the acting user's principal on every call, and
+  again for the approver at approval time. Domain services do not check permissions themselves
+  (`project-membership.guard.ts:29-60`), so the executor is the guard.
+- `projectId` is set from the thread, never read from input (S5b-R7). `recordDecision` today takes `projectId` from
+  the request body; the tool supplies it. Every id in input is checked against the project before the ability check;
+  a foreign id answers `not_found` (no existence leak).
+- `koda_dispatch_job` reuses the REPO handoff dispatch path (`threads.service.ts:85-101`) rather than a second
+  dispatch implementation.
+- No admin-only operation (users, runners, budgets, skill sources) is a tool. Ticket delete is not a tool.
 
-Write call:
+Fleet ops is a subset of these tools, plus an optional "diagnose a run" skill in the skill catalog.
 
-1. The agent calls `koda_create_tickets`. The executor validates and stores a PendingAction with a preview, and returns
-   immediately: `pending <actionId>: awaiting user approval; do not retry`.
-2. The thread page shows a confirmation card (preview, Approve, Reject, expiry); the inbox shows an `assistant_action`
-   row linking to the thread.
-3. On Approve the API re-checks the approver, executes through the registry, stores `result`, and sets `EXECUTED` or
-   `FAILED`. Reject sets `REJECTED`; the expiry sweeper sets `EXPIRED`.
-4. The outcome becomes a thread system note (`Action <id> executed: created KODA-41, KODA-42` or the failure reason).
-   If a session is live it is delivered at the start of the next turn; otherwise it is stored and seen on resume.
+## 8. PendingAction and the approvals inbox
+
+`PendingAction`: `id`, `projectId`, `threadId?`, `jobId?`, `toolCallId?`, `tool`, `input` (JSON), `preview` (text shown
+to the approver), `status` (`PENDING` | `APPROVED` | `REJECTED` | `EXPIRED` | `EXECUTED` | `FAILED`), `requestedById`,
+`decidedById?`, `decidedAt?`, `result` (JSON), `deliveredAt?` (outcome note handed to the agent), `expiresAt` (24 h),
+`createdAt`. Each has one `FleetApproval` row of type `assistant_action` (`type` is a String,
+`schema.prisma:884-890`; the TS union in `approval.domain.ts:4` gains it).
+
+Approvals changes (S5b-2a):
+
+- `ApprovalsService.decide` today routes every non-bash type into the budget branch
+  (`approvals.service.ts:92-96`, ADMIN-only, `policyId` required). A new `decideAssistant` branch: decisions
+  `approve` | `reject` (added to `APPROVAL_DECISIONS` for this type only), permission = the tool's ability evaluated for
+  the approver (S5b-R6), then executes through the registry and records `result`.
+- Expiry: the sweeper filter selects only `nax_bash_escalate` (`prisma-approval.repository.ts:75`); it is widened to
+  `assistant_action` with its own expiry rule (PENDING -> EXPIRED, approval closed).
+- Exposure: the project inbox list returns the full payload to any member (`project-fleet-approvals.controller.ts:31-37`,
+  `fleet-approval.dto.ts:26,42`). For `assistant_action` the list returns a summary (tool, thread, requester, status);
+  the detail returns the preview and input only when the caller holds the read ability for that tool's data.
+- Notifications: `ApprovalCloser.enqueueRequested` fans out to all global admins
+  (`approval-closer.ts:158-165`, `fleet-approval-requested.subscriber.ts:40-47`). For `assistant_action` it notifies
+  the thread creator only (in-app and email under the approval category), never all admins.
+- Web: `assistant_action` gets its own label and summary (today unknown types fall back to "budget override",
+  `apps/web/lib/fleet-approvals.ts:330`), and the inline thread card.
+
+Write flow:
+
+1. The agent calls `koda_create_tickets`. The executor validates, checks ids and the requester's ability, stores the
+   PendingAction (under the thread lock), and returns at once:
+   `pending <actionId>: awaiting user approval; do not retry`.
+2. The thread shows a confirmation card (preview, Approve, Reject, expiry); the inbox shows the row.
+3. Approve: re-check the approver, execute, store `result`, set `EXECUTED` or `FAILED`. Reject: `REJECTED`. Expiry:
+   `EXPIRED`. Each outcome writes a `system`-role thread message (`ChatMessage.role` gains `system`,
+   `schema.prisma:1104`) and pushes it on the thread SSE.
+4. Delivery to the agent (S5b-R10): the next THREAD_INPUT the user sends carries the undelivered outcome notes before
+   the user's text, and marks them `deliveredAt`. `koda_get_action` returns an action's status and result at any time.
    The agent never blocks on a human.
 
 Failure handling:
 
 | Case | Behaviour |
 |---|---|
-| Actor lacks permission | Tool error `forbidden: needs <ROLE> on <project>`; audit `forbidden` |
-| Target changed before approval (ticket deleted, job already terminal) | `FAILED` with the reason; card shows it |
-| Approver lacks permission | 403; action stays PENDING |
-| API unreachable from the runner | Proxy returns a tool error; one retry for read tools only |
-| Approval after the thread is archived | Executes (it is the user's decision); outcome note stored |
-| Runner below protocol v5 | REPO threads run without koda tools; PROJECT threads are not placed on it |
+| Requester lacks the ability | Tool error `forbidden: <action> needs <role/ability> on <project>`; audit `forbidden` |
+| Id from another project | Tool error `not_found`; audit `forbidden` |
+| Target changed before approval (ticket deleted, job terminal) | `FAILED` with the reason; card and note show it |
+| Approver lacks the ability | 403; action stays PENDING |
+| Repeat tool call (same `toolCallId`) | Stored result / existing PendingAction returned |
+| 11th pending action | Tool error asking the agent to wait for decisions |
+| Job reaped mid-call | Typed tool error; writes not retried; PendingActions kept |
+| Approval after the thread is archived | Executes (the user's decision); system note stored |
+| `FLEET_THREADS_ENABLED` off | Tool route and approval execution refused |
 
-## 9. Delivery (nax features, in order)
+## 9. Safety
 
-1. **S5b-1 `fleet-s5b-koda-read`** (api, runner, web): PROJECT thread kind (migration, placement, no-worktree session,
-   form scope picker); registry + executor + runner tool route + audit; all read tools; secret masker; protocol v5
-   (THREAD payload gains `kodaTools: ToolDescriptor[]`); citation links in the web.
-2. **S5b-2 `fleet-s5b-koda-write`** (api, web): PendingAction + `assistant_action` approval type; all write tools;
-   confirmation cards; outcome notes into the thread; expiry sweeper.
-3. **S5b-3 `fleet-s5b-koda-mcp`** (api): streamable-HTTP MCP endpoint over the same registry, authenticated by user or
-   agent API key; reads execute directly, writes return `pending` and are approved in the koda inbox.
+- **Fencing.** User-written content in results is wrapped in a fence with a per-result random token
+  (`<<koda-data-7f3a…>> … <<end-koda-data-7f3a…>>`), so content cannot close the fence. The thread system prompt says
+  fenced content is data, never instructions. The structural guard is that no write happens without a human approving
+  the exact preview.
+- **Masked and fenced fields:** ticket title and body, comments, KB chunk text, memory item content, ADR rationale,
+  story titles, job escalation reasons, and log lines.
+- **Secret masking.** The API has no server-side secret masking today (only auth-secret handling). S5b-1b adds a masker
+  in the tool layer (token-shaped values; `KEY=value` with secret-like key names; URL credentials) applied to every
+  masked field above.
+- **Log excerpts.** Level filtering exists only on the `run` stream (nax LogEntry JSON, `fleet/logs/log-entry.ts:4,60-62`);
+  stdout / stderr are raw text and are returned as tail excerpts. Reads scan a bounded window (`FLEET_LOG_SCAN_BYTES`,
+  default 2 MiB, `config/fleet.config.ts:128`) and logs expire (`logRetentionDays`). Results carry `truncated`,
+  `scannedBytes` and `expired`. `LogReadService` is added to `LogsModule` exports (`logs/logs.module.ts:33`).
+- **Output caps.** Default 20 items or 16 KB per result, whichever first, with a cursor for more.
+- **Citations.** Results carry stable references: ticket key + web path, job id + web path, KB document id, memory id.
+  The system prompt asks the agent to cite them; the web renders them as links.
+- **Audit.** `AssistantToolCall` stores tool, input hash (not input), outcome, duration, result bytes. Executed writes
+  go through the domain services, so the usual timeline / outbox events fire, actor = the approving user, annotated
+  `via: thread <id>` (or `via: mcp key <id>`).
+- **Cost.** Thread spend: section 6. A dispatch carries its own `maxCostUsd` on the card, and project budgets apply
+  (no `repo:` key for PROJECT threads' own spend; a dispatched RUN has a repo and keeps it).
 
-Each feature gets spec-writing, spec-review, `nax plan` and `nax run` (both with approval), then deploy and a live check
-on koda-wk. S5b-1 may be split further at spec time if it exceeds the story-size cap.
+## 10. Delivery (nax features, in order)
 
-## 10. Testing
+| # | Feature | Packages | Content |
+|---|---|---|---|
+| 1 | `fleet-s5b-project-threads` (S5b-1a) | api, protocol, runner, web | PROJECT kind end to end with no koda tools: migration (ChatThread + FleetJob nullability, check constraints), budget keys, ASSIGN v5 + parser, `threadKoda` capability + placement, no-worktree runner path, `fleet.threadNotRepo`, web scope picker, PROJECT variants of activity / instructions |
+| 2 | `fleet-s5b-koda-read-core` (S5b-1b) | api, runner | registry, executor (ability, project ids, caps, masking, fencing, idempotency), runner tool route + lease check, audit, ASSIGN `kodaTools`, runner proxies, ticket + fleet read tools |
+| 3 | `fleet-s5b-koda-read-knowledge` (S5b-1c) | api, web | KB / context / memory / timeline read tools, citations in the web, system prompt additions |
+| 4 | `fleet-s5b-koda-actions` (S5b-2a) | api, web | PendingAction, `assistant_action` approvals branch + sweeper + notifications + list exposure, `system` messages, outcome delivery via THREAD_INPUT, `koda_get_action`, confirmation card |
+| 5 | `fleet-s5b-koda-write-tools` (S5b-2b) | api | all write tools from section 7 |
+| 6 | `fleet-s5b-koda-mcp` (S5b-3) | api | streamable-HTTP MCP over the registry, user or agent API key (agent keys need the project roster; no delete), writes return `pending` |
 
-- api: per-tool unit tests (permission matrix VIEWER / DEVELOPER / ADMIN / non-member, caps, masking, citations);
-  executor and PendingAction state-machine tests; DB-backed route tests for the runner tool route (lease auth) and
-  approve -> execute -> outcome note.
-- runner: proxy tool tests against a scripted fake API; PROJECT-thread session start without a worktree.
-- web: unit tests for the scope picker, citation rendering and the confirmation card; one Playwright journey (PROJECT
-  thread asks "which tickets are blocked", gets a cited answer, proposes two tickets, approve, tickets exist).
+Each feature: spec-writing, spec-review, `nax plan` and `nax run` (both need approval), then deploy and a live check on
+koda-wk.
+
+## 11. Testing
+
+- api: per-tool unit tests (ability matrix VIEWER / DEVELOPER / ADMIN / non-member; foreign ids; caps; masking; fence
+  token); executor idempotency; PendingAction state machine; DB-backed tests for the tool route (lease, epoch,
+  UPLOADING refusal) and approve -> execute -> system note; migration test for the check constraints.
+- runner: PROJECT-thread start without a worktree; proxy tools against a scripted fake API; v5 ASSIGN parsing.
+- web: scope picker, citation rendering, confirmation card; one Playwright journey per user-facing feature (PROJECT
+  thread asks "which tickets are blocked", gets a cited answer; later proposes two tickets, approve, tickets exist).
 - Live check on koda-wk after each feature.
 
-## 11. Out of scope
+## 12. Out of scope
 
-- MCP before S5b-3; ACP-backed threads (S5a phase D, still deferred).
+- MCP before S5b-3; ACP-backed threads (S5a phase D, still deferred; PROJECT + ACP refused).
 - Questions across projects (a thread sees only its project).
 - Text-to-SQL or any direct database access by the agent.
 - Editing a proposed action's input on the card (reject and ask again).
-- Write tools for admin-only objects.
+- Write tools for admin-only objects; ticket delete.
+- A server-to-session command for notes (outcomes ride the next THREAD_INPUT, S5b-R10).
 - Server-side LLM calls (the koda API never holds model credentials).
