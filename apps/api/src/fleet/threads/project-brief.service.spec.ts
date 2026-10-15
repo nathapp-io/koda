@@ -300,4 +300,57 @@ describe('ProjectBriefService', () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0]?.[0])).toContain('r1');
   });
+
+  it('F1: a repository lookup that outlives 3000 ms answers unavailable (timeout) and warns once', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(Logger.prototype, 'warn');
+    warn.mockClear();
+    try {
+      repos.findById.mockImplementation(() => new Promise<FleetRepoRecord | null>(() => {}));
+      const pending = service.resolveRepoContext('r1');
+      await vi.advanceTimersByTimeAsync(TIMEOUT_MS);
+      await expect(pending).resolves.toBe(`${UNAVAILABLE} (timeout)`);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain('r1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('F1: the deadline is one 3000 ms budget, not one per stage (lookup + read)', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(Logger.prototype, 'warn');
+    warn.mockClear();
+    try {
+      let release: (value: FleetRepoRecord | null) => void = () => {};
+      repos.findById.mockImplementation(() => new Promise<FleetRepoRecord | null>((resolve) => { release = resolve; }));
+      onlyContext('# Arch');
+      const pending = service.resolveRepoContext('r1');
+      // The lookup costs 2000 ms of the budget; the read then never settles.
+      await vi.advanceTimersByTimeAsync(2_000);
+      release(repoRecord());
+      github.getBranchHead.mockImplementation(() => new Promise<string>(() => {}));
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(pending).resolves.toBe(`${UNAVAILABLE} (timeout)`);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain('r1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('F1: a lookup that outlives 3000 ms cannot name the repository, so the cached text is not rendered', async () => {
+    vi.useFakeTimers();
+    try {
+      onlyContext('# Arch');
+      await service.resolveRepoContext('r1');
+      clock = 400_000;
+      repos.findById.mockImplementation(() => new Promise<FleetRepoRecord | null>(() => {}));
+      const pending = service.resolveRepoContext('r1');
+      await vi.advanceTimersByTimeAsync(TIMEOUT_MS);
+      await expect(pending).resolves.toBe(`${UNAVAILABLE} (timeout)`);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

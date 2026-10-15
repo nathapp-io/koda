@@ -13,7 +13,7 @@ const FALLBACK_FILE = 'AGENTS.md';
 const CACHE_TTL_MS = 300_000;
 /** Rule api-core: caches need a size cap; the entry with the oldest `checkedAt` goes first (spec 1c-D4). */
 const CACHE_MAX_ENTRIES = 200;
-/** Repository context never blocks a message for longer than this (spec 1c-D5). */
+/** The whole call — repository lookup and forge read together — never blocks a message for longer than this (1c-D5). */
 const READ_TIMEOUT_MS = 3_000;
 /** 1c-R3: the cap holds after masking; koda's own `.nax/context.md` is 9411 bytes. */
 const MAX_CONTEXT_BYTES = 10_240;
@@ -64,45 +64,59 @@ export class ProjectBriefService {
   /**
    * The repository context section for `repoId`, or a one-line reason it is unavailable. `null` (a PROJECT
    * thread of a project without a fleet repo) answers `no repository` without a lookup or a forge call.
+   * One 3000 ms deadline bounds the whole call — the repository lookup and the forge read share it — so a
+   * stalled database or forge can never park a message (1c-D5).
    */
   async resolveRepoContext(repoId: string | null): Promise<string> {
     if (repoId === null) return unavailable('no repository');
+    const state: { repo: FleetRepoRecord | null } = { repo: null };
+    const attempt = this.attempt(repoId, state);
+    let outcome: string | typeof TIMED_OUT;
     try {
-      const repo = await this.repos.findById(repoId);
-      if (!repo) return unavailable('no repository');
-      if (repo.provider !== GITHUB_PROVIDER) return unavailable('not a GitHub repository');
-      const installationId = repo.githubInstallationId;
-      if (installationId === null) return unavailable('no installation');
-      return await this.contextFor(repoId, repo, installationId);
+      outcome = await this.bounded(attempt);
     } catch (error) {
       this.logFailure(repoId, 'read failed', error);
-      return unavailable('read failed');
+      return this.afterFailure(state.repo, this.cache.get(repoId), 'read failed');
     }
+    if (outcome !== TIMED_OUT) return outcome;
+    this.logFailure(repoId, 'timeout');
+    return this.afterFailure(state.repo, this.cache.get(repoId), 'timeout');
+  }
+
+  /** The bounded path. `state` carries whatever the deadline needs to render a fallback when it fires. */
+  private async attempt(repoId: string, state: { repo: FleetRepoRecord | null }): Promise<string> {
+    const repo = await this.repos.findById(repoId);
+    if (!repo) return unavailable('no repository');
+    state.repo = repo;
+    if (repo.provider !== GITHUB_PROVIDER) return unavailable('not a GitHub repository');
+    const installationId = repo.githubInstallationId;
+    if (installationId === null) return unavailable('no installation');
+    return await this.contextFor(repoId, repo, installationId);
   }
 
   private async contextFor(repoId: string, repo: FleetRepoRecord, installationId: bigint): Promise<string> {
     const cached = this.cache.get(repoId);
     if (cached && this.now() - cached.checkedAt < CACHE_TTL_MS) return this.section(repo, cached, false);
 
-    let read: BriefRead | typeof TIMED_OUT;
+    let read: BriefRead;
     try {
-      read = await this.readWithinTimeout(repo, installationId, cached);
+      read = await this.read(repo, installationId, cached);
     } catch (error) {
       this.logFailure(repoId, 'read failed', error);
       return this.afterFailure(repo, cached, 'read failed');
-    }
-    if (read === TIMED_OUT) {
-      this.logFailure(repoId, 'timeout');
-      return this.afterFailure(repo, cached, 'timeout');
     }
     const entry: BriefCacheEntry = { ...read, checkedAt: this.now() };
     this.remember(repoId, entry);
     return this.section(repo, entry, false);
   }
 
-  /** The cached text when the previous read found one (possibly stale), the failure reason otherwise. */
-  private afterFailure(repo: FleetRepoRecord, cached: BriefCacheEntry | undefined, reason: UnavailableReason): string {
-    return cached && cached.text !== null ? this.section(repo, cached, true) : unavailable(reason);
+  /**
+   * The cached text when the previous read found one (possibly stale), the failure reason otherwise. Without a
+   * repository row there is no `<owner>/<name>` for the header, so a failed lookup answers the reason line (the
+   * cached entry carries only `sha`, `path`, `text` and `checkedAt`).
+   */
+  private afterFailure(repo: FleetRepoRecord | null, cached: BriefCacheEntry | undefined, reason: UnavailableReason): string {
+    return repo && cached && cached.text !== null ? this.section(repo, cached, true) : unavailable(reason);
   }
 
   private section(repo: FleetRepoRecord, entry: BriefCacheEntry, cached: boolean): string {
@@ -111,9 +125,8 @@ export class ProjectBriefService {
     return `Repository context (${repo.owner}/${repo.name} ${entry.path} @ ${entry.sha.slice(0, 7)}${marker}):\n${entry.text}`;
   }
 
-  /** The forge read, bounded by `READ_TIMEOUT_MS`; the losing side of the race stays silent. */
-  private async readWithinTimeout(repo: FleetRepoRecord, installationId: bigint, cached?: BriefCacheEntry): Promise<BriefRead | typeof TIMED_OUT> {
-    const work = this.read(repo, installationId, cached);
+  /** Races `work` against the deadline; the losing side of the race stays silent. */
+  private async bounded(work: Promise<string>): Promise<string | typeof TIMED_OUT> {
     void work.catch(() => undefined);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
