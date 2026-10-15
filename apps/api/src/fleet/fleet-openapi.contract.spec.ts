@@ -38,7 +38,7 @@ describe('fleet OpenAPI contract', () => {
     expect(spec.paths['/api/projects/{slug}/fleet/runners']?.['get']).toBeDefined();
     expect(spec.paths['/api/fleet/repos/{id}/check']?.['post']).toBeDefined();
     expect(Object.keys(spec.components.schemas['RunnerSummaryDto']?.properties ?? {}).sort())
-      .toEqual(['arch', 'enabled', 'id', 'labels', 'name', 'online', 'os', 'profiles', 'threadBackends']);
+      .toEqual(['arch', 'enabled', 'id', 'labels', 'name', 'online', 'os', 'profiles', 'projectThreads', 'threadBackends']);
     expect(Object.keys(spec.components.schemas['RepoCheckResultDto']?.properties ?? {}).sort())
       .toEqual(['checkedAt', 'reachable', 'reason', 'repoId']);
   });

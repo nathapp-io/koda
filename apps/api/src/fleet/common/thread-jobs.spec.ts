@@ -24,6 +24,16 @@ describe('thread job kind (US-001)', () => {
   });
 });
 
+describe('chat thread kinds (US-001)', () => {
+  it('US-001 AC1: the API CHAT_THREAD_KINDS deep-equals the package CHAT_THREAD_KINDS', () => {
+    expect(apiThreads.CHAT_THREAD_KINDS).toEqual(pkg.CHAT_THREAD_KINDS);
+  });
+
+  it('US-001 AC1: the shared chat thread kinds are REPO then PROJECT', () => {
+    expect(pkg.CHAT_THREAD_KINDS).toEqual(['REPO', 'PROJECT']);
+  });
+});
+
 describe('thread command types (US-001)', () => {
   it('US-001: the API THREAD_COMMAND_TYPES deep-equals the package THREAD_COMMAND_TYPES', () => {
     expect(apiThreads.THREAD_COMMAND_TYPES).toEqual(pkg.THREAD_COMMAND_TYPES);

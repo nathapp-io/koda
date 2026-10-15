@@ -14765,6 +14765,10 @@
                 }
               }
             }
+          },
+          "projectThreads": {
+            "type": "boolean",
+            "description": "Fleet S5b: the runner hosts PROJECT threads with no checkout"
           }
         },
         "required": [
@@ -14776,7 +14780,8 @@
           "enabled",
           "online",
           "profiles",
-          "threadBackends"
+          "threadBackends",
+          "projectThreads"
         ]
       },
       "FleetJobLogStreamDto": {

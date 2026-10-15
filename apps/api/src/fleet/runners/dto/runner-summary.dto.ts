@@ -23,6 +23,12 @@ function threadBackends(capabilities: unknown, protocolVersion: number): { nativ
   return { native, acp };
 }
 
+/** Fleet S5b §2: true only when the runner is at the thread protocol floor and its stored report advertises projectThreads. */
+function hasProjectThreads(capabilities: unknown, protocolVersion: number): boolean {
+  if (protocolVersion < THREAD_MIN_PROTOCOL_VERSION || !isRecord(capabilities)) return false;
+  return capabilities['projectThreads'] === true;
+}
+
 /**
  * What a project member needs to dispatch (labels, pin, profile chain) and to name runners in job
  * lists (overview D118). No versions, capacity, credentials or sandbox detail.
@@ -37,12 +43,14 @@ export class RunnerSummaryDto {
   @ApiProperty({ description: 'Synced within FLEET_RUNNER_OFFLINE_SEC (the placement rule)' }) declare online: boolean;
   @ApiProperty({ type: [String], description: 'Machine profile names, sorted' }) declare profiles: string[];
   @ApiProperty({ type: 'object', properties: { native: { type: 'array', items: { type: 'string' } }, acp: { type: 'array', items: { type: 'string' } } } }) declare threadBackends: { native: string[]; acp: string[] };
+  @ApiProperty({ description: 'Fleet S5b: the runner hosts PROJECT threads with no checkout' }) declare projectThreads: boolean;
 
   static from(r: RunnerRecord, view: RunnerView): RunnerSummaryDto {
     return Object.assign(new RunnerSummaryDto(), {
       id: r.id, name: r.name, os: r.os, arch: r.arch, labels: r.labels, enabled: r.enabled,
       online: isRunnerOnline(r.lastSeenAt, view.now, view.offlineSec), profiles: profileNames(r.capabilities),
       threadBackends: threadBackends(r.capabilities, r.protocolVersion),
+      projectThreads: hasProjectThreads(r.capabilities, r.protocolVersion),
     });
   }
 }
