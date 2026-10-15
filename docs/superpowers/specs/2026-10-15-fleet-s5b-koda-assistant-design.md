@@ -72,6 +72,20 @@ User, 2026-10-15 (during S5b-1a spec-writing):
   clones, fetches or touches it, and no git token is requested. `ChatThread.repoId` stays null for PROJECT and
   WORKSPACE threads, so deleting a repo never deletes those threads.
 
+User, 2026-10-15 (after S5b-1b; research note `koda-agent-knowledge-research-2026-10-15.md` in the workspace):
+
+- **S5b-R14 1c is the layered project-knowledge model.** The gap is content and reach, not retrieval: memory holds only
+  automatic ticket facts, `DecisionEvent` is empty, and the project's architecture, specs, ADRs and run reports live
+  as repo Markdown and nax artifacts that no thread can reach. 1c delivers L0 an always-loaded brief, L1/L2 indexed
+  repo docs and run outcomes (heading chunks with an extractive abstract and a citation), and the tools over them.
+  `koda_context_query` is dropped. ADRs stay docs-as-code. Deferred behind a brainstorm eval set: reranker, code
+  embeddings, temporal graph, automatic memory extraction. Abstracts and chunk context lines are extractive, because
+  the API holds no model credentials (section 12). 1c ships as three features (section 10, rows 3a-3c).
+- **S5b-R15 PROJECT threads read code (revises S5b-R13).** A PROJECT thread's runner keeps a read-only shallow checkout
+  of every fleet repo of the project at its default branch, with a read-only brokered token, and offers the REPO
+  thread's read tools over it (no `write_doc`). Gated by a `projectCode` capability. The anchor repo still decides
+  placement and budget keys; S5b-R13's "never clones" now applies only to WORKSPACE threads.
+
 ## 3. Research summary (2026-10-15)
 
 Surveyed: Plane MCP server (MIT), LibreChat (MIT), CopilotKit (MIT), assistant-ui (MIT), Onyx CE (MIT),
@@ -291,7 +305,9 @@ Failure handling:
 |---|---|---|---|
 | 1 | `fleet-s5b-project-threads` (S5b-1a) | api, protocol, runner, web | PROJECT kind end to end with no koda tools: migration (`kind`, nullable repo fields), anchor repo for the job, `projectThreads` capability + placement, ASSIGN `thread.kind` + optional `feature`, no-checkout runner path, `threads.notRepoThread` / `threads.noFleetRepo`, PROJECT instructions, web scope picker and hidden handoff actions |
 | 2 | `fleet-s5b-koda-read-core` (S5b-1b) | api, runner | registry, project-aware executor (ability, project resolution per S5b-R7, ids, caps, masking, fencing, idempotency), runner tool route + lease check, audit, ASSIGN `kodaTools` + `kodaTools` capability, runner proxies, ticket + fleet read tools |
-| 3 | `fleet-s5b-koda-read-knowledge` (S5b-1c) | api, web | KB / context / memory / timeline read tools, citations in the web, system prompt additions |
+| 3a | `fleet-s5b-koda-knowledge-core` (S5b-1c-a) | api, web | L0 brief: `Project.brief` + the anchor repo's `.nax/context.md` / `AGENTS.md` (GitHub App read, cached per sha) in every thread's instructions, capped 8 KB; `koda_memory_search` (text filter), `koda_timeline`; web brief editor and koda path links in replies |
+| 3b | `fleet-s5b-project-thread-code` (S5b-1c-b) | api, protocol, runner | S5b-R15: read-only shallow checkout of all the project's fleet repos for PROJECT threads, read tools over it, `projectCode` capability |
+| 3c | `fleet-s5b-koda-knowledge-index` (S5b-1c-c) | api, web | repo Markdown (docs, ADRs, specs, README, context) and fleet run outcomes (`feature-report.md`, advisor decisions) indexed via the GitHub App, scheduled + after a merged RUN, heading chunks with extractive abstracts, `koda_kb_search` + `koda_get_doc`, `repo:path@sha#heading` citations, brainstorm eval set |
 | 4 | `fleet-s5b-workspace-threads` (S5b-1d) | api, runner, web | WORKSPACE kind: creator-only visibility, top-level `/threads` routes and page, home project, `project` argument on tools, `koda_my_projects` |
 | 5 | `fleet-s5b-koda-actions` (S5b-2a) | api, web | PendingAction, `assistant_action` approvals branch + sweeper + notifications + list exposure, `system` messages, outcome delivery via THREAD_INPUT, `koda_get_action`, confirmation card |
 | 6 | `fleet-s5b-koda-write-tools` (S5b-2b) | api | all write tools from section 7 |
