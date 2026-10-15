@@ -108,6 +108,33 @@ describe('parseCapabilitiesCore projectThreads (US-001 AC2-AC4)', () => {
   });
 });
 
+describe('parseCapabilitiesCore projectCode (US-001 AC2-AC4)', () => {
+  it('US-001 AC2: keeps projectCode: true', () => {
+    const parsed = parseCapabilitiesCore({ ...valid, projectCode: true });
+    expect(parsed.projectCode).toBe(true);
+  });
+
+  it('US-001 AC3: omits the projectCode key when the report has none', () => {
+    const parsed = parseCapabilitiesCore({ ...valid, kodaTools: true });
+    expect(parsed).not.toHaveProperty('projectCode');
+    // Positive control: the same report with the flag set does carry the key, so the
+    // absence above is a real absence and not a parser that never emits it.
+    expect(parseCapabilitiesCore({ ...valid, projectCode: true })).toHaveProperty('projectCode', true);
+  });
+
+  it('US-001 AC4: refuses projectCode: false with reason projectCode', () => {
+    const err = rejection({ ...valid, projectCode: false });
+    expect(err).toBeInstanceOf(CapabilityValidationError);
+    expect(err).toMatchObject({ reason: 'projectCode' });
+  });
+
+  it("US-001 AC4: refuses projectCode: 'yes' with reason projectCode", () => {
+    const err = rejection({ ...valid, projectCode: 'yes' });
+    expect(err).toBeInstanceOf(CapabilityValidationError);
+    expect(err).toMatchObject({ reason: 'projectCode' });
+  });
+});
+
 describe('parseCapabilitiesCore kodaTools (US-001 AC1-AC3)', () => {
   it('US-001 AC1: keeps kodaTools: true', () => {
     const parsed = parseCapabilitiesCore({ ...valid, kodaTools: true });

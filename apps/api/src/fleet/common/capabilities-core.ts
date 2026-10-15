@@ -118,7 +118,7 @@ function parseCredential(c: unknown, i: number): RunnerCredential {
 export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
   if (!isObj(raw)) fail('not an object');
   if (Buffer.byteLength(JSON.stringify(raw), 'utf8') > MAX_CAPABILITIES_BYTES) fail('too large');
-  const { nax, sandbox, profiles, credentials, tools, executors, approvals, interaction, configJobs, threadBackends, threadWrite, projectThreads, kodaTools } = raw;
+  const { nax, sandbox, profiles, credentials, tools, executors, approvals, interaction, configJobs, threadBackends, threadWrite, projectThreads, kodaTools, projectCode } = raw;
 
   if (
     !isObj(nax) || !isStr(nax.version) || !Array.isArray(nax.protocols) || nax.protocols.length === 0 ||
@@ -141,6 +141,8 @@ export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
   if (projectThreads !== undefined && projectThreads !== true) fail('projectThreads');
   // Fleet S5b §2: strict like threadWrite; only exactly `true` is meaningful (koda tool descriptors on the ASSIGN).
   if (kodaTools !== undefined && kodaTools !== true) fail('kodaTools');
+  // Fleet S5b 1c-b §2: strict like kodaTools; only exactly `true` is meaningful (project repositories on the ASSIGN).
+  if (projectCode !== undefined && projectCode !== true) fail('projectCode');
 
   const parsedCredentials = credentials.map(parseCredential);
 
@@ -162,5 +164,6 @@ export function parseCapabilitiesCore(raw: unknown): RunnerCapabilities {
     ...(threadWrite === true ? { threadWrite: true as const } : {}),
     ...(projectThreads === true ? { projectThreads: true as const } : {}),
     ...(kodaTools === true ? { kodaTools: true as const } : {}),
+    ...(projectCode === true ? { projectCode: true as const } : {}),
   };
 }

@@ -82,6 +82,8 @@ export interface RunnerCapabilities {
   projectThreads?: true;
   /** Fleet S5b: the runner proxies koda API tools into a session. Absent on older runners (no tools on the ASSIGN). */
   kodaTools?: true;
+  /** Fleet S5b: the runner fetches a PROJECT session's repositories and hosts code tools over them. Absent on older runners. */
+  projectCode?: true;
 }
 
 export interface EnrollRequest {
@@ -214,7 +216,8 @@ export interface RunnerEvent {
 export interface JobReport { jobId: string; leaseEpoch: number; events: RunnerEvent[] }
 export type CommandAckResult = 'ok' | 'rejected';
 export interface CommandAck { commandId: string; leaseEpoch: number; result: CommandAckResult; detail?: string }
-export interface TokenRequest { jobId: string; leaseEpoch: number }
+/** Fleet S5b 1c-b: `repoId` asks for one project repository's read-only token (a PROJECT session). */
+export interface TokenRequest { jobId: string; leaseEpoch: number; repoId?: string }
 
 export interface SyncRequest {
   protocolVersion: number;
@@ -261,8 +264,9 @@ export interface FleetCommandOut {
   payload: AssignPayload | ReadoptPayload | AbandonPayload | ApprovalAnswerPayload | ThreadInputPayload | ThreadAnswerPayload | Record<string, never>;
 }
 
-export interface GitToken { jobId: string; token: string; expiresAt: string; username: 'x-access-token' | 'oauth2' }
-export interface GitTokenError { jobId: string; reason: string }
+/** Fleet S5b 1c-b: `repoId`, present only on a read-only per-repository mint, says which repository the token is for. */
+export interface GitToken { jobId: string; token: string; expiresAt: string; username: 'x-access-token' | 'oauth2'; repoId?: string }
+export interface GitTokenError { jobId: string; reason: string; repoId?: string }
 export interface JobAck { jobId: string; ackedSeq: number }
 
 export interface SyncResponse {

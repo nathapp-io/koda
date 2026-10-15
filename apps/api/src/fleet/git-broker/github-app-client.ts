@@ -59,9 +59,25 @@ export class GitHubAppClient {
 
   /** Repo-scoped installation token (spec §7.1): contents + pull_requests write, metadata read; checks + statuses + actions read so nax can see CI (#276; `gh pr checks` reads each check's workflow run). */
   async mintInstallationToken(installationId: bigint, repoName: string): Promise<{ token: string; expiresAt: Date }> {
+    return this.mintScopedToken(installationId, repoName, { contents: 'write', pull_requests: 'write', metadata: 'read', checks: 'read', statuses: 'read', actions: 'read' });
+  }
+
+  /**
+   * Fleet S5b 1c-b-D3: the read-only counterpart of `mintInstallationToken`, for a PROJECT session that only
+   * clones and reads. Same endpoint and same error mapping; the grant is contents + metadata read only.
+   */
+  async mintReadOnlyToken(installationId: bigint, repoName: string): Promise<{ token: string; expiresAt: Date }> {
+    return this.mintScopedToken(installationId, repoName, { contents: 'read', metadata: 'read' });
+  }
+
+  private async mintScopedToken(
+    installationId: bigint,
+    repoName: string,
+    permissions: Record<string, 'read' | 'write'>,
+  ): Promise<{ token: string; expiresAt: Date }> {
     const minted = await this.http.request('POST', `${this.api}/app/installations/${installationId.toString()}/access_tokens`, this.headers(this.createAppJwt()), {
       repositories: [repoName],
-      permissions: { contents: 'write', pull_requests: 'write', metadata: 'read', checks: 'read', statuses: 'read', actions: 'read' },
+      permissions,
     });
     if (minted.status === 404) throw new RepoCheckException('app_not_installed');
     if (minted.status === 422 || minted.status === 403) throw new RepoCheckException('app_permissions_insufficient');

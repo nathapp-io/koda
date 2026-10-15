@@ -32,6 +32,30 @@ export interface KodaToolDescriptor {
 /** Fleet S5b §1: what the runner's assign parser and the API's descriptor catalog both enforce. */
 export const KODA_TOOL_LIMITS = { maxTools: 32, nameRe: /^koda_[a-z][a-z_]{0,58}$/ } as const;
 
+/**
+ * Fleet S5b 1c-b §1: the caps a PROJECT session's repository list respects. `maxRepos` repositories are
+ * fetchable per session; `maxUnavailable` unavailable entries are kept. The API mirrors these values in
+ * apps/api/src/fleet/common/thread-jobs.ts and a spec pins the two equal (the production image does not
+ * ship workspace packages).
+ */
+export const PROJECT_CODE_LIMITS = { maxRepos: 10, maxUnavailable: 50 } as const;
+
+/** One repository of a PROJECT session's code context: what to clone and where from. */
+export interface ProjectRepoAssign {
+  repoId: string;
+  owner: string;
+  name: string;
+  defaultBranch: string;
+  cloneUrl: string;
+}
+
+/** A project repository the session cannot read, with the reason the agent is told. */
+export interface ProjectRepoUnavailable {
+  owner: string;
+  name: string;
+  reason: 'not a GitHub repository' | 'no installation' | 'limit';
+}
+
 export interface ThreadSkill { name: string; dir: string; description: string }
 export interface ThreadSkillSource { sourceId: string; owner: string; repo: string; sha: string; skills: ThreadSkill[] }
 
@@ -56,6 +80,13 @@ export interface ThreadAssign {
   title?: string;
   /** Fleet S5b §1: the koda tools the session exposes; present only for a SESSION on a runner advertising `kodaTools`. */
   kodaTools?: KodaToolDescriptor[];
+  /**
+   * Fleet S5b 1c-b: the project's repositories a PROJECT SESSION reads, when the runner advertises
+   * `projectCode`. At most PROJECT_CODE_LIMITS.maxRepos entries; absent when the runner lacks the capability.
+   */
+  projectRepos?: ProjectRepoAssign[];
+  /** Fleet S5b 1c-b: project repositories this session cannot read; at most PROJECT_CODE_LIMITS.maxUnavailable. */
+  projectReposUnavailable?: ProjectRepoUnavailable[];
 }
 
 export interface ThreadInputPayload { messageId: string; text: string }
