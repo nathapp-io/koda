@@ -87,6 +87,41 @@ describe('maskSecrets (US-001 AC5-AC11)', () => {
   it('B2: masks a bracketed value under a secret-named key without eating the text after it', () => {
     expect(maskSecrets('password: {"a":1} then words')).toBe('password: [masked] then words');
   });
+
+  it('B4: masks the unquoted suffix that follows a bracketed secret value, up to the next whitespace', () => {
+    const out = maskSecrets('DB_PASSWORD=[abc]hunter2 next');
+    expect(out).toBe('DB_PASSWORD=[masked] next');
+    expect(out).not.toContain('hunter2');
+  });
+
+  it('B4: masks the unquoted suffix that follows a brace-prefixed secret value, up to the next separator', () => {
+    const out = maskSecrets('API_KEY={x}secret;rest');
+    expect(out).toBe('API_KEY=[masked];rest');
+    expect(out).not.toContain('secret');
+  });
+
+  it('B4: keeps a JSON key that follows a bracketed secret value after its separator', () => {
+    expect(maskSecrets('{"apiKey":{"a":1},"other":2}')).toBe('{"apiKey":[masked],"other":2}');
+  });
+
+  it('B4: masks an enclosing closing brace that directly follows a bracketed secret value (over-masks, never leaks)', () => {
+    expect(maskSecrets('{"password":{"a":1}}')).toBe('{"password":[masked]');
+  });
+
+  it('B4: still masks a nested secret inside a bracketed value of a non-secret key', () => {
+    expect(maskSecrets('{"config":{"apiKey":"x"}}')).toBe('{"config":{"apiKey":"[masked]"}}');
+  });
+
+  it('B4: masks the unquoted suffix that follows a quoted secret value, up to the next whitespace', () => {
+    const out = maskSecrets('DB_PASSWORD="abc"hunter2 next');
+    expect(out).toBe('DB_PASSWORD="[masked]" next');
+    expect(out).not.toContain('hunter2');
+  });
+
+  it('B4: keeps the JSON closers and separators that follow a quoted secret value', () => {
+    expect(maskSecrets('{"config":{"apiKey":"abc123"}}')).toBe('{"config":{"apiKey":"[masked]"}}');
+    expect(maskSecrets('{"servers":["x",{"password":"a"}],"token":"b";c')).toBe('{"servers":["x",{"password":"[masked]"}],"token":"[masked]";c');
+  });
 });
 
 describe('fenceData (US-001 AC12-AC13)', () => {

@@ -82,11 +82,21 @@ function bareEnd(text: string, start: number): number {
   return i;
 }
 
-/** The end (exclusive) of the value that starts at `start`, by the value's own shape (spec §1 step 4). */
+/**
+ * The end (exclusive) of the value that starts at `start`, by the value's own shape (spec §1 step 4). A `{...}` /
+ * `[...]` value is followed by any unquoted suffix (`[abc]hunter2`), which runs on to the next VALUE_STOP like a bare
+ * value. That suffix may also swallow an enclosing closer (`{"password":{"a":1}}` masks the outer `}` too): stopping
+ * at a closer would leak the suffix text after it (`[abc]hun}ter2`), so the over-mask is the safe side. A `"`-quoted
+ * value is followed by its unquoted suffix too (`"abc"hunter2`), unless a JSON closer comes right after the quote.
+ */
 function valueEnd(text: string, start: number): number {
   const first = text[start];
-  if (first === '"') return quotedEnd(text, start);
-  if (first === '{' || first === '[') return bracketedEnd(text, start);
+  if (first === '"') {
+    const end = quotedEnd(text, start);
+    const next = text[end];
+    return next === undefined || next === '}' || next === ']' ? end : bareEnd(text, end);
+  }
+  if (first === '{' || first === '[') return bareEnd(text, bracketedEnd(text, start));
   return bareEnd(text, start);
 }
 
