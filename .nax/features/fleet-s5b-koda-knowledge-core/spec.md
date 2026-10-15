@@ -64,7 +64,7 @@ Decisions grounded in the code (this spec):
   timeout or any GitHub error the service uses the cached text when one exists (even when stale) and otherwise renders
   the repository section as unavailable. The project brief from the database is always rendered.
 - 1c-D6 (caps and masking): `Project.brief` is at most 3000 characters (validated on update). The repository context is
-  cut at 8192 UTF-8 bytes with `capText` from `apps/api/src/fleet/assistant/assistant-tool-safety.ts` and passed
+  cut at 10240 UTF-8 bytes with `capText` from `apps/api/src/fleet/assistant/assistant-tool-safety.ts` and passed
   through `maskSecrets` from the same file. The brief and the context file are guidance the project's admins and
   repository writers control, so they are not fenced.
 - 1c-D7 (tool group): both tools live in a new injectable `KnowledgeTools`
@@ -185,7 +185,7 @@ instructions are exactly as today.
 | Neither `.nax/context.md` nor `AGENTS.md` exists | `unavailable (no context file)` | US-002 |
 | GitHub read exceeds 3000 ms | cached text with `, cached`, else `unavailable (timeout)`; message still sent | US-002 |
 | GitHub read throws | cached text with `, cached`, else `unavailable (read failed)`; logged at warn | US-002 |
-| Context file over 8192 bytes | cut by `capText`, ending `[truncated]` | US-002 |
+| Context file over 10240 bytes | cut by `capText`, ending `[truncated]` | US-002 |
 | Memory `text` empty or over 100 chars, unknown `kind` / `status`, bad `page` | `invalid_input: <field>` | US-004 |
 | Timeline `ticket` not `KEY-N`, `days` out of 1-90, empty or unknown `eventTypes`, bad `cursor` length | `invalid_input: <field>` | US-005 |
 | Timeline `ticket` of another project or missing | `not_found` | US-005 |
@@ -358,7 +358,7 @@ list.
 10. [unit] Two `resolve` calls 400 seconds apart where `getBranchHead` returns a new sha the second time call `getFile` again and the second block holds the new file text and the new sha7.
 11. [unit] `resolve` when `getBranchHead` never settles returns within 3500 ms (fake timers advanced by 3000 ms) a block ending with `Repository context: unavailable (timeout)` and still holding the project brief.
 12. [unit] `resolve` after a successful read, when a later read (past 300 seconds) throws, returns the earlier file text under a header ending `@ <sha7>, cached):`.
-13. [unit] `resolve` when `.nax/context.md` holds 9000 bytes of 60-byte ASCII lines returns a repository section of at most 8192 UTF-8 bytes ending with the line `[truncated]`.
+13. [unit] `resolve` when `.nax/context.md` holds 9000 bytes of 60-byte ASCII lines returns a repository section of at most 10240 UTF-8 bytes ending with the line `[truncated]`.
 14. [unit] `resolve` when `.nax/context.md` holds `DB_PASSWORD=hunter2 x` returns a block holding `DB_PASSWORD=[masked] x` and not `hunter2`.
 
 ### US-003: Brief block in thread instructions (`Workdir: apps/api`)
