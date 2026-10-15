@@ -195,6 +195,9 @@ const ctx = (over: Partial<ToolContext> = {}): ToolContext => ({
   ...over,
 });
 
+/** The three lines `ctx.data` produces in these tests. */
+const fence = (text: string): string[] => ['<<koda-data-0000000000000000>>', text, '<<end-koda-data-0000000000000000>>'];
+
 /**
  * The tools' execute paths against mocked services: the project scope, the filters, the emitted fields and the
  * log header. The PG-backed integration spec covers the same behaviour against real rows.
@@ -310,6 +313,28 @@ describe('fleet read tools execute (US-004)', () => {
     expect(content).toContain('- online: false enabled: false projectThreads: true');
     expect(fencedLines(content)).toEqual(['box-a', 'linux, gpu', 'box-b']);
     expect(content).toContain('labels: (none)');
+  });
+
+  it('koda_runner_status answers one bulleted block per runner, status line first', async () => {
+    const listSummaries = vi.fn(async () => ({
+      records: [
+        { name: 'box-a', labels: ['linux', 'gpu'], online: true, enabled: true, projectThreads: false },
+        { name: 'box-b', labels: [], online: false, enabled: false, projectThreads: true },
+      ],
+      hasNext: false,
+    }));
+    const tool = runnerStatusTool({ listSummaries } as unknown as RunnersService);
+    const content = await tool.execute(ctx(), {});
+
+    // The exact wire format, so a reader of the result (agent or spec helper) can split on the bullet.
+    expect(content.split('\n')).toEqual([
+      '- online: true enabled: true projectThreads: false',
+      'name:', ...fence('box-a'),
+      'labels:', ...fence('linux, gpu'),
+      '- online: false enabled: false projectThreads: true',
+      'name:', ...fence('box-b'),
+      'labels: (none)',
+    ]);
   });
 
   it('koda_job_log_excerpt reads backward, prints the scan header and fences each entry text', async () => {

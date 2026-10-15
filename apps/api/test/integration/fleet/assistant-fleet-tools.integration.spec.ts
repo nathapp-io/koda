@@ -50,11 +50,14 @@ function fencedLines(content: string): string[] {
   return values;
 }
 
-/** One block per runner of a `koda_runner_status` result: it starts at the runner's `- online: …` line. */
+/**
+ * One block per runner of a `koda_runner_status` result: a block starts at the runner's status line, with the
+ * `- ` bullet of the wire format stripped so its first line is the status itself.
+ */
 function runnerBlocks(content: string): string[] {
   const blocks: string[] = [];
   for (const line of content.split('\n')) {
-    if (line.startsWith('- online: ')) blocks.push(line);
+    if (line.startsWith('- online: ')) blocks.push(line.slice('- '.length));
     else if (blocks.length > 0) blocks[blocks.length - 1] += `\n${line}`;
   }
   return blocks;
@@ -226,6 +229,8 @@ describeIntegration('fleet assistant fleet tools (PG, US-004)', () => {
     const result = await call('ac9', 'koda_runner_status', {});
     expect(result.isError).toBe(false);
     const blocks = runnerBlocks(result.content);
+    // One block per runner row: the enrolled box-a and the ten-minute-old box-offline.
+    expect(blocks).toHaveLength(await prisma.runner.count());
     const blockFor = (name: string) => blocks.find((block) => fencedLines(block).includes(name));
     // Each block's first line is the runner's status; its name is fenced under `name:`.
     expect(blockFor('box-a')?.split('\n')[0]).toBe('online: true enabled: true projectThreads: false');
