@@ -19,7 +19,7 @@ import { BudgetGate } from '../budgets/budget-gate';
 import { jobGateKeys } from '../budgets/budget-rules';
 import { BudgetPausedException } from '../budgets/budget.exceptions';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
-import { buildThreadInstructions } from './thread-instructions';
+import { buildProjectThreadInstructions, buildThreadInstructions } from './thread-instructions';
 import { sendRefusal, type ThreadSendRefusal } from './thread-send-rules';
 import { allocateThreadSeq, repoThreadFields, type ChatMessageRecord, type ChatThreadRecord, type ChatThreadRepository, type ThreadSession, type ThreadWriteResult } from './domain/chat-thread.domain';
 import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
@@ -100,7 +100,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       select: { id: true, state: true, leaseEpoch: true },
     });
     const result = await this.sendRefusalFor({
-      id: thread.id, status: thread.status, runnerId: thread.runnerId, repoId: thread.repoId, projectId,
+      id: thread.id, kind: thread.kind, status: thread.status, runnerId: thread.runnerId, repoId: thread.repoId, projectId,
       costUsd: new Prisma.Decimal(thread.costUsd), maxCostUsd: new Prisma.Decimal(thread.maxCostUsd),
     }, job);
     return result.refusal;
@@ -316,8 +316,9 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
         await this.prisma.client.chatMessage.update({ where: { id: message.id }, data: { jobId: job.id, turnId: job.id } });
         const linkedMessage = { ...message, jobId: job.id, turnId: job.id };
         await this.jobs.appendEvent(job.id, { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });
+        // The job names where it runs: a PROJECT thread's job carries the anchor repo, not the thread's null repo fields.
         await this.activity.record({ actorType: 'USER', actorId: input.userId, action: 'job.dispatched', entityType: 'job', entityId: job.id, jobId: job.id,
-          projectId: thread.projectId, responsibleUserId: input.userId, payload: { repoId: thread.repoId, feature: `thread-${thread.id}`, command: 'THREAD', ref: thread.baseRef } });
+          projectId: thread.projectId, responsibleUserId: input.userId, payload: { repoId: job.repoId, feature: `thread-${thread.id}`, command: 'THREAD', ref: job.ref } });
         return { kind: 'done' as const, result: { message: linkedMessage, jobId: job.id, deduplicated: false }, placeJobId: job.id };
       });
       if (outcome.kind === 'retry') continue;
@@ -329,9 +330,12 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
   }
 
   /** The facts `sendRefusal` judges, read under the thread and job locks. Writes nothing. */
-  private async sendRefusalFor(thread: { id: string; status: string; costUsd: Prisma.Decimal; maxCostUsd: Prisma.Decimal; runnerId: string | null; projectId: string; repoId: string | null }, job: { id: string; state: string; leaseEpoch: number } | null): Promise<SendRefusalResult> {
+  private async sendRefusalFor(thread: { id: string; kind?: string; status: string; costUsd: Prisma.Decimal; maxCostUsd: Prisma.Decimal; runnerId: string | null; projectId: string; repoId: string | null }, job: { id: string; state: string; leaseEpoch: number } | null): Promise<SendRefusalResult> {
+    // A PROJECT thread owns no repo, so its budget gate is scoped to the anchor repo its job will run on (S5b-R13);
+    // a project without a fleet repo gates no repo scope at all. The missing anchor is not a send refusal (US-004).
+    const gateRepoId = mapThreadKind(thread.kind) === 'PROJECT' ? (await this.anchorRepoFor(thread.projectId))?.id ?? null : thread.repoId;
     const pauses = await this.budgets.snapshot(new Date());
-    const pausedPolicy = pauses.match(jobGateKeys({ projectId: thread.projectId, repoId: thread.repoId, pinnedRunnerId: thread.runnerId }));
+    const pausedPolicy = pauses.match(jobGateKeys({ projectId: thread.projectId, repoId: gateRepoId, pinnedRunnerId: thread.runnerId }));
     const runnerRow = thread.runnerId ? await this.prisma.client.runner.findUnique({ where: { id: thread.runnerId }, select: { lastSeenAt: true, protocolVersion: true } }) : null;
     const closeCommand = job ? await this.prisma.client.fleetCommand.findFirst({ where: { jobId: job.id, type: FleetCommandType.THREAD_CLOSE, leaseEpoch: job.leaseEpoch }, select: { id: true } }) : null;
     const turnInFlight = await this.prisma.client.chatMessage.findFirst({ where: { threadId: thread.id, status: { in: ['pending', 'streaming'] } }, select: { id: true } });
@@ -369,22 +373,21 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
   }
 
   /**
-   * Creates the THREAD job of a REPO thread and its turn. The guard is the last line before the write: a PROJECT
-   * thread has no repo to check out, so it answers 409 `threads.notRepoThread` (the PROJECT branch is US-004).
+   * Creates a thread's THREAD job and its turn. A REPO thread runs on its own repo and is told to draft the feature's
+   * spec there; a PROJECT thread has no repo to check out, so its job lands on the project's anchor repo — bookkeeping
+   * for placement, budgets, dashboards and activity (S5b-R13) — and is told it has no repository. A project with no
+   * fleet repo cannot run one: 409 `threads.noFleetRepo`.
    */
   private async createThreadJob(thread: Prisma.ChatThreadGetPayload<object>, action: ThreadAction, message?: ChatMessageRecord) {
-    const { repoId, baseRef, feature, specPath } = repoThreadFields(thread);
-    const repo = await this.prisma.client.fleetRepo.findUnique({ where: { id: repoId }, select: { owner: true, name: true } });
-    if (!repo) throw new NotFoundAppException({}, 'fleet.repos');
-    const previousSession = action === 'SESSION' ? await this.prisma.client.fleetThreadTurn.findFirst({ where: { threadId: thread.id, action: 'SESSION' }, select: { jobId: true } }) : null;
     const skills = thread.skills as unknown as ThreadSkillSource[];
     const backend = thread.backend as unknown as ThreadBackend;
-    const instructions = buildThreadInstructions({ repo: `${repo.owner}/${repo.name}`, baseRef, feature, specPath, skills });
+    const target = await this.jobTargetFor(thread);
+    const previousSession = action === 'SESSION' ? await this.prisma.client.fleetThreadTurn.findFirst({ where: { threadId: thread.id, action: 'SESSION' }, select: { jobId: true } }) : null;
     const remaining = new Prisma.Decimal(thread.maxCostUsd).minus(thread.costUsd);
     let job;
     try {
       job = await this.jobs.createJob({
-        projectId: thread.projectId, repoId, ref: baseRef, command: 'THREAD', threadId: thread.id,
+        projectId: thread.projectId, repoId: target.repoId, ref: target.ref, command: 'THREAD', threadId: thread.id,
         feature: `thread-${thread.id}`, planFrom: null, profiles: [], maxCostUsd: action === 'SESSION' ? remaining.toString() : '0', bashMode: 'raw',
         approvalTimeoutSec: DEFAULT_APPROVAL_TIMEOUT_SEC, selectorLabels: [], pinnedRunnerId: thread.runnerId,
         requestedById: thread.createdById,
@@ -394,11 +397,40 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       throw error;
     }
     await this.prisma.client.fleetThreadTurn.create({ data: {
-      jobId: job.id, threadId: thread.id, action, initialMessageId: message?.id ?? null, instructions,
+      jobId: job.id, threadId: thread.id, action, initialMessageId: message?.id ?? null, instructions: target.instructions,
       backend: backend as Prisma.InputJsonValue, skills: skills as unknown as Prisma.InputJsonValue,
       resume: action === 'SESSION' && previousSession !== null,
     } });
     return job;
+  }
+
+  /** Where a THREAD job runs and what its agent is told: the thread's own repo, or the project anchor for a PROJECT thread. */
+  private async jobTargetFor(thread: Prisma.ChatThreadGetPayload<object>): Promise<{ repoId: string; ref: string; instructions: string }> {
+    const skills = thread.skills as unknown as ThreadSkillSource[];
+    if (mapThreadKind(thread.kind) === 'PROJECT') {
+      const anchor = await this.anchorRepoFor(thread.projectId);
+      if (!anchor) throw new ConflictAppException({}, 'threads.noFleetRepo');
+      const project = await this.prisma.client.project.findUnique({ where: { id: thread.projectId }, select: { slug: true } });
+      if (!project) throw new NotFoundAppException({}, 'projects');
+      return { repoId: anchor.id, ref: anchor.defaultBranch, instructions: buildProjectThreadInstructions({ project: project.slug, skills }) };
+    }
+    const { repoId, baseRef, feature, specPath } = repoThreadFields(thread);
+    const repo = await this.prisma.client.fleetRepo.findUnique({ where: { id: repoId }, select: { owner: true, name: true } });
+    if (!repo) throw new NotFoundAppException({}, 'fleet.repos');
+    return { repoId, ref: baseRef, instructions: buildThreadInstructions({ repo: `${repo.owner}/${repo.name}`, baseRef, feature, specPath, skills }) };
+  }
+
+  /**
+   * The project's anchor repo (S5b-R13), with the same rule as `IFleetRepoRepository.findAnchor`: the oldest repo by
+   * `createdAt`, ties broken by the smallest `id`. The anchor is bookkeeping only — placement, budget keys, dashboards
+   * and activity — and the runner neither clones nor fetches it.
+   */
+  private anchorRepoFor(projectId: string) {
+    return this.prisma.client.fleetRepo.findFirst({
+      where: { projectId },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: { id: true, defaultBranch: true },
+    });
   }
 
   private async currentThreadJob(threadId: string) {

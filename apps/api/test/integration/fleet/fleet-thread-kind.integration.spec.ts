@@ -135,13 +135,6 @@ describeIntegration('fleet thread kind (PG, US-002)', () => {
     expect(thread.createdById).toBe(world.ids.dev);
   });
 
-  it('a PROJECT thread send answers the kind refusal until US-004 adds the PROJECT session branch', async () => {
-    const thread = await projectThread();
-    const res = await request(server).post(`/api/projects/web/threads/${thread.id}/messages`).set(asDev())
-      .send({ text: 'hello', clientMessageId: 'cm-project-1' }).expect(409);
-    expect(res.body.message).toBe('This action needs a repository thread');
-  });
-
   describe('the migration itself', () => {
     let scratch: ScratchSchema;
     const schema = 'chat_thread_kind_mig';
