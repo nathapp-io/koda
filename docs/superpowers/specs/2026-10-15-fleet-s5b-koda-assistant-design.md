@@ -1,7 +1,8 @@
 # Fleet S5b: koda assistant in threads (design)
 
 Status: design approved in brainstorming 2026-10-15; revised after one read-only codebase review (2 BLOCKER, 9 MAJOR,
-6 MINOR, all addressed below; revision 1). Umbrella design: delivery is six nax features, each with its own spec, PRD
+6 MINOR, all addressed below; revision 1); revision 2 adds WORKSPACE threads and the anchor repo (S5b-R12, R13).
+Umbrella design: delivery is seven nax features, each with its own spec, PRD
 and run (section 10). File:line references are against koda main `22c825c5`.
 
 ## 1. Goal
@@ -37,21 +38,39 @@ Design decisions taken in the review revision (revision 1):
 - **S5b-R6 Permissions are CASL, per tool.** Each tool names the exact CASL tuple or `@ProjectRoles` its REST route
   enforces (section 7 table); the executor evaluates it with `KodaCaslAbilityFactory` for the acting user's principal.
   No role-string comparison.
-- **S5b-R7 Project id is never taken from tool input.** The executor sets `projectId` from the thread (or the MCP
-  key's project) and checks that every referenced id (repo, job, ticket, approval, KB doc, memory item) belongs to that
-  project before the permission check.
+- **S5b-R7 The executor owns the project scope.** REPO and PROJECT threads: the executor sets `projectId` from the
+  thread and any `project` argument is refused. WORKSPACE threads (S5b-R12): every project-scoped tool requires a
+  `project` slug argument, which the executor resolves and checks against the creator's project memberships on every
+  call. In both cases every referenced id (repo, job, ticket, approval, KB doc, memory item) must belong to the
+  resolved project before the permission check. The registry and executor are built project-aware from S5b-1b on.
 - **S5b-R8 Approvals get an `assistant_action` branch, not the budget branch.** Own decisions (`approve` | `reject`),
   own permission function, own expiry sweep, notification to the thread creator only (section 8).
-- **S5b-R9 Placement capability `threadKoda`.** A protocol-v5 runner advertises `threadKoda: true`. PROJECT threads are
-  placed only on such runners; REPO threads may run on a runner without it and then show a thread notice
-  "koda tools unavailable on runner <name>". PROJECT threads with an ACP backend are refused at creation (ACP sessions
-  get no tools, nax#2444).
+- **S5b-R9 Two placement capabilities, no protocol version bump.** `projectThreads: true` (S5b-1a): the runner can
+  host a thread with no checkout; PROJECT and WORKSPACE thread jobs are placed only on such runners. `kodaTools: true`
+  (S5b-1b): the runner builds koda tool proxies; REPO threads may run on a runner without it and then show a thread
+  notice "koda tools unavailable on runner <name>". The ASSIGN changes are additive optional fields, gated by these
+  capabilities, so `FLEET_PROTOCOL_VERSION` stays 4. PROJECT and WORKSPACE threads with an ACP backend are refused at
+  creation (ACP sessions get no tools, nax#2444).
 - **S5b-R10 Action outcomes reach the agent through the next user message.** No new server-to-session command.
   Undelivered outcome notes are attached to the next THREAD_INPUT the user sends (rendered before the user's text),
   and `koda_get_action` lets the agent check an action on demand. Notes are stored as thread messages of a new
   `system` role so the transcript and resume carry them.
-- **S5b-R11 Split into six nax features** (section 10), because the story-size gate is 15 ACs per story
+- **S5b-R11 Split into seven nax features** (section 10), because the story-size gate is 15 ACs per story
   (`.nax/config.json:63-67`) and S5b-1 as first drafted could not fit one feature.
+
+User, 2026-10-15 (during S5b-1a spec-writing):
+
+- **S5b-R12 WORKSPACE threads (app-wide), personal.** A third thread kind for questions across projects ("which
+  projects have pending tickets?"). Only its creator can list, read or act on it (a project thread is readable by
+  project members, so it must never carry another project's data). It lives at a top-level `/threads` page, tools take
+  a validated `project` argument (S5b-R7), and a `koda_my_projects` read tool lists the creator's projects with open
+  ticket, failed job and pending approval counts. Delivered as its own feature after the read tools, before writes.
+- **S5b-R13 Anchor repo and home project for bookkeeping.** `FleetJob.repoId` and `FleetJob.projectId` stay required.
+  A PROJECT thread's jobs use the project's oldest fleet repo (by `createdAt`, then id) as an anchor; a WORKSPACE
+  thread's jobs use a home project chosen at creation (default: the creator's first project that has a fleet repo)
+  and that project's anchor repo. The anchor is used only for placement, budget keys and dashboards; the runner never
+  clones, fetches or touches it, and no git token is requested. `ChatThread.repoId` stays null for PROJECT and
+  WORKSPACE threads, so deleting a repo never deletes those threads.
 
 ## 3. Research summary (2026-10-15)
 
@@ -112,32 +131,35 @@ Units and their single purpose:
 - **PROJECT-thread job path** (api, protocol, runner): a THREAD job with no repo (section 5).
 - **Web**: scope picker on the new-thread form, citation links, PendingAction cards, inbox rows.
 
-## 5. Thread kinds and PROJECT job shape
+## 5. Thread kinds and job shape
 
-`ChatThread` gains `kind` (`REPO` | `PROJECT`, default `REPO`; existing rows backfill to `REPO`). `repoId`, `baseRef`,
-`feature` and `specPath` become nullable (`schema.prisma:1058-1095`). A check constraint, added in raw SQL in the
-migration as the existing partial indexes are, enforces: `REPO` has all four set, `PROJECT` has none set.
+`ChatThread` gains `kind` (`REPO` | `PROJECT` | `WORKSPACE`, default `REPO`; existing rows backfill to `REPO`).
+`repoId`, `baseRef`, `feature` and `specPath` become nullable (`schema.prisma:1058-1095`). A check constraint, added in
+raw SQL in the migration as the existing partial indexes are, enforces: `REPO` has all four set; `PROJECT` and
+`WORKSPACE` have none set. `projectId` stays required: the thread's project for REPO / PROJECT, the home project for
+WORKSPACE (S5b-R13). The existing partial unique index on active `(repoId, feature)` admits many rows with a null
+`repoId`, so it needs no change.
 
-A PROJECT thread still runs as a THREAD fleet job. The repo-shaped job plumbing changes as follows:
+Visibility: REPO and PROJECT threads keep S5a's rule (project members read, the creator acts). WORKSPACE threads are
+creator-only: the project thread list and detail routes never return them; they are served by top-level `/threads`
+routes (WORKSPACE feature).
+
+Every thread runs as a THREAD fleet job. `FleetJob` is unchanged: `repoId`, `ref`, `feature` stay required (S5b-R13).
 
 | Place | Today | Change |
 |---|---|---|
-| `FleetJob.repoId`, `ref` (`schema.prisma:955-958`) | non-null | nullable; non-null for every command except a PROJECT THREAD job (service-level invariant + check constraint) |
-| `FleetJob.feature` | non-null | PROJECT THREAD job stores the literal `project-thread` |
-| Thread job creation (`prisma-chat-thread.repository.ts:356-367`) | `repoId: thread.repoId, ref: thread.baseRef` | PROJECT: both null |
-| Budget keys (`budgets/budget-rules.ts:40-47`) | always `repo:<id>` | omit the `repo:` key when repoId is null; project and global keys still apply |
-| ASSIGN payload (`fleet-protocol/src/index.ts:233`, builder `jobs/assign-payload.ts:27-44`) | `repo` required | v5: `repo` and `feature` optional; present iff the thread is REPO; adds `kodaTools: ToolDescriptor[]` |
-| Runner ASSIGN parser (`supervisor/assign-parser.ts:102-103`) | rejects a missing repo | v5: accepts a missing repo for THREAD only |
-| Runner thread run (`thread/thread-job-run.ts:265`, `:323`, `:355`) | always prepares a worktree; mutex key `repoKey` | PROJECT: no worktree, cwd = `<runner home>/threads/<threadId>/scratch`, mutex key `project:<threadId>` |
-| Runner tools (`thread/tools/index.ts:9-11`) | always the five repo tools | REPO: repo tools + koda proxies; PROJECT: `load_skill`, `read_skill_file` + koda proxies |
-| Thread activity payloads (`prisma-chat-thread.repository.ts:210`) and thread instructions (`:361`) | assume repo and feature | PROJECT variants (no repo, no feature, no spec path) |
-| Placement (`placement-rules.ts:108-123`) | thread backends only | PROJECT requires `threadKoda`; PROJECT + ACP backend refused at thread creation |
+| Thread job creation (`prisma-chat-thread.repository.ts:356-367`, `createThreadJob`) | `repoId: thread.repoId, ref: thread.baseRef`, `feature: thread-<id>` | PROJECT / WORKSPACE: `repoId` = the anchor repo, `ref` = the anchor's default branch, `feature` = `thread-<id>` (unchanged); no fleet repo -> 409 `threads.noFleetRepo` |
+| Budget keys (`budgets/budget-rules.ts:40-47`) | `repo:<id>` from the job | unchanged; the anchor repo's scope applies (documented, accepted) |
+| Thread instructions (`thread-instructions.ts`, built in `createThreadJob`) | repo + feature + spec path | PROJECT / WORKSPACE variant: names the project, no repo, no spec path, no `write_doc` |
+| ASSIGN `thread` block (`fleet-protocol/src/threads.ts`, `ThreadAssign`) | `feature` required | adds optional `kind`; `feature` optional and absent for PROJECT / WORKSPACE |
+| Runner ASSIGN parser (`supervisor/assign-parser.ts:148-188`) | requires `thread.feature` | accepts a missing `feature` only with `kind` PROJECT or WORKSPACE |
+| Runner thread run (`thread/thread-job-run.ts:217-330`) | acquires git credentials, prepares a worktree, opens live publish | PROJECT / WORKSPACE: no credentials, no worktree, no live publish; session cwd = `<runner home>/threads/<threadId>/scratch` (created empty; pruned with the thread dir) |
+| Runner tools (`thread/tools/index.ts:9-11`) | always the five repo tools | PROJECT / WORKSPACE: `load_skill`, `read_skill_file`; koda proxies added in S5b-1b |
+| Placement (`placement-rules.ts:108-123`) | thread backends only | PROJECT / WORKSPACE jobs need `projectThreads`; ACP backend refused at thread creation |
+| Capabilities (`capabilities-core.ts:121-158`, runner `nax-probe.ts:156-170`) | `threadWrite`, `configJobs` | adds `projectThreads: true` (S5b-1a) and `kodaTools: true` (S5b-1b), strict like `threadWrite` |
 
-PROJECT threads have no Publish, Discard, Plan or Run: the web hides them and the API answers 409 with a new i18n key
-`fleet.threadNotRepo` (en + zh). REPO threads keep all S5a behaviour.
-
-Protocol: `FLEET_PROTOCOL_VERSION` 4 -> 5 (`fleet-protocol/src/index.ts:9`); `SUPPORTED_FLEET_PROTOCOL_VERSIONS` gains 5
-(`fleet/common/protocol.ts:56`); `threadKoda` is parsed in `capabilities-core.ts:121-158`.
+PROJECT and WORKSPACE threads have no Publish, Discard, Plan or Run: the web hides them and the API answers 409 with a
+new i18n key `threads.notRepoThread` (en + zh). REPO threads keep all S5a behaviour.
 
 ## 6. Tool route and executor contract
 
@@ -267,12 +289,13 @@ Failure handling:
 
 | # | Feature | Packages | Content |
 |---|---|---|---|
-| 1 | `fleet-s5b-project-threads` (S5b-1a) | api, protocol, runner, web | PROJECT kind end to end with no koda tools: migration (ChatThread + FleetJob nullability, check constraints), budget keys, ASSIGN v5 + parser, `threadKoda` capability + placement, no-worktree runner path, `fleet.threadNotRepo`, web scope picker, PROJECT variants of activity / instructions |
-| 2 | `fleet-s5b-koda-read-core` (S5b-1b) | api, runner | registry, executor (ability, project ids, caps, masking, fencing, idempotency), runner tool route + lease check, audit, ASSIGN `kodaTools`, runner proxies, ticket + fleet read tools |
+| 1 | `fleet-s5b-project-threads` (S5b-1a) | api, protocol, runner, web | PROJECT kind end to end with no koda tools: migration (`kind`, nullable repo fields, check constraint), anchor repo for the job, `projectThreads` capability + placement, ASSIGN `thread.kind` + optional `feature`, no-checkout runner path, `threads.notRepoThread` / `threads.noFleetRepo`, PROJECT instructions, web scope picker and hidden handoff actions |
+| 2 | `fleet-s5b-koda-read-core` (S5b-1b) | api, runner | registry, project-aware executor (ability, project resolution per S5b-R7, ids, caps, masking, fencing, idempotency), runner tool route + lease check, audit, ASSIGN `kodaTools` + `kodaTools` capability, runner proxies, ticket + fleet read tools |
 | 3 | `fleet-s5b-koda-read-knowledge` (S5b-1c) | api, web | KB / context / memory / timeline read tools, citations in the web, system prompt additions |
-| 4 | `fleet-s5b-koda-actions` (S5b-2a) | api, web | PendingAction, `assistant_action` approvals branch + sweeper + notifications + list exposure, `system` messages, outcome delivery via THREAD_INPUT, `koda_get_action`, confirmation card |
-| 5 | `fleet-s5b-koda-write-tools` (S5b-2b) | api | all write tools from section 7 |
-| 6 | `fleet-s5b-koda-mcp` (S5b-3) | api | streamable-HTTP MCP over the registry, user or agent API key (agent keys need the project roster; no delete), writes return `pending` |
+| 4 | `fleet-s5b-workspace-threads` (S5b-1d) | api, runner, web | WORKSPACE kind: creator-only visibility, top-level `/threads` routes and page, home project, `project` argument on tools, `koda_my_projects` |
+| 5 | `fleet-s5b-koda-actions` (S5b-2a) | api, web | PendingAction, `assistant_action` approvals branch + sweeper + notifications + list exposure, `system` messages, outcome delivery via THREAD_INPUT, `koda_get_action`, confirmation card |
+| 6 | `fleet-s5b-koda-write-tools` (S5b-2b) | api | all write tools from section 7 |
+| 7 | `fleet-s5b-koda-mcp` (S5b-3) | api | streamable-HTTP MCP over the registry, user or agent API key (agent keys need the project roster; no delete), writes return `pending` and take the `project` argument as WORKSPACE threads do |
 
 Each feature: spec-writing, spec-review, `nax plan` and `nax run` (both need approval), then deploy and a live check on
 koda-wk.
@@ -282,7 +305,7 @@ koda-wk.
 - api: per-tool unit tests (ability matrix VIEWER / DEVELOPER / ADMIN / non-member; foreign ids; caps; masking; fence
   token); executor idempotency; PendingAction state machine; DB-backed tests for the tool route (lease, epoch,
   UPLOADING refusal) and approve -> execute -> system note; migration test for the check constraints.
-- runner: PROJECT-thread start without a worktree; proxy tools against a scripted fake API; v5 ASSIGN parsing.
+- runner: PROJECT-thread start without a worktree; proxy tools against a scripted fake API; ASSIGN parsing of `thread.kind` and the optional `feature`.
 - web: scope picker, citation rendering, confirmation card; one Playwright journey per user-facing feature (PROJECT
   thread asks "which tickets are blocked", gets a cited answer; later proposes two tickets, approve, tickets exist).
 - Live check on koda-wk after each feature.
@@ -290,7 +313,7 @@ koda-wk.
 ## 12. Out of scope
 
 - MCP before S5b-3; ACP-backed threads (S5a phase D, still deferred; PROJECT + ACP refused).
-- Questions across projects (a thread sees only its project).
+- Questions across projects in REPO or PROJECT threads (those see only their project; cross-project questions belong to WORKSPACE threads, S5b-R12).
 - Text-to-SQL or any direct database access by the agent.
 - Editing a proposed action's input on the card (reject and ask again).
 - Write tools for admin-only objects; ticket delete.
