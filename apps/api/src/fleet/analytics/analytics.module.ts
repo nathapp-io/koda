@@ -17,5 +17,6 @@ import { FleetAnalyticsController } from './fleet-analytics.controller';
     PrismaAnalyticsRepository, { provide: ANALYTICS_REPOSITORY, useExisting: PrismaAnalyticsRepository },
     AnalyticsService,
   ],
+  exports: [AnalyticsService],
 })
 export class AnalyticsModule {}
