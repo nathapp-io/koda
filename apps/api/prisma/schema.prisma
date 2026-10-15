@@ -1026,6 +1026,7 @@ model FleetJob {
   storyResults        FleetStoryResult[]
   reviewResults       FleetReviewResult[]
   configEdit          FleetConfigEdit?
+  assistantToolCalls  AssistantToolCall[]
 
   @@index([state])
   @@index([runnerId, state])
@@ -1036,6 +1037,29 @@ model FleetJob {
   @@index([runnerId, firstStartedAt])
   @@index([scheduleId, queuedAt])
   @@index([threadId])
+}
+
+/// Fleet S5b §1 (US-002): the hash-only audit of one koda tool call a THREAD session made. The input is never stored,
+/// only its sha256; (jobId, toolCallId) is the replay key. Deleted with its job.
+model AssistantToolCall {
+  id          String   @id @default(cuid())
+  jobId       String
+  threadId    String
+  projectId   String
+  toolCallId  String // at most 200 chars
+  tool        String
+  inputHash   String // sha256 hex of the stable JSON of the raw input
+  outcome     String // ok | invalid_input | forbidden | not_found | error
+  content     String   @db.Text // the capped result
+  isError     Boolean
+  resultBytes Int
+  durationMs  Int
+  createdAt   DateTime @default(now())
+
+  job FleetJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, toolCallId])
+  @@index([threadId, createdAt])
 }
 
 /// Fleet S3 §1: the edit set of a CONFIG_EDIT / CONFIG_DRIFT job (D466). 1:1 with FleetJob.
@@ -1076,7 +1100,7 @@ model ChatThread {
   specPath        String? // .nax/features/<feature>/spec.md
   pendingQuestion Json? // { requestId, text, expiresAt }; written by B2
   session         Json? // S5a: the thread's session state, folded from the thread stream
-  writtenPaths    String[] @default([]) // S5a write path: distinct paths write_doc touched (capped at 200)
+  writtenPaths    String[]  @default([]) // S5a write path: distinct paths write_doc touched (capped at 200)
   publishedSha    String? // S5a write path: the sha of the last publish
   specPublished   Boolean   @default(false) // S5a write path: a publish has carried the feature spec
   lastWrite       Json? // S5a write path: ThreadWriteResult of the last Publish or Discard

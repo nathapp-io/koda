@@ -13,6 +13,7 @@ import { LogAppendHooks } from './logs/log-append-hooks';
 import { FleetLogRetentionProcessor } from './logs/fleet-log-retention.processor';
 import { AnalyticsService } from './analytics/analytics.service';
 import { FleetDashboardService } from './dashboard/dashboard.service';
+import { AssistantToolExecutor } from './assistant/assistant-tool.executor';
 import { GlobalStubsModule } from '../common/test-helpers/global-stubs.module';
 
 // GlobalStubsModule stands in for the global PrismaModule/CacheModule plus the
@@ -44,6 +45,7 @@ describe('FleetModule', () => {
     expect(module.get(AnalyticsService)).toBeDefined();
     expect(module.get(FleetDashboardService)).toBeDefined();
     expect(module.get(ConfigJobsService)).toBeDefined();
+    expect(module.get(AssistantToolExecutor, { strict: false })).toBeDefined();
   });
 
   it('binds the fake reader only when both test flags are on (S3 plan C11)', () => {

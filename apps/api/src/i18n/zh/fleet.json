@@ -46,5 +46,6 @@
   "forge": { "502": "代码托管平台未正确响应，请稍后重试" },
   "naxFile": { "404": "该文件在此提交中不存在", "422": "此文件无法在此编辑：{reason}" },
   "configJobActive": { "409": "该仓库已有进行中的配置任务：{activeJobId}" },
-  "configEditInput": { "-2": "配置编辑无效：{reason}" }
+  "configEditInput": { "-2": "配置编辑无效：{reason}" },
+  "assistantTool": { "404": "未知的 koda 工具" }
 }
