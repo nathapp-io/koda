@@ -89,6 +89,9 @@ const onDiscard = (): Promise<void> => runAction(() => controller.discard())
       <FleetThreadsThreadKodaToolsNotice
         :thread="controller.thread.value"
       />
+      <FleetThreadsThreadProjectCodeNotice
+        :thread="controller.thread.value"
+      />
       <FleetThreadsThreadActionBar
         :thread="controller.thread.value"
         :messages="controller.messages.value"

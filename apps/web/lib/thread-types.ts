@@ -57,6 +57,8 @@ export interface ThreadSession {
   stale?: true
   /** Set when the session's runner lacks koda tools capability (fleet S5b US-007). */
   kodaToolsUnavailableOn?: string
+  /** Set when a PROJECT session's runner lacks projectCode capability (fleet S5b 1c-b-D8). */
+  projectCodeUnavailableOn?: string
 }
 
 /**

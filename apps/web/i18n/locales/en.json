@@ -874,6 +874,9 @@
       },
       "kodaTools": {
         "unavailable": "koda tools are unavailable on runner {runner}; this session cannot read koda data."
+      },
+      "projectCode": {
+        "unavailable": "project code is unavailable on runner {runner}; this session cannot read the project's repositories."
       }
     },
     "common": {

@@ -874,6 +874,9 @@
       },
       "kodaTools": {
         "unavailable": "此运行器 {runner} 上无法使用 koda 工具；此会话无法读取 koda 数据。"
+      },
+      "projectCode": {
+        "unavailable": "此运行器 {runner} 上无法读取项目代码；此会话无法读取项目的代码仓库。"
       }
     },
     "common": {
