@@ -75,6 +75,8 @@ export interface TicketListFilters {
   assignedToUserId?: string;
   assignedToAgentId?: string;
   unassigned?: boolean;
+  /** S5b US-003 1b-R3: case-insensitive substring match on the title, used by the koda tool search. */
+  titleContains?: string;
 }
 
 export interface CreateTicketData {

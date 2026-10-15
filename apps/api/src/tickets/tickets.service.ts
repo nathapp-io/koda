@@ -25,7 +25,14 @@ import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
 import { allowedActions, canOverrideClose } from './state-machine/allowed-actions';
 import { TicketDetailResponseDto } from './dto/ticket-detail-response.dto';
 
-export type TicketListFilterInput = Omit<ListTicketsQuery, 'current' | 'size'> & { assignedToAgentId?: string };
+/**
+ * The list filters of `findAll`. `titleContains` is not on the REST `ListTicketsQuery` (S5b US-003): only the
+ * agent-facing koda search passes it.
+ */
+export type TicketListFilterInput = Omit<ListTicketsQuery, 'current' | 'size'> & {
+  assignedToAgentId?: string;
+  titleContains?: string;
+};
 
 interface AssignInput {
   userId?: string;
@@ -154,6 +161,7 @@ export class TicketsService {
         assignedToUserId: filters.assignedTo,
         assignedToAgentId: filters.assignedToAgentId,
         unassigned: filters.unassigned,
+        titleContains: filters.titleContains,
       },
       page,
     );
