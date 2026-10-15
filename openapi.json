@@ -16535,14 +16535,24 @@
           "id": {
             "type": "string"
           },
-          "repoId": {
+          "kind": {
+            "enum": [
+              "REPO",
+              "PROJECT"
+            ],
             "type": "string"
+          },
+          "repoId": {
+            "type": "string",
+            "nullable": true
           },
           "baseRef": {
-            "type": "string"
+            "type": "string",
+            "nullable": true
           },
           "feature": {
-            "type": "string"
+            "type": "string",
+            "nullable": true
           },
           "title": {
             "type": "string"
@@ -16582,7 +16592,8 @@
             "nullable": true
           },
           "specPath": {
-            "type": "string"
+            "type": "string",
+            "nullable": true
           },
           "pendingQuestion": {
             "type": "object",
@@ -16662,6 +16673,7 @@
         },
         "required": [
           "id",
+          "kind",
           "repoId",
           "baseRef",
           "feature",
@@ -16711,14 +16723,24 @@
           "id": {
             "type": "string"
           },
-          "repoId": {
+          "kind": {
+            "enum": [
+              "REPO",
+              "PROJECT"
+            ],
             "type": "string"
+          },
+          "repoId": {
+            "type": "string",
+            "nullable": true
           },
           "baseRef": {
-            "type": "string"
+            "type": "string",
+            "nullable": true
           },
           "feature": {
-            "type": "string"
+            "type": "string",
+            "nullable": true
           },
           "title": {
             "type": "string"
@@ -16758,7 +16780,8 @@
             "nullable": true
           },
           "specPath": {
-            "type": "string"
+            "type": "string",
+            "nullable": true
           },
           "pendingQuestion": {
             "type": "object",
@@ -16867,6 +16890,7 @@
         },
         "required": [
           "id",
+          "kind",
           "repoId",
           "baseRef",
           "feature",

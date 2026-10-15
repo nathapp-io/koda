@@ -77,6 +77,24 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
     );
   }
 
+  /** The repository's thread mapping, driven through get() with a stub Prisma row. */
+  function repoOfThreadRow(threadRow: Record<string, unknown>): PrismaChatThreadRepository {
+    const prisma = {
+      client: {
+        chatThread: { findFirst: vi.fn(async () => threadRow) },
+        fleetJob: { findFirst: vi.fn(async () => null) },
+      },
+    } as never;
+    return new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+  }
+
+  const threadRow = (over: Record<string, unknown> = {}) => ({
+    id: 'T', projectId: 'P', kind: 'REPO', repoId: 'R', baseRef: 'trunk', feature: 'f', title: 'x', createdById: 'U', runnerId: null,
+    backend: { kind: 'native' }, status: 'ACTIVE', archivedAt: null, skills: [], maxCostUsd: { toString: () => '5' },
+    costUsd: { toString: () => '0' }, tokens: null, specPath: 's', pendingQuestion: null, session: null,
+    lastActivityAt: new Date(0), createdAt: new Date(0), ...over,
+  });
+
   it('US-003 AC13: messages() returns rows without threadId, streamRound or streamRoundStart', async () => {
     const repo = repoWith(async () => [row]);
     const [message] = await repo.messages('T', 0, 100);
@@ -161,6 +179,25 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
     const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
     const thread = await repo.create({ projectId: 'P', repoId: 'R', baseRef: 'trunk', feature: 'f', title: 'x', createdById: 'U', backend: { kind: 'native' }, skills: [], maxCostUsd: '5' });
     expect(thread).toMatchObject({ writtenPaths: [], publishedSha: null, specPublished: false, lastWrite: null });
+  });
+
+  it('US-002: get() maps a PROJECT row to kind PROJECT with null repo fields', async () => {
+    const repo = repoOfThreadRow(threadRow({ kind: 'PROJECT', repoId: null, baseRef: null, feature: null, specPath: null }));
+    expect(await repo.get('P', 'T')).toMatchObject({
+      kind: 'PROJECT', repoId: null, baseRef: null, feature: null, specPath: null,
+    });
+  });
+
+  it('US-002: get() maps a row with no kind (written before the column) to kind REPO', async () => {
+    const withoutKind = threadRow();
+    delete withoutKind.kind;
+    const repo = repoOfThreadRow(withoutKind);
+    expect(await repo.get('P', 'T')).toMatchObject({ kind: 'REPO', repoId: 'R', feature: 'f' });
+  });
+
+  it('US-002: get() maps an unknown stored kind to kind REPO', async () => {
+    const repo = repoOfThreadRow(threadRow({ kind: 'WORKSPACE' }));
+    expect((await repo.get('P', 'T'))?.kind).toBe('REPO');
   });
 
   it('US-003 AC13: messages() passes the after-seq filter and limit to the query', async () => {

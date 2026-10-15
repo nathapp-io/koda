@@ -21,13 +21,16 @@ import { BudgetPausedException } from '../budgets/budget.exceptions';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
 import { buildThreadInstructions } from './thread-instructions';
 import { sendRefusal, type ThreadSendRefusal } from './thread-send-rules';
-import { allocateThreadSeq, type ChatMessageRecord, type ChatThreadRecord, type ChatThreadRepository, type ThreadSession, type ThreadWriteResult } from './domain/chat-thread.domain';
+import { allocateThreadSeq, repoThreadFields, type ChatMessageRecord, type ChatThreadRecord, type ChatThreadRepository, type ThreadSession, type ThreadWriteResult } from './domain/chat-thread.domain';
 import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
-import type { ThreadAction, ThreadBackend } from '../common/thread-jobs';
+import type { ChatThreadKind, ThreadAction, ThreadBackend } from '../common/thread-jobs';
 import { THREAD_LIMITS } from '../common/thread-jobs';
 
 /** The states a thread's current job is no longer live in (job-state.ts owns these). Prisma's `notIn` wants a mutable list. */
 const TERMINAL_JOB_STATES: string[] = ['COMPLETED', 'FAILED', 'CANCELLED', 'CRASHED', 'ESCALATED'];
+
+/** Only a stored `PROJECT` reads as one; anything else (missing on old rows, or unknown) is a REPO thread (US-002). */
+const mapThreadKind = (kind: string | null | undefined): ChatThreadKind => (kind === 'PROJECT' ? 'PROJECT' : 'REPO');
 
 /** A budget refusal carries the paused policy so the 409 names its scope. */
 type SendRefusalResult = { refusal: 'budgetPaused'; pausedPolicy: BudgetPolicyRecord } | { refusal: Exclude<ThreadSendRefusal, 'budgetPaused'> | null; pausedPolicy: null };
@@ -174,6 +177,8 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     const result = await this.txManager.run(async () => {
       const before = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId } });
       if (!before) throw new NotFoundAppException({}, 'threads.notFound');
+      // 1a-R3: Publish is REPO-only, and the guard runs before the creator check so a PROJECT thread answers 409.
+      const repoFields = repoThreadFields(before);
       if (before.createdById !== userId) throw new ForbiddenAppException({}, 'threads.notCreator');
       const current = await this.activeThreadJob(threadId);
       if (current) await this.jobs.lockById(current.id);
@@ -190,7 +195,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       if (!runner || !isRunnerOnline(runner.lastSeenAt, new Date(), this.config.runnerOfflineSec)) throw new ConflictAppException({}, 'threads.runnerOffline');
       const capabilities = runner.capabilities as { threadWrite?: unknown };
       if (runner.protocolVersion < THREAD_MIN_PROTOCOL_VERSION || capabilities.threadWrite !== true) throw new ConflictAppException({}, 'threads.runnerOutdated');
-      const pausedPolicy = this.budgets.snapshot(new Date()).then((snapshot) => snapshot.match(jobGateKeys({ projectId: thread.projectId, repoId: thread.repoId, pinnedRunnerId: thread.runnerId })));
+      const pausedPolicy = this.budgets.snapshot(new Date()).then((snapshot) => snapshot.match(jobGateKeys({ projectId: thread.projectId, repoId: repoFields.repoId, pinnedRunnerId: thread.runnerId })));
       const paused = await pausedPolicy;
       if (paused) throw new BudgetPausedException(paused);
       if (active?.command === 'THREAD' && active.action === 'SESSION') {
@@ -207,7 +212,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       if (thread.writtenPaths.length === 0) throw new ConflictAppException({}, 'threads.nothingToPublish');
       const job = await this.createThreadJob(thread, 'PUBLISH');
       await this.jobs.appendEvent(job.id, { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });
-      await this.activity.record({ actorType: 'USER', actorId: userId, action: 'job.dispatched', entityType: 'job', entityId: job.id, jobId: job.id, projectId: thread.projectId, responsibleUserId: userId, payload: { repoId: thread.repoId, feature: `thread-${thread.id}`, command: 'THREAD', ref: thread.baseRef } });
+      await this.activity.record({ actorType: 'USER', actorId: userId, action: 'job.dispatched', entityType: 'job', entityId: job.id, jobId: job.id, projectId: thread.projectId, responsibleUserId: userId, payload: { repoId: repoFields.repoId, feature: `thread-${thread.id}`, command: 'THREAD', ref: repoFields.baseRef } });
       placeJobId = job.id;
       return { jobId: job.id };
     });
@@ -225,6 +230,8 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     const result = await this.txManager.run(async () => {
       const before = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId } });
       if (!before) throw new NotFoundAppException({}, 'threads.notFound');
+      // 1a-R3: Discard is REPO-only, and the guard runs before the creator check so a PROJECT thread answers 409.
+      const repoFields = repoThreadFields(before);
       if (before.createdById !== userId) throw new ForbiddenAppException({}, 'threads.notCreator');
       const current = await this.activeThreadJob(threadId);
       if (current) await this.jobs.lockById(current.id);
@@ -241,12 +248,12 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       if (!runner || !isRunnerOnline(runner.lastSeenAt, new Date(), this.config.runnerOfflineSec)) throw new ConflictAppException({}, 'threads.runnerOffline');
       const capabilities = runner.capabilities as { threadWrite?: unknown };
       if (runner.protocolVersion < THREAD_MIN_PROTOCOL_VERSION || capabilities.threadWrite !== true) throw new ConflictAppException({}, 'threads.runnerOutdated');
-      const paused = (await this.budgets.snapshot(new Date())).match(jobGateKeys({ projectId: thread.projectId, repoId: thread.repoId, pinnedRunnerId: thread.runnerId }));
+      const paused = (await this.budgets.snapshot(new Date())).match(jobGateKeys({ projectId: thread.projectId, repoId: repoFields.repoId, pinnedRunnerId: thread.runnerId }));
       if (paused) throw new BudgetPausedException(paused);
       if (active) throw new ConflictAppException({}, 'threads.busy');
       const job = await this.createThreadJob(thread, 'DISCARD');
       await this.jobs.appendEvent(job.id, { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });
-      await this.activity.record({ actorType: 'USER', actorId: userId, action: 'job.dispatched', entityType: 'job', entityId: job.id, jobId: job.id, projectId: thread.projectId, responsibleUserId: userId, payload: { repoId: thread.repoId, feature: `thread-${thread.id}`, command: 'THREAD', ref: thread.baseRef } });
+      await this.activity.record({ actorType: 'USER', actorId: userId, action: 'job.dispatched', entityType: 'job', entityId: job.id, jobId: job.id, projectId: thread.projectId, responsibleUserId: userId, payload: { repoId: repoFields.repoId, feature: `thread-${thread.id}`, command: 'THREAD', ref: repoFields.baseRef } });
       placeJobId = job.id;
       return { jobId: job.id };
     });
@@ -313,7 +320,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
   }
 
   /** The facts `sendRefusal` judges, read under the thread and job locks. Writes nothing. */
-  private async sendRefusalFor(thread: { id: string; status: string; costUsd: Prisma.Decimal; maxCostUsd: Prisma.Decimal; runnerId: string | null; projectId: string; repoId: string }, job: { id: string; state: string; leaseEpoch: number } | null): Promise<SendRefusalResult> {
+  private async sendRefusalFor(thread: { id: string; status: string; costUsd: Prisma.Decimal; maxCostUsd: Prisma.Decimal; runnerId: string | null; projectId: string; repoId: string | null }, job: { id: string; state: string; leaseEpoch: number } | null): Promise<SendRefusalResult> {
     const pauses = await this.budgets.snapshot(new Date());
     const pausedPolicy = pauses.match(jobGateKeys({ projectId: thread.projectId, repoId: thread.repoId, pinnedRunnerId: thread.runnerId }));
     const runnerRow = thread.runnerId ? await this.prisma.client.runner.findUnique({ where: { id: thread.runnerId }, select: { lastSeenAt: true, protocolVersion: true } }) : null;
@@ -352,18 +359,23 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     return job ? { ...job, action: job.threadTurn?.action ?? null } : null;
   }
 
+  /**
+   * Creates the THREAD job of a REPO thread and its turn. The guard is the last line before the write: a PROJECT
+   * thread has no repo to check out, so it answers 409 `threads.notRepoThread` (the PROJECT branch is US-004).
+   */
   private async createThreadJob(thread: Prisma.ChatThreadGetPayload<object>, action: ThreadAction, message?: ChatMessageRecord) {
-    const repo = await this.prisma.client.fleetRepo.findUnique({ where: { id: thread.repoId }, select: { owner: true, name: true } });
+    const { repoId, baseRef, feature, specPath } = repoThreadFields(thread);
+    const repo = await this.prisma.client.fleetRepo.findUnique({ where: { id: repoId }, select: { owner: true, name: true } });
     if (!repo) throw new NotFoundAppException({}, 'fleet.repos');
     const previousSession = action === 'SESSION' ? await this.prisma.client.fleetThreadTurn.findFirst({ where: { threadId: thread.id, action: 'SESSION' }, select: { jobId: true } }) : null;
     const skills = thread.skills as unknown as ThreadSkillSource[];
     const backend = thread.backend as unknown as ThreadBackend;
-    const instructions = buildThreadInstructions({ repo: `${repo.owner}/${repo.name}`, baseRef: thread.baseRef, feature: thread.feature, specPath: thread.specPath, skills });
+    const instructions = buildThreadInstructions({ repo: `${repo.owner}/${repo.name}`, baseRef, feature, specPath, skills });
     const remaining = new Prisma.Decimal(thread.maxCostUsd).minus(thread.costUsd);
     let job;
     try {
       job = await this.jobs.createJob({
-        projectId: thread.projectId, repoId: thread.repoId, ref: thread.baseRef, command: 'THREAD', threadId: thread.id,
+        projectId: thread.projectId, repoId, ref: baseRef, command: 'THREAD', threadId: thread.id,
         feature: `thread-${thread.id}`, planFrom: null, profiles: [], maxCostUsd: action === 'SESSION' ? remaining.toString() : '0', bashMode: 'raw',
         approvalTimeoutSec: DEFAULT_APPROVAL_TIMEOUT_SEC, selectorLabels: [], pinnedRunnerId: thread.runnerId,
         requestedById: thread.createdById,
@@ -396,7 +408,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
 
   private mapThread(row: Prisma.ChatThreadGetPayload<object>, activeJob: { id: string; state: string } | null): ChatThreadRecord {
     return {
-      id: row.id, repoId: row.repoId, baseRef: row.baseRef, feature: row.feature,
+      id: row.id, kind: mapThreadKind(row.kind), repoId: row.repoId, baseRef: row.baseRef, feature: row.feature,
       title: row.title, createdById: row.createdById, runnerId: row.runnerId,
       backend: row.backend as unknown as ThreadBackend, status: row.status, archivedAt: row.archivedAt,
       skills: row.skills as unknown as ThreadSkillSource[], maxCostUsd: row.maxCostUsd.toString(),

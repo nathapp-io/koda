@@ -205,7 +205,8 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     if (!thread) return null;
     const message = turn.initialMessageId ? await this.db.chatMessage.findUnique({ where: { id: turn.initialMessageId }, select: { id: true, content: true } }) : null;
     return {
-      threadId: turn.threadId, action: turn.action as ThreadAssign['action'], feature: thread.feature, resume: turn.resume,
+      // 1a-R1: a PROJECT thread has no feature of its own; the runner still needs a name for the workdir.
+      threadId: turn.threadId, action: turn.action as ThreadAssign['action'], feature: thread.feature ?? `thread-${turn.threadId}`, resume: turn.resume,
       instructions: turn.instructions, backend: turn.backend as unknown as ThreadAssign['backend'],
       skills: turn.skills as unknown as ThreadAssign['skills'],
       initialMessage: message ? { messageId: message.id, text: message.content } : null,

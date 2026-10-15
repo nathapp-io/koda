@@ -6,7 +6,7 @@ import { FLEET_CFG, fleetConfig } from '../../config/fleet.config';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { SkillsService } from '../../skills/skills.service';
 import { FLEET_REPO_REPOSITORY, type IFleetRepoRepository } from '../repos/domain/fleet-repo.domain';
-import { CHAT_THREAD_REPOSITORY, type ChatMessageRecord, type ChatThreadDetail, type ChatThreadRecord, type ChatThreadRepository } from './domain/chat-thread.domain';
+import { CHAT_THREAD_REPOSITORY, repoThreadFields, type ChatMessageRecord, type ChatThreadDetail, type ChatThreadRecord, type ChatThreadRepository } from './domain/chat-thread.domain';
 import { isMaxCostUsd, validateCreateThread, type CreateThreadInput } from './thread-input';
 import type { AnswerQuestionDto, SendMessageDto } from './dto/thread.dto';
 import type { PlanThreadDto, RunThreadDto } from './dto/thread-handoff.dto';
@@ -85,14 +85,16 @@ export class ThreadsService {
   async plan(projectId: string, threadId: string, userId: string, input: PlanThreadDto): Promise<import('../jobs/dto/fleet-job.dto').DispatchResultDto> {
     const thread = await this.threads.get(projectId, threadId);
     if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
+    // 1a-R3: Plan is REPO-only, and the guard runs before the creator check so a PROJECT thread answers 409.
+    const { repoId, feature, specPath } = repoThreadFields(thread);
     if (thread.createdById !== userId) throw new ForbiddenAppException({}, 'threads.notCreator');
     if (!this.config.threadsEnabled) throw new ConflictAppException({}, 'threads.disabled');
     if (thread.status === 'ARCHIVED') throw new ConflictAppException({}, 'threads.archived');
     if (!thread.specPublished) throw new ConflictAppException({}, 'threads.notPublished');
     if (!thread.runnerId) throw new ConflictAppException({}, 'threads.runnerMissing');
     return this.fleetJobs.dispatch(userId, projectId, {
-      repoId: thread.repoId, command: 'PLAN', ref: `feat/${thread.feature}`, feature: thread.feature,
-      planFrom: thread.specPath, profiles: input.profiles, maxCostUsd: input.maxCostUsd ?? THREAD_HANDOFF_DEFAULT_MAX_COST_USD,
+      repoId, command: 'PLAN', ref: `feat/${feature}`, feature,
+      planFrom: specPath, profiles: input.profiles, maxCostUsd: input.maxCostUsd ?? THREAD_HANDOFF_DEFAULT_MAX_COST_USD,
       pinnedRunnerId: thread.runnerId ?? undefined,
     }, { threadId });
   }
@@ -101,6 +103,8 @@ export class ThreadsService {
   async run(projectId: string, threadId: string, userId: string, input: RunThreadDto): Promise<import('../jobs/dto/fleet-job.dto').DispatchResultDto> {
     const thread = await this.threads.get(projectId, threadId);
     if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
+    // 1a-R3: Run is REPO-only, and the guard runs before the creator check so a PROJECT thread answers 409.
+    const { repoId, feature } = repoThreadFields(thread);
     if (thread.createdById !== userId) throw new ForbiddenAppException({}, 'threads.notCreator');
     if (!this.config.threadsEnabled) throw new ConflictAppException({}, 'threads.disabled');
     if (thread.status === 'ARCHIVED') throw new ConflictAppException({}, 'threads.archived');
@@ -108,7 +112,7 @@ export class ThreadsService {
     if (plan?.state !== 'COMPLETED') throw new ConflictAppException({}, 'threads.notPlanned');
     if (!thread.runnerId) throw new ConflictAppException({}, 'threads.runnerMissing');
     return this.fleetJobs.dispatch(userId, projectId, {
-      repoId: thread.repoId, command: 'RUN', ref: `feat/${thread.feature}`, feature: thread.feature,
+      repoId, command: 'RUN', ref: `feat/${feature}`, feature,
       profiles: input.profiles, maxCostUsd: input.maxCostUsd ?? THREAD_HANDOFF_DEFAULT_MAX_COST_USD,
       bashMode: input.bashMode, pinnedRunnerId: thread.runnerId ?? undefined,
     }, { threadId });

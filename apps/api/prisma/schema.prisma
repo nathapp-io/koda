@@ -1055,12 +1055,14 @@ model FleetConfigEdit {
 
 /// Fleet S5a §1: a chat thread on a repo's nax feature. At most one ACTIVE thread per (repoId, feature) (partial unique
 /// index in the migration). runnerId is pinned at the first THREAD assignment and never changed; SetNull on runner delete.
+/// Fleet S5b §1a-R4: `kind` is REPO (the four repo fields, checked by RepoThreadFields) or PROJECT (no repo at all).
 model ChatThread {
   id              String    @id @default(cuid())
   projectId       String
-  repoId          String
-  baseRef         String
-  feature         String // nax feature; branch feat/<feature>
+  kind            String    @default("REPO") // REPO | PROJECT
+  repoId          String?
+  baseRef         String?
+  feature         String? // nax feature; branch feat/<feature>
   title           String
   createdById     String
   runnerId        String?
@@ -1071,7 +1073,7 @@ model ChatThread {
   maxCostUsd      Decimal   @default(5) @db.Decimal(12, 4)
   costUsd         Decimal   @default(0) @db.Decimal(12, 4)
   tokens          Json? // { input, output, cacheRead, cacheWrite }; written by B2
-  specPath        String // .nax/features/<feature>/spec.md
+  specPath        String? // .nax/features/<feature>/spec.md
   pendingQuestion Json? // { requestId, text, expiresAt }; written by B2
   session         Json? // S5a: the thread's session state, folded from the thread stream
   writtenPaths    String[] @default([]) // S5a write path: distinct paths write_doc touched (capped at 200)
@@ -1083,7 +1085,7 @@ model ChatThread {
   createdAt       DateTime  @default(now())
 
   project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  repo      FleetRepo         @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  repo      FleetRepo?        @relation(fields: [repoId], references: [id], onDelete: Cascade)
   createdBy User              @relation("ChatThreadCreatedBy", fields: [createdById], references: [id])
   runner    Runner?           @relation("ChatThreadRunner", fields: [runnerId], references: [id], onDelete: SetNull)
   messages  ChatMessage[]
