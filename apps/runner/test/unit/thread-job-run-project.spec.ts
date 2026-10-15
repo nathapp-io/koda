@@ -41,7 +41,7 @@ function setup(kind?: 'PROJECT' | 'REPO') {
   const journal = Journal.open(':memory:');
   journal.insertJob({ assign: assignFor('THREAD', { jobId, thread }), leaseEpoch, repoKey: 'acme/app', jobDir: join(workspaceRoot, '.jobs', jobId) });
   const calls: string[] = [];
-  const state: { open?: Record<string, unknown>; scratchExistedAtOpen?: boolean } = {};
+  const state: { open?: Record<string, unknown>; scratchExistedAtOpen?: boolean; streamRegistered?: boolean } = {};
   const host = {
     sessions: { async open(input: Record<string, unknown>) {
       calls.push('sessions.open'); state.open = input;
@@ -57,7 +57,7 @@ function setup(kind?: 'PROJECT' | 'REPO') {
     async prepareWorktree() { calls.push('prepareWorktree'); return { ok: true as const, worktree: join(root, 'wt'), tipSha: 'b'.repeat(40) }; },
     async ensureSkills() { calls.push('ensureSkills'); return { ok: true as const }; },
   };
-  const logs = { register() {}, wake() {}, async drain() { return 'drained' as const; }, stopJob() {} };
+  const logs = { register() { state.streamRegistered = true; }, wake() {}, async drain() { return 'drained' as const; }, stopJob() {} };
   const deps = { journal, log: createMemoryLogger(), now: () => new Date('2026-01-01T00:00:00.000Z'), sleep: async () => undefined, mutex: { acquire: async () => () => undefined }, logs, host, tuning };
   return { journal, calls, state, run: new ThreadJobRun(deps, jobId, leaseEpoch) };
 }
@@ -66,7 +66,8 @@ async function running(kind?: 'PROJECT' | 'REPO') {
   const context = setup(kind);
   await mkdir(join(workspaceRoot, '.jobs', jobId), { recursive: true });
   const starting = context.run.start('prepare');
-  await waitFor(() => context.journal.getJob(jobId, leaseEpoch)?.state === 'RUNNING');
+  // RUNNING is recorded before openStream finishes initializing the command writer.
+  await waitFor(() => context.journal.getJob(jobId, leaseEpoch)?.state === 'RUNNING' && context.state.streamRegistered === true);
   return { ...context, finish: async () => { context.run.halt(); await starting; context.journal.close(); } };
 }
 
