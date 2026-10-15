@@ -120,9 +120,21 @@ function entryText(entry: LogEntryView): string {
   return entry.message ?? entry.text ?? '';
 }
 
-/** `<timestamp> <level>`, either part omitted when the entry does not carry it; empty for a bare stdout line. */
+/**
+ * A parsed entry's timestamp is untrusted: the `run` stream is written by the job itself, so the field can hold
+ * anything — a newline, a fake instruction, a credential. Only a strict ISO-8601 instant is emitted; any other
+ * value is treated as absent, so a label can never take a line of its own or carry a secret out of the fence.
+ */
+const LOG_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+
+/** The entry's timestamp when it is a strict instant; `level` needs no check — it is one of `LOG_LEVELS`. */
+function entryTimestamp(entry: LogEntryView): string | undefined {
+  return typeof entry.timestamp === 'string' && LOG_TIMESTAMP.test(entry.timestamp) ? entry.timestamp : undefined;
+}
+
+/** `<timestamp> <level>`, either part omitted when the entry does not carry it (or when the timestamp is not an instant). */
 function entryLabel(entry: LogEntryView): string {
-  return [entry.timestamp, entry.level].filter((part): part is string => typeof part === 'string').join(' ');
+  return [entryTimestamp(entry), entry.level].filter((part): part is string => typeof part === 'string').join(' ');
 }
 
 /**

@@ -58,6 +58,35 @@ describe('maskSecrets (US-001 AC5-AC11)', () => {
   it('AC-11: keeps the quotes of a quoted value', () => {
     expect(maskSecrets('PASSWORD="hunter2"')).toBe('PASSWORD="[masked]"');
   });
+
+  it('B2: masks a secret nested under a key that is not one, instead of consuming it as a value', () => {
+    expect(maskSecrets('{"config":{"apiKey":"abc123"}}')).toBe('{"config":{"apiKey":"[masked]"}}');
+  });
+
+  it('B2: masks a doubly nested secret and keeps the keys around it', () => {
+    expect(maskSecrets('{"config":{"db":{"password":"hunter2"}},"user":"bob"}'))
+      .toBe('{"config":{"db":{"password":"[masked]"}},"user":"bob"}');
+  });
+
+  it('B2: masks a secret nested inside an array under a plain key', () => {
+    expect(maskSecrets('{"servers":[{"password":"hunter2"}]}')).toBe('{"servers":[{"password":"[masked]"}]}');
+  });
+
+  it('B2: masks a quoted value whole when it holds an escaped quote', () => {
+    expect(maskSecrets('{"apiKey":"abc\\"def"}')).toBe('{"apiKey":"[masked]"}');
+  });
+
+  it('B2: masks both a secret value with an escaped quote and the plain key after it', () => {
+    expect(maskSecrets('{"token":"a\\"b","user":"bob"}')).toBe('{"token":"[masked]","user":"bob"}');
+  });
+
+  it('B2: leaves a secret-named key that has no value at all unchanged', () => {
+    expect(maskSecrets('password: ')).toBe('password: ');
+  });
+
+  it('B2: masks a bracketed value under a secret-named key without eating the text after it', () => {
+    expect(maskSecrets('password: {"a":1} then words')).toBe('password: [masked] then words');
+  });
 });
 
 describe('fenceData (US-001 AC12-AC13)', () => {

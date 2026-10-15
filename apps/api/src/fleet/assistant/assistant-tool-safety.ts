@@ -31,15 +31,102 @@ const BEARER = /\bBearer\s+[^\s,;]+/gi;
 /** Step 4: the key names whose values are always secret. */
 const SECRET_KEY = /SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|APIKEY|PRIVATE_KEY/i;
 /**
- * `KEY=value`, `KEY: value` and JSON `"KEY": "value"`. The quotes of a quoted key or value stay in place; an
- * unquoted value runs to the next whitespace, `,`, `;`, `&` or the end of the text.
+ * One assignment: a `"`-quoted key or a bare `[A-Za-z0-9_.-]+` word, then `:` or `=`. A quoted key is matched up to
+ * its next `"` without escape handling, exactly as the value scan used to run: that also finds an assignment written
+ * inside an escaped string (`\"apiKey\":\"x\"`), at the cost of reading an escaped quote as the key's close. The pass
+ * is a scanner rather than one replace, because a key that is not a secret must not consume its value —
+ * `{"config":{"apiKey":"x"}}` still masks the nested `apiKey`. The quotes of a key stay in place.
  */
-const KEY_VALUE = /("[^"]*"|[A-Za-z0-9_.-]+)(\s*[:=]\s*)("[^"]+"|[^\s,;&]+)/g;
+const ASSIGNMENT = /("[^"]*"|[A-Za-z0-9_.-]+)(\s*[:=]\s*)/;
 
 /** Step 5: URL userinfo (`scheme://user:pass@host`), which the key/value pass cannot see. */
 const URL_USERINFO = /([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/@\s]+@/g;
 
+/** The characters that end an unquoted value: a whitespace, `,`, `;` or `&` (spec §1 step 4). */
+const VALUE_STOP = /[\s,;&]/;
+
 const unquote = (key: string): string => key.replace(/^"|"$/g, '');
+
+/** The end (exclusive) of a `"`-quoted value, `\`-escaped characters included; an unterminated one runs to the end. */
+function quotedEnd(text: string, start: number): number {
+  let i = start + 1;
+  while (i < text.length) {
+    if (text[i] === '\\') { i += 2; continue; }
+    if (text[i] === '"') return i + 1;
+    i += 1;
+  }
+  return text.length;
+}
+
+/** The end (exclusive) of a `{...}` / `[...]` value, its nested strings included; an unterminated one runs to the end. */
+function bracketedEnd(text: string, start: number): number {
+  let depth = 0;
+  let i = start;
+  while (i < text.length) {
+    const char = text[i];
+    if (char === '"') { i = quotedEnd(text, i); continue; }
+    if (char === '{' || char === '[') depth += 1;
+    else if (char === '}' || char === ']') {
+      depth -= 1;
+      if (depth === 0) return i + 1;
+    }
+    i += 1;
+  }
+  return text.length;
+}
+
+/** The end (exclusive) of an unquoted value: it runs to the next whitespace, `,`, `;`, `&` or the end of the text. */
+function bareEnd(text: string, start: number): number {
+  let i = start;
+  while (i < text.length && !VALUE_STOP.test(text[i] as string)) i += 1;
+  return i;
+}
+
+/** The end (exclusive) of the value that starts at `start`, by the value's own shape (spec §1 step 4). */
+function valueEnd(text: string, start: number): number {
+  const first = text[start];
+  if (first === '"') return quotedEnd(text, start);
+  if (first === '{' || first === '[') return bracketedEnd(text, start);
+  return bareEnd(text, start);
+}
+
+/** A quoted value keeps its quotes; every other value is replaced whole. */
+function maskValue(value: string): string {
+  return value.startsWith('"') ? `"${MASKED}"` : MASKED;
+}
+
+/**
+ * Step 4: every key that names a secret loses its value. The scan moves left to right; after a secret's value has
+ * been masked the scan resumes past it, and after any other assignment it resumes right behind the separator, so a
+ * value that holds a nested assignment (`{"config":{"apiKey":"x"}}`) is still scanned.
+ */
+function maskKeyValues(text: string): string {
+  const pattern = new RegExp(ASSIGNMENT.source, 'g');
+  let out = '';
+  let cursor = 0;
+  let match = pattern.exec(text);
+  while (match !== null) {
+    const start = match.index;
+    if (start < cursor) {
+      pattern.lastIndex = cursor;   // already inside a masked value: never match there again
+    } else {
+      const key = match[1] as string;
+      const separator = match[2] as string;
+      out += text.slice(cursor, start) + key + separator;
+      cursor = start + match[0].length;
+      if (SECRET_KEY.test(unquote(key))) {
+        const end = valueEnd(text, cursor);
+        // A key with no value at all (`password: ` at the end of a line) keeps its text: there is nothing to mask.
+        if (end > cursor) {
+          out += maskValue(text.slice(cursor, end));
+          cursor = end;
+        }
+      }
+    }
+    match = pattern.exec(text);
+  }
+  return out + text.slice(cursor);
+}
 
 /**
  * Replaces every credential-looking value with `[masked]`, in the order the spec fixes: PEM blocks, token
@@ -50,9 +137,7 @@ export function maskSecrets(text: string): string {
   let out = text.replace(PEM_BLOCK, MASKED);
   for (const shape of TOKEN_SHAPES) out = out.replace(shape, MASKED);
   out = out.replace(BEARER, `Bearer ${MASKED}`);
-  out = out.replace(KEY_VALUE, (match, key: string, separator: string, value: string) =>
-    SECRET_KEY.test(unquote(key)) ? `${key}${separator}${value.startsWith('"') ? `"${MASKED}"` : MASKED}` : match,
-  );
+  out = maskKeyValues(out);
   return out.replace(URL_USERINFO, `$1${MASKED}@`);
 }
 

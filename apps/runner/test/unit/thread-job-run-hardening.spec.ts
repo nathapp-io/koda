@@ -61,7 +61,7 @@ function setup(options: { send: () => AsyncGenerator<SessionEvent>; cancel?: () 
     tuning: {
       threadIdleMs: options.threadIdleMs ?? 60_000, threadHeartbeatMs: 30_000, threadWakeGapMs: 0,
       threadSearchTimeoutMs: 1_000, threadSkillFetchTimeoutMs: 1_000,
-      logDrainTimeoutMs: 1_000, threadCloseTimeoutMs: 10_000,
+      logDrainTimeoutMs: 1_000, threadCloseTimeoutMs: 10_000, threadRunningAckPollMs: 250, threadRunningAckWaitMs: 0,
     },
   };
   return { journal, clock, jobDir, run: new ThreadJobRun(deps, jobId, leaseEpoch) };

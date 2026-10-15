@@ -17,7 +17,7 @@ const homeDir = join(root, 'home');
 const workspaceRoot = join(root, 'workspace');
 const jobId = 'thread-action-job';
 const leaseEpoch = 1;
-const tuning = { threadIdleMs: 60_000, threadHeartbeatMs: 30_000, threadWakeGapMs: 0, threadSearchTimeoutMs: 1_000, threadSkillFetchTimeoutMs: 1_000, logDrainTimeoutMs: 1_000, threadCloseTimeoutMs: 10_000 };
+const tuning = { threadIdleMs: 60_000, threadHeartbeatMs: 30_000, threadWakeGapMs: 0, threadSearchTimeoutMs: 1_000, threadSkillFetchTimeoutMs: 1_000, logDrainTimeoutMs: 1_000, threadCloseTimeoutMs: 10_000, threadRunningAckPollMs: 250, threadRunningAckWaitMs: 0 };
 const threadBase = { threadId: 'thread-1', feature: 'divide', resume: false, instructions: 'help', backend: { kind: 'native' as const, model: 'minimax/MiniMax-M3' }, skills: [], initialMessage: null };
 
 function setup(action: 'PUBLISH' | 'DISCARD', overrides: { publish?: (input: Record<string, unknown>) => Promise<unknown>; discard?: (input: Record<string, unknown>) => Promise<unknown>; title?: string; git?: Git; mutex?: RepoMutex } = {}) {

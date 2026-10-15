@@ -150,15 +150,16 @@ describe('buildKodaToolProxies (US-006 AC-7..AC-10, AC-14)', () => {
 
   test('US-006 kodaTools AC-14: an aborted call becomes the network answer, with no retry', async () => {
     const controller = new AbortController();
-    const { calls, caller } = recordingCaller(async (args) => {
+    const { calls, caller } = recordingCaller(async () => {
       // The transport's own abort path: the merged signal is aborted, so the call ends with an AbortError.
-      expect(args.signal?.aborted).toBe(true);
       throw Object.assign(new Error('This operation was aborted'), { name: 'AbortError' });
     });
     const tool = buildProxies([DESCRIPTORS[0] as KodaToolDescriptor], options(caller))[0] as EmbedderTool;
     controller.abort();
     expect(await tool.run({ ref: 'WEB-1' }, context('c9', controller.signal))).toEqual({ content: 'koda tool unavailable: network error', isError: true });
     expect(calls).toHaveLength(1);
+    // Asserted here, after the await: an `expect` inside the callback the proxy swallows could never fail this test.
+    expect(calls[0]?.signal?.aborted).toBe(true);
   });
 
   test('US-006 kodaTools: an unexpected failure (neither ServerError nor abort) is also the network answer', async () => {
@@ -187,7 +188,7 @@ const skill = {
 const tuning = {
   threadIdleMs: 60_000, threadHeartbeatMs: 30_000, threadWakeGapMs: 0,
   threadSearchTimeoutMs: 1_000, threadSkillFetchTimeoutMs: 1_000,
-  logDrainTimeoutMs: 1_000, threadCloseTimeoutMs: 10_000,
+  logDrainTimeoutMs: 1_000, threadCloseTimeoutMs: 10_000, threadRunningAckPollMs: 250, threadRunningAckWaitMs: 0,
 };
 const idleSession: AgentSession = {
   id: threadId, backend: { kind: 'native', capabilities: {} }, lastTurn: undefined,
@@ -195,8 +196,20 @@ const idleSession: AgentSession = {
   answer: () => 'accepted', cancel: () => undefined, close: async () => undefined,
 };
 
+/** What a B3 test overrides: the ack-wait timings, and the clock and sleeper the wait runs on. */
+interface RunOverrides {
+  tuning?: Partial<typeof tuning>;
+  now?: () => Date;
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+}
+
 /** One ThreadJobRun for a REPO (default) or PROJECT session that records what the session opener was handed. */
-function sessionRun(kind: 'REPO' | 'PROJECT' | undefined, descriptors: KodaToolDescriptor[] | undefined, caller: KodaToolCaller | undefined) {
+function sessionRun(
+  kind: 'REPO' | 'PROJECT' | undefined,
+  descriptors: KodaToolDescriptor[] | undefined,
+  caller: KodaToolCaller | undefined,
+  over: RunOverrides = {},
+) {
   const thread: ThreadAssign = {
     threadId, action: 'SESSION', ...(kind === undefined ? {} : { kind }), feature: `thread-${threadId}`, resume: false,
     instructions: 'be helpful', backend: { kind: 'native', model: 'minimax/MiniMax-M3' },
@@ -222,7 +235,13 @@ function sessionRun(kind: 'REPO' | 'PROJECT' | undefined, descriptors: KodaToolD
     ...(caller === undefined ? {} : { kodaTools: caller }),
   };
   const logs = { register() {}, wake() {}, async drain() { return 'drained' as const; }, stopJob() {} };
-  const deps = { journal, log: createMemoryLogger(), now: () => new Date('2026-01-01T00:00:00.000Z'), sleep: async () => undefined, mutex: { acquire: async () => () => undefined }, logs, host, tuning };
+  const deps = {
+    journal, log: createMemoryLogger(),
+    now: over.now ?? (() => new Date('2026-01-01T00:00:00.000Z')),
+    sleep: over.sleep ?? (async () => undefined),
+    mutex: { acquire: async () => () => undefined }, logs, host,
+    tuning: { ...tuning, ...over.tuning },
+  };
   return { journal, opened, run: new ThreadJobRun(deps, jobId, leaseEpoch) };
 }
 
@@ -291,5 +310,111 @@ describe('ThreadJobRun koda tool session sets (US-006 AC-11, AC-12, AC-15, AC-16
     context1.run.halt();
     await starting;
     context1.journal.close();
+  });
+});
+
+/** The state names still unacked for this job: `RUNNING` in the list means the server has not applied it yet. */
+function pendingStateNames(journal: Journal): string[] {
+  return journal.pendingEvents(jobId, leaseEpoch, 1_000)
+    .filter((event) => event.type === 'state')
+    .map((event) => (event.payload as { to: string }).to);
+}
+
+/** The seq of the job's RUNNING state event: what the sync loop's ack names when the server applies it. */
+function runningSeq(journal: Journal): number {
+  const running = journal.pendingEvents(jobId, leaseEpoch, 1_000)
+    .find((event) => event.type === 'state' && (event.payload as { to?: string }).to === 'RUNNING');
+  if (running === undefined) throw new Error('the RUNNING event is not pending');
+  return running.seq;
+}
+
+/**
+ * Review B3: the RUNNING transition is only a journal event until the sync loop ships it. The proxies are attached
+ * while the row is still ASSIGNED, so a call that reaches the API before the server has applied the transition is
+ * refused `fleet.jobState` — and it is never retried. Every proxied call therefore waits for that ack first.
+ */
+describe('ThreadJobRun gates proxied koda calls on the RUNNING ack (review B3)', () => {
+  /** One PROJECT run whose proxies are ready to be called, with the clock and sleeper the test chose. */
+  async function startRun(caller: KodaToolCaller, over: RunOverrides) {
+    const context1 = sessionRun('PROJECT', DESCRIPTORS, caller, over);
+    await mkdir(join(workspaceRoot, '.jobs', jobId), { recursive: true });
+    const starting = context1.run.start('prepare');
+    await waitFor(() => context1.journal.getJob(jobId, leaseEpoch)?.state === 'RUNNING');
+    const tools = (context1.opened.at(-1)?.['tools'] ?? []) as EmbedderTool[];
+    const stop = async (): Promise<void> => {
+      context1.run.halt();
+      await starting;
+      context1.journal.close();
+    };
+    return { ...context1, tools, stop };
+  }
+
+  test('B3: a call made while RUNNING is still unacked waits for the sync ack, then makes its one call', async () => {
+    const seen = { polls: 0, pendingAtCall: [] as string[] };
+    const holder: { journal?: Journal } = {};
+    const { calls, caller } = recordingCaller(async () => {
+      // What the server saw when the call arrived: RUNNING must already be out of the pending set.
+      seen.pendingAtCall = holder.journal === undefined ? [] : pendingStateNames(holder.journal);
+      return { content: 'WEB-1: fix login', isError: false };
+    });
+    // The sync loop's own cadence: it acks on the third ack-poll, as a delayed sync would.
+    const sleep = async (ms: number): Promise<void> => {
+      if (ms !== tuning.threadRunningAckPollMs || holder.journal === undefined) return;
+      seen.polls += 1;
+      if (seen.polls >= 3) holder.journal.ackThrough(jobId, leaseEpoch, runningSeq(holder.journal));
+    };
+    // A frozen clock and a 60 s bound: only the ack can end this wait, so the poll count proves it waited.
+    const { journal, tools, stop } = await startRun(caller, { tuning: { threadRunningAckWaitMs: 60_000 }, sleep });
+    holder.journal = journal;
+
+    const answer = await tools[2]?.run({ ref: 'WEB-1' }, context('c9'));
+
+    expect(answer).toEqual({ content: 'WEB-1: fix login', isError: false });
+    expect(calls).toHaveLength(1);                        // exactly one call: a proxied call is never retried
+    expect(seen.polls).toBe(3);                           // it waited for the sync to ack RUNNING
+    expect(seen.pendingAtCall).not.toContain('RUNNING');  // and only then did the call reach the API
+    await stop();
+  });
+
+  test('B3: a wait that runs out still lets its single call through, so a broken sync cannot hang a turn', async () => {
+    const seen = { polls: 0, elapsedMs: 0 };
+    const { calls, caller } = recordingCaller(async () => ({ content: 'answered once', isError: false }));
+    const sleep = async (ms: number): Promise<void> => {
+      if (ms !== tuning.threadRunningAckPollMs) return;
+      seen.polls += 1;
+      seen.elapsedMs += ms;
+    };
+    const { tools, stop } = await startRun(caller, {
+      tuning: { threadRunningAckWaitMs: 1_000 },
+      now: () => new Date(Date.parse('2026-01-01T00:00:00.000Z') + seen.elapsedMs),
+      sleep,
+    });
+
+    const answer = await tools[2]?.run({ ref: 'WEB-1' }, context('c9'));
+
+    expect(seen.polls).toBe(4);                            // 250 ms x 4 = the 1 s bound, then the one call goes out
+    expect(calls).toHaveLength(1);
+    expect(answer).toEqual({ content: 'answered once', isError: false });
+    await stop();
+  });
+
+  test('B3: a turn that is already aborted does not sit in the wait', async () => {
+    const seen = { polls: 0 };
+    const { calls, caller } = recordingCaller(async () => ({ content: 'answered', isError: false }));
+    const sleep = async (ms: number): Promise<void> => { if (ms === tuning.threadRunningAckPollMs) seen.polls += 1; };
+    const { journal, tools, stop } = await startRun(caller, { tuning: { threadRunningAckWaitMs: 60_000 }, sleep });
+    const controller = new AbortController();
+    controller.abort();
+
+    const answer = await tools[2]?.run({ ref: 'WEB-1' }, context('c9', controller.signal));
+
+    expect(seen.polls).toBe(0);                            // the wait ends on the turn's own signal, not on the clock
+    expect(calls).toHaveLength(1);
+    // The call carries the aborted signal: the transport refuses it and the proxy answers the network result.
+    expect(calls[0]?.signal?.aborted).toBe(true);
+    // And it went out without the ack — the signal, not a sync, ended the wait.
+    expect(pendingStateNames(journal)).toContain('RUNNING');
+    expect(answer).toEqual({ content: 'answered', isError: false });
+    await stop();
   });
 });

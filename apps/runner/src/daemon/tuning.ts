@@ -45,6 +45,12 @@ export interface Tuning {
   readonly threadSkillFetchTimeoutMs: number;
   /** B3b: how long an abandon waits for a hung `session.close()` before it gives up on it. */
   readonly threadCloseTimeoutMs: number;
+  /**
+   * Fleet S5b US-006: how often, and for how long, a proxied koda tool call waits for the server to ack the
+   * job's RUNNING event before it calls the API. 0 waits for nothing.
+   */
+  readonly threadRunningAckPollMs: number;
+  readonly threadRunningAckWaitMs: number;
 }
 
 /** D42: the design's constants in one place; only `startDaemon` options (tests) override them, runner.json cannot. */
@@ -79,4 +85,6 @@ export const TUNING: Tuning = Object.freeze({
   threadSearchTimeoutMs: 10_000,
   threadSkillFetchTimeoutMs: 120_000,
   threadCloseTimeoutMs: 10_000,
+  threadRunningAckPollMs: 250,
+  threadRunningAckWaitMs: 30_000,
 });

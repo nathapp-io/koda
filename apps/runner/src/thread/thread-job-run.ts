@@ -1,7 +1,7 @@
 import { chmod, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentSession, EmbedderTool, SessionEvent } from '@nathapp/nax-agent';
-import { THREAD_LIMITS, type ThreadAssign, type ThreadCommandType } from '@nathapp/fleet-protocol';
+import { THREAD_LIMITS, type StateEventPayload, type ThreadAssign, type ThreadCommandType } from '@nathapp/fleet-protocol';
 import type { CredentialProvider } from '../credentials/broker';
 import { errorMessage } from '../errors';
 import type { Git } from '../executor/git';
@@ -95,6 +95,13 @@ export interface ThreadRunTuning {
   readonly threadSkillFetchTimeoutMs: number;
   readonly logDrainTimeoutMs: number;
   readonly threadCloseTimeoutMs: number;
+  /**
+   * Fleet S5b US-006 (review B3): how often, and for how long, a proxied koda tool call waits for the server to
+   * ack the job's RUNNING event before it calls the API. 0 waits for nothing. `src/daemon/tuning.ts` carries the
+   * daemon's values; only tests override them.
+   */
+  readonly threadRunningAckPollMs: number;
+  readonly threadRunningAckWaitMs: number;
   /** Passed to the writer; default `THREAD_STREAM_LIMITS.streamMaxBytes`. Tests lower it. */
   readonly streamMaxBytes?: number;
 }
@@ -123,6 +130,9 @@ const SESSION_ERROR = 'session_error';
 
 /** The ask transport's request-id rule: 1..200 printable ASCII characters. */
 const REQUEST_ID_RE = /^[\x20-\x7e]{1,200}$/;
+
+/** Review B3: the same generous scan bound `JobRun` uses for its ack waits — the RUNNING event is never far from the tail. */
+const PENDING_SCAN_LIMIT = 100_000;
 
 /** A string of at most `messageMaxBytes` UTF-8 bytes — the bound the API applies to a message and an answer. */
 function isMessageText(value: unknown): value is string {
@@ -454,7 +464,39 @@ export class ThreadJobRun {
     const descriptors = thread.kodaTools;
     const caller = this.deps.host.kodaTools;
     if (descriptors === undefined || caller === undefined) return [];
-    return buildKodaToolProxies(descriptors, { jobId: this.jobId, leaseEpoch: this.leaseEpoch, caller });
+    // Review B3: the proxies are attached while the row is still ASSIGNED — only this journal knows RUNNING yet.
+    // Every proxied call therefore waits for the server's ack of the RUNNING event first; a call that reaches the
+    // API too early is refused `fleet.jobState` and is never retried, so the first tool call of a session would
+    // fail whenever the sync that reports the transition is slow.
+    const gated: KodaToolCaller = {
+      call: async (args) => { await this.awaitRunningAck(args.signal); return caller.call(args); },
+    };
+    return buildKodaToolProxies(descriptors, { jobId: this.jobId, leaseEpoch: this.leaseEpoch, caller: gated });
+  }
+
+  /** Review B3: the RUNNING state event is still unacked, so the server has not applied the transition yet. */
+  private runningAckPending(): boolean {
+    return this.deps.journal.pendingEvents(this.jobId, this.leaseEpoch, PENDING_SCAN_LIMIT)
+      .some((event) => event.type === 'state' && (event.payload as StateEventPayload).to === 'RUNNING');
+  }
+
+  /**
+   * Review B3: waits until the server has acked the RUNNING transition, so a session's first tool call does not
+   * race the sync that reports it. The wait is bounded twice over — by the injected clock and by the number of
+   * polls that bound can hold, so neither a standing clock nor a sleeper that returns early can spin it — and it
+   * ends early on a halt or the turn's own abort signal. A wait that runs out (an unreachable server, a hung sync)
+   * lets the one call through anyway instead of hanging the turn: that call fails like any other unreachable-server
+   * call, and it is never retried.
+   */
+  private async awaitRunningAck(signal: AbortSignal | undefined): Promise<void> {
+    const { threadRunningAckPollMs: pollMs, threadRunningAckWaitMs: waitMs } = this.deps.tuning;
+    if (waitMs <= 0 || !this.runningAckPending()) return;
+    const interval = Math.max(1, pollMs);
+    const deadline = this.deps.now().getTime() + waitMs;
+    for (let polls = 0; polls < Math.ceil(waitMs / interval) && this.runningAckPending(); polls += 1) {
+      if (this.halted || signal?.aborted || this.deps.now().getTime() >= deadline) return;
+      await this.deps.sleep(interval, signal);
+    }
   }
 
   /** Step 5: the assigned skill sources, fetched into the runner's own skill cache. */
