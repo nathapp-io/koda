@@ -358,7 +358,7 @@ list.
 10. [unit] Two `resolve` calls 400 seconds apart where `getBranchHead` returns a new sha the second time call `getFile` again and the second block holds the new file text and the new sha7.
 11. [unit] `resolve` when `getBranchHead` never settles returns within 3500 ms (fake timers advanced by 3000 ms) a block ending with `Repository context: unavailable (timeout)` and still holding the project brief.
 12. [unit] `resolve` after a successful read, when a later read (past 300 seconds) throws, returns the earlier file text under a header ending `@ <sha7>, cached):`.
-13. [unit] `resolve` when `.nax/context.md` holds 9000 bytes of 60-byte ASCII lines returns a repository section of at most 10240 UTF-8 bytes ending with the line `[truncated]`.
+13. [unit] `resolve` when `.nax/context.md` holds 14000 bytes of 60-byte ASCII lines returns a repository section of at most 10240 UTF-8 bytes ending with the line `[truncated]`.
 14. [unit] `resolve` when `.nax/context.md` holds `DB_PASSWORD=hunter2 x` returns a block holding `DB_PASSWORD=[masked] x` and not `hunter2`.
 
 ### US-003: Brief block in thread instructions (`Workdir: apps/api`)
