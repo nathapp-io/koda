@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-project-thread-code",
   "branchName": "feat/fleet-s5b-project-thread-code",
   "createdAt": "2026-10-16T00:00:00.000Z",
-  "updatedAt": "2026-10-15T18:04:56.876Z",
+  "updatedAt": "2026-10-15T18:15:34.413Z",
   "userStories": [
     {
       "id": "US-001",
@@ -265,8 +265,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -278,7 +278,9 @@
         "profileModelTier": "powerful",
         "initialAgent": "native",
         "initialProfileId": "native-sol",
-        "initialModelTier": "powerful"
+        "initialModelTier": "powerful",
+        "initialComplexity": "complex",
+        "modelTier": "powerful"
       },
       "contextFiles": [
         "apps/runner/src/supervisor/assign-parser.ts",
@@ -302,6 +304,7 @@
       "priorErrors": [],
       "priorFailures": [],
       "storyPoints": 1,
+      "storyGitRef": "de0144ab3ba498524aa45bfe5913d089b294e42e",
       "outOfScope": [
         "Wiring `repoCredentials` into `ThreadHostDeps` and the daemon, and calling `acquireRepo` from `runProject`, belong to US-007."
       ]
