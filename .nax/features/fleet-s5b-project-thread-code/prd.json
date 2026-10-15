@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-project-thread-code",
   "branchName": "feat/fleet-s5b-project-thread-code",
   "createdAt": "2026-10-16T00:00:00.000Z",
-  "updatedAt": "2026-10-15T18:15:34.413Z",
+  "updatedAt": "2026-10-15T18:30:47.295Z",
   "userStories": [
     {
       "id": "US-001",
@@ -338,8 +338,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -351,7 +351,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "apps/runner/src/thread/tools/list-files.ts",
@@ -372,6 +374,7 @@
       "priorErrors": [],
       "priorFailures": [],
       "storyPoints": 1,
+      "storyGitRef": "d3a2ff8543812da75f8dac050901632bf4b422d1",
       "outOfScope": [
         "Tool results with code are neither masked nor fenced, as REPO thread tool results are not.",
         "Creating or refreshing mirrors (US-006) and opening the session with these tools (US-007)."
