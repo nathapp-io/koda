@@ -246,7 +246,9 @@ DTO and domain fields and the e2e coverage, and regenerates `openapi.json` with 
 generated clients with `bun run generate`. US-002 creates `ProjectBriefService` in the threads module. US-003 adds
 `renderBriefBlock`, wires the service into `ThreadsService.sendMessage` and passes `repoContext` through the
 repository. US-004 creates `knowledge-tools.ts` with `koda_memory_search` and `KNOWLEDGE_TOOL_DESCRIPTORS`; US-005 adds
-`koda_timeline` to the same group and descriptor list.
+`koda_timeline` to the same group and descriptor list. US-002 and US-004 may add stub providers to the shared test stub module
+`apps/api/src/common/test-helpers/global-stubs.module.ts` (a `GitHubAppClient` stub, stubs the memory graph needs)
+when a module compile test needs them, leaving existing stubs unchanged.
 
 ### Context Files
 
@@ -331,7 +333,6 @@ repository. US-004 creates `knowledge-tools.ts` with `koda_memory_search` and `K
 **US-002**
 
 - `apps/api/src/fleet/threads/threads.module.ts` — imports `GitBrokerModule` and provides `ProjectBriefService`.
-- `apps/api/src/common/test-helpers/global-stubs.module.ts` — the shared stub module may gain a `GitHubAppClient` stub if a module compile test of the threads graph needs one; existing stubs unchanged.
 
 **US-003**
 
@@ -347,7 +348,6 @@ repository. US-004 creates `knowledge-tools.ts` with `koda_memory_search` and `K
 - `apps/api/src/fleet/assistant/koda-tool-descriptors.ts` — `KODA_TOOL_DESCRIPTORS` gains `KNOWLEDGE_TOOL_DESCRIPTORS`.
 - `apps/api/src/fleet/assistant/assistant.module.ts` — imports `MemoryModule`, provides `KnowledgeTools`.
 - `apps/api/src/fleet/assistant/assistant.module.spec.ts` — compiles `AssistantModule` with `GlobalStubsModule`; it may add stub providers that `MemoryModule`'s graph needs, keeping its one assertion (it resolves `AssistantToolExecutor`).
-- `apps/api/src/common/test-helpers/global-stubs.module.ts` — may gain stubs the memory graph needs; existing stubs unchanged.
 
 **US-005**
 
