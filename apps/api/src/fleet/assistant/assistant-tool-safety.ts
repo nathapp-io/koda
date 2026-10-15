@@ -79,14 +79,17 @@ function cutAtBytes(text: string, maxBytes: number): string {
 }
 
 /**
- * Caps a result to `maxBytes` of UTF-8. Text that fits is returned unchanged. Otherwise the result keeps the
- * longest run of whole leading lines that fits beside a final `[truncated]` line; when not even the first line
- * fits that way, the first line is cut at a character boundary instead. The result never exceeds `maxBytes`.
+ * Caps a result to `maxBytes` of UTF-8; the cap is absolute for every `maxBytes`. Text that fits is returned
+ * unchanged. Otherwise the result keeps the longest run of whole leading lines that fits beside a final
+ * `[truncated]` line; when not even the first line fits that way, the first line is cut at a character boundary
+ * instead. A cap too small to hold the marker line itself (`maxBytes` below `1 + [truncated]`) has no room for an
+ * honest marker, so it falls back to the longest character-boundary prefix of the text that fits.
  */
 export function capText(text: string, maxBytes: number): string {
   if (encoder.encode(text).byteLength <= maxBytes) return text;
-  const lines = text.split('\n');
   const reserve = 1 + encoder.encode(TRUNCATED).byteLength; // the newline before the marker
+  if (maxBytes < reserve) return cutAtBytes(text, Math.max(0, maxBytes));
+  const lines = text.split('\n');
   const kept: string[] = [];
   let used = 0;
   for (const line of lines) {
@@ -96,5 +99,5 @@ export function capText(text: string, maxBytes: number): string {
     used = next;
   }
   if (kept.length > 0) return [...kept, TRUNCATED].join('\n');
-  return `${cutAtBytes(lines[0] ?? '', Math.max(0, maxBytes - reserve))}\n${TRUNCATED}`;
+  return `${cutAtBytes(lines[0] ?? '', maxBytes - reserve)}\n${TRUNCATED}`;
 }

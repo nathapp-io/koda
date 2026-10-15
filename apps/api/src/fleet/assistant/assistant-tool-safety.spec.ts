@@ -97,6 +97,17 @@ describe('capText (US-001 AC14-AC15)', () => {
     expect(capText(text, 21)).toBe(text);
   });
 
+  it('AC-14: never exceeds a cap too small for the truncation line', () => {
+    const text = 'abcdefghij\nklmno';
+    for (const maxBytes of [0, 1, 5, 10, 11, 12, 23]) {
+      expect(utf8(capText(text, maxBytes)), `maxBytes ${maxBytes}`).toBeLessThanOrEqual(maxBytes);
+    }
+    expect(capText(text, 0)).toBe('');
+    expect(capText(text, 5)).toBe('abcde');
+    expect(capText('é'.repeat(10), 3)).toBe('é');
+    expect(capText(text, 12)).toBe(`\n${TRUNCATED}`);
+  });
+
   it('AC-15: keeps whole leading lines and ends with the truncation line', () => {
     const lines = Array.from({ length: 1000 }, (_, i) => `${String(i).padStart(4, '0')}${'x'.repeat(36)}`);
     const capped = capText(lines.join('\n'), 1024);
