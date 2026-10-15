@@ -80,3 +80,37 @@ describe('PrismaTicketsRepository — hasFleetOwnership (#231)', () => {
     await expect(repo.hasFleetOwnership('t1')).resolves.toBe(false);
   });
 });
+
+describe('PrismaTicketsRepository — findTicketRefs (S5b US-005)', () => {
+  const repoWith = (rows: unknown[]) => {
+    const findMany = vi.fn().mockResolvedValue(rows);
+    const prisma = { client: { ticket: { findMany } } };
+    return { repo: new PrismaTicketsRepository(prisma as never), findMany };
+  };
+
+  it('scopes the read to the project and to the named, non-deleted ids, in one query', async () => {
+    const { repo, findMany } = repoWith([
+      { id: 't1', number: 3, project: { key: 'WEB' } },
+      { id: 't2', number: 12, project: { key: 'WEB' } },
+    ]);
+
+    const refs = await repo.findTicketRefs('p1', ['t1', 't2', 't-of-another-project']);
+
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledWith({
+      where: { projectId: 'p1', id: { in: ['t1', 't2', 't-of-another-project'] }, deletedAt: null },
+      select: { id: true, number: true, project: { select: { key: true } } },
+    });
+    expect(refs).toEqual([
+      { id: 't1', ref: 'WEB-3' },
+      { id: 't2', ref: 'WEB-12' },
+    ]);
+  });
+
+  it('answers no rows for an empty id list without touching the database', async () => {
+    const { repo, findMany } = repoWith([]);
+
+    await expect(repo.findTicketRefs('p1', [])).resolves.toEqual([]);
+    expect(findMany).not.toHaveBeenCalled();
+  });
+});

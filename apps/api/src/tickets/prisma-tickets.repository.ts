@@ -12,6 +12,7 @@ import type {
   TicketProject,
   TicketDomain,
   TicketListFilters,
+  TicketRefRecord,
   CreateTicketData,
   UpdateTicketData,
   AssignTicketData,
@@ -269,6 +270,20 @@ export class PrismaTicketsRepository implements ITicketRepository {
       select: { role: true },
     });
     return member?.role ?? null;
+  }
+
+  /**
+   * S5b US-005: one read for many refs. The project scope and `deletedAt: null` are what make a
+   * foreign or deleted ticket miss instead of answering a ref the caller may not name, and the ref
+   * itself comes from the joined project key — the same `KEY-N` the ticket responses carry.
+   */
+  async findTicketRefs(projectId: string, ids: string[]): Promise<TicketRefRecord[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.db.ticket.findMany({
+      where: { projectId, id: { in: ids }, deletedAt: null },
+      select: { id: true, number: true, project: { select: { key: true } } },
+    });
+    return rows.map((row) => ({ id: row.id, ref: `${row.project.key}-${row.number}` }));
   }
 
   async findTicketByRefRaw(projectSlug: string, ref: string): Promise<TicketDomain | null> {

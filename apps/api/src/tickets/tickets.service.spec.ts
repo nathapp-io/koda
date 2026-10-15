@@ -110,6 +110,7 @@ describe('TicketsService', () => {
     assignTicket: vi.fn(),
     softDeleteTicket: vi.fn(),
     findTicketByRefRaw: vi.fn(),
+    findTicketRefs: vi.fn(),
     findUserById: vi.fn(),
     findAgentById: vi.fn(),
     isAgentOnProjectRoster: vi.fn(),
@@ -1229,6 +1230,27 @@ describe('TicketsService', () => {
           metadata: { projectId: 'proj-123', eventId: 'evt-assign-1' },
         }),
       );
+    });
+  });
+
+  describe('findRefsByIds (S5b US-005)', () => {
+    it('AC-13: maps the ids the repository resolved and leaves a foreign or deleted ticket out', async () => {
+      mockTicketRepo.findTicketRefs.mockResolvedValue([
+        { id: 'ticket-123', ref: 'KODA-1' },
+        { id: 'ticket-124', ref: 'KODA-2' },
+      ]);
+
+      const refs = await service.findRefsByIds('proj-123', ['ticket-123', 'ticket-124', 'ticket-of-another-project']);
+
+      expect(refs).toEqual(new Map([['ticket-123', 'KODA-1'], ['ticket-124', 'KODA-2']]));
+      // The project scope is the service's: the repository never sees an unscoped read.
+      expect(mockTicketRepo.findTicketRefs).toHaveBeenCalledWith('proj-123', ['ticket-123', 'ticket-124', 'ticket-of-another-project']);
+      expect(refs.has('ticket-of-another-project')).toBe(false);
+    });
+
+    it('answers an empty map without reading for an empty id list', async () => {
+      expect(await service.findRefsByIds('proj-123', [])).toEqual(new Map());
+      expect(mockTicketRepo.findTicketRefs).not.toHaveBeenCalled();
     });
   });
 });

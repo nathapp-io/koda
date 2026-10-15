@@ -200,6 +200,17 @@ export class TicketsService {
   }
 
   /**
+   * S5b US-005: ticket id -> ref (`KEY-N`) for the named ids, in one read. `projectId` is the whole
+   * scope, so an id of another project (or of a soft-deleted ticket) is absent from the map instead of
+   * resolved — a caller can never name a ticket of a project it is not acting in.
+   */
+  async findRefsByIds(projectId: string, ids: string[]): Promise<Map<string, string>> {
+    if (ids.length === 0) return new Map();
+    const refs = await this.ticketRepo.findTicketRefs(projectId, ids);
+    return new Map(refs.map((row) => [row.id, row.ref]));
+  }
+
+  /**
    * M25: the detail view plus the actions the caller may take. `principal`
    * must be role-enriched (withProjectRole) by the controller.
    */

@@ -42,6 +42,12 @@ export interface TicketAssignee {
   name: string;
 }
 
+/** S5b US-005: a ticket named by id and by its human ref (`KEY-N`), for callers that resolve many at once. */
+export interface TicketRefRecord {
+  id: string;
+  ref: string;
+}
+
 export interface TicketDomain {
   id: string;
   projectId: string;
@@ -153,6 +159,12 @@ export interface ITicketRepository {
    */
   lockProjectAgents(projectId: string): Promise<void>;
   findProjectMemberRole(projectId: string, userId: string): Promise<string | null>;
+  /**
+   * S5b US-005: the ref (`KEY-N`) of every named ticket that lives in `projectId` and is not
+   * soft-deleted, in one read. An id of another project, of a deleted ticket or of no ticket at
+   * all is simply absent from the answer — never resolved to a foreign ref.
+   */
+  findTicketRefs(projectId: string, ids: string[]): Promise<TicketRefRecord[]>;
   /**
    * Fleet C9 follow-up (#231): true when the ticket is already owned by fleet
    * work — a fleet-sourced `pr` link exists, or a non-terminal FleetJobTicket is
