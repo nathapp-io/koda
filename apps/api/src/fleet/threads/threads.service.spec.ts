@@ -1,10 +1,18 @@
 import { ConfigType } from '@nestjs/config';
 import { fleetConfig } from '../../config/fleet.config';
 import { SkillsService } from '../../skills/skills.service';
-import type { IFleetRepoRepository } from '../repos/domain/fleet-repo.domain';
+import type { IFleetRepoRepository, FleetRepoRecord } from '../repos/domain/fleet-repo.domain';
 import type { FleetJobsService } from '../jobs/fleet-jobs.service';
-import type { ChatThreadRecord, ChatThreadRepository } from './domain/chat-thread.domain';
+import type { ChatThreadRecord, ChatMessageRecord, ChatThreadRepository } from './domain/chat-thread.domain';
+import type { ProjectBriefService } from './project-brief.service';
 import { ThreadsService } from './threads.service';
+
+/**
+ * The ProjectBriefService stub every construction passes (S5b US-003): a fixed repository section and no repository
+ * read, so an existing expectation never depends on the brief block.
+ */
+const briefStub = (section = 'Repository context: unavailable (no repository)') =>
+  ({ resolveRepoContext: vi.fn(async () => section) }) as unknown as ProjectBriefService;
 
 const record: ChatThreadRecord = {
   id: 't1', kind: 'REPO', repoId: 'r1', baseRef: 'main', feature: 'auth', title: 'T', createdById: 'u1', runnerId: null,
@@ -24,6 +32,7 @@ describe('ThreadsService.list', () => {
       {} as unknown as SkillsService,
       config,
       {} as unknown as FleetJobsService,
+      briefStub(),
     );
 
     const open = await service.list('p1', undefined, 0, 20);
@@ -46,6 +55,7 @@ describe('ThreadsService.plan (US-006)', () => {
       {} as unknown as SkillsService,
       { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
       { dispatch } as unknown as FleetJobsService,
+      briefStub(),
     );
 
     await service.plan('p1', 't1', 'u1', {});
@@ -59,7 +69,7 @@ describe('ThreadsService.plan (US-006)', () => {
     const dispatch = vi.fn();
     const threads = { get: vi.fn().mockResolvedValue({ ...record, specPublished: true, runnerId: null }) } as unknown as ChatThreadRepository;
     const service = new ThreadsService(threads, {} as unknown as IFleetRepoRepository, {} as unknown as SkillsService,
-      { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>, { dispatch } as unknown as FleetJobsService);
+      { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>, { dispatch } as unknown as FleetJobsService, briefStub());
     await expect(service.plan('p1', 't1', 'u1', {})).rejects.toMatchObject({ code: 409, prefix: 'threads.runnerMissing' });
     expect(dispatch).not.toHaveBeenCalled();
   });
@@ -73,6 +83,7 @@ describe('ThreadsService.plan (US-006)', () => {
       {} as unknown as SkillsService,
       { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
       { dispatch } as unknown as FleetJobsService,
+      briefStub(),
     );
     await expect(service.plan('p1', 't1', 'u1', {})).rejects.toMatchObject({ code: 409, prefix: 'threads.notPublished', httpStatus: 409 });
     expect(dispatch).not.toHaveBeenCalled();
@@ -87,6 +98,7 @@ describe('ThreadsService.run (US-007)', () => {
     {} as unknown as SkillsService,
     { threadsEnabled: enabled } as unknown as ConfigType<typeof fleetConfig>,
     { dispatch } as unknown as FleetJobsService,
+    briefStub(),
   );
 
   it('AC-1: dispatches a RUN on the feature branch pinned to the thread runner, with the default cap and thread id', async () => {
@@ -192,6 +204,7 @@ describe('ThreadsService.create (US-003)', () => {
       { snapshotForProject } as unknown as SkillsService,
       { threadsEnabled: true, ...over.config } as unknown as ConfigType<typeof fleetConfig>,
       {} as unknown as FleetJobsService,
+      briefStub(),
     );
     return { service, create, findAnchor, findById, snapshotForProject };
   };
@@ -251,9 +264,89 @@ describe('ThreadsService.discard (US-004)', () => {
       {} as unknown as SkillsService,
       { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
       {} as unknown as FleetJobsService,
+      briefStub(),
     );
 
     await expect(service.discard('p1', 't1', 'u1')).resolves.toEqual({ jobId: 'job-d1' });
     expect(discard).toHaveBeenCalledWith('p1', 't1', 'u1');
+  });
+});
+
+describe('ThreadsService.sendMessage repository context (S5b US-003)', () => {
+  const SECTION = 'Repository context: unavailable (no repository)';
+  const message: ChatMessageRecord = {
+    id: 'm1', seq: 1, jobId: 'j1', turnId: 'j1', role: 'user', authorUserId: 'u1', clientMessageId: 'c1',
+    content: 'hi', toolSummary: null, status: 'pending', errorReason: null, usage: null, costUsd: null,
+    costSource: null, createdAt: new Date('2026-10-01T00:00:00.000Z'),
+  };
+
+  /**
+   * A service whose brief stub, thread read and repository call all record into `order`, so the order of the two
+   * calls the brief block depends on is asserted, not just their arguments.
+   */
+  const serviceFor = (thread: ChatThreadRecord | null, anchor: { id: string } | null = { id: 'r-anchor' }) => {
+    const order: string[] = [];
+    const resolveRepoContext = vi.fn(async (repoId: string | null) => {
+      order.push(`resolve:${repoId === null ? 'null' : repoId}`);
+      return SECTION;
+    });
+    const findAnchor = vi.fn(async () => anchor as FleetRepoRecord | null);
+    const sendMessage = vi.fn(async (input: { repoContext?: string }) => {
+      order.push(`send:${input.repoContext ?? 'none'}`);
+      return { message, jobId: 'j1', deduplicated: false };
+    });
+    const get = vi.fn(async () => thread);
+    const service = new ThreadsService(
+      { get, sendMessage } as unknown as ChatThreadRepository,
+      { findAnchor } as unknown as IFleetRepoRepository,
+      {} as unknown as SkillsService,
+      { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
+      {} as unknown as FleetJobsService,
+      { resolveRepoContext } as unknown as ProjectBriefService,
+    );
+    return { service, order, resolveRepoContext, findAnchor, sendMessage, get };
+  };
+
+  const projectThread: ChatThreadRecord = { ...record, kind: 'PROJECT', repoId: null, baseRef: null, feature: null, specPath: null };
+  const send = (service: ThreadsService) => service.sendMessage('p1', 't1', 'u1', { text: 'hi', clientMessageId: 'c1' });
+
+  it('AC-7: a PROJECT send resolves the anchor repository context once, before the repository call', async () => {
+    const { service, order, resolveRepoContext, findAnchor, sendMessage } = serviceFor(projectThread);
+
+    await send(service);
+
+    expect(findAnchor).toHaveBeenCalledWith('p1');
+    expect(resolveRepoContext).toHaveBeenCalledTimes(1);
+    expect(resolveRepoContext).toHaveBeenCalledWith('r-anchor');
+    expect(sendMessage).toHaveBeenCalledWith({ projectId: 'p1', threadId: 't1', userId: 'u1', text: 'hi', clientMessageId: 'c1', repoContext: SECTION });
+    expect(order).toEqual(['resolve:r-anchor', `send:${SECTION}`]);
+  });
+
+  it('AC-8: a REPO send resolves the thread own repository context and reads no anchor', async () => {
+    const { service, resolveRepoContext, findAnchor } = serviceFor(record);
+
+    await send(service);
+
+    expect(resolveRepoContext).toHaveBeenCalledWith('r1');
+    expect(findAnchor).not.toHaveBeenCalled();
+  });
+
+  it('AC-9: a PROJECT send in a project with no fleet repo resolves a null repository', async () => {
+    const { service, resolveRepoContext, sendMessage } = serviceFor(projectThread, null);
+
+    await send(service);
+
+    expect(resolveRepoContext).toHaveBeenCalledWith(null);
+    expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ repoContext: SECTION }));
+  });
+
+  it('skips the resolution and passes no repoContext when the thread is not there, so the repository answers not found', async () => {
+    const { service, resolveRepoContext, sendMessage, get } = serviceFor(null);
+
+    await send(service);
+
+    expect(get).toHaveBeenCalledWith('p1', 't1');
+    expect(resolveRepoContext).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ repoContext: undefined }));
   });
 });

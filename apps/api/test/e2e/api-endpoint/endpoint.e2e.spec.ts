@@ -28,8 +28,10 @@ import { resetDb } from '../../helpers/reset-db';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { SkillsService } from '../../../src/skills/skills.service';
 import { FleetHttpWorld } from '../../helpers/fleet-fixtures';
-import { buildThreadInstructions } from '../../../src/fleet/threads/thread-instructions';
+import { buildThreadInstructions, renderBriefBlock } from '../../../src/fleet/threads/thread-instructions';
 import type { ThreadSkillSource } from '../../../src/skills/skill-catalog.domain';
+import { GitHubAppClient } from '../../../src/fleet/git-broker/github-app-client';
+import { ProjectBriefService } from '../../../src/fleet/threads/project-brief.service';
 import { PlacementService } from '../../../src/fleet/jobs/placement.service';
 import { RunnerNotifier } from '../../../src/fleet/jobs/runner-notifier';
 import { PrismaThreadIngestRepository } from '../../../src/fleet/threads/ingest/prisma-thread-ingest.repository';
@@ -3208,6 +3210,8 @@ describeIntegration('API Integration Tests', () => {
   describe('US-003 Thread routes', () => {
     let world: FleetHttpWorld;
     let threadId: string;
+    /** The stubbed forge methods, restored when the thread suite ends (S5b 1c-D1: a send reads the repository context). */
+    let githubSpies: Array<{ mockRestore: () => void }> = [];
 
     const config = () => app.get<IFleetConfig>(FLEET_CFG, { strict: false });
     const db = () => app.get<PrismaService<PrismaClient>>(PrismaService).client;
@@ -3266,6 +3270,20 @@ describeIntegration('API Integration Tests', () => {
         projectId: project.id, opsProjectId: foreignProject.id, repoId: repo.id, foreignRepoId: foreignRepo.id,
       };
       config().threadsEnabled = true;
+
+      // Every SESSION send resolves its repository context before the transaction (S5b 1c-D1), so the forge is stubbed
+      // on the app's client: no live GitHub call, and `getFile` answering null reads as "no context file".
+      const github = app.get(GitHubAppClient);
+      githubSpies = [
+        vi.spyOn(github, 'mintInstallationToken').mockResolvedValue({ token: 't', expiresAt: new Date(Date.now() + 3_600_000) }),
+        vi.spyOn(github, 'getBranchHead').mockResolvedValue('e2e0000aaaa'),
+        vi.spyOn(github, 'getFile').mockResolvedValue(null),
+      ];
+    });
+
+    afterAll(() => {
+      for (const spy of githubSpies) spy.mockRestore();
+      githubSpies = [];
     });
 
     it('US-003 AC1: creates an active thread with repo defaults and caller identity', async () => {
@@ -3818,10 +3836,14 @@ describeIntegration('API Integration Tests', () => {
         const turn = await db().fleetThreadTurn.findUniqueOrThrow({ where: { jobId: result.jobId } });
         expect(turn).toMatchObject({ action: 'SESSION', initialMessageId: result.message.id, resume: false, backend: thread.backend, skills: thread.skills });
         const repo = await db().fleetRepo.findUniqueOrThrow({ where: { id: thread.repoId } });
+        const project = await db().project.findUniqueOrThrow({ where: { id: thread.projectId }, select: { brief: true } });
         expect(turn.instructions).toBe(buildThreadInstructions({
           repo: `${repo.owner}/${repo.name}`, baseRef: thread.baseRef, feature: thread.feature,
           specPath: thread.specPath, skills: thread.skills as unknown as ThreadSkillSource[],
+          // S5b US-003: every SESSION turn carries the L0 brief block after its role line.
+          brief: renderBriefBlock({ brief: project.brief, repoContext: 'Repository context: unavailable (no context file)' }),
         }));
+        expect(turn.instructions.split('\n').slice(1, 3)).toEqual(['Project brief:', project.brief ?? '(none)']);
         expect(turn.instructions).toContain('write_doc');
         expect(placement).toHaveBeenCalledTimes(1);
         expect(placement).toHaveBeenCalledWith(result.jobId);
@@ -4027,6 +4049,74 @@ describeIntegration('API Integration Tests', () => {
       const summary = records.find((record) => record.id === runner.id);
       expect(summary).toBeDefined();
       expect((summary as Record<string, unknown>).threadBackends).toEqual({ native: ['m1'], acp: [] });
+    });
+
+    // ─────────────────────────────────────────────────────────────────
+    // S5b US-003 — the L0 brief block in a SESSION turn's instructions
+    // ─────────────────────────────────────────────────────────────────
+
+    describe('S5b US-003 brief block in thread instructions', () => {
+      let seeded: { slug: string };
+
+      beforeAll(async () => {
+        const prisma = db();
+        const dev = await prisma.user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
+        // Its own project: its anchor repository has no GitHub installation, so the section is the deterministic
+        // `no installation` line (no forge call at all) and the shared thread suite's repo is left untouched.
+        const project = await prisma.project.create({ data: { name: 'Brief block', slug: 'brief-block', key: 'BRFB' } });
+        await prisma.projectMember.create({ data: { projectId: project.id, userId: dev.id, role: 'DEVELOPER' } });
+        await prisma.fleetRepo.create({ data: {
+          projectId: project.id, provider: 'github', owner: 'acme', name: 'brief-app', defaultBranch: 'trunk',
+          githubInstallationId: null, createdById: world.ids.root,
+        } });
+        await prisma.project.update({ where: { id: project.id }, data: { brief: 'Seeded brief' } });
+        seeded = { slug: project.slug };
+      });
+
+      it('AC-10: a PROJECT send stores the project brief and the anchor repository section right after the role line', async () => {
+        const thread = body<{ id: string }>(await request(httpServer)
+          .post(`/api/projects/${seeded.slug}/threads`).set('Authorization', `Bearer ${world.tokens.dev}`)
+          .send({ kind: 'PROJECT', title: 'Seeded', backend: { kind: 'native' } })
+          .expect(201));
+        const sent = body<{ jobId: string }>(await request(httpServer)
+          .post(`/api/projects/${seeded.slug}/threads/${thread.id}/messages`).set('Authorization', `Bearer ${world.tokens.dev}`)
+          .send({ text: 'hello', clientMessageId: `brief-${thread.id}` })
+          .expect(201));
+
+        const turn = await db().fleetThreadTurn.findUniqueOrThrow({ where: { jobId: sent.jobId } });
+        expect(turn.action).toBe('SESSION');
+        expect(turn.instructions.split('\n').slice(1, 4))
+          .toEqual(['Project brief:', 'Seeded brief', 'Repository context: unavailable (no installation)']);
+      });
+
+      it('AC-11: a REPO send stores the project brief as the second and third line', async () => {
+        await db().project.update({ where: { id: world.projectId }, data: { brief: 'Repo brief' } });
+        try {
+          const thread = await newThread('brief-repo');
+          const sent = body<{ jobId: string }>(await sendMessage(thread.id).expect(201));
+
+          const turn = await db().fleetThreadTurn.findUniqueOrThrow({ where: { jobId: sent.jobId } });
+          expect(turn.instructions.split('\n').slice(1, 3)).toEqual(['Project brief:', 'Repo brief']);
+        } finally {
+          await db().project.update({ where: { id: world.projectId }, data: { brief: null } });
+        }
+      });
+
+      it('AC-12: publish queues a PUBLISH job and resolves no repository context', async () => {
+        const runner = await publishRunner('brief-publish');
+        const thread = await newThread('brief-publish', { writtenPaths: ['docs/a.md'], runnerId: runner.id });
+        const resolveRepoContext = vi.spyOn(app.get(ProjectBriefService, { strict: false }), 'resolveRepoContext');
+        try {
+          const result = body<{ jobId: string }>(await publishThread(thread.id).expect(200));
+
+          expect(result.jobId).toBeTruthy();
+          expect(await db().fleetJob.count({ where: { threadId: thread.id, command: 'THREAD' } })).toBe(1);
+          expect(await db().fleetThreadTurn.findUniqueOrThrow({ where: { jobId: result.jobId } })).toMatchObject({ action: 'PUBLISH' });
+          expect(resolveRepoContext).not.toHaveBeenCalled();
+        } finally {
+          resolveRepoContext.mockRestore();
+        }
+      });
     });
   });
 

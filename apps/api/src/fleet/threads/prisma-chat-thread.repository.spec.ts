@@ -1,3 +1,4 @@
+import { Prisma } from '../../generated/prisma/client';
 import { PrismaChatThreadRepository } from './prisma-chat-thread.repository';
 
 /** A ChatMessage row as Prisma returns it, including the fold-internal round columns. */
@@ -225,5 +226,94 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
     const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
     await repo.messages('T', 4, 25);
     expect(findMany).toHaveBeenCalledWith({ where: { threadId: 'T', seq: { gt: 4 } }, orderBy: { seq: 'asc' }, take: 25 });
+  });
+});
+
+/**
+ * The stored instructions of a SESSION turn (S5b US-003 AC-10/AC-11 at the repository level, without a database): a
+ * send whose repository context was resolved beforehand stores the brief block, and one without it stores exactly
+ * today's instructions.
+ */
+describe('PrismaChatThreadRepository SESSION turn instructions (S5b US-003)', () => {
+  const threadRow = (over: Record<string, unknown> = {}) => ({
+    id: 'T', projectId: 'P', kind: 'REPO', repoId: 'R', baseRef: 'trunk', feature: 'f', title: 'x', createdById: 'U', runnerId: null,
+    backend: { kind: 'native' }, status: 'ACTIVE', archivedAt: null, skills: [], maxCostUsd: new Prisma.Decimal(5),
+    costUsd: new Prisma.Decimal(0), tokens: null, specPath: '.nax/features/f/spec.md', pendingQuestion: null, session: null,
+    writtenPaths: [], publishedSha: null, specPublished: false, lastWrite: null,
+    lastActivityAt: new Date(0), createdAt: new Date(0), ...over,
+  });
+
+  const messageRow = { id: 'M', threadId: 'T', seq: 1, jobId: null, turnId: null, role: 'user', authorUserId: 'U', clientMessageId: 'c1', content: 'hi', toolSummary: null, status: 'pending', errorReason: null, usage: null, costUsd: null, costSource: null, streamRound: null, streamRoundStart: null, createdAt: new Date(0) };
+
+  /** A repository whose Prisma fake answers the send path: one thread row, no active job and a fresh message sequence. */
+  function sendRepo(row: Record<string, unknown>) {
+    const turnCreate = vi.fn(async (_args: unknown) => ({}));
+    const projectFindUnique = vi.fn(async (_args: unknown) => ({ slug: 'sandbox', brief: 'Seeded brief' }));
+    const repoFindUnique = vi.fn(async (_args: unknown) => ({ owner: 'acme', name: 'koda' }));
+    const anchorFindFirst = vi.fn(async (_args: unknown) => ({ id: 'A', defaultBranch: 'trunk' }));
+    const prisma = {
+      client: {
+        chatThread: { findFirst: vi.fn(async () => row), update: vi.fn(async () => row) },
+        chatMessage: { findUnique: vi.fn(async () => null), findFirst: vi.fn(async () => null), create: vi.fn(async () => messageRow), update: vi.fn(async () => messageRow) },
+        fleetJob: { findFirst: vi.fn(async () => null) },
+        fleetThreadTurn: { findFirst: vi.fn(async () => null), create: turnCreate },
+        fleetRepo: { findUnique: repoFindUnique, findFirst: anchorFindFirst },
+        project: { findUnique: projectFindUnique },
+        $queryRaw: vi.fn(async () => [{ nextSeq: 1 }]),
+      },
+    };
+    const jobs = { createJob: vi.fn(async () => ({ id: 'J', repoId: 'R', ref: 'trunk' })), appendEvent: vi.fn(async () => ({})) };
+    const txManager = { run: vi.fn(async (fn: () => Promise<unknown>) => fn()) };
+    const repo = new PrismaChatThreadRepository(
+      prisma as never, jobs as never, txManager as never, { record: vi.fn(async () => ({})) } as never, { placeJob: vi.fn(async () => undefined) } as never,
+      { notify: vi.fn() } as never, { snapshot: vi.fn(async () => ({ match: () => null })) } as never, { threadsEnabled: true } as never,
+    );
+    return { repo, turnCreate, projectFindUnique, repoFindUnique, anchorFindFirst, jobs };
+  }
+
+  const instructionsOf = (turnCreate: { mock: { calls: unknown[][] } }): string => {
+    const args = turnCreate.mock.calls.at(-1)?.[0] as { data: { instructions: string } };
+    return args.data.instructions;
+  };
+
+  it('US-003 AC-10: a PROJECT SESSION turn stores the project brief and the anchor repository section after the role line', async () => {
+    const { repo, turnCreate, anchorFindFirst, projectFindUnique } = sendRepo(threadRow({ kind: 'PROJECT', repoId: null, baseRef: null, feature: null, specPath: null }));
+
+    await repo.sendMessage({ projectId: 'P', threadId: 'T', userId: 'U', text: 'hi', clientMessageId: 'c1', repoContext: 'Repository context: unavailable (no installation)' });
+
+    expect(anchorFindFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { projectId: 'P' } }));
+    expect(projectFindUnique).toHaveBeenCalledWith({ where: { id: 'P' }, select: { slug: true, brief: true } });
+    expect(instructionsOf(turnCreate).split('\n').slice(1, 4))
+      .toEqual(['Project brief:', 'Seeded brief', 'Repository context: unavailable (no installation)']);
+    expect(turnCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ action: 'SESSION' }) });
+  });
+
+  it('US-003 AC-11: a REPO SESSION turn stores the project brief as lines two and three', async () => {
+    const { repo, turnCreate, projectFindUnique, repoFindUnique } = sendRepo(threadRow());
+
+    await repo.sendMessage({ projectId: 'P', threadId: 'T', userId: 'U', text: 'hi', clientMessageId: 'c1', repoContext: 'Repository context: unavailable (no context file)' });
+
+    expect(repoFindUnique).toHaveBeenCalledWith({ where: { id: 'R' }, select: { owner: true, name: true } });
+    expect(projectFindUnique).toHaveBeenCalledWith({ where: { id: 'P' }, select: { brief: true } });
+    expect(instructionsOf(turnCreate).split('\n').slice(1, 3)).toEqual(['Project brief:', 'Seeded brief']);
+  });
+
+  it('US-003: a SESSION send without a repository context stores exactly today\'s instructions and no project brief read', async () => {
+    const { repo, turnCreate, projectFindUnique } = sendRepo(threadRow());
+
+    await repo.sendMessage({ projectId: 'P', threadId: 'T', userId: 'U', text: 'hi', clientMessageId: 'c1' });
+
+    expect(projectFindUnique).not.toHaveBeenCalled();
+    expect(instructionsOf(turnCreate).split('\n')).not.toContain('Project brief:');
+  });
+
+  it('US-003: a null project brief renders (none) under the header', async () => {
+    const { repo, turnCreate, projectFindUnique } = sendRepo(threadRow());
+    projectFindUnique.mockResolvedValueOnce({ slug: 'sandbox', brief: null } as never);
+
+    await repo.sendMessage({ projectId: 'P', threadId: 'T', userId: 'U', text: 'hi', clientMessageId: 'c1', repoContext: 'Repository context: unavailable (no context file)' });
+
+    expect(instructionsOf(turnCreate).split('\n').slice(1, 4))
+      .toEqual(['Project brief:', '(none)', 'Repository context: unavailable (no context file)']);
   });
 });

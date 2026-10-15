@@ -19,7 +19,7 @@ import { BudgetGate } from '../budgets/budget-gate';
 import { jobGateKeys } from '../budgets/budget-rules';
 import { BudgetPausedException } from '../budgets/budget.exceptions';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
-import { buildProjectThreadInstructions, buildThreadInstructions } from './thread-instructions';
+import { buildProjectThreadInstructions, buildThreadInstructions, renderBriefBlock } from './thread-instructions';
 import { sendRefusal, type ThreadSendRefusal } from './thread-send-rules';
 import { allocateThreadSeq, repoThreadFields, type ChatMessageRecord, type ChatThreadRecord, type ChatThreadRepository, type ThreadSession, type ThreadWriteResult } from './domain/chat-thread.domain';
 import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
@@ -270,7 +270,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     return result;
   }
 
-  async sendMessage(input: { projectId: string; threadId: string; userId: string; text: string; clientMessageId: string }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }> {
+  async sendMessage(input: { projectId: string; threadId: string; userId: string; text: string; clientMessageId: string; repoContext?: string }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }> {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const outcome = await this.txManager.run(async () => {
         const threadBefore = await this.prisma.client.chatThread.findFirst({ where: { id: input.threadId, projectId: input.projectId } });
@@ -312,7 +312,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
           return { kind: 'done' as const, result: { message, jobId: null, deduplicated: false }, notifyRunnerId: currentAfterLock.runnerId };
         }
 
-        const job = await this.createThreadJob(thread, 'SESSION', message);
+        const job = await this.createThreadJob(thread, 'SESSION', message, input.repoContext);
         await this.prisma.client.chatMessage.update({ where: { id: message.id }, data: { jobId: job.id, turnId: job.id } });
         const linkedMessage = { ...message, jobId: job.id, turnId: job.id };
         await this.jobs.appendEvent(job.id, { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });
@@ -377,11 +377,14 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
    * spec there; a PROJECT thread has no repo to check out, so its job lands on the project's anchor repo — bookkeeping
    * for placement, budgets, dashboards and activity (S5b-R13) — and is told it has no repository. A project with no
    * fleet repo cannot run one: 409 `threads.noFleetRepo`.
+   *
+   * `repoContext` is the repository section `ThreadsService` resolved before the transaction (1c-D1); only a SESSION
+   * passes it, so a PUBLISH or DISCARD turn keeps today's instructions.
    */
-  private async createThreadJob(thread: Prisma.ChatThreadGetPayload<object>, action: ThreadAction, message?: ChatMessageRecord) {
+  private async createThreadJob(thread: Prisma.ChatThreadGetPayload<object>, action: ThreadAction, message?: ChatMessageRecord, repoContext?: string) {
     const skills = thread.skills as unknown as ThreadSkillSource[];
     const backend = thread.backend as unknown as ThreadBackend;
-    const target = await this.jobTargetFor(thread);
+    const target = await this.jobTargetFor(thread, repoContext);
     const previousSession = action === 'SESSION' ? await this.prisma.client.fleetThreadTurn.findFirst({ where: { threadId: thread.id, action: 'SESSION' }, select: { jobId: true } }) : null;
     const remaining = new Prisma.Decimal(thread.maxCostUsd).minus(thread.costUsd);
     let job;
@@ -405,19 +408,35 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
   }
 
   /** Where a THREAD job runs and what its agent is told: the thread's own repo, or the project anchor for a PROJECT thread. */
-  private async jobTargetFor(thread: Prisma.ChatThreadGetPayload<object>): Promise<{ repoId: string; ref: string; instructions: string }> {
+  private async jobTargetFor(thread: Prisma.ChatThreadGetPayload<object>, repoContext?: string): Promise<{ repoId: string; ref: string; instructions: string }> {
     const skills = thread.skills as unknown as ThreadSkillSource[];
     if (mapThreadKind(thread.kind) === 'PROJECT') {
       const anchor = await this.anchorRepoFor(thread.projectId);
       if (!anchor) throw new ConflictAppException({}, 'threads.noFleetRepo');
-      const project = await this.prisma.client.project.findUnique({ where: { id: thread.projectId }, select: { slug: true } });
+      const project = await this.prisma.client.project.findUnique({ where: { id: thread.projectId }, select: { slug: true, brief: true } });
       if (!project) throw new NotFoundAppException({}, 'projects');
-      return { repoId: anchor.id, ref: anchor.defaultBranch, instructions: buildProjectThreadInstructions({ project: project.slug, skills }) };
+      return { repoId: anchor.id, ref: anchor.defaultBranch, instructions: buildProjectThreadInstructions({ project: project.slug, skills, brief: this.briefBlock(project.brief, repoContext) }) };
     }
     const { repoId, baseRef, feature, specPath } = repoThreadFields(thread);
     const repo = await this.prisma.client.fleetRepo.findUnique({ where: { id: repoId }, select: { owner: true, name: true } });
     if (!repo) throw new NotFoundAppException({}, 'fleet.repos');
-    return { repoId, ref: baseRef, instructions: buildThreadInstructions({ repo: `${repo.owner}/${repo.name}`, baseRef, feature, specPath, skills }) };
+    return { repoId, ref: baseRef, instructions: buildThreadInstructions({ repo: `${repo.owner}/${repo.name}`, baseRef, feature, specPath, skills, brief: await this.readBriefBlock(thread.projectId, repoContext) }) };
+  }
+
+  /**
+   * The L0 brief block of a turn that carries a repository context section (1c-D1): the project's brief and the
+   * section, rendered here, inside the transaction — the brief is a database read. A turn without a section (a
+   * PUBLISH or DISCARD job) gets no block, so its instructions are exactly as before.
+   */
+  private briefBlock(brief: string | null, repoContext: string | undefined): string | undefined {
+    return repoContext === undefined ? undefined : renderBriefBlock({ brief, repoContext });
+  }
+
+  /** The block for a REPO thread, whose project row is not read for anything else: no section, no brief read. */
+  private async readBriefBlock(projectId: string, repoContext: string | undefined): Promise<string | undefined> {
+    if (repoContext === undefined) return undefined;
+    const project = await this.prisma.client.project.findUnique({ where: { id: projectId }, select: { brief: true } });
+    return this.briefBlock(project?.brief ?? null, repoContext);
   }
 
   /**

@@ -8,6 +8,7 @@ import { SkillsService } from '../../skills/skills.service';
 import { FLEET_REPO_REPOSITORY, type IFleetRepoRepository } from '../repos/domain/fleet-repo.domain';
 import { CHAT_THREAD_REPOSITORY, repoThreadFields, type ChatMessageRecord, type ChatThreadDetail, type ChatThreadRecord, type ChatThreadRepository } from './domain/chat-thread.domain';
 import { isMaxCostUsd, validateCreateThread, type CreateThreadInput } from './thread-input';
+import { ProjectBriefService } from './project-brief.service';
 import type { AnswerQuestionDto, SendMessageDto } from './dto/thread.dto';
 import type { PlanThreadDto, RunThreadDto } from './dto/thread-handoff.dto';
 import { THREAD_HANDOFF_DEFAULT_MAX_COST_USD } from './thread-handoff';
@@ -22,6 +23,7 @@ export class ThreadsService {
     private readonly skills: SkillsService,
     @Inject(FLEET_CFG) private readonly config: ConfigType<typeof fleetConfig>,
     private readonly fleetJobs: FleetJobsService,
+    private readonly projectBrief: ProjectBriefService,
   ) {}
 
   async create(projectId: string, userId: string, input: CreateThreadInput): Promise<ChatThreadRecord> {
@@ -139,6 +141,20 @@ export class ThreadsService {
         typeof input.clientMessageId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(input.clientMessageId)) {
       throw new ValidationAppException({ reason: 'message' }, 'threads.input');
     }
-    return this.threads.sendMessage({ projectId, threadId, userId, text: input.text, clientMessageId: input.clientMessageId });
+    // 1c-D1: the repository context is resolved here, before the send transaction, because the GitHub read must not
+    // run inside it. A missing thread skips the resolution entirely: the repository answers its own not-found.
+    const thread = await this.threads.get(projectId, threadId);
+    const repoContext = thread ? await this.projectBrief.resolveRepoContext(await this.repoIdForThread(projectId, thread)) : undefined;
+    return this.threads.sendMessage({ projectId, threadId, userId, text: input.text, clientMessageId: input.clientMessageId, repoContext });
+  }
+
+  /**
+   * The repository whose context file a turn's brief block reads (1c-D2): the REPO thread's own repository, or the
+   * project's anchor repository for a PROJECT thread — the same repo its job lands on — and null when the project has
+   * no fleet repo. Both are read at their own default branch (inside `ProjectBriefService`), never the thread's baseRef.
+   */
+  private async repoIdForThread(projectId: string, thread: ChatThreadRecord): Promise<string | null> {
+    if (thread.kind !== 'PROJECT') return thread.repoId;
+    return (await this.repos.findAnchor(projectId))?.id ?? null;
   }
 }
