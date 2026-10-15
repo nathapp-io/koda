@@ -1,4 +1,3 @@
-<!-- spec-writing: completed-through-phase-5 -->
 # SPEC: Fleet S5b-1a — Project Threads (Thread Kind, Anchor Repo, No-Checkout Runner Path, Web Scope Picker)
 
 ## Summary
@@ -89,9 +88,9 @@ implement.
   `mapThread` (`prisma-chat-thread.repository.ts:397-409`) maps `kind`; a stored value other than `PROJECT` maps to
   `REPO`.
 - `repoThreadFields(thread: { kind: string; repoId: string | null; baseRef: string | null; feature: string | null; specPath: string | null }): { repoId: string; baseRef: string; feature: string; specPath: string }`
-  — new, in `chat-thread.domain.ts`. Returns the four fields for a REPO thread; throws
-  `ConflictAppException({}, 'threads.notRepoThread')` (409) for a PROJECT thread or for a REPO row with any of the four
-  null. Every REPO-only consumer reads the fields through it:
+  — new, in `chat-thread.domain.ts`. Throws `ConflictAppException({}, 'threads.notRepoThread')` (409) only when
+  `kind === 'PROJECT'` or any of the four fields is null; otherwise returns the four fields. A missing or unknown `kind`
+  is treated as `REPO`, matching `mapThread` (existing unit fixtures build thread rows without `kind`). Every REPO-only consumer reads the fields through it:
   - `ThreadsService.plan` and `ThreadsService.run` (`threads.service.ts:87-115`): call it right after the not-found
     check, before the creator check.
   - `PrismaChatThreadRepository.publish` and `discard` (`prisma-chat-thread.repository.ts:171-255`): call it on the
@@ -101,8 +100,9 @@ implement.
     then a PROJECT send answers 409 `threads.notRepoThread`).
   - `findThreadAssign` (`prisma-fleet-job.repository.ts:201-215`) uses `thread.feature ?? \`thread-${turn.threadId}\``
     (1a-R1).
-  - The thread-ingest cost event (`threads/ingest/prisma-thread-ingest.repository.ts:269`) uses
-    `featureName: thread.feature ?? \`thread-${thread.id}\``.
+  - The thread-ingest cost event (`threads/ingest/prisma-thread-ingest.repository.ts:256-270`, `costEventData`): its
+    `thread` argument gains `id` (the two call sites at `:201` and `:249` add `id` to the thread select), and
+    `featureName` becomes `thread.feature ?? \`thread-${thread.id}\``.
   - `jobGateKeys` (`apps/api/src/fleet/budgets/budget-rules.ts:40-47`) — Baseline: `repoId: string`, always emits a
     `repo:<id>` key. Target: `repoId: string | null`; null emits no `repo:` key (project, runner and global keys
     unchanged). The `thread` parameter of `sendRefusalFor` (`prisma-chat-thread.repository.ts:316`) widens `repoId` to
@@ -150,8 +150,8 @@ implement.
 - `createThreadJob` (`prisma-chat-thread.repository.ts:354-381`) — Target: for a PROJECT thread it resolves the anchor
   inside the send transaction; none answers 409 `threads.noFleetRepo`; the job gets `repoId` = anchor id and `ref` =
   anchor `defaultBranch`; the instructions come from `buildProjectThreadInstructions` with the project's slug.
-- `sendRefusalFor` (`:316-334`) and `sendRefusalOf` (`:84-97`) — Target: for a PROJECT thread the budget gate keys use
-  the anchor's id, or `null` when the project has no fleet repo. The no-repo case is not a send refusal: GET detail
+- `sendRefusalFor` (`:316-334`) and `sendRefusalOf` (`:84-97`) — Target: `sendRefusalFor`'s `thread` parameter gains
+  `kind` (passed by `sendRefusalOf` and by `sendMessage`); for a PROJECT thread the budget gate keys use the anchor's id, or `null` when the project has no fleet repo. The no-repo case is not a send refusal: GET detail
   answers 200 with the usual `sendRefusal`, and the send itself then answers 409 `threads.noFleetRepo` from
   `createThreadJob`.
 - Job-dispatch activity payload (`:304`) — Target: for a PROJECT thread `payload.repoId` is the anchor's id and
@@ -195,12 +195,13 @@ implement.
 - `threadScratchDir(homeDir: string, threadId: string): string` — new in `apps/runner/src/thread/thread-paths.ts`:
   `join(threadDirFor(homeDir, threadId), 'scratch')`. It lives under the thread directory, so `pruneThreads` removes it
   with the thread.
-- `buildProjectThreadTools(ctx: Pick<ThreadToolContext, 'skillsRoot' | 'skills'>): EmbedderTool[]` — new in
-  `apps/runner/src/thread/tools/index.ts`: `[loadSkillTool(ctx), readSkillFileTool(ctx)]`.
+- `buildProjectThreadTools(ctx: ThreadToolContext): EmbedderTool[]` — new in `apps/runner/src/thread/tools/index.ts`:
+  `[loadSkillTool(ctx), readSkillFileTool(ctx)]`. The PROJECT run builds the full `ThreadToolContext` as the REPO path
+  does, with `worktree` = the scratch dir and no `feature` / `onDocWritten`; the two factories keep their signatures.
 - `ThreadJobRun.run` SESSION path (`apps/runner/src/thread/thread-job-run.ts:217-330`) — Target: when
   `thread.kind === 'PROJECT'` it skips step 1 (`credentials.acquire`) and steps 2-4 (`prepare`), creates
   `threadScratchDir(homeDir, threadId)` (recursive; no error when it exists), runs step 5 (skills) unchanged, opens the
-  session with `worktree` = that scratch dir and `tools` = `buildProjectThreadTools(...)`, opens the stream with `stale`
+  session with `worktree` = that scratch dir and `tools` = `buildProjectThreadTools({ worktree: scratch, skillsRoot, skills, git, searchTimeoutMs, nowMs })`, opens the stream with `stale`
   false, and creates no `ThreadLivePublish`. `command('THREAD_PUBLISH', …)` on such a run returns
   `{ result: 'rejected', detail: 'not_repo_thread' }`. REPO runs are unchanged.
 
@@ -211,7 +212,8 @@ implement.
   `projectThreads: boolean`.
 - `apps/web/lib/thread-create.ts` — Target: `ThreadCreateValues` gains `kind: 'REPO' | 'PROJECT'`.
   `buildThreadCreateSchema` adds `kind: z.enum(['REPO', 'PROJECT']).default('REPO')` and moves the `repoId`, `baseRef`
-  and `feature` rules into a `superRefine` that runs them only when `kind` is `REPO` (same message keys).
+  and `feature` rules into a `superRefine` that runs them only when `kind` is `REPO` (same message keys), adding each
+  issue with `path: ['repoId']`, `['baseRef']` or `['feature']` so the form shows it on that field.
   `toCreateThreadBody` returns `{ kind: 'PROJECT', title, maxCostUsd, backend }` for PROJECT and today's body plus
   `kind: 'REPO'` for REPO. `eligibleModels(runners, kind)` gains a `kind` argument; for `PROJECT` it keeps only runners
   whose `projectThreads` is true.
@@ -385,6 +387,7 @@ after US-002.
 
 **US-003**
 
+- `apps/api/src/fleet/threads/prisma-chat-thread.repository.spec.ts` — the `create` call at line 162 passes the old input shape without `kind`; the repository input now requires `kind`, so that call gains `kind: 'REPO'` for `bun run type-check:spec`. Its expectations are unchanged.
 - `apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts` — the endpoint lifecycle suite covers every endpoint behaviour change (rule api-testing); this story adds POST /api/projects/:slug/threads with `kind: 'PROJECT'` (201) and with `kind: 'PROJECT'` plus a `feature` (400). Existing expectations unchanged.
 - `apps/api/src/i18n/en/threads.json` — gains `noFleetRepo`.
 - `apps/api/src/i18n/zh/threads.json` — gains `noFleetRepo`.
@@ -439,7 +442,7 @@ None. The story changes repository internals only; no existing test pins a PROJE
 
 1. [integration] Inserting a `ChatThread` row with no `kind` value stores `kind` `REPO`.
 2. [integration] Inserting a `ChatThread` row with `kind` `PROJECT` and null `repoId`, `baseRef`, `feature` and `specPath` succeeds.
-3. [integration] Inserting two ACTIVE `ChatThread` rows with `kind` `PROJECT` and null `repoId` and `feature` in one project succeeds.
+3. [unit] `repoThreadFields` for a thread object with no `kind` property and all four fields set returns those four values.
 4. [integration] Applying the `20261017090000_chat_thread_kind` migration with `applyMigration` to a scratch schema from `scratchSchemaBefore` that holds one `ChatThread` row leaves that row with `kind` `REPO`.
 5. [integration] After that migration the pre-existing `ChatThread` row keeps its `repoId`, `feature` and `specPath` values.
 6. [integration] `GET /api/projects/:slug/threads/:id` for a PROJECT thread row answers 200 with `kind` `PROJECT`.
@@ -523,7 +526,7 @@ None. The story changes repository internals only; no existing test pins a PROJE
 ### US-007: Web scope picker and PROJECT thread rendering (`Workdir: apps/web`)
 
 1. [unit] `buildThreadCreateSchema(t)` accepts values with `kind: 'PROJECT'`, an empty `repoId`, an empty `feature`, a title, a cost cap and a model.
-2. [unit] `buildThreadCreateSchema(t)` rejects values with `kind: 'REPO'` and an empty `repoId` with the message key `fleet.threads.new.validation.repoRequired`.
+2. [unit] `buildThreadCreateSchema(t)` rejects values with `kind: 'REPO'` and an empty `repoId` with an issue at path `['repoId']` whose message key is `fleet.threads.new.validation.repoRequired`.
 3. [unit] `toCreateThreadBody` for values with `kind: 'PROJECT'` returns a body whose `kind` is `PROJECT` and that has no `repoId`, `feature` or `baseRef` key.
 4. [unit] `toCreateThreadBody` for values with `kind: 'REPO'` returns a body whose `kind` is `REPO`.
 5. [unit] `eligibleModels(runners, 'PROJECT')` returns only models of online, enabled runners whose `projectThreads` is `true`.
