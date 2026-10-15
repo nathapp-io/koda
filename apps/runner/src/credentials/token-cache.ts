@@ -20,6 +20,7 @@ export interface TokenCacheTiming {
 }
 
 interface Entry {
+  readonly repoId?: string;
   readonly jobId: string;
   readonly leaseEpoch: number;
   readonly token: CachedToken | null;
@@ -30,10 +31,12 @@ interface Entry {
 /** The server accepts at most 64 token requests per sync (apps/api/src/fleet/sync/sync-request.parser.ts). */
 export const MAX_TOKEN_REQUESTS = 64;
 
-const keyOf = (jobId: string, leaseEpoch: number): string => `${jobId}:${leaseEpoch}`;
+const scopeOf = (jobId: string, repoId?: string): string => JSON.stringify([jobId, repoId]);
+const keyOf = (jobId: string, leaseEpoch: number, repoId?: string): string =>
+  `${jobId}:${leaseEpoch}${repoId === undefined ? '' : `:${repoId}`}`;
 
 /**
- * Per (jobId, leaseEpoch) git tokens, in memory only (design §3.1, D81): never journaled, logged or written to disk.
+ * Per (jobId, leaseEpoch, repoId?) git tokens, in memory only (design §3.1, D81): never journaled, logged or written to disk.
  * A restarted daemon starts empty and asks again for every job that still wants one.
  */
 export class TokenCache {
@@ -48,61 +51,62 @@ export class TokenCache {
     return () => { this.listeners = this.listeners.filter((other) => other !== listener); };
   }
 
-  want(jobId: string, leaseEpoch: number): void {
-    const key = keyOf(jobId, leaseEpoch);
+  want(jobId: string, leaseEpoch: number, repoId?: string): void {
+    const key = keyOf(jobId, leaseEpoch, repoId);
     if (this.entries.has(key)) return;
-    this.entries = new Map([...this.entries, [key, { jobId, leaseEpoch, token: null, error: null, coolUntilMs: 0 }]]);
+    this.entries = new Map([...this.entries, [key, { jobId, leaseEpoch, ...(repoId === undefined ? {} : { repoId }), token: null, error: null, coolUntilMs: 0 }]]);
     for (const listener of this.listeners) listener();
   }
 
-  wanted(jobId: string, leaseEpoch: number): boolean {
-    return this.entries.has(keyOf(jobId, leaseEpoch));
+  wanted(jobId: string, leaseEpoch: number, repoId?: string): boolean {
+    return this.entries.has(keyOf(jobId, leaseEpoch, repoId));
   }
 
-  drop(jobId: string, leaseEpoch: number): void {
-    const key = keyOf(jobId, leaseEpoch);
+  drop(jobId: string, leaseEpoch: number, repoId?: string): void {
+    const key = keyOf(jobId, leaseEpoch, repoId);
     if (this.entries.has(key)) this.entries = new Map([...this.entries].filter(([other]) => other !== key));
   }
 
   /** An expired token is never served; an error only shows when there is no live token (D82). */
-  state(jobId: string, leaseEpoch: number, nowMs: number): TokenState {
-    const entry = this.entries.get(keyOf(jobId, leaseEpoch));
+  state(jobId: string, leaseEpoch: number, nowMs: number, repoId?: string): TokenState {
+    const entry = this.entries.get(keyOf(jobId, leaseEpoch, repoId));
     if (entry?.token && Date.parse(entry.token.expiresAt) > nowMs) return { kind: 'token', token: entry.token };
     if (entry?.error) return { kind: 'error', reason: entry.error };
     return { kind: 'pending' };
   }
 
-  /** D81: one request per job (its highest wanted epoch) for a missing or nearly expired token, outside any cool-down. */
+  /** D81: one request per (job, repoId), using its highest wanted epoch for a missing or nearly expired token, outside any cool-down. */
   requests(nowMs: number): TokenRequest[] {
     const highest = new Map<string, Entry>();
     for (const entry of this.entries.values()) {
-      const seen = highest.get(entry.jobId);
-      if (!seen || entry.leaseEpoch > seen.leaseEpoch) highest.set(entry.jobId, entry);
+      const seen = highest.get(scopeOf(entry.jobId, entry.repoId));
+      if (!seen || entry.leaseEpoch > seen.leaseEpoch) highest.set(scopeOf(entry.jobId, entry.repoId), entry);
     }
     return [...highest.values()]
       .filter((entry) => entry.coolUntilMs <= nowMs && (entry.token === null || !this.fresh(entry.token.expiresAt, nowMs)))
+      .sort((a, b) => Number(a.repoId !== undefined) - Number(b.repoId !== undefined))
       .slice(0, MAX_TOKEN_REQUESTS)
-      .map((entry) => ({ jobId: entry.jobId, leaseEpoch: entry.leaseEpoch }));
+      .map((entry) => ({ jobId: entry.jobId, leaseEpoch: entry.leaseEpoch, ...(entry.repoId === undefined ? {} : { repoId: entry.repoId }) }));
   }
 
-  /** A GitToken names only its job: it belongs to the epoch this sync asked for (D81). */
+  /** A GitToken names its job and optional repository: it belongs to the epoch this sync asked for (D81). */
   apply(requested: readonly TokenRequest[], tokens: readonly GitToken[], errors: readonly GitTokenError[], nowMs: number): void {
-    const epochOf = new Map(requested.map((r) => [r.jobId, r.leaseEpoch] as const));
+    const epochOf = new Map(requested.map((r) => [scopeOf(r.jobId, r.repoId), r.leaseEpoch] as const));
     const next = new Map(this.entries);
     const cool = nowMs + this.timing.cooldownMs;
     for (const token of tokens) {
-      const epoch = epochOf.get(token.jobId);
-      const entry = epoch === undefined ? undefined : next.get(keyOf(token.jobId, epoch));
+      const epoch = epochOf.get(scopeOf(token.jobId, token.repoId));
+      const entry = epoch === undefined ? undefined : next.get(keyOf(token.jobId, epoch, token.repoId));
       if (!entry) continue;
       const cached: CachedToken = { token: token.token, username: token.username, expiresAt: token.expiresAt };
       // A token already inside the margin (a refresh that returned the same token, or clock skew) would be asked for
       // again at once: cool down instead (D81).
-      next.set(keyOf(entry.jobId, entry.leaseEpoch), { ...entry, token: cached, error: null, coolUntilMs: this.fresh(token.expiresAt, nowMs) ? 0 : cool });
+      next.set(keyOf(entry.jobId, entry.leaseEpoch, entry.repoId), { ...entry, token: cached, error: null, coolUntilMs: this.fresh(token.expiresAt, nowMs) ? 0 : cool });
     }
     for (const error of errors) {
-      const epoch = epochOf.get(error.jobId);
-      const entry = epoch === undefined ? undefined : next.get(keyOf(error.jobId, epoch));
-      if (entry) next.set(keyOf(entry.jobId, entry.leaseEpoch), { ...entry, error: error.reason, coolUntilMs: cool });
+      const epoch = epochOf.get(scopeOf(error.jobId, error.repoId));
+      const entry = epoch === undefined ? undefined : next.get(keyOf(error.jobId, epoch, error.repoId));
+      if (entry) next.set(keyOf(entry.jobId, entry.leaseEpoch, entry.repoId), { ...entry, error: error.reason, coolUntilMs: cool });
     }
     this.entries = next;
   }

@@ -18,8 +18,8 @@ export function defaultSocketDir(uid: number): string {
 }
 
 /** D78: one socket per (runner, job, epoch); the runner id keeps two daemons of one uid apart. */
-export function socketPathFor(dir: string, runnerId: string, jobId: string, leaseEpoch: number): string {
-  const key = createHash('sha256').update(`${runnerId}:${jobId}:${leaseEpoch}`).digest('hex').slice(0, 16);
+export function socketPathFor(dir: string, runnerId: string, jobId: string, leaseEpoch: number, repoId?: string): string {
+  const key = createHash('sha256').update(`${runnerId}:${jobId}:${leaseEpoch}${repoId === undefined ? '' : `:${repoId}`}`).digest('hex').slice(0, 16);
   return join(dir, `${key}.sock`);
 }
 

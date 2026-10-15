@@ -1,5 +1,6 @@
 // apps/runner/test/unit/broker.spec.ts
 import { afterAll, describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { chmod, mkdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { CredentialBroker, type BrokerTiming } from '../../src/credentials/broker';
@@ -167,4 +168,84 @@ describe('CredentialBroker (design §3.1, D78-D83, D90)', () => {
     expect(await requestCredential(w.sock(row))).toEqual({ ok: false, reason: 'unavailable' });
     expect(w.tokens.wanted('j1', 1)).toBe(true);
   });
+});
+
+test('project code AC-10: socket hashes preserve legacy names and separate repositories', () => {
+  for (const repoId of [undefined, 'r1']) {
+    const hash = createHash('sha256').update(`run:j1:1${repoId === undefined ? '' : `:${repoId}`}`).digest('hex').slice(0, 16);
+    expect(socketPathFor('/tmp', 'run', 'j1', 1, repoId)).toBe(join('/tmp', `${hash}.sock`));
+  }
+});
+
+function requiredHelper(helper: string | null | undefined): string {
+  if (!helper) throw new Error('missing helper');
+  return helper;
+}
+
+async function helperGet(helper: string, host = 'github.com', protocol = 'https'): Promise<string> {
+  const proc = Bun.spawn(['sh', '-c', `${helper.slice(1)} get`], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
+  proc.stdin.write(`protocol=${protocol}\nhost=${host}\n\n`);
+  proc.stdin.end();
+  const out = await new Response(proc.stdout).text();
+  expect(await proc.exited).toBe(0);
+  return out;
+}
+
+async function repoWorld() {
+  const w = await world();
+  const broker = new CredentialBroker({ tokens: w.tokens, socketDir: w.socketDir, runnerId: 'r1',
+    selfCommand: [process.execPath, join(import.meta.dir, '../../src/main.ts')],
+    nowMs: Date.now, sleep: Bun.sleep, timing: FAST });
+  const row = w.job();
+  const acquire = (repoId: string) => broker.acquireRepo(row, { repoId, cloneUrl: 'https://github.com/o/n.git' }, { wait: true });
+  const grant = (repoId: string) => w.tokens.apply([{ jobId: 'j1', leaseEpoch: 1, repoId }],
+    [{ jobId: 'j1', repoId, token: `repo-${repoId}`, username: 'x-access-token', expiresAt: new Date(Date.now() + 3_600_000).toISOString() }], [], Date.now());
+  return { ...w, broker, row, acquire, grant };
+}
+
+test('project code AC-11: repository helper serves the repository token without shims', async () => {
+  const w = await repoWorld();
+  try {
+    const pending = w.acquire('r1');
+    setTimeout(() => w.grant('r1'), 20);
+    const result = await pending;
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.credentials.binDir).toBeNull();
+    expect(result.credentials.helper).toBeTruthy();
+    expect(await helperGet(requiredHelper(result.credentials.helper))).toBe('username=x-access-token\npassword=repo-r1\n');
+    await expect(stat(join(w.row.jobDir, 'bin'))).rejects.toThrow();
+  } finally { await w.broker.closeAll(); }
+});
+
+test('project code AC-12: repository helper refuses other hosts and protocols', async () => {
+  const w = await repoWorld();
+  try {
+    w.tokens.want('j1', 1, 'r1'); w.grant('r1');
+    const result = await w.acquire('r1');
+    if (!result.ok) throw new Error(result.reason);
+    expect(await helperGet(requiredHelper(result.credentials.helper), 'gitlab.com')).toBe('');
+    expect(await helperGet(requiredHelper(result.credentials.helper), 'github.com', 'http')).toBe('');
+  } finally { await w.broker.closeAll(); }
+});
+
+test('project code AC-13: releaseRepo closes only its socket; release drops all repositories', async () => {
+  const w = await repoWorld();
+  try {
+    const helpers: string[] = [];
+    for (const id of ['r1', 'r2']) {
+      w.tokens.want('j1', 1, id); w.grant(id);
+      const result = await w.acquire(id);
+      if (!result.ok) throw new Error(result.reason);
+      helpers.push(requiredHelper(result.credentials.helper));
+    }
+    await w.broker.releaseRepo(w.row, 'r1');
+    expect(w.tokens.wanted('j1', 1, 'r1')).toBe(false);
+    expect(await helperGet(requiredHelper(helpers[0]))).toBe('');
+    expect(await helperGet(requiredHelper(helpers[1]))).toContain('password=repo-r2');
+    w.tokens.want('j1', 1, 'r1'); w.grant('r1'); await w.acquire('r1');
+    await w.broker.release(w.row);
+    for (const id of ['r1', 'r2']) expect(w.tokens.wanted('j1', 1, id)).toBe(false);
+    for (const helper of helpers) expect(await helperGet(helper)).toBe('');
+  } finally { await w.broker.closeAll(); }
 });

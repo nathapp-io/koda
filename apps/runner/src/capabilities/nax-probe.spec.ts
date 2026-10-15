@@ -92,6 +92,7 @@ describe('NaxCapabilityProbe (design §3.2, D98-D101)', () => {
       threadWrite: true,
       projectThreads: true,
       kodaTools: true,
+      projectCode: true,
       approvals: { relay: true },
     });
     expect(warnings).toEqual([]);
