@@ -9986,6 +9986,63 @@
         ]
       }
     },
+    "/api/fleet/runner/jobs/{jobId}/tools/{name}": {
+      "post": {
+        "operationId": "RunnerToolController_call",
+        "parameters": [
+          {
+            "name": "jobId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "leaseEpoch",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ content, isError } — a tool-level refusal is isError: true, not an HTTP error"
+          },
+          "400": {
+            "description": "Invalid leaseEpoch or malformed body"
+          },
+          "401": {
+            "description": "Runner authentication failed"
+          },
+          "404": {
+            "description": "No such job, or an unknown koda tool"
+          },
+          "409": {
+            "description": "Threads disabled, stale lease, not a THREAD job, the job is not RUNNING, or the thread is closing"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Run one koda tool for the thread of the held job at its lease (S5b §1b)",
+        "tags": [
+          "fleet-runner"
+        ]
+      }
+    },
     "/api/home": {
       "get": {
         "operationId": "HomeController_get",
@@ -16637,6 +16694,10 @@
               },
               "stale": {
                 "type": "boolean"
+              },
+              "kodaToolsUnavailableOn": {
+                "type": "string",
+                "description": "Set when the hosting runner does not advertise kodaTools (S5b 1b-D4)"
               }
             }
           },
@@ -16825,6 +16886,10 @@
               },
               "stale": {
                 "type": "boolean"
+              },
+              "kodaToolsUnavailableOn": {
+                "type": "string",
+                "description": "Set when the hosting runner does not advertise kodaTools (S5b 1b-D4)"
               }
             }
           },

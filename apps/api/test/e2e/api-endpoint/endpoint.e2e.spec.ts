@@ -3917,4 +3917,17 @@ describeIntegration('API Integration Tests', () => {
       expect((summary as Record<string, unknown>).threadBackends).toEqual({ native: ['m1'], acp: [] });
     });
   });
+
+  describe('US-005 Runner tool route', () => {
+    it('refuses a user token on the runner tool route with 401 fleet.runnerAuth', async () => {
+      // The happy path needs a runner key holding a job; this suite has no runner-key routes, so it pins the
+      // failure direction of the fail-closed guard (runner keys are refused off runner routes and vice versa).
+      const res = await request(httpServer)
+        .post('/api/fleet/runner/jobs/does-not-exist/tools/koda_get_ticket?leaseEpoch=1')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ toolCallId: 'c1', input: { ref: 'WEB-1' } })
+        .expect(401);
+      refusal(res, 'fleet.runnerAuth.40000');
+    });
+  });
 });

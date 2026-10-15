@@ -47,5 +47,7 @@
   "naxFile": { "404": "This file does not exist at that commit", "422": "This file cannot be edited here: {reason}" },
   "configJobActive": { "409": "A config job is already active for this repository: {activeJobId}" },
   "configEditInput": { "-2": "Invalid config edit: {reason}" },
-  "assistantTool": { "404": "Unknown koda tool" }
+  "assistantTool": { "404": "Unknown koda tool" },
+  "notThreadJob": { "409": "This job is not a thread job with a session" },
+  "toolCall": { "-2": "Invalid koda tool call: {reason}" }
 }

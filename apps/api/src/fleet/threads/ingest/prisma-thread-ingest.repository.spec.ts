@@ -28,7 +28,7 @@ function matching(messages: Msg[], where: { threadId: string; turnId?: string; r
 }
 
 /** An in-memory stand-in for the Prisma calls the fold makes. Enough to pin the fold's row effects. */
-function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?: number; messages?: Msg[]; pendingQuestion?: unknown; session?: unknown; resume?: boolean; writtenPaths?: string[]; jobState?: string; leaseEpoch?: number } = {}) {
+function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?: number; messages?: Msg[]; pendingQuestion?: unknown; session?: unknown; resume?: boolean; writtenPaths?: string[]; jobState?: string; leaseEpoch?: number; runnerId?: string | null; runner?: { name: string; capabilities: unknown } | null } = {}) {
   const messages: Msg[] = [...(opts.messages ?? [])];
   const thread = {
     id: 'T', nextSeq: opts.nextSeq ?? 2, lastActivityAt: new Date(0),
@@ -40,7 +40,7 @@ function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?
     lastWrite: null as unknown,
   };
   const turn = { resume: opts.resume ?? false };
-  const job = { id: 'J', command: opts.command ?? 'THREAD', threadId: opts.threadId === undefined ? 'T' : opts.threadId, state: opts.jobState ?? 'RUNNING', leaseEpoch: opts.leaseEpoch ?? 1 };
+  const job = { id: 'J', command: opts.command ?? 'THREAD', threadId: opts.threadId === undefined ? 'T' : opts.threadId, state: opts.jobState ?? 'RUNNING', leaseEpoch: opts.leaseEpoch ?? 1, runnerId: opts.runnerId ?? null };
   const cursor = { offset: 0n, skippedLines: 0 };
   const client = {
     // Row locks (SELECT ... FOR UPDATE) return nothing; the seq UPDATE returns the seq it took and advances the counter.
@@ -90,6 +90,8 @@ function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?
       }),
     },
     threadIngestCursor: { upsert: vi.fn(async () => cursor) },
+    // 1b-D4: the runner's stored capabilities decide the tools notice; a job with no runner never reads this.
+    runner: { findUnique: vi.fn(async () => opts.runner ?? null) },
     $executeRaw: vi.fn(async () => 0),
   };
   return { client, messages, thread };
@@ -447,6 +449,61 @@ describe('PrismaThreadIngestRepository.fold tools and approvals (US-004)', () =>
     const { client, thread } = fakeClient({ nextSeq: 2 });
     await repoWith(client).fold(batch([{ type: 'session_closed', reason: 'idle' }]));
     expect(thread.session).toMatchObject({ state: 'closed', reason: 'idle', resumed: false, contextReset: false });
+  });
+});
+
+describe('PrismaThreadIngestRepository.fold tools notice (US-005)', () => {
+  it('AC-14: a runner whose stored capabilities lack kodaTools names itself on the live session', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, runnerId: 'r1', runner: { name: 'wk-mac', capabilities: { threadBackends: { native: ['m1'], acp: [] } } } });
+    await repoWith(client).fold(batch([sessionStarted()]));
+    expect(thread.session).toEqual({
+      jobId: 'J', state: 'live', resumed: false, contextReset: false, reason: null, at: '2026-10-14T00:00:00.000Z',
+      kodaToolsUnavailableOn: 'wk-mac',
+    });
+    expect(client.runner.findUnique).toHaveBeenCalledWith({ where: { id: 'r1' }, select: { name: true, capabilities: true } });
+  });
+
+  it('AC-15: a runner with kodaTools stores the session with no notice key', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, runnerId: 'r1', runner: { name: 'wk-mac', capabilities: { kodaTools: true } } });
+    await repoWith(client).fold(batch([sessionStarted()]));
+    expect(thread.session).not.toHaveProperty('kodaToolsUnavailableOn');
+    expect(thread.session).toMatchObject({ jobId: 'J', state: 'live' });
+  });
+
+  it('stores no notice for a job with no runner, and never reads one', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, runnerId: null });
+    await repoWith(client).fold(batch([sessionStarted()]));
+    expect(thread.session).not.toHaveProperty('kodaToolsUnavailableOn');
+    expect(client.runner.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('stores no notice when the runner row is gone', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, runnerId: 'r1', runner: null });
+    await repoWith(client).fold(batch([sessionStarted()]));
+    expect(thread.session).not.toHaveProperty('kodaToolsUnavailableOn');
+  });
+
+  it('reads any other capabilities object as "no kodaTools"', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, runnerId: 'r1', runner: { name: 'wk-mac', capabilities: null } });
+    await repoWith(client).fold(batch([sessionStarted()]));
+    expect(thread.session).toMatchObject({ kodaToolsUnavailableOn: 'wk-mac' });
+  });
+
+  it('keeps the stale-start catch-up guard: no notice is written for a start after the job ended (AC-19)', async () => {
+    const closed = { jobId: 'J', state: 'failed', resumed: false, contextReset: false, reason: 'runner silent', at: '2026-10-14T00:01:00.000Z' };
+    const { client, thread } = fakeClient({ nextSeq: 2, jobState: 'CRASHED', session: closed, runnerId: 'r1', runner: { name: 'wk-mac', capabilities: {} } });
+    await repoWith(client).fold(batch([sessionStarted()]));
+    expect(thread.session).toEqual(closed);
+    expect(client.runner.findUnique).not.toHaveBeenCalled();
+  });
+
+  it.each(['session_closed', 'session_failed'] as const)('carries an existing notice through a %s', async (type) => {
+    const { client, thread } = fakeClient({
+      nextSeq: 2,
+      session: { jobId: 'J', state: 'live', resumed: false, contextReset: false, reason: null, at: 'A', kodaToolsUnavailableOn: 'wk-mac' },
+    });
+    await repoWith(client).fold(batch([{ type, reason: 'idle' }]));
+    expect(thread.session).toMatchObject({ jobId: 'J', kodaToolsUnavailableOn: 'wk-mac' });
   });
 });
 
