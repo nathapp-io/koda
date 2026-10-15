@@ -1,6 +1,6 @@
 import { chmod, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { AgentSession, SessionEvent } from '@nathapp/nax-agent';
+import type { AgentSession, EmbedderTool, SessionEvent } from '@nathapp/nax-agent';
 import { THREAD_LIMITS, type ThreadAssign, type ThreadCommandType } from '@nathapp/fleet-protocol';
 import type { CredentialProvider } from '../credentials/broker';
 import { errorMessage } from '../errors';
@@ -20,6 +20,7 @@ import type { OpenThreadSessionOptions } from './session-factory';
 import { ThreadEventWriter } from './thread-event-writer';
 import { prepareThreadWorktree as defaultPrepareThreadWorktree, type PrepareThreadWorktreeInput } from './thread-worktree';
 import { threadScratchDir } from './thread-paths';
+import { buildKodaToolProxies, type KodaToolCaller } from './tools/koda-proxies';
 import { buildProjectThreadTools, buildThreadTools } from './tools';
 
 /** The thread stream file, inside the job's own `.jobs/<jobId>` directory. */
@@ -79,6 +80,11 @@ export interface ThreadHostDeps {
   readonly discard?: (input: ThreadDiscardInput) => Promise<ThreadDiscardResult>;
   /** The skills remote's base URL; the default fetches from `https://github.com`. */
   readonly skillOrigin?: string;
+  /**
+   * Fleet S5b US-006: the API's koda tools, proxied into a session whose ASSIGN carries `thread.kodaTools`.
+   * Absent, the session keeps the kind's own tools and reaches no koda data.
+   */
+  readonly kodaTools?: KodaToolCaller;
 }
 
 export interface ThreadRunTuning {
@@ -290,16 +296,19 @@ export class ThreadJobRun {
       jobId: this.jobId,
       thread,
       worktree: prepared.worktree,
-      tools: buildThreadTools({
-        worktree: prepared.worktree,
-        skillsRoot: this.skillsRoot(),
-        skills: thread.skills,
-        git: this.deps.host.git,
-        searchTimeoutMs: this.deps.tuning.threadSearchTimeoutMs,
-        nowMs: () => this.deps.now().getTime(),
-        feature: thread.feature,
-        onDocWritten: (path, bytes) => { if (!this.halted) this.writer?.docWritten(path, bytes); },
-      }),
+      tools: [
+        ...buildThreadTools({
+          worktree: prepared.worktree,
+          skillsRoot: this.skillsRoot(),
+          skills: thread.skills,
+          git: this.deps.host.git,
+          searchTimeoutMs: this.deps.tuning.threadSearchTimeoutMs,
+          nowMs: () => this.deps.now().getTime(),
+          feature: thread.feature,
+          onDocWritten: (path, bytes) => { if (!this.halted) this.writer?.docWritten(path, bytes); },
+        }),
+        ...this.kodaToolProxies(thread),
+      ],
       approvalTimeoutSec: row.assign.approvalTimeoutSec,
     });
     if (this.halted) {
@@ -356,14 +365,17 @@ export class ThreadJobRun {
       jobId: this.jobId,
       thread,
       worktree: scratch,
-      tools: buildProjectThreadTools({
-        worktree: scratch,
-        skillsRoot: this.skillsRoot(),
-        skills: thread.skills,
-        git: this.deps.host.git,
-        searchTimeoutMs: this.deps.tuning.threadSearchTimeoutMs,
-        nowMs: () => this.deps.now().getTime(),
-      }),
+      tools: [
+        ...buildProjectThreadTools({
+          worktree: scratch,
+          skillsRoot: this.skillsRoot(),
+          skills: thread.skills,
+          git: this.deps.host.git,
+          searchTimeoutMs: this.deps.tuning.threadSearchTimeoutMs,
+          nowMs: () => this.deps.now().getTime(),
+        }),
+        ...this.kodaToolProxies(thread),
+      ],
       approvalTimeoutSec: row.assign.approvalTimeoutSec,
     });
     if (this.halted) {
@@ -430,6 +442,19 @@ export class ThreadJobRun {
     } catch (error) {
       this.deps.log.warn('credential release failed', { jobId: this.jobId, error: errorMessage(error) });
     }
+  }
+
+  /**
+   * Fleet S5b US-006: the ASSIGN's koda tool proxies, appended after the kind's own tools in descriptor order.
+   * The API defines and executes the tools; this run only forwards each call with the provider's tool call id.
+   * Without descriptors, or without a host caller (a runner that was never wired to one), the kind's tools stand
+   * alone — a session whose runner cannot proxy koda tools reaches no koda data.
+   */
+  private kodaToolProxies(thread: ThreadAssign): EmbedderTool[] {
+    const descriptors = thread.kodaTools;
+    const caller = this.deps.host.kodaTools;
+    if (descriptors === undefined || caller === undefined) return [];
+    return buildKodaToolProxies(descriptors, { jobId: this.jobId, leaseEpoch: this.leaseEpoch, caller });
   }
 
   /** Step 5: the assigned skill sources, fetched into the runner's own skill cache. */
