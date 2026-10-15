@@ -13,6 +13,7 @@ import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import { JobTransitionsService, SYSTEM_ACTOR } from './job-transitions.service';
 import { EMPTY_LOAD, evaluateRunners, firstMisfit, jobScopePause, MisfitReason, orderCandidates, PlacementJob, QUEUED_SCAN_LIMIT, toLoads, toPlacementJob } from './placement-rules';
 import { isThreadKind, type ThreadAssign } from '../common/thread-jobs';
+import { withProjectRepos } from './project-repos-assign';
 import type { RunnerCapabilities } from '../common/protocol';
 import { RunnerNotifier } from './runner-notifier';
 import {
@@ -194,11 +195,22 @@ export class PlacementService {
     if (leaseEpoch === null) return null; // another placement won (spec §6.1)
     const after = await this.repo.findById(job.id);
     if (!after) return null;
-    const payload = buildAssignPayload(after, repo, cloneUrlFor(repo, this.vcsConfig), gitIdentityFor(repo.provider, this.fleetConfig), withKodaTools(thread, runner.capabilities));
+    const payload = buildAssignPayload(after, repo, cloneUrlFor(repo, this.vcsConfig), gitIdentityFor(repo.provider, this.fleetConfig), await this.attachProjectRepos(withKodaTools(thread, runner.capabilities), job, runner.capabilities));
     if (thread) await this.repo.pinThreadRunner(thread.threadId, runner.id);
     await this.repo.createCommand({ runnerId: runner.id, jobId: job.id, type: FleetCommandType.ASSIGN, leaseEpoch, payload });
     const live = await this.transitions.record({ before: job, after, by: 'server', now, actor: SYSTEM_ACTOR, reason: `assigned to ${runner.name}` });
     return { leaseEpoch, live };
+  }
+
+  /**
+   * 1c-b-D7: only a PROJECT SESSION on a runner advertising `projectCode` reads the project's repositories; a runner
+   * without the capability keeps the thread block as the repository read it — it must not even read the repository
+   * list — and is told why on the session it starts (1c-b-D8). The read runs inside the placement transaction, so the
+   * list the ASSIGN publishes is the list the token fence recomputes from the same rows (1c-b-D5).
+   */
+  private async attachProjectRepos(thread: ThreadAssign | undefined, job: FleetJobRecord, capabilities: RunnerCapabilities): Promise<ThreadAssign | undefined> {
+    if (!thread || thread.kind !== 'PROJECT' || thread.action !== 'SESSION' || capabilities.projectCode !== true) return thread;
+    return withProjectRepos(thread, await this.repo.findProjectRepos(job.projectId), this.vcsConfig);
   }
 }
 

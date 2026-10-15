@@ -8,6 +8,7 @@ import { FleetCommandAckResult, FleetCommandType, FleetJobState, FleetJobKind } 
 import type { RunnerCapabilities, BashMode } from '../common/protocol';
 import { ACTIVE_STATES, RUNNER_HELD_STATES } from './job-state';
 import type { ThreadAssign } from '../common/thread-jobs';
+import { PROJECT_CODE_LIMITS } from '../common/thread-jobs';
 import type { ConfigJobResult } from '../common/config-jobs';
 import {
   ActiveJobRef, DuplicateActiveJobError, FleetArtifactRecord, FleetCommandRecord, FleetJobEventRecord, FleetJobFilters,
@@ -45,6 +46,20 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
       select: { id: true, projectId: true, provider: true, owner: true, name: true, defaultBranch: true, githubInstallationId: true },
     });
     return r ? { ...r, provider: r.provider as FleetRepoRef['provider'] } : null;
+  }
+
+  /**
+   * 1c-b-D7: the project's repositories in the anchor order (`createdAt` ascending, ties by `id` ascending, like
+   * `findAnchor`), bounded by the most a PROJECT session's ASSIGN can name or list as unavailable (10 + 50).
+   */
+  async findProjectRepos(projectId: string): Promise<FleetRepoRef[]> {
+    const rows = await this.db.fleetRepo.findMany({
+      where: { projectId },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: PROJECT_CODE_LIMITS.maxRepos + PROJECT_CODE_LIMITS.maxUnavailable,
+      select: { id: true, projectId: true, provider: true, owner: true, name: true, defaultBranch: true, githubInstallationId: true },
+    });
+    return rows.map((r) => ({ ...r, provider: r.provider as FleetRepoRef['provider'] }));
   }
 
   async createJob(data: NewFleetJob): Promise<FleetJobRecord> {

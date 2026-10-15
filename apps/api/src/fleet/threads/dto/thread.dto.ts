@@ -24,7 +24,7 @@ export class ThreadDto {
   @ApiProperty({ nullable: true }) tokens: unknown;
   @ApiProperty({ nullable: true }) specPath: string | null;
   @ApiProperty({ nullable: true }) pendingQuestion: unknown;
-  @ApiProperty({ nullable: true, type: 'object', properties: { jobId: { type: 'string' }, state: { type: 'string', enum: ['live', 'closed', 'failed'] }, resumed: { type: 'boolean' }, contextReset: { type: 'boolean' }, reason: { type: 'string', nullable: true }, at: { type: 'string' }, stale: { type: 'boolean' }, kodaToolsUnavailableOn: { type: 'string', description: 'Set when the hosting runner does not advertise kodaTools (S5b 1b-D4)' } } }) session: ThreadSession | null;
+  @ApiProperty({ nullable: true, type: 'object', properties: { jobId: { type: 'string' }, state: { type: 'string', enum: ['live', 'closed', 'failed'] }, resumed: { type: 'boolean' }, contextReset: { type: 'boolean' }, reason: { type: 'string', nullable: true }, at: { type: 'string' }, stale: { type: 'boolean' }, kodaToolsUnavailableOn: { type: 'string', description: 'Set when the hosting runner does not advertise kodaTools (S5b 1b-D4)' }, projectCodeUnavailableOn: { type: 'string', description: 'Set when the hosting runner does not advertise projectCode on a PROJECT thread (S5b 1c-b-D8)' } } }) session: ThreadSession | null;
   @ApiProperty() lastActivityAt: Date;
   @ApiProperty() createdAt: Date;
   @ApiProperty({ nullable: true, type: 'object', properties: { id: { type: 'string' }, state: { type: 'string' } } }) activeJob: { id: string; state: string } | null;

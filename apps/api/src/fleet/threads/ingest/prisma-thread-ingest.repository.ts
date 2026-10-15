@@ -24,7 +24,7 @@ const UNFOLDED_STREAM_LIMIT = 200;
 const QUESTION_TEXT_MAX = 2048;
 
 /** A ThreadSession as stored in `ChatThread.session` (the API `session` JSON). */
-interface StoredSession { jobId: string; state: 'live' | 'closed' | 'failed'; resumed: boolean; contextReset: boolean; reason: string | null; at: string; stale?: true; kodaToolsUnavailableOn?: string }
+interface StoredSession { jobId: string; state: 'live' | 'closed' | 'failed'; resumed: boolean; contextReset: boolean; reason: string | null; at: string; stale?: true; kodaToolsUnavailableOn?: string; projectCodeUnavailableOn?: string }
 
 /** Reads a message's stored `toolSummary` (JSON, written only by this fold) as its typed entries. */
 const readSummary = (json: Prisma.JsonValue | null): ToolSummaryEntry[] => (json as unknown as ToolSummaryEntry[] | null) ?? [];
@@ -422,8 +422,8 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
       // the job row lock, so the state and epoch are current.
       if (stale) return [];
       const turn = await db.fleetThreadTurn.findUnique({ where: { jobId: batch.jobId }, select: { resume: true } });
-      // 1b-D4: the runner that hosts the session decides whether the session has koda tools at all.
-      const notice = await this.kodaToolsNotice(runnerId);
+      // 1b-D4 / 1c-b-D8: the runner that hosts the session decides whether it has koda tools and project code at all.
+      const notice = await this.sessionNotices(threadId, runnerId);
       const session: StoredSession = {
         jobId: batch.jobId, state: 'live', resumed: line.resumed, contextReset: turn?.resume === true && !line.resumed, reason: null, at,
         ...(line.stale === true ? { stale: true as const } : {}),
@@ -444,8 +444,9 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
       state: line.type === 'session_closed' ? 'closed' : 'failed',
       resumed: current?.resumed ?? false,
       contextReset: current?.contextReset ?? false,
-      // A same-job close keeps the session's own facts (1b-D4's notice, 1a's stale flag).
+      // A same-job close keeps the session's own facts (1b-D4's and 1c-b-D8's notices, 1a's stale flag).
       ...(current?.kodaToolsUnavailableOn !== undefined ? { kodaToolsUnavailableOn: current.kodaToolsUnavailableOn } : {}),
+      ...(current?.projectCodeUnavailableOn !== undefined ? { projectCodeUnavailableOn: current.projectCodeUnavailableOn } : {}),
       // Closing a stale session must leave Discard available; only a successful discard clears it.
       ...(current?.stale === true ? { stale: true as const } : {}),
       reason: line.reason,
@@ -464,19 +465,28 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
   }
 
   /**
-   * 1b-D4: the runner the job ran on decides whether the session it hosts has koda tools. A runner row whose stored
-   * capabilities lack `kodaTools: true` names itself on the session; a job with no runner, or a runner row that is
-   * gone, stores no notice. The same capability read gates the ASSIGN descriptors (1b-D3), so the two agree except
-   * across a re-probe between the assign and the session start (a runner restart, which also ends the session).
+   * 1b-D4 / 1c-b-D8: the runner the job ran on decides whether the session it hosts has koda tools and whether it can
+   * read project code. A runner row whose stored capabilities lack the capability names itself on the session; a job
+   * with no runner, or a runner row that is gone, stores no notice. The same capability reads gate the ASSIGN
+   * descriptors and repository list (1b-D3, 1c-b-D7), so the two agree except across a re-probe between the assign and
+   * the session start (a runner restart, which also ends the session).
+   *
+   * The project-code notice is a PROJECT thread's alone: a REPO thread has its own checkout, so a runner without
+   * `projectCode` loses it nothing. `ChatThread.kind` defaults to `REPO`.
    */
-  private async kodaToolsNotice(runnerId: string | null): Promise<Pick<StoredSession, 'kodaToolsUnavailableOn'>> {
+  private async sessionNotices(threadId: string, runnerId: string | null): Promise<Pick<StoredSession, 'kodaToolsUnavailableOn' | 'projectCodeUnavailableOn'>> {
     if (!runnerId) return {};
     const runner = await this.prisma.client.runner.findUnique({
       where: { id: runnerId },
       select: { name: true, capabilities: true },
     });
     if (!runner) return {};
-    return (runner.capabilities as { kodaTools?: unknown } | null)?.kodaTools === true ? {} : { kodaToolsUnavailableOn: runner.name };
+    const capabilities = runner.capabilities as { kodaTools?: unknown; projectCode?: unknown } | null;
+    const thread = await this.prisma.client.chatThread.findUnique({ where: { id: threadId }, select: { kind: true } });
+    return {
+      ...(capabilities?.kodaTools === true ? {} : { kodaToolsUnavailableOn: runner.name }),
+      ...(thread?.kind === 'PROJECT' && capabilities?.projectCode !== true ? { projectCodeUnavailableOn: runner.name } : {}),
+    };
   }
 
   /**

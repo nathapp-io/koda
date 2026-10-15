@@ -131,20 +131,21 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
     expect(thread?.session).toEqual(session);
   });
 
-  it('US-004 AC12: get() maps a thread with no session to a null session', async () => {
-    const threadRow = {
-      id: 'T', projectId: 'P', repoId: 'R', baseRef: 'trunk', feature: 'f', title: 'x', createdById: 'U', runnerId: null,
-      backend: { kind: 'native' }, status: 'ACTIVE', archivedAt: null, skills: [], maxCostUsd: { toString: () => '5' },
-      costUsd: { toString: () => '0' }, tokens: null, specPath: 's', pendingQuestion: null, session: null,
-      lastActivityAt: new Date(0), createdAt: new Date(0),
+  it('US-003 AC-12: get() passes a session with projectCodeUnavailableOn through unchanged', async () => {
+    const session = {
+      jobId: 'J', state: 'live', resumed: false, contextReset: false, reason: null, at: 'A', projectCodeUnavailableOn: 'wk-mac',
     };
-    const prisma = {
-      client: {
-        chatThread: { findFirst: vi.fn(async () => threadRow) },
-        fleetJob: { findFirst: vi.fn(async () => null) },
-      },
-    } as never;
-    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    const repo = repoOfThreadRow(threadRow({ kind: 'PROJECT', session }));
+
+    const thread = await repo.get('P', 'T');
+
+    expect(thread?.session).toEqual(session);
+    expect(thread?.session?.projectCodeUnavailableOn).toBe('wk-mac');
+  });
+
+  it('US-004 AC12: get() maps a thread with no session to a null session', async () => {
+    const repo = repoOfThreadRow(threadRow({ session: null }));
+
     expect((await repo.get('P', 'T'))?.session).toBeNull();
   });
 
