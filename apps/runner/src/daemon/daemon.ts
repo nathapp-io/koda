@@ -193,7 +193,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         homeDir: home.dir, naxHome: config.naxHome,
         nativeModels: threadNativeModels(config.naxHome, () => reporter.latest()),
       }),
-      credentials: broker, git, homeDir: home.dir, workspaceRoot: config.workspaceRoot,
+      credentials: broker, repoCredentials: broker, git, homeDir: home.dir, workspaceRoot: config.workspaceRoot,
       // Fleet S5b §1: the session's koda tool proxies reach the API through this client; nothing else leaves the runner.
       kodaTools: { call: (args) => client.callKodaTool(args) },
     },

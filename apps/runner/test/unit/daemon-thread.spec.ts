@@ -184,6 +184,16 @@ describe('project code daemon prune', () => {
 });
 
 describe('startDaemon thread wiring (US-007)', () => {
+  test('project code AC-14: thread host uses the daemon CredentialBroker for repository tokens', async () => {
+    const f = await fixture();
+    const daemon = await f.daemon({ tuning: { projectCodeFetchTimeoutMs: 4321 } });
+    try {
+      const deps = (daemon.supervisor as unknown as { deps: SupervisorDeps }).deps;
+      expect(deps.threads?.host.repoCredentials).toBeDefined();
+      expect(deps.threads?.host.repoCredentials as unknown).toBe(deps.threads?.host.credentials);
+      expect(deps.threads?.tuning.projectCodeFetchTimeoutMs).toBe(4321);
+    } finally { await daemon.stop(); }
+  });
   test('AC-1: nax mode configures nax-agent credentials once, for the runner\'s nax home', async () => {
     const f = await fixture();
     const calls: Array<{ configDir(): string }> = [];
