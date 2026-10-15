@@ -13540,7 +13540,8 @@
               "thread_capacity",
               "thread_backend",
               "threads_disabled",
-              "thread_write"
+              "thread_write",
+              "project_threads"
             ],
             "type": "string"
           }
@@ -15738,7 +15739,8 @@
               "thread_capacity",
               "thread_backend",
               "threads_disabled",
-              "thread_write"
+              "thread_write",
+              "project_threads"
             ],
             "type": "string"
           }
@@ -16385,7 +16387,8 @@
               "thread_capacity",
               "thread_backend",
               "threads_disabled",
-              "thread_write"
+              "thread_write",
+              "project_threads"
             ],
             "type": "string"
           }

@@ -3,23 +3,33 @@ import { isRunnerOnline } from '../common/runner-online';
 import { isConfigKind } from '../common/config-jobs';
 import { jobGateKeys } from '../budgets/budget-rules';
 import { isThreadKind } from '../common/thread-jobs';
-import type { ThreadAction, ThreadBackend } from '../common/thread-jobs';
+import type { ThreadAction, ThreadBackend, ChatThreadKind } from '../common/thread-jobs';
 import type { FleetJobRecord, FleetRepoRef } from './domain/fleet-job.domain';
 
 /** The first placement rule a runner fails (spec §4), reported per runner at dispatch. */
 export type MisfitReason =
   | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
   | 'provider_unavailable' | 'sandbox' | 'interaction' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity'
-  | 'config_jobs' | 'thread_capacity' | 'thread_backend' | 'threads_disabled' | 'thread_write';
+  | 'config_jobs' | 'thread_capacity' | 'thread_backend' | 'threads_disabled' | 'thread_write' | 'project_threads';
 
 // budget_paused is not permanent either: it clears on resume or month rollover (S1b §2.3).
 // provider_unavailable is not permanent: a later probe may fix it, so the job queues and a
 // pinned dispatch answers 201 (spec §4).
 // interaction is not permanent either: the runner's env is fixed and a re-probe clears it (#207).
+// project_threads is not permanent either (S5b-R9): the runner's daemon may start hosting them (US-005).
 /** A pinned job whose runner fails one of these can never run there: 422 at dispatch (spec §4). */
 export const PERMANENT_MISFITS: ReadonlySet<MisfitReason> = new Set<MisfitReason>([
   'disabled', 'executor', 'protocol', 'provider_missing', 'sandbox', 'tools', 'approvals_relay', 'config_jobs',
 ]);
+
+/** The thread facts placement judges: the turn's backend and action, whether thread jobs are on, and the thread kind. */
+export interface PlacementThread {
+  backend: ThreadBackend;
+  enabled: boolean;
+  action?: ThreadAction;
+  /** The normalized thread kind (1a-R1); absent means REPO (a thread row that names none). */
+  kind?: ChatThreadKind;
+}
 
 export interface PlacementJob {
   command: string;
@@ -29,7 +39,7 @@ export interface PlacementJob {
   selectorLabels: readonly string[];
   pinnedRunnerId: string | null;
   bashMode: BashMode;
-  thread?: { backend: ThreadBackend; enabled: boolean; action?: ThreadAction };
+  thread?: PlacementThread;
 }
 
 export interface PlacementRunner {
@@ -108,6 +118,9 @@ export function firstMisfit(job: PlacementJob, runner: PlacementRunner, load: Ru
   if (isThreadKind(job.command)) {
     if (!job.thread?.enabled) return 'threads_disabled';
     if ((runner.protocolVersion ?? 0) < 4) return 'protocol';
+    // S5b-R9: a PROJECT thread runs with no checkout, which only a runner advertising projectThreads can host.
+    // Recoverable (a daemon upgrade clears it), so an unfit runner leaves the job QUEUED, never cancels it.
+    if (job.thread.kind === 'PROJECT' && runner.capabilities.projectThreads !== true) return 'project_threads';
     // Fleet S5a §4: Publish and Discard run in the worktree, not on an agent, so they need threadWrite and no backend.
     const action = job.thread.action ?? 'SESSION';
     if (action === 'SESSION') {
@@ -163,7 +176,7 @@ export const toLoads = (refs: readonly { runnerId: string; repoId: string; comma
 export const toPlacementJob = (
   job: Pick<FleetJobRecord, 'command' | 'repoId' | 'profiles' | 'selectorLabels' | 'pinnedRunnerId' | 'bashMode'>,
   repo: Pick<FleetRepoRef, 'provider'>,
-  thread?: { backend: ThreadBackend; enabled: boolean; action?: ThreadAction },
+  thread?: PlacementThread,
 ): PlacementJob => ({
   command: job.command, repoId: job.repoId, provider: repo.provider, profiles: job.profiles, selectorLabels: job.selectorLabels, pinnedRunnerId: job.pinnedRunnerId, bashMode: job.bashMode,
   ...(thread ? { thread } : {}),

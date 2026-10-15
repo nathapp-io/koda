@@ -68,6 +68,11 @@ describe('fleet OpenAPI contract', () => {
     expect(JSON.stringify(spec.components.schemas['PlacementMisfitDto'])).toContain('budget_paused');
   });
 
+  it('exposes the project_threads misfit on the dispatch and dashboard enums (US-005)', () => {
+    expect(JSON.stringify(spec.components.schemas['PlacementMisfitDto'])).toContain('project_threads');
+    expect(JSON.stringify(spec.components.schemas['AttentionReasonDto'])).toContain('project_threads');
+  });
+
   it('exposes the schedule routes, the job schedule filter and the job schedule fields (S1b §3.4)', () => {
     const base = '/api/projects/{slug}/fleet/schedules';
     expect(spec.paths[base]?.['get']).toBeDefined();
