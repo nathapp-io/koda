@@ -213,6 +213,15 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     return rows.map((r) => ({ runnerId: r.runnerId as string, repoId: r.repoId, command: r.command }));
   }
 
+  async findThreadTokenScope(jobId: string): Promise<{ kind: 'REPO' | 'PROJECT'; action: string } | null> {
+    const turn = await this.db.fleetThreadTurn.findUnique({
+      where: { jobId },
+      select: { action: true, thread: { select: { kind: true } } },
+    });
+    // Match findThreadAssign: only an explicit PROJECT kind has project scope.
+    return turn ? { kind: turn.thread.kind === 'PROJECT' ? 'PROJECT' : 'REPO', action: turn.action } : null;
+  }
+
   async findThreadAssign(jobId: string): Promise<ThreadAssign | null> {
     const turn = await this.db.fleetThreadTurn.findUnique({ where: { jobId } });
     if (!turn) return null;
