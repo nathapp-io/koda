@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-koda-read-core",
   "branchName": "feat/fleet-s5b-koda-read-core",
   "createdAt": "2026-10-15T00:00:00.000Z",
-  "updatedAt": "2026-10-15T07:27:51.335Z",
+  "updatedAt": "2026-10-15T09:47:46.982Z",
   "userStories": [
     {
       "id": "US-001",
@@ -34,8 +34,8 @@
         "data-safety"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -47,7 +47,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "packages/fleet-protocol/src/threads.ts",
@@ -71,7 +73,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "a38d77a49918035d7a3bdb53b13f980ca67a4eef"
     },
     {
       "id": "US-002",
@@ -110,8 +116,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -123,7 +129,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "claude",
         "initialProfileId": "claude-sonnet",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "expert",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/projects/project-access.service.ts",
@@ -172,7 +180,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "4cc3b7d78ca3891267b91074a467c1a4bce98e8f"
     },
     {
       "id": "US-003",
@@ -206,8 +218,8 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -219,7 +231,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/tickets/tickets.service.ts",
@@ -249,7 +263,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "a38d92b413514e3e9954ca34efdf99adc8322bda"
     },
     {
       "id": "US-004",
@@ -284,8 +302,8 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -297,7 +315,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
@@ -318,7 +338,11 @@
         "koda_list_jobs returns a final more: call koda_list_jobs with page 2 line when 21 scoped jobs match."
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "bf1443755579160111894c51780bb3a776c4806c"
     },
     {
       "id": "US-005",
@@ -357,8 +381,8 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -370,7 +394,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/logs/log-upload.controller.ts",
@@ -424,7 +450,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "dca170223fdce22f9bbe5edb7522cb7316341c7b"
     },
     {
       "id": "US-006",
@@ -459,8 +489,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -472,7 +502,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "apps/runner/src/supervisor/assign-parser.ts",
@@ -504,7 +536,11 @@
         }
       ],
       "workdir": "apps/runner",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "964c93c23917291ec86e962cb62af4efb3324172"
     },
     {
       "id": "US-007",
@@ -542,7 +578,9 @@
         "profileModelTier": "fast",
         "initialAgent": "claude",
         "initialProfileId": "claude-haiku",
-        "initialModelTier": "fast"
+        "initialModelTier": "fast",
+        "initialComplexity": "medium",
+        "modelTier": "fast"
       },
       "contextFiles": [
         "apps/web/lib/thread-types.ts",
@@ -570,7 +608,11 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b2d51db999cd7d86ce017b5449354f7b0cb50e48"
     }
   ],
   "analysis": "Adversarial refine audit: enumerated all 92 explicit spec acceptance criteria and retained them in their original stories and original order: US-001 criteria 1-15; US-002 criteria 1-15; US-003 criteria 1-14; US-004 criteria 1-15; US-005 criteria 1-15; US-006 criteria 1-13; US-007 criteria 1-5. Parenthetical and trailing anchors were preserved, including unchanged ordinary prose, table-driven token cases, raw-input hash/no stored input, sequential replay without reexecution, foreign-project refs, descriptor order and identical daemon forwarding arguments. All are observable as returned content/records, exceptions, HTTP responses, audit rows, logs or opener/caller arguments; no deprecated file-check AC tags occur. Every story already has negative-path criteria. Each failure-handling row maps to its owning story; the parser refusal additionally gets an explicit no-execution assertion. All 22 feature-level Out of Scope items remain verbatim and separate, including the explicitly US-002-scoped items located in that feature-level section. There were no story-local exclusion blocks under the spec ACs to hoist.\n\nAudit corrections: clarified that the new runner tool route takes leaseEpoch in the query, not the old umbrella route's header; made route refusal criteria self-contained; corrected the ServerError fixture to the actual three-argument constructor without changing its status/message/result assertions. Added observable compatibility criteria for TicketsService.findAll without titleContains, stale session-start catch-up, unchanged base REPO/PROJECT tool sets with absent descriptors or caller, and the existing stale banner on the web page. These appended regression criteria satisfy this refine pass and are not represented as original spec ACs; unrelated hardening remains in suggestedCriteria. The resulting criterion counts are 15, 19, 15, 15, 19, 16 and 6 respectively. All seven story IDs, workdirs and binding dependency arrays remain unchanged. Each contextFiles list includes the critical spec-recommended paths within the five-file limit, never this story's new outputs. US-005 is complex rather than expert because it reuses existing authentication/fence/service conventions; strict three-session TDD remains required for security/session-related stories.\n\nCodebase recheck: API common/thread-jobs.ts:4-8 already type-reexports ThreadAssign, and jobs/assign-payload.ts:27-42 forwards its optional thread block, so the additive package field propagates without duplicating a local runtime contract or importing the assistant module into FleetJobsModule. PlacementService.assign at jobs/placement.service.ts:187-200 is the descriptor attachment seam. Thread ingest at threads/ingest/prisma-thread-ingest.repository.ts:420-431 returns before mutating stale starts; preserve this guard. TicketsService.findAll at tickets/tickets.service.ts:137-167 delegates existing scope/filter values to the repository, whose findTicketPage at tickets/prisma-tickets.repository.ts:167-196 excludes soft-deletes and sorts ascending number. ServerError at apps/runner/src/sync/http.ts:8-12 requires status, message and body. apps/runner/src/thread/tools/index.ts:10-17 defines the exact pre-existing tool order, and apps/web/pages/[project]/threads/[id].vue:83-89 retains the stale banner before the new notice.\n\nRepository discovery: the codebase-memory MCP server is not exposed by this host, so navigation fell back to the supplied known paths, direct reads and text searches. This is an enhancement of the merged PROJECT-thread implementation, not greenfield. The detected Express/Next.js labels in the prompt are inaccurate: app guidance identifies NestJS 12 on Fastify and Nuxt 3/Vue SSR (.nax/mono/apps/api/context.md:22; .nax/mono/apps/web/context.md:22). Read the matching app context before implementation; API implementers must also load the nathapp-nestjs-patterns skill in their implementation environment (not found among repository files during this planning pass). No implementation or test execution is part of this PRD-writing task.\n\nArchitecture and invariants: the API owns all data access, actor reconstruction, authorization, project scoping, masking, fencing, output limits and persisted replay. A runner key authenticates transport only; tools execute as ChatThread.createdById, never as the runner or job requester. UserPrincipal includes actorType, id, role and email (apps/api/src/auth/principal/koda-principal.types.ts:8). ProjectAccessService.resolveMembership reads current membership, permits global ADMIN without a membership row and throws for non-members (apps/api/src/projects/project-access.service.ts:45). KodaCaslAbilityFactory's READABLE_RESOURCES includes Ticket but not FleetJob (apps/api/src/auth/casl/koda-casl-ability.factory.ts:23); project VIEWER cannot create FleetJob while DEVELOPER can (same file:70). FleetJobsController.list/get enforce project membership and user identity, not a FleetJob read ability (apps/api/src/fleet/jobs/fleet-jobs.controller.ts:64). Therefore two ticket tools declare read Ticket and six fleet tools declare member; tools must not compare role strings. Every target id remains scoped to the job's project; foreign ids yield not_found. No tool accepts project/projectId/projectSlug as a scope selector.\n\nUS-001 impact: packages/fleet-protocol/src/threads.ts:33 defines ThreadAssign with optional kind and title but no kodaTools; packages/fleet-protocol/src/index.ts:9 keeps protocol version 4 and exports threads, and RunnerCapabilities at :63 ends with optional threadWrite/projectThreads. Add optional descriptor/capability fields, KodaToolDescriptor and KODA_TOOL_LIMITS without a protocol bump. apps/api/src/fleet/common/capabilities-core.ts:121 destructures and validates optional capabilities; mirror its exact-true pattern at :140-143 and conditional spread at :159-160 so absence remains absence. API production code must import fleet-protocol with import type only; runtime package imports in unit specs are allowed by the existing check (apps/api/src/fleet/common/protocol.spec.ts:10-14,35). Safety primitives are new in assistant/ (directory does not yet exist); use the whole-leading-line reserve-marker approach of apps/runner/src/thread/tools/shared.ts:45, but add UTF-8-safe first-line clipping. Security-sensitive regex ordering must preserve JSON quotes, mask credentials without changing ordinary prose, neutralize forged closing fences and never exceed byte limits. The spec's fenceData prose has three closing angle brackets, but US-001 AC12 and AC13 require two: implement <<koda-data-abc>> and <<end-koda-data-abc>>.\n\nUS-002 architecture: add AssistantModule to apps/api/src/fleet/fleet.module.ts:21, an injectable registry, executor, plain static descriptor module, and a private ASSISTANT_TOOL_CALL_REPOSITORY binding to a PrismaAssistantToolCallRepository extending AbstractPrismaRepository over AssistantToolCall. The repository alone owns audit persistence plus the explicitly permitted findCallContext(jobId) cross-model read. The context query traverses FleetJob -> thread -> creator (including disabled, role and email) plus the job Project slug; do not export this repository or let tools query Prisma. Existing thread persistence already crosses model boundaries (apps/api/src/fleet/threads/prisma-chat-thread.repository.ts:49-86). Schema entry points are apps/api/prisma/schema.prisma:952 (FleetJob) and :1059 (ChatThread, creator relation at :1089). Add AssistantToolCall and FleetJob inverse relation and migration 20261018090000_assistant_tool_call; job FK cascades, raw inputs are never stored. Hash raw JSON with sha256(stableStringify(input)); stableStringify recursively sorts object keys and preserves array order (apps/api/src/fleet/sync/stable-json.ts:2). Replay precedes context/parse/authorization and returns the original capped result even if current permissions have since changed; mismatched tool/hash is not inserted. Use isUniqueViolation(error, 'toolCallId') rather than meta.target because Prisma's adapter reports constraint names (apps/api/src/common/utils/prisma-errors.ts:9). Concurrent first calls may both execute read-only work, but the unique-index loser returns the persisted winner, with no promise of single execution under concurrency. Sequential replay is required; a concurrent-first-call test is explicitly excluded. Capture one now and one random 8-byte fence token per non-replayed call; mask before fencing each user-written field. Outcomes include refusals as data, capped content, bytes and duration. Unexpected tool errors are logged with job id, never returned verbatim. Unknown tools remain HTTP-level exceptions.\n\nModule graph/test risk: FleetJobsModule already exports FLEET_JOB_REPOSITORY and FleetJobsService (apps/api/src/fleet/jobs/fleet-jobs.module.ts:37). AssistantModule will import it for tools/route; placement must import KODA_TOOL_DESCRIPTORS directly from its plain module, never import AssistantModule, avoiding a cycle. Registry registration happens in each injectable group's onModuleInit; descriptor data must be static, not appended at runtime by lifecycle hooks. US-002 initially creates an empty constant; US-003 and US-004 edit it and assistant.module.ts. Their binding dependencies do not serialize those siblings, and US-005 depends only on US-003, not US-004; preserve the required DAG, integrate both descriptor/provider changes without overwriting one another and finish both groups before feature-wide validation. Unit DI compilation uses GlobalStubsModule, which supplies real ConfigModule loaders plus mocked Prisma, transactions, outbox and config (apps/api/src/common/test-helpers/global-stubs.module.ts:128-159); keep the existing FleetModule assertions unchanged (apps/api/src/fleet/fleet.module.spec.ts:23-59) and grow assistant.module.spec.ts as imports grow.\n\nUS-003 impact: TicketsService.findAll currently maps status/type/priority, assignedTo -> assignedToUserId, assignedToAgentId and unassigned (apps/api/src/tickets/tickets.service.ts:137-167); extend TicketListFilterInput at :28, TicketListFilters and the mapping with titleContains without changing REST ListTicketsQuery. PrismaTicketsRepository.findTicketPage filters by projectId and deletedAt:null and pages in ascending ticket-number order (apps/api/src/tickets/prisma-tickets.repository.ts:167-196); add case-insensitive title contains without weakening tenancy or soft delete. Existing TicketsService.findByRef uses findTicketScoped(projectId, project.key, ref) (apps/api/src/tickets/tickets.service.ts:170-186); tool parser is intentionally stricter than REST, accepting only KEY-N, not CUID. me maps to the creator's user id and unassigned means both assignment ids null. Export CommentsService and TicketLinksService from their currently non-exporting modules. Use services for links and last ten oldest-to-newest comments, not direct reads. Both instruction builders currently end by appending skillLines (apps/api/src/fleet/threads/thread-instructions.ts:3-29); insert the exact safety/citation sentence immediately before that block, for every session even without tools. Existing regression targets include ticket-pagination.integration.spec.ts and ticket-tenancy.integration.spec.ts under apps/api/test/integration/tickets/.\n\nUS-004 impact: FleetJobsService.list delegates scoped filters and maps summary DTOs (apps/api/src/fleet/jobs/fleet-jobs.service.ts:131); get enforces project id through findInProject (same file:297-310). AnalyticsService.spend accepts projectId plus from/to and now and returns already formatted totals; preserve its Decimal-derived money strings without recomputation (apps/api/src/fleet/analytics/analytics.service.ts:31-52). ApprovalsService.list accepts project route and filters (apps/api/src/fleet/approvals/approvals.service.ts:25,77); avoid admin/global route. RunnersService.listSummaries is the explicitly project-visible global runner summary (apps/api/src/fleet/runners/runners.service.ts:32-36); emit only requested summary fields, fencing runner-supplied name and labels despite the catalog table's 'none' shorthand. LogReadService.entries already scans a bounded backward window and returns complete/truncated/scanned bounds (apps/api/src/fleet/logs/log-read.service.ts:106-115); target scopes before reading and raises FleetLogExpiredException for expired rows (same file:147-162). Preserve bounded scans; never broaden to raw download or the thread stream. Export AnalyticsService, ApprovalsService, RunnersService and LogReadService; preserve existing exports (apps/api/src/fleet/logs/logs.module.ts:33 and apps/api/src/fleet/runners/runners.module.ts:19). No story titles are emitted by get_job.\n\nUS-005 integration: mirror @RunnerRoute, @SkipThrottle, @Principal and query conventions from apps/api/src/fleet/logs/log-upload.controller.ts:13-44, but keep all ordered refusals in RunnerToolService. FenceService.holds is pure identity/epoch comparison (apps/api/src/fleet/sync/fence.service.ts:16); do not call abandon, which persists commands/activity (same file:21). Validate body/epoch before kill switch, job lookup, lease, kind, state, close and registry lookup. RUNNING only, including replay requests; UPLOADING must refuse. PlacementService.assign calls buildAssignPayload after casAssign (apps/api/src/fleet/jobs/placement.service.ts:187-200); gate static descriptor attachment on SESSION plus runner.capabilities.kodaTools===true, preserving omission for PUBLISH/DISCARD and older runners for both REPO and PROJECT. The session fold ignores stale ended-attempt starts and writes a fresh live snapshot (apps/api/src/fleet/threads/ingest/prisma-thread-ingest.repository.ts:416-431). Read the held job's stored runner capability/name at that moment and add optional kodaToolsUnavailableOn only if the runner exists and lacks true. Update local StoredSession at :27, domain ThreadSession, DTO metadata and existing exact snapshot assertions without changing stale/replay semantics. Route errors need both API locales; successful tool-level failures remain 200 JsonResponse.Ok. Regenerate root openapi.json and the CLI client via bun run generate, never hand-edit generated clients. Extend endpoint lifecycle suite only with root user-token rejection (401 fleet.runnerAuth); real runner happy path belongs in the new integration suite, as explicitly exempted by the spec.\n\nUS-006 integration: runner already pins @nathapp/nax-agent 0.86.0 (apps/runner/package.json:23). ServerClient constructs /api URLs, runner bearer and merged abort/timeout signals, unwraps ret:0 envelopes, and preserves ServerError messages (apps/runner/src/sync/http.ts:60-104). Add a separate 30-second tool POST with English errors and one request only, not retries; ServerError currently requires a third body argument (:8-12), so test fixtures must pass it while preserving the spec's status/message semantics. Thread assign parsing uses isObj to reject arrays and reconstructs optional keys (apps/runner/src/supervisor/assign-parser.ts:15,145-193); add complete descriptor-array checks before copying. ThreadHostDeps currently contains session/credentials/git/skill seams (apps/runner/src/thread/thread-job-run.ts:65-80). Append proxy tools at the REPO opener at :289 and PROJECT opener at :351 without changing the kind's base tool order (apps/runner/src/thread/tools/index.ts:10-17). Wire the optional caller in daemon host construction (apps/runner/src/daemon/daemon.ts:182) to ServerClient.callKodaTool; network remains in src/sync. NaxCapabilityProbe's report currently advertises threadWrite/projectThreads (apps/runner/src/capabilities/nax-probe.ts:169-170); add kodaTools:true and update exact report expectations (nax-probe.spec.ts:92-93). ACP REPO sessions do not receive embedder tools and get no special notice; do not redesign ACP sessions. Maintain abort propagation and error-to-data behavior without logging raw inputs or adding user tokens to the runner.\n\nUS-007 UI integration: the web hand-writes ThreadSession (apps/web/lib/thread-types.ts:48), and its pure handoff helpers provide showStaleBanner (apps/web/lib/thread-handoff.ts:33). Add the optional field and live-session-only showKodaToolsNotice. Follow the interpolation/i18n pattern of apps/web/components/fleet/threads/ThreadStaleBanner.vue:1-18 and mountSfc/fleet harness used by apps/web/tests/components/thread-stale-banner.spec.ts:1-15. Insert the new notice after FleetThreadsThreadStaleBanner in apps/web/pages/[project]/threads/[id].vue:83, using Nuxt component naming, existing border tokens and no new navigation/layout. Both locale files must contain the new key. A closed/failed/no-session snapshot never shows it; the runner name is untrusted text, not HTML. Existing thread page, handoff and component tests should retain their assertions.\n\nDelivery and validation: apply the additive audit migration and regenerate Prisma before API use; integrations rebuild from schema.prisma so both schema and committed migration must agree. Older protocol-4 runners stay schedulable and simply receive no descriptors; a notice is a session snapshot rather than a continuously recomputed capability verdict. No breaking REST ticket-list contract is introduced. Keep exactly the seven binding stories and their given workdirs/dependencies, including US-001's package edits while workdir remains apps/api. API tests use Vitest vi.*, colocated non-DB unit/DI specs, and PG-backed integrations through seedFleetHttpWorld and seedThreadJob (apps/api/test/helpers/thread-fixtures.ts:29-69). DB suites must actually run under KODA_DB_TESTS=1/test:scoped with the compose test Postgres up; no silent skip, and never run DB-resetting suites concurrently against one test database. Runner unit suites use Bun and injected transports/fake sessions (apps/runner/package.json:13); web component suites use Jest. Generated nax acceptance files remain untouched and run only through each app's documented acceptance command. Root type-check after protocol edits, ordinary lint/build and full regression validation are pipeline gates, not acceptance criteria.",

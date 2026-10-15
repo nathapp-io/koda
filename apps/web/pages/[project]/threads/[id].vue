@@ -86,6 +86,9 @@ const onDiscard = (): Promise<void> => runAction(() => controller.discard())
         :is-creator="isCreator"
         @discard="onDiscard"
       />
+      <FleetThreadsThreadKodaToolsNotice
+        :thread="controller.thread.value"
+      />
       <FleetThreadsThreadActionBar
         :thread="controller.thread.value"
         :messages="controller.messages.value"

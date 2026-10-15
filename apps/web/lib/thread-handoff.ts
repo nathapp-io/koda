@@ -34,6 +34,10 @@ export function showStaleBanner(thread: ThreadDetailDto): boolean {
   return thread.session?.stale === true
 }
 
+export function showKodaToolsNotice(thread: ThreadDetailDto): boolean {
+  return thread.session?.state === 'live' && thread.session.kodaToolsUnavailableOn !== undefined
+}
+
 const COMPLETED = 'COMPLETED'
 
 const blocked = (reason: HandoffBlock): HandoffActionState => ({ enabled: false, reason })
