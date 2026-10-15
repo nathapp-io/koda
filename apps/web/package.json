@@ -11,7 +11,8 @@
     "lint:json-error": "eslint -f json \"./**/*.{ts,vue}\" --ignore-pattern \".nuxt/**\" --ignore-pattern \".output/**\" --max-warnings=0 --quiet",
     "lint:fix": "eslint \"./**/*.{ts,vue}\" --ignore-pattern \".nuxt/**\" --ignore-pattern \".output/**\" --fix",
     "type-check": "nuxt typecheck",
-    "test": "jest",
+    "test": "jest && bun run test:real-sanitizer",
+    "test:real-sanitizer": "bun run tests/harness/thread-markdown-real-sanitizer.ts",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed"

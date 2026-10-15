@@ -80,6 +80,10 @@ jest.mock('isomorphic-dompurify', () => {
 })
 
 import { renderThreadMarkdown } from '../../lib/thread-markdown'
+import {
+  B1_QUOTED_ATTRIBUTE_HTML,
+  B1_QUOTED_ATTRIBUTE_TEXT_NODE_HTML,
+} from '../fixtures/b1-quoted-attribute'
 import DOMPurify from 'isomorphic-dompurify'
 
 /** The sanitizer double, so a test can see how often (and with what) the module sanitizes. */
@@ -280,10 +284,16 @@ describe('US-006 AC1-AC8: renderThreadMarkdown links koda ticket and job paths',
 // re-linked the path inside it and turned `<svg onload=alert(1)>` into a real element. jest
 // cannot load the real sanitizer (isomorphic-dompurify needs jsdom, whose ESM dependencies jest
 // does not transform — every spec here replaces it, as tests/lib/markdown.spec.ts explains), so
-// the double answers these inputs with exactly the bytes the real sanitizer returns: the case
-// below asserts that byte-for-byte equivalence, which is what makes the double faithful here.
-const REAL_SANITIZER_ATTACK_OUTPUT = '<span title="> /sandbox/tickets/SB-3 <svg onload=alert(1)>">hello</span>'
-const REAL_SANITIZER_TEXT_NODE_OUTPUT = '<span title="a > b <svg onload=alert(1)>">see /sandbox/tickets/SB-3 now</span>'
+// the double answers these inputs with exactly the bytes the real sanitizer returns.
+//
+// The two byte strings are the shared fixture `tests/fixtures/b1-quoted-attribute.ts`: the cases
+// below drive the linkifier with the double, and `bun run test` additionally runs
+// `tests/harness/thread-markdown-real-sanitizer.ts`, which feeds those same bytes to the real
+// marked + isomorphic-dompurify stack, asserts the sanitizer really returns them, and parses the
+// result with a real HTML parser. That harness is where the equivalence claimed here is verified;
+// jest cannot execute the production sanitizer at all.
+const REAL_SANITIZER_ATTACK_OUTPUT = B1_QUOTED_ATTRIBUTE_HTML
+const REAL_SANITIZER_TEXT_NODE_OUTPUT = B1_QUOTED_ATTRIBUTE_TEXT_NODE_HTML
 
 describe('B1: a `>` inside a quoted attribute value is not a tag boundary', () => {
   test('the sanitizer double hands the linkifier exactly what the real sanitizer returns', () => {
