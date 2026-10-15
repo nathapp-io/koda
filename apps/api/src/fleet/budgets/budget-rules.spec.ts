@@ -43,6 +43,13 @@ describe('budget rules (S1b §2.1-§2.3)', () => {
     expect(jobSpendKeys({ projectId: 'p', repoId: 'r', runnerId: null })).toEqual(['global', 'project:p', 'repo:r']);
   });
 
+  it('US-002 AC-15: a thread with no repo gates no repo scope, only project, runner and global', () => {
+    const keys = jobGateKeys({ projectId: 'p1', repoId: null, pinnedRunnerId: null });
+    expect(keys.filter((key) => key.startsWith('repo:'))).toEqual([]);
+    expect(keys).toEqual(['global', 'project:p1']);
+    expect(jobGateKeys({ projectId: 'p1', repoId: null, pinnedRunnerId: 'rn' })).toEqual(['global', 'project:p1', 'runner:rn']);
+  });
+
   it('enforces a monthly pause only in its own window; a lifetime pause always', () => {
     expect(isEffectivelyPaused(policy(), NOW)).toBe(false);
     expect(isEffectivelyPaused(policy({ pausedAt: OCT, pausedWindowStart: OCT }), NOW)).toBe(true);

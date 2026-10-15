@@ -11,6 +11,7 @@ const schema = buildThreadCreateSchema(t)
  * the empty-string defaults (the select's "default" entries).
  */
 const valid = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  kind: 'REPO',
   repoId: 'r1',
   baseRef: '',
   feature: 'add-auth',
@@ -68,6 +69,7 @@ describe('buildThreadCreateSchema (US-005 AC1-AC3)', () => {
 describe('toCreateThreadBody (US-005 AC4-AC6)', () => {
   test('AC4: drops empty baseRef and effort, coerces the cap text to a number and sends a native backend', () => {
     const body = toCreateThreadBody({
+      kind: 'REPO',
       repoId: 'r1',
       feature: 'add-auth',
       title: 'Auth spec',
@@ -77,6 +79,7 @@ describe('toCreateThreadBody (US-005 AC4-AC6)', () => {
       baseRef: '',
     })
     expect(body).toEqual({
+      kind: 'REPO',
       repoId: 'r1',
       feature: 'add-auth',
       title: 'Auth spec',
@@ -90,6 +93,7 @@ describe('toCreateThreadBody (US-005 AC4-AC6)', () => {
 
   test('AC5: an effort of high travels inside the backend', () => {
     const body = toCreateThreadBody({
+      kind: 'REPO',
       repoId: 'r1',
       feature: 'add-auth',
       title: 'Auth spec',
@@ -104,6 +108,7 @@ describe('toCreateThreadBody (US-005 AC4-AC6)', () => {
 
   test('AC6: a baseRef of develop travels as a top-level baseRef', () => {
     const body = toCreateThreadBody({
+      kind: 'REPO',
       repoId: 'r1',
       feature: 'add-auth',
       title: 'Auth spec',
@@ -122,12 +127,12 @@ describe('eligibleModels (US-005 AC7-AC8)', () => {
     expect(eligibleModels([
       runner({ id: 'a', online: true, enabled: true, threadBackends: { native: ['m2', 'm1'], acp: [] } }),
       runner({ id: 'b', online: true, enabled: true, threadBackends: { native: ['m1'], acp: [] } }),
-    ])).toEqual(['m1', 'm2'])
+    ], 'REPO')).toEqual(['m1', 'm2'])
   })
 
   test('AC8: an offline runner offers no model even with threadBackends.native populated', () => {
     expect(eligibleModels([
       runner({ online: false, enabled: true, threadBackends: { native: ['m3'], acp: [] } }),
-    ])).toEqual([])
+    ], 'REPO')).toEqual([])
   })
 })

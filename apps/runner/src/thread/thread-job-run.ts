@@ -19,7 +19,8 @@ import { ensureSkills as defaultEnsureSkills, type EnsureSkillsOptions } from '.
 import type { OpenThreadSessionOptions } from './session-factory';
 import { ThreadEventWriter } from './thread-event-writer';
 import { prepareThreadWorktree as defaultPrepareThreadWorktree, type PrepareThreadWorktreeInput } from './thread-worktree';
-import { buildThreadTools } from './tools';
+import { threadScratchDir } from './thread-paths';
+import { buildProjectThreadTools, buildThreadTools } from './tools';
 
 /** The thread stream file, inside the job's own `.jobs/<jobId>` directory. */
 export const THREAD_EVENTS_FILE = 'thread-events.jsonl';
@@ -243,6 +244,11 @@ export class ThreadJobRun {
       return;
     }
 
+    if (thread.kind === 'PROJECT') {
+      await this.runProject(row, thread);
+      return;
+    }
+
     // Step 1: the git credentials, waiting for the job's first token. The wait polls the cancel request and a
     // halt, so an abandon does not sit out the token timeout. A refusal holds the socket, the wanted token and
     // the shims the broker opened before it waited, so it gives them back too — as the RUN path's cleanup does.
@@ -328,6 +334,55 @@ export class ThreadJobRun {
       stopIdle: () => this.stopIdle(),
       armIdle: () => this.armIdle(),
     });
+    this.startHeartbeat();
+    this.startInitialTurn(thread);
+    await this.waitForEnd();
+  }
+
+  /**
+   * A PROJECT thread has no checkout: no git credentials and no worktree (steps 1-4 are skipped). The session runs in
+   * an empty scratch directory under the thread's own directory, with the skill tools only, and the run has no live publish.
+   */
+  private async runProject(row: JobRow, thread: ThreadAssign): Promise<void> {
+    const skills = await this.setUpSkills(thread);
+    if (this.stopped()) return;
+    if (!skills.ok) {
+      this.endBeforeRunning('FAILED', skills.reason);
+      return;
+    }
+    const scratch = threadScratchDir(this.deps.host.homeDir, thread.threadId);
+    await mkdir(scratch, { recursive: true, mode: 0o700 });
+    const opened = await this.deps.host.sessions.open({
+      jobId: this.jobId,
+      thread,
+      worktree: scratch,
+      tools: buildProjectThreadTools({
+        worktree: scratch,
+        skillsRoot: this.skillsRoot(),
+        skills: thread.skills,
+        git: this.deps.host.git,
+        searchTimeoutMs: this.deps.tuning.threadSearchTimeoutMs,
+        nowMs: () => this.deps.now().getTime(),
+      }),
+      approvalTimeoutSec: row.assign.approvalTimeoutSec,
+    });
+    if (this.halted) {
+      if (opened.ok) this.startSessionClose(opened.session);
+      return;
+    }
+    if (this.cancelRequested()) {
+      if (opened.ok) await this.closeSession(opened.session);
+      this.endBeforeRunning('CANCELLED', 'cancelled before start');
+      return;
+    }
+    if (!opened.ok) {
+      this.endBeforeRunning('FAILED', opened.reason);
+      return;
+    }
+    this.session = opened.session;
+    this.maxCostUsd = Number(row.assign.maxCostUsd);
+    this.events.transition('RUNNING', undefined, { pid: null, pgid: null, branch: null });
+    await this.openStream(thread, opened.resumed, false);
     this.startHeartbeat();
     this.startInitialTurn(thread);
     await this.waitForEnd();
@@ -679,6 +734,7 @@ export class ThreadJobRun {
     // A command only applies once the run can actually keep it: the row goes RUNNING before `openStream` awaits
     // its way to the writer, and in that window a turn could not be streamed — so the run is not ready yet.
     if (this.events.currentState() !== 'RUNNING' || this.writer === null) return { result: 'rejected', detail: 'session_not_ready' };
+    if (type === 'THREAD_PUBLISH' && this.row()?.assign.thread?.kind === 'PROJECT') return { result: 'rejected', detail: 'not_repo_thread' };
     if (type === 'THREAD_PUBLISH') return this.livePublish?.command() ?? { result: 'rejected', detail: 'session_not_ready' };
     switch (type) {
       case 'THREAD_INPUT': return this.applyInput(payload);

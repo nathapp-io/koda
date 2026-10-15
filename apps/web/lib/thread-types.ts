@@ -6,6 +6,13 @@
  * — the browser never sums or re-rounds it (web context A7).
  */
 
+/**
+ * Runtime mirror of packages/fleet-protocol/src/threads.ts (`ChatThreadKind`, fleet S5b).
+ * A PROJECT thread needs no repository: its `repoId`, `baseRef`, `feature` and `specPath` are null
+ * and it has no Publish, Discard, Plan or Run.
+ */
+export type ChatThreadKind = 'REPO' | 'PROJECT'
+
 /** Runtime mirror of packages/fleet-protocol/src/threads.ts (`ThreadBackend`). */
 export type ThreadBackend =
   | { kind: 'native'; model?: string; effort?: string }
@@ -76,9 +83,10 @@ export interface ThreadHandoff {
 
 export interface ThreadDto {
   id: string
-  repoId: string
-  baseRef: string
-  feature: string
+  kind: ChatThreadKind
+  repoId: string | null
+  baseRef: string | null
+  feature: string | null
   title: string
   createdById: string
   runnerId: string | null
@@ -89,7 +97,7 @@ export interface ThreadDto {
   maxCostUsd: string
   costUsd: string
   tokens: ThreadTokens | null
-  specPath: string
+  specPath: string | null
   pendingQuestion: ThreadPendingQuestion | null
   session: ThreadSession | null
   lastActivityAt: string

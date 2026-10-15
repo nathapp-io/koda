@@ -15,6 +15,11 @@ defineProps<{
 }>()
 
 const { t } = useI18n()
+
+/** A PROJECT thread has no feature: it shows the scope label where a REPO thread shows `feat/<feature>` (S5b). */
+function featureLabel(thread: ThreadDto): string {
+  return thread.kind === 'PROJECT' ? t('fleet.threads.kind.project') : `feat/${thread.feature}`
+}
 </script>
 
 <template>
@@ -40,7 +45,7 @@ const { t } = useI18n()
             <NuxtLink :to="`/${slug}/threads/${thread.id}`" class="text-primary hover:underline">{{ thread.title }}</NuxtLink>
           </td>
           <td class="px-3 py-2 text-muted-foreground">{{ nameOf(thread.createdById) ?? thread.createdById }}</td>
-          <td class="px-3 py-2 font-mono text-xs">feat/{{ thread.feature }}</td>
+          <td class="px-3 py-2 font-mono text-xs">{{ featureLabel(thread) }}</td>
           <td class="px-3 py-2">{{ thread.backend.kind }}<span v-if="thread.backend.model"> · {{ thread.backend.model }}</span></td>
           <td class="px-3 py-2"><span class="rounded bg-muted px-1.5 py-0.5 text-xs">{{ t(`fleet.threads.session.${sessionLabel(thread)}`) }}</span></td>
           <td class="px-3 py-2 text-muted-foreground">{{ activityText(thread.lastActivityAt) }}</td>

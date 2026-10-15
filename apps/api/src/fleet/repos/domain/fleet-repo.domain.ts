@@ -20,6 +20,11 @@ export interface IFleetRepoRepository {
   /** Throws ConflictAppException(fleet.repos) on a duplicate (provider, owner, name). */
   create(data: Omit<FleetRepoRecord, 'id' | 'createdAt'>): Promise<FleetRepoRecord>;
   findById(id: string): Promise<FleetRepoRecord | null>;
+  /**
+   * The project's anchor repo (fleet S5b-R13): the smallest `createdAt`, ties broken by the smallest `id`; null when
+   * the project has no fleet repo. A PROJECT thread uses it as bookkeeping only — no checkout, no git token.
+   */
+  findAnchor(projectId: string): Promise<FleetRepoRecord | null>;
   findPage(filters: { projectId?: string }, page: IPageOption): Promise<IPageResult<FleetRepoRecord>>;
   delete(id: string): Promise<void>;
   /** Number of the repo's jobs in an active state (plan D15). */

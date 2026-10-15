@@ -1,7 +1,7 @@
 import { describe, expect, test } from '@jest/globals'
 import { ref, computed, watch } from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
-import type { FakeNode } from '../helpers/mount-sfc'
+import type { FakeNode, Mounted } from '../helpers/mount-sfc'
 import { uiStubs, i18nStub } from '../helpers/fleet-harness'
 import type { ThreadDto } from '~/lib/thread-types'
 
@@ -9,6 +9,7 @@ const threadListTableFile = webFile('components', 'fleet', 'threads', 'ThreadLis
 
 const listItem = (overrides: Record<string, unknown> = {}): ThreadDto => ({
   id: 'th1',
+  kind: 'REPO',
   repoId: 'r1',
   baseRef: 'main',
   feature: 'f1',
@@ -112,5 +113,43 @@ describe('US-004 AC5-AC10: ThreadListTable row rendering', () => {
     const app = mountTable([], { status: 'ARCHIVED' })
 
     expect(app.text()).toContain('fleet.threads.list.emptyArchived')
+  })
+})
+
+/** The PROJECT thread shape: no repository, base ref, feature or spec path (fleet S5b). */
+const projectItem = (overrides: Record<string, unknown> = {}): ThreadDto => listItem({
+  kind: 'PROJECT',
+  repoId: null,
+  baseRef: null,
+  feature: null,
+  specPath: null,
+  title: 'Chat about the project',
+  ...overrides,
+})
+
+/** The table's first body row (the header row carries `th`, so it has no `td`). */
+const bodyRow = (app: Mounted): FakeNode | undefined =>
+  app.find('tr').find(row => app.find('td', row).length > 0)
+
+/** The feature column cell: the row's third cell (title, creator, feature). */
+const featureCell = (app: Mounted): FakeNode | undefined => {
+  const row = bodyRow(app)
+  return row ? app.find('td', row)[2] : undefined
+}
+
+describe('US-007 AC12-AC13: ThreadListTable feature column by scope', () => {
+  test('AC12: a PROJECT thread row shows the fleet.threads.kind.project label in the feature column', () => {
+    const app = mountTable([projectItem()])
+
+    const cell = featureCell(app)
+    expect(cell).toBeDefined()
+    expect(app.textOf(cell as FakeNode)).toBe('fleet.threads.kind.project')
+  })
+
+  test('AC13: a PROJECT thread row renders no feat/ text', () => {
+    const app = mountTable([projectItem()])
+
+    expect(app.text()).toContain('Chat about the project')
+    expect(app.text()).not.toContain('feat/')
   })
 })

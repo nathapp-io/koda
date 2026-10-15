@@ -25,6 +25,8 @@ export interface HandoffActionState {
 }
 
 export function showActionBar(thread: ThreadDetailDto, isCreator: boolean): boolean {
+  // S5b 1a-R3: a PROJECT thread has no Publish, Discard, Plan or Run; the API answers 409.
+  if (thread.kind === 'PROJECT') return false
   return isCreator && thread.archivedAt === null && thread.sendRefusal !== 'disabled'
 }
 

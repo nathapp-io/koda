@@ -1,16 +1,17 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Allow } from 'class-validator';
 import type { ThreadSkillSource } from '../../../skills/skill-catalog.domain';
-import type { ThreadBackend } from '../../common/thread-jobs';
+import type { ChatThreadKind, ThreadBackend } from '../../common/thread-jobs';
 import type { ThreadSession, ThreadWriteResult } from '../domain/chat-thread.domain';
 import type { ThreadSendRefusal } from '../thread-send-rules';
 import type { ChatThreadHandoff } from '../domain/chat-thread.domain';
 
 export class ThreadDto {
   @ApiProperty() id: string;
-  @ApiProperty() repoId: string;
-  @ApiProperty() baseRef: string;
-  @ApiProperty() feature: string;
+  @ApiProperty({ enum: ['REPO', 'PROJECT'] }) kind: ChatThreadKind;
+  @ApiProperty({ nullable: true }) repoId: string | null;
+  @ApiProperty({ nullable: true }) baseRef: string | null;
+  @ApiProperty({ nullable: true }) feature: string | null;
   @ApiProperty() title: string;
   @ApiProperty() createdById: string;
   @ApiProperty({ nullable: true }) runnerId: string | null;
@@ -21,7 +22,7 @@ export class ThreadDto {
   @ApiProperty() maxCostUsd: string;
   @ApiProperty() costUsd: string;
   @ApiProperty({ nullable: true }) tokens: unknown;
-  @ApiProperty() specPath: string;
+  @ApiProperty({ nullable: true }) specPath: string | null;
   @ApiProperty({ nullable: true }) pendingQuestion: unknown;
   @ApiProperty({ nullable: true, type: 'object', properties: { jobId: { type: 'string' }, state: { type: 'string', enum: ['live', 'closed', 'failed'] }, resumed: { type: 'boolean' }, contextReset: { type: 'boolean' }, reason: { type: 'string', nullable: true }, at: { type: 'string' }, stale: { type: 'boolean' } } }) session: ThreadSession | null;
   @ApiProperty() lastActivityAt: Date;
@@ -85,8 +86,9 @@ export class AnswerQuestionDto {
 }
 
 export class CreateThreadDto {
-  @Allow() @ApiProperty() repoId: string;
-  @Allow() @ApiProperty() feature: string;
+  @Allow() @ApiProperty({ required: false, enum: ['REPO', 'PROJECT'] }) kind?: ChatThreadKind;
+  @Allow() @ApiProperty({ required: false }) repoId?: string;
+  @Allow() @ApiProperty({ required: false }) feature?: string;
   @Allow() @ApiProperty({ required: false }) baseRef?: string;
   @Allow() @ApiProperty() title: string;
   @Allow() @ApiProperty({ required: false }) maxCostUsd?: number;

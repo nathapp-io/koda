@@ -66,7 +66,7 @@ describe.skipIf(!enabled)('S1b 1a: an unfinished RUN pushes its progress and ano
         await hold.reached;   // nax has exited and the progress push is on the wire
         return jobId;
       });
-      const held = await world.job(id);
+      const held = await world.waitForJob(id, (job) => job.state === 'RUNNING');
       expect(held.state).toBe('RUNNING');
       // What the silence sweep and FenceService.abandon write. The runner's own fence would need a sync that
       // mentions the job, which an exited nax no longer guarantees (D153).

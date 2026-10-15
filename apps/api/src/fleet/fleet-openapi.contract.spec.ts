@@ -38,7 +38,7 @@ describe('fleet OpenAPI contract', () => {
     expect(spec.paths['/api/projects/{slug}/fleet/runners']?.['get']).toBeDefined();
     expect(spec.paths['/api/fleet/repos/{id}/check']?.['post']).toBeDefined();
     expect(Object.keys(spec.components.schemas['RunnerSummaryDto']?.properties ?? {}).sort())
-      .toEqual(['arch', 'enabled', 'id', 'labels', 'name', 'online', 'os', 'profiles', 'threadBackends']);
+      .toEqual(['arch', 'enabled', 'id', 'labels', 'name', 'online', 'os', 'profiles', 'projectThreads', 'threadBackends']);
     expect(Object.keys(spec.components.schemas['RepoCheckResultDto']?.properties ?? {}).sort())
       .toEqual(['checkedAt', 'reachable', 'reason', 'repoId']);
   });
@@ -66,6 +66,11 @@ describe('fleet OpenAPI contract', () => {
     expect(Object.keys(spec.components.schemas['BudgetPolicyDto']?.properties ?? {}))
       .toEqual(expect.arrayContaining(['scopeType', 'windowKind', 'amountUsd', 'spentUsd', 'windowStart', 'paused', 'warnReached']));
     expect(JSON.stringify(spec.components.schemas['PlacementMisfitDto'])).toContain('budget_paused');
+  });
+
+  it('exposes the project_threads misfit on the dispatch and dashboard enums (US-005)', () => {
+    expect(JSON.stringify(spec.components.schemas['PlacementMisfitDto'])).toContain('project_threads');
+    expect(JSON.stringify(spec.components.schemas['AttentionReasonDto'])).toContain('project_threads');
   });
 
   it('exposes the schedule routes, the job schedule filter and the job schedule fields (S1b §3.4)', () => {

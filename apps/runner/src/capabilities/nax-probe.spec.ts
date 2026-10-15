@@ -90,6 +90,7 @@ describe('NaxCapabilityProbe (design §3.2, D98-D101)', () => {
       executors: ['host'],
       configJobs: true,
       threadWrite: true,
+      projectThreads: true,
       approvals: { relay: true },
     });
     expect(warnings).toEqual([]);

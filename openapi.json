@@ -13540,7 +13540,8 @@
               "thread_capacity",
               "thread_backend",
               "threads_disabled",
-              "thread_write"
+              "thread_write",
+              "project_threads"
             ],
             "type": "string"
           }
@@ -14765,6 +14766,10 @@
                 }
               }
             }
+          },
+          "projectThreads": {
+            "type": "boolean",
+            "description": "Fleet S5b: the runner hosts PROJECT threads with no checkout"
           }
         },
         "required": [
@@ -14776,7 +14781,8 @@
           "enabled",
           "online",
           "profiles",
-          "threadBackends"
+          "threadBackends",
+          "projectThreads"
         ]
       },
       "FleetJobLogStreamDto": {
@@ -15733,7 +15739,8 @@
               "thread_capacity",
               "thread_backend",
               "threads_disabled",
-              "thread_write"
+              "thread_write",
+              "project_threads"
             ],
             "type": "string"
           }
@@ -16380,7 +16387,8 @@
               "thread_capacity",
               "thread_backend",
               "threads_disabled",
-              "thread_write"
+              "thread_write",
+              "project_threads"
             ],
             "type": "string"
           }
@@ -16497,6 +16505,13 @@
       "CreateThreadDto": {
         "type": "object",
         "properties": {
+          "kind": {
+            "enum": [
+              "REPO",
+              "PROJECT"
+            ],
+            "type": "string"
+          },
           "repoId": {
             "type": "string"
           },
@@ -16518,8 +16533,6 @@
           }
         },
         "required": [
-          "repoId",
-          "feature",
           "title",
           "backend"
         ]
@@ -16530,14 +16543,24 @@
           "id": {
             "type": "string"
           },
-          "repoId": {
+          "kind": {
+            "enum": [
+              "REPO",
+              "PROJECT"
+            ],
             "type": "string"
+          },
+          "repoId": {
+            "type": "string",
+            "nullable": true
           },
           "baseRef": {
-            "type": "string"
+            "type": "string",
+            "nullable": true
           },
           "feature": {
-            "type": "string"
+            "type": "string",
+            "nullable": true
           },
           "title": {
             "type": "string"
@@ -16577,7 +16600,8 @@
             "nullable": true
           },
           "specPath": {
-            "type": "string"
+            "type": "string",
+            "nullable": true
           },
           "pendingQuestion": {
             "type": "object",
@@ -16657,6 +16681,7 @@
         },
         "required": [
           "id",
+          "kind",
           "repoId",
           "baseRef",
           "feature",
@@ -16706,14 +16731,24 @@
           "id": {
             "type": "string"
           },
-          "repoId": {
+          "kind": {
+            "enum": [
+              "REPO",
+              "PROJECT"
+            ],
             "type": "string"
+          },
+          "repoId": {
+            "type": "string",
+            "nullable": true
           },
           "baseRef": {
-            "type": "string"
+            "type": "string",
+            "nullable": true
           },
           "feature": {
-            "type": "string"
+            "type": "string",
+            "nullable": true
           },
           "title": {
             "type": "string"
@@ -16753,7 +16788,8 @@
             "nullable": true
           },
           "specPath": {
-            "type": "string"
+            "type": "string",
+            "nullable": true
           },
           "pendingQuestion": {
             "type": "object",
@@ -16862,6 +16898,7 @@
         },
         "required": [
           "id",
+          "kind",
           "repoId",
           "baseRef",
           "feature",

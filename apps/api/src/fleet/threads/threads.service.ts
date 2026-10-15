@@ -6,7 +6,7 @@ import { FLEET_CFG, fleetConfig } from '../../config/fleet.config';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { SkillsService } from '../../skills/skills.service';
 import { FLEET_REPO_REPOSITORY, type IFleetRepoRepository } from '../repos/domain/fleet-repo.domain';
-import { CHAT_THREAD_REPOSITORY, type ChatMessageRecord, type ChatThreadDetail, type ChatThreadRecord, type ChatThreadRepository } from './domain/chat-thread.domain';
+import { CHAT_THREAD_REPOSITORY, repoThreadFields, type ChatMessageRecord, type ChatThreadDetail, type ChatThreadRecord, type ChatThreadRepository } from './domain/chat-thread.domain';
 import { isMaxCostUsd, validateCreateThread, type CreateThreadInput } from './thread-input';
 import type { AnswerQuestionDto, SendMessageDto } from './dto/thread.dto';
 import type { PlanThreadDto, RunThreadDto } from './dto/thread-handoff.dto';
@@ -26,15 +26,23 @@ export class ThreadsService {
 
   async create(projectId: string, userId: string, input: CreateThreadInput): Promise<ChatThreadRecord> {
     if (!this.config.threadsEnabled) throw new ConflictAppException({}, 'threads.disabled');
-    validateCreateThread(input, input.baseRef ?? 'main');
-    const repo = await this.repos.findById(input.repoId);
+    const normalized = validateCreateThread(input, input.baseRef ?? 'main');
+    // S5b-R3: a PROJECT thread has no repo, worktree or feature. The anchor repo is bookkeeping only (S5b-R13).
+    if (normalized.kind === 'PROJECT') {
+      const anchor = await this.repos.findAnchor(projectId);
+      if (!anchor) throw new ConflictAppException({}, 'threads.noFleetRepo');
+      const skills = await this.skills.snapshotForProject(projectId);
+      return this.threads.create({ kind: 'PROJECT', projectId, repoId: null, baseRef: null, feature: null, title: normalized.title, createdById: userId, backend: normalized.backend, skills, maxCostUsd: normalized.maxCostUsd });
+    }
+    const repo = await this.repos.findById(normalized.repoId);
     if (!repo || repo.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.repos');
-    const normalized = validateCreateThread(input, repo.defaultBranch);
+    // Today's two-pass flow: the repo's own default branch replaces the placeholder of the first pass.
+    const resolved = validateCreateThread({ ...input, kind: 'REPO' }, repo.defaultBranch);
     const skills = await this.skills.snapshotForProject(projectId);
     try {
-      return await this.threads.create({ projectId, repoId: repo.id, baseRef: normalized.baseRef, feature: normalized.feature, title: normalized.title, createdById: userId, backend: normalized.backend, skills, maxCostUsd: normalized.maxCostUsd });
+      return await this.threads.create({ kind: 'REPO', projectId, repoId: repo.id, baseRef: resolved.baseRef, feature: resolved.feature, title: resolved.title, createdById: userId, backend: resolved.backend, skills, maxCostUsd: resolved.maxCostUsd });
     } catch (error) {
-      if (isUniqueViolation(error, 'repo_feature')) throw new ConflictAppException({ feature: normalized.feature }, 'threads.featureTaken');
+      if (isUniqueViolation(error, 'repo_feature')) throw new ConflictAppException({ feature: resolved.feature }, 'threads.featureTaken');
       throw error;
     }
   }
@@ -85,14 +93,16 @@ export class ThreadsService {
   async plan(projectId: string, threadId: string, userId: string, input: PlanThreadDto): Promise<import('../jobs/dto/fleet-job.dto').DispatchResultDto> {
     const thread = await this.threads.get(projectId, threadId);
     if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
+    // 1a-R3: Plan is REPO-only, and the guard runs before the creator check so a PROJECT thread answers 409.
+    const { repoId, feature, specPath } = repoThreadFields(thread);
     if (thread.createdById !== userId) throw new ForbiddenAppException({}, 'threads.notCreator');
     if (!this.config.threadsEnabled) throw new ConflictAppException({}, 'threads.disabled');
     if (thread.status === 'ARCHIVED') throw new ConflictAppException({}, 'threads.archived');
     if (!thread.specPublished) throw new ConflictAppException({}, 'threads.notPublished');
     if (!thread.runnerId) throw new ConflictAppException({}, 'threads.runnerMissing');
     return this.fleetJobs.dispatch(userId, projectId, {
-      repoId: thread.repoId, command: 'PLAN', ref: `feat/${thread.feature}`, feature: thread.feature,
-      planFrom: thread.specPath, profiles: input.profiles, maxCostUsd: input.maxCostUsd ?? THREAD_HANDOFF_DEFAULT_MAX_COST_USD,
+      repoId, command: 'PLAN', ref: `feat/${feature}`, feature,
+      planFrom: specPath, profiles: input.profiles, maxCostUsd: input.maxCostUsd ?? THREAD_HANDOFF_DEFAULT_MAX_COST_USD,
       pinnedRunnerId: thread.runnerId ?? undefined,
     }, { threadId });
   }
@@ -101,6 +111,8 @@ export class ThreadsService {
   async run(projectId: string, threadId: string, userId: string, input: RunThreadDto): Promise<import('../jobs/dto/fleet-job.dto').DispatchResultDto> {
     const thread = await this.threads.get(projectId, threadId);
     if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
+    // 1a-R3: Run is REPO-only, and the guard runs before the creator check so a PROJECT thread answers 409.
+    const { repoId, feature } = repoThreadFields(thread);
     if (thread.createdById !== userId) throw new ForbiddenAppException({}, 'threads.notCreator');
     if (!this.config.threadsEnabled) throw new ConflictAppException({}, 'threads.disabled');
     if (thread.status === 'ARCHIVED') throw new ConflictAppException({}, 'threads.archived');
@@ -108,7 +120,7 @@ export class ThreadsService {
     if (plan?.state !== 'COMPLETED') throw new ConflictAppException({}, 'threads.notPlanned');
     if (!thread.runnerId) throw new ConflictAppException({}, 'threads.runnerMissing');
     return this.fleetJobs.dispatch(userId, projectId, {
-      repoId: thread.repoId, command: 'RUN', ref: `feat/${thread.feature}`, feature: thread.feature,
+      repoId, command: 'RUN', ref: `feat/${feature}`, feature,
       profiles: input.profiles, maxCostUsd: input.maxCostUsd ?? THREAD_HANDOFF_DEFAULT_MAX_COST_USD,
       bashMode: input.bashMode, pinnedRunnerId: thread.runnerId ?? undefined,
     }, { threadId });

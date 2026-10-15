@@ -197,7 +197,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
     const source = line.costSource ?? 'computed';
     let inserted = true;
     if (source !== 'unpriced') {
-      const thread = await db.chatThread.findUniqueOrThrow({ where: { id: threadId }, select: { backend: true, feature: true } });
+      const thread = await db.chatThread.findUniqueOrThrow({ where: { id: threadId }, select: { id: true, backend: true, feature: true } });
       const create = await db.fleetCostEvent.createMany({ data: [this.costEventData(batch, job, thread, {
         callId: `${line.turnId}:${line.round}`, inputTokens: line.inputTokens, outputTokens: line.outputTokens,
         cacheReadTokens: line.cacheRead, cacheWriteTokens: line.cacheWrite, costUsd: line.costUsd,
@@ -245,7 +245,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
     const turnSpend = await this.sumTurnCost(job.id, line.turnId, batch.leaseEpoch);
     const reconcile = new Prisma.Decimal(String(line.costUsd)).sub(turnSpend);
     if (reconcile.lte(0)) return false;
-    const thread = await db.chatThread.findUniqueOrThrow({ where: { id: threadId }, select: { backend: true, feature: true } });
+    const thread = await db.chatThread.findUniqueOrThrow({ where: { id: threadId }, select: { id: true, backend: true, feature: true } });
     const result = await db.fleetCostEvent.createMany({ data: [this.costEventData(batch, job, thread, {
       callId: `${line.turnId}:turn_end`, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
       costUsd: reconcile, at: new Date(), pricingSource: line.costSource ?? 'computed',
@@ -256,7 +256,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
   private costEventData(
     batch: ThreadIngestBatch,
     job: { id: string; projectId: string; repoId: string; runnerId: string | null },
-    thread: { backend: Prisma.JsonValue; feature: string | null },
+    thread: { id: string; backend: Prisma.JsonValue; feature: string | null },
     fields: {
       callId: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number;
       costUsd: number | Prisma.Decimal; at: Date; pricingSource: string;
@@ -266,7 +266,9 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
     return {
       jobId: job.id, leaseEpoch: batch.leaseEpoch, projectId: job.projectId, repoId: job.repoId, runnerId: job.runnerId,
       at: fields.at, agentName: backend.kind === 'native' ? 'native' : backend.agent ?? 'native',
-      model: backend.model ?? 'default', profile: 'read', stage: 'thread', featureName: thread.feature,
+      model: backend.model ?? 'default', profile: 'read', stage: 'thread',
+      // 1a-R1: a PROJECT thread has no feature, so the cost row is named after the thread.
+      featureName: thread.feature ?? `thread-${thread.id}`,
       callId: fields.callId, inputTokens: fields.inputTokens, outputTokens: fields.outputTokens,
       cacheReadTokens: fields.cacheReadTokens, cacheWriteTokens: fields.cacheWriteTokens,
       costUsd: new Prisma.Decimal(String(fields.costUsd)), pricingSource: fields.pricingSource,

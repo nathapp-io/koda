@@ -82,6 +82,31 @@ describe('parseCapabilitiesCore threadBackends (US-001)', () => {
   });
 });
 
+describe('parseCapabilitiesCore projectThreads (US-001 AC2-AC4)', () => {
+  it('US-001 AC2: keeps projectThreads: true', () => {
+    const parsed = parseCapabilitiesCore({ ...valid, projectThreads: true });
+    expect(parsed.projectThreads).toBe(true);
+  });
+
+  it('US-001 AC3: omits the projectThreads key when the report has none', () => {
+    const parsed = parseCapabilitiesCore({ ...valid, threadWrite: true });
+    expect(parsed).not.toHaveProperty('projectThreads');
+    expect(Object.keys(parsed).sort()).toEqual(['credentials', 'executors', 'nax', 'profiles', 'sandbox', 'threadWrite', 'tools']);
+  });
+
+  it('US-001 AC4: refuses projectThreads: false with reason projectThreads', () => {
+    const err = rejection({ ...valid, projectThreads: false });
+    expect(err).toBeInstanceOf(CapabilityValidationError);
+    expect(err).toMatchObject({ reason: 'projectThreads' });
+  });
+
+  it("US-001 AC4: refuses projectThreads: 'yes' with reason projectThreads", () => {
+    const err = rejection({ ...valid, projectThreads: 'yes' });
+    expect(err).toBeInstanceOf(CapabilityValidationError);
+    expect(err).toMatchObject({ reason: 'projectThreads' });
+  });
+});
+
 describe('parseCapabilitiesCore threadWrite (US-001 AC3-AC6)', () => {
   it('US-001 AC3: keeps threadWrite: true', () => {
     const parsed = parseCapabilitiesCore({ ...valid, threadWrite: true });

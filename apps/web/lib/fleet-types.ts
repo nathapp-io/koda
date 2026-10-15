@@ -109,6 +109,8 @@ export interface FleetRunnerSummary {
   online: boolean
   profiles: string[]
   threadBackends: RunnerThreadBackends
+  /** Fleet S5b: the runner hosts PROJECT threads with no checkout. */
+  projectThreads: boolean
 }
 
 export type FleetProvider = 'github' | 'gitlab'

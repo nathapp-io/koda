@@ -9,6 +9,11 @@ export function threadWorktreeDir(homeDir: string, threadId: string): string {
   return join(threadDirFor(homeDir, threadId), 'wt');
 }
 
+/** A PROJECT thread's working directory: empty scratch space under the thread directory, removed with the thread. */
+export function threadScratchDir(homeDir: string, threadId: string): string {
+  return join(threadDirFor(homeDir, threadId), 'scratch');
+}
+
 export function threadTranscriptDir(homeDir: string, threadId: string): string {
   return join(threadDirFor(homeDir, threadId), 'transcript');
 }

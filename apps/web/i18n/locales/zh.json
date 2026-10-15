@@ -743,6 +743,9 @@
   },
   "fleet": {
     "threads": {
+      "kind": {
+        "project": "项目线程"
+      },
       "list": {
         "title": "线程",
         "status": "线程状态",
@@ -768,6 +771,9 @@
       },
       "new": {
         "title": "新建线程",
+        "scope": "范围",
+        "scopeRepo": "代码库",
+        "scopeProject": "项目",
         "repo": "代码库",
         "repoPlaceholder": "选择代码库",
         "baseRef": "基础分支",

@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals'
-import { handoffActionState, isHandoffBusy } from '~/lib/thread-handoff'
+import { handoffActionState, isHandoffBusy, showActionBar } from '~/lib/thread-handoff'
 import type { ChatMessageDto, ThreadDetailDto, ThreadHandoffJob } from '~/lib/thread-types'
 
 const message = (overrides: Record<string, unknown> = {}): ChatMessageDto => ({
@@ -30,6 +30,7 @@ const job = (state: string, overrides: Partial<ThreadHandoffJob> = {}): ThreadHa
 
 const thread = (overrides: Record<string, unknown> = {}): ThreadDetailDto => ({
   id: 't1',
+  kind: 'REPO',
   repoId: 'r1',
   baseRef: 'main',
   feature: 'f1',
@@ -171,5 +172,19 @@ describe('US-001 thread handoff action rules', () => {
     })
 
     expect(handoffActionState(t, [], 'discard')).toEqual({ enabled: false, reason: 'sessionActive' })
+  })
+})
+
+describe('US-007 showActionBar scope rule', () => {
+  test('AC10: a PROJECT thread whose creator is the viewer shows no action bar (the API answers 409 notRepoThread)', () => {
+    const t = thread({ kind: 'PROJECT', repoId: null, baseRef: null, feature: null, specPath: null })
+
+    expect(showActionBar(t, true)).toBe(false)
+  })
+
+  test('AC11: an eligible REPO thread whose creator is the viewer shows the action bar', () => {
+    const t = thread({ kind: 'REPO', archivedAt: null, sendRefusal: null })
+
+    expect(showActionBar(t, true)).toBe(true)
   })
 })

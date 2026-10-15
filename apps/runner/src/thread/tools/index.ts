@@ -10,3 +10,8 @@ import { writeDocTool } from './write-doc';
 export function buildThreadTools(ctx: ThreadToolContext): EmbedderTool[] {
   return [listFilesTool(ctx), searchRepoTool(ctx), loadSkillTool(ctx), readSkillFileTool(ctx), writeDocTool(ctx)];
 }
+
+/** A PROJECT thread has no checkout: only the skill tools, over the same context a REPO thread builds. */
+export function buildProjectThreadTools(ctx: ThreadToolContext): EmbedderTool[] {
+  return [loadSkillTool(ctx), readSkillFileTool(ctx)];
+}

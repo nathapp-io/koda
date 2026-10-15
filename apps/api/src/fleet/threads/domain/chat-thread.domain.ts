@@ -1,9 +1,33 @@
 import type { ThreadSkillSource } from '../../../skills/skill-catalog.domain';
-import type { ThreadBackend } from '../../common/thread-jobs';
+import type { ChatThreadKind, ThreadBackend } from '../../common/thread-jobs';
 import type { ThreadSendRefusal } from '../thread-send-rules';
 import type { PrismaClient } from '../../../generated/prisma/client';
+import { ConflictAppException } from '../../../common/exceptions/conflict-app.exception';
 
 export const CHAT_THREAD_REPOSITORY = Symbol('CHAT_THREAD_REPOSITORY');
+
+/** The repo fields of a REPO thread, all present. */
+export interface RepoThreadFields { repoId: string; baseRef: string; feature: string; specPath: string }
+
+/**
+ * The REPO-only guard (fleet S5b §1a-R3): the repo fields of a thread whose kind is REPO. A PROJECT thread, and a
+ * REPO row whose `kind` is missing or unknown (rows written before the kind column, and unit fixtures), is judged by
+ * the four fields alone. Every REPO-only consumer — Plan, Run, Publish, Discard, the THREAD job factory and the ASSIGN
+ * and cost-event fallbacks — reads the fields through this one function, so the refusal is uniform.
+ */
+export function repoThreadFields(thread: {
+  kind?: string;
+  repoId: string | null;
+  baseRef: string | null;
+  feature: string | null;
+  specPath: string | null;
+}): RepoThreadFields {
+  const { repoId, baseRef, feature, specPath } = thread;
+  if (thread.kind === 'PROJECT' || repoId === null || baseRef === null || feature === null || specPath === null) {
+    throw new ConflictAppException({}, 'threads.notRepoThread');
+  }
+  return { repoId, baseRef, feature, specPath };
+}
 
 /** Counter-based sequence allocation with a fallback past existing rows; caller holds the thread row lock. */
 export async function allocateThreadSeq(client: PrismaClient, threadId: string): Promise<number> {
@@ -36,9 +60,10 @@ export type ThreadWriteResult =
   | { kind: 'discard_failed'; jobId: string; at: string; reason: string };
 
 export interface ChatThreadRecord {
-  id: string; repoId: string; baseRef: string; feature: string; title: string;
+  id: string; kind: ChatThreadKind; repoId: string | null; baseRef: string | null; feature: string | null;
+  title: string;
   createdById: string; runnerId: string | null; backend: ThreadBackend; status: string; archivedAt: Date | null;
-  skills: ThreadSkillSource[]; maxCostUsd: string; costUsd: string; tokens: unknown; specPath: string;
+  skills: ThreadSkillSource[]; maxCostUsd: string; costUsd: string; tokens: unknown; specPath: string | null;
   pendingQuestion: unknown; session: ThreadSession | null; lastActivityAt: Date; createdAt: Date;
   activeJob: { id: string; state: string } | null;
   /** Distinct paths write_doc touched since the last publish (capped at 200 by the ingest, US-002). */
@@ -59,7 +84,7 @@ export interface ChatMessageRecord {
 }
 
 export interface ChatThreadRepository {
-  create(input: { projectId: string; repoId: string; baseRef: string; feature: string; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord>;
+  create(input: { kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord>;
   list(projectId: string, status: string | undefined, skip: number, take: number): Promise<ChatThreadRecord[]>;
   get(projectId: string, id: string): Promise<ChatThreadRecord | null>;
   handoff(threadId: string): Promise<ChatThreadHandoff>;

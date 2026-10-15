@@ -33,7 +33,7 @@ const repo = (over: Record<string, unknown> = {}) => ({
 /** A native-capable runner summary (SEAM-4: threadBackends feeds eligibleModels). */
 const runnerWithModels = (models: string[], over: Record<string, unknown> = {}) => ({
   id: 'rn1', name: 'mac-1', os: 'linux', arch: 'x64', labels: [], enabled: true, online: true,
-  profiles: [], threadBackends: { native: models, acp: [] }, ...over,
+  profiles: [], threadBackends: { native: models, acp: [] }, projectThreads: false, ...over,
 })
 
 const skill = (over: Record<string, unknown> = {}) => ({
@@ -72,6 +72,8 @@ const backendPicker = loadSfc(webFile('components', 'fleet', 'threads', 'Backend
 type PageOver = {
   /** Native models the single online enabled runner offers; undefined => none eligible. */
   models?: string[]
+  /** Whether that runner advertises projectThreads (S5b): only then does it offer PROJECT models. */
+  projectThreads?: boolean
   skills?: Record<string, unknown>[]
   post?: jest.Mock
 }
@@ -81,7 +83,7 @@ function mountPage(over: PageOver = {}) {
   const get = jest.fn(async () => ({}))
   const nav = jest.fn(async () => undefined)
   const push = jest.fn(async () => undefined)
-  const runners = over.models ? [runnerWithModels(over.models)] : []
+  const runners = over.models ? [runnerWithModels(over.models, { projectThreads: over.projectThreads ?? false })] : []
   const app = mountSfc(pageFile, {
     components: { ...stubs, FormField, Input, FleetThreadsBackendPicker: backendPicker },
     fleetComponents: ['FleetNativeSelect'],
@@ -187,7 +189,7 @@ describe('US-005 AC11-AC15: pages/[project]/threads/new.vue', () => {
     await fillAndSubmit(m.app)
 
     expect(m.post).toHaveBeenCalledWith('/projects/web/threads', {
-      repoId: 'r1', feature: 'add-auth', title: 'Auth spec', maxCostUsd: 5, backend: { kind: 'native', model: 'm1' },
+      kind: 'REPO', repoId: 'r1', feature: 'add-auth', title: 'Auth spec', maxCostUsd: 5, backend: { kind: 'native', model: 'm1' },
     })
     m.app.unmount()
   })
@@ -225,6 +227,90 @@ describe('US-005 AC11-AC15: pages/[project]/threads/new.vue', () => {
     const text = m.app.text()
     expect(text).toContain('spec-review')
     expect(text).toContain('a1b2c3d')
+    m.app.unmount()
+  })
+})
+
+// ── US-007: the scope picker (Repo | Project), PROJECT hides the repo fields ──────────────────
+
+/** Drives the scope select (the FormField named kind) like a native change event. */
+function setScope(app: Mounted, value: 'REPO' | 'PROJECT'): void {
+  const select = must(selectIn(app, 'kind'), 'scope select')
+  ;(select.props.onChange as (e: unknown) => void)({ target: { value } })
+}
+
+/** Types into a named text input (the Input stub turns input events into update:modelValue). */
+function typeInto(app: Mounted, field: string, value: string): void {
+  const input = must(inputIn(app, field), `${field} input`)
+  ;(input.props.onInput as (e: unknown) => void)({ target: { value } })
+}
+
+describe('US-007 AC7-AC9: pages/[project]/threads/new.vue scope picker', () => {
+  test('AC7: the scope select offers Repo and Project with Repo selected by default', async () => {
+    const m = mountPage({ models: ['m1'] })
+    await m.settle()
+
+    const select = must(selectIn(m.app, 'kind'), 'scope select')
+    expect(optionValues(m.app, select)).toEqual(['REPO', 'PROJECT'])
+    expect(select.props.value).toBe('REPO')
+    m.app.unmount()
+  })
+
+  test('AC8: choosing Project hides the repo, base-ref and feature fields and keeps the rest', async () => {
+    const m = mountPage({ models: ['m1'], projectThreads: true })
+    await m.settle()
+
+    expect(m.app.one('[data-field="repoId"]')).toBeDefined()
+    expect(m.app.one('[data-field="baseRef"]')).toBeDefined()
+    expect(m.app.one('[data-field="feature"]')).toBeDefined()
+
+    setScope(m.app, 'PROJECT')
+    await Vue.nextTick()
+
+    expect(m.app.one('[data-field="repoId"]')).toBeUndefined()
+    expect(m.app.one('[data-field="baseRef"]')).toBeUndefined()
+    expect(m.app.one('[data-field="feature"]')).toBeUndefined()
+    expect(m.app.one('[data-field="title"]')).toBeDefined()
+    expect(m.app.one('[data-field="maxCostUsd"]')).toBeDefined()
+    m.app.unmount()
+  })
+
+  test('AC8 (edge): switching back to Repo restores the repo fields with the values they held', async () => {
+    const m = mountPage({ models: ['m1'], projectThreads: true })
+    await m.settle()
+
+    const repoSelect = must(selectIn(m.app, 'repoId'), 'repo select')
+    ;(repoSelect.props.onChange as (e: unknown) => void)({ target: { value: 'r1' } })
+    await Vue.nextTick()
+
+    setScope(m.app, 'PROJECT')
+    await Vue.nextTick()
+    setScope(m.app, 'REPO')
+    await Vue.nextTick()
+
+    expect(must(selectIn(m.app, 'repoId'), 'repo select').props.value).toBe('r1')
+    m.app.unmount()
+  })
+
+  test('AC9: submitting the Project scope posts a PROJECT body with no repo fields', async () => {
+    const m = mountPage({ models: ['m1'], projectThreads: true })
+    await m.settle()
+
+    setScope(m.app, 'PROJECT')
+    await Vue.nextTick()
+    typeInto(m.app, 'title', 'Project chat')
+    typeInto(m.app, 'maxCostUsd', '5')
+    await Vue.nextTick()
+
+    const form = must(m.app.one('form'), 'thread create form')
+    await (form.props.onSubmit as (e: { preventDefault: () => void }) => Promise<void>)({ preventDefault: jest.fn() })
+
+    expect(m.post).toHaveBeenCalledWith('/projects/web/threads', {
+      kind: 'PROJECT',
+      title: 'Project chat',
+      maxCostUsd: 5,
+      backend: { kind: 'native', model: 'm1' },
+    })
     m.app.unmount()
   })
 })

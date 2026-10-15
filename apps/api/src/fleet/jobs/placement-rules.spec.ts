@@ -204,6 +204,37 @@ describe('THREAD placement (US-006)', () => {
   });
 });
 
+describe('PROJECT thread placement (US-005)', () => {
+  const threadJob = (kind: 'REPO' | 'PROJECT', model?: string) => job({
+    command: 'THREAD', profiles: [], selectorLabels: [],
+    thread: { backend: { kind: 'native', ...(model ? { model } : {}) }, enabled: true, kind },
+  });
+  const threadRunner = (over: Partial<RunnerCapabilities> = {}, runnerOver: Partial<PlacementRunner> = {}) => runner({
+    protocolVersion: 4, threadCapacity: 2, capabilities: caps({ threadBackends: { native: ['m1'], acp: [] }, ...over }), ...runnerOver,
+  });
+  const freeCapacity = { active: 0, repoIds: new Set<string>(), threads: 0 };
+
+  it('AC-8: reports project_threads for a PROJECT thread on a runner without projectThreads', () => {
+    expect(misfit(threadJob('PROJECT', 'm1'), threadRunner(), freeCapacity)).toBe('project_threads');
+  });
+
+  it('AC-9: fits a PROJECT thread on a runner with projectThreads, the named model and free thread capacity', () => {
+    expect(misfit(threadJob('PROJECT', 'm1'), threadRunner({ projectThreads: true }), freeCapacity)).toBeNull();
+  });
+
+  it('AC-10: fits a REPO thread on a runner without projectThreads', () => {
+    expect(misfit(threadJob('REPO', 'm1'), threadRunner(), freeCapacity)).toBeNull();
+  });
+
+  it('AC-11: reports protocol before project_threads on a protocol-3 runner', () => {
+    expect(misfit(threadJob('PROJECT', 'm1'), threadRunner({}, { protocolVersion: 3 }), freeCapacity)).toBe('protocol');
+  });
+
+  it('AC-12: project_threads is a waiting reason, never permanent', () => {
+    expect(PERMANENT_MISFITS.has('project_threads')).toBe(false);
+  });
+});
+
 describe('evaluateRunners (S2b (c) §2.3)', () => {
   it('returns one verdict per runner, applying each runner pause and load', () => {
     const loads = new Map([['r2', { active: 1, repoIds: new Set(['other-repo']) }]]);

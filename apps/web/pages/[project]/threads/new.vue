@@ -23,12 +23,19 @@ const skills = ref<ProjectSkillDto[]>([])
 const loadFailed = ref(false)
 const submitError = ref('')
 const skillsError = ref('')
-const models = computed(() => eligibleModels(options.runners.value))
+const models = computed(() => eligibleModels(options.runners.value, values.kind === 'PROJECT' ? 'PROJECT' : 'REPO'))
 const repoOptions = computed(() => options.repos.value.map(repo => ({ value: repo.id, label: `${repo.owner}/${repo.name}` })))
 const selectedRepo = computed(() => options.repos.value.find(repo => repo.id === values.repoId) ?? null)
+/** The scope picker (S5b 1a-R5): Repo is the default, so today's behaviour survives. */
+const scopeOptions = computed(() => [
+  { value: 'REPO', label: t('fleet.threads.new.scopeRepo') },
+  { value: 'PROJECT', label: t('fleet.threads.new.scopeProject') },
+])
+/** A PROJECT thread has no repository, base ref or feature; the form hides those fields. */
+const isProject = computed(() => values.kind === 'PROJECT')
 const { handleSubmit, isSubmitting, values, setFieldValue } = useForm({
   validationSchema: toTypedSchema(buildThreadCreateSchema(t)),
-  initialValues: { repoId: '', baseRef: '', feature: '', title: '', maxCostUsd: 5, model: '', effort: '' },
+  initialValues: { kind: 'REPO', repoId: '', baseRef: '', feature: '', title: '', maxCostUsd: 5, model: '', effort: '' },
   keepValuesOnUnmount: true,
 })
 
@@ -74,21 +81,28 @@ const submit = handleSubmit(async (formValues: ThreadCreateFormValues) => {
       <p v-if="submitError" class="text-sm" role="alert">{{ submitError }}</p>
     </div>
     <form v-else class="space-y-5" data-testid="thread-create-form" @submit="submit">
-      <FormField v-slot="{ componentField }" name="repoId">
+      <FormField v-slot="{ componentField }" name="kind">
+        <FormItem>
+          <FormLabel>{{ t('fleet.threads.new.scope') }}</FormLabel>
+          <FormControl><FleetNativeSelect v-bind="componentField" :options="scopeOptions" testid="thread-new-scope" /></FormControl>
+          <FormMessage />
+        </FormItem>
+      </FormField>
+      <FormField v-if="!isProject" v-slot="{ componentField }" name="repoId">
         <FormItem>
           <FormLabel>{{ t('fleet.threads.new.repo') }}</FormLabel>
           <FormControl><FleetNativeSelect v-bind="componentField" :options="repoOptions" :placeholder="t('fleet.threads.new.repoPlaceholder')" testid="thread-new-repo" /></FormControl>
           <FormMessage />
         </FormItem>
       </FormField>
-      <FormField v-slot="{ componentField }" name="baseRef">
+      <FormField v-if="!isProject" v-slot="{ componentField }" name="baseRef">
         <FormItem>
           <FormLabel>{{ t('fleet.threads.new.baseRef') }}</FormLabel>
           <FormControl><Input v-bind="componentField" :placeholder="selectedRepo?.defaultBranch ?? ''" data-testid="thread-new-baseRef" /></FormControl>
           <FormMessage />
         </FormItem>
       </FormField>
-      <FormField v-slot="{ componentField }" name="feature">
+      <FormField v-if="!isProject" v-slot="{ componentField }" name="feature">
         <FormItem>
           <FormLabel>{{ t('fleet.threads.new.feature') }}</FormLabel>
           <FormControl><Input v-bind="componentField" data-testid="thread-new-feature" /></FormControl>

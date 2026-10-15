@@ -1,0 +1,608 @@
+{
+  "project": "koda",
+  "feature": "fleet-s5b-project-threads",
+  "branchName": "feat/fleet-s5b-project-threads",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "updatedAt": "2026-10-15T05:41:59.528Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Thread kind contract and runner capability",
+      "description": "**Goal** — Add the backward-compatible PROJECT thread kind and explicit runner capability contract without changing protocol version.\n\n**Motivation** — The koda assistant (S5b) must answer questions such as \"which tickets are blocked?\" that have nothing to do with a repo checkout.\n\n**Approach** — Protocol package (`packages/fleet-protocol/src/threads.ts`, `index.ts`; US-001, additive only)\n\n- `ChatThreadKind` — new: `export type ChatThreadKind = 'REPO' | 'PROJECT'` and `export const CHAT_THREAD_KINDS = ['REPO', 'PROJECT'] as const`, re-exported from `index.ts`.\n- `ThreadAssign` — Target: gains `kind?: ChatThreadKind` (documented: absent means `REPO`). `feature` stays `string`.\n- `RunnerCapabilities` (`index.ts:64-81`) — Target: gains `projectThreads?: true` (\"Fleet S5b: the runner hosts PROJECT threads with no checkout. Absent on older runners.\").\n\nAPI contract (US-001)\n\n- `apps/api/src/fleet/common/thread-jobs.ts` — re-exports `ChatThreadKind` and mirrors `CHAT_THREAD_KINDS` at runtime, as it does `THREAD_COMMAND_TYPES`.\n- `parseCapabilitiesCore` (`apps/api/src/fleet/common/capabilities-core.ts:118-158`) — Target: accepts `projectThreads`, strict like `threadWrite` (only exactly `true`; any other present value fails with reason `projectThreads`); the parsed result has `projectThreads: true` only when the report had it.\n- `RunnerSummaryDto` (`apps/api/src/fleet/runners/dto/runner-summary.dto.ts`) — Target: gains `projectThreads: boolean`, true iff `protocolVersion >= THREAD_MIN_PROTOCOL_VERSION` and the stored capabilities have `projectThreads === true`.\n\nS5b-R9: no protocol version bump. The ASSIGN `thread` block gains an optional `kind`; a runner advertises `projectThreads: true`; PROJECT THREAD jobs are placed only on runners that advertise it.\n\n1a-R1: the API always sends `thread.kind` (`REPO` or `PROJECT`) on a THREAD ASSIGN. A runner treats a missing `kind` as `REPO`. `ThreadAssign.feature` stays a required string: for a PROJECT thread the API sends `thread-<threadId>` (the job's own feature), and the runner never uses it for a PROJECT run. This keeps the runner's existing `feature: string` consumers (`thread-worktree.ts`, `thread-publish.ts`, `thread-action-run.ts`) unchanged.\n\n1a-R6: the new protocol type is named `ChatThreadKind` (not `ThreadKind`), because `isThreadKind(command)` already means \"the job command is THREAD\".\n\nUpdate existing exact expectations: runner-summary.dto.spec.ts capability-free result gains projectThreads: false; fleet-openapi.contract.spec.ts and test/integration/fleet/runner-views.integration.spec.ts sorted summary keys gain projectThreads. Other expectations unchanged. Regenerate openapi.json via bun run api:export-spec and refresh the generated CLI via bun run generate; never manually edit generated clients. The API runtime mirror must not introduce a production runtime import from the workspace protocol package; the parity unit test uses a runtime import.\n\n**Scope** — In: shared additive wire types/constants, API capability parsing, project runner summary and related contract regeneration/tests. Out: schema/guards (US-002), creation (US-003), session jobs (US-004), ASSIGN/placement integration (US-005), runner execution (US-006), web scope picker (US-007); no protocol bump or kodaTools capability.\n\n**Interface** —\n```ts\nexport type ChatThreadKind = 'REPO' | 'PROJECT';\nexport const CHAT_THREAD_KINDS = ['REPO', 'PROJECT'] as const;\n// ThreadAssign gains:\nkind?: ChatThreadKind;\n// RunnerCapabilities gains:\nprojectThreads?: true;\n// RunnerSummaryDto gains:\nprojectThreads: boolean;\n```",
+      "acceptanceCriteria": [
+        "[unit] In apps/api/src/fleet/common/thread-jobs.spec.ts, the API's CHAT_THREAD_KINDS deep-equals the CHAT_THREAD_KINDS exported by @nathapp/fleet-protocol (runtime import), which is ['REPO', 'PROJECT'].",
+        "[unit] parseCapabilitiesCore on a valid report plus projectThreads: true returns an object whose projectThreads is true.",
+        "[unit] parseCapabilitiesCore on a valid report without projectThreads returns an object that has no projectThreads key.",
+        "[unit] parseCapabilitiesCore on a valid report plus projectThreads: false throws CapabilityValidationError with reason projectThreads.",
+        "[unit] RunnerSummaryDto.from for a runner at protocol 4 whose capabilities have projectThreads: true returns projectThreads: true.",
+        "[unit] RunnerSummaryDto.from for a runner at protocol 4 whose capabilities have no projectThreads returns projectThreads: false.",
+        "[unit] RunnerSummaryDto.from for a runner at protocol 3 whose capabilities have projectThreads: true returns projectThreads: false."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "protocol",
+        "capabilities",
+        "backward-compatibility"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Mechanical additive contract propagation following existing literal-true capability and runtime-mirror patterns; no changes to credential handling or authorization.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "packages/fleet-protocol/src/threads.ts",
+        "packages/fleet-protocol/src/index.ts",
+        "apps/api/src/fleet/common/thread-jobs.ts",
+        "apps/api/src/fleet/common/capabilities-core.ts",
+        "apps/api/src/fleet/runners/dto/runner-summary.dto.ts"
+      ],
+      "suggestedCriteria": [
+        "parseCapabilitiesCore throws CapabilityValidationError with reason projectThreads when a valid report has projectThreads: null.",
+        "parseCapabilitiesCore throws CapabilityValidationError with reason projectThreads when a valid report has projectThreads: 'true'."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/runners/dto/runner-summary.dto.spec.ts",
+          "reason": "the test at line 14 asserts the whole `RunnerSummaryDto` with `toEqual`; the DTO gains `projectThreads`, so the expected literal gains `projectThreads: false` for that capability-free record. Other expectations unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/fleet-openapi.contract.spec.ts",
+          "reason": "the assertion at lines 40-41 pins the exact sorted key list of `RunnerSummaryDto`; it gains `projectThreads`. Other contract assertions unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/runner-views.integration.spec.ts",
+          "reason": "line 80 pins the exact sorted key list of a GET /api/projects/web/fleet/runners record; it gains `projectThreads` because that route returns `RunnerSummaryDto`. Other expectations unchanged."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run api:export-spec` for `RunnerSummaryDto.projectThreads`; `bun run generate` also refreshes the untracked CLI client."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "2de0d7e6caacf6f09634de1c2f0597bbb7f14823"
+    },
+    {
+      "id": "US-002",
+      "title": "Thread kind data and REPO-only guard",
+      "description": "**Goal** — Persist thread kind and nullable repo fields, migrate existing threads safely, and narrow every API REPO-only consumer through one guard.\n\n**Motivation** — Today a thread cannot exist without `repoId`, `baseRef`, `feature` and `specPath` (`apps/api/prisma/schema.prisma:1058-1095`), the create route requires a repo and a feature (`apps/api/src/fleet/threads/thread-input.ts`), and the runner always acquires git credentials and prepares a worktree before it opens a session (`apps/runner/src/thread/thread-job-run.ts:217-330`).\n\n**Approach** — API data and REPO-only guard (US-002)\n\n- `ChatThread` (`apps/api/prisma/schema.prisma:1058-1095`) — Target: gains `kind String @default(\"REPO\") // REPO | PROJECT`; `repoId`, `baseRef`, `feature`, `specPath` become `String?`; the `repo` relation becomes optional. New migration `apps/api/prisma/migrations/20261017090000_chat_thread_kind/migration.sql` (sorts after the latest, `20261016090000_fleet_job_workflow`): adds the column with default `'REPO'` and drops NOT NULL on the four columns. The partial unique index `ChatThread_active_repo_feature_key` is unchanged (it admits any number of null `repoId` rows).\n- `ChatThreadRecord` (`apps/api/src/fleet/threads/domain/chat-thread.domain.ts:46-58`) — Target: gains `kind: ChatThreadKind`; `repoId`, `baseRef`, `feature`, `specPath` become `string | null`. `ThreadDto` (`dto/thread.dto.ts`) mirrors it (`kind` with `enum: ['REPO', 'PROJECT']`; the four fields `nullable: true`). `mapThread` (`prisma-chat-thread.repository.ts:397-409`) maps `kind`; a stored value other than `PROJECT` maps to `REPO`.\n- `repoThreadFields(thread: { kind: string; repoId: string | null; baseRef: string | null; feature: string | null; specPath: string | null }): { repoId: string; baseRef: string; feature: string; specPath: string }` — new, in `chat-thread.domain.ts`. Throws `ConflictAppException({}, 'threads.notRepoThread')` (409) only when `kind === 'PROJECT'` or any of the four fields is null; otherwise returns the four fields. A missing or unknown `kind` is treated as `REPO`, matching `mapThread` (existing unit fixtures build thread rows without `kind`). Every REPO-only consumer reads the fields through it:\n  - `ThreadsService.plan` and `ThreadsService.run` (`threads.service.ts:87-115`): call it right after the not-found check, before the creator check.\n  - `PrismaChatThreadRepository.publish` and `discard` (`prisma-chat-thread.repository.ts:171-255`): call it on the first read row right after its not-found check (`:181` and the matching line in `discard`), before the creator check.\n  - `PrismaChatThreadRepository.createThreadJob` (`:354-381`) for a REPO thread (the PROJECT branch is US-004; until then a PROJECT send answers 409 `threads.notRepoThread`).\n  - `findThreadAssign` (`prisma-fleet-job.repository.ts:201-215`) uses `thread.feature ?? `thread-${turn.threadId}`` (1a-R1).\n  - The thread-ingest cost event (`threads/ingest/prisma-thread-ingest.repository.ts:256-270`, `costEventData`): its `thread` argument gains `id` (the two call sites at `:201` and `:249` add `id` to the thread select), and `featureName` becomes `thread.feature ?? `thread-${thread.id}``.\n  - `jobGateKeys` (`apps/api/src/fleet/budgets/budget-rules.ts:40-47`) — Baseline: `repoId: string`, always emits a `repo:<id>` key. Target: `repoId: string | null`; null emits no `repo:` key (project, runner and global keys unchanged). The `thread` parameter of `sendRefusalFor` (`prisma-chat-thread.repository.ts:316`) widens `repoId` to `string | null` the same way. In US-002 both still receive `thread.repoId` as stored (null for a PROJECT row); US-004 swaps in the anchor.\n- i18n (`apps/api/src/i18n/{en,zh}/threads.json`): new key `notRepoThread`.\n\n1a-R3: PROJECT threads have no Publish, Discard, Plan or Run. The routes answer 409 `threads.notRepoThread`; the web hides the action bar.\n\n1a-R4: the kind rule (REPO has `repoId`, `baseRef`, `feature`, `specPath`; PROJECT has none) is enforced by the create path, the only writer of those columns. No database check constraint: integration schemas are built with `prisma db push` (`apps/api/test/helpers/partial-indexes.ts`), which cannot create one.\n\nCompatibility note: the stated helper signature describes persisted rows; its call surface must also permit the AC's missing-kind fixture and treat it as REPO. Do not require a kind at runtime for old fixtures. Update the typed ChatThreadRecord literal in threads.service.spec.ts with kind: 'REPO'; other expectations unchanged. Regenerate Prisma client and openapi.json for kind and nullable response fields. Test migration SQL with scratchSchemaBefore/applyMigration, not only db push. US-002 owns every API nullable-column compile site listed above so this story is independently usable before PROJECT create/send exists.\n\n**Scope** — In: ChatThread migration/schema/domain/response, REPO-only guard and guard precedence, nullable budgets/ASSIGN/cost fallbacks, localized conflict and existing fixture updates. Out: PROJECT create validation/anchor lookup (US-003), PROJECT session branch and anchor budgeting (US-004), emitted ASSIGN kind/placement (US-005), runner/web changes (US-006/007); no FleetJob schema changes, SQL check constraint or thread conversion.\n\n**Interface** — The persisted-row signature quoted above is widened at the helper's callable boundary to make the missing-kind fixture in AC3 type-safe:\n```ts\nrepoThreadFields(thread: { kind?: string; repoId: string | null; baseRef: string | null; feature: string | null; specPath: string | null }): { repoId: string; baseRef: string; feature: string; specPath: string }\n```\nOnly the helper input kind is optional; persisted ChatThreadRecord.kind remains required. Missing or unknown kind with four non-null fields returns those fields unchanged, and PROJECT or any null field still throws the specified conflict.",
+      "acceptanceCriteria": [
+        "[integration] Inserting a ChatThread row with no kind value stores kind REPO.",
+        "[integration] Inserting a ChatThread row with kind PROJECT and null repoId, baseRef, feature and specPath succeeds.",
+        "[unit] repoThreadFields for a thread object with no kind property and all four fields set returns those four values.",
+        "[integration] Applying the 20261017090000_chat_thread_kind migration with applyMigration to a scratch schema from scratchSchemaBefore that holds one ChatThread row leaves that row with kind REPO.",
+        "[integration] After that migration the pre-existing ChatThread row keeps its repoId, feature and specPath values.",
+        "[integration] GET /api/projects/:slug/threads/:id for a PROJECT thread row answers 200 with kind PROJECT.",
+        "[integration] GET /api/projects/:slug/threads/:id for a PROJECT thread row answers 200 with repoId, feature and specPath null.",
+        "[unit] repoThreadFields for a REPO thread with all four fields set returns those four values.",
+        "[unit] repoThreadFields for a PROJECT thread throws ConflictAppException with the threads.notRepoThread key.",
+        "[unit] repoThreadFields for a REPO thread whose feature is null throws ConflictAppException with the threads.notRepoThread key.",
+        "[integration] POST /api/projects/:slug/threads/:id/plan by the creator of a PROJECT thread answers 409 with the threads.notRepoThread message.",
+        "[integration] POST /api/projects/:slug/threads/:id/run by the creator of a PROJECT thread answers 409 with the threads.notRepoThread message.",
+        "[integration] POST /api/projects/:slug/threads/:id/publish by the creator of a PROJECT thread answers 409 with the threads.notRepoThread message.",
+        "[integration] POST /api/projects/:slug/threads/:id/discard by the creator of a PROJECT thread answers 409 with the threads.notRepoThread message.",
+        "[unit] In budget-rules.spec.ts, jobGateKeys({ projectId: 'p1', repoId: null, pinnedRunnerId: null }) returns keys none of which starts with repo:."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "prisma",
+        "migration",
+        "guards",
+        "backward-compatibility"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Nullable schema propagation spans repository, dispatch, cost and budget modules; changes to protected REPO-only endpoint guard precedence require strict isolated TDD.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/domain/chat-thread.domain.ts",
+        "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
+        "apps/api/src/fleet/threads/threads.service.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+        "apps/api/src/fleet/budgets/budget-rules.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261017090000_chat_thread_kind/migration.sql",
+        "apps/api/test/integration/fleet/fleet-thread-kind.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "repoThreadFields returns all four fields unchanged when kind is an unknown stored string and the four fields are non-null.",
+        "GET /api/projects/:slug/threads/:id returns kind REPO when the stored kind is not PROJECT.",
+        "Inserting two active PROJECT ChatThread rows with null repoId and feature in the same project succeeds under the unchanged active repo-feature index."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "`ChatThread` gains `kind` and the four repo fields become optional; integration suites build their schema from this file."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/threads.service.spec.ts",
+          "reason": "its `record` literal at line 9 is typed `ChatThreadRecord`, which gains the required `kind`; the literal gains `kind: 'REPO'` so `bun run type-check:spec` passes. Its expectations are unchanged."
+        },
+        {
+          "path": "apps/api/src/i18n/en/threads.json",
+          "reason": "gains `notRepoThread`."
+        },
+        {
+          "path": "apps/api/src/i18n/zh/threads.json",
+          "reason": "gains `notRepoThread`."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run api:export-spec` for `ThreadDto.kind` and the nullable thread fields."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "21e943d666580a9ed39d4faaeadb4ff348ddd77c"
+    },
+    {
+      "id": "US-003",
+      "title": "Create PROJECT threads",
+      "description": "**Goal** — Allow authorized project developers to create native PROJECT threads with null repo fields when a deterministic anchor repo exists.\n\n**Motivation** — A user would have to pick a repo and an unused feature name just to chat, and every session would clone and check out a repo it never reads.\n\n**Approach** — API create (US-003)\n\n- `validateCreateThread` (`apps/api/src/fleet/threads/thread-input.ts`) — Baseline: `validateCreateThread(value: CreateThreadInput, defaultBranch: string): Omit<CreateThreadInput, 'baseRef' | 'maxCostUsd'> & { baseRef: string; maxCostUsd: string }`. Target:\n\n```ts\nexport interface CreateThreadInput { kind?: ChatThreadKind; repoId?: string; feature?: string; baseRef?: string; title: string; maxCostUsd?: number; backend: ThreadBackend }\nexport type NormalizedCreateThread =\n  | { kind: 'REPO'; repoId: string; feature: string; baseRef: string; title: string; maxCostUsd: string; backend: ThreadBackend }\n  | { kind: 'PROJECT'; title: string; maxCostUsd: string; backend: ThreadBackend & { kind: 'native' } };\nexport function validateCreateThread(value: CreateThreadInput, defaultBranch: string): NormalizedCreateThread;\n```\n\n  Checks, in order, first failure wins: `kind` (absent means `REPO`; any other value than `REPO` / `PROJECT` fails with reason `kind`); for `REPO`, a missing or non-string `repoId` fails with reason `repoId` (new rule), then today's `feature`, `baseRef` checks; for `PROJECT`, any of `repoId`, `feature`, `baseRef` present fails with reason `projectFields`; then today's `title`, `maxCostUsd`, `backend` checks; for `PROJECT`, a backend of kind `acp` fails with reason `backend`. All failures are `ValidationAppException({ reason }, 'threads.input')` (400).\n- `CreateThreadDto` (`dto/thread.dto.ts`) — Target: gains `kind?` (`enum: ['REPO', 'PROJECT']`); `repoId` and `feature` become `required: false`.\n- `ChatThreadRepository.create` input (`chat-thread.domain.ts:62`) and `PrismaChatThreadRepository.create` (`prisma-chat-thread.repository.ts:48-56`) — Target: input is `{ kind: ChatThreadKind; projectId; repoId: string | null; baseRef: string | null; feature: string | null; title; createdById; backend; skills; maxCostUsd }`; `specPath` is `.nax/features/<feature>/spec.md` for REPO and `null` for PROJECT.\n- `ThreadsService.create` (`threads.service.ts:27-40`) — Target: calls `validateCreateThread` once for PROJECT (no repo lookup). For PROJECT it resolves the anchor through `IFleetRepoRepository.findAnchor(projectId)`; null answers `ConflictAppException({}, 'threads.noFleetRepo')` (409); otherwise it creates the thread with `kind: 'PROJECT'` and null repo fields. REPO keeps today's two-pass flow.\n- `IFleetRepoRepository.findAnchor(projectId: string): Promise<FleetRepoRecord | null>` — new (`apps/api/src/fleet/repos/domain/fleet-repo.domain.ts`, implemented in `prisma-fleet-repo.repository.ts`): the project's repo with the smallest `createdAt`, ties broken by the smallest `id`; null when the project has none.\n- i18n: new key `noFleetRepo` in `threads.json` (en + zh).\n\nS5b-R3: a `PROJECT` thread has no repo, worktree or feature. `REPO` threads keep all S5a behaviour.\n\n1a-R2: PROJECT threads with an ACP backend are refused at creation (ACP sessions get no tools, nax#2444).\n\nThe kill switch is unchanged: `FLEET_THREADS_ENABLED` gates PROJECT threads exactly as it gates REPO threads.\n\nKeep current controller human-principal, ProjectMembershipGuard and CREATE FleetJob CASL authorization; PROJECT is not a new permission bypass. Snapshot skills as today. The anchor existence check must not populate ChatThread.repoId or any repo-specific thread field. Update prisma-chat-thread.repository.spec.ts's existing create call with kind: 'REPO', preserving its expectations. Extend test/e2e/api-endpoint/endpoint.e2e.spec.ts with POST /api/projects/:slug/threads kind PROJECT 201 and kind PROJECT plus feature 400. Regenerate openapi.json for kind and optional create fields and refresh the CLI through generation. Write unit input tests alongside existing service tests and real Postgres anchor/create integration tests.\n\n**Scope** — In: discriminated normalization, create DTO/service/repository fields, deterministic public anchor lookup, localized no-repo conflict and endpoint lifecycle behavior. Out: transactional send anchor helper, session instructions/jobs/budget substitution (US-004), ASSIGN/placement (US-005), runner (US-006), web (US-007); ACP PROJECT sessions and WORKSPACE are not enabled.\n\n**Interface** —\n```ts\nIFleetRepoRepository.findAnchor(projectId: string): Promise<FleetRepoRecord | null>\n```\nThe CreateThreadInput, NormalizedCreateThread and validateCreateThread declarations above are the target create contract.",
+      "acceptanceCriteria": [
+        "[unit] validateCreateThread with kind: 'PROJECT', a title and a native backend returns a value whose kind is PROJECT.",
+        "[unit] validateCreateThread with kind: 'PROJECT' and a feature throws ValidationAppException with reason projectFields.",
+        "[unit] validateCreateThread with kind: 'PROJECT' and a repoId throws ValidationAppException with reason projectFields.",
+        "[unit] validateCreateThread with kind: 'PROJECT' and a baseRef throws ValidationAppException with reason projectFields.",
+        "[unit] validateCreateThread with kind: 'PROJECT' and backend { kind: 'acp', agent: 'claude' } throws ValidationAppException with reason backend.",
+        "[unit] validateCreateThread with kind: 'WORKSPACE' throws ValidationAppException with reason kind.",
+        "[unit] validateCreateThread with no kind, no repoId and no feature throws ValidationAppException with reason repoId.",
+        "[unit] validateCreateThread with no kind, a repoId, a valid feature and a native backend returns a value whose kind is REPO.",
+        "[integration] PrismaFleetRepoRepository.findAnchor(projectId) for a project with two repos created at different times returns the repo with the earlier createdAt.",
+        "[integration] PrismaFleetRepoRepository.findAnchor(projectId) for a project with no fleet repo returns null.",
+        "[integration] POST /api/projects/:slug/threads as a project DEVELOPER with { kind: 'PROJECT', title, backend: { kind: 'native', model: 'm1' } } answers 201 and the response's kind is PROJECT.",
+        "[integration] The thread row created by that request has null repoId, baseRef, feature and specPath.",
+        "[integration] POST /api/projects/:slug/threads with kind: 'PROJECT' in a project that has no fleet repo answers 409 with the threads.noFleetRepo message.",
+        "[integration] GET /api/projects/:slug/threads returns a PROJECT thread created in that project with kind PROJECT."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "validation",
+        "authorization",
+        "anchor-repo",
+        "prisma"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Discriminated creation spans input validation, persisted invariants and repo/service contracts; protected human/project-role creation must preserve authorization and requires strict isolated TDD.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/thread-input.ts",
+        "apps/api/src/fleet/threads/threads.service.ts",
+        "apps/api/src/fleet/repos/prisma-fleet-repo.repository.ts",
+        "apps/api/src/fleet/threads/threads.controller.ts",
+        "apps/api/test/helpers/fleet-fixtures.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/threads/thread-input.spec.ts",
+        "apps/api/test/integration/fleet/fleet-project-threads.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "PrismaFleetRepoRepository.findAnchor(projectId) returns the smallest id when two repos in that project have identical createdAt timestamps.",
+        "PrismaFleetRepoRepository.findAnchor(projectId) returns null when only another project's fleet repos exist.",
+        "POST /api/projects/:slug/threads with kind PROJECT and a feature answers 400 with threads.input and reason projectFields.",
+        "POST /api/projects/:slug/threads with kind PROJECT answers 409 threads.disabled when FLEET_THREADS_ENABLED is false.",
+        "POST /api/projects/:slug/threads with kind PROJECT by a project VIEWER answers 403.",
+        "validateCreateThread with an unknown kind and malformed title throws ValidationAppException with reason kind."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/threads/prisma-chat-thread.repository.spec.ts",
+          "reason": "the `create` call at line 162 passes the old input shape without `kind`; the repository input now requires `kind`, so that call gains `kind: 'REPO'` for `bun run type-check:spec`. Its expectations are unchanged."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "the endpoint lifecycle suite covers every endpoint behaviour change (rule api-testing); this story adds POST /api/projects/:slug/threads with `kind: 'PROJECT'` (201) and with `kind: 'PROJECT'` plus a `feature` (400). Existing expectations unchanged."
+        },
+        {
+          "path": "apps/api/src/i18n/en/threads.json",
+          "reason": "gains `noFleetRepo`."
+        },
+        {
+          "path": "apps/api/src/i18n/zh/threads.json",
+          "reason": "gains `noFleetRepo`."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run api:export-spec` for `CreateThreadDto.kind` and the optional `repoId` / `feature`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "a833cfef468c1df74a9e61de5adc4610fb16483d"
+    },
+    {
+      "id": "US-004",
+      "title": "PROJECT session job on the anchor repo",
+      "description": "**Goal** — Dispatch PROJECT conversation sessions using the deterministic bookkeeping anchor with project-only instructions and consistent budget/activity/cost accounting.\n\n**Motivation** — The koda assistant (S5b) must answer questions such as \"which tickets are blocked?\" that have nothing to do with a repo checkout.\n\n**Approach** — API session job (US-004)\n\n- `anchorRepoFor(projectId)` — a private helper of `PrismaChatThreadRepository` with the same rule as `findAnchor`.\n- `createThreadJob` (`prisma-chat-thread.repository.ts:354-381`) — Target: for a PROJECT thread it resolves the anchor inside the send transaction; none answers 409 `threads.noFleetRepo`; the job gets `repoId` = anchor id and `ref` = anchor `defaultBranch`; the instructions come from `buildProjectThreadInstructions` with the project's slug.\n- `sendRefusalFor` (`:316-334`) and `sendRefusalOf` (`:84-97`) — Target: `sendRefusalFor`'s `thread` parameter gains `kind` (passed by `sendRefusalOf` and by `sendMessage`); for a PROJECT thread the budget gate keys use the anchor's id, or `null` when the project has no fleet repo. The no-repo case is not a send refusal: GET detail answers 200 with the usual `sendRefusal`, and the send itself then answers 409 `threads.noFleetRepo` from `createThreadJob`.\n- Job-dispatch activity payload (`:304`) — Target: for a PROJECT thread `payload.repoId` is the anchor's id and `payload.ref` its default branch.\n- `buildProjectThreadInstructions(input: { project: string; skills: ThreadSkillSource[] }): string` — new, in `apps/api/src/fleet/threads/thread-instructions.ts`. Worked shape:\n\n```ts\nexport function buildProjectThreadInstructions(input: { project: string; skills: ThreadSkillSource[] }): string {\n  const lines = [\n    `You are a brainstorming partner for the koda project \"${input.project}\". This thread is not tied to a repository.`,\n    'Ask one question at a time. You have no repository, no shell and no web access; do not claim facts about code you cannot see.',\n  ];\n  // then the same \"Skills available\" block as buildThreadInstructions\n}\n```\n\n  The text never mentions `write_doc`, `list_files`, `search_repo` or Publish.\n\nS5b-R13 (anchor repo): `FleetJob.repoId`, `ref` and `feature` stay required. A PROJECT thread's THREAD job uses the project's **anchor repo** — its oldest `FleetRepo` by `createdAt`, then smallest `id` — as `repoId`, the anchor's `defaultBranch` as `ref`, and `thread-<threadId>` as `feature` (as every THREAD job already does). The anchor is bookkeeping only (placement, budget keys, dashboards, activity); the runner never clones, fetches or touches it and requests no git token for the job. A project with no fleet repo cannot create or run a PROJECT thread (409 `threads.noFleetRepo`).\n\nRetain the existing transaction, job/thread locks, duplicate clientMessageId behavior, remaining-cost Prisma.Decimal calculation, thread pinning/resume and post-commit placement/notifier boundaries. Derive activity repoId/ref from the anchor job, not the null thread fields. Reuse the exact skill-list formatting of buildThreadInstructions. The nullable cost event fallback was implemented in US-002: verify the turn_end path through real ingest produces featureName thread-<threadId>, including id in both cost lookup selections. No existing REPO expectations change.\n\nSEAM-2 (US-003 -> US-004): `IFleetRepoRepository.findAnchor`'s rule is what thread job creation applies; a US-004 AC triggers `POST /api/projects/:slug/threads/:id/messages` and asserts the job's `repoId` is the oldest repo's id.\nSEAM-3 (US-004): `buildProjectThreadInstructions` is called by thread job creation; US-004 ACs trigger `POST /api/projects/:slug/threads/:id/messages` and assert the stored `FleetThreadTurn.instructions`.\n\n**Scope** — In: transactional PROJECT SESSION job branch, private anchor lookup, project instructions, detail/send refusal anchor budgeting, dispatch activity and PROJECT cost-ingest verification. Out: create validation/public anchor lookup (US-003), ASSIGN kind and placement capability (US-005), no-checkout runner session (US-006), UI (US-007); no FleetJob schema changes or koda data tools. Anchor repo budget gates are explicitly in scope: a pause on that repo must stop PROJECT sends. Removing that accepted coupling is out of scope. US-004 only: budget pauses scoped to the anchor repo also stop PROJECT threads; this coupling is accepted (S5b-R13). Existing repo deletion/resume side effects are accepted, not redesigned.\n\n**Interface** —\n```ts\nexport function buildProjectThreadInstructions(input: { project: string; skills: ThreadSkillSource[] }): string\n```\nPrivate `anchorRepoFor(projectId)` follows `findAnchor`: createdAt ascending, then id ascending, null when absent.",
+      "acceptanceCriteria": [
+        "[integration] POST /api/projects/:slug/threads/:id/messages by the creator of a PROJECT thread in a project with two fleet repos creates a THREAD FleetJob whose repoId is the repo with the earlier createdAt.",
+        "[integration] The THREAD FleetJob created by that send has ref equal to the anchor repo's defaultBranch.",
+        "[integration] The THREAD FleetJob created by that send has feature equal to thread-<threadId>.",
+        "[integration] The FleetThreadTurn created by that send has instructions that contain the project's slug.",
+        "[integration] The FleetThreadTurn created by that send has instructions that do not mention write_doc.",
+        "[unit] In thread-instructions.spec.ts, buildProjectThreadInstructions({ project: 'sandbox', skills: [] }) returns text that contains `Skills available: none.`.",
+        "[unit] buildProjectThreadInstructions with one skill source holding the skill `spec-writing` returns text with a line `- spec-writing — <description>` after `Skills available`, where <description> is that skill's description.",
+        "[integration] POST /api/projects/:slug/threads/:id/messages on a PROJECT thread in a project whose only fleet repo was deleted answers 409 with the threads.noFleetRepo message.",
+        "[integration] That refused send creates no FleetJob row for the thread.",
+        "[integration] GET /api/projects/:slug/threads/:id for a PROJECT thread in a project with no fleet repo answers 200.",
+        "[integration] With a budget policy paused on the anchor repo's scope, POST /api/projects/:slug/threads/:id/messages on a PROJECT thread answers 409 with the fleet.budgetPaused message.",
+        "[integration] The job.dispatched activity row written by a PROJECT thread send has payload.repoId equal to the anchor repo's id.",
+        "[integration] Ingesting a turn_end cost line for a PROJECT thread's THREAD job writes a cost event whose featureName is thread-<threadId>.",
+        "[integration] POST /api/projects/:slug/threads/:id/messages on a REPO thread still creates a THREAD FleetJob whose repoId is the thread's repoId."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "sessions",
+        "transactions",
+        "budgets",
+        "anchor-repo",
+        "accounting"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Session creation crosses transactional messaging, dynamic anchor selection, budgets, activity and cost ingestion; session and creator-gated send behavior requires strict isolated TDD.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
+        "apps/api/src/fleet/threads/thread-instructions.ts",
+        "apps/api/src/fleet/threads/ingest/prisma-thread-ingest.repository.ts",
+        "apps/api/src/fleet/repos/prisma-fleet-repo.repository.ts",
+        "apps/api/test/helpers/thread-fixtures.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/fleet-project-thread-send.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "A PROJECT thread send uses the smallest repo id when two candidate anchor repos have identical createdAt timestamps.",
+        "The job.dispatched activity from a PROJECT thread send has payload.ref equal to the selected anchor's defaultBranch.",
+        "buildProjectThreadInstructions returns text containing none of list_files, search_repo or Publish.",
+        "A PROJECT send refused with threads.noFleetRepo leaves no new ChatMessage row for that clientMessageId.",
+        "GET /api/projects/:slug/threads/:id returns sendRefusal budgetPaused for a PROJECT thread when its anchor repo scope is paused."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "4029b707dd9c6bb90c5add96e931ee34ba6eed3a"
+    },
+    {
+      "id": "US-005",
+      "title": "PROJECT ASSIGN and placement",
+      "description": "**Goal** — Carry normalized thread kind into ASSIGN and both placement paths so only capable runners host PROJECT sessions.\n\n**Motivation** — The koda assistant (S5b) must answer questions such as \"which tickets are blocked?\" that have nothing to do with a repo checkout.\n\n**Approach** — API ASSIGN and placement (US-005)\n\n- `findThreadAssign` (`prisma-fleet-job.repository.ts:201-215`) — Target: also selects the thread's `kind` and returns `kind` (`PROJECT` when the row says `PROJECT`, otherwise `REPO`); `feature` per 1a-R1.\n- `toPlacementJob` (`apps/api/src/fleet/jobs/placement-rules.ts:163-170`) and `PlacementJob.thread` (`:24-33`) — Target: the thread argument gains `kind?: ChatThreadKind`. Both builders pass the assign's `kind`: `PlacementService.placeJob` (`placement.service.ts:85-86`, reached right after a send commits) and `PlacementService.fillRunnerThreads` (`:165`, reached from a runner sync).\n- `firstMisfit` THREAD branch (`placement-rules.ts:108-125`) — Target: right after the `protocol` check, a job whose `thread.kind` is `PROJECT` on a runner whose `capabilities.projectThreads !== true` returns the new `MisfitReason` `'project_threads'`. Not in `PERMANENT_MISFITS`. The value is added to `MisfitReason`, the `PlacementMisfitDto.reason` enum (`jobs/dto/fleet-job.dto.ts:127`) and the dashboard list (`dashboard/dashboard.types.ts:109-111`).\n\nS5b-R9: no protocol version bump. The ASSIGN `thread` block gains an optional `kind`; a runner advertises `projectThreads: true`; PROJECT THREAD jobs are placed only on runners that advertise it.\n\n1a-R1: the API always sends `thread.kind` (`REPO` or `PROJECT`) on a THREAD ASSIGN. A runner treats a missing `kind` as `REPO`. `ThreadAssign.feature` stays a required string: for a PROJECT thread the API sends `thread-<threadId>` (the job's own feature), and the runner never uses it for a PROJECT run. This keeps the runner's existing `feature: string` consumers (`thread-worktree.ts`, `thread-publish.ts`, `thread-action-run.ts`) unchanged.\n\nUse the US-002 fallback `thread.feature ?? `thread-${turn.threadId}``. ASSIGN still carries the required repo block for the anchor; it does not change PROJECT thread.repoId. Preserve normal backend matching, thread capacity, protocol precedence, budget gating, casAssign, pinning, transitions and post-commit notification. An unavailable PROJECT capability is recoverable, not permanent, so unsupported runners leave the job QUEUED. Regenerate openapi.json for PlacementMisfitDto.reason and the dashboard misfit enum; do not invent a protocol bump or alter existing REPO placements.\n\nSEAM-1 (US-001 -> US-005): `parseCapabilitiesCore` stores `projectThreads`; US-005 ACs post a capability report through `POST /api/fleet/runner/sync` and assert placement of a PROJECT THREAD job.\nSEAM-4 (US-005): both placement entry points carry `kind` — `POST /api/projects/:slug/threads/:id/messages` with a runner already online reaches `PlacementService.placeJob`; `POST /api/fleet/runner/sync` reaches `PlacementService.fillRunnerThreads`. US-005 has an AC for each.\n\n**Scope** — In: ASSIGN kind normalization/feature preservation, both placement builders, recoverable project_threads misfit and API/dashboard enum contracts, sync integration. Out: protocol declaration/parser (US-001), thread schema/nullable fallbacks (US-002), create/send logic (US-003/004), runner parser/execution (US-006), web forms (US-007); no protocol version bump, optional ThreadAssign.feature, ACP PROJECT path or kodaTools placement.\n\n**Interface** — The thread argument of `toPlacementJob` and `PlacementJob.thread` gains `kind?: ChatThreadKind`; `MisfitReason` gains `'project_threads'`; `ThreadAssign.kind` is always populated by the API and `ThreadAssign.feature` remains `string`.",
+      "acceptanceCriteria": [
+        "[integration] A PROJECT thread send followed by POST /api/fleet/runner/sync from an online protocol-4 runner whose capabilities include projectThreads: true and the native model the thread names returns an ASSIGN command whose payload.thread.kind is PROJECT.",
+        "[integration] That ASSIGN payload's thread.feature is thread-<threadId>.",
+        "[integration] That ASSIGN payload's repo.owner and repo.name are the anchor repo's.",
+        "[integration] A REPO thread send followed by the same sync returns an ASSIGN whose thread.kind is REPO.",
+        "[integration] That REPO ASSIGN payload's thread.feature equals the thread's feature.",
+        "[integration] A PROJECT thread send while the only online runner has thread backends but no projectThreads (the PlacementService.placeJob path) leaves the THREAD job QUEUED.",
+        "[integration] A PROJECT thread send with no runner online, followed by POST /api/fleet/runner/sync from a protocol-4 runner without projectThreads (the fillRunnerThreads path), returns no ASSIGN command.",
+        "[unit] In placement-rules.spec.ts, firstMisfit for a THREAD job with thread.kind PROJECT and a runner without projectThreads returns project_threads.",
+        "[unit] firstMisfit for a THREAD job with thread.kind PROJECT and a runner with projectThreads: true, a matching native model and free thread capacity returns null.",
+        "[unit] firstMisfit for a THREAD job with thread.kind REPO and a runner without projectThreads but with a matching native model and free thread capacity returns null.",
+        "[unit] firstMisfit for a THREAD job with thread.kind PROJECT on a runner at protocol 3 returns protocol.",
+        "[unit] PERMANENT_MISFITS.has('project_threads') returns false.",
+        "[unit] In prisma-fleet-job.repository.find-thread-assign.spec.ts, findThreadAssign for a thread row whose kind is absent returns kind REPO and the row's feature."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "placement",
+        "protocol",
+        "sessions",
+        "capabilities"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Additive kind propagation through existing ASSIGN and two placement builders plus one ordered capability check uses established patterns; sync integration tests cover both paths without changing session lifecycle, locks, credentials or authorization.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+        "apps/api/src/fleet/jobs/placement-rules.ts",
+        "apps/api/src/fleet/jobs/placement.service.ts",
+        "apps/api/src/fleet/jobs/dto/fleet-job.dto.ts",
+        "apps/api/src/fleet/dashboard/dashboard.types.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/fleet-project-thread-placement.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "findThreadAssign returns kind REPO for a row whose stored kind is an unknown string.",
+        "A queued PROJECT session receives an ASSIGN after a runner's subsequent sync adds projectThreads: true with a matching native model and free thread capacity."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "openapi.json",
+          "reason": "regenerated by `bun run api:export-spec` for the new `PlacementMisfitDto.reason` value `project_threads` and the dashboard misfit enum."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "d050b51535756e9fab623149eaec58e82a8abe3b"
+    },
+    {
+      "id": "US-006",
+      "title": "Runner no-checkout path for PROJECT threads",
+      "description": "**Goal** — Run PROJECT sessions in a safe scratch directory with only skill tools and no anchor git credential or checkout operations.\n\n**Motivation** — A user would have to pick a repo and an unused feature name just to chat, and every session would clone and check out a repo it never reads.\n\n**Approach** — Runner (US-006)\n\n- `parseAssign` thread block (`apps/runner/src/supervisor/assign-parser.ts:148-188`) — Target: reads optional `kind`; a present value other than `REPO` or `PROJECT` returns `{ ok: false, detail: 'invalid thread kind' }`. A `PROJECT` block with an action other than `SESSION` returns `{ ok: false, detail: 'invalid thread action' }`. `feature` is checked as today for every kind. The parsed `ThreadAssign` carries `kind` as received (absent stays absent).\n- Capability probe (`apps/runner/src/capabilities/nax-probe.ts:156-170`) — Target: the report gains `projectThreads: true`.\n- `threadScratchDir(homeDir: string, threadId: string): string` — new in `apps/runner/src/thread/thread-paths.ts`: `join(threadDirFor(homeDir, threadId), 'scratch')`. It lives under the thread directory, so `pruneThreads` removes it with the thread.\n- `buildProjectThreadTools(ctx: ThreadToolContext): EmbedderTool[]` — new in `apps/runner/src/thread/tools/index.ts`: `[loadSkillTool(ctx), readSkillFileTool(ctx)]`. The PROJECT run builds the full `ThreadToolContext` as the REPO path does, with `worktree` = the scratch dir and no `feature` / `onDocWritten`; the two factories keep their signatures.\n- `ThreadJobRun.run` SESSION path (`apps/runner/src/thread/thread-job-run.ts:217-330`) — Target: when `thread.kind === 'PROJECT'` it skips step 1 (`credentials.acquire`) and steps 2-4 (`prepare`), creates `threadScratchDir(homeDir, threadId)` (recursive; no error when it exists), runs step 5 (skills) unchanged, opens the session with `worktree` = that scratch dir and `tools` = `buildProjectThreadTools({ worktree: scratch, skillsRoot, skills, git, searchTimeoutMs, nowMs })`, opens the stream with `stale` false, and creates no `ThreadLivePublish`. `command('THREAD_PUBLISH', …)` on such a run returns `{ result: 'rejected', detail: 'not_repo_thread' }`. REPO runs are unchanged.\n\n1a-R1: the API always sends `thread.kind` (`REPO` or `PROJECT`) on a THREAD ASSIGN. A runner treats a missing `kind` as `REPO`. `ThreadAssign.feature` stays a required string: for a PROJECT thread the API sends `thread-<threadId>` (the job's own feature), and the runner never uses it for a PROJECT run. This keeps the runner's existing `feature: string` consumers (`thread-worktree.ts`, `thread-publish.ts`, `thread-action-run.ts`) unchanged.\n\nThe anchor is bookkeeping only (placement, budget keys, dashboards, activity); the runner never clones, fetches or touches it and requests no git token for the job. Retain common skill setup, session initialization, cancellation/halt checks, bounded session close, transcript/resume behavior, heartbeat/idle/cost limits, log shipping/drain and legal transitions. Skill-cache fetches are unchanged; they are not a checkout of the anchor. Use threadDirFor's safe-segment validation rather than constructing paths from untrusted thread ids. Do not add network calls outside established runner transport seams. PROJECT never creates ThreadLivePublish, and does not call REPO prepare/publish/action helpers. Update the nax-probe.spec.ts whole capability expectation with projectThreads: true; other expectations unchanged. Use temp filesystem, injected seams and the real journal in focused runner tests; preserve the existing REPO and missing-kind paths.\n\nSEAM-5 (US-001 -> US-006): `ThreadAssign.kind` from the package is what the runner parser reads; US-006 ACs drive `parseAssign` with a PROJECT thread block, and start a `ThreadJobRun` from it.\n\n**Scope** — In: runner payload validation, advertised capability, scratch path helper, skill-only tools and PROJECT SESSION setup/command rejection. Out: API schema/create/send/placement (US-002 through US-005), web (US-007), koda tool proxies and ACP PROJECT support; no ThreadAssign.feature optionality, protocol version bump, PROJECT repository tools, Publish/Discard/Plan/Run or anchor checkout.\n\n**Interface** —\n```ts\nthreadScratchDir(homeDir: string, threadId: string): string\nbuildProjectThreadTools(ctx: ThreadToolContext): EmbedderTool[]\n```\nInvalid kind: `{ ok: false, detail: 'invalid thread kind' }`. Invalid PROJECT action: `{ ok: false, detail: 'invalid thread action' }`. PROJECT live publish: `{ result: 'rejected', detail: 'not_repo_thread' }`.",
+      "acceptanceCriteria": [
+        "[unit] In assign-parser-thread.spec.ts, parseAssign on a THREAD ASSIGN whose thread block has kind: 'PROJECT', action SESSION and a valid feature returns ok: true with assign.thread.kind PROJECT.",
+        "[unit] parseAssign on a THREAD ASSIGN whose thread block has kind: 'PROJECT' and action PUBLISH returns { ok: false, detail: 'invalid thread action' }.",
+        "[unit] parseAssign on a THREAD ASSIGN whose thread block has kind: 'OTHER' returns { ok: false, detail: 'invalid thread kind' }.",
+        "[unit] parseAssign on a THREAD ASSIGN whose thread block has no kind returns ok: true with no kind key on assign.thread.",
+        "[unit] The capability report from the nax probe includes projectThreads: true.",
+        "[unit] threadScratchDir('/home/r', 't1') returns /home/r/threads/t1/scratch.",
+        "[unit] buildProjectThreadTools returns tools whose names are exactly ['load_skill', 'read_skill_file'].",
+        "[unit] In thread-job-run-project.spec.ts, starting a ThreadJobRun for a PROJECT SESSION ASSIGN calls the session opener with worktree equal to threadScratchDir(homeDir, threadId).",
+        "[unit] Starting a ThreadJobRun for a PROJECT SESSION ASSIGN calls the session opener with tools whose names are exactly ['load_skill', 'read_skill_file'].",
+        "[unit] Starting a ThreadJobRun for a PROJECT SESSION ASSIGN never calls credentials.acquire.",
+        "[unit] Starting a ThreadJobRun for a PROJECT SESSION ASSIGN never calls the prepareWorktree seam.",
+        "[unit] Starting a ThreadJobRun for a PROJECT SESSION ASSIGN creates the directory threadScratchDir(homeDir, threadId) before the session opener is called.",
+        "[unit] command('THREAD_PUBLISH', {}) on a running PROJECT ThreadJobRun returns { result: 'rejected', detail: 'not_repo_thread' }.",
+        "[unit] Starting a ThreadJobRun for a SESSION ASSIGN with no kind calls the prepareWorktree seam (REPO path unchanged)."
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "sessions",
+        "credentials",
+        "tools",
+        "filesystem",
+        "backward-compatibility"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Branches a large credential/session lifecycle while preserving bespoke halt, cancellation, logging and publication invariants; credential exclusion and tool isolation mandate strict isolated TDD and convention-sensitive implementation.",
+        "agentProfileId": "claude-sonnet",
+        "agent": "claude",
+        "profileModelTier": "balanced",
+        "initialAgent": "claude",
+        "initialProfileId": "claude-sonnet",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/runner/src/supervisor/assign-parser.ts",
+        "apps/runner/src/thread/thread-job-run.ts",
+        "apps/runner/src/thread/thread-paths.ts",
+        "apps/runner/src/thread/tools/index.ts",
+        "apps/runner/src/capabilities/nax-probe.ts"
+      ],
+      "expectedFiles": [
+        "apps/runner/test/unit/thread-job-run-project.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Starting a PROJECT SESSION when its scratch directory already exists still opens the session in that directory.",
+        "parseAssign returns { ok: false, detail: 'invalid thread action' } for a PROJECT thread with action DISCARD.",
+        "A PROJECT session_started stream line does not have stale: true.",
+        "A PROJECT SESSION whose skill setup fails does not call the session opener.",
+        "threadScratchDir rejects a threadId containing ../ rather than returning a path outside the thread directory.",
+        "A PROJECT session receives no git token request while waiting for and opening its agent session."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/runner/src/capabilities/nax-probe.spec.ts",
+          "reason": "the probe test near line 92 asserts the whole capability report with `toEqual`; the report gains `projectThreads: true`, so the expected literal gains that key. Other expectations unchanged."
+        }
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "e0da41ae6e168e225624a3ee819a905f010e49ef"
+    },
+    {
+      "id": "US-007",
+      "title": "Web scope picker and PROJECT thread rendering",
+      "description": "**Goal** — Let users choose Repo or Project scope and render PROJECT identity without repo fields or the REPO action bar.\n\n**Motivation** — A user would have to pick a repo and an unused feature name just to chat, and every session would clone and check out a repo it never reads.\n\n**Approach** — Web (US-007)\n\n- `ThreadDto` (`apps/web/lib/thread-types.ts:77-104`) — Target: gains `kind: 'REPO' | 'PROJECT'`; `repoId`, `baseRef`, `feature`, `specPath` become `string | null`. `FleetRunnerSummary` (`apps/web/lib/fleet-types.ts:102-112`) gains `projectThreads: boolean`.\n- `apps/web/lib/thread-create.ts` — Target: `ThreadCreateValues` gains `kind: 'REPO' | 'PROJECT'`. `buildThreadCreateSchema` adds `kind: z.enum(['REPO', 'PROJECT']).default('REPO')` and moves the `repoId`, `baseRef` and `feature` rules into a `superRefine` that runs them only when `kind` is `REPO` (same message keys), adding each issue with `path: ['repoId']`, `['baseRef']` or `['feature']` so the form shows it on that field. `toCreateThreadBody` returns `{ kind: 'PROJECT', title, maxCostUsd, backend }` for PROJECT and today's body plus `kind: 'REPO'` for REPO. `eligibleModels(runners, kind)` gains a `kind` argument; for `PROJECT` it keeps only runners whose `projectThreads` is true.\n- `apps/web/pages/[project]/threads/new.vue` — Target: a native `<select>` for the scope (`Repo` | `Project`, default `Repo`, 1a-R5) above the fields; Project hides the repo, base-ref and feature fields and passes `kind` to `eligibleModels`.\n- `showActionBar` (`apps/web/lib/thread-handoff.ts:27-29`) — Target: false when `thread.kind === 'PROJECT'`.\n- `ThreadListTable.vue:43` and `ThreadHeader.vue:25` — Target: a PROJECT thread renders `t('fleet.threads.kind.project')` where a REPO thread renders `feat/<feature>`.\n- i18n (`apps/web/i18n/locales/{en,zh}.json`): `fleet.threads.new.scope`, `fleet.threads.new.scopeRepo`, `fleet.threads.new.scopeProject`, `fleet.threads.kind.project`.\n\n1a-R3: PROJECT threads have no Publish, Discard, Plan or Run. The routes answer 409 `threads.notRepoThread`; the web hides the action bar.\n1a-R5: the new-thread form defaults to the Repo scope (today's behaviour).\n\nKeep existing online/enabled filtering, model deduplication/sorting, shared title/cost/model/effort validation, default branch placeholder, skill display, role-gated create presentation and the models watcher. The request builder must omit repoId/feature/baseRef keys even when hidden fields retain previous Repo values. Update CreateThreadBody typing consistently with its discriminated returned bodies. This is a Nuxt/Vue form, not React/Next.js; use the existing useApi/composables and form-field conventions. Do not show the anchor repo. Existing REPO exact bodies in tests/lib/thread-create.spec.ts and tests/pages/threads-new-page.spec.ts gain kind: 'REPO'; eligibleModels calls gain 'REPO' as second argument; expected REPO model lists and other expectations are unchanged. Add pure schema/body/model tests in tests/lib/thread-create-project.spec.ts and extend existing component/page/handoff suites to cover select default, hidden fields, PROJECT submit and header/list labels. Render untrusted thread data with existing safe text conventions and keep the API authoritative for permissions.\n\n**Scope** — In: mirrored DTO types, scope-aware schema/body/model selection, native scope picker, PROJECT feature labels, hidden action bar and en/zh strings with unit/component coverage. Out: backend creation/anchor behavior (US-003/004), placement (US-005), runner execution (US-006); no anchor display, general navigation/layout/token redesign, koda data tools or Playwright PROJECT journey.\n\n**Interface** — `ThreadCreateValues.kind: 'REPO' | 'PROJECT'`; schema field `kind: z.enum(['REPO', 'PROJECT']).default('REPO')`; `eligibleModels(runners, kind)`; PROJECT create body `{ kind: 'PROJECT', title, maxCostUsd, backend }`; REPO body is today's body plus `kind: 'REPO'`.",
+      "acceptanceCriteria": [
+        "[unit] buildThreadCreateSchema(t) accepts values with kind: 'PROJECT', an empty repoId, an empty feature, a title, a cost cap and a model.",
+        "[unit] buildThreadCreateSchema(t) rejects values with kind: 'REPO' and an empty repoId with an issue at path ['repoId'] whose message key is fleet.threads.new.validation.repoRequired.",
+        "[unit] toCreateThreadBody for values with kind: 'PROJECT' returns a body whose kind is PROJECT and that has no repoId, feature or baseRef key.",
+        "[unit] toCreateThreadBody for values with kind: 'REPO' returns a body whose kind is REPO.",
+        "[unit] eligibleModels(runners, 'PROJECT') returns only models of online, enabled runners whose projectThreads is true.",
+        "[unit] eligibleModels(runners, 'REPO') returns models of online, enabled runners regardless of projectThreads.",
+        "[unit] The new-thread page renders the scope select with Repo selected by default.",
+        "[unit] The new-thread page with the scope set to Project does not render the repo, base-ref and feature fields.",
+        "[unit] Submitting the new-thread page with the scope set to Project posts a body to /projects/<slug>/threads whose kind is PROJECT.",
+        "[unit] showActionBar returns false for a thread with kind: 'PROJECT' whose creator is the viewer.",
+        "[unit] showActionBar returns true for a REPO thread whose creator is the viewer, not archived, with sendRefusal not disabled.",
+        "[unit] ThreadListTable renders the fleet.threads.kind.project label in the feature column for a PROJECT thread row.",
+        "[unit] ThreadListTable renders no feat/ text for a PROJECT thread row.",
+        "[unit] ThreadHeader renders the fleet.threads.kind.project label for a PROJECT thread.",
+        "[unit] ThreadHeader renders no feat/ text for a PROJECT thread."
+      ],
+      "tags": [
+        "feature",
+        "web",
+        "nuxt",
+        "forms",
+        "i18n",
+        "threads"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Existing pure schema/body/filter helpers and Vue form/component tests support local scope conditionals and DTO/i18n additions; hiding the action bar is presentation only, with no changes to authentication, authorization enforcement or session lifecycle.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/web/lib/thread-create.ts",
+        "apps/web/pages/[project]/threads/new.vue",
+        "apps/web/lib/thread-handoff.ts",
+        "apps/web/components/fleet/threads/ThreadListTable.vue",
+        "apps/web/components/fleet/threads/ThreadHeader.vue"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/lib/thread-create-project.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Switching a populated Repo form to Project and submitting produces a request without repoId, feature or baseRef keys.",
+        "Switching the scope to Project replaces a selected model not offered by a projectThreads runner with the first eligible PROJECT model, or an empty model when none exists.",
+        "buildThreadCreateSchema(t) returns kind REPO when the input omits kind and contains otherwise valid REPO fields.",
+        "The PROJECT form disables submission when no online enabled runner advertises projectThreads with a native model.",
+        "ThreadHeader continues rendering feat/<feature> for a REPO thread."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "gains `fleet.threads.new.scope`, `fleet.threads.new.scopeRepo`, `fleet.threads.new.scopeProject`, `fleet.threads.kind.project`."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "gains the same four keys."
+        },
+        {
+          "path": "apps/web/tests/lib/thread-create.spec.ts",
+          "reason": "its `toCreateThreadBody` expectations for a REPO form pin the body with `toEqual`; the REPO body now also carries `kind: 'REPO'`, so each expected REPO body gains that key. Calls to `eligibleModels(runners)` gain the second argument `'REPO'`; expected model lists are unchanged."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-new-page.spec.ts",
+          "reason": "the submit test near line 189 asserts the exact POST body to /projects/web/threads with `toHaveBeenCalledWith`; the REPO body now carries `kind: 'REPO'`, so the expected body gains that key. Other expectations unchanged."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "cbfd0a661f3e39ad518d06b286daa54885c0e744"
+    }
+  ],
+  "analysis": "This is an enhancement to the existing S5a thread implementation, not a greenfield assistant. Goal: introduce PROJECT threads belonging only to a project, carry their kind from creation through ASSIGN to the runner and web, and host their conversations with skill tools but without an anchor checkout or git credential request. Done means all seven stories and their behavioral criteria are satisfied while existing REPO thread behavior remains unchanged. This is only S5b-1a; the umbrella design's later data tools and personal workspace threads must not leak into implementation.\n\nDiscovery and architecture: codebase-memory MCP was unavailable in this session, so discovery used direct repository reads, Glob and Grep. References below are verified against current files rather than trusting the spec's baseline line numbers. The supplied framework detection is inaccurate: apps/api/src/fleet/threads/threads.controller.ts:1-23 uses NestJS controllers, Swagger, ProjectMembershipGuard and Nathapp primitives; .nax/mono/apps/api/context.md:17-29 specifies NestJS 12 + Fastify, Prisma 7 and Vitest. .nax/mono/apps/web/context.md:19-28 and apps/web/pages/[project]/threads/new.vue:1-12 establish Nuxt 3/Vue, vee-validate/Zod and Jest, not Next.js. The runner is Bun-only ESM; .nax/mono/apps/runner/context.md:19-22 specifies bun:sqlite and bun test. Read each app context before implementation and the nathapp-nestjs-patterns skill before writing NestJS code. Do not edit generated AGENTS.md or generated CLI files. All paths in this PRD are repository-rooted. Binding workdirs/dependencies take precedence over the general single-package rule: US-001 remains workdir apps/api even though it also edits packages/fleet-protocol.\n\nShared rulings for every story: S5b-R3 means a PROJECT ChatThread has null repoId/baseRef/feature/specPath and no worktree, while REPO retains S5a behavior. S5b-R13 leaves FleetJob.repoId/ref/feature required: the anchor is the project's oldest FleetRepo ordered by createdAt ascending, id ascending; its id/defaultBranch become the job repoId/ref, and the job feature is thread-<threadId>. The anchor exists for bookkeeping, placement, budget scopes, dashboards and activity only and must never be exposed as the thread's repo or touched by the PROJECT runner. Creation and new session sends without any fleet repo return 409 threads.noFleetRepo. S5b-R9 keeps FLEET_PROTOCOL_VERSION at 4: optional ThreadAssign.kind plus projectThreads?: true provide compatibility. The API always emits kind; absent or unknown stored kind maps to REPO; a runner treats absent kind as REPO but rejects an explicitly unknown kind. ThreadAssign.feature stays required string and PROJECT gets thread-<threadId>; do not loosen downstream REPO worktree/publish/action consumers. Use ChatThreadKind rather than ThreadKind because isThreadKind already classifies THREAD job commands. PROJECT only accepts native backends, has only SESSION actions, and never offers Publish/Discard/Plan/Run. FLEET_THREADS_ENABLED and all existing project/user/creator authorization remain intact. The kind/field invariant is enforced by the only column writer, creation, with no SQL check constraint. Repo is the default form scope.\n\nUS-001 impact and dependencies: packages/fleet-protocol/src/threads.ts:1-40 currently defines isThreadKind, ThreadBackend and ThreadAssign with required feature but no chat kind. packages/fleet-protocol/src/index.ts:9-17 exports threads and fixes protocol at 4; RunnerCapabilities at :64-82 contains optional threadBackends/threadWrite. Add ChatThreadKind/CHAT_THREAD_KINDS, optional ThreadAssign.kind and optional literal-true projectThreads. apps/api/src/fleet/common/thread-jobs.ts:1-23 is the type-only re-export/runtime mirror boundary: production API must not runtime-import the protocol package, while its parity spec may runtime-import it. apps/api/src/fleet/common/capabilities-core.ts:118-160 validates untrusted reports, strips unknown fields and conditionally includes threadWrite only for true; mirror that strict parsing for projectThreads and preserve its absence. apps/api/src/fleet/runners/dto/runner-summary.dto.ts:15-47 gates threadBackends by THREAD_MIN_PROTOCOL_VERSION; expose projectThreads as a boolean gated by the same threshold and stored exact true. Modify existing common/capabilities-thread.spec.ts, common/thread-jobs.spec.ts and runners/dto/runner-summary.dto.spec.ts. Exact response-key/whole-object expectations in fleet-openapi.contract.spec.ts and test/integration/fleet/runner-views.integration.spec.ts must gain the new field without other expectation changes. Regenerate root openapi.json and the CLI via bun run generate from the root. This additive story must leave all current protocol consumers compatible.\n\nUS-002 impact and migration: apps/api/prisma/schema.prisma:1058-1095 currently makes all four thread repo fields and its FleetRepo relation required. Add kind String @default(\"REPO\"), make those columns String? and the relation optional; do not change FleetJob or ChatThread_active_repo_feature_key. The latest committed migration is 20261016090000_fleet_job_workflow; create exactly 20261017090000_chat_thread_kind/migration.sql with ADD COLUMN default REPO and four DROP NOT NULL operations. Existing rows must retain their repo/feature/spec data. Null repoId lets multiple PROJECT threads coexist under the unchanged partial unique index. apps/api/test/helpers/migration-schema.ts:1-63 exposes scratchSchemaBefore/applyMigration to test real upgrade SQL separately from the usual db push test schema; db push cannot supply a check constraint, hence the application invariant. apps/api/src/fleet/threads/domain/chat-thread.domain.ts:38-62 and dto/thread.dto.ts:9-33 need kind and nullable fields. The domain's repoThreadFields must accept old fixtures with missing kind at runtime (and permit their invocation in typed tests) and normalize only by rejecting PROJECT or any null field; an unknown/missing kind with complete fields is REPO-compatible. Guard plan/run immediately after not-found at threads.service.ts:87-115; guard publish/discard on the first read after not-found at prisma-chat-thread.repository.ts:171-255, before creator checks. Use the returned non-null fields at REPO-only compile sites. Until US-004, PROJECT job creation deliberately refuses through that helper. Other required nullable consumers: jobs/prisma-fleet-job.repository.ts:201-215 falls back to thread-<turn.threadId>; threads/ingest/prisma-thread-ingest.repository.ts:201,249,256-273 selects id in both cost paths and falls back to thread-<thread.id>; budgets/budget-rules.ts:40-42 omits the repo gate key when repoId is null; sendRefusalFor at prisma-chat-thread.repository.ts:316 widens repoId without substituting an anchor yet. mapThread at :397-409 maps only exact PROJECT to PROJECT, all other stored values to REPO. Add en/zh threads.notRepoThread, update typed record fixture in threads.service.spec.ts and regenerate the OpenAPI thread response. Nullability is a cross-module compile risk owned completely by US-002, not deferred to later stories.\n\nUS-003 create path: apps/api/src/fleet/threads/thread-input.ts:5-34 currently validates feature, baseRef, title, maxCostUsd and backend in that order and returns a REPO-only shape. Replace with the specified discriminated NormalizedCreateThread union, preserving existing title/control-character, cost default/range/precision, feature/ref and backend validation. First failure order is kind, REPO repoId then existing feature/ref OR PROJECT prohibited fields, then shared title/cost/backend, then PROJECT native-only restriction. Presence of PROJECT repoId/feature/baseRef is rejected, not silently stripped. A missing kind means REPO and a missing/non-string repoId gets reason repoId. threads.service.ts:27-40 currently validates twice around findById and snapshots project skills; retain the two-pass REPO lookup/ownership flow, but PROJECT validates only once, checks findAnchor(projectId), then stores null repo fields with the immutable backend and skills snapshot. apps/api/src/fleet/repos/prisma-fleet-repo.repository.ts:18-35 currently has findProject/create/findById but no anchor helper; add findAnchor to it and repos/domain/fleet-repo.domain.ts. The create repository currently unconditionally derives specPath at prisma-chat-thread.repository.ts:48-56; switch to kind-discriminated null/feature path. CreateThreadDto (dto/thread.dto.ts:86-94) needs @Allow for the new input under existing whitelisting and Swagger optional repoId/feature. Existing controller at threads.controller.ts:25-37 must continue asserting human principal, membership and CREATE FleetJob ability (DEVELOPER+), with the same JSON envelope. No new permission system. Extend the endpoint lifecycle suite test/e2e/api-endpoint/endpoint.e2e.spec.ts with PROJECT 201 and forbidden feature 400; update the existing repository create fixture with kind REPO. Add noFleetRepo translations in both API locales, regenerate contract/client. A create-time anchor check does not bind the thread to that repo; sends resolve the current anchor again.\n\nUS-004 session dispatch, budgets and accounting: prisma-chat-thread.repository.ts:260-313 sends with a two-attempt retry, dedup checks, job-then-thread locks, atomic message/turn/job/event/activity writes, and placement/notifier calls only after commit. Preserve this transaction and lock discipline; a failed anchor lookup must roll back the send and leave no orphan FleetJob or message. createThreadJob at :354-381 currently always loads the thread repo, builds repo instructions and creates a job with required repo fields and synthetic job feature. Add private anchorRepoFor with the same ordering as findAnchor and resolve inside the send transaction for PROJECT. Build project instructions using the project's slug, not repo identity, and keep existing remaining-cost Decimal math, pinning, resume and turn snapshots. sendRefusalOf at :84-97 manually copies fields and therefore must explicitly propagate kind to sendRefusalFor at :316-334; sendMessage also supplies it. PROJECT budgets use current anchor id, or null if absent. No-repo is not a new ThreadSendRefusal: GET detail still returns 200 with usual refusal calculation; createThreadJob is the authoritative 409 source for a new session send. The activity at :303-304 must use the actual job's anchor repo/ref rather than null thread fields. buildThreadInstructions at threads/thread-instructions.ts:3-25 supplies the skill formatting to reuse; PROJECT instructions explicitly disclaim repo/shell/web access and contain none of write_doc/list_files/search_repo/Publish. The US-002 cost fallback must be exercised through actual PROJECT turn_end ingestion, not only unit-tested in isolation. Existing integration thread-cost, thread-ingest-stream, thread-content-events and unit repository/cost suites are regression anchors. Budget policies on the anchor intentionally pause these conversations as well.\n\nUS-005 ASSIGN and placement: jobs/prisma-fleet-job.repository.ts:201-218 reads the turn, feature/title and initial message to produce ThreadAssign; add kind selection with exact-PROJECT/otherwise-REPO mapping and preserve the required feature fallback. PlacementJob.thread at placement-rules.ts:24-33 and toPlacementJob at :163-170 accept optional kind. firstMisfit at :102-130 handles THREAD before ordinary repo tools/mutex/capacity checks; insert project_threads immediately after protocol and before backend/action checks, leave it out of PERMANENT_MISFITS (:20-22), and leave thread capacity behavior intact. Both independent builders at placement.service.ts:85-86 (immediate send) and :160-166 (sync fillRunnerThreads) must forward kind. assign at :185-200 uses casAssign, buildAssignPayload, pins the thread runner, creates ASSIGN and records transition; do not bypass those paths. Expose the new misfit enum in jobs/dto/fleet-job.dto.ts and dashboard/dashboard.types.ts and regenerate openapi.json. Tests must send a capability report through actual runner sync to connect US-001's stored capability to scheduling, and exercise both immediate online placement and later sync placement. Existing placement-rules.spec.ts, placement.service.thread-write.spec.ts and prisma-fleet-job.repository.find-thread-assign.spec.ts cover backward-compatible rule/order and fixture behavior. Other toPlacementJob consumers in fleet-jobs.service.ts:81, schedules/schedules.service.ts:185 and dashboard/attention-unplaceable.ts:70 must remain source-compatible with the optional argument change; do not broaden this feature into dashboard redesign.\n\nUS-006 runner boundary and lifecycle: apps/runner/src/supervisor/assign-parser.ts:148-188 validates THREAD payloads and reconstructs a clean object. Preserve absent kind as an absent key, reject explicitly unknown kind, reject PROJECT non-SESSION actions, and retain safe feature validation even though PROJECT never uses feature at runtime. nax-probe.ts:156-176 builds a bounded report with threadWrite; add projectThreads true and update its whole-report spec. thread/thread-paths.ts:4-22 uses assertSegment via threadDirFor; scratch must be a child of that safe thread directory so the existing pruneThreads lifecycle owns it. thread/tools/index.ts:10-12 exposes REPO tools including list_files/search_repo/write_doc; add the PROJECT factory returning exactly load_skill/read_skill_file with the full existing ThreadToolContext but no feature/onDocWritten. ThreadJobRun is a large lifecycle implementation (thread-job-run.ts:217-331): SESSION currently always acquires credentials, prepares worktree, fetches skills, opens the session, announces RUNNING/log stream, installs ThreadLivePublish and starts heartbeat/turn. Branch only the PROJECT setup to recursive scratch mkdir, common skill setup and session tools; skip all acquire/prepare/anchor operations. Keep shared stop/halt/cancel checks, late session close, cost/idle/heartbeat/log drain and terminal transitions. No ThreadLivePublish for PROJECT; command handling currently at :673-682 would otherwise answer session_not_ready, so add the exact not_repo_thread rejection. Existing REPO prepare/publish/action code continues using required ThreadAssign.feature. Skill source fetching remains unchanged and is distinct from accessing the anchor repo; do not accidentally remove skills to achieve no checkout. Session factories, thread worktree/action/publish consumers and the supervisor remain on their existing interfaces. Tests should use real temp directories and in-memory journal with injected session/credential/prepare seams, not installed nax or actual credentials. Important regression suites include thread-job-run.spec.ts, thread-job-run-halt-safety.spec.ts, thread-job-run-commands.spec.ts, thread-job-run-publish.spec.ts and thread-stale-start.spec.ts.\n\nUS-007 web: apps/web/lib/thread-create.ts:8-24 has required REPO form/body types, :27-45 has unconditional repo/feature validation, :61-79 builds the request and filters enabled/online native models. Add kind/default REPO, a PROJECT body with no repo keys and REPO-only superRefine issues on the original field paths/message keys. Keep shared title/cost/model/effort behavior and sorted/deduplicated native model results; PROJECT additionally requires runner.projectThreads. The page at pages/[project]/threads/new.vue:26-39 derives models and seeds useForm without kind, with keepValuesOnUnmount true; add native scope select, initial REPO and pass selected kind to model eligibility. The watch at :35-39 must continue reconciling model selection as scope/options change. Hide only repo/baseRef/feature for PROJECT; never send hidden stale values. lib/thread-types.ts:77-104 and lib/fleet-types.ts:102-112 mirror server fields and must be updated; typed fixtures across Jest files may need explicit REPO/false values as required by those types, without changing prior REPO assertions. lib/thread-handoff.ts:27-29 currently shows the bar by creator/archive/disabled state only; add PROJECT false without loosening other conditions. ThreadListTable.vue:43 and ThreadHeader.vue:25 currently interpolate feat/<feature>; render the translated project kind instead for PROJECT, never anchor details or feat/null. Add both locale keys for scope/labels. Existing tests/lib/thread-create.spec.ts and tests/pages/threads-new-page.spec.ts have exact REPO POST expectations and eligibleModels call signatures to update; reuse tests/components/thread-list-table.spec.ts, tests/lib/thread-handoff.spec.ts and tests/pages/threads-detail-page.spec.ts for rendering/action regressions alongside new tests/lib/thread-create-project.spec.ts. Keep this a focused form/rendering change, not a navigation/layout/token redesign; no Playwright journey is required.\n\nTest/migration/rollout strategy: implementation stories create their code and tests together using the assigned TDD strategies. API tests use Vitest vi.*, vi.hoisted when needed and generated Prisma client/test helpers, not @prisma/client imports. Run DB-backed criteria with real isolated Postgres using apps/api bun run test:scoped and KODA_DB_TESTS=1 for direct Vitest calls; apps/api/package.json:11-35 separates unit, integration/e2e, db generation and type-check:spec. Compose test DB must be started outside the sandbox when Docker is unavailable; do not count skipped integration suites as passing. DB-mode runs reset schemas, so never share one test database concurrently. Migration tests use a scratch pre-migration schema and ensure both default backfill and preservation of existing data; ordinary tests build with db push and existing partial indexes. Regenerate Prisma after US-002 and OpenAPI/CLI after API contract changes (US-001/002/003/005), never edit generated output manually. Preserve existing whole-object and sorted-key assertions with only specified additions. Runner tests use bun test; web uses Jest unit/component tests. Generated .nax acceptance files, when present, are run in place by the documented app commands, never copied or edited. This PRD phase did not execute tests or change implementation code.\n\nRisks and seam verification: nullable columns propagate into plan/run/publish/discard, budgets, ASSIGN and cost event ingestion; early narrowing plus synthetic feature fallback is essential for deployable intermediate stories. Stored unknown/missing kinds and older runners require intentionally different normalization (API tolerates old rows/fixtures; runner rejects present unknown wire values). Strict capability parsing must neither manufacture false/absent capabilities nor omit the new true flag while cleaning reports. Anchor selection must be deterministic on tied timestamps and consistent between create and transactional send; repo deletion after creation must not cascade-delete PROJECT threads. Accepted existing deletion semantics are active-anchor job deletion refusal and idle-anchor deletion removing old jobs/turns, producing resume false next session. Keep budget/refusal reads safe with no anchor and do not turn detail reads into errors. Lifecycle branching must never accidentally acquire credentials, clone/fetch the anchor, expose repository tools, create a live publisher or break existing cancellation/log/session shutdown behavior. Preserve human/project/creator authorization and exact guard precedence. SEAM-1 verifies sync capability persistence to placement; SEAM-2 asserts anchor selection via HTTP send and stored job; SEAM-3 asserts project instructions via stored turn after HTTP send; SEAM-4 verifies both placeJob and fillRunnerThreads; SEAM-5 drives parseAssign into the PROJECT ThreadJobRun. Binding dependency graph is US-001 -> US-002 -> US-003 -> US-004 -> US-005, plus US-006 after US-001 and US-007 after US-003; no story merges, splits or extra stories. Roll out additive protocol support first, then the nullable schema and API creation/session/placement, with runner capability advertising and web scope UI gated by those contracts. FLEET_THREADS_ENABLED remains the existing emergency disable for both kinds.\n\nRefine-pass audit: compared all 92 spec acceptance criteria ordinal-by-ordinal against the unchanged story allocation: US-001 1..7; US-002 1..15; US-003 1..14; US-004 1..14; US-005 1..13; US-006 1..14; US-007 1..15. Every original assertion remains in acceptanceCriteria, including missing-kind compatibility, migration data preservation, both placement entry-point parentheticals, matching-model/free-thread-capacity qualifications, the REPO path unchanged clause and REPO online/enabled filtering regardless of projectThreads. All are observable through returned objects, exceptions/HTTP responses, persisted rows, recorded collaborator calls or filesystem state; no quality-gate or deprecated file-content ACs are present. US-004's skill output assertion now quotes the exact line and makes clear that <description> is skill.description, not a property of ThreadSkillSource. Every story already has negative criteria (US-001#4, US-002#9-14, US-003#2-7/#13, US-004#8-11, US-005#6-8/#11, US-006#2/#3/#13, US-007#2/#10) and regression criteria (US-001#3/#6/#7, US-002#1/#3-5/#8, US-003#8, US-004#14, US-005#4/#5/#10/#13, US-006#4/#14, US-007#4/#6/#7/#11), so none were invented or promoted from suggestedCriteria. All 11 failure-table rows map to those mandatory criteria. All 13 feature exclusions remain verbatim in outOfScope; in particular the US-004 anchor-budget coupling is an accepted behavior that must be implemented, not permission to omit the gate. All seven story ids, workdirs and dependency arrays still exactly match the binding table; no dependency can be minimized further without violating it.\n\nAudit corrections and evidence: US-002 contextFiles now matches all five spec-recommended core source files (domain, thread repository, service, job repository, budgets); migration/schema helpers remain required implementation notes rather than crowding out the nullable-field consumer context. US-003 contextFiles now includes the explicitly recommended fleet-fixtures.ts alongside validator/service/repo/controller. Other stories already included their key recommended contexts; no output file is used as context. Source re-reads confirmed thread-input.ts:18-34 has the existing ordered REPO validator, threads.service.ts:27-40 the two-pass create, chat-thread.domain.ts:38-62 the non-null record/create shape, prisma-chat-thread.repository.ts:298-381 the atomic session creation/refusal/activity path, placement-rules.ts:108-130/:163-170 the existing THREAD branch and builder, prisma-fleet-job.repository.ts:201-215 the current ASSIGN mapper, runner assign-parser.ts:148-188 the clean payload reconstruction and thread-job-run.ts:673-682 the existing session_not_ready publish fallback to replace for PROJECT. The repoThreadFields interface now explicitly widens only its input kind to optional so the missing-kind AC is type-safe; persisted ChatThreadRecord.kind remains required. Header rendering coverage is not a stub-only plan: apps/web/tests/pages/threads-detail-page.spec.ts:15,174,183-184 mounts the real ThreadHeader. US-005 is medium/tdd-simple because it adds kind forwarding and an ordered capability predicate without changing locks, session lifecycle or authorization; US-007 is medium/tdd-simple because its existing pure helpers and Vue tests cover local form/render branches, not security enforcement. Strict isolated TDD remains for protected guard ordering/creation, session job creation and the runner credential/session boundary. Proposed new helpers and files are explicit story outputs or new functions in existing files; no invented existing collaborator or new dependency was found. No tests were executed during this PRD-only audit.",
+  "outOfScope": [
+    "koda data tools in threads (the tool registry, executor, runner tool route and `kodaTools` capability) are S5b-1b and later; PROJECT threads in this feature have only the skill tools.",
+    "WORKSPACE (app-wide, personal) threads are S5b-1d; this feature adds only the `PROJECT` kind.",
+    "ACP backends for PROJECT threads: refused at creation; no ACP placement or runner path for PROJECT threads.",
+    "`write_doc`, Publish, Discard, Plan and Run for PROJECT threads.",
+    "Converting an existing thread between `REPO` and `PROJECT`.",
+    "Any change to the `FleetJob` schema: `repoId`, `ref` and `feature` stay required (anchor repo, S5b-R13).",
+    "A database check constraint for the thread kind rule (ruling 1a-R4).",
+    "A `FLEET_PROTOCOL_VERSION` bump; the protocol additions are optional fields gated by the `projectThreads` capability.",
+    "Making `ThreadAssign.feature` optional; PROJECT ASSIGNs carry `thread-<threadId>` (ruling 1a-R1).",
+    "Choosing a different anchor than the project's oldest fleet repo, or showing the anchor repo in the web.",
+    "Anchor repo deletion side effects: deleting the anchor is refused while a PROJECT session is active (existing `countUnfinishedJobs` rule), and deleting an idle anchor removes its old THREAD jobs and their turns, so the next PROJECT session starts with `resume: false`; both are accepted.",
+    "A Playwright journey for PROJECT threads (a deliberate departure from the umbrella's one-journey-per-feature guidance); web stories are verified by unit and component tests.",
+    "US-004 only: budget pauses scoped to the anchor repo also stop PROJECT threads; this coupling is accepted (S5b-R13)."
+  ],
+  "routingProfile": "cross-agent"
+}

@@ -36,9 +36,16 @@ export function isStaleMonthlyPause(p: PauseFields, now: Date): boolean {
     p.pausedWindowStart.getTime() < windowStart(p.windowKind, now).getTime();
 }
 
-/** S1b §2.3: the scopes that gate a job, in precedence order (the pinned runner last). */
-export function jobGateKeys(job: { projectId: string; repoId: string; pinnedRunnerId: string | null }): string[] {
-  return ['global', `project:${job.projectId}`, `repo:${job.repoId}`, ...(job.pinnedRunnerId ? [`runner:${job.pinnedRunnerId}`] : [])];
+/**
+ * S1b §2.3: the scopes that gate a job, in precedence order (the pinned runner last). A job with no repo — a PROJECT
+ * thread has none of its own — gates no repo scope (fleet S5b US-002).
+ */
+export function jobGateKeys(job: { projectId: string; repoId: string | null; pinnedRunnerId: string | null }): string[] {
+  return [
+    'global', `project:${job.projectId}`,
+    ...(job.repoId === null ? [] : [`repo:${job.repoId}`]),
+    ...(job.pinnedRunnerId ? [`runner:${job.pinnedRunnerId}`] : []),
+  ];
 }
 
 /** S1b §2.2: the scopes whose window spend a job's cost change moves (its current runner, not the pin). */

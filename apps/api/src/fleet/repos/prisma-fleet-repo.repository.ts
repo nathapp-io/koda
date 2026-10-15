@@ -34,6 +34,11 @@ export class PrismaFleetRepoRepository implements IFleetRepoRepository {
     return this.db.fleetRepo.findUnique({ where: { id } });
   }
 
+  /** The project's anchor repo (S5b-R13): oldest `createdAt`, ties by smallest `id`. */
+  findAnchor(projectId: string): Promise<FleetRepoRecord | null> {
+    return this.db.fleetRepo.findFirst({ where: { projectId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+  }
+
   async findPage(filters: { projectId?: string }, page: IPageOption): Promise<IPageResult<FleetRepoRecord>> {
     const where: Prisma.FleetRepoWhereInput = filters.projectId ? { projectId: filters.projectId } : {};
     const rows = await Paginate(this.db.fleetRepo, page, { where, orderBy: [{ owner: 'asc' }, { name: 'asc' }, { id: 'asc' }] });
