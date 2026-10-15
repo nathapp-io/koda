@@ -565,4 +565,20 @@ describe('US-006 (koda knowledge) AC9: koda ticket paths in an assistant message
     expect(renderedElements(app).filter(element => element.tag === 'a')).toEqual([])
     expect(innerHtmlOf(app).join('')).toContain('/sandbox/tickets/SB-3')
   })
+
+  test('B1: a `>` inside a quoted attribute of an assistant message renders no element of that text', () => {
+    // The branch-review B1 input: the path and the `<svg onload=…>` sit in a quoted attribute, so
+    // the sanitized string must survive linkification unchanged and reach v-html as one span.
+    const app = mountTimeline(
+      threadDetail(),
+      [message({ role: 'assistant', content: '<span title="> /sandbox/tickets/SB-3 <svg onload=alert(1)>">hello</span>' })],
+      { slug: 'sandbox' },
+    )
+
+    const elements = renderedElements(app)
+    expect(elements.filter(element => element.tag === 'svg')).toEqual([])
+    expect(elements.flatMap(element => Object.keys(element.attrValues))).not.toContain('onload')
+    expect(elements.filter(element => element.tag === 'span')[0].attrValues.title)
+      .toBe('> /sandbox/tickets/SB-3 <svg onload=alert(1)>')
+  })
 })

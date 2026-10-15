@@ -73,10 +73,17 @@ jest.mock('isomorphic-dompurify', () => {
     return result
   }
 
-  return { __esModule: true, default: { sanitize: (dirty: string) => sanitizeHtml(dirty), addHook: jest.fn() } }
+  return {
+    __esModule: true,
+    default: { sanitize: jest.fn((dirty: string) => sanitizeHtml(dirty)), addHook: jest.fn() },
+  }
 })
 
 import { renderThreadMarkdown } from '../../lib/thread-markdown'
+import DOMPurify from 'isomorphic-dompurify'
+
+/** The sanitizer double, so a test can see how often (and with what) the module sanitizes. */
+const sanitizeDouble = DOMPurify.sanitize as unknown as jest.Mock
 
 // ── a real HTML parser, so the assertions are about elements, not substrings ──────────────────
 
@@ -133,6 +140,10 @@ const elementsOfTree = (tree: HtmlElement[], tag: string): HtmlElement[] =>
   flatten(tree).filter(element => element.tag === tag)
 
 const textOf = (element: HtmlElement): string => element.text + element.children.map(textOf).join('')
+
+/** Every attribute name of every element of a tree. */
+const attributeNames = (tree: HtmlElement[]): string[] =>
+  flatten(tree).flatMap(element => Object.keys(element.attrs))
 
 // ── US-006 AC1-AC8 ───────────────────────────────────────────────────────────────────────────
 
@@ -200,10 +211,12 @@ describe('US-006 AC1-AC8: renderThreadMarkdown links koda ticket and job paths',
 
   test('AC8: an img with an onerror handler is removed and the ticket path is still linked', () => {
     const html = renderThreadMarkdown('<img src=x onerror=alert(1)> /sandbox/tickets/SB-3', 'sandbox')
+    const tree = treeOf(html)
 
-    expect(elementsOf(html, 'img')).toEqual([])
+    expect(elementsOfTree(tree, 'img')).toEqual([])
+    expect(attributeNames(tree)).not.toContain('onerror')
     expect(html).not.toContain('onerror')
-    const links = elementsOf(html, 'a')
+    const links = elementsOfTree(tree, 'a')
     expect(links).toHaveLength(1)
     expect(links[0].attrs.href).toBe('/sandbox/tickets/SB-3')
   })
@@ -251,5 +264,79 @@ describe('US-006 AC1-AC8: renderThreadMarkdown links koda ticket and job paths',
 
     expect(html).toContain('see ')
     expect(html).toContain(' now')
+  })
+})
+
+// ── B1 (branch review): the linkifier must not re-open markup it only meant to read ───────────
+//
+// The linkifier runs on the sanitizer's output string. `>` inside a *quoted attribute value* is
+// data, never the end of the tag, and isomorphic-dompurify 2.36.0 (the production sanitizer)
+// hands those bytes back unchanged — it escapes `&` and `"` in an attribute value, never `<`/`>`:
+//
+//   $ node -e "const DP = require('isomorphic-dompurify'); console.log(DP.sanitize('<span title=\"> /sandbox/tickets/SB-3 <svg onload=alert(1)>\">hello</span>'))"
+//   <span title="> /sandbox/tickets/SB-3 <svg onload=alert(1)>">hello</span>
+//
+// Splitting the string at the first `>` after `<` therefore read that attribute value as text,
+// re-linked the path inside it and turned `<svg onload=alert(1)>` into a real element. jest
+// cannot load the real sanitizer (isomorphic-dompurify needs jsdom, whose ESM dependencies jest
+// does not transform — every spec here replaces it, as tests/lib/markdown.spec.ts explains), so
+// the double answers these inputs with exactly the bytes the real sanitizer returns: the case
+// below asserts that byte-for-byte equivalence, which is what makes the double faithful here.
+const REAL_SANITIZER_ATTACK_OUTPUT = '<span title="> /sandbox/tickets/SB-3 <svg onload=alert(1)>">hello</span>'
+const REAL_SANITIZER_TEXT_NODE_OUTPUT = '<span title="a > b <svg onload=alert(1)>">see /sandbox/tickets/SB-3 now</span>'
+
+describe('B1: a `>` inside a quoted attribute value is not a tag boundary', () => {
+  test('the sanitizer double hands the linkifier exactly what the real sanitizer returns', () => {
+    // No slug: the output is `renderMarkdownOrEscape`'s, byte for byte — the linkifier's input.
+    expect(renderThreadMarkdown(REAL_SANITIZER_ATTACK_OUTPUT)).toBe(REAL_SANITIZER_ATTACK_OUTPUT)
+    expect(renderThreadMarkdown(REAL_SANITIZER_TEXT_NODE_OUTPUT)).toBe(REAL_SANITIZER_TEXT_NODE_OUTPUT)
+  })
+
+  test('an attribute value holding a `>` and a tag-like string stays an attribute value', () => {
+    const html = renderThreadMarkdown(REAL_SANITIZER_ATTACK_OUTPUT, 'sandbox')
+
+    // The path in this input sits in an attribute, not a text node, so nothing is linked and the
+    // output is the sanitizer's own bytes.
+    expect(html).toBe(REAL_SANITIZER_ATTACK_OUTPUT)
+
+    const tree = treeOf(html)
+
+    expect(elementsOfTree(tree, 'svg')).toEqual([])
+    expect(attributeNames(tree)).not.toContain('onload')
+    expect(attributeNames(tree)).not.toContain('onerror')
+    // The attribute text was not rewritten as markup: the span's title is unchanged and the path
+    // inside it (it is not a text node) is not a link.
+    expect(elementsOfTree(tree, 'span')[0].attrs.title).toBe('> /sandbox/tickets/SB-3 <svg onload=alert(1)>')
+    expect(elementsOfTree(tree, 'a')).toEqual([])
+  })
+
+  test('a path in a real text node is still linked when an earlier attribute holds a `>`', () => {
+    const html = renderThreadMarkdown(REAL_SANITIZER_TEXT_NODE_OUTPUT, 'sandbox')
+    const tree = treeOf(html)
+
+    expect(elementsOfTree(tree, 'svg')).toEqual([])
+    expect(attributeNames(tree)).not.toContain('onload')
+    expect(elementsOfTree(tree, 'span')[0].attrs.title).toBe('a > b <svg onload=alert(1)>')
+
+    const links = elementsOfTree(tree, 'a')
+    expect(links).toHaveLength(1)
+    expect(links[0].attrs.href).toBe('/sandbox/tickets/SB-3')
+    expect(textOf(links[0])).toBe('/sandbox/tickets/SB-3')
+  })
+
+  test('the rewritten HTML is sanitized again before it is rendered', () => {
+    sanitizeDouble.mockClear()
+    renderThreadMarkdown('see /sandbox/tickets/SB-3 now', 'sandbox')
+
+    expect(sanitizeDouble).toHaveBeenCalledTimes(2)
+    // The second pass is the final output, anchors included — not the source HTML.
+    expect(sanitizeDouble.mock.calls[1][0]).toContain('<a href="/sandbox/tickets/SB-3">')
+  })
+
+  test('without a slug the output is sanitized once (the S5a behaviour is unchanged)', () => {
+    sanitizeDouble.mockClear()
+    renderThreadMarkdown('see /sandbox/tickets/SB-3 now')
+
+    expect(sanitizeDouble).toHaveBeenCalledTimes(1)
   })
 })

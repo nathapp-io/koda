@@ -7,14 +7,22 @@
  * need a click.
  *
  * Fleet S5b US-006 (1c-R2): the paths the knowledge tools emit (`/<slug>/tickets/<ref>`,
- * `/<slug>/fleet/jobs/<id>`) become links, given the project slug. Only the text of the
- * sanitized HTML is rewritten: the anchors this adds carry a path produced by a strict pattern,
- * never content-derived markup, so the sanitizer still runs first and nothing is re-parsed.
+ * `/<slug>/fleet/jobs/<id>`) become links, given the project slug. Only the *text runs* of the
+ * sanitized HTML are rewritten: the anchors this adds carry a path produced by a strict pattern,
+ * never content-derived markup. The rewrite is followed by one more pass through the same
+ * sanitizer, so whatever leaves this module is sanitized by construction (B1).
+ *
+ * A tag is scanned the way the HTML tokenizer scans one — a quoted attribute value is data, so a
+ * `>` inside `title="a > b"` does not end the tag. Splitting at the first `>` (the branch-review
+ * B1 defect) read attribute content as markup and could turn a `<svg onload=…>` quoted inside a
+ * title into a real element. No DOM is built here on purpose: this runs during SSR too, where
+ * `DOMParser` is not available, and `isomorphic-dompurify` does not expose its jsdom window.
+ *
  * Text inside an existing link or a fenced code block is left alone; an inline code span whose
  * whole text is one of the paths is wrapped, code element and all.
  */
 
-import { renderMarkdownOrEscape } from '~/lib/markdown'
+import { renderMarkdownOrEscape, sanitizeHtmlFragment } from '~/lib/markdown'
 
 /** Every `<img …>` element, case-insensitively, with or without a trailing slash or attributes. */
 const IMG_TAG = /<img\b[^>]*>/gi
@@ -67,25 +75,73 @@ function linkifyText(text: string, slug: string): string {
   return out + text.slice(last)
 }
 
-/** Splits sanitized HTML into tag and text runs (`<` cannot appear inside a text run). */
+/**
+ * The index of the `>` that closes the tag opening at `start` (`html[start] === '<'`), or -1 when
+ * that `<` does not open a tag (it is text) or the tag is truncated.
+ *
+ * The scan follows the HTML tokenizer: inside a quoted attribute value every character is data, so
+ * a `>` there does not end the tag, and `<` in front of anything but a letter, `/`, `!` or `?` is
+ * text (the sanitizer hands `title="a > b"` back with the `>` unescaped, see B1).
+ */
+function tagEnd(html: string, start: number): number {
+  let index = start + 1
+  const next = html[index]
+  if (next === undefined) return -1
+  if (next === '!') {
+    // `<!-- … -->` ends at the first `-->`; any other declaration (`<!doctype …>`) at its `>`.
+    if (html.startsWith('<!--', start)) {
+      const end = html.indexOf('-->', start + 4)
+      return end === -1 ? -1 : end + 2
+    }
+    return html.indexOf('>', index)
+  }
+  if (next === '?') return html.indexOf('>', index)
+  if (next === '/') index += 1
+  if (!/[a-zA-Z]/.test(html[index] ?? '')) return -1
+  while (/[a-zA-Z0-9-]/.test(html[index] ?? '')) index += 1
+  while (index < html.length) {
+    const char = html[index]
+    if (char === '"' || char === "'") {
+      const end = html.indexOf(char, index + 1)
+      if (end === -1) return -1
+      index = end + 1
+      continue
+    }
+    if (char === '>') return index
+    index += 1
+  }
+  return -1
+}
+
+/**
+ * Splits sanitized HTML into tag and text runs, alternating and never empty. A `<` that does not
+ * open a tag (or a truncated one) stays part of the text run it was found in.
+ */
 function tokenize(html: string): string[] {
   const tokens: string[] = []
+  let text = ''
   let index = 0
   while (index < html.length) {
     const open = html.indexOf('<', index)
     if (open === -1) {
-      tokens.push(html.slice(index))
+      text += html.slice(index)
       break
     }
-    const close = html.indexOf('>', open)
-    if (close === -1) {
-      tokens.push(html.slice(index))
-      break
+    text += html.slice(index, open)
+    const end = tagEnd(html, open)
+    if (end === -1) {
+      text += '<'
+      index = open + 1
+      continue
     }
-    if (open > index) tokens.push(html.slice(index, open))
-    tokens.push(html.slice(open, close + 1))
-    index = close + 1
+    if (text !== '') {
+      tokens.push(text)
+      text = ''
+    }
+    tokens.push(html.slice(open, end + 1))
+    index = end + 1
   }
+  if (text !== '') tokens.push(text)
   return tokens
 }
 
@@ -146,5 +202,8 @@ function linkifyPaths(html: string, slug: string): string {
 /** B4-D6: assistant content through the shared sanitizer, images stripped, koda paths linked. */
 export function renderThreadMarkdown(content: string, slug?: string): string {
   const html = renderMarkdownOrEscape(content).replace(IMG_TAG, '')
-  return slug ? linkifyPaths(html, slug) : html
+  if (!slug) return html
+  // B1: the rewrite reads and re-serialises sanitized HTML, so its own output goes through the
+  // sanitizer again — what this returns is sanitized whatever the rewrite did.
+  return sanitizeHtmlFragment(linkifyPaths(html, slug))
 }
