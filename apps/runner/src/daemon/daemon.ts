@@ -34,6 +34,7 @@ import { ThreadSessionFactory } from '../thread/session-factory';
 import { threadNativeModels } from '../thread/thread-host';
 import type { ThreadRunSetup } from '../thread/thread-job-run';
 import { pruneThreads } from '../thread/thread-prune';
+import { pruneProjectCode } from '../thread/project-code/mirror-prune';
 import { systemNow, systemSleep, type Now, type Sleep } from '../time';
 import { CapacityTracker, freeSlots } from './capacity';
 import { DAEMON_VERSION } from '../version';
@@ -133,8 +134,17 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   await pruneJobs(journal, config, log);
   // Fleet S5a §3: the latest sync's archived thread ids (an absent field keeps the previous list); the prune
   // pass runs at start and every `pruneIntervalMs`. A throw is a warning — it never stops the daemon.
+  const mutex = new RepoMutex();
   let archivedThreadIds: readonly string[] = [];
   const pruneThreadAssets = async (): Promise<void> => {
+    try {
+      await pruneProjectCode({
+        git, mutex, homeDir: home.dir, nowMs: now().getTime(), ttlMs: tuning.projectCodeMirrorTtlMs,
+        activeJobIds: new Set(journal.activeJobs().filter((job) => job.command === 'THREAD').map((job) => job.jobId)),
+      });
+    } catch (error) {
+      log.warn('project code prune failed', { error: errorMessage(error) });
+    }
     try {
       await pruneThreads({
         git, homeDir: home.dir, archivedThreadIds, now,
@@ -190,7 +200,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     tuning,
   } : undefined;
   const supervisor = new Supervisor({
-    journal, executor, mutex: new RepoMutex(), uploader, log, now, sleep,
+    journal, executor, mutex, uploader, log, now, sleep,
     tuning: {
       statusPollMs: tuning.statusPollMs, killGraceMs: tuning.killGraceMs, ackPollMs: tuning.ackPollMs, uploadAckWaitMs: tuning.uploadAckWaitMs, logDrainTimeoutMs: tuning.logDrainTimeoutMs,
       configJobTimeoutMs: tuning.configJobTimeoutMs, configHeartbeatMs: tuning.configHeartbeatMs,

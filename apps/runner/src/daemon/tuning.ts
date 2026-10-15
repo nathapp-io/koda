@@ -43,6 +43,8 @@ export interface Tuning {
   readonly threadWakeGapMs: number;
   readonly threadSearchTimeoutMs: number;
   readonly threadSkillFetchTimeoutMs: number;
+  readonly projectCodeFetchTimeoutMs: number;
+  readonly projectCodeMirrorTtlMs: number;
   /** B3b: how long an abandon waits for a hung `session.close()` before it gives up on it. */
   readonly threadCloseTimeoutMs: number;
   /**
@@ -84,6 +86,8 @@ export const TUNING: Tuning = Object.freeze({
   threadWakeGapMs: 250,
   threadSearchTimeoutMs: 10_000,
   threadSkillFetchTimeoutMs: 120_000,
+  projectCodeFetchTimeoutMs: 120_000,
+  projectCodeMirrorTtlMs: 1_209_600_000,
   threadCloseTimeoutMs: 10_000,
   threadRunningAckPollMs: 250,
   threadRunningAckWaitMs: 30_000,
