@@ -743,6 +743,9 @@
   },
   "fleet": {
     "threads": {
+      "kind": {
+        "project": "Project thread"
+      },
       "list": {
         "title": "Threads",
         "status": "Thread status",
@@ -768,6 +771,9 @@
       },
       "new": {
         "title": "New thread",
+        "scope": "Scope",
+        "scopeRepo": "Repo",
+        "scopeProject": "Project",
         "repo": "Repository",
         "repoPlaceholder": "Select a repository",
         "baseRef": "Base ref",

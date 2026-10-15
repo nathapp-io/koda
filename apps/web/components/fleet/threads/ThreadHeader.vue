@@ -16,13 +16,18 @@ const { t } = useI18n()
 const runner = computed(() => props.runners.find(r => r.id === props.thread.runnerId) ?? null)
 const skillNames = computed(() => props.thread.skills.flatMap(source => source.skills.map(skill => skill.name)))
 const totalTokens = computed(() => (props.thread.tokens ? props.thread.tokens.input + props.thread.tokens.output : null))
+
+/** A PROJECT thread has no feature branch: the header shows the scope label instead (S5b 1a-R3). */
+const featureLabel = computed(() =>
+  props.thread.kind === 'PROJECT' ? t('fleet.threads.kind.project') : `feat/${props.thread.feature}`,
+)
 </script>
 
 <template>
   <div class="space-y-2" data-testid="thread-header">
     <div class="flex flex-wrap items-center gap-2">
       <h1 class="text-xl font-semibold">{{ props.thread.title }}</h1>
-      <span class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">feat/{{ props.thread.feature }}</span>
+      <span class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{{ featureLabel }}</span>
       <span class="rounded bg-muted px-1.5 py-0.5 text-xs">{{ props.thread.backend.kind }}<span v-if="props.thread.backend.model"> · {{ props.thread.backend.model }}</span></span>
     </div>
     <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">

@@ -1,11 +1,12 @@
 import * as z from 'zod'
 import type { FleetRunnerSummary } from '~/lib/fleet-types'
-import type { ThreadBackend } from '~/lib/thread-types'
+import type { ChatThreadKind, ThreadBackend } from '~/lib/thread-types'
 import { FEATURE_RE } from '~/lib/fleet-dispatch'
 
 type Translate = (key: string) => string
 
 export interface ThreadCreateValues {
+  kind: ChatThreadKind
   repoId: string
   baseRef: string
   feature: string
@@ -15,23 +16,25 @@ export interface ThreadCreateValues {
   effort: string
 }
 
-export interface CreateThreadBody {
-  repoId: string
-  feature: string
-  title: string
-  maxCostUsd: number
-  backend: ThreadBackend & { kind: 'native' }
-  baseRef?: string
-}
+type NativeBackend = ThreadBackend & { kind: 'native' }
+
+/**
+ * The create request body, discriminated by `kind` exactly as the API reads it: a PROJECT thread
+ * carries no repository fields at all (a stale value in a hidden form field must never leak).
+ */
+export type CreateThreadBody =
+  | { kind: 'REPO'; repoId: string; feature: string; title: string; maxCostUsd: number; backend: NativeBackend; baseRef?: string }
+  | { kind: 'PROJECT'; title: string; maxCostUsd: number; backend: NativeBackend }
 
 export function buildThreadCreateSchema(t: Translate) {
   const required = t('fleet.threads.new.validation.required')
   const invalid = t('fleet.threads.new.validation.invalid')
   return z.object({
-    repoId: z.string().min(1, t('fleet.threads.new.validation.repoRequired')),
-    baseRef: z.string().max(255, t('fleet.threads.new.validation.baseRef')),
-    feature: z.string().regex(FEATURE_RE, t('fleet.threads.new.validation.feature'))
-      .refine(value => !value.includes('..'), t('fleet.threads.new.validation.feature')),
+    kind: z.enum(['REPO', 'PROJECT']).default('REPO'),
+    // The scope decides which of these are required; a PROJECT form leaves them empty (or stale).
+    repoId: z.string().default(''),
+    baseRef: z.string().default(''),
+    feature: z.string().default(''),
     title: z.string().min(1, t('fleet.threads.new.validation.title')).max(200, t('fleet.threads.new.validation.title'))
       .refine(value => !Array.from(value).some(character => {
         const code = character.charCodeAt(0)
@@ -41,6 +44,19 @@ export function buildThreadCreateSchema(t: Translate) {
       .refine(value => Math.abs(value * 10_000 - Math.round(value * 10_000)) < 1e-6, invalid),
     model: z.string().min(1, required),
     effort: z.enum(['', 'low', 'medium', 'high', 'xhigh']),
+  }).superRefine((values, ctx) => {
+    // A PROJECT thread has no repository, base ref or feature: those rules run only for REPO
+    // (S5b 1a-R4), and each issue lands on the field so the form shows it there.
+    if (values.kind !== 'REPO') return
+    if (values.repoId.length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['repoId'], message: t('fleet.threads.new.validation.repoRequired') })
+    }
+    if (values.baseRef.length > 255) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['baseRef'], message: t('fleet.threads.new.validation.baseRef') })
+    }
+    if (!FEATURE_RE.test(values.feature) || values.feature.includes('..')) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['feature'], message: t('fleet.threads.new.validation.feature') })
+    }
   })
 }
 
@@ -61,19 +77,26 @@ export function buildThreadMessageSchema(t: Translate) {
 export function toCreateThreadBody(values: ThreadCreateValues): CreateThreadBody {
   const baseRef = values.baseRef.trim()
   const effort = values.effort.trim()
+  const backend: NativeBackend = { kind: 'native', model: values.model, ...(effort ? { effort } : {}) }
+  const title = values.title
+  const maxCostUsd = Number(values.maxCostUsd)
+  // A PROJECT body has no repository keys at all, so a REPO value left in a hidden field cannot leak.
+  if (values.kind === 'PROJECT') return { kind: 'PROJECT', title, maxCostUsd, backend }
   return {
+    kind: 'REPO',
     repoId: values.repoId,
     feature: values.feature,
-    title: values.title,
-    maxCostUsd: Number(values.maxCostUsd),
-    backend: { kind: 'native', model: values.model, ...(effort ? { effort } : {}) },
+    title,
+    maxCostUsd,
+    backend,
     ...(baseRef ? { baseRef } : {}),
   }
 }
 
-export function eligibleModels(runners: readonly FleetRunnerSummary[]): string[] {
+/** The models offered by the eligible runners of one scope: union, deduplicated and sorted. */
+export function eligibleModels(runners: readonly FleetRunnerSummary[], kind: ChatThreadKind): string[] {
   return [...new Set(runners
-    .filter(runner => runner.online && runner.enabled)
+    .filter(runner => runner.online && runner.enabled && (kind !== 'PROJECT' || runner.projectThreads))
     .flatMap(runner => runner.threadBackends?.native ?? []))]
     .sort((a, b) => a.localeCompare(b))
 }

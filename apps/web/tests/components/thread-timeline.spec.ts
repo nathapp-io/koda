@@ -171,6 +171,7 @@ const badgeFile = webFile('components', 'fleet', 'FleetJobStateBadge.vue')
 
 const threadDetail = (over: Record<string, unknown> = {}): ThreadDetailDto => ({
   id: 'th1',
+  kind: 'REPO',
   repoId: 'r1',
   baseRef: 'main',
   feature: 'add-auth',
@@ -418,6 +419,29 @@ describe('US-006 AC1-AC13: components/fleet/threads transcript components', () =
     expect(app.text()).toContain('spec-writing')
   })
 })
+// ── US-007: the header shows the scope label instead of a feature branch for a PROJECT thread ──
+
+describe('US-007 AC14-AC15: ThreadHeader scope label', () => {
+  test('AC14: a PROJECT thread header shows the fleet.threads.kind.project label', () => {
+    const app = mountHeader(
+      threadDetail({ kind: 'PROJECT', repoId: null, baseRef: null, feature: null, specPath: null, title: 'Project chat' }),
+      [],
+    )
+
+    expect(app.text()).toContain('fleet.threads.kind.project')
+  })
+
+  test('AC15: a PROJECT thread header renders no feat/ text', () => {
+    const app = mountHeader(
+      threadDetail({ kind: 'PROJECT', repoId: null, baseRef: null, feature: null, specPath: null, title: 'Project chat' }),
+      [],
+    )
+
+    expect(app.text()).toContain('Project chat')
+    expect(app.text()).not.toContain('feat/')
+  })
+})
+
 // ── US-004: the timeline shows the latest write and the latest PLAN and RUN ────────────────
 
 describe('US-004 AC-13: ThreadTimeline places the write marker and the job card among the messages', () => {
