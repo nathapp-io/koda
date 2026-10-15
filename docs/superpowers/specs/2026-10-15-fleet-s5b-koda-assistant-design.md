@@ -289,7 +289,7 @@ Failure handling:
 
 | # | Feature | Packages | Content |
 |---|---|---|---|
-| 1 | `fleet-s5b-project-threads` (S5b-1a) | api, protocol, runner, web | PROJECT kind end to end with no koda tools: migration (`kind`, nullable repo fields, check constraint), anchor repo for the job, `projectThreads` capability + placement, ASSIGN `thread.kind` + optional `feature`, no-checkout runner path, `threads.notRepoThread` / `threads.noFleetRepo`, PROJECT instructions, web scope picker and hidden handoff actions |
+| 1 | `fleet-s5b-project-threads` (S5b-1a) | api, protocol, runner, web | PROJECT kind end to end with no koda tools: migration (`kind`, nullable repo fields), anchor repo for the job, `projectThreads` capability + placement, ASSIGN `thread.kind` + optional `feature`, no-checkout runner path, `threads.notRepoThread` / `threads.noFleetRepo`, PROJECT instructions, web scope picker and hidden handoff actions |
 | 2 | `fleet-s5b-koda-read-core` (S5b-1b) | api, runner | registry, project-aware executor (ability, project resolution per S5b-R7, ids, caps, masking, fencing, idempotency), runner tool route + lease check, audit, ASSIGN `kodaTools` + `kodaTools` capability, runner proxies, ticket + fleet read tools |
 | 3 | `fleet-s5b-koda-read-knowledge` (S5b-1c) | api, web | KB / context / memory / timeline read tools, citations in the web, system prompt additions |
 | 4 | `fleet-s5b-workspace-threads` (S5b-1d) | api, runner, web | WORKSPACE kind: creator-only visibility, top-level `/threads` routes and page, home project, `project` argument on tools, `koda_my_projects` |
@@ -304,7 +304,7 @@ koda-wk.
 
 - api: per-tool unit tests (ability matrix VIEWER / DEVELOPER / ADMIN / non-member; foreign ids; caps; masking; fence
   token); executor idempotency; PendingAction state machine; DB-backed tests for the tool route (lease, epoch,
-  UPLOADING refusal) and approve -> execute -> system note; migration test for the check constraints.
+  UPLOADING refusal) and approve -> execute -> system note; migration test for the `kind` column.
 - runner: PROJECT-thread start without a worktree; proxy tools against a scripted fake API; ASSIGN parsing of `thread.kind` and the optional `feature`.
 - web: scope picker, citation rendering, confirmation card; one Playwright journey per user-facing feature (PROJECT
   thread asks "which tickets are blocked", gets a cited answer; later proposes two tickets, approve, tickets exist).
