@@ -1,4 +1,3 @@
-<!-- spec-writing: completed-through-phase-5 -->
 # SPEC: Fleet S5b-1c-a — project brief and knowledge read tools (core)
 
 ## Summary
@@ -259,7 +258,7 @@ generated clients with `bun run generate`. US-002 creates `ProjectBriefService` 
 `renderBriefBlock`, wires the service into `ThreadsService.sendMessage` and passes `repoContext` through the
 repository. US-004 creates `knowledge-tools.ts` with `koda_memory_search` and `KNOWLEDGE_TOOL_DESCRIPTORS`; US-005 adds
 `koda_timeline` to the same group and descriptor list. US-002 may add a `GitHubAppClient` stub, and US-004 the stub providers the memory graph needs, to the shared test stub module
-`apps/api/src/common/test-helpers/global-stubs.module.ts` when `assistant.module.spec.ts` needs them, leaving existing
+`apps/api/src/common/test-helpers/global-stubs.module.ts` when a module compile test (`threads.module.spec.ts`, `assistant.module.spec.ts`) needs them, leaving existing
 stubs unchanged.
 
 ### Context Files
