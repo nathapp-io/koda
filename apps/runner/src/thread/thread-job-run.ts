@@ -1,7 +1,7 @@
 import { chmod, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { AgentSession, SessionEvent } from '@nathapp/nax-agent';
-import { THREAD_LIMITS, type ThreadAssign, type ThreadCommandType } from '@nathapp/fleet-protocol';
+import type { AgentSession, EmbedderTool, SessionEvent } from '@nathapp/nax-agent';
+import { THREAD_LIMITS, type StateEventPayload, type ThreadAssign, type ThreadCommandType } from '@nathapp/fleet-protocol';
 import type { CredentialProvider } from '../credentials/broker';
 import { errorMessage } from '../errors';
 import type { Git } from '../executor/git';
@@ -20,6 +20,7 @@ import type { OpenThreadSessionOptions } from './session-factory';
 import { ThreadEventWriter } from './thread-event-writer';
 import { prepareThreadWorktree as defaultPrepareThreadWorktree, type PrepareThreadWorktreeInput } from './thread-worktree';
 import { threadScratchDir } from './thread-paths';
+import { buildKodaToolProxies, type KodaToolCaller } from './tools/koda-proxies';
 import { buildProjectThreadTools, buildThreadTools } from './tools';
 
 /** The thread stream file, inside the job's own `.jobs/<jobId>` directory. */
@@ -79,6 +80,11 @@ export interface ThreadHostDeps {
   readonly discard?: (input: ThreadDiscardInput) => Promise<ThreadDiscardResult>;
   /** The skills remote's base URL; the default fetches from `https://github.com`. */
   readonly skillOrigin?: string;
+  /**
+   * Fleet S5b US-006: the API's koda tools, proxied into a session whose ASSIGN carries `thread.kodaTools`.
+   * Absent, the session keeps the kind's own tools and reaches no koda data.
+   */
+  readonly kodaTools?: KodaToolCaller;
 }
 
 export interface ThreadRunTuning {
@@ -89,6 +95,14 @@ export interface ThreadRunTuning {
   readonly threadSkillFetchTimeoutMs: number;
   readonly logDrainTimeoutMs: number;
   readonly threadCloseTimeoutMs: number;
+  /**
+   * Fleet S5b US-006 (review B3): how often, and for how long, a proxied koda tool call waits for the server to
+   * ack the job's RUNNING event before it calls the API; a call still unacked when the wait ends is not sent (review
+   * B3, D-6). 0 waits for nothing and forwards every call. `src/daemon/tuning.ts` carries the
+   * daemon's values; only tests override them.
+   */
+  readonly threadRunningAckPollMs: number;
+  readonly threadRunningAckWaitMs: number;
   /** Passed to the writer; default `THREAD_STREAM_LIMITS.streamMaxBytes`. Tests lower it. */
   readonly streamMaxBytes?: number;
 }
@@ -117,6 +131,12 @@ const SESSION_ERROR = 'session_error';
 
 /** The ask transport's request-id rule: 1..200 printable ASCII characters. */
 const REQUEST_ID_RE = /^[\x20-\x7e]{1,200}$/;
+
+/** Review B3: the same generous scan bound `JobRun` uses for its ack waits — the RUNNING event is never far from the tail. */
+const PENDING_SCAN_LIMIT = 100_000;
+
+/** Review B3 (D-6): the unavailable answer for a proxied call that was not sent because RUNNING was never acked. Same shape as the proxy layer's own unavailable answers. */
+const UNAVAILABLE_NOT_RUNNING = 'koda tool unavailable: job is not running yet';
 
 /** A string of at most `messageMaxBytes` UTF-8 bytes — the bound the API applies to a message and an answer. */
 function isMessageText(value: unknown): value is string {
@@ -290,16 +310,19 @@ export class ThreadJobRun {
       jobId: this.jobId,
       thread,
       worktree: prepared.worktree,
-      tools: buildThreadTools({
-        worktree: prepared.worktree,
-        skillsRoot: this.skillsRoot(),
-        skills: thread.skills,
-        git: this.deps.host.git,
-        searchTimeoutMs: this.deps.tuning.threadSearchTimeoutMs,
-        nowMs: () => this.deps.now().getTime(),
-        feature: thread.feature,
-        onDocWritten: (path, bytes) => { if (!this.halted) this.writer?.docWritten(path, bytes); },
-      }),
+      tools: [
+        ...buildThreadTools({
+          worktree: prepared.worktree,
+          skillsRoot: this.skillsRoot(),
+          skills: thread.skills,
+          git: this.deps.host.git,
+          searchTimeoutMs: this.deps.tuning.threadSearchTimeoutMs,
+          nowMs: () => this.deps.now().getTime(),
+          feature: thread.feature,
+          onDocWritten: (path, bytes) => { if (!this.halted) this.writer?.docWritten(path, bytes); },
+        }),
+        ...this.kodaToolProxies(thread),
+      ],
       approvalTimeoutSec: row.assign.approvalTimeoutSec,
     });
     if (this.halted) {
@@ -356,14 +379,17 @@ export class ThreadJobRun {
       jobId: this.jobId,
       thread,
       worktree: scratch,
-      tools: buildProjectThreadTools({
-        worktree: scratch,
-        skillsRoot: this.skillsRoot(),
-        skills: thread.skills,
-        git: this.deps.host.git,
-        searchTimeoutMs: this.deps.tuning.threadSearchTimeoutMs,
-        nowMs: () => this.deps.now().getTime(),
-      }),
+      tools: [
+        ...buildProjectThreadTools({
+          worktree: scratch,
+          skillsRoot: this.skillsRoot(),
+          skills: thread.skills,
+          git: this.deps.host.git,
+          searchTimeoutMs: this.deps.tuning.threadSearchTimeoutMs,
+          nowMs: () => this.deps.now().getTime(),
+        }),
+        ...this.kodaToolProxies(thread),
+      ],
       approvalTimeoutSec: row.assign.approvalTimeoutSec,
     });
     if (this.halted) {
@@ -430,6 +456,58 @@ export class ThreadJobRun {
     } catch (error) {
       this.deps.log.warn('credential release failed', { jobId: this.jobId, error: errorMessage(error) });
     }
+  }
+
+  /**
+   * Fleet S5b US-006: the ASSIGN's koda tool proxies, appended after the kind's own tools in descriptor order.
+   * The API defines and executes the tools; this run only forwards each call with the provider's tool call id.
+   * Without descriptors, or without a host caller (a runner that was never wired to one), the kind's tools stand
+   * alone — a session whose runner cannot proxy koda tools reaches no koda data.
+   */
+  private kodaToolProxies(thread: ThreadAssign): EmbedderTool[] {
+    const descriptors = thread.kodaTools;
+    const caller = this.deps.host.kodaTools;
+    if (descriptors === undefined || caller === undefined) return [];
+    // Review B3 (D-6): the proxies are attached while the row is still ASSIGNED — only this journal knows RUNNING
+    // yet. Every proxied call therefore waits for the server's ack of the RUNNING event first, and is forwarded only
+    // once that ack is confirmed. A call that reaches the API too early is refused `fleet.jobState` and is never
+    // retried, so it is never sent at all when the ack does not arrive: a timed-out wait, a halt or an aborted turn
+    // answers the unavailable result the proxy layer uses for a failed call, and the model sees the job is not
+    // running yet.
+    const gated: KodaToolCaller = {
+      call: async (args) => {
+        if (!(await this.awaitRunningAck(args.signal))) return { content: UNAVAILABLE_NOT_RUNNING, isError: true };
+        return caller.call(args);
+      },
+    };
+    return buildKodaToolProxies(descriptors, { jobId: this.jobId, leaseEpoch: this.leaseEpoch, caller: gated });
+  }
+
+  /** Review B3: the RUNNING state event is still unacked, so the server has not applied the transition yet. */
+  private runningAckPending(): boolean {
+    return this.deps.journal.pendingEvents(this.jobId, this.leaseEpoch, PENDING_SCAN_LIMIT)
+      .some((event) => event.type === 'state' && (event.payload as StateEventPayload).to === 'RUNNING');
+  }
+
+  /**
+   * Review B3 (D-6): waits until the server has acked the RUNNING transition, so a session's first tool call does not
+   * race the sync that reports it. Resolves `true` when the call may go out: no RUNNING event is pending, the wait is
+   * disabled (`threadRunningAckWaitMs <= 0`), or the ack arrived in time. The wait is bounded twice over — by the
+   * injected clock and by the number of polls that bound can hold, so neither a standing clock nor a sleeper that
+   * returns early can spin it — and it ends early on a halt or the turn's own abort signal. Resolves `false` when the
+   * wait ends without the ack (it ran out, the run halted or the turn aborted); the caller then sends nothing, since
+   * a call that reaches the API before RUNNING is applied is refused and never retried.
+   */
+  private async awaitRunningAck(signal: AbortSignal | undefined): Promise<boolean> {
+    const { threadRunningAckPollMs: pollMs, threadRunningAckWaitMs: waitMs } = this.deps.tuning;
+    if (waitMs <= 0 || !this.runningAckPending()) return true;
+    const interval = Math.max(1, pollMs);
+    const deadline = this.deps.now().getTime() + waitMs;
+    for (let polls = 0; polls < Math.ceil(waitMs / interval) && this.runningAckPending(); polls += 1) {
+      if (this.halted || signal?.aborted || this.deps.now().getTime() >= deadline) return false;
+      await this.deps.sleep(interval, signal);
+    }
+    return !this.runningAckPending();
   }
 
   /** Step 5: the assigned skill sources, fetched into the runner's own skill cache. */

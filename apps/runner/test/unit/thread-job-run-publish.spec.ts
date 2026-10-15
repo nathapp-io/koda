@@ -15,7 +15,7 @@ const thread: ThreadAssign = {
   threadId: 'thread-1', action: 'SESSION', feature: 'divide', title: 'Divide brainstorm', resume: false,
   instructions: 'be helpful', backend: { kind: 'native', model: 'minimax/MiniMax-M3' }, skills: [], initialMessage: null,
 };
-const tuning = { threadIdleMs: 60_000, threadHeartbeatMs: 30_000, threadWakeGapMs: 0, threadSearchTimeoutMs: 1_000, threadSkillFetchTimeoutMs: 1_000, logDrainTimeoutMs: 1_000, threadCloseTimeoutMs: 10 };
+const tuning = { threadIdleMs: 60_000, threadHeartbeatMs: 30_000, threadWakeGapMs: 0, threadSearchTimeoutMs: 1_000, threadSkillFetchTimeoutMs: 1_000, logDrainTimeoutMs: 1_000, threadCloseTimeoutMs: 10, threadRunningAckPollMs: 250, threadRunningAckWaitMs: 0 };
 const turnEnd = { type: 'turn_end', sessionId: 'thread-1', turnId: 'turn-1', at: new Date(0).toISOString(), status: 'completed' } as never;
 function deferred<T = void>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
 function setup(options: { send?: () => AsyncGenerator<SessionEvent>; publish?: (input: Record<string, unknown>) => Promise<ThreadPublishResult>; stale?: boolean; title?: string; noTitle?: boolean } = {}) {

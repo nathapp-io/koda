@@ -55,6 +55,8 @@ export interface ThreadSession {
   at: string
   /** Set while the runner reports the session's worktree stale; absent otherwise (fleet S5a §4). */
   stale?: true
+  /** Set when the session's runner lacks koda tools capability (fleet S5b US-007). */
+  kodaToolsUnavailableOn?: string
 }
 
 /**

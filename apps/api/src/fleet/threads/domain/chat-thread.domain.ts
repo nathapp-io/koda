@@ -47,6 +47,8 @@ export interface ThreadSession {
   at: string;
   /** Set while the runner reports the session's worktree stale; absent otherwise (fleet S5a §4). */
   stale?: true;
+  /** Fleet S5b 1b-D4: the runner hosting this session does not advertise `kodaTools`, so its sessions get none. */
+  kodaToolsUnavailableOn?: string;
 }
 
 /**

@@ -147,7 +147,11 @@ describeIntegration('fleet thread tools, questions and session (PG, US-004)', ()
     const s = await fresh('tools-ac12');
     await put(s, [{ type: 'session_started', at: '2026-10-14T00:00:00.000Z', resumed: false, backend: { kind: 'native' }, skillShas: [] }]);
     const thread = await prisma.chatThread.findUniqueOrThrow({ where: { id: s.threadId } });
-    expect(thread.session).toEqual({ jobId: s.jobId, state: 'live', resumed: false, contextReset: false, reason: null, at: '2026-10-14T00:00:00.000Z' });
+    // US-005 1b-D4: the runner never reported kodaTools, so the folded session names it.
+    expect(thread.session).toEqual({
+      jobId: s.jobId, state: 'live', resumed: false, contextReset: false, reason: null, at: '2026-10-14T00:00:00.000Z',
+      kodaToolsUnavailableOn: 'tools-session-runner',
+    });
   });
 
   it('US-004 AC13: session_started with resumed false on a resume turn sets contextReset', async () => {

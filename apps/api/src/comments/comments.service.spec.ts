@@ -185,6 +185,8 @@ describe('CommentsService', () => {
       create: vi.fn(),
       findById: vi.fn(),
       findByTicketId: vi.fn(),
+      findRecentByTicketId: vi.fn(),
+      countByTicketId: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
       findProjectBySlug: vi.fn(),
@@ -544,6 +546,37 @@ describe('CommentsService', () => {
       mockCommentRepo.findTicketScoped.mockResolvedValue(null);
 
       await expect(service.findByTicket('koda', 'KODA-999')).rejects.toThrow();
+    });
+  });
+
+  // S5b US-003 fix F1: the koda tool reads a ticket's newest comments through a
+  // bounded query instead of loading the whole history.
+  describe('findRecentByTicket', () => {
+    it('asks the repository for only the newest `limit` comments and never for the whole history', async () => {
+      mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockCommentRepo.findTicketScoped.mockResolvedValue(mockTicket);
+      const recent = Array.from({ length: 10 }, (_, index) => ({
+        ...mockComment,
+        id: `comment-${index + 3}`,
+        body: `body ${index + 3}`,
+      }));
+      mockCommentRepo.findRecentByTicketId.mockResolvedValue(recent);
+      mockCommentRepo.countByTicketId.mockResolvedValue(12);
+
+      const result = await service.findRecentByTicket('koda', 'KODA-1', 10);
+
+      expect(mockCommentRepo.findRecentByTicketId).toHaveBeenCalledWith(mockTicket.id, 10);
+      expect(mockCommentRepo.findByTicketId).not.toHaveBeenCalled();
+      expect(result.total).toBe(12);
+      expect(result.comments.map((comment) => comment.body)).toEqual(recent.map((comment) => comment.body));
+    });
+
+    it('returns 404 for a ref of another project and reads no comments', async () => {
+      mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockCommentRepo.findTicketScoped.mockResolvedValue(null);
+
+      await expect(service.findRecentByTicket('koda', 'OTHER-1', 10)).rejects.toThrow();
+      expect(mockCommentRepo.findRecentByTicketId).not.toHaveBeenCalled();
     });
   });
 

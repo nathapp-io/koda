@@ -869,6 +869,9 @@
         "markerPaths": "Paths",
         "markerIgnored": "Ignored",
         "card": { "plan": "Plan", "run": "Run", "openJob": "Open job", "pr": "View pull request", "needsYou": "Needs you" }
+      },
+      "kodaTools": {
+        "unavailable": "koda tools are unavailable on runner {runner}; this session cannot read koda data."
       }
     },
     "common": {

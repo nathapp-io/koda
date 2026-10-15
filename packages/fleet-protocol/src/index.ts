@@ -80,6 +80,8 @@ export interface RunnerCapabilities {
   threadWrite?: true;
   /** Fleet S5b: the runner hosts PROJECT threads with no checkout. Absent on older runners. */
   projectThreads?: true;
+  /** Fleet S5b: the runner proxies koda API tools into a session. Absent on older runners (no tools on the ASSIGN). */
+  kodaTools?: true;
 }
 
 export interface EnrollRequest {

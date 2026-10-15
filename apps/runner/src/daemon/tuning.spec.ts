@@ -13,6 +13,7 @@ describe('TUNING (D42, slice 3 design)', () => {
       configJobTimeoutMs: 600_000, configHeartbeatMs: 30_000,
       threadIdleMs: 900_000, threadHeartbeatMs: 30_000, threadWakeGapMs: 250, threadSearchTimeoutMs: 10_000,
       threadSkillFetchTimeoutMs: 120_000, threadCloseTimeoutMs: 10_000,
+      threadRunningAckPollMs: 250, threadRunningAckWaitMs: 30_000,
     });
     expect(Object.isFrozen(TUNING)).toBe(true);
   });

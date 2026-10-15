@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { FleetCommandOut, ThreadAssign } from '@nathapp/fleet-protocol';
+import type { FleetCommandOut, KodaToolDescriptor, ThreadAssign } from '@nathapp/fleet-protocol';
 import { assignFor } from '../../test/helpers/assign';
 import { parseAssign } from './assign-parser';
 
@@ -197,5 +197,80 @@ describe('parseAssign THREAD (US-001)', () => {
     const parsed = parseAssign(cmd(assign));
     expect(parsed.ok).toBe(true);
     if (parsed.ok) expect(parsed.assign.thread).not.toHaveProperty('kind');
+  });
+});
+
+/**
+ * Fleet S5b US-006: the ASSIGN's koda tool descriptors are re-validated here with the same limits the API's
+ * catalog enforces — the server is trusted to deliver, not to be well formed.
+ */
+const KODA_DESCRIPTOR: KodaToolDescriptor = {
+  name: 'koda_get_ticket',
+  description: 'reads one ticket of this project',
+  inputSchema: { type: 'object', properties: { ref: { type: 'string' } }, required: ['ref'] },
+};
+
+/** Distinct names that match KODA_TOOL_LIMITS.nameRe (`koda_` + a letter + up to 58 of `[a-z_]`). */
+const validNames = (count: number): string[] => Array.from({ length: count }, (_, i) => `koda_${'x'.repeat(i + 1)}`);
+
+describe('parseAssign koda tools (US-006 AC-1..AC-4)', () => {
+  test('US-006 kodaTools AC-1: a THREAD ASSIGN with one valid descriptor keeps it on assign.thread', () => {
+    const { assign } = threadFixture({ kodaTools: [KODA_DESCRIPTOR] } as never);
+    const parsed = parseAssign(cmd(assign));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.assign.thread?.kodaTools).toEqual([KODA_DESCRIPTOR]);
+  });
+
+  test('US-006 kodaTools AC-2: a THREAD ASSIGN without kodaTools has no kodaTools key', () => {
+    const { assign } = threadFixture();
+    const parsed = parseAssign(cmd(assign));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.assign.thread).not.toHaveProperty('kodaTools');
+  });
+
+  test('US-006 kodaTools AC-3: a descriptor named get_ticket refuses the ASSIGN', () => {
+    const { assign } = threadFixture({ kodaTools: [{ ...KODA_DESCRIPTOR, name: 'get_ticket' }] } as never);
+    expect(parseAssign(cmd(assign))).toEqual({ ok: false, detail: 'invalid koda tools' });
+  });
+
+  test('US-006 kodaTools AC-4: 33 valid descriptors refuse the ASSIGN (limit is 32)', () => {
+    const descriptors = validNames(33).map((name) => ({ ...KODA_DESCRIPTOR, name }));
+    const { assign } = threadFixture({ kodaTools: descriptors } as never);
+    expect(parseAssign(cmd(assign))).toEqual({ ok: false, detail: 'invalid koda tools' });
+  });
+
+  test('US-006 kodaTools: 32 valid descriptors are accepted (the limit itself passes)', () => {
+    const descriptors = validNames(32).map((name) => ({ ...KODA_DESCRIPTOR, name }));
+    const { assign } = threadFixture({ kodaTools: descriptors } as never);
+    const parsed = parseAssign(cmd(assign));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.assign.thread?.kodaTools).toEqual(descriptors);
+  });
+
+  test('US-006 kodaTools: a malformed list is refused one row at a time', () => {
+    const rows: Array<[string, unknown]> = [
+      ['not an array', { name: 'koda_get_ticket' }],
+      ['an empty name', [{ ...KODA_DESCRIPTOR, name: '' }]],
+      ['a name over 64 characters', [{ ...KODA_DESCRIPTOR, name: `koda_${'x'.repeat(60)}` }]],
+      ['a 2001-character description', [{ ...KODA_DESCRIPTOR, description: 'd'.repeat(2001) }]],
+      ['a non-string description', [{ ...KODA_DESCRIPTOR, description: 42 }]],
+      ['a missing description', [{ name: 'koda_get_ticket', inputSchema: { type: 'object' } }]],
+      ['a null inputSchema', [{ ...KODA_DESCRIPTOR, inputSchema: null }]],
+      ['an array inputSchema', [{ ...KODA_DESCRIPTOR, inputSchema: [] }]],
+      ['a null entry', [null]],
+      ['a missing name', [{ description: 'x', inputSchema: {} }]],
+    ];
+    for (const [label, kodaTools] of rows) {
+      const { assign } = threadFixture({ kodaTools } as never);
+      expect({ label, parsed: parseAssign(cmd(assign)) }).toEqual({ label, parsed: { ok: false, detail: 'invalid koda tools' } });
+    }
+  });
+
+  test('US-006 kodaTools: a 2000-character description is accepted (the limit itself passes)', () => {
+    const descriptor = { ...KODA_DESCRIPTOR, description: 'd'.repeat(2000) };
+    const { assign } = threadFixture({ kodaTools: [descriptor] } as never);
+    const parsed = parseAssign(cmd(assign));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.assign.thread?.kodaTools).toEqual([descriptor]);
   });
 });

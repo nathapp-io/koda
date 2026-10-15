@@ -24,7 +24,7 @@ const UNFOLDED_STREAM_LIMIT = 200;
 const QUESTION_TEXT_MAX = 2048;
 
 /** A ThreadSession as stored in `ChatThread.session` (the API `session` JSON). */
-interface StoredSession { jobId: string; state: 'live' | 'closed' | 'failed'; resumed: boolean; contextReset: boolean; reason: string | null; at: string; stale?: true }
+interface StoredSession { jobId: string; state: 'live' | 'closed' | 'failed'; resumed: boolean; contextReset: boolean; reason: string | null; at: string; stale?: true; kodaToolsUnavailableOn?: string }
 
 /** Reads a message's stored `toolSummary` (JSON, written only by this fold) as its typed entries. */
 const readSummary = (json: Prisma.JsonValue | null): ToolSummaryEntry[] => (json as unknown as ToolSummaryEntry[] | null) ?? [];
@@ -128,7 +128,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
             }
           }
           else if (isSessionLine(line)) {
-            const erroredIds = await this.foldSessionLine(batch, threadId, line, isTerminal(job.state) || batch.leaseEpoch !== job.leaseEpoch);
+            const erroredIds = await this.foldSessionLine(batch, threadId, line, isTerminal(job.state) || batch.leaseEpoch !== job.leaseEpoch, job.runnerId);
             for (const id of erroredIds) messageIds.add(id);
             threadChanged = true;
           }
@@ -413,7 +413,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
    * Folds a runner session line into `ChatThread.session`. `session_failed` also errors the thread's pending and
    * streaming messages with the reason, keeping their content (fleet S5a §8).
    */
-  private async foldSessionLine(batch: ThreadIngestBatch, threadId: string, line: SessionThreadLine, stale: boolean): Promise<string[]> {
+  private async foldSessionLine(batch: ThreadIngestBatch, threadId: string, line: SessionThreadLine, stale: boolean, runnerId: string | null): Promise<string[]> {
     const db = this.prisma.client;
     const at = line.at ?? new Date().toISOString();
     if (line.type === 'session_started') {
@@ -422,9 +422,12 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
       // the job row lock, so the state and epoch are current.
       if (stale) return [];
       const turn = await db.fleetThreadTurn.findUnique({ where: { jobId: batch.jobId }, select: { resume: true } });
+      // 1b-D4: the runner that hosts the session decides whether the session has koda tools at all.
+      const notice = await this.kodaToolsNotice(runnerId);
       const session: StoredSession = {
         jobId: batch.jobId, state: 'live', resumed: line.resumed, contextReset: turn?.resume === true && !line.resumed, reason: null, at,
         ...(line.stale === true ? { stale: true as const } : {}),
+        ...notice,
       };
       await db.chatThread.update({ where: { id: threadId }, data: { session: session as unknown as Prisma.InputJsonValue } });
       return [];
@@ -441,6 +444,8 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
       state: line.type === 'session_closed' ? 'closed' : 'failed',
       resumed: current?.resumed ?? false,
       contextReset: current?.contextReset ?? false,
+      // A same-job close keeps the session's own facts (1b-D4's notice, 1a's stale flag).
+      ...(current?.kodaToolsUnavailableOn !== undefined ? { kodaToolsUnavailableOn: current.kodaToolsUnavailableOn } : {}),
       // Closing a stale session must leave Discard available; only a successful discard clears it.
       ...(current?.stale === true ? { stale: true as const } : {}),
       reason: line.reason,
@@ -456,6 +461,22 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
       data: { status: 'errored', errorReason: line.reason.slice(0, ERROR_REASON_MAX) },
     });
     return affected.map(({ id }) => id);
+  }
+
+  /**
+   * 1b-D4: the runner the job ran on decides whether the session it hosts has koda tools. A runner row whose stored
+   * capabilities lack `kodaTools: true` names itself on the session; a job with no runner, or a runner row that is
+   * gone, stores no notice. The same capability read gates the ASSIGN descriptors (1b-D3), so the two agree except
+   * across a re-probe between the assign and the session start (a runner restart, which also ends the session).
+   */
+  private async kodaToolsNotice(runnerId: string | null): Promise<Pick<StoredSession, 'kodaToolsUnavailableOn'>> {
+    if (!runnerId) return {};
+    const runner = await this.prisma.client.runner.findUnique({
+      where: { id: runnerId },
+      select: { name: true, capabilities: true },
+    });
+    if (!runner) return {};
+    return (runner.capabilities as { kodaTools?: unknown } | null)?.kodaTools === true ? {} : { kodaToolsUnavailableOn: runner.name };
   }
 
   /**

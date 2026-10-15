@@ -869,6 +869,9 @@
         "markerPaths": "路径",
         "markerIgnored": "已忽略",
         "card": { "plan": "规划", "run": "运行", "openJob": "打开任务", "pr": "查看拉取请求", "needsYou": "需要你处理" }
+      },
+      "kodaTools": {
+        "unavailable": "此运行器 {runner} 上无法使用 koda 工具；此会话无法读取 koda 数据。"
       }
     },
     "common": {

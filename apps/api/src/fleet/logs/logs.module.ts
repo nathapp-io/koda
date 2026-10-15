@@ -30,6 +30,6 @@ import { PrismaLogRetentionRepository } from './prisma-log-retention.repository'
     PrismaLogRetentionRepository, { provide: LOG_RETENTION_REPOSITORY, useExisting: PrismaLogRetentionRepository },
     FleetLogLivePublisher, LogUploadService, LogFallbackService, LogReadService, FleetLogRetentionProcessor, LogAppendHooks,
   ],
-  exports: [LOG_STORE, FLEET_JOB_LOG_REPOSITORY, FleetLogLivePublisher, LogFallbackService, LogAppendHooks],
+  exports: [LOG_STORE, FLEET_JOB_LOG_REPOSITORY, FleetLogLivePublisher, LogFallbackService, LogAppendHooks, LogReadService],
 })
 export class LogsModule {}

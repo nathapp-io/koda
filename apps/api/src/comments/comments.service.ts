@@ -146,6 +146,24 @@ export class CommentsService {
     return CommentResponseDto.fromMany(comments);
   }
 
+  /**
+   * US-003 fix F1: a ticket's newest `limit` comments, oldest first, plus how many the ticket holds. The bounded
+   * read keeps a long comment history out of memory — `findByTicket` loads every row — while `total` lets the caller
+   * say what it left out.
+   */
+  async findRecentByTicket(
+    projectSlug: string,
+    ticketRef: string,
+    limit: number,
+  ): Promise<{ comments: CommentResponseDto[]; total: number }> {
+    const { ticket } = await this.resolveTicketByRef(projectSlug, ticketRef);
+    const [comments, total] = await Promise.all([
+      this.commentRepo.findRecentByTicketId(ticket.id, limit),
+      this.commentRepo.countByTicketId(ticket.id),
+    ]);
+    return { comments: CommentResponseDto.fromMany(comments), total };
+  }
+
   async findById(id: string) {
     const comment = await this.commentRepo.findById(id);
 

@@ -7,11 +7,13 @@ import type { LiveFleetJobEvent } from '../../live/live-event';
 import { cloneUrlFor } from '../git-broker/clone-url';
 import { BudgetGate } from '../budgets/budget-gate';
 import { budgetReason } from '../budgets/budget-rules';
+import { KODA_TOOL_DESCRIPTORS } from '../assistant/koda-tool-descriptors';
 import { buildAssignPayload, gitIdentityFor } from './assign-payload';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import { JobTransitionsService, SYSTEM_ACTOR } from './job-transitions.service';
 import { EMPTY_LOAD, evaluateRunners, firstMisfit, jobScopePause, MisfitReason, orderCandidates, PlacementJob, QUEUED_SCAN_LIMIT, toLoads, toPlacementJob } from './placement-rules';
-import { isThreadKind } from '../common/thread-jobs';
+import { isThreadKind, type ThreadAssign } from '../common/thread-jobs';
+import type { RunnerCapabilities } from '../common/protocol';
 import { RunnerNotifier } from './runner-notifier';
 import {
   FLEET_JOB_REPOSITORY, FleetJobRecord, FleetRepoRef, IFleetJobRepository, PlacementRunnerRow,
@@ -192,10 +194,21 @@ export class PlacementService {
     if (leaseEpoch === null) return null; // another placement won (spec §6.1)
     const after = await this.repo.findById(job.id);
     if (!after) return null;
-    const payload = buildAssignPayload(after, repo, cloneUrlFor(repo, this.vcsConfig), gitIdentityFor(repo.provider, this.fleetConfig), thread ?? undefined);
+    const payload = buildAssignPayload(after, repo, cloneUrlFor(repo, this.vcsConfig), gitIdentityFor(repo.provider, this.fleetConfig), withKodaTools(thread, runner.capabilities));
     if (thread) await this.repo.pinThreadRunner(thread.threadId, runner.id);
     await this.repo.createCommand({ runnerId: runner.id, jobId: job.id, type: FleetCommandType.ASSIGN, leaseEpoch, payload });
     const live = await this.transitions.record({ before: job, after, by: 'server', now, actor: SYSTEM_ACTOR, reason: `assigned to ${runner.name}` });
     return { leaseEpoch, live };
   }
+}
+
+/**
+ * 1b-D3 (S5b-R9): only a SESSION turn on a runner advertising `kodaTools` carries the static descriptor catalog, so
+ * the session can proxy koda reads. Publish and Discard run no agent, and a runner that does not advertise the
+ * capability would refuse the ASSIGN (US-006), so both keep the thread block as the repository read it. The
+ * descriptors come from the plain `koda-tool-descriptors` module: placement never imports the assistant module.
+ */
+function withKodaTools(thread: ThreadAssign | undefined, capabilities: RunnerCapabilities): ThreadAssign | undefined {
+  if (!thread || thread.action !== 'SESSION' || capabilities.kodaTools !== true) return thread;
+  return { ...thread, kodaTools: [...KODA_TOOL_DESCRIPTORS] };
 }

@@ -16,6 +16,6 @@ import { RUNNER_REPOSITORY } from './domain/runner.domain';
   imports: [PrismaModule, ProjectAccessModule, FleetActivityModule],
   controllers: [EnrollmentsController, RunnerApiController, RunnersController, ProjectFleetRunnersController],
   providers: [PrismaRunnerRepository, { provide: RUNNER_REPOSITORY, useExisting: PrismaRunnerRepository }, EnrollmentService, RunnersService, EnrollmentRetentionProcessor],
-  exports: [RUNNER_REPOSITORY],
+  exports: [RUNNER_REPOSITORY, RunnersService],
 })
 export class RunnersModule {}

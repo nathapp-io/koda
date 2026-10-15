@@ -17,5 +17,6 @@ import { ProjectFleetApprovalsController } from './project-fleet-approvals.contr
   imports: [PrismaModule, ProjectAccessModule, ApprovalStoreModule, BudgetStoreModule, BudgetsModule, FleetJobsModule, FleetActivityModule],
   controllers: [ProjectFleetApprovalsController, FleetApprovalsController, FleetApprovalCountsController],
   providers: [ApprovalsService, ApprovalExpirySweeper],
+  exports: [ApprovalsService],
 })
 export class ApprovalsModule {}

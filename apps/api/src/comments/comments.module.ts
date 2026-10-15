@@ -15,5 +15,6 @@ import { ProjectAccessModule } from '../projects/project-access.module';
     { provide: COMMENT_REPOSITORY, useExisting: PrismaCommentRepository },
     CommentsService,
   ],
+  exports: [CommentsService],
 })
 export class CommentsModule {}

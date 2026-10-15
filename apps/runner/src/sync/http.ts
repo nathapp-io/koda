@@ -30,6 +30,8 @@ export interface ServerClientOptions {
 const UPLOAD_TIMEOUT_MS = 10 * 60_000;
 /** Plan D322: a backstop only; the LogShipper aborts a PUT after its own logPutTimeoutMs. */
 const LOG_PUT_TIMEOUT_MS = 60_000;
+/** S5b §1: a proxied koda tool call that has not answered in 30 s is over; the proxy reports it as unavailable. */
+const KODA_TOOL_TIMEOUT_MS = 30_000;
 const LOG_OUTCOMES: ReadonlySet<string> = new Set(['appended', 'duplicate', 'offset', 'complete', 'stream_cap', 'rate_limited']);
 const isAbort = (error: unknown): boolean => error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
 
@@ -121,6 +123,19 @@ export class ServerClient {
 
   sync(request: SyncRequest, signal?: AbortSignal): Promise<SyncResponse> {
     return this.post('/fleet/runner/sync', request, true, this.options.syncTimeoutMs ?? 35_000, signal);
+  }
+
+  /**
+   * S5b §1: one proxied koda tool call of a live THREAD job. The lease epoch fences it exactly as the config
+   * edit and the bundle upload are fenced (409 = this runner no longer holds the job), the body is the provider's
+   * tool call, and the caller's signal merges with the 30 s timeout. A refusal rejects with `ServerError`.
+   */
+  async callKodaTool(args: { jobId: string; leaseEpoch: number; name: string; toolCallId: string; input: unknown; signal?: AbortSignal }): Promise<{ content: string; isError: boolean }> {
+    const url = `${this.url(`/fleet/runner/jobs/${encodeURIComponent(args.jobId)}/tools/${encodeURIComponent(args.name)}`)}?leaseEpoch=${args.leaseEpoch}`;
+    const headers = { ...this.bearer(), 'content-type': 'application/json', 'accept-language': 'en' };
+    const body = { toolCallId: args.toolCallId, input: args.input };
+    const response = await this.send(url, { method: 'POST', headers, body: JSON.stringify(body) }, KODA_TOOL_TIMEOUT_MS, args.signal);
+    return this.json<{ content: string; isError: boolean }>(response);
   }
 
   async uploadBundle(args: { jobId: string; leaseEpoch: number; filePath: string; sha256: string; signal?: AbortSignal }): Promise<{ status: number; message?: string }> {

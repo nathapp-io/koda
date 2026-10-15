@@ -13,3 +13,7 @@ describe('US-003 ThreadStaleBanner',()=>{
  test('AC-10 disables Discard while a thread job is active',()=>{const app=mount({id:'j',state:'RUNNING'}); expect(app.one('[data-testid="thread-stale-discard"]')?.props.disabled).toBe(true); app.unmount()})
  test('AC-11 confirms discard exactly once when idle',async()=>{const app=mount(); click(app.one('[data-testid="thread-stale-discard"]')); await settle(); click(app.one('[data-testid="thread-discard-confirm"]')); expect(app.emitted('discard')).toEqual([[]]); app.unmount()})
 })
+
+describe('US-007 ThreadStaleBanner with kodaToolsUnavailableOn absent',()=>{
+ test('AC-6 renders stale banner when session is stale and kodaToolsUnavailableOn is absent',()=>{const activeJob=null;const app=mount(activeJob); expect(app.one('[data-testid="thread-stale-banner"]')).toBeDefined(); expect(app.text()).toContain('fleet.threads.handoff.stale.title'); app.unmount()})
+})

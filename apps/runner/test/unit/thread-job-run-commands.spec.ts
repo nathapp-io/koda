@@ -21,7 +21,7 @@ const thread: ThreadAssign = {
 const tuning = {
   threadIdleMs: 60_000, threadHeartbeatMs: 30_000, threadWakeGapMs: 0,
   threadSearchTimeoutMs: 1_000, threadSkillFetchTimeoutMs: 1_000,
-  logDrainTimeoutMs: 1_000, threadCloseTimeoutMs: 10,
+  logDrainTimeoutMs: 1_000, threadCloseTimeoutMs: 10, threadRunningAckPollMs: 250, threadRunningAckWaitMs: 0,
 };
 const completed = {
   type: 'turn_end', sessionId: 'thread-1', turnId: 'turn-1',
@@ -133,6 +133,11 @@ async function running(context: ReturnType<typeof setup>): Promise<{ started: Pr
   const started = context.run.start('prepare');
   const ready = await eventually(() => context.journal.getJob(jobId, leaseEpoch)?.state === 'RUNNING');
   expect(ready).toBe(true);
+  // The row goes RUNNING before `openStream` awaits its way to the writer, and commands answer `session_not_ready`
+  // until it has. An empty THREAD_INPUT probes that without starting a turn: once ready it is `invalid payload`.
+  const writerReady = await eventually(async () =>
+    (await context.run.command('THREAD_INPUT', {})).detail !== 'session_not_ready');
+  expect(writerReady).toBe(true);
   await Bun.sleep(10);
   return { started };
 }

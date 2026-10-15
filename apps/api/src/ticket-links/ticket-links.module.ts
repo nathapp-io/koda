@@ -14,5 +14,6 @@ import { TICKET_LINK_REPOSITORY } from './domain/ticket-link.domain';
     { provide: TICKET_LINK_REPOSITORY, useExisting: PrismaTicketLinkRepository },
     TicketLinksService,
   ],
+  exports: [TicketLinksService],
 })
 export class TicketLinksModule {}

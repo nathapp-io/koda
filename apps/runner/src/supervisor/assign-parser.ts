@@ -1,4 +1,4 @@
-import { THREAD_LIMITS, THREAD_MODEL_ID_RE, isConfigKind, type AssignPayload, type BashMode, type FleetCommandOut, type FleetJobKindName, type ThreadAssign, type ThreadBackend, type ThreadSkillSource } from '@nathapp/fleet-protocol';
+import { THREAD_LIMITS, KODA_TOOL_LIMITS, THREAD_MODEL_ID_RE, isConfigKind, type AssignPayload, type BashMode, type FleetCommandOut, type FleetJobKindName, type KodaToolDescriptor, type ThreadAssign, type ThreadBackend, type ThreadSkillSource } from '@nathapp/fleet-protocol';
 import { assertCloneUrl } from '../executor/workspace';
 import { COST_RE, PROFILE_NAME, RESERVED_PREFIX } from '../executor/nax-process';
 import { PathError, assertFeature, assertOwner, assertRelativePath, assertSegment } from '../paths/safe-segment';
@@ -80,6 +80,31 @@ function cleanSkills(v: unknown): ThreadSkillSource[] | null {
       cleaned.push({ name: s['name'] as string, dir: s['dir'] as string, description: s['description'] as string });
     }
     out.push({ sourceId: sourceId as string, owner: owner as string, repo: repo as string, sha: sha as string, skills: cleaned });
+  }
+  return out;
+}
+
+/** S5b §1 §"Runner (proxies)": a descriptor's description is a string of at most this many characters. */
+const KODA_TOOL_DESCRIPTION_MAX_CHARS = 2_000;
+
+/**
+ * Fleet S5b US-006: the ASSIGN's koda tool descriptors are re-validated with the same limits the API's catalog
+ * enforces, and only the validated fields are copied — a descriptor reaches nax-agent's tool table and the model's
+ * prompt, so an odd name or a schema of another shape is refused whole (`invalid koda tools`), not trimmed.
+ * An absent field is not this function's business: the caller keeps the key off the assign.
+ */
+function cleanKodaTools(v: unknown): KodaToolDescriptor[] | null {
+  if (!Array.isArray(v) || v.length > KODA_TOOL_LIMITS.maxTools) return null;
+  const out: KodaToolDescriptor[] = [];
+  for (const entry of v) {
+    if (!isObj(entry)) return null;
+    const name = entry['name'];
+    const description = entry['description'];
+    const inputSchema = entry['inputSchema'];
+    if (typeof name !== 'string' || !KODA_TOOL_LIMITS.nameRe.test(name)) return null;
+    if (typeof description !== 'string' || description.length > KODA_TOOL_DESCRIPTION_MAX_CHARS) return null;
+    if (!isObj(inputSchema)) return null;
+    out.push({ name, description, inputSchema: { ...inputSchema } });
   }
   return out;
 }
@@ -178,6 +203,11 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   // The title is optional; the API bounds it at 200 characters (thread-input.ts), so it is copied only when present.
   const rawTitle = t['title'];
   if (rawTitle !== undefined && !text(rawTitle, THREAD_TITLE_MAX_CHARS)) return bad('thread title');
+  // Fleet S5b: the koda tools this session may proxy. Optional — the API sends none to a runner that does not
+  // advertise the capability — and an empty list is the same as none.
+  const rawKodaTools = t['kodaTools'];
+  const kodaTools = rawKodaTools === undefined ? undefined : cleanKodaTools(rawKodaTools);
+  if (kodaTools === null) return bad('koda tools');
   const thread: ThreadAssign = {
     threadId: t['threadId'] as string,
     action,
@@ -189,6 +219,7 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
     skills,
     initialMessage,
     ...(rawTitle !== undefined ? { title: rawTitle as string } : {}),
+    ...(kodaTools === undefined ? {} : { kodaTools }),
   };
   return { ok: true, assign: { ...baseAssign, ...expectBranch, thread } };
 }

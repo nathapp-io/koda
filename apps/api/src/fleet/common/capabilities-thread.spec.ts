@@ -1,3 +1,4 @@
+import { KODA_TOOL_LIMITS } from '@nathapp/fleet-protocol';
 import { CapabilityValidationError, parseCapabilitiesCore } from './capabilities-core';
 
 const valid = {
@@ -104,6 +105,37 @@ describe('parseCapabilitiesCore projectThreads (US-001 AC2-AC4)', () => {
     const err = rejection({ ...valid, projectThreads: 'yes' });
     expect(err).toBeInstanceOf(CapabilityValidationError);
     expect(err).toMatchObject({ reason: 'projectThreads' });
+  });
+});
+
+describe('parseCapabilitiesCore kodaTools (US-001 AC1-AC3)', () => {
+  it('US-001 AC1: keeps kodaTools: true', () => {
+    const parsed = parseCapabilitiesCore({ ...valid, kodaTools: true });
+    expect(parsed.kodaTools).toBe(true);
+  });
+
+  it('US-001 AC2: omits the kodaTools key when the report has none', () => {
+    const parsed = parseCapabilitiesCore({ ...valid, projectThreads: true });
+    expect(parsed).not.toHaveProperty('kodaTools');
+  });
+
+  it('US-001 AC3: refuses kodaTools: false with reason kodaTools', () => {
+    const err = rejection({ ...valid, kodaTools: false });
+    expect(err).toBeInstanceOf(CapabilityValidationError);
+    expect(err).toMatchObject({ reason: 'kodaTools' });
+  });
+
+  it("US-001 AC3: refuses kodaTools: 'yes' with reason kodaTools", () => {
+    const err = rejection({ ...valid, kodaTools: 'yes' });
+    expect(err).toBeInstanceOf(CapabilityValidationError);
+    expect(err).toMatchObject({ reason: 'kodaTools' });
+  });
+});
+
+describe('KODA_TOOL_LIMITS (US-001 AC4)', () => {
+  it('US-001 AC4: nameRe accepts koda_get_ticket and rejects get_ticket', () => {
+    expect(KODA_TOOL_LIMITS.nameRe.test('koda_get_ticket')).toBe(true);
+    expect(KODA_TOOL_LIMITS.nameRe.test('get_ticket')).toBe(false);
   });
 });
 

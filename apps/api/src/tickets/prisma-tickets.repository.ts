@@ -179,6 +179,10 @@ export class PrismaTicketsRepository implements ITicketRepository {
           }),
     };
 
+    // S5b US-003 1b-R3: the koda tool's title search. `contains` on Postgres is an ILIKE over the whole column,
+    // so no index can serve it — it is only ever used by the agent tool, on one measured page.
+    if (filters.titleContains) where.title = { contains: filters.titleContains, mode: 'insensitive' };
+
     // `number` is unique per project, so it is a total order for offset paging.
     const rows = await Paginate(this.db.ticket, page, {
       where,
