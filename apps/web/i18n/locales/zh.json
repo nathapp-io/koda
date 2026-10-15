@@ -163,6 +163,8 @@
       "description": "管理项目详情。",
       "projectDescription": "描述",
       "projectDescriptionPlaceholder": "输入项目描述",
+      "brief": "项目简介",
+      "briefHint": "供代理优先阅读的项目背景（最多 3000 个字符）",
       "save": "保存项目",
       "delete": "删除项目",
       "updated": "项目更新成功",

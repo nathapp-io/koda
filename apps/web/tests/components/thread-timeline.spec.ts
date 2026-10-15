@@ -96,11 +96,23 @@ interface HtmlNode {
 interface HtmlElement {
   tag: string
   attrs: string[]
+  /** Attribute values by name, so a test can read an `href` (@vue/compiler-dom parses `x="y"`). */
+  attrValues: Record<string, string>
   text: string
   children: HtmlElement[]
 }
 
-/** Every element of one HTML string: tag, attribute names and descendant text (a tiny DOM). */
+/** An attribute value in the parsed tree: a string, or the parser's text node for `href="x"`. */
+function attributeValue(prop: { value?: unknown }): string {
+  const value = prop.value
+  if (typeof value === 'string') return value
+  if (value !== null && typeof value === 'object' && 'content' in value) {
+    return String((value as { content?: unknown }).content ?? '')
+  }
+  return ''
+}
+
+/** Every element of one HTML string: tag, attribute names/values and descendant text (a tiny DOM). */
 function parsedElements(html: string): HtmlElement[] {
   const roots = compilerDom.parse(html).children as HtmlNode[]
   const visit = (node: HtmlNode): HtmlElement[] => {
@@ -110,7 +122,16 @@ function parsedElements(html: string): HtmlElement[] {
       .filter(c => c.type === 2 && c.content !== undefined)
       .map(c => c.content as string)
       .join('')
-    return [{ tag: node.tag, attrs: (node.props ?? []).map(p => p.name ?? ''), text: ownText, children }, ...children]
+    return [
+      {
+        tag: node.tag,
+        attrs: (node.props ?? []).map(p => p.name ?? ''),
+        attrValues: Object.fromEntries((node.props ?? []).map(p => [p.name ?? '', attributeValue(p)])),
+        text: ownText,
+        children,
+      },
+      ...children,
+    ]
   }
   return roots.flatMap(visit)
 }
@@ -516,5 +537,32 @@ describe('US-004 AC-13: ThreadTimeline places the write marker and the job card 
     }
     walk(app.root)
     expect(order).toEqual(['thread-message', 'thread-write-marker', 'thread-message', 'thread-job-card'])
+  })
+})
+
+// ── fleet-s5b-koda-knowledge-core US-006: koda paths in an assistant message become links ────
+
+describe('US-006 (koda knowledge) AC9: koda ticket paths in an assistant message', () => {
+  test('AC9: Timeline mounted with slug sandbox renders the ticket path in the assistant message as a link to that path', () => {
+    const app = mountTimeline(
+      threadDetail(),
+      [message({ role: 'assistant', content: 'see /sandbox/tickets/SB-3 for details' })],
+      { slug: 'sandbox' },
+    )
+
+    const link = renderedElements(app).find(element => element.tag === 'a' && element.attrValues.href === '/sandbox/tickets/SB-3')
+    expect(link).toBeDefined()
+    expect(link && textOfElement(link)).toBe('/sandbox/tickets/SB-3')
+  })
+
+  test('AC9 (control): with another slug the same message stays plain text', () => {
+    const app = mountTimeline(
+      threadDetail(),
+      [message({ role: 'assistant', content: 'see /sandbox/tickets/SB-3 for details' })],
+      { slug: 'web' },
+    )
+
+    expect(renderedElements(app).filter(element => element.tag === 'a')).toEqual([])
+    expect(innerHtmlOf(app).join('')).toContain('/sandbox/tickets/SB-3')
   })
 })

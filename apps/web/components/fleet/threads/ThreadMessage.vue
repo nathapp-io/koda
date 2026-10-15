@@ -7,12 +7,15 @@ import FleetThreadsThreadToolChip from '~/components/fleet/threads/ThreadToolChi
  * Fleet S5a §4.62 (US-006): one transcript row.
  *
  * B4-D1: an assistant `content` is the ONE runner/agent string rendered as HTML, through
- * `renderThreadMarkdown` (sanitized, images removed). Everything else — user messages,
- * `errorReason`, tool text — stays `{{ }}` interpolation only, never `v-html`.
+ * `renderThreadMarkdown` (sanitized, images removed, koda ticket/job paths linked). Everything
+ * else — user messages, `errorReason`, tool text — stays `{{ }}` interpolation only, never `v-html`.
+ *
+ * fleet S5b (US-006): the project `slug` is what turns `/<slug>/tickets/<ref>` and
+ * `/<slug>/fleet/jobs/<id>` inside that content into links.
  */
 const TERMINAL_STATUSES: readonly string[] = ['errored', 'cancelled', 'timed_out', 'interrupted']
 
-const props = defineProps<{ message: ChatMessageDto }>()
+const props = defineProps<{ message: ChatMessageDto; slug?: string }>()
 const { t } = useI18n()
 </script>
 
@@ -21,7 +24,7 @@ const { t } = useI18n()
     <div
       v-if="props.message.role === 'assistant' && props.message.content"
       class="whitespace-pre-wrap break-words"
-      v-html="renderThreadMarkdown(props.message.content)"
+      v-html="renderThreadMarkdown(props.message.content, props.slug)"
     />
     <div v-else class="whitespace-pre-wrap break-words">{{ props.message.content }}</div>
 
