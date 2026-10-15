@@ -26,15 +26,23 @@ export class ThreadsService {
 
   async create(projectId: string, userId: string, input: CreateThreadInput): Promise<ChatThreadRecord> {
     if (!this.config.threadsEnabled) throw new ConflictAppException({}, 'threads.disabled');
-    validateCreateThread(input, input.baseRef ?? 'main');
-    const repo = await this.repos.findById(input.repoId);
+    const normalized = validateCreateThread(input, input.baseRef ?? 'main');
+    // S5b-R3: a PROJECT thread has no repo, worktree or feature. The anchor repo is bookkeeping only (S5b-R13).
+    if (normalized.kind === 'PROJECT') {
+      const anchor = await this.repos.findAnchor(projectId);
+      if (!anchor) throw new ConflictAppException({}, 'threads.noFleetRepo');
+      const skills = await this.skills.snapshotForProject(projectId);
+      return this.threads.create({ kind: 'PROJECT', projectId, repoId: null, baseRef: null, feature: null, title: normalized.title, createdById: userId, backend: normalized.backend, skills, maxCostUsd: normalized.maxCostUsd });
+    }
+    const repo = await this.repos.findById(normalized.repoId);
     if (!repo || repo.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.repos');
-    const normalized = validateCreateThread(input, repo.defaultBranch);
+    // Today's two-pass flow: the repo's own default branch replaces the placeholder of the first pass.
+    const resolved = validateCreateThread({ ...input, kind: 'REPO' }, repo.defaultBranch);
     const skills = await this.skills.snapshotForProject(projectId);
     try {
-      return await this.threads.create({ projectId, repoId: repo.id, baseRef: normalized.baseRef, feature: normalized.feature, title: normalized.title, createdById: userId, backend: normalized.backend, skills, maxCostUsd: normalized.maxCostUsd });
+      return await this.threads.create({ kind: 'REPO', projectId, repoId: repo.id, baseRef: resolved.baseRef, feature: resolved.feature, title: resolved.title, createdById: userId, backend: resolved.backend, skills, maxCostUsd: resolved.maxCostUsd });
     } catch (error) {
-      if (isUniqueViolation(error, 'repo_feature')) throw new ConflictAppException({ feature: normalized.feature }, 'threads.featureTaken');
+      if (isUniqueViolation(error, 'repo_feature')) throw new ConflictAppException({ feature: resolved.feature }, 'threads.featureTaken');
       throw error;
     }
   }

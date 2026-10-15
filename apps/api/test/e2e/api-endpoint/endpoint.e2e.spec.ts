@@ -3231,6 +3231,23 @@ describeIntegration('API Integration Tests', () => {
       refusal(res, 'threads.input.400', { reason: 'backend' });
     });
 
+    it('US-003 AC11/AC12: creates a PROJECT thread with an anchor repo present and no repo fields on the row', async () => {
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads`).set('Authorization', `Bearer ${world.tokens.dev}`)
+        .send({ kind: 'PROJECT', title: 'Brainstorm', backend: { kind: 'native', model: 'm1' } }).expect(201);
+      const thread = body<{ id: string; kind: string; repoId: string | null; baseRef: string | null; feature: string | null; specPath: string | null; createdById: string }>(res);
+      expect(thread).toMatchObject({
+        kind: 'PROJECT', repoId: null, baseRef: null, feature: null, specPath: null, createdById: world.ids.dev,
+      });
+      expect(await db().chatThread.findUniqueOrThrow({ where: { id: thread.id } }))
+        .toMatchObject({ kind: 'PROJECT', repoId: null, baseRef: null, feature: null, specPath: null });
+    });
+
+    it('US-003 AC2: rejects a PROJECT create that also carries a feature', async () => {
+      const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads`).set('Authorization', `Bearer ${world.tokens.dev}`)
+        .send({ kind: 'PROJECT', feature: 'project-thread-feature', title: 'Bad project thread', backend: { kind: 'native', model: 'm1' } }).expect(400);
+      refusal(res, 'threads.input.400', { reason: 'projectFields' });
+    });
+
     it('US-006 AC-2: refuses to plan a thread before its spec is published', async () => {
       const thread = body<{ id: string }>(await createThread('plan-unpublished').expect(201));
       const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)

@@ -177,8 +177,27 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
     };
     const prisma = { client: { chatThread: { create: vi.fn(async () => createdRow) } } } as never;
     const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
-    const thread = await repo.create({ projectId: 'P', repoId: 'R', baseRef: 'trunk', feature: 'f', title: 'x', createdById: 'U', backend: { kind: 'native' }, skills: [], maxCostUsd: '5' });
+    const thread = await repo.create({ kind: 'REPO', projectId: 'P', repoId: 'R', baseRef: 'trunk', feature: 'f', title: 'x', createdById: 'U', backend: { kind: 'native' }, skills: [], maxCostUsd: '5' });
     expect(thread).toMatchObject({ writtenPaths: [], publishedSha: null, specPublished: false, lastWrite: null });
+  });
+
+  it('US-003: create() writes specPath from the feature for a REPO thread and null for a PROJECT thread', async () => {
+    const createdRow = {
+      id: 'T', projectId: 'P', repoId: null, baseRef: null, feature: null, title: 'x', createdById: 'U', runnerId: null,
+      backend: { kind: 'native' }, status: 'ACTIVE', archivedAt: null, skills: [], maxCostUsd: { toString: () => '5' },
+      costUsd: { toString: () => '0' }, tokens: null, specPath: null, pendingQuestion: null, session: null,
+      writtenPaths: [], publishedSha: null, specPublished: false, lastWrite: null,
+      lastActivityAt: new Date(0), createdAt: new Date(0),
+    };
+    const create = vi.fn(async () => createdRow);
+    const prisma = { client: { chatThread: { create } } } as never;
+    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+
+    await repo.create({ kind: 'PROJECT', projectId: 'P', repoId: null, baseRef: null, feature: null, title: 'x', createdById: 'U', backend: { kind: 'native' }, skills: [], maxCostUsd: '5' });
+    expect(create).toHaveBeenLastCalledWith({ data: expect.objectContaining({ kind: 'PROJECT', repoId: null, baseRef: null, feature: null, specPath: null }) });
+
+    await repo.create({ kind: 'REPO', projectId: 'P', repoId: 'R', baseRef: 'trunk', feature: 'add-auth', title: 'x', createdById: 'U', backend: { kind: 'native' }, skills: [], maxCostUsd: '5' });
+    expect(create).toHaveBeenLastCalledWith({ data: expect.objectContaining({ kind: 'REPO', repoId: 'R', feature: 'add-auth', specPath: '.nax/features/add-auth/spec.md' }) });
   });
 
   it('US-002: get() maps a PROJECT row to kind PROJECT with null repo fields', async () => {

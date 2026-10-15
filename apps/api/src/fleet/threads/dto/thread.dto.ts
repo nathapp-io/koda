@@ -86,8 +86,9 @@ export class AnswerQuestionDto {
 }
 
 export class CreateThreadDto {
-  @Allow() @ApiProperty() repoId: string;
-  @Allow() @ApiProperty() feature: string;
+  @Allow() @ApiProperty({ required: false, enum: ['REPO', 'PROJECT'] }) kind?: ChatThreadKind;
+  @Allow() @ApiProperty({ required: false }) repoId?: string;
+  @Allow() @ApiProperty({ required: false }) feature?: string;
   @Allow() @ApiProperty({ required: false }) baseRef?: string;
   @Allow() @ApiProperty() title: string;
   @Allow() @ApiProperty({ required: false }) maxCostUsd?: number;

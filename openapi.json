@@ -16502,6 +16502,13 @@
       "CreateThreadDto": {
         "type": "object",
         "properties": {
+          "kind": {
+            "enum": [
+              "REPO",
+              "PROJECT"
+            ],
+            "type": "string"
+          },
           "repoId": {
             "type": "string"
           },
@@ -16523,8 +16530,6 @@
           }
         },
         "required": [
-          "repoId",
-          "feature",
           "title",
           "backend"
         ]

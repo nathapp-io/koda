@@ -175,6 +175,72 @@ describe('ThreadsService.run (US-007)', () => {
   });
 });
 
+describe('ThreadsService.create (US-003)', () => {
+  const createService = (over: {
+    config?: Partial<ConfigType<typeof fleetConfig>>;
+    repos?: Partial<IFleetRepoRepository>;
+    threads?: Partial<ChatThreadRepository>;
+    snapshot?: ReturnType<typeof vi.fn>;
+  } = {}) => {
+    const create = vi.fn().mockImplementation(async (input: Record<string, unknown>) => ({ ...record, ...input }));
+    const findAnchor = vi.fn().mockResolvedValue({ id: 'r-anchor' });
+    const findById = vi.fn().mockResolvedValue({ id: 'r1', projectId: 'p1', defaultBranch: 'trunk' });
+    const snapshotForProject = over.snapshot ?? vi.fn().mockResolvedValue([]);
+    const service = new ThreadsService(
+      { create, ...over.threads } as unknown as ChatThreadRepository,
+      { findAnchor, findById, ...over.repos } as unknown as IFleetRepoRepository,
+      { snapshotForProject } as unknown as SkillsService,
+      { threadsEnabled: true, ...over.config } as unknown as ConfigType<typeof fleetConfig>,
+      {} as unknown as FleetJobsService,
+    );
+    return { service, create, findAnchor, findById, snapshotForProject };
+  };
+
+  it('AC-11/12: creates a PROJECT thread against the project anchor with no repo lookup and null repo fields', async () => {
+    const { service, create, findAnchor, findById } = createService();
+    await service.create('p1', 'u1', { kind: 'PROJECT', title: 'Brainstorm', backend: { kind: 'native', model: 'm1' } });
+
+    expect(findAnchor).toHaveBeenCalledWith('p1');
+    expect(findById).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith({
+      kind: 'PROJECT', projectId: 'p1', repoId: null, baseRef: null, feature: null, title: 'Brainstorm',
+      createdById: 'u1', backend: { kind: 'native', model: 'm1' }, skills: [], maxCostUsd: '5',
+    });
+  });
+
+  it('AC-13: refuses a PROJECT thread with threads.noFleetRepo when the project has no fleet repo', async () => {
+    const { service, create, snapshotForProject } = createService({ repos: { findAnchor: vi.fn().mockResolvedValue(null) } });
+    await expect(service.create('p1', 'u1', { kind: 'PROJECT', title: 'Brainstorm', backend: { kind: 'native' } }))
+      .rejects.toMatchObject({ code: 409, prefix: 'threads.noFleetRepo', httpStatus: 409 });
+    expect(create).not.toHaveBeenCalled();
+    expect(snapshotForProject).not.toHaveBeenCalled();
+  });
+
+  it('keeps the REPO two-pass flow: the repo branch validates the baseRef and the created row carries the repo', async () => {
+    const { service, create, findAnchor, findById } = createService();
+    await service.create('p1', 'u1', { repoId: 'r1', feature: 'add-auth', title: 'Add auth', backend: { kind: 'native' } });
+
+    expect(findById).toHaveBeenCalledWith('r1');
+    expect(findAnchor).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ kind: 'REPO', repoId: 'r1', baseRef: 'trunk', feature: 'add-auth' }));
+  });
+
+  it('refuses a REPO create whose repo belongs to another project before any write', async () => {
+    const { service, create } = createService({ repos: { findById: vi.fn().mockResolvedValue({ id: 'r1', projectId: 'other', defaultBranch: 'trunk' }) } });
+    await expect(service.create('p1', 'u1', { repoId: 'r1', feature: 'add-auth', title: 'Add auth', backend: { kind: 'native' } }))
+      .rejects.toMatchObject({ code: 404, prefix: 'fleet.repos' });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('gates PROJECT exactly as it gates REPO: threads.disabled wins', async () => {
+    const { service, create, findAnchor } = createService({ config: { threadsEnabled: false } });
+    await expect(service.create('p1', 'u1', { kind: 'PROJECT', title: 'Brainstorm', backend: { kind: 'native' } }))
+      .rejects.toMatchObject({ code: 409, prefix: 'threads.disabled' });
+    expect(findAnchor).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+});
+
 describe('ThreadsService.discard (US-004)', () => {
   it('AC-1: passes the project, thread and user to the repository and returns its { jobId }', async () => {
     const discard = vi.fn().mockResolvedValue({ jobId: 'job-d1' });

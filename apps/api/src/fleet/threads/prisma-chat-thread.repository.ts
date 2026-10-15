@@ -48,12 +48,21 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     @Inject(FLEET_CFG) private readonly config: ConfigType<typeof fleetConfig>,
   ) {}
 
-  async create(input: { projectId: string; repoId: string; baseRef: string; feature: string; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord> {
+  async create(input: { kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord> {
     const row = await this.prisma.client.chatThread.create({ data: {
-      ...input,
+      kind: input.kind,
+      projectId: input.projectId,
+      repoId: input.repoId,
+      baseRef: input.baseRef,
+      feature: input.feature,
+      title: input.title,
+      createdById: input.createdById,
       backend: input.backend as Prisma.InputJsonValue,
       skills: input.skills as unknown as Prisma.InputJsonValue,
-      specPath: `.nax/features/${input.feature}/spec.md`,
+      // 1a-R4: a REPO thread's spec lives at .nax/features/<feature>/spec.md; a PROJECT thread has no repo, no feature
+      // and no spec.
+      specPath: input.kind === 'PROJECT' || input.feature === null ? null : `.nax/features/${input.feature}/spec.md`,
+      maxCostUsd: input.maxCostUsd,
     } });
     return this.mapThread(row, null);
   }
