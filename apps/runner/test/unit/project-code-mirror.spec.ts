@@ -169,6 +169,51 @@ test('malformed last-used refuses pruning rather than deleting data', async () =
   expect(existsSync(f.dir)).toBe(true);
 });
 
+test('B4: an operational probe failure never deletes or reinitializes a live mirror', async () => {
+  const f = await fixture();
+  const first = await f.refresh({ pinId: 'j1' });
+  if (!first.ok) throw new Error('refresh failed');
+  // What a broken machine (a malformed global git config, an unreadable object store) looks like to the probe: a
+  // nonzero exit that says nothing about this mirror. Re-initializing here would throw away the pin j1's session reads.
+  const brokenProbe: Git = { ...f.input.git, run: async (args, options) => {
+    if (args[0] === 'rev-parse' && args[1] === '--is-bare-repository') {
+      return { code: 128, stdout: '', stderr: 'fatal: bad config line 1 in file /home/wk/.gitconfig' };
+    }
+    return f.input.git.run(args, options);
+  } };
+
+  expect(await f.refresh({ git: brokenProbe, pinId: 'j2' })).toEqual({ ok: false, reason: 'fetch failed' });
+  expect(existsSync(f.dir)).toBe(true);
+  expect(await git(f.dir, 'rev-parse', 'refs/koda/pins/j1')).toBe(first.sha);
+  // The prune must not read the same failure as proof that the mirror is junk: it keeps the mirror and its pin, and
+  // the failure reaches the daemon's `project code prune failed` warning.
+  await expect(f.pruneMirror(['j1'], 11000, 5000, brokenProbe)).rejects.toThrow(/bad config/);
+  expect(existsSync(f.dir)).toBe(true);
+  expect(await git(f.dir, 'cat-file', 'blob', `${first.sha}:hello.txt`)).toBe('first');
+});
+
+test('B4: a real-git probe under a malformed global config preserves the mirror and its pin', async () => {
+  const f = await fixture();
+  const first = await f.refresh({ pinId: 'j1' });
+  if (!first.ok) throw new Error('refresh failed');
+  const configPath = join(f.base, 'broken.gitconfig');
+  await writeFile(configPath, '[oops\n');
+  const savedConfig = process.env['GIT_CONFIG_GLOBAL'];
+  process.env['GIT_CONFIG_GLOBAL'] = configPath;
+  try {
+    // The probe really fails on this machine, on a healthy mirror, before it can look at the repository at all.
+    const probe = await f.input.git.run(['rev-parse', '--is-bare-repository'], { cwd: f.dir });
+    expect(probe.code).not.toBe(0);
+    expect(probe.stderr).toContain('bad config');
+    await expect(f.pruneMirror(['j1'])).rejects.toThrow(/bad config/);
+    expect(existsSync(f.dir)).toBe(true);
+  } finally {
+    process.env['GIT_CONFIG_GLOBAL'] = savedConfig;
+  }
+  expect(await git(f.dir, 'rev-parse', 'refs/koda/pins/j1')).toBe(first.sha);
+  expect(await git(f.dir, 'cat-file', 'blob', `${first.sha}:hello.txt`)).toBe('first');
+});
+
 test('B2: a failed initialization leaves no half-made mirror and the next refresh recovers', async () => {
   const f = await fixture();
   let inits = 0;

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { GitError, type Git } from '../../executor/git';
 import { assertSegment } from '../../paths/safe-segment';
 import type { RepoMutex } from '../../supervisor/repo-mutex';
-import { isBareMirror, projectCodeDirFor } from './mirror-store';
+import { probeMirror, projectCodeDirFor } from './mirror-store';
 
 export interface PruneProjectCodeInput {
   homeDir: string;
@@ -40,11 +40,12 @@ export async function pruneProjectCode(input: PruneProjectCodeInput): Promise<vo
       });
       if (!info?.isDirectory()) continue;
       const options = { cwd, env: { GIT_CONFIG_NOSYSTEM: '1' } };
-      // Review B2: a directory git cannot read as a repository holds no pin and no session can use it; left alone it
-      // fails `for-each-ref` here and blocks every mirror after it, and no fetch ever repairs it. Recovering it is
-      // the next refresh's job, so remove it. A repository that only fails later (a broken git, an I/O error) still
-      // propagates: unreadable is not the same as absent.
-      if (!(await isBareMirror(input.git, options))) {
+      // Review B2/B4: a directory git reads and rejects as a mirror holds no pin and no session can use it; left alone
+      // it fails `for-each-ref` here and blocks every mirror after it, and no fetch ever repairs it. Recovering it is
+      // the next refresh's job, so remove it. A probe that fails for another reason (a malformed global config, an
+      // unreadable object store) throws out of `probeMirror` instead: it says nothing about this mirror, so the mirror
+      // and its pins stay, and the daemon logs `project code prune failed`.
+      if ((await probeMirror(input.git, options)) === 'not-a-mirror') {
         await rm(cwd, { recursive: true, force: true });
         continue;
       }

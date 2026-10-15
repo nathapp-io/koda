@@ -2,7 +2,7 @@ import { lstat, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { ProjectRepoAssign } from '@nathapp/fleet-protocol';
-import type { Git, GitOptions } from '../../executor/git';
+import { GitError, type Git, type GitOptions } from '../../executor/git';
 import { assertSegment } from '../../paths/safe-segment';
 import type { RepoMutex } from '../../supervisor/repo-mutex';
 
@@ -10,15 +10,28 @@ export function projectCodeDirFor(homeDir: string, repoId: string): string {
   return join(homeDir, 'project-code', `${assertSegment('repoId', repoId)}.git`);
 }
 
+/** Git's own words when the path is not a repository. `git.ts` pins `LC_ALL=C`, so this is never a translation. */
+const NOT_A_REPOSITORY = /not a git repository/;
+
+/** What git says about a path this store owns. See `probeMirror`. */
+export type MirrorState = 'bare' | 'not-a-mirror';
+
 /**
- * Review B2: a mirror is a repository only when git says so. The directory's existence proves nothing — a daemon
- * killed between `mkdir` and `init`, or an `init` that failed halfway, leaves a directory that every later fetch
- * would fail in forever. `rev-parse` exits non-zero in such a directory (and in a working tree that never was a
- * mirror), so this is the one check that tells a usable mirror from a poisoned path.
+ * Review B2/B4: a mirror is a repository only when git says so, and git saying *nothing* is not git saying "no".
+ *
+ * - `bare`: the usable bare mirror this store keeps.
+ * - `not-a-mirror`: git read the path and it is not that mirror — never initialized, left half-made by an interrupted
+ *   `init`, a working tree, or plain junk. It holds no pin and no session can read it, so replacing it loses nothing.
+ *
+ * Anything else — a malformed global git config, an unreadable object store, a missing `git` — **throws**. That is an
+ * operational failure of the machine, not evidence about the mirror: reading it as "invalid" deleted (prune) or
+ * re-initialized (refresh) healthy mirrors with live pins (review B4). Fail safe: keep the mirror, report the failure.
  */
-export async function isBareMirror(git: Git, options: GitOptions): Promise<boolean> {
+export async function probeMirror(git: Git, options: GitOptions): Promise<MirrorState> {
   const probe = await git.run(['rev-parse', '--is-bare-repository'], options);
-  return probe.code === 0 && probe.stdout.trim() === 'true';
+  if (probe.code === 0) return probe.stdout.trim() === 'true' ? 'bare' : 'not-a-mirror';
+  if (NOT_A_REPOSITORY.test(probe.stderr)) return 'not-a-mirror';
+  throw new GitError(['rev-parse', '--is-bare-repository'], probe);
 }
 
 /**
@@ -69,11 +82,11 @@ export async function refreshMirror(input: RefreshMirrorInput): Promise<RefreshM
       throw error;
     });
     if (existing && !existing.isDirectory()) return { ok: false, reason: 'fetch failed' };
-    // Review B2: the directory existing is not enough — git must be able to read it as a bare repository, or the
-    // fetch below fails forever in a path no retry ever repairs.
-    if (!existing || !(await isBareMirror(input.git, options))) {
-      if (!(await createBareMirror(input.git, cwd, options))) return { ok: false, reason: 'fetch failed' };
-    }
+    // Review B2/B4: the directory existing is not enough — git must be able to read it as a bare repository, or the
+    // fetch below fails forever in a path no retry ever repairs. A probe failure that is *not* git rejecting the path
+    // throws (probeMirror), the catch below reports `fetch failed`, and the mirror with its pins stays untouched.
+    const state = existing ? await probeMirror(input.git, options) : 'not-a-mirror';
+    if (state === 'not-a-mirror' && !(await createBareMirror(input.git, cwd, options))) return { ok: false, reason: 'fetch failed' };
     const started = input.nowMs();
     const fetched = await input.git.run([
       '-c', 'core.hooksPath=/dev/null', '-c', 'gc.auto=0',
