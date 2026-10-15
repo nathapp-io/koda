@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-project-thread-code",
   "branchName": "feat/fleet-s5b-project-thread-code",
   "createdAt": "2026-10-16T00:00:00.000Z",
-  "updatedAt": "2026-10-15T18:30:47.295Z",
+  "updatedAt": "2026-10-15T18:39:35.586Z",
   "userStories": [
     {
       "id": "US-001",
@@ -410,8 +410,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -423,7 +423,9 @@
         "profileModelTier": "powerful",
         "initialAgent": "native",
         "initialProfileId": "native-sol",
-        "initialModelTier": "powerful"
+        "initialModelTier": "powerful",
+        "initialComplexity": "complex",
+        "modelTier": "powerful"
       },
       "contextFiles": [
         "apps/runner/src/thread/skill-fetch.ts",
@@ -451,6 +453,7 @@
       "priorErrors": [],
       "priorFailures": [],
       "storyPoints": 1,
+      "storyGitRef": "56c582fc54723330f4944ee9ee8696c1af06b386",
       "outOfScope": [
         "Calling `refreshMirror` from `runProject` and passing `repoCredentials` to the thread host belong to US-007."
       ]
