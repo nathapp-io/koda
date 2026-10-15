@@ -86,13 +86,13 @@ describe('US-007 ThreadKodaToolsNotice', () => {
     app.unmount()
   })
 
-  test('AC-6: ThreadStaleBanner is unaffected when there is no kodaToolsUnavailableOn', () => {
-    // This test verifies that adding the new field doesn't break the stale banner
-    // by testing that a stale session without kodaToolsUnavailableOn still works
+  test('AC-6: ThreadKodaToolsNotice does not render when session is stale but has no kodaToolsUnavailableOn', () => {
+    // This test verifies that ThreadKodaToolsNotice does not interfere with the stale banner
+    // when a session is stale but lacks the kodaToolsUnavailableOn field
     const t = thread('live')
     const staleThread = { ...t, session: t.session ? { ...t.session, stale: true } : null }
     const app = mount(staleThread)
-    // Should render nothing because there's no kodaToolsUnavailableOn
+    // ThreadKodaToolsNotice should render nothing because there's no kodaToolsUnavailableOn
     expect(app.text()).toBe('')
     app.unmount()
   })
