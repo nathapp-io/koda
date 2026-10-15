@@ -1,12 +1,46 @@
-import { lstat, mkdir, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import type { ProjectRepoAssign } from '@nathapp/fleet-protocol';
-import type { Git } from '../../executor/git';
+import type { Git, GitOptions } from '../../executor/git';
 import { assertSegment } from '../../paths/safe-segment';
 import type { RepoMutex } from '../../supervisor/repo-mutex';
 
 export function projectCodeDirFor(homeDir: string, repoId: string): string {
   return join(homeDir, 'project-code', `${assertSegment('repoId', repoId)}.git`);
+}
+
+/**
+ * Review B2: a mirror is a repository only when git says so. The directory's existence proves nothing — a daemon
+ * killed between `mkdir` and `init`, or an `init` that failed halfway, leaves a directory that every later fetch
+ * would fail in forever. `rev-parse` exits non-zero in such a directory (and in a working tree that never was a
+ * mirror), so this is the one check that tells a usable mirror from a poisoned path.
+ */
+export async function isBareMirror(git: Git, options: GitOptions): Promise<boolean> {
+  const probe = await git.run(['rev-parse', '--is-bare-repository'], options);
+  return probe.code === 0 && probe.stdout.trim() === 'true';
+}
+
+/**
+ * Review B2: build the mirror in a staging directory beside it and rename it into place, so the mirror path is
+ * either absent or a complete bare repository — never a half-initialized directory that poisons every retry.
+ * A path that exists but is not a repository (an interrupted init, a crash between mkdir and init, an older
+ * runner's leftovers) is replaced here; the caller holds the mirror's mutex, so nothing else is using it.
+ */
+async function createBareMirror(git: Git, cwd: string, options: GitOptions): Promise<boolean> {
+  const staging = `${cwd}.init-${randomUUID().slice(0, 8)}`;
+  try {
+    await mkdir(staging, { recursive: true });
+    if ((await git.run(['init', '--bare', '-q'], { ...options, cwd: staging })).code !== 0) return false;
+    await rm(cwd, { recursive: true, force: true });
+    await rename(staging, cwd);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    // After a successful rename the staging path is gone; after a failure it must not be left beside the mirror.
+    await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+  }
 }
 
 export interface RefreshMirrorInput {
@@ -35,9 +69,10 @@ export async function refreshMirror(input: RefreshMirrorInput): Promise<RefreshM
       throw error;
     });
     if (existing && !existing.isDirectory()) return { ok: false, reason: 'fetch failed' };
-    if (!existing) {
-      await mkdir(cwd, { recursive: true });
-      if ((await input.git.run(['init', '--bare', '-q'], options)).code !== 0) return { ok: false, reason: 'fetch failed' };
+    // Review B2: the directory existing is not enough — git must be able to read it as a bare repository, or the
+    // fetch below fails forever in a path no retry ever repairs.
+    if (!existing || !(await isBareMirror(input.git, options))) {
+      if (!(await createBareMirror(input.git, cwd, options))) return { ok: false, reason: 'fetch failed' };
     }
     const started = input.nowMs();
     const fetched = await input.git.run([

@@ -136,11 +136,18 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   // pass runs at start and every `pruneIntervalMs`. A throw is a warning — it never stops the daemon.
   const mutex = new RepoMutex();
   let archivedThreadIds: readonly string[] = [];
+  /**
+   * Review B1: the live THREAD job ids. The mirror prune reads this again under each mirror's mutex, so a job
+   * assigned while the sweep runs — it journals its row, then pins under that same mutex — is never mistaken for an
+   * abandoned pin whose `gc` would drop the objects a live session reads.
+   */
+  const activeThreadJobIds = (): ReadonlySet<string> =>
+    new Set(journal.activeJobs().filter((job) => job.command === 'THREAD').map((job) => job.jobId));
   const pruneThreadAssets = async (): Promise<void> => {
     try {
       await pruneProjectCode({
         git, mutex, homeDir: home.dir, nowMs: now().getTime(), ttlMs: tuning.projectCodeMirrorTtlMs,
-        activeJobIds: new Set(journal.activeJobs().filter((job) => job.command === 'THREAD').map((job) => job.jobId)),
+        activeJobIds: activeThreadJobIds(), currentActiveJobIds: activeThreadJobIds,
       });
     } catch (error) {
       log.warn('project code prune failed', { error: errorMessage(error) });

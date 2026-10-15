@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ProjectRepoAssign } from '@nathapp/fleet-protocol';
 import { createGit, type Git } from '../../src/executor/git';
@@ -22,8 +22,9 @@ async function fixture() {
   const input = { git: createGit(), mutex: new RepoMutex(), homeDir: base, repo, credentialHelper: null, timeoutMs: 5000, nowMs: () => 10000, allowFileProtocol: true, pinId: 'j1' };
   const dir = store.projectCodeDirFor(base, repo.repoId);
   const refresh = (over: Partial<typeof input> = {}) => store.refreshMirror({ ...input, ...over });
-  const pruneMirror = (active: string[], nowMs = 11000, ttlMs = 5000, gitAdapter = input.git, mutex = input.mutex) => prune.pruneProjectCode({ homeDir: base, git: gitAdapter, mutex, nowMs, ttlMs, activeJobIds: new Set(active) });
-  return { base, origin, repo, input, dir, refresh, pruneMirror, store };
+  const pruneMirror = (active: string[], nowMs = 11000, ttlMs = 5000, gitAdapter = input.git, mutex = input.mutex, current?: () => ReadonlySet<string>) =>
+    prune.pruneProjectCode({ homeDir: base, git: gitAdapter, mutex, nowMs, ttlMs, activeJobIds: new Set(active), ...(current ? { currentActiveJobIds: current } : {}) });
+  return { base, origin, repo, input, dir, refresh, pruneMirror, prune, store };
 }
 
 test('AC-1: creates a shallow bare mirror at the main tip', async () => {
@@ -166,4 +167,65 @@ test('malformed last-used refuses pruning rather than deleting data', async () =
   await writeFile(join(f.dir, 'koda-last-used'), 'invalid');
   await expect(f.pruneMirror([], 20000)).rejects.toThrow();
   expect(existsSync(f.dir)).toBe(true);
+});
+
+test('B2: a failed initialization leaves no half-made mirror and the next refresh recovers', async () => {
+  const f = await fixture();
+  let inits = 0;
+  const adapter: Git = { ...f.input.git, run: async (args, options) => {
+    if (args[0] === 'init') { inits++; return { code: 1, stdout: '', stderr: 'fatal: interrupted' }; }
+    return f.input.git.run(args, options);
+  } };
+  expect(await f.refresh({ git: adapter })).toEqual({ ok: false, reason: 'fetch failed' });
+  expect(inits).toBe(1);
+  // A directory git never finished initializing must not survive: every later refresh would fetch into it and fail.
+  expect(existsSync(f.dir)).toBe(false);
+  expect(await f.refresh()).toEqual({ ok: true, sha: await git(f.origin.dir, 'rev-parse', 'main') });
+  expect(await git(f.dir, 'rev-parse', '--is-bare-repository')).toBe('true');
+});
+
+test('B2: a directory left by an interrupted init is reinitialized instead of poisoning the mirror', async () => {
+  const f = await fixture();
+  await mkdir(f.dir, { recursive: true });
+  await writeFile(join(f.dir, 'HEAD'), 'ref: refs/heads/main\n');   // what a killed `git init --bare` can leave behind
+  const result = await f.refresh();
+  if (!result.ok) throw new Error('refresh failed');
+  expect(result.sha).toBe(await git(f.origin.dir, 'rev-parse', 'main'));
+  expect(await git(f.dir, 'rev-parse', '--is-bare-repository')).toBe('true');
+  expect(await git(f.dir, 'cat-file', 'blob', `${result.sha}:hello.txt`)).toBe('first');
+});
+
+test('B2: prune removes a directory that is not a repository and the next session recreates it', async () => {
+  const f = await fixture();
+  await mkdir(f.dir, { recursive: true });
+  await writeFile(join(f.dir, 'junk'), 'not a git directory\n');
+  await f.pruneMirror([]);   // must not throw at for-each-ref, or it blocks every other mirror's prune too
+  expect(existsSync(f.dir)).toBe(false);
+  expect(await f.refresh()).toEqual({ ok: true, sha: await git(f.origin.dir, 'rev-parse', 'main') });
+});
+
+test('B1: a pin created after the snapshot but before the lock keeps its content through gc', async () => {
+  const f = await fixture();
+  // The session that the daemon's pre-lock snapshot does not know about: it pins the tip of the moment.
+  const older = await f.refresh({ pinId: 'j9' });
+  if (!older.ok) throw new Error('refresh failed');
+  // A later session moves the tip, so only j9's pin keeps the older commit reachable.
+  const newer = await pushCommit(f.base, f.origin.url, 'main', 'hello.txt', 'second\n');
+  await f.refresh({ pinId: 'j2' });
+  expect(newer).not.toBe(older.sha);
+
+  const events: string[] = [];
+  const mutex = new RepoMutex();
+  const acquire = mutex.acquire.bind(mutex);
+  const ordered = { acquire: async (key: string) => { const release = await acquire(key); events.push(`lock:${key}`); return () => { release(); }; } };
+  const liveIds = new Set(['j2', 'j9']);   // the journal as it stands now; the snapshot below was taken before j9 existed
+  await f.prune.pruneProjectCode({
+    homeDir: f.base, git: f.input.git, mutex: ordered, nowMs: 11000, ttlMs: 5000,
+    activeJobIds: new Set(['j2']), currentActiveJobIds: () => { events.push('ids'); return liveIds; },
+  });
+
+  expect(await git(f.dir, 'cat-file', 'blob', `${older.sha}:hello.txt`)).toBe('first');
+  expect(await git(f.dir, 'for-each-ref', '--format=%(refname)', 'refs/koda/pins/')).toBe('refs/koda/pins/j2\nrefs/koda/pins/j9');
+  // The live read must happen while the mirror's mutex is held, so no session can pin between it and the deletions.
+  expect(events.indexOf('ids')).toBeGreaterThan(events.indexOf('lock:project-code:r1'));
 });

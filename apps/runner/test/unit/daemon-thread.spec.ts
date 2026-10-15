@@ -157,6 +157,14 @@ describe('project code daemon prune', () => {
       expect(calls[0].homeDir).toBe(f.home.dir);
       const deps = (daemon.supervisor as unknown as { deps: SupervisorDeps }).deps;
       expect(calls[0].mutex).toBe(deps.mutex);
+      // Review B1: the snapshot `activeJobIds` is a value taken before the sweep, so a job assigned while the sweep
+      // runs is missing from it; `currentActiveJobIds` is the live read the prune takes under each mirror's mutex.
+      expect(calls[0].currentActiveJobIds).toBeFunction();
+      const late = Journal.open(f.home.journalPath);
+      late.insertJob({ assign: f.assign('late1'), leaseEpoch: 1, repoKey: 'acme/app', jobDir: join(f.config.workspaceRoot, '.jobs', 'late1') });
+      late.close();
+      expect(calls[0].currentActiveJobIds?.().has('late1')).toBe(true);
+      expect(calls[0].activeJobIds.has('late1')).toBe(false);
     } finally {
       await daemon?.stop();
       pruneSpy.mockRestore();
