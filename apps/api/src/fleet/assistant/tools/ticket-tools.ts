@@ -83,14 +83,11 @@ function linkLines(ctx: ToolContext, links: readonly TicketLinkResponseDto[]): s
   return lines;
 }
 
-/** The last 10 comment bodies, oldest first, each in its own fence. */
-function commentLines(ctx: ToolContext, comments: readonly CommentResponseDto[]): string[] {
+/** The last 10 comment bodies, oldest first, each in its own fence; the header names a truncated history. */
+function commentLines(ctx: ToolContext, comments: readonly CommentResponseDto[], total: number): string[] {
   if (comments.length === 0) return ['comments: none'];
-  const shown = comments.slice(-LAST_COMMENTS);
-  const lines = [
-    shown.length === comments.length ? 'comments:' : `comments (last ${LAST_COMMENTS} of ${comments.length}):`,
-  ];
-  for (const comment of shown) lines.push(ctx.data(comment.body));
+  const lines = [comments.length === total ? 'comments:' : `comments (last ${LAST_COMMENTS} of ${total}):`];
+  for (const comment of comments) lines.push(ctx.data(comment.body));
   return lines;
 }
 
@@ -152,9 +149,10 @@ export function getTicketTool(deps: { tickets: TicketsService; links: TicketLink
     async execute(ctx: ToolContext, input: GetTicketInput): Promise<string> {
       // Scope first: `findByRef` is what turns a foreign or missing ref into not_found.
       const ticket = await deps.tickets.findByRef(ctx.projectSlug, input.ref);
-      const [links, comments] = await Promise.all([
+      const [links, recent] = await Promise.all([
         deps.links.findByTicket(ctx.projectSlug, input.ref),
-        deps.comments.findByTicket(ctx.projectSlug, input.ref),
+        // F1: bounded — the newest 10 only, never the ticket's whole comment history.
+        deps.comments.findRecentByTicket(ctx.projectSlug, input.ref, LAST_COMMENTS),
       ]);
       const lines = [
         `${ticket.ref} ${ticket.status} ${ticket.priority} ${ticket.type} ${ticketPath(ctx.projectSlug, ticket.ref)}`,
@@ -163,7 +161,7 @@ export function getTicketTool(deps: { tickets: TicketsService; links: TicketLink
         ...labelled(ctx, 'title', ticket.title),
         ...labelled(ctx, 'description', ticket.description),
         ...linkLines(ctx, links),
-        ...commentLines(ctx, comments),
+        ...commentLines(ctx, recent.comments, recent.total),
       ];
       return lines.join('\n');
     },

@@ -3,7 +3,7 @@ import { CommentsService } from '../../../comments/comments.service';
 import { TicketLinksService } from '../../../ticket-links/ticket-links.service';
 import { TicketsService } from '../../../tickets/tickets.service';
 import { AssistantToolRegistry } from '../assistant-tool.registry';
-import { ToolInputError } from '../assistant-tool.types';
+import { ToolInputError, type ToolContext } from '../assistant-tool.types';
 import { KODA_TOOL_DESCRIPTORS } from '../koda-tool-descriptors';
 import { TicketTools, getTicketTool, searchTicketsTool } from './ticket-tools';
 
@@ -102,5 +102,43 @@ describe('ticket read tools (US-003)', () => {
     expect(reasonOf(() => get().parse({ ref: 'web-1' }))).toBe('ref');
     expect(reasonOf(() => get().parse({ ref: '1' }))).toBe('ref');
     expect(reasonOf(() => get().parse(null))).toBe('ref');
+  });
+});
+
+// US-003 fix F1: the detail tool reads a ticket's comments through the bounded
+// newest-10 service method; a ticket with a long history must not be loaded whole.
+describe('koda_get_ticket execute (US-003 fix F1)', () => {
+  const FENCE = '<<koda-data-0000000000000000>>';
+  const ctx = {
+    projectId: 'project-1',
+    projectSlug: 'web',
+    actor: { id: 'dev-1' },
+    threadId: 'thread-1',
+    jobId: 'job-1',
+    now: new Date('2026-10-15T00:00:00.000Z'),
+    data: (text: string) => `${FENCE}\n${text}\n<<end-koda-data-0000000000000000>>`,
+  } as unknown as ToolContext;
+
+  it('asks for the newest 10 comments and labels the result with the ticket total', async () => {
+    const findRecentByTicket = vi.fn(async () => ({
+      comments: Array.from({ length: 10 }, (_, index) => ({ id: `comment-${index + 3}`, body: `body ${index + 3}` })),
+      total: 12,
+    }));
+    const tool = getTicketTool({
+      tickets: {
+        findByRef: vi.fn(async () => ({
+          ref: 'WEB-1', status: 'IN_PROGRESS', priority: 'HIGH', type: 'BUG',
+          title: 'Fix login page', description: null, assignee: null,
+        })),
+      } as unknown as TicketsService,
+      links: { findByTicket: vi.fn(async () => []) } as unknown as TicketLinksService,
+      comments: { findRecentByTicket } as unknown as CommentsService,
+    });
+
+    const content = await tool.execute(ctx, { ref: 'WEB-1' });
+
+    expect(findRecentByTicket).toHaveBeenCalledWith('web', 'WEB-1', 10);
+    expect(content).toContain('comments (last 10 of 12):');
+    expect(content.match(/body \d+/g)).toEqual(Array.from({ length: 10 }, (_, index) => `body ${index + 3}`));
   });
 });

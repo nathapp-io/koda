@@ -11,6 +11,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { AssistantToolExecutor } from '../../../src/fleet/assistant/assistant-tool.executor';
+import { CommentsService } from '../../../src/comments/comments.service';
 import { TicketsService } from '../../../src/tickets/tickets.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
@@ -54,6 +55,7 @@ describeIntegration('fleet assistant ticket tools (PG, US-003)', () => {
   let thread: ThreadJobSeed;
   let executor: AssistantToolExecutor;
   let ticketsService: TicketsService;
+  let commentsService: CommentsService;
 
   /** The ticket row of project `web` (or `ops`), at an explicit number so every ref is predictable. */
   const ticket = (
@@ -76,6 +78,7 @@ describeIntegration('fleet assistant ticket tools (PG, US-003)', () => {
     thread = await seedThreadJobFor(prisma, world, { runnerId: runner.id, apiKey: 'unused' }, { feature: 'us003-tickets' });
     executor = app.get<AssistantToolExecutor>(AssistantToolExecutor, { strict: false });
     ticketsService = app.get<TicketsService>(TicketsService, { strict: false });
+    commentsService = app.get<CommentsService>(CommentsService, { strict: false });
 
     // WEB-1: the IN_PROGRESS ticket the search and detail ACs read.
     await ticket(world.projectId, {
@@ -198,6 +201,15 @@ describeIntegration('fleet assistant ticket tools (PG, US-003)', () => {
     const result = await call('ac12', 'koda_get_ticket', { ref: 'OPS-1' });
     expect(result.isError).toBe(true);
     expect(result.content).toBe('not_found');
+  });
+
+  it('F1: findRecentByTicket reads only the newest 10 comments, oldest first', async () => {
+    const recent = await commentsService.findRecentByTicket('web', 'WEB-11', 10);
+    expect(recent.total).toBe(12);
+    expect(recent.comments).toHaveLength(10);
+    expect(recent.comments.map((comment) => comment.body)).toEqual(
+      Array.from({ length: 10 }, (_, index) => `comment body ${String(index + 3).padStart(2, '0')}`),
+    );
   });
 
   it('AC-15: without titleContains, findAll keeps project scope, status, soft-delete and number order', async () => {

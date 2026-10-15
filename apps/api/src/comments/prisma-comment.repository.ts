@@ -59,6 +59,28 @@ export class PrismaCommentRepository extends AbstractPrismaRepository<CommentDom
     return models.map((m) => this.toDomain(m as Comment));
   }
 
+  /**
+   * US-003 fix F1: the newest `limit` comments of a ticket, returned oldest
+   * first. `take` bounds the read, so a ticket with a long comment history
+   * never loads every row for a caller that only renders an excerpt. The `id`
+   * tiebreaker makes which rows are "the newest" deterministic when several
+   * comments share a `createdAt`.
+   */
+  async findRecentByTicketId(ticketId: string, limit: number): Promise<CommentDomain[]> {
+    const models = await this.prisma.client.comment.findMany({
+      where: { ticketId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit,
+    });
+    // Newest first from the database; the caller renders oldest first.
+    return models.reverse().map((m) => this.toDomain(m as Comment));
+  }
+
+  /** US-003 fix F1: how many comments a ticket holds, so an excerpt can say what it left out. */
+  async countByTicketId(ticketId: string): Promise<number> {
+    return this.prisma.client.comment.count({ where: { ticketId } });
+  }
+
   async findProjectBySlug(slug: string): Promise<{ id: string; key: string; deletedAt: Date | null } | null> {
     return this.prisma.client.project.findUnique({
       where: { slug },
