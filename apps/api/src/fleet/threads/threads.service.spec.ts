@@ -45,6 +45,31 @@ describe('ThreadsService.list', () => {
   });
 });
 
+describe('ThreadsService.get (US-003 AC-12)', () => {
+  it('passes a stored session notice through unchanged, with the send refusal and handoff beside it', async () => {
+    const session = {
+      jobId: 'j1', state: 'live' as const, resumed: false, contextReset: false, reason: null, at: 'A', projectCodeUnavailableOn: 'wk-mac',
+    };
+    const threads = {
+      get: vi.fn().mockResolvedValue({ ...record, kind: 'PROJECT', repoId: null, session }),
+      sendRefusalOf: vi.fn().mockResolvedValue(null),
+      handoff: vi.fn().mockResolvedValue({ plan: null, run: null }),
+    } as unknown as ChatThreadRepository;
+    const service = new ThreadsService(
+      threads,
+      {} as unknown as IFleetRepoRepository,
+      {} as unknown as SkillsService,
+      { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
+      {} as unknown as FleetJobsService,
+      briefStub(),
+    );
+
+    const thread = await service.get('p1', 't1');
+
+    expect(thread.session).toEqual(session);
+  });
+});
+
 describe('ThreadsService.plan (US-006)', () => {
   it('dispatches a published thread plan on its feature branch with default cap and thread id', async () => {
     const dispatch = vi.fn().mockResolvedValue({ job: { id: 'j1' } });
