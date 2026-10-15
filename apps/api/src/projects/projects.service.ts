@@ -154,6 +154,7 @@ export class ProjectsService {
       slug: updateProjectDto.slug,
       key: updateProjectDto.key,
       description: updateProjectDto.description,
+      brief: updateProjectDto.brief,
       gitRemoteUrl: updateProjectDto.gitRemoteUrl,
       autoIndexOnClose: updateProjectDto.autoIndexOnClose,
       autoAssign: updateProjectDto.autoAssign,

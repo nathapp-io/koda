@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { MemoryGovernanceService, GovernanceResult } from './memory-governance.service';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
-import { MemoryItem } from './memory-item-repository';
+import { MemoryItem, ProjectMemoryQuery } from './memory-item-repository';
 
 const createMockRepository = () => ({
   findByProject: vi.fn(),
@@ -35,6 +35,19 @@ describe('MemoryGovernanceService', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  describe('AC-12 (S5b US-004): getProjectMemory forwards the text filter', () => {
+    it('passes text abc to PrismaMemoryItemRepository.findByProjectMemory', async () => {
+      const query: ProjectMemoryQuery = { projectId: 'project-123', text: 'abc' };
+      const page = { current: 1, size: 20 };
+      const answer = { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false };
+      mockRepository.findByProjectMemory.mockResolvedValue(answer);
+
+      await expect(service.getProjectMemory(query, page)).resolves.toEqual(answer);
+
+      expect(mockRepository.findByProjectMemory).toHaveBeenCalledWith(query, page);
+    });
   });
 
   describe('AC-2: runCleanup() executes all four sub-jobs', () => {

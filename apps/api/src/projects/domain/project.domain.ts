@@ -20,6 +20,8 @@ export interface ProjectDomain {
   slug: string;
   key: string;
   description: string | null;
+  /** S5b US-001: optional so existing project literals in tests stay valid. */
+  brief?: string | null;
   gitRemoteUrl: string | null;
   autoIndexOnClose: boolean;
   autoAssign: string;

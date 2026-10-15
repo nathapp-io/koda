@@ -45,7 +45,7 @@ function onAnswer(requestId: string, text: string): void {
       {{ t('fleet.threads.detail.contextReset') }}
     </div>
     <template v-for="entry in entries" :key="entry.key">
-      <FleetThreadsThreadMessage v-if="entry.kind === 'message'" :message="entry.message" />
+      <FleetThreadsThreadMessage v-if="entry.kind === 'message'" :message="entry.message" :slug="props.slug" />
       <FleetThreadsThreadWriteMarker v-else-if="entry.kind === 'write'" :write="entry.write" />
       <FleetThreadsThreadJobCard
         v-else

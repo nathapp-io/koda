@@ -11105,6 +11105,13 @@
             "description": "Project description",
             "example": "Updated description"
           },
+          "brief": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 3000,
+            "description": "Curated short project brief rendered into thread instructions (at most 3000 characters)",
+            "example": "Koda is a fleet platform that tracks tickets for humans and agents."
+          },
           "gitRemoteUrl": {
             "type": "string",
             "format": "uri",

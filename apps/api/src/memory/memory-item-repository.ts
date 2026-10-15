@@ -15,6 +15,8 @@ export interface ProjectMemoryQuery {
   projectId: string;
   kind?: MemoryKind;
   subject?: string;
+  /** Case-insensitive substring of `subject`, `predicate` or `object` (S5b US-004). */
+  text?: string;
   status?: string;
   orderBy?: 'confidence' | 'updatedAt' | 'createdAt';
 }

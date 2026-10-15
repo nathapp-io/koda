@@ -108,6 +108,62 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
     });
   });
 
+  describe('case-insensitive text filter', () => {
+    const textTerm = (text: string) => ({
+      OR: [
+        { subject: { contains: text, mode: 'insensitive' } },
+        { predicate: { contains: text, mode: 'insensitive' } },
+        { object: { contains: text, mode: 'insensitive' } },
+      ],
+    });
+
+    it('adds its own AND term over subject, predicate and object without replacing the TTL OR', async () => {
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      mockPrismaClient.memoryItem.count.mockResolvedValue(0);
+
+      await repository.findByProjectMemory({ projectId: 'project-123', text: 'deploy' }, { current: 1, size: 10 });
+
+      expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            projectId: 'project-123',
+            deletedAt: null,
+            status: 'active',
+            OR: [{ ttlAt: null }, { ttlAt: { gt: expect.any(Date) } }],
+            AND: [textTerm('deploy')],
+          }),
+        }),
+      );
+    });
+
+    it('combines with an explicit status, which has no TTL OR of its own', async () => {
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      mockPrismaClient.memoryItem.count.mockResolvedValue(0);
+
+      await repository.findByProjectMemory(
+        { projectId: 'project-123', status: 'superseded', text: 'deploy' },
+        { current: 1, size: 10 },
+      );
+
+      const callArgs = mockPrismaClient.memoryItem.findMany.mock.calls[0][0] as { where: Record<string, unknown> };
+      expect(callArgs.where.AND).toEqual([textTerm('deploy')]);
+      expect(callArgs.where.OR).toBeUndefined();
+    });
+
+    it('adds no AND term when text is absent or blank', async () => {
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      mockPrismaClient.memoryItem.count.mockResolvedValue(0);
+
+      await repository.findByProjectMemory({ projectId: 'project-123' }, { current: 1, size: 10 });
+      await repository.findByProjectMemory({ projectId: 'project-123', text: '   ' }, { current: 1, size: 10 });
+
+      for (const call of mockPrismaClient.memoryItem.findMany.mock.calls) {
+        const where = (call[0] as { where: Record<string, unknown> }).where;
+        expect(where.AND).toBeUndefined();
+      }
+    });
+  });
+
   describe('ordering variants', () => {
     it('should order by confidence desc, updatedAt desc, createdAt desc by default', async () => {
       mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);

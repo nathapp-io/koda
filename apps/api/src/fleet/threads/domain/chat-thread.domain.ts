@@ -92,7 +92,7 @@ export interface ChatThreadRepository {
   handoff(threadId: string): Promise<ChatThreadHandoff>;
   sendRefusalOf(projectId: string, thread: ChatThreadRecord): Promise<ThreadSendRefusal | null>;
   messages(threadId: string, afterSeq: number, limit: number): Promise<ChatMessageRecord[]>;
-  sendMessage(input: { projectId: string; threadId: string; userId: string; text: string; clientMessageId: string }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }>;
+  sendMessage(input: { projectId: string; threadId: string; userId: string; text: string; clientMessageId: string; repoContext?: string }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }>;
   publish(projectId: string, threadId: string, userId: string): Promise<{ jobId: string | null }>;
   discard(projectId: string, threadId: string, userId: string): Promise<{ jobId: string }>;
   archivedThreadIds(runnerId: string): Promise<string[]>;

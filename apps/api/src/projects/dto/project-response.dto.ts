@@ -32,6 +32,14 @@ export class ProjectResponseDto {
   })
   description?: string | null;
 
+  @ApiPropertyOptional({
+    description: 'Curated short project brief (at most 3000 characters)',
+    example: 'Koda is a fleet platform that tracks tickets for humans and agents.',
+    nullable: true,
+    required: false,
+  })
+  brief?: string | null;
+
   @ApiProperty({
     description: 'Git remote repository URL',
     example: 'https://github.com/nathapp-io/koda',
@@ -87,6 +95,7 @@ export class ProjectResponseDto {
       slug: project.slug,
       key: project.key,
       description: project.description,
+      brief: project.brief,
       gitRemoteUrl: project.gitRemoteUrl,
       autoIndexOnClose: project.autoIndexOnClose,
       createdAt: project.createdAt,

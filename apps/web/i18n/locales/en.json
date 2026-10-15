@@ -163,6 +163,8 @@
       "description": "Manage project details.",
       "projectDescription": "Description",
       "projectDescriptionPlaceholder": "Short project description",
+      "brief": "Brief",
+      "briefHint": "Curated project context the agents read first (up to 3000 characters)",
       "save": "Save Project",
       "delete": "Delete Project",
       "updated": "Project updated successfully",

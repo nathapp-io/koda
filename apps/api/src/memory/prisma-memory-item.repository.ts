@@ -265,6 +265,19 @@ export class PrismaMemoryItemRepository
 
     if (query.kind) where.kind = query.kind;
     if (query.subject && query.subject.trim().length > 0) where.subject = { startsWith: query.subject };
+    // S5b US-004: the text match is its own AND term. It must never join the TTL `OR` above: an `OR` of a
+    // text match and a TTL bound would return expired rows that match the text.
+    if (query.text && query.text.trim().length > 0) {
+      where.AND = [
+        {
+          OR: [
+            { subject: { contains: query.text, mode: 'insensitive' } },
+            { predicate: { contains: query.text, mode: 'insensitive' } },
+            { object: { contains: query.text, mode: 'insensitive' } },
+          ],
+        },
+      ];
+    }
 
     const orderByField = query.orderBy ?? 'confidence';
     const orderByClause: Record<string, 'asc' | 'desc'>[] = [];
