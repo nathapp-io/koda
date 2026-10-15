@@ -22,6 +22,16 @@ export type ThreadBackend =
 /** Runner capability report: native model ids it can serve, ACP agents it can launch. */
 export interface ThreadBackends { native: string[]; acp: ThreadAgent[] }
 
+/** Fleet S5b §1: one koda API tool the API attaches to a THREAD ASSIGN so the runner can proxy it into the session. */
+export interface KodaToolDescriptor {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
+/** Fleet S5b §1: what the runner's assign parser and the API's descriptor catalog both enforce. */
+export const KODA_TOOL_LIMITS = { maxTools: 32, nameRe: /^koda_[a-z][a-z_]{0,58}$/ } as const;
+
 export interface ThreadSkill { name: string; dir: string; description: string }
 export interface ThreadSkillSource { sourceId: string; owner: string; repo: string; sha: string; skills: ThreadSkill[] }
 
@@ -44,6 +54,8 @@ export interface ThreadAssign {
   initialMessage: { messageId: string; text: string } | null;
   /** At most 200 characters; absent when the thread has no title. */
   title?: string;
+  /** Fleet S5b §1: the koda tools the session exposes; present only for a SESSION on a runner advertising `kodaTools`. */
+  kodaTools?: KodaToolDescriptor[];
 }
 
 export interface ThreadInputPayload { messageId: string; text: string }
