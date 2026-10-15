@@ -90,8 +90,8 @@ describe('US-007 ThreadKodaToolsNotice', () => {
     // This test verifies that adding the new field doesn't break the stale banner
     // by testing that a stale session without kodaToolsUnavailableOn still works
     const t = thread('live')
-    t.session!.stale = true
-    const app = mount(t)
+    const staleThread = { ...t, session: t.session ? { ...t.session, stale: true } : null }
+    const app = mount(staleThread)
     // Should render nothing because there's no kodaToolsUnavailableOn
     expect(app.text()).toBe('')
     app.unmount()
