@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-workspace-threads",
   "branchName": "feat/fleet-s5b-workspace-threads",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "updatedAt": "2026-10-16T17:01:36.749Z",
+  "updatedAt": "2026-10-16T17:10:54.534Z",
   "userStories": [
     {
       "id": "US-001",
@@ -222,8 +222,8 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -235,7 +235,9 @@
         "profileModelTier": "powerful",
         "initialAgent": "native",
         "initialProfileId": "native-sol",
-        "initialModelTier": "powerful"
+        "initialModelTier": "powerful",
+        "initialComplexity": "complex",
+        "modelTier": "powerful"
       },
       "contextFiles": [
         "apps/api/src/fleet/threads/thread-input.ts",
@@ -274,6 +276,7 @@
       "priorErrors": [],
       "priorFailures": [],
       "storyPoints": 1,
+      "storyGitRef": "25ae6f9af819dee50e23b93f7d135747567fca14",
       "outOfScope": [
         "Rate limiting of `POST /threads` beyond the API's global throttler.",
         "List, get, messages, events and commands routes (US-004); send and archive (US-005)."
