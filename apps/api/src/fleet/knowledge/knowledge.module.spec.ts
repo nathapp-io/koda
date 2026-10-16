@@ -2,6 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module';
 import { KnowledgeChunkStore } from './knowledge-chunk-store';
 import { KnowledgeIndexService } from './knowledge-index.service';
+import { KnowledgeSearchService } from './knowledge-search.service';
+import { ProjectKnowledgeController } from './project-knowledge.controller';
 import { KnowledgeModule } from './knowledge.module';
 import { KNOWLEDGE_INDEX_REPOSITORY } from './knowledge-index.domain';
 
@@ -25,8 +27,13 @@ describe('KnowledgeModule', () => {
     expect(module.get(KNOWLEDGE_INDEX_REPOSITORY, { strict: false })).toBeDefined();
   });
 
-  it('exports the service only', () => {
+  it('resolves the search service and the project knowledge controller (US-002)', () => {
+    expect(module.get(KnowledgeSearchService)).toBeInstanceOf(KnowledgeSearchService);
+    expect(module.get(ProjectKnowledgeController, { strict: false })).toBeInstanceOf(ProjectKnowledgeController);
+  });
+
+  it('exports the services only', () => {
     const exportsOf = Reflect.getMetadata('exports', KnowledgeModule) as unknown[];
-    expect(exportsOf).toEqual([KnowledgeIndexService]);
+    expect(exportsOf).toEqual([KnowledgeIndexService, KnowledgeSearchService]);
   });
 });

@@ -35,6 +35,8 @@ import { ProjectBriefService } from '../../../src/fleet/threads/project-brief.se
 import { PlacementService } from '../../../src/fleet/jobs/placement.service';
 import { RunnerNotifier } from '../../../src/fleet/jobs/runner-notifier';
 import { PrismaThreadIngestRepository } from '../../../src/fleet/threads/ingest/prisma-thread-ingest.repository';
+import { KnowledgeSearchService, type KnowledgeHit } from '../../../src/fleet/knowledge/knowledge-search.service';
+import { KnowledgeStoreUnavailableError } from '../../../src/fleet/knowledge/knowledge-chunk-store';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -4130,6 +4132,122 @@ describeIntegration('API Integration Tests', () => {
         .send({ toolCallId: 'c1', input: { ref: 'WEB-1' } })
         .expect(401);
       refusal(res, 'fleet.runnerAuth.40000');
+    });
+  });
+
+  describe('S5b US-002 knowledge search route', () => {
+    const HIT: KnowledgeHit = {
+      repoId: 'stub-repo', owner: 'o', name: 'n', path: 'docs/adr/1.md', sha: 'abc1234', anchor: 'adr-1',
+      headingPath: 'ADR 1', title: 'ADR 1', abstract: 'abstract', snippet: 'snippet', score: 1 / 61,
+    };
+
+    let slug: string;
+    let projectId: string;
+    let repoId: string;
+    let memberToken: string;
+    let outsiderToken: string;
+    let searchSpy: ReturnType<typeof vi.spyOn>;
+    let enabledBefore: boolean;
+
+    const fleetConfigOf = () => app.get<IFleetConfig>(FLEET_CFG, { strict: false });
+    const db = () => app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    const search = (token: string, payload: Record<string, unknown>) => request(httpServer)
+      .post(`/api/projects/${slug}/knowledge/search`)
+      .set('Authorization', `Bearer ${token}`)
+      .send(payload);
+
+    beforeAll(async () => {
+      const prisma = db();
+      const admin = await prisma.user.findUniqueOrThrow({ where: { email: 'admin@koda.test' } });
+      const developer = await prisma.user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
+      const project = await prisma.project.create({ data: { name: 'Knowledge search', slug: 'knowledge-search', key: 'KS' } });
+      const repo = await prisma.fleetRepo.create({ data: {
+        projectId: project.id, provider: 'github', owner: 'o', name: 'n', defaultBranch: 'main', createdById: admin.id,
+      } });
+      await prisma.projectMember.create({ data: { projectId: project.id, userId: developer.id, role: 'DEVELOPER' } });
+
+      slug = project.slug;
+      projectId = project.id;
+      repoId = repo.id;
+      memberToken = nonAdminUserAccessToken;
+
+      // A user of no project at all: the 403 case needs a real principal, not a project role.
+      const registered = await request(httpServer)
+        .post('/api/auth/register')
+        .send({ email: 'knowledge-outsider@koda.test', name: 'Knowledge Outsider', password: 'Member1234!Aa' })
+        .expect(201);
+      outsiderToken = body<{ accessToken: string }>(registered).accessToken;
+
+      // The route's own search body/repo/availability logic is under test, so the hybrid search itself is
+      // stubbed (the real one needs a LanceDB store and is covered by knowledge-search.service.spec.ts).
+      enabledBefore = fleetConfigOf().knowledgeIndexEnabled;
+      fleetConfigOf().knowledgeIndexEnabled = true;
+      searchSpy = vi.spyOn(app.get(KnowledgeSearchService), 'search');
+    });
+
+    afterAll(() => {
+      searchSpy.mockRestore();
+      fleetConfigOf().knowledgeIndexEnabled = enabledBefore;
+    });
+
+    beforeEach(() => {
+      searchSpy.mockReset();
+    });
+
+    it('AC-9: answers 200 with the service result and calls search with the resolved repo id', async () => {
+      searchSpy.mockResolvedValue({ lexicalOnly: false, empty: false, hits: [HIT] });
+
+      const res = await search(memberToken, { query: 'broker', repo: 'o/n', limit: 5 }).expect(200);
+
+      expect(searchSpy).toHaveBeenCalledWith({ projectId, query: 'broker', repoId, limit: 5 });
+      expect(body(res)).toEqual({ lexicalOnly: false, empty: false, hits: [HIT] });
+    });
+
+    it('AC-10: answers 400 for a rejected body and never searches', async () => {
+      const cases: Array<[Record<string, unknown>, string]> = [
+        [{ query: '' }, 'query'],
+        [{ query: 'broker', pathPrefix: '../x' }, 'pathPrefix'],
+      ];
+
+      for (const [payload, reason] of cases) {
+        const res = await search(memberToken, payload).expect(400);
+        refusal(res, 'knowledge.input.-2', { reason });
+      }
+      expect(searchSpy).not.toHaveBeenCalled();
+    });
+
+    it('AC-11: answers 404 for a repository the project does not own', async () => {
+      const res = await search(memberToken, { query: 'broker', repo: 'o/missing' }).expect(404);
+
+      refusal(res, 'knowledge.repoNotFound.404');
+      expect(searchSpy).not.toHaveBeenCalled();
+    });
+
+    it('AC-12: answers 409 while the kill switch is off', async () => {
+      fleetConfigOf().knowledgeIndexEnabled = false;
+      try {
+        const res = await search(memberToken, { query: 'broker' }).expect(409);
+        refusal(res, 'knowledge.disabled.409');
+        expect(searchSpy).not.toHaveBeenCalled();
+      } finally {
+        fleetConfigOf().knowledgeIndexEnabled = true;
+      }
+    });
+
+    it('AC-13: answers 409 knowledge.unavailable when the store throws', async () => {
+      searchSpy.mockRejectedValue(new KnowledgeStoreUnavailableError());
+
+      const res = await search(memberToken, { query: 'broker' }).expect(409);
+
+      refusal(res, 'knowledge.unavailable.409');
+      expect(searchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('AC-14: answers 403 for a user who is not a project member', async () => {
+      const res = await search(outsiderToken, { query: 'broker' }).expect(403);
+
+      expect(res.body.ret).not.toBe(0);
+      expect(searchSpy).not.toHaveBeenCalled();
     });
   });
 });

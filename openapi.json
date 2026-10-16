@@ -10043,6 +10043,61 @@
         ]
       }
     },
+    "/api/projects/{slug}/knowledge/search": {
+      "post": {
+        "operationId": "ProjectKnowledgeController_search",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeSearchBodyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeSearchResultDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid search body (knowledge.input)"
+          },
+          "404": {
+            "description": "knowledge.repoNotFound"
+          },
+          "409": {
+            "description": "knowledge.disabled, or knowledge.unavailable when the store is down"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Search the project's indexed repository docs (project member)",
+        "tags": [
+          "fleet knowledge"
+        ]
+      }
+    },
     "/api/home": {
       "get": {
         "operationId": "HomeController_get",
@@ -17388,6 +17443,121 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "KnowledgeSearchBodyDto": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search text, 1-500 characters",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "repo": {
+            "type": "string",
+            "description": "Restrict the search to one of the project repositories, as owner/name"
+          },
+          "pathPrefix": {
+            "type": "string",
+            "description": "Only hits whose path starts with this prefix; relative, no `..`",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum hits, 1-50",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "KnowledgeHitDto": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "sha": {
+            "type": "string"
+          },
+          "anchor": {
+            "type": "string",
+            "description": "GitHub heading anchor of the chunk; empty on the document summary chunk"
+          },
+          "headingPath": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "abstract": {
+            "type": "string"
+          },
+          "snippet": {
+            "type": "string",
+            "description": "The first 400 characters of the chunk text"
+          },
+          "status": {
+            "type": "string"
+          },
+          "supersededBy": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number",
+            "description": "Reciprocal rank fusion score of the legs the chunk appears in"
+          }
+        },
+        "required": [
+          "repoId",
+          "owner",
+          "name",
+          "path",
+          "sha",
+          "anchor",
+          "headingPath",
+          "title",
+          "abstract",
+          "snippet",
+          "score"
+        ]
+      },
+      "KnowledgeSearchResultDto": {
+        "type": "object",
+        "properties": {
+          "lexicalOnly": {
+            "type": "boolean",
+            "description": "True when the query embedding failed and only the lexical leg answered"
+          },
+          "empty": {
+            "type": "boolean",
+            "description": "True when the project has no indexed repository chunk at all"
+          },
+          "hits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeHitDto"
+            }
+          }
+        },
+        "required": [
+          "lexicalOnly",
+          "empty",
+          "hits"
         ]
       },
       "HomeActivityDto": {

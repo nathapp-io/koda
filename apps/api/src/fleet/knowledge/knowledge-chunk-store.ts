@@ -84,8 +84,15 @@ export class KnowledgeChunkStore {
   async lexical(projectId: string, query: string, predicate: string, limit: number): Promise<KnowledgeChunkRow[]> {
     this.assertAvailable();
     const table = await this.table(projectId);
-    const records: LanceRecord[] = await table.query().fullTextSearch(query, { columns: 'content' }).where(predicate).limit(limit).toArray();
-    return records.map(parseRow);
+    try {
+      return await this.fullTextQuery(table, query, predicate, limit);
+    } catch {
+      // LanceDB drops a table's full-text index as soon as a row is deleted, and every `replaceFile` deletes the
+      // file's rows first — so a project's index is gone after a pass, and `optimize` does not restore it. Rebuild
+      // it once and retry (a second failure propagates), so the lexical leg still answers after the indexer wrote.
+      await this.rebuildFullTextIndex(projectId, table);
+      return this.fullTextQuery(table, query, predicate, limit);
+    }
   }
 
   async vector(projectId: string, embedding: number[], predicate: string, limit: number): Promise<KnowledgeChunkRow[]> {
@@ -97,6 +104,17 @@ export class KnowledgeChunkStore {
 
   private assertAvailable(): void {
     if (!this.manager.available) throw new KnowledgeStoreUnavailableError();
+  }
+
+  private async fullTextQuery(table: LanceTable, query: string, predicate: string, limit: number): Promise<KnowledgeChunkRow[]> {
+    const records: LanceRecord[] = await table.query().fullTextSearch(query, { columns: 'content' }).where(predicate).limit(limit).toArray();
+    return records.map(parseRow);
+  }
+
+  /** Rebuilds the `content` FTS index under the table's write mutex, replacing the index LanceDB dropped. */
+  private async rebuildFullTextIndex(projectId: string, table: LanceTable): Promise<void> {
+    const { Index } = await import('@lancedb/lancedb');
+    await this.manager.exclusive(tableName(projectId), () => table.createIndex('content', { config: Index.fts(), replace: true }));
   }
 
   private assertReady(sourceId: string): void {

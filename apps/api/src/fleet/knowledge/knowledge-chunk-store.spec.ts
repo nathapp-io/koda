@@ -68,4 +68,55 @@ describe('KnowledgeChunkStore', () => {
     await expect(store.replaceFile('p1', 'repo:r1:a.md', [row('repo:r1:b.md', 0)])).rejects.toBeInstanceOf(KnowledgeInvalidPathError);
     expect(manager.exclusive).not.toHaveBeenCalled();
   });
+
+  /** A table whose full-text query answers `toArray` and whose index can be rebuilt. */
+  function fakeTable(toArray: () => Promise<LanceRecord[]>) {
+    return {
+      createIndex: vi.fn(async () => undefined),
+      query: () => ({ fullTextSearch: () => ({ where: () => ({ limit: () => ({ toArray }) }) }) }),
+    };
+  }
+
+  function tableManager(table: unknown) {
+    return {
+      available: true,
+      getOrCreateTable: vi.fn(async () => table),
+      exclusive: vi.fn(async (_tableName: string, fn: () => Promise<unknown>) => fn()),
+    };
+  }
+
+  it('rebuilds the full-text index once when the lexical query fails, then answers the retry', async () => {
+    const toArray = vi.fn();
+    toArray
+      .mockRejectedValueOnce(new Error('Invalid user input: Column content has no inverted index'))
+      .mockResolvedValue([row('repo:r1:a.md', 1), row('repo:r1:a.md', 0)]);
+    const table = fakeTable(toArray);
+    const manager = tableManager(table);
+    const store = new KnowledgeChunkStore(manager as unknown as LanceTableManager);
+
+    const rows = await store.lexical('p1', 'broker', "source = 'repo'", 5);
+
+    expect(rows.map((r) => r.id)).toEqual(['repo:r1:a.md#1', 'repo:r1:a.md#0']);
+    expect(toArray).toHaveBeenCalledTimes(2);
+    expect(table.createIndex).toHaveBeenCalledWith('content', { config: expect.anything(), replace: true });
+    expect(manager.exclusive).toHaveBeenCalledWith('project_p1', expect.any(Function));
+  });
+
+  it('leaves the index alone when the lexical query answers', async () => {
+    const table = fakeTable(async () => [row('repo:r1:a.md', 0)]);
+    const store = new KnowledgeChunkStore(tableManager(table) as unknown as LanceTableManager);
+
+    expect((await store.lexical('p1', 'broker', "source = 'repo'", 5)).map((r) => r.id)).toEqual(['repo:r1:a.md#0']);
+    expect(table.createIndex).not.toHaveBeenCalled();
+  });
+
+  it('rethrows the lexical failure when the rebuilt index does not help', async () => {
+    const table = fakeTable(async () => {
+      throw new Error('Invalid user input: Column content has no inverted index');
+    });
+    const store = new KnowledgeChunkStore(tableManager(table) as unknown as LanceTableManager);
+
+    await expect(store.lexical('p1', 'broker', "source = 'repo'", 5)).rejects.toThrow('no inverted index');
+    expect(table.createIndex).toHaveBeenCalledTimes(1);
+  });
 });
