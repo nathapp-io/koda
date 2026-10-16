@@ -1,7 +1,7 @@
 import { chmod, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentSession, EmbedderTool, SessionEvent } from '@nathapp/nax-agent';
-import { THREAD_LIMITS, type StateEventPayload, type ThreadAssign, type ThreadCommandType } from '@nathapp/fleet-protocol';
+import { THREAD_LIMITS, type ChatThreadKind, type StateEventPayload, type ThreadAssign, type ThreadCommandType } from '@nathapp/fleet-protocol';
 import type { CredentialProvider, RepoCredentialProvider } from '../credentials/broker';
 import { buildProjectCodeTools, type ProjectCodePin } from './project-code/code-tools';
 import { projectCodeDirFor, refreshMirror } from './project-code/mirror-store';
@@ -175,6 +175,14 @@ function readAnswer(payload: unknown): { requestId: string; text: string } | nul
 }
 
 /**
+ * Fleet S5b 1d: a thread kind that owns no checkout and no project repositories — `PROJECT` and `WORKSPACE`.
+ * Both run the same no-checkout path and both refuse a publish (there is no worktree to publish from).
+ */
+function isNoCheckoutKind(kind: ChatThreadKind | undefined): boolean {
+  return kind === 'PROJECT' || kind === 'WORKSPACE';
+}
+
+/**
  * Fleet S5a slice B3b: one THREAD job, from ASSIGN to cleanup. It is deliberately not a `JobRun` — a thread
  * spawns no nax, uploads no bundle and reaps no clone. Only PROJECT code mirror refreshes take the mutex
  * directly, under project-code keys. `start` resolves only once the run has ended: a terminal transition and its `markDone`, an abandon
@@ -271,7 +279,8 @@ export class ThreadJobRun {
       return;
     }
 
-    if (thread.kind === 'PROJECT') {
+    // A PROJECT or WORKSPACE thread has no checkout: both take the no-checkout path.
+    if (isNoCheckoutKind(thread.kind)) {
       await this.runProject(row, thread);
       return;
     }
@@ -370,8 +379,9 @@ export class ThreadJobRun {
   }
 
   /**
-   * A PROJECT thread runs in its own scratch directory, never a checkout, and has no live publish.
-   * Optional read-only repository mirrors are pinned before opening the session.
+   * A PROJECT or WORKSPACE thread runs in its own scratch directory, never a checkout, and has no live publish.
+   * Optional read-only repository mirrors are pinned before opening the session — a WORKSPACE ASSIGN carries no
+   * `projectRepos`, so it gets none.
    */
   private async runProject(row: JobRow, thread: ThreadAssign): Promise<void> {
     const skills = await this.setUpSkills(thread);
@@ -887,7 +897,7 @@ export class ThreadJobRun {
     // A command only applies once the run can actually keep it: the row goes RUNNING before `openStream` awaits
     // its way to the writer, and in that window a turn could not be streamed — so the run is not ready yet.
     if (this.events.currentState() !== 'RUNNING' || this.writer === null) return { result: 'rejected', detail: 'session_not_ready' };
-    if (type === 'THREAD_PUBLISH' && this.row()?.assign.thread?.kind === 'PROJECT') return { result: 'rejected', detail: 'not_repo_thread' };
+    if (type === 'THREAD_PUBLISH' && isNoCheckoutKind(this.row()?.assign.thread?.kind)) return { result: 'rejected', detail: 'not_repo_thread' };
     if (type === 'THREAD_PUBLISH') return this.livePublish?.command() ?? { result: 'rejected', detail: 'session_not_ready' };
     switch (type) {
       case 'THREAD_INPUT': return this.applyInput(payload);

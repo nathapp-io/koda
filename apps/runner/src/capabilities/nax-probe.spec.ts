@@ -58,6 +58,12 @@ describe('listProfileNames (D98, D112)', () => {
 });
 
 describe('NaxCapabilityProbe (design §3.2, D98-D101)', () => {
+  test('US-007 AC-4: the report advertises workspaceThreads', async () => {
+    const home = await naxHome(['fast']);
+    const { capabilities } = await probeWith(home, new FakeNaxCli({ config: { fast: NATIVE } })).run();
+    expect(capabilities.workspaceThreads).toBe(true);
+  });
+
   test("reports nax's answers: version, ProfileNeeds per profile, needed credentials first, sandbox, protocols and tools", async () => {
     const home = await naxHome(['native-ds', 'cross-agent', 'koda-job-cabc']);
     const nax = new FakeNaxCli({
@@ -91,6 +97,7 @@ describe('NaxCapabilityProbe (design §3.2, D98-D101)', () => {
       configJobs: true,
       threadWrite: true,
       projectThreads: true,
+      workspaceThreads: true,
       kodaTools: true,
       projectCode: true,
       approvals: { relay: true },

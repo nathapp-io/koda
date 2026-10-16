@@ -198,6 +198,33 @@ describe('parseAssign THREAD (US-001)', () => {
     expect(parsed.ok).toBe(true);
     if (parsed.ok) expect(parsed.assign.thread).not.toHaveProperty('kind');
   });
+
+  test('US-007 AC-1: WORKSPACE SESSION thread parses with kind WORKSPACE', () => {
+    const { assign } = threadFixture({ kind: 'WORKSPACE' });
+    const parsed = parseAssign(cmd(assign));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.assign.thread?.kind).toBe('WORKSPACE');
+  });
+
+  test('US-007 AC-2: WORKSPACE PUBLISH thread returns invalid thread action', () => {
+    const { assign } = threadFixture({ kind: 'WORKSPACE', action: 'PUBLISH', initialMessage: null as never });
+    expect(parseAssign(cmd(assign))).toEqual({ ok: false, detail: 'invalid thread action' });
+  });
+
+  test('US-007 AC-2b: WORKSPACE DISCARD thread returns invalid thread action', () => {
+    const { assign } = threadFixture({ kind: 'WORKSPACE', action: 'DISCARD', initialMessage: null as never });
+    expect(parseAssign(cmd(assign))).toEqual({ ok: false, detail: 'invalid thread action' });
+  });
+
+  test('US-007 AC-3: WORKSPACE carrying projectRepos returns invalid project repos', () => {
+    const { assign } = threadFixture({ kind: 'WORKSPACE', projectRepos: [PROJECT_REPO] } as never);
+    expect(parseAssign(cmd(assign))).toEqual({ ok: false, detail: 'invalid project repos' });
+  });
+
+  test('US-007 AC-3b: WORKSPACE carrying projectReposUnavailable returns invalid project repos', () => {
+    const { assign } = threadFixture({ kind: 'WORKSPACE', projectReposUnavailable: [UNAVAILABLE] } as never);
+    expect(parseAssign(cmd(assign))).toEqual({ ok: false, detail: 'invalid project repos' });
+  });
 });
 
 /**
