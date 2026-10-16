@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { isSafeFilterValue, LanceRecord, LanceTable, LanceTableManager, REPO_SOURCE, whereIfSupported } from '../../rag/lance-table-manager';
+import {
+  isSafeFilterValue, LanceRecord, LanceTable, LanceTableManager, OUTCOME_SOURCE, REPO_SOURCE, whereIfSupported,
+} from '../../rag/lance-table-manager';
 
 const MAX_FILE_ROWS = 2_000;
 
@@ -129,6 +131,17 @@ export class KnowledgeChunkStore {
     this.assertAvailable();
     const table = await this.table(projectId);
     const records: LanceRecord[] = await whereIfSupported(table.query(), `source = '${REPO_SOURCE}'`).limit(1).toArray();
+    return records.length > 0;
+  }
+
+  /**
+   * S5b 3c-2-D9: whether the project's table holds at least one run-outcome chunk. The same table read as
+   * `hasRepoRows`, for the `source: 'outcomes'` half of the search's `empty` answer.
+   */
+  async hasOutcomeRows(projectId: string): Promise<boolean> {
+    this.assertAvailable();
+    const table = await this.table(projectId);
+    const records: LanceRecord[] = await whereIfSupported(table.query(), `source = '${OUTCOME_SOURCE}'`).limit(1).toArray();
     return records.length > 0;
   }
 

@@ -5,12 +5,17 @@ import type { RunOutcomeRow } from '../ingest/domain/bundle-ingest.domain';
 import { PROJECT_CODE_LIMITS } from '../common/thread-jobs';
 import { MAX_KNOWLEDGE_FILES } from './knowledge-allowlist';
 import {
-  IKnowledgeIndexRepository, KnowledgeFileState, KnowledgeFinishResult, KnowledgeIndexState, KnowledgeIndexStatus, KnowledgeRepoRef, KnowledgeRunOutcomes,
+  IKnowledgeIndexRepository, KnowledgeFileState, KnowledgeFinishResult, KnowledgeIndexState, KnowledgeIndexStatus, KnowledgeJobInfo, KnowledgeRepoRef, KnowledgeRunOutcomes,
 } from './knowledge-index.domain';
 
 export { KNOWLEDGE_INDEX_REPOSITORY } from './knowledge-index.domain';
 
 const MAX_GITHUB_REPOS = 500;
+/** S5b 3c-2-D4: the caps of one `describeJobs` read — the jobs a search may name, and their fleet links. */
+const MAX_DESCRIBED_JOBS = 200;
+const MAX_DESCRIBED_LINKS = 1000;
+/** S5b 3c-2-D4: the outcome fence reads the links the fleet wrote, never a ticket's own VCS link. */
+const FLEET_LINK_SOURCE = 'fleet';
 /** S5b 3c-2-D4: an ingest that succeeded — only those retire the outcomes of an earlier attempt. */
 const INGESTED_STATUSES = ['done', 'partial'] as const;
 /** S5b 3c-2-D6: the outcome files, in the order a pass writes them. */
@@ -216,5 +221,38 @@ export class PrismaKnowledgeIndexRepository implements IKnowledgeIndexRepository
         .map(kind => rows.find(row => row.kind === kind))
         .filter((row): row is RunOutcomeRow => row !== undefined),
     };
+  }
+
+  /**
+   * S5b 3c-2-D4: the current state of the given jobs, in two bounded queries rather than one per hit. Same
+   * recorded exception as `findRunOutcomes`: read-only, bounded and module-private. Only the jobs of
+   * `projectId` come back, so the caller drops an outcome hit whose job is a foreign or a deleted one (US-005),
+   * and `prState` is the state of the job's most recently updated fleet link, the one the fleet PR sync writes.
+   */
+  async describeJobs(projectId: string, jobIds: string[]): Promise<KnowledgeJobInfo[]> {
+    if (jobIds.length === 0) return [];
+    const [jobs, links] = await Promise.all([
+      this.db.fleetJob.findMany({
+        where: { id: { in: jobIds }, projectId },
+        take: MAX_DESCRIBED_JOBS,
+        select: { id: true, repoId: true, feature: true, state: true, resultPrUrl: true },
+      }),
+      this.db.ticketLink.findMany({
+        where: { jobId: { in: jobIds }, source: FLEET_LINK_SOURCE, prState: { not: null } },
+        orderBy: [{ prUpdatedAt: 'desc' }, { id: 'asc' }],
+        take: MAX_DESCRIBED_LINKS,
+        select: { jobId: true, prState: true },
+      }),
+    ]);
+    // The links arrive newest first, so the first link a job appears in is the PR state it is reported with.
+    const prState = new Map<string, string>();
+    for (const link of links) {
+      if (link.jobId === null || link.prState === null || prState.has(link.jobId)) continue;
+      prState.set(link.jobId, link.prState);
+    }
+    return jobs.map(job => ({
+      jobId: job.id, repoId: job.repoId, feature: job.feature, state: job.state,
+      prUrl: job.resultPrUrl, prState: prState.get(job.id) ?? null,
+    }));
   }
 }

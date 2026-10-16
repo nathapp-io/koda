@@ -170,7 +170,8 @@ describe('kb-eval runEval', () => {
     expect(calls.map((call) => call.url)).toEqual(questions.map(() => 'http://k/api/projects/koda-dogfood/knowledge/search'));
     expect(calls.map((call) => call.init.method)).toEqual(['POST', 'POST']);
     expect(calls.map((call) => headersOf(call)['Authorization'])).toEqual(['Bearer t', 'Bearer t']);
-    expect(calls.map(bodyOf)).toEqual(questions.map((asked) => ({ query: asked.question, limit: 20 })));
+    // US-005 AC-14: the evaluation reads repository docs only, so its scores stay comparable to the 3c-1 baseline.
+    expect(calls.map(bodyOf)).toEqual(questions.map((asked) => ({ query: asked.question, limit: 20, source: 'docs' })));
   });
 
   it('AC-6: a 500 answer misses the question, prints the status and the run continues', async () => {

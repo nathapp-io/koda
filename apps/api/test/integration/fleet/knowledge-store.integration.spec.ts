@@ -183,6 +183,95 @@ describe('KnowledgeSearchService on LanceDB', () => {
 });
 
 /**
+ * Fleet S5b US-005/AC-12: the source filter on a real LanceDB — one repository chunk and one outcome chunk of
+ * the same table, carrying the same text. Each leg is restricted by the asked source, so `docs` answers the
+ * repository chunk alone, `outcomes` the outcome chunk alone, and `all` both.
+ */
+describe('KnowledgeSearchService source filter on LanceDB (US-005)', () => {
+  const PROJECT = 'proj_knowledge_sources';
+  const TEXT = 'The fleet broker mints a read-only token for the runner';
+  const DOC_ID = 'repo:r1:docs/a.md';
+  const OUTCOME_ID = 'outcome:r1:j1:report';
+
+  let root: string;
+  let manager: LanceTableManager;
+  let embedding: EmbeddingService;
+  let store: KnowledgeChunkStore;
+  let service: KnowledgeSearchService;
+
+  /** One chunk row of the source it belongs to, with the metadata 3c-2-D4/D6 write. */
+  function record(source: 'repo' | 'outcome', sourceId: string, path: string, vector: number[]): LanceRecord {
+    return {
+      id: `${sourceId}#0`,
+      source,
+      source_id: sourceId,
+      content: TEXT,
+      vector,
+      metadata: JSON.stringify({
+        repoId: 'r1', owner: 'o', name: 'n', path, sha: 'sha-1', blobSha: 'blob-1', title: 'Broker',
+        headingPath: 'Broker', anchor: 'broker', chunkIndex: 0, chunkCount: 1, abstract: 'abstract', text: TEXT,
+        ...(source === 'outcome' ? { jobId: 'j1', feature: 'f', outcomeKind: 'report' } : {}),
+      }),
+      created_at: '2026-10-20T00:00:00.000Z',
+      provider: embedding.providerName,
+      model: 'fake-v1',
+    };
+  }
+
+  beforeAll(async () => {
+    root = mkdtempSync(join(tmpdir(), 'koda-knowledge-sources-'));
+    const ragConfig = { lancedbPath: root, inMemoryOnly: false } as IRagConfig;
+    embedding = new EmbeddingService({ ...ragConfig, embeddingProvider: 'fake', embeddingModel: 'fake-v1' } as IRagConfig);
+    manager = new LanceTableManager(ragConfig, embedding);
+    manager.ensureStorage();
+    store = new KnowledgeChunkStore(manager);
+    const index = {
+      listProjectRepos: async () => [{ id: 'r1', projectId: PROJECT, provider: 'github', owner: 'o', name: 'n', defaultBranch: 'main', githubInstallationId: null }],
+      describeJobs: async (_projectId: string, jobIds: string[]) =>
+        jobIds.map((jobId) => ({ jobId, repoId: 'r1', feature: 'f', state: 'COMPLETED', prUrl: null, prState: null })),
+    };
+    service = new KnowledgeSearchService(store, embedding, index as unknown as KnowledgeIndexService);
+
+    const vector = await embedding.embed(TEXT);
+    await store.replaceFile(PROJECT, DOC_ID, [record('repo', DOC_ID, 'docs/a.md', vector)]);
+    await store.replaceFile(PROJECT, OUTCOME_ID, [record('outcome', OUTCOME_ID, 'feature-report.md', vector)]);
+    // The indexer's end state: one `optimize` after writing (1c-c-D5); the lexical leg repairs the full-text
+    // index the deletes dropped, exactly as the AC-8 case above relies on.
+    const table = await manager.getOrCreateTable(`project_${PROJECT}`);
+    await manager.exclusive(`project_${PROJECT}`, () => table.optimize());
+  });
+
+  afterAll(async () => {
+    await manager.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('AC-12: source all answers both the repository and the outcome chunk', async () => {
+    const result = await service.search({ projectId: PROJECT, query: TEXT, source: 'all', limit: 20 });
+
+    expect(result.lexicalOnly).toBe(false);
+    expect(result.empty).toBe(false);
+    expect(result.hits.map((hit) => `${hit.source}:${hit.path}`).sort()).toEqual(['outcome:feature-report.md', 'repo:docs/a.md']);
+
+    const outcome = result.hits.find((hit) => hit.source === 'outcome');
+    expect(outcome).toMatchObject({ jobId: 'j1', feature: 'f', outcomeKind: 'report', jobState: 'COMPLETED', prState: null, prUrl: null });
+  });
+
+  it("AC-12: source 'docs' answers the repository chunk alone", async () => {
+    const result = await service.search({ projectId: PROJECT, query: TEXT, source: 'docs', limit: 20 });
+
+    expect(result.hits.map((hit) => `${hit.source}:${hit.path}`)).toEqual(['repo:docs/a.md']);
+  });
+
+  it("AC-12: source 'outcomes' answers the outcome chunk alone and is not empty", async () => {
+    const result = await service.search({ projectId: PROJECT, query: TEXT, source: 'outcomes', limit: 20 });
+
+    expect(result.empty).toBe(false);
+    expect(result.hits.map((hit) => `${hit.source}:${hit.path}`)).toEqual(['outcome:feature-report.md']);
+  });
+});
+
+/**
  * 1c-c-R6: repository chunks share the project's LanceDB table with ticket documents, so a pass that indexes
  * hundreds of matching chunks must not be able to crowd ticket search out of its bounded candidate pools. The
  * review reproduced the opposite on a real table: `search` returned ticket t1 before 120 relevant repository

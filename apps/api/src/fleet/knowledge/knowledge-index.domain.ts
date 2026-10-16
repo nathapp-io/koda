@@ -84,6 +84,19 @@ export interface KnowledgeRunOutcomes {
   outcomes: RunOutcomeRow[];
 }
 
+/**
+ * S5b 3c-2-D4: one job of the project as a search sees it — the current job state, its result pull request
+ * and the state of its newest fleet link. Only jobs of the asked project are described (US-005).
+ */
+export interface KnowledgeJobInfo {
+  jobId: string;
+  repoId: string;
+  feature: string;
+  state: string;
+  prUrl: string | null;
+  prState: string | null;
+}
+
 export interface IKnowledgeIndexRepository {
   findRepo(repoId: string): Promise<KnowledgeRepoRef | null>;
   findProjectRepos(projectId: string): Promise<KnowledgeRepoRef[]>;
@@ -106,4 +119,9 @@ export interface IKnowledgeIndexRepository {
    * job's `FleetBundleIngest` rows whose status is `done` or `partial`; null for an unknown job.
    */
   findRunOutcomes(jobId: string): Promise<KnowledgeRunOutcomes | null>;
+  /**
+   * S5b 3c-2-D4: the current state of the given jobs, for the outcome hits of one search. Only jobs of
+   * `projectId` are described, at most 200 of them, and at most the first 1000 of their fleet links.
+   */
+  describeJobs(projectId: string, jobIds: string[]): Promise<KnowledgeJobInfo[]>;
 }

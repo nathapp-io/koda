@@ -37,7 +37,7 @@ const PROJECT_ID = 'proj-1';
 const PROJECT: ProjectContext = { project: { id: PROJECT_ID, slug: 'koda' }, role: 'DEVELOPER' };
 
 const HIT: KnowledgeHit = {
-  repoId: 'repo-1', owner: 'o', name: 'n', path: 'docs/adr/1.md', sha: 'sha-1', anchor: 'adr',
+  source: 'repo', repoId: 'repo-1', owner: 'o', name: 'n', path: 'docs/adr/1.md', sha: 'sha-1', anchor: 'adr',
   headingPath: 'ADR', title: 'ADR 1', abstract: 'abstract', snippet: 'snippet', score: 1 / 61,
 };
 const RESULT: KnowledgeSearchResult = { lexicalOnly: false, empty: false, hits: [HIT] };
@@ -130,6 +130,35 @@ describe('ProjectKnowledgeController.search', () => {
     await controller.search({ query: 'broker', pathPrefix: 'docs/adr/' }, PROJECT);
 
     expect(search.search).toHaveBeenCalledWith({ projectId: PROJECT_ID, query: 'broker', pathPrefix: 'docs/adr/', limit: 20 });
+  });
+
+  it("US-005 AC-13: passes the body's source through to the search", async () => {
+    const { controller, search } = harness();
+
+    await controller.search({ query: 'broker', source: 'outcomes' }, PROJECT);
+
+    expect(search.search).toHaveBeenCalledWith({ projectId: PROJECT_ID, query: 'broker', source: 'outcomes', limit: 20 });
+  });
+
+  it('US-005 AC-13: leaves source off the service input when the body carries none', async () => {
+    const { controller, search } = harness();
+
+    await controller.search({ query: 'broker' }, PROJECT);
+
+    // The service defaults it to `all`; a body without the field must not decide that here.
+    expect(search.search).toHaveBeenCalledWith({ projectId: PROJECT_ID, query: 'broker', limit: 20 });
+  });
+
+  it('US-005 AC-13: answers 400 knowledge.input naming source and never searches for an unknown source', async () => {
+    const { controller, search } = harness();
+
+    const error = await rejectionOf(() => controller.search({ query: 'broker', source: 'code' } as unknown as KnowledgeSearchBodyDto, PROJECT));
+
+    expect(error).toBeInstanceOf(ValidationAppException);
+    expect((error as ValidationAppException).getStatus()).toBe(400);
+    expect((error as ValidationAppException).prefix).toBe('knowledge.input');
+    expect(JSON.stringify((error as ValidationAppException).args)).toContain('source');
+    expect(search.search).not.toHaveBeenCalled();
   });
 
   it('AC-10: answers 400 and never searches for a rejected body', async () => {
@@ -503,6 +532,19 @@ describe('POST /projects/:slug/knowledge/search', () => {
 
     expect(res.statusCode).toBe(200);
     expect(search.search).toHaveBeenCalledWith({ projectId: PROJECT_ID, query: 'broker', limit: 20 });
+  });
+
+  it("US-005 AC-13: passes source: 'outcomes' through the body pipe and answers 400 for source: 'code'", async () => {
+    const ok = await post({ query: 'broker', source: 'outcomes' });
+
+    expect(ok.statusCode).toBe(200);
+    // The global pipe's whitelist keeps only fields the DTO marks `@Allow()`, so a missing one is dropped here.
+    expect(search.search).toHaveBeenCalledWith({ projectId: PROJECT_ID, query: 'broker', source: 'outcomes', limit: 20 });
+
+    const bad = await post({ query: 'broker', source: 'code' });
+
+    expect(bad.statusCode).toBe(400);
+    expect(search.search).toHaveBeenCalledTimes(1);
   });
 
   it('AC-10: answers 400 for an empty query, a traversing pathPrefix and a missing body', async () => {

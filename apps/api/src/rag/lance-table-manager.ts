@@ -55,6 +55,13 @@ export const REPO_SOURCE = 'repo';
 export const EXCLUDE_REPO_ROWS_PREDICATE = `source != '${REPO_SOURCE}'`;
 
 /**
+ * S5b 3c-2-D6: run-outcome knowledge chunks carry `source = 'outcome'` in the same shared table, with the
+ * `source_id` namespace `outcome:<repoId>:<jobId>:<kind>`. `KnowledgeRepoIndexer` writes them and the knowledge
+ * read path (`KnowledgeChunkStore.hasOutcomeRows`, the outcome leg of `KnowledgeSearchService`) selects them.
+ */
+export const OUTCOME_SOURCE = 'outcome';
+
+/**
  * Applies `where(predicate)` to a LanceDB query builder (`table.query()`,
  * `table.search()`, `table.vectorSearch()`). The in-memory fallback table
  * (`InMemoryTable`) and test doubles expose no `where`, and can never hold

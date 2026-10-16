@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
-  IKnowledgeIndexRepository, KNOWLEDGE_INDEX_REPOSITORY, KnowledgeProjectState, KnowledgeRepoRef,
+  IKnowledgeIndexRepository, KNOWLEDGE_INDEX_REPOSITORY, KnowledgeJobInfo, KnowledgeProjectState, KnowledgeRepoRef,
 } from './knowledge-index.domain';
 import { DEFAULT_KNOWLEDGE_PATTERNS } from './knowledge-patterns';
 
@@ -28,6 +28,14 @@ export class KnowledgeIndexService {
 
   listProjectRepos(projectId: string): Promise<KnowledgeRepoRef[]> {
     return this.repository.findProjectRepos(projectId);
+  }
+
+  /**
+   * US-005: the current state of the given jobs of the project (3c-2-D4). The search describes the jobs of its
+   * outcome hits through this, never by injecting the module-private repository (the api-data layering rule).
+   */
+  describeJobs(projectId: string, jobIds: string[]): Promise<KnowledgeJobInfo[]> {
+    return this.repository.describeJobs(projectId, jobIds);
   }
 
   /** The project's repositories joined with their index rows (null before a first pass). */

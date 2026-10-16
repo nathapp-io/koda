@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EmbeddingService } from '../../rag/embedding.service';
 import { RagService } from '../../rag/rag.service';
-import type { LanceRecord } from '../../rag/lance-table-manager';
+import { LanceRecord, OUTCOME_SOURCE } from '../../rag/lance-table-manager';
 import { GitHubAppClient } from '../git-broker/github-app-client';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { KnowledgeChunkStore } from './knowledge-chunk-store';
@@ -23,9 +23,6 @@ export interface OutcomePassResult {
   status: 'indexed' | 'skipped' | 'failed';
   reason?: string;
 }
-
-/** S5b 3c-2-D6: the LanceDB `source` of an outcome chunk, and the id namespace of its rows. */
-export const OUTCOME_SOURCE = 'outcome';
 
 /** S5b 3c-2-D6: the two outcome files of a job, in the order a pass writes them. */
 const OUTCOME_FILES = [

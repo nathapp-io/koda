@@ -293,3 +293,149 @@ describe('PrismaKnowledgeIndexRepository.findRunOutcomes (S5b US-004)', () => {
     expect((await repo.findRunOutcomes('j1'))?.job.resultSha).toBeNull();
   });
 });
+
+/**
+ * Fleet S5b US-005/AC-10 — the bounded job and PR read the outcome fence makes (3c-2-D4). The Prisma client is
+ * faked here so the two queries, their caps and the first-link-per-job choice run without a database, and the fake
+ * honours the `where`, `orderBy` and `take` it is handed; the real ordering on Postgres lives in
+ * test/integration/fleet/knowledge-store.integration.spec.ts.
+ */
+describe('PrismaKnowledgeIndexRepository.describeJobs (S5b US-005)', () => {
+  interface JobRow {
+    id: string;
+    projectId: string;
+    repoId: string;
+    feature: string;
+    state: string;
+    resultPrUrl: string | null;
+  }
+
+  interface LinkRow {
+    id: string;
+    jobId: string | null;
+    prState: string | null;
+    prUpdatedAt: Date | null;
+    source: string;
+  }
+
+  /** `prUpdatedAt` desc then `id`, the ordering of the query: Postgres puts NULLs first on a DESC order. */
+  function byPrUpdatedAtThenId(a: LinkRow, b: LinkRow): number {
+    if (a.prUpdatedAt !== b.prUpdatedAt) {
+      if (a.prUpdatedAt === null) return -1;
+      if (b.prUpdatedAt === null) return 1;
+      return a.prUpdatedAt > b.prUpdatedAt ? -1 : 1;
+    }
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  }
+
+  function build(seed: { jobs?: JobRow[]; links?: LinkRow[] } = {}) {
+    const jobs: JobRow[] = seed.jobs ?? [];
+    const links: LinkRow[] = seed.links ?? [];
+    const jobFindMany = vi.fn(async (args: { where: { id: { in: string[] }; projectId: string }; take: number }) =>
+      jobs.filter((row) => args.where.id.in.includes(row.id) && row.projectId === args.where.projectId).slice(0, args.take));
+    const linkFindMany = vi.fn(async (args: { where: { jobId: { in: string[] } }; take: number }) =>
+      links
+        .filter((row) => row.jobId !== null && args.where.jobId.in.includes(row.jobId) && row.source === 'fleet' && row.prState !== null)
+        .sort(byPrUpdatedAtThenId)
+        .slice(0, args.take));
+    const repo = new PrismaKnowledgeIndexRepository({
+      client: { fleetJob: { findMany: jobFindMany }, ticketLink: { findMany: linkFindMany } },
+    } as unknown as PrismaService<PrismaClient>);
+    return { repo, jobFindMany, linkFindMany };
+  }
+
+  const jobRow = (over: Partial<JobRow> = {}): JobRow => ({
+    id: 'j1', projectId: 'p1', repoId: 'r1', feature: 'f', state: 'COMPLETED', resultPrUrl: 'https://github.com/o/n/pull/9', ...over,
+  });
+
+  const linkRow = (over: Partial<LinkRow> = {}): LinkRow => ({
+    id: 'l1', jobId: 'j1', prState: 'open', prUpdatedAt: new Date('2026-10-20T10:00:00.000Z'), source: 'fleet', ...over,
+  });
+
+  it('AC-10: answers a job of the project with its current state and newest fleet PR state', async () => {
+    const { repo, jobFindMany, linkFindMany } = build({
+      jobs: [jobRow()],
+      links: [
+        linkRow({ id: 'l1', prState: 'open', prUpdatedAt: new Date('2026-10-20T10:00:00.000Z') }),
+        linkRow({ id: 'l2', prState: 'merged', prUpdatedAt: new Date('2026-10-21T10:00:00.000Z') }),
+      ],
+    });
+
+    expect(await repo.describeJobs('p1', ['j1'])).toEqual([
+      { jobId: 'j1', repoId: 'r1', feature: 'f', state: 'COMPLETED', prUrl: 'https://github.com/o/n/pull/9', prState: 'merged' },
+    ]);
+    expect(jobFindMany).toHaveBeenCalledWith({
+      where: { id: { in: ['j1'] }, projectId: 'p1' },
+      take: 200,
+      select: { id: true, repoId: true, feature: true, state: true, resultPrUrl: true },
+    });
+    expect(linkFindMany).toHaveBeenCalledWith({
+      where: { jobId: { in: ['j1'] }, source: 'fleet', prState: { not: null } },
+      orderBy: [{ prUpdatedAt: 'desc' }, { id: 'asc' }],
+      take: 1000,
+      select: { jobId: true, prState: true },
+    });
+  });
+
+  it('AC-10: omits a job of another project, as the query does', async () => {
+    const { repo } = build({
+      jobs: [jobRow(), jobRow({ id: 'j2', projectId: 'p2' })],
+      links: [linkRow(), linkRow({ id: 'l2', jobId: 'j2' })],
+    });
+
+    expect(await repo.describeJobs('p1', ['j1', 'j2'])).toEqual([
+      { jobId: 'j1', repoId: 'r1', feature: 'f', state: 'COMPLETED', prUrl: 'https://github.com/o/n/pull/9', prState: 'open' },
+    ]);
+  });
+
+  it('answers no info for an unknown job id and reads the links of the ids it was given', async () => {
+    const { repo, linkFindMany } = build({ jobs: [] });
+
+    expect(await repo.describeJobs('p1', ['missing'])).toEqual([]);
+    expect(linkFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ jobId: { in: ['missing'] } }) }));
+  });
+
+  it('runs no query for an empty id list', async () => {
+    const { repo, jobFindMany, linkFindMany } = build({ jobs: [jobRow()] });
+
+    expect(await repo.describeJobs('p1', [])).toEqual([]);
+    expect(jobFindMany).not.toHaveBeenCalled();
+    expect(linkFindMany).not.toHaveBeenCalled();
+  });
+
+  it('answers a null prState for a job whose fleet links carry none', async () => {
+    const { repo } = build({
+      jobs: [jobRow({ resultPrUrl: null })],
+      links: [linkRow({ prState: null }), linkRow({ id: 'l2', prState: 'open', source: 'vcs' })],
+    });
+
+    expect(await repo.describeJobs('p1', ['j1'])).toEqual([
+      { jobId: 'j1', repoId: 'r1', feature: 'f', state: 'COMPLETED', prUrl: null, prState: null },
+    ]);
+  });
+
+  it('keeps the newest link per job when several jobs are described at once', async () => {
+    const { repo } = build({
+      jobs: [jobRow(), jobRow({ id: 'j2', state: 'FAILED' })],
+      links: [
+        linkRow({ id: 'l1', jobId: 'j1', prState: 'open' }),
+        linkRow({ id: 'l2', jobId: 'j2', prState: 'closed', prUpdatedAt: new Date('2026-10-22T10:00:00.000Z') }),
+        linkRow({ id: 'l3', jobId: 'j2', prState: 'draft', prUpdatedAt: new Date('2026-10-19T10:00:00.000Z') }),
+      ],
+    });
+
+    expect((await repo.describeJobs('p1', ['j1', 'j2'])).map((info) => [info.jobId, info.prState])).toEqual([
+      ['j1', 'open'], ['j2', 'closed'],
+    ]);
+  });
+
+  it('breaks an equal prUpdatedAt by link id ascending', async () => {
+    const same = new Date('2026-10-20T10:00:00.000Z');
+    const { repo } = build({
+      jobs: [jobRow()],
+      links: [linkRow({ id: 'lb', prState: 'closed', prUpdatedAt: same }), linkRow({ id: 'la', prState: 'merged', prUpdatedAt: same })],
+    });
+
+    expect((await repo.describeJobs('p1', ['j1']))[0].prState).toBe('merged');
+  });
+});

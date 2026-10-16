@@ -18,12 +18,14 @@ import { KnowledgeSearchQuery, KnowledgeSearchResult, KnowledgeSearchService, pa
 
 export class KnowledgeSearchBodyDto {
   @Allow() @ApiProperty({ description: 'Search text, 1-500 characters', minLength: 1, maxLength: 500 }) query: string;
+  @Allow() @ApiPropertyOptional({ description: 'Which sources to search', enum: ['docs', 'outcomes', 'all'], default: 'all' }) source?: 'docs' | 'outcomes' | 'all';
   @Allow() @ApiPropertyOptional({ description: 'Restrict the search to one of the project repositories, as owner/name' }) repo?: string;
   @Allow() @ApiPropertyOptional({ description: 'Only hits whose path starts with this prefix; relative, no `..`', minLength: 1, maxLength: 300 }) pathPrefix?: string;
   @Allow() @ApiPropertyOptional({ description: 'Maximum hits, 1-50', minimum: 1, maximum: 50, default: 20 }) limit?: number;
 }
 
 export class KnowledgeHitDto {
+  @ApiProperty({ description: 'Which indexed source the chunk came from', enum: ['repo', 'outcome'] }) source: 'repo' | 'outcome';
   @ApiProperty() repoId: string;
   @ApiProperty() owner: string;
   @ApiProperty() name: string;
@@ -37,6 +39,13 @@ export class KnowledgeHitDto {
   @ApiPropertyOptional() status?: string;
   @ApiPropertyOptional() supersededBy?: string;
   @ApiProperty({ description: 'Reciprocal rank fusion score of the legs the chunk appears in' }) score: number;
+  // US-005: outcome hits only — the job the chunk came from and its current state, read per search.
+  @ApiPropertyOptional({ required: false, description: 'Outcome hits only: the job the chunk came from' }) jobId?: string;
+  @ApiPropertyOptional({ required: false, description: 'Outcome hits only: the feature that job ran' }) feature?: string;
+  @ApiPropertyOptional({ required: false, description: 'Outcome hits only: the outcome file the chunk came from', enum: ['report', 'decisions'] }) outcomeKind?: string;
+  @ApiPropertyOptional({ required: false, description: 'Outcome hits only: the job’s current state' }) jobState?: string;
+  @ApiPropertyOptional({ required: false, type: String, nullable: true, description: 'Outcome hits only: the state of the job’s newest fleet pull request' }) prState?: string | null;
+  @ApiPropertyOptional({ required: false, type: String, nullable: true, description: 'Outcome hits only: that pull request’s url' }) prUrl?: string | null;
 }
 
 export class KnowledgeSearchResultDto {
@@ -160,6 +169,8 @@ export class ProjectKnowledgeController {
     return JsonResponse.Ok<KnowledgeSearchResultDto>(await this.runSearch({
       projectId,
       query: parsed.value.query,
+      // US-005: the service's own default is `all`, so the body decides only when it carries a source.
+      ...(parsed.value.source === undefined ? {} : { source: parsed.value.source }),
       ...(repoId === undefined ? {} : { repoId }),
       ...(parsed.value.pathPrefix === undefined ? {} : { pathPrefix: parsed.value.pathPrefix }),
       limit: parsed.value.limit,

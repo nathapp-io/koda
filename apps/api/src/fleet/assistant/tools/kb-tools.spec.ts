@@ -23,7 +23,7 @@ const context = (): ToolCallContext => ({
 
 /** One search hit with every field the tool reads spelled out. */
 const hit = (over: Partial<KnowledgeHit> = {}): KnowledgeHit => ({
-  repoId: 'repo-1', owner: 'o', name: 'n', path: 'docs/a.md', sha: 'abcdef1234', anchor: 'cache',
+  source: 'repo', repoId: 'repo-1', owner: 'o', name: 'n', path: 'docs/a.md', sha: 'abcdef1234', anchor: 'cache',
   headingPath: 'A > Cache', title: 'A', abstract: 'The broker keeps a token cache.', snippet: 'the cache is keyed by issuer',
   score: 1, ...over,
 });

@@ -14091,6 +14091,16 @@
             "minLength": 1,
             "maxLength": 500
           },
+          "source": {
+            "type": "string",
+            "description": "Which sources to search",
+            "enum": [
+              "docs",
+              "outcomes",
+              "all"
+            ],
+            "default": "all"
+          },
           "repo": {
             "type": "string",
             "description": "Restrict the search to one of the project repositories, as owner/name"
@@ -14116,6 +14126,14 @@
       "KnowledgeHitDto": {
         "type": "object",
         "properties": {
+          "source": {
+            "type": "string",
+            "description": "Which indexed source the chunk came from",
+            "enum": [
+              "repo",
+              "outcome"
+            ]
+          },
           "repoId": {
             "type": "string"
           },
@@ -14157,9 +14175,40 @@
           "score": {
             "type": "number",
             "description": "Reciprocal rank fusion score of the legs the chunk appears in"
+          },
+          "jobId": {
+            "type": "string",
+            "description": "Outcome hits only: the job the chunk came from"
+          },
+          "feature": {
+            "type": "string",
+            "description": "Outcome hits only: the feature that job ran"
+          },
+          "outcomeKind": {
+            "type": "string",
+            "description": "Outcome hits only: the outcome file the chunk came from",
+            "enum": [
+              "report",
+              "decisions"
+            ]
+          },
+          "jobState": {
+            "type": "string",
+            "description": "Outcome hits only: the job’s current state"
+          },
+          "prState": {
+            "type": "string",
+            "nullable": true,
+            "description": "Outcome hits only: the state of the job’s newest fleet pull request"
+          },
+          "prUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Outcome hits only: that pull request’s url"
           }
         },
         "required": [
+          "source",
           "repoId",
           "owner",
           "name",

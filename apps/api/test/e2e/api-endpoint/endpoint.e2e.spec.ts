@@ -4139,7 +4139,7 @@ describeIntegration('API Integration Tests', () => {
 
   describe('S5b US-002 knowledge search route', () => {
     const HIT: KnowledgeHit = {
-      repoId: 'stub-repo', owner: 'o', name: 'n', path: 'docs/adr/1.md', sha: 'abc1234', anchor: 'adr-1',
+      source: 'repo', repoId: 'stub-repo', owner: 'o', name: 'n', path: 'docs/adr/1.md', sha: 'abc1234', anchor: 'adr-1',
       headingPath: 'ADR 1', title: 'ADR 1', abstract: 'abstract', snippet: 'snippet', score: 1 / 61,
     };
 
@@ -4218,6 +4218,29 @@ describeIntegration('API Integration Tests', () => {
 
       refusal(res, 'knowledge.repoNotFound.404');
       expect(searchSpy).not.toHaveBeenCalled();
+    });
+
+    it('US-005 AC-13: passes the body source to the service and answers 400 for an unknown one', async () => {
+      searchSpy.mockResolvedValue({ lexicalOnly: false, empty: false, hits: [HIT] });
+      const cases: Array<{ source: string; status: number; expected?: Record<string, unknown> }> = [
+        { source: 'outcomes', status: 200, expected: { projectId, query: 'broker', source: 'outcomes', limit: 20 } },
+        { source: 'docs', status: 200, expected: { projectId, query: 'broker', source: 'docs', limit: 20 } },
+        { source: 'all', status: 200, expected: { projectId, query: 'broker', source: 'all', limit: 20 } },
+        { source: 'code', status: 400 },
+      ];
+
+      for (const { source, status, expected } of cases) {
+        searchSpy.mockClear();
+
+        const res = await search(memberToken, { query: 'broker', source }).expect(status);
+
+        if (expected === undefined) {
+          refusal(res, 'knowledge.input.-2', { reason: 'source' });
+          expect(searchSpy).not.toHaveBeenCalled();
+          continue;
+        }
+        expect(searchSpy).toHaveBeenCalledWith(expected);
+      }
     });
 
     it('AC-12: answers 409 while the kill switch is off', async () => {

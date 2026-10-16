@@ -21,6 +21,11 @@ export const KB_EVAL_HIT_LIMIT = 20;
 export const KB_EVAL_RECALL_AT_5 = 5;
 export const KB_EVAL_RECALL_AT_20 = 20;
 export const KB_EVAL_TOKEN_ENV = 'KODA_EVAL_TOKEN';
+/**
+ * S5b US-005: the questions name repository documents, so the script asks for `docs` only — the scores stay
+ * comparable with the 3c-1 baseline, which ran before outcome chunks existed.
+ */
+export const KB_EVAL_SOURCE = 'docs';
 
 /** One document that should answer a question, as the fixture spells it. */
 export interface KbEvalExpected {
@@ -176,7 +181,7 @@ async function ask(deps: KbEvalDeps, searchUrl: string, token: string, entry: Kb
     response = await deps.fetch(searchUrl, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: entry.question, limit: KB_EVAL_HIT_LIMIT }),
+      body: JSON.stringify({ query: entry.question, limit: KB_EVAL_HIT_LIMIT, source: KB_EVAL_SOURCE }),
     });
   } catch (error) {
     deps.print(`kb-eval: ${entry.id} search request failed: ${reasonOf(error)}`);
