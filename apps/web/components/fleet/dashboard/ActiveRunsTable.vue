@@ -1,11 +1,19 @@
 <script setup lang="ts">
 import FleetJobStateBadge from '~/components/fleet/FleetJobStateBadge.vue'
 import { costText, jobPath, storiesText } from '~/lib/fleet-dashboard'
+import { phaseLabelKey } from '~/lib/fleet-phase'
 import type { DashboardActiveJob, ScopeKind } from '~/lib/fleet-dashboard-types'
 
 /** Spec §4.2: what is queued or running now, oldest first; the feature opens the job page. */
 defineProps<{ jobs: readonly DashboardActiveJob[]; now: Date; scope: ScopeKind; truncated: boolean }>()
 const { t } = useI18n()
+
+/** D7: a known nax phase reads as its label; any other nax text is shown raw (R4). */
+function phaseText(phase: string | null): string {
+  if (phase === null) return '-'
+  const key = phaseLabelKey(phase)
+  return key === null ? phase : t(key)
+}
 
 /** A queued job has no runner yet; a held job whose runner was deleted has an id but no name. */
 function runnerText(job: DashboardActiveJob): string {
@@ -50,7 +58,7 @@ function runnerText(job: DashboardActiveJob): string {
             <TableCell><FleetJobStateBadge :state="job.state" /></TableCell>
             <TableCell data-testid="fleet-dashboard-active-runner">{{ runnerText(job) }}</TableCell>
             <TableCell>{{ job.currentStoryId ?? '-' }}</TableCell>
-            <TableCell>{{ job.currentPhase ?? '-' }}</TableCell>
+            <TableCell data-testid="fleet-dashboard-active-phase">{{ phaseText(job.currentPhase) }}</TableCell>
             <TableCell data-testid="fleet-dashboard-active-stories">{{ storiesText(job.storiesDone, job.storiesTotal) }}</TableCell>
             <TableCell class="whitespace-nowrap" data-testid="fleet-dashboard-active-cost">{{ costText(job.costSpentUsd, job.maxCostUsd) }}</TableCell>
             <TableCell class="whitespace-nowrap"><FleetAge :iso="job.lastHeartbeatAt" :now="now" mode="ago" /></TableCell>

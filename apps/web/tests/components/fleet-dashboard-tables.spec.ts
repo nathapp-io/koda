@@ -36,11 +36,17 @@ describe('FleetDashboardActiveRunsTable (spec §4.2)', () => {
     const app = mount('ActiveRunsTable.vue', { jobs: [active('a')], now: NOW, scope: 'project', truncated: false })
     expect(texts(app, 'fleet-dashboard-active-stories')).toEqual(['3/5'])
     expect(texts(app, 'fleet-dashboard-active-cost')).toEqual(['$0.0664 / $5.0000'])
+    expect(texts(app, 'fleet-dashboard-active-phase')).toEqual(['Review'])
     const row = app.textOf(byId(app, 'fleet-dashboard-active-row')[0])
     expect(row).toContain('US-002')
-    expect(row).toContain('review')
+    expect(row).toContain('Review')
     expect(row).toContain('2m ago')
     expect(row).toContain('Running')
+  })
+
+  it('a phase the web does not know is shown raw (D7, R4)', () => {
+    const app = mount('ActiveRunsTable.vue', { jobs: [active('a', { currentPhase: 'half-built' })], now: NOW, scope: 'project', truncated: false })
+    expect(texts(app, 'fleet-dashboard-active-phase')).toEqual(['half-built'])
   })
 
   it('the project column shows only in the admin scope', () => {

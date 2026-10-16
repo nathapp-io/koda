@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { codeLabel } from '~/lib/fleet-i18n'
+import { phaseLabelKey } from '~/lib/fleet-phase'
 import type { StoryRow } from '~/lib/fleet-jobs'
 
 /** D443: the List view of FleetJobPipeline; the heading and truncation note live there. */
@@ -7,6 +8,11 @@ defineProps<{ rows: readonly StoryRow[] }>()
 const { t, te } = useI18n()
 
 const statusLabel = (status: string): string => codeLabel(t, te, 'fleet.storyStatus', status)
+/** D7: a known nax phase reads as its label; any other nax text is shown raw (R4). */
+const phaseText = (phase: string): string => {
+  const key = phaseLabelKey(phase)
+  return key === null ? phase : t(key)
+}
 </script>
 
 <template>
@@ -23,7 +29,7 @@ const statusLabel = (status: string): string => codeLabel(t, te, 'fleet.storySta
     >
       <span class="font-mono text-xs">{{ row.id }}</span>
       <span class="min-w-0 flex-1 break-words">{{ row.title }}</span>
-      <span v-if="row.current && row.phase" class="text-xs text-muted-foreground" data-testid="fleet-job-story-phase">{{ t('fleet.jobs.detail.stories.phase', { phase: row.phase }) }}</span>
+      <span v-if="row.current && row.phase" class="text-xs text-muted-foreground" data-testid="fleet-job-story-phase">{{ t('fleet.jobs.detail.stories.phase', { phase: phaseText(row.phase) }) }}</span>
       <span class="text-xs text-muted-foreground">{{ t('fleet.jobs.detail.stories.attempts', { count: row.attempts }) }}</span>
       <Badge :variant="row.variant">{{ statusLabel(row.status) }}</Badge>
       <span v-if="row.dependsOn.length > 0" class="basis-full text-xs text-muted-foreground" data-testid="fleet-job-story-deps">
