@@ -3,7 +3,7 @@
   "feature": "fleet-knowledge-embed-and-run-progress",
   "branchName": "feat/fleet-knowledge-embed-and-run-progress",
   "createdAt": "2026-10-16T00:00:00.000Z",
-  "updatedAt": "2026-10-16T07:46:08.292Z",
+  "updatedAt": "2026-10-16T08:03:01.517Z",
   "userStories": [
     {
       "id": "US-001",
@@ -93,8 +93,8 @@
         "embedding"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -106,7 +106,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/rag/providers/ollama-embedding.provider.ts",
@@ -132,7 +134,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "3bb76a15153dafdd0fc7a28b03bd8e13d35e442a"
     },
     {
       "id": "US-003",
