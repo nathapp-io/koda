@@ -28,8 +28,9 @@ const STORY_TITLE_MAX = 80;
 const STORY_DEPENDS_MAX = 10;
 const STORY_ATTEMPTS_MAX = 1_000_000;
 const STORY_STATUS_RE = /^[a-z][a-z-]{0,31}$/;
-/** S2b (j) §1.3 bounds: nax stage status strings, passed through (D429). */
-const POST_RUN_STAGES = ['acceptance', 'regression', 'finish'] as const;
+/** S2b (j) §1.3 bounds: nax stage status strings, passed through (D429). `workflowStep` carries nax's
+ *  workflow step (US-003). */
+const POST_RUN_STAGES = ['acceptance', 'regression', 'finish', 'workflowStep'] as const;
 const STAGE_STATUS_RE = /^[\x20-\x7e]{1,32}$/;
 
 const isStoryId = (v: unknown): boolean => typeof v === 'string' && v.trim() !== '' && v.length <= STORY_ID_MAX;

@@ -14,9 +14,10 @@ interface Spec {
 const spec = JSON.parse(readFileSync(join(__dirname, '..', '..', '..', '..', 'openapi.json'), 'utf-8')) as Spec;
 
 describe('fleet OpenAPI contract', () => {
-  it('exposes the job post-run stages (S2b (j) D433, D435)', () => {
+  it('exposes the job post-run stages (S2b (j) D433, D435; US-003 workflowStep)', () => {
     expect(Object.keys(spec.components.schemas['FleetJobDto']?.properties ?? {})).toContain('postRun');
-    expect(Object.keys(spec.components.schemas['FleetJobPostRunDto']?.properties ?? {}).sort()).toEqual(['acceptance', 'finish', 'regression']);
+    expect(Object.keys(spec.components.schemas['FleetJobPostRunDto']?.properties ?? {}).sort())
+      .toEqual(['acceptance', 'finish', 'regression', 'workflowStep']);
   });
 
   it('declares the slug path param on every project-scoped fleet operation (D120)', () => {

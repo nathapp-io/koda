@@ -1,5 +1,7 @@
 import { FleetJobDto } from './fleet-job.dto';
 import { FleetJobEventDto } from './fleet-job-event.dto';
+import type { FleetJobRecord } from '../domain/fleet-job.domain';
+import { interpretEvent } from '../../sync/event-payloads';
 
 describe('fleet job DTOs', () => {
   const workflow = { runId: 'run-1', outcome: 'draft' as const, workflowPassed: true, reasons: [], openItems: [] };
@@ -65,5 +67,14 @@ describe('fleet job DTOs', () => {
     const dto = FleetJobDto.from({ ...record, bashMode: 'escalate', approvalTimeoutSec: 120 } as never, 2);
     expect(dto).toEqual(expect.objectContaining({ bashMode: 'escalate', approvalTimeoutSec: 120, pendingApprovals: 2 }));
     expect(FleetJobDto.summary(record as never).pendingApprovals).toBe(0);
+  });
+
+  it('AC-6: carries postRun.workflowStep from the job row through the mirror', () => {
+    // The row's postRun is what the sync mirror stored (D428); the DTO must hand it on unchanged.
+    const effect = interpretEvent('snapshot', { postRun: { acceptance: 'passed', workflowStep: 'done' } });
+    if (effect.kind !== 'mirror') throw new Error(`expected a mirror, got ${effect.kind}`);
+    const row = { ...(workflowRecord() as FleetJobRecord), postRun: effect.patch.postRun ?? null };
+    expect(row.postRun).toEqual({ acceptance: 'passed', workflowStep: 'done' });
+    expect(FleetJobDto.from(row).postRun).toEqual({ acceptance: 'passed', workflowStep: 'done' });
   });
 });

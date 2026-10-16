@@ -13288,6 +13288,10 @@
           "finish": {
             "type": "string",
             "maxLength": 32
+          },
+          "workflowStep": {
+            "type": "string",
+            "maxLength": 32
           }
         }
       },

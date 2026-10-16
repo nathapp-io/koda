@@ -115,6 +115,31 @@ describe('postRunStages (S2b (j) §1.3, D429)', () => {
   });
 });
 
+describe('postRunStages workflowStep (US-003 AC-1..AC-4)', () => {
+  it('AC-1: keeps a workflow step sent on its own', () => {
+    expect(postRunStages({ workflowStep: 'branch-review' })).toEqual({ workflowStep: 'branch-review' });
+  });
+
+  it('AC-2: keeps the workflow step next to the other stages', () => {
+    expect(postRunStages({ acceptance: 'passed', workflowStep: 'publish' })).toEqual({ acceptance: 'passed', workflowStep: 'publish' });
+  });
+
+  it('AC-3: drops a 33-character workflow step and keeps the other stages', () => {
+    expect(postRunStages({ acceptance: 'passed', workflowStep: 'x'.repeat(33) })).toEqual({ acceptance: 'passed' });
+  });
+
+  it('AC-4: a non-string workflow step leaves nothing to mirror', () => {
+    expect(postRunStages({ workflowStep: 7 })).toBeUndefined();
+  });
+});
+
+describe('snapshot postRun workflowStep mirror (US-003 AC-5)', () => {
+  it('AC-5: mirrors a workflow step as the patch postRun', () => {
+    expect(interpretEvent('snapshot', { postRun: { workflowStep: 'final-gates' } }))
+      .toEqual({ kind: 'mirror', patch: { postRun: { workflowStep: 'final-gates' } } });
+  });
+});
+
 describe('snapshot postRun mirror', () => {
   it('mirrors valid stages next to the other fields', () => {
     expect(interpretEvent('snapshot', { currentPhase: 'review', postRun: { acceptance: 'running' } }))

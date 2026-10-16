@@ -95,6 +95,30 @@ describe('JobReportProcessor approval_request (S1.5 §2.2)', () => {
   });
 });
 
+describe('JobReportProcessor postRun mirror (US-003 AC-7, AC-8)', () => {
+  const snapshot = (jobId: string, leaseEpoch: number, postRun: object): JobReport => ({
+    jobId, leaseEpoch, events: [{ seq: 1, type: 'snapshot', payload: { postRun } as never }],
+  });
+
+  it('AC-7: stores the workflow step of a RUNNING job snapshot', async () => {
+    const repo = makeRepo();
+    repo.seed({ ...runningJob });
+    const { processor } = makeProcessor(repo);
+    const out = await processor.process('r1', snapshot(runningJob.id, runningJob.leaseEpoch, { acceptance: 'running', workflowStep: 'branch-review' }), NOW);
+    expect(repo.update).toHaveBeenCalledWith('job-1', expect.objectContaining({ postRun: { acceptance: 'running', workflowStep: 'branch-review' } }));
+    expect(out.ack).toEqual({ jobId: 'job-1', ackedSeq: 1 });
+    expect((await repo.lockById('job-1'))?.postRun).toEqual({ acceptance: 'running', workflowStep: 'branch-review' });
+  });
+
+  it('AC-8: a later snapshot replaces the stored workflow step (no merge)', async () => {
+    const repo = makeRepo();
+    repo.seed({ ...runningJob, postRun: { acceptance: 'running', workflowStep: 'branch-review' } });
+    const { processor } = makeProcessor(repo);
+    await processor.process('r1', snapshot(runningJob.id, runningJob.leaseEpoch, { acceptance: 'passed', workflowStep: 'publish' }), NOW);
+    expect((await repo.lockById('job-1'))?.postRun).toEqual({ acceptance: 'passed', workflowStep: 'publish' });
+  });
+});
+
 describe('JobReportProcessor config job end (fleet S3 D476: UPLOADING with no bundle)', () => {
   it('applies snapshot(configResult) -> UPLOADING -> COMPLETED in one report with no bundle and no ingest', async () => {
     const repo = makeRepo();
