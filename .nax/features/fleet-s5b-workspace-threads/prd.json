@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-workspace-threads",
   "branchName": "feat/fleet-s5b-workspace-threads",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "updatedAt": "2026-10-16T17:41:20.752Z",
+  "updatedAt": "2026-10-16T17:52:22.300Z",
   "userStories": [
     {
       "id": "US-001",
@@ -557,8 +557,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -570,7 +570,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "apps/runner/src/supervisor/assign-parser.ts",
@@ -595,6 +597,7 @@
       "priorErrors": [],
       "priorFailures": [],
       "storyPoints": 1,
+      "storyGitRef": "bd4930e7c58af715a311bd00d4f029a3c344f8a8",
       "outOfScope": [
         "All API changes (US-001 to US-006)."
       ]
