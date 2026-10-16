@@ -25,6 +25,7 @@ function make() {
   const svc = new BundleIngestService(
     repo as never, store as never, jobs as never, live as never, { record: vi.fn() } as never, { signal: vi.fn() } as never,
     { run: (fn: () => unknown) => fn() } as never, ticketEffects as never, { onIngestCorrection: vi.fn() } as never,
+    { enqueueOutcomes: vi.fn() } as never,
   );
   return { svc, ticketEffects, repo };
 }

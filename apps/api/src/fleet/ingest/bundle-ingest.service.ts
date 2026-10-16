@@ -14,6 +14,7 @@ import {
 import { computeCorrection } from './ingest-corrections';
 import { parseBundle } from './parse-bundle';
 import { FleetJobOutcomeRecorder } from '../jobs/job-outcome.recorder';
+import { KnowledgeIndexQueue } from '../knowledge/knowledge-index.queue';
 
 const SECRETISH = /(token|secret|password|key)=\S+/gi;
 const trimError = (error: unknown): string =>
@@ -35,6 +36,8 @@ export class BundleIngestService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly ticketEffects: FleetJobTicketEffects,
     private readonly outcomes: FleetJobOutcomeRecorder,
+    /** S5b 3c-2-D8 (US-004): the outcome index queue; the ingest is its only trigger. */
+    private readonly knowledge: KnowledgeIndexQueue,
   ) {}
 
   /** D369: off the request path; never throws. */
@@ -105,6 +108,10 @@ export class BundleIngestService {
     this.live.publish([result.event]);
     if (result.spendKeys.length > 0) this.budgets.signal(result.spendKeys);
     if (result.prFilled) void this.ticketEffects.upsertPrLinks(claim.jobId); // C9 §3.3: late PR URL; never throws
+    // S5b 3c-2-D8: the outcome pass runs after the commit, never inside it, once per ingest and only for a
+    // RUN job: a PLAN or CONFIG_EDIT job stores no outcome rows, and a RUN ingest without outcome rows
+    // retires the epoch before it.
+    if (result.isRun) this.knowledge.enqueueOutcomes(claim.jobId);
   }
 
   private async recordFailure(claim: IngestClaim, error: unknown, now: Date): Promise<void> {

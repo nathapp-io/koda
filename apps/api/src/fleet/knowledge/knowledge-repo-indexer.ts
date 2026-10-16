@@ -8,12 +8,30 @@ import { KnowledgeChunkStore } from './knowledge-chunk-store';
 import { selectIndexableEntries } from './knowledge-allowlist';
 import { knowledgePatternsKey } from './knowledge-patterns';
 import { chunkMarkdown } from './markdown-chunker';
-import { KNOWLEDGE_INDEX_REPOSITORY, IKnowledgeIndexRepository, KnowledgeFileState, KnowledgeFinishResult, KnowledgeRepoRef } from './knowledge-index.domain';
+import { chunkDecisions } from './decisions-chunker';
+import {
+  KNOWLEDGE_INDEX_REPOSITORY, IKnowledgeIndexRepository, KnowledgeFileState, KnowledgeFinishResult, KnowledgeRepoRef, KnowledgeRunOutcomeJob, KnowledgeRunOutcomes,
+} from './knowledge-index.domain';
 
 export interface IndexPassResult {
   status: 'indexed' | 'unchanged' | 'skipped' | 'failed' | 'busy';
   reason?: string;
 }
+
+/** S5b 3c-2-D7: what an outcome pass did. A pass records no state, so the reason travels in the result. */
+export interface OutcomePassResult {
+  status: 'indexed' | 'skipped' | 'failed';
+  reason?: string;
+}
+
+/** S5b 3c-2-D6: the LanceDB `source` of an outcome chunk, and the id namespace of its rows. */
+export const OUTCOME_SOURCE = 'outcome';
+
+/** S5b 3c-2-D6: the two outcome files of a job, in the order a pass writes them. */
+const OUTCOME_FILES = [
+  { kind: 'report', path: 'feature-report.md' },
+  { kind: 'decisions', path: 'decisions.jsonl' },
+] as const;
 
 export const KNOWLEDGE_INDEX_CLOCK = Symbol('KNOWLEDGE_INDEX_CLOCK');
 const LEASE_MS = 900_000;
@@ -138,6 +156,65 @@ export class KnowledgeRepoIndexer {
   }
 
   private sourceId(repoId: string, path: string): string { return `repo:${repoId}:${path}`; }
+
+  /**
+   * S5b 3c-2-D7: projects one job's latest ingested run outcomes into the project's knowledge table.
+   *
+   * No lease and no `KnowledgeRepoIndex`/`KnowledgeRepoFile` state: outcome passes are logged, not recorded
+   * (a repeated pass is idempotent through `replaceFile`'s delete-by-`source_id`). Each of the two files is
+   * embedded and written on its own, one after the other, because they share one embedding server.
+   */
+  async indexOutcomes(jobId: string, now = new Date()): Promise<OutcomePassResult> {
+    try {
+      const found = await this.state.findRunOutcomes(jobId);
+      if (!found) return { status: 'skipped', reason: 'unknown job' };
+      for (const { kind, path } of OUTCOME_FILES) await this.outcomeFile(found, kind, path, now);
+      await this.rag.optimizeTable(found.job.projectId);
+      return { status: 'indexed' };
+    } catch (error) {
+      return { status: 'failed', reason: (error instanceof Error ? error.message : String(error)).slice(0, 500) };
+    }
+  }
+
+  /** One outcome file: its rows replaced, or its earlier rows deleted when this epoch has no such outcome. */
+  private async outcomeFile(found: KnowledgeRunOutcomes, kind: typeof OUTCOME_FILES[number]['kind'], path: string, now: Date): Promise<void> {
+    const { job } = found;
+    const sourceId = `outcome:${job.repoId}:${job.id}:${kind}`;
+    const outcome = found.outcomes.find(row => row.kind === kind);
+    const chunks = outcome === undefined ? []
+      : kind === 'decisions' ? chunkDecisions(outcome.content) : chunkMarkdown({ path, text: outcome.content });
+    if (chunks.length === 0) {
+      // A later ingest without this file retires the earlier epoch's rows of this kind.
+      await this.store.deleteFile(job.projectId, sourceId);
+      return;
+    }
+    const contents = chunks.map(chunk => this.outcomeContent(job, path, chunk));
+    const vectors = await this.embedAll(contents, this.clock());
+    const unembeddedCount = vectors.filter(vector => vector === null).length;
+    if (unembeddedCount > 0) {
+      // Do not log provider errors: they may contain credentials or arbitrary remote response bodies.
+      this.logger.warn(`Knowledge outcome embedding failed for ${unembeddedCount} of ${chunks.length} chunks (job ${job.id}); storing unembedded chunks`);
+    }
+    await this.store.replaceFile(job.projectId, sourceId, chunks.map((chunk, index) => {
+      const vector = vectors[index];
+      return {
+        id: `${sourceId}#${chunk.chunkIndex}`, source: OUTCOME_SOURCE, source_id: sourceId, content: contents[index],
+        vector: vector ?? Array(this.embeddings.dimensions).fill(0),
+        metadata: JSON.stringify({
+          repoId: job.repoId, owner: job.owner, name: job.name, path, sha: job.resultSha ?? '', blobSha: '',
+          jobId: job.id, feature: job.feature, outcomeKind: kind, title: chunk.title, headingPath: chunk.headingPath,
+          anchor: chunk.anchor, chunkIndex: chunk.chunkIndex, chunkCount: chunks.length, abstract: chunk.abstract, text: chunk.text,
+        }),
+        created_at: now.toISOString(), provider: vector === null ? 'none' : this.embeddings.providerName,
+        model: vector === null ? '' : this.embeddings.modelName,
+      };
+    }));
+  }
+
+  /** The 3c-2-D6 context line: repo and job identity first, then the outcome file and its heading path. */
+  private outcomeContent(job: KnowledgeRunOutcomeJob, path: string, chunk: { headingPath: string; abstract: string; text: string }): string {
+    return `${job.owner}/${job.name} · run ${job.id} · ${job.feature} · ${path}${chunk.headingPath ? ` · ${chunk.headingPath}` : ''}\n${chunk.abstract}\n\n${chunk.text}`;
+  }
 
   private async rows(repo: KnowledgeRepoRef, path: string, blobSha: string, sha: string, text: string, now: Date): Promise<{ rows: LanceRecord[]; unembeddedCount: number }> {
     const startedAt = this.clock();

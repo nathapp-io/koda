@@ -1,15 +1,20 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { KnowledgeRepoFile as FileRow, KnowledgeRepoIndex as IndexRow, Prisma, PrismaClient } from '../../generated/prisma/client';
+import type { RunOutcomeRow } from '../ingest/domain/bundle-ingest.domain';
 import { PROJECT_CODE_LIMITS } from '../common/thread-jobs';
 import { MAX_KNOWLEDGE_FILES } from './knowledge-allowlist';
 import {
-  IKnowledgeIndexRepository, KnowledgeFileState, KnowledgeFinishResult, KnowledgeIndexState, KnowledgeIndexStatus, KnowledgeRepoRef,
+  IKnowledgeIndexRepository, KnowledgeFileState, KnowledgeFinishResult, KnowledgeIndexState, KnowledgeIndexStatus, KnowledgeRepoRef, KnowledgeRunOutcomes,
 } from './knowledge-index.domain';
 
 export { KNOWLEDGE_INDEX_REPOSITORY } from './knowledge-index.domain';
 
 const MAX_GITHUB_REPOS = 500;
+/** S5b 3c-2-D4: an ingest that succeeded — only those retire the outcomes of an earlier attempt. */
+const INGESTED_STATUSES = ['done', 'partial'] as const;
+/** S5b 3c-2-D6: the outcome files, in the order a pass writes them. */
+const OUTCOME_KINDS = ['report', 'decisions'] as const;
 const REPO_SELECT = { id: true, projectId: true, provider: true, owner: true, name: true, defaultBranch: true, githubInstallationId: true } as const;
 
 const toRepo = (r: { id: string; projectId: string; provider: string; owner: string; name: string; defaultBranch: string; githubInstallationId: bigint | null }): KnowledgeRepoRef => ({
@@ -169,5 +174,47 @@ export class PrismaKnowledgeIndexRepository implements IKnowledgeIndexRepository
       create: { projectId, patterns },
       update: { patterns },
     });
+  }
+
+  /**
+   * S5b 3c-2-D4: reads the fleet tables directly — a recorded exception to the cross-module rule, because
+   * `KnowledgeModule` cannot import `FleetJobsModule` (jobs imports tickets, and tickets imports this module).
+   * Read-only, bounded and module-private, like the `FleetRepo` read of `findProjectRepos`.
+   *
+   * The epoch is the highest `leaseEpoch` a *successful* ingest wrote (`done` or `partial`): a failed ingest
+   * never retires the outcomes of the attempt before it. The rows come back `report` first, the order the
+   * bundle writes them and the outcome pass consumes them.
+   */
+  async findRunOutcomes(jobId: string): Promise<KnowledgeRunOutcomes | null> {
+    const job = await this.db.fleetJob.findUnique({
+      where: { id: jobId },
+      select: {
+        id: true, projectId: true, repoId: true, feature: true, resultSha: true,
+        repo: { select: { owner: true, name: true } },
+      },
+    });
+    if (!job) return null;
+    const latest = await this.db.fleetBundleIngest.findFirst({
+      where: { jobId, status: { in: [...INGESTED_STATUSES] } },
+      orderBy: { leaseEpoch: 'desc' },
+      take: 1,
+      select: { leaseEpoch: true },
+    });
+    const rows = latest === null ? [] : await this.db.fleetRunOutcome.findMany({
+      where: { jobId, leaseEpoch: latest.leaseEpoch },
+      orderBy: { kind: 'asc' },
+      // `@@unique([jobId, leaseEpoch, kind])` holds at most the two known kinds.
+      take: 2,
+      select: { kind: true, content: true },
+    });
+    return {
+      job: {
+        id: job.id, projectId: job.projectId, repoId: job.repoId, feature: job.feature,
+        owner: job.repo.owner, name: job.repo.name, resultSha: job.resultSha,
+      },
+      outcomes: OUTCOME_KINDS
+        .map(kind => rows.find(row => row.kind === kind))
+        .filter((row): row is RunOutcomeRow => row !== undefined),
+    };
   }
 }

@@ -10,7 +10,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { Index } from '@lancedb/lancedb';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '../../../src/generated/prisma/client';
+import { PrismaClient, Prisma } from '../../../src/generated/prisma/client';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 import type { IRagConfig } from '../../../src/config/rag.config';
 import { LanceRecord, LanceTableManager } from '../../../src/rag/lance-table-manager';
@@ -426,5 +426,94 @@ describePg('PrismaKnowledgeIndexRepository (PG)', () => {
     await prisma.client.project.delete({ where: { id: projectId } });
 
     expect(await prisma.client.knowledgeProjectPatterns.count({ where: { projectId } })).toBe(0);
+  });
+});
+
+/**
+ * Fleet S5b US-004 (3c-2-D4): the outcome read the indexing pass projects. Same PG harness as above; the
+ * epoch selection is what has to be real here, so every case seeds `FleetBundleIngest` and
+ * `FleetRunOutcome` rows rather than faking the client.
+ */
+describePg('PrismaKnowledgeIndexRepository.findRunOutcomes (PG)', () => {
+  let prisma: PrismaService<PrismaClient>;
+  let repo: PrismaKnowledgeIndexRepository;
+
+  beforeAll(async () => {
+    await resetDb();
+    prisma = new PrismaService({ client: PrismaClient, clientOptions: { adapter: createPgAdapter(process.env.DATABASE_URL) } });
+    await prisma.onModuleInit();
+    repo = new PrismaKnowledgeIndexRepository(prisma);
+  });
+
+  afterAll(async () => {
+    await prisma.onModuleDestroy();
+  });
+
+  /** A COMPLETED RUN job of its own project/repo with one artifact, ingest row and outcomes per epoch. */
+  const seedRunJob = async (
+    epochs: Array<{ epoch: number; status: string; outcomes?: Array<{ kind: string; content: string }> }>,
+  ): Promise<{ jobId: string; projectId: string; repoId: string; owner: string; name: string }> => {
+    const { projectId, repoId, adminId } = await seedFleetBase(prisma.client);
+    const { owner, name } = await prisma.client.fleetRepo.findUniqueOrThrow({ where: { id: repoId } });
+    const job = await prisma.client.fleetJob.create({
+      data: {
+        projectId, repoId, ref: 'main', command: 'RUN', feature: 'f', profiles: [], selectorLabels: [],
+        maxCostUsd: new Prisma.Decimal(1), requestedById: adminId, state: 'COMPLETED', resultSha: 'abc1234',
+      },
+    });
+    for (const { epoch, status, outcomes = [] } of epochs) {
+      const artifact = await prisma.client.fleetJobArtifact.create({
+        data: { jobId: job.id, leaseEpoch: epoch, kind: 'bundle', storageKey: `jobs/${job.id}/${epoch}/a.tar.gz`, sizeBytes: BigInt(1), sha256: 'a'.repeat(64) },
+      });
+      await prisma.client.fleetBundleIngest.create({
+        data: { artifactId: artifact.id, jobId: job.id, leaseEpoch: epoch, status, parserVersion: 3, ingestedAt: new Date('2026-10-20T10:00:00.000Z') },
+      });
+      if (outcomes.length > 0) {
+        await prisma.client.fleetRunOutcome.createMany({
+          data: outcomes.map((o) => ({ jobId: job.id, leaseEpoch: epoch, projectId, repoId, kind: o.kind, content: o.content })),
+        });
+      }
+    }
+    return { jobId: job.id, projectId, repoId, owner, name };
+  };
+
+  it('AC-14: answers the highest ingested epoch only, with the repository owner and name', async () => {
+    const seeded = await seedRunJob([
+      { epoch: 1, status: 'done', outcomes: [{ kind: 'report', content: '# run 1' }] },
+      { epoch: 2, status: 'partial', outcomes: [{ kind: 'report', content: '# run 2' }, { kind: 'decisions', content: '{"id":"D-1"}' }] },
+    ]);
+
+    const found = await repo.findRunOutcomes(seeded.jobId);
+
+    expect(found?.job).toEqual({
+      id: seeded.jobId, projectId: seeded.projectId, repoId: seeded.repoId,
+      owner: seeded.owner, name: seeded.name, feature: 'f', resultSha: 'abc1234',
+    });
+    expect(found?.outcomes).toEqual([{ kind: 'report', content: '# run 2' }, { kind: 'decisions', content: '{"id":"D-1"}' }]);
+  });
+
+  it('AC-15: a newer ingest without an outcome row retires the earlier epoch', async () => {
+    const seeded = await seedRunJob([
+      { epoch: 1, status: 'done', outcomes: [{ kind: 'report', content: '# run 1' }] },
+      { epoch: 2, status: 'done' },
+    ]);
+
+    expect((await repo.findRunOutcomes(seeded.jobId))?.outcomes).toEqual([]);
+  });
+
+  it('a failed ingest never retires the outcomes of the attempt before it', async () => {
+    const seeded = await seedRunJob([
+      { epoch: 1, status: 'done', outcomes: [{ kind: 'report', content: '# run 1' }] },
+      { epoch: 2, status: 'failed' },
+    ]);
+
+    expect((await repo.findRunOutcomes(seeded.jobId))?.outcomes).toEqual([{ kind: 'report', content: '# run 1' }]);
+  });
+
+  it('answers an empty list for a job whose only ingest never succeeded, and null for an unknown job', async () => {
+    const seeded = await seedRunJob([{ epoch: 1, status: 'pending' }]);
+
+    expect((await repo.findRunOutcomes(seeded.jobId))?.outcomes).toEqual([]);
+    expect(await repo.findRunOutcomes('missing')).toBeNull();
   });
 });

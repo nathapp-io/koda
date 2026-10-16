@@ -3,6 +3,8 @@ import { Readable } from 'stream';
 import { BundleIngestService } from './bundle-ingest.service';
 import { computeCorrection } from './ingest-corrections';
 import { parseBundle } from './parse-bundle';
+import { KnowledgeIndexQueue } from '../knowledge/knowledge-index.queue';
+import { testFleetConfig } from '../../common/test-helpers/fleet-config';
 
 vi.mock('./bundle-reader', () => ({ readBundleFiles: vi.fn(async () => ({})) }));
 vi.mock('./parse-bundle', () => ({
@@ -27,7 +29,7 @@ function make(updated: Record<string, unknown>) {
   const svc = new BundleIngestService(
     repo as never, store as never, jobs as never, live as never, { record: vi.fn() } as never, { signal: vi.fn() } as never,
     { run: async (fn: () => unknown) => { order.push('tx:start'); const r = await fn(); order.push('tx:end'); return r; } } as never,
-    { upsertPrLinks: vi.fn().mockResolvedValue(undefined) } as never, outcomes as never,
+    { upsertPrLinks: vi.fn().mockResolvedValue(undefined) } as never, outcomes as never, { enqueueOutcomes: vi.fn() } as never,
   );
   return { svc, outcomes, repo, order };
 }
@@ -66,7 +68,7 @@ const parsedWithReport = {
 };
 const noCorrection = { patch: {}, costRaised: false, escalated: false, escalatedFrom: null, liveCostUsd: null };
 
-function makeForCommand(command: string) {
+function makeForCommand(command: string, knowledge = { enqueueOutcomes: vi.fn() }) {
   const job = {
     id: 'j1', leaseEpoch: 1, naxRunId: 'run-1', projectId: 'p', repoId: 'r', runnerId: 'rn', state: 'COMPLETED',
     command, requestedById: 'u', resultPrUrl: null, costSpentUsd: '0', stateReason: 'done', finishResult: null,
@@ -79,12 +81,17 @@ function makeForCommand(command: string) {
   };
   const store = { get: vi.fn(async () => Readable.from([])) };
   const jobs = { lockById: vi.fn(async () => job), update: vi.fn(async () => job), appendEvent: vi.fn() };
+  // Records the transaction boundaries so a test can prove the post-commit hook fired after the commit.
+  const order: string[] = [];
+  const txManager = {
+    run: async (fn: () => unknown) => { order.push('tx:start'); try { return await fn(); } finally { order.push('tx:end'); } },
+  };
   const svc = new BundleIngestService(
     repo as never, store as never, jobs as never, { event: vi.fn(() => ({})), publish: vi.fn() } as never,
-    { record: vi.fn() } as never, { signal: vi.fn() } as never, { run: (fn: () => unknown) => fn() } as never,
-    { upsertPrLinks: vi.fn() } as never, { onIngestCorrection: vi.fn() } as never,
+    { record: vi.fn() } as never, { signal: vi.fn() } as never, txManager as never,
+    { upsertPrLinks: vi.fn() } as never, { onIngestCorrection: vi.fn() } as never, knowledge as never,
   );
-  return { svc, repo };
+  return { svc, repo, knowledge, order };
 }
 
 describe('BundleIngestService run outcomes (S5b US-001 AC-10/AC-11)', () => {
@@ -106,5 +113,77 @@ describe('BundleIngestService run outcomes (S5b US-001 AC-10/AC-11)', () => {
     const { svc, repo } = makeForCommand('PLAN');
     await svc.ingestOne(now);
     expect(repo.replaceRows).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ outcomes: [] }));
+  });
+});
+
+/**
+ * S5b US-004 (3c-2-D8): the ingest is the outcome pass's only trigger. It fires once per ingest, after the
+ * transaction committed, and only for a RUN job — a rolled-back ingest queues nothing.
+ */
+describe('BundleIngestService outcome index trigger (S5b US-004)', () => {
+  it('AC-8: enqueues one outcome pass for a claimed RUN job, after the transaction resolved', async () => {
+    (parseBundle as Mock).mockReturnValueOnce(parsedWithReport);
+    (computeCorrection as Mock).mockReturnValueOnce(noCorrection);
+    const { svc, knowledge, order } = makeForCommand('RUN');
+    knowledge.enqueueOutcomes.mockImplementation((jobId: string) => { order.push(`enqueue:${jobId}`); });
+
+    await svc.ingestOne(now);
+
+    expect(knowledge.enqueueOutcomes).toHaveBeenCalledExactlyOnceWith('j1');
+    expect(order).toEqual(['tx:start', 'tx:end', 'enqueue:j1']);
+  });
+
+  it('AC-8: never enqueues for a claimed PLAN job', async () => {
+    (parseBundle as Mock).mockReturnValueOnce(parsedWithReport);
+    (computeCorrection as Mock).mockReturnValueOnce(noCorrection);
+    const { svc, knowledge } = makeForCommand('PLAN');
+
+    await svc.ingestOne(now);
+
+    expect(knowledge.enqueueOutcomes).not.toHaveBeenCalled();
+  });
+
+  it('AC-9: a failing write never enqueues an outcome pass', async () => {
+    (parseBundle as Mock).mockReturnValueOnce(parsedWithReport);
+    (computeCorrection as Mock).mockReturnValueOnce(noCorrection);
+    const { svc, repo, knowledge } = makeForCommand('RUN');
+    repo.replaceRows.mockRejectedValue(new Error('boom'));
+
+    await svc.ingestOne(now);
+
+    expect(repo.markRetry).toHaveBeenCalled();
+    expect(knowledge.enqueueOutcomes).not.toHaveBeenCalled();
+  });
+
+  it('AC-10: ingest through the real queue reaches indexOutcomes and never indexRepo', async () => {
+    (parseBundle as Mock).mockReturnValueOnce(parsedWithReport);
+    (computeCorrection as Mock).mockReturnValueOnce(noCorrection);
+    const indexer = {
+      indexRepo: vi.fn(async () => ({ status: 'indexed' })),
+      indexOutcomes: vi.fn(async () => ({ status: 'indexed' })),
+    };
+    const queue = new KnowledgeIndexQueue(indexer as never, testFleetConfig({ knowledgeIndexEnabled: true }));
+    const { svc } = makeForCommand('RUN', queue as never);
+
+    await svc.ingestOne(now);
+
+    await vi.waitFor(() => expect(indexer.indexOutcomes).toHaveBeenCalledExactlyOnceWith('j1'));
+    expect(indexer.indexRepo).not.toHaveBeenCalled();
+  });
+
+  it('AC-10: the real queue is a no-op for ingest while indexing is off', async () => {
+    (parseBundle as Mock).mockReturnValueOnce(parsedWithReport);
+    (computeCorrection as Mock).mockReturnValueOnce(noCorrection);
+    const indexer = {
+      indexRepo: vi.fn(async () => ({ status: 'indexed' })),
+      indexOutcomes: vi.fn(async () => ({ status: 'indexed' })),
+    };
+    const queue = new KnowledgeIndexQueue(indexer as never, testFleetConfig({ knowledgeIndexEnabled: false }));
+    const { svc } = makeForCommand('RUN', queue as never);
+
+    await svc.ingestOne(now);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(indexer.indexOutcomes).not.toHaveBeenCalled();
   });
 });

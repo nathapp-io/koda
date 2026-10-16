@@ -45,6 +45,10 @@ export interface KnowledgeChunkMetadata {
   text: string;
   status?: string;
   supersededBy?: string;
+  /** S5b 3c-2-D6: outcome rows only — the job they came from, its feature and which outcome file they are. */
+  jobId?: string;
+  feature?: string;
+  outcomeKind?: string;
 }
 
 export interface KnowledgeChunkRow extends KnowledgeChunkMetadata {

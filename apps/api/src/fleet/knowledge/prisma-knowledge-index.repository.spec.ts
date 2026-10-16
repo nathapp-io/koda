@@ -220,3 +220,76 @@ describe('PrismaKnowledgeIndexRepository project patterns (US-002)', () => {
     expect(await repo.listStates('p1')).toEqual([expect.objectContaining({ patternsKey: null })]);
   });
 });
+
+/**
+ * Fleet S5b US-004/AC-14/AC-15 — the read the outcome pass projects. The Prisma client is faked here so the
+ * epoch selection and the row mapping run without a database; the PG round-trip (constraints, `take`, the
+ * real `orderBy`) lives in test/integration/fleet/knowledge-store.integration.spec.ts.
+ */
+describe('PrismaKnowledgeIndexRepository.findRunOutcomes (S5b US-004)', () => {
+  const JOB_ROW = {
+    id: 'j1', projectId: 'p1', repoId: 'r1', feature: 'f', resultSha: 'abc1234',
+    repo: { owner: 'o', name: 'n' },
+  };
+  type Row = { kind: string; content: string };
+
+  /** The three delegates the read touches: the job, its newest successful ingest, and that epoch's rows. */
+  function build(over: { job?: unknown; latest?: unknown; rows?: Row[] } = {}) {
+    const findUnique = vi.fn(async () => (over.job === undefined ? JOB_ROW : over.job));
+    const findFirst = vi.fn(async () => (over.latest === undefined ? { leaseEpoch: 2 } : over.latest));
+    const findMany = vi.fn(async () => over.rows ?? [{ kind: 'report', content: '# R' }, { kind: 'decisions', content: '{"id":"D-1"}' }]);
+    const repo = new PrismaKnowledgeIndexRepository({
+      client: { fleetJob: { findUnique }, fleetBundleIngest: { findFirst }, fleetRunOutcome: { findMany } },
+    } as unknown as PrismaService<PrismaClient>);
+    return { repo, findUnique, findFirst, findMany };
+  }
+
+  it('AC-14: reads the highest successfully ingested epoch and its rows, report first', async () => {
+    const { repo, findFirst, findMany } = build({ rows: [{ kind: 'decisions', content: '{"id":"D-1"}' }, { kind: 'report', content: '# R' }] });
+
+    const found = await repo.findRunOutcomes('j1');
+
+    expect(found?.job).toEqual({ id: 'j1', projectId: 'p1', repoId: 'r1', feature: 'f', resultSha: 'abc1234', owner: 'o', name: 'n' });
+    expect(found?.outcomes).toEqual([{ kind: 'report', content: '# R' }, { kind: 'decisions', content: '{"id":"D-1"}' }]);
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { jobId: 'j1', status: { in: ['done', 'partial'] } }, orderBy: { leaseEpoch: 'desc' }, take: 1, select: { leaseEpoch: true },
+    });
+    expect(findMany).toHaveBeenCalledWith({
+      where: { jobId: 'j1', leaseEpoch: 2 }, orderBy: { kind: 'asc' }, take: 2, select: { kind: true, content: true },
+    });
+  });
+
+  it('AC-15: answers an empty outcome list when the latest epoch carries no outcome row', async () => {
+    const { repo, findMany } = build({ rows: [] });
+
+    expect((await repo.findRunOutcomes('j1'))?.outcomes).toEqual([]);
+    expect(findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers empty without reading outcome rows when the job never ingested successfully', async () => {
+    const { repo, findMany } = build({ latest: null });
+
+    expect((await repo.findRunOutcomes('j1'))?.outcomes).toEqual([]);
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it('answers null for an unknown job and reads no ingest or outcome row', async () => {
+    const { repo, findFirst, findMany } = build({ job: null });
+
+    expect(await repo.findRunOutcomes('missing')).toBeNull();
+    expect(findFirst).not.toHaveBeenCalled();
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it('drops a row whose kind is neither outcome file', async () => {
+    const { repo } = build({ rows: [{ kind: 'other', content: 'x' }, { kind: 'report', content: '# R' }] });
+
+    expect((await repo.findRunOutcomes('j1'))?.outcomes).toEqual([{ kind: 'report', content: '# R' }]);
+  });
+
+  it('reports a null resultSha as null, not as an empty string', async () => {
+    const { repo } = build({ job: { ...JOB_ROW, resultSha: null } });
+
+    expect((await repo.findRunOutcomes('j1'))?.job.resultSha).toBeNull();
+  });
+});

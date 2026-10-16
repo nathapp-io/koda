@@ -1,5 +1,7 @@
 /** Fleet S5b knowledge index (1c-c-D2/D3): domain types and the module-private repository contract. */
 
+import type { RunOutcomeRow } from '../ingest/domain/bundle-ingest.domain';
+
 export const KNOWLEDGE_INDEX_REPOSITORY = Symbol('KNOWLEDGE_INDEX_REPOSITORY');
 
 export type KnowledgeIndexStatus = 'idle' | 'running' | 'failed' | 'skipped';
@@ -62,6 +64,26 @@ export interface KnowledgeProjectState {
   state: KnowledgeIndexState | null;
 }
 
+/** S5b 3c-2-D4: the job whose outcomes a pass projects, with the repository it ran in. */
+export interface KnowledgeRunOutcomeJob {
+  id: string;
+  projectId: string;
+  repoId: string;
+  owner: string;
+  name: string;
+  feature: string;
+  resultSha: string | null;
+}
+
+/**
+ * S5b 3c-2-D4: one job's latest ingested run outcomes, `report` first. `outcomes` is empty when that
+ * epoch carried none, so a newer bundle without a report retires the older epoch's outcomes.
+ */
+export interface KnowledgeRunOutcomes {
+  job: KnowledgeRunOutcomeJob;
+  outcomes: RunOutcomeRow[];
+}
+
 export interface IKnowledgeIndexRepository {
   findRepo(repoId: string): Promise<KnowledgeRepoRef | null>;
   findProjectRepos(projectId: string): Promise<KnowledgeRepoRef[]>;
@@ -79,4 +101,9 @@ export interface IKnowledgeIndexRepository {
   findProjectPatterns(projectId: string): Promise<string[] | null>;
   /** US-002: null deletes the row (the project falls back to the default corpus). */
   saveProjectPatterns(projectId: string, patterns: string[] | null): Promise<void>;
+  /**
+   * S5b 3c-2-D4: the job's latest ingested run outcomes. The epoch is the highest `leaseEpoch` among the
+   * job's `FleetBundleIngest` rows whose status is `done` or `partial`; null for an unknown job.
+   */
+  findRunOutcomes(jobId: string): Promise<KnowledgeRunOutcomes | null>;
 }
