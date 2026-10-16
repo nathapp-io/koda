@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { IVcsRepository, VCS_REPOSITORY } from '../../vcs/domain/vcs.repository';
 import { mapPrState } from '../../vcs/pr-state';
@@ -10,7 +11,7 @@ import { GitLabTokenSource } from '../git-broker/gitlab-token.source';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { PrismaFleetTicketsRepository } from './prisma-fleet-tickets.repository';
 import type { RefreshableLink, RefreshRepo } from './prisma-fleet-tickets.repository';
-import { KnowledgeIndexQueue } from '../knowledge/knowledge-index.queue';
+import { KNOWLEDGE_REPO_MERGED, type KnowledgeRepoMergedEvent } from '../common/knowledge-events';
 
 export interface RefreshSummary {
   skipped: boolean;
@@ -45,7 +46,7 @@ export class FleetPrStateRefresher implements OnModuleInit, OnModuleDestroy {
     @Inject(VCS_REPOSITORY) private readonly vcsRepo: Pick<IVcsRepository, 'updateTicketLinkWithPrState'>,
     private readonly prSync: VcsPrSyncService,
     @Inject(FLEET_CFG) private readonly config: Pick<IFleetConfig, 'sweepEnabled' | 'prRefreshMs'>,
-    private readonly knowledge: KnowledgeIndexQueue,
+    private readonly events: EventEmitter2,
   ) {}
 
   onModuleInit(): void {
@@ -121,8 +122,8 @@ export class FleetPrStateRefresher implements OnModuleInit, OnModuleDestroy {
   /**
    * True when this pass changed the link. A deleted PR (null) becomes closed, like the VCS poll's 404.
    * A merge that was actually applied is the S5b freshness hook: the repository's docs just changed, so the
-   * index pass is queued (1c-c-D11). An unchanged link returns above and a link already `merged` is no longer
-   * refreshable, so one merge enqueues once.
+   * index pass is requested with `KNOWLEDGE_REPO_MERGED` (1c-c-D11). An unchanged link returns above and a
+   * link already `merged` is no longer refreshable, so one merge emits once.
    */
   private async apply(link: RefreshableLink, pr: VcsPrStatus | null): Promise<boolean> {
     const next = pr === null ? 'closed' : mapPrState(pr);
@@ -132,7 +133,7 @@ export class FleetPrStateRefresher implements OnModuleInit, OnModuleDestroy {
       ? await this.prSync.applyMergedPr(link, pr)
       : await this.vcsRepo.updateTicketLinkWithPrState(link.id, next);
     if (outcome !== 'updated') return false;
-    if (merged) this.knowledge.enqueue(link.repo.id, 'merge');
+    if (merged) this.events.emit(KNOWLEDGE_REPO_MERGED, { repoId: link.repo.id } satisfies KnowledgeRepoMergedEvent);
     return true;
   }
 }

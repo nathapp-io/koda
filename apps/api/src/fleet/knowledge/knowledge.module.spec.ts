@@ -40,14 +40,14 @@ describe('KnowledgeModule', () => {
     expect(Reflect.getMetadata('exports', KnowledgeModule)).not.toContain(KnowledgeRepoIndexer);
   });
 
-  it('resolves the queue and the poller, and exports the queue for the merge hook (US-005)', () => {
+  it('resolves the queue and the poller, both module-private (the triggers reach the queue by event)', () => {
     expect(module.get(KnowledgeIndexQueue)).toBeInstanceOf(KnowledgeIndexQueue);
     expect(module.get(KnowledgePoller)).toBeInstanceOf(KnowledgePoller);
     expect(Reflect.getMetadata('exports', KnowledgeModule)).not.toContain(KnowledgePoller);
   });
 
-  it('exports the services and the queue only', () => {
+  it('exports the two services only', () => {
     const exportsOf = Reflect.getMetadata('exports', KnowledgeModule) as unknown[];
-    expect(exportsOf).toEqual([KnowledgeIndexService, KnowledgeSearchService, KnowledgeIndexQueue]);
+    expect(exportsOf).toEqual([KnowledgeIndexService, KnowledgeSearchService]);
   });
 });

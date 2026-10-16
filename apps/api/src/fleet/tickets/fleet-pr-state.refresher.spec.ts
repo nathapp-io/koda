@@ -1,4 +1,5 @@
 import type { Mock } from 'vitest';
+import { KNOWLEDGE_REPO_MERGED } from '../common/knowledge-events';
 import { FleetPrStateRefresher } from './fleet-pr-state.refresher';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { testFleetConfig } from '../../common/test-helpers/fleet-config';
@@ -20,7 +21,7 @@ describe('FleetPrStateRefresher (C9 §3.4, D456)', () => {
   let gitlabTokens: { resolve: Mock };
   let vcsRepo: { updateTicketLinkWithPrState: Mock };
   let prSync: { applyMergedPr: Mock };
-  let knowledge: { enqueue: Mock };
+  let events: { emit: Mock };
   let refresher: FleetPrStateRefresher;
 
   beforeEach(() => {
@@ -30,10 +31,10 @@ describe('FleetPrStateRefresher (C9 §3.4, D456)', () => {
     gitlabTokens = { resolve: vi.fn().mockResolvedValue('glpat') };
     vcsRepo = { updateTicketLinkWithPrState: vi.fn().mockResolvedValue('updated') };
     prSync = { applyMergedPr: vi.fn().mockResolvedValue('updated') };
-    knowledge = { enqueue: vi.fn() };
+    events = { emit: vi.fn() };
     refresher = new FleetPrStateRefresher(
       repo as never, github as never, gitlab as never, gitlabTokens as never, vcsRepo as never, prSync as never,
-      testFleetConfig(), knowledge as never,
+      testFleetConfig(), events as never,
     );
   });
 
@@ -119,14 +120,14 @@ describe('FleetPrStateRefresher (C9 §3.4, D456)', () => {
     return l;
   };
 
-  it('AC-8: enqueues the repository once when a PR merge was applied', async () => {
+  it('AC-8: emits one repo-merged event when a PR merge was applied', async () => {
     merged();
 
     await refresher.refresh();
 
     expect(prSync.applyMergedPr).toHaveBeenCalledTimes(1);
-    expect(knowledge.enqueue).toHaveBeenCalledTimes(1);
-    expect(knowledge.enqueue).toHaveBeenCalledWith('r9', 'merge');
+    expect(events.emit).toHaveBeenCalledTimes(1);
+    expect(events.emit).toHaveBeenCalledWith(KNOWLEDGE_REPO_MERGED, { repoId: 'r9' });
   });
 
   it('AC-15: a merge keeps the pass summary and the shared merge write', async () => {
@@ -135,18 +136,18 @@ describe('FleetPrStateRefresher (C9 §3.4, D456)', () => {
     await expect(refresher.refresh()).resolves.toEqual({ skipped: false, checked: 1, changed: 1, failedRepos: 0 });
 
     expect(vcsRepo.updateTicketLinkWithPrState).not.toHaveBeenCalled();
-    expect(knowledge.enqueue).toHaveBeenCalledWith('r9', 'merge');
+    expect(events.emit).toHaveBeenCalledWith(KNOWLEDGE_REPO_MERGED, { repoId: 'r9' });
   });
 
-  it('AC-9: does not enqueue for a link that is already merged', async () => {
+  it('AC-9: does not emit for a link that is already merged', async () => {
     merged('merged');
 
     await expect(refresher.refresh()).resolves.toEqual({ skipped: false, checked: 1, changed: 0, failedRepos: 0 });
 
-    expect(knowledge.enqueue).not.toHaveBeenCalled();
+    expect(events.emit).not.toHaveBeenCalled();
   });
 
-  it('AC-10: does not enqueue for a PR that closed without merging', async () => {
+  it('AC-10: does not emit for a PR that closed without merging', async () => {
     const l = link('a', 1, { ...gh, id: 'r9' });
     repo.findRefreshableFleetLinks.mockResolvedValue([l]);
     github.getPullRequest.mockResolvedValue(pr({ state: 'closed' }));
@@ -154,15 +155,15 @@ describe('FleetPrStateRefresher (C9 §3.4, D456)', () => {
     await expect(refresher.refresh()).resolves.toEqual({ skipped: false, checked: 1, changed: 1, failedRepos: 0 });
 
     expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('a', 'closed');
-    expect(knowledge.enqueue).not.toHaveBeenCalled();
+    expect(events.emit).not.toHaveBeenCalled();
   });
 
-  it('does not enqueue when the merge step refused to update (a lost race)', async () => {
+  it('does not emit when the merge step refused to update (a lost race)', async () => {
     merged();
     prSync.applyMergedPr.mockResolvedValue(undefined);
 
     await refresher.refresh();
 
-    expect(knowledge.enqueue).not.toHaveBeenCalled();
+    expect(events.emit).not.toHaveBeenCalled();
   });
 });

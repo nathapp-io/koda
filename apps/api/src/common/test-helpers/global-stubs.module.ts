@@ -1,6 +1,7 @@
 import { vi } from 'vitest';
 import { Global, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { OutboxService } from '@nathapp/nestjs-outbox';
@@ -136,6 +137,8 @@ export const mockFleetConfig: IFleetConfig = testFleetConfig();
       load: [authConfig, vcsConfig, outboxConfig],
       envFilePath: ['.env.test'],
     }),
+    // AppModule registers it too: the knowledge trigger events (fleet/common/knowledge-events.ts).
+    EventEmitterModule.forRoot(),
   ],
   providers: [
     { provide: PrismaService, useValue: mockPrismaService },

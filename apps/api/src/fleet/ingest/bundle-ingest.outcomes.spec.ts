@@ -1,9 +1,12 @@
 import type { Mock } from 'vitest';
 import { Readable } from 'stream';
+import { Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BundleIngestService } from './bundle-ingest.service';
 import { computeCorrection } from './ingest-corrections';
 import { parseBundle } from './parse-bundle';
 import { KnowledgeIndexQueue } from '../knowledge/knowledge-index.queue';
+import { KNOWLEDGE_RUN_INGESTED, type KnowledgeRunIngestedEvent } from '../common/knowledge-events';
 import { testFleetConfig } from '../../common/test-helpers/fleet-config';
 
 vi.mock('./bundle-reader', () => ({ readBundleFiles: vi.fn(async () => ({})) }));
@@ -29,7 +32,7 @@ function make(updated: Record<string, unknown>) {
   const svc = new BundleIngestService(
     repo as never, store as never, jobs as never, live as never, { record: vi.fn() } as never, { signal: vi.fn() } as never,
     { run: async (fn: () => unknown) => { order.push('tx:start'); const r = await fn(); order.push('tx:end'); return r; } } as never,
-    { upsertPrLinks: vi.fn().mockResolvedValue(undefined) } as never, outcomes as never, { enqueueOutcomes: vi.fn() } as never,
+    { upsertPrLinks: vi.fn().mockResolvedValue(undefined) } as never, outcomes as never, { emit: vi.fn() } as never,
   );
   return { svc, outcomes, repo, order };
 }
@@ -68,7 +71,7 @@ const parsedWithReport = {
 };
 const noCorrection = { patch: {}, costRaised: false, escalated: false, escalatedFrom: null, liveCostUsd: null };
 
-function makeForCommand(command: string, knowledge = { enqueueOutcomes: vi.fn() }) {
+function makeForCommand(command: string, events: { emit: (...args: never[]) => unknown } = { emit: vi.fn() }) {
   const job = {
     id: 'j1', leaseEpoch: 1, naxRunId: 'run-1', projectId: 'p', repoId: 'r', runnerId: 'rn', state: 'COMPLETED',
     command, requestedById: 'u', resultPrUrl: null, costSpentUsd: '0', stateReason: 'done', finishResult: null,
@@ -89,9 +92,9 @@ function makeForCommand(command: string, knowledge = { enqueueOutcomes: vi.fn() 
   const svc = new BundleIngestService(
     repo as never, store as never, jobs as never, { event: vi.fn(() => ({})), publish: vi.fn() } as never,
     { record: vi.fn() } as never, { signal: vi.fn() } as never, txManager as never,
-    { upsertPrLinks: vi.fn() } as never, { onIngestCorrection: vi.fn() } as never, knowledge as never,
+    { upsertPrLinks: vi.fn() } as never, { onIngestCorrection: vi.fn() } as never, events as never,
   );
-  return { svc, repo, knowledge, order };
+  return { svc, repo, events: events as { emit: Mock }, order };
 }
 
 describe('BundleIngestService run outcomes (S5b US-001 AC-10/AC-11)', () => {
@@ -120,39 +123,58 @@ describe('BundleIngestService run outcomes (S5b US-001 AC-10/AC-11)', () => {
  * S5b US-004 (3c-2-D8): the ingest is the outcome pass's only trigger. It fires once per ingest, after the
  * transaction committed, and only for a RUN job — a rolled-back ingest queues nothing.
  */
+/** A real emitter with the queue's handler on it, as `KnowledgeModule` subscribes it at bootstrap. */
+function listeningTo(queue: KnowledgeIndexQueue): EventEmitter2 {
+  const events = new EventEmitter2();
+  events.on(KNOWLEDGE_RUN_INGESTED, (event: KnowledgeRunIngestedEvent) => queue.onRunIngested(event));
+  return events;
+}
+
 describe('BundleIngestService outcome index trigger (S5b US-004)', () => {
-  it('AC-8: enqueues one outcome pass for a claimed RUN job, after the transaction resolved', async () => {
+  it('AC-8: emits one run-ingested event for a claimed RUN job, after the transaction resolved', async () => {
     (parseBundle as Mock).mockReturnValueOnce(parsedWithReport);
     (computeCorrection as Mock).mockReturnValueOnce(noCorrection);
-    const { svc, knowledge, order } = makeForCommand('RUN');
-    knowledge.enqueueOutcomes.mockImplementation((jobId: string) => { order.push(`enqueue:${jobId}`); });
+    const { svc, events, order } = makeForCommand('RUN');
+    events.emit.mockImplementation((_name: string, event: KnowledgeRunIngestedEvent) => { order.push(`emit:${event.jobId}`); });
 
     await svc.ingestOne(now);
 
-    expect(knowledge.enqueueOutcomes).toHaveBeenCalledExactlyOnceWith('j1');
-    expect(order).toEqual(['tx:start', 'tx:end', 'enqueue:j1']);
+    expect(events.emit).toHaveBeenCalledExactlyOnceWith(KNOWLEDGE_RUN_INGESTED, { jobId: 'j1' });
+    expect(order).toEqual(['tx:start', 'tx:end', 'emit:j1']);
   });
 
-  it('AC-8: never enqueues for a claimed PLAN job', async () => {
+  it('AC-8: never emits for a claimed PLAN job', async () => {
     (parseBundle as Mock).mockReturnValueOnce(parsedWithReport);
     (computeCorrection as Mock).mockReturnValueOnce(noCorrection);
-    const { svc, knowledge } = makeForCommand('PLAN');
+    const { svc, events } = makeForCommand('PLAN');
 
     await svc.ingestOne(now);
 
-    expect(knowledge.enqueueOutcomes).not.toHaveBeenCalled();
+    expect(events.emit).not.toHaveBeenCalled();
   });
 
-  it('AC-9: a failing write never enqueues an outcome pass', async () => {
+  it('logs a warning when no listener heard the run-ingested event', async () => {
     (parseBundle as Mock).mockReturnValueOnce(parsedWithReport);
     (computeCorrection as Mock).mockReturnValueOnce(noCorrection);
-    const { svc, repo, knowledge } = makeForCommand('RUN');
+    const warn = vi.spyOn(Logger.prototype, 'warn');
+    warn.mockClear();
+    const { svc } = makeForCommand('RUN', { emit: vi.fn(() => false) });
+
+    await svc.ingestOne(now);
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('no listener for fleet.knowledge.run-ingested (job j1)'));
+  });
+
+  it('AC-9: a failing write never emits a run-ingested event', async () => {
+    (parseBundle as Mock).mockReturnValueOnce(parsedWithReport);
+    (computeCorrection as Mock).mockReturnValueOnce(noCorrection);
+    const { svc, repo, events } = makeForCommand('RUN');
     repo.replaceRows.mockRejectedValue(new Error('boom'));
 
     await svc.ingestOne(now);
 
     expect(repo.markRetry).toHaveBeenCalled();
-    expect(knowledge.enqueueOutcomes).not.toHaveBeenCalled();
+    expect(events.emit).not.toHaveBeenCalled();
   });
 
   it('AC-10: ingest through the real queue reaches indexOutcomes and never indexRepo', async () => {
@@ -163,7 +185,7 @@ describe('BundleIngestService outcome index trigger (S5b US-004)', () => {
       indexOutcomes: vi.fn(async () => ({ status: 'indexed' })),
     };
     const queue = new KnowledgeIndexQueue(indexer as never, testFleetConfig({ knowledgeIndexEnabled: true }));
-    const { svc } = makeForCommand('RUN', queue as never);
+    const { svc } = makeForCommand('RUN', listeningTo(queue));
 
     await svc.ingestOne(now);
 
@@ -179,7 +201,7 @@ describe('BundleIngestService outcome index trigger (S5b US-004)', () => {
       indexOutcomes: vi.fn(async () => ({ status: 'indexed' })),
     };
     const queue = new KnowledgeIndexQueue(indexer as never, testFleetConfig({ knowledgeIndexEnabled: false }));
-    const { svc } = makeForCommand('RUN', queue as never);
+    const { svc } = makeForCommand('RUN', listeningTo(queue));
 
     await svc.ingestOne(now);
     await new Promise((resolve) => setImmediate(resolve));

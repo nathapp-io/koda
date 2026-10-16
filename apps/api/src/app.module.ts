@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { I18nCoreModule, ServerSecurityConfig } from '@nathapp/nestjs-common';
 import { ScheduleModule } from '@nestjs/schedule';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { CacheModule, CacheStrategy } from '@nathapp/nestjs-cache';
 import { LoggingModule } from '@nathapp/nestjs-logging';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
@@ -68,6 +69,10 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
     }),
     ConfigBridgeModule,
     ScheduleModule.forRoot(),
+    // In-process trigger events (fleet/common/knowledge-events.ts); global, so emitters need no module import.
+    // NotifyModule (via EmailModule) registers its own forRoot(): that is a second emitter, and the @OnEvent
+    // listeners are subscribed on both, so keep this explicit registration rather than relying on notify's.
+    EventEmitterModule.forRoot(),
     I18nCoreModule.forRoot({
       fallbackLanguage: 'en',
       loaderOptions: {

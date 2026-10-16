@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { ARTIFACT_STORE, ArtifactStore } from '../artifacts/artifact-store';
 import { BudgetEvaluator } from '../budgets/budget-evaluator';
@@ -14,7 +15,7 @@ import {
 import { computeCorrection } from './ingest-corrections';
 import { parseBundle } from './parse-bundle';
 import { FleetJobOutcomeRecorder } from '../jobs/job-outcome.recorder';
-import { KnowledgeIndexQueue } from '../knowledge/knowledge-index.queue';
+import { KNOWLEDGE_RUN_INGESTED, type KnowledgeRunIngestedEvent } from '../common/knowledge-events';
 
 const SECRETISH = /(token|secret|password|key)=\S+/gi;
 const trimError = (error: unknown): string =>
@@ -36,8 +37,8 @@ export class BundleIngestService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly ticketEffects: FleetJobTicketEffects,
     private readonly outcomes: FleetJobOutcomeRecorder,
-    /** S5b 3c-2-D8 (US-004): the outcome index queue; the ingest is its only trigger. */
-    private readonly knowledge: KnowledgeIndexQueue,
+    /** S5b 3c-2-D8 (US-004): carries `KNOWLEDGE_RUN_INGESTED`; the ingest is the outcome pass's only trigger. */
+    private readonly events: EventEmitter2,
   ) {}
 
   /** D369: off the request path; never throws. */
@@ -111,7 +112,9 @@ export class BundleIngestService {
     // S5b 3c-2-D8: the outcome pass runs after the commit, never inside it, once per ingest and only for a
     // RUN job: a PLAN or CONFIG_EDIT job stores no outcome rows, and a RUN ingest without outcome rows
     // retires the epoch before it.
-    if (result.isRun) this.knowledge.enqueueOutcomes(claim.jobId);
+    if (result.isRun && !this.events.emit(KNOWLEDGE_RUN_INGESTED, { jobId: claim.jobId } satisfies KnowledgeRunIngestedEvent)) {
+      this.logger.warn(`no listener for ${KNOWLEDGE_RUN_INGESTED} (job ${claim.jobId}); its outcome pass was not queued`);
+    }
   }
 
   private async recordFailure(claim: IngestClaim, error: unknown, now: Date): Promise<void> {
