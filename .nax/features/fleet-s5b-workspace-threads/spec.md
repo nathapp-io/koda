@@ -1,4 +1,3 @@
-<!-- spec-writing: completed-through-phase-5 -->
 # SPEC: Fleet S5b-1d-1 — Workspace Threads (Personal Thread Kind, Home Project, Creator-Only Routes, Runner Path)
 
 ## Summary
@@ -186,7 +185,7 @@ implement.
   `ThreadsController.assertUser`). `POST /threads` → 201 `WorkspaceThreadDto`.
 - i18n (`apps/api/src/i18n/{en,zh}/threads.json`): new key `homeProjectAccess`.
 
-**Workspace read routes and events** (US-004)
+**Workspace read routes, commands and events** (US-004)
 
 - `WorkspaceThreadsService.list(userId, status, skip, take)`, `get(userId, id)` (adds `sendRefusal` and `handoff` as
   `ThreadsService.get` does), `messages(userId, id, afterSeq, limit)` — all through `{ kind: 'workspace', userId }`; a
@@ -197,9 +196,15 @@ implement.
   / `limit` rules as the project route).
 - `WorkspaceThreadEventsGuard` and `WorkspaceThreadEventsController` — new, `workspace-thread-events.controller.ts`,
   `@Controller('threads/:id/events')`, mirroring `ThreadEventsGuard` / `ThreadEventsController`
-  (`thread-events.controller.ts`): a non-user principal → 403 `threads.principal`; a thread that is not this user's
+  (`thread-events.controller.ts`) except that the guard reads the thread through `WorkspaceThreadsService` (the
+  workspace-scope `ChatThreadRepository.get`) and never injects `PrismaService` (`api-data.md`: no new direct Prisma
+  outside a repository): a non-user principal → 403 `threads.principal`; a thread that is not this user's
   WORKSPACE thread → 404 `threads.notFound`, checked before a stream slot is acquired; `stillAllowed` re-reads the
   principal and allows the stream while it is not revoked. No project membership check.
+- `updateCap`, `stop`, `endSession`, `answer` — the `ThreadsService` equivalents through the workspace scope. Routes:
+  `PATCH /threads/:id` (→ 200 `WorkspaceThreadDto`; the service attaches `homeProject` to the record `updateCap`
+  returns), `POST /threads/:id/stop`, `POST /threads/:id/end-session`, `POST /threads/:id/answer`, with the status codes
+  of their project counterparts.
 - `ThreadsModule` (`threads.module.ts:19-23`) — Target: `controllers` gain `WorkspaceThreadsController` and
   `WorkspaceThreadEventsController`; `providers` gain `WorkspaceThreadsService` and `WorkspaceThreadEventsGuard`.
 
@@ -209,10 +214,12 @@ implement.
   (400 `threads.input`, reason `message`), reads the thread through the workspace scope (404), runs the 1d-D9 host check
   on `thread.projectId`, then calls `ChatThreadRepository.sendMessage({ scope: { kind: 'workspace', userId }, …,
   repoContext: undefined })`. It never calls `ProjectBriefService.resolveRepoContext`.
-- `updateCap`, `stop`, `endSession`, `answer`, `archive` — the `ThreadsService` equivalents through the workspace
-  scope; `archive` passes `canArchive: false` (creator only, 1d-D2). Routes: `POST /threads/:id/messages` (201, or 200
-  for a deduplicated `clientMessageId`), `PATCH /threads/:id`, `POST /threads/:id/stop`, `POST /threads/:id/end-session`,
-  `POST /threads/:id/answer`, `POST /threads/:id/archive`, with the status codes of their project counterparts.
+- `archive(principal, id)` — reads the thread through the workspace scope (404), calls
+  `ChatThreadRepository.archive({ kind: 'workspace', userId }, id, userId, false)` (creator only, 1d-D2), and cancels
+  the returned live THREAD job with `FleetJobsService.cancel(userId, thread.projectId, jobId, true)` — the home project
+  id, because `cancel` answers 404 for any other project — swallowing a `ConflictAppException` as
+  `ThreadsService.archive` does. Routes: `POST /threads/:id/messages` (201, or 200 for a deduplicated
+  `clientMessageId`) and `POST /threads/:id/archive`, with the status codes of their project counterparts.
 - `jobTargetFor` (`prisma-chat-thread.repository.ts:411-429`) — Target: a `WORKSPACE` thread resolves
   `anchorRepoFor(thread.projectId)` (409 `threads.noFleetRepo` when null) and returns `repoId` = anchor id, `ref` =
   anchor `defaultBranch`, `instructions` = `buildWorkspaceThreadInstructions({ skills })`. No project row or brief read.
@@ -319,6 +326,7 @@ project create permission check — `ThreadsController.create` (`threads.control
 - A database check constraint for the kind rule (1a-R4 still applies: the create paths enforce it).
 - A `FLEET_PROTOCOL_VERSION` bump; the additions are optional fields gated by the `workspaceThreads` capability.
 - Notifications, emails or activity feed entries specific to WORKSPACE threads.
+- Preserving WORKSPACE threads when their home project is hard-deleted: `ChatThread.project` cascades, as it does for every thread kind (projects are soft-deleted in normal operation).
 - A Playwright journey; this feature has no web change.
 - US-005 only: budget pauses scoped to the home project or its anchor repo also stop WORKSPACE threads; this coupling is accepted (S5b-R13).
 - US-005 only: a demotion that commits between the 1d-D9 host check and the send transaction is not detected for that one send.
@@ -329,8 +337,8 @@ project create permission check — `ThreadsController.create` (`threads.control
 1. **US-001: Workspace kind contract, runner capability and index** — `Workdir: apps/api` — No dependencies.
 2. **US-002: Thread scope; project thread surfaces never expose a WORKSPACE thread** — `Workdir: apps/api` — Depends on US-001.
 3. **US-003: Create WORKSPACE threads with a home project** — `Workdir: apps/api` — Depends on US-002.
-4. **US-004: WORKSPACE read routes and events stream** — `Workdir: apps/api` — Depends on US-003.
-5. **US-005: WORKSPACE turns, commands and the session job** — `Workdir: apps/api` — Depends on US-004.
+4. **US-004: WORKSPACE read routes, commands and events stream** — `Workdir: apps/api` — Depends on US-003.
+5. **US-005: WORKSPACE turns, archive and the session job** — `Workdir: apps/api` — Depends on US-004.
 6. **US-006: WORKSPACE ASSIGN, placement, git tokens, tool route and notices** — `Workdir: apps/api` — Depends on US-005.
 7. **US-007: Runner accepts and runs WORKSPACE sessions** — `Workdir: apps/runner` — Depends on US-001.
 
@@ -338,8 +346,8 @@ US-001 also edits `packages/fleet-protocol/src/threads.ts` and `packages/fleet-p
 additive (a new union member and a new optional capability), so `bun run type-check` at the repo root passes for every
 package after it. US-002 changes the thread repository's method signatures and owns every compile site that calls them
 (`ThreadsService`), so the `apps/api` type-check passes after US-002. Every story that changes the API contract
-(US-001, US-003, US-004, US-005, US-006) regenerates the committed `openapi.json` with `bun run api:export-spec` from the
-repo root.
+(US-001, US-003, US-004, US-005, US-006) regenerates the committed `openapi.json` and the CLI's generated client with
+`bun run generate` from the repo root (`apps/cli/src/generated/` is never hand-edited).
 
 ### Context Files
 
@@ -419,36 +427,46 @@ repo root.
 
 **US-001**
 
+- `apps/api/src/fleet/threads/domain/chat-thread.domain.spec.ts` — the test at `:18-20` ("treats an unknown kind like an absent one") uses `kind: 'WORKSPACE'` as its unknown kind, which `repoThreadFields` now refuses; its fixture kind becomes a fictional value (`'FUTURE' as never`) so the unknown-kind intent is kept. US-001 AC-10 is the WORKSPACE counterpart.
+- `apps/api/src/fleet/threads/prisma-chat-thread.repository.spec.ts` — the test at `:219-222` ("get() maps an unknown stored kind to kind REPO") uses `threadRow({ kind: 'WORKSPACE' })`, which `mapThreadKind` now maps to `WORKSPACE`; its fixture kind becomes `'FUTURE'`. US-001 AC-8 is the WORKSPACE counterpart.
+- `apps/api/src/fleet/threads/threads.service.spec.ts` — the typed `ChatThreadRecord` literal at `:17` gains `projectId`, which `ChatThreadRecord` requires from US-001 on (spec type-check).
+- `apps/api/src/common/test-helpers/global-stubs.module.ts` — only if compiling `ThreadsModule` with its new `ProjectsModule` import (US-003) needs a stub the global module lacks; listed here so the module specs of US-003 and US-004 may extend it without touching any assertion.
+- `apps/cli/src/generated/types.gen.ts` — regenerated by `bun run generate` for the contract changes of this story; never hand-edited.
 - `apps/api/src/fleet/common/thread-jobs.spec.ts` — the test at `:32-34` asserts `pkg.CHAT_THREAD_KINDS` equals `['REPO', 'PROJECT']`; it becomes `['REPO', 'PROJECT', 'WORKSPACE']`. The deep-equality test above it is unchanged.
 - `apps/api/src/fleet/runners/dto/runner-summary.dto.spec.ts` — the exact-object `toEqual` at `:14` pins the DTO's field set; it gains `workspaceThreads: false` (the fixture's capabilities do not advertise it). Every other assertion is unchanged.
 - `apps/api/src/fleet/fleet-openapi.contract.spec.ts` — the sorted key list of `RunnerSummaryDto` at `:39-42` gains `workspaceThreads`. Other assertions are unchanged.
 - `apps/api/test/integration/fleet/runner-views.integration.spec.ts` — the exact sorted key list at `:80` of a GET /projects/:slug/fleet/runners record gains `workspaceThreads`. Other assertions are unchanged.
-- `openapi.json` — regenerated with `bun run api:export-spec`: `RunnerSummaryDto.workspaceThreads`, `ThreadDto.projectId`, `ThreadDto.kind` gains `WORKSPACE`.
+- `openapi.json` — regenerated with `bun run generate`: `RunnerSummaryDto.workspaceThreads`, `ThreadDto.projectId`, `ThreadDto.kind` gains `WORKSPACE`.
 
 **US-002**
 
 - `apps/api/src/fleet/threads/prisma-chat-thread.repository.spec.ts` — calls that pass a bare project id — `repo.get('P', 'T')`, `repo.command('P', 'T', 'U', …)` and the `sendMessage({ projectId: … })` inputs — become `{ kind: 'project', projectId: 'P' }` scopes (ruling 1d-D10); expectations on the Prisma `where` of those reads gain `kind: { not: 'WORKSPACE' }`. The behaviour each test asserts is unchanged.
-- `apps/api/src/fleet/threads/threads.service.spec.ts` — the typed `ChatThreadRecord` literal at `:17` gains `projectId`; the assertions at `:346` (`sendMessage` called with `projectId: 'p1'`) and `:373` (`get` called with `('p1', 't1')`) become `scope: { kind: 'project', projectId: 'p1' }` and `get({ kind: 'project', projectId: 'p1' }, 't1')`. The service's public signatures are unchanged.
+- `apps/api/src/fleet/threads/threads.service.spec.ts` — the assertions at `:346` (`sendMessage` called with `projectId: 'p1'`) and `:373` (`get` called with `('p1', 't1')`) become `scope: { kind: 'project', projectId: 'p1' }` and `get({ kind: 'project', projectId: 'p1' }, 't1')`. The service's public signatures are unchanged.
 - `apps/api/test/helpers/thread-fixtures.ts` — `seedThreadJobFor` gains the optional `kind`, `createdById` and `projectId` seed options described in Design; existing callers keep today's REPO seed.
 
 **US-003**
 
+- `apps/cli/src/generated/types.gen.ts` — regenerated by `bun run generate` for the routes and DTOs this story adds; never hand-edited.
 - `apps/api/src/fleet/threads/threads.module.spec.ts` — gains resolution of `WorkspaceThreadsService` and `WorkspaceThreadsController`; existing assertions are unchanged.
-- `openapi.json` — regenerated with `bun run api:export-spec`: POST /api/threads, `CreateWorkspaceThreadDto`, `WorkspaceThreadDto`.
+- `openapi.json` — regenerated with `bun run generate`: POST /api/threads, `CreateWorkspaceThreadDto`, `WorkspaceThreadDto`.
 
 **US-004**
 
+- `apps/cli/src/generated/types.gen.ts` — regenerated by `bun run generate` for the routes and DTOs this story adds; never hand-edited.
 - `apps/api/src/fleet/threads/threads.module.spec.ts` — gains resolution of `WorkspaceThreadEventsGuard` and `WorkspaceThreadEventsController`; existing assertions are unchanged.
-- `openapi.json` — regenerated with `bun run api:export-spec`: GET /api/threads, GET /api/threads/{id}, GET /api/threads/{id}/messages, `WorkspaceThreadDetailDto`, `WorkspaceThreadListDto`.
+- `openapi.json` — regenerated with `bun run generate`: GET /api/threads, GET /api/threads/{id}, GET /api/threads/{id}/messages, `WorkspaceThreadDetailDto`, `WorkspaceThreadListDto`.
 
 **US-005**
 
-- `openapi.json` — regenerated with `bun run api:export-spec`: POST /api/threads/{id}/messages, PATCH /api/threads/{id}, POST /api/threads/{id}/stop, `end-session`, `answer` and `archive`.
+- `apps/cli/src/generated/types.gen.ts` — regenerated by `bun run generate` for the routes and DTOs this story adds; never hand-edited.
+- `openapi.json` — regenerated with `bun run generate`: POST /api/threads/{id}/messages, PATCH /api/threads/{id}, POST /api/threads/{id}/stop, `end-session`, `answer` and `archive`.
 
 **US-006**
 
+- `apps/api/src/fleet/jobs/prisma-fleet-job.repository.find-thread-assign.spec.ts` — the test at `:63-66` ("treats an unknown kind as REPO") uses `kind: 'WORKSPACE'` as its unknown kind, which `findThreadAssign` now returns as `WORKSPACE`; its fixture kind becomes `'FUTURE'`. US-006 AC-1 is the WORKSPACE counterpart.
+- `apps/cli/src/generated/types.gen.ts` — regenerated by `bun run generate` for the misfit enum change; never hand-edited.
 - `apps/api/src/fleet/assistant/runner-tool.service.spec.ts` — its `jobs` stub implements the methods `RunnerToolService` used before; it gains `findThreadTokenScope` (returning a `PROJECT` scope by default), because `call` now consults it. Assertions are unchanged.
-- `openapi.json` — regenerated with `bun run api:export-spec`: `PlacementMisfitDto.reason` and `AttentionReasonDto` gain `workspace_threads`.
+- `openapi.json` — regenerated with `bun run generate`: `PlacementMisfitDto.reason`, `AttentionReasonDto` and the credential board's `misfit` enum (`credential-board.dto.ts:42`, fed by `MISFIT_REASONS`) gain `workspace_threads`.
 
 **US-007**
 
@@ -456,9 +474,9 @@ repo root.
 
 ### Seams
 
-- US-002 → US-003, US-004, US-005: `ThreadScope` and the scoped repository methods. Every workspace route reaches the repository through `{ kind: 'workspace', userId }`; US-004 AC-5 and US-005 AC-5 prove a non-creator's request misses through the HTTP routes.
-- US-003 → US-004: the module wiring of the workspace controllers is proven by HTTP requests (US-004 AC-11, AC-12, AC-13), not only by the module spec.
-- US-003 → US-005 / US-006: a thread created by `POST /threads` is the one US-005 AC-1 sends to and US-006 AC-9 / AC-10 place; both enter at the HTTP route.
+- US-002 → US-003, US-004, US-005: `ThreadScope` and the scoped repository methods. Every workspace route reaches the repository through `{ kind: 'workspace', userId }`; US-004 AC-4, AC-15 and US-005 AC-6 prove a non-creator's request misses through the HTTP routes.
+- US-003 → US-004: the module wiring of the workspace controllers is proven by HTTP requests (US-004 AC-9, AC-10, AC-11), not only by the module spec.
+- US-003 → US-005 / US-006: a thread created by `POST /threads` is the one US-005 AC-1 sends to and US-006 AC-10 / AC-11 place; both enter at the HTTP route.
 - US-002 → US-006: `findThreadTokenScope` answering `WORKSPACE` is consumed by the sync git-token path (US-006 AC-7) and the runner tool route (US-006 AC-8).
 - US-001 → US-007: the protocol's `WORKSPACE` member of `ChatThreadKind` is what the runner's parser accepts (US-007 AC-1).
 
@@ -492,7 +510,10 @@ repo root.
 9. [integration] `POST /projects/:slug/threads/:id/messages` for that WORKSPACE thread, sent by its creator, answers 404 and creates no `ChatMessage` row.
 10. [integration] `POST /projects/:slug/threads/:id/publish` for that WORKSPACE thread, sent by its creator, answers 404 with key `threads.notFound`.
 11. [integration] `GET /projects/:slug/threads/:id/events` for that WORKSPACE thread, opened by its creator, answers 404.
-12. [unit] `PrismaFleetJobRepository.findThreadTokenScope(jobId)` for the SESSION turn of a thread whose row has `kind: 'WORKSPACE'` returns `{ kind: 'WORKSPACE', action: 'SESSION' }`.
+12. [integration] `POST /projects/:slug/threads/:id/archive` for that WORKSPACE thread, sent by an ADMIN member of the project who did not create it, leaves the thread's `status` `ACTIVE`.
+13. [integration] `PATCH /projects/:slug/threads/:id` with `{ "maxCostUsd": 9 }` for that WORKSPACE thread, sent by its creator, answers 404 with key `threads.notFound`.
+14. [integration] `POST /projects/:slug/threads/:id/end-session` for that WORKSPACE thread, sent by its creator, answers 404 with key `threads.notFound`.
+15. [unit] `PrismaFleetJobRepository.findThreadTokenScope(jobId)` for the SESSION turn of a thread whose row has `kind: 'WORKSPACE'` returns `{ kind: 'WORKSPACE', action: 'SESSION' }`.
 
 ### US-003: Create WORKSPACE threads with a home project (`Workdir: apps/api`)
 
@@ -508,8 +529,8 @@ repo root.
 10. [integration] `POST /threads` with no `homeProject`, by a global ADMIN who has no `ProjectMember` row in any project while a project with a fleet repo exists, answers 409 with key `threads.noFleetRepo`.
 11. [integration] `POST /threads` with `homeProject` naming a project where the user is a VIEWER answers 403 with key `threads.homeProjectAccess`.
 12. [integration] `POST /threads` with `homeProject` naming a project where the user is a DEVELOPER but which has no fleet repo answers 409 with key `threads.noFleetRepo`.
-13. [integration] `POST /threads` with `homeProject` naming an existing project the user is not a member of answers 404.
-14. [integration] `POST /threads` with `homeProject` naming a slug that matches no project answers 404.
+13. [integration] `POST /threads` with `homeProject` naming an existing project the user is not a member of answers 404 with key `projects`.
+14. [integration] `POST /threads` with `homeProject` naming a slug that matches no project answers 404 with key `projects`.
 15. [integration] `POST /threads` while `FLEET_THREADS_ENABLED` is off answers 409 with key `threads.disabled`.
 
 ### US-004: WORKSPACE read routes and events stream (`Workdir: apps/api`)
@@ -517,33 +538,35 @@ repo root.
 1. [integration] `GET /threads` by user U returns U's WORKSPACE threads and none of U's REPO or PROJECT threads.
 2. [integration] `GET /threads` by user U returns no WORKSPACE thread created by another user.
 3. [integration] Each item of `GET /threads` carries `homeProject` with the `slug` and `name` of the thread's home project.
-4. [integration] `GET /threads?size=101` answers 400 with key `threads.input` and reason `size`.
-5. [integration] `GET /threads/:id` by a global ADMIN who did not create the WORKSPACE thread answers 404 with key `threads.notFound`.
-6. [integration] `GET /threads/:id` by the creator answers 200 with `kind: 'WORKSPACE'` and `handoff` equal to `{ plan: null, run: null }`.
-7. [integration] `GET /threads/:id` by the creator of a PROJECT thread, using that PROJECT thread's id, answers 404 with key `threads.notFound`.
-8. [integration] `GET /threads/:id/messages` by the creator returns the thread's messages in `seq` order.
-9. [integration] `GET /threads/:id/messages` by another user answers 404 with key `threads.notFound`.
-10. [integration] `GET /threads` called with an agent API key answers 403 with key `threads.principal`.
-11. [integration] `POST /threads` called with an agent API key answers 403 with key `threads.principal`.
-12. [integration] `GET /threads/:id/events` opened by the creator answers 200 with content type `text/event-stream`.
-13. [integration] `GET /threads/:id/events` opened by a user who did not create the WORKSPACE thread answers 404, and that user can still open the configured maximum number of other streams afterwards (no stream slot was consumed).
+4. [integration] `GET /threads/:id` by a global ADMIN who did not create the WORKSPACE thread answers 404 with key `threads.notFound`.
+5. [integration] `GET /threads/:id` by the creator answers 200 with `kind: 'WORKSPACE'` and `handoff` equal to `{ plan: null, run: null }`.
+6. [integration] `GET /threads/:id` by the creator of a PROJECT thread, using that PROJECT thread's id, answers 404 with key `threads.notFound`.
+7. [integration] `GET /threads/:id/messages` by the creator returns the thread's messages in `seq` order.
+8. [integration] `GET /threads/:id/messages` by another user answers 404 with key `threads.notFound`.
+9. [integration] `GET /threads` called with an agent API key answers 403 with key `threads.principal`.
+10. [integration] `POST /threads` called with an agent API key answers 403 with key `threads.principal`.
+11. [integration] `GET /threads/:id/events` opened by the creator answers 200 with content type `text/event-stream`.
+12. [integration] `GET /threads/:id/events` opened by a user who did not create the WORKSPACE thread answers 404 with key `threads.notFound`.
+13. [integration] `PATCH /threads/:id` with `{ "maxCostUsd": 7 }` by the creator answers 200 with `maxCostUsd` `"7"` and a `homeProject` object.
+14. [integration] `POST /threads/:id/end-session` by the creator while the thread has no live session answers 409 with key `threads.noSession`.
+15. [integration] `POST /threads/:id/stop` by a user who did not create the WORKSPACE thread answers 404 with key `threads.notFound`.
 
-### US-005: WORKSPACE turns, commands and the session job (`Workdir: apps/api`)
+### US-005: WORKSPACE turns, archive and the session job (`Workdir: apps/api`)
 
 1. [integration] `POST /threads/:id/messages` by the creator of a WORKSPACE thread answers 201 and creates a THREAD `FleetJob` whose `projectId` is the home project's id.
 2. [integration] That THREAD `FleetJob`'s `repoId` is the home project's oldest fleet repo.
 3. [integration] The `FleetThreadTurn` of that job has `instructions` that start with `You are a brainstorming partner in a koda workspace thread.`
-4. [unit] `buildWorkspaceThreadInstructions({ skills: [] })` returns text containing `This thread belongs to no project and no repository.` and containing no `koda_` tool name.
-5. [integration] `POST /threads/:id/messages` by a user who did not create the WORKSPACE thread answers 404 with key `threads.notFound` and creates no `ChatMessage` row.
-6. [integration] `POST /threads/:id/messages` by the creator after the creator was changed to VIEWER on the home project answers 403 with key `threads.homeProjectAccess` and creates no `ChatMessage` row.
-7. [integration] `POST /threads/:id/messages` by the creator after the creator was removed from the home project answers 403 with key `threads.homeProjectAccess`.
-8. [integration] `POST /threads/:id/messages` by a global ADMIN creator after the home project was soft-deleted answers 403 with key `threads.homeProjectAccess`.
-9. [integration] `POST /threads/:id/messages` by the creator after the home project's only fleet repo was deleted answers 409 with key `threads.noFleetRepo` and creates no THREAD job.
-10. [unit] `WorkspaceThreadsService.sendMessage` never calls `ProjectBriefService.resolveRepoContext` and passes `repoContext: undefined` to `ChatThreadRepository.sendMessage`.
-11. [integration] `PATCH /threads/:id` with `{ "maxCostUsd": 7 }` by the creator answers 200 with `maxCostUsd` `"7"`.
-12. [integration] `POST /threads/:id/end-session` by the creator while the thread has no live session answers 409 with key `threads.noSession`.
-13. [integration] `POST /threads/:id/stop` by a user who did not create the WORKSPACE thread answers 404 with key `threads.notFound`.
-14. [integration] `POST /threads/:id/archive` by the creator answers 200, and a following `GET /threads/:id` shows `status: 'ARCHIVED'`.
+4. [unit] `buildWorkspaceThreadInstructions({ skills: [] })` returns text that names no `koda_` tool.
+5. [integration] The `skills` of a thread created by `POST /threads` equal the enabled skills snapshot of its home project.
+6. [integration] `POST /threads/:id/messages` by a user who did not create the WORKSPACE thread answers 404 with key `threads.notFound` and creates no `ChatMessage` row.
+7. [integration] `POST /threads/:id/messages` by the creator after the creator was changed to VIEWER on the home project answers 403 with key `threads.homeProjectAccess`.
+8. [integration] `POST /threads/:id/messages` by the creator after the creator was removed from the home project answers 403 with key `threads.homeProjectAccess`.
+9. [integration] `POST /threads/:id/messages` by a global ADMIN creator after the home project was soft-deleted answers 403 with key `threads.homeProjectAccess`.
+10. [integration] `POST /threads/:id/messages` by the creator after the home project's only fleet repo was deleted answers 409 with key `threads.noFleetRepo`.
+11. [integration] `POST /threads/:id/messages` by the creator while a budget policy pauses the `repo` scope of the home project's anchor repo answers the budget-paused refusal and creates no THREAD job.
+12. [unit] `WorkspaceThreadsService.sendMessage` passes `repoContext: undefined` to `ChatThreadRepository.sendMessage`.
+13. [integration] After `POST /threads/:id/archive` by the creator, `GET /threads/:id` shows `status: 'ARCHIVED'`.
+14. [integration] `POST /threads/:id/archive` by the creator while the thread's THREAD job is RUNNING answers 200 and leaves a cancel request on that job.
 15. [integration] `POST /threads/:id/archive` by a global ADMIN who did not create the thread answers 404 with key `threads.notFound`.
 
 ### US-006: WORKSPACE ASSIGN, placement, git tokens, tool route and notices (`Workdir: apps/api`)
