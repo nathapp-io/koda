@@ -8,6 +8,7 @@ import { ProjectBriefService } from './project-brief.service';
 import { ThreadsModule } from './threads.module';
 import { WorkspaceThreadsService } from './workspace-threads.service';
 import { WorkspaceThreadsController } from './workspace-threads.controller';
+import { WorkspaceThreadEventsController, WorkspaceThreadEventsGuard } from './workspace-thread-events.controller';
 
 /**
  * DI guard, as approval-store.module.spec.ts: a missing provider or an import cycle fails
@@ -23,6 +24,8 @@ describe('ThreadsModule', () => {
     try {
       expect(moduleRef.get(WorkspaceThreadsService)).toBeDefined();
       expect(moduleRef.get(WorkspaceThreadsController)).toBeDefined();
+      expect(moduleRef.get(WorkspaceThreadEventsController)).toBeDefined();
+      expect(moduleRef.get(WorkspaceThreadEventsGuard)).toBeDefined();
       expect(moduleRef.get(ThreadsController)).toBeDefined();
       expect(moduleRef.get(ThreadEventsController)).toBeDefined();
       expect(moduleRef.get(ThreadEventsGuard)).toBeDefined();

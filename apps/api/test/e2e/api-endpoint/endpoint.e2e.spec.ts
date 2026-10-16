@@ -4165,6 +4165,73 @@ describeIntegration('API Integration Tests', () => {
         }
       });
     });
+
+    // ─────────────────────────────────────────────────────────────────
+    // S5b US-004 — top-level /threads read routes, commands and events
+    // ─────────────────────────────────────────────────────────────────
+
+    describe('S5b US-004 workspace read routes and events', () => {
+      let workspaceId: string;
+
+      beforeAll(async () => {
+        workspaceId = body<{ id: string }>(await request(httpServer).post('/api/threads')
+          .set('Authorization', `Bearer ${world.tokens.dev}`)
+          .send({ title: 'Workspace read', backend: { kind: 'native' }, homeProject: projectSlug }).expect(201)).id;
+      });
+
+      it('GET /api/threads lists the caller’s workspace threads and refuses an agent key or bad query', async () => {
+        const list = body<{ items: Array<Record<string, unknown>>; threadsEnabled: boolean }>(
+          await request(httpServer).get('/api/threads').set('Authorization', `Bearer ${world.tokens.dev}`).expect(200));
+        expect(list.items.find((item) => item.id === workspaceId)).toMatchObject({ kind: 'WORKSPACE', homeProject: { slug: projectSlug } });
+        expect(list.items.every((item) => item.kind === 'WORKSPACE')).toBe(true);
+        expect(list.threadsEnabled).toBe(true);
+        refusal(await request(httpServer).get('/api/threads').set('Authorization', `Bearer ${agentApiKey}`).expect(403), 'threads.principal.403');
+        refusal(await request(httpServer).get('/api/threads?page=0').set('Authorization', `Bearer ${world.tokens.dev}`).expect(400), 'threads.input.400', { reason: 'page' });
+      });
+
+      it('GET /api/threads/:id answers the creator and hides other users’ and other kinds’ threads', async () => {
+        const thread = body<{ kind: string; handoff: unknown; homeProject: { slug: string } }>(
+          await request(httpServer).get(`/api/threads/${workspaceId}`).set('Authorization', `Bearer ${world.tokens.dev}`).expect(200));
+        expect(thread).toMatchObject({ kind: 'WORKSPACE', handoff: { plan: null, run: null }, homeProject: { slug: projectSlug } });
+        refusal(await request(httpServer).get(`/api/threads/${workspaceId}`).set('Authorization', `Bearer ${world.tokens.root}`).expect(404), 'threads.notFound.404');
+        refusal(await request(httpServer).get(`/api/threads/${threadId}`).set('Authorization', `Bearer ${world.tokens.dev}`).expect(404), 'threads.notFound.404');
+      });
+
+      it('GET /api/threads/:id/messages answers the creator and rejects a limit outside the shared bounds', async () => {
+        await db().chatMessage.create({ data: { threadId: workspaceId, seq: 1, role: 'user', content: 'hi', status: 'complete' } });
+        const list = body<{ items: Array<Record<string, unknown>> }>(
+          await request(httpServer).get(`/api/threads/${workspaceId}/messages`).set('Authorization', `Bearer ${world.tokens.dev}`).expect(200));
+        expect(list.items).toEqual([expect.objectContaining({ seq: 1, content: 'hi' })]);
+        refusal(await request(httpServer).get(`/api/threads/${workspaceId}/messages?limit=0`).set('Authorization', `Bearer ${world.tokens.dev}`).expect(400), 'threads.input.400', { reason: 'messages' });
+      });
+
+      it('PATCH /api/threads/:id answers the cap with the home project and hides the thread from a non-creator', async () => {
+        const thread = body<{ maxCostUsd: string; homeProject: { slug: string } }>(
+          await request(httpServer).patch(`/api/threads/${workspaceId}`).set('Authorization', `Bearer ${world.tokens.dev}`).send({ maxCostUsd: 9 }).expect(200));
+        expect(thread).toMatchObject({ maxCostUsd: '9', homeProject: { slug: projectSlug } });
+        refusal(await request(httpServer).patch(`/api/threads/${workspaceId}`).set('Authorization', `Bearer ${world.tokens.root}`).send({ maxCostUsd: 9 }).expect(404), 'threads.notFound.404');
+      });
+
+      it('POST /api/threads/:id/end-session answers 409 without a live session and hides the thread from a non-creator', async () => {
+        refusal(await request(httpServer).post(`/api/threads/${workspaceId}/end-session`).set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(409), 'threads.noSession.409');
+        refusal(await request(httpServer).post(`/api/threads/${workspaceId}/end-session`).set('Authorization', `Bearer ${world.tokens.root}`).send({}).expect(404), 'threads.notFound.404');
+      });
+
+      it('POST /api/threads/:id/stop answers 409 without a live session and hides the thread from a non-creator', async () => {
+        refusal(await request(httpServer).post(`/api/threads/${workspaceId}/stop`).set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(409), 'threads.noSession.409');
+        refusal(await request(httpServer).post(`/api/threads/${workspaceId}/stop`).set('Authorization', `Bearer ${world.tokens.root}`).send({}).expect(404), 'threads.notFound.404');
+      });
+
+      it('POST /api/threads/:id/answer validates the body and hides the thread from a non-creator', async () => {
+        refusal(await request(httpServer).post(`/api/threads/${workspaceId}/answer`).set('Authorization', `Bearer ${world.tokens.dev}`).send({ requestId: 'q1', text: '' }).expect(400), 'threads.input.400', { reason: 'answer' });
+        refusal(await request(httpServer).post(`/api/threads/${workspaceId}/answer`).set('Authorization', `Bearer ${world.tokens.root}`).send({ requestId: 'q1', text: 'yes' }).expect(404), 'threads.notFound.404');
+      });
+
+      it('GET /api/threads/:id/events hides the stream from a non-creator', async () => {
+        // The open-stream happy path needs the streaming helper (it never ends for supertest): test/integration/fleet.
+        refusal(await request(httpServer).get(`/api/threads/${workspaceId}/events`).set('Authorization', `Bearer ${world.tokens.root}`).expect(404), 'threads.notFound.404');
+      });
+    });
   });
 
   describe('US-005 Runner tool route', () => {

@@ -9074,6 +9074,244 @@
         "tags": [
           "fleet threads"
         ]
+      },
+      "get": {
+        "operationId": "WorkspaceThreadsController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceThreadListDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the caller’s personal workspace chat threads",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/threads/{id}": {
+      "get": {
+        "operationId": "WorkspaceThreadsController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceThreadDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get one of the caller’s personal workspace chat threads",
+        "tags": [
+          "fleet threads"
+        ]
+      },
+      "patch": {
+        "operationId": "WorkspaceThreadsController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateThreadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceThreadDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update the cost cap of one of the caller’s workspace chat threads",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/threads/{id}/messages": {
+      "get": {
+        "operationId": "WorkspaceThreadsController_messages",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatMessageListDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the messages of one of the caller’s workspace chat threads",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/threads/{id}/stop": {
+      "post": {
+        "operationId": "WorkspaceThreadsController_stop",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Stop the live turn of a workspace chat thread (creator)",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/threads/{id}/end-session": {
+      "post": {
+        "operationId": "WorkspaceThreadsController_endSession",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Close the live session of a workspace chat thread (creator)",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/threads/{id}/answer": {
+      "post": {
+        "operationId": "WorkspaceThreadsController_answer",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerQuestionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Answer a pending question of a workspace chat thread (creator)",
+        "tags": [
+          "fleet threads"
+        ]
       }
     },
     "/api/projects/{slug}/threads": {
@@ -17046,6 +17284,375 @@
           "lastWrite"
         ]
       },
+      "WorkspaceThreadListDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceThreadDto"
+            }
+          },
+          "threadsEnabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "threadsEnabled"
+        ]
+      },
+      "WorkspaceThreadDetailDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "REPO",
+              "PROJECT",
+              "WORKSPACE"
+            ],
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The thread's project; for a WORKSPACE thread, its home project"
+          },
+          "repoId": {
+            "type": "string",
+            "nullable": true
+          },
+          "baseRef": {
+            "type": "string",
+            "nullable": true
+          },
+          "feature": {
+            "type": "string",
+            "nullable": true
+          },
+          "title": {
+            "type": "string"
+          },
+          "createdById": {
+            "type": "string"
+          },
+          "runnerId": {
+            "type": "string",
+            "nullable": true
+          },
+          "backend": {
+            "type": "object"
+          },
+          "status": {
+            "type": "string"
+          },
+          "archivedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "maxCostUsd": {
+            "type": "string"
+          },
+          "costUsd": {
+            "type": "string"
+          },
+          "tokens": {
+            "type": "object",
+            "nullable": true
+          },
+          "specPath": {
+            "type": "string",
+            "nullable": true
+          },
+          "pendingQuestion": {
+            "type": "object",
+            "nullable": true
+          },
+          "session": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "jobId": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "live",
+                  "closed",
+                  "failed"
+                ]
+              },
+              "resumed": {
+                "type": "boolean"
+              },
+              "contextReset": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "nullable": true
+              },
+              "at": {
+                "type": "string"
+              },
+              "stale": {
+                "type": "boolean"
+              },
+              "kodaToolsUnavailableOn": {
+                "type": "string",
+                "description": "Set when the hosting runner does not advertise kodaTools (S5b 1b-D4)"
+              },
+              "projectCodeUnavailableOn": {
+                "type": "string",
+                "description": "Set when the hosting runner does not advertise projectCode on a PROJECT thread (S5b 1c-b-D8)"
+              }
+            }
+          },
+          "lastActivityAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "activeJob": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            }
+          },
+          "writtenPaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "publishedSha": {
+            "type": "string",
+            "nullable": true
+          },
+          "specPublished": {
+            "type": "boolean"
+          },
+          "lastWrite": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true
+          },
+          "sendRefusal": {
+            "nullable": true,
+            "enum": [
+              "disabled",
+              "archived",
+              "costCap",
+              "budgetPaused",
+              "runnerOffline",
+              "runnerOutdated",
+              "closing",
+              "turnRunning"
+            ],
+            "type": "string"
+          },
+          "handoff": {
+            "type": "object",
+            "properties": {
+              "plan": {
+                "type": "object",
+                "nullable": true,
+                "additionalProperties": true
+              },
+              "run": {
+                "type": "object",
+                "nullable": true,
+                "additionalProperties": true
+              }
+            }
+          },
+          "homeProject": {
+            "required": [
+              "slug",
+              "name"
+            ],
+            "type": "object",
+            "properties": {
+              "slug": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "projectId",
+          "repoId",
+          "baseRef",
+          "feature",
+          "title",
+          "createdById",
+          "runnerId",
+          "backend",
+          "status",
+          "archivedAt",
+          "skills",
+          "maxCostUsd",
+          "costUsd",
+          "tokens",
+          "specPath",
+          "pendingQuestion",
+          "session",
+          "lastActivityAt",
+          "createdAt",
+          "activeJob",
+          "writtenPaths",
+          "publishedSha",
+          "specPublished",
+          "lastWrite",
+          "sendRefusal",
+          "handoff"
+        ]
+      },
+      "ChatMessageDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "seq": {
+            "type": "number"
+          },
+          "jobId": {
+            "type": "string",
+            "nullable": true
+          },
+          "turnId": {
+            "type": "string",
+            "nullable": true
+          },
+          "role": {
+            "type": "string"
+          },
+          "authorUserId": {
+            "type": "string",
+            "nullable": true
+          },
+          "clientMessageId": {
+            "type": "string",
+            "nullable": true
+          },
+          "content": {
+            "type": "string"
+          },
+          "toolSummary": {
+            "type": "object",
+            "nullable": true
+          },
+          "status": {
+            "type": "string"
+          },
+          "errorReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "usage": {
+            "type": "object",
+            "nullable": true
+          },
+          "costUsd": {
+            "type": "string",
+            "nullable": true
+          },
+          "costSource": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "seq",
+          "jobId",
+          "turnId",
+          "role",
+          "authorUserId",
+          "clientMessageId",
+          "content",
+          "toolSummary",
+          "status",
+          "errorReason",
+          "usage",
+          "costUsd",
+          "costSource",
+          "createdAt"
+        ]
+      },
+      "ChatMessageListDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatMessageDto"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "UpdateThreadDto": {
+        "type": "object",
+        "properties": {
+          "maxCostUsd": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "maxCostUsd"
+        ]
+      },
+      "AnswerQuestionDto": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32768
+          }
+        },
+        "required": [
+          "requestId",
+          "text"
+        ]
+      },
       "CreateThreadDto": {
         "type": "object",
         "properties": {
@@ -17498,17 +18105,6 @@
           "handoff"
         ]
       },
-      "UpdateThreadDto": {
-        "type": "object",
-        "properties": {
-          "maxCostUsd": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "maxCostUsd"
-        ]
-      },
       "PlanThreadDto": {
         "type": "object",
         "properties": {
@@ -17557,25 +18153,6 @@
           }
         }
       },
-      "AnswerQuestionDto": {
-        "type": "object",
-        "properties": {
-          "requestId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "text": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 32768
-          }
-        },
-        "required": [
-          "requestId",
-          "text"
-        ]
-      },
       "SendMessageDto": {
         "type": "object",
         "properties": {
@@ -17594,83 +18171,6 @@
           "clientMessageId"
         ]
       },
-      "ChatMessageDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "seq": {
-            "type": "number"
-          },
-          "jobId": {
-            "type": "string",
-            "nullable": true
-          },
-          "turnId": {
-            "type": "string",
-            "nullable": true
-          },
-          "role": {
-            "type": "string"
-          },
-          "authorUserId": {
-            "type": "string",
-            "nullable": true
-          },
-          "clientMessageId": {
-            "type": "string",
-            "nullable": true
-          },
-          "content": {
-            "type": "string"
-          },
-          "toolSummary": {
-            "type": "object",
-            "nullable": true
-          },
-          "status": {
-            "type": "string"
-          },
-          "errorReason": {
-            "type": "string",
-            "nullable": true
-          },
-          "usage": {
-            "type": "object",
-            "nullable": true
-          },
-          "costUsd": {
-            "type": "string",
-            "nullable": true
-          },
-          "costSource": {
-            "type": "string",
-            "nullable": true
-          },
-          "createdAt": {
-            "format": "date-time",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "seq",
-          "jobId",
-          "turnId",
-          "role",
-          "authorUserId",
-          "clientMessageId",
-          "content",
-          "toolSummary",
-          "status",
-          "errorReason",
-          "usage",
-          "costUsd",
-          "costSource",
-          "createdAt"
-        ]
-      },
       "SendMessageResultDto": {
         "type": "object",
         "properties": {
@@ -17685,20 +18185,6 @@
         "required": [
           "message",
           "jobId"
-        ]
-      },
-      "ChatMessageListDto": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ChatMessageDto"
-            }
-          }
-        },
-        "required": [
-          "items"
         ]
       },
       "SkillDto": {

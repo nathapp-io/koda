@@ -11,6 +11,8 @@ export interface SseMessage {
 export interface SseConnection {
   status: number;
   body: string;
+  /** The response `content-type` header (AC-11 pins `text/event-stream`). */
+  contentType: string;
   next(predicate: (m: SseMessage) => boolean, timeoutMs?: number): Promise<SseMessage>;
   closed: Promise<void>;
   isClosed(): boolean;
@@ -47,6 +49,7 @@ export async function openSse(url: string, token: string): Promise<SseConnection
     return {
       status: res.status,
       body,
+      contentType: res.headers.get('content-type') ?? '',
       next: () => Promise.reject(new Error(`stream not open (${res.status})`)),
       closed: Promise.resolve(),
       isClosed: () => true,
@@ -101,6 +104,7 @@ export async function openSse(url: string, token: string): Promise<SseConnection
   return {
     status: res.status,
     body: '',
+    contentType: res.headers.get('content-type') ?? '',
     next(predicate, timeoutMs = 3000) {
       const queued = inbox.find(predicate);
       if (queued) {

@@ -7,6 +7,8 @@ import type { SkillsService } from '../../skills/skills.service';
 import type { ProjectsService } from '../../projects/projects.service';
 import type { ProjectAccessService } from '../../projects/project-access.service';
 import type { IFleetConfig } from '../../config/fleet.config';
+import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
+import { FleetCommandType } from '../../common/enums';
 
 describe('workspace home project creation', () => {
   const a = { id: 'a', slug: 'a', name: 'A', createdAt: new Date(1000) };
@@ -48,4 +50,90 @@ describe('workspace home project creation', () => {
   it('AC-15: kill switch precedes validation', async () => { config.threadsEnabled = false; await expect(service.create(principal, { ...input, kind: 'PROJECT' })).rejects.toMatchObject({ prefix: 'threads.disabled', httpStatus: 409 }); });
   it('breaks createdAt ties by id', async () => { reachable = [b, { ...a, createdAt: b.createdAt }]; expect(await service.create(principal, input)).toMatchObject({ projectId: 'a' }); });
   it('explicit admin home need not have a membership row', async () => { principal.role = 'ADMIN'; roles = {}; expect(await service.create(principal, { ...input, homeProject: 'b' })).toMatchObject({ projectId: 'b' }); });
+});
+
+/**
+ * US-004: every read, cap write and command goes through the workspace scope, so the HTTP layer never
+ * names a project (1d-D2 creator-only, 1d-D10 thread scope).
+ */
+describe('workspace read, cap and command scope', () => {
+  const record = { id: 't1', kind: 'WORKSPACE' as const, projectId: 'p1', createdById: 'u', homeProject: { slug: 'web', name: 'Web' }, maxCostUsd: '5' };
+  let repository: Record<'list' | 'get' | 'sendRefusalOf' | 'handoff' | 'messages' | 'updateCap' | 'command', ReturnType<typeof vi.fn>>;
+  let config: { threadsEnabled: boolean };
+  let service: WorkspaceThreadsService;
+
+  beforeEach(() => {
+    repository = {
+      list: vi.fn(async () => [record]), get: vi.fn(async () => record), sendRefusalOf: vi.fn(async () => null),
+      handoff: vi.fn(async () => ({ plan: null, run: null })), messages: vi.fn(async () => [{ id: 'm1', seq: 1 }]),
+      updateCap: vi.fn(async () => record), command: vi.fn(async () => undefined),
+    };
+    config = { threadsEnabled: true };
+    service = new WorkspaceThreadsService(
+      repository as unknown as ChatThreadRepository,
+      {} as IFleetRepoRepository, {} as SkillsService, config as IFleetConfig, {} as ProjectsService, {} as ProjectAccessService, new KodaCaslAbilityFactory(),
+    );
+  });
+
+  it('AC-1/AC-3: lists through the workspace scope and reports the kill switch', async () => {
+    await expect(service.list('u', 'ACTIVE', 20, 20)).resolves.toEqual({ items: [record], threadsEnabled: true });
+    expect(repository.list).toHaveBeenCalledWith({ kind: 'workspace', userId: 'u' }, 'ACTIVE', 20, 20);
+  });
+
+  it('AC-5: reads the owned thread with its send refusal and handoff', async () => {
+    await expect(service.get('u', 't1')).resolves.toEqual({ ...record, sendRefusal: null, handoff: { plan: null, run: null } });
+    expect(repository.get).toHaveBeenCalledWith({ kind: 'workspace', userId: 'u' }, 't1');
+    // The send refusal is judged against the thread's home project.
+    expect(repository.sendRefusalOf).toHaveBeenCalledWith('p1', record);
+    expect(repository.handoff).toHaveBeenCalledWith('t1');
+  });
+
+  it('AC-4/AC-6: a miss through the workspace scope answers 404 threads.notFound', async () => {
+    repository.get.mockResolvedValue(null);
+    await expect(service.get('u', 't1')).rejects.toMatchObject({ prefix: 'threads.notFound', httpStatus: 404 });
+    expect(repository.handoff).not.toHaveBeenCalled();
+  });
+
+  it('AC-7/AC-8: reads the owned thread before its messages and refuses a miss', async () => {
+    await expect(service.messages('u', 't1', 3, 100)).resolves.toEqual({ items: [{ id: 'm1', seq: 1 }] });
+    expect(repository.get).toHaveBeenCalledWith({ kind: 'workspace', userId: 'u' }, 't1');
+    expect(repository.messages).toHaveBeenCalledWith('t1', 3, 100);
+    repository.get.mockResolvedValue(null);
+    await expect(service.messages('u', 't1', 0, 100)).rejects.toMatchObject({ prefix: 'threads.notFound', httpStatus: 404 });
+    expect(repository.messages).toHaveBeenCalledTimes(1);
+  });
+
+  it('AC-13: writes the cap through the workspace scope and answers the home project', async () => {
+    const updated = { ...record, maxCostUsd: '7', homeProject: undefined };
+    repository.updateCap.mockResolvedValue(updated);
+    repository.get.mockResolvedValue({ ...record, maxCostUsd: '7' });
+    const result = await service.updateCap('u', 't1', 7);
+    expect(repository.updateCap).toHaveBeenCalledWith({ kind: 'workspace', userId: 'u' }, 't1', 'u', '7');
+    expect(result).toEqual({ ...updated, homeProject: { slug: 'web', name: 'Web' } });
+    expect(result).not.toBe(updated);
+  });
+
+  it('refuses a cap outside the shared bounds before touching the repository', async () => {
+    await expect(service.updateCap('u', 't1', 0)).rejects.toMatchObject({ prefix: 'threads.input', httpStatus: 400 });
+    expect(repository.updateCap).not.toHaveBeenCalled();
+  });
+
+  it('AC-14/AC-15: queues stop and end-session through the workspace scope', async () => {
+    await service.stop('u', 't1');
+    await service.endSession('u', 't1');
+    expect(repository.command).toHaveBeenNthCalledWith(1, { kind: 'workspace', userId: 'u' }, 't1', 'u', FleetCommandType.THREAD_STOP_TURN, {});
+    expect(repository.command).toHaveBeenNthCalledWith(2, { kind: 'workspace', userId: 'u' }, 't1', 'u', FleetCommandType.THREAD_CLOSE, {});
+  });
+
+  it('propagates the repository session refusal of a command', async () => {
+    repository.command.mockRejectedValue(new ConflictAppException({}, 'threads.noSession'));
+    await expect(service.endSession('u', 't1')).rejects.toMatchObject({ prefix: 'threads.noSession', httpStatus: 409 });
+  });
+
+  it('answers a question through the workspace scope after validating the body', async () => {
+    await service.answer('u', 't1', { requestId: 'q1', text: 'yes' });
+    expect(repository.command).toHaveBeenCalledWith({ kind: 'workspace', userId: 'u' }, 't1', 'u', FleetCommandType.THREAD_ANSWER, { requestId: 'q1', text: 'yes' });
+    await expect(service.answer('u', 't1', { requestId: 'q1', text: '' })).rejects.toMatchObject({ prefix: 'threads.input', httpStatus: 400 });
+    expect(repository.command).toHaveBeenCalledTimes(1);
+  });
 });
