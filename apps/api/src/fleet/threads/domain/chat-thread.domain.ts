@@ -94,18 +94,21 @@ export interface ChatMessageRecord {
   usage: unknown; costUsd: string | null; costSource: string | null; createdAt: Date;
 }
 
+/** Which threads a lookup may see: a project's REPO and PROJECT threads, or one user's WORKSPACE threads. */
+export type ThreadScope = { kind: 'project'; projectId: string } | { kind: 'workspace'; userId: string };
+
 export interface ChatThreadRepository {
   create(input: { kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord>;
-  list(projectId: string, status: string | undefined, skip: number, take: number): Promise<ChatThreadRecord[]>;
-  get(projectId: string, id: string): Promise<ChatThreadRecord | null>;
+  list(scope: ThreadScope, status: string | undefined, skip: number, take: number): Promise<ChatThreadRecord[]>;
+  get(scope: ThreadScope, id: string): Promise<ChatThreadRecord | null>;
   handoff(threadId: string): Promise<ChatThreadHandoff>;
   sendRefusalOf(projectId: string, thread: ChatThreadRecord): Promise<ThreadSendRefusal | null>;
   messages(threadId: string, afterSeq: number, limit: number): Promise<ChatMessageRecord[]>;
-  sendMessage(input: { projectId: string; threadId: string; userId: string; text: string; clientMessageId: string; repoContext?: string }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }>;
+  sendMessage(input: { scope: ThreadScope; threadId: string; userId: string; text: string; clientMessageId: string; repoContext?: string }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }>;
   publish(projectId: string, threadId: string, userId: string): Promise<{ jobId: string | null }>;
   discard(projectId: string, threadId: string, userId: string): Promise<{ jobId: string }>;
   archivedThreadIds(runnerId: string): Promise<string[]>;
-  updateCap(projectId: string, threadId: string, userId: string, maxCostUsd: string): Promise<ChatThreadRecord>;
-  command(projectId: string, threadId: string, userId: string, type: string, payload: object): Promise<void>;
-  archive(projectId: string, threadId: string, userId: string, canArchive: boolean): Promise<string | null>;
+  updateCap(scope: ThreadScope, threadId: string, userId: string, maxCostUsd: string): Promise<ChatThreadRecord>;
+  command(scope: ThreadScope, threadId: string, userId: string, type: string, payload: object): Promise<void>;
+  archive(scope: ThreadScope, threadId: string, userId: string, canArchive: boolean): Promise<string | null>;
 }

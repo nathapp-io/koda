@@ -21,7 +21,7 @@ import { BudgetPausedException } from '../budgets/budget.exceptions';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
 import { buildProjectThreadInstructions, buildThreadInstructions, renderBriefBlock } from './thread-instructions';
 import { sendRefusal, type ThreadSendRefusal } from './thread-send-rules';
-import { allocateThreadSeq, repoThreadFields, type ChatMessageRecord, type ChatThreadRecord, type ChatThreadRepository, type ThreadSession, type ThreadWriteResult } from './domain/chat-thread.domain';
+import { allocateThreadSeq, repoThreadFields, type ChatMessageRecord, type ChatThreadRecord, type ChatThreadRepository, type ThreadScope, type ThreadSession, type ThreadWriteResult } from './domain/chat-thread.domain';
 import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
 import type { ChatThreadKind, ThreadAction, ThreadBackend } from '../common/thread-jobs';
 import { THREAD_LIMITS } from '../common/thread-jobs';
@@ -35,6 +35,13 @@ const mapThreadKind = (kind: string | null | undefined): ChatThreadKind =>
 
 /** A budget refusal carries the paused policy so the 409 names its scope. */
 type SendRefusalResult = { refusal: 'budgetPaused'; pausedPolicy: BudgetPolicyRecord } | { refusal: Exclude<ThreadSendRefusal, 'budgetPaused'> | null; pausedPolicy: null };
+
+/** Shared visibility fence, applied before and after acquiring mutation locks. */
+const scopeWhere = (scope: ThreadScope): Prisma.ChatThreadWhereInput => scope.kind === 'project'
+  ? { projectId: scope.projectId, kind: { not: 'WORKSPACE' } }
+  : { createdById: scope.userId, kind: 'WORKSPACE' };
+const homeProjectInclude = (scope: ThreadScope) => scope.kind === 'workspace'
+  ? { project: { select: { slug: true, name: true } } } as const : undefined;
 
 @Injectable()
 export class PrismaChatThreadRepository implements ChatThreadRepository {
@@ -68,16 +75,16 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     return this.mapThread(row, null);
   }
 
-  async list(projectId: string, status: string | undefined, skip: number, take: number): Promise<ChatThreadRecord[]> {
-    const rows = await this.prisma.client.chatThread.findMany({ where: { projectId, ...(status ? { status } : {}) }, skip, take, orderBy: [{ lastActivityAt: 'desc' }, { id: 'desc' }] });
+  async list(scope: ThreadScope, status: string | undefined, skip: number, take: number): Promise<ChatThreadRecord[]> {
+    const rows = await this.prisma.client.chatThread.findMany({ where: { ...scopeWhere(scope), ...(status ? { status } : {}) }, include: homeProjectInclude(scope), skip, take, orderBy: [{ lastActivityAt: 'desc' }, { id: 'desc' }] });
     const jobs = rows.length ? await this.prisma.client.fleetJob.findMany({ where: { threadId: { in: rows.map((row) => row.id) }, command: 'THREAD', state: { notIn: TERMINAL_JOB_STATES } }, orderBy: [{ queuedAt: 'desc' }, { id: 'desc' }], select: { id: true, state: true, threadId: true } }) : [];
     const active = new Map<string, { id: string; state: string }>();
     for (const job of jobs) if (job.threadId && !active.has(job.threadId)) active.set(job.threadId, { id: job.id, state: job.state });
     return rows.map((row) => this.mapThread(row, active.get(row.id) ?? null));
   }
 
-  async get(projectId: string, id: string): Promise<ChatThreadRecord | null> {
-    const row = await this.prisma.client.chatThread.findFirst({ where: { id, projectId } });
+  async get(scope: ThreadScope, id: string): Promise<ChatThreadRecord | null> {
+    const row = await this.prisma.client.chatThread.findFirst({ where: { id, ...scopeWhere(scope) }, include: homeProjectInclude(scope) });
     if (!row) return null;
     const job = await this.prisma.client.fleetJob.findFirst({ where: { threadId: id, command: 'THREAD', state: { notIn: TERMINAL_JOB_STATES } }, orderBy: [{ queuedAt: 'desc' }, { id: 'desc' }], select: { id: true, state: true } });
     return this.mapThread(row, job);
@@ -117,30 +124,33 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     return rows.map((row) => row.id);
   }
 
-  async updateCap(projectId: string, threadId: string, userId: string, maxCostUsd: string): Promise<ChatThreadRecord> {
+  async updateCap(scope: ThreadScope, threadId: string, userId: string, maxCostUsd: string): Promise<ChatThreadRecord> {
     const updated = await this.txManager.run(async () => {
-      const before = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId } });
+      const before = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, ...scopeWhere(scope) } });
       if (!before) throw new NotFoundAppException({}, 'threads.notFound');
       if (before.createdById !== userId) throw new ForbiddenAppException({}, 'threads.notCreator');
       const job = await this.currentThreadJob(threadId);
       if (job) await this.jobs.lockById(job.id);
       await this.prisma.client.$queryRaw`SELECT "id" FROM "ChatThread" WHERE "id" = ${threadId} FOR UPDATE`;
+      const thread = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, ...scopeWhere(scope) } });
+      if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
+      if (thread.createdById !== userId) throw new ForbiddenAppException({}, 'threads.notCreator');
       const row = await this.prisma.client.chatThread.update({ where: { id: threadId }, data: { maxCostUsd } });
       return this.mapThread(row, job);
     });
     return updated;
   }
 
-  async command(projectId: string, threadId: string, userId: string, type: string, payload: object): Promise<void> {
+  async command(scope: ThreadScope, threadId: string, userId: string, type: string, payload: object): Promise<void> {
     let runnerId: string | null = null;
     await this.txManager.run(async () => {
-      const before = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId } });
+      const before = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, ...scopeWhere(scope) } });
       if (!before) throw new NotFoundAppException({}, 'threads.notFound');
       if (before.createdById !== userId) throw new ForbiddenAppException({}, 'threads.notCreator');
       const current = await this.currentThreadJob(threadId);
       if (current) await this.jobs.lockById(current.id);
       await this.prisma.client.$queryRaw`SELECT "id" FROM "ChatThread" WHERE "id" = ${threadId} FOR UPDATE`;
-      const thread = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId } });
+      const thread = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, ...scopeWhere(scope) } });
       if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
       if (thread.createdById !== userId) throw new ForbiddenAppException({}, 'threads.notCreator');
       if (type === FleetCommandType.THREAD_ANSWER) {
@@ -163,15 +173,15 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     if (runnerId) this.notifier.notify(runnerId);
   }
 
-  async archive(projectId: string, threadId: string, userId: string, canArchive: boolean): Promise<string | null> {
+  async archive(scope: ThreadScope, threadId: string, userId: string, canArchive: boolean): Promise<string | null> {
     return this.txManager.run(async () => {
-      const before = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId } });
+      const before = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, ...scopeWhere(scope) } });
       if (!before) throw new NotFoundAppException({}, 'threads.notFound');
       if (before.createdById !== userId && !canArchive) throw new ForbiddenAppException({}, 'threads.notCreator');
       const current = await this.currentThreadJob(threadId);
       if (current) await this.jobs.lockById(current.id);
       await this.prisma.client.$queryRaw`SELECT "id" FROM "ChatThread" WHERE "id" = ${threadId} FOR UPDATE`;
-      const thread = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId } });
+      const thread = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, ...scopeWhere(scope) } });
       if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
       if (thread.status === 'ARCHIVED') return null;
       await this.prisma.client.chatThread.update({ where: { id: threadId }, data: { status: 'ARCHIVED', archivedAt: new Date() } });
@@ -185,7 +195,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     let notifyRunnerId: string | null = null;
     let placeJobId: string | null = null;
     const result = await this.txManager.run(async () => {
-      const before = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId } });
+      const before = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId, kind: { not: 'WORKSPACE' } } });
       if (!before) throw new NotFoundAppException({}, 'threads.notFound');
       // 1a-R3: Publish is REPO-only, and the guard runs before the creator check so a PROJECT thread answers 409.
       const repoFields = repoThreadFields(before);
@@ -193,7 +203,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       const current = await this.activeThreadJob(threadId);
       if (current) await this.jobs.lockById(current.id);
       await this.prisma.client.$queryRaw`SELECT "id" FROM "ChatThread" WHERE "id" = ${threadId} FOR UPDATE`;
-      const thread = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId } });
+      const thread = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId, kind: { not: 'WORKSPACE' } } });
       if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
       const active = await this.activeThreadJob(threadId);
       if ((current?.id ?? null) !== (active?.id ?? null)) throw new ConflictAppException({}, 'threads.busy');
@@ -238,7 +248,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
   async discard(projectId: string, threadId: string, userId: string): Promise<{ jobId: string }> {
     let placeJobId: string | null = null;
     const result = await this.txManager.run(async () => {
-      const before = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId } });
+      const before = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId, kind: { not: 'WORKSPACE' } } });
       if (!before) throw new NotFoundAppException({}, 'threads.notFound');
       // 1a-R3: Discard is REPO-only, and the guard runs before the creator check so a PROJECT thread answers 409.
       const repoFields = repoThreadFields(before);
@@ -246,7 +256,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       const current = await this.activeThreadJob(threadId);
       if (current) await this.jobs.lockById(current.id);
       await this.prisma.client.$queryRaw`SELECT "id" FROM "ChatThread" WHERE "id" = ${threadId} FOR UPDATE`;
-      const thread = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId } });
+      const thread = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, projectId, kind: { not: 'WORKSPACE' } } });
       if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
       const active = await this.activeThreadJob(threadId);
       if ((current?.id ?? null) !== (active?.id ?? null)) throw new ConflictAppException({}, 'threads.busy');
@@ -271,10 +281,10 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     return result;
   }
 
-  async sendMessage(input: { projectId: string; threadId: string; userId: string; text: string; clientMessageId: string; repoContext?: string }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }> {
+  async sendMessage(input: { scope: ThreadScope; threadId: string; userId: string; text: string; clientMessageId: string; repoContext?: string }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }> {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const outcome = await this.txManager.run(async () => {
-        const threadBefore = await this.prisma.client.chatThread.findFirst({ where: { id: input.threadId, projectId: input.projectId } });
+        const threadBefore = await this.prisma.client.chatThread.findFirst({ where: { id: input.threadId, ...scopeWhere(input.scope) } });
         if (!threadBefore) throw new NotFoundAppException({}, 'threads.notFound');
         if (threadBefore.createdById !== input.userId) throw new ForbiddenAppException({}, 'threads.notCreator');
         const duplicate = await this.prisma.client.chatMessage.findUnique({ where: { threadId_clientMessageId: { threadId: input.threadId, clientMessageId: input.clientMessageId } } });
@@ -283,7 +293,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
         const currentJob = await this.currentThreadJob(input.threadId);
         if (currentJob) await this.jobs.lockById(currentJob.id);
         await this.prisma.client.$queryRaw`SELECT "id" FROM "ChatThread" WHERE "id" = ${input.threadId} FOR UPDATE`;
-        const thread = await this.prisma.client.chatThread.findFirst({ where: { id: input.threadId, projectId: input.projectId } });
+        const thread = await this.prisma.client.chatThread.findFirst({ where: { id: input.threadId, ...scopeWhere(input.scope) } });
         if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
         const currentAfterLock = await this.currentThreadJob(input.threadId);
         if ((currentJob?.id ?? null) !== (currentAfterLock?.id ?? null)) return { kind: 'retry' as const };
@@ -467,9 +477,10 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     return { ...message, costUsd: row.costUsd?.toString() ?? null };
   }
 
-  private mapThread(row: Prisma.ChatThreadGetPayload<object>, activeJob: { id: string; state: string } | null): ChatThreadRecord {
+  private mapThread(row: Prisma.ChatThreadGetPayload<object> & { project?: { slug: string; name: string } }, activeJob: { id: string; state: string } | null): ChatThreadRecord {
     return {
       id: row.id, kind: mapThreadKind(row.kind), projectId: row.projectId,
+      ...(row.project ? { homeProject: row.project } : {}),
       repoId: row.repoId, baseRef: row.baseRef, feature: row.feature,
       title: row.title, createdById: row.createdById, runnerId: row.runnerId,
       backend: row.backend as unknown as ThreadBackend, status: row.status, archivedAt: row.archivedAt,

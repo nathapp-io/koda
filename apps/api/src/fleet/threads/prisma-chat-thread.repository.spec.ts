@@ -40,31 +40,31 @@ function commandRepo(opts: { action: 'SESSION' | 'PUBLISH' | 'DISCARD'; pendingQ
 describe('PrismaChatThreadRepository.command while a PUBLISH or DISCARD job is active (US-004)', () => {
   it('AC-14: answers threads.noSession for an end-session on a live PUBLISH job', async () => {
     const { repo, jobs } = commandRepo({ action: 'PUBLISH' });
-    await expect(repo.command('P', 'T', 'U', 'THREAD_CLOSE', {})).rejects.toMatchObject({ prefix: 'threads.noSession' });
+    await expect(repo.command({ kind: 'project', projectId: 'P' }, 'T', 'U', 'THREAD_CLOSE', {})).rejects.toMatchObject({ prefix: 'threads.noSession' });
     expect(jobs.createCommand).not.toHaveBeenCalled();
   });
 
   it('AC-14: answers threads.noSession for a stop on a live DISCARD job', async () => {
     const { repo, jobs } = commandRepo({ action: 'DISCARD' });
-    await expect(repo.command('P', 'T', 'U', 'THREAD_STOP_TURN', {})).rejects.toMatchObject({ prefix: 'threads.noSession' });
+    await expect(repo.command({ kind: 'project', projectId: 'P' }, 'T', 'U', 'THREAD_STOP_TURN', {})).rejects.toMatchObject({ prefix: 'threads.noSession' });
     expect(jobs.createCommand).not.toHaveBeenCalled();
   });
 
   it('AC-15: an answer on a live PUBLISH job with no pending question answers threads.noQuestion first', async () => {
     const { repo, jobs } = commandRepo({ action: 'PUBLISH' });
-    await expect(repo.command('P', 'T', 'U', 'THREAD_ANSWER', { requestId: 'q1', text: 'yes' })).rejects.toMatchObject({ prefix: 'threads.noQuestion' });
+    await expect(repo.command({ kind: 'project', projectId: 'P' }, 'T', 'U', 'THREAD_ANSWER', { requestId: 'q1', text: 'yes' })).rejects.toMatchObject({ prefix: 'threads.noQuestion' });
     expect(jobs.createCommand).not.toHaveBeenCalled();
   });
 
   it('AC-15: C2-D7 covers only stop and end-session, so an answer with a matching question still reaches the job', async () => {
     const { repo, jobs } = commandRepo({ action: 'PUBLISH', pendingQuestion: { requestId: 'q1' } });
-    await repo.command('P', 'T', 'U', 'THREAD_ANSWER', { requestId: 'q1', text: 'yes' });
+    await repo.command({ kind: 'project', projectId: 'P' }, 'T', 'U', 'THREAD_ANSWER', { requestId: 'q1', text: 'yes' });
     expect(jobs.createCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'THREAD_ANSWER', jobId: 'J' }));
   });
 
   it('a stop on a live SESSION job still queues the command', async () => {
     const { repo, jobs, notifier } = commandRepo({ action: 'SESSION' });
-    await repo.command('P', 'T', 'U', 'THREAD_STOP_TURN', {});
+    await repo.command({ kind: 'project', projectId: 'P' }, 'T', 'U', 'THREAD_STOP_TURN', {});
     expect(jobs.createCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'THREAD_STOP_TURN', jobId: 'J', leaseEpoch: 4 }));
     expect(notifier.notify).toHaveBeenCalledWith('R');
   });
@@ -127,7 +127,7 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
       },
     } as never;
     const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
-    const thread = await repo.get('P', 'T');
+    const thread = await repo.get({ kind: 'project', projectId: 'P' }, 'T');
     expect(thread?.session).toEqual(session);
   });
 
@@ -137,7 +137,7 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
     };
     const repo = repoOfThreadRow(threadRow({ kind: 'PROJECT', session }));
 
-    const thread = await repo.get('P', 'T');
+    const thread = await repo.get({ kind: 'project', projectId: 'P' }, 'T');
 
     expect(thread?.session).toEqual(session);
     expect(thread?.session?.projectCodeUnavailableOn).toBe('wk-mac');
@@ -146,7 +146,7 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
   it('US-004 AC12: get() maps a thread with no session to a null session', async () => {
     const repo = repoOfThreadRow(threadRow({ session: null }));
 
-    expect((await repo.get('P', 'T'))?.session).toBeNull();
+    expect((await repo.get({ kind: 'project', projectId: 'P' }, 'T'))?.session).toBeNull();
   });
 
   it('US-001 AC-14: get() maps writtenPaths, publishedSha, specPublished and lastWrite unchanged', async () => {
@@ -165,7 +165,7 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
       },
     } as never;
     const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
-    const thread = await repo.get('P', 'T');
+    const thread = await repo.get({ kind: 'project', projectId: 'P' }, 'T');
     expect(thread).toMatchObject({ writtenPaths: ['docs/a.md'], publishedSha: 'a'.repeat(40), specPublished: true, lastWrite });
   });
 
@@ -204,7 +204,7 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
 
   it('US-002: get() maps a PROJECT row to kind PROJECT with null repo fields', async () => {
     const repo = repoOfThreadRow(threadRow({ kind: 'PROJECT', repoId: null, baseRef: null, feature: null, specPath: null }));
-    expect(await repo.get('P', 'T')).toMatchObject({
+    expect(await repo.get({ kind: 'project', projectId: 'P' }, 'T')).toMatchObject({
       kind: 'PROJECT', repoId: null, baseRef: null, feature: null, specPath: null,
     });
   });
@@ -213,22 +213,22 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
     const withoutKind = threadRow();
     delete withoutKind.kind;
     const repo = repoOfThreadRow(withoutKind);
-    expect(await repo.get('P', 'T')).toMatchObject({ kind: 'REPO', repoId: 'R', feature: 'f' });
+    expect(await repo.get({ kind: 'project', projectId: 'P' }, 'T')).toMatchObject({ kind: 'REPO', repoId: 'R', feature: 'f' });
   });
 
   it('US-002: get() maps an unknown stored kind to kind REPO', async () => {
     const repo = repoOfThreadRow(threadRow({ kind: 'FUTURE' }));
-    expect((await repo.get('P', 'T'))?.kind).toBe('REPO');
+    expect((await repo.get({ kind: 'project', projectId: 'P' }, 'T'))?.kind).toBe('REPO');
   });
 
   it('US-001 AC-8: get() maps a stored WORKSPACE kind to kind WORKSPACE', async () => {
     const repo = repoOfThreadRow(threadRow({ kind: 'WORKSPACE', repoId: null, baseRef: null, feature: null, specPath: null }));
-    expect((await repo.get('P', 'T'))?.kind).toBe('WORKSPACE');
+    expect((await repo.get({ kind: 'workspace', userId: 'U' }, 'T'))?.kind).toBe('WORKSPACE');
   });
 
   it('US-001 AC-9: get() maps the stored projectId onto the record', async () => {
     const repo = repoOfThreadRow(threadRow({ kind: 'WORKSPACE', repoId: null, baseRef: null, feature: null, specPath: null }));
-    expect((await repo.get('P', 'T'))?.projectId).toBe('P');
+    expect((await repo.get({ kind: 'workspace', userId: 'U' }, 'T'))?.projectId).toBe('P');
   });
 
   it('US-003 AC13: messages() passes the after-seq filter and limit to the query', async () => {
@@ -324,7 +324,7 @@ describe('PrismaChatThreadRepository SESSION turn instructions (S5b US-003)', ()
   it('US-003 AC-10: a PROJECT SESSION turn stores the project brief and the anchor repository section after the role line', async () => {
     const { repo, turnCreate, anchorFindFirst, projectFindUnique } = sendRepo(threadRow({ kind: 'PROJECT', repoId: null, baseRef: null, feature: null, specPath: null }));
 
-    await repo.sendMessage({ projectId: 'P', threadId: 'T', userId: 'U', text: 'hi', clientMessageId: 'c1', repoContext: 'Repository context: unavailable (no installation)' });
+    await repo.sendMessage({ scope: { kind: 'project', projectId: 'P' }, threadId: 'T', userId: 'U', text: 'hi', clientMessageId: 'c1', repoContext: 'Repository context: unavailable (no installation)' });
 
     expect(anchorFindFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { projectId: 'P' } }));
     expect(projectFindUnique).toHaveBeenCalledWith({ where: { id: 'P' }, select: { slug: true, brief: true } });
@@ -336,7 +336,7 @@ describe('PrismaChatThreadRepository SESSION turn instructions (S5b US-003)', ()
   it('US-003 AC-11: a REPO SESSION turn stores the project brief as lines two and three', async () => {
     const { repo, turnCreate, projectFindUnique, repoFindUnique } = sendRepo(threadRow());
 
-    await repo.sendMessage({ projectId: 'P', threadId: 'T', userId: 'U', text: 'hi', clientMessageId: 'c1', repoContext: 'Repository context: unavailable (no context file)' });
+    await repo.sendMessage({ scope: { kind: 'project', projectId: 'P' }, threadId: 'T', userId: 'U', text: 'hi', clientMessageId: 'c1', repoContext: 'Repository context: unavailable (no context file)' });
 
     expect(repoFindUnique).toHaveBeenCalledWith({ where: { id: 'R' }, select: { owner: true, name: true } });
     expect(projectFindUnique).toHaveBeenCalledWith({ where: { id: 'P' }, select: { brief: true } });
@@ -346,7 +346,7 @@ describe('PrismaChatThreadRepository SESSION turn instructions (S5b US-003)', ()
   it('US-003: a SESSION send without a repository context stores exactly today\'s instructions and no project brief read', async () => {
     const { repo, turnCreate, projectFindUnique } = sendRepo(threadRow());
 
-    await repo.sendMessage({ projectId: 'P', threadId: 'T', userId: 'U', text: 'hi', clientMessageId: 'c1' });
+    await repo.sendMessage({ scope: { kind: 'project', projectId: 'P' }, threadId: 'T', userId: 'U', text: 'hi', clientMessageId: 'c1' });
 
     expect(projectFindUnique).not.toHaveBeenCalled();
     expect(instructionsOf(turnCreate).split('\n')).not.toContain('Project brief:');
@@ -356,7 +356,7 @@ describe('PrismaChatThreadRepository SESSION turn instructions (S5b US-003)', ()
     const { repo, turnCreate, projectFindUnique } = sendRepo(threadRow());
     projectFindUnique.mockResolvedValueOnce({ slug: 'sandbox', brief: null } as never);
 
-    await repo.sendMessage({ projectId: 'P', threadId: 'T', userId: 'U', text: 'hi', clientMessageId: 'c1', repoContext: 'Repository context: unavailable (no context file)' });
+    await repo.sendMessage({ scope: { kind: 'project', projectId: 'P' }, threadId: 'T', userId: 'U', text: 'hi', clientMessageId: 'c1', repoContext: 'Repository context: unavailable (no context file)' });
 
     expect(instructionsOf(turnCreate).split('\n').slice(1, 4))
       .toEqual(['Project brief:', '(none)', 'Repository context: unavailable (no context file)']);

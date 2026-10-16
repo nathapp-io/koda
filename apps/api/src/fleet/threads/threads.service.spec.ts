@@ -343,7 +343,7 @@ describe('ThreadsService.sendMessage repository context (S5b US-003)', () => {
     expect(findAnchor).toHaveBeenCalledWith('p1');
     expect(resolveRepoContext).toHaveBeenCalledTimes(1);
     expect(resolveRepoContext).toHaveBeenCalledWith('r-anchor');
-    expect(sendMessage).toHaveBeenCalledWith({ projectId: 'p1', threadId: 't1', userId: 'u1', text: 'hi', clientMessageId: 'c1', repoContext: SECTION });
+    expect(sendMessage).toHaveBeenCalledWith({ scope: { kind: 'project', projectId: 'p1' }, threadId: 't1', userId: 'u1', text: 'hi', clientMessageId: 'c1', repoContext: SECTION });
     expect(order).toEqual(['resolve:r-anchor', `send:${SECTION}`]);
   });
 
@@ -370,7 +370,7 @@ describe('ThreadsService.sendMessage repository context (S5b US-003)', () => {
 
     await send(service);
 
-    expect(get).toHaveBeenCalledWith('p1', 't1');
+    expect(get).toHaveBeenCalledWith({ kind: 'project', projectId: 'p1' }, 't1');
     expect(resolveRepoContext).not.toHaveBeenCalled();
     expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ repoContext: undefined }));
   });

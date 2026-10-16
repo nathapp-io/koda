@@ -3957,6 +3957,30 @@ describeIntegration('API Integration Tests', () => {
       threadMessage(res, 'threads.noQuestion.409');
     });
 
+    it('workspace isolation: every project transcript/action surface hides a WORKSPACE thread', async () => {
+      const thread = await db().chatThread.create({ data: {
+        projectId: world.projectId, kind: 'WORKSPACE', title: 'Private workspace', createdById: world.ids.dev,
+        backend: { kind: 'native', model: 'm1' }, skills: [],
+      } });
+      const base = `/api/projects/${projectSlug}/threads/${thread.id}`;
+      const auth = { Authorization: `Bearer ${world.tokens.dev}` };
+      const list = await request(httpServer).get(`/api/projects/${projectSlug}/threads`).set(auth).expect(200);
+      expect(body<{ items: { id: string }[] }>(list).items.map(item => item.id)).not.toContain(thread.id);
+      for (const suffix of ['', '/messages', '/events']) {
+        threadMessage(await request(httpServer).get(`${base}${suffix}`).set(auth).expect(404), 'threads.notFound.404');
+      }
+      for (const [suffix, payload] of [
+        ['messages', { text: 'private', clientMessageId: 'private' }], ['publish', {}], ['discard', {}],
+        ['archive', {}], ['end-session', {}], ['stop', {}], ['answer', { requestId: 'q1', text: 'yes' }],
+        ['plan', {}], ['run', {}],
+      ] as const) {
+        threadMessage(await request(httpServer).post(`${base}/${suffix}`).set(auth).send(payload).expect(404), 'threads.notFound.404');
+      }
+      threadMessage(await request(httpServer).patch(base).set(auth).send({ maxCostUsd: 9 }).expect(404), 'threads.notFound.404');
+      expect(await db().chatMessage.count({ where: { threadId: thread.id } })).toBe(0);
+      expect(await db().chatThread.findUniqueOrThrow({ where: { id: thread.id } })).toMatchObject({ status: 'ACTIVE' });
+    });
+
     it('US-007 AC7: creator updates the thread cost cap', async () => {
       const thread = await newThread('patch-cap');
       const res = await request(httpServer).patch(`/api/projects/${projectSlug}/threads/${thread.id}`)

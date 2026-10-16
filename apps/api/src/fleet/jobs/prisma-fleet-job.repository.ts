@@ -1,3 +1,4 @@
+import type { ChatThreadKind } from '../common/thread-jobs';
 import { Injectable } from '@nestjs/common';
 import { FleetCommand as FleetCommandRow, FleetJob as JobRow, Prisma, PrismaClient } from '../../generated/prisma/client';
 import { Paginate, PrismaService } from '@nathapp/nestjs-prisma';
@@ -213,13 +214,13 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     return rows.map((r) => ({ runnerId: r.runnerId as string, repoId: r.repoId, command: r.command }));
   }
 
-  async findThreadTokenScope(jobId: string): Promise<{ kind: 'REPO' | 'PROJECT'; action: string } | null> {
+  async findThreadTokenScope(jobId: string): Promise<{ kind: ChatThreadKind; action: string } | null> {
     const turn = await this.db.fleetThreadTurn.findUnique({
       where: { jobId },
       select: { action: true, thread: { select: { kind: true } } },
     });
-    // Match findThreadAssign: only an explicit PROJECT kind has project scope.
-    return turn ? { kind: turn.thread.kind === 'PROJECT' ? 'PROJECT' : 'REPO', action: turn.action } : null;
+    // Preserve both non-repo kinds; legacy or unknown kinds retain REPO scope.
+    return turn ? { kind: turn.thread.kind === 'WORKSPACE' ? 'WORKSPACE' : turn.thread.kind === 'PROJECT' ? 'PROJECT' : 'REPO', action: turn.action } : null;
   }
 
   async findThreadAssign(jobId: string): Promise<ThreadAssign | null> {
