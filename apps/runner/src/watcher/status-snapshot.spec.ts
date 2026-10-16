@@ -66,6 +66,55 @@ describe('mapStatusToSnapshot (slice 3 design §1.3)', () => {
   });
 });
 
+describe('workflow step mirror (US-004 D5)', () => {
+  test('AC-1: a running status with a workflow step and no postRun sends postRun.workflowStep', () => {
+    const snap = mapStatusToSnapshot({ run: { id: 'r', status: 'running' }, workflow: { step: 'branch-review' } });
+    expect(snap.postRun).toEqual({ workflowStep: 'branch-review' });
+  });
+  test('AC-2: a post-run stage status and the workflow step are both kept', () => {
+    const snap = mapStatusToSnapshot({
+      run: { id: 'r', status: 'running' },
+      postRun: { acceptance: { status: 'passed' } },
+      workflow: { step: 'publish' },
+    });
+    expect(snap.postRun).toEqual({ acceptance: 'passed', workflowStep: 'publish' });
+  });
+  test('AC-3: no workflow block and no postRun leaves postRun out', () => {
+    expect(mapStatusToSnapshot({ run: { id: 'r', status: 'running' } })).not.toHaveProperty('postRun');
+  });
+  test('AC-4: a workflow step over 32 characters is clipped to its first 32', () => {
+    const snap = mapStatusToSnapshot({ run: { id: 'r', status: 'running' }, workflow: { step: 'x'.repeat(40) } });
+    expect(snap.postRun?.workflowStep).toBe('x'.repeat(32));
+    expect(snap.postRun?.workflowStep).toHaveLength(32);
+  });
+  test('AC-5: a running status between stories falls back to the workflow step', () => {
+    const snap = mapStatusToSnapshot({ run: { id: 'r', status: 'running' }, current: null, workflow: { step: 'final-gates' } });
+    expect(snap.currentPhase).toBe('final-gates');
+    expect(snap.currentStoryId).toBeNull();
+  });
+  test('AC-6: a current story keeps its own phase and id', () => {
+    const snap = mapStatusToSnapshot({
+      run: { id: 'r', status: 'running' },
+      current: { storyId: 'US-002', phase: 'review' },
+      workflow: { step: 'repo-gates' },
+    });
+    expect(snap.currentPhase).toBe('review');
+    expect(snap.currentStoryId).toBe('US-002');
+  });
+  test('AC-7: a finished run does not fall back to the workflow step', () => {
+    const snap = mapStatusToSnapshot({ run: { id: 'r', status: 'completed' }, current: null, workflow: { step: 'done' } });
+    expect(snap.currentPhase).toBeNull();
+  });
+  test('AC-8: a running status without a workflow block has no phase to fall back to', () => {
+    expect(mapStatusToSnapshot({ run: { id: 'r', status: 'running' }, current: null }).currentPhase).toBeNull();
+  });
+  test('a current story without a phase counts as absent and falls back to the workflow step', () => {
+    const snap = mapStatusToSnapshot({ run: { id: 'r', status: 'running' }, current: { storyId: 'US-002' }, workflow: { step: 'branch-fix' } });
+    expect(snap.currentPhase).toBe('branch-fix');
+    expect(snap.currentStoryId).toBe('US-002');
+  });
+});
+
 describe('formatCost', () => {
   test.each([[0, '0.0000'], [1.5, '1.5000'], [0.00004, '0.0000'], [12.34567, '12.3457'], [99999999, '99999999.0000']])('%p -> %p', (input, out) => {
     expect(formatCost(input)).toBe(out);

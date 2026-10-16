@@ -83,6 +83,29 @@ describe('snapshots', () => {
   });
 });
 
+describe('workflow step in the snapshot (US-004 D5)', () => {
+  test('AC-9: a running status between stories reports the workflow step as the phase', async () => {
+    const w = new Watcher(sink, options());
+    await writeStatus({ current: null, workflow: { step: 'branch-review', stories: {} } });
+    await w.tick();
+    expect(snaps).toHaveLength(1);
+    expect(snaps[0].postRun?.workflowStep).toBe('branch-review');
+    expect(snaps[0].currentPhase).toBe('branch-review');
+  });
+  test('AC-10: a changed step emits once more; the same file twice emits nothing extra', async () => {
+    const w = new Watcher(sink, options());
+    await writeStatus({ current: null, workflow: { step: 'branch-review', stories: {} } });
+    await w.tick();
+    await writeStatus({ current: null, workflow: { step: 'final-gates', stories: {} } });
+    await w.tick();
+    expect(snaps).toHaveLength(2);
+    expect(snaps[0].postRun?.workflowStep).toBe('branch-review');
+    expect(snaps[1].postRun?.workflowStep).toBe('final-gates');
+    await w.tick();
+    expect(snaps).toHaveLength(2);
+  });
+});
+
 describe('run log discovery', () => {
   test('none, one, and several (newest wins)', async () => {
     expect(await findRunLog(join(base, 'out'), 'feat')).toBeNull();
