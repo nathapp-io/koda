@@ -13,6 +13,7 @@ import type { ConfigType } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
+import { PERMISSION_KEY } from '@nathapp/nestjs-auth';
 import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FLEET_CFG } from '../../config/fleet.config';
@@ -23,7 +24,10 @@ import { ProjectMembershipGuard } from '../../projects/project-membership.guard'
 import type { ProjectContext } from '../../projects/project-context';
 import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module';
 import { KnowledgeStoreUnavailableError } from './knowledge-chunk-store';
+import type { KnowledgeIndexState, KnowledgeProjectState, KnowledgeRepoRef } from './knowledge-index.domain';
 import { KnowledgeIndexService } from './knowledge-index.service';
+import { KnowledgeIndexQueue } from './knowledge-index.queue';
+import type { KnowledgeRepoStatesDto } from './knowledge-repo-state.dto';
 import type { KnowledgeHit, KnowledgeSearchQuery, KnowledgeSearchResult } from './knowledge-search.service';
 import { KnowledgeSearchService } from './knowledge-search.service';
 import { KnowledgeSearchBodyDto, ProjectKnowledgeController } from './project-knowledge.controller';
@@ -40,23 +44,32 @@ const RESULT: KnowledgeSearchResult = { lexicalOnly: false, empty: false, hits: 
 interface Harness {
   controller: ProjectKnowledgeController;
   search: { search: ReturnType<typeof vi.fn> };
-  index: { resolveProjectRepo: ReturnType<typeof vi.fn> };
+  index: { resolveProjectRepo: ReturnType<typeof vi.fn>; listProjectStates: ReturnType<typeof vi.fn> };
+  queue: { enqueue: ReturnType<typeof vi.fn> };
   config: { knowledgeIndexEnabled: boolean };
 }
 
-function harness(overrides: { enabled?: boolean; result?: KnowledgeSearchResult; repo?: unknown } = {}): Harness {
+function harness(overrides: {
+  enabled?: boolean;
+  result?: KnowledgeSearchResult;
+  repo?: unknown;
+  states?: KnowledgeProjectState[];
+} = {}): Harness {
   const search = { search: vi.fn(async (_input: KnowledgeSearchQuery) => overrides.result ?? RESULT) };
   const index = {
     resolveProjectRepo: vi.fn(async (_projectId: string, _ref: { owner: string; name: string }) =>
       overrides.repo === null ? null : overrides.repo ?? { id: 'repo-1' }),
+    listProjectStates: vi.fn(async (_projectId: string) => overrides.states ?? []),
   };
+  const queue = { enqueue: vi.fn() };
   const config = { knowledgeIndexEnabled: overrides.enabled ?? true };
   const controller = new ProjectKnowledgeController(
     search as unknown as KnowledgeSearchService,
     index as unknown as KnowledgeIndexService,
     config as unknown as ConfigType<typeof fleetConfig>,
+    queue as unknown as KnowledgeIndexQueue,
   );
-  return { controller, search, index, config };
+  return { controller, search, index, queue, config };
 }
 
 /** The error a call throws, so a test can assert on the exception the route would map to a status. */
@@ -173,6 +186,113 @@ describe('ProjectKnowledgeController.search', () => {
   });
 });
 
+const REPO: KnowledgeRepoRef = {
+  id: 'repo-1', projectId: PROJECT_ID, provider: 'github', owner: 'o', name: 'n', defaultBranch: 'main',
+  githubInstallationId: BigInt(7),
+};
+const GITLAB_REPO: KnowledgeRepoRef = { ...REPO, id: 'repo-2', provider: 'gitlab', owner: 'grp', name: 'lib', githubInstallationId: null };
+const INDEX_STATE: KnowledgeIndexState = {
+  repoId: 'repo-1', projectId: PROJECT_ID, status: 'idle', indexedSha: 'sha-1', fileCount: 2, chunkCount: 5,
+  unembeddedCount: 1, skippedCount: 3, lastError: null, leaseUntil: null,
+  startedAt: new Date('2026-10-15T10:00:00.000Z'), finishedAt: new Date('2026-10-15T10:01:00.000Z'),
+  updatedAt: new Date('2026-10-15T10:01:00.000Z'),
+};
+
+describe('ProjectKnowledgeController repos (US-005, 1c-c-D12)', () => {
+  it('AC-14: answers one entry per project repository with `never` for a repository that has no state row', async () => {
+    const { controller, index } = harness({ states: [{ repo: REPO, state: INDEX_STATE }, { repo: GITLAB_REPO, state: null }] });
+
+    const response = await controller.repos(PROJECT);
+
+    expect(index.listProjectStates).toHaveBeenCalledWith(PROJECT_ID);
+    expect(response).toEqual({
+      ret: 0,
+      data: {
+        enabled: true,
+        repos: [
+          {
+            repoId: 'repo-1', owner: 'o', name: 'n', provider: 'github', status: 'idle', indexedSha: 'sha-1',
+            fileCount: 2, chunkCount: 5, unembeddedCount: 1, skippedCount: 3, lastError: null,
+            startedAt: INDEX_STATE.startedAt, finishedAt: INDEX_STATE.finishedAt,
+          },
+          {
+            repoId: 'repo-2', owner: 'grp', name: 'lib', provider: 'gitlab', status: 'never', indexedSha: null,
+            fileCount: 0, chunkCount: 0, unembeddedCount: 0, skippedCount: 0, lastError: null,
+            startedAt: null, finishedAt: null,
+          },
+        ],
+      },
+    });
+  });
+
+  it('AC-14: reports enabled false while the kill switch is off and still lists the repositories', async () => {
+    const { controller } = harness({ enabled: false, states: [{ repo: REPO, state: null }] });
+
+    const response = await controller.repos(PROJECT);
+
+    expect(response.data).toMatchObject({ enabled: false, repos: [{ repoId: 'repo-1', status: 'never' }] });
+  });
+
+  it('answers an empty list for a project with no fleet repository', async () => {
+    const { controller } = harness();
+
+    await expect(controller.repos(PROJECT)).resolves.toEqual({ ret: 0, data: { enabled: true, repos: [] } });
+  });
+
+  it('carries a failed pass through as its status, reason and finish time', async () => {
+    const failed: KnowledgeIndexState = { ...INDEX_STATE, status: 'failed', indexedSha: null, lastError: 'tree truncated', startedAt: null };
+    const { controller } = harness({ states: [{ repo: REPO, state: failed }] });
+
+    const response = await controller.repos(PROJECT);
+    const data = response.data as KnowledgeRepoStatesDto;
+
+    expect(data.repos[0]).toMatchObject({ status: 'failed', lastError: 'tree truncated', indexedSha: null, startedAt: null });
+  });
+});
+
+describe('ProjectKnowledgeController reindex (US-005, 1c-c-D12)', () => {
+  it('AC-11: queues an admin pass for one of the project repositories', async () => {
+    const { controller, queue, index } = harness();
+
+    const response = await controller.reindex('repo-1', PROJECT);
+
+    expect(index.resolveProjectRepo).toHaveBeenCalledWith(PROJECT_ID, { repoId: 'repo-1' });
+    expect(queue.enqueue).toHaveBeenCalledTimes(1);
+    expect(queue.enqueue).toHaveBeenCalledWith('repo-1', 'admin');
+    expect(response).toEqual({ ret: 0, data: { queued: true } });
+  });
+
+  it('AC-12: answers 404 for a repository the project does not own and queues nothing', async () => {
+    const { controller, queue } = harness({ repo: null });
+
+    const error = await rejectionOf(() => controller.reindex('foreign', PROJECT));
+
+    expect(error).toBeInstanceOf(NotFoundAppException);
+    expect((error as NotFoundAppException).getStatus()).toBe(404);
+    expect((error as NotFoundAppException).prefix).toBe('knowledge.repoNotFound');
+    expect(queue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('AC-13: answers 409 while the kill switch is off and queues nothing', async () => {
+    const { controller, queue, index } = harness({ enabled: false });
+
+    const error = await rejectionOf(() => controller.reindex('repo-1', PROJECT));
+
+    expect(error).toBeInstanceOf(ConflictAppException);
+    expect((error as ConflictAppException).getStatus()).toBe(409);
+    expect((error as ConflictAppException).prefix).toBe('knowledge.disabled');
+    expect(queue.enqueue).not.toHaveBeenCalled();
+    expect(index.resolveProjectRepo).not.toHaveBeenCalled();
+  });
+
+  it('AC-11/AC-12: reindex is a global ADMIN route, so a developer is refused by the permission guard', () => {
+    const permissions = Reflect.getMetadata(PERMISSION_KEY, ProjectKnowledgeController.prototype.reindex) as unknown;
+    expect(JSON.stringify(permissions)).toContain('ADMIN');
+    // The member-facing reads carry a membership guard, not an admin permission.
+    expect(Reflect.getMetadata(PERMISSION_KEY, ProjectKnowledgeController.prototype.repos)).toBeUndefined();
+  });
+});
+
 /**
  * The route as HTTP: the same app-level pipe the API boots with (whitelist, so a body whose fields are not
  * marked with `@Allow()` arrives empty by default) and the JSON envelope. The membership guard is replaced by
@@ -183,16 +303,24 @@ describe('POST /projects/:slug/knowledge/search', () => {
   let app: INestApplication;
   let fastify: { inject: (options: Record<string, unknown>) => Promise<{ statusCode: number; json: () => unknown }> };
   let search: { search: ReturnType<typeof vi.fn> };
+  let index: { resolveProjectRepo: ReturnType<typeof vi.fn>; listProjectStates: ReturnType<typeof vi.fn> };
+  let queue: { enqueue: ReturnType<typeof vi.fn> };
   const config = { knowledgeIndexEnabled: true };
 
   beforeAll(async () => {
     search = { search: vi.fn(async (_input: KnowledgeSearchQuery) => RESULT) };
+    index = {
+      resolveProjectRepo: vi.fn(async () => ({ id: 'repo-1' })),
+      listProjectStates: vi.fn(async () => [{ repo: REPO, state: INDEX_STATE }, { repo: GITLAB_REPO, state: null }]),
+    };
+    queue = { enqueue: vi.fn() };
     const module = await Test.createTestingModule({
       controllers: [ProjectKnowledgeController],
       providers: [
         { provide: KnowledgeSearchService, useValue: search },
-        { provide: KnowledgeIndexService, useValue: { resolveProjectRepo: vi.fn(async () => ({ id: 'repo-1' })) } },
+        { provide: KnowledgeIndexService, useValue: index },
         { provide: FLEET_CFG, useValue: config },
+        { provide: KnowledgeIndexQueue, useValue: queue },
       ],
     })
       .overrideGuard(ProjectMembershipGuard)
@@ -217,6 +345,9 @@ describe('POST /projects/:slug/knowledge/search', () => {
   beforeEach(() => {
     search.search.mockReset();
     search.search.mockResolvedValue(RESULT);
+    index.resolveProjectRepo.mockReset();
+    index.resolveProjectRepo.mockResolvedValue({ id: 'repo-1' });
+    queue.enqueue.mockClear();
     config.knowledgeIndexEnabled = true;
   });
 
@@ -288,6 +419,71 @@ describe('POST /projects/:slug/knowledge/search', () => {
 
     expect(res.statusCode).toBe(409);
   });
+
+  // ── US-005: the state and reindex routes over the same app ────────────────────────────────────────────
+  const get = (): Promise<{ statusCode: number; json: () => unknown }> => fastify.inject({
+    method: 'GET',
+    url: '/api/projects/koda/knowledge/repos',
+    headers: { authorization: 'Bearer test-token' },
+  });
+
+  const reindex = (repoId: string): Promise<{ statusCode: number; json: () => unknown }> => fastify.inject({
+    method: 'POST',
+    url: `/api/projects/koda/knowledge/repos/${repoId}/reindex`,
+    headers: { authorization: 'Bearer test-token' },
+  });
+
+  it('AC-14: GET repos answers 200 with the enabled flag and the repository states', async () => {
+    const res = await get();
+
+    expect(res.statusCode).toBe(200);
+    expect(index.listProjectStates).toHaveBeenCalledWith(PROJECT_ID);
+    expect(res.json()).toEqual({
+      ret: 0,
+      data: {
+        enabled: true,
+        repos: [
+          expect.objectContaining({ repoId: 'repo-1', status: 'idle', fileCount: 2, finishedAt: '2026-10-15T10:01:00.000Z' }),
+          expect.objectContaining({ repoId: 'repo-2', provider: 'gitlab', status: 'never', indexedSha: null, startedAt: null }),
+        ],
+      },
+    });
+  });
+
+  it('AC-14: GET repos answers enabled false while the kill switch is off', async () => {
+    config.knowledgeIndexEnabled = false;
+
+    const res = await get();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ data: { enabled: false } });
+  });
+
+  it('AC-11: POST reindex answers 202 { queued: true } and queues the admin pass', async () => {
+    const res = await reindex('repo-1');
+
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toEqual({ ret: 0, data: { queued: true } });
+    expect(queue.enqueue).toHaveBeenCalledWith('repo-1', 'admin');
+  });
+
+  it('AC-12: POST reindex answers 404 for a repository outside the project', async () => {
+    index.resolveProjectRepo.mockResolvedValueOnce(null);
+
+    const res = await reindex('foreign');
+
+    expect(res.statusCode).toBe(404);
+    expect(queue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('AC-13: POST reindex answers 409 while the kill switch is off', async () => {
+    config.knowledgeIndexEnabled = false;
+
+    const res = await reindex('repo-1');
+
+    expect(res.statusCode).toBe(409);
+    expect(queue.enqueue).not.toHaveBeenCalled();
+  });
 });
 
 /**
@@ -317,8 +513,9 @@ describe('POST /projects/:slug/knowledge/search without project membership', () 
       controllers: [ProjectKnowledgeController],
       providers: [
         { provide: KnowledgeSearchService, useValue: search },
-        { provide: KnowledgeIndexService, useValue: { resolveProjectRepo: vi.fn(async () => ({ id: 'repo-1' })) } },
+        { provide: KnowledgeIndexService, useValue: { resolveProjectRepo: vi.fn(async () => ({ id: 'repo-1' })), listProjectStates: vi.fn(async () => []) } },
         { provide: FLEET_CFG, useValue: { knowledgeIndexEnabled: true } },
+        { provide: KnowledgeIndexQueue, useValue: { enqueue: vi.fn() } },
         // The API authenticates with CombinedAuthGuard before ProjectMembershipGuard; without a principal every
         // request is refused for the wrong reason (`!req.user`), so the member case would prove nothing.
         { provide: APP_GUARD, useValue: {

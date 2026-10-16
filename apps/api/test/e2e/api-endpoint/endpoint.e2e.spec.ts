@@ -37,6 +37,7 @@ import { RunnerNotifier } from '../../../src/fleet/jobs/runner-notifier';
 import { PrismaThreadIngestRepository } from '../../../src/fleet/threads/ingest/prisma-thread-ingest.repository';
 import { KnowledgeSearchService, type KnowledgeHit } from '../../../src/fleet/knowledge/knowledge-search.service';
 import { KnowledgeStoreUnavailableError } from '../../../src/fleet/knowledge/knowledge-chunk-store';
+import { KnowledgeIndexQueue } from '../../../src/fleet/knowledge/knowledge-index.queue';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -4249,6 +4250,151 @@ describeIntegration('API Integration Tests', () => {
         expect(searchSpy).not.toHaveBeenCalled();
       } finally {
         await db().projectMember.create({ data: { projectId, userId: developerId, role: 'DEVELOPER' } });
+      }
+    });
+  });
+
+  describe('S5b US-005 knowledge index state and reindex routes', () => {
+    interface RepoState {
+      repoId: string; owner: string; name: string; provider: string; status: string; indexedSha: string | null;
+      fileCount: number; chunkCount: number; unembeddedCount: number; skippedCount: number;
+      lastError: string | null; startedAt: string | null; finishedAt: string | null;
+    }
+
+    let slug: string;
+    let repoId: string;
+    let gitlabRepoId: string;
+    let foreignRepoId: string;
+    let enqueueSpy: ReturnType<typeof vi.spyOn> | undefined;
+    let enabledBefore: boolean;
+
+    const fleetConfigOf = () => app.get<IFleetConfig>(FLEET_CFG, { strict: false });
+    const db = () => app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    const reindex = (token: string, repo: string) => request(httpServer)
+      .post(`/api/projects/${slug}/knowledge/repos/${repo}/reindex`)
+      .set('Authorization', `Bearer ${token}`);
+    const states = (token: string) => request(httpServer)
+      .get(`/api/projects/${slug}/knowledge/repos`)
+      .set('Authorization', `Bearer ${token}`);
+
+    beforeAll(async () => {
+      // The spy goes first: whatever else fails here, afterAll must be able to restore it.
+      enabledBefore = fleetConfigOf().knowledgeIndexEnabled;
+      fleetConfigOf().knowledgeIndexEnabled = true;
+      // The queue is stubbed: the real one would run an index pass against the forge, while these cases pin the
+      // enqueue the route makes (the pass itself is covered by knowledge-repo-indexer.spec.ts).
+      enqueueSpy = vi.spyOn(app.get(KnowledgeIndexQueue), 'enqueue').mockImplementation(() => undefined);
+
+      const prisma = db();
+      const admin = await prisma.user.findUniqueOrThrow({ where: { email: 'admin@koda.test' } });
+      const developer = await prisma.user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
+      const project = await prisma.project.create({ data: { name: 'Knowledge index', slug: 'knowledge-index', key: 'KIX' } });
+      const github = await prisma.fleetRepo.create({ data: {
+        projectId: project.id, provider: 'github', owner: 'acme', name: 'docs-app', defaultBranch: 'main', createdById: admin.id,
+      } });
+      const gitlab = await prisma.fleetRepo.create({ data: {
+        projectId: project.id, provider: 'gitlab', owner: 'grp', name: 'lib', defaultBranch: 'main', createdById: admin.id,
+      } });
+      const foreign = await prisma.project.create({ data: { name: 'Knowledge index foreign', slug: 'knowledge-index-foreign', key: 'KIXF' } });
+      const foreignRepo = await prisma.fleetRepo.create({ data: {
+        projectId: foreign.id, provider: 'github', owner: 'acme', name: 'other', defaultBranch: 'main', createdById: admin.id,
+      } });
+      await prisma.projectMember.create({ data: { projectId: project.id, userId: developer.id, role: 'DEVELOPER' } });
+      // One repository carries a finished pass; the other one has no state row at all (`status: 'never'`).
+      await prisma.knowledgeRepoIndex.create({ data: {
+        repoId: github.id, projectId: project.id, status: 'idle', indexedSha: 'head0001', fileCount: 4, chunkCount: 9,
+        unembeddedCount: 1, skippedCount: 2, lastError: null,
+        startedAt: new Date('2026-10-15T10:00:00.000Z'), finishedAt: new Date('2026-10-15T10:01:00.000Z'),
+      } });
+
+      slug = project.slug;
+      repoId = github.id;
+      gitlabRepoId = gitlab.id;
+      foreignRepoId = foreignRepo.id;
+    });
+
+    afterAll(() => {
+      enqueueSpy?.mockRestore();
+      fleetConfigOf().knowledgeIndexEnabled = enabledBefore;
+    });
+
+    beforeEach(() => {
+      enqueueSpy?.mockClear();
+    });
+
+    it('AC-11: POST reindex answers 202 { queued: true } as a global ADMIN and enqueues an admin pass', async () => {
+      const res = await reindex(userAccessToken, repoId).expect(202);
+
+      expect(body(res)).toEqual({ queued: true });
+      expect(enqueueSpy).toHaveBeenCalledTimes(1);
+      expect(enqueueSpy).toHaveBeenCalledWith(repoId, 'admin');
+    });
+
+    it('AC-12: POST reindex answers 403 for a project DEVELOPER and enqueues nothing', async () => {
+      const res = await reindex(nonAdminUserAccessToken, repoId).expect(403);
+
+      expect(res.body.ret).not.toBe(0);
+      expect(enqueueSpy).not.toHaveBeenCalled();
+    });
+
+    it('AC-12: POST reindex answers 404 for a repository of another project', async () => {
+      const res = await reindex(userAccessToken, foreignRepoId).expect(404);
+
+      refusal(res, 'knowledge.repoNotFound.404');
+      expect(enqueueSpy).not.toHaveBeenCalled();
+    });
+
+    it('AC-13: POST reindex answers 409 while the kill switch is off', async () => {
+      fleetConfigOf().knowledgeIndexEnabled = false;
+      try {
+        const res = await reindex(userAccessToken, repoId).expect(409);
+
+        refusal(res, 'knowledge.disabled.409');
+        expect(enqueueSpy).not.toHaveBeenCalled();
+      } finally {
+        fleetConfigOf().knowledgeIndexEnabled = true;
+      }
+    });
+
+    it('AC-14: GET repos answers one entry per fleet repository, `never` for the never-indexed one', async () => {
+      const res = await states(nonAdminUserAccessToken).expect(200);
+      const data = body<{ enabled: boolean; repos: RepoState[] }>(res);
+
+      expect(data.enabled).toBe(true);
+      expect(data.repos.map((repo) => repo.repoId).sort()).toEqual([repoId, gitlabRepoId].sort());
+      expect(data.repos.find((repo) => repo.repoId === repoId)).toMatchObject({
+        owner: 'acme', name: 'docs-app', provider: 'github', status: 'idle', indexedSha: 'head0001',
+        fileCount: 4, chunkCount: 9, unembeddedCount: 1, skippedCount: 2, lastError: null,
+        startedAt: '2026-10-15T10:00:00.000Z', finishedAt: '2026-10-15T10:01:00.000Z',
+      });
+      expect(data.repos.find((repo) => repo.repoId === gitlabRepoId)).toMatchObject({
+        provider: 'gitlab', status: 'never', indexedSha: null, fileCount: 0, chunkCount: 0,
+        unembeddedCount: 0, skippedCount: 0, lastError: null, startedAt: null, finishedAt: null,
+      });
+    });
+
+    it('AC-14: GET repos reports enabled false while the kill switch is off and still lists the repositories', async () => {
+      fleetConfigOf().knowledgeIndexEnabled = false;
+      try {
+        const res = await states(nonAdminUserAccessToken).expect(200);
+        const data = body<{ enabled: boolean; repos: RepoState[] }>(res);
+
+        expect(data.enabled).toBe(false);
+        expect(data.repos).toHaveLength(2);
+      } finally {
+        fleetConfigOf().knowledgeIndexEnabled = true;
+      }
+    });
+
+    it('AC-14: GET repos answers 403 for a user who is not a project member', async () => {
+      const member = await db().projectMember.findFirstOrThrow({ where: { project: { slug } } });
+      await db().projectMember.delete({ where: { id: member.id } });
+      try {
+        const res = await states(nonAdminUserAccessToken).expect(403);
+
+        expect(res.body.ret).not.toBe(0);
+      } finally {
+        await db().projectMember.create({ data: { projectId: member.projectId, userId: member.userId, role: 'DEVELOPER' } });
       }
     });
   });

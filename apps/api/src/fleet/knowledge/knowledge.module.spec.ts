@@ -1,7 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module';
 import { KnowledgeChunkStore } from './knowledge-chunk-store';
+import { KnowledgeIndexQueue } from './knowledge-index.queue';
 import { KnowledgeIndexService } from './knowledge-index.service';
+import { KnowledgePoller } from './knowledge-poller';
 import { KnowledgeSearchService } from './knowledge-search.service';
 import { ProjectKnowledgeController } from './project-knowledge.controller';
 import { KnowledgeModule } from './knowledge.module';
@@ -38,8 +40,14 @@ describe('KnowledgeModule', () => {
     expect(Reflect.getMetadata('exports', KnowledgeModule)).not.toContain(KnowledgeRepoIndexer);
   });
 
-  it('exports the services only', () => {
+  it('resolves the queue and the poller, and exports the queue for the merge hook (US-005)', () => {
+    expect(module.get(KnowledgeIndexQueue)).toBeInstanceOf(KnowledgeIndexQueue);
+    expect(module.get(KnowledgePoller)).toBeInstanceOf(KnowledgePoller);
+    expect(Reflect.getMetadata('exports', KnowledgeModule)).not.toContain(KnowledgePoller);
+  });
+
+  it('exports the services and the queue only', () => {
     const exportsOf = Reflect.getMetadata('exports', KnowledgeModule) as unknown[];
-    expect(exportsOf).toEqual([KnowledgeIndexService, KnowledgeSearchService]);
+    expect(exportsOf).toEqual([KnowledgeIndexService, KnowledgeSearchService, KnowledgeIndexQueue]);
   });
 });

@@ -5,6 +5,7 @@ import { TicketsModule } from '../../tickets/tickets.module';
 import { ProjectAccessModule } from '../../projects/project-access.module';
 import { VcsModule } from '../../vcs/vcs.module';
 import { GitBrokerModule } from '../git-broker/git-broker.module';
+import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { FleetJobTicketEffects } from './fleet-job-ticket.effects';
 import { FleetPrStateRefresher } from './fleet-pr-state.refresher';
 import { FleetTicketEventRecorder } from './fleet-ticket-event.recorder';
@@ -12,9 +13,12 @@ import { FleetTicketsService } from './fleet-tickets.service';
 import { PrismaFleetTicketsRepository } from './prisma-fleet-tickets.repository';
 import { TicketFleetJobsController } from './ticket-fleet-jobs.controller';
 
-/** Fleet C9 (spec docs/superpowers/specs/2026-10-06-fleet-c9-ticket-work-products-design.md). */
+/**
+ * Fleet C9 (spec docs/superpowers/specs/2026-10-06-fleet-c9-ticket-work-products-design.md).
+ * S5b US-005: `KnowledgeModule` is imported for the queue the merge hook enqueues into (1c-c-D11).
+ */
 @Module({
-  imports: [PrismaModule, TicketsModule, EventsModule, ProjectAccessModule, VcsModule, GitBrokerModule],
+  imports: [PrismaModule, TicketsModule, EventsModule, ProjectAccessModule, VcsModule, GitBrokerModule, KnowledgeModule],
   controllers: [TicketFleetJobsController],
   providers: [PrismaFleetTicketsRepository, FleetTicketsService, FleetTicketEventRecorder, FleetJobTicketEffects, FleetPrStateRefresher],
   exports: [PrismaFleetTicketsRepository, FleetTicketsService, FleetJobTicketEffects, FleetPrStateRefresher],

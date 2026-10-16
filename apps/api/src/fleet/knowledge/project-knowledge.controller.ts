@@ -1,7 +1,8 @@
-import { Body, Controller, HttpCode, Inject, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Param, Post, UseGuards } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiProperty, ApiPropertyOptional, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Allow } from 'class-validator';
+import { RequiredPermission } from '@nathapp/nestjs-auth';
 import { JsonResponse, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FLEET_CFG, fleetConfig } from '../../config/fleet.config';
@@ -10,6 +11,8 @@ import { CurrentProject } from '../../projects/current-project.decorator';
 import type { ProjectContext } from '../../projects/project-context';
 import { KnowledgeStoreUnavailableError } from './knowledge-chunk-store';
 import { KnowledgeIndexService } from './knowledge-index.service';
+import { KnowledgeIndexQueue } from './knowledge-index.queue';
+import { KnowledgeReindexResultDto, KnowledgeRepoStatesDto, toKnowledgeRepoState } from './knowledge-repo-state.dto';
 import { KnowledgeSearchQuery, KnowledgeSearchResult, KnowledgeSearchService, parseKnowledgeSearchInput } from './knowledge-search.service';
 
 export class KnowledgeSearchBodyDto {
@@ -42,9 +45,10 @@ export class KnowledgeSearchResultDto {
 }
 
 /**
- * Fleet S5b (1c-c-D12): the project's repository knowledge. `POST search` is the member-facing hybrid search;
- * US-005 adds the reindex and state routes here. The repository is resolved through `KnowledgeIndexService`
- * (the api-data layering rule), never by injecting the module-private repository.
+ * Fleet S5b (1c-c-D12): the project's repository knowledge. `POST search` is the member-facing hybrid search,
+ * `GET repos` the index state of every repository, `POST repos/:repoId/reindex` the admin trigger. The
+ * repository is resolved through `KnowledgeIndexService` (the api-data layering rule), never by injecting the
+ * module-private repository.
  */
 @ApiTags('fleet knowledge')
 @ApiBearerAuth()
@@ -56,7 +60,36 @@ export class ProjectKnowledgeController {
     private readonly searchService: KnowledgeSearchService,
     private readonly index: KnowledgeIndexService,
     @Inject(FLEET_CFG) private readonly config: ConfigType<typeof fleetConfig>,
+    private readonly queue: KnowledgeIndexQueue,
   ) {}
+
+  @Get('repos')
+  @ApiOperation({ summary: "Index state of the project's repositories (project member)" })
+  @ApiResponse({ status: 200, type: KnowledgeRepoStatesDto })
+  async repos(@CurrentProject() project: ProjectContext) {
+    const states = await this.index.listProjectStates(project.project.id);
+    return JsonResponse.Ok<KnowledgeRepoStatesDto>({
+      enabled: this.config.knowledgeIndexEnabled,
+      // One entry per project repository, including GitLab and never-indexed ones (1c-c-D12).
+      repos: states.map(toKnowledgeRepoState),
+    });
+  }
+
+  @Post('repos/:repoId/reindex')
+  @HttpCode(202)
+  @RequiredPermission('ADMIN')
+  @ApiParam({ name: 'repoId', required: true, schema: { type: 'string' } })
+  @ApiOperation({ summary: "Queue an index pass for one of the project's repositories (global admin)" })
+  @ApiResponse({ status: 202, type: KnowledgeReindexResultDto })
+  @ApiResponse({ status: 404, description: 'knowledge.repoNotFound' })
+  @ApiResponse({ status: 409, description: 'knowledge.disabled' })
+  async reindex(@Param('repoId') repoId: string, @CurrentProject() project: ProjectContext) {
+    if (!this.config.knowledgeIndexEnabled) throw new ConflictAppException({}, 'knowledge.disabled');
+    const repo = await this.index.resolveProjectRepo(project.project.id, { repoId });
+    if (!repo) throw new NotFoundAppException({}, 'knowledge.repoNotFound');
+    this.queue.enqueue(repo.id, 'admin');
+    return JsonResponse.Ok<KnowledgeReindexResultDto>({ queued: true });
+  }
 
   @Post('search')
   @HttpCode(200)
