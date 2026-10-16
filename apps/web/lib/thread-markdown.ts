@@ -57,58 +57,162 @@ function pathPattern(slug: string): string {
  * `job:<jobId>/(feature-report.md|decisions.jsonl)[#<fragment>]`, linked to the job page. The path
  * excludes quotes, `<`, `>` and `&` as well as `@`, `#` and whitespace, so a match is attribute-safe.
  */
-const REPO_PART = '[A-Za-z0-9_.-]+'
-const CITATION_PATH = '[^@#\\s"\'<>&`]+'
-const CITATION_FRAGMENT = '[A-Za-z0-9_-]+'
-const DOC_CITATION =
-  `(?<owner>${REPO_PART})/(?<name>${REPO_PART}):(?<docPath>${CITATION_PATH})@(?<sha>[0-9a-f]{7,40})(?:#(?<docFragment>${CITATION_FRAGMENT}))?`
+const CITATION_FRAGMENT_SOURCE = '[A-Za-z0-9_-]+'
 const JOB_CITATION =
-  `job:(?<jobId>${JOB_ID})/(?:feature-report\\.md|decisions\\.jsonl)(?:#${CITATION_FRAGMENT})?`
+  `job:(?<jobId>${JOB_ID})/(?:feature-report\\.md|decisions\\.jsonl)(?:#${CITATION_FRAGMENT_SOURCE})?`
 
-/** One alternation over everything this module links; the named group says which one matched. */
-function linkPattern(slug: string, flags: string, whole = false): RegExp {
-  const body = `(?<path>${pathPattern(slug)})|(?<doc>${DOC_CITATION})|(?<job>${JOB_CITATION})`
-  return new RegExp(whole ? `^(?:${body})$` : body, flags)
+/**
+ * B3: the document citation is parsed, not matched by an unanchored regex. `/<owner>/<name>:/` cannot be
+ * anchored by a literal prefix, so the regex engine retried an open-ended `owner` (and an open-ended path)
+ * at every character of a run, which is quadratic on an ordinary long token — 100,000 `a` characters took
+ * seconds in the SSR/browser render path. `docCitations` walks each token once instead (see its comment).
+ */
+const CITATION_WORD = /[A-Za-z0-9_.-]/
+/** The characters a citation's path may not hold; `@` among them is what keeps the backward walk linear. */
+const CITATION_PATH_STOP = /[@#\s"'<>&`]/
+const CITATION_SHA = /[0-9a-f]{7,40}/y
+const CITATION_FRAGMENT = new RegExp(CITATION_FRAGMENT_SOURCE, 'y')
+
+/** One linkable occurrence: its half-open span in a text run and the `<a …>` that opens its link. */
+interface Citation {
+  start: number
+  end: number
+  opening: string
+}
+
+/**
+ * The koda paths and outcome citations of one text run, left to right. Both open with a literal
+ * (`/<slug>/…`, `job:`), so a single regex pass over the run is linear and cannot backtrack over a long
+ * token (B3).
+ */
+function prefixedCitations(text: string, slug: string): Citation[] {
+  const pattern = new RegExp(`(?<path>${pathPattern(slug)})|${JOB_CITATION}`, 'g')
+  const citations: Citation[] = []
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(text)) !== null) {
+    const jobId = match.groups?.jobId
+    const href = jobId === undefined ? match[0] : `/${slug}/fleet/jobs/${jobId}`
+    citations.push({ start: match.index, end: match.index + match[0].length, opening: `<a href="${escapeAttribute(href)}">` })
+  }
+  return citations
+}
+
+/**
+ * Every document citation of one text run, left to right. A citation holds no `CITATION_PATH_STOP`
+ * character, so the whole prefix of a candidate lies in the run of ordinary characters that its `@` ends —
+ * and `@` is itself a stop character, so those runs never overlap and the scan visits each character a
+ * constant number of times (B3).
+ */
+function docCitations(text: string): Citation[] {
+  const citations: Citation[] = []
+  for (let at = text.indexOf('@'); at !== -1; at = text.indexOf('@', at + 1)) {
+    const citation = docCitationAt(text, at)
+    if (citation !== null) citations.push(citation)
+  }
+  return citations
+}
+
+/** The document citation whose sha tail starts after the `@` at `at`, or null when `at` starts none. */
+function docCitationAt(text: string, at: number): Citation | null {
+  CITATION_SHA.lastIndex = at + 1
+  const sha = CITATION_SHA.exec(text)
+  if (sha === null) return null
+  let end = at + 1 + sha[0].length
+  let fragment = ''
+  if (text[end] === '#') {
+    CITATION_FRAGMENT.lastIndex = end + 1
+    const match = CITATION_FRAGMENT.exec(text)
+    if (match !== null) {
+      fragment = match[0]
+      end += match[0].length + 1
+    }
+  }
+
+  let regionStart = at
+  while (regionStart > 0 && !CITATION_PATH_STOP.test(text[regionStart - 1])) regionStart -= 1
+  const split = citationSplit(text, regionStart, at)
+  if (split === null) return null
+
+  const owner = text.slice(split.ownerStart, split.slash)
+  const name = text.slice(split.slash + 1, split.colon)
+  const docPath = text.slice(split.colon + 1, at)
+  const hash = fragment === '' ? '' : `#${fragment}`
+  const href = `https://github.com/${owner}/${name}/blob/${sha[0]}/${docPath}${hash}`
+  return {
+    start: split.ownerStart,
+    end,
+    opening: `<a href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer">`,
+  }
+}
+
+/**
+ * The leftmost `owner/name:` the citation at `at` can start at, within the run of ordinary characters
+ * `[regionStart, at)` — the same start the regex reads, because a greedy `owner` can only end at a `/` that
+ * closes the word run it began in. The colons are read from a slice of that run, so a run with no colon never
+ * sends a scan past it (B3): the run is the candidate's whole prefix, and `@` bounds it, so the slices of
+ * distinct candidates never overlap and the work stays linear.
+ */
+function citationSplit(text: string, regionStart: number, at: number): { ownerStart: number; slash: number; colon: number } | null {
+  const region = text.slice(regionStart, at)
+  let best: { ownerStart: number; slash: number; colon: number } | null = null
+  for (let colon = region.indexOf(':'); colon !== -1; colon = region.indexOf(':', colon + 1)) {
+    // The path between the colon and the `@` must hold at least one character.
+    if (colon + 1 >= region.length) continue
+    const owner = ownerBefore(text, regionStart + colon, regionStart)
+    if (owner === null) continue
+    if (best === null || owner.ownerStart < best.ownerStart) best = { ...owner, colon: regionStart + colon }
+  }
+  return best
+}
+
+/** The non-empty `owner/name` a colon closes, or null when the colon follows neither. */
+function ownerBefore(text: string, colon: number, regionStart: number): { ownerStart: number; slash: number } | null {
+  let nameStart = colon
+  while (nameStart > regionStart && CITATION_WORD.test(text[nameStart - 1])) nameStart -= 1
+  if (nameStart === colon) return null
+  const slash = nameStart - 1
+  if (slash < regionStart || text[slash] !== '/') return null
+  let ownerStart = slash
+  while (ownerStart > regionStart && CITATION_WORD.test(text[ownerStart - 1])) ownerStart -= 1
+  if (ownerStart === slash) return null
+  return { ownerStart, slash }
 }
 
 function escapeAttribute(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-/** The opening `<a …>` for one match of {@link linkPattern}. */
-function openingAnchor(match: RegExpExecArray, slug: string): string {
-  const groups = match.groups ?? {}
-  if (groups.doc !== undefined) {
-    const fragment = groups.docFragment === undefined ? '' : `#${groups.docFragment}`
-    const href = `https://github.com/${groups.owner}/${groups.name}/blob/${groups.sha}/${groups.docPath}${fragment}`
-    return `<a href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer">`
-  }
-  if (groups.job !== undefined) return `<a href="${escapeAttribute(`/${slug}/fleet/jobs/${groups.jobId}`)}">`
-  return `<a href="${match[0]}">`
-}
-
 /** The whole text is exactly one linkable path or citation for this slug? Then its opening anchor, else null. */
 function wholeLink(text: string, slug: string): string | null {
-  const match = linkPattern(slug, '', true).exec(text)
-  return match === null ? null : openingAnchor(match, slug)
+  const citation = allCitations(text, slug).find((candidate) => candidate.start === 0 && candidate.end === text.length)
+  return citation === undefined ? null : citation.opening
+}
+
+/** Every linkable occurrence of one text run, left to right. */
+function allCitations(text: string, slug: string): Citation[] {
+  return [...prefixedCitations(text, slug), ...docCitations(text)].sort((a, b) => a.start - b.start)
 }
 
 /** Linkifies the koda paths and knowledge citations that stand alone in one run of text. */
 function linkifyText(text: string, slug: string): string {
-  const pattern = linkPattern(slug, 'g')
   let out = ''
-  let last = 0
-  let match: RegExpExecArray | null
-  while ((match = pattern.exec(text)) !== null) {
-    const start = match.index
-    const end = start + match[0].length
-    const before = start === 0 ? '' : text[start - 1]
-    const after = end >= text.length ? '' : text[end]
+  // `copied` is how much of the text the output already holds; `cursor` is where the next occurrence may
+  // start. A rejected occurrence consumes its span, exactly like a regex match the old loop skipped, and an
+  // occurrence that starts inside a consumed span is dropped: an unanchored regex restarted at the consumed
+  // span's end and re-parsed its tail as a second citation (the B3 differential note), which linked the tail of
+  // a citation it had already linked. The tail of an already-linked citation is not standalone text.
+  let copied = 0
+  let cursor = 0
+  for (const citation of allCitations(text, slug)) {
+    if (citation.start < cursor) continue
+    cursor = citation.end
+    const before = citation.start === 0 ? '' : text[citation.start - 1]
+    const after = citation.end >= text.length ? '' : text[citation.end]
     if (CONTINUES_PATH.test(before) || CONTINUES_PATH.test(after)) continue
-    out += `${text.slice(last, start)}${openingAnchor(match, slug)}${match[0]}</a>`
-    last = end
+    out += `${text.slice(copied, citation.start)}${citation.opening}${text.slice(citation.start, citation.end)}</a>`
+    copied = citation.end
   }
-  return out + text.slice(last)
+  return out + text.slice(copied)
 }
 
 /**

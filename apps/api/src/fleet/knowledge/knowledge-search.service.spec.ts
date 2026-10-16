@@ -494,6 +494,23 @@ describe('KnowledgeSearchService.readOutcome (US-005)', () => {
     expect(await service.readOutcome(PROJECT, 'j1', 'prd.json')).toEqual([]);
     expect(store.readFile).not.toHaveBeenCalled();
   });
+
+  /**
+   * M1 (branch review): the path comes from an untrusted citation, so the file lookup must be an own-key one.
+   * With an object literal, `OUTCOME_KIND_BY_PATH['__proto__']` answered `Object.prototype` (truthy) and
+   * `['constructor']` a function, so those names fell through to a `describeJobs` and a chunk-store read that
+   * should never happen.
+   */
+  it.each(['__proto__', 'constructor', 'prototype', 'toString', 'hasOwnProperty'])(
+    'M1: answers no rows for the inherited name %s and reads nothing',
+    async (path) => {
+      const { service, store, index } = harness({ file: [outcomeRow('j1', 'o1')], jobs: [job('j1')] });
+
+      expect(await service.readOutcome(PROJECT, 'j1', path)).toEqual([]);
+      expect(index.describeJobs).not.toHaveBeenCalled();
+      expect(store.readFile).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe('parseKnowledgeSearchInput', () => {

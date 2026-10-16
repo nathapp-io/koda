@@ -51,15 +51,36 @@ export function isSafeFilterValue(value: string): boolean {
  */
 export const REPO_SOURCE = 'repo';
 
-/** DataFusion predicate matching every row that is not a repository chunk (1c-c-R6). */
-export const EXCLUDE_REPO_ROWS_PREDICATE = `source != '${REPO_SOURCE}'`;
-
 /**
  * S5b 3c-2-D6: run-outcome knowledge chunks carry `source = 'outcome'` in the same shared table, with the
  * `source_id` namespace `outcome:<repoId>:<jobId>:<kind>`. `KnowledgeRepoIndexer` writes them and the knowledge
  * read path (`KnowledgeChunkStore.hasOutcomeRows`, the outcome leg of `KnowledgeSearchService`) selects them.
  */
 export const OUTCOME_SOURCE = 'outcome';
+
+/**
+ * The sources that belong to the knowledge search path of the shared `project_<projectId>` table (1c-c-R6,
+ * 3c-2-D6). Ticket, KB and graph retrieval must never return a row of one of these: an indexed corpus — or a
+ * project's run outcomes — can otherwise fill a bounded candidate pool and crowd the tickets out of it.
+ */
+export const KNOWLEDGE_ROW_SOURCES: readonly string[] = [REPO_SOURCE, OUTCOME_SOURCE];
+
+/**
+ * DataFusion predicate matching every row that is not a knowledge chunk (1c-c-R6, 3c-2-D6). Both sources are
+ * excluded in the query itself, *before* the leg's candidate limit, so the limit is spent on real hits.
+ */
+export const EXCLUDE_KNOWLEDGE_ROWS_PREDICATE = KNOWLEDGE_ROW_SOURCES
+  .map((source) => `source != '${source}'`)
+  .join(' AND ');
+
+/**
+ * True when a record belongs to the knowledge search path. The defensive filter every legacy retrieval leg
+ * applies to the rows a leg returned anyway — the in-memory fallback table has no `where`, so the predicate
+ * above is not the only guard.
+ */
+export function isKnowledgeRow(record: { source: string }): boolean {
+  return KNOWLEDGE_ROW_SOURCES.includes(record.source);
+}
 
 /**
  * Applies `where(predicate)` to a LanceDB query builder (`table.query()`,

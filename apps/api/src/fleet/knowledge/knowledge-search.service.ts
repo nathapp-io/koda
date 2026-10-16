@@ -32,11 +32,15 @@ const KNOWLEDGE_SOURCES: readonly KnowledgeSource[] = ['docs', 'outcomes', 'all'
 /** S5b 3c-2-D9: the source of one hit, read off the row's `source_id` namespace (3c-2-D6). */
 export type KnowledgeHitSource = 'repo' | 'outcome';
 
-/** S5b 3c-2-D9: the outcome file a job read names, and the outcome kind its `source_id` carries (3c-2-D6). */
-const OUTCOME_KIND_BY_PATH: Readonly<Record<string, string>> = {
-  'feature-report.md': 'report',
-  'decisions.jsonl': 'decisions',
-};
+/**
+ * S5b 3c-2-D9: the outcome file a job read names, and the outcome kind its `source_id` carries (3c-2-D6). A
+ * `Map`, not an object literal: the path is untrusted (it comes from a citation), and an inherited name such as
+ * `__proto__` or `constructor` would answer a truthy value no file of this feature has (M1).
+ */
+const OUTCOME_KIND_BY_PATH: ReadonlyMap<string, string> = new Map([
+  ['feature-report.md', 'report'],
+  ['decisions.jsonl', 'decisions'],
+]);
 
 /** One search result: the chunk's citation fields plus its fused score. */
 export interface KnowledgeHit {
@@ -245,10 +249,11 @@ export class KnowledgeSearchService {
   /**
    * S5b 3c-2-D9: one of a job's two outcome files, read back by `koda_get_doc` (US-006). The job is described
    * first, so a foreign or deleted job answers no rows and the store is never read; a path that is not one of
-   * the two files the outcome pass writes names no kind, and therefore no rows either.
+   * the two files the outcome pass writes names no kind, and therefore no rows either — an own-key lookup, so
+   * an inherited name such as `__proto__` reads nothing as well (M1).
    */
   async readOutcome(projectId: string, jobId: string, path: string): Promise<KnowledgeChunkRow[]> {
-    const kind = OUTCOME_KIND_BY_PATH[path];
+    const kind = OUTCOME_KIND_BY_PATH.get(path);
     if (kind === undefined) return [];
     const [job] = await this.index.describeJobs(projectId, [jobId]);
     if (job === undefined) return [];

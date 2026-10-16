@@ -37,24 +37,40 @@ export type KnowledgePatternsParse = { ok: true; value: string[] } | KnowledgePa
 
 /** True when `path` (a repository-relative file path) matches one pattern. */
 export function matchesKnowledgePattern(path: string, pattern: string): boolean {
-  return matchSegments(splitPath(path), 0, splitPath(pattern), 0);
+  return matchSegments(splitPath(path), splitPath(pattern));
 }
 
 function splitPath(value: string): string[] {
   return value.length === 0 ? [...EMPTY_PATH] : value.split('/');
 }
 
-/** Recursive on segments: at most one `**` step per pattern segment, and patterns stay short. */
-function matchSegments(path: string[], at: number, pattern: string[], index: number): boolean {
-  if (index === pattern.length) return at === path.length;
-  if (pattern[index] === '**') {
-    for (let skip = at; skip <= path.length; skip += 1) {
-      if (matchSegments(path, skip, pattern, index + 1)) return true;
+/**
+ * Whether the whole path matches the whole pattern, in time bounded by the pattern and path segment counts.
+ *
+ * The match state is exactly a pair of segment positions, so every pair is visited at most once and its answer
+ * memoized: without that, a pattern accepted by `parseKnowledgePatterns` (up to 200 characters, so up to sixty
+ * `**` segments) against a deep path explores every split of each `**` combinatorially — twelve `**` segments
+ * already took seconds to reject one 21-segment path, and the indexer would do that per tree entry (B2).
+ */
+function matchSegments(path: string[], pattern: string[]): boolean {
+  const states = new Map<number, boolean>();
+  const walk = (at: number, index: number): boolean => {
+    if (index === pattern.length) return at === path.length;
+    const state = index * (path.length + 1) + at;
+    const cached = states.get(state);
+    if (cached !== undefined) return cached;
+
+    let matched = false;
+    if (pattern[index] === '**') {
+      // `**` matches zero or more whole segments; each skip is one memoized state pair.
+      for (let skip = at; skip <= path.length && !matched; skip += 1) matched = walk(skip, index + 1);
+    } else if (at < path.length) {
+      matched = matchesSegment(path[at], pattern[index]) && walk(at + 1, index + 1);
     }
-    return false;
-  }
-  if (at === path.length) return false;
-  return matchesSegment(path[at], pattern[index]) && matchSegments(path, at + 1, pattern, index + 1);
+    states.set(state, matched);
+    return matched;
+  };
+  return walk(0, 0);
 }
 
 /** One segment against one pattern segment: literal characters, with `*` matching any run (never a `/`). */

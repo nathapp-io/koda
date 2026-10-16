@@ -61,6 +61,53 @@ describe('matchesKnowledgePattern', () => {
     expect(matchesDefault('.nax/features/f1/prd.json')).toBe(false);
     expect(matchesDefault('src/a.ts')).toBe(false);
   });
+
+  /**
+   * B2 (branch review): `parseKnowledgePatterns` accepts patterns holding dozens of `**` segments, and the
+   * indexer matches every tree entry against every pattern. The matcher memoizes the (path segment, pattern
+   * segment) states, so its work is bounded by the two segment counts instead of exploring every split of every
+   * `**`: the reported shape — twelve `**` segments rejecting one 21-segment path — took 3.3 seconds before,
+   * which the file-count cap cannot bound.
+   */
+  describe('adversarial multi-globstar patterns (B2)', () => {
+    /** A parser-accepted pattern: `count` `**` segments then a literal last segment. */
+    const globstars = (count: number): string => `${'**/'.repeat(count)}missing.md`;
+    const deepPath = (segments: number): string => Array.from({ length: segments }, (_, i) => `s${i}`).join('/');
+
+    const timeMatch = (path: string, pattern: string): number => {
+      const started = performance.now();
+      matchesKnowledgePattern(path, pattern);
+      return performance.now() - started;
+    };
+
+    it('rejects a 21-segment path against twelve ** segments without backtracking', () => {
+      const pattern = globstars(12);
+      expect(parseKnowledgePatterns([pattern])).toEqual({ ok: true, value: [pattern] });
+
+      expect(matchesKnowledgePattern(`${deepPath(20)}/a.md`, pattern)).toBe(false);
+
+      expect(timeMatch(`${deepPath(20)}/a.md`, pattern)).toBeLessThan(1000);
+    });
+
+    it('bounds the worst pattern the parser accepts against a deep path', () => {
+      const pattern = globstars(60);
+      expect(pattern.length).toBeLessThanOrEqual(200);
+      expect(parseKnowledgePatterns([pattern])).toEqual({ ok: true, value: [pattern] });
+
+      expect(timeMatch(`${deepPath(60)}/a.md`, pattern)).toBeLessThan(1000);
+    });
+
+    it('still matches the paths a multi-** pattern accepts', () => {
+      expect(matchesKnowledgePattern('missing.md', globstars(12))).toBe(true);
+      expect(matchesKnowledgePattern('a/b/c/d/e/missing.md', globstars(12))).toBe(true);
+      expect(matchesKnowledgePattern(`${deepPath(20)}/missing.md`, globstars(12))).toBe(true);
+    });
+
+    it('does not confuse a ** run with a segment a * must match by itself', () => {
+      expect(matchesKnowledgePattern('a/b/missing.md', '**/*/*/missing.md')).toBe(true);
+      expect(matchesKnowledgePattern('a/missing.md', '**/*/*/missing.md')).toBe(false);
+    });
+  });
 });
 
 describe('parseKnowledgePatterns', () => {
