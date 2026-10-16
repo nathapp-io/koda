@@ -1,7 +1,18 @@
 import { Injectable } from '@nestjs/common';
-import { isSafeFilterValue, LanceRecord, LanceTable, LanceTableManager } from '../../rag/lance-table-manager';
+import { isSafeFilterValue, LanceRecord, LanceTable, LanceTableManager, REPO_SOURCE, whereIfSupported } from '../../rag/lance-table-manager';
 
 const MAX_FILE_ROWS = 2_000;
+
+/**
+ * LanceDB (lance-0.23.2 scanner) fails a full-text query with
+ * `Invalid user input: Column content has no inverted index` once the table's
+ * full-text index is gone. Only that failure is answered by rebuilding the
+ * index; a predicate, planning or transient failure is not.
+ */
+function isMissingFullTextIndex(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /no inverted index|no full[-\s]?text[-\s]?search index|full[-\s]?text[-\s]?search index (?:was )?not found/i.test(message);
+}
 
 export class KnowledgeStoreUnavailableError extends Error {
   constructor() {
@@ -86,10 +97,13 @@ export class KnowledgeChunkStore {
     const table = await this.table(projectId);
     try {
       return await this.fullTextQuery(table, query, predicate, limit);
-    } catch {
+    } catch (error) {
       // LanceDB drops a table's full-text index as soon as a row is deleted, and every `replaceFile` deletes the
       // file's rows first — so a project's index is gone after a pass, and `optimize` does not restore it. Rebuild
       // it once and retry (a second failure propagates), so the lexical leg still answers after the indexer wrote.
+      // Only the dropped-index error is answered that way: a rebuild takes the table's write mutex and is far more
+      // expensive than the query, so a predicate or transient failure is never charged for one.
+      if (!isMissingFullTextIndex(error)) throw error;
       await this.rebuildFullTextIndex(projectId, table);
       return this.fullTextQuery(table, query, predicate, limit);
     }
@@ -100,6 +114,18 @@ export class KnowledgeChunkStore {
     const table = await this.table(projectId);
     const records: LanceRecord[] = await table.vectorSearch(embedding).distanceType('cosine').where(predicate).limit(limit).toArray();
     return records.map(parseRow);
+  }
+
+  /**
+   * Whether the project's table holds at least one repository chunk. This is the 1c-c-D7 definition of `empty`:
+   * neither retrieval leg answering a row is not the same thing (the embedding can be down, or every row can be
+   * `provider: 'none'`), so `KnowledgeSearchService` asks the table directly.
+   */
+  async hasRepoRows(projectId: string): Promise<boolean> {
+    this.assertAvailable();
+    const table = await this.table(projectId);
+    const records: LanceRecord[] = await whereIfSupported(table.query(), `source = '${REPO_SOURCE}'`).limit(1).toArray();
+    return records.length > 0;
   }
 
   private assertAvailable(): void {
@@ -122,7 +148,14 @@ export class KnowledgeChunkStore {
     if (!isSafeFilterValue(sourceId)) throw new KnowledgeInvalidPathError(sourceId);
   }
 
-  private table(projectId: string): Promise<LanceTable> {
-    return this.manager.getOrCreateTable(tableName(projectId));
+  /**
+   * The table, or `KnowledgeStoreUnavailableError`. `getOrCreateTable` can discover a native-store failure while
+   * it opens the table (the lazy connect) and answer the in-memory fallback, so availability is rechecked after
+   * initialization: a fallback table must never accept a write that durable file state then reports as indexed.
+   */
+  private async table(projectId: string): Promise<LanceTable> {
+    const table = await this.manager.getOrCreateTable(tableName(projectId));
+    this.assertAvailable();
+    return table;
   }
 }

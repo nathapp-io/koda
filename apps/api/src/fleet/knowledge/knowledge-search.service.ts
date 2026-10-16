@@ -156,9 +156,10 @@ export class KnowledgeSearchService {
 
     return {
       lexicalOnly: vectorLeg.skipped,
-      // The store exposes no count, so "the table holds no repo row" is read off the legs: neither retrieval
-      // path answered a row. A query that matches nothing still reaches the vector leg's nearest neighbours.
-      empty: lexicalRows.length === 0 && vectorLeg.rows.length === 0,
+      // 1c-c-D7: `empty` means the project's table holds no `repo` row at all. Two empty legs are not the same
+      // thing — the embedding can be down (no vector leg) and the lexical leg can miss every stored row — so the
+      // table is asked directly, and only when no hit came back.
+      empty: hits.length === 0 && !(await this.store.hasRepoRows(input.projectId)),
       hits,
     };
   }

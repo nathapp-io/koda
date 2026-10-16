@@ -52,18 +52,20 @@ interface Harness {
     lexical: ReturnType<typeof vi.fn>;
     vector: ReturnType<typeof vi.fn>;
     readFile: ReturnType<typeof vi.fn>;
+    hasRepoRows: ReturnType<typeof vi.fn>;
   };
   embedding: { embed: ReturnType<typeof vi.fn> };
   index: { listProjectRepos: ReturnType<typeof vi.fn> };
 }
 
 function harness(
-  options: { lexical?: KnowledgeChunkRow[]; vector?: KnowledgeChunkRow[]; repos?: string[] } = {},
+  options: { lexical?: KnowledgeChunkRow[]; vector?: KnowledgeChunkRow[]; repos?: string[]; repoRows?: boolean } = {},
 ): Harness {
   const store = {
     lexical: vi.fn(async (_projectId: string, _query: string, _predicate: string, _limit: number) => options.lexical ?? []),
     vector: vi.fn(async (_projectId: string, _vector: number[], _predicate: string, _limit: number) => options.vector ?? []),
     readFile: vi.fn(async (_projectId: string, _sourceId: string) => [] as KnowledgeChunkRow[]),
+    hasRepoRows: vi.fn(async (_projectId: string) => options.repoRows ?? false),
   };
   const embedding = { embed: vi.fn(async (_text: string) => EMBEDDING) };
   const index = { listProjectRepos: vi.fn(async (_projectId: string) => (options.repos ?? ['r1']).map(repoRef)) };
@@ -182,6 +184,34 @@ describe('KnowledgeSearchService', () => {
     const result = await service.search({ projectId: PROJECT, query: QUERY, limit: 20 });
 
     expect(result.empty).toBe(false);
+  });
+
+  it('AC-7: reads empty off the table, not off the legs, when the embedding is down and the lexical query misses', async () => {
+    const { service, embedding, store } = harness({ lexical: [], vector: [], repoRows: true });
+    embedding.embed.mockRejectedValue(new Error('ollama is down'));
+
+    const result = await service.search({ projectId: PROJECT, query: QUERY, limit: 20 });
+
+    expect(store.hasRepoRows).toHaveBeenCalledWith(PROJECT);
+    expect(result).toEqual({ lexicalOnly: true, empty: false, hits: [] });
+  });
+
+  it('AC-7: does not report empty when every stored row is provider: none and the lexical query misses', async () => {
+    // The vector leg's `provider != 'none'` clause answers nothing and the lexical leg matched nothing, yet the
+    // table holds repository chunks: the project is indexed, the query just missed.
+    const { service } = harness({ lexical: [], vector: [], repoRows: true });
+
+    const result = await service.search({ projectId: PROJECT, query: QUERY, limit: 20 });
+
+    expect(result).toEqual({ lexicalOnly: false, empty: false, hits: [] });
+  });
+
+  it('AC-7: does not ask the table whether rows exist when a leg already answered a hit', async () => {
+    const { service, store } = harness({ lexical: [row('a')] });
+
+    await service.search({ projectId: PROJECT, query: QUERY, limit: 20 });
+
+    expect(store.hasRepoRows).not.toHaveBeenCalled();
   });
 
   it('breaks an equal fused score by row id ascending (1c-c-D7), not by leg order', async () => {

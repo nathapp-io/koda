@@ -8,13 +8,18 @@
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { Index } from '@lancedb/lancedb';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 import type { IRagConfig } from '../../../src/config/rag.config';
 import { LanceRecord, LanceTableManager } from '../../../src/rag/lance-table-manager';
 import { EmbeddingService } from '../../../src/rag/embedding.service';
+import { HybridRetrieverService } from '../../../src/rag/hybrid-retriever.service';
+import type { EntityStore } from '../../../src/rag/entity-store';
+import type { PrismaRagRepository } from '../../../src/rag/prisma-rag.repository';
 import { KnowledgeChunkStore } from '../../../src/fleet/knowledge/knowledge-chunk-store';
+import { MAX_KNOWLEDGE_FILES } from '../../../src/fleet/knowledge/knowledge-allowlist';
 import type { KnowledgeIndexService } from '../../../src/fleet/knowledge/knowledge-index.service';
 import { KnowledgeSearchService } from '../../../src/fleet/knowledge/knowledge-search.service';
 import { PrismaKnowledgeIndexRepository } from '../../../src/fleet/knowledge/prisma-knowledge-index.repository';
@@ -177,6 +182,103 @@ describe('KnowledgeSearchService on LanceDB', () => {
   });
 });
 
+/**
+ * 1c-c-R6: repository chunks share the project's LanceDB table with ticket documents, so a pass that indexes
+ * hundreds of matching chunks must not be able to crowd ticket search out of its bounded candidate pools. The
+ * review reproduced the opposite on a real table: `search` returned ticket t1 before 120 relevant repository
+ * chunks were indexed and no results afterwards.
+ */
+describe('Ticket search isolation on the shared table (1c-c-R6)', () => {
+  const PROJECT = 'proj_ticket_isolation';
+  const QUERY = 'broker token cache design';
+  const TICKET_ID = 'ticket-t1';
+  const REPO_CHUNKS = 120;
+
+  let root: string;
+  let manager: LanceTableManager;
+  let embedding: EmbeddingService;
+  let retriever: HybridRetrieverService;
+
+  beforeAll(async () => {
+    root = mkdtempSync(join(tmpdir(), 'koda-ticket-isolation-'));
+    const ragConfig = { lancedbPath: root, inMemoryOnly: false } as IRagConfig;
+    embedding = new EmbeddingService({ ...ragConfig, embeddingProvider: 'fake', embeddingModel: 'fake-v1' } as IRagConfig);
+    manager = new LanceTableManager(ragConfig, embedding);
+    manager.ensureStorage();
+    retriever = new HybridRetrieverService(
+      ragConfig,
+      embedding,
+      { searchEntities: () => [], computeEntityScore: () => 0 } as unknown as EntityStore,
+      { findProjectGraphifyEnabled: async () => ({ graphifyEnabled: false }) } as unknown as PrismaRagRepository,
+      manager,
+    );
+
+    const queryVector = await embedding.embed(QUERY);
+    const tableName = `project_${PROJECT}`;
+    const table = await manager.getOrCreateTable(tableName);
+    // The ticket matches the query, but strictly weaker than the repository chunks do: its vector is the query
+    // vector turned away from itself, and its text repeats the query terms once instead of six times.
+    const ticketVector = [...queryVector];
+    ticketVector[0] += 0.5;
+    await manager.addRecord(tableName, table, {
+      id: TICKET_ID, source: 'ticket', source_id: 't1', content: QUERY, vector: ticketVector,
+      metadata: '{"ref":"KODA-1"}', created_at: '2026-10-20T00:00:00.000Z',
+      provider: embedding.providerName, model: embedding.modelName,
+    });
+
+    const rows: LanceRecord[] = Array.from({ length: REPO_CHUNKS }, (_, i) => {
+      const sourceId = `repo:r1:docs/${i}.md`;
+      return {
+        id: `${sourceId}#0`, source: 'repo', source_id: sourceId,
+        content: Array(6).fill(QUERY).join(' '), vector: queryVector,
+        metadata: JSON.stringify({
+          repoId: 'r1', owner: 'o', name: 'n', path: `docs/${i}.md`, sha: 'sha-1', blobSha: 'blob-1', title: 'Broker',
+          headingPath: 'Broker', anchor: 'broker', chunkIndex: 0, chunkCount: 1, abstract: 'abstract', text: QUERY,
+        }),
+        created_at: '2026-10-20T00:00:00.000Z', provider: embedding.providerName, model: embedding.modelName,
+      };
+    });
+    // The full-text index is created last, on the final row set, so the native FTS leg (not the scan fallback)
+    // ranks the chunks: a pass leaves the table in exactly this state (1c-c-D5).
+    await manager.exclusive(tableName, async () => {
+      await table.add(rows);
+      await table.createIndex('content', { config: Index.fts(), replace: true });
+    });
+  });
+
+  afterAll(async () => {
+    await manager.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('returns the matching ticket instead of an empty result', async () => {
+    const result = await retriever.search({ projectId: PROJECT, query: QUERY, limit: 20 });
+
+    expect(result.results.map((row) => row.id)).toContain(TICKET_ID);
+  });
+
+  it('never returns a repository chunk from ticket search', async () => {
+    const result = await retriever.search({ projectId: PROJECT, query: QUERY, limit: 20 });
+
+    expect(result.results.map((row) => row.source)).not.toContain('repo');
+  });
+
+  it('leaves the repository chunks readable through the knowledge search path', async () => {
+    const store = new KnowledgeChunkStore(manager);
+    const service = new KnowledgeSearchService(
+      store,
+      embedding,
+      { listProjectRepos: async () => [{ id: 'r1', projectId: PROJECT, provider: 'github', owner: 'o', name: 'n', defaultBranch: 'main', githubInstallationId: null }] } as unknown as KnowledgeIndexService,
+    );
+
+    const result = await service.search({ projectId: PROJECT, query: QUERY, limit: 20 });
+
+    expect(result.empty).toBe(false);
+    expect(result.hits.length).toBeGreaterThan(0);
+    expect(result.hits.every((hit) => hit.repoId === 'r1')).toBe(true);
+  });
+});
+
 const describePg = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describePg('PrismaKnowledgeIndexRepository (PG)', () => {
@@ -241,6 +343,24 @@ describePg('PrismaKnowledgeIndexRepository (PG)', () => {
     expect(await repo.listFiles(repoId)).toEqual([{ repoId, path: 'docs/a.md', blobSha: 's2', chunkCount: 3, unembeddedCount: 1 }]);
     await repo.deleteFile(repoId, 'docs/a.md');
     expect(await repo.listFiles(repoId)).toEqual([]);
+  });
+
+  it('listFiles reads every persisted state past the 2000-file corpus cap (US-004/AC-5)', async () => {
+    // An interrupted corpus replacement leaves the new files' rows written and the old files' rows not yet
+    // deleted — more rows than the cap. The cleanup step must still see all of them.
+    const { repoId } = await seedFleetBase(prisma.client);
+    const count = MAX_KNOWLEDGE_FILES + 1;
+    await prisma.client.knowledgeRepoFile.createMany({
+      data: Array.from({ length: count }, (_, i) => ({
+        repoId, path: `docs/${String(i).padStart(5, '0')}.md`, blobSha: 'sha', chunkCount: 1, unembeddedCount: 0,
+      })),
+    });
+
+    const files = await repo.listFiles(repoId);
+
+    expect(files).toHaveLength(count);
+    expect(files[0].path).toBe('docs/00000.md');
+    expect(files[count - 1].path).toBe(`docs/${String(count - 1).padStart(5, '0')}.md`);
   });
 
   it('deleting a FleetRepo cascades to its index and file rows (AC-6)', async () => {

@@ -107,8 +107,22 @@ export class PrismaKnowledgeIndexRepository implements IKnowledgeIndexRepository
   }
 
   async listFiles(repoId: string): Promise<KnowledgeFileState[]> {
-    const rows = await this.db.knowledgeRepoFile.findMany({ where: { repoId }, orderBy: { path: 'asc' }, take: MAX_KNOWLEDGE_FILES });
-    return rows.map(toFile);
+    // Enumerates every persisted state, paginated by `path`: an interrupted pass leaves the new files' rows
+    // written and the obsolete files' rows not yet deleted, so a repository can temporarily hold more rows than
+    // the 2000-file corpus cap. A capped read would hide the tail from the indexer's cleanup step and keep those
+    // files' chunks searchable forever (US-004/AC-5); the cap belongs to corpus selection, not to bookkeeping.
+    const rows: FileRow[] = [];
+    let after: string | undefined;
+    for (;;) {
+      const page: FileRow[] = await this.db.knowledgeRepoFile.findMany({
+        where: { repoId, ...(after === undefined ? {} : { path: { gt: after } }) },
+        orderBy: { path: 'asc' },
+        take: MAX_KNOWLEDGE_FILES,
+      });
+      rows.push(...page);
+      if (page.length < MAX_KNOWLEDGE_FILES) return rows.map(toFile);
+      after = page[page.length - 1].path;
+    }
   }
 
   async upsertFile(file: KnowledgeFileState): Promise<void> {

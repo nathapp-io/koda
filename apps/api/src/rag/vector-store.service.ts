@@ -5,7 +5,7 @@ import { PrismaRagRepository } from './prisma-rag.repository';
 import { EmbeddingService } from './embedding.service';
 import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
 import { EntityStore } from './entity-store';
-import { LanceTableManager, isSafeFilterValue } from './lance-table-manager';
+import { LanceTableManager, EXCLUDE_REPO_ROWS_PREDICATE, REPO_SOURCE, isSafeFilterValue, whereIfSupported } from './lance-table-manager';
 import { resolveCreatedAt } from './created-at-override';
 import type { LanceRecord, LanceTable } from './lance-table-manager';
 import { simpleFtsScore, reciprocalRankFusion, getSimilarityTier, getVerdict } from './rag.service';
@@ -264,7 +264,11 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
 
       const fetchLimit = Math.min(rowCount, limit * 4);
       const scanLimit = Math.min(rowCount, 500);
-      const allRows: LanceRecord[] = await table.query().limit(scanLimit).toArray();
+      // 1c-c-R6: repository knowledge chunks share the table with tickets and documents but belong to the
+      // knowledge search path; every leg drops them before its candidate limit so an indexed corpus cannot crowd
+      // KB results out of the bounded pool.
+      const allRows: LanceRecord[] = await whereIfSupported(table.query(), EXCLUDE_REPO_ROWS_PREDICATE)
+        .limit(scanLimit).toArray();
 
       // Native FTS path when LanceDB is available; fall back to in-memory simpleFtsScore
       let nativeFtsRows: LanceRecord[] = [];
@@ -273,7 +277,10 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
       if (this.lanceTable.available) {
         let nativeFtsFailed = false;
         try {
-          const nativeFtsResult = await table.search(query, 'fts', 'content');
+          const nativeFtsResult = await whereIfSupported(
+            table.search(query, 'fts', 'content'),
+            EXCLUDE_REPO_ROWS_PREDICATE,
+          );
 
           if (Array.isArray(nativeFtsResult)) {
             nativeFtsRows = nativeFtsResult as LanceRecord[];
@@ -288,6 +295,7 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
             nativeFtsFailed = true;
             this.logger.warn('Native FTS returned unsupported shape — using in-memory FTS');
           }
+          nativeFtsRows = nativeFtsRows.filter((r) => r.source !== REPO_SOURCE);
         } catch (err) {
           nativeFtsFailed = true;
           this.logger.warn(`Native FTS search failed (${(err as Error).message}) — using in-memory FTS`);
@@ -295,6 +303,7 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
         if (nativeFtsFailed) {
           // Fall back to in-memory FTS when native FTS is unavailable
           ftsRanked = allRows
+            .filter((r) => r.source !== REPO_SOURCE)
             .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query) }))
             .filter((r) => r.score > 0)
             .sort((a, b) => b.score - a.score)
@@ -305,6 +314,7 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
         }
       } else {
         ftsRanked = allRows
+          .filter((r) => r.source !== REPO_SOURCE)
           .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query) }))
           .filter((r) => r.score > 0)
           .sort((a, b) => b.score - a.score)
@@ -318,11 +328,12 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
       if (this.lanceTable.available) {
         try {
           const queryVector = await this.embeddingService.embed(query);
-          vectorRows = await table
+          vectorRows = await whereIfSupported(table
             .vectorSearch(queryVector)
-            .distanceType('cosine')
+            .distanceType('cosine'), EXCLUDE_REPO_ROWS_PREDICATE)
             .limit(fetchLimit)
             .toArray();
+          vectorRows = vectorRows.filter((r) => r.source !== REPO_SOURCE);
         } catch (err) {
           this.logger.warn(`Vector search failed (${(err as Error).message}) — using FTS only`);
         }
