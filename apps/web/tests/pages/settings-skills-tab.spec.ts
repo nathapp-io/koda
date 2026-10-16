@@ -18,6 +18,17 @@ const ProjectSkillsPanelStub = {
   },
 }
 
+/** Records the slug each SettingsKnowledgeCard receives (US-007). */
+const knowledgeSpy = jest.fn()
+const SettingsKnowledgeCardStub = {
+  name: 'StubSettingsKnowledgeCard',
+  props: ['slug'],
+  setup(props: { slug?: string }) {
+    knowledgeSpy(props.slug)
+    return () => Vue.h('x-stub-stub', { 'data-stub': 'knowledge-card', 'data-slug': props.slug ?? '' })
+  },
+}
+
 const inert = (tag: string) => ({
   name: `Inert${tag}`,
   setup: () => () => Vue.h('x-stub-stub', { 'data-stub': tag }),
@@ -43,6 +54,7 @@ function mountSettings() {
       ProjectInvitesPanel: inert('invites'),
       SettingsProjectCard: inert('project-card'),
       SettingsVcsCard: inert('vcs-card'),
+      SettingsKnowledgeCard: SettingsKnowledgeCardStub,
       LoadingState: inert('loading'),
       ErrorState: inert('error'),
     },
@@ -60,14 +72,15 @@ function mountSettings() {
 
 afterEach(() => {
   panelSpy.mockClear()
+  knowledgeSpy.mockClear()
 })
 
 describe('settings page skills tab (US-007)', () => {
-  test('US-007 AC1: renders three tab triggers, project, vcs and skills, in that order', () => {
+  test('US-007 AC1: renders four tab triggers, project, vcs, skills and knowledge, in that order', () => {
     const app = mountSettings()
 
     const triggers = app.find('[data-stub="tabs-trigger"]').map((t) => t.props.value)
-    expect(triggers).toEqual(['project', 'vcs', 'skills'])
+    expect(triggers).toEqual(['project', 'vcs', 'skills', 'knowledge'])
     app.unmount()
   })
 
@@ -90,6 +103,29 @@ describe('settings page skills tab (US-007)', () => {
 
     const projectContent = app.find('[data-stub="tabs-content"]').filter((c) => c.props.value === 'project')
     expect(app.find('[data-stub="project-skills-panel"]', projectContent[0])).toHaveLength(0)
+    app.unmount()
+  })
+})
+
+describe('settings page knowledge tab (US-007 AC11)', () => {
+  test('AC11: the knowledge content renders SettingsKnowledgeCard with the route slug', () => {
+    const app = mountSettings()
+
+    const content = app.find('[data-stub="tabs-content"]').filter((c) => c.props.value === 'knowledge')
+    expect(content).toHaveLength(1)
+    const cards = app.find('[data-stub="knowledge-card"]', content[0])
+    expect(cards).toHaveLength(1)
+    expect(cards[0].props['data-slug']).toBe('web')
+    expect(knowledgeSpy).toHaveBeenCalledWith('web')
+    app.unmount()
+  })
+
+  test('AC11 (control): the knowledge card is not inside any other tab', () => {
+    const app = mountSettings()
+
+    for (const other of app.find('[data-stub="tabs-content"]').filter((c) => c.props.value !== 'knowledge')) {
+      expect(app.find('[data-stub="knowledge-card"]', other)).toHaveLength(0)
+    }
     app.unmount()
   })
 })

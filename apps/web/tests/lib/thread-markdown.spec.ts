@@ -350,3 +350,91 @@ describe('B1: a `>` inside a quoted attribute value is not a tag boundary', () =
     expect(sanitizeDouble).toHaveBeenCalledTimes(1)
   })
 })
+
+// ── US-007 AC12-AC15: knowledge citations ────────────────────────────────────────────────────
+
+const JOB = 'cmvjob00000000000000001'
+
+describe('US-007 AC12-AC15: renderThreadMarkdown links knowledge citations', () => {
+  test('AC12: a document citation links to the GitHub blob at its sha, in a new tab, with noopener noreferrer', () => {
+    const html = renderThreadMarkdown('see o/n:docs/a.md@abc1234#intro', 'web')
+
+    const links = elementsOf(html, 'a')
+    expect(links).toHaveLength(1)
+    expect(links[0].attrs.href).toBe('https://github.com/o/n/blob/abc1234/docs/a.md#intro')
+    expect(links[0].attrs.target).toBe('_blank')
+    expect(links[0].attrs.rel).toBe('noopener noreferrer')
+    expect(textOf(links[0])).toBe('o/n:docs/a.md@abc1234#intro')
+  })
+
+  test('AC13: an outcome citation links to the job page of the project', () => {
+    const html = renderThreadMarkdown(`job:${JOB}/feature-report.md#branch-fix`, 'web')
+
+    const links = elementsOf(html, 'a')
+    expect(links).toHaveLength(1)
+    expect(links[0].attrs.href).toBe(`/web/fleet/jobs/${JOB}`)
+    expect(links[0].attrs.target).toBeUndefined()
+    expect(textOf(links[0])).toBe(`job:${JOB}/feature-report.md#branch-fix`)
+  })
+
+  test('an outcome citation of decisions.jsonl without a fragment is linked', () => {
+    const html = renderThreadMarkdown(`see job:${JOB}/decisions.jsonl.`, 'web')
+
+    const links = elementsOf(html, 'a')
+    expect(links).toHaveLength(1)
+    expect(links[0].attrs.href).toBe(`/web/fleet/jobs/${JOB}`)
+    expect(textOf(links[0])).toBe(`job:${JOB}/decisions.jsonl`)
+  })
+
+  test('AC14: an inline code span holding only a document citation sits inside a link to the blob', () => {
+    const html = renderThreadMarkdown('read `o/n:docs/a.md@abc1234` first', 'web')
+
+    const tree = treeOf(html)
+    const links = elementsOfTree(tree, 'a')
+    expect(links).toHaveLength(1)
+    expect(links[0].attrs.href).toBe('https://github.com/o/n/blob/abc1234/docs/a.md')
+    expect(links[0].attrs.target).toBe('_blank')
+    expect(links[0].attrs.rel).toBe('noopener noreferrer')
+    const code = elementsOfTree(tree, 'code')
+    expect(code).toHaveLength(1)
+    expect(flatten(links[0].children)).toContain(code[0])
+  })
+
+  test('an inline code span holding only an outcome citation is wrapped in a link to the job', () => {
+    const html = renderThreadMarkdown(`\`job:${JOB}/decisions.jsonl#d1\``, 'web')
+
+    const links = elementsOf(html, 'a')
+    expect(links).toHaveLength(1)
+    expect(links[0].attrs.href).toBe(`/web/fleet/jobs/${JOB}`)
+  })
+
+  test('AC15: a citation inside the text of an absolute URL is not linked', () => {
+    const html = renderThreadMarkdown('https://x.dev/o/n:docs/a.md@abc1234', 'web')
+
+    expect(elementsOf(html, 'a').filter(link => link.attrs.href?.startsWith('https://github.com'))).toEqual([])
+  })
+
+  test('a sha shorter than 7 or longer than 40 characters is not a citation', () => {
+    expect(elementsOf(renderThreadMarkdown('o/n:docs/a.md@abc123', 'web'), 'a')).toEqual([])
+    expect(elementsOf(renderThreadMarkdown(`o/n:docs/a.md@${'a'.repeat(41)}`, 'web'), 'a')).toEqual([])
+    expect(elementsOf(renderThreadMarkdown('o/n:docs/a.md@ABCDEF1', 'web'), 'a')).toEqual([])
+  })
+
+  test('citations are not linked without a slug, inside a fenced block, or inside an existing link', () => {
+    expect(elementsOf(renderThreadMarkdown('o/n:docs/a.md@abc1234'), 'a')).toEqual([])
+    expect(elementsOf(renderThreadMarkdown('```\no/n:docs/a.md@abc1234\n```', 'web'), 'a')).toEqual([])
+    const nested = elementsOf(renderThreadMarkdown('[x](/web/tickets/SB-3) [o/n:docs/a.md@abc1234](/web/tickets/SB-3)', 'web'), 'a')
+    expect(nested).toHaveLength(2)
+    expect(nested.every(link => link.attrs.href === '/web/tickets/SB-3')).toBe(true)
+  })
+
+  test('a citation with other text around it, and the existing path links, still work together', () => {
+    const html = renderThreadMarkdown(`(o/n:docs/a.md@abc1234), /web/tickets/SB-3 and job:${JOB}/feature-report.md`, 'web')
+
+    expect(elementsOf(html, 'a').map(link => link.attrs.href)).toEqual([
+      'https://github.com/o/n/blob/abc1234/docs/a.md',
+      '/web/tickets/SB-3',
+      `/web/fleet/jobs/${JOB}`,
+    ])
+  })
+})

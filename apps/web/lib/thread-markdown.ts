@@ -18,8 +18,11 @@
  * title into a real element. No DOM is built here on purpose: this runs during SSR too, where
  * `DOMParser` is not available, and `isomorphic-dompurify` does not expose its jsdom window.
  *
+ * Fleet S5b US-007 (3c-2-D13): document citations (`o/n:docs/a.md@<sha>`) link to GitHub and outcome
+ * citations (`job:<id>/feature-report.md`) to the job page, under the same rules.
+ *
  * Text inside an existing link or a fenced code block is left alone; an inline code span whose
- * whole text is one of the paths is wrapped, code element and all.
+ * whole text is one of the paths or citations is wrapped, code element and all.
  */
 
 import { renderMarkdownOrEscape, sanitizeHtmlFragment } from '~/lib/markdown'
@@ -48,18 +51,51 @@ function pathPattern(slug: string): string {
   return `/${escapeRegExp(slug)}/(?:tickets/${TICKET_REF}|fleet/jobs/${JOB_ID})`
 }
 
-/** The whole text is exactly one koda path for this slug? Then that path, else null. */
-function wholePath(text: string, slug: string): string | null {
-  return new RegExp(`^${pathPattern(slug)}$`).test(text) ? text : null
+/**
+ * Fleet S5b US-007 (3c-2-D13): the citations the knowledge tools emit.
+ * A document: `<owner>/<name>:<path>@<sha>[#<fragment>]`, linked to GitHub at that sha. An outcome:
+ * `job:<jobId>/(feature-report.md|decisions.jsonl)[#<fragment>]`, linked to the job page. The path
+ * excludes quotes, `<`, `>` and `&` as well as `@`, `#` and whitespace, so a match is attribute-safe.
+ */
+const REPO_PART = '[A-Za-z0-9_.-]+'
+const CITATION_PATH = '[^@#\\s"\'<>&`]+'
+const CITATION_FRAGMENT = '[A-Za-z0-9_-]+'
+const DOC_CITATION =
+  `(?<owner>${REPO_PART})/(?<name>${REPO_PART}):(?<docPath>${CITATION_PATH})@(?<sha>[0-9a-f]{7,40})(?:#(?<docFragment>${CITATION_FRAGMENT}))?`
+const JOB_CITATION =
+  `job:(?<jobId>${JOB_ID})/(?:feature-report\\.md|decisions\\.jsonl)(?:#${CITATION_FRAGMENT})?`
+
+/** One alternation over everything this module links; the named group says which one matched. */
+function linkPattern(slug: string, flags: string, whole = false): RegExp {
+  const body = `(?<path>${pathPattern(slug)})|(?<doc>${DOC_CITATION})|(?<job>${JOB_CITATION})`
+  return new RegExp(whole ? `^(?:${body})$` : body, flags)
 }
 
-function anchor(path: string): string {
-  return `<a href="${path}">${path}</a>`
+function escapeAttribute(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-/** Linkifies the koda paths that stand alone in one run of text. */
+/** The opening `<a …>` for one match of {@link linkPattern}. */
+function openingAnchor(match: RegExpExecArray, slug: string): string {
+  const groups = match.groups ?? {}
+  if (groups.doc !== undefined) {
+    const fragment = groups.docFragment === undefined ? '' : `#${groups.docFragment}`
+    const href = `https://github.com/${groups.owner}/${groups.name}/blob/${groups.sha}/${groups.docPath}${fragment}`
+    return `<a href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer">`
+  }
+  if (groups.job !== undefined) return `<a href="${escapeAttribute(`/${slug}/fleet/jobs/${groups.jobId}`)}">`
+  return `<a href="${match[0]}">`
+}
+
+/** The whole text is exactly one linkable path or citation for this slug? Then its opening anchor, else null. */
+function wholeLink(text: string, slug: string): string | null {
+  const match = linkPattern(slug, '', true).exec(text)
+  return match === null ? null : openingAnchor(match, slug)
+}
+
+/** Linkifies the koda paths and knowledge citations that stand alone in one run of text. */
 function linkifyText(text: string, slug: string): string {
-  const pattern = new RegExp(pathPattern(slug), 'g')
+  const pattern = linkPattern(slug, 'g')
   let out = ''
   let last = 0
   let match: RegExpExecArray | null
@@ -69,7 +105,7 @@ function linkifyText(text: string, slug: string): string {
     const before = start === 0 ? '' : text[start - 1]
     const after = end >= text.length ? '' : text[end]
     if (CONTINUES_PATH.test(before) || CONTINUES_PATH.test(after)) continue
-    out += text.slice(last, start) + anchor(match[0])
+    out += `${text.slice(last, start)}${openingAnchor(match, slug)}${match[0]}</a>`
     last = end
   }
   return out + text.slice(last)
@@ -157,7 +193,7 @@ function isClosingTag(token: string | undefined, name: string): boolean {
   return info !== null && info.closing && info.name === name
 }
 
-/** Rewrites the standalone koda paths of already-sanitized HTML into links. */
+/** Rewrites the standalone koda paths and knowledge citations of already-sanitized HTML into links. */
 function linkifyPaths(html: string, slug: string): string {
   const tokens = tokenize(html)
   const out: string[] = []
@@ -186,9 +222,9 @@ function linkifyPaths(html: string, slug: string): string {
     // An inline code span whose only content is a path: wrap the whole element in the link.
     if (info.name === 'code' && !info.selfClosing && !inside('a') && !inside('pre')) {
       const content = tokens[index + 1]
-      const path = content !== undefined && !content.startsWith('<') ? wholePath(content, slug) : null
-      if (path !== null && isClosingTag(tokens[index + 2], 'code')) {
-        out.push(`<a href="${path}">`, token, content, tokens[index + 2], '</a>')
+      const opening = content !== undefined && !content.startsWith('<') ? wholeLink(content, slug) : null
+      if (opening !== null && isClosingTag(tokens[index + 2], 'code')) {
+        out.push(opening, token, content, tokens[index + 2], '</a>')
         index += 2
         continue
       }
