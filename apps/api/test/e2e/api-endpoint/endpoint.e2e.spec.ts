@@ -4145,8 +4145,8 @@ describeIntegration('API Integration Tests', () => {
     let projectId: string;
     let repoId: string;
     let memberToken: string;
-    let outsiderToken: string;
-    let searchSpy: ReturnType<typeof vi.spyOn>;
+    let developerId: string;
+    let searchSpy: ReturnType<typeof vi.spyOn> | undefined;
     let enabledBefore: boolean;
 
     const fleetConfigOf = () => app.get<IFleetConfig>(FLEET_CFG, { strict: false });
@@ -4157,6 +4157,13 @@ describeIntegration('API Integration Tests', () => {
       .send(payload);
 
     beforeAll(async () => {
+      // The spy goes first: whatever else fails here, afterAll must be able to restore it.
+      // The route's own search body/repo/availability logic is under test, so the hybrid search itself is
+      // stubbed (the real one needs a LanceDB store and is covered by knowledge-search.service.spec.ts).
+      enabledBefore = fleetConfigOf().knowledgeIndexEnabled;
+      fleetConfigOf().knowledgeIndexEnabled = true;
+      searchSpy = vi.spyOn(app.get(KnowledgeSearchService), 'search');
+
       const prisma = db();
       const admin = await prisma.user.findUniqueOrThrow({ where: { email: 'admin@koda.test' } });
       const developer = await prisma.user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
@@ -4169,29 +4176,17 @@ describeIntegration('API Integration Tests', () => {
       slug = project.slug;
       projectId = project.id;
       repoId = repo.id;
+      developerId = developer.id;
       memberToken = nonAdminUserAccessToken;
-
-      // A user of no project at all: the 403 case needs a real principal, not a project role.
-      const registered = await request(httpServer)
-        .post('/api/auth/register')
-        .send({ email: 'knowledge-outsider@koda.test', name: 'Knowledge Outsider', password: 'Member1234!Aa' })
-        .expect(201);
-      outsiderToken = body<{ accessToken: string }>(registered).accessToken;
-
-      // The route's own search body/repo/availability logic is under test, so the hybrid search itself is
-      // stubbed (the real one needs a LanceDB store and is covered by knowledge-search.service.spec.ts).
-      enabledBefore = fleetConfigOf().knowledgeIndexEnabled;
-      fleetConfigOf().knowledgeIndexEnabled = true;
-      searchSpy = vi.spyOn(app.get(KnowledgeSearchService), 'search');
     });
 
     afterAll(() => {
-      searchSpy.mockRestore();
+      searchSpy?.mockRestore();
       fleetConfigOf().knowledgeIndexEnabled = enabledBefore;
     });
 
     beforeEach(() => {
-      searchSpy.mockReset();
+      searchSpy?.mockReset();
     });
 
     it('AC-9: answers 200 with the service result and calls search with the resolved repo id', async () => {
@@ -4244,10 +4239,17 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('AC-14: answers 403 for a user who is not a project member', async () => {
-      const res = await search(outsiderToken, { query: 'broker' }).expect(403);
+      // The membership is dropped and restored rather than registering a second user: POST /api/auth/register is
+      // throttled at 5/min per IP and this file already registers four users (it answered 429 for a fifth).
+      await db().projectMember.deleteMany({ where: { projectId, userId: developerId } });
+      try {
+        const res = await search(memberToken, { query: 'broker' }).expect(403);
 
-      expect(res.body.ret).not.toBe(0);
-      expect(searchSpy).not.toHaveBeenCalled();
+        expect(res.body.ret).not.toBe(0);
+        expect(searchSpy).not.toHaveBeenCalled();
+      } finally {
+        await db().projectMember.create({ data: { projectId, userId: developerId, role: 'DEVELOPER' } });
+      }
     });
   });
 });

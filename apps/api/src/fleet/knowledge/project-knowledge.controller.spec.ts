@@ -3,19 +3,25 @@
  *
  * The route's decision logic is pinned with direct instantiation; a second block drives the real HTTP route
  * (status codes, JSON envelope, the global validation pipe's whitelist) on a Fastify app with the membership
- * guard and the search service stubbed, so both run without a database. The full route against Postgres and
- * the real project membership lives in test/e2e/api-endpoint/endpoint.e2e.spec.ts (AC-9..AC-14).
+ * guard stubbed, and a third drives it with the real `ProjectMembershipGuard` over a stubbed
+ * `ProjectAccessService`, so a non-member's refusal is pinned without a database. The full route against
+ * Postgres and the real project membership lives in test/e2e/api-endpoint/endpoint.e2e.spec.ts (AC-9..AC-14).
  */
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import type { ExecutionContext } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
-import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FLEET_CFG } from '../../config/fleet.config';
 import type { fleetConfig } from '../../config/fleet.config';
+import { ProjectAccessModule } from '../../projects/project-access.module';
+import { ProjectAccessService } from '../../projects/project-access.service';
 import { ProjectMembershipGuard } from '../../projects/project-membership.guard';
 import type { ProjectContext } from '../../projects/project-context';
+import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module';
 import { KnowledgeStoreUnavailableError } from './knowledge-chunk-store';
 import { KnowledgeIndexService } from './knowledge-index.service';
 import type { KnowledgeHit, KnowledgeSearchQuery, KnowledgeSearchResult } from './knowledge-search.service';
@@ -281,5 +287,86 @@ describe('POST /projects/:slug/knowledge/search', () => {
     const res = await post({ query: '' });
 
     expect(res.statusCode).toBe(409);
+  });
+});
+
+/**
+ * AC-14's refusal, runnable without a database: the real `ProjectMembershipGuard` is attached to the route, and
+ * its `ProjectAccessService` is replaced with one that resolves the project and refuses the caller the way a
+ * non-member (`resolveMembership`) does. An authenticating global guard supplies the principal the membership
+ * guard reads, so the 403 below comes from the membership and not from a missing principal.
+ */
+describe('POST /projects/:slug/knowledge/search without project membership', () => {
+  let app: INestApplication;
+  let fastify: { inject: (options: Record<string, unknown>) => Promise<{ statusCode: number; json: () => unknown }> };
+  let search: { search: ReturnType<typeof vi.fn> };
+  let membership: 'member' | 'non-member';
+
+  beforeAll(async () => {
+    search = { search: vi.fn(async () => RESULT) };
+    const access = {
+      findProjectIdBySlug: vi.fn(async () => PROJECT_ID),
+      resolveMembership: vi.fn(async () => {
+        if (membership === 'non-member') throw new ForbiddenAppException({}, 'projects');
+        return 'DEVELOPER';
+      }),
+    };
+    const principal = { kind: 'user', id: 'user-1', role: 'MEMBER' };
+    const module = await Test.createTestingModule({
+      imports: [GlobalStubsModule, ProjectAccessModule],
+      controllers: [ProjectKnowledgeController],
+      providers: [
+        { provide: KnowledgeSearchService, useValue: search },
+        { provide: KnowledgeIndexService, useValue: { resolveProjectRepo: vi.fn(async () => ({ id: 'repo-1' })) } },
+        { provide: FLEET_CFG, useValue: { knowledgeIndexEnabled: true } },
+        // The API authenticates with CombinedAuthGuard before ProjectMembershipGuard; without a principal every
+        // request is refused for the wrong reason (`!req.user`), so the member case would prove nothing.
+        { provide: APP_GUARD, useValue: {
+          canActivate: (ctx: ExecutionContext): boolean => {
+            ctx.switchToHttp().getRequest().user = principal;
+            return true;
+          },
+        } },
+      ],
+    })
+      .overrideProvider(ProjectAccessService)
+      .useValue(access)
+      .compile();
+    app = module.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
+    app.setGlobalPrefix('api');
+    await app.init();
+    fastify = app.getHttpAdapter().getInstance() as typeof fastify;
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(() => {
+    membership = 'member';
+    search.search.mockClear();
+  });
+
+  const post = (): Promise<{ statusCode: number; json: () => unknown }> => fastify.inject({
+    method: 'POST',
+    url: '/api/projects/koda/knowledge/search',
+    headers: { authorization: 'Bearer test-token' },
+    payload: { query: 'broker' },
+  });
+
+  it('AC-14: answers 403 and does not search for a non-member', async () => {
+    membership = 'non-member';
+
+    const res = await post();
+
+    expect(res.statusCode).toBe(403);
+    expect(search.search).not.toHaveBeenCalled();
+  });
+
+  it('searches for a project member, so the refusal above is the membership, not the route', async () => {
+    const res = await post();
+
+    expect(res.statusCode).toBe(200);
+    expect(search.search).toHaveBeenCalledTimes(1);
   });
 });
