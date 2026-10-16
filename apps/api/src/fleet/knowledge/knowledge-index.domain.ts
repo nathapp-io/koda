@@ -49,6 +49,8 @@ export interface KnowledgeFinishResult {
   skippedCount: number;
   lastError: string | null;
   finishedAt: Date;
+  /** Finish always clears the lease. */
+  leaseUntil?: null;
 }
 
 export interface KnowledgeProjectState {
@@ -62,8 +64,8 @@ export interface IKnowledgeIndexRepository {
   findAllGithubRepos(): Promise<KnowledgeRepoRef[]>;
   /** Takes the repository's lease when it is free or expired; false when another pass holds it. */
   claim(repoId: string, projectId: string, now: Date, leaseMs: number): Promise<boolean>;
-  /** Extends a held lease; false when the row is no longer running. */
-  renew(repoId: string, leaseUntil: Date): Promise<boolean>;
+  /** Extends this pass's lease; startedAt fences a renewal against a later claim. */
+  renew(repoId: string, leaseUntil: Date, startedAt?: Date): Promise<boolean>;
   finish(repoId: string, result: KnowledgeFinishResult): Promise<void>;
   listFiles(repoId: string): Promise<KnowledgeFileState[]>;
   upsertFile(file: KnowledgeFileState): Promise<void>;

@@ -79,9 +79,9 @@ export class PrismaKnowledgeIndexRepository implements IKnowledgeIndexRepository
     return taken.count === 1;
   }
 
-  async renew(repoId: string, leaseUntil: Date): Promise<boolean> {
+  async renew(repoId: string, leaseUntil: Date, startedAt?: Date): Promise<boolean> {
     const renewed = await this.db.knowledgeRepoIndex.updateMany({
-      where: { repoId, status: 'running' },
+      where: { repoId, status: 'running', ...(startedAt ? { startedAt } : {}) },
       data: { leaseUntil },
     });
     return renewed.count === 1;

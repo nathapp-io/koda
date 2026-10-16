@@ -7,12 +7,13 @@ import { KNOWLEDGE_INDEX_REPOSITORY } from './knowledge-index.domain';
 import { KnowledgeChunkStore } from './knowledge-chunk-store';
 import { KnowledgeIndexService } from './knowledge-index.service';
 import { KnowledgeSearchService } from './knowledge-search.service';
+import { KnowledgeRepoIndexer, KNOWLEDGE_INDEX_CLOCK } from './knowledge-repo-indexer';
 import { ProjectKnowledgeController } from './project-knowledge.controller';
 import { PrismaKnowledgeIndexRepository } from './prisma-knowledge-index.repository';
 
 /**
  * Fleet S5b knowledge index (1c-c-D2). Exports services only; the repository stays module-private.
- * Later stories add the indexer, queue and poller here.
+ * The indexer is private; later stories add the queue and poller here.
  */
 @Module({
   imports: [PrismaModule, RagModule, GitBrokerModule, ProjectAccessModule],
@@ -23,6 +24,8 @@ import { PrismaKnowledgeIndexRepository } from './prisma-knowledge-index.reposit
     KnowledgeChunkStore,
     KnowledgeIndexService,
     KnowledgeSearchService,
+    KnowledgeRepoIndexer,
+    { provide: KNOWLEDGE_INDEX_CLOCK, useValue: Date.now },
   ],
   exports: [KnowledgeIndexService, KnowledgeSearchService],
 })

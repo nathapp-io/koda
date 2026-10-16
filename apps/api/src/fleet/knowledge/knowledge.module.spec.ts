@@ -5,6 +5,7 @@ import { KnowledgeIndexService } from './knowledge-index.service';
 import { KnowledgeSearchService } from './knowledge-search.service';
 import { ProjectKnowledgeController } from './project-knowledge.controller';
 import { KnowledgeModule } from './knowledge.module';
+import { KnowledgeRepoIndexer } from './knowledge-repo-indexer';
 import { KNOWLEDGE_INDEX_REPOSITORY } from './knowledge-index.domain';
 
 describe('KnowledgeModule', () => {
@@ -30,6 +31,11 @@ describe('KnowledgeModule', () => {
   it('resolves the search service and the project knowledge controller (US-002)', () => {
     expect(module.get(KnowledgeSearchService)).toBeInstanceOf(KnowledgeSearchService);
     expect(module.get(ProjectKnowledgeController, { strict: false })).toBeInstanceOf(ProjectKnowledgeController);
+  });
+
+  it('resolves the private repository indexer (US-004)', () => {
+    expect(module.get(KnowledgeRepoIndexer)).toBeInstanceOf(KnowledgeRepoIndexer);
+    expect(Reflect.getMetadata('exports', KnowledgeModule)).not.toContain(KnowledgeRepoIndexer);
   });
 
   it('exports the services only', () => {
