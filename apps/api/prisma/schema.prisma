@@ -195,6 +195,7 @@ model Project {
   invites            ProjectInvite[]
   agents             AgentProject[]
   skills             ProjectSkill[]
+  knowledgePatterns  KnowledgeProjectPatterns?
 
   @@index([deletedAt])
 }
@@ -826,6 +827,7 @@ model KnowledgeRepoIndex {
   projectId       String
   status          String    @default("idle") // idle | running | failed | skipped
   indexedSha      String?
+  patternsKey     String? // S5b US-002: the patterns snapshot the pass selected with; null before the feature
   fileCount       Int       @default(0)
   chunkCount      Int       @default(0)
   unembeddedCount Int       @default(0)
@@ -850,6 +852,15 @@ model KnowledgeRepoFile {
   repo            FleetRepo @relation(fields: [repoId], references: [id], onDelete: Cascade)
 
   @@id([repoId, path])
+}
+
+/// S5b US-002: a project's Markdown corpus patterns. No row means the default 3c-1 corpus.
+model KnowledgeProjectPatterns {
+  projectId String   @id
+  patterns  Json
+  updatedAt DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 model FleetActivity {

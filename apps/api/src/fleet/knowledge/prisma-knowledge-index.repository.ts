@@ -91,6 +91,7 @@ export class PrismaKnowledgeIndexRepository implements IKnowledgeIndexRepository
     const data = {
       status: result.status,
       ...(result.indexedSha !== undefined ? { indexedSha: result.indexedSha } : {}),
+      ...(result.patternsKey !== undefined ? { patternsKey: result.patternsKey } : {}),
       fileCount: result.fileCount,
       chunkCount: result.chunkCount,
       unembeddedCount: result.unembeddedCount,
@@ -145,5 +146,28 @@ export class PrismaKnowledgeIndexRepository implements IKnowledgeIndexRepository
       take: PROJECT_CODE_LIMITS.maxRepos + PROJECT_CODE_LIMITS.maxUnavailable,
     });
     return rows.map(toState);
+  }
+
+  /**
+   * US-002: the project's saved patterns. A row whose JSON is not an array of strings is treated as no row: the
+   * selection must never be handed a value the parser would have rejected.
+   */
+  async findProjectPatterns(projectId: string): Promise<string[] | null> {
+    const row = await this.db.knowledgeProjectPatterns.findUnique({ where: { projectId } });
+    if (!row || !Array.isArray(row.patterns)) return null;
+    return row.patterns.filter((pattern): pattern is string => typeof pattern === 'string');
+  }
+
+  /** US-002: one row per project; null deletes it, so the project falls back to the default corpus. */
+  async saveProjectPatterns(projectId: string, patterns: string[] | null): Promise<void> {
+    if (patterns === null) {
+      await this.db.knowledgeProjectPatterns.deleteMany({ where: { projectId } });
+      return;
+    }
+    await this.db.knowledgeProjectPatterns.upsert({
+      where: { projectId },
+      create: { projectId, patterns },
+      update: { patterns },
+    });
   }
 }

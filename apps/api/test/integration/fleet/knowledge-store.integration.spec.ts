@@ -381,4 +381,50 @@ describePg('PrismaKnowledgeIndexRepository (PG)', () => {
     await prisma.client.fleetRepo.update({ where: { id: repoId }, data: { githubInstallationId: null } });
     expect((await repo.findAllGithubRepos()).map((r) => r.id)).not.toContain(repoId);
   });
+
+  it('AC-11: saveProjectPatterns round-trips a list and null deletes the row', async () => {
+    const { projectId } = await seedFleetBase(prisma.client);
+
+    expect(await repo.findProjectPatterns(projectId)).toBeNull();
+
+    await repo.saveProjectPatterns(projectId, ['a/*.md']);
+    expect(await repo.findProjectPatterns(projectId)).toEqual(['a/*.md']);
+
+    await repo.saveProjectPatterns(projectId, ['b/*.md']);
+    expect(await repo.findProjectPatterns(projectId)).toEqual(['b/*.md']);
+
+    await repo.saveProjectPatterns(projectId, null);
+    expect(await repo.findProjectPatterns(projectId)).toBeNull();
+    expect(await prisma.client.knowledgeProjectPatterns.count({ where: { projectId } })).toBe(0);
+  });
+
+  it('AC-11: a finish with a patternsKey is read back by listStates', async () => {
+    const { projectId, repoId } = await seedFleetBase(prisma.client);
+    const base = { projectId, fileCount: 1, chunkCount: 2, unembeddedCount: 0, skippedCount: 0, lastError: null, finishedAt: minutes(5) };
+
+    await repo.finish(repoId, { ...base, status: 'idle', indexedSha: 'abc', patternsKey: 'x' });
+
+    const [state] = await repo.listStates(projectId);
+    expect(state).toMatchObject({ repoId, patternsKey: 'x', indexedSha: 'abc' });
+  });
+
+  it('AC-11: a finish without a patternsKey leaves the stored one alone', async () => {
+    const { projectId, repoId } = await seedFleetBase(prisma.client);
+    const base = { projectId, fileCount: 1, chunkCount: 2, unembeddedCount: 0, skippedCount: 0, lastError: null, finishedAt: minutes(5) };
+
+    await repo.finish(repoId, { ...base, status: 'idle', patternsKey: 'handbook/*.md' });
+    await repo.finish(repoId, { ...base, status: 'failed', lastError: 'boom' });
+
+    const [state] = await repo.listStates(projectId);
+    expect(state).toMatchObject({ patternsKey: 'handbook/*.md', status: 'failed', lastError: 'boom' });
+  });
+
+  it('deleting a project cascades to its patterns row', async () => {
+    const { projectId } = await seedFleetBase(prisma.client);
+    await repo.saveProjectPatterns(projectId, ['a/*.md']);
+
+    await prisma.client.project.delete({ where: { id: projectId } });
+
+    expect(await prisma.client.knowledgeProjectPatterns.count({ where: { projectId } })).toBe(0);
+  });
 });

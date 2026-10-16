@@ -38,6 +38,7 @@ import { PrismaThreadIngestRepository } from '../../../src/fleet/threads/ingest/
 import { KnowledgeSearchService, type KnowledgeHit } from '../../../src/fleet/knowledge/knowledge-search.service';
 import { KnowledgeStoreUnavailableError } from '../../../src/fleet/knowledge/knowledge-chunk-store';
 import { KnowledgeIndexQueue } from '../../../src/fleet/knowledge/knowledge-index.queue';
+import { DEFAULT_KNOWLEDGE_PATTERNS } from '../../../src/fleet/knowledge/knowledge-patterns';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -4395,6 +4396,128 @@ describeIntegration('API Integration Tests', () => {
         expect(res.body.ret).not.toBe(0);
       } finally {
         await db().projectMember.create({ data: { projectId: member.projectId, userId: member.userId, role: 'DEVELOPER' } });
+      }
+    });
+  });
+
+  describe('S5b US-002 knowledge patterns route', () => {
+    let slug: string;
+    let projectId: string;
+    let repoIds: string[];
+    let enqueueSpy: ReturnType<typeof vi.spyOn> | undefined;
+    let enabledBefore: boolean;
+
+    const fleetConfigOf = () => app.get<IFleetConfig>(FLEET_CFG, { strict: false });
+    const db = () => app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    const putPatterns = (token: string, payload: Record<string, unknown>) => request(httpServer)
+      .put(`/api/projects/${slug}/knowledge/patterns`)
+      .set('Authorization', `Bearer ${token}`)
+      .send(payload);
+    const states = (token: string) => request(httpServer)
+      .get(`/api/projects/${slug}/knowledge/repos`)
+      .set('Authorization', `Bearer ${token}`);
+
+    beforeAll(async () => {
+      // The spy goes first: whatever else fails here, afterAll must be able to restore it.
+      enabledBefore = fleetConfigOf().knowledgeIndexEnabled;
+      fleetConfigOf().knowledgeIndexEnabled = true;
+      // The queue is stubbed: the real one would run an index pass against the forge, while these cases pin the
+      // enqueue the save makes (the pass itself is covered by knowledge-repo-indexer.spec.ts).
+      enqueueSpy = vi.spyOn(app.get(KnowledgeIndexQueue), 'enqueue').mockImplementation(() => undefined);
+
+      const prisma = db();
+      const admin = await prisma.user.findUniqueOrThrow({ where: { email: 'admin@koda.test' } });
+      const developer = await prisma.user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
+      const project = await prisma.project.create({ data: { name: 'Knowledge patterns', slug: 'knowledge-patterns', key: 'KPT' } });
+      const first = await prisma.fleetRepo.create({ data: {
+        projectId: project.id, provider: 'github', owner: 'acme', name: 'handbook', defaultBranch: 'main', createdById: admin.id,
+      } });
+      const second = await prisma.fleetRepo.create({ data: {
+        projectId: project.id, provider: 'gitlab', owner: 'grp', name: 'notes', defaultBranch: 'main', createdById: admin.id,
+      } });
+      await prisma.projectMember.create({ data: { projectId: project.id, userId: developer.id, role: 'DEVELOPER' } });
+
+      slug = project.slug;
+      projectId = project.id;
+      repoIds = [first.id, second.id];
+    });
+
+    afterAll(() => {
+      enqueueSpy?.mockRestore();
+      fleetConfigOf().knowledgeIndexEnabled = enabledBefore;
+    });
+
+    beforeEach(() => {
+      enqueueSpy?.mockClear();
+    });
+
+    it('AC-12: PUT patterns as a global ADMIN saves the list, queues every repository and answers them', async () => {
+      const res = await putPatterns(userAccessToken, { patterns: ['handbook/*.md'] }).expect(200);
+
+      expect(body(res)).toEqual({ patterns: ['handbook/*.md'], custom: true, queued: repoIds.length });
+      expect(enqueueSpy).toHaveBeenCalledTimes(repoIds.length);
+      expect([...enqueueSpy.mock.calls.map((call) => call[0])].sort()).toEqual([...repoIds].sort());
+      expect(enqueueSpy.mock.calls.every((call) => call[1] === 'admin')).toBe(true);
+      const row = await db().knowledgeProjectPatterns.findUniqueOrThrow({ where: { projectId } });
+      expect(row.patterns).toEqual(['handbook/*.md']);
+    });
+
+    it('AC-13: PUT patterns with null restores the defaults and GET repos reports them', async () => {
+      const put = await putPatterns(userAccessToken, { patterns: null }).expect(200);
+      const putData = body<{ patterns: string[]; custom: boolean; queued: number }>(put);
+
+      expect(putData.custom).toBe(false);
+      expect(putData.patterns).toEqual([...DEFAULT_KNOWLEDGE_PATTERNS]);
+
+      const res = await states(nonAdminUserAccessToken).expect(200);
+      const data = body<{ patterns: string[]; customPatterns: boolean; defaultPatterns: string[] }>(res);
+
+      expect(data.customPatterns).toBe(false);
+      expect(data.patterns).toEqual([...DEFAULT_KNOWLEDGE_PATTERNS]);
+      expect(data.defaultPatterns).toEqual([...DEFAULT_KNOWLEDGE_PATTERNS]);
+    });
+
+    it('AC-13: GET repos reports a saved list as the custom one', async () => {
+      await putPatterns(userAccessToken, { patterns: ['handbook/**/*.md'] }).expect(200);
+      try {
+        const res = await states(nonAdminUserAccessToken).expect(200);
+        const data = body<{ patterns: string[]; customPatterns: boolean; defaultPatterns: string[] }>(res);
+
+        expect(data.patterns).toEqual(['handbook/**/*.md']);
+        expect(data.customPatterns).toBe(true);
+        expect(data.defaultPatterns).toEqual([...DEFAULT_KNOWLEDGE_PATTERNS]);
+      } finally {
+        await putPatterns(userAccessToken, { patterns: null }).expect(200);
+      }
+    });
+
+    it.each([
+      ['a list the parser rejects (400)', (): string => userAccessToken, { patterns: ['README.md', 'src/a.ts'] }, 400, 'patterns[1]'],
+      ['a project member who is not a global admin (403)', (): string => nonAdminUserAccessToken, { patterns: ['handbook/*.md'] }, 403, null],
+    ])('AC-14: PUT patterns refuses %s', async (_label, token, payload, status, reason) => {
+      const res = await putPatterns(token(), payload as Record<string, unknown>).expect(status);
+
+      if (reason === null) {
+        expect(res.body.ret).not.toBe(0);
+      } else {
+        refusal(res, 'knowledge.input.400', { reason });
+      }
+      expect(enqueueSpy).not.toHaveBeenCalled();
+    });
+
+    it('AC-15: PUT patterns while indexing is disabled answers queued 0 and enqueues nothing', async () => {
+      fleetConfigOf().knowledgeIndexEnabled = false;
+      try {
+        const res = await putPatterns(userAccessToken, { patterns: ['handbook/*.md'] }).expect(200);
+        const data = body<{ patterns: string[]; custom: boolean; queued: number }>(res);
+
+        expect(data).toEqual({ patterns: ['handbook/*.md'], custom: true, queued: 0 });
+        expect(enqueueSpy).not.toHaveBeenCalled();
+        // Saved anyway, so the next pass with indexing on selects with it.
+        const row = await db().knowledgeProjectPatterns.findUniqueOrThrow({ where: { projectId } });
+        expect(row.patterns).toEqual(['handbook/*.md']);
+      } finally {
+        fleetConfigOf().knowledgeIndexEnabled = true;
       }
     });
   });

@@ -28,6 +28,8 @@ function fixture(paths = ['docs/a.md'], fileText = text) {
   const state = {
     findRepo: vi.fn().mockResolvedValue(repo), claim: vi.fn().mockResolvedValue(true), renew: vi.fn().mockResolvedValue(true),
     listStates: vi.fn().mockResolvedValue([]), listFiles: vi.fn().mockResolvedValue([]),
+    // US-002: a project that saved no patterns; a test that saves some overrides this.
+    findProjectPatterns: vi.fn().mockResolvedValue(null),
     finish: vi.fn().mockResolvedValue(undefined), upsertFile: vi.fn().mockResolvedValue(undefined), deleteFile: vi.fn().mockResolvedValue(undefined),
   };
   const github = {
@@ -125,7 +127,7 @@ describe('KnowledgeRepoIndexer', () => {
 
   it.each([0, 3])('AC-7: same head retries only unembedded files (count %i)', async unembedded => {
     const f = fixture(['docs/a.md', 'docs/b.md']);
-    f.state.listStates.mockResolvedValue([{ repoId: 'r1', indexedSha: 'head', fileCount: 2, chunkCount: 6, unembeddedCount: unembedded, skippedCount: 7 }]);
+    f.state.listStates.mockResolvedValue([{ repoId: 'r1', indexedSha: 'head', patternsKey: 'default', fileCount: 2, chunkCount: 6, unembeddedCount: unembedded, skippedCount: 7 }]);
     f.state.listFiles.mockResolvedValue([stored('docs/a.md', unembedded), stored('docs/b.md')]);
     expect(await f.indexer.indexRepo('r1', now)).toEqual({ status: unembedded ? 'indexed' : 'unchanged' });
     if (unembedded) expect(f.github.getFile.mock.calls).toEqual([['secret', 'o', 'n', 'docs/a.md', 'head']]);
@@ -398,5 +400,101 @@ describe('KnowledgeRepoIndexer batched embedding (US-002)', () => {
     expect(warning).not.toHaveBeenCalled();
     expect(f.state.upsertFile).toHaveBeenCalledWith(expect.objectContaining({ unembeddedCount: 0 }));
     expect(f.store.replaceFile).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * US-002: the pass selects with the project's saved patterns and records the key of the list it read, so a save
+ * that lands while a pass runs leaves that pass on the old key and makes the next pass re-select.
+ */
+describe('KnowledgeRepoIndexer project patterns (US-002)', () => {
+  it('AC-8: reads only the files the saved patterns select', async () => {
+    const f = fixture(['handbook/a.md', 'docs/b.md']);
+    f.state.findProjectPatterns.mockResolvedValue(['handbook/*.md']);
+
+    await f.indexer.indexRepo('r1', now);
+
+    expect(f.state.findProjectPatterns).toHaveBeenCalledWith('p1');
+    expect(f.github.getFile.mock.calls).toEqual([['secret', 'o', 'n', 'handbook/a.md', 'head']]);
+    expect(f.state.finish).toHaveBeenCalledWith('r1', expect.objectContaining({ indexedSha: 'head' }));
+  });
+
+  it('AC-9: a stored key other than the project list re-selects instead of answering unchanged', async () => {
+    const f = fixture(['handbook/a.md']);
+    f.state.listStates.mockResolvedValue([{ repoId: 'r1', indexedSha: 'head', patternsKey: 'default', fileCount: 1, chunkCount: 3, unembeddedCount: 0, skippedCount: 0 }]);
+    f.state.listFiles.mockResolvedValue([stored('handbook/a.md')]);
+    f.state.findProjectPatterns.mockResolvedValue(['handbook/*.md']);
+
+    expect(await f.indexer.indexRepo('r1', now)).toEqual({ status: 'indexed' });
+
+    expect(f.github.getTree).toHaveBeenCalled();
+  });
+
+  it('AC-9: an equal key with the same head still answers unchanged', async () => {
+    const f = fixture(['handbook/a.md']);
+    f.state.listStates.mockResolvedValue([{ repoId: 'r1', indexedSha: 'head', patternsKey: 'handbook/*.md', fileCount: 1, chunkCount: 3, unembeddedCount: 0, skippedCount: 0 }]);
+    f.state.listFiles.mockResolvedValue([stored('handbook/a.md')]);
+    f.state.findProjectPatterns.mockResolvedValue(['handbook/*.md']);
+
+    expect(await f.indexer.indexRepo('r1', now)).toEqual({ status: 'unchanged' });
+
+    expect(f.github.getTree).not.toHaveBeenCalled();
+  });
+
+  it('AC-10: records the saved list as the pass key', async () => {
+    const f = fixture();
+    f.state.findProjectPatterns.mockResolvedValue(['handbook/*.md']);
+
+    await f.indexer.indexRepo('r1', now);
+
+    expect(f.state.finish).toHaveBeenCalledWith('r1', expect.objectContaining({ status: 'idle', patternsKey: 'handbook/*.md' }));
+  });
+
+  it('AC-10: records the default key for a project with no saved list', async () => {
+    const f = fixture();
+
+    await f.indexer.indexRepo('r1', now);
+
+    expect(f.state.finish).toHaveBeenCalledWith('r1', expect.objectContaining({ status: 'idle', patternsKey: 'default' }));
+  });
+
+  it('a save during a running pass leaves that pass on the old key and the next pass re-selects', async () => {
+    const f = fixture(['handbook/a.md', 'docs/b.md']);
+    let saved: string[] | null = ['handbook/*.md'];
+    f.state.findProjectPatterns.mockImplementation(async () => saved);
+    // The admin's save lands once the pass is already reading files, i.e. after it read the list.
+    f.github.getFile.mockImplementation(async (_token: string, _owner: string, _name: string, path: string) => {
+      saved = ['docs/*.md'];
+      return { content: Buffer.from(text), sha: `blob-${path}`, size: text.length };
+    });
+
+    await f.indexer.indexRepo('r1', now);
+
+    expect(f.github.getFile.mock.calls.map(call => call[3])).toEqual(['handbook/a.md']);
+    const first = f.state.finish.mock.calls[0][1] as { patternsKey?: string | null };
+    expect(first.patternsKey).toBe('handbook/*.md');
+
+    // The next pass reads the key the first pass stored and the newly saved list: they differ, so it re-selects.
+    f.state.listStates.mockResolvedValue([{
+      repoId: 'r1', indexedSha: 'head', patternsKey: first.patternsKey, fileCount: 1, chunkCount: 3, unembeddedCount: 0, skippedCount: 0,
+    }]);
+    f.state.listFiles.mockResolvedValue([stored('handbook/a.md')]);
+    f.github.getFile.mockClear();
+
+    expect(await f.indexer.indexRepo('r1', now)).toEqual({ status: 'indexed' });
+
+    expect(f.github.getTree).toHaveBeenCalledTimes(2);
+    expect(f.github.getFile.mock.calls.map(call => call[3])).toEqual(['docs/b.md']);
+    expect(f.state.finish.mock.calls[1][1]).toMatchObject({ patternsKey: 'docs/*.md' });
+  });
+
+  it('an empty saved list selects nothing at all', async () => {
+    const f = fixture(['README.md', 'docs/a.md']);
+    f.state.findProjectPatterns.mockResolvedValue([]);
+
+    expect(await f.indexer.indexRepo('r1', now)).toEqual({ status: 'indexed' });
+
+    expect(f.github.getFile).not.toHaveBeenCalled();
+    expect(f.state.finish).toHaveBeenCalledWith('r1', expect.objectContaining({ fileCount: 0, patternsKey: '' }));
   });
 });

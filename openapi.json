@@ -6063,6 +6063,55 @@
         ]
       }
     },
+    "/api/projects/{slug}/knowledge/patterns": {
+      "put": {
+        "operationId": "ProjectKnowledgeController_patterns",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgePatternsBodyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgePatternsResultDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid patterns body (knowledge.input)"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Replace the project's Markdown corpus patterns (global admin)",
+        "tags": [
+          "fleet knowledge"
+        ]
+      }
+    },
     "/api/projects/{slug}/knowledge/repos/{repoId}/reindex": {
       "post": {
         "operationId": "ProjectKnowledgeController_reindex",
@@ -13947,6 +13996,24 @@
             "type": "boolean",
             "description": "True when repository knowledge indexing is on"
           },
+          "patterns": {
+            "description": "The project's effective corpus patterns (US-002)",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "customPatterns": {
+            "type": "boolean",
+            "description": "True when `patterns` are the project’s own rather than the defaults"
+          },
+          "defaultPatterns": {
+            "description": "The built-in corpus patterns, so a client can restore them",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "repos": {
             "type": "array",
             "items": {
@@ -13956,7 +14023,51 @@
         },
         "required": [
           "enabled",
+          "patterns",
+          "customPatterns",
+          "defaultPatterns",
           "repos"
+        ]
+      },
+      "KnowledgePatternsBodyDto": {
+        "type": "object",
+        "properties": {
+          "patterns": {
+            "description": "Markdown path patterns (1-50), or null for the default corpus",
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "patterns"
+        ]
+      },
+      "KnowledgePatternsResultDto": {
+        "type": "object",
+        "properties": {
+          "patterns": {
+            "description": "The effective corpus patterns after the save",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "custom": {
+            "type": "boolean",
+            "description": "True when the patterns are the project’s own rather than the defaults"
+          },
+          "queued": {
+            "type": "number",
+            "description": "Repository passes queued by the save; 0 while indexing is disabled"
+          }
+        },
+        "required": [
+          "patterns",
+          "custom",
+          "queued"
         ]
       },
       "KnowledgeReindexResultDto": {

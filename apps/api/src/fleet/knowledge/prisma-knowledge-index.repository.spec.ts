@@ -97,3 +97,126 @@ describe('PrismaKnowledgeIndexRepository.listFiles', () => {
     expect(findMany).toHaveBeenCalledTimes(2);
   });
 });
+
+/**
+ * US-002: the project's saved patterns row and the patterns snapshot of an index row. The Prisma client is faked
+ * again (no database); the same contract is pinned against Postgres in
+ * test/integration/fleet/knowledge-store.integration.spec.ts.
+ */
+interface PatternRow {
+  projectId: string;
+  patterns: unknown;
+  updatedAt: Date;
+}
+
+interface IndexRow {
+  repoId: string;
+  projectId: string;
+  patternsKey?: string | null;
+  [field: string]: unknown;
+}
+
+/** The two delegates the pattern and state contract touches, over in-memory maps. */
+function patternClient(seed: Record<string, unknown> = {}): {
+  client: unknown;
+  patterns: Map<string, PatternRow>;
+  index: Map<string, IndexRow>;
+} {
+  const patterns = new Map<string, PatternRow>(
+    Object.entries(seed).map(([projectId, value]) => [projectId, { projectId, patterns: value, updatedAt: new Date(0) }]),
+  );
+  const index = new Map<string, IndexRow>();
+  const client = {
+    knowledgeProjectPatterns: {
+      findUnique: async ({ where }: { where: { projectId: string } }) => patterns.get(where.projectId) ?? null,
+      upsert: async ({ where, create, update }: { where: { projectId: string }; create: { patterns: unknown }; update: { patterns: unknown } }) => {
+        const existing = patterns.get(where.projectId);
+        const row = { projectId: where.projectId, patterns: (existing ? update : create).patterns, updatedAt: new Date() };
+        patterns.set(where.projectId, row);
+        return row;
+      },
+      deleteMany: async ({ where }: { where: { projectId: string } }) => ({ count: patterns.delete(where.projectId) ? 1 : 0 }),
+    },
+    knowledgeRepoIndex: {
+      upsert: async ({ where, create, update }: { where: { repoId: string }; create: IndexRow; update: IndexRow }) => {
+        const existing = index.get(where.repoId);
+        const row = { ...(existing ? { ...existing, ...update } : create) };
+        index.set(where.repoId, row);
+        return row;
+      },
+      findMany: async ({ where }: { where: { projectId: string } }) => [...index.values()].filter((row) => row.projectId === where.projectId),
+    },
+  };
+  return { client, patterns, index };
+}
+
+function buildPatternRepo(seed: Record<string, unknown> = {}) {
+  const backing = patternClient(seed);
+  const repo = new PrismaKnowledgeIndexRepository({ client: backing.client } as unknown as PrismaService<PrismaClient>);
+  return { repo, ...backing };
+}
+
+const FINISH_BASE = { projectId: 'p1', fileCount: 1, chunkCount: 3, unembeddedCount: 0, skippedCount: 0, lastError: null, finishedAt: new Date('2026-10-21T00:00:00Z') };
+
+describe('PrismaKnowledgeIndexRepository project patterns (US-002)', () => {
+  it('AC-11: saveProjectPatterns round-trips a list, and null deletes the row', async () => {
+    const { repo, patterns } = buildPatternRepo();
+
+    await repo.saveProjectPatterns('p1', ['a/*.md']);
+    expect(await repo.findProjectPatterns('p1')).toEqual(['a/*.md']);
+
+    await repo.saveProjectPatterns('p1', null);
+    expect(await repo.findProjectPatterns('p1')).toBeNull();
+    expect(patterns.size).toBe(0);
+  });
+
+  it('upserts the row for a project that already saved a list and leaves other projects alone', async () => {
+    const { repo, patterns } = buildPatternRepo({ p2: ['docs/*.md'] });
+
+    await repo.saveProjectPatterns('p1', ['a/*.md']);
+    await repo.saveProjectPatterns('p1', ['b/*.md']);
+
+    expect(await repo.findProjectPatterns('p1')).toEqual(['b/*.md']);
+    expect(await repo.findProjectPatterns('p2')).toEqual(['docs/*.md']);
+    expect(patterns.size).toBe(2);
+  });
+
+  it('answers null for a project that never saved patterns and for a row that is not a string list', async () => {
+    const { repo } = buildPatternRepo({ corrupt: { not: 'a list' } });
+
+    expect(await repo.findProjectPatterns('missing')).toBeNull();
+    expect(await repo.findProjectPatterns('corrupt')).toBeNull();
+  });
+
+  it('drops a non-string entry from a stored list instead of handing it to the selector', async () => {
+    const { repo } = buildPatternRepo({ p1: ['a/*.md', 7] });
+
+    expect(await repo.findProjectPatterns('p1')).toEqual(['a/*.md']);
+  });
+
+  it('AC-11: finish writes the pass patternsKey and listStates reads it back', async () => {
+    const { repo } = buildPatternRepo();
+
+    await repo.finish('r1', { ...FINISH_BASE, status: 'idle', patternsKey: 'x' });
+
+    expect(await repo.listStates('p1')).toEqual([expect.objectContaining({ repoId: 'r1', patternsKey: 'x', fileCount: 1 })]);
+  });
+
+  it('finish without a patternsKey keeps the stored one, so a failed pass never clears the snapshot', async () => {
+    const { repo } = buildPatternRepo();
+
+    await repo.finish('r1', { ...FINISH_BASE, status: 'idle', patternsKey: 'handbook/*.md' });
+    await repo.finish('r1', { ...FINISH_BASE, status: 'failed', lastError: 'boom' });
+
+    expect(await repo.listStates('p1')).toEqual([expect.objectContaining({ patternsKey: 'handbook/*.md', status: 'failed', lastError: 'boom' })]);
+  });
+
+  it('finish writes an explicit null, so a project that cleared its patterns records the default key', async () => {
+    const { repo } = buildPatternRepo();
+
+    await repo.finish('r1', { ...FINISH_BASE, status: 'idle', patternsKey: 'handbook/*.md' });
+    await repo.finish('r1', { ...FINISH_BASE, status: 'idle', patternsKey: null });
+
+    expect(await repo.listStates('p1')).toEqual([expect.objectContaining({ patternsKey: null })]);
+  });
+});

@@ -6,6 +6,7 @@ import { GitHubAppClient } from '../git-broker/github-app-client';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { KnowledgeChunkStore } from './knowledge-chunk-store';
 import { selectIndexableEntries } from './knowledge-allowlist';
+import { knowledgePatternsKey } from './knowledge-patterns';
 import { chunkMarkdown } from './markdown-chunker';
 import { KNOWLEDGE_INDEX_REPOSITORY, IKnowledgeIndexRepository, KnowledgeFileState, KnowledgeFinishResult, KnowledgeRepoRef } from './knowledge-index.domain';
 
@@ -68,21 +69,29 @@ export class KnowledgeRepoIndexer {
     let previousSha: string | null = null;
     let finishedIdle = false;
     try {
-      const [previousStates, previousFiles] = await Promise.all([this.state.listStates(repo.projectId), this.state.listFiles(repoId)]);
+      const [patterns, previousStates, previousFiles] = await Promise.all([
+        this.state.findProjectPatterns(repo.projectId),
+        this.state.listStates(repo.projectId),
+        this.state.listFiles(repoId),
+      ]);
+      // US-002: the key of the list this pass read. A save that lands after this read leaves the pass — and its
+      // stored key — on the old list, so the next pass re-selects.
+      const patternsKey = knowledgePatternsKey(patterns);
       files = new Map(previousFiles.map(file => [file.path, file]));
       const previous = previousStates.find(state => state.repoId === repoId);
       previousSha = previous?.indexedSha ?? null;
       skippedCount = previous?.skippedCount ?? 0;
       token = (await this.github.mintReadOnlyToken(repo.githubInstallationId, repo.name)).token;
       const head = await this.github.getBranchHead(token, repo.owner, repo.name, repo.defaultBranch);
-      if (head === previous?.indexedSha && previousFiles.every(file => file.unembeddedCount === 0)) {
+      // A row written before the feature has a null key, so its first pass re-selects as well.
+      if (head === previous?.indexedSha && previousFiles.every(file => file.unembeddedCount === 0) && previous?.patternsKey === patternsKey) {
         await finish({ status: 'idle', lastError: previous.lastError, fileCount: previous.fileCount,
-          chunkCount: previous.chunkCount, unembeddedCount: previous.unembeddedCount });
+          chunkCount: previous.chunkCount, unembeddedCount: previous.unembeddedCount, patternsKey });
         return { status: 'unchanged' };
       }
       const tree = await this.github.getTree(token, repo.owner, repo.name, head, true);
       if (tree.truncated) throw new Error('tree truncated');
-      const selection = selectIndexableEntries(tree.entries);
+      const selection = selectIndexableEntries(tree.entries, patterns ?? undefined);
       skippedCount = selection.skipped;
       const kept = new Set(selection.kept.map(entry => entry.path));
       let mutated = false;
@@ -115,7 +124,7 @@ export class KnowledgeRepoIndexer {
         files.delete(path);
         mutated = true;
       }
-      await finish({ status: 'idle', indexedSha: head, lastError: selection.capMessage });
+      await finish({ status: 'idle', indexedSha: head, lastError: selection.capMessage, patternsKey });
       finishedIdle = true;
       if (mutated) await this.rag.optimizeTable(repo.projectId);
       return { status: 'indexed' };

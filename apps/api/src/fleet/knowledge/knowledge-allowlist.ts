@@ -1,5 +1,6 @@
 import { isSafeFilterValue } from '../../rag/lance-table-manager';
 import type { ForgeTreeEntry } from '../git-broker/forge-tree';
+import { matchesKnowledgePattern } from './knowledge-patterns';
 
 /** 1c-c-D9 step 7: largest blob (bytes) a pass reads. */
 export const MAX_KNOWLEDGE_FILE_BYTES = 262_144;
@@ -24,13 +25,13 @@ export function isIndexablePath(path: string): boolean {
   return SPEC_PATH.test(path);
 }
 
-export function selectIndexableEntries(entries: ForgeTreeEntry[]): KnowledgeSelection {
+export function selectIndexableEntries(entries: ForgeTreeEntry[], patterns?: readonly string[]): KnowledgeSelection {
   const hasNaxContext = entries.some((e) => e.type === 'blob' && e.path === NAX_CONTEXT);
   const kept: ForgeTreeEntry[] = [];
   let skipped = 0;
   let capped = false;
   for (const entry of entries) {
-    if (entry.type !== 'blob' || !isIndexablePath(entry.path)) continue;
+    if (entry.type !== 'blob' || !selects(entry.path, patterns)) continue;
     if (entry.path === AGENTS && hasNaxContext) continue;
     if ((entry.size !== null && entry.size > MAX_KNOWLEDGE_FILE_BYTES) || !isSafeFilterValue(entry.path)) {
       skipped += 1;
@@ -44,4 +45,13 @@ export function selectIndexableEntries(entries: ForgeTreeEntry[]): KnowledgeSele
     kept.push(entry);
   }
   return { kept, skipped, capMessage: capped ? KNOWLEDGE_CAP_MESSAGE : null };
+}
+
+/**
+ * US-002: a project that saved patterns selects with them; a project that saved none keeps the fixed 3c-1 rule.
+ * An empty list therefore selects nothing — it never falls back to the default corpus.
+ */
+function selects(path: string, patterns: readonly string[] | undefined): boolean {
+  if (patterns === undefined) return isIndexablePath(path);
+  return patterns.some((pattern) => matchesKnowledgePattern(path, pattern));
 }

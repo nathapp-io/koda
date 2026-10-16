@@ -27,10 +27,11 @@ import { KnowledgeStoreUnavailableError } from './knowledge-chunk-store';
 import type { KnowledgeIndexState, KnowledgeProjectState, KnowledgeRepoRef } from './knowledge-index.domain';
 import { KnowledgeIndexService } from './knowledge-index.service';
 import { KnowledgeIndexQueue } from './knowledge-index.queue';
+import { DEFAULT_KNOWLEDGE_PATTERNS } from './knowledge-patterns';
 import type { KnowledgeRepoStatesDto } from './knowledge-repo-state.dto';
 import type { KnowledgeHit, KnowledgeSearchQuery, KnowledgeSearchResult } from './knowledge-search.service';
 import { KnowledgeSearchService } from './knowledge-search.service';
-import { KnowledgeSearchBodyDto, ProjectKnowledgeController } from './project-knowledge.controller';
+import { KnowledgePatternsBodyDto, KnowledgeSearchBodyDto, ProjectKnowledgeController } from './project-knowledge.controller';
 
 const PROJECT_ID = 'proj-1';
 const PROJECT: ProjectContext = { project: { id: PROJECT_ID, slug: 'koda' }, role: 'DEVELOPER' };
@@ -44,9 +45,20 @@ const RESULT: KnowledgeSearchResult = { lexicalOnly: false, empty: false, hits: 
 interface Harness {
   controller: ProjectKnowledgeController;
   search: { search: ReturnType<typeof vi.fn> };
-  index: { resolveProjectRepo: ReturnType<typeof vi.fn>; listProjectStates: ReturnType<typeof vi.fn> };
+  index: {
+    resolveProjectRepo: ReturnType<typeof vi.fn>;
+    listProjectStates: ReturnType<typeof vi.fn>;
+    listProjectRepos: ReturnType<typeof vi.fn>;
+    getPatterns: ReturnType<typeof vi.fn>;
+    savePatterns: ReturnType<typeof vi.fn>;
+  };
   queue: { enqueue: ReturnType<typeof vi.fn> };
   config: { knowledgeIndexEnabled: boolean };
+}
+
+/** The contract `KnowledgeIndexService` answers with for a stored list; the route only forwards it. */
+function patternsAnswer(stored: string[] | null): { patterns: string[]; custom: boolean } {
+  return stored === null ? { patterns: [...DEFAULT_KNOWLEDGE_PATTERNS], custom: false } : { patterns: stored, custom: true };
 }
 
 function harness(overrides: {
@@ -54,12 +66,21 @@ function harness(overrides: {
   result?: KnowledgeSearchResult;
   repo?: unknown;
   states?: KnowledgeProjectState[];
+  repos?: KnowledgeRepoRef[];
+  stored?: string[] | null;
 } = {}): Harness {
   const search = { search: vi.fn(async (_input: KnowledgeSearchQuery) => overrides.result ?? RESULT) };
+  let stored: string[] | null = overrides.stored ?? null;
   const index = {
     resolveProjectRepo: vi.fn(async (_projectId: string, _ref: { owner: string; name: string }) =>
       overrides.repo === null ? null : overrides.repo ?? { id: 'repo-1' }),
     listProjectStates: vi.fn(async (_projectId: string) => overrides.states ?? []),
+    listProjectRepos: vi.fn(async (_projectId: string) => overrides.repos ?? []),
+    getPatterns: vi.fn(async (_projectId: string) => patternsAnswer(stored)),
+    savePatterns: vi.fn(async (_projectId: string, patterns: string[] | null) => {
+      stored = patterns;
+      return patternsAnswer(stored);
+    }),
   };
   const queue = { enqueue: vi.fn() };
   const config = { knowledgeIndexEnabled: overrides.enabled ?? true };
@@ -209,6 +230,9 @@ describe('ProjectKnowledgeController repos (US-005, 1c-c-D12)', () => {
       ret: 0,
       data: {
         enabled: true,
+        patterns: [...DEFAULT_KNOWLEDGE_PATTERNS],
+        customPatterns: false,
+        defaultPatterns: [...DEFAULT_KNOWLEDGE_PATTERNS],
         repos: [
           {
             repoId: 'repo-1', owner: 'o', name: 'n', provider: 'github', status: 'idle', indexedSha: 'sha-1',
@@ -233,10 +257,26 @@ describe('ProjectKnowledgeController repos (US-005, 1c-c-D12)', () => {
     expect(response.data).toMatchObject({ enabled: false, repos: [{ repoId: 'repo-1', status: 'never' }] });
   });
 
+  it('AC-13: reports the project’s saved patterns and the defaults beside the repository states', async () => {
+    const { controller, index } = harness({ states: [{ repo: REPO, state: null }], stored: ['handbook/*.md'] });
+
+    const response = await controller.repos(PROJECT);
+
+    expect(index.getPatterns).toHaveBeenCalledWith(PROJECT_ID);
+    expect(response.data).toMatchObject({
+      patterns: ['handbook/*.md'],
+      customPatterns: true,
+      defaultPatterns: [...DEFAULT_KNOWLEDGE_PATTERNS],
+    });
+  });
+
   it('answers an empty list for a project with no fleet repository', async () => {
     const { controller } = harness();
 
-    await expect(controller.repos(PROJECT)).resolves.toEqual({ ret: 0, data: { enabled: true, repos: [] } });
+    const response = await controller.repos(PROJECT);
+
+    expect(response).toMatchObject({ ret: 0, data: { enabled: true, repos: [] } });
+    expect((response.data as KnowledgeRepoStatesDto).patterns).toEqual([...DEFAULT_KNOWLEDGE_PATTERNS]);
   });
 
   it('carries a failed pass through as its status, reason and finish time', async () => {
@@ -291,6 +331,82 @@ describe('ProjectKnowledgeController reindex (US-005, 1c-c-D12)', () => {
     // The member-facing reads carry a membership guard, not an admin permission.
     expect(Reflect.getMetadata(PERMISSION_KEY, ProjectKnowledgeController.prototype.repos)).toBeUndefined();
   });
+
+  it('AC-14: patterns is a global ADMIN route like reindex, and a read of it is not', () => {
+    expect(JSON.stringify(Reflect.getMetadata(PERMISSION_KEY, ProjectKnowledgeController.prototype.patterns))).toContain('ADMIN');
+    expect(JSON.stringify(Reflect.getMetadata(PERMISSION_KEY, ProjectKnowledgeController.prototype.patterns)))
+      .toBe(JSON.stringify(Reflect.getMetadata(PERMISSION_KEY, ProjectKnowledgeController.prototype.reindex)));
+  });
+});
+
+describe('ProjectKnowledgeController patterns (US-002)', () => {
+  it('AC-12: saves the list, queues every project repository and answers the count', async () => {
+    const { controller, index, queue } = harness({ repos: [REPO, GITLAB_REPO] });
+
+    const response = await controller.patterns({ patterns: ['handbook/*.md'] }, PROJECT);
+
+    expect(index.savePatterns).toHaveBeenCalledWith(PROJECT_ID, ['handbook/*.md']);
+    expect(queue.enqueue.mock.calls).toEqual([[REPO.id, 'admin'], [GITLAB_REPO.id, 'admin']]);
+    expect(response).toEqual({ ret: 0, data: { patterns: ['handbook/*.md'], custom: true, queued: 2 } });
+  });
+
+  it('AC-13: a null body clears the project list and answers the default corpus', async () => {
+    const { controller, index } = harness({ stored: ['handbook/*.md'] });
+
+    const response = await controller.patterns({ patterns: null }, PROJECT);
+
+    expect(index.savePatterns).toHaveBeenCalledWith(PROJECT_ID, null);
+    expect(response).toEqual({ ret: 0, data: { patterns: [...DEFAULT_KNOWLEDGE_PATTERNS], custom: false, queued: 0 } });
+  });
+
+  it('AC-14: rejects a list the parser refuses with 400 knowledge.input and the failing reason', async () => {
+    const { controller, index, queue } = harness({ repos: [REPO] });
+
+    const error = await rejectionOf(() => controller.patterns({ patterns: ['README.md', 'src/a.ts'] }, PROJECT));
+
+    expect(error).toBeInstanceOf(ValidationAppException);
+    expect((error as ValidationAppException).getStatus()).toBe(400);
+    expect((error as ValidationAppException).prefix).toBe('knowledge.input');
+    expect(JSON.stringify((error as ValidationAppException).args)).toContain('patterns[1]');
+    expect(index.savePatterns).not.toHaveBeenCalled();
+    expect(queue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a missing patterns field', {}],
+    ['a string instead of a list', { patterns: 'docs/*.md' }],
+    ['an empty list', { patterns: [] }],
+    ['a non-Markdown entry', { patterns: ['docs/a.txt'] }],
+    ['too many patterns', { patterns: Array.from({ length: 51 }, (_, i) => `docs/f${i}.md`) }],
+  ])('AC-14: rejects %s with 400 and saves nothing', async (_label, body) => {
+    const { controller, index } = harness();
+
+    const error = await rejectionOf(() => controller.patterns(body as KnowledgePatternsBodyDto, PROJECT));
+
+    expect(error).toBeInstanceOf(ValidationAppException);
+    expect((error as ValidationAppException).getStatus()).toBe(400);
+    expect(index.savePatterns).not.toHaveBeenCalled();
+  });
+
+  it('AC-15: saves while indexing is disabled but queues nothing', async () => {
+    const { controller, index, queue } = harness({ enabled: false, repos: [REPO, GITLAB_REPO] });
+
+    const response = await controller.patterns({ patterns: ['handbook/*.md'] }, PROJECT);
+
+    expect(index.savePatterns).toHaveBeenCalledWith(PROJECT_ID, ['handbook/*.md']);
+    expect(queue.enqueue).not.toHaveBeenCalled();
+    expect(response).toEqual({ ret: 0, data: { patterns: ['handbook/*.md'], custom: true, queued: 0 } });
+  });
+
+  it('queues every repository, including ones that have never been indexed', async () => {
+    const { controller, queue } = harness({ repos: [REPO, GITLAB_REPO] });
+
+    await controller.patterns({ patterns: ['handbook/*.md'] }, PROJECT);
+
+    expect(queue.enqueue).toHaveBeenCalledTimes(2);
+    expect(queue.enqueue).toHaveBeenNthCalledWith(1, 'repo-1', 'admin');
+    expect(queue.enqueue).toHaveBeenNthCalledWith(2, 'repo-2', 'admin');
+  });
 });
 
 /**
@@ -303,8 +419,15 @@ describe('POST /projects/:slug/knowledge/search', () => {
   let app: INestApplication;
   let fastify: { inject: (options: Record<string, unknown>) => Promise<{ statusCode: number; json: () => unknown }> };
   let search: { search: ReturnType<typeof vi.fn> };
-  let index: { resolveProjectRepo: ReturnType<typeof vi.fn>; listProjectStates: ReturnType<typeof vi.fn> };
+  let index: {
+    resolveProjectRepo: ReturnType<typeof vi.fn>;
+    listProjectStates: ReturnType<typeof vi.fn>;
+    listProjectRepos: ReturnType<typeof vi.fn>;
+    getPatterns: ReturnType<typeof vi.fn>;
+    savePatterns: ReturnType<typeof vi.fn>;
+  };
   let queue: { enqueue: ReturnType<typeof vi.fn> };
+  let stored: string[] | null = null;
   const config = { knowledgeIndexEnabled: true };
 
   beforeAll(async () => {
@@ -312,6 +435,12 @@ describe('POST /projects/:slug/knowledge/search', () => {
     index = {
       resolveProjectRepo: vi.fn(async () => ({ id: 'repo-1' })),
       listProjectStates: vi.fn(async () => [{ repo: REPO, state: INDEX_STATE }, { repo: GITLAB_REPO, state: null }]),
+      listProjectRepos: vi.fn(async () => [REPO, GITLAB_REPO]),
+      getPatterns: vi.fn(async () => patternsAnswer(stored)),
+      savePatterns: vi.fn(async (_projectId: string, patterns: string[] | null) => {
+        stored = patterns;
+        return patternsAnswer(stored);
+      }),
     };
     queue = { enqueue: vi.fn() };
     const module = await Test.createTestingModule({
@@ -347,6 +476,9 @@ describe('POST /projects/:slug/knowledge/search', () => {
     search.search.mockResolvedValue(RESULT);
     index.resolveProjectRepo.mockReset();
     index.resolveProjectRepo.mockResolvedValue({ id: 'repo-1' });
+    index.savePatterns.mockClear();
+    index.listProjectRepos.mockClear();
+    stored = null;
     queue.enqueue.mockClear();
     config.knowledgeIndexEnabled = true;
   });
@@ -442,6 +574,9 @@ describe('POST /projects/:slug/knowledge/search', () => {
       ret: 0,
       data: {
         enabled: true,
+        patterns: [...DEFAULT_KNOWLEDGE_PATTERNS],
+        customPatterns: false,
+        defaultPatterns: [...DEFAULT_KNOWLEDGE_PATTERNS],
         repos: [
           expect.objectContaining({ repoId: 'repo-1', status: 'idle', fileCount: 2, finishedAt: '2026-10-15T10:01:00.000Z' }),
           expect.objectContaining({ repoId: 'repo-2', provider: 'gitlab', status: 'never', indexedSha: null, startedAt: null }),
@@ -483,6 +618,77 @@ describe('POST /projects/:slug/knowledge/search', () => {
 
     expect(res.statusCode).toBe(409);
     expect(queue.enqueue).not.toHaveBeenCalled();
+  });
+
+  // ── US-002: PUT patterns over the same app, with the real body pipe ───────────────────────────────────
+  const putPatterns = (payload: unknown): Promise<{ statusCode: number; json: () => unknown }> => fastify.inject({
+    method: 'PUT',
+    url: '/api/projects/koda/knowledge/patterns',
+    headers: { authorization: 'Bearer test-token' },
+    payload,
+  });
+
+  it('AC-12: PUT patterns answers 200 with the saved list and queues one pass per repository', async () => {
+    const res = await putPatterns({ patterns: ['handbook/*.md'] });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ret: 0, data: { patterns: ['handbook/*.md'], custom: true, queued: 2 } });
+    expect(index.savePatterns).toHaveBeenCalledWith(PROJECT_ID, ['handbook/*.md']);
+    expect(queue.enqueue.mock.calls).toEqual([['repo-1', 'admin'], ['repo-2', 'admin']]);
+  });
+
+  it('AC-13: PUT patterns with null answers the default corpus, and GET repos follows it', async () => {
+    const put = await putPatterns({ patterns: null });
+
+    expect(put.statusCode).toBe(200);
+    expect(put.json()).toEqual({ ret: 0, data: { patterns: [...DEFAULT_KNOWLEDGE_PATTERNS], custom: false, queued: 2 } });
+
+    const res = await get();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      data: { customPatterns: false, defaultPatterns: [...DEFAULT_KNOWLEDGE_PATTERNS], patterns: [...DEFAULT_KNOWLEDGE_PATTERNS] },
+    });
+  });
+
+  it('AC-13: GET repos reports a saved list as the custom one', async () => {
+    await putPatterns({ patterns: ['handbook/*.md'] });
+
+    const res = await get();
+
+    expect(res.json()).toMatchObject({
+      data: { patterns: ['handbook/*.md'], customPatterns: true, defaultPatterns: [...DEFAULT_KNOWLEDGE_PATTERNS] },
+    });
+  });
+
+  it('AC-14: PUT patterns answers 400 knowledge.input carrying the failing reason and saves nothing', async () => {
+    const res = await putPatterns({ patterns: ['README.md', 'src/a.ts'] });
+
+    expect(res.statusCode).toBe(400);
+    // This app has no global i18n filter, so the refusal body is the raw AppException payload; the rendered
+    // sentence is pinned by the endpoint e2e suite.
+    expect((res.json() as { args?: { reason?: string } }).args?.reason).toBe('patterns[1]');
+    expect(index.savePatterns).not.toHaveBeenCalled();
+    expect(queue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('AC-14: PUT patterns answers 400 for any other body, including a missing patterns field', async () => {
+    for (const payload of [{}, { patterns: 'docs/*.md' }, { patterns: [] }, { pattern: ['docs/*.md'] }]) {
+      const res = await putPatterns(payload);
+      expect(res.statusCode, JSON.stringify(payload)).toBe(400);
+    }
+    expect(index.savePatterns).not.toHaveBeenCalled();
+  });
+
+  it('AC-15: PUT patterns saves while indexing is disabled but queues nothing', async () => {
+    config.knowledgeIndexEnabled = false;
+
+    const res = await putPatterns({ patterns: ['handbook/*.md'] });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ret: 0, data: { patterns: ['handbook/*.md'], custom: true, queued: 0 } });
+    expect(queue.enqueue).not.toHaveBeenCalled();
+    expect(index.listProjectRepos).not.toHaveBeenCalled();
   });
 });
 

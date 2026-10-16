@@ -19,6 +19,8 @@ export interface KnowledgeIndexState {
   projectId: string;
   status: KnowledgeIndexStatus;
   indexedSha: string | null;
+  /** US-002: the patterns key the last finished pass selected with; null on a row written before the feature. */
+  patternsKey?: string | null;
   fileCount: number;
   chunkCount: number;
   unembeddedCount: number;
@@ -43,6 +45,8 @@ export interface KnowledgeFinishResult {
   projectId: string;
   status: Exclude<KnowledgeIndexStatus, 'running'>;
   indexedSha?: string | null;
+  /** US-002: written when given, like `indexedSha`; a failed pass keeps the stored key. */
+  patternsKey?: string | null;
   fileCount: number;
   chunkCount: number;
   unembeddedCount: number;
@@ -71,4 +75,8 @@ export interface IKnowledgeIndexRepository {
   upsertFile(file: KnowledgeFileState): Promise<void>;
   deleteFile(repoId: string, path: string): Promise<void>;
   listStates(projectId: string): Promise<KnowledgeIndexState[]>;
+  /** US-002: the project's saved patterns, or null when it saved none. */
+  findProjectPatterns(projectId: string): Promise<string[] | null>;
+  /** US-002: null deletes the row (the project falls back to the default corpus). */
+  saveProjectPatterns(projectId: string, patterns: string[] | null): Promise<void>;
 }
