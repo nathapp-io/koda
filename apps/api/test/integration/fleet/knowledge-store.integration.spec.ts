@@ -606,3 +606,82 @@ describePg('PrismaKnowledgeIndexRepository.findRunOutcomes (PG)', () => {
     expect(await repo.findRunOutcomes('missing')).toBeNull();
   });
 });
+
+/**
+ * Fleet S5b US-005/AC-10 (3c-2-D4): the job and PR read the outcome fence makes, against Postgres. The ordering
+ * (`prUpdatedAt` desc then `id`), the `source`/`prState` filter of the link query and the project fence are
+ * exactly what a fake client can only imitate, so every row here is real.
+ */
+describePg('PrismaKnowledgeIndexRepository.describeJobs (PG)', () => {
+  let prisma: PrismaService<PrismaClient>;
+  let repo: PrismaKnowledgeIndexRepository;
+  let tickets = 0;
+
+  beforeAll(async () => {
+    await resetDb();
+    prisma = new PrismaService({ client: PrismaClient, clientOptions: { adapter: createPgAdapter(process.env.DATABASE_URL) } });
+    await prisma.onModuleInit();
+    repo = new PrismaKnowledgeIndexRepository(prisma);
+  });
+
+  afterAll(async () => {
+    await prisma.onModuleDestroy();
+  });
+
+  /** A COMPLETED RUN job of its own project (its own repo), with the result PR url a search reports. */
+  const seedJob = async (feature: string, resultPrUrl: string | null): Promise<{ jobId: string; projectId: string; repoId: string }> => {
+    const { projectId, repoId, adminId } = await seedFleetBase(prisma.client);
+    const job = await prisma.client.fleetJob.create({
+      data: {
+        projectId, repoId, ref: 'main', command: 'RUN', feature, profiles: [], selectorLabels: [],
+        maxCostUsd: new Prisma.Decimal(1), requestedById: adminId, state: 'COMPLETED', resultPrUrl,
+      },
+    });
+    return { jobId: job.id, projectId, repoId };
+  };
+
+  /** A ticket link of `jobId` — `source` and `prState` decide whether `describeJobs` may report it. */
+  const seedLink = async (
+    input: { projectId: string; jobId: string; prState: string | null; prUpdatedAt: Date; source?: string },
+  ): Promise<string> => {
+    tickets += 1;
+    const ticket = await prisma.client.ticket.create({
+      data: { projectId: input.projectId, number: tickets, type: 'TASK', title: `T${tickets}`, status: 'IN_PROGRESS' },
+    });
+    const url = `https://github.com/acme/app/pull/${tickets}`;
+    await prisma.client.ticketLink.create({
+      data: {
+        ticketId: ticket.id, url, provider: 'github', linkType: 'pr', prNumber: tickets, externalRef: `acme/app#${tickets}`,
+        source: input.source ?? 'fleet', jobId: input.jobId, prState: input.prState, prUpdatedAt: input.prUpdatedAt,
+      },
+    });
+    return url;
+  };
+
+  it('AC-10: answers the newest fleet link state and the result PR url, and omits a job of another project', async () => {
+    const mine = await seedJob('f1', 'https://github.com/acme/app/pull/9');
+    const foreign = await seedJob('f2', 'https://github.com/acme/app/pull/10');
+    await seedLink({ ...mine, prState: 'open', prUpdatedAt: new Date('2026-10-20T10:00:00.000Z') });
+    await seedLink({ ...mine, prState: 'merged', prUpdatedAt: new Date('2026-10-21T10:00:00.000Z') });
+    // Newer rows that the link query excludes: a `vcs` link and a fleet link without a PR state.
+    await seedLink({ ...mine, prState: 'closed', prUpdatedAt: new Date('2026-10-22T10:00:00.000Z'), source: 'vcs' });
+    await seedLink({ ...mine, prState: null, prUpdatedAt: new Date('2026-10-23T10:00:00.000Z') });
+    await seedLink({ ...foreign, prState: 'merged', prUpdatedAt: new Date('2026-10-24T10:00:00.000Z') });
+
+    const described = await repo.describeJobs(mine.projectId, [mine.jobId, foreign.jobId]);
+
+    expect(described).toEqual([{
+      jobId: mine.jobId, repoId: mine.repoId, feature: 'f1', state: 'COMPLETED',
+      prUrl: 'https://github.com/acme/app/pull/9', prState: 'merged',
+    }]);
+  });
+
+  it('answers a null prState for a job whose fleet links carry none, and no info for an unknown id', async () => {
+    const mine = await seedJob('f3', null);
+    await seedLink({ ...mine, prState: null, prUpdatedAt: new Date('2026-10-20T10:00:00.000Z') });
+
+    expect(await repo.describeJobs(mine.projectId, [mine.jobId, 'missing'])).toEqual([
+      { jobId: mine.jobId, repoId: mine.repoId, feature: 'f3', state: 'COMPLETED', prUrl: null, prState: null },
+    ]);
+  });
+});
