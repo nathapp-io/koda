@@ -212,11 +212,12 @@ function isHeadingLine(line: string): boolean {
 }
 
 /** Rule 8: GitHub's heading ids restricted to ASCII, with a `-n` suffix on a repeated anchor. */
-function slug(text: string): string {
+export function slug(text: string): string {
   return text.toLowerCase().replace(ANCHOR_DROPPED, '').replace(ANCHOR_SPACE, '-');
 }
 
-function uniqueAnchor(base: string, counts: Map<string, number>, used: Set<string>): string {
+/** Rule 8: `base` itself first, then `base-1`, `base-2`, ... skipping the anchors already used. */
+export function uniqueAnchor(base: string, counts: Map<string, number>, used: Set<string>): string {
   if (!used.has(base)) {
     counts.set(base, 0);
     used.add(base);
