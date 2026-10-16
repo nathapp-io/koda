@@ -34,6 +34,8 @@ export function testFleetConfig(overrides: Partial<IFleetConfig> = {}): IFleetCo
     prRefreshMs: 600_000,
     credentialExpiryWarnDays: 7,
     threadsEnabled: false,
+    knowledgeIndexEnabled: false,
+    knowledgePollMs: 1_800_000,
     ...overrides,
   };
 }

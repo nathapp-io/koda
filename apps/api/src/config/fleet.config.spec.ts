@@ -166,4 +166,24 @@ describe('fleet config', () => {
     expect(fleetConfig().threadsEnabled).toBe(false);
     delete process.env.FLEET_THREADS_ENABLED;
   });
+  it.each([
+    { enabled: undefined, poll: undefined, expectedEnabled: false, expectedPoll: 1_800_000 },
+    { enabled: undefined, poll: 'abc', expectedEnabled: false, expectedPoll: 1_800_000 },
+  ])('defaults knowledge index config (enabled=$enabled poll=$poll)', ({ enabled, poll, expectedEnabled, expectedPoll }) => {
+    delete process.env.KNOWLEDGE_INDEX_ENABLED;
+    delete process.env.KNOWLEDGE_POLL_MS;
+    if (enabled !== undefined) process.env.KNOWLEDGE_INDEX_ENABLED = enabled;
+    if (poll !== undefined) process.env.KNOWLEDGE_POLL_MS = poll;
+    const cfg = fleetConfig();
+    expect(cfg.knowledgeIndexEnabled).toBe(expectedEnabled);
+    expect(cfg.knowledgePollMs).toBe(expectedPoll);
+  });
+
+  it('enables the knowledge index and raises a low poll interval to 60000', () => {
+    process.env.KNOWLEDGE_INDEX_ENABLED = 'true';
+    process.env.KNOWLEDGE_POLL_MS = '5000';
+    const cfg = fleetConfig();
+    expect(cfg.knowledgeIndexEnabled).toBe(true);
+    expect(cfg.knowledgePollMs).toBe(60_000);
+  });
 });
