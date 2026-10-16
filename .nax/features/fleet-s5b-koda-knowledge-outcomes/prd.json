@@ -88,7 +88,7 @@
         "[integration] PrismaKnowledgeIndexRepository.saveProjectPatterns(p, ['a/*.md']) then findProjectPatterns(p) answers ['a/*.md']; after saveProjectPatterns(p, null) it answers null; and a finish with patternsKey: 'x' is read back by listStates(p).",
         "[integration] PUT /api/projects/:slug/knowledge/patterns as a global admin with { patterns: ['handbook/*.md'] }, with indexing enabled and a stubbed KnowledgeIndexQueue, answers 200 { patterns: ['handbook/*.md'], custom: true, queued: <the project's repository count> } and calls enqueue(<repoId>, 'admin') once per project repository.",
         "[integration] PUT .../knowledge/patterns with { patterns: null } answers custom: false and patterns equal to DEFAULT_KNOWLEDGE_PATTERNS, and a following GET .../knowledge/repos answers customPatterns: false and defaultPatterns equal to DEFAULT_KNOWLEDGE_PATTERNS.",
-        "[integration] PUT .../knowledge/patterns with { patterns: ['src/a.ts'] } answers 400, and by a project member who is not a global admin answers 403 (one table-driven test).",
+        "[integration] PUT .../knowledge/patterns with { patterns: ['README.md', 'src/a.ts'] } answers 400 with the body's reason patterns[1], and by a project member who is not a global admin answers 403 (one table-driven test).",
         "[integration] PUT .../knowledge/patterns with indexing disabled answers 200 with queued: 0 and never calls enqueue."
       ],
       "tags": [
@@ -357,6 +357,14 @@
         {
           "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
           "reason": "the `HIT: KnowledgeHit` fixture at `:4140` gains `source: 'repo'`, because `source` is a required `KnowledgeHit` field; the search route assertions around it are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/kb-tools.spec.ts",
+          "reason": "the typed `KnowledgeHit` literal at `:25` gains `source: 'repo'`, because `source` is a required `KnowledgeHit` field; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/knowledge/project-knowledge.controller.spec.ts",
+          "reason": "the typed `HIT: KnowledgeHit` literal at `:38` gains `source: 'repo'`, because `source` is a required `KnowledgeHit` field; every assertion is unchanged."
         },
         {
           "path": "apps/api/test/unit/scripts/kb-eval.spec.ts",
