@@ -3,7 +3,7 @@
   "feature": "fleet-knowledge-embed-and-run-progress",
   "branchName": "feat/fleet-knowledge-embed-and-run-progress",
   "createdAt": "2026-10-16T00:00:00.000Z",
-  "updatedAt": "2026-10-16T08:48:06.885Z",
+  "updatedAt": "2026-10-16T09:02:46.510Z",
   "userStories": [
     {
       "id": "US-001",
@@ -373,8 +373,8 @@
         "i18n"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -386,7 +386,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/components/fleet/FleetJobProgress.vue",
@@ -425,7 +427,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "76d5fda7be63525574460cb456a64b84eb554137"
     }
   ],
   "analysis": "Two independent fixes in a Bun/Turborepo monorepo (api NestJS+Vitest, runner bun:test, web Nuxt+Jest, cli generated client).\n\nTrack A (#286, US-001/US-002, apps/api): the knowledge index loses whole files to the embedder. apps/api/src/fleet/knowledge/markdown-chunker.ts keeps blank-line-free blocks whole (up to 20,055 chars vs MAX_CHUNK_CHARS = 2000); splitSections (:261-271) and splitText (:273-286) must re-split packed parts over the cap by walking lines, tracking fences like textBlocks (:289-321) via fenceMarker (:197-202), keeping glueHeadingBlock (:323-327) and capping buildSummary (:330-336). Surrogate pairs must never be cut. Existing AC-9 tests in markdown-chunker.spec.ts (:127-145) assert the old uncapped behaviour and must be updated. Ollama refused the oversize request and KnowledgeRepoIndexer.rows (knowledge-repo-indexer.ts:122-152) stored every chunk unembedded. OllamaEmbeddingProvider.embedBatch (apps/api/src/rag/providers/ollama-embedding.provider.ts) currently does Promise.all of embed; it must become one POST /api/embed {model,input,truncate:true}. embed and /api/embeddings stay untouched (ticket RAG, R3). The indexer must embed in sequential batches of 16 with EMBED_REQUEST_TIMEOUT_MS=60_000 and FILE_EMBED_DEADLINE_MS=300_000 (replacing EMBEDDING_TIMEOUT_MS=120_000), per-chunk fallback through embed, one warning per file (LEASE_MS=900_000 at :18 stays above the deadline; retry of files with unembeddedCount>0 at :67/:82 unchanged). Risks: fence-budget arithmetic, off-by-one at the 2000 cap, fake-timer tests for the race/deadline (injected this.clock()), fixture() in knowledge-repo-indexer.spec.ts (:19-41) needs an embed mock and AC-6 (:97-111) updates.\n\nTrack B (#206, US-003..US-006): mirror nax workflow.step. R1 no Prisma migration (FleetJob.postRun is Json?). R2 protocol changes additive only. US-003 (api): add workflowStep?: string to packages/fleet-protocol/src/index.ts:163 SnapshotEventPayload.postRun, to POST_RUN_STAGES (apps/api/src/fleet/sync/event-payloads.ts:32, validated by STAGE_STATUS_RE :33), FleetJobPostRun (fleet-job.domain.ts:28-32) and FleetJobPostRunDto (fleet-job.dto.ts:20-24, maxLength 32). Regenerate openapi.json with `bun run api:export-spec` and apps/cli/src/generated via `bun run generate` (never hand-edit generated files); fleet-openapi.contract.spec.ts:19 closed-world list gains workflowStep. Runner-sync integration tests need the compose test Postgres (`bun run test:db:up` in apps/api). US-004 (runner): apps/runner/src/watcher/status-snapshot.ts postRunStages (:30-40) and mapStatusToSnapshot (:42-62); parseStatusView already reads workflow.step. Watcher.tick (watcher.ts:37-67) sends a snapshot only when payload changed. US-005 (web): pipelineStages (apps/web/lib/fleet-story-graph.ts:184-204) gains a workflow-mode five-stage strip; StageKey/STAGE_KEYS extended; i18n keys fleet.jobs.detail.pipeline.stage.{review,gates,publish} in en/zh; fleet-types.ts:205-209 gains workflowStep; fixtures in fleet-job-pipeline.spec.ts and tests/e2e/fleet-story-graph.e2e.spec.ts switch currentPhase from 'implement' to 'execution' so they keep testing the four-stage non-workflow RUN. US-006 (web): new apps/web/lib/fleet-phase.ts (KNOWN_PHASES, phaseLabelKey), used by FleetJobProgress.vue, FleetJobStories.vue, story-graph/StoryNode.vue (:52-53) and dashboard/ActiveRunsTable.vue; en/zh keys fleet.jobs.phases.*; update assertions in fleet-job-stories.spec.ts:35 and fleet-dashboard-tables.spec.ts:41. Unknown text is shown raw (R4). Dependencies: US-004 and US-005 depend on US-003 (protocol/DTO field). US-001, US-002, US-003, US-006 are independent. Repo rules: no hand edits of generated files or AGENTS.md; i18n for api and web are separate systems; unit tests in src/**/*.spec.ts, integration in test/integration, no us-XXX test folders. Code style: immutability, no console.log, small files.",
