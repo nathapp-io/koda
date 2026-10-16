@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-koda-knowledge-index",
   "branchName": "feat/fleet-s5b-koda-knowledge-index",
   "createdAt": "2026-10-20T09:00:00.000Z",
-  "updatedAt": "2026-10-16T04:05:02.325Z",
+  "updatedAt": "2026-10-16T04:13:27.458Z",
   "userStories": [
     {
       "id": "US-001",
@@ -276,8 +276,8 @@
         "US-001",
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -289,7 +289,9 @@
         "profileModelTier": "powerful",
         "initialAgent": "native",
         "initialProfileId": "native-sol",
-        "initialModelTier": "powerful"
+        "initialModelTier": "powerful",
+        "initialComplexity": "complex",
+        "modelTier": "powerful"
       },
       "contextFiles": [
         "apps/api/src/fleet/git-broker/github-app-client.ts",
@@ -312,7 +314,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "42bd43fcefbe3f8df463a09e184ae1fcb53b9ae0"
     },
     {
       "id": "US-005",
