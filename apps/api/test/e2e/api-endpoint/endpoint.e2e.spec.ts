@@ -4227,6 +4227,21 @@ describeIntegration('API Integration Tests', () => {
         refusal(await request(httpServer).post(`/api/threads/${workspaceId}/answer`).set('Authorization', `Bearer ${world.tokens.root}`).send({ requestId: 'q1', text: 'yes' }).expect(404), 'threads.notFound.404');
       });
 
+      it('workspace messages and archive: creator succeeds, non-creator is hidden, malformed message is refused', async () => {
+        const id = body<{ id: string }>(await request(httpServer).post('/api/threads')
+          .set('Authorization', `Bearer ${world.tokens.dev}`)
+          .send({ title: 'Workspace turn', backend: { kind: 'native' }, homeProject: projectSlug }).expect(201)).id;
+        const messagesUrl = `/api/threads/${id}/messages`;
+        const archiveUrl = `/api/threads/${id}/archive`;
+        refusal(await request(httpServer).post(messagesUrl).set('Authorization', `Bearer ${world.tokens.root}`).send({ text: 'hi', clientMessageId: 'one' }).expect(404), 'threads.notFound.404');
+        refusal(await request(httpServer).post(messagesUrl).set('Authorization', `Bearer ${world.tokens.dev}`).send({ text: '', clientMessageId: 'one' }).expect(400), 'threads.input.400', { reason: 'message' });
+        const sent = body<{ message: { id: string }; jobId: string }>(await request(httpServer).post(messagesUrl).set('Authorization', `Bearer ${world.tokens.dev}`).send({ text: 'hi', clientMessageId: 'one' }).expect(201));
+        expect(sent.jobId).toBeTruthy();
+        expect(body<{ message: { id: string } }>(await request(httpServer).post(messagesUrl).set('Authorization', `Bearer ${world.tokens.dev}`).send({ text: 'hi', clientMessageId: 'one' }).expect(200)).message.id).toBe(sent.message.id);
+        refusal(await request(httpServer).post(archiveUrl).set('Authorization', `Bearer ${world.tokens.root}`).send({}).expect(404), 'threads.notFound.404');
+        expect(body<{ status: string }>(await request(httpServer).post(archiveUrl).set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(200)).status).toBe('ARCHIVED');
+      });
+
       it('GET /api/threads/:id/events hides the stream from a non-creator', async () => {
         // The open-stream happy path needs the streaming helper (it never ends for supertest): test/integration/fleet.
         refusal(await request(httpServer).get(`/api/threads/${workspaceId}/events`).set('Authorization', `Bearer ${world.tokens.root}`).expect(404), 'threads.notFound.404');

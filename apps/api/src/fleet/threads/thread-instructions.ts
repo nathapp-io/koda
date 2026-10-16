@@ -49,10 +49,16 @@ export function buildProjectThreadInstructions(input: { project: string; skills:
   return [...lines, ...skillLines(input.skills)].join('\n');
 }
 
-/**
- * The brief block as the lines that follow the role line, or nothing at all. Both builders place it right after
- * their first line and before every other line (1c-D1); without a brief the instructions are exactly as before.
- */
+/** A personal brainstorming session: no project brief, repository context or koda tool catalog. */
+export function buildWorkspaceThreadInstructions(input: { skills: ThreadSkillSource[] }): string {
+  const lines = [
+    'You are a brainstorming partner in a koda workspace thread. This thread belongs to no project and no repository.',
+    'Ask one question at a time. You have no repository, no shell, no web access and no koda tools; do not claim facts about projects, tickets or code you cannot see.',
+  ];
+  return [...lines, ...skillLines(input.skills)].join('\n');
+}
+
+/** The project/repo brief follows the role line; workspace sessions never use it. */
 function briefLines(brief: string | undefined): string[] {
   return brief === undefined ? [] : brief.split('\n');
 }

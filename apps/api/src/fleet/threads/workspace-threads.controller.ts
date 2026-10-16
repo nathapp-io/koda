@@ -1,9 +1,9 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
 import { ForbiddenAppException, JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import { isUserPrincipal, type KodaPrincipal, type UserPrincipal } from '../../auth/principal/koda-principal.types';
-import { AnswerQuestionDto, ChatMessageListDto, UpdateThreadDto } from './dto/thread.dto';
+import { AnswerQuestionDto, ChatMessageListDto, SendMessageDto, SendMessageResultDto, UpdateThreadDto } from './dto/thread.dto';
 import { CreateWorkspaceThreadDto, WorkspaceThreadDetailDto, WorkspaceThreadDto, WorkspaceThreadListDto } from './dto/workspace-thread.dto';
 import { WorkspaceThreadsService } from './workspace-threads.service';
 
@@ -69,6 +69,27 @@ export class WorkspaceThreadsController {
     const limit = intParam(query.limit, 1, 200);
     if ((query.afterSeq !== undefined && after === null) || (query.limit !== undefined && limit === null)) throw new ValidationAppException({ reason: 'messages' }, 'threads.input');
     return JsonResponse.Ok(await this.threads.messages(user.id, id, after ?? 0, limit ?? 100));
+  }
+
+  @Post(':id/messages')
+  @HttpCode(201)
+  @ApiOperation({ summary: 'Send a message to a personal workspace chat thread' })
+  @ApiResponse({ status: 201, type: SendMessageResultDto })
+  @ApiResponse({ status: 200, type: SendMessageResultDto })
+  async send(@Param('id') id: string, @Body() dto: SendMessageDto, @Principal() principal: KodaPrincipal, @Res({ passthrough: true }) response: { status: (code: number) => unknown }) {
+    const result = await this.threads.sendMessage(this.user(principal), id, dto);
+    if (result.deduplicated) response.status(200);
+    return JsonResponse.Ok({ message: result.message, jobId: result.jobId });
+  }
+
+  @Post(':id/archive')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Archive a personal workspace chat thread (creator)' })
+  @ApiResponse({ status: 200, type: WorkspaceThreadDetailDto })
+  async archive(@Param('id') id: string, @Principal() principal: KodaPrincipal) {
+    const user = this.user(principal);
+    await this.threads.archive(user, id);
+    return JsonResponse.Ok(await this.threads.get(user.id, id));
   }
 
   @Patch(':id')

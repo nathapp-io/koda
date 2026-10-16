@@ -14,7 +14,8 @@ import { SkillsService } from '../../skills/skills.service';
 import { FLEET_REPO_REPOSITORY, type IFleetRepoRepository } from '../repos/domain/fleet-repo.domain';
 import { CHAT_THREAD_REPOSITORY, type ChatMessageRecord, type ChatThreadDetail, type ChatThreadRecord, type ChatThreadRepository } from './domain/chat-thread.domain';
 import { isMaxCostUsd, validateCreateWorkspaceThread, type CreateWorkspaceThreadInput } from './thread-input';
-import type { AnswerQuestionDto } from './dto/thread.dto';
+import type { AnswerQuestionDto, SendMessageDto } from './dto/thread.dto';
+import { FleetJobsService } from '../jobs/fleet-jobs.service';
 
 @Injectable()
 export class WorkspaceThreadsService {
@@ -26,6 +27,7 @@ export class WorkspaceThreadsService {
     private readonly projects: ProjectsService,
     private readonly access: ProjectAccessService,
     private readonly casl: KodaCaslAbilityFactory,
+    private readonly fleetJobs: FleetJobsService,
   ) {}
 
   async create(principal: UserPrincipal, input: CreateWorkspaceThreadInput): Promise<ChatThreadRecord> {
@@ -106,9 +108,40 @@ export class WorkspaceThreadsService {
     return this.threads.command({ kind: 'workspace', userId }, threadId, userId, FleetCommandType.THREAD_ANSWER, input);
   }
 
+  async sendMessage(principal: UserPrincipal, id: string, input: SendMessageDto): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }> {
+    if (typeof input.text !== 'string' || input.text.length === 0 || Buffer.byteLength(input.text, 'utf8') > 32768 ||
+        typeof input.clientMessageId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(input.clientMessageId)) {
+      throw new ValidationAppException({ reason: 'message' }, 'threads.input');
+    }
+    const thread = await this.requireOwnedThread(principal.id, id);
+    // Like REPO context resolution, the live host check is deliberately outside the send transaction (1d-D9).
+    const reachable = await this.projects.findAllForPrincipal(principal);
+    if (!reachable.some(project => project.id === thread.projectId) || !await this.canHost(thread.projectId, principal)) {
+      throw new ForbiddenAppException({}, 'threads.homeProjectAccess');
+    }
+    return this.threads.sendMessage({ scope: { kind: 'workspace', userId: principal.id }, threadId: id, userId: principal.id, text: input.text, clientMessageId: input.clientMessageId, repoContext: undefined });
+  }
+
+  async archive(principal: UserPrincipal, id: string): Promise<void> {
+    const thread = await this.requireOwnedThread(principal.id, id);
+    const jobId = await this.threads.archive({ kind: 'workspace', userId: principal.id }, id, principal.id, false);
+    if (!jobId) return;
+    try { await this.fleetJobs.cancel(principal.id, thread.projectId, jobId, true); }
+    catch (error) {
+      if (!(error instanceof ConflictAppException)) throw error;
+      // The terminal transition may win after archive commits.
+    }
+  }
+
   private async canHost(projectId: string, principal: UserPrincipal): Promise<boolean> {
-    const role = await this.access.resolveMembership(projectId, principal);
-    const ability = await this.casl.createForUser(withProjectRole(principal, role));
-    return ability.can(CaslPermissionAction.CREATE, 'FleetJob');
+    try {
+      const role = await this.access.resolveMembership(projectId, principal);
+      const ability = await this.casl.createForUser(withProjectRole(principal, role));
+      return ability.can(CaslPermissionAction.CREATE, 'FleetJob');
+    } catch (error) {
+      // Membership can disappear after the reachable-project read; keep the home-project refusal key.
+      if (error instanceof ForbiddenAppException) return false;
+      throw error;
+    }
   }
 }

@@ -19,7 +19,7 @@ import { BudgetGate } from '../budgets/budget-gate';
 import { jobGateKeys } from '../budgets/budget-rules';
 import { BudgetPausedException } from '../budgets/budget.exceptions';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
-import { buildProjectThreadInstructions, buildThreadInstructions, renderBriefBlock } from './thread-instructions';
+import { buildWorkspaceThreadInstructions, buildProjectThreadInstructions, buildThreadInstructions, renderBriefBlock } from './thread-instructions';
 import { sendRefusal, type ThreadSendRefusal } from './thread-send-rules';
 import { allocateThreadSeq, repoThreadFields, type ChatMessageRecord, type ChatThreadRecord, type ChatThreadRepository, type ThreadScope, type ThreadSession, type ThreadWriteResult } from './domain/chat-thread.domain';
 import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
@@ -342,9 +342,9 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
 
   /** The facts `sendRefusal` judges, read under the thread and job locks. Writes nothing. */
   private async sendRefusalFor(thread: { id: string; kind?: string; status: string; costUsd: Prisma.Decimal; maxCostUsd: Prisma.Decimal; runnerId: string | null; projectId: string; repoId: string | null }, job: { id: string; state: string; leaseEpoch: number } | null): Promise<SendRefusalResult> {
-    // A PROJECT thread owns no repo, so its budget gate is scoped to the anchor repo its job will run on (S5b-R13);
+    // PROJECT and WORKSPACE threads own no repo, so their budget gate uses the home project's anchor (S5b-R13);
     // a project without a fleet repo gates no repo scope at all. The missing anchor is not a send refusal (US-004).
-    const gateRepoId = mapThreadKind(thread.kind) === 'PROJECT' ? (await this.anchorRepoFor(thread.projectId))?.id ?? null : thread.repoId;
+    const gateRepoId = mapThreadKind(thread.kind) !== 'REPO' ? (await this.anchorRepoFor(thread.projectId))?.id ?? null : thread.repoId;
     const pauses = await this.budgets.snapshot(new Date());
     const pausedPolicy = pauses.match(jobGateKeys({ projectId: thread.projectId, repoId: gateRepoId, pinnedRunnerId: thread.runnerId }));
     const runnerRow = thread.runnerId ? await this.prisma.client.runner.findUnique({ where: { id: thread.runnerId }, select: { lastSeenAt: true, protocolVersion: true } }) : null;
@@ -418,9 +418,14 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     return job;
   }
 
-  /** Where a THREAD job runs and what its agent is told: the thread's own repo, or the project anchor for a PROJECT thread. */
+  /** Job bookkeeping uses the thread's own repo, or the home anchor for PROJECT/WORKSPACE; only REPO gets a checkout. */
   private async jobTargetFor(thread: Prisma.ChatThreadGetPayload<object>, repoContext?: string): Promise<{ repoId: string; ref: string; instructions: string }> {
     const skills = thread.skills as unknown as ThreadSkillSource[];
+    if (mapThreadKind(thread.kind) === 'WORKSPACE') {
+      const anchor = await this.anchorRepoFor(thread.projectId);
+      if (!anchor) throw new ConflictAppException({}, 'threads.noFleetRepo');
+      return { repoId: anchor.id, ref: anchor.defaultBranch, instructions: buildWorkspaceThreadInstructions({ skills }) };
+    }
     if (mapThreadKind(thread.kind) === 'PROJECT') {
       const anchor = await this.anchorRepoFor(thread.projectId);
       if (!anchor) throw new ConflictAppException({}, 'threads.noFleetRepo');

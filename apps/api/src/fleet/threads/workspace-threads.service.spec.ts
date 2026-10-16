@@ -33,7 +33,7 @@ describe('workspace home project creation', () => {
       config as IFleetConfig,
       { findAllForPrincipal: vi.fn(async () => reachable) } as unknown as ProjectsService,
       { findMembershipRole: vi.fn(async (id: string) => roles[id] ?? null), resolveMembership: vi.fn(async (id: string) => principal.role === 'ADMIN' ? 'ADMIN' : roles[id]) } as unknown as ProjectAccessService,
-      new KodaCaslAbilityFactory(),
+      new KodaCaslAbilityFactory(), {} as never,
     );
   });
   it('AC-6/7: chooses oldest home and persists WORKSPACE with null repo fields', async () => {
@@ -71,7 +71,7 @@ describe('workspace read, cap and command scope', () => {
     config = { threadsEnabled: true };
     service = new WorkspaceThreadsService(
       repository as unknown as ChatThreadRepository,
-      {} as IFleetRepoRepository, {} as SkillsService, config as IFleetConfig, {} as ProjectsService, {} as ProjectAccessService, new KodaCaslAbilityFactory(),
+      {} as IFleetRepoRepository, {} as SkillsService, config as IFleetConfig, {} as ProjectsService, {} as ProjectAccessService, new KodaCaslAbilityFactory(), {} as never,
     );
   });
 

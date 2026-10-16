@@ -321,6 +321,16 @@ describe('PrismaChatThreadRepository SESSION turn instructions (S5b US-003)', ()
     return args.data.instructions;
   };
 
+  it('WORKSPACE SESSION uses the anchor without reading any project brief or repository context', async () => {
+    const { repo, turnCreate, projectFindUnique, repoFindUnique, jobs } = sendRepo(threadRow({ kind: 'WORKSPACE', repoId: null, baseRef: null, feature: null, specPath: null }));
+    await repo.sendMessage({ scope: { kind: 'workspace', userId: 'U' }, threadId: 'T', userId: 'U', text: 'hi', clientMessageId: 'c1', repoContext: 'must be ignored' });
+    expect(jobs.createJob).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'P', repoId: 'A', ref: 'trunk', command: 'THREAD', feature: 'thread-T' }));
+    expect(projectFindUnique).not.toHaveBeenCalled();
+    expect(repoFindUnique).not.toHaveBeenCalled();
+    expect(instructionsOf(turnCreate)).toMatch(/^You are a brainstorming partner in a koda workspace thread\./);
+    expect(instructionsOf(turnCreate)).not.toContain('must be ignored');
+  });
+
   it('US-003 AC-10: a PROJECT SESSION turn stores the project brief and the anchor repository section after the role line', async () => {
     const { repo, turnCreate, anchorFindFirst, projectFindUnique } = sendRepo(threadRow({ kind: 'PROJECT', repoId: null, baseRef: null, feature: null, specPath: null }));
 

@@ -9215,6 +9215,96 @@
         "tags": [
           "fleet threads"
         ]
+      },
+      "post": {
+        "operationId": "WorkspaceThreadsController_send",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendMessageResultDto"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendMessageResultDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Send a message to a personal workspace chat thread",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
+    "/api/threads/{id}/archive": {
+      "post": {
+        "operationId": "WorkspaceThreadsController_archive",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceThreadDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Archive a personal workspace chat thread (creator)",
+        "tags": [
+          "fleet threads"
+        ]
       }
     },
     "/api/threads/{id}/stop": {
@@ -17623,6 +17713,40 @@
           "items"
         ]
       },
+      "SendMessageDto": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32768
+          },
+          "clientMessageId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          }
+        },
+        "required": [
+          "text",
+          "clientMessageId"
+        ]
+      },
+      "SendMessageResultDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "$ref": "#/components/schemas/ChatMessageDto"
+          },
+          "jobId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "message",
+          "jobId"
+        ]
+      },
       "UpdateThreadDto": {
         "type": "object",
         "properties": {
@@ -18152,40 +18276,6 @@
             "description": "gated/escalate relay bash asks to the approvals inbox. Needs a runner with the approval relay."
           }
         }
-      },
-      "SendMessageDto": {
-        "type": "object",
-        "properties": {
-          "text": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 32768
-          },
-          "clientMessageId": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9_-]{1,64}$"
-          }
-        },
-        "required": [
-          "text",
-          "clientMessageId"
-        ]
-      },
-      "SendMessageResultDto": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "$ref": "#/components/schemas/ChatMessageDto"
-          },
-          "jobId": {
-            "type": "string",
-            "nullable": true
-          }
-        },
-        "required": [
-          "message",
-          "jobId"
-        ]
       },
       "SkillDto": {
         "type": "object",
