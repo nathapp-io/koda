@@ -120,6 +120,81 @@ check('AC-8: the img is removed, its handler is gone and the path is still linke
   assert.equal(links[0].getAttribute('href'), '/sandbox/tickets/SB-3')
 })
 
+// ── #289: link and table attributes survive the app's URI allowlist ──────────────────────────
+// DOMPurify tests every attribute outside its URI-safe list against ALLOWED_URI_REGEXP, so values
+// such as `_blank` or `3` were dropped while the jest spec (which doubles the sanitizer) passed.
+
+check('a document citation opens in a new tab with noopener noreferrer through the real pipeline', () => {
+  const html = renderThreadMarkdown('see `nathapp-io/koda:docs/a.md@abcdef1#cache`', 'sandbox')
+  const link = documentOf(html).querySelector('a')
+  assert.ok(link, `no link was built: ${html}`)
+  assert.equal(link.getAttribute('href'), 'https://github.com/nathapp-io/koda/blob/abcdef1/docs/a.md#cache')
+  assert.equal(link.getAttribute('target'), '_blank', `target was dropped: ${html}`)
+  assert.equal(link.getAttribute('rel'), 'noopener noreferrer', `rel was dropped: ${html}`)
+})
+
+check('an outcome citation links to the job page through the real pipeline', () => {
+  const html = renderThreadMarkdown('see job:cmv7qnyya001z08pfqxauihsp/decisions.jsonl#d-1', 'sandbox')
+  const link = documentOf(html).querySelector('a')
+  assert.ok(link, `no link was built: ${html}`)
+  assert.equal(link.getAttribute('href'), '/sandbox/fleet/jobs/cmv7qnyya001z08pfqxauihsp')
+})
+
+check('an authored link that keeps target="_blank" is forced to rel="noopener noreferrer"', () => {
+  const html = sanitizeHtmlFragment('<a href="https://example.com/" target="_blank" rel="opener">x</a>')
+  const link = documentOf(html).querySelector('a')
+  assert.ok(link, `the link was lost: ${html}`)
+  assert.equal(link.getAttribute('target'), '_blank')
+  assert.equal(link.getAttribute('rel'), 'noopener noreferrer', `rel was not forced: ${html}`)
+})
+
+check('rel written before target is still forced to noopener noreferrer', () => {
+  const html = sanitizeHtmlFragment('<a rel="opener" href="https://example.com/" target="_blank">x</a>')
+  assert.equal(documentOf(html).querySelector('a')?.getAttribute('rel'), 'noopener noreferrer', `rel was not forced: ${html}`)
+})
+
+for (const [label, fragment] of [
+  ['a named frame', '<a href="https://example.com/" target="opener-frame" rel="opener">x</a>'],
+  ['an upper-case _BLANK', '<a href="https://example.com/" TARGET="_BLANK" rel="opener">x</a>'],
+  ['a non-link element', '<span target="_blank" rel="opener">x</span>'],
+] as const) {
+  check(`target and rel are dropped for ${label}`, () => {
+    const html = sanitizeHtmlFragment(fragment)
+    const element = documentOf(html).querySelector('a, span')
+    assert.ok(element, `the element was lost: ${html}`)
+    assert.equal(element.hasAttribute('target'), false, `target survived: ${html}`)
+    assert.equal(element.hasAttribute('rel'), false, `rel survived without a new-tab target: ${html}`)
+  })
+}
+
+check('the URI allowlist still refuses a javascript: href', () => {
+  const html = sanitizeHtmlFragment('<a href="javascript:alert(1)" target="_blank">x</a>')
+  assert.equal(documentOf(html).querySelector('a')?.hasAttribute('href'), false, `href survived: ${html}`)
+})
+
+check('ordered-list start and table span attributes survive the sanitizer', () => {
+  const html = sanitizeHtmlFragment(
+    '<ol start="3"><li>a</li></ol><table><tbody><tr><th scope="col" colspan="2">h</th><td rowspan="2">c</td></tr></tbody></table>',
+  )
+  const doc = documentOf(html)
+  assert.equal(doc.querySelector('ol')?.getAttribute('start'), '3', `start was dropped: ${html}`)
+  assert.equal(doc.querySelector('th')?.getAttribute('colspan'), '2', `colspan was dropped: ${html}`)
+  assert.equal(doc.querySelector('th')?.getAttribute('scope'), 'col', `scope was dropped: ${html}`)
+  assert.equal(doc.querySelector('td')?.getAttribute('rowspan'), '2', `rowspan was dropped: ${html}`)
+})
+
+check('img width and height survive as small numbers only', () => {
+  const kept = documentOf(sanitizeHtmlFragment('<img src="https://example.com/a.png" width="120" height="80">')).querySelector('img')
+  assert.equal(kept?.getAttribute('width'), '120')
+  assert.equal(kept?.getAttribute('height'), '80')
+
+  const html = sanitizeHtmlFragment('<img src="https://example.com/a.png" width="99999" height="javascript:alert(1)"><ol start="x"><li>a</li></ol>')
+  const doc = documentOf(html)
+  assert.equal(doc.querySelector('img')?.hasAttribute('width'), false, `an oversized width survived: ${html}`)
+  assert.equal(doc.querySelector('img')?.hasAttribute('height'), false, `a non-numeric height survived: ${html}`)
+  assert.equal(doc.querySelector('ol')?.hasAttribute('start'), false, `a non-numeric start survived: ${html}`)
+})
+
 // ── B3 (branch review): a long citation-free token renders in bounded time ───────────────────
 
 /**
@@ -129,6 +204,7 @@ check('AC-8: the img is removed, its handler is gone and the path is still linke
  * text run once. This runs the whole real stack (marked, the sanitizer, the linkifier), which is
  * where the cost was measured.
  */
+
 check('renderThreadMarkdown is bounded on a 100,000-character citation-free token', () => {
   const text = 'a'.repeat(100_000)
   const started = Date.now()

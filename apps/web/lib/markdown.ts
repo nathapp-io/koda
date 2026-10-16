@@ -18,6 +18,13 @@ const ALLOWED_ATTR = [
 
 const ALLOWED_URI_REGEXP = /^(?:(?:https?|mailto):|#|\/)/i
 
+/**
+ * #289: DOMPurify tests every attribute outside its URI-safe list against ALLOWED_URI_REGEXP, so
+ * these plain-value attributes (`_blank`, `noopener noreferrer`, `3`) were silently dropped. They
+ * never hold a URL, so they skip the URI test; `href` and `src` still take it.
+ */
+const URI_SAFE_ATTR = ['rel', 'target', 'colspan', 'rowspan', 'scope', 'start', 'width', 'height']
+
 const LANGUAGE_CLASS = /^language-[\w-]+$/
 
 /**
@@ -32,9 +39,31 @@ export function keepClassAttribute(tagName: string, value: string): boolean {
   return tag === 'span' && trimmed === 'mention-chip'
 }
 
+/** Attributes that skip the URI test only because they are numbers; anything else is dropped. */
+const NUMERIC_ATTR = new Set(['colspan', 'rowspan', 'start', 'width', 'height'])
+const SMALL_NUMBER = /^\d{1,4}$/
+
 DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
+  if (NUMERIC_ATTR.has(data.attrName)) {
+    if (!SMALL_NUMBER.test(data.attrValue)) data.keepAttr = false
+    return
+  }
   if (data.attrName !== 'class') return
   if (!keepClassAttribute(node.nodeName, data.attrValue)) data.keepAttr = false
+})
+
+/**
+ * A link may only open a new tab, and one that does never gets a handle on this page (tab-nabbing):
+ * `target` survives only as `_blank` on <a>, which forces `rel`; without it `rel` has no use and goes.
+ */
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  const newTab = node.nodeName.toLowerCase() === 'a' && node.getAttribute('target') === '_blank'
+  if (newTab) {
+    node.setAttribute('rel', 'noopener noreferrer')
+    return
+  }
+  node.removeAttribute('target')
+  node.removeAttribute('rel')
 })
 
 
@@ -54,6 +83,7 @@ function sanitizeHtml(dirty: string): string {
     ALLOWED_ATTR,
     ALLOW_DATA_ATTR: false,
     ALLOWED_URI_REGEXP,
+    ADD_URI_SAFE_ATTR: URI_SAFE_ATTR,
     FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button'],
     FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'style'],
   })
