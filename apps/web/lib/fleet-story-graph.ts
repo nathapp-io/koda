@@ -145,8 +145,13 @@ export function neighbourhood(edges: readonly StoryEdge[], activeId: string | nu
   return new Set([activeId, ...linked])
 }
 
-export type StageKey = 'stories' | 'acceptance' | 'regression' | 'finish'
-export const STAGE_KEYS: readonly StageKey[] = ['stories', 'acceptance', 'regression', 'finish']
+export type StageKey = 'stories' | 'acceptance' | 'regression' | 'finish' | 'review' | 'gates' | 'publish'
+/** Every stage key a RUN can render; the mode-specific lists below pick from it. */
+export const STAGE_KEYS: readonly StageKey[] = ['stories', 'acceptance', 'regression', 'finish', 'review', 'gates', 'publish']
+/** Spec §2.1: the four stages of a pipeline-mode RUN. */
+export const CLASSIC_STAGE_KEYS: readonly StageKey[] = ['stories', 'acceptance', 'regression', 'finish']
+/** D6: a workflow-mode RUN skips regression and replaces finish with its own three stages. */
+export const WORKFLOW_STAGE_KEYS: readonly StageKey[] = ['stories', 'acceptance', 'review', 'gates', 'publish']
 /** Translated under fleet.jobs.detail.pipeline.state; any other value is nax text shown raw (D429). */
 export const KNOWN_STAGE_STATES = ['pending', 'running', 'passed', 'failed', 'skipped', 'unknown'] as const
 
@@ -179,25 +184,79 @@ function postRunState(value: unknown, active: boolean): string {
 }
 
 type StageJob = Pick<FleetJobDto, 'command' | 'state' | 'postRun' | 'stories' | 'currentStoryId' | 'currentPhase'>
+  & { workflow?: FleetJobDto['workflow'] }
+
+/** D6: the phases a nax workflow RUN reports; a caller that omits all three workflow signals is pipeline mode. */
+const WORKFLOW_PHASES: ReadonlySet<string> = new Set([
+  'workflow', 'implement', 'gates', 'review', 'rereview', 'suite', 'residual', 'fix', 'closed',
+])
+
+/** D6: the workflow steps of each of the three workflow stages, in pipeline order. */
+const WORKFLOW_GROUPS: readonly (readonly string[])[] = [
+  ['repo-gates', 'branch-review', 'branch-fix', 'branch-rereview', 'adjudicate'],
+  ['final-gates', 'gate-repair'],
+  ['publish', 'done'],
+]
+type GroupKey = 'review' | 'gates' | 'publish'
+
+/**
+ * D6: a group before the current step passed, the current one runs on an active job and failed on a terminal one,
+ * and later groups wait on an active job and are skipped on a terminal one.
+ */
+function groupState(index: number, current: number, active: boolean): string {
+  if (index < current) return 'passed'
+  if (index === current) return active ? 'running' : 'failed'
+  return active ? 'pending' : 'skipped'
+}
+
+/** D6: publish follows the workflow result; `ready` and `local-only` summarize it, anything else is nax text (R4). */
+const PUBLISH_OUTCOMES: Readonly<Record<string, string>> = { ready: 'passed', 'local-only': 'failed' }
+
+const publishState = (outcome: string | undefined, active: boolean): string => {
+  if (outcome === undefined) return active ? 'running' : 'unknown'
+  return PUBLISH_OUTCOMES[outcome] ?? outcome
+}
+
+/** D6: the three workflow stages from the run's step, plus its workflow result once the step is `done`. */
+function workflowStates(step: string | undefined, outcome: string | undefined, active: boolean): Record<GroupKey, string> {
+  if (step === 'done') return { review: 'passed', gates: 'passed', publish: publishState(outcome, active) }
+  const current = step === undefined ? -1 : WORKFLOW_GROUPS.findIndex(steps => steps.includes(step))
+  if (current === -1) {
+    const idle = active ? 'pending' : 'unknown'
+    return { review: idle, gates: idle, publish: idle }
+  }
+  return {
+    review: groupState(0, current, active),
+    gates: groupState(1, current, active),
+    publish: groupState(2, current, active),
+  }
+}
+
+/** D6: any of the three signals means a workflow RUN, whose strip differs from the classic one. */
+function isWorkflowRun(job: StageJob, step: string | undefined): boolean {
+  if (step !== undefined) return true
+  if (job.workflow != null) return true
+  return typeof job.currentPhase === 'string' && WORKFLOW_PHASES.has(job.currentPhase)
+}
+
+const stage = (key: StageKey, state: string): PipelineStage => ({
+  key,
+  state,
+  known: (KNOWN_STAGE_STATES as readonly string[]).includes(state),
+  variant: STAGE_VARIANTS[state] ?? 'outline',
+})
 
 /** Spec §2.1: the RUN strip; PLAN jobs have none. Stale nax values are shown as stored, never inferred. */
 export function pipelineStages(job: StageJob): PipelineStage[] {
   if (job.command !== 'RUN') return []
   const active = isActiveJobState(job.state)
   const post = job.postRun ?? {}
-  const states: Record<StageKey, string> = {
-    stories: storiesState(storyRows(job), active),
-    acceptance: postRunState(post.acceptance, active),
-    regression: postRunState(post.regression, active),
-    finish: postRunState(post.finish, active),
+  const step = typeof post.workflowStep === 'string' ? post.workflowStep : undefined
+  const stories = stage('stories', storiesState(storyRows(job), active))
+  const acceptance = stage('acceptance', postRunState(post.acceptance, active))
+  if (isWorkflowRun(job, step)) {
+    const groups = workflowStates(step, job.workflow?.outcome, active)
+    return [stories, acceptance, stage('review', groups.review), stage('gates', groups.gates), stage('publish', groups.publish)]
   }
-  return STAGE_KEYS.map((key) => {
-    const state = states[key]
-    return {
-      key,
-      state,
-      known: (KNOWN_STAGE_STATES as readonly string[]).includes(state),
-      variant: STAGE_VARIANTS[state] ?? 'outline',
-    }
-  })
+  return [stories, acceptance, stage('regression', postRunState(post.regression, active)), stage('finish', postRunState(post.finish, active))]
 }

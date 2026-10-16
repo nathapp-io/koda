@@ -1556,7 +1556,10 @@
             "stories": "故事",
             "acceptance": "验收",
             "regression": "回归",
-            "finish": "收尾"
+            "finish": "收尾",
+            "review": "审查",
+            "gates": "门禁",
+            "publish": "发布"
           },
           "state": {
             "pending": "待处理",

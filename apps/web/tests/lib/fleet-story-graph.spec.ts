@@ -1,7 +1,7 @@
 import { describe, test, expect } from '@jest/globals'
-import { edgePath, edgePaths, layoutStoryGraph, neighbourhood, pipelineStages } from '~/lib/fleet-story-graph'
+import { CLASSIC_STAGE_KEYS, STAGE_KEYS, WORKFLOW_STAGE_KEYS, edgePath, edgePaths, layoutStoryGraph, neighbourhood, pipelineStages } from '~/lib/fleet-story-graph'
 import type { StoryRow } from '~/lib/fleet-jobs'
-import type { FleetJobDto } from '~/lib/fleet-types'
+import type { FleetJobDto, FleetJobWorkflowOutcome } from '~/lib/fleet-types'
 
 const row = (id: string, dependsOn: string[] = []): StoryRow => ({
   id, title: id, status: 'pending', attempts: 0, current: false, phase: null, variant: 'outline', dependsOn,
@@ -189,5 +189,102 @@ describe('pipelineStages (spec §2.1, D442)', () => {
   test('typed on the real DTO', () => {
     const dto = { command: 'RUN', state: 'QUEUED', postRun: null, stories: null, currentStoryId: null, currentPhase: null } as unknown as FleetJobDto
     expect(pipelineStages(dto)).toHaveLength(4)
+  })
+})
+
+describe('pipelineStages workflow mode (D6)', () => {
+  type StageJob = Parameters<typeof pipelineStages>[0]
+  const story = (id: string, status: string) => ({ id, title: id, status, attempts: 1, dependsOn: [] })
+  const run = (over: Partial<StageJob> = {}): StageJob => ({
+    command: 'RUN', state: 'RUNNING', postRun: null, currentStoryId: null, currentPhase: null,
+    stories: [story('US-001', 'passed'), story('US-002', 'in-progress')], ...over,
+  })
+  const workflow = (outcome: FleetJobWorkflowOutcome): StageJob['workflow'] => ({ outcome } as StageJob['workflow'])
+  const keys = (job: StageJob): string[] => pipelineStages(job).map(stage => stage.key)
+  const states = (job: StageJob): string[][] => pipelineStages(job).map(stage => [stage.key, stage.state])
+  /** The three workflow stages; Stories and Acceptance keep their own rules. */
+  const groups = (job: StageJob): string[][] => states(job).slice(2)
+
+  test('AC-1: a RUNNING RUN with a workflow step gets the five workflow stages, in order', () => {
+    expect(keys(run({ postRun: { workflowStep: 'branch-review' } })))
+      .toEqual(['stories', 'acceptance', 'review', 'gates', 'publish'])
+  })
+
+  test('AC-2: step branch-review runs the review group; gates and publish wait', () => {
+    expect(groups(run({ postRun: { workflowStep: 'branch-review' } })))
+      .toEqual([['review', 'running'], ['gates', 'pending'], ['publish', 'pending']])
+  })
+
+  test('AC-3: step gate-repair has review passed and gates running', () => {
+    expect(groups(run({ postRun: { workflowStep: 'gate-repair' } })))
+      .toEqual([['review', 'passed'], ['gates', 'running'], ['publish', 'pending']])
+  })
+
+  test('AC-4: a step done with outcome ready passes every workflow group', () => {
+    const job = run({ state: 'COMPLETED', postRun: { workflowStep: 'done' }, workflow: workflow('ready') })
+    expect(groups(job)).toEqual([['review', 'passed'], ['gates', 'passed'], ['publish', 'passed']])
+  })
+
+  test('AC-5: outcome draft is shown raw on the publish stage', () => {
+    const job = run({ state: 'ESCALATED', postRun: { workflowStep: 'done' }, workflow: workflow('draft') })
+    expect(pipelineStages(job)[4]).toEqual({ key: 'publish', state: 'draft', known: false, variant: 'outline' })
+  })
+
+  test('AC-6: outcome local-only fails publish', () => {
+    const job = run({ state: 'FAILED', postRun: { workflowStep: 'done' }, workflow: workflow('local-only') })
+    expect(groups(job)[2]).toEqual(['publish', 'failed'])
+  })
+
+  test('AC-7: a FAILED RUN at final-gates fails gates and skips publish', () => {
+    expect(groups(run({ state: 'FAILED', postRun: { workflowStep: 'final-gates' } })))
+      .toEqual([['review', 'passed'], ['gates', 'failed'], ['publish', 'skipped']])
+  })
+
+  test('AC-8: currentPhase implement alone is workflow mode, with the groups pending', () => {
+    const job = run({ postRun: null, workflow: null, currentPhase: 'implement', state: 'RUNNING' })
+    expect(keys(job)).toEqual(['stories', 'acceptance', 'review', 'gates', 'publish'])
+    expect(groups(job)).toEqual([['review', 'pending'], ['gates', 'pending'], ['publish', 'pending']])
+  })
+
+  test('AC-9: a step in no group leaves all three groups pending', () => {
+    expect(groups(run({ postRun: { workflowStep: 'mystery' } })))
+      .toEqual([['review', 'pending'], ['gates', 'pending'], ['publish', 'pending']])
+  })
+
+  test('AC-10: a pipeline-mode RUN keeps the four classic stages and their states', () => {
+    const job = run({ currentPhase: 'execution', workflow: null, postRun: { acceptance: 'passed', regression: 'running' } })
+    expect(states(job)).toEqual([
+      ['stories', 'running'], ['acceptance', 'passed'], ['regression', 'running'], ['finish', 'pending'],
+    ])
+  })
+
+  test('AC-12: a FAILED RUN at done without a workflow result reads publish unknown', () => {
+    const job = run({ state: 'FAILED', postRun: { workflowStep: 'done' }, workflow: null })
+    expect(groups(job)[2]).toEqual(['publish', 'unknown'])
+  })
+
+  test('AC-13: an UPLOADING RUN at done without a workflow result has publish running', () => {
+    const job = run({ state: 'UPLOADING', postRun: { workflowStep: 'done' }, workflow: null })
+    expect(groups(job)[2]).toEqual(['publish', 'running'])
+  })
+
+  test('a job DTO without the workflow signal is not workflow mode (a caller may omit it)', () => {
+    expect(keys(run({ currentPhase: 'execution' })))
+      .toEqual(['stories', 'acceptance', 'regression', 'finish'])
+  })
+
+  test('the exported key lists match what each mode renders', () => {
+    expect(keys(run({ postRun: { workflowStep: 'branch-review' } }))).toEqual([...WORKFLOW_STAGE_KEYS])
+    expect(keys(run({ currentPhase: 'execution' }))).toEqual([...CLASSIC_STAGE_KEYS])
+    expect([...STAGE_KEYS].sort()).toEqual([...CLASSIC_STAGE_KEYS, 'review', 'gates', 'publish'].sort())
+  })
+
+  test('every step of a group lands on that group', () => {
+    for (const step of ['repo-gates', 'branch-review', 'branch-fix', 'branch-rereview', 'adjudicate']) {
+      expect(groups(run({ postRun: { workflowStep: step } }))[0]).toEqual(['review', 'running'])
+    }
+    expect(groups(run({ postRun: { workflowStep: 'gate-repair' } }))[1]).toEqual(['gates', 'running'])
+    expect(groups(run({ postRun: { workflowStep: 'publish' } })))
+      .toEqual([['review', 'passed'], ['gates', 'passed'], ['publish', 'running']])
   })
 })

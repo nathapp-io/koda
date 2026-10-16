@@ -1556,7 +1556,10 @@
             "stories": "Stories",
             "acceptance": "Acceptance",
             "regression": "Regression",
-            "finish": "Finish"
+            "finish": "Finish",
+            "review": "Review",
+            "gates": "Gates",
+            "publish": "Publish"
           },
           "state": {
             "pending": "Pending",
