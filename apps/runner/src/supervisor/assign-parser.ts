@@ -1,4 +1,4 @@
-import { THREAD_LIMITS, KODA_TOOL_LIMITS, THREAD_MODEL_ID_RE, isConfigKind, type AssignPayload, type BashMode, type FleetCommandOut, type FleetJobKindName, type KodaToolDescriptor, type ThreadAssign, type ThreadBackend, type ThreadSkillSource } from '@nathapp/fleet-protocol';
+import { THREAD_LIMITS, KODA_TOOL_LIMITS, PROJECT_CODE_LIMITS, THREAD_MODEL_ID_RE, isConfigKind, type AssignPayload, type BashMode, type FleetCommandOut, type FleetJobKindName, type KodaToolDescriptor, type ProjectRepoAssign, type ProjectRepoUnavailable, type ThreadAssign, type ThreadBackend, type ThreadSkillSource } from '@nathapp/fleet-protocol';
 import { assertCloneUrl } from '../executor/workspace';
 import { COST_RE, PROFILE_NAME, RESERVED_PREFIX } from '../executor/nax-process';
 import { PathError, assertFeature, assertOwner, assertRelativePath, assertSegment } from '../paths/safe-segment';
@@ -109,6 +109,41 @@ function cleanKodaTools(v: unknown): KodaToolDescriptor[] | null {
   return out;
 }
 
+/** Project code is read only, and clone targets must use TLS even on a trusted ASSIGN. */
+function cleanProjectRepos(v: unknown): ProjectRepoAssign[] | null {
+  if (!Array.isArray(v) || v.length > PROJECT_CODE_LIMITS.maxRepos) return null;
+  const out: ProjectRepoAssign[] = [];
+  for (const entry of v) {
+    if (!isObj(entry)) return null;
+    const { repoId, owner, name, defaultBranch, cloneUrl } = entry;
+    if (!text(repoId, 64) || !checked(() => assertSegment('repoId', repoId))) return null;
+    if (typeof owner !== 'string' || !checked(() => assertOwner(owner))) return null;
+    if (typeof name !== 'string' || !checked(() => assertSegment('repo name', name))) return null;
+    if (!plain(defaultBranch, 255) || typeof cloneUrl !== 'string') return null;
+    try {
+      if (new URL(cloneUrl).protocol !== 'https:') return null;
+    } catch {
+      return null;
+    }
+    out.push({ repoId, owner, name, defaultBranch, cloneUrl });
+  }
+  return out;
+}
+
+function cleanProjectUnavailable(v: unknown): ProjectRepoUnavailable[] | null {
+  if (!Array.isArray(v) || v.length > PROJECT_CODE_LIMITS.maxUnavailable) return null;
+  const out: ProjectRepoUnavailable[] = [];
+  for (const entry of v) {
+    if (!isObj(entry)) return null;
+    const { owner, name, reason } = entry;
+    if (typeof owner !== 'string' || !checked(() => assertOwner(owner))) return null;
+    if (typeof name !== 'string' || !checked(() => assertSegment('repo name', name))) return null;
+    if (reason !== 'not a GitHub repository' && reason !== 'no installation' && reason !== 'limit') return null;
+    out.push({ owner, name, reason });
+  }
+  return out;
+}
+
 const utf8Bytes = (s: string): number => new TextEncoder().encode(s).length;
 
 /**
@@ -208,6 +243,12 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   const rawKodaTools = t['kodaTools'];
   const kodaTools = rawKodaTools === undefined ? undefined : cleanKodaTools(rawKodaTools);
   if (kodaTools === null) return bad('koda tools');
+  const rawRepos = t['projectRepos'];
+  const rawUnavailable = t['projectReposUnavailable'];
+  if ((rawRepos !== undefined || rawUnavailable !== undefined) && rawKind !== 'PROJECT') return bad('project repos');
+  const projectRepos = rawRepos === undefined ? undefined : cleanProjectRepos(rawRepos);
+  const projectReposUnavailable = rawUnavailable === undefined ? undefined : cleanProjectUnavailable(rawUnavailable);
+  if (projectRepos === null || projectReposUnavailable === null) return bad('project repos');
   const thread: ThreadAssign = {
     threadId: t['threadId'] as string,
     action,
@@ -220,6 +261,8 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
     initialMessage,
     ...(rawTitle !== undefined ? { title: rawTitle as string } : {}),
     ...(kodaTools === undefined ? {} : { kodaTools }),
+    ...(projectRepos === undefined ? {} : { projectRepos }),
+    ...(projectReposUnavailable === undefined ? {} : { projectReposUnavailable }),
   };
   return { ok: true, assign: { ...baseAssign, ...expectBranch, thread } };
 }

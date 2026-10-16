@@ -34,6 +34,7 @@ import { ThreadSessionFactory } from '../thread/session-factory';
 import { threadNativeModels } from '../thread/thread-host';
 import type { ThreadRunSetup } from '../thread/thread-job-run';
 import { pruneThreads } from '../thread/thread-prune';
+import { pruneProjectCode } from '../thread/project-code/mirror-prune';
 import { systemNow, systemSleep, type Now, type Sleep } from '../time';
 import { CapacityTracker, freeSlots } from './capacity';
 import { DAEMON_VERSION } from '../version';
@@ -133,8 +134,24 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   await pruneJobs(journal, config, log);
   // Fleet S5a §3: the latest sync's archived thread ids (an absent field keeps the previous list); the prune
   // pass runs at start and every `pruneIntervalMs`. A throw is a warning — it never stops the daemon.
+  const mutex = new RepoMutex();
   let archivedThreadIds: readonly string[] = [];
+  /**
+   * Review B1: the live THREAD job ids. The mirror prune reads this again under each mirror's mutex, so a job
+   * assigned while the sweep runs — it journals its row, then pins under that same mutex — is never mistaken for an
+   * abandoned pin whose `gc` would drop the objects a live session reads.
+   */
+  const activeThreadJobIds = (): ReadonlySet<string> =>
+    new Set(journal.activeJobs().filter((job) => job.command === 'THREAD').map((job) => job.jobId));
   const pruneThreadAssets = async (): Promise<void> => {
+    try {
+      await pruneProjectCode({
+        git, mutex, homeDir: home.dir, nowMs: now().getTime(), ttlMs: tuning.projectCodeMirrorTtlMs,
+        activeJobIds: activeThreadJobIds(), currentActiveJobIds: activeThreadJobIds,
+      });
+    } catch (error) {
+      log.warn('project code prune failed', { error: errorMessage(error) });
+    }
     try {
       await pruneThreads({
         git, homeDir: home.dir, archivedThreadIds, now,
@@ -183,14 +200,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         homeDir: home.dir, naxHome: config.naxHome,
         nativeModels: threadNativeModels(config.naxHome, () => reporter.latest()),
       }),
-      credentials: broker, git, homeDir: home.dir, workspaceRoot: config.workspaceRoot,
+      credentials: broker, repoCredentials: broker, git, homeDir: home.dir, workspaceRoot: config.workspaceRoot,
       // Fleet S5b §1: the session's koda tool proxies reach the API through this client; nothing else leaves the runner.
       kodaTools: { call: (args) => client.callKodaTool(args) },
     },
     tuning,
   } : undefined;
   const supervisor = new Supervisor({
-    journal, executor, mutex: new RepoMutex(), uploader, log, now, sleep,
+    journal, executor, mutex, uploader, log, now, sleep,
     tuning: {
       statusPollMs: tuning.statusPollMs, killGraceMs: tuning.killGraceMs, ackPollMs: tuning.ackPollMs, uploadAckWaitMs: tuning.uploadAckWaitMs, logDrainTimeoutMs: tuning.logDrainTimeoutMs,
       configJobTimeoutMs: tuning.configJobTimeoutMs, configHeartbeatMs: tuning.configHeartbeatMs,

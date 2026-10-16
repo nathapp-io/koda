@@ -16705,6 +16705,10 @@
               "kodaToolsUnavailableOn": {
                 "type": "string",
                 "description": "Set when the hosting runner does not advertise kodaTools (S5b 1b-D4)"
+              },
+              "projectCodeUnavailableOn": {
+                "type": "string",
+                "description": "Set when the hosting runner does not advertise projectCode on a PROJECT thread (S5b 1c-b-D8)"
               }
             }
           },
@@ -16897,6 +16901,10 @@
               "kodaToolsUnavailableOn": {
                 "type": "string",
                 "description": "Set when the hosting runner does not advertise kodaTools (S5b 1b-D4)"
+              },
+              "projectCodeUnavailableOn": {
+                "type": "string",
+                "description": "Set when the hosting runner does not advertise projectCode on a PROJECT thread (S5b 1c-b-D8)"
               }
             }
           },

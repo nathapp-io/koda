@@ -42,7 +42,7 @@ export function buildProjectThreadInstructions(input: { project: string; skills:
   const lines = [
     `You are a brainstorming partner for the koda project "${input.project}". This thread is not tied to a repository.`,
     ...briefLines(input.brief),
-    'Ask one question at a time. You have no repository, no shell and no web access; do not claim facts about code you cannot see.',
+    "Ask one question at a time. You have no shell and no web access. You read the project's code only through list_repos, list_files, search_repo and read_file when they are available (read-only, pinned at session start); cite code as owner/name:path@sha7 and never claim facts about code you have not read.",
     KODA_TOOLS_LINE,
   ];
   return [...lines, ...skillLines(input.skills)].join('\n');

@@ -73,6 +73,17 @@ describe('thread limits (US-001)', () => {
   });
 });
 
+describe('project code limits (US-001 AC1)', () => {
+  it('US-001 AC1: the API PROJECT_CODE_LIMITS deep-equals the package PROJECT_CODE_LIMITS', () => {
+    expect(apiThreads.PROJECT_CODE_LIMITS).toEqual(pkg.PROJECT_CODE_LIMITS);
+  });
+
+  it('US-001 AC1: the shared limits are { maxRepos: 10, maxUnavailable: 50 }', () => {
+    expect(apiThreads.PROJECT_CODE_LIMITS).toEqual({ maxRepos: 10, maxUnavailable: 50 });
+    expect(pkg.PROJECT_CODE_LIMITS).toEqual({ maxRepos: 10, maxUnavailable: 50 });
+  });
+});
+
 describe('MODEL_ID_RE (US-001)', () => {
   it.each([['deepseek-v3'], ['gpt-4o'], ['anthropic/claude-3.5@beta:v1'], ['a'], ['a'.repeat(128)]])('accepts the model id %s', (id) => {
     expect(apiThreads.MODEL_ID_RE.test(id)).toBe(true);

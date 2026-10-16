@@ -2,7 +2,9 @@ import { chmod, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentSession, EmbedderTool, SessionEvent } from '@nathapp/nax-agent';
 import { THREAD_LIMITS, type StateEventPayload, type ThreadAssign, type ThreadCommandType } from '@nathapp/fleet-protocol';
-import type { CredentialProvider } from '../credentials/broker';
+import type { CredentialProvider, RepoCredentialProvider } from '../credentials/broker';
+import { buildProjectCodeTools, type ProjectCodePin } from './project-code/code-tools';
+import { projectCodeDirFor, refreshMirror } from './project-code/mirror-store';
 import { errorMessage } from '../errors';
 import type { Git } from '../executor/git';
 import type { JobRow } from '../journal/types';
@@ -25,6 +27,8 @@ import { buildProjectThreadTools, buildThreadTools } from './tools';
 
 /** The thread stream file, inside the job's own `.jobs/<jobId>` directory. */
 export const THREAD_EVENTS_FILE = 'thread-events.jsonl';
+
+const PROJECT_CODE_FETCH_CONCURRENCY = 3;
 
 /**
  * A seam input re-spelled as an anonymous object type. An interface carries no implicit index signature, so a
@@ -67,6 +71,8 @@ export type ThreadLogShipping = Omit<LogShipping, 'register'> & { register(job: 
 export interface ThreadHostDeps {
   readonly sessions: ThreadSessionOpener;
   readonly credentials: CredentialProvider;
+  readonly repoCredentials?: RepoCredentialProvider;
+  readonly refreshMirror?: typeof refreshMirror;
   readonly git: Git;
   /** RunnerHome.dir: the skill cache lives in `<homeDir>/skills`, the worktrees in `<homeDir>/threads`. */
   readonly homeDir: string;
@@ -93,6 +99,7 @@ export interface ThreadRunTuning {
   readonly threadWakeGapMs: number;
   readonly threadSearchTimeoutMs: number;
   readonly threadSkillFetchTimeoutMs: number;
+  readonly projectCodeFetchTimeoutMs?: number;
   readonly logDrainTimeoutMs: number;
   readonly threadCloseTimeoutMs: number;
   /**
@@ -113,8 +120,8 @@ export interface ThreadRunSetup {
 }
 
 /**
- * The run takes no repo mutex of its own — it only hands one to `prepareThreadWorktree` — so the seam is the
- * `acquire` a worktree preparation needs, and `logs` is `LogShipping` with its job input re-spelled (`Seam`).
+ * REPO preparation receives the mutex; PROJECT code refreshes use it only under `project-code:<repoId>`
+ * keys. The seam is `acquire`, and `logs` is `LogShipping` with its job input re-spelled (`Seam`).
  */
 export type ThreadRunDeps =
   Pick<JobRunDeps, 'journal' | 'log' | 'now' | 'sleep'>
@@ -169,8 +176,8 @@ function readAnswer(payload: unknown): { requestId: string; text: string } | nul
 
 /**
  * Fleet S5a slice B3b: one THREAD job, from ASSIGN to cleanup. It is deliberately not a `JobRun` — a thread
- * spawns no nax, uploads no bundle and owns a worktree of its own, so it takes no repo mutex and reaps no
- * clone. `start` resolves only once the run has ended: a terminal transition and its `markDone`, an abandon
+ * spawns no nax, uploads no bundle and reaps no clone. Only PROJECT code mirror refreshes take the mutex
+ * directly, under project-code keys. `start` resolves only once the run has ended: a terminal transition and its `markDone`, an abandon
  * or a halt. The Supervisor keeps the run in its map until then, so a command reaches it while it prepares,
  * runs or closes.
  */
@@ -363,8 +370,8 @@ export class ThreadJobRun {
   }
 
   /**
-   * A PROJECT thread has no checkout: no git credentials and no worktree (steps 1-4 are skipped). The session runs in
-   * an empty scratch directory under the thread's own directory, with the skill tools only, and the run has no live publish.
+   * A PROJECT thread runs in its own scratch directory, never a checkout, and has no live publish.
+   * Optional read-only repository mirrors are pinned before opening the session.
    */
   private async runProject(row: JobRow, thread: ThreadAssign): Promise<void> {
     const skills = await this.setUpSkills(thread);
@@ -373,6 +380,8 @@ export class ThreadJobRun {
       this.endBeforeRunning('FAILED', skills.reason);
       return;
     }
+    const codeTools = await this.projectCodeTools(row, thread);
+    if (this.stopped()) return;
     const scratch = threadScratchDir(this.deps.host.homeDir, thread.threadId);
     await mkdir(scratch, { recursive: true, mode: 0o700 });
     const opened = await this.deps.host.sessions.open({
@@ -388,6 +397,7 @@ export class ThreadJobRun {
           searchTimeoutMs: this.deps.tuning.threadSearchTimeoutMs,
           nowMs: () => this.deps.now().getTime(),
         }),
+        ...codeTools,
         ...this.kodaToolProxies(thread),
       ],
       approvalTimeoutSec: row.assign.approvalTimeoutSec,
@@ -412,6 +422,71 @@ export class ThreadJobRun {
     this.startHeartbeat();
     this.startInitialTurn(thread);
     await this.waitForEnd();
+  }
+
+  /** Want every token before waiting; bound only the mirror fetches, not credential acquisition. */
+  private async projectCodeTools(row: JobRow, thread: ThreadAssign): Promise<EmbedderTool[]> {
+    const { host, tuning } = this.deps;
+    const provider = host.repoCredentials;
+    const repos = thread.projectRepos;
+    if (repos === undefined || provider === undefined) return [];
+    const pins: ProjectCodePin[] = [];
+    const unavailable: Array<{ repo: string; reason: string }> = [];
+    const isCancelled = () => this.cancelRequested() || this.halted;
+    try {
+      const acquired = await Promise.all(repos.map(async (repo) => {
+        try {
+          return await provider.acquireRepo(row, { repoId: repo.repoId, cloneUrl: repo.cloneUrl }, { wait: true, isCancelled });
+        } catch {
+          // Keep operational failures local to this repository; never expose a credential-bearing exception.
+          this.deps.log.warn('project code token acquisition failed', { jobId: this.jobId, repoId: repo.repoId });
+          return { ok: false as const, reason: 'git token: acquisition failed' };
+        }
+      }));
+      const results: Array<ProjectCodePin | { repo: string; reason: string } | undefined> = new Array(repos.length);
+      let next = 0;
+      const worker = async () => {
+        while (!isCancelled()) {
+          const index = next++;
+          const repo = repos[index];
+          const token = acquired[index];
+          if (repo === undefined || token === undefined) return;
+          const name = `${repo.owner}/${repo.name}`;
+          if (!token.ok) {
+            results[index] = { repo: name, reason: `token: ${token.reason}` };
+            continue;
+          }
+          try {
+            const refreshed = await (host.refreshMirror ?? refreshMirror)({
+              git: host.git, mutex: this.deps.mutex, homeDir: host.homeDir, repo,
+              credentialHelper: token.credentials.helper, pinId: this.jobId,
+              timeoutMs: tuning.projectCodeFetchTimeoutMs ?? 120_000,
+              nowMs: () => this.deps.now().getTime(),
+            });
+            results[index] = refreshed.ok
+              ? { repo: name, sha: refreshed.sha, gitDir: projectCodeDirFor(host.homeDir, repo.repoId) }
+              : { repo: name, reason: refreshed.reason };
+          } catch {
+            this.deps.log.warn('project code fetch failed', { jobId: this.jobId, repoId: repo.repoId });
+            results[index] = { repo: name, reason: 'fetch failed' };
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(PROJECT_CODE_FETCH_CONCURRENCY, repos.length) }, worker));
+      for (const result of results) {
+        if (result === undefined) continue;
+        if ('sha' in result) pins.push(result);
+        else unavailable.push(result);
+      }
+    } finally {
+      // A refused/cancelled acquisition can still own a wanted token and socket, so release every attempt.
+      await Promise.all(repos.map(async (repo) => {
+        try { await provider.releaseRepo(row, repo.repoId); }
+        catch { this.deps.log.warn('project code credential release failed', { jobId: this.jobId, repoId: repo.repoId }); }
+      }));
+    }
+    unavailable.push(...(thread.projectReposUnavailable ?? []).map((repo) => ({ repo: `${repo.owner}/${repo.name}`, reason: repo.reason })));
+    return buildProjectCodeTools({ pins, unavailable, git: host.git, searchTimeoutMs: tuning.threadSearchTimeoutMs, nowMs: () => this.deps.now().getTime() });
   }
 
   /** Every start step begins here: a halt ends the run silently, a cancel request ends it CANCELLED. */

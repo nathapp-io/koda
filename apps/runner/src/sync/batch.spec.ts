@@ -123,3 +123,10 @@ describe('token requests (design §3.1)', () => {
     expect(request.tokenRequests).toEqual([]);
   });
 });
+
+test('project code AC-9: preserves optional repoId in token requests', () => {
+  const tokenRequests = [{ jobId: 'j1', leaseEpoch: 1, repoId: 'r1' }, { jobId: 'j1', leaseEpoch: 1 }];
+  const sent = build({ tokenRequests }).tokenRequests;
+  expect(sent).toEqual(tokenRequests);
+  expect(sent?.[1]).not.toHaveProperty('repoId');
+});

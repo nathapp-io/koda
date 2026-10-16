@@ -1,4 +1,6 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, spyOn, test } from 'bun:test';
+import type { SupervisorDeps } from '../../src/supervisor/supervisor';
+import * as threadPrune from '../../src/thread/thread-prune';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -134,7 +136,72 @@ async function fixture() {
   return { home, config, fleet, daemon, assign, seedRunningThread };
 }
 
+describe('project code daemon prune', () => {
+  test('AC-13: active THREAD job ids and the Supervisor mutex reach mirror prune', async () => {
+    const mirrorPrune = await import('../../src/thread/project-code/mirror-prune');
+    const calls: Parameters<typeof mirrorPrune.pruneProjectCode>[0][] = [];
+    const pruneSpy = spyOn(mirrorPrune, 'pruneProjectCode').mockImplementation(async (input) => { calls.push(input); });
+    const f = await fixture();
+    await f.seedRunningThread();
+    const journal = Journal.open(f.home.journalPath);
+    const payload = f.assign('j1');
+    journal.insertJob({ assign: payload, leaseEpoch: 1, repoKey: 'acme/app', jobDir: join(f.config.workspaceRoot, '.jobs', 'j1') });
+    journal.insertJob({ assign: { ...f.assign('run1'), command: 'RUN', thread: undefined }, leaseEpoch: 1, repoKey: 'acme/app', jobDir: join(f.config.workspaceRoot, '.jobs', 'run1') });
+    journal.close();
+    let daemon: DaemonHandle | undefined;
+    try {
+      daemon = await f.daemon({ tuning: { pruneIntervalMs: 60000, projectCodeMirrorTtlMs: 1234 } });
+      expect(calls.length).toBeGreaterThan(0);
+      expect(calls[0].activeJobIds).toEqual(new Set(['seed', 'j1']));
+      expect(calls[0].ttlMs).toBe(1234);
+      expect(calls[0].homeDir).toBe(f.home.dir);
+      const deps = (daemon.supervisor as unknown as { deps: SupervisorDeps }).deps;
+      expect(calls[0].mutex).toBe(deps.mutex);
+      // Review B1: the snapshot `activeJobIds` is a value taken before the sweep, so a job assigned while the sweep
+      // runs is missing from it; `currentActiveJobIds` is the live read the prune takes under each mirror's mutex.
+      expect(calls[0].currentActiveJobIds).toBeFunction();
+      const late = Journal.open(f.home.journalPath);
+      late.insertJob({ assign: f.assign('late1'), leaseEpoch: 1, repoKey: 'acme/app', jobDir: join(f.config.workspaceRoot, '.jobs', 'late1') });
+      late.close();
+      expect(calls[0].currentActiveJobIds?.().has('late1')).toBe(true);
+      expect(calls[0].activeJobIds.has('late1')).toBe(false);
+    } finally {
+      await daemon?.stop();
+      pruneSpy.mockRestore();
+    }
+  });
+
+  test('AC-14: mirror prune failure warns and does not prevent thread prune', async () => {
+    const mirrorPrune = await import('../../src/thread/project-code/mirror-prune');
+    const pruneSpy = spyOn(mirrorPrune, 'pruneProjectCode').mockRejectedValue(new Error('broken mirror'));
+    const threadsSpy = spyOn(threadPrune, 'pruneThreads').mockResolvedValue(undefined);
+    const f = await fixture();
+    const log = createMemoryLogger();
+    let daemon: DaemonHandle | undefined;
+    try {
+      daemon = await f.daemon({ log, tuning: { pruneIntervalMs: 60000 } });
+      expect(pruneSpy).toHaveBeenCalled();
+      expect(threadsSpy).toHaveBeenCalled();
+      expect(log.lines.some((entry) => entry.level === 'warn' && entry.message === 'project code prune failed')).toBe(true);
+    } finally {
+      await daemon?.stop();
+      pruneSpy.mockRestore();
+      threadsSpy.mockRestore();
+    }
+  });
+});
+
 describe('startDaemon thread wiring (US-007)', () => {
+  test('project code AC-14: thread host uses the daemon CredentialBroker for repository tokens', async () => {
+    const f = await fixture();
+    const daemon = await f.daemon({ tuning: { projectCodeFetchTimeoutMs: 4321 } });
+    try {
+      const deps = (daemon.supervisor as unknown as { deps: SupervisorDeps }).deps;
+      expect(deps.threads?.host.repoCredentials).toBeDefined();
+      expect(deps.threads?.host.repoCredentials as unknown).toBe(deps.threads?.host.credentials);
+      expect(deps.threads?.tuning.projectCodeFetchTimeoutMs).toBe(4321);
+    } finally { await daemon.stop(); }
+  });
   test('AC-1: nax mode configures nax-agent credentials once, for the runner\'s nax home', async () => {
     const f = await fixture();
     const calls: Array<{ configDir(): string }> = [];

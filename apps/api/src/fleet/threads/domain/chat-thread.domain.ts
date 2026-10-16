@@ -49,6 +49,11 @@ export interface ThreadSession {
   stale?: true;
   /** Fleet S5b 1b-D4: the runner hosting this session does not advertise `kodaTools`, so its sessions get none. */
   kodaToolsUnavailableOn?: string;
+  /**
+   * Fleet S5b 1c-b-D8: the runner hosting this PROJECT session does not advertise `projectCode`, so the session reads
+   * no project code. Absent on a REPO thread's session and on a runner that advertised the capability.
+   */
+  projectCodeUnavailableOn?: string;
 }
 
 /**

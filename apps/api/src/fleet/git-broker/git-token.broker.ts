@@ -27,8 +27,14 @@ export class GitTokenBroker {
     private readonly gitlab: GitLabTokenSource,
   ) {}
 
-  async mint(req: { jobId: string; leaseEpoch: number; repo: FleetRepoRef }, now = new Date()): Promise<MintResult> {
-    const key = `${req.jobId}:${req.leaseEpoch}`;
+  /**
+   * Fleet S5b 1c-b-D4: `readOnly: true` mints one project repository's read-only token for a PROJECT session.
+   * It is cached under its own key (per job, epoch and repository), and its result carries the `repoId` so the
+   * runner can tell which repository a token belongs to. Write mints are unchanged.
+   */
+  async mint(req: { jobId: string; leaseEpoch: number; repo: FleetRepoRef; readOnly?: boolean }, now = new Date()): Promise<MintResult> {
+    const readOnly = req.readOnly === true;
+    const key = readOnly ? `${req.jobId}:${req.leaseEpoch}:ro:${req.repo.id}` : `${req.jobId}:${req.leaseEpoch}`;
     const cached = this.cache.get(key);
     const reuseMarginMs = this.fleetConfig.gitTokenReuseMarginSec * 1000;
     if (cached && Date.parse(cached.expiresAt) - now.getTime() > reuseMarginMs) return { ok: true, token: cached };
@@ -37,10 +43,12 @@ export class GitTokenBroker {
       this.cache = new Map([...[...this.cache].filter(([, t]) => Date.parse(t.expiresAt) > now.getTime()), [key, token]]);
       return { ok: true, token };
     } catch (error) {
-      if (error instanceof RepoCheckException) return { ok: false, error: { jobId: req.jobId, reason: error.reason } };
+      // Only a read-only mint is per repository, so only it names one on the error.
+      const withRepoId = readOnly ? { repoId: req.repo.id } : {};
+      if (error instanceof RepoCheckException) return { ok: false, error: { jobId: req.jobId, reason: error.reason, ...withRepoId } };
       // Never log the error message: a provider body could echo a credential.
       this.logger.error(`Git token mint failed for job ${req.jobId} (${error instanceof Error ? error.name : 'unknown'})`);
-      return { ok: false, error: { jobId: req.jobId, reason: 'provider_error' } };
+      return { ok: false, error: { jobId: req.jobId, reason: 'provider_error', ...withRepoId } };
     }
   }
 
@@ -48,13 +56,17 @@ export class GitTokenBroker {
     this.cache = new Map([...this.cache].filter(([key]) => !key.startsWith(`${jobId}:`)));
   }
 
-  private async fresh(req: { jobId: string; repo: FleetRepoRef }, now: Date): Promise<GitToken> {
-    const { repo } = req;
+  private async fresh(req: { jobId: string; repo: FleetRepoRef; readOnly?: boolean }, now: Date): Promise<GitToken> {
+    const { repo, readOnly } = req;
     if (repo.provider === 'github') {
       if (repo.githubInstallationId === null) throw new RepoCheckException('app_not_installed');
-      const { token, expiresAt } = await this.github.mintInstallationToken(repo.githubInstallationId, repo.name);
-      return { jobId: req.jobId, token, username: 'x-access-token', expiresAt: expiresAt.toISOString() };
+      const { token, expiresAt } = readOnly
+        ? await this.github.mintReadOnlyToken(repo.githubInstallationId, repo.name)
+        : await this.github.mintInstallationToken(repo.githubInstallationId, repo.name);
+      return { jobId: req.jobId, token, username: 'x-access-token', expiresAt: expiresAt.toISOString(), ...(readOnly ? { repoId: repo.id } : {}) };
     }
+    // Fleet S5b defers read-only GitLab access (spec §1c-b-R2): never fall back to the write-capable stored token.
+    if (readOnly) throw new RepoCheckException('provider_error');
     const token = await this.gitlab.resolve(repo.projectId, repo.owner, repo.name);
     return { jobId: req.jobId, token, username: 'oauth2', expiresAt: new Date(now.getTime() + this.fleetConfig.gitlabTokenTtlSec * 1000).toISOString() };
   }

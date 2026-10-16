@@ -274,3 +274,56 @@ describe('parseAssign koda tools (US-006 AC-1..AC-4)', () => {
     if (parsed.ok) expect(parsed.assign.thread?.kodaTools).toEqual([descriptor]);
   });
 });
+
+const PROJECT_REPO = { repoId: 'r1', owner: 'o', name: 'n', defaultBranch: 'main', cloneUrl: 'https://github.com/o/n.git' };
+const UNAVAILABLE = { owner: 'o', name: 'g', reason: 'no installation' as const };
+describe('project code ASSIGN', () => {
+  test('project code AC-1: copies both repository arrays', () => {
+    const { assign } = threadFixture({ kind: 'PROJECT', projectRepos: [PROJECT_REPO], projectReposUnavailable: [UNAVAILABLE] } as never);
+    const parsed = parseAssign(cmd(assign));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error(parsed.detail);
+    expect(parsed.assign.thread?.projectRepos).toEqual([PROJECT_REPO]);
+    expect(parsed.assign.thread?.projectReposUnavailable).toEqual([UNAVAILABLE]);
+    expect(parsed.assign.thread?.projectRepos).not.toBe(assign.thread?.projectRepos);
+    expect(parsed.assign.thread?.projectRepos?.[0]).not.toBe(PROJECT_REPO);
+  });
+  test.each([
+    'bad', Array(11).fill(PROJECT_REPO), null, [null],
+    ...[{ repoId: '../x' }, { repoId: 'x'.repeat(65) }, { owner: 'a//b' }, { name: 'a/b' },
+      { defaultBranch: '' }, { defaultBranch: 'x'.repeat(256) }, { defaultBranch: 'a\nb' },
+      { cloneUrl: 'file:///tmp/x' }, { cloneUrl: 'http://github.com/o/n.git' }, { cloneUrl: 'not a url' }]
+      .map((over) => [{ ...PROJECT_REPO, ...over }]),
+  ].map((projectRepos) => ({ projectRepos })))('project code AC-2: rejects malformed projectRepos %j', ({ projectRepos }) => {
+    expect(parseAssign(cmd(threadFixture({ kind: 'PROJECT', projectRepos } as never).assign))).toEqual({ ok: false, detail: 'invalid project repos' });
+  });
+  test.each([
+    { projectReposUnavailable: Array(51).fill(UNAVAILABLE) },
+    { projectReposUnavailable: [{ ...UNAVAILABLE, reason: 'other' }] },
+    { projectReposUnavailable: 'bad' }, { projectReposUnavailable: [null] },
+    { projectReposUnavailable: [{ ...UNAVAILABLE, owner: 'a//b' }] },
+    { projectReposUnavailable: [{ ...UNAVAILABLE, name: 'a/b' }] },
+    { kind: 'REPO', projectRepos: [PROJECT_REPO] },
+    { kind: undefined, projectRepos: [] },
+  ])('project code AC-3: rejects unavailable or REPO lists %j', (over) => {
+    expect(parseAssign(cmd(threadFixture({ kind: 'PROJECT', ...over } as never).assign))).toEqual({ ok: false, detail: 'invalid project repos' });
+  });
+  test('project code boundaries: maximum lists and all unavailable reasons are accepted and sanitized', () => {
+    const projectRepos = Array.from({ length: 10 }, (_, i) => ({ ...PROJECT_REPO, repoId: `r${i}`, extra: true }));
+    const projectReposUnavailable = Array.from({ length: 50 }, (_, i) => ({ ...UNAVAILABLE, reason: ['no installation', 'limit', 'not a GitHub repository'][i % 3], extra: true }));
+    const parsed = parseAssign(cmd(threadFixture({ kind: 'PROJECT', projectRepos, projectReposUnavailable } as never).assign));
+    if (!parsed.ok) throw new Error(parsed.detail);
+    expect(parsed.assign.thread?.projectRepos).toHaveLength(10);
+    expect(parsed.assign.thread?.projectReposUnavailable).toHaveLength(50);
+    expect(parsed.assign.thread?.projectRepos?.[0]).not.toHaveProperty('extra');
+    expect(parsed.assign.thread?.projectReposUnavailable?.[0]).not.toHaveProperty('extra');
+    expect(parsed.assign.thread?.projectReposUnavailable?.[0]).not.toBe(projectReposUnavailable[0]);
+  });
+  test('project code AC-4: absent arrays stay absent', () => {
+    const parsed = parseAssign(cmd(threadFixture({ kind: 'PROJECT' }).assign));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error(parsed.detail);
+    expect(parsed.assign.thread).not.toHaveProperty('projectRepos');
+    expect(parsed.assign.thread).not.toHaveProperty('projectReposUnavailable');
+  });
+});

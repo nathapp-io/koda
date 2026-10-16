@@ -38,6 +38,11 @@ export function showKodaToolsNotice(thread: ThreadDetailDto): boolean {
   return thread.session?.state === 'live' && thread.session.kodaToolsUnavailableOn !== undefined
 }
 
+/** S5b 1c-b-D16: a live PROJECT session on a runner without projectCode cannot read the project's repos. */
+export function showProjectCodeNotice(thread: ThreadDetailDto): boolean {
+  return thread.session?.state === 'live' && thread.session.projectCodeUnavailableOn !== undefined
+}
+
 const COMPLETED = 'COMPLETED'
 
 const blocked = (reason: HandoffBlock): HandoffActionState => ({ enabled: false, reason })

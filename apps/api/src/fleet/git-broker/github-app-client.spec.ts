@@ -92,6 +92,34 @@ describe('GitHubAppClient', () => {
     await expect(client.mintInstallationToken(BigInt(78), 'app')).rejects.toMatchObject({ reason: 'app_not_installed' });
   });
 
+  describe('mintReadOnlyToken (fleet S5b US-001 AC5-AC6)', () => {
+    const MINT = 'POST /app/installations/42/access_tokens';
+
+    it('US-001 AC5: posts a contents/metadata read body and resolves the minted token', async () => {
+      forge.routes.set(MINT, (req) => {
+        expect(req.body).toEqual({ repositories: ['sandbox'], permissions: { contents: 'read', metadata: 'read' } });
+        return { status: 201, body: { token: 'ghs_ro', expires_at: '2026-10-01T01:00:00Z' } };
+      });
+      await expect(client.mintReadOnlyToken(BigInt(42), 'sandbox')).resolves.toEqual({ token: 'ghs_ro', expiresAt: new Date('2026-10-01T01:00:00Z') });
+      expect(forge.requests.at(-1)?.path).toBe('/app/installations/42/access_tokens');
+    });
+
+    const failures: Array<[number, Record<string, unknown>, string]> = [
+      [404, {}, 'app_not_installed'],
+      [403, {}, 'app_permissions_insufficient'],
+      [422, {}, 'app_permissions_insufficient'],
+      [500, {}, 'provider_error'],
+      [201, { expires_at: '2026-10-01T01:00:00Z' }, 'provider_error'],
+      [201, { token: 'ghs_ro' }, 'provider_error'],
+      [201, { token: 'ghs_ro', expires_at: 'soon' }, 'provider_error'],
+    ];
+
+    it.each(failures)('US-001 AC6: maps a %s answer with %j to %s', async (status, body, reason) => {
+      forge.routes.set(MINT, () => ({ status, body }));
+      await expect(client.mintReadOnlyToken(BigInt(42), 'sandbox')).rejects.toMatchObject({ reason });
+    });
+  });
+
   it('reports github_app_not_configured when the key file is unset', async () => {
     const bare = new GitHubAppClient({ ...fleetCfg, githubAppPrivateKeyFile: undefined } as never, { githubApiUrl: forge.url } as never, new FleetHttpClient(fleetCfg as never), { mint: vi.fn() } as unknown as GitTokenBroker);
     await expect(bare.verifyRepo('o', 'r')).rejects.toMatchObject({ reason: 'github_app_not_configured' });

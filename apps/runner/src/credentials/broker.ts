@@ -29,6 +29,12 @@ export interface CredentialProvider {
   release(job: JobRow): Promise<void>;
 }
 
+/** Read-only project repository credentials; no job-local command shims. */
+export interface RepoCredentialProvider {
+  acquireRepo(job: JobRow, repo: { repoId: string; cloneUrl: string }, options: AcquireOptions): Promise<AcquireResult>;
+  releaseRepo(job: JobRow, repoId: string): Promise<void>;
+}
+
 export interface BrokerTiming {
   readonly waitMs: number;
   readonly serveWaitMs: number;
@@ -49,7 +55,7 @@ export interface BrokerDeps {
 }
 
 const NONE: JobCredentials = { helper: null, binDir: null };
-const keyOf = (job: JobRow): string => `${job.jobId}:${job.leaseEpoch}`;
+const keyOf = (job: JobRow, repoId?: string): string => `${job.jobId}:${job.leaseEpoch}${repoId === undefined ? '' : `:${repoId}`}`;
 
 function credentialTarget(cloneUrl: string): URL | null {
   const url = new URL(cloneUrl);
@@ -65,9 +71,10 @@ async function closeQuietly(pending: Promise<CredentialServer>): Promise<void> {
 }
 
 /** Design §3.1: one socket per (job, epoch), answered from the TokenCache, and the job's shims. */
-export class CredentialBroker implements CredentialProvider {
+export class CredentialBroker implements CredentialProvider, RepoCredentialProvider {
   private servers: ReadonlyMap<string, Promise<CredentialServer>> = new Map();
   private closing = false;
+  private readonly repositories = new Map<string, Set<string>>();
 
   constructor(private readonly deps: BrokerDeps) {}
 
@@ -91,8 +98,43 @@ export class CredentialBroker implements CredentialProvider {
     return refused ?? { ok: true, credentials };
   }
 
+  async acquireRepo(job: JobRow, repo: { repoId: string; cloneUrl: string }, options: AcquireOptions): Promise<AcquireResult> {
+    const target = credentialTarget(repo.cloneUrl);
+    if (!target) return { ok: true, credentials: NONE };
+    const { tokens, socketDir, runnerId, selfCommand } = this.deps;
+    const { repoId } = repo;
+    tokens.want(job.jobId, job.leaseEpoch, repoId);
+    const key = keyOf(job);
+    const repos = this.repositories.get(key) ?? new Set<string>();
+    repos.add(repoId);
+    this.repositories.set(key, repos);
+    const sock = socketPathFor(socketDir, runnerId, job.jobId, job.leaseEpoch, repoId);
+    try {
+      await this.serve(job, sock, target, repoId);
+    } catch (error) {
+      if (error instanceof SocketDirError) return { ok: false, reason: 'git credentials: socket dir unsafe' };
+      throw error;
+    }
+    const credentials: JobCredentials = { helper: helperValue(selfCommand, sock), binDir: null };
+    if (!options.wait) return { ok: true, credentials };
+    const refused = await this.firstToken(job, options.isCancelled, repoId);
+    return refused ?? { ok: true, credentials };
+  }
+
+  async releaseRepo(job: JobRow, repoId: string): Promise<void> {
+    this.deps.tokens.drop(job.jobId, job.leaseEpoch, repoId);
+    const key = keyOf(job, repoId);
+    const pending = this.servers.get(key);
+    this.servers = new Map([...this.servers].filter(([other]) => other !== key));
+    const repos = this.repositories.get(keyOf(job));
+    repos?.delete(repoId);
+    if (repos?.size === 0) this.repositories.delete(keyOf(job));
+    if (pending) await closeQuietly(pending);
+  }
+
   /** D90: this epoch's socket closes, its token is forgotten, its shims go. Other epochs are untouched. */
   async release(job: JobRow): Promise<void> {
+    for (const repoId of [...(this.repositories.get(keyOf(job)) ?? [])]) await this.releaseRepo(job, repoId);
     const key = keyOf(job);
     this.deps.tokens.drop(job.jobId, job.leaseEpoch);
     const pending = this.servers.get(key);
@@ -111,15 +153,15 @@ export class CredentialBroker implements CredentialProvider {
     await Promise.all(pending.map(closeQuietly));
   }
 
-  private async serve(job: JobRow, sock: string, target: URL): Promise<void> {
-    const key = keyOf(job);
+  private async serve(job: JobRow, sock: string, target: URL, repoId?: string): Promise<void> {
+    const key = keyOf(job, repoId);
     const existing = this.servers.get(key);
     if (existing) {
       await existing;
       return;
     }
     await ensureSocketDir(this.deps.socketDir, this.deps.uid ?? process.getuid?.() ?? 0);   // D109: not only at daemon start
-    const pending = CredentialServer.listen(sock, () => this.reply(job, target));
+    const pending = CredentialServer.listen(sock, () => this.reply(job, target, repoId));
     this.servers = new Map([...this.servers, [key, pending]]);
     try {
       await pending;
@@ -130,12 +172,12 @@ export class CredentialBroker implements CredentialProvider {
   }
 
   /** D79: the socket's answer; waits up to serveWaitMs for a token that has not arrived yet. */
-  private async reply(job: JobRow, target: URL): Promise<CredentialReply> {
+  private async reply(job: JobRow, target: URL, repoId?: string): Promise<CredentialReply> {
     const { tokens, nowMs, sleep, timing } = this.deps;
     const deadline = nowMs() + timing.serveWaitMs;
     for (;;) {
-      if (!tokens.wanted(job.jobId, job.leaseEpoch)) return { ok: false, reason: 'job ended' };
-      const state = tokens.state(job.jobId, job.leaseEpoch, nowMs());
+      if (!tokens.wanted(job.jobId, job.leaseEpoch, repoId)) return { ok: false, reason: 'job ended' };
+      const state = tokens.state(job.jobId, job.leaseEpoch, nowMs(), repoId);
       if (state.kind === 'token') {
         const { username, token, expiresAt } = state.token;
         return { ok: true, username, token, expiresAt, protocol: target.protocol.slice(0, -1), host: target.host };
@@ -147,11 +189,11 @@ export class CredentialBroker implements CredentialProvider {
   }
 
   /** D82: null once the first token is there; otherwise why prepare must stop. */
-  private async firstToken(job: JobRow, isCancelled?: () => boolean): Promise<Extract<AcquireResult, { ok: false }> | null> {
+  private async firstToken(job: JobRow, isCancelled?: () => boolean, repoId?: string): Promise<Extract<AcquireResult, { ok: false }> | null> {
     const { tokens, nowMs, sleep, timing } = this.deps;
     const deadline = nowMs() + timing.waitMs;
     for (;;) {
-      const state = tokens.state(job.jobId, job.leaseEpoch, nowMs());
+      const state = tokens.state(job.jobId, job.leaseEpoch, nowMs(), repoId);
       if (state.kind === 'token') return null;
       if (state.kind === 'error') return { ok: false, reason: `git token: ${state.reason}` };
       if (this.closing || isCancelled?.()) return { ok: false, reason: 'cancelled', cancelled: true };

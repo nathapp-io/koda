@@ -125,3 +125,48 @@ describe('TokenCache want, drop and listeners', () => {
     expect(cache.requests(T0)).toEqual([]);
   });
 });
+
+describe('project code tokens', () => {
+  test('project code AC-5: job and repository requests coexist without an undefined key', () => {
+    const c = new TokenCache(timing);
+    c.want('j1', 1); c.want('j1', 1, 'r1');
+    expect(c.requests(T0)).toEqual([{ jobId: 'j1', leaseEpoch: 1 }, { jobId: 'j1', leaseEpoch: 1, repoId: 'r1' }]);
+    expect(c.requests(T0)[0]).not.toHaveProperty('repoId');
+  });
+  test('project code AC-6: prioritizes job tokens then first-wanted repositories; overflow waits', () => {
+    const c = new TokenCache(timing);
+    for (let i = 0; i < 70; i++) c.want('j1', 1, `r${i}`);
+    c.want('j1', 1);
+    const requests = c.requests(T0);
+    expect(requests).toEqual([{ jobId: 'j1', leaseEpoch: 1 }, ...Array.from({ length: 63 }, (_, i) => ({ jobId: 'j1', leaseEpoch: 1, repoId: `r${i}` }))]);
+    c.apply(requests, requests.map((r) => ({ ...tok(r.jobId, iso(T0 + 3_600_000)), ...(r.repoId === undefined ? {} : { repoId: r.repoId }) })), [], T0);
+    expect(c.requests(T0).map((r) => r.repoId)).toEqual(['r63', 'r64', 'r65', 'r66', 'r67', 'r68', 'r69']);
+  });
+  test('project code AC-7: applies repository token only to the requested repository and epoch', () => {
+    const c = new TokenCache(timing);
+    c.want('j1', 1); c.want('j1', 1, 'r1');
+    c.apply(c.requests(T0), [{ ...tok('j1', iso(T0 + 3_600_000)), repoId: 'r1' }], [], T0);
+    expect(c.state('j1', 1, T0, 'r1').kind).toBe('token');
+    expect(c.state('j1', 1, T0)).toEqual({ kind: 'pending' });
+  });
+  test('project code AC-8: applies and drops repository error without touching job token demand', () => {
+    const c = new TokenCache(timing);
+    c.want('j1', 1); c.want('j1', 1, 'r1');
+    c.apply(c.requests(T0), [], [{ jobId: 'j1', repoId: 'r1', reason: 'repo_not_assigned' }], T0);
+    expect(c.state('j1', 1, T0, 'r1')).toEqual({ kind: 'error', reason: 'repo_not_assigned' });
+    c.drop('j1', 1, 'r1');
+    expect(c.wanted('j1', 1, 'r1')).toBe(false);
+    expect(c.wanted('j1', 1)).toBe(true);
+  });
+  test('project code: highest epoch is independent per repository, stale and unsolicited replies ignored', () => {
+    const c = new TokenCache(timing);
+    c.want('j1', 1, 'r1'); c.want('j1', 1, 'r2'); c.want('j1', 2, 'r1'); c.want('j1', 1);
+    const requests = c.requests(T0);
+    expect(requests).toEqual([{ jobId: 'j1', leaseEpoch: 1 }, { jobId: 'j1', leaseEpoch: 2, repoId: 'r1' }, { jobId: 'j1', leaseEpoch: 1, repoId: 'r2' }]);
+    c.apply(requests, ['r1', 'r2', 'r3'].map((repoId) => ({ ...tok('j1', iso(T0 + 3_600_000)), repoId })), [], T0);
+    expect(c.state('j1', 1, T0, 'r1').kind).toBe('pending');
+    expect(c.state('j1', 2, T0, 'r1').kind).toBe('token');
+    expect(c.state('j1', 1, T0, 'r2').kind).toBe('token');
+    expect(c.wanted('j1', 1, 'r3')).toBe(false);
+  });
+});

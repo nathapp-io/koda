@@ -28,9 +28,11 @@ function matching(messages: Msg[], where: { threadId: string; turnId?: string; r
 }
 
 /** An in-memory stand-in for the Prisma calls the fold makes. Enough to pin the fold's row effects. */
-function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?: number; messages?: Msg[]; pendingQuestion?: unknown; session?: unknown; resume?: boolean; writtenPaths?: string[]; jobState?: string; leaseEpoch?: number; runnerId?: string | null; runner?: { name: string; capabilities: unknown } | null } = {}) {
+function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?: number; messages?: Msg[]; pendingQuestion?: unknown; session?: unknown; resume?: boolean; writtenPaths?: string[]; jobState?: string; leaseEpoch?: number; runnerId?: string | null; runner?: { name: string; capabilities: unknown } | null; kind?: string } = {}) {
   const messages: Msg[] = [...(opts.messages ?? [])];
   const thread = {
+    // 1c-b-D8: the session_started branch reads the thread's kind (PROJECT sessions get the code-tools notice).
+    kind: opts.kind ?? 'REPO',
     id: 'T', nextSeq: opts.nextSeq ?? 2, lastActivityAt: new Date(0),
     pendingQuestion: (opts.pendingQuestion === undefined ? { requestId: 'q1' } : opts.pendingQuestion) as unknown,
     session: (opts.session ?? null) as unknown,
@@ -504,6 +506,87 @@ describe('PrismaThreadIngestRepository.fold tools notice (US-005)', () => {
     });
     await repoWith(client).fold(batch([{ type, reason: 'idle' }]));
     expect(thread.session).toMatchObject({ jobId: 'J', kodaToolsUnavailableOn: 'wk-mac' });
+  });
+});
+
+describe('PrismaThreadIngestRepository.fold project code notice (US-003)', () => {
+  it('AC-9: a PROJECT session on a runner whose capabilities lack projectCode names the runner', async () => {
+    const { client, thread } = fakeClient({
+      nextSeq: 2, kind: 'PROJECT', runnerId: 'r1', runner: { name: 'wk-mac', capabilities: { kodaTools: true } },
+    });
+    await repoWith(client).fold(batch([sessionStarted()]));
+    expect(thread.session).toEqual({
+      jobId: 'J', state: 'live', resumed: false, contextReset: false, reason: null, at: '2026-10-14T00:00:00.000Z',
+      projectCodeUnavailableOn: 'wk-mac',
+    });
+    expect(client.chatThread.findUnique).toHaveBeenCalledWith({ where: { id: 'T' }, select: { kind: true } });
+  });
+
+  it('AC-9: records the notice beside the koda tools notice when neither capability is advertised', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, kind: 'PROJECT', runnerId: 'r1', runner: { name: 'wk-mac', capabilities: {} } });
+    await repoWith(client).fold(batch([sessionStarted()]));
+    expect(thread.session).toMatchObject({ kodaToolsUnavailableOn: 'wk-mac', projectCodeUnavailableOn: 'wk-mac' });
+  });
+
+  it('AC-10: a PROJECT session on a runner with projectCode stores no notice', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, kind: 'PROJECT', runnerId: 'r1', runner: { name: 'wk-mac', capabilities: { projectCode: true } } });
+    await repoWith(client).fold(batch([sessionStarted()]));
+    expect(thread.session).not.toHaveProperty('projectCodeUnavailableOn');
+    expect(thread.session).toMatchObject({ jobId: 'J', state: 'live' });
+  });
+
+  it('AC-10: a REPO session on a runner without projectCode stores no notice', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, kind: 'REPO', runnerId: 'r1', runner: { name: 'wk-mac', capabilities: {} } });
+    await repoWith(client).fold(batch([sessionStarted()]));
+    expect(thread.session).not.toHaveProperty('projectCodeUnavailableOn');
+    expect(thread.session).toMatchObject({ jobId: 'J', state: 'live', kodaToolsUnavailableOn: 'wk-mac' });
+  });
+
+  it('stores no notice for a PROJECT thread on a job with no runner, and never reads the kind', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, kind: 'PROJECT', runnerId: null });
+    await repoWith(client).fold(batch([sessionStarted()]));
+    expect(thread.session).not.toHaveProperty('projectCodeUnavailableOn');
+    expect(client.chatThread.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('stores a projectCode: false value as "no projectCode"', async () => {
+    const { client, thread } = fakeClient({ nextSeq: 2, kind: 'PROJECT', runnerId: 'r1', runner: { name: 'wk-mac', capabilities: { projectCode: false } } });
+    await repoWith(client).fold(batch([sessionStarted()]));
+    expect(thread.session).toMatchObject({ projectCodeUnavailableOn: 'wk-mac' });
+  });
+
+  it('AC-11: a close of that session keeps the notice', async () => {
+    const { client, thread } = fakeClient({
+      nextSeq: 2, kind: 'PROJECT',
+      session: { jobId: 'J', state: 'live', resumed: false, contextReset: false, reason: null, at: 'A', projectCodeUnavailableOn: 'wk-mac' },
+    });
+    await repoWith(client).fold(batch([{ type: 'session_closed', reason: 'idle' }]));
+    expect(thread.session).toMatchObject({ jobId: 'J', state: 'closed', projectCodeUnavailableOn: 'wk-mac' });
+  });
+
+  it('AC-11: a failure of that session keeps the notice', async () => {
+    const { client, thread } = fakeClient({
+      nextSeq: 2, kind: 'PROJECT',
+      session: { jobId: 'J', state: 'live', resumed: false, contextReset: false, reason: null, at: 'A', projectCodeUnavailableOn: 'wk-mac' },
+    });
+    await repoWith(client).fold(batch([{ type: 'session_failed', reason: 'session_error' }]));
+    expect(thread.session).toMatchObject({ jobId: 'J', state: 'failed', projectCodeUnavailableOn: 'wk-mac' });
+  });
+
+  it('a close for another job does not inherit the previous job notice', async () => {
+    const { client, thread } = fakeClient({
+      nextSeq: 2,
+      session: { jobId: 'old-job', state: 'live', resumed: false, contextReset: false, reason: null, at: 'A', projectCodeUnavailableOn: 'wk-mac' },
+    });
+    await repoWith(client).fold(batch([{ type: 'session_closed', reason: 'idle' }]));
+    expect(thread.session).not.toHaveProperty('projectCodeUnavailableOn');
+  });
+
+  it('keeps the stale-start catch-up guard: no notice for a start after the job ended', async () => {
+    const closed = { jobId: 'J', state: 'failed', resumed: false, contextReset: false, reason: 'runner silent', at: '2026-10-14T00:01:00.000Z' };
+    const { client, thread } = fakeClient({ nextSeq: 2, jobState: 'CRASHED', kind: 'PROJECT', session: closed, runnerId: 'r1', runner: { name: 'wk-mac', capabilities: {} } });
+    await repoWith(client).fold(batch([sessionStarted()]));
+    expect(thread.session).toEqual(closed);
   });
 });
 

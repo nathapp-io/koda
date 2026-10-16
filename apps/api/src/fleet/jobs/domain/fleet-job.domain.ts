@@ -213,6 +213,11 @@ export type PlacementRunnerRow = PlacementRunner & { bootId: string };
 
 export interface IFleetJobRepository {
   findRepo(repoId: string): Promise<FleetRepoRef | null>;
+  /**
+   * 1c-b-D7: the project's repositories in the anchor order (`createdAt` ascending, ties by `id` ascending), at most
+   * 60 (`PROJECT_CODE_LIMITS.maxRepos + maxUnavailable`), for a PROJECT session's ASSIGN and the token fence.
+   */
+  findProjectRepos(projectId: string): Promise<FleetRepoRef[]>;
   /** @throws DuplicateActiveJobError */
   createJob(data: NewFleetJob): Promise<FleetJobRecord>;
   findActiveJobId(repoId: string, feature: string): Promise<string | null>;
@@ -238,6 +243,8 @@ export interface IFleetJobRepository {
   lockRunners(ids?: readonly string[]): Promise<string[]>;
   findActiveLoads(runnerIds: readonly string[]): Promise<ActiveJobRef[]>;
   findThreadAssign(jobId: string): Promise<ThreadAssign | null>;
+  /** Minimal scope projection for the per-repository read-only token fence. */
+  findThreadTokenScope(jobId: string): Promise<{ kind: 'REPO' | 'PROJECT'; action: string } | null>;
   pinThreadRunner(threadId: string, runnerId: string): Promise<void>;
 
   /** Takes the next server seq from FleetJob.eventSeq (row-locked by the increment). */

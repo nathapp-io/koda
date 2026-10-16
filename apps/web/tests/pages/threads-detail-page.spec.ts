@@ -4,7 +4,7 @@ import { ref } from 'vue'
 import { createRequire } from 'node:module'
 import { mountSfc, webFile, loadSfc } from '../helpers/mount-sfc'
 import type { FakeNode } from '../helpers/mount-sfc'
-import { uiStubs, i18nStub, toastRecorder } from '../helpers/fleet-harness'
+import { uiStubs, i18nStub, toastRecorder, enI18n } from '../helpers/fleet-harness'
 import type { ChatMessageDto, ThreadDetailDto } from '~/lib/thread-types'
 import type { FleetRunnerSummary } from '~/lib/fleet-types'
 
@@ -177,9 +177,13 @@ function mountPage(over: {
   const toolChip = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadToolChip.vue'), { useI18n: () => i18nStub() })
   const questionCard = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadQuestionCard.vue'), { useI18n: () => i18nStub() })
   const jobCard = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadJobCard.vue'), { useI18n: () => i18nStub() })
+  // US-008: the project-code notice is mounted by the page itself, so the real component (not a
+  // stub) is what AC-6 asserts on.
+  const projectCodeNotice = loadSfc(webFile('components', 'fleet', 'threads', 'ThreadProjectCodeNotice.vue'), { useI18n: () => enI18n() })
   const app = mountSfc(pageFile, {
     components: {
       ...uiStubs,
+      FleetThreadsThreadProjectCodeNotice: projectCodeNotice,
       ThreadHeader: header,
       FleetThreadsThreadHeader: header,
       ThreadTimeline: timeline,
@@ -296,6 +300,24 @@ describe('US-006 AC14-AC15: pages/[project]/threads/[id].vue', () => {
     await m.settle()
 
     expect(headTitle(m.head())).toBe('• Auth spec')
+    m.app.unmount()
+  })
+
+  test('US-008 AC-6: a PROJECT thread whose live session reports projectCodeUnavailableOn renders the project-code notice', async () => {
+    const m = mountPage({
+      thread: threadDetail({
+        kind: 'PROJECT',
+        session: {
+          jobId: 'j1', state: 'live', resumed: false, contextReset: false, reason: null, at: '',
+          projectCodeUnavailableOn: 'wk-mac',
+        },
+      }),
+    })
+    await m.settle()
+
+    const notice = m.app.one('[data-testid="thread-project-code-notice"]')
+    expect(notice).toBeDefined()
+    expect(notice === undefined ? null : m.app.textOf(notice)).toContain('wk-mac')
     m.app.unmount()
   })
 })

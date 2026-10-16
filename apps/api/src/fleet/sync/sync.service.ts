@@ -11,6 +11,7 @@ import { GitTokenBroker } from '../git-broker/git-token.broker';
 import { FleetJobLivePublisher } from '../jobs/fleet-job-live.publisher';
 import { PlacementService } from '../jobs/placement.service';
 import { RunnerNotifier } from '../jobs/runner-notifier';
+import { fetchableProjectRepos } from '../jobs/project-repos-assign';
 import type { FleetRepoRef } from '../jobs/domain/fleet-job.domain';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { RUNNER_HELD_STATES, isTerminal } from '../jobs/job-state';
@@ -109,12 +110,12 @@ export class SyncService {
   }
 
   /** Spec §6.3: fence each request (ABANDON on a stale epoch), then mint outside any transaction. */
-  protected async grantTokens(runnerId: string, requests: ReadonlyArray<{ jobId: string; leaseEpoch: number }>, now: Date) {
+  protected async grantTokens(runnerId: string, requests: ReadonlyArray<{ jobId: string; leaseEpoch: number; repoId?: string }>, now: Date) {
     const gitTokens: GitToken[] = [];
     const gitTokenErrors: GitTokenError[] = [];
     const unknownJobIds: string[] = [];
     const toMint = await this.txManager.run(async () => {
-      const granted: Array<{ jobId: string; leaseEpoch: number; repo: FleetRepoRef }> = [];
+      const granted: Array<{ jobId: string; leaseEpoch: number; repo: FleetRepoRef; readOnly?: boolean }> = [];
       for (const req of requests) {
         // Row lock: two overlapping syncs from one runner must not both queue an ABANDON.
         const job = await this.repo.lockById(req.jobId);
@@ -123,7 +124,15 @@ export class SyncService {
         } else if (!this.fence.holds(job, runnerId, req.leaseEpoch)) {
           await this.fence.abandon(runnerId, job, req.leaseEpoch);
         } else if (!(RUNNER_HELD_STATES as readonly string[]).includes(job.state)) {
-          gitTokenErrors.push({ jobId: job.id, reason: 'job_not_active' });
+          gitTokenErrors.push({ jobId: job.id, reason: 'job_not_active', ...(req.repoId !== undefined ? { repoId: req.repoId } : {}) });
+        } else if (req.repoId !== undefined) {
+          // No stored ASSIGN scope: recompute with the same ordered, capped walk used by placement.
+          const scope = job.command === 'THREAD' ? await this.repo.findThreadTokenScope(job.id) : null;
+          const repos = scope?.kind === 'PROJECT' && scope.action === 'SESSION'
+            ? fetchableProjectRepos(await this.repo.findProjectRepos(job.projectId)) : [];
+          const repo = repos.find((r) => r.id === req.repoId);
+          if (repo) granted.push({ jobId: job.id, leaseEpoch: job.leaseEpoch, repo, readOnly: true });
+          else gitTokenErrors.push({ jobId: job.id, repoId: req.repoId, reason: 'repo_not_assigned' });
         } else {
           const repo = await this.repo.findRepo(job.repoId);
           if (repo) granted.push({ jobId: job.id, leaseEpoch: job.leaseEpoch, repo });
