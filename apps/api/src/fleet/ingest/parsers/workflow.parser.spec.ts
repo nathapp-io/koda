@@ -61,5 +61,5 @@ describe('parseWorkflowResult', () => {
 });
 
 describe('workflow ingest version', () => {
-  it('AC-15 is version 2', () => expect(INGEST_PARSER_VERSION).toBe(2));
+  it('AC-15 is version 3', () => expect(INGEST_PARSER_VERSION).toBe(3));
 });

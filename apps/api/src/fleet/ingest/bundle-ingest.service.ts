@@ -77,9 +77,11 @@ export class BundleIngestService {
       const job = await this.jobs.lockById(claim.jobId);
       if (!job) return null;
       const parsed = parseBundle(files, job.leaseEpoch === claim.leaseEpoch ? job.naxRunId : null);
+      // S5b 3c-2-D1: outcomes are stored for RUN jobs only; every other command writes an empty list.
+      const isRun = job.command === 'RUN';
       await this.repo.replaceRows(
         { jobId: job.id, leaseEpoch: claim.leaseEpoch, projectId: job.projectId, repoId: job.repoId, runnerId: job.runnerId, naxRunId: parsed.naxRunId },
-        parsed.rows,
+        { ...parsed.rows, outcomes: isRun ? parsed.rows.outcomes ?? [] : [] },
       );
       const correction = computeCorrection({ job, leaseEpoch: claim.leaseEpoch, ledgerCostUsd: parsed.ledgerCostUsd, runStatus: parsed.runStatus, finish: parsed.finish, workflow: parsed.workflow ?? null, workflowOutcome: parsed.workflowOutcome ?? null, workflowUrl: parsed.workflowUrl ?? null });
       const changed = Object.keys(correction.patch).length > 0;
@@ -96,7 +98,8 @@ export class BundleIngestService {
       await this.repo.markOutcome(claim.id, {
         kind: parsed.partial ? 'partial' : 'done', files: parsed.files, liveCostUsd: correction.liveCostUsd, ledgerCostUsd: parsed.ledgerCostUsd, ingestedAt: now,
       });
-      return { event: this.live.event(updated), spendKeys: correction.costRaised ? jobSpendKeys(updated) : [], prFilled };
+      // `isRun` travels with the commit result for the post-commit outcome-index hook (S5b 3c-2-D8, US-004).
+      return { event: this.live.event(updated), spendKeys: correction.costRaised ? jobSpendKeys(updated) : [], prFilled, isRun };
     });
     if (!result) return;
     this.live.publish([result.event]);

@@ -8,10 +8,29 @@ describe('readBundleFiles (spec §2.3)', () => {
   it('AC-7 assigns the exact result path to its own slot', () => {
     expect(slotOf('workflow/result.json')).toBe('workflowResult');
   });
-  it('AC-8 keeps workflow reports and decisions unallowlisted', () => {
-    expect(slotOf('workflow/feature-report.md')).toBeNull();
-    expect(slotOf('workflow/decisions.jsonl')).toBeNull();
+  it('AC-1 maps the two workflow outcome files to their own slots', () => {
+    expect(slotOf('workflow/feature-report.md')).toBe('featureReport');
+    expect(slotOf('workflow/decisions.jsonl')).toBe('decisions');
+    expect(slotOf('workflow/x/feature-report.md')).toBeNull();
   });
+  it('AC-2 reads the feature report and the decisions log as single files', async () => {
+    const decisions = '{"id":"D1","kind":"ruling"}\n';
+    const gz = await tarGz([
+      { name: 'workflow/feature-report.md', body: '# R' },
+      { name: 'workflow/decisions.jsonl', body: decisions },
+    ]);
+    const files = await readBundleFiles(stream(gz));
+    expect(files.featureReport).toEqual({ name: 'workflow/feature-report.md', text: '# R' });
+    expect(files.decisions).toEqual({ name: 'workflow/decisions.jsonl', text: decisions });
+  });
+
+  it('AC-3 answers null for both when the bundle carries neither file', async () => {
+    const gz = await tarGz([{ name: 'workflow/result.json', body: '{"schemaVersion":1}' }]);
+    const files = await readBundleFiles(stream(gz));
+    expect(files.featureReport).toBeNull();
+    expect(files.decisions).toBeNull();
+  });
+
   it('collects only allowlisted paths, normalising a leading ./', async () => {
     const gz = await tarGz([
       { name: './nax-out/cost/a.jsonl', body: '{"x":1}\n' },

@@ -2,6 +2,7 @@ import type { Mock } from 'vitest';
 import { Readable } from 'stream';
 import { BundleIngestService } from './bundle-ingest.service';
 import { computeCorrection } from './ingest-corrections';
+import { parseBundle } from './parse-bundle';
 
 vi.mock('./bundle-reader', () => ({ readBundleFiles: vi.fn(async () => ({})) }));
 vi.mock('./parse-bundle', () => ({
@@ -53,5 +54,57 @@ describe('BundleIngestService notification outcomes (S4a §2.4, D513)', () => {
     const { svc, outcomes } = make({});
     await svc.ingestOne(now);
     expect(outcomes.onIngestCorrection).not.toHaveBeenCalled();
+  });
+});
+
+/** S5b US-001: what the parser produced for a RUN bundle that carries workflow/feature-report.md. */
+const reportRow = { kind: 'report', content: '# R' } as const;
+const parsedWithReport = {
+  naxRunId: 'run-1', runStatus: 'completed', workflow: null, workflowOutcome: null, workflowUrl: null,
+  rows: { costEvents: [], stories: [], reviews: [], outcomes: [reportRow] },
+  finish: null, files: {}, partial: false, ledgerCostUsd: '0',
+};
+const noCorrection = { patch: {}, costRaised: false, escalated: false, escalatedFrom: null, liveCostUsd: null };
+
+function makeForCommand(command: string) {
+  const job = {
+    id: 'j1', leaseEpoch: 1, naxRunId: 'run-1', projectId: 'p', repoId: 'r', runnerId: 'rn', state: 'COMPLETED',
+    command, requestedById: 'u', resultPrUrl: null, costSpentUsd: '0', stateReason: 'done', finishResult: null,
+    escalationReason: null, resultBranch: null, resultSha: null, workflow: null,
+  };
+  const repo = {
+    claimNext: vi.fn().mockResolvedValueOnce({ id: 'i1', artifactId: 'a1', jobId: 'j1', leaseEpoch: 1, attempts: 0 }).mockResolvedValue(null),
+    findArtifact: vi.fn(async () => ({ storageKey: 'k', expiredAt: null })),
+    replaceRows: vi.fn(), markOutcome: vi.fn(), markRetry: vi.fn(), markFailed: vi.fn(),
+  };
+  const store = { get: vi.fn(async () => Readable.from([])) };
+  const jobs = { lockById: vi.fn(async () => job), update: vi.fn(async () => job), appendEvent: vi.fn() };
+  const svc = new BundleIngestService(
+    repo as never, store as never, jobs as never, { event: vi.fn(() => ({})), publish: vi.fn() } as never,
+    { record: vi.fn() } as never, { signal: vi.fn() } as never, { run: (fn: () => unknown) => fn() } as never,
+    { upsertPrLinks: vi.fn() } as never, { onIngestCorrection: vi.fn() } as never,
+  );
+  return { svc, repo };
+}
+
+describe('BundleIngestService run outcomes (S5b US-001 AC-10/AC-11)', () => {
+  it('AC-10 writes the parsed outcome rows for a RUN job', async () => {
+    (parseBundle as Mock).mockReturnValueOnce(parsedWithReport);
+    (computeCorrection as Mock).mockReturnValueOnce(noCorrection);
+    const { svc, repo } = makeForCommand('RUN');
+    await svc.ingestOne(now);
+    expect(repo.markRetry).not.toHaveBeenCalled();
+    expect(repo.replaceRows).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: 'j1', leaseEpoch: 1, projectId: 'p', repoId: 'r' }),
+      expect.objectContaining({ costEvents: [], stories: [], reviews: [], outcomes: [reportRow] }),
+    );
+  });
+
+  it('AC-11 writes no outcome rows for a PLAN job', async () => {
+    (parseBundle as Mock).mockReturnValueOnce(parsedWithReport);
+    (computeCorrection as Mock).mockReturnValueOnce(noCorrection);
+    const { svc, repo } = makeForCommand('PLAN');
+    await svc.ingestOne(now);
+    expect(repo.replaceRows).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ outcomes: [] }));
   });
 });

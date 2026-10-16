@@ -4,7 +4,9 @@ import type { IPageResult } from '@nathapp/nestjs-data';
 export const BUNDLE_INGEST_REPOSITORY = Symbol('BUNDLE_INGEST_REPOSITORY');
 
 /** Bump when a parser changes what it writes; `rerun-outdated` re-ingests older rows (spec §2.6). */
-export const INGEST_PARSER_VERSION = 2;
+export const INGEST_PARSER_VERSION = 3;
+/** S5b 3c-2-D1: characters kept of one run outcome (feature report or decisions log). */
+export const RUN_OUTCOME_MAX_CHARS = 262_144;
 export const INGEST_MAX_ATTEMPTS = 5;
 /** Delay after failure n (1-based), spec §2.5. */
 export const INGEST_BACKOFF_MS: readonly number[] = [60_000, 300_000, 1_800_000, 7_200_000];
@@ -105,10 +107,18 @@ export interface IngestContext {
   naxRunId: string | null;
 }
 
+/** S5b 3c-2-D1: one bounded run outcome file of a RUN job. */
+export interface RunOutcomeRow {
+  kind: 'report' | 'decisions';
+  content: string;
+}
+
 export interface IngestRows {
   costEvents: readonly CostEventRow[];
   stories: readonly StoryResultRow[];
   reviews: readonly ReviewResultRow[];
+  /** S5b 3c-2-D1: RUN outcomes; absent counts as an empty list. */
+  outcomes?: readonly RunOutcomeRow[];
 }
 
 export interface IngestOutcome {

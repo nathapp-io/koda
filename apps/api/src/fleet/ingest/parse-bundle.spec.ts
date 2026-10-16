@@ -59,6 +59,36 @@ describe('parseBundle', () => {
     expect(p.partial).toBe(false);
   });
 
+  it('AC-4 collects a report row then a decisions row', () => {
+    const decisions = '{"id":"D1","kind":"ruling","rationale":"why"}';
+    const p = parseBundle({
+      ...empty,
+      featureReport: { name: 'workflow/feature-report.md', text: '# R' },
+      decisions: { name: 'workflow/decisions.jsonl', text: decisions },
+    }, 'fallback');
+    expect(p.rows.outcomes).toEqual([{ kind: 'report', content: '# R' }, { kind: 'decisions', content: decisions }]);
+  });
+
+  it('AC-5 cuts an over-long report to the first 262144 characters', () => {
+    const p = parseBundle({ ...empty, featureReport: { name: 'workflow/feature-report.md', text: `${'a'.repeat(262_199)}TAIL` } }, 'fallback');
+    expect(p.rows.outcomes).toEqual([{ kind: 'report', content: 'a'.repeat(262_144) }]);
+  });
+
+  it('cuts an over-long decisions log to the same cap', () => {
+    const p = parseBundle({ ...empty, decisions: { name: 'workflow/decisions.jsonl', text: `${'b'.repeat(262_199)}TAIL` } }, 'fallback');
+    expect((p.rows.outcomes[0]?.content ?? '').length).toBe(262_144);
+    expect(p.rows.outcomes).toEqual([{ kind: 'decisions', content: 'b'.repeat(262_144) }]);
+  });
+
+  it('AC-6 ignores an empty report and leaves files and partial as without it', () => {
+    const status = { name: 'nax-out/status.json', text: JSON.stringify({ run: { id: 'run-1', status: 'completed' } }) };
+    const without = parseBundle({ ...empty, status }, 'fallback');
+    const withEmpty = parseBundle({ ...empty, status, featureReport: { name: 'workflow/feature-report.md', text: '' } }, 'fallback');
+    expect(withEmpty.rows.outcomes).toEqual([]);
+    expect(withEmpty.files).toEqual(without.files);
+    expect(withEmpty.partial).toBe(without.partial);
+  });
+
   it('is partial when a file is skipped, capped or oversized, and keeps the others', () => {
     const p = parseBundle({ ...empty, cost: [{ name: 'a', text: line('a', 1, 9) }], oversized: ['nax-out/metrics.json'] }, 'run-x');
     expect(p.naxRunId).toBe('run-x');
