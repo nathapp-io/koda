@@ -44,6 +44,29 @@ export function isSafeFilterValue(value: string): boolean {
 }
 
 /**
+ * 1c-c-D4: repository knowledge chunks carry `source = 'repo'` in the shared
+ * `project_<projectId>` table. Only the knowledge search path may retrieve them
+ * (1c-c-R6); every pre-existing retrieval leg excludes them before its
+ * candidate limit, so a passing indexer cannot crowd ticket results out.
+ */
+export const REPO_SOURCE = 'repo';
+
+/** DataFusion predicate matching every row that is not a repository chunk (1c-c-R6). */
+export const EXCLUDE_REPO_ROWS_PREDICATE = `source != '${REPO_SOURCE}'`;
+
+/**
+ * Applies `where(predicate)` to a LanceDB query builder (`table.query()`,
+ * `table.search()`, `table.vectorSearch()`). The in-memory fallback table
+ * (`InMemoryTable`) and test doubles expose no `where`, and can never hold
+ * repository rows, so an unsupported filter is skipped rather than failing the
+ * query.
+ */
+export function whereIfSupported<T>(query: T, predicate: string): T {
+  const builder = query as { where?: (predicate: string) => unknown };
+  return typeof builder?.where === 'function' ? (builder.where(predicate) as T) : query;
+}
+
+/**
  * In-memory fallback table used when the LanceDB native module is unavailable
  * (or RAG runs with inMemoryOnly=true). Implements the subset of the LanceDB
  * table API the RAG services rely on, including the delete-filter patterns

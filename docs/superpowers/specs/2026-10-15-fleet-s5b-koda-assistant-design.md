@@ -86,6 +86,16 @@ User, 2026-10-15 (after S5b-1b; research note `koda-agent-knowledge-research-202
   thread's read tools over it (no `write_doc`). Gated by a `projectCode` capability. The anchor repo still decides
   placement and budget keys; S5b-R13's "never clones" now applies only to WORKSPACE threads.
 
+User, 2026-10-16 (S5b-1c-c brainstorm, after 1c-b):
+
+- **1c-c-R1** hybrid lexical + vector on the existing LanceDB engine; embeddings from Ollama `nomic-embed-text` (a compose
+  service on koda-wk); Jina deferred, provider stays configuration. **1c-c-R2** fixed default allowlist; per-project
+  patterns in 3c-2. **1c-c-R3** 30-minute head poll + merged-RUN hook + admin re-index, incremental by blob sha.
+  **1c-c-R4** eval = 40 questions over `nathapp-io/koda` (registered in a koda-wk dogfood project), recall@5/@20 + MRR;
+  recall@20 < 0.85 -> try the reranker or Jina next. **1c-c-R5** 1c-c splits into 3c-1 (index + tools + eval) and 3c-2
+  (fleet outcomes, patterns, web). **1c-c-R6** separate search path; ticket search unchanged. **1c-c-R7** citations
+  `owner/name:path@sha7#anchor`.
+
 ## 3. Research summary (2026-10-15)
 
 Surveyed: Plane MCP server (MIT), LibreChat (MIT), CopilotKit (MIT), assistant-ui (MIT), Onyx CE (MIT),
@@ -307,7 +317,8 @@ Failure handling:
 | 2 | `fleet-s5b-koda-read-core` (S5b-1b) | api, runner | registry, project-aware executor (ability, project resolution per S5b-R7, ids, caps, masking, fencing, idempotency), runner tool route + lease check, audit, ASSIGN `kodaTools` + `kodaTools` capability, runner proxies, ticket + fleet read tools |
 | 3a | `fleet-s5b-koda-knowledge-core` (S5b-1c-a) | api, web | L0 brief: `Project.brief` + the anchor repo's `.nax/context.md` / `AGENTS.md` (GitHub App read, cached per sha) in every thread's instructions, capped 8 KB; `koda_memory_search` (text filter), `koda_timeline`; web brief editor and koda path links in replies |
 | 3b | `fleet-s5b-project-thread-code` (S5b-1c-b) | api, protocol, runner | S5b-R15: read-only shallow checkout of all the project's fleet repos for PROJECT threads, read tools over it, `projectCode` capability |
-| 3c | `fleet-s5b-koda-knowledge-index` (S5b-1c-c) | api, web | repo Markdown (docs, ADRs, specs, README, context) and fleet run outcomes (`feature-report.md`, advisor decisions) indexed via the GitHub App, scheduled + after a merged RUN, heading chunks with extractive abstracts, `koda_kb_search` + `koda_get_doc`, `repo:path@sha#heading` citations, brainstorm eval set |
+| 3c-1 | `fleet-s5b-koda-knowledge-index` (S5b-1c-c-1) | api | 1c-c-R1..R7: repo Markdown (README, `.nax/context.md`, `docs/**/*.md`, `.nax/features/*/spec.md`) indexed via the GitHub App read-only mint into the project's LanceDB table as heading chunks with extractive abstracts and context lines; hybrid FTS + Ollama vectors fused by RRF on a separate search path; 30-min head poll + merged-RUN hook + admin re-index; `koda_kb_search` + `koda_get_doc`; `owner/name:path@sha7#anchor` citations; 40-question eval over `nathapp-io/koda` (`kb:eval`) |
+| 3c-2 | `fleet-s5b-koda-knowledge-outcomes` (S5b-1c-c-2) | api, web | fleet run outcomes (`feature-report.md`, `decisions.jsonl`) kept as rows at bundle ingest for every RUN and indexed tagged with job and PR state; per-project path patterns (default = 3c-1 allowlist); web: patterns editor, re-index button + status, citation links |
 | 4 | `fleet-s5b-workspace-threads` (S5b-1d) | api, runner, web | WORKSPACE kind: creator-only visibility, top-level `/threads` routes and page, home project, `project` argument on tools, `koda_my_projects` |
 | 5 | `fleet-s5b-koda-actions` (S5b-2a) | api, web | PendingAction, `assistant_action` approvals branch + sweeper + notifications + list exposure, `system` messages, outcome delivery via THREAD_INPUT, `koda_get_action`, confirmation card |
 | 6 | `fleet-s5b-koda-write-tools` (S5b-2b) | api | all write tools from section 7 |

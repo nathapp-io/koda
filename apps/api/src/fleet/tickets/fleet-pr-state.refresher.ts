@@ -10,6 +10,7 @@ import { GitLabTokenSource } from '../git-broker/gitlab-token.source';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { PrismaFleetTicketsRepository } from './prisma-fleet-tickets.repository';
 import type { RefreshableLink, RefreshRepo } from './prisma-fleet-tickets.repository';
+import { KnowledgeIndexQueue } from '../knowledge/knowledge-index.queue';
 
 export interface RefreshSummary {
   skipped: boolean;
@@ -44,6 +45,7 @@ export class FleetPrStateRefresher implements OnModuleInit, OnModuleDestroy {
     @Inject(VCS_REPOSITORY) private readonly vcsRepo: Pick<IVcsRepository, 'updateTicketLinkWithPrState'>,
     private readonly prSync: VcsPrSyncService,
     @Inject(FLEET_CFG) private readonly config: Pick<IFleetConfig, 'sweepEnabled' | 'prRefreshMs'>,
+    private readonly knowledge: KnowledgeIndexQueue,
   ) {}
 
   onModuleInit(): void {
@@ -116,13 +118,21 @@ export class FleetPrStateRefresher implements OnModuleInit, OnModuleDestroy {
     return (number) => this.gitlab.getMergeRequest(token, repo.owner, repo.name, number);
   }
 
-  /** True when this pass changed the link. A deleted PR (null) becomes closed, like the VCS poll's 404. */
+  /**
+   * True when this pass changed the link. A deleted PR (null) becomes closed, like the VCS poll's 404.
+   * A merge that was actually applied is the S5b freshness hook: the repository's docs just changed, so the
+   * index pass is queued (1c-c-D11). An unchanged link returns above and a link already `merged` is no longer
+   * refreshable, so one merge enqueues once.
+   */
   private async apply(link: RefreshableLink, pr: VcsPrStatus | null): Promise<boolean> {
     const next = pr === null ? 'closed' : mapPrState(pr);
     if (next === link.prState) return false;
-    const outcome = pr !== null && next === 'merged'
+    const merged = pr !== null && next === 'merged';
+    const outcome = merged
       ? await this.prSync.applyMergedPr(link, pr)
       : await this.vcsRepo.updateTicketLinkWithPrState(link.id, next);
-    return outcome === 'updated';
+    if (outcome !== 'updated') return false;
+    if (merged) this.knowledge.enqueue(link.repo.id, 'merge');
+    return true;
   }
 }

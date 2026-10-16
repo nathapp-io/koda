@@ -60,6 +60,10 @@ export interface IFleetConfig {
   credentialExpiryWarnDays: number;
   /** S5a kill switch: FLEET_THREADS_ENABLED=true turns chat threads on; any other value keeps them off. */
   threadsEnabled: boolean;
+  /** S5b 1c-c-D1 kill switch: KNOWLEDGE_INDEX_ENABLED=true turns repository knowledge indexing on; any other value keeps it off. */
+  knowledgeIndexEnabled: boolean;
+  /** S5b 1c-c-D1: repository knowledge poll interval (ms); non-numeric falls back to 1 800 000, min 60 000. */
+  knowledgePollMs: number;
 }
 
 export class FleetConfigSchema {
@@ -94,9 +98,19 @@ export class FleetConfigSchema {
   @IsOptional() @IsString() FLEET_PR_REFRESH_MS: string;
   @IsOptional() @IsString() FLEET_CREDENTIAL_EXPIRY_WARN_DAYS: string;
   @IsOptional() @IsString() FLEET_THREADS_ENABLED: string;
+  @IsOptional() @IsString() KNOWLEDGE_INDEX_ENABLED: string;
+  @IsOptional() @IsString() KNOWLEDGE_POLL_MS: string;
 }
 
 const int = (key: string, fallback: number): number => Number.parseInt(process.env[key] ?? String(fallback), 10);
+const KNOWLEDGE_POLL_DEFAULT_MS = 1_800_000;
+const KNOWLEDGE_POLL_MIN_MS = 60_000;
+
+function knowledgePollMs(): number {
+  const parsed = int('KNOWLEDGE_POLL_MS', KNOWLEDGE_POLL_DEFAULT_MS);
+  return Math.max(Number.isFinite(parsed) ? parsed : KNOWLEDGE_POLL_DEFAULT_MS, KNOWLEDGE_POLL_MIN_MS);
+}
+
 const isTest = (): boolean => process.env['NODE_ENV'] === 'test';
 
 /** Same default rule as OUTBOX_RETENTION_DAYS: 30 outside tests, off in tests, 0 is the kill switch. */
@@ -142,6 +156,8 @@ export const fleetConfig = registerAs(FLEET_CFG, (): IFleetConfig => {
     prRefreshMs: int('FLEET_PR_REFRESH_MS', 600_000),
     credentialExpiryWarnDays: int('FLEET_CREDENTIAL_EXPIRY_WARN_DAYS', 7),
     threadsEnabled: process.env['FLEET_THREADS_ENABLED'] === 'true',
+    knowledgeIndexEnabled: process.env['KNOWLEDGE_INDEX_ENABLED'] === 'true',
+    knowledgePollMs: knowledgePollMs(),
   };
 });
 

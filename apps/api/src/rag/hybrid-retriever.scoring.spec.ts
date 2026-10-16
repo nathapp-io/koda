@@ -108,6 +108,58 @@ describe('HybridRetrieverService FTS-only hits (M17)', () => {
   });
 });
 
+/**
+ * 1c-c-R6: repository knowledge chunks share the project's table with tickets, so every retrieval leg of ticket
+ * search excludes them *before* its candidate limit. The real-LanceDB outcome (a matching ticket returned
+ * although 120 repository chunks fill both legs) is in test/integration/fleet/knowledge-store.integration.spec.ts.
+ */
+describe('HybridRetrieverService repository-row isolation (1c-c-R6)', () => {
+  const EXCLUDE_REPO_ROWS = "source != 'repo'";
+
+  /**
+   * A table stub that supports both the filtered and the unfiltered query chain, recording every `where`
+   * predicate the retriever asks for.
+   */
+  function recordingTable(opts: { scanned: LanceRecord[]; fts: LanceRecord[]; vector: LanceRecord[] }) {
+    const predicates: string[] = [];
+    const record = (predicate: string) => { predicates.push(predicate); return predicate; };
+    const scanResult = { toArray: vi.fn().mockResolvedValue(opts.scanned) };
+    const scan = { limit: vi.fn(() => scanResult) };
+    const ftsResult = { toArray: vi.fn().mockResolvedValue(opts.fts) };
+    const nearest = { limit: vi.fn(() => ({ toArray: vi.fn().mockResolvedValue(opts.vector) })) };
+    const table = {
+      countRows: vi.fn().mockResolvedValue(opts.scanned.length + 1000),
+      query: vi.fn(() => ({ ...scan, where: vi.fn((predicate: string) => { record(predicate); return scan; }) })),
+      search: vi.fn(() => ({ ...ftsResult, where: vi.fn((predicate: string) => { record(predicate); return ftsResult; }) })),
+      vectorSearch: vi.fn(() => ({
+        distanceType: vi.fn(() => ({ ...nearest, where: vi.fn((predicate: string) => { record(predicate); return nearest; }) })),
+      })),
+    };
+    return { table, predicates };
+  }
+
+  it('excludes repository rows in the scan, the full-text leg and the vector leg', async () => {
+    const { table, predicates } = recordingTable({ scanned: [], fts: [], vector: [] });
+    const retriever = buildRetriever(table);
+
+    await retriever.search({ projectId: 'p', query: 'alpha' });
+
+    // One predicate per leg: the table scan, the native full-text query and the vector query.
+    expect(predicates).toEqual([EXCLUDE_REPO_ROWS, EXCLUDE_REPO_ROWS, EXCLUDE_REPO_ROWS]);
+  });
+
+  it('never lets a repository row a leg answered anyway reach the results', async () => {
+    const repoRow = row('repo:r1:docs/a.md#0', 'alpha broker', { source: 'repo', source_id: 'repo:r1:docs/a.md' });
+    const ticket = row('t1', 'alpha broker');
+    const { table } = recordingTable({ scanned: [repoRow], fts: [repoRow], vector: [repoRow, ticket] });
+    const retriever = buildRetriever(table);
+
+    const result = await retriever.search({ projectId: 'p', query: 'alpha broker', limit: 20 });
+
+    expect(result.results.map((r) => r.id)).toEqual(['t1']);
+  });
+});
+
 describe('HybridRetrieverService similarity tiers (M18)', () => {
   it('tiers every strong vector hit by its raw cosine, not by a min-max-normalised score', async () => {
     const first = row('a', 'alpha', { _distance: 0.05 }); // cosine 0.95

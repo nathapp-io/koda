@@ -812,11 +812,44 @@ model FleetRepo {
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  jobs        FleetJob[]
-  chatThreads ChatThread[]
+  jobs           FleetJob[]
+  chatThreads    ChatThread[]
+  knowledgeIndex KnowledgeRepoIndex?
+  knowledgeFiles KnowledgeRepoFile[]
 
   @@unique([provider, owner, name])
   @@index([projectId])
+}
+
+model KnowledgeRepoIndex {
+  repoId          String    @id
+  projectId       String
+  status          String    @default("idle") // idle | running | failed | skipped
+  indexedSha      String?
+  fileCount       Int       @default(0)
+  chunkCount      Int       @default(0)
+  unembeddedCount Int       @default(0)
+  skippedCount    Int       @default(0)
+  lastError       String?
+  leaseUntil      DateTime?
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  updatedAt       DateTime  @updatedAt
+  repo            FleetRepo @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model KnowledgeRepoFile {
+  repoId          String
+  path            String
+  blobSha         String
+  chunkCount      Int
+  unembeddedCount Int       @default(0)
+  updatedAt       DateTime  @updatedAt
+  repo            FleetRepo @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  @@id([repoId, path])
 }
 
 model FleetActivity {

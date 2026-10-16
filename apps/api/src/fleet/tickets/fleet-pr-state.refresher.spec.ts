@@ -20,6 +20,7 @@ describe('FleetPrStateRefresher (C9 §3.4, D456)', () => {
   let gitlabTokens: { resolve: Mock };
   let vcsRepo: { updateTicketLinkWithPrState: Mock };
   let prSync: { applyMergedPr: Mock };
+  let knowledge: { enqueue: Mock };
   let refresher: FleetPrStateRefresher;
 
   beforeEach(() => {
@@ -29,8 +30,10 @@ describe('FleetPrStateRefresher (C9 §3.4, D456)', () => {
     gitlabTokens = { resolve: vi.fn().mockResolvedValue('glpat') };
     vcsRepo = { updateTicketLinkWithPrState: vi.fn().mockResolvedValue('updated') };
     prSync = { applyMergedPr: vi.fn().mockResolvedValue('updated') };
+    knowledge = { enqueue: vi.fn() };
     refresher = new FleetPrStateRefresher(
-      repo as never, github as never, gitlab as never, gitlabTokens as never, vcsRepo as never, prSync as never, testFleetConfig(),
+      repo as never, github as never, gitlab as never, gitlabTokens as never, vcsRepo as never, prSync as never,
+      testFleetConfig(), knowledge as never,
     );
   });
 
@@ -104,5 +107,62 @@ describe('FleetPrStateRefresher (C9 §3.4, D456)', () => {
     refresher.onModuleInit();
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+
+  // ── S5b US-005 (1c-c-D11): a merge is the repository-knowledge freshness hook ─────────────────────────
+  /** The refreshed link of the S5b fixture: repository r9, PR open, reported merged by the GitHub stub. */
+  const merged = (prState = 'open') => {
+    const repo9 = { ...gh, id: 'r9' };
+    const l = link('a', 1, repo9, prState);
+    repo.findRefreshableFleetLinks.mockResolvedValue([l]);
+    github.getPullRequest.mockResolvedValue(pr({ state: 'closed', merged: true }));
+    return l;
+  };
+
+  it('AC-8: enqueues the repository once when a PR merge was applied', async () => {
+    merged();
+
+    await refresher.refresh();
+
+    expect(prSync.applyMergedPr).toHaveBeenCalledTimes(1);
+    expect(knowledge.enqueue).toHaveBeenCalledTimes(1);
+    expect(knowledge.enqueue).toHaveBeenCalledWith('r9', 'merge');
+  });
+
+  it('AC-15: a merge keeps the pass summary and the shared merge write', async () => {
+    merged();
+
+    await expect(refresher.refresh()).resolves.toEqual({ skipped: false, checked: 1, changed: 1, failedRepos: 0 });
+
+    expect(vcsRepo.updateTicketLinkWithPrState).not.toHaveBeenCalled();
+    expect(knowledge.enqueue).toHaveBeenCalledWith('r9', 'merge');
+  });
+
+  it('AC-9: does not enqueue for a link that is already merged', async () => {
+    merged('merged');
+
+    await expect(refresher.refresh()).resolves.toEqual({ skipped: false, checked: 1, changed: 0, failedRepos: 0 });
+
+    expect(knowledge.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('AC-10: does not enqueue for a PR that closed without merging', async () => {
+    const l = link('a', 1, { ...gh, id: 'r9' });
+    repo.findRefreshableFleetLinks.mockResolvedValue([l]);
+    github.getPullRequest.mockResolvedValue(pr({ state: 'closed' }));
+
+    await expect(refresher.refresh()).resolves.toEqual({ skipped: false, checked: 1, changed: 1, failedRepos: 0 });
+
+    expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('a', 'closed');
+    expect(knowledge.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('does not enqueue when the merge step refused to update (a lost race)', async () => {
+    merged();
+    prSync.applyMergedPr.mockResolvedValue(undefined);
+
+    await refresher.refresh();
+
+    expect(knowledge.enqueue).not.toHaveBeenCalled();
   });
 });

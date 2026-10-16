@@ -7,6 +7,7 @@ import { TicketsModule } from '../../tickets/tickets.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { ApprovalsModule } from '../approvals/approvals.module';
 import { FleetJobsModule } from '../jobs/fleet-jobs.module';
+import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { LogsModule } from '../logs/logs.module';
 import { RunnersModule } from '../runners/runners.module';
 import { SyncModule } from '../sync/sync.module';
@@ -30,6 +31,8 @@ import { TicketTools } from './tools/ticket-tools';
     SyncModule,
     // US-004: the memory read tool's service. No cycle: nothing reachable from MemoryModule imports a fleet module.
     MemoryModule,
+    // US-006: the documentation tools read the project's knowledge index and its indexed chunks (1c-c-D13).
+    KnowledgeModule,
   ],
   controllers: [RunnerToolController],
   providers: [

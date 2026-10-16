@@ -1,0 +1,447 @@
+[
+  {
+    "id": "q01",
+    "question": "Why was making the vector or graph store the source of truth turned down in the memory design?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/adr/ADR-001-layered-memory-architecture.md",
+        "anchor": "make-the-vectorgraph-store-the-source-of-truth"
+      }
+    ]
+  },
+  {
+    "id": "q02",
+    "question": "Can a derived search index or embedding store ever be used to decide workflow or policy outcomes?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/adr/ADR-001-layered-memory-architecture.md",
+        "anchor": "canonical-over-derived"
+      }
+    ]
+  },
+  {
+    "id": "q03",
+    "question": "Which Prisma tables hold the authoritative history of ticket changes, agent actions and approval decisions?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/architecture.md",
+        "anchor": "canonical-stores-source-of-truth"
+      }
+    ]
+  },
+  {
+    "id": "q04",
+    "question": "How do project members get ticket updates pushed to their browser in real time, and how often is the outbox relayed?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/architecture.md",
+        "anchor": "live-updates-track-1-slice-5"
+      }
+    ]
+  },
+  {
+    "id": "q05",
+    "question": "Where does the project knowledge ingest-and-search code live, and how is its storage optimization strategy picked?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/architecture.md",
+        "anchor": "knowledge-base--rag"
+      }
+    ]
+  },
+  {
+    "id": "q06",
+    "question": "The nax sandbox probe reports unavailable on an Ubuntu 24.04 runner. What should an operator do about it?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/deployment/runner.md",
+        "anchor": "linux-2404-and-newer-apparmor"
+      }
+    ]
+  },
+  {
+    "id": "q07",
+    "question": "In what order should upgrades happen for the bash approval relay, and what happens to a gated job sent to a runner without relay support?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/deployment/runner.md",
+        "anchor": "bash-approvals-s15"
+      }
+    ]
+  },
+  {
+    "id": "q08",
+    "question": "Is the old SQLite deployment path still recommended for running koda?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/deployment/sqlite.md",
+        "anchor": "a-historical-sqlite-deployment-guide-deprecated"
+      }
+    ]
+  },
+  {
+    "id": "q09",
+    "question": "For heavy PostgreSQL traffic, should a connection pooler sit in front of the database, and in which pool mode?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/deployment/postgresql.md",
+        "anchor": "connection-pooling-pgbouncer"
+      }
+    ]
+  },
+  {
+    "id": "q10",
+    "question": "On a project sub-page like agents or labels, where does the back arrow take me?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/ux/navigation-map.md",
+        "anchor": "back-button"
+      }
+    ]
+  },
+  {
+    "id": "q11",
+    "question": "Where do toasts appear by default and how long do they stay up?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/ux/design-tokens.md",
+        "anchor": "toast-notifications"
+      }
+    ]
+  },
+  {
+    "id": "q12",
+    "question": "How should a destructive action such as delete be confirmed in the web UI?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/ux/component-patterns.md",
+        "anchor": "confirmation-pattern"
+      }
+    ]
+  },
+  {
+    "id": "q13",
+    "question": "Why does the project navigation move up by CSS ordering instead of reordering the markup?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/ux/redesign/MASTER-PLAN.md",
+        "anchor": "10-decisions-log"
+      }
+    ]
+  },
+  {
+    "id": "q14",
+    "question": "Can a brainstorm agent edit any file it likes in a thread's workspace, or only documentation through a restricted tool?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/superpowers/specs/2026-10-10-fleet-s5a-chat-threads-design.md",
+        "anchor": "rulings-user-2026-10-10"
+      }
+    ]
+  },
+  {
+    "id": "q15",
+    "question": "Which env flag switches chat threads off, and what stays readable while it is off?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/superpowers/specs/2026-10-10-fleet-s5a-chat-threads-design.md",
+        "anchor": "26-kill-switch"
+      }
+    ]
+  },
+  {
+    "id": "q16",
+    "question": "Can a thread have a plan or run active while someone sends a new message, and what error does that send get?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/superpowers/specs/2026-10-10-fleet-s5a-chat-threads-design.md",
+        "anchor": "51-one-active-job-per-thread"
+      }
+    ]
+  },
+  {
+    "id": "q17",
+    "question": "Does assigning an agent to a project give it extra permissions inside that project?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/superpowers/specs/2026-10-09-fleet-s4c-team-access-design.md",
+        "anchor": "rulings-user-2026-10-09"
+      }
+    ]
+  },
+  {
+    "id": "q18",
+    "question": "What error comes back when a ticket is assigned to an agent that is off the project roster or currently offline?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/superpowers/specs/2026-10-09-fleet-s4c-team-access-design.md",
+        "anchor": "34-guards-both-modes"
+      }
+    ]
+  },
+  {
+    "id": "q19",
+    "question": "Is a per-category email setting enough to get an email, or does a master email switch also need to be on?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/superpowers/specs/2026-10-08-fleet-s4b-email-and-invites-design.md",
+        "anchor": "31-preferences-two-layers"
+      }
+    ]
+  },
+  {
+    "id": "q20",
+    "question": "Why do email notifications wait a while before sending rather than going out right away?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/superpowers/specs/2026-10-08-fleet-s4b-email-and-invites-design.md",
+        "anchor": "rulings-user-2026-10-08"
+      }
+    ]
+  },
+  {
+    "id": "q21",
+    "question": "How does the server reject stale results from a runner that has lost its job lease?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/superpowers/specs/2026-09-29-fleet-s1-dispatch-design.md",
+        "anchor": "62-lease-epoch-fence"
+      }
+    ]
+  },
+  {
+    "id": "q22",
+    "question": "Can two jobs for the same repo and feature run at once, and does that limit apply per repo or per feature?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/superpowers/specs/2026-09-29-fleet-s1-dispatch-design.md",
+        "anchor": "64-one-active-job-per-repo-and-feature"
+      }
+    ]
+  },
+  {
+    "id": "q23",
+    "question": "When no runner is pinned, how does koda pick which machine gets a job?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/superpowers/specs/2026-09-29-fleet-s1-dispatch-design.md",
+        "anchor": "4-placement"
+      }
+    ]
+  },
+  {
+    "id": "q24",
+    "question": "Who is allowed to decide a bash approval request inside a project?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/superpowers/specs/2026-10-02-fleet-s1-5-approvals-design.md",
+        "anchor": "rulings-user-2026-10-02"
+      }
+    ]
+  },
+  {
+    "id": "q25",
+    "question": "Does the outbound webhook for an approval ask include the shell command text being requested?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/superpowers/specs/2026-10-02-fleet-s1-5-approvals-design.md",
+        "anchor": "rulings-user-2026-10-02"
+      }
+    ]
+  },
+  {
+    "id": "q26",
+    "question": "What happens to imported graph data, and what gets logged, if the graphify toggle is switched off?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/specs/SPEC-graphify-kb.md",
+        "anchor": "failure-handling"
+      }
+    ]
+  },
+  {
+    "id": "q27",
+    "question": "When does the agent management UI show an API key in plaintext?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/specs/SPEC-agents-management.md",
+        "anchor": "api-key-display-rule"
+      }
+    ]
+  },
+  {
+    "id": "q28",
+    "question": "When CLI settings conflict, which source wins among flags, project config, profile and global config?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/specs/SPEC-project-cli-config.md",
+        "anchor": "resolution-priority-highest-wins"
+      }
+    ]
+  },
+  {
+    "id": "q29",
+    "question": "How does koda work out whether a pasted URL is a GitHub, GitLab or Bitbucket pull request?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/specs/SPEC-ticket-links.md",
+        "anchor": "provider-detection"
+      }
+    ]
+  },
+  {
+    "id": "q30",
+    "question": "Why not drive the agent role list from seed data, a Prisma enum or a lookup table?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/specs/20260504-casl-migration-koda-principal.md",
+        "anchor": "why-not-seeds-as-ssot-prisma-enums-or-a-lookup-table"
+      }
+    ]
+  },
+  {
+    "id": "q31",
+    "question": "Is giving the ADMIN role a blanket manage-all permission risky as new resources get added?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/specs/20260504-casl-migration-koda-principal.md",
+        "anchor": "r3--manage-all-for-admin-may-be-too-permissive"
+      }
+    ]
+  },
+  {
+    "id": "q32",
+    "question": "Which tokenizer and stemming settings must the native full-text index use?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": ".nax/features/fts-tantivy/spec.md",
+        "anchor": "lancedb-0170-fts-api-mandatory--use-exactly-these"
+      }
+    ]
+  },
+  {
+    "id": "q33",
+    "question": "Do project VIEWER roles restrict ticket and comment writes, or only what people can see?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": ".nax/features/track3-tenancy/spec.md",
+        "anchor": "out-of-scope"
+      }
+    ]
+  },
+  {
+    "id": "q34",
+    "question": "What should the SLO page show a non-admin who opens it?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": ".nax/features/w1-observability-pages/spec.md",
+        "anchor": "failure-handling"
+      }
+    ]
+  },
+  {
+    "id": "q35",
+    "question": "How does koda recognise a ticket key such as PROJ-1 inside arbitrary text, regardless of case?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": ".nax/features/vcs-phase4-branch-commit-links/spec.md",
+        "anchor": "ticket-key-pattern-matching"
+      }
+    ]
+  },
+  {
+    "id": "q36",
+    "question": "Which config namespace strings and generated-file rules must the config refactor keep unchanged?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/superpowers/plans/2026-06-20-config-pattern-refactor.md",
+        "anchor": "global-constraints"
+      }
+    ]
+  },
+  {
+    "id": "q37",
+    "question": "Which files must never be hand-edited, even when the change looks small?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": ".nax/context.md",
+        "anchor": "engineering-rules"
+      }
+    ]
+  },
+  {
+    "id": "q38",
+    "question": "What must accompany every ticket status change?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "README.md",
+        "anchor": "ticket-workflow"
+      }
+    ]
+  },
+  {
+    "id": "q39",
+    "question": "Why does webhook delivery look up the live webhook config at send time instead of copying its URL and secret into the outbox?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/specs/SPEC-webhook-outbox-unification.md",
+        "anchor": "design-decisions"
+      },
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/superpowers/specs/2026-07-06-webhook-outbox-unification-design.md",
+        "anchor": "design-decisions"
+      }
+    ]
+  },
+  {
+    "id": "q40",
+    "question": "Which P0 items did the September whole-repo review put at the top of its fix order?",
+    "expected": [
+      {
+        "repo": "nathapp-io/koda",
+        "path": "docs/20260914-review-whole-repo.md",
+        "anchor": "priority-fix-order"
+      }
+    ]
+  }
+]

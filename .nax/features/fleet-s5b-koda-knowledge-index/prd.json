@@ -1,0 +1,582 @@
+{
+  "project": "koda",
+  "feature": "fleet-s5b-koda-knowledge-index",
+  "branchName": "feat/fleet-s5b-koda-knowledge-index",
+  "createdAt": "2026-10-20T09:00:00.000Z",
+  "updatedAt": "2026-10-16T04:57:35.663Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Knowledge state, chunk store, allowlist and configuration",
+      "description": "**Goal** — Establish opt-in repository knowledge configuration, durable repository/file state, a shared-table chunk store, project-scoped service access and fixed corpus selection.\n\n**Motivation** — The existing KB cannot serve this today.\n\n**Approach** — 1c-c-D1 (configuration): `IFleetConfig` (`apps/api/src/config/fleet.config.ts:8-63`) gains `knowledgeIndexEnabled: boolean` and `knowledgePollMs: number`. `FleetConfigSchema` gains `@IsOptional() @IsString() KNOWLEDGE_INDEX_ENABLED: string;` and `@IsOptional() @IsString() KNOWLEDGE_POLL_MS: string;` next to `FLEET_THREADS_ENABLED` (`:96`). The factory sets `knowledgeIndexEnabled: process.env['KNOWLEDGE_INDEX_ENABLED'] === 'true'` (the `threadsEnabled` rule, `:144`) and `knowledgePollMs` = `int('KNOWLEDGE_POLL_MS', 1_800_000)` (`int` at `:99`), replaced by `1_800_000` when it is not a finite number and raised to `60_000` when lower. Milliseconds match `FLEET_PR_REFRESH_MS`.\n\n1c-c-D2 (module): a new `KnowledgeModule` (`apps/api/src/fleet/knowledge/knowledge.module.ts`) imports `RagModule` and `GitBrokerModule`, provides the state repository, `KnowledgeIndexService`, `KnowledgeChunkStore`, `KnowledgeSearchService`, `KnowledgeRepoIndexer`, `KnowledgeIndexQueue`, `KnowledgePoller` and `ProjectKnowledgeController`, and exports `KnowledgeIndexService`, `KnowledgeSearchService` and `KnowledgeIndexQueue` only. `KnowledgeIndexService` is the service face over the state repository (the api-data layering rule: controllers and other modules never inject the repository): `resolveProjectRepo(projectId, ref: { repoId: string } | { owner: string; name: string }): Promise<KnowledgeRepoRef | null>` answers the repository only when it is one of `findProjectRepos(projectId)`, `listProjectRepos(projectId)` returns those repositories, and `listProjectStates(projectId)` returns them joined with their `KnowledgeRepoIndex` rows. `KnowledgeRepoRef` is `{ id, projectId, provider, owner, name, defaultBranch, githubInstallationId }`. `FleetModule` (`apps/api/src/fleet/fleet.module.ts`), `AssistantModule` (`apps/api/src/fleet/assistant/assistant.module.ts`) and `FleetTicketsModule` (`apps/api/src/fleet/tickets/fleet-tickets.module.ts`) import it. `RagModule`'s `exports` (`apps/api/src/rag/rag.module.ts:114`) gains `EmbeddingService`. No cycle: `RagModule` and `GitBrokerModule` import no fleet module.\nStaging: US-001 creates KnowledgeModule with state repository, KnowledgeIndexService and KnowledgeChunkStore and exports only the service available now; US-002, US-004 and US-005 add their providers/exports when implemented. FleetModule imports it now; AssistantModule and FleetTicketsModule imports accompany their consumers in US-006 and US-005. Do not introduce unresolved future providers.\n\n1c-c-D3 (state tables): migration `20261020090000_knowledge_index` adds the models in Interface, and `FleetRepo` gains the back-relations `knowledgeIndex KnowledgeRepoIndex?` and `knowledgeFiles KnowledgeRepoFile[]`. `PrismaKnowledgeIndexRepository` (behind `KNOWLEDGE_INDEX_REPOSITORY`, module-private) owns both tables and the read of indexable repositories: `findRepo(repoId)`, `findProjectRepos(projectId)` (ordered `createdAt`, then `id`, at most 60, as `PrismaFleetJobRepository.findProjectRepos`), `findAllGithubRepos()` (every GitHub repository with a non-null `githubInstallationId`, at most 500), `claim(repoId, projectId, now, leaseMs)`, `renew(repoId, leaseUntil): Promise<boolean>`, `finish(repoId, result)`, `listFiles(repoId)`, `upsertFile`, `deleteFile`, `listStates(projectId)`.\n\n1c-c-D4 (chunk rows): a repository chunk is one `LanceRecord` (`apps/api/src/rag/lance-table-manager.ts:18-30`) in table `project_<projectId>`: `id = repo:<repoId>:<path>#<chunkIndex>`, `source = 'repo'`, `source_id = repo:<repoId>:<path>`, `content` = the context line, a newline, the abstract, a blank line, then the chunk text (so full-text search also matches the context line), `vector` = the embedding of `content`, `metadata` = `JSON.stringify` of `{ repoId, owner, name, path, sha, blobSha, title, headingPath, anchor, chunkIndex, chunkCount, abstract, text, status?, supersededBy? }`, `created_at` = the pass time, and `provider` / `model` = the embedding provider and model, or `provider: 'none'` and `model: ''` with a zero vector of the table's dimension when the embedding failed (1c-c-D6). The context line is `<owner>/<name> · <path> · <headingPath>`, with `headingPath` the H1-H3 titles joined by ` > `; for chunk 0, whose `headingPath` is empty, it is `<owner>/<name> · <path>`.\n\n1c-c-D5 (chunk store): `KnowledgeChunkStore` wraps `LanceTableManager` (`lance-table-manager.ts:130`). Every write runs inside `exclusive('project_' + projectId, fn)` (`:369`) on the table from `getOrCreateTable` (`:231`): `replaceFile(projectId, sourceId, rows)` deletes `source_id = '<sourceId>'` then adds all rows in one `add` call; `deleteFile(projectId, sourceId)` deletes them. It never calls `addRecord` (`:395`), whose per-row delete-by-`source_id` would drop a file's other chunks. `readFile(projectId, sourceId)` returns the file's rows (at most 2000) parsed into `KnowledgeChunkRow` = `{ id, sourceId, provider }` plus every `metadata` field of 1c-c-D4, sorted by `chunkIndex`; `lexical` and `vector` return the same parsed shape. Every `sourceId` a method receives must pass `isSafeFilterValue` (`lance-table-manager.ts:37`), else the method throws `KnowledgeInvalidPathError`. `lexical(projectId, query, predicate, limit)` runs `table.query().fullTextSearch(query, { columns: 'content' }).where(predicate).limit(limit)` and `vector(projectId, embedding, predicate, limit)` runs `table.vectorSearch(embedding).distanceType('cosine').where(predicate).limit(limit)` (LanceDB 0.17 `QueryBase.where`). When `LanceTableManager.available` is false (in-memory mode), every method throws `KnowledgeStoreUnavailableError`. After a pass that wrote or deleted rows, the indexer calls `RagService.optimizeTable(projectId)` (`apps/api/src/rag/rag.service.ts:134`) once, so the full-text index covers the new rows. US-004 owns that indexer call.\n\nAllowlist contract from 1c-c-D9 step 7: The allowlist (pure `isIndexablePath(path: string): boolean` and `selectIndexableEntries(entries: ForgeTreeEntry[]): { kept: ForgeTreeEntry[]; skipped: number; capMessage: string | null }` in `apps/api/src/fleet/knowledge/knowledge-allowlist.ts`) keeps blob entries whose path is `README.md`, `.nax/context.md`, `AGENTS.md` (only when `.nax/context.md` is not in the tree), matches `docs/**/*.md`, or matches `.nax/features/<one segment>/spec.md`. It skips (and counts in `skippedCount`) an entry over 262144 bytes, an entry whose path fails `isSafeFilterValue` (`lance-table-manager.ts:37`), and every entry after the first 2000 kept (`capMessage` `2000-file cap reached`).\n\n**Scope** — In: schema and SQL migration, config and existing config tests, testFleetConfig defaults `knowledgeIndexEnabled: false` / `knowledgePollMs: 1_800_000` preserving all keys and overrides, repository/service/module, chunk store and allowlist. Add a co-located DB-free KnowledgeModule compilation spec and native LanceDB/Postgres integration fixture. Out: search/controller (US-002), chunking (US-003), indexer/embedding policy (US-004), queue/triggers/routes (US-005), tools (US-006), evaluation (US-007); no configurable paths, ticket retrieval changes or deleted-repo chunk cleanup.\n\n**Interface** — Exact state models:\n```prisma\nmodel KnowledgeRepoIndex {\n  repoId          String    @id\n  projectId       String\n  status          String    @default(\"idle\") // idle | running | failed | skipped\n  indexedSha      String?\n  fileCount       Int       @default(0)\n  chunkCount      Int       @default(0)\n  unembeddedCount Int       @default(0)\n  skippedCount    Int       @default(0)\n  lastError       String?\n  leaseUntil      DateTime?\n  startedAt       DateTime?\n  finishedAt      DateTime?\n  updatedAt       DateTime  @updatedAt\n  repo            FleetRepo @relation(fields: [repoId], references: [id], onDelete: Cascade)\n  @@index([projectId])\n}\n\nmodel KnowledgeRepoFile {\n  repoId          String\n  path            String\n  blobSha         String\n  chunkCount      Int\n  unembeddedCount Int       @default(0)\n  updatedAt       DateTime  @updatedAt\n  repo            FleetRepo @relation(fields: [repoId], references: [id], onDelete: Cascade)\n  @@id([repoId, path])\n}\n```\n`resolveProjectRepo(projectId, ref: { repoId: string } | { owner: string; name: string }): Promise<KnowledgeRepoRef | null>`; `isIndexablePath(path: string): boolean`; `selectIndexableEntries(entries: ForgeTreeEntry[]): { kept: ForgeTreeEntry[]; skipped: number; capMessage: string | null }`; `renew(repoId, leaseUntil): Promise<boolean>`; chunk-store signatures and KnowledgeChunkRow shape are specified verbatim above.",
+      "acceptanceCriteria": [
+        "[unit] fleetConfig() with KNOWLEDGE_INDEX_ENABLED and KNOWLEDGE_POLL_MS unset resolves knowledgeIndexEnabled: false and knowledgePollMs: 1800000, and with KNOWLEDGE_POLL_MS=abc resolves knowledgePollMs: 1800000 (one table-driven test).",
+        "[unit] fleetConfig() with KNOWLEDGE_INDEX_ENABLED=true and KNOWLEDGE_POLL_MS=5000 resolves knowledgeIndexEnabled: true and knowledgePollMs: 60000.",
+        "[unit] Test.createTestingModule({ imports: [KnowledgeModule] }) with PrismaService, TRANSACTION_MANAGER and the RAG_CFG / FLEET_CFG configs provided as stubs compiles, and KnowledgeChunkStore resolves from it.",
+        "[integration] PrismaKnowledgeIndexRepository.claim(repoId, projectId, now, 900000) on a repository with no state row creates it with status: 'running' and leaseUntil = now + 15 minutes and answers true, and a second claim at now + 1 minute answers false.",
+        "[integration] After a claim at now, a claim at now + 16 minutes answers true.",
+        "[integration] Deleting a FleetRepo row deletes its KnowledgeRepoIndex and KnowledgeRepoFile rows.",
+        "[integration] On a real LanceDB in a mkdtempSync directory, KnowledgeChunkStore.replaceFile(p, 'repo:r1:docs/a.md', [row0, row1, row2]) followed by readFile(p, 'repo:r1:docs/a.md') returns the three rows in chunkIndex order.",
+        "[integration] A second replaceFile for repo:r1:docs/a.md with one row leaves exactly that one row for the file, and the rows of repo:r1:docs/b.md are untouched.",
+        "[integration] deleteFile(p, 'repo:r1:docs/a.md') removes that file's rows and keeps a ticket row of the same table.",
+        "[unit] KnowledgeChunkStore.readFile on a manager whose available is false throws KnowledgeStoreUnavailableError.",
+        "[unit] isIndexablePath is true for README.md, .nax/context.md, AGENTS.md, docs/a.md, docs/x/y/b.md and .nax/features/f1/spec.md, and false for apps/api/README.md, CLAUDE.md, .nax/features/f1/prd.json, .nax/features/a/b/spec.md, docs/a.txt and src/a.ts (one table-driven test).",
+        "[unit] selectIndexableEntries keeps AGENTS.md when the entries hold no .nax/context.md, and drops it when they do.",
+        "[unit] selectIndexableEntries skips a docs/big.md entry of 300000 bytes and a docs/it's.md entry and reports skipped: 2.",
+        "[unit] selectIndexableEntries with 2001 indexable entries keeps the first 2000 in input order, reports skipped: 1 and capMessage: '2000-file cap reached'.",
+        "[unit] KnowledgeChunkStore.replaceFile(p, \"repo:r1:docs/it's.md\", rows) throws KnowledgeInvalidPathError and writes nothing."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "prisma",
+        "lancedb",
+        "configuration",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New persistence and LanceDB abstractions, atomic leases, shared locking and project/filter isolation span multiple modules; scoped access and filter safety warrant strict security TDD.",
+        "agentProfileId": "claude-sonnet",
+        "agent": "claude",
+        "profileModelTier": "balanced",
+        "initialAgent": "claude",
+        "initialProfileId": "claude-sonnet",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/rag/lance-table-manager.ts",
+        "apps/api/src/rag/rag.module.ts",
+        "apps/api/src/config/fleet.config.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+        "apps/api/test/integration/rag/hybrid-retriever.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261020090000_knowledge_index/migration.sql",
+        "apps/api/src/fleet/knowledge/knowledge.module.ts",
+        "apps/api/src/fleet/knowledge/prisma-knowledge-index.repository.ts",
+        "apps/api/src/fleet/knowledge/knowledge-index.service.ts",
+        "apps/api/src/fleet/knowledge/knowledge-chunk-store.ts",
+        "apps/api/src/fleet/knowledge/knowledge-allowlist.ts",
+        "apps/api/src/fleet/knowledge/knowledge-allowlist.spec.ts",
+        "apps/api/src/fleet/knowledge/knowledge.module.spec.ts",
+        "apps/api/src/fleet/knowledge/knowledge-chunk-store.spec.ts",
+        "apps/api/test/integration/fleet/knowledge-store.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "KnowledgeIndexService.resolveProjectRepo(projectId, { repoId }) returns null for a repository belonging to a different project.",
+        "When a second claim replaces a pass's expired lease, renew for the earlier pass returns false and leaves the replacement lease unchanged.",
+        "KnowledgeChunkStore.replaceFile throws KnowledgeStoreUnavailableError without adding rows when getOrCreateTable discovers native LanceDB is unavailable."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/common/test-helpers/fleet-config.ts",
+          "reason": "`testFleetConfig()` returns a complete `IFleetConfig` literal; it gains `knowledgeIndexEnabled: false` and `knowledgePollMs: 1_800_000` so every spec that uses it still type-checks; existing keys and the `overrides` behaviour are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "85e8bc4c7afa3b0440a96408149e494f9fcab681"
+    },
+    {
+      "id": "US-002",
+      "title": "Hybrid search service and search route",
+      "description": "**Goal** — Add project-isolated RRF repository-doc retrieval and a member search endpoint without changing existing ticket search.\n\n**Motivation** — Its search has no source filter, so repository chunks added to it would crowd ticket results.\n\n**Approach** — 1c-c-R6 (isolation): repository chunks share the project's LanceDB table but a separate search path; ticket search and its weighted fusion are unchanged.\n\n1c-c-D7 (search): `KnowledgeSearchService` depends on `KnowledgeChunkStore`, `EmbeddingService` and `KnowledgeIndexService`. `readDoc(projectId, repoId, path): Promise<KnowledgeChunkRow[]>` returns `KnowledgeChunkStore.readFile(projectId, 'repo:' + repoId + ':' + path)`; it is the only read path `koda_get_doc` uses. `search({ projectId, query, repoId?, pathPrefix?, limit })` returns `{ lexicalOnly: boolean; empty: boolean; hits: KnowledgeHit[] }`, where `KnowledgeHit` is `{ repoId, owner, name, path, sha, anchor, headingPath, title, abstract, snippet, status?, supersededBy?, score }` and `snippet` is the first 400 characters of the chunk text. The base predicate is `source = 'repo'`, plus `AND source_id LIKE 'repo:<repoId>:%'` when `repoId` is given. The lexical leg asks 50 rows (200 when `pathPrefix` is given, because the prefix is applied after the legs). AC-authoritative vector predicate construction: start `source = 'repo' AND provider != 'none'`, then append `AND source_id LIKE 'repo:<repoId>:%'` when restricted, so both predicates end with the repo clause. The vector leg embeds the query with `EmbeddingService.embed` and asks the same number of rows. When the query embedding throws, the vector leg is skipped and `lexicalOnly` is true. The legs fuse by reciprocal rank fusion, `score(row) = Σ 1 / (60 + rank)` over the legs the row appears in (rank 1-based), ties broken by row `id` ascending. Hits whose `repoId` is not among `KnowledgeIndexService.listProjectRepos(projectId)` are dropped (a deleted fleet repository's chunks), then hits whose `path` does not start with `pathPrefix` are dropped, then the list is cut to `limit`. `empty` is true when the project's table holds no `repo` row at all.\n\n1c-c-D12 (routes, search portion): `ProjectKnowledgeController` at `projects/:slug/knowledge`, `@UseGuards(ProjectMembershipGuard)` with `@ApiParam({ name: 'slug' })` (the `ProjectFleetReposController` pattern) and `@CurrentProject()`:\n- `POST search` (member, HTTP 200): body `{ query: string (1-500), repo?: \"owner/name\", pathPrefix?: string (1-300, no `..`, no leading `/`), limit?: integer 1-50 (default 20) }`; any other body answers 400, answers `{ lexicalOnly, empty, hits }` from `KnowledgeSearchService`; an unknown `repo` answers 404 `knowledge.repoNotFound`.\n- `POST reindex` and `POST search` answer 409 `knowledge.disabled` when `knowledgeIndexEnabled` is false (`ConflictAppException`, the `threads.disabled` pattern, `apps/api/src/fleet/threads/threads.service.ts:30`). The i18n keys go to `apps/api/src/i18n/{en,zh}/knowledge.json`. Reindex is implemented by US-005, not here.\nSearch route on an unavailable store: 409 `knowledge.unavailable`. i18n files contain nested `disabled.409`, `unavailable.409`, `repoNotFound.404` keys, as threads.json nests disabled.409. Resolve `repo` through KnowledgeIndexService.resolveProjectRepo within the caller's project, never through repository injection in the controller. Preserve JsonResponse envelopes.\n\nAdd KnowledgeSearchService and ProjectKnowledgeController to the US-001 KnowledgeModule and export KnowledgeSearchService. Route cases go into `apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts` with KnowledgeSearchService stubbed. Extend the upstream `knowledge-store.integration.spec.ts` for real native LanceDB search with fake embeddings and both embedded/unembedded rows. Regenerate `openapi.json` with `bun run api:export-spec` and the CLI client with `bun run generate` from repo root; generated types.gen.ts/sdk.gen.ts are never hand-edited.\n\n**Scope** — In: search/readDoc service, search request/result DTOs and route, membership/repo/path input checks, translations and generated contract. Out: state/reindex routes and queue/poller (US-005), indexer (US-004), agent presentation (US-006), evaluation caller (US-007); no ticket fusion edits, cross-project search, reranker/Jina or deletion of stale repository chunks.\n\n**Interface** — `readDoc(projectId, repoId, path): Promise<KnowledgeChunkRow[]>`; `search({ projectId, query, repoId?, pathPrefix?, limit })`; return `{ lexicalOnly: boolean; empty: boolean; hits: KnowledgeHit[] }`; `KnowledgeHit` is `{ repoId, owner, name, path, sha, anchor, headingPath, title, abstract, snippet, status?, supersededBy?, score }`. Controller exports `KnowledgeSearchBodyDto` and `KnowledgeSearchResultDto`.",
+      "acceptanceCriteria": [
+        "[unit] KnowledgeSearchService.search with a stub store whose lexical leg returns rows [a, b] and vector leg returns [b, c] returns hits in the order b, a, c, with b's score equal to 1/61 + 1/62.",
+        "[unit] search passes the lexical leg the predicate source = 'repo' and the vector leg source = 'repo' AND provider != 'none'.",
+        "[unit] With repoId: 'r1', both predicates end with AND source_id LIKE 'repo:r1:%'.",
+        "[unit] When EmbeddingService.embed throws, search never calls the vector leg, returns the lexical hits and lexicalOnly: true.",
+        "[unit] A hit whose repoId is not returned by the stubbed KnowledgeIndexService.listProjectRepos(projectId) is absent from the result.",
+        "[unit] With pathPrefix: 'docs/adr/', both legs are asked for 200 rows, only hits whose path starts with docs/adr/ are returned, and the result is cut to limit after that filter.",
+        "[unit] search on a project whose table holds no source = 'repo' row returns a result with empty: true and hits: [], alongside the result's lexicalOnly boolean.",
+        "[integration] On a real LanceDB holding one embedded and one provider: 'none' chunk of the same text, search with the fake embedding provider returns both hits, and the provider: 'none' hit's score is 1/(60 + its lexical rank).",
+        "[integration] POST /api/projects/:slug/knowledge/search as a project member with { query: 'broker', repo: 'o/n', limit: 5 } calls KnowledgeSearchService.search with the project's id, the repoId of o/n and limit: 5, and answers 200 with its { lexicalOnly, empty, hits }.",
+        "[integration] POST /api/projects/:slug/knowledge/search with an empty query, and with pathPrefix: '../x', answers 400 (one table-driven test).",
+        "[integration] POST /api/projects/:slug/knowledge/search with repo: 'o/missing' answers 404.",
+        "[integration] POST /api/projects/:slug/knowledge/search with knowledgeIndexEnabled: false answers 409.",
+        "[integration] When KnowledgeSearchService.search throws KnowledgeStoreUnavailableError, POST /api/projects/:slug/knowledge/search answers 409.",
+        "[integration] POST /api/projects/:slug/knowledge/search by a user who is not a project member answers 403."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "retrieval",
+        "lancedb",
+        "security",
+        "openapi"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "RRF and native store integration span a new service, guarded HTTP contract and generated client; project membership and repository isolation require strict security TDD.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/knowledge/knowledge-chunk-store.ts",
+        "apps/api/src/fleet/knowledge/knowledge-index.service.ts",
+        "apps/api/src/fleet/repos/project-fleet-repos.controller.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+        "apps/api/src/fleet/threads/threads.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/knowledge/knowledge-search.service.ts",
+        "apps/api/src/fleet/knowledge/knowledge-search.service.spec.ts",
+        "apps/api/src/fleet/knowledge/project-knowledge.controller.ts",
+        "apps/api/src/i18n/en/knowledge.json",
+        "apps/api/src/i18n/zh/knowledge.json"
+      ],
+      "suggestedCriteria": [
+        "KnowledgeSearchService.search returns empty: false with hits: [] when repo rows exist but neither retrieval leg matches the query.",
+        "KnowledgeSearchService.search orders equal RRF scores by row id ascending.",
+        "POST /api/projects/:slug/knowledge/search answers 404 knowledge.repoNotFound when repo names a repository belonging only to another project.",
+        "POST /api/projects/:slug/knowledge/search answers 400 when the request contains an unknown property instead of silently stripping it."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "openapi.json",
+          "reason": "outside the api package: regenerated by `bun run api:export-spec` for the knowledge search route."
+        },
+        {
+          "path": "apps/cli/src/generated/types.gen.ts",
+          "reason": "outside the api package: regenerated by `bun run generate` for the search route; never hand-edited."
+        },
+        {
+          "path": "apps/cli/src/generated/sdk.gen.ts",
+          "reason": "outside the api package: regenerated by `bun run generate` for the search route; never hand-edited."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "bdae9c14d096f4f9ef94e9dbcf3bd6404a4b4ee4"
+    },
+    {
+      "id": "US-003",
+      "title": "Markdown heading chunker",
+      "description": "**Goal** — Implement deterministic Markdown heading chunks, extractive abstracts, summary text, metadata and citation anchors as a pure helper.\n\n**Motivation** — The 2026-10-15 knowledge research found that koda's gap is content and reach, not retrieval sophistication: the project's architecture, specs, design documents and ADRs live as repository Markdown that no thread can reach.\n\n**Approach** — 1c-c-D8 (chunker): `chunkMarkdown(input: { path: string; text: string }): MarkdownChunk[]` in `apps/api/src/fleet/knowledge/markdown-chunker.ts` is pure. `MarkdownChunk` is `{ chunkIndex, title, headingPath, anchor, abstract, text, status?, supersededBy? }`. Rules, in order (the indexer decodes `ForgeFile.content` as UTF-8, invalid bytes becoming U+FFFD, and the chunker first normalises `\r\n` to `\n`; an empty text yields chunk 0 only, holding the title; a front matter block with no closing `---` line is ordinary text):\n1. A leading YAML front matter block (`---` line, lines, `---` line) is removed from the text; its `title`, `status`, `description` and `superseded-by` keys are read as plain `key: value` strings.\n2. The title is the front matter `title`, else the first H1 text, else the file name without `.md`.\n3. Sections start at ATX headings of level 1 to 3 (`#`, `##`, `###` followed by a space; trailing `#` characters and spaces are removed from the heading text) outside fenced code blocks (a fence opens and closes on a line starting with three backticks or three tildes). Text before the first heading is a section whose heading path is the title.\n4. A section of fewer than 200 characters merges into the following section (its text first), and the merged chunk keeps the following section's `headingPath` and `anchor`; a short last section merges into the previous one, which keeps its own `headingPath` and `anchor`.\n5. A section of more than 2000 characters splits at blank lines outside fences into parts of at most 2000 characters each; a single paragraph longer than 2000 characters is its own part. Parts keep the section's heading path and anchor.\n6. Chunk 0 is the document summary: `headingPath` and `anchor` are empty, `text` is the title, the front matter `description` (else the first paragraph of the first section), and a line `Sections: ` followed by the H2 titles joined by `; `. Section chunks follow from index 1.\n7. `abstract` is the first two sentences of the chunk text (a sentence ends at `. `, `? `, `! ` or a line break), after skipping heading lines, fenced blocks and list markers, cut to 300 characters; empty when nothing remains.\n8. `anchor` follows GitHub's heading ids restricted to ASCII: lower-case, drop every character that is not `a-z`, `0-9`, space, hyphen or underscore, replace each space with `-`; a repeated anchor in one file gets `-1`, `-2`, ... in order.\n9. `status` and `supersededBy` come from the front matter and are copied onto every chunk of the file.\n\nUse ordinary pure TypeScript text helpers, not Nest providers or an LLM. Sanity-check representative real design Markdown but keep unit tests deterministic and independent of its changing prose.\n\n**Scope** — In: new markdown-chunker.ts and its co-located unit spec; ordered extraction/merge/split/summary/anchor rules. Out: GitHub decoding and indexing calls (US-004), store/state/config (US-001), search (US-002), tools/citation parsing (US-006); no Setext section headings, non-ASCII anchor preservation or model-written abstracts.\n\n**Interface** — `chunkMarkdown(input: { path: string; text: string }): MarkdownChunk[]`; `MarkdownChunk` is `{ chunkIndex, title, headingPath, anchor, abstract, text, status?, supersededBy? }`.",
+      "acceptanceCriteria": [
+        "[unit] chunkMarkdown({ path: 'docs/a.md', text }) for a text with an H1 Alpha, an H2 Beta and an H2 Gamma, each section over 200 characters, returns chunk 0 with empty headingPath and anchor and text containing Sections: Beta; Gamma, then chunks with headingPath Alpha, Alpha > Beta and Alpha > Gamma.",
+        "[unit] A ## Not a heading line inside a block fenced with three backticks, or with three tildes, does not start a section (one table-driven test).",
+        "[unit] A text starting with a front matter block holding title: Decision 7, status: superseded and superseded-by: docs/adr/0009.md returns chunks whose title is Decision 7 and which all carry status: 'superseded' and supersededBy: 'docs/adr/0009.md'.",
+        "[unit] No chunk of that front-matter text includes the front matter lines in its text.",
+        "[unit] With no front matter and no H1, the title is the file name without .md (docs/guide-x.md gives guide-x).",
+        "[unit] A 150-character section between two long sections merges into the following section, whose chunk text starts with the short section's text and whose anchor is the following section's.",
+        "[unit] A trailing section of 150 characters merges into the previous section.",
+        "[unit] A 5000-character section made of 500-character paragraphs splits into chunks of at most 2000 characters each, all with the section's headingPath and anchor.",
+        "[unit] A single 3000-character paragraph is one chunk of 3000 characters.",
+        "[unit] The heading ## Token Broker: cache & reuse gets the anchor token-broker-cache--reuse.",
+        "[unit] Two headings ## Notes in one file get the anchors notes and notes-1.",
+        "[unit] A 400-character H2 section whose body starts 'First sentence. Second one! Third.' gets the abstract 'First sentence. Second one!'.",
+        "[unit] A 400-character H2 section whose body is a fenced block, then the line '- Item one. Done.', then further text, gets the abstract 'Item one. Done.'.",
+        "[unit] Text before the first heading becomes chunk 1 with the title as its headingPath, and chunk 0's text holds the front matter description when present.",
+        "[unit] A text with \\r\\n line ends returns the same chunks as the same text with \\n, and the heading ## Notes ## gives the heading text Notes and the anchor notes."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "algorithm",
+        "markdown"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A pure helper and unit spec with a fully specified deterministic algorithm; nuanced fences/merges/anchors but no external systems, permissions or runtime state.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/project-brief.service.ts",
+        "docs/superpowers/specs/2026-10-15-fleet-s5b-koda-assistant-design.md"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/knowledge/markdown-chunker.ts",
+        "apps/api/src/fleet/knowledge/markdown-chunker.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "chunkMarkdown({ path: 'docs/empty.md', text: '' }) returns only chunk 0 holding the title empty.",
+        "chunkMarkdown preserves an unclosed leading --- front matter block as ordinary text instead of removing it.",
+        "chunkMarkdown never cuts a generated abstract beyond 300 characters."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "30e054a3070147880065d4f97f1cbd7f55c0b3ec"
+    },
+    {
+      "id": "US-004",
+      "title": "Repository indexer pass",
+      "description": "**Goal** — Incrementally index each repository's allowlisted default-branch Markdown with leases, chunk embeddings, deletions, retryable fallback and durable pass results.\n\n**Motivation** — Neither lets an agent find \"where was the token broker's cache designed and why\" across a project's documents: the brief is capped at a few kilobytes, and grepping code finds the implementation, not the rationale.\n\n**Approach** — 1c-c-D9 (indexer pass): `KnowledgeRepoIndexer.indexRepo(repoId, now = new Date()): Promise<IndexPassResult>`, with `IndexPassResult = { status: 'indexed' | 'unchanged' | 'skipped' | 'failed' | 'busy'; reason?: string }`:\n1. `findRepo(repoId)`; unknown resolves `{ status: 'failed', reason: 'unknown repo' }` with no state written.\n2. A non-GitHub repository, or one with a null `githubInstallationId`, records state `skipped` with `lastError` `not a GitHub repository` / `no installation` and resolves `skipped`.\n3. `claim(repoId, projectId, now, 900_000)` atomically sets `status: running`, `startedAt`, and `leaseUntil = now + 15 min` only when the row is absent, not `running`, or `leaseUntil < now`; otherwise it resolves `busy` and nothing else runs.\n4. `mintReadOnlyToken(githubInstallationId, name)`, then `getBranchHead(token, owner, name, defaultBranch)` (`apps/api/src/fleet/git-broker/github-app-client.ts:69,148`).\n5. When the head equals `indexedSha` and no `KnowledgeRepoFile` row of the repository has `unembeddedCount > 0`, the pass finishes `idle` with counts unchanged and resolves `unchanged`.\n6. `getTree(token, owner, name, head, true)` (`:159`); a `truncated` tree fails the pass with `tree truncated`.\n7. The allowlist (pure `isIndexablePath(path: string): boolean` and `selectIndexableEntries(entries: ForgeTreeEntry[]): { kept: ForgeTreeEntry[]; skipped: number; capMessage: string | null }` in `apps/api/src/fleet/knowledge/knowledge-allowlist.ts`) keeps blob entries whose path is `README.md`, `.nax/context.md`, `AGENTS.md` (only when `.nax/context.md` is not in the tree), matches `docs/**/*.md`, or matches `.nax/features/<one segment>/spec.md`. It skips (and counts in `skippedCount`) an entry over 262144 bytes, an entry whose path fails `isSafeFilterValue` (`lance-table-manager.ts:37`), and every entry after the first 2000 kept (`capMessage` `2000-file cap reached`).\n8. A kept file whose `KnowledgeRepoFile.blobSha` equals the tree entry's `sha` and whose `unembeddedCount` is 0 is left alone. Every other kept file is read with `getFile(token, owner, name, path, head)` (`:174`), at most four at a time, chunked, embedded (1c-c-D6) and written with `replaceFile`; its `KnowledgeRepoFile` row is upserted and the lease is renewed with `renew(repoId, new Date(clock() + 900_000))` (`clock` is an injectable dependency defaulting to `Date.now`). `renew` answers false when the row is no longer this pass's lease (another claim took it); the pass then stops at once, writes no further rows or state, and resolves `{ status: 'failed', reason: 'lease lost' }`. An `embedBatch` call that has not settled within 120 seconds counts as a failed embedding (1c-c-D6). A `getFile` answer of null treats the file as removed.\n9. Every `KnowledgeRepoFile` row whose path is no longer kept has its chunks removed with `deleteFile` and its row deleted.\n10. The pass finishes `idle` with `indexedSha = head`, the file, chunk, unembedded and skipped counts, `lastError` null (or the `capMessage`), `leaseUntil` null and `finishedAt`; when it wrote or deleted rows it then optimizes once (1c-c-D5); it resolves `indexed`.\n11. Any thrown error after the claim (a mint, `getBranchHead`, `getTree` or `getFile` failure, or `KnowledgeStoreUnavailableError`) finishes the pass `failed` with `lastError` = `RepoCheckException.reason` or the error message cut to 500 characters, `leaseUntil` null, and resolves `failed`; `indexedSha` is not advanced.\n\n1c-c-D6 (embedding): the indexer embeds each changed file's chunk contents with `EmbeddingService.embedBatch(contents)` (`apps/api/src/rag/embedding.service.ts:42`). When it throws, or returns a vector count or length that differs from the chunk count or `EmbeddingService.dimensions`, every chunk of that file is stored unembedded (1c-c-D4), the file's `unembeddedCount` is its chunk count, and the pass logs one warning. The existing `VectorStore` zero-vector fallback (`vector-store.service.ts:198-206`) is unchanged.\n\n1c-c-D4 (chunk rows): a repository chunk is one `LanceRecord` (`apps/api/src/rag/lance-table-manager.ts:18-30`) in table `project_<projectId>`: `id = repo:<repoId>:<path>#<chunkIndex>`, `source = 'repo'`, `source_id = repo:<repoId>:<path>`, `content` = the context line, a newline, the abstract, a blank line, then the chunk text (so full-text search also matches the context line), `vector` = the embedding of `content`, `metadata` = `JSON.stringify` of `{ repoId, owner, name, path, sha, blobSha, title, headingPath, anchor, chunkIndex, chunkCount, abstract, text, status?, supersededBy? }`, `created_at` = the pass time, and `provider` / `model` = the embedding provider and model, or `provider: 'none'` and `model: ''` with a zero vector of the table's dimension when the embedding failed (1c-c-D6). The context line is `<owner>/<name> · <path> · <headingPath>`, with `headingPath` the H1-H3 titles joined by ` > `; for chunk 0, whose `headingPath` is empty, it is `<owner>/<name> · <path>`.\n\nEvery unit case runs KnowledgeRepoIndexer.indexRepo with a fake GitHubAppClient, a stub KnowledgeChunkStore, the fake embedding provider, and a stub state repository whose findRepo('r1') resolves a GitHub repository o/n with installation 5n and claim answers true, unless stated. Decode ForgeFile.content as UTF-8 with invalid bytes becoming U+FFFD and call US-003 chunkMarkdown; call US-001 selectIndexableEntries, KnowledgeChunkStore and module-private state repository rather than alternate implementations. Add KnowledgeRepoIndexer as a private KnowledgeModule provider. Fetch concurrency is at most four, but commit ordering must enforce AC8: on first failed renew, only one replaceFile has occurred and no finish occurs. Never log/persist minted tokens or hold a database transaction across HTTP/embeddings. The injectable clock and fake timers support lease/120-second tests.\n\n**Scope** — In: one repo pass, file chunk/embedding row construction, all state transitions, deletion/retry/lease behavior and optimize-once seam. Out: state/store/allowlist implementations (US-001), chunker algorithm (US-003), queue/poll/merge/admin invocation (US-005), search and agent tools (US-002/US-006); only default branch, no GitLab indexing, no outcomes corpus, no changed ticket fallback, no extra multi-instance coordinator or per-repository chunk cap.\n\n**Interface** — `KnowledgeRepoIndexer.indexRepo(repoId, now = new Date()): Promise<IndexPassResult>`; `IndexPassResult = { status: 'indexed' | 'unchanged' | 'skipped' | 'failed' | 'busy'; reason?: string }`. Existing collaborators: `EmbeddingService.embedBatch(texts): Promise<number[][]>`, `RagService.optimizeTable(projectId): Promise<void>`, `GitHubAppClient.mintReadOnlyToken(installationId: bigint, repoName: string): Promise<{ token; expiresAt }>`, `getBranchHead(token, owner, name, branch): Promise<string>`, `getTree(token, owner, name, treeish, recursive): Promise<{ entries: ForgeTreeEntry[]; truncated: boolean }>`, `getFile(token, owner, name, path, ref): Promise<ForgeFile | null>`.",
+      "acceptanceCriteria": [
+        "[unit] Given a fake GitHubAppClient, stub KnowledgeChunkStore, fake embedding provider, and stub state repository whose findRepo('r1') resolves GitHub o/n with installation 5n and defaultBranch main and whose claim answers true, indexRepo('r1') calls mintReadOnlyToken(5n, 'n'), getBranchHead(token, 'o', 'n', 'main') and getTree(token, 'o', 'n', head, true), in that order.",
+        "[unit] For a tree holding README.md, docs/a.md, .nax/features/f1/prd.json and src/a.ts, indexRepo calls getFile for exactly README.md and docs/a.md, each at the head sha.",
+        "[unit] A docs/a.md holding two H2 sections of 500 characters each (no H1) is written with one replaceFile(projectId, 'repo:r1:docs/a.md', rows) call whose rows carry source: 'repo', ids repo:r1:docs/a.md#0 to #2, the chunker's anchors in metadata, and chunk 0's content starting with the line o/n · docs/a.md.",
+        "[unit] A file whose KnowledgeRepoFile.blobSha equals its tree sha and whose unembeddedCount is 0 is neither read nor written.",
+        "[unit] A stored KnowledgeRepoFile for docs/gone.md that is not in the tree, and a tree file docs/null.md whose getFile answers null, each get deleteFile(projectId, 'repo:r1:<path>') and lose their file row (one table-driven test).",
+        "[unit] When embedBatch for docs/a.md throws, when it answers one vector fewer than the chunk count, when a vector's length differs from EmbeddingService.dimensions, and when it has not settled after 120 seconds of fake time, the file's rows carry provider: 'none', model: '' and a zero vector of EmbeddingService.dimensions, its file row has unembeddedCount equal to its chunk count, and the pass resolves indexed (one table-driven test).",
+        "[unit] When the head equals the stored indexedSha, the pass resolves unchanged without calling getTree when no file row has unembeddedCount > 0, and calls getTree and re-reads only that file when one file row has it (one table-driven test).",
+        "[unit] When renew answers false after the first of three changed files, the pass resolves { status: 'failed', reason: 'lease lost' }, calls replaceFile once, and never calls finish.",
+        "[unit] indexRepo on a GitLab repository records lastError: 'not a GitHub repository', and on a GitHub repository with a null installation records no installation; each resolves skipped and calls no GitHub method (one table-driven test).",
+        "[unit] When claim answers false, the pass resolves busy and calls no GitHub method and no store method.",
+        "[unit] A tree answered with truncated: true finishes the state failed with lastError: 'tree truncated', writes no rows, and leaves indexedSha unchanged.",
+        "[unit] When mintReadOnlyToken throws RepoCheckException('app_not_installed'), when getFile throws Error('boom'), and when replaceFile throws KnowledgeStoreUnavailableError, the state finishes failed with lastError app_not_installed, boom and the error's message respectively, leaseUntil null and indexedSha unchanged (one table-driven test).",
+        "[unit] Given the only kept file is docs/a.md and it produces three chunk rows, a successful pass calls RagService.optimizeTable(projectId) exactly once and finishes state with status: 'idle', indexedSha equal to the head, fileCount: 1, chunkCount: 3 and leaseUntil: null.",
+        "[unit] indexRepo('unknown') resolves { status: 'failed', reason: 'unknown repo' } and calls no state-writing method.",
+        "[unit] A pass writing three changed files calls the state repository's renew three times, each after that file's replaceFile."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "github",
+        "indexing",
+        "concurrency",
+        "security"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Coordinates forge tokens, bounded I/O, leased persistence and nontransactional LanceDB with timeout/retry and lease-loss fencing; credential use requires strict security TDD.",
+        "agentProfileId": "native-sol",
+        "agent": "native",
+        "profileModelTier": "powerful",
+        "initialAgent": "native",
+        "initialProfileId": "native-sol",
+        "initialModelTier": "powerful",
+        "initialComplexity": "complex",
+        "modelTier": "powerful"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/git-broker/github-app-client.ts",
+        "apps/api/src/fleet/repo-config/github-fleet-repo-files.reader.ts",
+        "apps/api/src/fleet/knowledge/knowledge-chunk-store.ts",
+        "apps/api/src/fleet/knowledge/markdown-chunker.ts",
+        "apps/api/src/fleet/knowledge/prisma-knowledge-index.repository.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/knowledge/knowledge-repo-indexer.ts",
+        "apps/api/src/fleet/knowledge/knowledge-repo-indexer.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "KnowledgeRepoIndexer never has more than four getFile requests in flight simultaneously.",
+        "When getBranchHead or getTree throws after claim, indexRepo resolves failed and preserves indexedSha while recording the error reason and clearing leaseUntil.",
+        "When an embedding promise resolves after its 120-second timeout, no additional chunk replacement occurs.",
+        "An unchanged-head pass finishes idle with the prior file, chunk, unembedded and skipped counts unchanged."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "42bd43fcefbe3f8df463a09e184ae1fcb53b9ae0"
+    },
+    {
+      "id": "US-005",
+      "title": "Index queue, poll, merge hook, reindex and state routes",
+      "description": "**Goal** — Keep knowledge fresh through a bounded queue, configurable head poll, successful fleet merge hook and ADMIN reindex endpoint, and expose repository index state to members.\n\n**Motivation** — The 2026-10-15 knowledge research found that koda's gap is content and reach, not retrieval sophistication: the project's architecture, specs, design documents and ADRs live as repository Markdown that no thread can reach.\n\n**Approach** — 1c-c-D10 (queue): `KnowledgeIndexQueue.enqueue(repoId, reason: 'poll' | 'merge' | 'admin')` adds the id to an in-process FIFO unless it is already waiting, and drains one `indexRepo` at a time; it never throws and logs a failed pass with `Logger.warn`. When `knowledgeIndexEnabled` is false, `enqueue` does nothing. The waiting set is capped at 1000 ids (a full queue drops the new id with a warning).\n\n1c-c-D11 (triggers): `KnowledgePoller` (`OnModuleInit`/`OnModuleDestroy`, the `FleetPrStateRefresher` timer pattern, `apps/api/src/fleet/tickets/fleet-pr-state.refresher.ts:49-53`) starts `setInterval(() => void this.poll(), knowledgePollMs)` only when `knowledgeIndexEnabled`; `poll()` enqueues every `findAllGithubRepos()` id with reason `poll`. `FleetPrStateRefresher` gains a constructor dependency `knowledge: KnowledgeIndexQueue`; in `apply` (`:120-128`), when `next === 'merged'` and `applyMergedPr` answers `'updated'`, it calls `knowledge.enqueue(link.repo.id, 'merge')`. A link already `merged` is no longer refreshable (`findRefreshableFleetLinks`, `prisma-fleet-tickets.repository.ts:183-187`), and `apply` returns early when the state is unchanged, so a merge enqueues once.\n\n1c-c-D12 (routes, state/reindex portion): `ProjectKnowledgeController` at `projects/:slug/knowledge`, `@UseGuards(ProjectMembershipGuard)` with `@ApiParam({ name: 'slug' })` (the `ProjectFleetReposController` pattern) and `@CurrentProject()`:\n- `GET repos` (member): `{ enabled, repos: KnowledgeRepoStateDto[] }`, one entry per `findProjectRepos` repository: `{ repoId, owner, name, provider, status, indexedSha, fileCount, chunkCount, unembeddedCount, skippedCount, lastError, startedAt, finishedAt }`, `status` `never` when no state row exists. Answers even when disabled.\n- `POST repos/:repoId/reindex` (`@RequiredPermission('ADMIN')`, HTTP 202): enqueues `admin` and answers `{ queued: true }`; 404 `knowledge.repoNotFound` when the repository is not one of the project's.\n- `POST reindex` and `POST search` answer 409 `knowledge.disabled` when `knowledgeIndexEnabled` is false (`ConflictAppException`, the `threads.disabled` pattern, `apps/api/src/fleet/threads/threads.service.ts:30`). The i18n keys go to `apps/api/src/i18n/{en,zh}/knowledge.json`. The concrete reindex route is repos/:repoId/reindex above; retain US-002 search behavior.\n\nComplete KnowledgeModule by adding private KnowledgeIndexQueue/KnowledgePoller providers and exporting KnowledgeIndexQueue alongside KnowledgeIndexService/KnowledgeSearchService only. FleetTicketsModule imports KnowledgeModule for the queue. Poller may inject the module-private state repository; controllers and other modules use only KnowledgeIndexService for project state/repo checks. The list uses listProjectStates(projectId), preserving all project fleet repos, including non-GitHub and never-indexed rows. Poller enumerates the module-private repository's findAllGithubRepos, bounded to 500 installed GitHub repos. Clean up/unref the timer using the existing refresher lifecycle pattern. Queue failures include both returned failed IndexPassResult and thrown errors; warn and continue, never reject the enqueue caller.\n\nUpdate `apps/api/src/fleet/tickets/fleet-pr-state.refresher.spec.ts`'s `new FleetPrStateRefresher(...)` call at :32 with a stub KnowledgeIndexQueue eighth argument; every existing assertion is unchanged. Route cases go into `apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts` with KnowledgeIndexQueue stubbed. Regenerate `openapi.json` with `bun run api:export-spec` and CLI client with `bun run generate`, preserving US-002 search output; generated types.gen.ts/sdk.gen.ts are never hand-edited.\n\n**Scope** — In: FIFO/poller, merge-only queue integration, reindex/state DTOs and routes, KnowledgeModule/FleetTicketsModule wiring and contract regeneration. Out: implementing search (US-002), indexing algorithm (US-004), tools (US-006), evaluation (US-007); no push webhook or durable queue, and no web status/reindex UI.\n\n**Interface** — `KnowledgeIndexQueue.enqueue(repoId, reason: 'poll' | 'merge' | 'admin')`; `KnowledgePoller.onModuleInit`, `onModuleDestroy`, `poll()`; `GET /api/projects/:slug/knowledge/repos` returns `{ enabled, repos: KnowledgeRepoStateDto[] }`; `POST /api/projects/:slug/knowledge/repos/:repoId/reindex` returns HTTP 202 `{ queued: true }`; state fields are `{ repoId, owner, name, provider, status, indexedSha, fileCount, chunkCount, unembeddedCount, skippedCount, lastError, startedAt, finishedAt }`.",
+      "acceptanceCriteria": [
+        "[unit] KnowledgeIndexQueue.enqueue('r1', 'admin') with knowledgeIndexEnabled: true calls the stubbed KnowledgeRepoIndexer.indexRepo with 'r1' once.",
+        "[unit] While a pass for r0 is still running, enqueuing r1, then r2, then r1 again runs indexRepo for r0, r1 and r2 once each, in that order.",
+        "[unit] enqueue with knowledgeIndexEnabled: false never calls indexRepo.",
+        "[unit] When indexRepo rejects, enqueue does not throw, Logger.warn is called once, and the next queued id still runs.",
+        "[unit] With 1000 ids waiting, enqueue of a new id does not add it and calls Logger.warn.",
+        "[unit] KnowledgePoller.onModuleInit with knowledgeIndexEnabled: false starts no timer.",
+        "[unit] KnowledgePoller.poll() enqueues every findAllGithubRepos() id with reason poll.",
+        "[unit] FleetPrStateRefresher.refresh() with a stubbed fleet link of repository r9 in state open whose PR the GitHub stub reports merged, and applyMergedPr answering 'updated', calls KnowledgeIndexQueue.enqueue('r9', 'merge') once.",
+        "[unit] refresh() with the same link already in state merged calls enqueue zero times.",
+        "[unit] refresh() with a link the GitHub stub reports closed calls enqueue zero times.",
+        "[integration] POST /api/projects/:slug/knowledge/repos/:repoId/reindex as a global ADMIN answers 202 { queued: true } and calls KnowledgeIndexQueue.enqueue(repoId, 'admin').",
+        "[integration] The reindex route as a project DEVELOPER answers 403, and as a global ADMIN for a repository of another project answers 404.",
+        "[integration] The reindex route with knowledgeIndexEnabled: false answers 409.",
+        "[integration] GET /api/projects/:slug/knowledge/repos as a project member answers 200 with one entry per fleet repository of the project, status: 'never' for a repository with no state row, and enabled equal to knowledgeIndexEnabled.",
+        "[unit] With the new eighth constructor dependency supplied and exactly one open link whose PR is merged and applyMergedPr answers 'updated', FleetPrStateRefresher.refresh() still returns { skipped: false, checked: 1, changed: 1, failedRepos: 0 }, preserving its existing merge-refresh summary behavior."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "queue",
+        "freshness",
+        "security",
+        "openapi"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Lifecycle queue/timer and merge integration cross module boundaries; global ADMIN authorization, project-repo isolation and generated routes require strict security TDD.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/tickets/fleet-pr-state.refresher.ts",
+        "apps/api/src/fleet/tickets/fleet-pr-state.refresher.spec.ts",
+        "apps/api/src/fleet/knowledge/knowledge-repo-indexer.ts",
+        "apps/api/src/fleet/knowledge/project-knowledge.controller.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/knowledge/knowledge-index.queue.ts",
+        "apps/api/src/fleet/knowledge/knowledge-poller.ts",
+        "apps/api/src/fleet/knowledge/knowledge-repo-state.dto.ts",
+        "apps/api/src/fleet/knowledge/knowledge-index.queue.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "KnowledgeIndexQueue logs Logger.warn when indexRepo resolves { status: 'failed', reason: 'tree truncated' } and proceeds to the next queued id.",
+        "KnowledgePoller.onModuleDestroy clears its interval so no subsequent poll is scheduled.",
+        "FleetPrStateRefresher.refresh does not enqueue a merge when applyMergedPr answers a value other than 'updated'.",
+        "GET /api/projects/:slug/knowledge/repos remains HTTP 200 with enabled: false while indexing is disabled."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/tickets/fleet-pr-state.refresher.spec.ts",
+          "reason": "the `new FleetPrStateRefresher(...)` call at `:32` gains a stub `KnowledgeIndexQueue` as its eighth argument; every existing assertion is unchanged."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "outside the api package: regenerated by `bun run api:export-spec` for the reindex and state routes."
+        },
+        {
+          "path": "apps/cli/src/generated/types.gen.ts",
+          "reason": "outside the api package: regenerated by `bun run generate` for the reindex and state routes; never hand-edited."
+        },
+        {
+          "path": "apps/cli/src/generated/sdk.gen.ts",
+          "reason": "outside the api package: regenerated by `bun run generate` for the reindex and state routes; never hand-edited."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "0b38a917370b3f44ea3084b774a851af6a1c89f4"
+    },
+    {
+      "id": "US-006",
+      "title": "Agent tools and instructions",
+      "description": "**Goal** — Let member-authorized thread agents search project documentation and read indexed documents/sections through two fenced, citation-producing tools.\n\n**Motivation** — Neither lets an agent find \"where was the token broker's cache designed and why\" across a project's documents: the brief is capped at a few kilobytes, and grepping code finds the implementation, not the rationale.\n\n**Approach** — 1c-c-D13 (tools): the tool factories `kbSearchTool(deps)` and `getDocTool(deps)` live in `apps/api/src/fleet/assistant/tools/kb-tools.ts`, with `deps = { search: KnowledgeSearchService; index: KnowledgeIndexService }`. Both tools resolve a `repo` (or a citation's `owner/name`) with `KnowledgeIndexService.resolveProjectRepo(ctx.projectId, { owner, name })`; null throws `NotFoundAppException`, so a deleted or foreign repository is `not_found`. A `path` that fails `isSafeFilterValue` is `ToolInputError('path')`. `koda-tool-descriptors.ts` gains `KODA_KB_SEARCH` and `KODA_GET_DOC`, appended to `KNOWLEDGE_TOOL_DESCRIPTORS` (`:219`), which makes 12 of `KODA_TOOL_LIMITS.maxTools` 32. Both are `permission: { kind: 'member' }` and registered by `KnowledgeTools.onModuleInit` (`apps/api/src/fleet/assistant/tools/knowledge-tools.ts:241`), which gains `KnowledgeSearchService` and `KnowledgeIndexService`.\n- `koda_kb_search` input `{ query: string 1-500, repo?: \"owner/name\", pathPrefix?: string 1-300 with no `..` and no leading `/`, limit?: integer 1-20 (default 8) }`. Output: when `empty`, exactly `knowledge index is empty for this project`; when no hit, `no results`; otherwise a first line `<n> results for \"<query>\"` (plus ` (lexical results only: embeddings unavailable)` when `lexicalOnly`), then per hit a line `[<i>] <owner>/<name>:<path>@<sha7>#<anchor> — <headingPath>` (`#<anchor>` omitted when empty), a line `(status: <status>[ → <supersededBy>])` when the chunk has a status, and `ctx.data(abstract + '\\n' + snippet)`. An unknown `repo` throws `NotFoundAppException` (the executor answers `not_found`).\n- `koda_get_doc` input `{ citation: string }` or `{ repo: \"owner/name\", path: string, anchor?: string, part?: integer >= 1 }`. A citation matches `^([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+):([^@#]+)(?:@[0-9a-f]{7,40})?(?:#([a-z0-9_-]+))?$`; anything else is `ToolInputError('citation')`. A citation's sha is ignored: the answer is always the indexed text, labelled with the indexed sha. It reads the file's rows with `KnowledgeSearchService.readDoc(ctx.projectId, repo.id, path)`, drops chunk 0 (unless the file has no other chunk), keeps only rows whose `anchor` equals the requested anchor when one is given, and joins their `text` with a blank line. The text is split into parts of at most 12000 characters at line boundaries (a single line longer than 12000 characters is cut at 12000 characters, the rest starting the next part); the answer is a line `<owner>/<name>:<path>@<sha7> (indexed) part <p> of <m>` followed by `ctx.data(part text)`. A repository or file with no rows, an anchor with no rows, or a `part` beyond `m` throws `NotFoundAppException`.\n\n1c-c-D14 (instructions): `KODA_TOOLS_LINE` (`apps/api/src/fleet/threads/thread-instructions.ts:7-8`) is appended with ` Search the project's docs with koda_kb_search and read them with koda_get_doc; cite docs as owner/name:path@sha7#anchor.` Both REPO and PROJECT instructions carry it.\n\nUse the existing executor's parse/member/execute pipeline, not a bypass. Validate malformed citations and unsafe paths in parse (where the executor maps ToolInputError to invalid_input); resolve missing repositories/files/anchors/parts in execution using NotFoundAppException. search calls carry ctx.projectId, default limit 8 and optional resolved repoId/pathPrefix; readDoc is the only indexed file read path. Do not access GitHub or honor a supplied citation sha as a historical fetch. Append descriptors in the exact order [KODA_MEMORY_SEARCH, KODA_TIMELINE, KODA_KB_SEARCH, KODA_GET_DOC]; keep input schemas aligned with parser validation and existing tool-count limits. AssistantModule imports KnowledgeModule.\n\nExisting `knowledge-tools.spec.ts` Test.createTestingModule provider list at :70-82 gains stub KnowledgeSearchService/KnowledgeIndexService values; its assertions are unchanged. Existing `thread-instructions.spec.ts` copy of KODA_TOOLS_LINE takes the appended text; placement assertions at :61-62, :98-99, :124-126 and :182-183 are unchanged. New tests must cover the AssistantToolExecutor.execute entry seam, membership context, exact output, data fencing and error mapping rather than testing only standalone string helpers.\n\n**Scope** — In: two tool factories/descriptors, KnowledgeTools registration/DI, member-only tool declarations and both thread instruction builders. Out: search ranking/readDoc implementation (US-002), indexer (US-004), queue/admin state routes (US-005), evaluation (US-007); no live/historical GitHub fetch, web link rendering, cross-project search or outcomes tools.\n\n**Interface** — `kbSearchTool(deps)` and `getDocTool(deps)`, with `deps = { search: KnowledgeSearchService; index: KnowledgeIndexService }`, implement `AssistantTool`; `permission: { kind: 'member' }`; koda_kb_search and koda_get_doc input/output grammars, citation regex and the instruction suffix are specified verbatim above.",
+      "acceptanceCriteria": [
+        "[unit] KNOWLEDGE_TOOL_DESCRIPTORS names koda_memory_search, koda_timeline, koda_kb_search and koda_get_doc in that order, and KODA_TOOL_DESCRIPTORS has at most KODA_TOOL_LIMITS.maxTools entries.",
+        "[unit] AssistantToolExecutor.execute of koda_kb_search { query: 'token cache' } for a job of project p1 calls KnowledgeSearchService.search with { projectId: 'p1', query: 'token cache', limit: 8 }.",
+        "[unit] With one hit { owner: 'o', name: 'n', path: 'docs/a.md', sha: 'abcdef1234', anchor: 'cache', headingPath: 'A > Cache' }, the result's first line is 1 results for \"token cache\" and the second is [1] o/n:docs/a.md@abcdef1#cache — A > Cache.",
+        "[unit] The hit's abstract and snippet appear inside the call's koda-data fence (passed through ctx.data).",
+        "[unit] A hit with status: 'superseded' and supersededBy: 'docs/adr/0009.md' adds the line (status: superseded → docs/adr/0009.md).",
+        "[unit] With lexicalOnly: true, the first line ends with (lexical results only: embeddings unavailable); with empty: true the whole result is knowledge index is empty for this project; with no hits it is no results.",
+        "[unit] koda_kb_search with query: '', with a 501-character query, with limit: 21 and with pathPrefix: '../x' each answers invalid_input with reasons query, query, limit and pathPrefix (one table-driven test).",
+        "[unit] koda_kb_search with repo: 'o/missing', and koda_get_doc with { repo: 'o/missing', path: 'docs/a.md' }, each answer not_found when KnowledgeIndexService.resolveProjectRepo resolves null (one table-driven test).",
+        "[unit] koda_get_doc with { citation: 'o/n:docs/a.md@1111111#cache' }, over rows indexed at sha abcdef1234, calls KnowledgeSearchService.readDoc(projectId, <id of o/n>, 'docs/a.md') and answers a first line o/n:docs/a.md@abcdef1 (indexed) part 1 of 1 followed by the fenced text of the rows whose anchor is cache.",
+        "[unit] Given docs/a.md has section chunks in addition to summary chunk 0, koda_get_doc with { repo: 'o/n', path: 'docs/a.md' } answers the text of every chunk except chunk 0, joined by a blank line, in chunkIndex order.",
+        "[unit] A document held in one row whose text is 30 lines of 999 characters joined by \\n (29999 characters) answers part 1 of 3 for part absent, part 3 of 3 for part: 3, and not_found for part: 4.",
+        "[unit] koda_get_doc with { citation: 'not a citation' } answers invalid_input: citation, with { repo: 'o/n', path: \"docs/it's.md\" } answers invalid_input: path, and with an anchor no row carries answers not_found.",
+        "[unit] A document that is one 13000-character line answers part 1 of 2 whose text is its first 12000 characters.",
+        "[unit] buildProjectThreadInstructions and buildThreadInstructions both return text whose koda tools: line ends with cite docs as owner/name:path@sha7#anchor. and names koda_kb_search and koda_get_doc, preserving the existing memory:<id> guidance and placement immediately before the skills block for both empty and non-empty skill snapshots.",
+        "[unit] When koda_get_doc resolves an in-project repository but KnowledgeSearchService.readDoc returns no rows for its requested file, AssistantToolExecutor.execute answers not_found."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "assistant",
+        "tools",
+        "citations",
+        "security"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New member-authorized tools cross registry, executor, service and thread instructions; project-scoped resolution, validation and untrusted-data fencing require strict security TDD.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/koda-tool-descriptors.ts",
+        "apps/api/src/fleet/assistant/tools/knowledge-tools.ts",
+        "apps/api/src/fleet/assistant/tools/knowledge-tools.spec.ts",
+        "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+        "apps/api/src/fleet/threads/thread-instructions.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/assistant/tools/kb-tools.ts",
+        "apps/api/src/fleet/assistant/tools/kb-tools.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "AssistantToolExecutor refuses either new knowledge tool with forbidden when the thread creator no longer has project membership.",
+        "koda_get_doc returns the summary text when chunk 0 is the file's only indexed chunk.",
+        "koda_kb_search omits the # suffix from a citation when the hit anchor is empty."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/tools/knowledge-tools.spec.ts",
+          "reason": "its `Test.createTestingModule` providers at `:70-82` gain stub `KnowledgeSearchService` and `KnowledgeIndexService` values, because `KnowledgeTools` now injects them; its assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/thread-instructions.spec.ts",
+          "reason": "the spec's copy of `KODA_TOOLS_LINE` at `:15` takes the 1c-c-D14 text; the placement assertions at `:61-62`, `:98-99`, `:124-126` and `:182-183` are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "3ec0286a6a3fddf380de69c4646333c42ebe14a5"
+    },
+    {
+      "id": "US-007",
+      "title": "Evaluation script",
+      "description": "**Goal** — Add a deterministic scoring function and authenticated REST evaluation CLI over the reviewed 40-question repository-doc fixture.\n\n**Motivation** — The 2026-10-15 knowledge research found that koda's gap is content and reach, not retrieval sophistication: the project's architecture, specs, design documents and ADRs live as repository Markdown that no thread can reach.\n\n**Approach** — 1c-c-D15 (evaluation): `apps/api/test/kb-eval/questions.json` (committed with this spec, not written by a story) is an array of 40 `{ id: string, question: string, expected: Array<{ repo: string; path: string; anchor?: string }> }`. `apps/api/scripts/kb-eval.ts` exports pure `scoreRun(questions, answers): KbEvalReport`, where `answers` maps a question id to its ranked hits and `KbEvalReport` is `{ questions: number; recallAt5: number; recallAt20: number; mrr: number; anchorRecallAt20: number; misses: string[] }`. A question counts toward recall@k when any of its `expected` `{repo, path}` appears among its first k hits; `mrr` averages `1 / rank` of the first matching hit (0 when none); `anchorRecallAt20` also requires the anchor when the expected entry has one; `misses` lists the ids with no match in the first 20. A hit matches an expected entry when `<owner>/<name>` equals `repo` and `path` equals `path`. `runEval(argv: string[], deps: { fetch: typeof fetch; env: Record<string, string | undefined>; print: (line: string) => void; writeFile: (path: string, text: string) => Promise<void>; questions: KbEvalQuestion[] }): Promise<KbEvalReport>` is the CLI body: with `--base-url <url> --project <slug> [--out <file>]` it sends `Authorization: Bearer <KODA_EVAL_TOKEN>` (a koda user access token or API key, the scheme `CombinedAuthGuard` reads, `apps/api/src/auth/guards/combined-auth.guard.ts:103-107`), calls `POST /api/projects/<slug>/knowledge/search` with `limit: 20` once per question, prints the report and writes it as JSON when `--out` is given. `apps/api/package.json` gains `\"kb:eval\": \"bun scripts/kb-eval.ts\"`. The existing `evaluate:retrieval` script (`apps/api/scripts/evaluate-retrieval.ts`, synthetic ticket documents) is unchanged.\n\n1c-c-R4 (evaluation): 40 questions over `nathapp-io/koda`, registered as a fleet repository of a koda-wk project; recall@5, recall@20 and MRR; if recall@20 is below 0.85, the reranker or Jina is tried next (a decision rule, not a gate).\nFailure handling: Eval: search call answers non-200 — the question is recorded as a miss and the HTTP status printed; the run continues. Use the API's existing JsonResponse {ret,data} envelope to obtain ranked hits. Export helpers without making network calls on module import; use a guarded CLI entry point and injected collaborators for deterministic unit tests. The question fixture is read-only input: validate its 40 unique ids, nonempty questions and allowlisted expected paths in this story's unit spec without regenerating or editing it.\n\n**Scope** — In: scripts/kb-eval.ts, script's pure scoring/CLI functions and entry point, unit tests, kb:eval package command and read-only fixture validation. Out: fixture authoring, search route/retrieval (US-002), indexing/queue (US-004/US-005), tools (US-006); no synthetic evaluate:retrieval changes, deployment registration/env compose work, reranker/Jina implementation or score threshold release gate.\n\n**Interface** — `scoreRun(questions, answers): KbEvalReport`; `runEval(argv: string[], deps: { fetch: typeof fetch; env: Record<string, string | undefined>; print: (line: string) => void; writeFile: (path: string, text: string) => Promise<void>; questions: KbEvalQuestion[] }): Promise<KbEvalReport>`; `KbEvalReport` is `{ questions: number; recallAt5: number; recallAt20: number; mrr: number; anchorRecallAt20: number; misses: string[] }`; `KbEvalQuestion` matches `{ id: string, question: string, expected: Array<{ repo: string; path: string; anchor?: string }> }`.",
+      "acceptanceCriteria": [
+        "[unit] scoreRun with two questions, one whose expected { repo: 'o/n', path: 'docs/a.md' } matches the 3rd hit (owner: 'o', name: 'n', path: 'docs/a.md') and one whose expected path is the 12th hit, returns recallAt5: 0.5, recallAt20: 1 and mrr equal to (1/3 + 1/12) / 2.",
+        "[unit] A question whose expected path is absent from its 20 hits is listed in misses and adds 0 to mrr.",
+        "[unit] An expected entry with anchor: 'cache' counts toward anchorRecallAt20 only when a hit in the first 20 has that path and that anchor, and still counts toward recallAt20 on the path alone.",
+        "[unit] A question with two expected entries counts as found when either one matches.",
+        "[unit] runEval(['--base-url', 'http://k', '--project', 'koda-dogfood'], deps) with a stubbed fetch and KODA_EVAL_TOKEN=t calls http://k/api/projects/koda-dogfood/knowledge/search once per question with method POST, the header Authorization: Bearer t, and a JSON body { query: <question>, limit: 20 }.",
+        "[unit] When the stubbed fetch answers 500 for one question in runEval, that question is in misses, the HTTP status 500 is printed, the run continues with the next question, and the report counts all questions.",
+        "[unit] Every entry of apps/api/test/kb-eval/questions.json has a unique id, a non-empty question and at least one expected entry for which isIndexablePath(path) is true, and the file holds 40 entries."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "tooling",
+        "evaluation",
+        "security"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A small injected CLI and pure ranking metrics use established script patterns; handling a Bearer access token invokes the credential security override.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/test/kb-eval/questions.json",
+        "apps/api/scripts/test-scoped.ts",
+        "apps/api/test/unit/scripts/test-scoped.spec.ts",
+        "apps/api/src/fleet/knowledge/knowledge-allowlist.ts",
+        "apps/api/src/fleet/knowledge/project-knowledge.controller.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/scripts/kb-eval.ts",
+        "apps/api/test/unit/scripts/kb-eval.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "runEval writes the returned report as JSON to the requested --out path and prints the report through deps.print.",
+        "runEval scores hits read from a successful search response's data object in the { ret: 0, data } envelope.",
+        "runEval never prints the KODA_EVAL_TOKEN value when a search call fails."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "2d6c3b038feda5b0031a8c19a722a653027d7bf4"
+    }
+  ],
+  "analysis": "FEATURE AND BASELINE\nThis is S5b-R14 / feature 3c-1: index the default-branch Markdown of each project's GitHub fleet repositories into its existing LanceDB project_<projectId> table, then expose a separate hybrid repository-doc search, indexed-document tools, freshness triggers, state routes and an evaluation CLI. Exactly seven stories and the declared dependency graph are binding. Knowledge indexing is opt-in with KNOWLEDGE_INDEX_ENABLED=true. Completion means executable implementations and the specified behavioral assertions, not a retrieval-score gate: recall@20 below 0.85 informs a subsequent reranker/Jina experiment. Fleet outcomes, configurable patterns and web are the subsequent feature, not this one.\n\nDISCOVERY AND CONVENTIONS\nThe codebase-memory MCP server is not exposed in this session; structural discovery used direct file reads and text search as the repository's documented fallback. No production code was changed while preparing this PRD. The supplied auto-detected Express/Next.js labels are misleading: repository guidance establishes NestJS 12/Fastify for apps/api and Nuxt SSR for apps/web (.nax/mono/apps/api/context.md:21-30; root AGENTS.md). Runtime dependencies confirm NestJS/Fastify, Prisma 7 and LanceDB 0.17.0 (apps/api/package.json:41-65). Use Nathapp patterns, JsonResponse envelopes, generated Prisma types, PrismaService's client proxy, local string statuses rather than Prisma enums, and API-only English/Chinese translations. Read the nathapp-nestjs-patterns skill before implementing NestJS code; it was not exposed as a skill or found by repository glob during this planning session. Do not author generated AGENTS.md or generated CLI sources. This work does not touch runner/web implementations.\n\nUS-001: SHARED STORAGE, STATE AND CONFIG\nIFleetConfig ends in threadsEnabled and has no knowledge keys (apps/api/src/config/fleet.config.ts:8-63); FleetConfigSchema has optional string declarations at :65-97; int() is parseInt at :99; fleetConfig returns environment values at :110-145. Add the exact two knowledge keys, finite fallback and 60000 ms minimum without changing existing settings. Existing config tests restore process.env and exercise factory calls (apps/api/src/config/fleet.config.spec.ts:8-18). testFleetConfig() is a complete IFleetConfig literal with ...overrides last (apps/api/src/common/test-helpers/fleet-config.ts:4-38); adding defaults there prevents unrelated fixtures from breaking.\nFleetRepo is a string-provider model with project cascade and a globally unique (provider, owner, name) tuple, with no knowledge relations (apps/api/prisma/schema.prisma:802-821). Add only the two specified models and back-relations plus migration 20261020090000_knowledge_index. The state repository must remain module-private behind KNOWLEDGE_INDEX_REPOSITORY; cross-module consumers and controllers use KnowledgeIndexService. Mirror findRepo's selected fields and findProjectRepos's createdAt/id ordering and 60-row bound (apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:43-63). A PostgreSQL atomic claim, not a find-then-unconditional-write, must guard 15-minute leases and expired takeover. Preserve enough ownership information to make renew return false after lease replacement; the requested renew signature has no explicit lease token, so take particular care implementing its compare-and-set without expanding the specified public schema.\nLanceRecord's schema is already source-agnostic (apps/api/src/rag/lance-table-manager.ts:18-30). isSafeFilterValue rejects empty values, apostrophes and control characters, but is not a path traversal validator (:37-44). LanceTableManager owns the single connection and mutex (:130-161); getOrCreateTable can itself discover native unavailability (:206-231). Check availability around opening rather than accidentally accepting the in-memory fallback. exclusive serializes writes across ALL RAG consumers (:369-384). addRecord deletes by source_id before each single add (:395-403), so using it for chunks would retain only the final chunk. replaceFile must hold the manager lock for delete plus a single multi-row add; no separate manager or per-row addRecord. Native availability is mandatory for this feature even though existing ticket services tolerate InMemoryTable. readFile is bounded to 2000 rows and sorts chunkIndex. New tables derive vector dimensions from EmbeddingService when created (:325-341); existing project-table dimension compatibility must be considered, not fixed by silently replacing tables.\nRagModule already provides one shared manager through a factory and already provides EmbeddingService, but does not export the latter (apps/api/src/rag/rag.module.ts:72-114). Export it additively. KnowledgeModule imports RagModule/GitBrokerModule, with Prisma/project-access support as required by existing DI conventions. Build the module incrementally: US-001 state/store, US-002 search/controller, US-004 indexer, US-005 queue/poller. Its final public exports are ONLY KnowledgeIndexService, KnowledgeSearchService and KnowledgeIndexQueue. Never reference a not-yet-created later-story class in an intermediate module. FleetModule currently composes the feature modules without KnowledgeModule (apps/api/src/fleet/fleet.module.ts:21-25); AssistantModule and FleetTicketsModule will import it when adding their respective consumers.\n\nUS-002: RETRIEVAL, ISOLATION AND HTTP\nEmbeddingService exposes dimensions/providerName/modelName and embed/embedBatch, delegating to configured fake/OpenAI/Ollama providers (apps/api/src/rag/embedding.service.ts:13-44). Use it directly; do not route repository chunks through VectorStore or existing ticket weighted fusion. Existing VectorStore.indexDocument uses one generated id per document and a zero-vector fallback while retaining provider labels (apps/api/src/rag/vector-store.service.ts:189-227); leave that behavior unchanged. Repository embeddings have a new provider='none' marker so their vector leg excludes unembedded rows. RRF is by chunk id, rank starts at 1, k=60, ties id ascending, then project-repo membership filtering, pathPrefix filtering, then limit. empty means no repo rows in the project table, not no matches for a query or repo restriction; do not derive it merely from an empty lexical response. The spec's US-002 AC3 fixes predicate ordering: construct vector predicate as source = 'repo' AND provider != 'none' before appending AND source_id LIKE 'repo:r1:%', so both predicates end in the repo clause. This resolves the prose ordering ambiguity toward the acceptance criterion.\nProjectFleetReposController demonstrates @ApiParam slug, @CurrentProject, ProjectMembershipGuard and JsonResponse.Ok (apps/api/src/fleet/repos/project-fleet-repos.controller.ts:11-25). ProjectMembershipGuard resolves project and membership once and attaches request.projectContext; global admins bypass membership lookup, agents use project roster semantics (apps/api/src/projects/project-membership.guard.ts:13-56). Preserve these semantics; do not add an unrequested users-only restriction to knowledge routes. Controller repo resolution must be within KnowledgeIndexService's bounded project list, never an unrestricted repo lookup. threads.disabled demonstrates ConflictAppException({}, prefix) (apps/api/src/fleet/threads/threads.service.ts:29-30); translations must nest the HTTP code, as threads.json does (apps/api/src/i18n/en/threads.json:5). A global whitelist can strip unknown properties instead of rejecting them; this search route must explicitly fulfill the spec's 400-on-any-other-body contract without changing validation behavior for unrelated endpoints.\nEndpoint tests belong in apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts, which uses AppModule, real PostgreSQL, supertest and body() to unwrap {ret,data} (:16-47); refusal() checks actual translated status-nested messages (:50-87). Stub KnowledgeSearchService for route tests rather than requiring Ollama/native LanceDB there. Real-LanceDB search behavior belongs with the new store integration fixture. After the contract change run bun run api:export-spec and bun run generate at repo root, commit openapi.json and generated CLI artifacts, never hand-edit them.\n\nUS-003: PURE CHUNKING\nNo current knowledge folder exists. Implement a pure helper, no Nest/Prisma/forge access. Preserve exact extraction rules: UTF-8 decoding happens in indexer; chunker normalizes CRLF, strips only closed leading front matter, tracks H1-H3 headings outside backtick/tilde fences, merges <200-character sections before splitting >2000-character sections outside fences, preserves oversized single paragraphs, adds document summary at index 0, extracts two-sentence abstracts <=300 characters, and assigns ASCII GitHub-style duplicate anchors in file order. Summary's headingPath is empty even though pre-heading section's headingPath is the document title. Do not use an LLM or upgrade this to a general Markdown renderer. Two-part split/merge interactions and fenced-block paragraph boundaries are the main algorithmic risks. Thread instruction helpers demonstrate the existing small text-function style (apps/api/src/fleet/threads/thread-instructions.ts:14-72); the spec points to project-brief.service.ts as the local helper pattern.\n\nUS-004: INCREMENTAL INDEXER\nGitHubAppClient already offers read-only scoped tokens granting contents/metadata read (apps/api/src/fleet/git-broker/github-app-client.ts:65-88), branch head (:148-155), recursive trees (:159-171), file reads (:174-187), null-on-missing file and RepoCheckException reasons. GitBrokerModule exports this client and imports VcsModule but no fleet module (:1-15), so the proposed knowledge dependency does not introduce a cycle. Use mintReadOnlyToken, never the PR writer token or a new forge HTTP client; never log/store tokens or keep a database transaction open over GitHub/embedding I/O.\nIndexer reads only default branch head, not main hard-coded for repositories with another default. Skip unsupported/missing-installation repositories; unknown ids write no state. Acquire lease before GitHub I/O, short circuit equal head only if every stored file is embedded, reject truncated trees, select allowlisted blobs, and fetch changed/unembedded files at head with at most four getFile calls concurrent. Writes and lease renewal must honor the AC that loss after the first write permits no later writes and no finish; bounded prefetch is compatible, uncontrolled concurrent file commits are not. Each file is replaced before its state upsert/renew, while deletions remove chunks and state. All vectors for a file fall back together on thrown, timeout, count or dimension failure; retry such files even at unchanged head next pass. A 120-second embedBatch timeout is needed because the current Ollama implementation is fetch plus Promise.all and has no timeout (apps/api/src/rag/providers/ollama-embedding.provider.ts:16-30). Ensure late timeout resolutions do not schedule late writes. RagService.optimizeTable delegates to the existing vector-store optimize path (apps/api/src/rag/rag.service.ts:134-135); call it once only for a mutating pass. PostgreSQL state and LanceDB rows are not a distributed transaction: indexedSha must advance only on successful finish; blob-state upserts and per-file replacement provide idempotent retries after partial failure. Unchanged blobs intentionally keep their prior indexed sha metadata, so document tools must label the sha actually stored, not current head. The per-file 2000-row read bound is intentional; the spec explicitly excludes a separate per-repository chunk cap.\n\nUS-005: BACKGROUND WORK AND STATE/ADMIN ROUTES\nFleetPrStateRefresher currently has seven constructor arguments (:39-47), gated unref'd setInterval and cleanup (:49-58), guarded sequential refresh (:61-84), and apply returns early for identical state and otherwise returns outcome === 'updated' (:119-127). Add knowledge queue as argument eight. Enqueue only after next === merged AND applyMergedPr returned updated, not on plain closed state or already merged links. findRefreshableFleetLinks already excludes merged/closed and deleted tickets (apps/api/src/fleet/tickets/prisma-fleet-tickets.repository.ts:183-197), so preserve that query. Its unit fixture constructs the refresher directly and must gain a queue stub without losing existing assertions (apps/api/src/fleet/tickets/fleet-pr-state.refresher.spec.ts:23-34). Queue is per-process FIFO, deduplicates waiting ids, caps waiting at 1000, drains one indexRepo at a time, warns on failed results/rejections and continues; disabled enqueue is a no-op. Poller has its own knowledge flag/interval and enumerates at most 500 installed GitHub repos; do not tie the knowledge timer to FLEET_SWEEP_ENABLED. GET state remains available when disabled and includes every project fleet repo including skipped/non-GitHub/never rows; reindex is global ADMIN plus project repo scoping, HTTP 202. Preserve the exact existing PR refresher regressions. Regenerate OpenAPI/CLI again for state and reindex routes.\n\nUS-006: TOOLS AND THREAD INSTRUCTIONS\nKnowledgeTools currently injects registry/memory/timeline/tickets and registers memorySearchTool then timelineTool (apps/api/src/fleet/assistant/tools/knowledge-tools.ts:231-244). The descriptor array currently contains those two tools and is appended to the fleet/ticket catalogs (apps/api/src/fleet/assistant/koda-tool-descriptors.ts:219-224). Append the two specified descriptors without reordering existing entries; type-only imports from fleet-protocol remain mandatory in API. Tools must resolve owner/name through project-scoped KnowledgeIndexService even when consuming a citation. ToolContext.data masks and fences untrusted text; member permission is already an executor primitive (apps/api/src/fleet/assistant/assistant-tool.types.ts:5-22). AssistantToolExecutor catches ToolInputError during parse, not during execute (:81-90); perform malformed citation/path validation in parse so it becomes invalid_input rather than generic error. It resolves current creator membership on each new call (:93-101), fences via maskSecrets/fenceData (:112-120), and maps NotFoundAppException to not_found (:124-128). Do not bypass the executor or reinvent access checks in helpers. koda_get_doc reads ONLY indexed chunk rows, never a live GitHub file or a citation-selected commit. Preserve line-boundary 12000-character parts and single-long-line slicing. Citations' sha is ignored for retrieval but the stored indexed sha is always displayed.\nThe literal KODA_TOOLS_LINE is inserted immediately before skills in both thread builders (apps/api/src/fleet/threads/thread-instructions.ts:7-8,31-33,47-49). Append the exact docs sentence and update the test's literal (:14-15) without moving its placement assertions. Existing KnowledgeTools tests compile it with a Nest provider list and need search/index service stubs (apps/api/src/fleet/assistant/tools/knowledge-tools.spec.ts:70-82); keep the memory/timeline assertions unchanged. AssistantModule imports the service-owning modules already (apps/api/src/fleet/assistant/assistant.module.ts:24-45); import KnowledgeModule here for these new dependencies.\n\nUS-007: EVALUATION AND OPERATIONS\nThe reviewed fixture exists at apps/api/test/kb-eval/questions.json:1-447 and begins with expected nathapp-io/koda documentation paths/anchors; do not modify it. scoreRun matches exact owner/name plus path, permits alternative expected entries, averages per-question recall and reciprocal rank, separately reports anchor recall, and lists path misses at 20. runEval is injected for deterministic unit tests and performs sequential POST requests at limit 20, with Bearer KODA_EVAL_TOKEN; CombinedAuthGuard explicitly reads this scheme (apps/api/src/auth/guards/combined-auth.guard.ts:103-107). The search HTTP response is wrapped {ret,data}; unwrap using the repository convention rather than assuming hits at JSON root. Non-200 responses are misses, print their HTTP status, and do not abort later questions. Add an import-safe CLI entry point and kb:eval package script; scripts/test-scoped.ts:35-95 and test/unit/scripts/test-scoped.spec.ts:1-65 demonstrate exported pure functions and guarded main. Existing evaluate:retrieval stays untouched (apps/api/package.json:31-32). Registering nathapp-io/koda in the dogfood project and compose env propagation are operator steps, not story outputs.\n\nTEST AND DELIVERY PLAN\nUse Vitest vi.*, co-located unit specs, hoisted factories when needed, and lazy import() rather than require() of TypeScript. Module/DI compilation must be a DB-free co-located KnowledgeModule unit test with external Prisma/transaction/config providers mocked; do not hide wiring checks in integration. apps/api/package.json:12-23 and scripts/test-scoped.ts:29-73 distinguish unit from DB runs; run scoped integration/e2e with KODA_DB_TESTS=1 and provisioned compose test PostgreSQL (port 5433), otherwise Testcontainers needs Docker outside the sandbox. DB-mode setup force-resets a local *_test database: do not overlap DB runs. The referenced hybrid-retriever.integration.spec.ts has mkdtemp and fake embedding examples (:34-75) but its shown config sets inMemoryOnly:true (:103), so do NOT copy that flag for knowledge native-Lance assertions. Use actual native LanceDB temp directories and cleanup/close handles. API endpoint cases go in the one designated existing endpoint file with stubs, not new per-story endpoint files. US-001/002 exercise real LanceDB; US-001 exercises PostgreSQL leases/cascades; indexer/queue/tools/eval otherwise use deterministic fakes, fake timers and executor calls. Security-sensitive US-001 (filter/project scoping), US-002 (membership/isolation), US-004 (credential use), US-005 (ADMIN), US-006 (tool access) and US-007 (Bearer credential handling) use strict three-session-tdd; pure chunking uses its complexity default.\n\nMIGRATION, ROLLOUT AND RISKS\nApply additive Prisma migration, regenerate API Prisma client, then deploy with flag false. Existing table schema and ticket data are reused without a backfill or destructive rebuild; new repo rows are separate source/source_id values and all writes use shared locking. Enable only after Ollama nomic-embed-text and the native LanceDB path are healthy; queue/poll/admin create the index lazily. Use GET repos to inspect never/running/idle/failed/skipped, counts and errors; retry unembedded files on subsequent passes. No persistent queue survives restarts; next poll recovers. Leases guard overlapping passes but multi-instance queue/lock coordination is explicitly not expanded beyond the database lease. Audit for SQL filter injection, pathPrefix traversal, deleted/foreign repo leakage, dimensions mismatches, source-id replacement clobbering sibling chunks, stale full-text indexes after writes, unsupported native mode, late async writes after lease loss, unsafe repo content outside data fences, role regressions and test timers leaking. RRF and citations must be deterministic. Preserve every original AC under its declared story; failure-table cases missing from the enumerated AC text are made explicit in that story rather than silently deferred. Additional useful cases not demanded by the spec are suggestedCriteria only. Implementation order may run US-001 and US-003 independently, then US-002/US-004, then US-005/US-006/US-007 subject to their exact dependencies. Shared KnowledgeModule/controller/generated-artifact edits must be merged carefully; US-005 must preserve US-002's exported search contract and generated output.\n\nREFINE-PASS ADVERSARIAL AUDIT\nAll 94 original spec acceptance criteria remain under their original story, in their original ordinal order; none was moved into suggestedCriteria. The enumeration below maps spec AC numbers to the corresponding acceptanceCriteria array positions (1-based). Additional criteria are appended, not substituted. Original parentheticals and regression qualifications remain, including table-driven cases, unchanged indexedSha, sibling-file/ticket preservation, chunkIndex order, lease-loss no-finish, same-link-already-merged, and evaluation path-only versus anchor matching. No deprecated grep/file/verbatim tags occur.\nUS-001: 1 unset/non-numeric config defaults; 2 true/minimum interval; 3 stubbed module compilation and store resolution; 4 initial claim plus busy re-claim; 5 expired takeover; 6 repository cascades; 7 three ordered native rows; 8 replacement preserves other file; 9 deletion preserves ticket row; 10 unavailable read error; 11 allowlist true/false paths; 12 AGENTS fallback; 13 oversized/unsafe skips; 14 2000-file cap; 15 unsafe source-id rejection.\nUS-002: 1 RRF b/a/c and score; 2 source/provider predicates; 3 repo suffix on both predicates; 4 embedding-error lexical fallback; 5 deleted-repo hit exclusion; 6 200-row prefix filtering before limit; 7 truly empty repo corpus; 8 native embedded/unembedded lexical contribution; 9 member route project/repo/limit forwarding and response; 10 malformed query/prefix 400; 11 unknown repo 404; 12 disabled 409; 13 unavailable 409; 14 outsider 403.\nUS-003: 1 summary and hierarchical headings; 2 both fenced-heading negatives; 3 front-matter title/status/supersededBy; 4 front-matter removal; 5 filename title fallback; 6 short section merges forward; 7 short last section merges backward; 8 paragraph splitting and retained heading/anchor; 9 oversized paragraph retained; 10 punctuation anchor; 11 duplicate anchors; 12 two-sentence abstract; 13 fenced/list abstract extraction; 14 pre-heading section and description summary; 15 CRLF equivalence and trailing heading-marker removal.\nUS-004: 1 token/head/tree call order; 2 exact allowlisted head reads; 3 chunker/store seam and source/id/context metadata; 4 unchanged blob not read/written; 5 absent/null file deletion; 6 throw/count/timeout embedding fallback (also vector-length failure from the failure table); 7 unchanged head versus unembedded retry; 8 lost lease stops after one replacement without finish; 9 GitLab/no-installation skipped states; 10 held lease busy without I/O; 11 truncated-tree failure without advancing sha; 12 forge/store failures record reasons and clear lease without advancing sha; 13 success state counts and one optimize; 14 unknown repository no writes; 15 one post-write renewal per file.\nUS-005: 1 enqueue-to-indexRepo seam; 2 FIFO waiting-id deduplication; 3 disabled enqueue; 4 rejected pass warns and continues; 5 waiting cap; 6 disabled poll timer; 7 enumerate installed GitHub repos; 8 successful merge queue seam; 9 already-merged no enqueue; 10 closed no enqueue; 11 ADMIN reindex 202/queue seam; 12 developer 403 and foreign repo 404; 13 disabled reindex 409; 14 member state list with never/enabled.\nUS-006: 1 old/new descriptor order and tool ceiling; 2 executor project-scoped default-limit search seam; 3 exact result/citation lines; 4 abstract/snippet data fence; 5 superseded status line; 6 lexical-only/empty/no-result text; 7 query/limit/prefix invalid-input reasons; 8 unknown repo on both tools; 9 citation ignores requested sha and reads indexed section; 10 ordered whole-document section text without summary; 11 three-part pagination and missing part; 12 citation/path/anchor failures; 13 long-line cutting; 14 both instruction builders' suffix and tool names.\nUS-007: 1 recall/MRR at ranks 3 and 12; 2 missing path miss/zero reciprocal rank; 3 anchor recall versus path recall; 4 alternative expectations; 5 authenticated limit-20 REST requests; 6 non-200 miss/continue/all-question denominator (plus required printed status); 7 read-only forty-question fixture shape/ids/allowlist.\nAudit corrections: US-002 AC7 now describes fields of the declared result rather than implying lexicalOnly disappears for an empty corpus. US-004 AC13 now binds one-file/three-chunk fixture counts to fileCount=1 and chunkCount=3, removing the ambiguous wording that could read as null counters. US-006 AC10 explicitly concerns a file with section chunks, preserving the D13 summary-only exception exercised by its one-row pagination ACs. US-002 contextFiles now includes the spec-recommended threads.service.ts disabled-conflict pattern instead of the less critical embedding service (still documented above). US-004's common fake/stub preconditions are explicit in its description. Added backward-compatibility criteria for testFleetConfig defaults/overrides and FleetPrStateRefresher's existing merge summary; strengthened the instruction AC to preserve memory:<id> and placement before skills. Existing missing-file tool failure remains an additional explicit AC required by the failure table.\nNegative-path coverage is explicit in every story: US-001 unsafe/unavailable paths, US-002 400/403/404/409 and embedding failure, US-003 fenced non-headings and missing-title fallback, US-004 busy/skipped/failed/lost-lease paths, US-005 disabled/rejection/cap/forbidden paths, US-006 malformed/missing inputs and parts, US-007 non-200 misses. Every assertion is observable through results, exceptions, collaborator calls, state, logs, or fixture contents. Re-read current fleet config/helper, refresher/fixture, instruction fixture and executor mapping to verify parameter and lifecycle semantics. No speculative production helper or new external dependency is introduced. All context paths are existing files or declared upstream outputs, never this story's own outputs; no story exceeds five context files.\nAll seven bound dependencies/workdirs are unchanged and reference existing ids. Complexity remains medium for pure chunking and the injected CLI, complex for shared state/store, retrieval/controller, leased indexer, freshness integration and tool integration. Strict strategies remain only where project isolation/filter safety, guarded access, or credential handling triggers the original security override; pure chunking remains tdd-simple. All 17 top-level exclusions are retained verbatim: outcomes, configurable paths, web/link rendering, GitLab indexing, ticket/fallback changes, reranker/Jina/model extraction, nondefault refs, deleted-repo cleanup, push webhook, cross-project search, extra repo chunk cap, Setext/non-ASCII anchors, synthetic evaluation changes, deployment wiring/registration, fixture edits, extra multi-instance coordination, and queue persistence. No story-local deferral has been hoisted. Story scopes still include their tests, output formatting, CLI command or generated contract wherever applicable.",
+  "outOfScope": [
+    "Fleet run outcomes (`feature-report.md`, `decisions.jsonl`) are not indexed; they are feature 3c-2 `fleet-s5b-koda-knowledge-outcomes`.",
+    "Per-project path patterns are not configurable; every repository uses the fixed default allowlist until feature 3c-2.",
+    "No web page, button or status view for the index, and no rendering of `owner/name:path@sha7#anchor` citations as links; the web is feature 3c-2.",
+    "GitLab repositories are not indexed (1c-b-R2); they are recorded `skipped` with `not a GitHub repository`.",
+    "Ticket search, its weighted fusion, its swagger text that says RRF, and the `VectorStore` zero-vector fallback are unchanged (1c-c-R6).",
+    "No reranker, no Jina provider, no code embeddings, no LLM-written abstracts or context lines (S5b-R14).",
+    "Only the default branch is indexed; other branches, tags and pull request heads are not.",
+    "Chunks of a deleted fleet repository are not removed from LanceDB; search drops them (1c-c-D7).",
+    "No GitHub `push` webhook; freshness comes from the poll, the merge hook and the admin route.",
+    "No search across projects; every query is scoped to one project's table.",
+    "No per-repository chunk cap; the 2000-file and 256 KB-per-file caps bound a pass.",
+    "Setext headings (a line underlined with `===` or `---`) are not section headings, and anchors drop non-ASCII characters where GitHub keeps them, so a non-ASCII heading's anchor can differ from GitHub's.",
+    "The `evaluate:retrieval` script and its synthetic documents are unchanged.",
+    "Passing `KNOWLEDGE_INDEX_ENABLED` and `KNOWLEDGE_POLL_MS` through the koda-wk compose file, and registering `nathapp-io/koda` as a fleet repository, are deployment steps, not story work.",
+    "`apps/api/test/kb-eval/questions.json` is authored with this spec and reviewed by the user; no story writes or edits it.",
+    "US-004 only: two API instances do not coordinate passes beyond the database lease; koda runs one API instance.",
+    "US-005 only: the in-process queue does not survive an API restart; the next poll re-queues every repository."
+  ],
+  "routingProfile": "cross-agent"
+}

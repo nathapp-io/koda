@@ -35,6 +35,9 @@ import { ProjectBriefService } from '../../../src/fleet/threads/project-brief.se
 import { PlacementService } from '../../../src/fleet/jobs/placement.service';
 import { RunnerNotifier } from '../../../src/fleet/jobs/runner-notifier';
 import { PrismaThreadIngestRepository } from '../../../src/fleet/threads/ingest/prisma-thread-ingest.repository';
+import { KnowledgeSearchService, type KnowledgeHit } from '../../../src/fleet/knowledge/knowledge-search.service';
+import { KnowledgeStoreUnavailableError } from '../../../src/fleet/knowledge/knowledge-chunk-store';
+import { KnowledgeIndexQueue } from '../../../src/fleet/knowledge/knowledge-index.queue';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -4130,6 +4133,269 @@ describeIntegration('API Integration Tests', () => {
         .send({ toolCallId: 'c1', input: { ref: 'WEB-1' } })
         .expect(401);
       refusal(res, 'fleet.runnerAuth.40000');
+    });
+  });
+
+  describe('S5b US-002 knowledge search route', () => {
+    const HIT: KnowledgeHit = {
+      repoId: 'stub-repo', owner: 'o', name: 'n', path: 'docs/adr/1.md', sha: 'abc1234', anchor: 'adr-1',
+      headingPath: 'ADR 1', title: 'ADR 1', abstract: 'abstract', snippet: 'snippet', score: 1 / 61,
+    };
+
+    let slug: string;
+    let projectId: string;
+    let repoId: string;
+    let memberToken: string;
+    let developerId: string;
+    let searchSpy: ReturnType<typeof vi.spyOn> | undefined;
+    let enabledBefore: boolean;
+
+    const fleetConfigOf = () => app.get<IFleetConfig>(FLEET_CFG, { strict: false });
+    const db = () => app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    const search = (token: string, payload: Record<string, unknown>) => request(httpServer)
+      .post(`/api/projects/${slug}/knowledge/search`)
+      .set('Authorization', `Bearer ${token}`)
+      .send(payload);
+
+    beforeAll(async () => {
+      // The spy goes first: whatever else fails here, afterAll must be able to restore it.
+      // The route's own search body/repo/availability logic is under test, so the hybrid search itself is
+      // stubbed (the real one needs a LanceDB store and is covered by knowledge-search.service.spec.ts).
+      enabledBefore = fleetConfigOf().knowledgeIndexEnabled;
+      fleetConfigOf().knowledgeIndexEnabled = true;
+      searchSpy = vi.spyOn(app.get(KnowledgeSearchService), 'search');
+
+      const prisma = db();
+      const admin = await prisma.user.findUniqueOrThrow({ where: { email: 'admin@koda.test' } });
+      const developer = await prisma.user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
+      const project = await prisma.project.create({ data: { name: 'Knowledge search', slug: 'knowledge-search', key: 'KS' } });
+      const repo = await prisma.fleetRepo.create({ data: {
+        projectId: project.id, provider: 'github', owner: 'o', name: 'n', defaultBranch: 'main', createdById: admin.id,
+      } });
+      await prisma.projectMember.create({ data: { projectId: project.id, userId: developer.id, role: 'DEVELOPER' } });
+
+      slug = project.slug;
+      projectId = project.id;
+      repoId = repo.id;
+      developerId = developer.id;
+      memberToken = nonAdminUserAccessToken;
+    });
+
+    afterAll(() => {
+      searchSpy?.mockRestore();
+      fleetConfigOf().knowledgeIndexEnabled = enabledBefore;
+    });
+
+    beforeEach(() => {
+      searchSpy?.mockReset();
+    });
+
+    it('AC-9: answers 200 with the service result and calls search with the resolved repo id', async () => {
+      searchSpy.mockResolvedValue({ lexicalOnly: false, empty: false, hits: [HIT] });
+
+      const res = await search(memberToken, { query: 'broker', repo: 'o/n', limit: 5 }).expect(200);
+
+      expect(searchSpy).toHaveBeenCalledWith({ projectId, query: 'broker', repoId, limit: 5 });
+      expect(body(res)).toEqual({ lexicalOnly: false, empty: false, hits: [HIT] });
+    });
+
+    it('AC-10: answers 400 for a rejected body and never searches', async () => {
+      const cases: Array<[Record<string, unknown>, string]> = [
+        [{ query: '' }, 'query'],
+        [{ query: 'broker', pathPrefix: '../x' }, 'pathPrefix'],
+      ];
+
+      for (const [payload, reason] of cases) {
+        const res = await search(memberToken, payload).expect(400);
+        refusal(res, 'knowledge.input.-2', { reason });
+      }
+      expect(searchSpy).not.toHaveBeenCalled();
+    });
+
+    it('AC-11: answers 404 for a repository the project does not own', async () => {
+      const res = await search(memberToken, { query: 'broker', repo: 'o/missing' }).expect(404);
+
+      refusal(res, 'knowledge.repoNotFound.404');
+      expect(searchSpy).not.toHaveBeenCalled();
+    });
+
+    it('AC-12: answers 409 while the kill switch is off', async () => {
+      fleetConfigOf().knowledgeIndexEnabled = false;
+      try {
+        const res = await search(memberToken, { query: 'broker' }).expect(409);
+        refusal(res, 'knowledge.disabled.409');
+        expect(searchSpy).not.toHaveBeenCalled();
+      } finally {
+        fleetConfigOf().knowledgeIndexEnabled = true;
+      }
+    });
+
+    it('AC-13: answers 409 knowledge.unavailable when the store throws', async () => {
+      searchSpy.mockRejectedValue(new KnowledgeStoreUnavailableError());
+
+      const res = await search(memberToken, { query: 'broker' }).expect(409);
+
+      refusal(res, 'knowledge.unavailable.409');
+      expect(searchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('AC-14: answers 403 for a user who is not a project member', async () => {
+      // The membership is dropped and restored rather than registering a second user: POST /api/auth/register is
+      // throttled at 5/min per IP and this file already registers four users (it answered 429 for a fifth).
+      await db().projectMember.deleteMany({ where: { projectId, userId: developerId } });
+      try {
+        const res = await search(memberToken, { query: 'broker' }).expect(403);
+
+        expect(res.body.ret).not.toBe(0);
+        expect(searchSpy).not.toHaveBeenCalled();
+      } finally {
+        await db().projectMember.create({ data: { projectId, userId: developerId, role: 'DEVELOPER' } });
+      }
+    });
+  });
+
+  describe('S5b US-005 knowledge index state and reindex routes', () => {
+    interface RepoState {
+      repoId: string; owner: string; name: string; provider: string; status: string; indexedSha: string | null;
+      fileCount: number; chunkCount: number; unembeddedCount: number; skippedCount: number;
+      lastError: string | null; startedAt: string | null; finishedAt: string | null;
+    }
+
+    let slug: string;
+    let repoId: string;
+    let gitlabRepoId: string;
+    let foreignRepoId: string;
+    let enqueueSpy: ReturnType<typeof vi.spyOn> | undefined;
+    let enabledBefore: boolean;
+
+    const fleetConfigOf = () => app.get<IFleetConfig>(FLEET_CFG, { strict: false });
+    const db = () => app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    const reindex = (token: string, repo: string) => request(httpServer)
+      .post(`/api/projects/${slug}/knowledge/repos/${repo}/reindex`)
+      .set('Authorization', `Bearer ${token}`);
+    const states = (token: string) => request(httpServer)
+      .get(`/api/projects/${slug}/knowledge/repos`)
+      .set('Authorization', `Bearer ${token}`);
+
+    beforeAll(async () => {
+      // The spy goes first: whatever else fails here, afterAll must be able to restore it.
+      enabledBefore = fleetConfigOf().knowledgeIndexEnabled;
+      fleetConfigOf().knowledgeIndexEnabled = true;
+      // The queue is stubbed: the real one would run an index pass against the forge, while these cases pin the
+      // enqueue the route makes (the pass itself is covered by knowledge-repo-indexer.spec.ts).
+      enqueueSpy = vi.spyOn(app.get(KnowledgeIndexQueue), 'enqueue').mockImplementation(() => undefined);
+
+      const prisma = db();
+      const admin = await prisma.user.findUniqueOrThrow({ where: { email: 'admin@koda.test' } });
+      const developer = await prisma.user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
+      const project = await prisma.project.create({ data: { name: 'Knowledge index', slug: 'knowledge-index', key: 'KIX' } });
+      const github = await prisma.fleetRepo.create({ data: {
+        projectId: project.id, provider: 'github', owner: 'acme', name: 'docs-app', defaultBranch: 'main', createdById: admin.id,
+      } });
+      const gitlab = await prisma.fleetRepo.create({ data: {
+        projectId: project.id, provider: 'gitlab', owner: 'grp', name: 'lib', defaultBranch: 'main', createdById: admin.id,
+      } });
+      const foreign = await prisma.project.create({ data: { name: 'Knowledge index foreign', slug: 'knowledge-index-foreign', key: 'KIXF' } });
+      const foreignRepo = await prisma.fleetRepo.create({ data: {
+        projectId: foreign.id, provider: 'github', owner: 'acme', name: 'other', defaultBranch: 'main', createdById: admin.id,
+      } });
+      await prisma.projectMember.create({ data: { projectId: project.id, userId: developer.id, role: 'DEVELOPER' } });
+      // One repository carries a finished pass; the other one has no state row at all (`status: 'never'`).
+      await prisma.knowledgeRepoIndex.create({ data: {
+        repoId: github.id, projectId: project.id, status: 'idle', indexedSha: 'head0001', fileCount: 4, chunkCount: 9,
+        unembeddedCount: 1, skippedCount: 2, lastError: null,
+        startedAt: new Date('2026-10-15T10:00:00.000Z'), finishedAt: new Date('2026-10-15T10:01:00.000Z'),
+      } });
+
+      slug = project.slug;
+      repoId = github.id;
+      gitlabRepoId = gitlab.id;
+      foreignRepoId = foreignRepo.id;
+    });
+
+    afterAll(() => {
+      enqueueSpy?.mockRestore();
+      fleetConfigOf().knowledgeIndexEnabled = enabledBefore;
+    });
+
+    beforeEach(() => {
+      enqueueSpy?.mockClear();
+    });
+
+    it('AC-11: POST reindex answers 202 { queued: true } as a global ADMIN and enqueues an admin pass', async () => {
+      const res = await reindex(userAccessToken, repoId).expect(202);
+
+      expect(body(res)).toEqual({ queued: true });
+      expect(enqueueSpy).toHaveBeenCalledTimes(1);
+      expect(enqueueSpy).toHaveBeenCalledWith(repoId, 'admin');
+    });
+
+    it('AC-12: POST reindex answers 403 for a project DEVELOPER and enqueues nothing', async () => {
+      const res = await reindex(nonAdminUserAccessToken, repoId).expect(403);
+
+      expect(res.body.ret).not.toBe(0);
+      expect(enqueueSpy).not.toHaveBeenCalled();
+    });
+
+    it('AC-12: POST reindex answers 404 for a repository of another project', async () => {
+      const res = await reindex(userAccessToken, foreignRepoId).expect(404);
+
+      refusal(res, 'knowledge.repoNotFound.404');
+      expect(enqueueSpy).not.toHaveBeenCalled();
+    });
+
+    it('AC-13: POST reindex answers 409 while the kill switch is off', async () => {
+      fleetConfigOf().knowledgeIndexEnabled = false;
+      try {
+        const res = await reindex(userAccessToken, repoId).expect(409);
+
+        refusal(res, 'knowledge.disabled.409');
+        expect(enqueueSpy).not.toHaveBeenCalled();
+      } finally {
+        fleetConfigOf().knowledgeIndexEnabled = true;
+      }
+    });
+
+    it('AC-14: GET repos answers one entry per fleet repository, `never` for the never-indexed one', async () => {
+      const res = await states(nonAdminUserAccessToken).expect(200);
+      const data = body<{ enabled: boolean; repos: RepoState[] }>(res);
+
+      expect(data.enabled).toBe(true);
+      expect(data.repos.map((repo) => repo.repoId).sort()).toEqual([repoId, gitlabRepoId].sort());
+      expect(data.repos.find((repo) => repo.repoId === repoId)).toMatchObject({
+        owner: 'acme', name: 'docs-app', provider: 'github', status: 'idle', indexedSha: 'head0001',
+        fileCount: 4, chunkCount: 9, unembeddedCount: 1, skippedCount: 2, lastError: null,
+        startedAt: '2026-10-15T10:00:00.000Z', finishedAt: '2026-10-15T10:01:00.000Z',
+      });
+      expect(data.repos.find((repo) => repo.repoId === gitlabRepoId)).toMatchObject({
+        provider: 'gitlab', status: 'never', indexedSha: null, fileCount: 0, chunkCount: 0,
+        unembeddedCount: 0, skippedCount: 0, lastError: null, startedAt: null, finishedAt: null,
+      });
+    });
+
+    it('AC-14: GET repos reports enabled false while the kill switch is off and still lists the repositories', async () => {
+      fleetConfigOf().knowledgeIndexEnabled = false;
+      try {
+        const res = await states(nonAdminUserAccessToken).expect(200);
+        const data = body<{ enabled: boolean; repos: RepoState[] }>(res);
+
+        expect(data.enabled).toBe(false);
+        expect(data.repos).toHaveLength(2);
+      } finally {
+        fleetConfigOf().knowledgeIndexEnabled = true;
+      }
+    });
+
+    it('AC-14: GET repos answers 403 for a user who is not a project member', async () => {
+      const member = await db().projectMember.findFirstOrThrow({ where: { project: { slug } } });
+      await db().projectMember.delete({ where: { id: member.id } });
+      try {
+        const res = await states(nonAdminUserAccessToken).expect(403);
+
+        expect(res.body.ret).not.toBe(0);
+      } finally {
+        await db().projectMember.create({ data: { projectId: member.projectId, userId: member.userId, role: 'DEVELOPER' } });
+      }
     });
   });
 });
