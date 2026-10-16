@@ -292,3 +292,39 @@ describe('KnowledgeIndexQueue outcome keys (S5b US-004)', () => {
     expect(indexer.indexOutcomes).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * The trigger events (`common/knowledge-events.ts`): the merge hook and the ingest emit, the queue listens, so
+ * neither emitter's module imports `KnowledgeModule`. The handlers only translate the payload into the same
+ * enqueue calls the emitters used to make.
+ */
+describe('KnowledgeIndexQueue trigger events', () => {
+  it('a repo-merged event enqueues a merge pass for that repository', () => {
+    const { queue } = harness();
+    const enqueue = vi.spyOn(queue, 'enqueue');
+
+    queue.onRepoMerged({ repoId: 'r9' });
+
+    expect(enqueue).toHaveBeenCalledExactlyOnceWith('r9', 'merge');
+  });
+
+  it('a run-ingested event enqueues one outcome pass for that job', () => {
+    const { queue } = harness();
+    const enqueueOutcomes = vi.spyOn(queue, 'enqueueOutcomes');
+
+    queue.onRunIngested({ jobId: 'j1' });
+
+    expect(enqueueOutcomes).toHaveBeenCalledExactlyOnceWith('j1');
+  });
+
+  it('the handlers keep the kill switch: no pass while indexing is off', async () => {
+    const { queue, indexer } = harness(false);
+
+    queue.onRepoMerged({ repoId: 'r9' });
+    queue.onRunIngested({ jobId: 'j1' });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(indexer.indexRepo).not.toHaveBeenCalled();
+    expect(indexer.indexOutcomes).not.toHaveBeenCalled();
+  });
+});

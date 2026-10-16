@@ -256,6 +256,11 @@ Rules:
   ESCALATED from finish-audit, "nothing pushed" reason. The queue is `FleetBundleIngest` (enqueued in the bundle
   upload transaction, drained by a kick plus a 30 s sweeper gated by `FLEET_SWEEP_ENABLED`). Bundle contents are
   untrusted: only allowlisted paths, capped sizes, typed field readers. Admin routes: `fleet/ingest`.
+- Knowledge triggers (S5b): the PR-state merge hook and the RUN ingest emit the in-process events in
+  `src/fleet/common/knowledge-events.ts` on `EventEmitter2`; `KnowledgeIndexQueue` listens with `@OnEvent`.
+  Never import `KnowledgeModule` from a fleet module to queue a pass. Delivery is best-effort: listeners exist only
+  between application bootstrap and shutdown, so startup work that can emit waits for
+  `EventEmitterReadinessWatcher` (see `BundleIngestSweeper`).
 - `src/fleet/analytics/` (S2b): read-only cost and quality analytics over the ingest tables. The repository returns
   unrounded `Prisma.Decimal` sums; money becomes a 4-place string only in `AnalyticsService` (`usd4`, A7), never
   summed after rounding. SQL fragments for `groupBy`/`bucket` come from fixed maps keyed by validated enums. Project

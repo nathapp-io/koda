@@ -14,8 +14,9 @@ import { ProjectKnowledgeController } from './project-knowledge.controller';
 import { PrismaKnowledgeIndexRepository } from './prisma-knowledge-index.repository';
 
 /**
- * Fleet S5b knowledge index (1c-c-D2). Exports the two services plus the queue the merge hook triggers
- * (1c-c-D11); the repository, the indexer and the poller stay module-private.
+ * Fleet S5b knowledge index (1c-c-D2). Exports the two services; the repository, the indexer, the poller and
+ * the queue stay module-private. The merge hook and the bundle ingest reach the queue through the events in
+ * `common/knowledge-events.ts`, so neither of their modules imports this one.
  */
 @Module({
   imports: [PrismaModule, RagModule, GitBrokerModule, ProjectAccessModule],
@@ -31,6 +32,6 @@ import { PrismaKnowledgeIndexRepository } from './prisma-knowledge-index.reposit
     KnowledgePoller,
     { provide: KNOWLEDGE_INDEX_CLOCK, useValue: Date.now },
   ],
-  exports: [KnowledgeIndexService, KnowledgeSearchService, KnowledgeIndexQueue],
+  exports: [KnowledgeIndexService, KnowledgeSearchService],
 })
 export class KnowledgeModule {}

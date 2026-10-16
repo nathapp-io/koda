@@ -1,6 +1,13 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { KnowledgeRepoIndexer } from './knowledge-repo-indexer';
+import {
+  KNOWLEDGE_REPO_MERGED,
+  KNOWLEDGE_RUN_INGESTED,
+  type KnowledgeRepoMergedEvent,
+  type KnowledgeRunIngestedEvent,
+} from '../common/knowledge-events';
 
 /** 1c-c-D10: what asked for the pass. */
 export type KnowledgeEnqueueReason = 'poll' | 'merge' | 'admin';
@@ -41,6 +48,18 @@ export class KnowledgeIndexQueue {
 
   enqueue(repoId: string, reason: KnowledgeEnqueueReason): void {
     this.add(repoId, `repository ${repoId}`, reason);
+  }
+
+  /** The merge hook (`FleetPrStateRefresher`) emits this; the queue is its only listener (1c-c-D11). */
+  @OnEvent(KNOWLEDGE_REPO_MERGED)
+  onRepoMerged(event: KnowledgeRepoMergedEvent): void {
+    this.enqueue(event.repoId, 'merge');
+  }
+
+  /** The bundle ingest emits this after a RUN's ingest commits (3c-2-D8). */
+  @OnEvent(KNOWLEDGE_RUN_INGESTED)
+  onRunIngested(event: KnowledgeRunIngestedEvent): void {
+    this.enqueueOutcomes(event.jobId);
   }
 
   /** S5b 3c-2-D8: one outcome pass for a job, deduplicated and capped like a repository id. */

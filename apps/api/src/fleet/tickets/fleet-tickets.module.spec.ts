@@ -1,15 +1,16 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module';
-import { KnowledgeIndexQueue } from '../knowledge/knowledge-index.queue';
+import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { FleetPrStateRefresher } from './fleet-pr-state.refresher';
 import { FleetTicketsModule } from './fleet-tickets.module';
 
 /**
- * US-005 wiring: the PR-state refresher's merge hook needs `KnowledgeIndexQueue`, which `KnowledgeModule`
- * exports — so `FleetTicketsModule` must import that module. A missing import is a boot-time DI failure the
- * endpoint e2e suite would only report indirectly, so it is pinned here (database-free module compilation).
+ * The PR-state refresher's merge hook emits `KNOWLEDGE_REPO_MERGED` on the global `EventEmitter2` instead of
+ * calling the knowledge queue, so `FleetTicketsModule` must not import `KnowledgeModule` (that import made
+ * FleetJobs -> FleetTickets -> Knowledge a chain the knowledge module could never depend back on). A missing
+ * provider is a boot-time DI failure, so it is pinned here (database-free module compilation).
  */
-describe('FleetTicketsModule (US-005 merge hook wiring)', () => {
+describe('FleetTicketsModule (merge hook wiring)', () => {
   let module: TestingModule;
 
   beforeAll(async () => {
@@ -20,8 +21,11 @@ describe('FleetTicketsModule (US-005 merge hook wiring)', () => {
     if (module) await module.close();
   });
 
-  it('resolves the refresher with the exported knowledge queue', () => {
-    expect(module.get(KnowledgeIndexQueue)).toBeInstanceOf(KnowledgeIndexQueue);
+  it('resolves the refresher against the global event emitter', () => {
     expect(module.get(FleetPrStateRefresher)).toBeInstanceOf(FleetPrStateRefresher);
+  });
+
+  it('does not import KnowledgeModule', () => {
+    expect(Reflect.getMetadata('imports', FleetTicketsModule) as unknown[]).not.toContain(KnowledgeModule);
   });
 });
