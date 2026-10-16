@@ -26,7 +26,26 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
     return data.embedding;
   }
 
+  /**
+   * One `POST /api/embed` for the whole batch (Ollama's batch route). `truncate: true` lets the server cut a
+   * token-oversized input instead of refusing the request. Vector length is not checked here: the caller
+   * treats a wrong-length vector as a failed batch.
+   */
   async embedBatch(texts: string[]): Promise<number[][]> {
-    return Promise.all(texts.map((t) => this.embed(t)));
+    if (texts.length === 0) return [];
+    const response = await fetch(`${this.baseUrl}/api/embed`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: this.model, input: texts, truncate: true }),
+    });
+    if (!response.ok) {
+      throw new ValidationAppException();
+    }
+    const data = (await response.json()) as { embeddings?: number[][] };
+    const embeddings = data.embeddings;
+    if (!Array.isArray(embeddings) || embeddings.length !== texts.length || !embeddings.every(Array.isArray)) {
+      throw new ValidationAppException();
+    }
+    return embeddings;
   }
 }
