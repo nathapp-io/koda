@@ -5,6 +5,7 @@ import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { chunkMarkdown } from './markdown-chunker';
 import { FakeEmbeddingProvider } from '../../rag/providers/fake-embedding.provider';
 import type { IKnowledgeIndexRepository, KnowledgeFileState } from './knowledge-index.domain';
+import type { RunOutcomeRow } from '../ingest/domain/bundle-ingest.domain';
 import type { GitHubAppClient } from '../git-broker/github-app-client';
 import type { KnowledgeChunkStore } from './knowledge-chunk-store';
 import type { EmbeddingService } from '../../rag/embedding.service';
@@ -28,6 +29,8 @@ function fixture(paths = ['docs/a.md'], fileText = text) {
   const state = {
     findRepo: vi.fn().mockResolvedValue(repo), claim: vi.fn().mockResolvedValue(true), renew: vi.fn().mockResolvedValue(true),
     listStates: vi.fn().mockResolvedValue([]), listFiles: vi.fn().mockResolvedValue([]),
+    // US-002: a project that saved no patterns; a test that saves some overrides this.
+    findProjectPatterns: vi.fn().mockResolvedValue(null),
     finish: vi.fn().mockResolvedValue(undefined), upsertFile: vi.fn().mockResolvedValue(undefined), deleteFile: vi.fn().mockResolvedValue(undefined),
   };
   const github = {
@@ -125,7 +128,7 @@ describe('KnowledgeRepoIndexer', () => {
 
   it.each([0, 3])('AC-7: same head retries only unembedded files (count %i)', async unembedded => {
     const f = fixture(['docs/a.md', 'docs/b.md']);
-    f.state.listStates.mockResolvedValue([{ repoId: 'r1', indexedSha: 'head', fileCount: 2, chunkCount: 6, unembeddedCount: unembedded, skippedCount: 7 }]);
+    f.state.listStates.mockResolvedValue([{ repoId: 'r1', indexedSha: 'head', patternsKey: 'default', fileCount: 2, chunkCount: 6, unembeddedCount: unembedded, skippedCount: 7 }]);
     f.state.listFiles.mockResolvedValue([stored('docs/a.md', unembedded), stored('docs/b.md')]);
     expect(await f.indexer.indexRepo('r1', now)).toEqual({ status: unembedded ? 'indexed' : 'unchanged' });
     if (unembedded) expect(f.github.getFile.mock.calls).toEqual([['secret', 'o', 'n', 'docs/a.md', 'head']]);
@@ -398,5 +401,272 @@ describe('KnowledgeRepoIndexer batched embedding (US-002)', () => {
     expect(warning).not.toHaveBeenCalled();
     expect(f.state.upsertFile).toHaveBeenCalledWith(expect.objectContaining({ unembeddedCount: 0 }));
     expect(f.store.replaceFile).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * US-002: the pass selects with the project's saved patterns and records the key of the list it read, so a save
+ * that lands while a pass runs leaves that pass on the old key and makes the next pass re-select.
+ */
+describe('KnowledgeRepoIndexer project patterns (US-002)', () => {
+  it('AC-8: reads only the files the saved patterns select', async () => {
+    const f = fixture(['handbook/a.md', 'docs/b.md']);
+    f.state.findProjectPatterns.mockResolvedValue(['handbook/*.md']);
+
+    await f.indexer.indexRepo('r1', now);
+
+    expect(f.state.findProjectPatterns).toHaveBeenCalledWith('p1');
+    expect(f.github.getFile.mock.calls).toEqual([['secret', 'o', 'n', 'handbook/a.md', 'head']]);
+    expect(f.state.finish).toHaveBeenCalledWith('r1', expect.objectContaining({ indexedSha: 'head' }));
+  });
+
+  it('AC-9: a stored key other than the project list re-selects instead of answering unchanged', async () => {
+    const f = fixture(['handbook/a.md']);
+    f.state.listStates.mockResolvedValue([{ repoId: 'r1', indexedSha: 'head', patternsKey: 'default', fileCount: 1, chunkCount: 3, unembeddedCount: 0, skippedCount: 0 }]);
+    f.state.listFiles.mockResolvedValue([stored('handbook/a.md')]);
+    f.state.findProjectPatterns.mockResolvedValue(['handbook/*.md']);
+
+    expect(await f.indexer.indexRepo('r1', now)).toEqual({ status: 'indexed' });
+
+    expect(f.github.getTree).toHaveBeenCalled();
+  });
+
+  it('AC-9: an equal key with the same head still answers unchanged', async () => {
+    const f = fixture(['handbook/a.md']);
+    f.state.listStates.mockResolvedValue([{ repoId: 'r1', indexedSha: 'head', patternsKey: 'handbook/*.md', fileCount: 1, chunkCount: 3, unembeddedCount: 0, skippedCount: 0 }]);
+    f.state.listFiles.mockResolvedValue([stored('handbook/a.md')]);
+    f.state.findProjectPatterns.mockResolvedValue(['handbook/*.md']);
+
+    expect(await f.indexer.indexRepo('r1', now)).toEqual({ status: 'unchanged' });
+
+    expect(f.github.getTree).not.toHaveBeenCalled();
+  });
+
+  it('AC-10: records the saved list as the pass key', async () => {
+    const f = fixture();
+    f.state.findProjectPatterns.mockResolvedValue(['handbook/*.md']);
+
+    await f.indexer.indexRepo('r1', now);
+
+    expect(f.state.finish).toHaveBeenCalledWith('r1', expect.objectContaining({ status: 'idle', patternsKey: 'handbook/*.md' }));
+  });
+
+  it('AC-10: records the default key for a project with no saved list', async () => {
+    const f = fixture();
+
+    await f.indexer.indexRepo('r1', now);
+
+    expect(f.state.finish).toHaveBeenCalledWith('r1', expect.objectContaining({ status: 'idle', patternsKey: 'default' }));
+  });
+
+  it('a save during a running pass leaves that pass on the old key and the next pass re-selects', async () => {
+    const f = fixture(['handbook/a.md', 'docs/b.md']);
+    let saved: string[] | null = ['handbook/*.md'];
+    f.state.findProjectPatterns.mockImplementation(async () => saved);
+    // The admin's save lands once the pass is already reading files, i.e. after it read the list.
+    f.github.getFile.mockImplementation(async (_token: string, _owner: string, _name: string, path: string) => {
+      saved = ['docs/*.md'];
+      return { content: Buffer.from(text), sha: `blob-${path}`, size: text.length };
+    });
+
+    await f.indexer.indexRepo('r1', now);
+
+    expect(f.github.getFile.mock.calls.map(call => call[3])).toEqual(['handbook/a.md']);
+    const first = f.state.finish.mock.calls[0][1] as { patternsKey?: string | null };
+    expect(first.patternsKey).toBe('handbook/*.md');
+
+    // The next pass reads the key the first pass stored and the newly saved list: they differ, so it re-selects.
+    f.state.listStates.mockResolvedValue([{
+      repoId: 'r1', indexedSha: 'head', patternsKey: first.patternsKey, fileCount: 1, chunkCount: 3, unembeddedCount: 0, skippedCount: 0,
+    }]);
+    f.state.listFiles.mockResolvedValue([stored('handbook/a.md')]);
+    f.github.getFile.mockClear();
+
+    expect(await f.indexer.indexRepo('r1', now)).toEqual({ status: 'indexed' });
+
+    expect(f.github.getTree).toHaveBeenCalledTimes(2);
+    expect(f.github.getFile.mock.calls.map(call => call[3])).toEqual(['docs/b.md']);
+    expect(f.state.finish.mock.calls[1][1]).toMatchObject({ patternsKey: 'docs/*.md' });
+  });
+
+  it('an empty saved list selects nothing at all', async () => {
+    const f = fixture(['README.md', 'docs/a.md']);
+    f.state.findProjectPatterns.mockResolvedValue([]);
+
+    expect(await f.indexer.indexRepo('r1', now)).toEqual({ status: 'indexed' });
+
+    expect(f.github.getFile).not.toHaveBeenCalled();
+    expect(f.state.finish).toHaveBeenCalledWith('r1', expect.objectContaining({ fileCount: 0, patternsKey: '' }));
+  });
+});
+
+/**
+ * Fleet S5b US-004 (3c-2-D6/D7): the outcome pass projects one job's latest ingested run outcomes into the
+ * project's knowledge table — one file per kind, embedded through the same sequential path a repository file
+ * uses, whatever the repository host, with no `KnowledgeRepoIndex`/`KnowledgeRepoFile` state of its own.
+ */
+describe('KnowledgeRepoIndexer outcome passes (S5b US-004)', () => {
+  const JOB = 'j1';
+  const reportText = `## Alpha\n${'a'.repeat(500)}\n\n## Beta\n${'b'.repeat(500)}`;
+  const decisionsText = '{"id":"D-1"}\n{"id":"D-2"}';
+  const report: RunOutcomeRow = { kind: 'report', content: reportText };
+  const decisions: RunOutcomeRow = { kind: 'decisions', content: decisionsText };
+
+  /** Only `findRunOutcomes` exists on the state stub: any other state call is a bug the pass must not make. */
+  function outcomeFixture(outcomes: RunOutcomeRow[] | null) {
+    const job = { id: JOB, projectId: 'p1', repoId: 'r1', owner: 'o', name: 'n', feature: 'f', resultSha: 'abc1234' };
+    const state = { findRunOutcomes: vi.fn().mockResolvedValue(outcomes === null ? null : { job, outcomes }) };
+    const store = { replaceFile: vi.fn().mockResolvedValue(undefined), deleteFile: vi.fn().mockResolvedValue(undefined) };
+    const fake = new FakeEmbeddingProvider();
+    const embeddings = {
+      dimensions: fake.dimensions, providerName: fake.name, modelName: 'fake-model',
+      embedBatch: vi.fn((contents: string[]) => fake.embedBatch(contents)),
+      embed: vi.fn((content: string) => fake.embed(content)),
+    };
+    const rag = { optimizeTable: vi.fn().mockResolvedValue(undefined) };
+    const github = {
+      mintReadOnlyToken: vi.fn(), getBranchHead: vi.fn(), getTree: vi.fn(), getFile: vi.fn(),
+    };
+    const indexer = new KnowledgeRepoIndexer(state as unknown as IKnowledgeIndexRepository, github as unknown as GitHubAppClient,
+      store as unknown as KnowledgeChunkStore, embeddings as unknown as EmbeddingService, rag as unknown as RagService, () => now.getTime());
+    return { indexer, state, store, embeddings, rag, github, job, fake };
+  }
+
+  type OutcomeFixture = ReturnType<typeof outcomeFixture>;
+  const written = (f: OutcomeFixture): Array<[string, string, LanceRecord[]]> => f.store.replaceFile.mock.calls as Array<[string, string, LanceRecord[]]>;
+  const rowsOf = (f: OutcomeFixture, call = 0): LanceRecord[] => written(f)[call][2];
+
+  it('AC-1: writes one outcome file per kind, report first', async () => {
+    const f = outcomeFixture([decisions, report]);
+
+    expect(await f.indexer.indexOutcomes(JOB, now)).toEqual({ status: 'indexed' });
+
+    expect(f.state.findRunOutcomes).toHaveBeenCalledWith(JOB);
+    expect(written(f).map(call => [call[0], call[1]])).toEqual([
+      ['p1', `outcome:r1:${JOB}:report`], ['p1', `outcome:r1:${JOB}:decisions`],
+    ]);
+    written(f).forEach(([, sourceId, rows]) => {
+      expect(rows.length).toBeGreaterThan(0);
+      rows.forEach((row, index) => expect(row).toMatchObject({ source: 'outcome', source_id: sourceId, id: `${sourceId}#${index}` }));
+    });
+  });
+
+  it('AC-2: decisions rows carry the chunker anchors, the decisions kind and the jsonl path', async () => {
+    const f = outcomeFixture([decisions]);
+
+    expect(await f.indexer.indexOutcomes(JOB, now)).toEqual({ status: 'indexed' });
+
+    const rows = rowsOf(f);
+    expect(rows).toHaveLength(2);
+    expect(rows.map(row => JSON.parse(row.metadata))).toEqual([
+      expect.objectContaining({ anchor: 'd-1', outcomeKind: 'decisions', path: 'decisions.jsonl' }),
+      expect.objectContaining({ anchor: 'd-2', outcomeKind: 'decisions', path: 'decisions.jsonl' }),
+    ]);
+  });
+
+  it('AC-3: report rows carry the job context, the feature and the report metadata', async () => {
+    const f = outcomeFixture([report]);
+    const chunks = chunkMarkdown({ path: 'feature-report.md', text: reportText });
+
+    expect(await f.indexer.indexOutcomes(JOB, now)).toEqual({ status: 'indexed' });
+
+    const rows = rowsOf(f);
+    expect(rows).toHaveLength(chunks.length);
+    expect(rows[0].content.startsWith(`o/n · run ${JOB} · f · feature-report.md`)).toBe(true);
+    rows.forEach((row, index) => {
+      expect(JSON.parse(row.metadata)).toEqual({
+        repoId: 'r1', owner: 'o', name: 'n', path: 'feature-report.md', sha: 'abc1234', blobSha: '',
+        jobId: JOB, feature: 'f', outcomeKind: 'report', chunkCount: chunks.length, ...chunks[index],
+      });
+      expect(row.content).toBe(`o/n · run ${JOB} · f · feature-report.md${chunks[index].headingPath ? ` · ${chunks[index].headingPath}` : ''}\n${chunks[index].abstract}\n\n${chunks[index].text}`);
+      expect(row).toMatchObject({ created_at: now.toISOString(), provider: f.embeddings.providerName, model: 'fake-model' });
+    });
+    expect(f.embeddings.embedBatch).toHaveBeenCalledWith(rows.map(row => row.content));
+  });
+
+  it('AC-4: a job without a decisions outcome deletes its rows and optimizes the table once', async () => {
+    const f = outcomeFixture([report]);
+
+    expect(await f.indexer.indexOutcomes(JOB, now)).toEqual({ status: 'indexed' });
+
+    expect(f.store.deleteFile.mock.calls).toEqual([['p1', `outcome:r1:${JOB}:decisions`]]);
+    expect(f.rag.optimizeTable).toHaveBeenCalledExactlyOnceWith('p1');
+  });
+
+  it('AC-4: a job with no outcomes at all deletes both files', async () => {
+    const f = outcomeFixture([]);
+
+    expect(await f.indexer.indexOutcomes(JOB, now)).toEqual({ status: 'indexed' });
+
+    expect(f.store.deleteFile.mock.calls).toEqual([['p1', `outcome:r1:${JOB}:report`], ['p1', `outcome:r1:${JOB}:decisions`]]);
+    expect(f.store.replaceFile).not.toHaveBeenCalled();
+    expect(f.rag.optimizeTable).toHaveBeenCalledExactlyOnceWith('p1');
+  });
+
+  it('AC-4: an outcome whose chunk list is empty deletes that file', async () => {
+    const f = outcomeFixture([{ kind: 'decisions', content: '' }]);
+
+    expect(await f.indexer.indexOutcomes(JOB, now)).toEqual({ status: 'indexed' });
+
+    expect(f.store.deleteFile).toHaveBeenCalledWith('p1', `outcome:r1:${JOB}:decisions`);
+    expect(f.store.replaceFile).not.toHaveBeenCalled();
+  });
+
+  it('AC-5: stores zero vectors of the configured width when the embedding provider is down', async () => {
+    const f = outcomeFixture([report, decisions]);
+    f.embeddings.embedBatch.mockRejectedValue(new Error('embedding failed'));
+    f.embeddings.embed.mockRejectedValue(new Error('embedding failed'));
+
+    expect(await f.indexer.indexOutcomes(JOB, now)).toEqual({ status: 'indexed' });
+
+    const reportRows = rowsOf(f, 0);
+    const decisionsRows = rowsOf(f, 1);
+    expect(reportRows).toHaveLength(chunkMarkdown({ path: 'feature-report.md', text: reportText }).length);
+    expect(decisionsRows).toHaveLength(2);
+    [...reportRows, ...decisionsRows].forEach(row => expect(row).toMatchObject({ provider: 'none', model: '', vector: Array(f.embeddings.dimensions).fill(0) }));
+  });
+
+  it('AC-6: an unknown job writes nothing', async () => {
+    const f = outcomeFixture(null);
+
+    expect(await f.indexer.indexOutcomes('unknown', now)).toEqual({ status: 'skipped', reason: 'unknown job' });
+
+    expect(f.store.replaceFile).not.toHaveBeenCalled();
+    expect(f.store.deleteFile).not.toHaveBeenCalled();
+    expect(f.rag.optimizeTable).not.toHaveBeenCalled();
+    expect(f.embeddings.embedBatch).not.toHaveBeenCalled();
+  });
+
+  it('AC-7: a failing write fails the pass with the error message', async () => {
+    const f = outcomeFixture([report]);
+    f.store.replaceFile.mockRejectedValue(new Error('boom'));
+
+    expect(await f.indexer.indexOutcomes(JOB, now)).toEqual({ status: 'failed', reason: 'boom' });
+  });
+
+  it('AC-7: cuts the failure reason to 500 characters', async () => {
+    const f = outcomeFixture([report]);
+    f.store.replaceFile.mockRejectedValue(new Error('x'.repeat(600)));
+
+    expect(await f.indexer.indexOutcomes(JOB, now)).toEqual({ status: 'failed', reason: 'x'.repeat(500) });
+  });
+
+  it('indexes outcomes of a job on any repository host: they are read from Postgres, not the forge', async () => {
+    const f = outcomeFixture([report]);
+
+    expect(await f.indexer.indexOutcomes(JOB, now)).toEqual({ status: 'indexed' });
+
+    expect(Object.values(f.github).every(fn => fn.mock.calls.length === 0)).toBe(true);
+    expect(f.store.replaceFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('never writes repository index state for an outcome pass', async () => {
+    const f = outcomeFixture([report, decisions]);
+
+    await f.indexer.indexOutcomes(JOB, now);
+
+    // The stub holds `findRunOutcomes` only: a pass that touched claim/finish/upsertFile would throw instead.
+    expect(Object.keys(f.state)).toEqual(['findRunOutcomes']);
+    expect(f.store.deleteFile).not.toHaveBeenCalled();
   });
 });

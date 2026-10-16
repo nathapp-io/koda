@@ -16,10 +16,14 @@ export interface BundleFiles {
   finishLast: BundleFile[];
   status: BundleFile | null;
   workflowResult: BundleFile | null;
+  /** S5b 3c-2-D1: the RUN's feature report; optional so pre-existing literals stay valid. */
+  featureReport?: BundleFile | null;
+  /** S5b 3c-2-D1: the RUN's decisions log; optional so pre-existing literals stay valid. */
+  decisions?: BundleFile | null;
   oversized: string[];
 }
 
-type Slot = 'cost' | 'metrics' | 'reviews' | 'finishResults' | 'finishLast' | 'status' | 'workflowResult';
+type Slot = 'cost' | 'metrics' | 'reviews' | 'finishResults' | 'finishLast' | 'status' | 'workflowResult' | 'featureReport' | 'decisions';
 
 const SLOTS: ReadonlyArray<[RegExp, Slot]> = [
   [/^nax-out\/cost\/[^/]+\.jsonl$/, 'cost'],
@@ -29,6 +33,8 @@ const SLOTS: ReadonlyArray<[RegExp, Slot]> = [
   [/^nax-out\/finish-audit\/[^/]+\/last\.json$/, 'finishLast'],
   [/^nax-out\/status\.json$/, 'status'],
   [/^workflow\/result\.json$/, 'workflowResult'],
+  [/^workflow\/feature-report\.md$/, 'featureReport'],
+  [/^workflow\/decisions\.jsonl$/, 'decisions'],
 ];
 
 /** Spec §2.3: the allowlisted slot of a tar entry name, or null for anything else (including unsafe names). */
@@ -55,7 +61,7 @@ function readEntry(entry: Readable): Promise<string> {
  */
 export function readBundleFiles(bundle: Readable): Promise<BundleFiles> {
   return new Promise((resolve, reject) => {
-    const acc = { cost: [] as BundleFile[], metrics: null as BundleFile | null, reviews: [] as BundleFile[], finishResults: [] as BundleFile[], finishLast: [] as BundleFile[], status: null as BundleFile | null, workflowResult: null as BundleFile | null, oversized: [] as string[] };
+    const acc = { cost: [] as BundleFile[], metrics: null as BundleFile | null, reviews: [] as BundleFile[], finishResults: [] as BundleFile[], finishLast: [] as BundleFile[], status: null as BundleFile | null, workflowResult: null as BundleFile | null, featureReport: null as BundleFile | null, decisions: null as BundleFile | null, oversized: [] as string[] };
     const x = extract();
     const fail = (error: Error) => {
       bundle.destroy();
@@ -80,6 +86,8 @@ export function readBundleFiles(bundle: Readable): Promise<BundleFiles> {
         if (slot === 'metrics') acc.metrics = file;
         else if (slot === 'status') acc.status = file;
         else if (slot === 'workflowResult') acc.workflowResult = file;
+        else if (slot === 'featureReport') acc.featureReport = file;
+        else if (slot === 'decisions') acc.decisions = file;
         else acc[slot] = [...acc[slot], file];
       }, (error: unknown) => x.destroy(error as Error));
     });

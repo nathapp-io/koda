@@ -8,18 +8,21 @@
 import { Logger } from '@nestjs/common';
 import type { IFleetConfig } from '../../config/fleet.config';
 import { testFleetConfig } from '../../common/test-helpers/fleet-config';
-import type { IndexPassResult } from './knowledge-repo-indexer';
+import type { IndexPassResult, OutcomePassResult } from './knowledge-repo-indexer';
 import type { KnowledgeRepoIndexer } from './knowledge-repo-indexer';
 import { KnowledgeIndexQueue } from './knowledge-index.queue';
 
 interface Harness {
   queue: KnowledgeIndexQueue;
-  indexer: { indexRepo: ReturnType<typeof vi.fn> };
+  indexer: { indexRepo: ReturnType<typeof vi.fn>; indexOutcomes: ReturnType<typeof vi.fn> };
   config: Pick<IFleetConfig, 'knowledgeIndexEnabled'>;
 }
 
 function harness(enabled = true): Harness {
-  const indexer = { indexRepo: vi.fn(async (_repoId: string): Promise<IndexPassResult> => ({ status: 'indexed' })) };
+  const indexer = {
+    indexRepo: vi.fn(async (_repoId: string): Promise<IndexPassResult> => ({ status: 'indexed' })),
+    indexOutcomes: vi.fn(async (_jobId: string): Promise<OutcomePassResult> => ({ status: 'indexed' })),
+  };
   const config = testFleetConfig({ knowledgeIndexEnabled: enabled });
   // Direct instantiation: the queue has no Nest lifecycle, only constructor dependencies (api-testing rule).
   const queue = new KnowledgeIndexQueue(indexer as unknown as KnowledgeRepoIndexer, config);
@@ -158,5 +161,134 @@ describe('KnowledgeIndexQueue (1c-c-D10)', () => {
     release({ status: 'indexed' });
     await vi.waitFor(() => expect(indexer.indexRepo).toHaveBeenCalledTimes(2));
     expect(ids(indexer)).toEqual(['r0', 'r1']);
+  });
+});
+
+/**
+ * Fleet S5b US-004 (3c-2-D8): outcome passes share the repository queue — one FIFO, one pass at a time,
+ * the same waiting set, the same cap and the same kill switch. A `job:` key reaches `indexOutcomes`, any
+ * other key reaches `indexRepo`.
+ */
+describe('KnowledgeIndexQueue outcome keys (S5b US-004)', () => {
+  let warn: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    warn = vi.spyOn(Logger.prototype, 'warn');
+    warn.mockClear();
+  });
+
+  it('AC-11: runs indexOutcomes once for a job enqueued twice while a repository pass runs', async () => {
+    const { queue, indexer } = harness();
+    let release: (result: IndexPassResult) => void = () => undefined;
+    indexer.indexRepo.mockImplementationOnce(() => new Promise<IndexPassResult>((resolve) => { release = resolve; }));
+
+    queue.enqueue('r1', 'admin');
+    await vi.waitFor(() => expect(indexer.indexRepo).toHaveBeenCalledTimes(1));
+
+    queue.enqueueOutcomes('j1');
+    queue.enqueueOutcomes('j1');
+
+    // r1 still holds the single pass slot: the outcome pass waits for it and never overlaps.
+    expect(indexer.indexOutcomes).not.toHaveBeenCalled();
+    release({ status: 'indexed' });
+
+    await vi.waitFor(() => expect(indexer.indexOutcomes).toHaveBeenCalledTimes(1));
+    expect(indexer.indexOutcomes).toHaveBeenCalledWith('j1');
+    expect(indexer.indexRepo).toHaveBeenCalledTimes(1);
+  });
+
+  it('AC-12: enqueueing an outcome pass does nothing while indexing is off', async () => {
+    const { queue, indexer } = harness(false);
+
+    queue.enqueueOutcomes('j1');
+    queue.enqueueOutcomes('j2');
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(indexer.indexOutcomes).not.toHaveBeenCalled();
+    expect(indexer.indexRepo).not.toHaveBeenCalled();
+  });
+
+  it('AC-13: a failed outcome pass warns with the job and the reason and keeps draining', async () => {
+    const { queue, indexer } = harness();
+    indexer.indexOutcomes.mockResolvedValueOnce({ status: 'failed', reason: 'boom' });
+
+    queue.enqueueOutcomes('j1');
+    queue.enqueue('r2', 'poll');
+
+    await vi.waitFor(() => expect(indexer.indexRepo).toHaveBeenCalledTimes(1));
+    expect(indexer.indexOutcomes).toHaveBeenCalledTimes(1);
+    expect(indexer.indexRepo).toHaveBeenCalledWith('r2');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('j1');
+    expect(String(warn.mock.calls[0][0])).toContain('boom');
+  });
+
+  it('AC-13: a rejected outcome pass warns and keeps draining', async () => {
+    const { queue, indexer } = harness();
+    indexer.indexOutcomes.mockRejectedValueOnce(new Error('lancedb is down'));
+
+    expect(() => queue.enqueueOutcomes('j1')).not.toThrow();
+    queue.enqueueOutcomes('j2');
+
+    await vi.waitFor(() => expect(indexer.indexOutcomes).toHaveBeenCalledTimes(2));
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('lancedb is down');
+    expect(indexer.indexOutcomes.mock.calls).toEqual([['j1'], ['j2']]);
+  });
+
+  it('logs nothing for a skipped or healthy outcome pass', async () => {
+    const { queue, indexer } = harness();
+    indexer.indexOutcomes.mockResolvedValueOnce({ status: 'skipped', reason: 'unknown job' });
+
+    queue.enqueueOutcomes('j1');
+
+    await vi.waitFor(() => expect(indexer.indexOutcomes).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('drains job keys and repository ids through one FIFO, one pass at a time', async () => {
+    const { queue, indexer } = harness();
+    const order: string[] = [];
+    let release: (result: IndexPassResult) => void = () => undefined;
+    indexer.indexRepo.mockImplementation(async (repoId: string) => {
+      order.push(`repo:${repoId}`);
+      return { status: 'indexed' };
+    });
+    indexer.indexOutcomes.mockImplementation(async (jobId: string) => {
+      order.push(`job:${jobId}`);
+      if (jobId === 'j1') await new Promise<void>((resolve) => { release = () => resolve(); });
+      return { status: 'indexed' };
+    });
+
+    queue.enqueue('r1', 'poll');
+    queue.enqueueOutcomes('j1');
+    await vi.waitFor(() => expect(order).toEqual(['repo:r1', 'job:j1']));
+
+    queue.enqueue('r2', 'poll');
+    queue.enqueueOutcomes('j2');
+    expect(order).toEqual(['repo:r1', 'job:j1']); // j1 holds the slot: nothing else started
+
+    release({ status: 'indexed' });
+    await vi.waitFor(() => expect(order).toEqual(['repo:r1', 'job:j1', 'repo:r2', 'job:j2']));
+  });
+
+  it('drops an outcome key with a warning once 1000 keys are waiting', async () => {
+    const { queue, indexer } = harness();
+    let release: (result: IndexPassResult) => void = () => undefined;
+    indexer.indexRepo.mockImplementationOnce(() => new Promise<IndexPassResult>((resolve) => { release = resolve; }));
+
+    queue.enqueue('r0', 'poll');
+    await vi.waitFor(() => expect(indexer.indexRepo).toHaveBeenCalledTimes(1));
+    for (let index = 1; index <= 1000; index += 1) queue.enqueue(`r${index}`, 'poll');
+
+    warn.mockClear();
+    queue.enqueueOutcomes('overflow');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('overflow');
+
+    release({ status: 'indexed' });
+    await vi.waitFor(() => expect(indexer.indexRepo).toHaveBeenCalledTimes(1001));
+    expect(indexer.indexOutcomes).not.toHaveBeenCalled();
   });
 });

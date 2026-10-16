@@ -107,6 +107,47 @@ describeIntegration('bundle ingest repository (PG)', () => {
     expect(await repo.rerunOutdated(1)).toBe(0);
   });
 
+  it('AC-7 stores one FleetRunOutcome row per outcome stamped with the context project and repo', async () => {
+    const a = await jobWithBundle('COMPLETED');
+    const ctx = { jobId: a.jobId, leaseEpoch: 1, projectId: base.projectId, repoId: base.repoId, runnerId: null, naxRunId: 'run-1' };
+    await repo.replaceRows(ctx, {
+      costEvents: [], stories: [], reviews: [],
+      outcomes: [{ kind: 'report', content: '# R' }, { kind: 'decisions', content: '{"id":"D1"}' }],
+    });
+    const rows = await prisma.fleetRunOutcome.findMany({ where: { jobId: a.jobId } });
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.kind).sort()).toEqual(['decisions', 'report']);
+    expect(rows.every((r) => r.projectId === base.projectId && r.repoId === base.repoId && r.leaseEpoch === 1)).toBe(true);
+    expect(rows.find((r) => r.kind === 'report')?.content).toBe('# R');
+    expect(rows.find((r) => r.kind === 'decisions')?.content).toBe('{"id":"D1"}');
+  });
+
+  it('AC-8 replaces the same epoch and leaves another epoch of the job untouched', async () => {
+    const a = await jobWithBundle('COMPLETED');
+    const ctx = { jobId: a.jobId, leaseEpoch: 1, projectId: base.projectId, repoId: base.repoId, runnerId: null, naxRunId: 'run-1' };
+    await repo.replaceRows(ctx, {
+      costEvents: [], stories: [], reviews: [],
+      outcomes: [{ kind: 'report', content: 'old report' }, { kind: 'decisions', content: 'old decisions' }],
+    });
+    await prisma.fleetRunOutcome.create({
+      data: { jobId: a.jobId, leaseEpoch: 2, projectId: base.projectId, repoId: base.repoId, kind: 'report', content: 'epoch 2' },
+    });
+    await repo.replaceRows(ctx, { costEvents: [], stories: [], reviews: [], outcomes: [{ kind: 'report', content: 'new report' }] });
+    const rows = await prisma.fleetRunOutcome.findMany({ where: { jobId: a.jobId }, orderBy: [{ leaseEpoch: 'asc' }, { kind: 'asc' }] });
+    expect(rows.map((r) => `${r.leaseEpoch}:${r.kind}:${r.content}`)).toEqual(['1:report:new report', '2:report:epoch 2']);
+  });
+
+  it('AC-9 deletes the job’s outcomes with the job', async () => {
+    const a = await jobWithBundle('COMPLETED');
+    await repo.replaceRows(
+      { jobId: a.jobId, leaseEpoch: 1, projectId: base.projectId, repoId: base.repoId, runnerId: null, naxRunId: null },
+      { costEvents: [], stories: [], reviews: [], outcomes: [{ kind: 'report', content: '# R' }] },
+    );
+    expect(await prisma.fleetRunOutcome.count({ where: { jobId: a.jobId } })).toBe(1);
+    await prisma.fleetJob.delete({ where: { id: a.jobId } });
+    expect(await prisma.fleetRunOutcome.count({ where: { jobId: a.jobId } })).toBe(0);
+  });
+
   it('pages rows filtered by status with the job project', async () => {
     const a = await jobWithBundle('COMPLETED');
     await repo.enqueue(a.artifactId, a.jobId, 1, 1);

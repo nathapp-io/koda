@@ -2200,5 +2200,37 @@
       "nameRequired": "Name is required",
       "passwordMin": "Password must be at least 8 characters"
     }
+  },
+  "knowledge": {
+    "tab": "Knowledge",
+    "title": "Knowledge index",
+    "description": "Repository documents and run outcomes that agents can search for this project.",
+    "disabled": "Knowledge indexing is turned off for this deployment. Repositories are not indexed until it is enabled.",
+    "repos": {
+      "title": "Repositories",
+      "empty": "This project has no repositories.",
+      "files": "Files",
+      "chunks": "Chunks",
+      "unembedded": "Unembedded",
+      "skipped": "Skipped",
+      "finishedAt": "Last pass finished",
+      "lastError": "Last error"
+    },
+    "reindex": {
+      "action": "Re-index",
+      "queued": "Re-index queued"
+    },
+    "patterns": {
+      "title": "Document patterns",
+      "hint": "One pattern per line; * matches within a folder, ** across folders, and only .md files are indexed.",
+      "default": "Using the default patterns.",
+      "custom": "Using this project's own patterns.",
+      "save": "Save patterns",
+      "resetAction": "Reset to default",
+      "saved": "Patterns saved",
+      "reset": "Patterns reset to default",
+      "errorMarkdown": "Every pattern must end in .md",
+      "errorCount": "Enter between 1 and 50 patterns"
+    }
   }
 }

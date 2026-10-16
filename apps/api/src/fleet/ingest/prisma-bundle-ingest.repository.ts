@@ -54,6 +54,7 @@ export class PrismaBundleIngestRepository implements IBundleIngestRepository {
     await this.db.fleetCostEvent.deleteMany({ where });
     await this.db.fleetStoryResult.deleteMany({ where });
     await this.db.fleetReviewResult.deleteMany({ where });
+    await this.db.fleetRunOutcome.deleteMany({ where });
     const shared = { jobId: ctx.jobId, leaseEpoch: ctx.leaseEpoch, projectId: ctx.projectId };
     if (rows.costEvents.length > 0) {
       await this.db.fleetCostEvent.createMany({
@@ -68,6 +69,13 @@ export class PrismaBundleIngestRepository implements IBundleIngestRepository {
     if (rows.reviews.length > 0) {
       await this.db.fleetReviewResult.createMany({
         data: rows.reviews.map((r) => ({ ...shared, ...r, findingsBySeverity: r.findingsBySeverity as Prisma.InputJsonValue })),
+      });
+    }
+    // S5b 3c-2-D1: an absent list counts as empty; the two kinds are unique per (jobId, leaseEpoch).
+    const outcomes = rows.outcomes ?? [];
+    if (outcomes.length > 0) {
+      await this.db.fleetRunOutcome.createMany({
+        data: outcomes.map((r) => ({ ...shared, repoId: ctx.repoId, kind: r.kind, content: r.content })),
       });
     }
   }

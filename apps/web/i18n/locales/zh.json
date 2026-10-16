@@ -2200,5 +2200,37 @@
       "nameRequired": "请输入姓名",
       "passwordMin": "密码至少需要 8 个字符"
     }
+  },
+  "knowledge": {
+    "tab": "知识库",
+    "title": "知识索引",
+    "description": "代理可为此项目搜索的仓库文档和运行结果。",
+    "disabled": "此部署已关闭知识索引。启用之前不会为仓库建立索引。",
+    "repos": {
+      "title": "仓库",
+      "empty": "此项目没有仓库。",
+      "files": "文件",
+      "chunks": "分块",
+      "unembedded": "未向量化",
+      "skipped": "已跳过",
+      "finishedAt": "上次完成时间",
+      "lastError": "上次错误"
+    },
+    "reindex": {
+      "action": "重新索引",
+      "queued": "已加入重新索引队列"
+    },
+    "patterns": {
+      "title": "文档匹配规则",
+      "hint": "每行一条规则；* 匹配单层目录内，** 可跨目录，仅索引 .md 文件。",
+      "default": "正在使用默认规则。",
+      "custom": "正在使用此项目的自定义规则。",
+      "save": "保存规则",
+      "resetAction": "恢复默认",
+      "saved": "规则已保存",
+      "reset": "规则已恢复默认",
+      "errorMarkdown": "每条规则必须以 .md 结尾",
+      "errorCount": "请输入 1 到 50 条规则"
+    }
   }
 }

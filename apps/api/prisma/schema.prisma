@@ -195,6 +195,7 @@ model Project {
   invites            ProjectInvite[]
   agents             AgentProject[]
   skills             ProjectSkill[]
+  knowledgePatterns  KnowledgeProjectPatterns?
 
   @@index([deletedAt])
 }
@@ -826,6 +827,7 @@ model KnowledgeRepoIndex {
   projectId       String
   status          String    @default("idle") // idle | running | failed | skipped
   indexedSha      String?
+  patternsKey     String? // S5b US-002: the patterns snapshot the pass selected with; null before the feature
   fileCount       Int       @default(0)
   chunkCount      Int       @default(0)
   unembeddedCount Int       @default(0)
@@ -850,6 +852,15 @@ model KnowledgeRepoFile {
   repo            FleetRepo @relation(fields: [repoId], references: [id], onDelete: Cascade)
 
   @@id([repoId, path])
+}
+
+/// S5b US-002: a project's Markdown corpus patterns. No row means the default 3c-1 corpus.
+model KnowledgeProjectPatterns {
+  projectId String   @id
+  patterns  Json
+  updatedAt DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 model FleetActivity {
@@ -1061,6 +1072,7 @@ model FleetJob {
   reviewResults       FleetReviewResult[]
   configEdit          FleetConfigEdit?
   assistantToolCalls  AssistantToolCall[]
+  runOutcomes         FleetRunOutcome[]
 
   @@index([state])
   @@index([runnerId, state])
@@ -1094,6 +1106,24 @@ model AssistantToolCall {
 
   @@unique([jobId, toolCallId])
   @@index([threadId, createdAt])
+}
+
+/// Fleet S5b-1c-c-2 (3c-2-D1): one bounded RUN outcome file of a job's ingest attempt. Epoch-scoped, so a re-ingest
+/// of the same attempt replaces its rows; deleted with its job.
+model FleetRunOutcome {
+  id         String   @id @default(cuid())
+  jobId      String
+  leaseEpoch Int
+  projectId  String
+  repoId     String
+  kind       String // report | decisions
+  content    String   @db.Text
+  createdAt  DateTime @default(now())
+
+  job FleetJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, leaseEpoch, kind])
+  @@index([projectId])
 }
 
 /// Fleet S3 §1: the edit set of a CONFIG_EDIT / CONFIG_DRIFT job (D466). 1:1 with FleetJob.

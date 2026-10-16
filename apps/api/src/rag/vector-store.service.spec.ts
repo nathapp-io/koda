@@ -461,6 +461,78 @@ describe('VectorStore.search — native FTS path (US-003-2)', () => {
   });
 });
 
+/**
+ * 1c-c-R6 / 3c-2-D6: repository knowledge chunks and run-outcome chunks share the project's table with tickets
+ * and documents. A table double without `where` (the in-memory fallback shape) answers every leg unfiltered, so
+ * the defensive filter has to drop both sources anyway — a pool filled with knowledge rows must never crowd a
+ * ticket out of the result.
+ */
+describe('VectorStore.search — knowledge-row isolation (1c-c-R6)', () => {
+  function makeTableWithPredicates(rows: AnyRecord[], record: (predicate: string) => void) {
+    const scan = { limit: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue(rows) };
+    const fts = { toArray: vi.fn().mockResolvedValue(rows) };
+    const nearest = { limit: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue(rows) };
+    return {
+      countRows: vi.fn().mockResolvedValue(rows.length),
+      query: vi.fn().mockReturnValue({ ...scan, where: vi.fn((p: string) => { record(p); return scan; }) }),
+      search: vi.fn().mockReturnValue({ ...fts, where: vi.fn((p: string) => { record(p); return fts; }) }),
+      vectorSearch: vi.fn().mockReturnValue({
+        distanceType: vi.fn().mockReturnThis(),
+        ...nearest,
+        where: vi.fn((p: string) => { record(p); return nearest; }),
+      }),
+    };
+  }
+
+  function knowledgeRow(id: string, source: 'repo' | 'outcome'): AnyRecord {
+    return { ...makeMockRecord(id, 'authentication error in service'), source, source_id: id.replace(/#.*$/, '') };
+  }
+
+  it('excludes both knowledge sources in every leg, before its candidate limit', async () => {
+    const vectorStore = new VectorStore(mockRagConfigForSearch, mockEmbeddingServiceForSearch as never);
+    const predicates: string[] = [];
+    const mockTable = makeTableWithPredicates([makeMockRecord('t1', 'authentication error in service')], (p) => predicates.push(p));
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (vectorStore as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (vectorStore as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    await vectorStore.search('test-project', 'authentication error', 5);
+
+    const expected = "source != 'repo' AND source != 'outcome'";
+    expect(predicates).toEqual([expected, expected, expected]);
+  });
+
+  it('never returns a repository or outcome row a leg answered anyway', async () => {
+    const vectorStore = new VectorStore(mockRagConfigForSearch, mockEmbeddingServiceForSearch as never);
+    const ticket = makeMockRecord('t1', 'authentication error in service');
+    const rows = [knowledgeRow('repo:r1:docs/a.md#0', 'repo'), knowledgeRow('outcome:r1:j1:report#0', 'outcome'), ticket];
+    const scan = { limit: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue(rows) };
+    const mockTable = {
+      countRows: vi.fn().mockResolvedValue(rows.length),
+      query: vi.fn().mockReturnValue(scan),
+      search: vi.fn().mockResolvedValue(rows),
+      vectorSearch: vi.fn().mockReturnValue({
+        distanceType: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue(rows),
+      }),
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (vectorStore as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (vectorStore as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    const result = await vectorStore.search('test-project', 'authentication error', 5);
+
+    expect(result.results.map((r) => r.id)).toEqual(['t1']);
+    expect(result.results.map((r) => r.source)).not.toContain('repo');
+    expect(result.results.map((r) => r.source)).not.toContain('outcome');
+  });
+});
+
 describe('VectorStore.search — in-memory FTS fallback path (US-003-3)', () => {
   function makeTableWithRejectedSearch(allRows: AnyRecord[]) {
     return {

@@ -24,6 +24,9 @@ export class KnowledgeRepoStateDto {
 /** `enabled` is the kill switch, so a client can word "indexing is off" without a second request. */
 export class KnowledgeRepoStatesDto {
   @ApiProperty({ description: 'True when repository knowledge indexing is on' }) enabled: boolean;
+  @ApiProperty({ type: [String], description: "The project's effective corpus patterns (US-002)" }) patterns: string[];
+  @ApiProperty({ description: 'True when `patterns` are the project’s own rather than the defaults' }) customPatterns: boolean;
+  @ApiProperty({ type: [String], description: 'The built-in corpus patterns, so a client can restore them' }) defaultPatterns: string[];
   @ApiProperty({ type: [KnowledgeRepoStateDto] }) repos: KnowledgeRepoStateDto[];
 }
 

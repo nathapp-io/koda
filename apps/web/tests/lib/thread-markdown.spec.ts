@@ -350,3 +350,165 @@ describe('B1: a `>` inside a quoted attribute value is not a tag boundary', () =
     expect(sanitizeDouble).toHaveBeenCalledTimes(1)
   })
 })
+
+// ── US-007 AC12-AC15: knowledge citations ────────────────────────────────────────────────────
+
+const JOB = 'cmvjob00000000000000001'
+
+describe('US-007 AC12-AC15: renderThreadMarkdown links knowledge citations', () => {
+  test('AC12: a document citation links to the GitHub blob at its sha, in a new tab, with noopener noreferrer', () => {
+    const html = renderThreadMarkdown('see o/n:docs/a.md@abc1234#intro', 'web')
+
+    const links = elementsOf(html, 'a')
+    expect(links).toHaveLength(1)
+    expect(links[0].attrs.href).toBe('https://github.com/o/n/blob/abc1234/docs/a.md#intro')
+    expect(links[0].attrs.target).toBe('_blank')
+    expect(links[0].attrs.rel).toBe('noopener noreferrer')
+    expect(textOf(links[0])).toBe('o/n:docs/a.md@abc1234#intro')
+  })
+
+  test('AC13: an outcome citation links to the job page of the project', () => {
+    const html = renderThreadMarkdown(`job:${JOB}/feature-report.md#branch-fix`, 'web')
+
+    const links = elementsOf(html, 'a')
+    expect(links).toHaveLength(1)
+    expect(links[0].attrs.href).toBe(`/web/fleet/jobs/${JOB}`)
+    expect(links[0].attrs.target).toBeUndefined()
+    expect(textOf(links[0])).toBe(`job:${JOB}/feature-report.md#branch-fix`)
+  })
+
+  test('an outcome citation of decisions.jsonl without a fragment is linked', () => {
+    const html = renderThreadMarkdown(`see job:${JOB}/decisions.jsonl.`, 'web')
+
+    const links = elementsOf(html, 'a')
+    expect(links).toHaveLength(1)
+    expect(links[0].attrs.href).toBe(`/web/fleet/jobs/${JOB}`)
+    expect(textOf(links[0])).toBe(`job:${JOB}/decisions.jsonl`)
+  })
+
+  test('AC14: an inline code span holding only a document citation sits inside a link to the blob', () => {
+    const html = renderThreadMarkdown('read `o/n:docs/a.md@abc1234` first', 'web')
+
+    const tree = treeOf(html)
+    const links = elementsOfTree(tree, 'a')
+    expect(links).toHaveLength(1)
+    expect(links[0].attrs.href).toBe('https://github.com/o/n/blob/abc1234/docs/a.md')
+    expect(links[0].attrs.target).toBe('_blank')
+    expect(links[0].attrs.rel).toBe('noopener noreferrer')
+    const code = elementsOfTree(tree, 'code')
+    expect(code).toHaveLength(1)
+    expect(flatten(links[0].children)).toContain(code[0])
+  })
+
+  test('an inline code span holding only an outcome citation is wrapped in a link to the job', () => {
+    const html = renderThreadMarkdown(`\`job:${JOB}/decisions.jsonl#d1\``, 'web')
+
+    const links = elementsOf(html, 'a')
+    expect(links).toHaveLength(1)
+    expect(links[0].attrs.href).toBe(`/web/fleet/jobs/${JOB}`)
+  })
+
+  test('AC15: a citation inside the text of an absolute URL is not linked', () => {
+    const html = renderThreadMarkdown('https://x.dev/o/n:docs/a.md@abc1234', 'web')
+
+    expect(elementsOf(html, 'a').filter(link => link.attrs.href?.startsWith('https://github.com'))).toEqual([])
+  })
+
+  test('a sha shorter than 7 or longer than 40 characters is not a citation', () => {
+    expect(elementsOf(renderThreadMarkdown('o/n:docs/a.md@abc123', 'web'), 'a')).toEqual([])
+    expect(elementsOf(renderThreadMarkdown(`o/n:docs/a.md@${'a'.repeat(41)}`, 'web'), 'a')).toEqual([])
+    expect(elementsOf(renderThreadMarkdown('o/n:docs/a.md@ABCDEF1', 'web'), 'a')).toEqual([])
+  })
+
+  test('citations are not linked without a slug, inside a fenced block, or inside an existing link', () => {
+    expect(elementsOf(renderThreadMarkdown('o/n:docs/a.md@abc1234'), 'a')).toEqual([])
+    expect(elementsOf(renderThreadMarkdown('```\no/n:docs/a.md@abc1234\n```', 'web'), 'a')).toEqual([])
+    const nested = elementsOf(renderThreadMarkdown('[x](/web/tickets/SB-3) [o/n:docs/a.md@abc1234](/web/tickets/SB-3)', 'web'), 'a')
+    expect(nested).toHaveLength(2)
+    expect(nested.every(link => link.attrs.href === '/web/tickets/SB-3')).toBe(true)
+  })
+
+  test('a citation with other text around it, and the existing path links, still work together', () => {
+    const html = renderThreadMarkdown(`(o/n:docs/a.md@abc1234), /web/tickets/SB-3 and job:${JOB}/feature-report.md`, 'web')
+
+    expect(elementsOf(html, 'a').map(link => link.attrs.href)).toEqual([
+      'https://github.com/o/n/blob/abc1234/docs/a.md',
+      '/web/tickets/SB-3',
+      `/web/fleet/jobs/${JOB}`,
+    ])
+  })
+})
+
+// ── B3 (branch review): the citation scan must be bounded on a long token ─────────────────────
+//
+// The document citation's `owner` and path cannot be anchored by a literal prefix, so an unanchored
+// regex retries them at every character: `renderThreadMarkdown` on 100,000 `a` characters took 4.1
+// seconds, synchronously, on every SSR render and streaming update. The linkifier now scans each
+// text run once (`docCitations`), so these cases are the regression guard for ordinary, long,
+// citation-free tokens.
+describe('B3: the citation scan is bounded on a long token', () => {
+  const LONG = 'a'.repeat(100_000)
+
+  test('renders a 100,000-character non-citation token without quadratic retries', () => {
+    const started = Date.now()
+    const html = renderThreadMarkdown(LONG, 'web')
+    const elapsed = Date.now() - started
+
+    expect(html).toContain(LONG)
+    expect(elementsOf(html, 'a')).toEqual([])
+    expect(elapsed).toBeLessThan(1000)
+  })
+
+  test('renders a long token that ends beside a citation in bounded time, and still links it', () => {
+    const started = Date.now()
+    const html = renderThreadMarkdown(`${LONG} o/n:docs/a.md@abc1234`, 'web')
+    const elapsed = Date.now() - started
+
+    expect(elementsOf(html, 'a').map(link => link.attrs.href)).toEqual(['https://github.com/o/n/blob/abc1234/docs/a.md'])
+    expect(elapsed).toBeLessThan(1000)
+  })
+
+  test('bounds a token holding thousands of sha-shaped tails, and links none of them', () => {
+    // Every `@` here is a real sha tail with no `owner/name:` before it in its own run, so the parser may not
+    // scan past the run of any one of them: the colon search of each candidate stays inside its own run.
+    const text = `${'ab@abc1234'.repeat(5000)}:`
+    const started = Date.now()
+    const html = renderThreadMarkdown(text, 'web')
+    const elapsed = Date.now() - started
+
+    expect(elementsOf(html, 'a')).toEqual([])
+    expect(elapsed).toBeLessThan(1000)
+  })
+
+  /**
+   * The parsed citation must read the same shapes the old pattern did: the leftmost `owner/name:` of the run its
+   * `@` ends, the greedy path between that colon and the `@`, and the standalone check on both sides. Every
+   * expectation below is the value the pre-B3 regex produced (see the differential check in the fix report).
+   */
+  test('reads citations the way the old pattern did', () => {
+    const hrefs = (text: string): string[] => elementsOf(renderThreadMarkdown(text, 'web'), 'a').map(link => link.attrs.href)
+
+    expect(hrefs('o/n:a:b@abc1234')).toEqual(['https://github.com/o/n/blob/abc1234/a:b'])
+    expect(hrefs('a/b:c:d@abc1234')).toEqual(['https://github.com/a/b/blob/abc1234/c:d'])
+    expect(hrefs('o/n:@abc1234')).toEqual([])                       // no path between the colon and the @
+    expect(hrefs('o/n:docs/a.md@abc1234x')).toEqual([])             // the token continues past the sha
+    expect(hrefs('x/o/n:docs/a.md@abc1234')).toEqual([])            // the owner starts inside a longer token
+    expect(hrefs('-o/n:docs/a.md@abc1234')).toEqual(['https://github.com/-o/n/blob/abc1234/docs/a.md'])
+    expect(hrefs('o/n:docs/a.md@abc1234@abc1234')).toEqual(['https://github.com/o/n/blob/abc1234/docs/a.md'])
+    expect(hrefs('o/n:docs/a.md@abc1234#')).toEqual(['https://github.com/o/n/blob/abc1234/docs/a.md'])
+    expect(hrefs('o/n:docs/a.md@abc1234#frag.ment')).toEqual(['https://github.com/o/n/blob/abc1234/docs/a.md#frag'])
+    expect(hrefs('a.md@abc1234')).toEqual([])                       // no `owner/name:` separator
+  })
+
+  /**
+   * B3 boundary: an occurrence that starts inside an occurrence already linked is dropped. The old unanchored
+   * regex restarted at the end of the span it had linked and re-parsed that span's tail as a second citation,
+   * which is the one shape the differential check found different (see the fix report). A citation whose owner
+   * run overlaps a citation that was already linked is not standalone text.
+   */
+  test('drops a citation whose start is inside the citation already linked', () => {
+    const html = renderThreadMarkdown(`job:${JOB}/feature-report.md:abc1234o/n:docs/a.md@abc1234`, 'web')
+
+    expect(elementsOf(html, 'a').map(link => link.attrs.href)).toEqual([`/web/fleet/jobs/${JOB}`])
+  })
+})

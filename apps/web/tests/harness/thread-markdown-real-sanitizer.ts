@@ -120,6 +120,26 @@ check('AC-8: the img is removed, its handler is gone and the path is still linke
   assert.equal(links[0].getAttribute('href'), '/sandbox/tickets/SB-3')
 })
 
+// ── B3 (branch review): a long citation-free token renders in bounded time ───────────────────
+
+/**
+ * The reported case: the unanchored document-citation regex retried its open-ended `owner` at every
+ * character of an ordinary long token, so the real pipeline took 4.1 seconds on 100,000 `a`
+ * characters — synchronously, on every SSR render and streaming update. The linkifier now scans each
+ * text run once. This runs the whole real stack (marked, the sanitizer, the linkifier), which is
+ * where the cost was measured.
+ */
+check('renderThreadMarkdown is bounded on a 100,000-character citation-free token', () => {
+  const text = 'a'.repeat(100_000)
+  const started = Date.now()
+  const html = renderThreadMarkdown(text, 'sandbox')
+  const elapsed = Date.now() - started
+
+  assert.ok(html.includes(text), 'the rendered HTML lost the token')
+  assert.equal(documentOf(html).querySelectorAll('a').length, 0, `a link was built from a non-citation: ${html.slice(0, 200)}`)
+  assert.ok(elapsed < 1500, `renderThreadMarkdown took ${elapsed}ms on a citation-free token (quadratic scan?)`)
+})
+
 // ── runner ───────────────────────────────────────────────────────────────────────────────────
 
 let failed = 0

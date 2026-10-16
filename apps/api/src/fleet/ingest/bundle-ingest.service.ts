@@ -14,6 +14,7 @@ import {
 import { computeCorrection } from './ingest-corrections';
 import { parseBundle } from './parse-bundle';
 import { FleetJobOutcomeRecorder } from '../jobs/job-outcome.recorder';
+import { KnowledgeIndexQueue } from '../knowledge/knowledge-index.queue';
 
 const SECRETISH = /(token|secret|password|key)=\S+/gi;
 const trimError = (error: unknown): string =>
@@ -35,6 +36,8 @@ export class BundleIngestService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly ticketEffects: FleetJobTicketEffects,
     private readonly outcomes: FleetJobOutcomeRecorder,
+    /** S5b 3c-2-D8 (US-004): the outcome index queue; the ingest is its only trigger. */
+    private readonly knowledge: KnowledgeIndexQueue,
   ) {}
 
   /** D369: off the request path; never throws. */
@@ -77,9 +80,11 @@ export class BundleIngestService {
       const job = await this.jobs.lockById(claim.jobId);
       if (!job) return null;
       const parsed = parseBundle(files, job.leaseEpoch === claim.leaseEpoch ? job.naxRunId : null);
+      // S5b 3c-2-D1: outcomes are stored for RUN jobs only; every other command writes an empty list.
+      const isRun = job.command === 'RUN';
       await this.repo.replaceRows(
         { jobId: job.id, leaseEpoch: claim.leaseEpoch, projectId: job.projectId, repoId: job.repoId, runnerId: job.runnerId, naxRunId: parsed.naxRunId },
-        parsed.rows,
+        { ...parsed.rows, outcomes: isRun ? parsed.rows.outcomes ?? [] : [] },
       );
       const correction = computeCorrection({ job, leaseEpoch: claim.leaseEpoch, ledgerCostUsd: parsed.ledgerCostUsd, runStatus: parsed.runStatus, finish: parsed.finish, workflow: parsed.workflow ?? null, workflowOutcome: parsed.workflowOutcome ?? null, workflowUrl: parsed.workflowUrl ?? null });
       const changed = Object.keys(correction.patch).length > 0;
@@ -96,12 +101,17 @@ export class BundleIngestService {
       await this.repo.markOutcome(claim.id, {
         kind: parsed.partial ? 'partial' : 'done', files: parsed.files, liveCostUsd: correction.liveCostUsd, ledgerCostUsd: parsed.ledgerCostUsd, ingestedAt: now,
       });
-      return { event: this.live.event(updated), spendKeys: correction.costRaised ? jobSpendKeys(updated) : [], prFilled };
+      // `isRun` travels with the commit result for the post-commit outcome-index hook (S5b 3c-2-D8, US-004).
+      return { event: this.live.event(updated), spendKeys: correction.costRaised ? jobSpendKeys(updated) : [], prFilled, isRun };
     });
     if (!result) return;
     this.live.publish([result.event]);
     if (result.spendKeys.length > 0) this.budgets.signal(result.spendKeys);
     if (result.prFilled) void this.ticketEffects.upsertPrLinks(claim.jobId); // C9 §3.3: late PR URL; never throws
+    // S5b 3c-2-D8: the outcome pass runs after the commit, never inside it, once per ingest and only for a
+    // RUN job: a PLAN or CONFIG_EDIT job stores no outcome rows, and a RUN ingest without outcome rows
+    // retires the epoch before it.
+    if (result.isRun) this.knowledge.enqueueOutcomes(claim.jobId);
   }
 
   private async recordFailure(claim: IngestClaim, error: unknown, now: Date): Promise<void> {

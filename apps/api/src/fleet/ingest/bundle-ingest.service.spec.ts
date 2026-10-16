@@ -11,7 +11,7 @@ function make(attempts: number, opts: { expired?: boolean; storeFails?: boolean 
     markRetry: vi.fn(), markFailed: vi.fn(), markOutcome: vi.fn(), replaceRows: vi.fn(),
   };
   const store = { get: vi.fn(async () => (opts.storeFails ? Promise.reject(new Error('EIO disk')) : Readable.from([Buffer.from('not gzip')]))) };
-  const svc = new BundleIngestService(repo as never, store as never, {} as never, {} as never, {} as never, {} as never, { run: (fn: () => unknown) => fn() } as never, { upsertPrLinks: vi.fn() } as never, { onIngestCorrection: vi.fn() } as never);
+  const svc = new BundleIngestService(repo as never, store as never, {} as never, {} as never, {} as never, {} as never, { run: (fn: () => unknown) => fn() } as never, { upsertPrLinks: vi.fn() } as never, { onIngestCorrection: vi.fn() } as never, { enqueueOutcomes: vi.fn() } as never);
   return { svc, repo };
 }
 

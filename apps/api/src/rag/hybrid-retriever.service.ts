@@ -3,7 +3,12 @@ import { RAG_CFG, IRagConfig } from '../config/rag.config';
 import { PrismaRagRepository } from './prisma-rag.repository';
 import { EmbeddingService } from './embedding.service';
 import { EntityStore } from './entity-store';
-import { LanceTableManager, EXCLUDE_REPO_ROWS_PREDICATE, REPO_SOURCE, whereIfSupported } from './lance-table-manager';
+import {
+  LanceTableManager,
+  EXCLUDE_KNOWLEDGE_ROWS_PREDICATE,
+  isKnowledgeRow,
+  whereIfSupported,
+} from './lance-table-manager';
 import { resolveCreatedAt } from './created-at-override';
 import type { LanceRecord, LanceTable } from './lance-table-manager';
 import {
@@ -142,10 +147,10 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     }
 
     const candidatePoolSize = Math.max(100, limit * 5);
-    // 1c-c-R6: repository knowledge chunks share the table with tickets but belong to the knowledge search path.
-    // Every leg below drops them *before* its candidate limit, so an indexed documentation corpus can never
-    // crowd ticket results out of a bounded pool.
-    const allRows: LanceRecord[] = await whereIfSupported(table.query(), EXCLUDE_REPO_ROWS_PREDICATE)
+    // 1c-c-R6 / 3c-2-D6: repository knowledge chunks and run-outcome chunks share the table with tickets but
+    // belong to the knowledge search path. Every leg below drops both sources *before* its candidate limit, so
+    // an indexed corpus (or a project's run outcomes) can never crowd ticket results out of a bounded pool.
+    const allRows: LanceRecord[] = await whereIfSupported(table.query(), EXCLUDE_KNOWLEDGE_ROWS_PREDICATE)
       .limit(Math.min(rowCount, 500)).toArray();
 
     let ftsRanked: { id: string; score: number }[] = [];
@@ -154,7 +159,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     let nativeFtsRows: LanceRecord[] = [];
     const inMemoryFts = (): { id: string; score: number }[] =>
       allRows
-        .filter((r) => r.source !== REPO_SOURCE)
+        .filter((r) => !isKnowledgeRow(r))
         .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query.query) }))
         .filter((r) => r.score > 0)
         .sort((a, b) => b.score - a.score)
@@ -163,14 +168,14 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
       try {
         const nativeFtsResult = await whereIfSupported(
           table.search(query.query, 'fts', 'content'),
-          EXCLUDE_REPO_ROWS_PREDICATE,
+          EXCLUDE_KNOWLEDGE_ROWS_PREDICATE,
         );
         if (Array.isArray(nativeFtsResult)) {
           nativeFtsRows = nativeFtsResult as LanceRecord[];
         } else if (nativeFtsResult && typeof nativeFtsResult === 'object' && 'toArray' in nativeFtsResult) {
           nativeFtsRows = await (nativeFtsResult as { toArray: () => Promise<LanceRecord[]> }).toArray();
         }
-        nativeFtsRows = nativeFtsRows.filter((r) => r.source !== REPO_SOURCE);
+        nativeFtsRows = nativeFtsRows.filter((r) => !isKnowledgeRow(r));
         ftsRanked = nativeFtsRows.map((r, i) => ({ id: r.id as string, score: 1 / (i + 1) }));
       } catch {
         nativeFtsRows = [];
@@ -188,10 +193,10 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
         const queryVector = await this.embeddingService.embed(query.query);
         vectorRows = await whereIfSupported(table
           .vectorSearch(queryVector)
-          .distanceType('cosine'), EXCLUDE_REPO_ROWS_PREDICATE)
+          .distanceType('cosine'), EXCLUDE_KNOWLEDGE_ROWS_PREDICATE)
           .limit(candidatePoolSize)
           .toArray();
-        vectorRows = vectorRows.filter((r) => r.source !== REPO_SOURCE);
+        vectorRows = vectorRows.filter((r) => !isKnowledgeRow(r));
       } catch (err) {
         this.logger.warn({ storyId: 'US-004', msg: `Vector search failed: ${(err as Error).message}` });
       }
@@ -202,7 +207,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
         const queryVector = await this.embeddingService.embed(query.query);
         const dims = this.embeddingService.dimensions ?? 8;
         const allWithVectors = allRows
-          .filter((r) => r.source !== REPO_SOURCE)
+          .filter((r) => !isKnowledgeRow(r))
           .map((r) => {
             const docVec = (r.vector as number[]) ?? Array(dims).fill(0);
             const dot = queryVector.reduce((sum, qv, i) => sum + qv * docVec[i], 0);

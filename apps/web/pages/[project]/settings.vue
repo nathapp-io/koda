@@ -75,7 +75,7 @@ const { data: projectData, pending: loadingProject, error: projectError, refresh
 
     <!-- Tabs Container -->
     <Tabs default-value="project" class="w-full">
-      <TabsList class="grid w-full max-w-md grid-cols-3">
+      <TabsList class="grid w-full max-w-md grid-cols-4">
         <TabsTrigger value="project">
           {{ t('projects.title') }}
         </TabsTrigger>
@@ -84,6 +84,9 @@ const { data: projectData, pending: loadingProject, error: projectError, refresh
         </TabsTrigger>
         <TabsTrigger value="skills">
           {{ t('skills.project.tab') }}
+        </TabsTrigger>
+        <TabsTrigger value="knowledge">
+          {{ t('knowledge.tab') }}
         </TabsTrigger>
       </TabsList>
 
@@ -148,6 +151,17 @@ const { data: projectData, pending: loadingProject, error: projectError, refresh
       <!-- Skills Tab: project admins enable catalog skills for this project -->
       <TabsContent value="skills" class="space-y-4">
         <ProjectSkillsPanel :slug="slug" />
+      </TabsContent>
+
+      <!-- Knowledge Tab: repository index state, re-index and corpus patterns -->
+      <TabsContent value="knowledge" class="space-y-4">
+        <div class="rounded-md border border-border p-6 space-y-6">
+          <div>
+            <h2 class="text-lg font-semibold">{{ t('knowledge.title') }}</h2>
+            <p class="text-sm text-muted-foreground">{{ t('knowledge.description') }}</p>
+          </div>
+          <SettingsKnowledgeCard :slug="slug" />
+        </div>
       </TabsContent>
     </Tabs>
   </div>

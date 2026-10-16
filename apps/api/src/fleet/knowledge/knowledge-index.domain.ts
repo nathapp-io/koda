@@ -1,5 +1,7 @@
 /** Fleet S5b knowledge index (1c-c-D2/D3): domain types and the module-private repository contract. */
 
+import type { RunOutcomeRow } from '../ingest/domain/bundle-ingest.domain';
+
 export const KNOWLEDGE_INDEX_REPOSITORY = Symbol('KNOWLEDGE_INDEX_REPOSITORY');
 
 export type KnowledgeIndexStatus = 'idle' | 'running' | 'failed' | 'skipped';
@@ -19,6 +21,8 @@ export interface KnowledgeIndexState {
   projectId: string;
   status: KnowledgeIndexStatus;
   indexedSha: string | null;
+  /** US-002: the patterns key the last finished pass selected with; null on a row written before the feature. */
+  patternsKey?: string | null;
   fileCount: number;
   chunkCount: number;
   unembeddedCount: number;
@@ -43,6 +47,8 @@ export interface KnowledgeFinishResult {
   projectId: string;
   status: Exclude<KnowledgeIndexStatus, 'running'>;
   indexedSha?: string | null;
+  /** US-002: written when given, like `indexedSha`; a failed pass keeps the stored key. */
+  patternsKey?: string | null;
   fileCount: number;
   chunkCount: number;
   unembeddedCount: number;
@@ -58,6 +64,39 @@ export interface KnowledgeProjectState {
   state: KnowledgeIndexState | null;
 }
 
+/** S5b 3c-2-D4: the job whose outcomes a pass projects, with the repository it ran in. */
+export interface KnowledgeRunOutcomeJob {
+  id: string;
+  projectId: string;
+  repoId: string;
+  owner: string;
+  name: string;
+  feature: string;
+  resultSha: string | null;
+}
+
+/**
+ * S5b 3c-2-D4: one job's latest ingested run outcomes, `report` first. `outcomes` is empty when that
+ * epoch carried none, so a newer bundle without a report retires the older epoch's outcomes.
+ */
+export interface KnowledgeRunOutcomes {
+  job: KnowledgeRunOutcomeJob;
+  outcomes: RunOutcomeRow[];
+}
+
+/**
+ * S5b 3c-2-D4: one job of the project as a search sees it — the current job state, its result pull request
+ * and the state of its newest fleet link. Only jobs of the asked project are described (US-005).
+ */
+export interface KnowledgeJobInfo {
+  jobId: string;
+  repoId: string;
+  feature: string;
+  state: string;
+  prUrl: string | null;
+  prState: string | null;
+}
+
 export interface IKnowledgeIndexRepository {
   findRepo(repoId: string): Promise<KnowledgeRepoRef | null>;
   findProjectRepos(projectId: string): Promise<KnowledgeRepoRef[]>;
@@ -71,4 +110,18 @@ export interface IKnowledgeIndexRepository {
   upsertFile(file: KnowledgeFileState): Promise<void>;
   deleteFile(repoId: string, path: string): Promise<void>;
   listStates(projectId: string): Promise<KnowledgeIndexState[]>;
+  /** US-002: the project's saved patterns, or null when it saved none. */
+  findProjectPatterns(projectId: string): Promise<string[] | null>;
+  /** US-002: null deletes the row (the project falls back to the default corpus). */
+  saveProjectPatterns(projectId: string, patterns: string[] | null): Promise<void>;
+  /**
+   * S5b 3c-2-D4: the job's latest ingested run outcomes. The epoch is the highest `leaseEpoch` among the
+   * job's `FleetBundleIngest` rows whose status is `done` or `partial`; null for an unknown job.
+   */
+  findRunOutcomes(jobId: string): Promise<KnowledgeRunOutcomes | null>;
+  /**
+   * S5b 3c-2-D4: the current state of the given jobs, for the outcome hits of one search. Only jobs of
+   * `projectId` are described, at most 200 of them, and at most the first 1000 of their fleet links.
+   */
+  describeJobs(projectId: string, jobIds: string[]): Promise<KnowledgeJobInfo[]>;
 }
