@@ -3,7 +3,7 @@
   "feature": "fleet-knowledge-embed-and-run-progress",
   "branchName": "feat/fleet-knowledge-embed-and-run-progress",
   "createdAt": "2026-10-16T00:00:00.000Z",
-  "updatedAt": "2026-10-16T08:13:59.681Z",
+  "updatedAt": "2026-10-16T08:36:27.744Z",
   "userStories": [
     {
       "id": "US-001",
@@ -234,8 +234,8 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -247,7 +247,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "simple",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "apps/runner/src/watcher/status-snapshot.ts",
@@ -263,7 +265,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "38994be5260c8e706cb02b2f1556e784aa37887e"
     },
     {
       "id": "US-005",
