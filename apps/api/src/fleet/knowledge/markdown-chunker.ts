@@ -265,7 +265,10 @@ function splitSections(sections: Section[]): Section[] {
       parts.push(section);
       continue;
     }
-    for (const text of splitText(section.text)) parts.push({ ...section, text });
+    for (const packed of splitText(section.text)) {
+      const texts = packed.length <= MAX_CHUNK_CHARS ? [packed] : splitOversizedPart(packed);
+      for (const text of texts) parts.push({ ...section, text });
+    }
   }
   return parts;
 }
@@ -282,6 +285,77 @@ function splitText(text: string): string[] {
     }
     parts[parts.length - 1] = `${current}\n\n${block}`;
   }
+  return parts;
+}
+
+/** A UTF-16 cut must not leave half of a surrogate pair at a chunk boundary. */
+function safePrefix(text: string, budget: number): string {
+  let end = Math.min(text.length, Math.max(0, budget));
+  if (end < text.length && end > 0) {
+    const last = text.charCodeAt(end - 1);
+    if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  }
+  return text.slice(0, end);
+}
+
+/** Fallback for an oversized packed block: keep lines whole where possible and balance fences. */
+function splitOversizedPart(text: string): string[] {
+  const lines = text.split('\n');
+  // An opener that cannot leave room for even one code point plus its closing wrapper cannot
+  // be repeated verbatim under the cap. Preserve such pathological input as literal slices.
+  if (lines.some((line) => {
+    const marker = fenceMarker(line);
+    return marker !== null && line.length > MAX_CHUNK_CHARS - marker.length - 4;
+  })) {
+    const slices: string[] = [];
+    let remaining = text;
+    while (remaining !== '') {
+      const prefix = safePrefix(remaining, MAX_CHUNK_CHARS);
+      slices.push(prefix);
+      remaining = remaining.slice(prefix.length);
+    }
+    return slices;
+  }
+  const parts: string[] = [];
+  let current = '';
+  let fence: { marker: string; opening: string } | null = null;
+  const flush = (): void => {
+    if (current !== '') parts.push(fence === null ? current : `${current}\n${fence.marker}`);
+    current = fence?.opening ?? '';
+  };
+  const appendLine = (line: string, budget: number): void => {
+    const freshLength = fence === null ? 0 : fence.opening.length + 1;
+    // A normal-sized line moves intact. An oversized line first uses the remaining space.
+    if (line.length <= budget - freshLength && current.length + 1 + line.length > budget) flush();
+    let remaining = line;
+    let separator = current === '' ? '' : '\n';
+    while (current.length + separator.length + remaining.length > budget) {
+      const prefix = safePrefix(remaining, budget - current.length - separator.length);
+      if (prefix !== '') {
+        current += separator + prefix;
+        remaining = remaining.slice(prefix.length);
+      }
+      flush();
+      separator = current === '' ? '' : '\n';
+    }
+    current += separator + remaining;
+  };
+
+  for (const line of lines) {
+    const marker = fenceMarker(line);
+    if (fence !== null && marker === fence.marker) {
+      // The real closing line can use the space reserved for the synthetic close.
+      if (current.length + 1 + line.length > MAX_CHUNK_CHARS) flush();
+      fence = null;
+      appendLine(line, MAX_CHUNK_CHARS);
+    } else if (fence === null && marker !== null) {
+      appendLine(line, MAX_CHUNK_CHARS - marker.length - 1);
+      fence = { marker, opening: line };
+    } else {
+      appendLine(line, MAX_CHUNK_CHARS - (fence === null ? 0 : fence.marker.length + 1));
+    }
+  }
+  if (current !== '') parts.push(fence === null ? current : `${current}\n${fence.marker}`);
   return parts;
 }
 
@@ -332,7 +406,7 @@ function buildSummary(title: string, description: string | undefined, sections: 
   const intro = description ?? firstParagraph(sections[0]);
   if (intro !== '') parts.push(intro);
   parts.push(`Sections: ${h2Titles.join('; ')}`);
-  return parts.join('\n');
+  return safePrefix(parts.join('\n'), MAX_CHUNK_CHARS);
 }
 
 /** The first paragraph of the section: its heading line and leading blank lines skipped. */
