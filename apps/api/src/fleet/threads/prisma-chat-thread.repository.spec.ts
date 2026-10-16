@@ -217,8 +217,18 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
   });
 
   it('US-002: get() maps an unknown stored kind to kind REPO', async () => {
-    const repo = repoOfThreadRow(threadRow({ kind: 'WORKSPACE' }));
+    const repo = repoOfThreadRow(threadRow({ kind: 'FUTURE' }));
     expect((await repo.get('P', 'T'))?.kind).toBe('REPO');
+  });
+
+  it('US-001 AC-8: get() maps a stored WORKSPACE kind to kind WORKSPACE', async () => {
+    const repo = repoOfThreadRow(threadRow({ kind: 'WORKSPACE', repoId: null, baseRef: null, feature: null, specPath: null }));
+    expect((await repo.get('P', 'T'))?.kind).toBe('WORKSPACE');
+  });
+
+  it('US-001 AC-9: get() maps the stored projectId onto the record', async () => {
+    const repo = repoOfThreadRow(threadRow({ kind: 'WORKSPACE', repoId: null, baseRef: null, feature: null, specPath: null }));
+    expect((await repo.get('P', 'T'))?.projectId).toBe('P');
   });
 
   it('US-003 AC13: messages() passes the after-seq filter and limit to the query', async () => {
@@ -227,6 +237,40 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
     const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
     await repo.messages('T', 4, 25);
     expect(findMany).toHaveBeenCalledWith({ where: { threadId: 'T', seq: { gt: 4 } }, orderBy: { seq: 'asc' }, take: 25 });
+  });
+});
+
+/**
+ * US-001 AC-8/AC-9 — the WORKSPACE kind survives create(): the stored row's kind and projectId reach the record.
+ * The `projectId` column is the thread's project (for a WORKSPACE thread, its home project).
+ */
+describe('PrismaChatThreadRepository.create on a WORKSPACE row (US-001)', () => {
+  const workspaceRow = {
+    id: 'T', projectId: 'P', kind: 'WORKSPACE', repoId: null, baseRef: null, feature: null, title: 'x', createdById: 'U',
+    runnerId: null, backend: { kind: 'native' }, status: 'ACTIVE', archivedAt: null, skills: [], maxCostUsd: { toString: () => '5' },
+    costUsd: { toString: () => '0' }, tokens: null, specPath: null, pendingQuestion: null, session: null,
+    writtenPaths: [], publishedSha: null, specPublished: false, lastWrite: null,
+    lastActivityAt: new Date(0), createdAt: new Date(0),
+  };
+
+  function repoOfCreatedRow(row: Record<string, unknown>): PrismaChatThreadRepository {
+    const prisma = { client: { chatThread: { create: vi.fn(async () => row) } } } as never;
+    return new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+  }
+
+  const createWorkspace = (repo: PrismaChatThreadRepository) => repo.create({
+    kind: 'WORKSPACE', projectId: 'P', repoId: null, baseRef: null, feature: null, title: 'x', createdById: 'U',
+    backend: { kind: 'native' }, skills: [], maxCostUsd: '5',
+  });
+
+  it('AC-8: create() returns kind WORKSPACE for a row stored with kind WORKSPACE', async () => {
+    const thread = await createWorkspace(repoOfCreatedRow(workspaceRow));
+    expect(thread.kind).toBe('WORKSPACE');
+  });
+
+  it('AC-9: create() returns the record projectId equal to the stored row projectId', async () => {
+    const thread = await createWorkspace(repoOfCreatedRow(workspaceRow));
+    expect(thread.projectId).toBe('P');
   });
 });
 

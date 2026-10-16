@@ -29,8 +29,9 @@ import { THREAD_LIMITS } from '../common/thread-jobs';
 /** The states a thread's current job is no longer live in (job-state.ts owns these). Prisma's `notIn` wants a mutable list. */
 const TERMINAL_JOB_STATES: string[] = ['COMPLETED', 'FAILED', 'CANCELLED', 'CRASHED', 'ESCALATED'];
 
-/** Only a stored `PROJECT` reads as one; anything else (missing on old rows, or unknown) is a REPO thread (US-002). */
-const mapThreadKind = (kind: string | null | undefined): ChatThreadKind => (kind === 'PROJECT' ? 'PROJECT' : 'REPO');
+/** A stored `PROJECT` or `WORKSPACE` reads as itself; anything else (missing on old rows, or unknown) is a REPO thread. */
+const mapThreadKind = (kind: string | null | undefined): ChatThreadKind =>
+  (kind === 'PROJECT' || kind === 'WORKSPACE' ? kind : 'REPO');
 
 /** A budget refusal carries the paused policy so the 409 names its scope. */
 type SendRefusalResult = { refusal: 'budgetPaused'; pausedPolicy: BudgetPolicyRecord } | { refusal: Exclude<ThreadSendRefusal, 'budgetPaused'> | null; pausedPolicy: null };
@@ -468,7 +469,8 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
 
   private mapThread(row: Prisma.ChatThreadGetPayload<object>, activeJob: { id: string; state: string } | null): ChatThreadRecord {
     return {
-      id: row.id, kind: mapThreadKind(row.kind), repoId: row.repoId, baseRef: row.baseRef, feature: row.feature,
+      id: row.id, kind: mapThreadKind(row.kind), projectId: row.projectId,
+      repoId: row.repoId, baseRef: row.baseRef, feature: row.feature,
       title: row.title, createdById: row.createdById, runnerId: row.runnerId,
       backend: row.backend as unknown as ThreadBackend, status: row.status, archivedAt: row.archivedAt,
       skills: row.skills as unknown as ThreadSkillSource[], maxCostUsd: row.maxCostUsd.toString(),

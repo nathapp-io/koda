@@ -10,7 +10,7 @@ export type {
 export const THREAD_JOB_KIND = 'THREAD' as const;
 
 /** Mirror of the package's CHAT_THREAD_KINDS (fleet S5b); thread-jobs.spec.ts pins them equal. */
-export const CHAT_THREAD_KINDS: readonly ChatThreadKind[] = ['REPO', 'PROJECT'];
+export const CHAT_THREAD_KINDS: readonly ChatThreadKind[] = ['REPO', 'PROJECT', 'WORKSPACE'];
 
 export const THREAD_STREAM = 'thread' as const;
 export const THREAD_STREAM_LIMITS = { lineMaxBytes: 65_536, streamMaxBytes: 209_715_200 } as const;

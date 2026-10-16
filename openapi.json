@@ -6027,196 +6027,6 @@
         ]
       }
     },
-    "/api/projects/{slug}/knowledge/repos": {
-      "get": {
-        "operationId": "ProjectKnowledgeController_repos",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/KnowledgeRepoStatesDto"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Index state of the project's repositories (project member)",
-        "tags": [
-          "fleet knowledge"
-        ]
-      }
-    },
-    "/api/projects/{slug}/knowledge/patterns": {
-      "put": {
-        "operationId": "ProjectKnowledgeController_patterns",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/KnowledgePatternsBodyDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/KnowledgePatternsResultDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid patterns body (knowledge.input)"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Replace the project's Markdown corpus patterns (global admin)",
-        "tags": [
-          "fleet knowledge"
-        ]
-      }
-    },
-    "/api/projects/{slug}/knowledge/repos/{repoId}/reindex": {
-      "post": {
-        "operationId": "ProjectKnowledgeController_reindex",
-        "parameters": [
-          {
-            "name": "repoId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "202": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/KnowledgeReindexResultDto"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "knowledge.repoNotFound"
-          },
-          "409": {
-            "description": "knowledge.disabled"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Queue an index pass for one of the project's repositories (global admin)",
-        "tags": [
-          "fleet knowledge"
-        ]
-      }
-    },
-    "/api/projects/{slug}/knowledge/search": {
-      "post": {
-        "operationId": "ProjectKnowledgeController_search",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/KnowledgeSearchBodyDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/KnowledgeSearchResultDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid search body (knowledge.input)"
-          },
-          "404": {
-            "description": "knowledge.repoNotFound"
-          },
-          "409": {
-            "description": "knowledge.disabled, or knowledge.unavailable when the store is down"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Search the project's indexed repository docs (project member)",
-        "tags": [
-          "fleet knowledge"
-        ]
-      }
-    },
     "/api/projects/{slug}/fleet/approvals": {
       "get": {
         "operationId": "ProjectFleetApprovalsController_list",
@@ -10233,6 +10043,196 @@
         ]
       }
     },
+    "/api/projects/{slug}/knowledge/repos": {
+      "get": {
+        "operationId": "ProjectKnowledgeController_repos",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeRepoStatesDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Index state of the project's repositories (project member)",
+        "tags": [
+          "fleet knowledge"
+        ]
+      }
+    },
+    "/api/projects/{slug}/knowledge/patterns": {
+      "put": {
+        "operationId": "ProjectKnowledgeController_patterns",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgePatternsBodyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgePatternsResultDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid patterns body (knowledge.input)"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Replace the project's Markdown corpus patterns (global admin)",
+        "tags": [
+          "fleet knowledge"
+        ]
+      }
+    },
+    "/api/projects/{slug}/knowledge/repos/{repoId}/reindex": {
+      "post": {
+        "operationId": "ProjectKnowledgeController_reindex",
+        "parameters": [
+          {
+            "name": "repoId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeReindexResultDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "knowledge.repoNotFound"
+          },
+          "409": {
+            "description": "knowledge.disabled"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Queue an index pass for one of the project's repositories (global admin)",
+        "tags": [
+          "fleet knowledge"
+        ]
+      }
+    },
+    "/api/projects/{slug}/knowledge/search": {
+      "post": {
+        "operationId": "ProjectKnowledgeController_search",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeSearchBodyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeSearchResultDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid search body (knowledge.input)"
+          },
+          "404": {
+            "description": "knowledge.repoNotFound"
+          },
+          "409": {
+            "description": "knowledge.disabled, or knowledge.unavailable when the store is down"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Search the project's indexed repository docs (project member)",
+        "tags": [
+          "fleet knowledge"
+        ]
+      }
+    },
     "/api/home": {
       "get": {
         "operationId": "HomeController_get",
@@ -13907,345 +13907,6 @@
           "queuedAt"
         ]
       },
-      "KnowledgeRepoStateDto": {
-        "type": "object",
-        "properties": {
-          "repoId": {
-            "type": "string"
-          },
-          "owner": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "provider": {
-            "enum": [
-              "github",
-              "gitlab"
-            ],
-            "type": "string",
-            "description": "Forge of the repository"
-          },
-          "status": {
-            "enum": [
-              "idle",
-              "running",
-              "failed",
-              "skipped",
-              "never"
-            ],
-            "type": "string",
-            "description": "Index status, or `never` when no pass has run for this repository"
-          },
-          "indexedSha": {
-            "type": "string",
-            "nullable": true,
-            "description": "Commit the last successful pass indexed; null before the first pass"
-          },
-          "fileCount": {
-            "type": "number",
-            "description": "Indexed files of the last finished pass"
-          },
-          "chunkCount": {
-            "type": "number",
-            "description": "Chunks stored for those files"
-          },
-          "unembeddedCount": {
-            "type": "number",
-            "description": "Chunks stored without an embedding and retried on the next pass"
-          },
-          "skippedCount": {
-            "type": "number",
-            "description": "Files the allowlist skipped (too large, unsafe path, past the cap)"
-          },
-          "lastError": {
-            "type": "string",
-            "nullable": true,
-            "description": "Why the last pass failed or was skipped; null after a healthy pass"
-          },
-          "startedAt": {
-            "type": "string",
-            "nullable": true,
-            "description": "Start of the pass that wrote this state",
-            "format": "date-time"
-          },
-          "finishedAt": {
-            "type": "string",
-            "nullable": true,
-            "description": "End of the last pass that wrote this state",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "repoId",
-          "owner",
-          "name",
-          "provider",
-          "status",
-          "fileCount",
-          "chunkCount",
-          "unembeddedCount",
-          "skippedCount"
-        ]
-      },
-      "KnowledgeRepoStatesDto": {
-        "type": "object",
-        "properties": {
-          "enabled": {
-            "type": "boolean",
-            "description": "True when repository knowledge indexing is on"
-          },
-          "patterns": {
-            "description": "The project's effective corpus patterns (US-002)",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "customPatterns": {
-            "type": "boolean",
-            "description": "True when `patterns` are the project’s own rather than the defaults"
-          },
-          "defaultPatterns": {
-            "description": "The built-in corpus patterns, so a client can restore them",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "repos": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/KnowledgeRepoStateDto"
-            }
-          }
-        },
-        "required": [
-          "enabled",
-          "patterns",
-          "customPatterns",
-          "defaultPatterns",
-          "repos"
-        ]
-      },
-      "KnowledgePatternsBodyDto": {
-        "type": "object",
-        "properties": {
-          "patterns": {
-            "description": "Markdown path patterns (1-50), or null for the default corpus",
-            "nullable": true,
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "patterns"
-        ]
-      },
-      "KnowledgePatternsResultDto": {
-        "type": "object",
-        "properties": {
-          "patterns": {
-            "description": "The effective corpus patterns after the save",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "custom": {
-            "type": "boolean",
-            "description": "True when the patterns are the project’s own rather than the defaults"
-          },
-          "queued": {
-            "type": "number",
-            "description": "Repository passes queued by the save; 0 while indexing is disabled"
-          }
-        },
-        "required": [
-          "patterns",
-          "custom",
-          "queued"
-        ]
-      },
-      "KnowledgeReindexResultDto": {
-        "type": "object",
-        "properties": {
-          "queued": {
-            "type": "boolean",
-            "description": "True when the pass was queued; a full queue answers true and drops it (1c-c-D10)"
-          }
-        },
-        "required": [
-          "queued"
-        ]
-      },
-      "KnowledgeSearchBodyDto": {
-        "type": "object",
-        "properties": {
-          "query": {
-            "type": "string",
-            "description": "Search text, 1-500 characters",
-            "minLength": 1,
-            "maxLength": 500
-          },
-          "source": {
-            "type": "string",
-            "description": "Which sources to search",
-            "enum": [
-              "docs",
-              "outcomes",
-              "all"
-            ],
-            "default": "all"
-          },
-          "repo": {
-            "type": "string",
-            "description": "Restrict the search to one of the project repositories, as owner/name"
-          },
-          "pathPrefix": {
-            "type": "string",
-            "description": "Only hits whose path starts with this prefix; relative, no `..`",
-            "minLength": 1,
-            "maxLength": 300
-          },
-          "limit": {
-            "type": "number",
-            "description": "Maximum hits, 1-50",
-            "minimum": 1,
-            "maximum": 50,
-            "default": 20
-          }
-        },
-        "required": [
-          "query"
-        ]
-      },
-      "KnowledgeHitDto": {
-        "type": "object",
-        "properties": {
-          "source": {
-            "type": "string",
-            "description": "Which indexed source the chunk came from",
-            "enum": [
-              "repo",
-              "outcome"
-            ]
-          },
-          "repoId": {
-            "type": "string"
-          },
-          "owner": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string"
-          },
-          "sha": {
-            "type": "string"
-          },
-          "anchor": {
-            "type": "string",
-            "description": "GitHub heading anchor of the chunk; empty on the document summary chunk"
-          },
-          "headingPath": {
-            "type": "string"
-          },
-          "title": {
-            "type": "string"
-          },
-          "abstract": {
-            "type": "string"
-          },
-          "snippet": {
-            "type": "string",
-            "description": "The first 400 characters of the chunk text"
-          },
-          "status": {
-            "type": "string"
-          },
-          "supersededBy": {
-            "type": "string"
-          },
-          "score": {
-            "type": "number",
-            "description": "Reciprocal rank fusion score of the legs the chunk appears in"
-          },
-          "jobId": {
-            "type": "string",
-            "description": "Outcome hits only: the job the chunk came from"
-          },
-          "feature": {
-            "type": "string",
-            "description": "Outcome hits only: the feature that job ran"
-          },
-          "outcomeKind": {
-            "type": "string",
-            "description": "Outcome hits only: the outcome file the chunk came from",
-            "enum": [
-              "report",
-              "decisions"
-            ]
-          },
-          "jobState": {
-            "type": "string",
-            "description": "Outcome hits only: the job’s current state"
-          },
-          "prState": {
-            "type": "string",
-            "nullable": true,
-            "description": "Outcome hits only: the state of the job’s newest fleet pull request"
-          },
-          "prUrl": {
-            "type": "string",
-            "nullable": true,
-            "description": "Outcome hits only: that pull request’s url"
-          }
-        },
-        "required": [
-          "source",
-          "repoId",
-          "owner",
-          "name",
-          "path",
-          "sha",
-          "anchor",
-          "headingPath",
-          "title",
-          "abstract",
-          "snippet",
-          "score"
-        ]
-      },
-      "KnowledgeSearchResultDto": {
-        "type": "object",
-        "properties": {
-          "lexicalOnly": {
-            "type": "boolean",
-            "description": "True when the query embedding failed and only the lexical leg answered"
-          },
-          "empty": {
-            "type": "boolean",
-            "description": "True when the project has no indexed repository chunk at all"
-          },
-          "hits": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/KnowledgeHitDto"
-            }
-          }
-        },
-        "required": [
-          "lexicalOnly",
-          "empty",
-          "hits"
-        ]
-      },
       "RequeueCandidateDto": {
         "type": "object",
         "properties": {
@@ -15367,6 +15028,10 @@
           "projectThreads": {
             "type": "boolean",
             "description": "Fleet S5b: the runner hosts PROJECT threads with no checkout"
+          },
+          "workspaceThreads": {
+            "type": "boolean",
+            "description": "Fleet S5b 1d: the runner hosts WORKSPACE threads with no checkout"
           }
         },
         "required": [
@@ -15379,7 +15044,8 @@
           "online",
           "profiles",
           "threadBackends",
-          "projectThreads"
+          "projectThreads",
+          "workspaceThreads"
         ]
       },
       "FleetJobLogStreamDto": {
@@ -17143,9 +16809,14 @@
           "kind": {
             "enum": [
               "REPO",
-              "PROJECT"
+              "PROJECT",
+              "WORKSPACE"
             ],
             "type": "string"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The thread's project; for a WORKSPACE thread, its home project"
           },
           "repoId": {
             "type": "string",
@@ -17287,6 +16958,7 @@
         "required": [
           "id",
           "kind",
+          "projectId",
           "repoId",
           "baseRef",
           "feature",
@@ -17339,9 +17011,14 @@
           "kind": {
             "enum": [
               "REPO",
-              "PROJECT"
+              "PROJECT",
+              "WORKSPACE"
             ],
             "type": "string"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The thread's project; for a WORKSPACE thread, its home project"
           },
           "repoId": {
             "type": "string",
@@ -17512,6 +17189,7 @@
         "required": [
           "id",
           "kind",
+          "projectId",
           "repoId",
           "baseRef",
           "feature",
@@ -17921,6 +17599,345 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "KnowledgeRepoStateDto": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "github",
+              "gitlab"
+            ],
+            "type": "string",
+            "description": "Forge of the repository"
+          },
+          "status": {
+            "enum": [
+              "idle",
+              "running",
+              "failed",
+              "skipped",
+              "never"
+            ],
+            "type": "string",
+            "description": "Index status, or `never` when no pass has run for this repository"
+          },
+          "indexedSha": {
+            "type": "string",
+            "nullable": true,
+            "description": "Commit the last successful pass indexed; null before the first pass"
+          },
+          "fileCount": {
+            "type": "number",
+            "description": "Indexed files of the last finished pass"
+          },
+          "chunkCount": {
+            "type": "number",
+            "description": "Chunks stored for those files"
+          },
+          "unembeddedCount": {
+            "type": "number",
+            "description": "Chunks stored without an embedding and retried on the next pass"
+          },
+          "skippedCount": {
+            "type": "number",
+            "description": "Files the allowlist skipped (too large, unsafe path, past the cap)"
+          },
+          "lastError": {
+            "type": "string",
+            "nullable": true,
+            "description": "Why the last pass failed or was skipped; null after a healthy pass"
+          },
+          "startedAt": {
+            "type": "string",
+            "nullable": true,
+            "description": "Start of the pass that wrote this state",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": "string",
+            "nullable": true,
+            "description": "End of the last pass that wrote this state",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "repoId",
+          "owner",
+          "name",
+          "provider",
+          "status",
+          "fileCount",
+          "chunkCount",
+          "unembeddedCount",
+          "skippedCount"
+        ]
+      },
+      "KnowledgeRepoStatesDto": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "True when repository knowledge indexing is on"
+          },
+          "patterns": {
+            "description": "The project's effective corpus patterns (US-002)",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "customPatterns": {
+            "type": "boolean",
+            "description": "True when `patterns` are the project’s own rather than the defaults"
+          },
+          "defaultPatterns": {
+            "description": "The built-in corpus patterns, so a client can restore them",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "repos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeRepoStateDto"
+            }
+          }
+        },
+        "required": [
+          "enabled",
+          "patterns",
+          "customPatterns",
+          "defaultPatterns",
+          "repos"
+        ]
+      },
+      "KnowledgePatternsBodyDto": {
+        "type": "object",
+        "properties": {
+          "patterns": {
+            "description": "Markdown path patterns (1-50), or null for the default corpus",
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "patterns"
+        ]
+      },
+      "KnowledgePatternsResultDto": {
+        "type": "object",
+        "properties": {
+          "patterns": {
+            "description": "The effective corpus patterns after the save",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "custom": {
+            "type": "boolean",
+            "description": "True when the patterns are the project’s own rather than the defaults"
+          },
+          "queued": {
+            "type": "number",
+            "description": "Repository passes queued by the save; 0 while indexing is disabled"
+          }
+        },
+        "required": [
+          "patterns",
+          "custom",
+          "queued"
+        ]
+      },
+      "KnowledgeReindexResultDto": {
+        "type": "object",
+        "properties": {
+          "queued": {
+            "type": "boolean",
+            "description": "True when the pass was queued; a full queue answers true and drops it (1c-c-D10)"
+          }
+        },
+        "required": [
+          "queued"
+        ]
+      },
+      "KnowledgeSearchBodyDto": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search text, 1-500 characters",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "source": {
+            "type": "string",
+            "description": "Which sources to search",
+            "enum": [
+              "docs",
+              "outcomes",
+              "all"
+            ],
+            "default": "all"
+          },
+          "repo": {
+            "type": "string",
+            "description": "Restrict the search to one of the project repositories, as owner/name"
+          },
+          "pathPrefix": {
+            "type": "string",
+            "description": "Only hits whose path starts with this prefix; relative, no `..`",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum hits, 1-50",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "KnowledgeHitDto": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Which indexed source the chunk came from",
+            "enum": [
+              "repo",
+              "outcome"
+            ]
+          },
+          "repoId": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "sha": {
+            "type": "string"
+          },
+          "anchor": {
+            "type": "string",
+            "description": "GitHub heading anchor of the chunk; empty on the document summary chunk"
+          },
+          "headingPath": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "abstract": {
+            "type": "string"
+          },
+          "snippet": {
+            "type": "string",
+            "description": "The first 400 characters of the chunk text"
+          },
+          "status": {
+            "type": "string"
+          },
+          "supersededBy": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number",
+            "description": "Reciprocal rank fusion score of the legs the chunk appears in"
+          },
+          "jobId": {
+            "type": "string",
+            "description": "Outcome hits only: the job the chunk came from"
+          },
+          "feature": {
+            "type": "string",
+            "description": "Outcome hits only: the feature that job ran"
+          },
+          "outcomeKind": {
+            "type": "string",
+            "description": "Outcome hits only: the outcome file the chunk came from",
+            "enum": [
+              "report",
+              "decisions"
+            ]
+          },
+          "jobState": {
+            "type": "string",
+            "description": "Outcome hits only: the job’s current state"
+          },
+          "prState": {
+            "type": "string",
+            "nullable": true,
+            "description": "Outcome hits only: the state of the job’s newest fleet pull request"
+          },
+          "prUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Outcome hits only: that pull request’s url"
+          }
+        },
+        "required": [
+          "source",
+          "repoId",
+          "owner",
+          "name",
+          "path",
+          "sha",
+          "anchor",
+          "headingPath",
+          "title",
+          "abstract",
+          "snippet",
+          "score"
+        ]
+      },
+      "KnowledgeSearchResultDto": {
+        "type": "object",
+        "properties": {
+          "lexicalOnly": {
+            "type": "boolean",
+            "description": "True when the query embedding failed and only the lexical leg answered"
+          },
+          "empty": {
+            "type": "boolean",
+            "description": "True when the project has no indexed repository chunk at all"
+          },
+          "hits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeHitDto"
+            }
+          }
+        },
+        "required": [
+          "lexicalOnly",
+          "empty",
+          "hits"
         ]
       },
       "HomeActivityDto": {

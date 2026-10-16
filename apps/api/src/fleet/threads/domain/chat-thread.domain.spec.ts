@@ -1,8 +1,10 @@
+import { ConflictAppException } from '../../../common/exceptions/conflict-app.exception';
 import { repoThreadFields } from './chat-thread.domain';
 
 /**
  * US-002 AC-3, AC-8, AC-9, AC-10 — the REPO-only guard: a REPO thread (or a row with no/unknown kind, which
- * older fixtures and rows produce) yields its four repo fields; a PROJECT thread or any null field is a 409.
+ * older fixtures and rows produce) yields its four repo fields; a PROJECT or WORKSPACE thread, or any null
+ * field, is a 409.
  */
 describe('repoThreadFields (US-002)', () => {
   const fields = { repoId: 'r1', baseRef: 'trunk', feature: 'auth', specPath: '.nax/features/auth/spec.md' };
@@ -16,7 +18,14 @@ describe('repoThreadFields (US-002)', () => {
   });
 
   it('treats an unknown kind like an absent one, so a future kind cannot crash a REPO row', () => {
-    expect(repoThreadFields({ kind: 'WORKSPACE', ...fields })).toEqual(fields);
+    expect(repoThreadFields({ kind: 'FUTURE' as never, ...fields })).toEqual(fields);
+  });
+
+  it('US-001 AC-10: a WORKSPACE thread throws ConflictAppException with the threads.notRepoThread key', () => {
+    expect(() => repoThreadFields({ kind: 'WORKSPACE', repoId: 'r1', baseRef: 'main', feature: 'f', specPath: 's' }))
+      .toThrow(ConflictAppException);
+    expect(() => repoThreadFields({ kind: 'WORKSPACE', ...fields }))
+      .toThrow(expect.objectContaining({ code: 409, httpStatus: 409, prefix: 'threads.notRepoThread' }));
   });
 
   it('AC-9: a PROJECT thread throws ConflictAppException with the threads.notRepoThread key', () => {

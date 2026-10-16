@@ -10,10 +10,10 @@ export const CHAT_THREAD_REPOSITORY = Symbol('CHAT_THREAD_REPOSITORY');
 export interface RepoThreadFields { repoId: string; baseRef: string; feature: string; specPath: string }
 
 /**
- * The REPO-only guard (fleet S5b §1a-R3): the repo fields of a thread whose kind is REPO. A PROJECT thread, and a
- * REPO row whose `kind` is missing or unknown (rows written before the kind column, and unit fixtures), is judged by
- * the four fields alone. Every REPO-only consumer — Plan, Run, Publish, Discard, the THREAD job factory and the ASSIGN
- * and cost-event fallbacks — reads the fields through this one function, so the refusal is uniform.
+ * The REPO-only guard (fleet S5b §1a-R3): the repo fields of a thread whose kind is REPO. A PROJECT or WORKSPACE
+ * thread, and a REPO row whose `kind` is missing or unknown (rows written before the kind column, and unit fixtures),
+ * is judged by the four fields alone. Every REPO-only consumer — Plan, Run, Publish, Discard, the THREAD job factory
+ * and the ASSIGN and cost-event fallbacks — reads the fields through this one function, so the refusal is uniform.
  */
 export function repoThreadFields(thread: {
   kind?: string;
@@ -23,7 +23,9 @@ export function repoThreadFields(thread: {
   specPath: string | null;
 }): RepoThreadFields {
   const { repoId, baseRef, feature, specPath } = thread;
-  if (thread.kind === 'PROJECT' || repoId === null || baseRef === null || feature === null || specPath === null) {
+  // Fleet S5b 1d: a WORKSPACE thread owns no repo either; the create paths never give one repo fields, so this only
+  // catches a row that predates the refusal.
+  if (thread.kind === 'PROJECT' || thread.kind === 'WORKSPACE' || repoId === null || baseRef === null || feature === null || specPath === null) {
     throw new ConflictAppException({}, 'threads.notRepoThread');
   }
   return { repoId, baseRef, feature, specPath };
@@ -67,7 +69,7 @@ export type ThreadWriteResult =
   | { kind: 'discard_failed'; jobId: string; at: string; reason: string };
 
 export interface ChatThreadRecord {
-  id: string; kind: ChatThreadKind; repoId: string | null; baseRef: string | null; feature: string | null;
+  id: string; kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null;
   title: string;
   createdById: string; runnerId: string | null; backend: ThreadBackend; status: string; archivedAt: Date | null;
   skills: ThreadSkillSource[]; maxCostUsd: string; costUsd: string; tokens: unknown; specPath: string | null;
@@ -78,6 +80,8 @@ export interface ChatThreadRecord {
   publishedSha: string | null;
   specPublished: boolean;
   lastWrite: ThreadWriteResult | null;
+  /** Fleet S5b 1d: set only by a workspace-scope read (US-002); a project-scope record never carries it. */
+  homeProject?: { slug: string; name: string };
 }
 
 export interface ThreadHandoffJob { jobId: string; state: string; stateReason: string | null }
