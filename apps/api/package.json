@@ -29,6 +29,7 @@
     "seed:prod": "bun prisma/seed.ts",
     "seed:eval:documents": "bun scripts/seed-eval-documents.ts",
     "evaluate:retrieval": "bun scripts/evaluate-retrieval.ts",
+    "kb:eval": "bun scripts/kb-eval.ts",
     "policy:gates": "bun scripts/policy-gates-runner.ts",
     "postinstall": "[ ! -f prisma/schema.prisma ] || prisma generate",
     "type-check:spec": "tsc -p tsconfig.spec.json",
