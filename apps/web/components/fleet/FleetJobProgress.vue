@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { extractProgress, formatUsd } from '~/lib/fleet-jobs'
+import { phaseLabelKey } from '~/lib/fleet-phase'
 import type { FleetJobDto } from '~/lib/fleet-types'
 
 const props = defineProps<{ job: FleetJobDto }>()
@@ -8,6 +9,13 @@ const { t } = useI18n()
 
 const progress = computed(() => extractProgress(props.job.progress))
 const percent = computed(() => (progress.value ? Math.round((progress.value.passed / progress.value.total) * 100) : 0))
+/** D7: a known nax phase reads as its label; any other nax text is shown raw (R4). */
+const phase = computed(() => {
+  const raw = props.job.currentPhase
+  if (raw === null) return '-'
+  const key = phaseLabelKey(raw)
+  return key === null ? raw : t(key)
+})
 </script>
 
 <template>
@@ -30,7 +38,7 @@ const percent = computed(() => (progress.value ? Math.round((progress.value.pass
     </div>
     <div>
       <dt class="text-muted-foreground">{{ t('fleet.jobs.detail.phase') }}</dt>
-      <dd data-testid="fleet-job-phase">{{ job.currentPhase ?? '-' }}</dd>
+      <dd data-testid="fleet-job-phase">{{ phase }}</dd>
     </div>
     <div>
       <dt class="text-muted-foreground">{{ t('fleet.jobs.detail.cost') }}</dt>

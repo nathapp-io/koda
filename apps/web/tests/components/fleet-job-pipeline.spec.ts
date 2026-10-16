@@ -6,7 +6,7 @@ import type { FleetJobDto } from '../../lib/fleet-types'
 
 const file = webFile('components', 'fleet', 'story-graph', 'FleetJobPipeline.vue')
 const base = {
-  command: 'RUN', state: 'RUNNING', currentStoryId: 'US-002', currentPhase: 'implement', storiesTruncated: false,
+  command: 'RUN', state: 'RUNNING', currentStoryId: 'US-002', currentPhase: 'execution', storiesTruncated: false,
   postRun: { acceptance: 'running' },
   stories: [
     { id: 'US-001', title: 'Login form', status: 'passed', attempts: 1, dependsOn: [] },
@@ -81,6 +81,19 @@ describe('FleetJobPipeline (spec §2.2, D440-D443)', () => {
     const app = await mount({ postRun: { finish: 'half-done' } })
     const finish = app.find('[data-testid="fleet-pipeline-stage"]').find(s => s.props['data-stage'] === 'finish')
     expect(app.textOf(must(finish, 'finish stage'))).toContain('half-done')
+    app.unmount()
+  })
+
+  test('AC-11: a workflow-mode RUN shows the Review, Gates and Publish stage labels', async () => {
+    wide(true)
+    const app = await mount({ postRun: { workflowStep: 'branch-review' } })
+    expect(app.find('[data-testid="fleet-pipeline-stage"]').map(s => [s.props['data-stage'], s.props['data-state']])).toEqual([
+      ['stories', 'running'], ['acceptance', 'pending'], ['review', 'running'], ['gates', 'pending'], ['publish', 'pending'],
+    ])
+    const strip = app.textOf(the(app, 'fleet-pipeline-strip'))
+    expect(strip).toContain('Review')
+    expect(strip).toContain('Gates')
+    expect(strip).toContain('Publish')
     app.unmount()
   })
 

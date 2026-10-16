@@ -16,11 +16,13 @@ export class FleetJobStoryDto {
   @ApiProperty({ type: [String] }) declare dependsOn: string[];
 }
 
-/** S2b (j) §1.3: nax post-run stage statuses, passed through (pending/running/passed/failed/skipped/not-run, ...). */
+/** S2b (j) §1.3: nax post-run stage statuses, passed through (pending/running/passed/failed/skipped/not-run, ...).
+ *  `workflowStep` is nax's workflow step (`status.json` `workflow.step`, US-003). */
 export class FleetJobPostRunDto {
   @ApiPropertyOptional({ maxLength: 32 }) declare acceptance?: string;
   @ApiPropertyOptional({ maxLength: 32 }) declare regression?: string;
   @ApiPropertyOptional({ maxLength: 32 }) declare finish?: string;
+  @ApiPropertyOptional({ maxLength: 32 }) declare workflowStep?: string;
 }
 
 export class FleetJobWorkflowItemDto implements FleetJobWorkflowItem {

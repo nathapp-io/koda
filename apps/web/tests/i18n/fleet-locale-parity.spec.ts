@@ -70,7 +70,7 @@ const ENUMS: Record<string, string[]> = {
   'fleet.credentials.state': ['ok', 'expiring', 'expired', 'unavailable', 'missing', 'unknown'],
   'fleet.credentials.profiles': ['profile', 'needs', 'needsValue', 'sandbox', 'differs', 'ready', 'absent', 'unknown'],
   'fleet.dashboard.attention.condition.interaction': ['base', 'profile'],
-  'fleet.jobs.detail.pipeline.stage': ['stories', 'acceptance', 'regression', 'finish'],
+  'fleet.jobs.detail.pipeline.stage': ['stories', 'acceptance', 'regression', 'finish', 'review', 'gates', 'publish'],
   'fleet.jobs.detail.pipeline.state': ['pending', 'running', 'passed', 'failed', 'skipped', 'unknown'],
   'fleet.jobs.detail.pipeline.view': ['label', 'graph', 'list'],
   'fleet.jobs.detail.wipPush': ['pushed', 'none', 'failed'],

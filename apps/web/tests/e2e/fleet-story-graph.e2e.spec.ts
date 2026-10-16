@@ -41,7 +41,7 @@ test.describe('Fleet story graph (scripted runner)', () => {
         {
           type: 'snapshot',
           payload: {
-            heartbeatAt: new Date().toISOString(), currentStoryId: 'US-002', currentPhase: 'implement',
+            heartbeatAt: new Date().toISOString(), currentStoryId: 'US-002', currentPhase: 'execution',
             stories: [
               story('US-001', 'passed', [], 1),
               story('US-002', 'in-progress', ['US-001'], 1),
@@ -95,7 +95,7 @@ test.describe('Fleet story graph (scripted runner)', () => {
         {
           type: 'snapshot',
           payload: {
-            heartbeatAt: new Date().toISOString(), currentStoryId: 'US-003', currentPhase: 'implement',
+            heartbeatAt: new Date().toISOString(), currentStoryId: 'US-003', currentPhase: 'execution',
             stories: [
               story('US-001', 'passed', [], 1),
               story('US-002', 'passed', ['US-001'], 1),

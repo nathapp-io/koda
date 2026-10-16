@@ -159,8 +159,9 @@ export interface SnapshotEventPayload {
   /** S1b §1.2: true when the runner cut `stories` to fit; sent with `stories`. */
   storiesTruncated?: boolean;
   /** S2b (j): nax post-run stage statuses (`status.json` `postRun.<stage>.status`), passed through.
-   *  Each at most 32 printable ASCII chars; only stages nax wrote a status for. Absent = unchanged. */
-  postRun?: { acceptance?: string; regression?: string; finish?: string };
+   *  Each at most 32 printable ASCII chars; only stages nax wrote a status for. Absent = unchanged.
+   *  `workflowStep` is nax's workflow step (`status.json` `workflow.step`, US-003). */
+  postRun?: { acceptance?: string; regression?: string; finish?: string; workflowStep?: string };
   /** Log events dropped by the runner's rate limit since the last snapshot (§3.2). */
   droppedLogs?: number;
   /** Fleet S3 §3 (D475): a config job's result; files at most 50 x 512 chars, output at most 8 KiB. */

@@ -16,7 +16,18 @@ export interface IndexPassResult {
 
 export const KNOWLEDGE_INDEX_CLOCK = Symbol('KNOWLEDGE_INDEX_CLOCK');
 const LEASE_MS = 900_000;
-const EMBEDDING_TIMEOUT_MS = 120_000;
+/** One embedding request holds at most this many chunk contents (Ollama's batch route). */
+export const KNOWLEDGE_EMBED_BATCH = 16;
+/** One embedding request's ceiling; a batch that exceeds it costs the whole batch with no per-chunk retry. */
+export const EMBED_REQUEST_TIMEOUT_MS = 60_000;
+/**
+ * How long one file may spend embedding. Below `LEASE_MS` on purpose: a file commits and renews the pass lease
+ * after its embedding work, so the deadline keeps the next renewal on time instead of pausing an already-held lease.
+ */
+export const FILE_EMBED_DEADLINE_MS = 300_000;
+
+/** An embedding request's outcome: the vectors, or why the batch produced none. */
+type EmbedOutcome<T> = { kind: 'value'; value: T } | { kind: 'failed' } | { kind: 'timedout' };
 
 /** One default-branch pass. All writes are serial, including the renewal between file commits. */
 @Injectable()
@@ -120,34 +131,93 @@ export class KnowledgeRepoIndexer {
   private sourceId(repoId: string, path: string): string { return `repo:${repoId}:${path}`; }
 
   private async rows(repo: KnowledgeRepoRef, path: string, blobSha: string, sha: string, text: string, now: Date): Promise<{ rows: LanceRecord[]; unembeddedCount: number }> {
+    const startedAt = this.clock();
     const chunks = chunkMarkdown({ path, text });
     const contents = chunks.map(chunk => `${repo.owner}/${repo.name} · ${path}${chunk.headingPath ? ` · ${chunk.headingPath}` : ''}\n${chunk.abstract}\n\n${chunk.text}`);
-    let vectors: number[][];
-    let embedded = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      vectors = await Promise.race([
-        this.embeddings.embedBatch(contents),
-        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('embedding timeout')), EMBEDDING_TIMEOUT_MS); }),
-      ]);
-      if (vectors.length !== chunks.length || vectors.some(vector => vector.length !== this.embeddings.dimensions)) throw new Error('invalid embeddings');
-    } catch {
-      embedded = false;
-      vectors = chunks.map(() => Array(this.embeddings.dimensions).fill(0));
+    const vectors = await this.embedAll(contents, startedAt);
+    const unembeddedCount = vectors.filter(vector => vector === null).length;
+    if (unembeddedCount > 0) {
       // Do not log provider errors: they may contain credentials or arbitrary remote response bodies.
-      this.logger.warn(`Knowledge file embedding failed (repo ${repo.id}); storing unembedded chunks`);
-    } finally {
-      if (timer !== undefined) clearTimeout(timer);
+      this.logger.warn(`Knowledge file embedding failed for ${unembeddedCount} of ${chunks.length} chunks (repo ${repo.id}); storing unembedded chunks`);
     }
     const sourceId = this.sourceId(repo.id, path);
     return {
-      unembeddedCount: embedded ? 0 : chunks.length,
-      rows: chunks.map((chunk, index) => ({
-        id: `${sourceId}#${chunk.chunkIndex}`, source: 'repo', source_id: sourceId,
-        content: contents[index], vector: vectors[index],
-        metadata: JSON.stringify({ repoId: repo.id, owner: repo.owner, name: repo.name, path, sha, blobSha, ...chunk, chunkCount: chunks.length }),
-        created_at: now.toISOString(), provider: embedded ? this.embeddings.providerName : 'none', model: embedded ? this.embeddings.modelName : '',
-      })),
+      unembeddedCount,
+      rows: chunks.map((chunk, index) => {
+        const vector = vectors[index];
+        return {
+          id: `${sourceId}#${chunk.chunkIndex}`, source: 'repo', source_id: sourceId,
+          content: contents[index], vector: vector ?? Array(this.embeddings.dimensions).fill(0),
+          metadata: JSON.stringify({ repoId: repo.id, owner: repo.owner, name: repo.name, path, sha, blobSha, ...chunk, chunkCount: chunks.length }),
+          created_at: now.toISOString(), provider: vector === null ? 'none' : this.embeddings.providerName, model: vector === null ? '' : this.embeddings.modelName,
+        };
+      }),
     };
   }
+
+  /**
+   * Embeds the file's chunk contents in order, one batch of `KNOWLEDGE_EMBED_BATCH` at a time. The batches are
+   * sequential on purpose (an exception to the `Promise.all` guidance): they share one embedding server and one
+   * file deadline, so parallel requests would compete for the same capacity and could all time out together.
+   * `null` marks a chunk that stays unembedded.
+   */
+  private async embedAll(contents: string[], startedAt: number): Promise<Array<number[] | null>> {
+    const vectors: Array<number[] | null> = [];
+    for (let start = 0; start < contents.length; start += KNOWLEDGE_EMBED_BATCH) {
+      vectors.push(...await this.embedBatch(contents.slice(start, start + KNOWLEDGE_EMBED_BATCH), startedAt));
+    }
+    return vectors;
+  }
+
+  /** One batch: past the deadline every chunk is unembedded; a timed-out batch is never retried per chunk. */
+  private async embedBatch(batch: string[], startedAt: number): Promise<Array<number[] | null>> {
+    if (this.pastDeadline(startedAt)) return batch.map(() => null);
+    const outcome = await this.limited(() => this.embeddings.embedBatch(batch));
+    if (outcome.kind === 'timedout') return batch.map(() => null);
+    if (outcome.kind === 'value' && validVectors(outcome.value, batch.length, this.embeddings.dimensions)) return outcome.value;
+    return this.embedOneByOne(batch, startedAt);
+  }
+
+  /** A rejected or malformed batch: each chunk alone, under the same deadline and request timeout. */
+  private async embedOneByOne(batch: string[], startedAt: number): Promise<Array<number[] | null>> {
+    const vectors: Array<number[] | null> = [];
+    for (const content of batch) {
+      if (this.pastDeadline(startedAt)) { vectors.push(null); continue; }
+      const outcome = await this.limited(() => this.embeddings.embed(content));
+      vectors.push(outcome.kind === 'value' && isVectorOf(outcome.value, this.embeddings.dimensions) ? outcome.value : null);
+    }
+    return vectors;
+  }
+
+  private pastDeadline(startedAt: number): boolean {
+    return this.clock() - startedAt >= FILE_EMBED_DEADLINE_MS;
+  }
+
+  /** Races one embedding call against `EMBED_REQUEST_TIMEOUT_MS`. Never throws: the caller decides the cost. */
+  private async limited<T>(call: () => Promise<T>): Promise<EmbedOutcome<T>> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
+    try {
+      const value = await Promise.race([
+        call(),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => { timedOut = true; reject(new Error('embedding request timeout')); }, EMBED_REQUEST_TIMEOUT_MS); }),
+      ]);
+      return { kind: 'value', value };
+    } catch {
+      // The provider's error is dropped here, never logged or persisted: it may carry credentials.
+      return timedOut ? { kind: 'timedout' } : { kind: 'failed' };
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+}
+
+/** D3 validation: every content produced exactly one vector of the configured width. */
+function validVectors(vectors: unknown, count: number, dimensions: number): vectors is number[][] {
+  return Array.isArray(vectors) && vectors.length === count && vectors.every(vector => isVectorOf(vector, dimensions));
+}
+
+/** A resolved vector of the configured width; a malformed resolution is a failed chunk, never a crash. */
+function isVectorOf(value: unknown, dimensions: number): value is number[] {
+  return Array.isArray(value) && value.length === dimensions;
 }

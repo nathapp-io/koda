@@ -206,6 +206,8 @@ export interface FleetJobPostRunDto {
   acceptance?: string
   regression?: string
   finish?: string
+  /** US-005 (D6): the workflow step of a workflow-mode RUN; absent on a pipeline-mode RUN. */
+  workflowStep?: string
 }
 
 /** S1.5 §1.6: gated/escalate relay nax's bash asks to the approvals inbox; RUN jobs only. */

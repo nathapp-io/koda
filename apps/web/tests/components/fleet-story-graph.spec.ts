@@ -43,17 +43,23 @@ describe('StoryGraph (spec §2.2)', () => {
     app.unmount()
   })
 
-  test('a node shows id, title, translated status, attempts and, when current, the phase', () => {
+  test('a node shows id, title, translated status, attempts and, when current, the translated phase', () => {
     const app = mount()
     const current = nodeOf(app, 'US-002')
     expect(current).toBeDefined()
     const text = app.textOf(current)
-    for (const part of ['US-002', 'Title US-002', 'In progress', 'Attempts: 2', 'Now: implement']) expect(text).toContain(part)
+    for (const part of ['US-002', 'Title US-002', 'In progress', 'Attempts: 2', 'Now: Implement']) expect(text).toContain(part)
     expect(current.props['data-current']).toBe('true')
     expect(current.props['aria-current']).toBe('step')
     expect(current.props['data-status']).toBe('in-progress')
     expect(nodeOf(app, 'US-003').props['aria-current']).toBeUndefined()
     expect(app.find('[data-testid="fleet-story-node-phase"]')).toHaveLength(1)
+    app.unmount()
+  })
+
+  test('a phase the web does not know is shown raw on the node (D7, R4)', () => {
+    const app = mount(diamond.map(r => (r.current ? { ...r, phase: 'half-built' } : r)))
+    expect(app.textOf(app.find('[data-testid="fleet-story-node-phase"]')[0])).toBe('Now: half-built')
     app.unmount()
   })
 

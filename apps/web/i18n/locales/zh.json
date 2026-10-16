@@ -1556,7 +1556,10 @@
             "stories": "故事",
             "acceptance": "验收",
             "regression": "回归",
-            "finish": "收尾"
+            "finish": "收尾",
+            "review": "审查",
+            "gates": "门禁",
+            "publish": "发布"
           },
           "state": {
             "pending": "待处理",
@@ -1581,6 +1584,34 @@
         "bash": "Shell 审批",
         "waitingApproval": "等待审批（{count}）",
         "reviewApproval": "查看"
+      },
+      "phases": {
+        "queue-check": "队列检查",
+        "routing": "路由",
+        "constitution": "章程",
+        "context": "上下文",
+        "prompt": "提示词",
+        "optimizer": "优化器",
+        "execution": "执行",
+        "completion": "收尾",
+        "workflow": "工作流",
+        "implement": "实现",
+        "gates": "关卡",
+        "review": "审查",
+        "rereview": "复审",
+        "suite": "测试套件",
+        "residual": "遗留项",
+        "fix": "修复",
+        "closed": "已关闭",
+        "repo-gates": "仓库检查",
+        "branch-review": "分支审查",
+        "branch-fix": "分支修复",
+        "branch-rereview": "分支复审",
+        "adjudicate": "裁决",
+        "final-gates": "最终检查",
+        "gate-repair": "关卡修复",
+        "publish": "发布",
+        "done": "完成"
       },
       "workflow": {
         "title": "工作流结果",

@@ -27,12 +27,18 @@ describe('FleetJobStories, the List view (S1b §1.4, D443)', () => {
     unmount()
   })
 
-  test('highlights the current story with its phase while the job is active', () => {
+  test('highlights the current story with its translated phase while the job is active', () => {
     const { find, textOf, unmount } = mount()
     expect(find('[data-testid="fleet-job-story"]').map(r => r.props['data-current'])).toEqual(['false', 'true'])
     const phase = find('[data-testid="fleet-job-story-phase"]')
     expect(phase).toHaveLength(1)
-    expect(textOf(phase[0])).toContain('implement')
+    expect(textOf(phase[0])).toBe('Now: Implement')
+    unmount()
+  })
+
+  test('a phase the web does not know is shown raw (D7, R4)', () => {
+    const { find, textOf, unmount } = mount({ currentPhase: 'half-built' })
+    expect(textOf(find('[data-testid="fleet-job-story-phase"]')[0])).toBe('Now: half-built')
     unmount()
   })
 

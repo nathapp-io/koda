@@ -24,11 +24,13 @@ export interface FleetJobStory {
   dependsOn: string[];
 }
 
-/** S2b (j) §1.3: nax post-run stage statuses, as nax wrote them (at most 32 printable ASCII each). */
+/** S2b (j) §1.3: nax post-run stage statuses, as nax wrote them (at most 32 printable ASCII each).
+ *  `workflowStep` is nax's workflow step (`status.json` `workflow.step`, US-003). */
 export interface FleetJobPostRun {
   acceptance?: string;
   regression?: string;
   finish?: string;
+  workflowStep?: string;
 }
 
 export interface FleetJobWorkflowItem {

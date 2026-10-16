@@ -124,14 +124,13 @@ describe('chunkMarkdown', () => {
     expect(parts.map((part) => part.text).join('\n\n')).toBe(text);
   });
 
-  it('AC-9: keeps a single 3000-character paragraph as one chunk of 3000 characters', () => {
+  it('AC-9: splits a single 3000-character paragraph into capped chunks', () => {
     const paragraph = 'p'.repeat(3000);
 
     const chunks = chunkMarkdown({ path: 'docs/a.md', text: paragraph });
 
-    expect(chunks).toHaveLength(2);
-    expect(chunks[1].text).toBe(paragraph);
-    expect(chunks[1].text).toHaveLength(3000);
+    expect(sections(chunks).map((part) => part.text.length)).toEqual([2000, 1000]);
+    expect(sections(chunks).map((part) => part.text).join('')).toBe(paragraph);
   });
 
   it('AC-9: keeps the heading with its oversized paragraph instead of emitting a heading-only chunk', () => {
@@ -139,8 +138,8 @@ describe('chunkMarkdown', () => {
 
     const chunks = chunkMarkdown({ path: 'docs/a.md', text: lines('## Big', '', paragraph) });
 
-    expect(sections(chunks)).toHaveLength(1);
-    expect(chunks[1].text).toBe(lines('## Big', '', paragraph));
+    expect(chunks[1].text.startsWith('## Big\n\n')).toBe(true);
+    expect(sections(chunks).every((part) => part.text.length <= 2000 && part.text !== '## Big')).toBe(true);
     expect(chunks[1].headingPath).toBe('Big');
   });
 
@@ -237,5 +236,153 @@ describe('chunkMarkdown', () => {
       expect(chunk).not.toHaveProperty('status');
       expect(chunk).not.toHaveProperty('supersededBy');
     }
+  });
+});
+
+describe('chunkMarkdown cap edge cases', () => {
+  it.each([FENCE, TILDE_FENCE])('balances %s fences after prose, preserving mixed markers and body lines', (marker) => {
+    const other = marker === FENCE ? TILDE_FENCE : FENCE;
+    const body = Array.from({ length: 180 }, (_, i) => i === 80 ? other : `${i}${'x'.repeat(30)}`);
+    const chunks = sections(chunkMarkdown({ path: 'a.md', text: lines('prose', `${marker}ts`, ...body, marker, 'tail') }));
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((part) => part.text.length <= 2000)).toBe(true);
+    expect(chunks[0].text.startsWith(`prose\n${marker}ts\n`)).toBe(true);
+    expect(chunks[chunks.length - 1].text.endsWith(`\n${marker}\ntail`)).toBe(true);
+    expect(chunks.flatMap((part) => part.text.split('\n').filter((line) => !['prose', 'tail', marker, `${marker}ts`].includes(line)))).toEqual(body);
+  });
+
+  it('keeps surrogate pairs intact inside a long fenced line', () => {
+    const body = `${'a'.repeat(1989)}😀${'b'.repeat(2200)}`;
+    const parts = sections(chunkMarkdown({ path: 'a.md', text: lines(`${FENCE}ts`, body, FENCE) }));
+    expect(parts[0].text).toHaveLength(1999);
+    expect(parts[1].text.startsWith(`${FENCE}ts\n😀`)).toBe(true);
+    expect(parts.map((part) => part.text.split('\n').slice(1, -1).join('\n')).join('')).toBe(body);
+  });
+
+  it('cuts the summary before a surrogate pair that straddles its cap', () => {
+    const description = `${'a'.repeat(1995)}😀tail`;
+    const chunks = chunkMarkdown({ path: 'a.md', text: lines('---', `description: ${description}`, '---', 'body') });
+    expect(chunks[0].text).toBe(`a\n${'a'.repeat(1995)}😀t`);
+    const boundary = chunkMarkdown({ path: 'a.md', text: lines('---', `description: ${'a'.repeat(1997)}😀tail`, '---', 'body') });
+    expect(boundary[0].text).toBe(`a\n${'a'.repeat(1997)}`);
+  });
+
+  it.each([1994, 2003])('caps literal slices when a %i-character fence delimiter cannot fit with wrappers', (length) => {
+    const text = lines(`${FENCE}${'x'.repeat(length - FENCE.length)}`, 'body'.repeat(1000), FENCE);
+    const parts = sections(chunkMarkdown({ path: 'a.md', text }));
+    expect(parts.every((part) => part.text.length <= 2000)).toBe(true);
+    expect(parts.map((part) => part.text).join('')).toBe(text);
+    expect(parts[0].text).toHaveLength(2000);
+  });
+});
+
+describe('chunkMarkdown hard cap (US-001)', () => {
+  const chunk = (text: string): MarkdownChunk[] => chunkMarkdown({ path: 'docs/cap.md', text });
+  const list = lines('## List', ...Array.from({ length: 300 }, (_, i) => `- ${String(i).padStart(3, '0')}${'x'.repeat(35)}`));
+  const body = Array.from({ length: 200 }, (_, i) => `${String(i).padStart(3, '0')}${'x'.repeat(27)}`);
+  const fenced = lines(`${FENCE}ts`, ...body, FENCE);
+  const headings = Array.from({ length: 400 }, (_, i) => `## ${String(i).padStart(3, '0')}${'h'.repeat(17)}`).join('\n');
+  const capped = (chunks: MarkdownChunk[]): void => {
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const part of chunks) expect(part.text.length).toBeLessThanOrEqual(2000);
+  };
+
+  it('AC-1: caps a blank-line-free list and preserves its lines', () => {
+    const parts = sections(chunk(list));
+    capped(parts);
+    expect(parts.map((part) => part.text).join('\n')).toBe(list);
+  });
+
+  it('AC-2: slices a 5000-character line in order', () => {
+    const text = 'x'.repeat(5000);
+    const parts = sections(chunk(text));
+    expect(parts.map((part) => part.text.length)).toEqual([2000, 2000, 1000]);
+    expect(parts.map((part) => part.text).join('')).toBe(text);
+  });
+
+  it('AC-3: closes and reopens every fenced part within the cap', () => {
+    const parts = sections(chunk(fenced));
+    capped(parts);
+    for (const part of parts) {
+      expect(part.text.startsWith(`${FENCE}ts\n`)).toBe(true);
+      expect(part.text.endsWith(`\n${FENCE}`)).toBe(true);
+    }
+  });
+
+  it('AC-4: preserves all fenced body lines in order', () => {
+    const parts = sections(chunk(fenced));
+    expect(parts.length).toBeGreaterThan(1);
+    expect(parts.flatMap((part) => part.text.split('\n').slice(1, -1))).toEqual(body);
+  });
+
+  it('AC-5: never splits an emoji surrogate pair', () => {
+    const text = `${'a'.repeat(1999)}😀${'a'.repeat(100)}`;
+    const parts = sections(chunk(text));
+    expect(parts[0].text).toHaveLength(1999);
+    expect(parts[1].text.startsWith('😀')).toBe(true);
+    expect(parts.map((part) => part.text).join('')).toBe(text);
+  });
+
+  it('AC-6: caps a summary containing 400 H2 titles', () => {
+    expect(chunk(headings)[0].text).toHaveLength(2000);
+  });
+
+  it('AC-7: keeps ordinary paragraph packing at blank lines', () => {
+    const text = Array.from({ length: 10 }, () => 'p'.repeat(500)).join('\n\n');
+    const parts = sections(chunk(text));
+    capped(parts);
+    expect(parts.map((part) => part.text).join('\n\n')).toBe(text);
+    for (const part of parts) expect(part.text.split('\n\n').every((paragraph) => paragraph.length === 500)).toBe(true);
+  });
+
+  it('AC-8: keeps the heading attached to the oversized paragraph', () => {
+    const parts = sections(chunk(lines('## Big', '', 'p'.repeat(3000))));
+    capped(parts);
+    expect(parts[0].text.startsWith('## Big\n\n')).toBe(true);
+    expect(parts.every((part) => part.text !== '## Big')).toBe(true);
+  });
+
+  it('AC-9: retains section metadata on every list part', () => {
+    const parts = sections(chunk(list));
+    expect(parts.length).toBeGreaterThan(1);
+    for (const part of parts) expect(part).toMatchObject({ headingPath: 'List', anchor: 'list' });
+  });
+
+  it('AC-10: gives split list chunks contiguous indices including summary', () => {
+    const chunks = chunk(list);
+    expect(chunks.length).toBeGreaterThan(2);
+    expect(chunks.map((part) => part.chunkIndex)).toEqual(chunks.map((_, i) => i));
+  });
+
+  it.each([
+    ['line', 'x'.repeat(2001)],
+    ['fence', lines(`${FENCE}ts`, 'x'.repeat(1991), FENCE)],
+    ['summary', headings],
+  ])('AC-11: caps every chunk for an oversized %s', (_label, text) => {
+    capped(chunk(text));
+  });
+
+  it('AC-12: recognises a fence after a heading and balances each body part', () => {
+    const parts = sections(chunk(lines('## Code', '', fenced)));
+    capped(parts);
+    expect(parts[0].text.split('\n')[0]).toBe('## Code');
+    for (const part of parts) {
+      const partLines = part.text.split('\n');
+      const firstBody = partLines.findIndex((line) => body.includes(line));
+      expect(firstBody).toBeGreaterThan(partLines.indexOf(`${FENCE}ts`));
+      expect(partLines.indexOf(`${FENCE}ts`)).toBeGreaterThanOrEqual(0);
+      expect(partLines[partLines.length - 1]).toBe(FENCE);
+    }
+  });
+
+  it('AC-13: splits a long fenced body line with wrapper overhead counted', () => {
+    const text = 'x'.repeat(4000);
+    const parts = sections(chunk(lines(`${FENCE}ts`, text, FENCE)));
+    capped(parts);
+    for (const part of parts) {
+      expect(part.text.startsWith(`${FENCE}ts\n`)).toBe(true);
+      expect(part.text.endsWith(`\n${FENCE}`)).toBe(true);
+    }
+    expect(parts.map((part) => part.text.split('\n').slice(1, -1).join('\n')).join('')).toBe(text);
   });
 });

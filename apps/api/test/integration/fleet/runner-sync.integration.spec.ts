@@ -220,4 +220,24 @@ describeIntegration('runner sync (PG)', () => {
     await sync({ jobs: [{ ...e, events: [ev(5, 'snapshot', { postRun: { finish: 'passed' } })] }] });
     expect((await job(j.id)).postRun).toEqual({ finish: 'passed' });
   });
+
+  it('US-003 AC-7/AC-8: stores the workflow step of a RUNNING job and replaces it on a later snapshot', async () => {
+    await prisma.fleetJob.updateMany({ where: { runnerId: runner.runnerId, state: { in: ['ASSIGNED', 'RUNNING', 'UPLOADING'] } }, data: { state: 'FAILED' } });
+    const j = await dispatch('post-run-workflow');
+    const first = await sync();
+    const assign = first.commands.find((c) => c.jobId === j.id && c.type === 'ASSIGN');
+    expect(assign).toBeDefined();
+    const e = { jobId: j.id, leaseEpoch: j.leaseEpoch };
+
+    await sync({
+      commandAcks: [{ commandId: assign!.commandId, leaseEpoch: j.leaseEpoch, result: 'ok' }],
+      jobs: [{ ...e, events: [ev(1, 'state', { to: 'RUNNING' }), ev(2, 'snapshot', { postRun: { acceptance: 'running', workflowStep: 'branch-review' } })] }],
+    });
+    expect(await job(j.id)).toEqual(expect.objectContaining({ state: 'RUNNING' }));
+    expect((await job(j.id)).postRun).toEqual({ acceptance: 'running', workflowStep: 'branch-review' });
+
+    // present: the whole postRun is replaced, workflowStep included
+    await sync({ jobs: [{ ...e, events: [ev(3, 'snapshot', { postRun: { acceptance: 'passed', workflowStep: 'publish' } })] }] });
+    expect((await job(j.id)).postRun).toEqual({ acceptance: 'passed', workflowStep: 'publish' });
+  });
 });

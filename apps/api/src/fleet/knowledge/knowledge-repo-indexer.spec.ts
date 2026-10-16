@@ -16,7 +16,14 @@ const text = `## Alpha\n${'a'.repeat(500)}\n\n## Beta\n${'b'.repeat(500)}`;
 const entry = (path: string) => ({ path, type: 'blob' as const, sha: `blob-${path}`, size: 1100 });
 const stored = (path: string, unembeddedCount = 0): KnowledgeFileState => ({ repoId: 'r1', path, blobSha: entry(path).sha, chunkCount: 3, unembeddedCount });
 
-function fixture(paths = ['docs/a.md']) {
+/** US-002: 39 sections over the 200-character merge rule, so the file chunks as summary + 39 (40 rows). */
+const bigText = (): string => Array.from({ length: 39 }, (_, i) => `## S${i + 1}\n${'x'.repeat(250)}`).join('\n\n');
+
+/** The stored content of each chunk of the US-002 fixture file, in chunk order. */
+const bigContents = (path = 'docs/big.md'): string[] => chunkMarkdown({ path, text: bigText() })
+  .map(chunk => `o/n · ${path}${chunk.headingPath ? ` · ${chunk.headingPath}` : ''}\n${chunk.abstract}\n\n${chunk.text}`);
+
+function fixture(paths = ['docs/a.md'], fileText = text) {
   const repo = { id: 'r1', projectId: 'p1', provider: 'github', owner: 'o', name: 'n', defaultBranch: 'main', githubInstallationId: 5n };
   const state = {
     findRepo: vi.fn().mockResolvedValue(repo), claim: vi.fn().mockResolvedValue(true), renew: vi.fn().mockResolvedValue(true),
@@ -26,16 +33,20 @@ function fixture(paths = ['docs/a.md']) {
   const github = {
     mintReadOnlyToken: vi.fn().mockResolvedValue({ token: 'secret', expiresAt: now }), getBranchHead: vi.fn().mockResolvedValue('head'),
     getTree: vi.fn().mockResolvedValue({ entries: paths.map(entry), truncated: false }),
-    getFile: vi.fn().mockResolvedValue({ content: Buffer.from(text), sha: 'blob', size: text.length }),
+    getFile: vi.fn().mockResolvedValue({ content: Buffer.from(fileText), sha: 'blob', size: fileText.length }),
   };
   const store = { replaceFile: vi.fn().mockResolvedValue(undefined), deleteFile: vi.fn().mockResolvedValue(undefined) };
   const fake = new FakeEmbeddingProvider();
-  const embeddings = { dimensions: fake.dimensions, providerName: fake.name, modelName: 'fake-model', embedBatch: vi.fn((contents: string[]) => fake.embedBatch(contents)) };
+  const embeddings = {
+    dimensions: fake.dimensions, providerName: fake.name, modelName: 'fake-model',
+    embedBatch: vi.fn((contents: string[]) => fake.embedBatch(contents)),
+    embed: vi.fn((content: string) => fake.embed(content)),
+  };
   const rag = { optimizeTable: vi.fn().mockResolvedValue(undefined) };
   const clock = vi.fn(() => now.getTime() + 1000);
   const indexer = new KnowledgeRepoIndexer(state as unknown as IKnowledgeIndexRepository, github as unknown as GitHubAppClient,
     store as unknown as KnowledgeChunkStore, embeddings as unknown as EmbeddingService, rag as unknown as RagService, clock);
-  return { indexer, state, github, store, embeddings, rag, repo, clock };
+  return { indexer, state, github, store, embeddings, rag, repo, clock, fake };
 }
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
@@ -101,8 +112,10 @@ describe('KnowledgeRepoIndexer', () => {
     if (mode === 'count') f.embeddings.embedBatch.mockResolvedValue([Array(f.embeddings.dimensions).fill(1)]);
     if (mode === 'dimensions') f.embeddings.embedBatch.mockResolvedValue([[1], [1], [1]]);
     if (mode === 'timeout') { vi.useFakeTimers(); f.embeddings.embedBatch.mockImplementation(() => new Promise(() => {})); }
+    // A failed batch is retried one chunk at a time, so the single-chunk route must fail too.
+    f.embeddings.embed.mockRejectedValue(new Error('embedding failed'));
     const pass = f.indexer.indexRepo('r1', now);
-    if (mode === 'timeout') await vi.advanceTimersByTimeAsync(120_000);
+    if (mode === 'timeout') await vi.advanceTimersByTimeAsync(60_000);
     expect(await pass).toEqual({ status: 'indexed' });
     const rows = f.store.replaceFile.mock.calls[0][2] as LanceRecord[];
     rows.forEach(row => expect(row).toMatchObject({ provider: 'none', model: '', vector: Array(f.embeddings.dimensions).fill(0) }));
@@ -220,5 +233,170 @@ describe('KnowledgeRepoIndexer', () => {
       expect(f.store.replaceFile.mock.invocationCallOrder[i]).toBeLessThan(f.state.renew.mock.invocationCallOrder[i]);
       if (i < 2) expect(f.state.renew.mock.invocationCallOrder[i]).toBeLessThan(f.store.replaceFile.mock.invocationCallOrder[i + 1]);
     }
+  });
+});
+
+/**
+ * US-002: the file's chunks are embedded in batches of 16 through one embedding server, and a failure
+ * costs only the chunks that failed. Every count below is a literal, matching the acceptance criteria.
+ */
+describe('KnowledgeRepoIndexer batched embedding (US-002)', () => {
+  const bigFile = (): ReturnType<typeof fixture> => fixture(['docs/big.md'], bigText());
+  const rowsOf = (f: ReturnType<typeof fixture>): LanceRecord[] => f.store.replaceFile.mock.calls[0][2] as LanceRecord[];
+
+  /** Records how many calls were already in flight when each call started: `[0, 0, ...]` means one at a time. */
+  function startsOf(embed: { mockImplementation: (fn: never) => unknown }, fake: FakeEmbeddingProvider): number[] {
+    const starts: number[] = [];
+    let inFlight = 0;
+    embed.mockImplementation((async (input: string[] | string) => {
+      starts.push(inFlight);
+      inFlight += 1;
+      try {
+        return Array.isArray(input) ? await fake.embedBatch(input) : await fake.embed(input);
+      } finally {
+        inFlight -= 1;
+      }
+    }) as never);
+    return starts;
+  }
+
+  it('AC-5: embeds a 40-chunk file in three batches of 16, 16 and 8, one at a time', async () => {
+    const f = bigFile();
+    const contents = bigContents();
+    const starts = startsOf(f.embeddings.embedBatch, f.fake);
+    await f.indexer.indexRepo('r1', now);
+    expect(f.embeddings.embedBatch).toHaveBeenCalledTimes(3);
+    expect(f.embeddings.embedBatch.mock.calls.map(call => call[0])).toEqual([contents.slice(0, 16), contents.slice(16, 32), contents.slice(32)]);
+    expect(starts).toEqual([0, 0, 0]);
+    expect(f.embeddings.embed).not.toHaveBeenCalled();
+    const rows = rowsOf(f);
+    expect(rows).toHaveLength(40);
+    expect(rows.map(row => row.content)).toEqual(contents);
+    rows.forEach(row => expect(row.provider).toBe(f.fake.name));
+    expect(f.state.upsertFile).toHaveBeenCalledWith(expect.objectContaining({ unembeddedCount: 0, chunkCount: 40 }));
+  });
+
+  it('AC-6: retries a rejected batch one chunk at a time, one at a time', async () => {
+    const f = bigFile();
+    const contents = bigContents();
+    f.embeddings.embedBatch.mockImplementation((batch: string[]) =>
+      (batch[0] === contents[16] ? Promise.reject(new Error('batch down')) : f.fake.embedBatch(batch)));
+    const starts = startsOf(f.embeddings.embed, f.fake);
+    await f.indexer.indexRepo('r1', now);
+    expect(f.embeddings.embedBatch).toHaveBeenCalledTimes(3);
+    expect(f.embeddings.embed.mock.calls.map(call => call[0])).toEqual(contents.slice(16, 32));
+    expect(starts).toEqual(new Array(16).fill(0));
+    const rows = rowsOf(f);
+    expect(rows).toHaveLength(40);
+    expect(rows.every(row => row.provider === f.fake.name && row.model === 'fake-model')).toBe(true);
+    expect(rows[16].vector).toEqual(await f.fake.embed(contents[16]));
+    expect(f.state.upsertFile).toHaveBeenCalledWith(expect.objectContaining({ unembeddedCount: 0 }));
+  });
+
+  it('AC-7: a failing single-chunk retry leaves only that chunk unembedded', async () => {
+    const f = bigFile();
+    const contents = bigContents();
+    const failed = contents[16 + 3];
+    f.embeddings.embedBatch.mockImplementation((batch: string[]) =>
+      (batch[0] === contents[16] ? Promise.reject(new Error('batch down')) : f.fake.embedBatch(batch)));
+    f.embeddings.embed.mockImplementation((content: string) =>
+      (content === failed ? Promise.reject(new Error('chunk down')) : f.fake.embed(content)));
+    await f.indexer.indexRepo('r1', now);
+    const rows = rowsOf(f);
+    expect(rows).toHaveLength(40);
+    expect(rows[19]).toMatchObject({ provider: 'none', model: '', vector: Array(f.embeddings.dimensions).fill(0), content: failed });
+    rows.filter((_, index) => index !== 19).forEach(row => expect(row.provider).toBe(f.fake.name));
+    expect(f.state.upsertFile).toHaveBeenCalledWith(expect.objectContaining({ unembeddedCount: 1 }));
+  });
+
+  it('AC-7 boundary: a retry that resolves a non-array leaves that chunk unembedded, not the file failed', async () => {
+    const f = bigFile();
+    const contents = bigContents();
+    f.embeddings.embedBatch.mockImplementation((batch: string[]) =>
+      (batch[0] === contents[16] ? Promise.reject(new Error('batch down')) : f.fake.embedBatch(batch)));
+    f.embeddings.embed.mockImplementation((content: string) =>
+      (content === contents[19] ? Promise.resolve(undefined as unknown as number[]) : f.fake.embed(content)));
+    expect(await f.indexer.indexRepo('r1', now)).toEqual({ status: 'indexed' });
+    const rows = rowsOf(f);
+    expect(rows[19]).toMatchObject({ provider: 'none', model: '', vector: Array(f.embeddings.dimensions).fill(0) });
+    rows.filter((_, index) => index !== 19).forEach(row => expect(row.provider).toBe(f.fake.name));
+    expect(f.state.upsertFile).toHaveBeenCalledWith(expect.objectContaining({ unembeddedCount: 1 }));
+  });
+
+  it('AC-8: a batch that times out is unembedded with no per-chunk retry, and later batches still run', async () => {
+    vi.useFakeTimers();
+    const f = bigFile();
+    const contents = bigContents();
+    f.embeddings.embedBatch.mockImplementationOnce(() => new Promise(() => {}))
+      .mockImplementation((batch: string[]) => f.fake.embedBatch(batch));
+    const pass = f.indexer.indexRepo('r1', now);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await pass).toEqual({ status: 'indexed' });
+    expect(f.embeddings.embedBatch).toHaveBeenCalledTimes(3);
+    expect(f.embeddings.embedBatch.mock.calls[2][0]).toEqual(contents.slice(32));
+    expect(f.embeddings.embed).not.toHaveBeenCalled();
+    const rows = rowsOf(f);
+    expect(rows).toHaveLength(40);
+    rows.slice(0, 16).forEach(row => expect(row).toMatchObject({ provider: 'none', model: '', vector: Array(f.embeddings.dimensions).fill(0) }));
+    rows.slice(16).forEach(row => expect(row.provider).toBe(f.fake.name));
+    expect(f.state.upsertFile).toHaveBeenCalledWith(expect.objectContaining({ unembeddedCount: 16 }));
+  });
+
+  it('AC-9: a batch with a wrong-length vector is retried one chunk at a time', async () => {
+    const f = bigFile();
+    const contents = bigContents();
+    f.embeddings.embedBatch.mockImplementation(async (batch: string[]) => {
+      const vectors = await f.fake.embedBatch(batch);
+      return batch[0] === contents[0] ? [[0.5], ...vectors.slice(1)] : vectors;
+    });
+    await f.indexer.indexRepo('r1', now);
+    expect(f.embeddings.embedBatch).toHaveBeenCalledTimes(3);
+    expect(f.embeddings.embed.mock.calls.map(call => call[0])).toEqual(contents.slice(0, 16));
+    const rows = rowsOf(f);
+    expect(rows.every(row => row.provider === f.fake.name)).toBe(true);
+    expect(f.state.upsertFile).toHaveBeenCalledWith(expect.objectContaining({ unembeddedCount: 0 }));
+  });
+
+  it('AC-10: batches after the 300-second file deadline are not requested', async () => {
+    const f = bigFile();
+    const contents = bigContents();
+    const started = now.getTime();
+    f.clock.mockReturnValueOnce(started).mockReturnValueOnce(started).mockReturnValue(started + 300_000);
+    await f.indexer.indexRepo('r1', now);
+    expect(f.embeddings.embedBatch).toHaveBeenCalledTimes(1);
+    expect(f.embeddings.embedBatch.mock.calls[0][0]).toEqual(contents.slice(0, 16));
+    expect(f.embeddings.embed).not.toHaveBeenCalled();
+    const rows = rowsOf(f);
+    expect(rows).toHaveLength(40);
+    rows.slice(0, 16).forEach(row => expect(row.provider).toBe(f.fake.name));
+    rows.slice(16).forEach(row => expect(row).toMatchObject({ provider: 'none', model: '', vector: Array(f.embeddings.dimensions).fill(0) }));
+    expect(f.state.upsertFile).toHaveBeenCalledWith(expect.objectContaining({ unembeddedCount: 24 }));
+  });
+
+  it('AC-11: logs exactly one warning with the counts and no provider error text', async () => {
+    const f = bigFile();
+    const contents = bigContents();
+    const warning = vi.spyOn(Logger.prototype, 'warn'); warning.mockClear();
+    const doomed = new Set([contents[2], contents[7]]);
+    f.embeddings.embedBatch.mockImplementation((batch: string[]) =>
+      (batch[0] === contents[0] ? Promise.reject(new Error('provider exploded (secret)')) : f.fake.embedBatch(batch)));
+    f.embeddings.embed.mockImplementation((content: string) =>
+      (doomed.has(content) ? Promise.reject(new Error(`provider exploded on ${content}`)) : f.fake.embed(content)));
+    await f.indexer.indexRepo('r1', now);
+    expect(warning).toHaveBeenCalledTimes(1);
+    expect(warning).toHaveBeenCalledWith('Knowledge file embedding failed for 2 of 40 chunks (repo r1); storing unembedded chunks');
+    expect(String(warning.mock.calls[0][0])).not.toContain('provider exploded');
+    expect(f.state.upsertFile).toHaveBeenCalledWith(expect.objectContaining({ unembeddedCount: 2 }));
+  });
+
+  it('AC-12: logs no warning and records no unembedded chunks when every batch succeeds', async () => {
+    const f = bigFile();
+    const warning = vi.spyOn(Logger.prototype, 'warn'); warning.mockClear();
+    await f.indexer.indexRepo('r1', now);
+    expect(f.embeddings.embedBatch).toHaveBeenCalledTimes(3);
+    expect(f.embeddings.embed).not.toHaveBeenCalled();
+    expect(warning).not.toHaveBeenCalled();
+    expect(f.state.upsertFile).toHaveBeenCalledWith(expect.objectContaining({ unembeddedCount: 0 }));
+    expect(f.store.replaceFile).toHaveBeenCalledTimes(1);
   });
 });

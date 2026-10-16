@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { codeLabel } from '~/lib/fleet-i18n'
+import { phaseLabelKey } from '~/lib/fleet-phase'
 import type { StoryRow } from '~/lib/fleet-jobs'
 import type { UnresolvedDep } from '~/lib/fleet-story-graph'
 
@@ -14,6 +15,13 @@ const emit = defineEmits<{ activate: [id: string | null] }>()
 const { t, te } = useI18n()
 
 const statusLabel = computed(() => codeLabel(t, te, 'fleet.storyStatus', props.row.status))
+/** D7: a known nax phase reads as its label; any other nax text is shown raw (R4). */
+const phaseLabel = computed((): string => {
+  const raw = props.row.phase
+  if (raw === null) return ''
+  const key = phaseLabelKey(raw)
+  return key === null ? raw : t(key)
+})
 /** D446: screen readers hear the status and every dependency, since edges are decorative. */
 const label = computed(() => {
   const base = { id: props.row.id, title: props.row.title, status: statusLabel.value }
@@ -50,7 +58,7 @@ const noteText = (note: UnresolvedDep): string =>
     <p class="line-clamp-2 break-words" :title="row.title">{{ row.title }}</p>
     <p class="text-xs text-muted-foreground">{{ t('fleet.jobs.detail.stories.attempts', { count: row.attempts }) }}</p>
     <p v-if="row.current && row.phase" class="text-xs text-muted-foreground" data-testid="fleet-story-node-phase">
-      {{ t('fleet.jobs.detail.stories.phase', { phase: row.phase }) }}
+      {{ t('fleet.jobs.detail.stories.phase', { phase: phaseLabel }) }}
     </p>
     <p
       v-for="note in notes"

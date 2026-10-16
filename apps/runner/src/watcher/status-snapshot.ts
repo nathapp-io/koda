@@ -34,9 +34,22 @@ function postRunStages(status: StatusView): SnapshotEventPayload['postRun'] {
     ['acceptance', clip(post?.acceptance?.status, STAGE_STATUS_MAX)],
     ['regression', clip(post?.regression?.status, STAGE_STATUS_MAX)],
     ['finish', clip(post?.finish?.status, STAGE_STATUS_MAX)],
+    // D5 (US-004): the nax workflow step, so a job between stories still reports its phase.
+    ['workflowStep', clip(status.workflow?.step, STAGE_STATUS_MAX)],
   ];
   const stages = Object.fromEntries(entries.filter(([, v]) => v !== undefined));
   return Object.keys(stages).length > 0 ? stages : undefined;
+}
+
+/**
+ * D5 (US-004): nax clears `current` after the last story, while it still runs the feature steps (a CI wait can
+ * take 20 minutes), so a running run falls back to the workflow step. A `current` without a `phase` counts as
+ * absent; a run that is no longer running always reports null.
+ */
+function currentPhase(status: StatusView): string | null {
+  if (typeof status.current?.phase === 'string') return status.current.phase;
+  if (status.run.status === 'running' && status.workflow) return clip(status.workflow.step, STAGE_STATUS_MAX) ?? null;
+  return null;
 }
 
 export function mapStatusToSnapshot(status: StatusView, extras: SnapshotExtras = {}): SnapshotEventPayload {
@@ -49,7 +62,7 @@ export function mapStatusToSnapshot(status: StatusView, extras: SnapshotExtras =
     ['naxCostRunId', extras.costRunId ?? undefined],
     ['progress', status.progress],
     ['currentStoryId', status.current?.storyId ?? null],
-    ['currentPhase', status.current?.phase ?? null],
+    ['currentPhase', currentPhase(status)],
     ['costSpentUsd', cost],
     ['heartbeatAt', heartbeat],
     ['finishResult', finish?.result],

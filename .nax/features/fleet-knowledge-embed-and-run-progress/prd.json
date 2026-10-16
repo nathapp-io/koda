@@ -1,0 +1,452 @@
+{
+  "project": "koda",
+  "feature": "fleet-knowledge-embed-and-run-progress",
+  "branchName": "feat/fleet-knowledge-embed-and-run-progress",
+  "createdAt": "2026-10-16T00:00:00.000Z",
+  "updatedAt": "2026-10-16T09:02:46.510Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Chunker enforces the cap on every chunk",
+      "description": "**Goal** — Make the Markdown chunker enforce `MAX_CHUNK_CHARS = 2000` on every chunk text, including oversized blank-line-free blocks, fenced blocks and the summary chunk.\n\n**Motivation** — On the koda-wk live check the chunker kept blank-line-free blocks whole, up to 20,055 characters against `MAX_CHUNK_CHARS = 2000`; Ollama refused the request and the file sank in unfiltered search.\n\n**Approach** — D1 (chunk cap): `splitSections` (`apps/api/src/fleet/knowledge/markdown-chunker.ts:261-271`) keeps its blank-line packing (`splitText`, `:273-286`). A packed part longer than `MAX_CHUNK_CHARS` is re-split by walking its lines in order and appending each to the current part (joined with `\\n`) while the part stays within the cap:\n1. Fences: a line is a fence opener or closer when `fenceMarker` (`:197-202`) matches, tracked as `textBlocks` (`:289-321`) tracks them, so a fence can start anywhere in the part, after prose or a heading. While a fence is open, a part's budget is the cap minus the length of the closing line it will end with plus one, so the close always fits; the closing line written at a split is the opener's marker (three backticks or three tildes, the same marker as the opener), and a part that reopens the fence counts its opening line inside its budget. When the next line does not fit inside an open fence, the current part is ended with a line holding the opening marker (three backticks or three tildes) and the next part starts with the fence's opening line as written.\n2. A line that does not fit, outside a fence, starts a new part when it is itself within the cap.\n3. A line longer than the cap (or than a fenced part's budget) first fills the current part's remaining space, then continues in new parts of the budget that applies to each part (the fenced budget, opener and closer counted, while a fence is open; the full cap otherwise). A cut never separates a UTF-16 surrogate pair: when the last kept code unit is a high surrogate, the cut moves one unit earlier. This applies inside fences too.\nEvery split part keeps the section's `headingPath` and `anchor`. The heading glue (`glueHeadingBlock`, `:323-327`) stays, so by rule 3 a heading line leads the first part of its oversized paragraph and no part holds only the heading. The summary chunk (`buildSummary`, `:330-336`) is cut to `MAX_CHUNK_CHARS` with the same surrogate rule. Invariant: every chunk `text` is at most 2000 characters. The embedded content (repository, path and heading header, abstract, text) can exceed 2000 characters; D2's `truncate: true` covers it.\n\nMutated symbols: `splitSections` / `splitText` (baseline: a block over the cap is its own part of any length; target: D1); `buildSummary` (baseline: uncapped; target: result cut to `MAX_CHUNK_CHARS`). Read-only: `fenceMarker`, `textBlocks`, `glueHeadingBlock`, `isHeadingLine`.\n\n**Test updates** — In `markdown-chunker.spec.ts`: the AC-9 test at `:127-135` (\"keeps a single 3000-character paragraph as one chunk of 3000 characters\") now expects two section chunks of 2000 and 1000 characters whose concatenation is the paragraph; the AC-9 heading-glue test at `:137-145` now expects the first section chunk to start with the `## Big` heading line and every section chunk to be at most 2000 characters (no-heading-only-chunk intent unchanged). Other assertions unchanged.\n\n**Scope** — In: markdown-chunker.ts and its spec. Out: the embedding provider and indexer (US-002); re-chunking files already indexed with every chunk embedded.",
+      "acceptanceCriteria": [
+        "chunkMarkdown over a document of a `## List` heading followed directly by 300 list lines of 40 characters with no blank lines returns section chunks that are each at most 2000 characters, and joining their texts with `\\n` gives back the section text.",
+        "chunkMarkdown over a document holding only one 5000-character line with no spaces returns section chunks of 2000, 2000 and 1000 characters, in order, whose concatenation is the line.",
+        "chunkMarkdown over a document holding only a fenced block opened by a ```ts line and closed by a ``` line, with 200 body lines of 30 characters, returns parts that each start with the ```ts line, each end with a line equal to ```, and are each at most 2000 characters.",
+        "For a document holding only a ```ts fenced block of 200 body lines of 30 characters, the body lines of the returned parts, taken in order with the fence lines removed, equal the original 200 body lines.",
+        "chunkMarkdown over a document holding only a line of 1999 `a` characters followed by the emoji `😀` and 100 more `a` characters returns a first section chunk of 1999 characters, so the emoji's surrogate pair starts the second chunk intact.",
+        "chunkMarkdown over a document with 400 `##` headings of 20 characters each returns a summary chunk (index 0) whose text is at most 2000 characters.",
+        "chunkMarkdown over a 5000-character section of ten 500-character paragraphs separated by blank lines still returns parts of at most 2000 characters that break only at blank lines, as before D1.",
+        "chunkMarkdown over `## Big`, a blank line, and a 3000-character paragraph returns a first section chunk whose first line is `## Big` and no chunk holding only the heading.",
+        "Every section chunk produced from a `## List` heading followed directly by 300 list lines of 40 characters carries that section's `headingPath` and `anchor`.",
+        "The `chunkIndex` values of the chunks returned for a `## List` heading followed directly by 300 list lines of 40 characters run 0, 1, 2, ... with no gap.",
+        "For a document of one 2001-character line, a document of a 2001-character fenced block, and a document whose summary would exceed 2000 characters, every returned chunk `text` is at most 2000 characters.",
+        "chunkMarkdown over `## Code`, a blank line, and a ```ts fenced block of 200 body lines of 30 characters returns a first section chunk whose first line is `## Code`, and every section chunk holding body lines has a ```ts opening line before its first body line and a ``` line after its last body line.",
+        "chunkMarkdown over a document holding only a ```ts fenced block whose single body line is 4000 characters returns section chunks that are each at most 2000 characters, each starting with the ```ts line and ending with a ``` line."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "knowledge",
+        "chunker"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Single module but intricate fence-budget and surrogate-pair splitting algorithm with many edge cases; correctness-sensitive.",
+        "agentProfileId": "native-sol",
+        "agent": "native",
+        "profileModelTier": "powerful",
+        "initialAgent": "native",
+        "initialProfileId": "native-sol",
+        "initialModelTier": "powerful",
+        "initialComplexity": "complex",
+        "modelTier": "powerful"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/knowledge/markdown-chunker.ts",
+        "apps/api/src/fleet/knowledge/markdown-chunker.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "chunkMarkdown over a tilde-fenced (~~~) block of 200 body lines closes each split part with a line equal to ~~~."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/knowledge/markdown-chunker.spec.ts",
+          "reason": "the AC-9 test at `:127-135` (\"keeps a single 3000-character paragraph as one chunk of 3000 characters\") now expects two section chunks of 2000 and 1000 characters whose concatenation is the paragraph; other assertions unchanged. Also: the AC-9 heading-glue test at `:137-145` now expects the first section chunk to start with the `## Big` heading line and every section chunk to be at most 2000 characters, instead of one chunk holding the whole 3000-character paragraph; the no-heading-only-chunk intent is unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "a3274b160be1e7a88943e3e084c5bea82d2cf570"
+    },
+    {
+      "id": "US-002",
+      "title": "Batched embedding with per-chunk failure",
+      "description": "**Goal** — Embed a file's chunks through Ollama's batch endpoint in sequential batches so an embedding failure costs only the chunks that failed.\n\n**Motivation** — Ollama refused an oversize request and `KnowledgeRepoIndexer.rows` stored every chunk of the file unembedded (29 of 29 for two specs); one `/api/embeddings` call per chunk, all in parallel, also made the first pass slow (0.6 chunks/s on CPU Ollama).\n\n**Approach** — D2 (Ollama batch): `OllamaEmbeddingProvider.embedBatch` sends one `POST <baseUrl>/api/embed` with JSON body `{ \"model\": <model>, \"input\": <texts>, \"truncate\": true }` and returns `embeddings` from the response `{ \"embeddings\": number[][] }`. An empty `texts` returns `[]` with no request. A non-OK response throws `ValidationAppException` (as `embed` does). A response whose `embeddings` is not an array of `texts.length` arrays throws `ValidationAppException`.\n\nD3 (indexer embedding): `KnowledgeRepoIndexer.rows` (`apps/api/src/fleet/knowledge/knowledge-repo-indexer.ts:122-152`) embeds the file's chunk contents in order, in batches of `KNOWLEDGE_EMBED_BATCH = 16`, one request at a time (a deliberate exception to the `api-core.md` `Promise.all` guidance: the calls share one embedding server and the file deadline). The constants `EMBED_REQUEST_TIMEOUT_MS = 60_000` and `FILE_EMBED_DEADLINE_MS = 300_000` replace `EMBEDDING_TIMEOUT_MS = 120_000`. Per batch, in this order:\n1. Deadline: when `this.clock()` minus the clock reading taken at the start of `rows` is at least `FILE_EMBED_DEADLINE_MS`, this batch and every later one are unembedded with no request.\n2. Request: `this.embeddings.embedBatch(batch)` raced against `EMBED_REQUEST_TIMEOUT_MS`.\n3. Timeout: the whole batch is unembedded, with no per-chunk retry (a hung server must not cost 16 more timeouts).\n4. Validation: a resolved result with the wrong count, or a vector whose length is not `this.embeddings.dimensions`, is treated as a rejection.\n5. Rejection: each chunk of the batch is retried alone through `this.embeddings.embed(content)`, one at a time, each under the deadline check of step 1 and the timeout of step 2. A chunk whose retry rejects, times out or returns a vector of the wrong length is unembedded.\nAn embedded chunk's row keeps `provider: this.embeddings.providerName`, `model: this.embeddings.modelName` and its vector; an unembedded chunk's row gets `provider: 'none'`, `model: ''` and a zero vector of `this.embeddings.dimensions`. The row order and ids are unchanged. `unembeddedCount` is the number of unembedded chunks. When at least one chunk is unembedded, the indexer logs exactly one warning for the file, `Knowledge file embedding failed for <n> of <m> chunks (repo <repoId>); storing unembedded chunks`, and never logs provider error text. The file deadline (300 s) is below the pass lease (`LEASE_MS = 900_000`, `:18`), so a file finishes embedding before the next renewal is due. The existing retry of files with `unembeddedCount > 0` on a later pass (`:67`, `:82`) is unchanged.\n\nR3: ticket RAG is untouched. `EmbeddingService.embed` and `OllamaEmbeddingProvider.embed` keep `/api/embeddings`; only `embedBatch`, whose sole production caller is `KnowledgeRepoIndexer`, changes.\n\n**Test updates** — `ollama-embedding.provider.spec.ts` `embedBatch` test at `:65-71` now mocks one batch-route response `{ embeddings: [...] }` and expects one request. In `knowledge-repo-indexer.spec.ts`, `fixture()` (`:19-41`) gains an `embed` mock delegating to the fake provider; AC-6 (`:97-111`): the `throw`, `count` and `dimensions` modes also make `embed` reject so every chunk stays unembedded; the `timeout` mode advances `EMBED_REQUEST_TIMEOUT_MS` (60 s) instead of 120 s; the single-warning assertion is unchanged.\n\n**Scope** — In: ollama-embedding.provider.ts, knowledge-repo-indexer.ts and their specs. Out: chunker (US-001), ticket RAG embed path (`EmbeddingService.embed`, `OllamaEmbeddingProvider.embed`, `/api/embeddings`), concurrency above one request, lease renewal or splitting the file budget across the lease.\n\n**Interface**\n```typescript\nconst KNOWLEDGE_EMBED_BATCH = 16\nconst EMBED_REQUEST_TIMEOUT_MS = 60_000\nconst FILE_EMBED_DEADLINE_MS = 300_000\nOllamaEmbeddingProvider.embedBatch(texts: string[]): Promise<number[][]>\n```",
+      "acceptanceCriteria": [
+        "OllamaEmbeddingProvider.embedBatch(['a', 'b', 'c']) with `fetch` stubbed sends exactly one request, to `http://localhost:11434/api/embed`, method `POST`, with body `{\"model\":\"nomic-embed-text\",\"input\":[\"a\",\"b\",\"c\"],\"truncate\":true}`, and returns the three vectors of the response `embeddings` in order.",
+        "OllamaEmbeddingProvider.embedBatch rejects with ValidationAppException when the response is not OK.",
+        "OllamaEmbeddingProvider.embedBatch(['a', 'b']) rejects with ValidationAppException when the response `embeddings` holds one vector.",
+        "OllamaEmbeddingProvider.embedBatch([]) resolves to `[]` without calling `fetch`.",
+        "KnowledgeRepoIndexer.indexRepo over a file of 39 `## S<i>` sections, each a 250-character paragraph (a summary plus 39 section chunks, 40 in all), calls `embeddings.embedBatch` three times, with 16, 16 and 8 contents in chunk order, and never starts a call before the previous one settled.",
+        "When `embeddings.embedBatch` rejects for the second of three batches and `embeddings.embed` resolves, the rows written by `store.replaceFile` are all embedded (`provider` equals the fake provider name), and `embeddings.embed` was called once for each of the 16 chunks of that batch, one at a time.",
+        "When `embeddings.embedBatch` rejects for a batch and `embeddings.embed` rejects for exactly one of its chunks, only that chunk's row has `provider: 'none'`, `model: ''` and a zero vector, and `state.upsertFile` receives `unembeddedCount: 1`.",
+        "When `embeddings.embedBatch` never settles for its first call only, after advancing fake timers by 60,000 ms every chunk of that batch is unembedded, `embeddings.embed` is never called for them, and the later batches are still requested.",
+        "When `embeddings.embedBatch` resolves a batch with one vector of the wrong length, the indexer retries that batch one chunk at a time through `embeddings.embed`.",
+        "For the 40-chunk file of 39 `## S<i>` sections, with the injected clock returning T for its first two reads (the start of the file, before batch 1) and T + 300,000 for every later read, the second and later batches are not requested and their chunks are unembedded, while the first batch's rows keep their vectors.",
+        "A 40-chunk file of 39 `## S<i>` sections whose first `embedBatch` call rejects and whose `embed` rejects for exactly two chunks of that batch makes the indexer log exactly one warning, `Knowledge file embedding failed for 2 of 40 chunks (repo r1); storing unembedded chunks`, whose text holds no provider error message.",
+        "A file whose every batch and retry succeeds logs no embedding warning and records `unembeddedCount: 0`."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "knowledge",
+        "embedding"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Sequential batching with timeout race, deadline clock, validation and per-chunk fallback; fake-timer tests; two modules.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/rag/providers/ollama-embedding.provider.ts",
+        "apps/api/src/rag/providers/ollama-embedding.provider.spec.ts",
+        "apps/api/src/fleet/knowledge/knowledge-repo-indexer.ts",
+        "apps/api/src/fleet/knowledge/knowledge-repo-indexer.spec.ts",
+        "apps/api/src/rag/embedding.service.ts"
+      ],
+      "suggestedCriteria": [
+        "When `embeddings.embed` resolves a vector whose length differs from `dimensions` during a batch retry, that chunk's row has `provider: 'none'`."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/rag/providers/ollama-embedding.provider.spec.ts",
+          "reason": "the `embedBatch` test at `:65-71` mocks a per-text `{ embedding }` response from the legacy embeddings route; it now mocks one batch-route response `{ embeddings: [...] }` and expects one request (D2)."
+        },
+        {
+          "path": "apps/api/src/fleet/knowledge/knowledge-repo-indexer.spec.ts",
+          "reason": "`fixture()` (`:19-41`) gains an `embed` mock delegating to the fake provider, since D3 retries rejected batches through `embed`. Also: AC-6 (`:97-111`): the `throw`, `count` and `dimensions` modes also make `embed` reject so every chunk stays unembedded; the `timeout` mode advances `EMBED_REQUEST_TIMEOUT_MS` (60 s) instead of 120 s; the single-warning assertion is unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "3bb76a15153dafdd0fc7a28b03bd8e13d35e442a"
+    },
+    {
+      "id": "US-003",
+      "title": "Workflow step in the protocol and job mirror",
+      "description": "**Goal** — Carry a `workflowStep` key through the fleet protocol, the server's postRun mirror and the job DTO.\n\n**Motivation** — koda reads `workflow.step` only for the verdict, so the job page shows a blank phase while nax runs the feature steps after the last story.\n\n**Approach** — D4 (protocol and server): `SnapshotEventPayload.postRun` (`packages/fleet-protocol/src/index.ts:163`) gains `workflowStep?: string`. `POST_RUN_STAGES` (`apps/api/src/fleet/sync/event-payloads.ts:32`) gains `'workflowStep'`, so `postRunStages` keeps it under the same `STAGE_STATUS_RE` (`:33`, 1 to 32 printable ASCII characters). `FleetJobPostRun` (`apps/api/src/fleet/jobs/domain/fleet-job.domain.ts:28-32`) and `FleetJobPostRunDto` (`apps/api/src/fleet/jobs/dto/fleet-job.dto.ts:20-24`) gain `workflowStep?: string` (`maxLength: 32`). The existing rule that a present `postRun` replaces the stored one (D428) is unchanged. The sync route's established coverage is `test/integration/fleet/runner-sync.integration.spec.ts`; `test/e2e/api-endpoint/endpoint.e2e.spec.ts` covers `/fleet/runners` and the runner tool routes but no runner sync route and no job-detail route, so the changed response is pinned by the sync-route integration ACs and the `fleet-openapi.contract.spec.ts` contract test, not by a new e2e section.\n\nRulings: R1 no Prisma migration (`FleetJob.postRun` is a `Json?` column, so the new `workflowStep` key rides in it). R2 every change to `@nathapp/fleet-protocol` is additive (an optional field).\n\n**Test/generated updates** — `apps/api/src/fleet/fleet-openapi.contract.spec.ts`: the closed-world assertion at `:19` that `FleetJobPostRunDto` has exactly the properties `acceptance`, `finish`, `regression` now expects `acceptance`, `finish`, `regression`, `workflowStep`; the `postRun` assertion at `:18` is unchanged. Regenerate `openapi.json` with `bun run api:export-spec` and `apps/cli/src/generated/types.gen.ts` with `bun run generate`; never hand-edit generated files. Integration tests need the compose test Postgres (`bun run test:db:up` in `apps/api`).\n\n**Scope** — In: protocol type, event-payloads, domain, DTO, contract spec, regenerated openapi/CLI client. Out: runner mapping (US-004), web (US-005); any Prisma migration or new FleetJob column; any non-additive change to `@nathapp/fleet-protocol`.",
+      "acceptanceCriteria": [
+        "postRunStages({ workflowStep: 'branch-review' }) returns `{ workflowStep: 'branch-review' }`.",
+        "postRunStages({ acceptance: 'passed', workflowStep: 'publish' }) returns `{ acceptance: 'passed', workflowStep: 'publish' }`.",
+        "postRunStages({ acceptance: 'passed', workflowStep: 'x'.repeat(33) }) returns `{ acceptance: 'passed' }`.",
+        "postRunStages({ workflowStep: 7 }) returns `undefined`.",
+        "interpretEvent('snapshot', { postRun: { workflowStep: 'final-gates' } }) returns a mirror whose patch is `{ postRun: { workflowStep: 'final-gates' } }`.",
+        "FleetJobDto.from over a job row whose `postRun` is `{ acceptance: 'passed', workflowStep: 'done' }` returns `postRun` equal to `{ acceptance: 'passed', workflowStep: 'done' }`.",
+        "A runner `POST /api/fleet/runner/sync` carrying a `snapshot` event with `postRun: { acceptance: 'running', workflowStep: 'branch-review' }` for a RUNNING job stores the job's `postRun` as exactly `{ acceptance: 'running', workflowStep: 'branch-review' }`.",
+        "For a RUNNING job whose stored `postRun` is `{ acceptance: 'running', workflowStep: 'branch-review' }`, a sync snapshot with `postRun: { acceptance: 'passed', workflowStep: 'publish' }` replaces the stored `postRun` with `{ acceptance: 'passed', workflowStep: 'publish' }`."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "protocol",
+        "fleet"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Additive optional field across protocol, validation, domain and DTO plus generated artefacts; standard patterns.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/sync/event-payloads.ts",
+        "apps/api/src/fleet/sync/event-payloads.spec.ts",
+        "apps/api/src/fleet/jobs/domain/fleet-job.domain.ts",
+        "apps/api/src/fleet/jobs/dto/fleet-job.dto.ts",
+        "apps/api/test/integration/fleet/runner-sync.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "The generated OpenAPI schema for FleetJobPostRunDto lists `workflowStep` as a string property with maxLength 32."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "packages/fleet-protocol/src/index.ts",
+          "reason": "outside the api package: `SnapshotEventPayload.postRun` gains `workflowStep?: string` (D4); additive only."
+        },
+        {
+          "path": "apps/api/src/fleet/fleet-openapi.contract.spec.ts",
+          "reason": "the closed-world assertion at `:19` that `FleetJobPostRunDto` has exactly the properties `acceptance`, `finish`, `regression` now expects `acceptance`, `finish`, `regression`, `workflowStep`; the `postRun` assertion at `:18` is unchanged."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "outside the api package: regenerated by `bun run api:export-spec` for `FleetJobPostRunDto.workflowStep`."
+        },
+        {
+          "path": "apps/cli/src/generated/types.gen.ts",
+          "reason": "outside the api package: regenerated by `bun run generate` for the same field; never hand-edited."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b420302fb66855159d7bc87df5477582c0ee6072"
+    },
+    {
+      "id": "US-004",
+      "title": "Runner mirrors the workflow step",
+      "description": "**Goal** — Have the runner mirror nax's `workflow.step` into the snapshot's `postRun.workflowStep` and fall back to it for `currentPhase` when no story is current.\n\n**Motivation** — After the last story `current` is `null` while nax runs the feature steps, including a CI wait of up to 20 minutes, so the job page shows a blank phase for that stretch.\n\n**Approach** — D5 (runner): in `apps/runner/src/watcher/status-snapshot.ts`, `postRunStages` (`:30-40`) adds `['workflowStep', clip(status.workflow?.step, STAGE_STATUS_MAX)]`. `mapStatusToSnapshot` (`:42-62`) sets `currentPhase` to `status.current?.phase` when it is a string (a `current` without `phase` counts as absent); otherwise, when `status.run.status === 'running'` and `status.workflow` is present, to `clip(status.workflow.step, STAGE_STATUS_MAX)`; otherwise `null`. `currentStoryId` is unchanged (`status.current?.storyId ?? null`). `parseStatusView` already reads `workflow.step` (`apps/runner/src/verdict/status-view.ts`). `Watcher.tick` (`apps/runner/src/watcher/watcher.ts:37-67`) reads `status.json`, maps it with `mapStatusToSnapshot` and calls `sink.snapshot(payload)` when the payload changed. Runner is Bun-only (bun:test). Existing `status-snapshot.spec.ts` cases have no `workflow` block, so their expectations are unchanged.\n\nSEAM-1 (US-003 -> US-004): the runner sends `postRun.workflowStep`, which US-003 adds to the protocol type.\n\n**Scope** — In: apps/runner watcher snapshot mapping. Out: protocol/server (US-003), web (US-005); `current.storyId` mapping is unchanged.",
+      "acceptanceCriteria": [
+        "mapStatusToSnapshot over a running status with `workflow: { step: 'branch-review' }` and no `postRun` returns `postRun` equal to `{ workflowStep: 'branch-review' }`.",
+        "mapStatusToSnapshot over a status with `postRun.acceptance.status` `passed` and `workflow.step` `publish` returns `postRun` equal to `{ acceptance: 'passed', workflowStep: 'publish' }`.",
+        "mapStatusToSnapshot over a status with no `workflow` block and no `postRun` returns no `postRun` key.",
+        "mapStatusToSnapshot over a status whose `workflow.step` is 40 characters returns a `postRun.workflowStep` of its first 32 characters.",
+        "mapStatusToSnapshot over a running status with `current: null` and `workflow.step` `final-gates` returns `currentPhase: 'final-gates'` and `currentStoryId: null`.",
+        "mapStatusToSnapshot over a running status with `current: { storyId: 'US-002', phase: 'review' }` and `workflow.step` `repo-gates` returns `currentPhase: 'review'` and `currentStoryId: 'US-002'`.",
+        "mapStatusToSnapshot over a status with `run.status` `completed`, `current: null` and `workflow.step` `done` returns `currentPhase: null`.",
+        "mapStatusToSnapshot over a running status with `current: null` and no `workflow` block returns `currentPhase: null`.",
+        "Watcher.tick over a temp `status.json` with `run.status` `running`, `current: null` and `workflow: { step: 'branch-review', stories: {} }` calls `sink.snapshot` once with a payload whose `postRun.workflowStep` and `currentPhase` are both `branch-review`.",
+        "After a Watcher.tick that sent `postRun.workflowStep` `branch-review`, rewriting `status.json` with `workflow.step` `final-gates` and ticking again calls `sink.snapshot` a second time with `postRun.workflowStep` `final-gates`, and a third tick with the file unchanged calls it no more."
+      ],
+      "tags": [
+        "feature",
+        "runner",
+        "fleet"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Small mapping change in one file with a watcher integration check.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "simple",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/runner/src/watcher/status-snapshot.ts",
+        "apps/runner/src/watcher/status-snapshot.spec.ts",
+        "apps/runner/src/watcher/watcher.ts",
+        "apps/runner/src/watcher/watcher.spec.ts",
+        "apps/runner/src/verdict/status-view.ts"
+      ],
+      "suggestedCriteria": [
+        "mapStatusToSnapshot over a running status whose `current` has no `phase` and whose `workflow.step` is `gate-repair` returns `currentPhase: 'gate-repair'`."
+      ],
+      "workdir": "apps/runner",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "38994be5260c8e706cb02b2f1556e784aa37887e"
+    },
+    {
+      "id": "US-005",
+      "title": "Web workflow strip",
+      "description": "**Goal** — Give a workflow-mode RUN a five-stage pipeline strip (`stories`, `acceptance`, `review`, `gates`, `publish`) driven by `postRun.workflowStep`.\n\n**Motivation** — The strip (`Stories -> Acceptance -> Regression -> Finish`) shows a regression stage workflow mode skips and a finish stage it replaces.\n\n**Approach** — D6 (web strip): `pipelineStages` (`apps/web/lib/fleet-story-graph.ts:184-204`) recognises a workflow-mode RUN when any of these holds: `job.postRun?.workflowStep` is a string; `job.workflow != null` (`StageJob`, `:181`, gains an optional `workflow?: FleetJobDto['workflow']`, so a caller that omits it is not workflow mode); `job.currentPhase` is one of `workflow`, `implement`, `gates`, `review`, `rereview`, `suite`, `residual`, `fix`, `closed`. A workflow-mode RUN gets five stages, `stories`, `acceptance`, `review`, `gates`, `publish`. `stories` and `acceptance` keep today's rules. The step groups are: `review` = `repo-gates`, `branch-review`, `branch-fix`, `branch-rereview`, `adjudicate`; `gates` = `final-gates`, `gate-repair`; `publish` = `publish`, `done`. With step `s` and `active = isActiveJobState(job.state)`:\n- `s` is `done`: `review` and `gates` are `passed`; `publish` follows `job.workflow?.outcome`: `ready` gives `passed`, `local-only` gives `failed`, `draft` gives the raw `draft`; with no workflow result (it is written only at bundle ingest) `publish` is `running` when active (for example UPLOADING) and `unknown` otherwise.\n- `s` is in a group: groups before it are `passed`; its own group is `running` when active, else `failed`; later groups are `pending` when active, else `skipped`.\n- `s` is absent or in no group: all three are `pending` when active, else `unknown`.\nAny other RUN keeps today's four stages. `StageKey` and `STAGE_KEYS` gain the new keys; the strip labels them from `fleet.jobs.detail.pipeline.stage.{review,gates,publish}` (en `Review`, `Gates`, `Publish`). The web `FleetJobPostRunDto` type (`apps/web/lib/fleet-types.ts:205-209`) gains `workflowStep?: string`. Rule R4: nax text the web does not recognise is shown raw.\n\n**Files/updates** — `apps/web/i18n/locales/en.json` and `zh.json` gain the three stage keys. Fixture changes: `apps/web/tests/components/fleet-job-pipeline.spec.ts` base job (`:9`) uses `currentPhase: 'implement'`, which D6 reads as workflow mode, so it changes to `currentPhase: 'execution'` and the four-stage test at `:65-75` keeps testing a non-workflow RUN; `apps/web/tests/e2e/fleet-story-graph.e2e.spec.ts` snapshots (`:44`, `:98`) change `currentPhase: 'implement'` to `'execution'` since `:76-77` assert the `regression` and `finish` stages. A caller that passes the job DTO to `pipelineStages` supplies `workflow` from `FleetJobDto`; a caller that omits it is not workflow mode via that signal.\n\nSEAM-2 (US-003 -> US-005): the web reads `postRun.workflowStep` from the job DTO US-003 extends.\n\n**Scope** — In: fleet-story-graph.ts, fleet-types.ts, PipelineStrip.vue, locale files, tests. Out: phase labels (US-006), server/runner; per-story `state`/`round` from `workflow.stories`, `parallel.activeStories`, and telling a pipeline-mode RUN with story phase `implement`/`review` apart from workflow mode.",
+      "acceptanceCriteria": [
+        "pipelineStages over a RUNNING RUN with `postRun: { workflowStep: 'branch-review' }` returns stage keys `stories`, `acceptance`, `review`, `gates`, `publish`, in that order.",
+        "For a RUNNING RUN with `postRun: { workflowStep: 'branch-review' }`, pipelineStages returns `review` `running`, `gates` `pending` and `publish` `pending`.",
+        "pipelineStages over a RUNNING RUN with step `gate-repair` returns `review` `passed`, `gates` `running` and `publish` `pending`.",
+        "pipelineStages over a COMPLETED RUN with step `done` and `workflow.outcome` `ready` returns `review`, `gates` and `publish` all `passed`.",
+        "pipelineStages over an ESCALATED RUN with step `done` and `workflow.outcome` `draft` returns a `publish` stage `{ key: 'publish', state: 'draft', known: false, variant: 'outline' }`.",
+        "pipelineStages over a FAILED RUN with step `done` and `workflow.outcome` `local-only` returns `publish` `failed`.",
+        "pipelineStages over a FAILED RUN with step `final-gates` returns `review` `passed`, `gates` `failed` and `publish` `skipped`.",
+        "pipelineStages over a RUNNING RUN with `postRun: null`, `workflow: null` and `currentPhase: 'implement'` returns the five workflow stage keys with `review`, `gates` and `publish` all `pending`.",
+        "pipelineStages over a RUNNING RUN with step `mystery` returns `review`, `gates` and `publish` all `pending`.",
+        "pipelineStages over a RUNNING RUN with `currentPhase: 'execution'`, `workflow: null` and `postRun: { acceptance: 'passed', regression: 'running' }` returns the four stage keys `stories`, `acceptance`, `regression`, `finish` with the states it returned before D6.",
+        "The pipeline strip rendered for a RUNNING RUN with `postRun: { workflowStep: 'branch-review' }` in the en locale shows the stage labels `Review`, `Gates` and `Publish`.",
+        "pipelineStages over a FAILED RUN with step `done` and `workflow: null` returns `publish` `unknown`.",
+        "pipelineStages over an UPLOADING RUN with step `done` and `workflow: null` returns `publish` `running`."
+      ],
+      "tags": [
+        "feature",
+        "web",
+        "fleet",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "State-mapping logic in one lib plus label keys, type and fixture updates; clear rules.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/web/lib/fleet-story-graph.ts",
+        "apps/web/lib/fleet-types.ts",
+        "apps/web/components/fleet/story-graph/PipelineStrip.vue",
+        "apps/web/tests/lib/fleet-story-graph.spec.ts",
+        "apps/web/tests/components/fleet-job-pipeline.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "pipelineStages over a RUN whose job omits the `workflow` field and has no `workflowStep` and a non-workflow `currentPhase` returns the four non-workflow stage keys."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "gains `fleet.jobs.detail.pipeline.stage.{review,gates,publish}` (`Review`, `Gates`, `Publish`)."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "the same three keys in Chinese."
+        },
+        {
+          "path": "apps/web/lib/fleet-types.ts",
+          "reason": "`FleetJobPostRunDto` gains `workflowStep?: string`."
+        },
+        {
+          "path": "apps/web/tests/components/fleet-job-pipeline.spec.ts",
+          "reason": "the base job (`:9`) uses `currentPhase: 'implement'`, which D6 reads as workflow mode; the fixture changes to `currentPhase: 'execution'` so the four-stage test at `:65-75` keeps testing a non-workflow RUN."
+        },
+        {
+          "path": "apps/web/tests/e2e/fleet-story-graph.e2e.spec.ts",
+          "reason": "both snapshots (`:44`, `:98`) send `currentPhase: 'implement'`, which D6 reads as workflow mode, while `:76-77` assert the `regression` and `finish` stages; the snapshots change to `currentPhase: 'execution'` so the four-stage assertions keep testing a non-workflow RUN."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "68c8429565fc45b2f1a0c956316d4fda2aa2b7a3"
+    },
+    {
+      "id": "US-006",
+      "title": "Web phase labels",
+      "description": "**Goal** — Render known nax phases and workflow steps as localized labels across the job progress, stories, story graph node and dashboard runs table, and any other phase raw.\n\n**Motivation** — With workflow steps now appearing as the job phase, the page would show raw nax identifiers such as `branch-review`.\n\n**Approach** — D7 (web phase labels): a new `apps/web/lib/fleet-phase.ts` exports `KNOWN_PHASES` (the nax pipeline stage names `queue-check`, `routing`, `constitution`, `context`, `prompt`, `optimizer`, `execution`, `completion`, `workflow`; the workflow phases `implement`, `gates`, `review`, `rereview`, `suite`, `residual`, `fix`, `closed`; the feature steps `repo-gates`, `branch-review`, `branch-fix`, `branch-rereview`, `adjudicate`, `final-gates`, `gate-repair`, `publish`, `done`) and `phaseLabelKey(phase: string): string | null`, returning `fleet.jobs.phases.<phase>` for a known phase and `null` otherwise. `FleetJobProgress.vue`, `FleetJobStories.vue`, `story-graph/StoryNode.vue` (`:52-53`) and `dashboard/ActiveRunsTable.vue` render a known phase through `t(key)` and any other phase raw. en labels are sentence case of the name (`branch-review` -> `Branch review`, `implement` -> `Implement`, `final-gates` -> `Final gates`), with zh translations alongside. Rule R4: nax text the web does not recognise is shown raw. SEAM-3: `phaseLabelKey` is consumed by four components; one AC per component.\n\n**Files/updates** — Create `apps/web/lib/fleet-phase.ts`, `apps/web/tests/lib/fleet-phase.spec.ts` and `apps/web/tests/components/fleet-job-progress.spec.ts`. `apps/web/i18n/locales/en.json` and `zh.json` gain `fleet.jobs.phases.<phase>` for every `KNOWN_PHASES` entry. Update `apps/web/tests/components/fleet-job-stories.spec.ts` (phase assertion at `:35` expects the label `Implement` instead of raw `implement`) and `apps/web/tests/components/fleet-dashboard-tables.spec.ts` (assertion at `:41` expects `Review` instead of raw `review`).\n\n**Scope** — In: web phase label helper, four components, locale files, tests. Out: the timeline (`FleetJobTimeline.vue`, `summarizeEvent`) and the CLI `fleet-job` view keep the raw phase.\n\n**Interface**\n```typescript\nexport const KNOWN_PHASES: readonly string[]\nexport function phaseLabelKey(phase: string): string | null\n```",
+      "acceptanceCriteria": [
+        "phaseLabelKey('branch-review') returns `fleet.jobs.phases.branch-review`.",
+        "phaseLabelKey('half-built') returns `null`.",
+        "For every entry of KNOWN_PHASES, the en and zh locale files both define a non-empty string at `fleet.jobs.phases.<entry>`.",
+        "FleetJobProgress rendered for a job with `currentPhase: 'final-gates'` in the en locale shows `Final gates` in its phase field.",
+        "FleetJobProgress rendered for a job with `currentPhase: 'half-built'` shows `half-built` raw in its phase field.",
+        "ActiveRunsTable rendered with a run whose `currentPhase` is `review` in the en locale shows `Review` in that row.",
+        "FleetJobStories rendered for an active job whose current story's phase is `implement` in the en locale shows `Implement` in the story's phase text.",
+        "StoryNode rendered for the current story of an active job whose phase is `implement` in the en locale shows `Implement` in its phase text."
+      ],
+      "tags": [
+        "feature",
+        "web",
+        "fleet",
+        "i18n"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "New small helper consumed by four components plus en/zh locale keys and test updates; standard patterns.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/web/components/fleet/FleetJobProgress.vue",
+        "apps/web/components/fleet/FleetJobStories.vue",
+        "apps/web/components/fleet/dashboard/ActiveRunsTable.vue",
+        "apps/web/components/fleet/story-graph/StoryNode.vue",
+        "apps/web/tests/components/fleet-job-stories.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/lib/fleet-phase.ts",
+        "apps/web/tests/lib/fleet-phase.spec.ts",
+        "apps/web/tests/components/fleet-job-progress.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "phaseLabelKey('') returns `null`."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "gains `fleet.jobs.phases.<phase>` for every `KNOWN_PHASES` entry."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "the same keys in Chinese."
+        },
+        {
+          "path": "apps/web/tests/components/fleet-job-stories.spec.ts",
+          "reason": "the phase assertion at `:35` expects the label `Implement` instead of the raw `implement` (D7)."
+        },
+        {
+          "path": "apps/web/tests/components/fleet-dashboard-tables.spec.ts",
+          "reason": "the phase assertion at `:41` expects the label `Review` instead of the raw `review` (D7)."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "76d5fda7be63525574460cb456a64b84eb554137"
+    }
+  ],
+  "analysis": "Two independent fixes in a Bun/Turborepo monorepo (api NestJS+Vitest, runner bun:test, web Nuxt+Jest, cli generated client).\n\nTrack A (#286, US-001/US-002, apps/api): the knowledge index loses whole files to the embedder. apps/api/src/fleet/knowledge/markdown-chunker.ts keeps blank-line-free blocks whole (up to 20,055 chars vs MAX_CHUNK_CHARS = 2000); splitSections (:261-271) and splitText (:273-286) must re-split packed parts over the cap by walking lines, tracking fences like textBlocks (:289-321) via fenceMarker (:197-202), keeping glueHeadingBlock (:323-327) and capping buildSummary (:330-336). Surrogate pairs must never be cut. Existing AC-9 tests in markdown-chunker.spec.ts (:127-145) assert the old uncapped behaviour and must be updated. Ollama refused the oversize request and KnowledgeRepoIndexer.rows (knowledge-repo-indexer.ts:122-152) stored every chunk unembedded. OllamaEmbeddingProvider.embedBatch (apps/api/src/rag/providers/ollama-embedding.provider.ts) currently does Promise.all of embed; it must become one POST /api/embed {model,input,truncate:true}. embed and /api/embeddings stay untouched (ticket RAG, R3). The indexer must embed in sequential batches of 16 with EMBED_REQUEST_TIMEOUT_MS=60_000 and FILE_EMBED_DEADLINE_MS=300_000 (replacing EMBEDDING_TIMEOUT_MS=120_000), per-chunk fallback through embed, one warning per file (LEASE_MS=900_000 at :18 stays above the deadline; retry of files with unembeddedCount>0 at :67/:82 unchanged). Risks: fence-budget arithmetic, off-by-one at the 2000 cap, fake-timer tests for the race/deadline (injected this.clock()), fixture() in knowledge-repo-indexer.spec.ts (:19-41) needs an embed mock and AC-6 (:97-111) updates.\n\nTrack B (#206, US-003..US-006): mirror nax workflow.step. R1 no Prisma migration (FleetJob.postRun is Json?). R2 protocol changes additive only. US-003 (api): add workflowStep?: string to packages/fleet-protocol/src/index.ts:163 SnapshotEventPayload.postRun, to POST_RUN_STAGES (apps/api/src/fleet/sync/event-payloads.ts:32, validated by STAGE_STATUS_RE :33), FleetJobPostRun (fleet-job.domain.ts:28-32) and FleetJobPostRunDto (fleet-job.dto.ts:20-24, maxLength 32). Regenerate openapi.json with `bun run api:export-spec` and apps/cli/src/generated via `bun run generate` (never hand-edit generated files); fleet-openapi.contract.spec.ts:19 closed-world list gains workflowStep. Runner-sync integration tests need the compose test Postgres (`bun run test:db:up` in apps/api). US-004 (runner): apps/runner/src/watcher/status-snapshot.ts postRunStages (:30-40) and mapStatusToSnapshot (:42-62); parseStatusView already reads workflow.step. Watcher.tick (watcher.ts:37-67) sends a snapshot only when payload changed. US-005 (web): pipelineStages (apps/web/lib/fleet-story-graph.ts:184-204) gains a workflow-mode five-stage strip; StageKey/STAGE_KEYS extended; i18n keys fleet.jobs.detail.pipeline.stage.{review,gates,publish} in en/zh; fleet-types.ts:205-209 gains workflowStep; fixtures in fleet-job-pipeline.spec.ts and tests/e2e/fleet-story-graph.e2e.spec.ts switch currentPhase from 'implement' to 'execution' so they keep testing the four-stage non-workflow RUN. US-006 (web): new apps/web/lib/fleet-phase.ts (KNOWN_PHASES, phaseLabelKey), used by FleetJobProgress.vue, FleetJobStories.vue, story-graph/StoryNode.vue (:52-53) and dashboard/ActiveRunsTable.vue; en/zh keys fleet.jobs.phases.*; update assertions in fleet-job-stories.spec.ts:35 and fleet-dashboard-tables.spec.ts:41. Unknown text is shown raw (R4). Dependencies: US-004 and US-005 depend on US-003 (protocol/DTO field). US-001, US-002, US-003, US-006 are independent. Repo rules: no hand edits of generated files or AGENTS.md; i18n for api and web are separate systems; unit tests in src/**/*.spec.ts, integration in test/integration, no us-XXX test folders. Code style: immutability, no console.log, small files.",
+  "outOfScope": [
+    "Splitting the per-file embedding budget across the pass lease, or renewing the lease mid-file; the 300 s file deadline stays below the 900 s lease instead.",
+    "Changing ticket RAG embedding (`EmbeddingService.embed`, `OllamaEmbeddingProvider.embed`, `/api/embeddings`).",
+    "Re-chunking files already indexed with every chunk embedded; only files with unembedded chunks are retried, and an operator can clear a repository's `KnowledgeRepoFile` rows to force a full re-index.",
+    "The deferred #285 minors: DB-free LanceDB tests sharing a DB-gated file, the full-text index rebuild on every lexical failure, and `empty` describing retrieval rather than corpus existence.",
+    "An Ollama CPU limit, or moving koda-wk to a native Ollama; that is deployment configuration outside this repository.",
+    "Showing nax `workflow.stories` per-story `state` and `round` on the story graph.",
+    "Showing `parallel.activeStories`; nax workflow mode never writes it.",
+    "A Prisma migration or a new `FleetJob` column for the workflow step.",
+    "Translating raw nax stage states other than the existing `KNOWN_STAGE_STATES`.",
+    "Non-additive changes to `@nathapp/fleet-protocol`.",
+    "Translating phases in the job timeline (`FleetJobTimeline.vue`, `summarizeEvent`); timeline entries keep the raw phase.",
+    "Telling a pipeline-mode RUN whose story phase is `implement` or `review` apart from a workflow-mode RUN; D6 reads those phases as workflow mode, which nax 0.88.0 pipeline mode never writes.",
+    "US-002 only: concurrency above one embedding request at a time.",
+    "US-006 only: the CLI `fleet-job` view keeps printing the raw phase."
+  ],
+  "routingProfile": "cross-agent+cc-plan"
+}
