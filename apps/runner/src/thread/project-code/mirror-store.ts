@@ -23,15 +23,37 @@ export type MirrorState = 'bare' | 'not-a-mirror';
  * - `not-a-mirror`: git read the path and it is not that mirror — never initialized, left half-made by an interrupted
  *   `init`, a working tree, or plain junk. It holds no pin and no session can read it, so replacing it loses nothing.
  *
- * Anything else — a malformed global git config, an unreadable object store, a missing `git` — **throws**. That is an
- * operational failure of the machine, not evidence about the mirror: reading it as "invalid" deleted (prune) or
- * re-initialized (refresh) healthy mirrors with live pins (review B4). Fail safe: keep the mirror, report the failure.
+ * Anything else — a malformed global git config, an unreadable `HEAD`, `objects` or `refs`, a missing `git` —
+ * **throws**. That is an operational failure of the machine, not evidence about the mirror: reading it as "invalid"
+ * deleted (prune) or re-initialized (refresh) healthy mirrors with live pins (review B4). Fail safe: keep the mirror,
+ * report the failure.
+ *
+ * Git prints "not a git repository" for an unreadable `HEAD`, `objects` or `refs` too, so that message alone is
+ * ambiguous: it means `not-a-mirror` only when the filesystem confirms part of the repository skeleton is absent.
  */
 export async function probeMirror(git: Git, options: GitOptions): Promise<MirrorState> {
   const probe = await git.run(['rev-parse', '--is-bare-repository'], options);
   if (probe.code === 0) return probe.stdout.trim() === 'true' ? 'bare' : 'not-a-mirror';
-  if (NOT_A_REPOSITORY.test(probe.stderr)) return 'not-a-mirror';
+  if (NOT_A_REPOSITORY.test(probe.stderr) && (await skeletonIncomplete(options.cwd))) return 'not-a-mirror';
   throw new GitError(['rev-parse', '--is-bare-repository'], probe);
+}
+
+const SKELETON = ['HEAD', 'objects', 'refs'] as const;
+
+/**
+ * True only when some entry of a bare repository's skeleton is absent. An entry that exists, or that cannot be
+ * stat-ed (a permission failure), is no evidence of an interrupted init, so a complete skeleton git still rejects is
+ * kept rather than replaced.
+ */
+async function skeletonIncomplete(cwd: string): Promise<boolean> {
+  const present = await Promise.all(SKELETON.map((entry) => lstat(join(cwd, entry)).then(
+    () => true,
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return false;
+      throw error;
+    },
+  )));
+  return present.includes(false);
 }
 
 /**

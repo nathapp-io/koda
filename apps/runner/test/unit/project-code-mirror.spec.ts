@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ProjectRepoAssign } from '@nathapp/fleet-protocol';
 import { createGit, type Git } from '../../src/executor/git';
@@ -213,6 +213,31 @@ test('B4: a real-git probe under a malformed global config preserves the mirror 
   expect(await git(f.dir, 'rev-parse', 'refs/koda/pins/j1')).toBe(first.sha);
   expect(await git(f.dir, 'cat-file', 'blob', `${first.sha}:hello.txt`)).toBe('first');
 });
+
+// Root reads through mode 000, so the unreadable-path cases below only reproduce for an unprivileged user.
+const asRoot = process.getuid?.() === 0;
+
+for (const entry of ['HEAD', 'objects', 'refs']) {
+  test.skipIf(asRoot)(`B4: an unreadable ${entry} keeps the mirror and its live pin`, async () => {
+    const f = await fixture();
+    const first = await f.refresh({ pinId: 'j1' });
+    if (!first.ok) throw new Error('refresh failed');
+    const path = join(f.dir, entry);
+    await chmod(path, 0o000);
+    try {
+      // Git says "not a git repository" here, exactly as it does for a path that never was one.
+      const probe = await f.input.git.run(['rev-parse', '--is-bare-repository'], { cwd: f.dir });
+      expect(probe.stderr).toContain('not a git repository');
+      expect(await f.refresh({ pinId: 'j2' })).toEqual({ ok: false, reason: 'fetch failed' });
+      await expect(f.pruneMirror(['j1'])).rejects.toThrow();
+      expect(existsSync(f.dir)).toBe(true);
+    } finally {
+      await chmod(path, entry === 'HEAD' ? 0o644 : 0o755);
+    }
+    expect(await git(f.dir, 'rev-parse', 'refs/koda/pins/j1')).toBe(first.sha);
+    expect(await git(f.dir, 'cat-file', 'blob', `${first.sha}:hello.txt`)).toBe('first');
+  });
+}
 
 test('B2: a failed initialization leaves no half-made mirror and the next refresh recovers', async () => {
   const f = await fixture();
