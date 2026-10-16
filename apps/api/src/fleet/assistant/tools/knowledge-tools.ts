@@ -5,6 +5,8 @@ import { MemoryGovernanceService } from '../../../memory/memory-governance.servi
 import { decodeTimelineCursor } from '../../../memory/timeline-cursor';
 import { TimelineService, type TimelineEvent } from '../../../memory/timeline.service';
 import { TicketsService } from '../../../tickets/tickets.service';
+import { KnowledgeIndexService } from '../../knowledge/knowledge-index.service';
+import { KnowledgeSearchService } from '../../knowledge/knowledge-search.service';
 import { AssistantToolRegistry } from '../assistant-tool.registry';
 import {
   KODA_MEMORY_SEARCH,
@@ -13,11 +15,12 @@ import {
   type TimelineEventType,
 } from '../koda-tool-descriptors';
 import { ToolInputError, type AssistantTool, type ToolContext } from '../assistant-tool.types';
+import { getDocTool, kbSearchTool } from './kb-tools';
 
 /**
- * Fleet S5b US-004/US-005: the knowledge read tools. The project is the thread's project (S5b-R7) — no tool takes a project
- * argument, and every read is scoped by `ctx.projectId`, so an item or an event of another project can never be named. Input is
- * parsed by hand (1b-D5); the descriptor's `inputSchema` is what the model sees.
+ * Fleet S5b US-004/US-005/US-006: the knowledge read tools. The project is the thread's project (S5b-R7) — no tool takes a project
+ * argument, and every read is scoped by `ctx.projectId`, so an item, an event or a document of another project can never be named.
+ * Input is parsed by hand (1b-D5); the descriptor's `inputSchema` is what the model sees.
  */
 
 /** Every list tool asks the API for one page of 20 (1b §Tool catalog). */
@@ -228,7 +231,7 @@ export function timelineTool(deps: { timeline: TimelineService; tickets: Tickets
   };
 }
 
-/** The S5b US-004/US-005 tool group (1b-D7): registers the knowledge tools with the registry at bootstrap. */
+/** The S5b US-004/US-005/US-006 tool group (1b-D7): registers the knowledge tools with the registry at bootstrap. */
 @Injectable()
 export class KnowledgeTools implements OnModuleInit {
   constructor(
@@ -236,9 +239,17 @@ export class KnowledgeTools implements OnModuleInit {
     private readonly memory: MemoryGovernanceService,
     private readonly timeline: TimelineService,
     private readonly tickets: TicketsService,
+    private readonly knowledge: KnowledgeSearchService,
+    private readonly index: KnowledgeIndexService,
   ) {}
 
   onModuleInit(): void {
-    this.registry.register(memorySearchTool(this.memory), timelineTool({ timeline: this.timeline, tickets: this.tickets }));
+    const docs = { search: this.knowledge, index: this.index };
+    this.registry.register(
+      memorySearchTool(this.memory),
+      timelineTool({ timeline: this.timeline, tickets: this.tickets }),
+      kbSearchTool(docs),
+      getDocTool(docs),
+    );
   }
 }

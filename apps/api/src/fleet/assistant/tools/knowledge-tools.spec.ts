@@ -1,6 +1,9 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
+import { KODA_TOOL_LIMITS } from '@nathapp/fleet-protocol';
+import { KnowledgeIndexService } from '../../knowledge/knowledge-index.service';
+import { KnowledgeSearchService } from '../../knowledge/knowledge-search.service';
 import { MemoryGovernanceService } from '../../../memory/memory-governance.service';
 import type { MemoryItem } from '../../../memory/memory-item-repository';
 import { encodeTimelineCursor } from '../../../memory/timeline-cursor';
@@ -9,7 +12,7 @@ import { TimelineService } from '../../../memory/timeline.service';
 import { TicketsService } from '../../../tickets/tickets.service';
 import { AssistantToolRegistry } from '../assistant-tool.registry';
 import { ToolInputError, type ToolContext } from '../assistant-tool.types';
-import { KODA_TOOL_DESCRIPTORS } from '../koda-tool-descriptors';
+import { KODA_TOOL_DESCRIPTORS, KNOWLEDGE_TOOL_DESCRIPTORS } from '../koda-tool-descriptors';
 import { KnowledgeTools, memorySearchTool, timelineTool } from './knowledge-tools';
 
 const TOOL_NAMES = ['koda_memory_search', 'koda_timeline'] as const;
@@ -18,6 +21,8 @@ const TOOL_NAMES = ['koda_memory_search', 'koda_timeline'] as const;
 const stubMemory = {} as MemoryGovernanceService;
 const stubTimeline = {} as TimelineService;
 const stubTickets = {} as TicketsService;
+const stubSearch = {} as KnowledgeSearchService;
+const stubIndex = {} as KnowledgeIndexService;
 
 /** The `reason` a parser refuses with; fails loudly when it accepts or throws something else. */
 function reasonOf(run: () => unknown): string {
@@ -80,6 +85,8 @@ describe('knowledge tools (US-004)', () => {
         { provide: MemoryGovernanceService, useValue: stubMemory },
         { provide: TimelineService, useValue: stubTimeline },
         { provide: TicketsService, useValue: stubTickets },
+        { provide: KnowledgeSearchService, useValue: stubSearch },
+        { provide: KnowledgeIndexService, useValue: stubIndex },
       ],
     }).compile();
     await module.init();
@@ -101,6 +108,21 @@ describe('knowledge tools (US-004)', () => {
 
   it('declares project membership as the permission of every knowledge tool', () => {
     for (const name of TOOL_NAMES) expect(registry.get(name)?.permission).toEqual({ kind: 'member' });
+  });
+
+  it('AC-1: the knowledge catalog names all four tools in order, and the catalog stays inside the tool limit', () => {
+    expect(KNOWLEDGE_TOOL_DESCRIPTORS.map((descriptor) => descriptor.name))
+      .toEqual(['koda_memory_search', 'koda_timeline', 'koda_kb_search', 'koda_get_doc']);
+    expect(KODA_TOOL_DESCRIPTORS.length).toBeLessThanOrEqual(KODA_TOOL_LIMITS.maxTools);
+    expect(new Set(KODA_TOOL_DESCRIPTORS.map((descriptor) => descriptor.name)).size).toBe(KODA_TOOL_DESCRIPTORS.length);
+  });
+
+  it('AC-1: registers the two documentation tools with the catalog entries and member permission', () => {
+    for (const name of ['koda_kb_search', 'koda_get_doc']) {
+      const tool = registry.get(name);
+      expect(tool?.descriptor).toBe(KODA_TOOL_DESCRIPTORS.find((descriptor) => descriptor.name === name));
+      expect(tool?.permission).toEqual({ kind: 'member' });
+    }
   });
 
   it('AC-11: the parser refuses each invalid field with its own reason', () => {

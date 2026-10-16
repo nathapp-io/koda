@@ -2,5 +2,6 @@
   "disabled": { "409": "Repository knowledge indexing is disabled" },
   "unavailable": { "409": "The knowledge store is unavailable" },
   "repoNotFound": { "404": "Repository not found in this project" },
+  "docNotFound": { "404": "Document not found in the project's knowledge index" },
   "input": { "-2": "Invalid knowledge search input: {reason}", "400": "Invalid knowledge search input: {reason}" }
 }
