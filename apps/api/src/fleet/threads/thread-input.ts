@@ -2,6 +2,18 @@ import { ValidationAppException } from '@nathapp/nestjs-common';
 import { FEATURE_RE, GIT_REF_RE } from '../jobs/dispatch-input';
 import { MODEL_ID_RE, type ChatThreadKind, type ThreadBackend } from '../common/thread-jobs';
 
+export interface CreateWorkspaceThreadInput { kind?: ChatThreadKind; repoId?: string; feature?: string; baseRef?: string; homeProject?: string; title: string; maxCostUsd?: number; backend: ThreadBackend }
+export interface NormalizedCreateWorkspaceThread { kind: 'WORKSPACE'; homeProject?: string; title: string; maxCostUsd: string; backend: ThreadBackend & { kind: 'native' } }
+
+/** Workspace-only fields precede the shared project-thread validation tail. */
+export function validateCreateWorkspaceThread(value: CreateWorkspaceThreadInput): NormalizedCreateWorkspaceThread {
+  if (value.kind !== undefined && value.kind !== 'WORKSPACE') fail('kind');
+  if (present(value.repoId) || present(value.feature) || present(value.baseRef)) fail('workspaceFields');
+  if (present(value.homeProject) && (typeof value.homeProject !== 'string' || value.homeProject.length < 1 || value.homeProject.length > 100)) fail('homeProject');
+  const normalized = validateCreateThread({ kind: 'PROJECT', title: value.title, maxCostUsd: value.maxCostUsd, backend: value.backend }, 'main');
+  return { ...normalized, kind: 'WORKSPACE', ...(present(value.homeProject) ? { homeProject: value.homeProject } : {}) };
+}
+
 export interface CreateThreadInput { kind?: ChatThreadKind; repoId?: string; feature?: string; baseRef?: string; title: string; maxCostUsd?: number; backend: ThreadBackend }
 
 /**

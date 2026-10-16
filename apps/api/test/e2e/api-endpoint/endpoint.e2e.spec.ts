@@ -3290,6 +3290,25 @@ describeIntegration('API Integration Tests', () => {
       githubSpies = [];
     });
 
+    it('workspace POST /threads creates a personal thread in the explicit home project', async () => {
+      const res = await request(httpServer).post('/api/threads').set('Authorization', `Bearer ${world.tokens.dev}`)
+        .send({ title: 'Workspace', backend: { kind: 'native' }, homeProject: projectSlug }).expect(201);
+      const thread = body<{ id: string; kind: string; homeProject: { slug: string } }>(res);
+      try {
+        expect(thread).toMatchObject({ kind: 'WORKSPACE', homeProject: { slug: projectSlug } });
+        expect(await db().chatThread.findUniqueOrThrow({ where: { id: thread.id } })).toMatchObject({ kind: 'WORKSPACE', projectId: world.projectId, createdById: world.ids.dev });
+      } finally { await db().chatThread.delete({ where: { id: thread.id } }); }
+    });
+
+    it('workspace POST /threads refuses repo fields and non-user principals', async () => {
+      const res = await request(httpServer).post('/api/threads').set('Authorization', `Bearer ${world.tokens.dev}`)
+        .send({ title: 'Workspace', backend: { kind: 'native' }, repoId: world.repoId }).expect(400);
+      refusal(res, 'threads.input.-2', { reason: 'workspaceFields' });
+      const agentRes = await request(httpServer).post('/api/threads').set('Authorization', `Bearer ${agentApiKey}`)
+        .send({ title: 'Workspace', backend: { kind: 'native' } }).expect(403);
+      refusal(agentRes, 'threads.principal.403');
+    });
+
     it('US-003 AC1: creates an active thread with repo defaults and caller identity', async () => {
       const res = await createThread('add-auth').expect(201);
       const thread = body<{ id: string; status: string; createdById: string; baseRef: string; specPath: string; maxCostUsd: string }>(res);

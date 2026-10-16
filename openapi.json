@@ -9039,6 +9039,43 @@
         ]
       }
     },
+    "/api/threads": {
+      "post": {
+        "operationId": "WorkspaceThreadsController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWorkspaceThreadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceThreadDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a personal workspace chat thread",
+        "tags": [
+          "fleet threads"
+        ]
+      }
+    },
     "/api/projects/{slug}/threads": {
       "post": {
         "operationId": "ThreadsController_create",
@@ -16763,6 +16800,250 @@
           "runners",
           "providers",
           "profiles"
+        ]
+      },
+      "CreateWorkspaceThreadDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "enum": [
+              "WORKSPACE"
+            ],
+            "type": "string"
+          },
+          "repoId": {
+            "type": "string",
+            "description": "Not allowed on workspace threads"
+          },
+          "feature": {
+            "type": "string",
+            "description": "Not allowed on workspace threads"
+          },
+          "baseRef": {
+            "type": "string",
+            "description": "Not allowed on workspace threads"
+          },
+          "homeProject": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "maxCostUsd": {
+            "type": "number",
+            "default": 5
+          },
+          "backend": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "title",
+          "backend"
+        ]
+      },
+      "WorkspaceThreadDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "REPO",
+              "PROJECT",
+              "WORKSPACE"
+            ],
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The thread's project; for a WORKSPACE thread, its home project"
+          },
+          "repoId": {
+            "type": "string",
+            "nullable": true
+          },
+          "baseRef": {
+            "type": "string",
+            "nullable": true
+          },
+          "feature": {
+            "type": "string",
+            "nullable": true
+          },
+          "title": {
+            "type": "string"
+          },
+          "createdById": {
+            "type": "string"
+          },
+          "runnerId": {
+            "type": "string",
+            "nullable": true
+          },
+          "backend": {
+            "type": "object"
+          },
+          "status": {
+            "type": "string"
+          },
+          "archivedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "maxCostUsd": {
+            "type": "string"
+          },
+          "costUsd": {
+            "type": "string"
+          },
+          "tokens": {
+            "type": "object",
+            "nullable": true
+          },
+          "specPath": {
+            "type": "string",
+            "nullable": true
+          },
+          "pendingQuestion": {
+            "type": "object",
+            "nullable": true
+          },
+          "session": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "jobId": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "live",
+                  "closed",
+                  "failed"
+                ]
+              },
+              "resumed": {
+                "type": "boolean"
+              },
+              "contextReset": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "nullable": true
+              },
+              "at": {
+                "type": "string"
+              },
+              "stale": {
+                "type": "boolean"
+              },
+              "kodaToolsUnavailableOn": {
+                "type": "string",
+                "description": "Set when the hosting runner does not advertise kodaTools (S5b 1b-D4)"
+              },
+              "projectCodeUnavailableOn": {
+                "type": "string",
+                "description": "Set when the hosting runner does not advertise projectCode on a PROJECT thread (S5b 1c-b-D8)"
+              }
+            }
+          },
+          "lastActivityAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "activeJob": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            }
+          },
+          "writtenPaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "publishedSha": {
+            "type": "string",
+            "nullable": true
+          },
+          "specPublished": {
+            "type": "boolean"
+          },
+          "lastWrite": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true
+          },
+          "homeProject": {
+            "required": [
+              "slug",
+              "name"
+            ],
+            "type": "object",
+            "properties": {
+              "slug": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "projectId",
+          "repoId",
+          "baseRef",
+          "feature",
+          "title",
+          "createdById",
+          "runnerId",
+          "backend",
+          "status",
+          "archivedAt",
+          "skills",
+          "maxCostUsd",
+          "costUsd",
+          "tokens",
+          "specPath",
+          "pendingQuestion",
+          "session",
+          "lastActivityAt",
+          "createdAt",
+          "activeJob",
+          "writtenPaths",
+          "publishedSha",
+          "specPublished",
+          "lastWrite"
         ]
       },
       "CreateThreadDto": {

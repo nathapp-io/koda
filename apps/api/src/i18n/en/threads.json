@@ -1,4 +1,5 @@
 {
+  "homeProjectAccess": { "403": "You cannot create jobs in this home project", "40003": "You cannot create jobs in this home project" },
   "principal": { "403": "Only users can access chat threads", "40003": "Only users can access chat threads" },
   "notFound": { "404": "Thread not found" },
   "input": { "-2": "Invalid thread input: {reason}", "400": "Invalid thread input: {reason}" },
