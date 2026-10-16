@@ -4,9 +4,10 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
-import { seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { seedFleetHttpWorld, insertRunner, FLEET_CAPS, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { seedThreadJob } from '../../helpers/thread-fixtures';
 import { FLEET_CFG, type IFleetConfig } from '../../../src/config/fleet.config';
+import { PlacementService } from '../../../src/fleet/jobs/placement.service';
 import { SkillsService } from '../../../src/skills/skills.service';
 
 const describeDb = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -117,4 +118,24 @@ describeDb('workspace turns and archive', () => {
     expect(res.body.message).toBe('Thread not found');
     expect((await prisma.chatThread.findUniqueOrThrow({ where: { id: thread.id } })).status).toBe('ACTIVE');
   });
+  it.each([false, true])('workspace placement AC-10/11: workspaceThreads=%s', async (workspaceThreads) => {
+    await prisma.runner.updateMany({ data: { enabled: false } });
+    const runner = await insertRunner(prisma, { capabilities: { ...FLEET_CAPS, projectThreads: true, workspaceThreads, threadBackends: { native: ['m1'], acp: [] } } });
+    await prisma.runner.update({ where: { id: runner.id }, data: { protocolVersion: 4, threadCapacity: 2 } });
+    try {
+      const thread = await create();
+      const result = data<{ jobId: string }>(await send(thread.id).expect(201));
+      const placement = await app.get(PlacementService).placeJob(result.jobId);
+      const job = await prisma.fleetJob.findUniqueOrThrow({ where: { id: result.jobId } });
+      if (!workspaceThreads) {
+        expect(job.state).toBe('QUEUED');
+        expect(placement.misfits).toContainEqual(expect.objectContaining({ runnerId: runner.id, reason: 'workspace_threads' }));
+      } else {
+        expect(job).toMatchObject({ state: 'ASSIGNED', runnerId: runner.id });
+        const command = await prisma.fleetCommand.findFirstOrThrow({ where: { jobId: job.id, type: 'ASSIGN' } });
+        expect(command.payload).toMatchObject({ thread: { kind: 'WORKSPACE' } });
+      }
+    } finally { await prisma.runner.update({ where: { id: runner.id }, data: { enabled: false } }); }
+  });
+
 });

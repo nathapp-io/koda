@@ -484,7 +484,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
     const capabilities = runner.capabilities as { kodaTools?: unknown; projectCode?: unknown } | null;
     const thread = await this.prisma.client.chatThread.findUnique({ where: { id: threadId }, select: { kind: true } });
     return {
-      ...(capabilities?.kodaTools === true ? {} : { kodaToolsUnavailableOn: runner.name }),
+      ...(thread?.kind === 'WORKSPACE' || capabilities?.kodaTools === true ? {} : { kodaToolsUnavailableOn: runner.name }),
       ...(thread?.kind === 'PROJECT' && capabilities?.projectCode !== true ? { projectCodeUnavailableOn: runner.name } : {}),
     };
   }

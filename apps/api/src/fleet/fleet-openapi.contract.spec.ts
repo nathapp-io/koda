@@ -168,3 +168,10 @@ describe('fleet OpenAPI contract', () => {
     expect(JSON.stringify(spec.components.schemas['RunnerConditionDto'])).toContain('expiring');
   });
 });
+
+
+it('workspace AC-5 exposes workspace_threads in placement, attention and credential board', () => {
+  expect(JSON.stringify(spec.components.schemas['PlacementMisfitDto'])).toContain('workspace_threads');
+  expect(JSON.stringify(spec.components.schemas['AttentionReasonDto'])).toContain('workspace_threads');
+  expect(JSON.stringify(spec.components.schemas['ProfileCellDto'])).toContain('workspace_threads');
+});

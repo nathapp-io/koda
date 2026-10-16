@@ -10,7 +10,7 @@ import type { FleetJobRecord, FleetRepoRef } from './domain/fleet-job.domain';
 export type MisfitReason =
   | 'disabled' | 'offline' | 'budget_paused' | 'labels' | 'executor' | 'protocol' | 'provider_missing'
   | 'provider_unavailable' | 'sandbox' | 'interaction' | 'tools' | 'approvals_relay' | 'busy_repo' | 'capacity'
-  | 'config_jobs' | 'thread_capacity' | 'thread_backend' | 'threads_disabled' | 'thread_write' | 'project_threads';
+  | 'config_jobs' | 'thread_capacity' | 'thread_backend' | 'threads_disabled' | 'thread_write' | 'project_threads' | 'workspace_threads';
 
 // budget_paused is not permanent either: it clears on resume or month rollover (S1b §2.3).
 // provider_unavailable is not permanent: a later probe may fix it, so the job queues and a
@@ -121,6 +121,8 @@ export function firstMisfit(job: PlacementJob, runner: PlacementRunner, load: Ru
     // S5b-R9: a PROJECT thread runs with no checkout, which only a runner advertising projectThreads can host.
     // Recoverable (a daemon upgrade clears it), so an unfit runner leaves the job QUEUED, never cancels it.
     if (job.thread.kind === 'PROJECT' && runner.capabilities.projectThreads !== true) return 'project_threads';
+    // Recoverable: a daemon upgrade can enable workspace hosting.
+    if (job.thread.kind === 'WORKSPACE' && runner.capabilities.workspaceThreads !== true) return 'workspace_threads';
     // Fleet S5a §4: Publish and Discard run in the worktree, not on an agent, so they need threadWrite and no backend.
     const action = job.thread.action ?? 'SESSION';
     if (action === 'SESSION') {

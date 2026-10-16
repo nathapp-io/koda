@@ -18,6 +18,7 @@ function fixture(over: { job?: unknown; threadsEnabled?: boolean; tool?: boolean
   const job = over.job === undefined ? RUNNING_THREAD_JOB : over.job;
   const jobs = {
     findById: vi.fn(async () => job),
+    findThreadTokenScope: vi.fn(async () => ({ kind: 'PROJECT', action: 'SESSION' })),
     findPendingCommand: vi.fn(async () => null),
     createCommand: vi.fn(async () => ({})),
   };
@@ -171,4 +172,13 @@ describe('US-005 AC-1: a call that passes every gate reaches the executor', () =
       .resolves.toEqual({ content: 'WEB-1 ok', isError: false });
     expect(execute).toHaveBeenCalledWith({ jobId: 'j1', toolCallId: 'c1', name: 'koda_get_ticket', input: { ref: 'WEB-1' } });
   });
+});
+
+
+it('workspace AC-8 refuses tools before registry or executor', async () => {
+  const { service, jobs, registry, execute } = fixture();
+  jobs.findThreadTokenScope.mockResolvedValue({ kind: 'WORKSPACE', action: 'SESSION' });
+  await expect(service.call('r1', 'j1', '1', 'koda_search_tickets', BODY)).rejects.toMatchObject({ prefix: 'fleet.notThreadJob', code: 409, httpStatus: 409 });
+  expect(registry.get).not.toHaveBeenCalled();
+  expect(execute).not.toHaveBeenCalled();
 });

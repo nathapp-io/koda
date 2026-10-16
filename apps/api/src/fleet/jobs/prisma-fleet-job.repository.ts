@@ -231,7 +231,7 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     const message = turn.initialMessageId ? await this.db.chatMessage.findUnique({ where: { id: turn.initialMessageId }, select: { id: true, content: true } }) : null;
     return {
       // 1a-R1: the API always names the thread's kind; a row that says something else (or nothing) is a REPO thread.
-      threadId: turn.threadId, action: turn.action as ThreadAssign['action'], kind: thread.kind === 'PROJECT' ? 'PROJECT' : 'REPO',
+      threadId: turn.threadId, action: turn.action as ThreadAssign['action'], kind: thread.kind === 'WORKSPACE' ? 'WORKSPACE' : thread.kind === 'PROJECT' ? 'PROJECT' : 'REPO',
       // 1a-R1: a PROJECT thread has no feature of its own; the runner still needs a name for the workdir.
       feature: thread.feature ?? `thread-${turn.threadId}`, resume: turn.resume,
       instructions: turn.instructions, backend: turn.backend as unknown as ThreadAssign['backend'],

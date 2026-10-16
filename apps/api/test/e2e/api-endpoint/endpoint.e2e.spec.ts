@@ -27,6 +27,7 @@ import { join } from 'node:path';
 import { resetDb } from '../../helpers/reset-db';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { SkillsService } from '../../../src/skills/skills.service';
+import { seedThreadJob } from '../../helpers/thread-fixtures';
 import { FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { buildThreadInstructions, renderBriefBlock } from '../../../src/fleet/threads/thread-instructions';
 import type { ThreadSkillSource } from '../../../src/skills/skill-catalog.domain';
@@ -4240,6 +4241,15 @@ describeIntegration('API Integration Tests', () => {
         expect(body<{ message: { id: string } }>(await request(httpServer).post(messagesUrl).set('Authorization', `Bearer ${world.tokens.dev}`).send({ text: 'hi', clientMessageId: 'one' }).expect(200)).message.id).toBe(sent.message.id);
         refusal(await request(httpServer).post(archiveUrl).set('Authorization', `Bearer ${world.tokens.root}`).send({}).expect(404), 'threads.notFound.404');
         expect(body<{ status: string }>(await request(httpServer).post(archiveUrl).set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(200)).status).toBe('ARCHIVED');
+      });
+
+      it('workspace tool route refuses a held RUNNING job with 409 fleet.notThreadJob', async () => {
+        const seeded = await seedThreadJob(httpServer, db(), world, { kind: 'WORKSPACE' });
+        try {
+          const res = await request(httpServer).post(`/api/fleet/runner/jobs/${seeded.jobId}/tools/koda_search_tickets?leaseEpoch=1`)
+            .set('Authorization', `Bearer ${seeded.runnerKey}`).send({ toolCallId: 'workspace-call', input: {} }).expect(409);
+          refusal(res, 'fleet.notThreadJob.409');
+        } finally { await db().runner.update({ where: { id: seeded.runnerId }, data: { enabled: false } }); }
       });
 
       it('GET /api/threads/:id/events hides the stream from a non-creator', async () => {

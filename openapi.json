@@ -14164,7 +14164,8 @@
               "thread_backend",
               "threads_disabled",
               "thread_write",
-              "project_threads"
+              "project_threads",
+              "workspace_threads"
             ],
             "type": "string"
           }
@@ -16368,7 +16369,8 @@
               "thread_backend",
               "threads_disabled",
               "thread_write",
-              "project_threads"
+              "project_threads",
+              "workspace_threads"
             ],
             "type": "string"
           }
@@ -17016,7 +17018,8 @@
               "thread_backend",
               "threads_disabled",
               "thread_write",
-              "project_threads"
+              "project_threads",
+              "workspace_threads"
             ],
             "type": "string"
           }
