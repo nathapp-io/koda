@@ -1,0 +1,500 @@
+{
+  "project": "koda",
+  "feature": "fleet-s5b-koda-write-tools",
+  "branchName": "feat/fleet-s5b-koda-write-tools",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "updatedAt": "2026-10-17T13:35:34.767Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Executor refusal and partial-outcome errors",
+      "description": "**Goal** — Let write previews refuse proposals precisely and approved tools report bounded partial-failure text.\n\n**Motivation** — A preview can only refuse with `not_found`.\n\n**Approach** — **2b1-D1 Preview refusals.** The executor maps two more exceptions thrown by a write tool's `preview`:\n- `ToolInputError(reason)` answers `invalid_input: <reason>`, audit outcome `invalid_input`.\n- `ToolForbiddenError(need)` answers `forbidden: <tool> needs <need> on <projectSlug>`, audit outcome `forbidden`. This is the text format `execParsed` already uses for an ability refusal.\n- Both stop before `propose`, so no action exists. `NotFoundAppException` keeps answering `not_found`.\n\n**2b1-D2 Partial outcomes.** A tool's `execute` may throw `ToolActionError(text)`. `executeAction` answers `{ ok: false, text }` with `text` capped at `RESULT_CAP_BYTES`, so the action is `FAILED` and its outcome note quotes the text. Every other exception keeps today's mapping. The outcome note keeps its 500-character cap (`NOTE_RESULT_MAX`, `actions/outcome-note.ts:4`), so a long batch result is cut in the note; the action's stored `result` keeps all of it and `koda_get_action` returns it.\n\nChanged — the baseline exists only to locate the code; the target is the interface to implement:\n- `apps/api/src/fleet/assistant/assistant-tool.types.ts`\n  - Baseline: exports `ToolInputError` only.\n  - Target: also exports `ToolForbiddenError` (constructor `(need: string)`, readonly `need`) and `ToolActionError` (constructor `(text: string)`, readonly `text`), both subclasses of `Error`.\n- `AssistantToolExecutor.proposeWrite` (`assistant-tool.executor.ts`)\n  - Baseline: a `preview` exception other than `NotFoundAppException` answers `error: <tool> failed`.\n  - Target: `ToolInputError` answers `invalid_input: <reason>` and `ToolForbiddenError` answers `forbidden: <tool> needs <need> on <slug>` (2b1-D1). Both are recorded with that outcome, and `propose` is not called.\n- `AssistantToolExecutor.executeAction`\n  - Baseline: `NotFoundAppException` answers `not_found`; anything else answers `error: <tool> failed`.\n  - Target: `ToolActionError` answers `{ ok: false, text: capText(error.text, RESULT_CAP_BYTES) }`, with no error log. The other two mappings are unchanged.\n\n**Scope** — In: modify assistant-tool.types.ts and the two executor catches; create write-tool-errors.spec.ts using stub writes and the existing executor harness pattern. Out: US-002 descriptors/helper extraction; US-003 through US-007 real tool factories/registration; changes to approval lifecycle, outcome-note caps or web rendering.\n\n**Interface** — `ToolForbiddenError` (constructor `(need: string)`, readonly `need`) and `ToolActionError` (constructor `(text: string)`, readonly `text`), both subclasses of `Error`. `ToolActionError` answers `{ ok: false, text: capText(error.text, RESULT_CAP_BYTES) }`.\n\nKeep existing parser refusals, tool-call replay, actionScope reauthorization, generic exception logging and NotFoundAppException mappings unchanged. Unit tests use vi stubs and inspect the recorded AssistantToolCall outcome and attached proposer's calls; no database is needed.",
+      "acceptanceCriteria": [
+        "[unit] AssistantToolExecutor.execute calling a stub write tool named w, whose preview throws ToolInputError('status'), returns { isError: true, content: 'invalid_input: status' }.",
+        "[unit] For a stub write tool whose preview throws ToolInputError('status'), the attached proposer's propose is never called.",
+        "[unit] For a stub write tool whose preview throws ToolInputError('status'), the AssistantToolCall row the executor records has outcome invalid_input.",
+        "[unit] AssistantToolExecutor.execute calling a stub write tool named w in project web, whose preview throws new ToolForbiddenError('transition Ticket'), returns { isError: true, content: 'forbidden: w needs transition Ticket on web' }.",
+        "[unit] For a stub write tool whose preview throws ToolForbiddenError, the attached proposer's propose is never called.",
+        "[unit] For a stub write tool whose preview throws ToolForbiddenError, the AssistantToolCall row the executor records has outcome forbidden.",
+        "[unit] AssistantToolExecutor.executeAction for an action whose tool's execute throws new ToolActionError('created KODA-1\nfailed at ticket 2: error') returns { ok: false, text: 'created KODA-1\nfailed at ticket 2: error' }.",
+        "[unit] AssistantToolExecutor.executeAction for an action whose tool's execute throws a ToolActionError whose text is RESULT_CAP_BYTES + 100 bytes returns a text of at most RESULT_CAP_BYTES bytes.",
+        "[unit] AssistantToolExecutor.executeAction for an action of tool w whose execute throws a plain Error returns { ok: false, text: 'error: w failed' }."
+      ],
+      "tags": [
+        "api",
+        "feature",
+        "assistant",
+        "security",
+        "error-handling"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Small, specified extension of existing error mappings; permission refusal and audit semantics make the access-control security override applicable.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/assistant-tool.types.ts",
+        "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+        "apps/api/src/fleet/assistant/assistant-tool.executor.spec.ts",
+        "apps/api/src/fleet/assistant/actions/assistant-action-decisions.ts",
+        "apps/api/src/fleet/assistant/actions/outcome-note.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/assistant/write-tool-errors.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+          "reason": "`proposeWrite` maps `ToolInputError` and `ToolForbiddenError` from `preview` (2b1-D1) and `executeAction` maps `ToolActionError` (2b1-D2); every other path is unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Write descriptors and shared tool-input helpers",
+      "description": "**Goal** — Advertise the five bounded, approval-only write tools and extract the two shared action-tool helpers without behavioral changes.\n\n**Motivation** — Today a thread can only propose a comment: the registry holds one write tool (`apps/api/src/fleet/assistant/tools/action-tools.ts:116-130`).\n\n**Approach** — **2b1-D3 Descriptors.** The five descriptors form a new group `WRITE_TOOL_DESCRIPTORS`, in the order `koda_create_tickets`, `koda_update_ticket`, `koda_link_tickets`, `koda_add_memory`, `koda_record_decision`. `KODA_TOOL_DESCRIPTORS` spreads it last, after `ACTION_TOOL_DESCRIPTORS`. REPO and PROJECT threads then carry 19 descriptors and WORKSPACE threads 20, under `KODA_TOOL_LIMITS.maxTools` (32). Every description says the change happens only after the user approves it and that the call must not be repeated, as `KODA_ADD_COMMENT` does. The runner refuses the whole tool list when any description exceeds `KODA_TOOL_DESCRIPTION_MAX_CHARS` (2000, `apps/runner/src/supervisor/assign-parser.ts`), and a WORKSPACE thread appends its `project` sentence, so every description stays at most 2000 characters after that sentence is appended.\n\n**2b1-D5 Input bounds** (the parser refuses with the named reason):\n| Tool | Field | Rule | Reason |\n|---|---|---|---|\n| `koda_create_tickets` | `tickets` | array of 1 to 20 objects | `tickets` |\n| | `tickets[i].type` | one of `BUG`, `ENHANCEMENT`, `TASK`, `QUESTION` | `tickets[i].type` |\n| | `tickets[i].title` | string, 1 to 200 characters after trim | `tickets[i].title` |\n| | `tickets[i].description` | optional string, at most 4000 characters | `tickets[i].description` |\n| | `tickets[i].priority` | optional, one of `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` | `tickets[i].priority` |\n| `koda_update_ticket` | `ref` | `TICKET_REF` | `ref` |\n| | `title` | optional string, 1 to 200 characters after trim | `title` |\n| | `description` | optional string, at most 4000 characters | `description` |\n| | `priority` | optional, one of the four priorities | `priority` |\n| | `status` | optional, exactly `IN_PROGRESS` | `status` |\n| | (all four absent) | at least one change | `changes` |\n| `koda_link_tickets` | `links` | array of 1 to 20 objects | `links` |\n| | `links[i].ref` | `TICKET_REF` | `links[i].ref` |\n| | `links[i].url` | an absolute `http:` or `https:` URL, at most 2048 characters | `links[i].url` |\n| | `links[i].linkType` | optional, one of `url`, `pr`, `commit`, `branch` | `links[i].linkType` |\n| `koda_add_memory` | `kind` | one of `FACT`, `PREFERENCE`, `CONSTRAINT`, `INCIDENT_PATTERN` (never `DECISION`) | `kind` |\n| | `subject`, `predicate` | string, 1 to 200 characters after trim | `subject`, `predicate` |\n| | `object` | optional string, at most 4000 characters | `object` |\n| `koda_record_decision` | `topic` | string, 1 to 200 characters after trim | `topic` |\n| | `decision` | string, 1 to 4000 characters after trim | `decision` |\n| | `rationale` | optional string, at most 4000 characters | `rationale` |\n\n`i` is the zero-based index. The descriptors' JSON schemas carry the same bounds. A parsed value is stored as written: only the trimmed length is judged, as `koda_add_comment` does.\n\nThe two input helpers private to `action-tools.ts`, `asRecord` and `ticketPath` (`tools/action-tools.ts:41-48`), move to a new `tools/tool-input.ts` and are exported from there; `action-tools.ts` imports them, unchanged in behaviour.\n\nUpdate only the existing descriptor assertions the spec identifies: the test `gives REPO and PROJECT 14 descriptors and WORKSPACE 15` becomes 19 and 20, and its `at(-1)` name check becomes `koda_record_decision`; the AC-15 suffix assertion instead puts `koda_get_action` and `koda_add_comment` directly before the five new entries; AC-22 slices off `ACTION_TOOL_DESCRIPTORS.length + WRITE_TOOL_DESCRIPTORS.length` and appends `...WRITE_TOOL_DESCRIPTORS` to full-list equality. Other existing assertions remain unchanged. Add the new descriptor and helper behavioral assertions.\n\n**Scope** — In: koda-tool-descriptors.ts/.spec.ts, new tools/tool-input.ts/.spec.ts, and the helper import replacement in action-tools.ts. Out: US-001 error types/executor changes; US-003 through US-007 parsers, previews, execution and registration; runner/protocol edits. Do not extract duplicate helpers from unrelated read-tool groups.\n\n**Interface** — `KODA_TOOL_DESCRIPTORS`: `[...TICKET, ...FLEET, ...KNOWLEDGE, ...ACTION, ...WRITE_TOOL_DESCRIPTORS]` (19 entries), plus the exported constants `KODA_CREATE_TICKETS`, `KODA_UPDATE_TICKET`, `KODA_LINK_TICKETS`, `KODA_ADD_MEMORY`, `KODA_RECORD_DECISION` and `WRITE_TOOL_DESCRIPTORS`. Export `asRecord` and `ticketPath` with the existing signatures/behavior. Schemas are model-facing guidance; tool stories separately implement the runtime bounds. Preserve required `project` injection and catalog immutability for WORKSPACE threads.",
+      "acceptanceCriteria": [
+        "[unit] WRITE_TOOL_DESCRIPTORS.map((d) => d.name) equals ['koda_create_tickets', 'koda_update_ticket', 'koda_link_tickets', 'koda_add_memory', 'koda_record_decision'].",
+        "[unit] The last five entries of kodaToolDescriptorsFor('REPO') are the WRITE_TOOL_DESCRIPTORS entries, in order.",
+        "[unit] The two entries of kodaToolDescriptorsFor('REPO') before those five are named koda_get_action and koda_add_comment.",
+        "[unit] kodaToolDescriptorsFor('REPO') has 19 entries.",
+        "[unit] kodaToolDescriptorsFor('WORKSPACE') has 20 entries.",
+        "[unit] Every WRITE_TOOL_DESCRIPTORS entry's description contains 'only after the user approves'.",
+        "[unit] Every entry of kodaToolDescriptorsFor('WORKSPACE') has a description of at most 2000 characters.",
+        "[unit] KODA_CREATE_TICKETS.inputSchema.properties.tickets has minItems 1 and maxItems 20.",
+        "[unit] KODA_LINK_TICKETS.inputSchema.properties.links has minItems 1 and maxItems 20.",
+        "[unit] KODA_UPDATE_TICKET.inputSchema.properties.status.enum equals ['IN_PROGRESS'].",
+        "[unit] KODA_ADD_MEMORY.inputSchema.properties.kind.enum equals ['FACT', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN'].",
+        "[unit] asRecord([1]), imported from tools/tool-input.ts, returns {}.",
+        "[unit] ticketPath('web', 'KODA-1'), imported from tools/tool-input.ts, returns '/web/tickets/KODA-1'."
+      ],
+      "tags": [
+        "api",
+        "feature",
+        "assistant",
+        "descriptors",
+        "refactor"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Specified catalog/schema additions and a behavior-preserving helper move across a few files; no authorization execution changes.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/koda-tool-descriptors.ts",
+        "apps/api/src/fleet/assistant/koda-tool-descriptors.spec.ts",
+        "apps/api/src/fleet/assistant/tools/action-tools.ts",
+        "apps/api/src/fleet/assistant/tools/ticket-tools.ts",
+        "apps/runner/src/supervisor/assign-parser.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/assistant/tools/tool-input.ts",
+        "apps/api/src/fleet/assistant/tools/tool-input.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/koda-tool-descriptors.spec.ts",
+          "reason": "the test `gives REPO and PROJECT 14 descriptors and WORKSPACE 15` becomes 19 and 20, and its `at(-1)` name check becomes `koda_record_decision`; the AC-15 test that `kodaToolDescriptorsFor('REPO')` ends with `koda_get_action` then `koda_add_comment` asserts instead that those two directly precede the five `WRITE_TOOL_DESCRIPTORS` entries; the AC-22 tests slice off `ACTION_TOOL_DESCRIPTORS.length + WRITE_TOOL_DESCRIPTORS.length` and their full-list equality gains `...WRITE_TOOL_DESCRIPTORS` last. No other assertion changes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/action-tools.ts",
+          "reason": "imports `asRecord` and `ticketPath` from the new tool-input helper module (US-002 Creates) instead of declaring them (2b1-D8); behaviour unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Propose and approve ticket creation batches",
+      "description": "**Goal** — Add koda_create_tickets as a registered write tool that proposes 1–20 tickets and creates them in order only on approval.\n\n**Motivation** — The umbrella's example asks include \"Turn this brainstorm into tickets\" and \"Record this decision as an ADR\".\n\n**Approach** — **2b-R4** `koda_create_tickets` and `koda_link_tickets` apply their items one at a time, in input order. A failure stops the batch, the action is `FAILED`, and its result names what was already applied.\n\n**2b1-D4 Permissions** mirror each REST route (S5b-R6):\n- `koda_create_tickets`: ability `create` `Ticket` (`tickets.controller.ts:168`).\n\n**2b1-D5 Input bounds** (the parser refuses with the named reason):\n| Tool | Field | Rule | Reason |\n|---|---|---|---|\n| `koda_create_tickets` | `tickets` | array of 1 to 20 objects | `tickets` |\n| | `tickets[i].type` | one of `BUG`, `ENHANCEMENT`, `TASK`, `QUESTION` | `tickets[i].type` |\n| | `tickets[i].title` | string, 1 to 200 characters after trim | `tickets[i].title` |\n| | `tickets[i].description` | optional string, at most 4000 characters | `tickets[i].description` |\n| | `tickets[i].priority` | optional, one of `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` | `tickets[i].priority` |\n\n`i` is the zero-based index. The descriptors' JSON schemas carry the same bounds. A parsed value is stored as written: only the trimmed length is judged, as `koda_add_comment` does.\n\n**2b1-D6 Previews.** Every preview is passed through `maskSecrets`, as `koda_add_comment`'s is. Each one names the project slug, and every existing ticket it names is read through the project-scoped `TicketsService.findByRef`, so a foreign or missing ref raises `NotFoundAppException` and answers `not_found` before any action exists. The first lines are fixed:\n- `koda_create_tickets`: `Create <n> ticket(s) in <slug>:`, then per ticket `<i+1>. [<type>, <priority>] <title>` (priority defaults to `MEDIUM`). When the ticket has a description, each of its lines follows, indented by four spaces.\n- Preview size is accepted as bounded by the input bounds (at most about 85 KB for 20 tickets with full descriptions); previews are not truncated, because the user approves the exact text.\n\n**2b1-D7 Execution** runs as the requester with the action project's role (`ctx.actor`, 2a-D8), through the domain services, so the usual ticket events, timeline rows and outbox events fire.\n- `koda_create_tickets` calls `TicketsService.create(slug, { type, title, description, priority }, ctx.actor)` once per ticket, in order. The result is one line per ticket, `created <ref> /<slug>/tickets/<ref>`. When ticket `k` fails, it throws `ToolActionError` whose text is the lines already written, then `failed at ticket <k+1>: <reason>`, where the reason is `not_found` for `NotFoundAppException` and `error` for anything else.\n\n**2b1-D8 Tool groups and files.** Each tool is a factory in its own file under `tools/`: `create-tickets-tool.ts`, `update-ticket-tool.ts`, `link-tickets-tool.ts`, `add-memory-tool.ts` and `record-decision-tool.ts`. `TicketWriteTools` (`tools/ticket-write-tools.ts`) registers the three ticket tools and `MemoryWriteTools` (`tools/memory-write-tools.ts`) the two memory tools, each in `onModuleInit` like `ActionTools`. Both are `AssistantModule` providers.\n\nThis story creates createTicketsTool and TicketWriteTools with only the create factory registered; US-004 and US-005 add the other ticket factories. Add TicketWriteTools to assistant.module.ts providers (and its symbol import), without adding Nest module imports. Extend assistant.module.spec.ts with an init()-based no-DB assertion of write kind and create Ticket permission, preserving existing tests. Add the unit factory spec and the per-story PG route/approve integration spec.\n\nIntegration tests are one file per story. They enter at the runner tool route `POST /api/fleet/runner/jobs/:jobId/tools/<name>?leaseEpoch=<n>` and decide at `POST /api/projects/web/fleet/approvals/:approvalId/decide` (the app's `/api` prefix, as in the fixture), where `approvalId` is the stored `PendingAction`'s `approvalId` (not the action id). The fixtures follow `test/integration/fleet/assistant-action-tools.integration.spec.ts`: `seedFleetHttpWorld`, with the web project's key set to `KODA` so the first ticket is `KODA-1`; DEVELOPER `dev`, VIEWER `viewer`; a RUNNING REPO THREAD job from `seedThreadJobFor`, created by `dev` unless an AC names `viewer`; `FLEET_THREADS_ENABLED=true` before boot. The tests need the compose test DB (`bun run test:db:up`). Run the new integration file under test:scoped so it actually executes in DB mode.\n\n**Scope** — In: create factory/parser/masked preview/serial execution, TicketWriteTools provider, AssistantModule registration and per-story tests. Out: US-001 executor/error definitions; US-002 descriptors/helpers; US-004/005 update/link tools; US-006/007 memory tools; atomic batch creation. US-003 only: a requester without `create` `Ticket` (a VIEWER) is refused by the existing executor ability path (2a US-002 AC-8); this feature adds no AC for it.\n\n**Interface** — `TicketsService.create(projectSlug, dto: CreateTicketDto, principal)`, `findByRef(projectSlug, ref)` and `update(projectSlug, ref, dto: UpdateTicketDto, principal)` — `apps/api/src/tickets/tickets.service.ts:93,178,227`. Mirror `addCommentTool` with exported `createTicketsTool` returning an AssistantTool with `kind: 'write'`, descriptor KODA_CREATE_TICKETS and `{ kind: 'ability', action: 'create', subject: 'Ticket' }`. Use US-001 ToolActionError for partial outcomes and US-002 shared helpers; never execute writes from preview.",
+      "acceptanceCriteria": [
+        "[unit] createTicketsTool(...).parse({ tickets: [] }) throws ToolInputError with reason tickets.",
+        "[unit] createTicketsTool(...).parse with 21 valid tickets throws ToolInputError with reason tickets.",
+        "[unit] createTicketsTool(...).parse({ tickets: [{ type: 'TASK', title: 'a' }, { type: 'EPIC', title: 'b' }] }) throws ToolInputError with reason tickets[1].type.",
+        "[unit] createTicketsTool(...).parse({ tickets: [{ type: 'TASK', title: '   ' }] }) throws ToolInputError with reason tickets[0].title.",
+        "[unit] createTicketsTool(...).preview for two tickets in project web returns text whose first line is 'Create 2 ticket(s) in web:'.",
+        "[unit] createTicketsTool(...).preview for a first ticket { type: 'TASK', title: 'Add login' } with no priority returns text whose second line is '1. [TASK, MEDIUM] Add login'.",
+        "[unit] createTicketsTool(...).preview for a ticket whose description holds token=ghp_abcdefghijklmnopqrstuvwxyz0123456789 returns text in which ghp_abcdefghijklmnopqrstuvwxyz0123456789 does not appear.",
+        "[unit] For createTicketsTool(...).execute in project web with tickets titled a then b, the list of argument tuples TicketsService.create received equals, in order, ('web', { type, title: 'a', description, priority }, ctx.actor) and ('web', { type, title: 'b', description, priority }, ctx.actor).",
+        "[unit] createTicketsTool(...).execute in project web, when TicketsService.create answers refs KODA-5 and KODA-6, returns 'created KODA-5 /web/tickets/KODA-5\ncreated KODA-6 /web/tickets/KODA-6'.",
+        "[unit] When the second of three TicketsService.create calls throws a plain Error after the first answered KODA-5 in project web, createTicketsTool(...).execute throws a ToolActionError whose text is 'created KODA-5 /web/tickets/KODA-5\nfailed at ticket 2: error'.",
+        "[unit] In assistant.module.spec.ts, after the compiled AssistantModule testing module runs init(), AssistantToolRegistry.get('koda_create_tickets')?.permission equals { kind: 'ability', action: 'create', subject: 'Ticket' }.",
+        "[integration] POST /fleet/runner/jobs/:jobId/tools/koda_create_tickets?leaseEpoch=<n> from the runner holding dev's RUNNING REPO THREAD job, with two tickets, answers 200 with content starting 'pending '.",
+        "[integration] After dev approves that action at POST /projects/web/fleet/approvals/:approvalId/decide with { decision: 'approve' }, the titles of the project's two newest tickets, oldest first, equal the two proposed titles.",
+        "[integration] Each ticket created by that approval has createdByUserId equal to dev's id."
+      ],
+      "tags": [
+        "api",
+        "feature",
+        "assistant",
+        "tickets",
+        "security",
+        "integration"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The factory and onModuleInit provider mirror ActionTools and call the existing TicketsService serially without new module integrations; requester attribution and create Ticket permission retain the strict security TDD override.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/tools/action-tools.ts",
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/src/fleet/assistant/assistant.module.ts",
+        "apps/api/src/fleet/assistant/assistant.module.spec.ts",
+        "apps/api/test/integration/fleet/assistant-action-tools.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/assistant/tools/create-tickets-tool.ts",
+        "apps/api/src/fleet/assistant/tools/create-tickets-tool.spec.ts",
+        "apps/api/src/fleet/assistant/tools/ticket-write-tools.ts",
+        "apps/api/test/integration/fleet/assistant-create-tickets-tool.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/assistant.module.ts",
+          "reason": "the providers list gains `TicketWriteTools`; no import changes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant.module.spec.ts",
+          "reason": "gains a test that `koda_create_tickets` is registered as a write tool with its permission; existing tests unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Propose ticket edits and permission-checked starts",
+      "description": "**Goal** — Add koda_update_ticket for title/description/priority edits and the sole status move to IN_PROGRESS, validating permission and state before proposal and rechecking state at approval.\n\n**Motivation** — `koda_update_ticket` needs to refuse a status the requester may not set, or a move the ticket's state does not allow, before an action exists.\n\n**Approach** — **2b-R3** `koda_update_ticket` may set `status` only to `IN_PROGRESS` (the \"start\" move). The PATCH path carries no comment, and every other move needs a typed comment (`tickets/state-machine/ticket-transitions.ts:13-31`).\n\n**2b1-D4 Permissions** mirror each REST route (S5b-R6):\n- `koda_update_ticket`: ability `update` `Ticket` (`tickets.controller.ts:214`). When `status` is set, the preview also requires `transition` `Ticket`, as `TicketsService.update` does through `assertTransitionPermission`.\n\n**2b1-D5 Input bounds** (the parser refuses with the named reason):\n| Tool | Field | Rule | Reason |\n|---|---|---|---|\n| `koda_update_ticket` | `ref` | `TICKET_REF` | `ref` |\n| | `title` | optional string, 1 to 200 characters after trim | `title` |\n| | `description` | optional string, at most 4000 characters | `description` |\n| | `priority` | optional, one of the four priorities | `priority` |\n| | `status` | optional, exactly `IN_PROGRESS` | `status` |\n| | (all four absent) | at least one change | `changes` |\n\nThe four priorities are `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`. The descriptors' JSON schemas carry the same bounds. A parsed value is stored as written: only the trimmed length is judged, as `koda_add_comment` does.\n\n**2b1-D6 Previews.** Every preview is passed through `maskSecrets`, as `koda_add_comment`'s is. Each one names the project slug, and every existing ticket it names is read through the project-scoped `TicketsService.findByRef`, so a foreign or missing ref raises `NotFoundAppException` and answers `not_found` before any action exists. The first lines are fixed:\n- `koda_update_ticket`: `Update <ref> \"<title>\" in <slug>:`, then one line per changed field in the order `title`, `description`, `priority`, `status`. Title, priority and status read `<field>: <current> -> <new>`. A description change reads `description:` followed by the new text, each line indented by four spaces; the old text is not shown.\n- `koda_update_ticket` with `status` checks the requester's `transition` permission before the ticket's current status, so a requester without it gets `forbidden` whatever the status.\n- Preview size is accepted as bounded by the input bounds (at most about 85 KB for 20 tickets with full descriptions); previews are not truncated, because the user approves the exact text.\n\n**2b1-D7 Execution** runs as the requester with the action project's role (`ctx.actor`, 2a-D8), through the domain services, so the usual ticket events, timeline rows and outbox events fire.\n- `koda_update_ticket` first reads the ticket. When `status` is set and the ticket's current status cannot move to `IN_PROGRESS` (`validateTransition` throws), it throws `ToolActionError('<ref> cannot move from <status> to IN_PROGRESS')` before any write. Otherwise it calls `TicketsService.update(slug, ref, changes, ctx.actor)`, and the result is `updated <ref> /<slug>/tickets/<ref>`. A `ForbiddenAppException` from the service becomes `ToolActionError('forbidden: <ref> needs transition Ticket')`.\n\nFailure handling:\n- `status` set and the requester lacks `transition` `Ticket`: Preview throws `ToolForbiddenError('transition Ticket')`; `forbidden: koda_update_ticket needs transition Ticket on <slug>`; no action.\n- `status` set and the ticket cannot start from its current status: Preview throws `ToolInputError('status')`; `invalid_input: status`; no action.\n- Ticket changed between proposal and approval so it can no longer start: `FAILED`, result `<ref> cannot move from <status> to IN_PROGRESS`; nothing written.\n\nCreate update-ticket-tool.ts/.spec.ts and assistant-update-ticket-tool.integration.spec.ts. Register updateTicketTool in the TicketWriteTools provider created by US-003. Extend assistant.module.spec.ts with the write-kind/update Ticket registration check; preserve all existing tests. No new AssistantModule provider or Nest module import is needed. Per-story integration uses US-003's route/decide fixtures: POST /api/fleet/runner/jobs/:jobId/tools/koda_update_ticket?leaseEpoch=<n>, then POST /api/projects/web/fleet/approvals/:approvalId/decide with the stored approvalId, not action id. Set FLEET_THREADS_ENABLED=true before boot, project web key KODA, dev DEVELOPER, dev-created RUNNING REPO THREAD job, and explicitly set each test's own ticket status. Use the compose test DB and test:scoped for real integration execution.\n\n**Scope** — In: update parser, masked field-diff preview, transition permission/state refusal, approval-time precheck, domain update call and registration/tests. Out: US-003 creation, US-005 links, US-006/007 memory writes; non-start status moves, typed-comment workflow, assignments/labels/deletion, and locking the race between start check and TicketsService.update. US-004 only: a requester without `update` `Ticket` (a VIEWER) is refused by the existing executor ability path (2a US-002 AC-8); this feature adds no AC for it. US-004 only: a `koda_update_ticket` ref that matches no ticket of the project answers `not_found` through `TicketsService.findByRef` and the existing executor preview mapping, as US-005 AC-6 pins for links; this feature adds no `koda_update_ticket` AC for it.\n\n**Interface** — `TicketsService.create(projectSlug, dto: CreateTicketDto, principal)`, `findByRef(projectSlug, ref)` and `update(projectSlug, ref, dto: UpdateTicketDto, principal)` — `apps/api/src/tickets/tickets.service.ts:93,178,227`. `TicketTransitionsService.assertTransitionPermission(principal)` — throws `ForbiddenAppException` without `transition` `Ticket` (`tickets/state-machine/ticket-transitions.service.ts:518`). `validateTransition(from, to, commentType?)` — throws `ValidationAppException` for a move with no rule (`tickets/state-machine/ticket-transitions.ts:39`). Export updateTicketTool as an AssistantTool using KODA_UPDATE_TICKET, kind write and `{ kind: 'ability', action: 'update', subject: 'Ticket' }`. Do not include ref in the changes DTO, and do not call assertTransitionPermission for field-only previews. Use validateTransition without a comment to reject VERIFY_FIX as well as terminal/self transitions.",
+      "acceptanceCriteria": [
+        "[unit] updateTicketTool(...).parse({ ref: 'KODA-1' }) throws ToolInputError with reason changes.",
+        "[unit] updateTicketTool(...).parse({ ref: 'KODA-1', status: 'CLOSED' }) throws ToolInputError with reason status.",
+        "[unit] updateTicketTool(...).preview for { ref: 'KODA-1', priority: 'HIGH' } on a ticket titled Fix login with priority MEDIUM in project web returns text whose first line is 'Update KODA-1 \"Fix login\" in web:'.",
+        "[unit] updateTicketTool(...).preview for { ref: 'KODA-1', priority: 'HIGH' } on a ticket whose priority is MEDIUM returns text whose second line is 'priority: MEDIUM -> HIGH'.",
+        "[unit] updateTicketTool(...).preview for { ref: 'KODA-1', title: 'New' } never calls TicketTransitionsService.assertTransitionPermission.",
+        "[unit] updateTicketTool(...).preview for { ref: 'KODA-1', status: 'IN_PROGRESS' }, when assertTransitionPermission throws ForbiddenAppException, throws a ToolForbiddenError whose need is 'transition Ticket'.",
+        "[unit] updateTicketTool(...).preview for { ref: 'KODA-1', status: 'IN_PROGRESS' } on a ticket whose status is VERIFY_FIX throws ToolInputError with reason status.",
+        "[unit] updateTicketTool(...).execute in project web with { ref: 'KODA-1', priority: 'HIGH' } calls TicketsService.update once with ('web', 'KODA-1', { priority: 'HIGH' }, ctx.actor).",
+        "[unit] updateTicketTool(...).execute in project web with { ref: 'KODA-1', priority: 'HIGH' } returns 'updated KODA-1 /web/tickets/KODA-1'.",
+        "[unit] updateTicketTool(...).execute with { ref: 'KODA-1', status: 'IN_PROGRESS' } on a ticket whose status is now CLOSED throws new ToolActionError('KODA-1 cannot move from CLOSED to IN_PROGRESS').",
+        "[unit] When updateTicketTool(...).execute with status: 'IN_PROGRESS' finds the ticket CLOSED, TicketsService.update is never called.",
+        "[unit] updateTicketTool(...).execute with { ref: 'KODA-1', status: 'IN_PROGRESS' } on a CREATED ticket, when TicketsService.update throws ForbiddenAppException, throws new ToolActionError('forbidden: KODA-1 needs transition Ticket').",
+        "[unit] In assistant.module.spec.ts, after the compiled AssistantModule testing module runs init(), AssistantToolRegistry.get('koda_update_ticket')?.permission equals { kind: 'ability', action: 'update', subject: 'Ticket' }.",
+        "[integration] At the runner tool route, koda_update_ticket with { ref: 'KODA-1', status: 'IN_PROGRESS' } for a ticket in VERIFY_FIX answers { isError: true, content: 'invalid_input: status' }.",
+        "[integration] koda_update_ticket with { ref: 'KODA-1', status: 'IN_PROGRESS', priority: 'HIGH' } at the runner tool route for a CREATED ticket, approved by dev at the decide route, leaves the ticket with { status: 'IN_PROGRESS', priority: 'HIGH' }.",
+        "[integration] When KODA-1 changes from CREATED to CLOSED after a start proposal and before dev approves it, the stored PendingAction matches { status: 'FAILED', result: 'KODA-1 cannot move from CLOSED to IN_PROGRESS' }.",
+        "[integration] Given KODA-1 was CREATED with priority MEDIUM when a proposal requested status IN_PROGRESS and priority HIGH, and its status changes to CLOSED before approval, approving that action leaves the ticket with { status: 'CLOSED', priority: 'MEDIUM' }."
+      ],
+      "tags": [
+        "api",
+        "feature",
+        "assistant",
+        "tickets",
+        "security",
+        "state-machine"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The additive factory reuses exported TicketsService, assertTransitionPermission and validateTransition with specified error adapters, not a new workflow abstraction; transition authorization requires strict security TDD.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/src/tickets/state-machine/ticket-transitions.service.ts",
+        "apps/api/src/tickets/state-machine/ticket-transitions.ts",
+        "apps/api/src/fleet/assistant/tools/ticket-write-tools.ts",
+        "apps/api/test/integration/fleet/assistant-create-tickets-tool.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/assistant/tools/update-ticket-tool.ts",
+        "apps/api/src/fleet/assistant/tools/update-ticket-tool.spec.ts",
+        "apps/api/test/integration/fleet/assistant-update-ticket-tool.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/assistant.module.spec.ts",
+          "reason": "gains a test that `koda_update_ticket` is registered as a write tool with its permission; existing tests unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Propose ordered ticket URL link batches",
+      "description": "**Goal** — Add koda_link_tickets as a member-permitted write tool for attaching 1–20 URLs to project tickets after approval.\n\n**Motivation** — The 2a write contract is generic — `kind: 'write'`, `preview`, `execute` (`apps/api/src/fleet/assistant/assistant-tool.types.ts:18-33`) — so each new tool is a descriptor, a parser, a preview and an execute.\n\n**Approach** — **2b-R4** `koda_create_tickets` and `koda_link_tickets` apply their items one at a time, in input order. A failure stops the batch, the action is `FAILED`, and its result names what was already applied.\n\n**2b1-D4 Permissions** mirror each REST route (S5b-R6):\n- `koda_link_tickets`: project membership. The link route checks only membership (`ticket-links.controller.ts:57`). This corrects the umbrella §7 row, which named the ticket abilities.\n\n**2b1-D5 Input bounds** (the parser refuses with the named reason):\n| Tool | Field | Rule | Reason |\n|---|---|---|---|\n| `koda_link_tickets` | `links` | array of 1 to 20 objects | `links` |\n| | `links[i].ref` | `TICKET_REF` | `links[i].ref` |\n| | `links[i].url` | an absolute `http:` or `https:` URL, at most 2048 characters | `links[i].url` |\n| | `links[i].linkType` | optional, one of `url`, `pr`, `commit`, `branch` | `links[i].linkType` |\n\n`i` is the zero-based index. The descriptors' JSON schemas carry the same bounds. A parsed value is stored as written: only the trimmed length is judged, as `koda_add_comment` does.\n\n**2b1-D6 Previews.** Every preview is passed through `maskSecrets`, as `koda_add_comment`'s is. Each one names the project slug, and every existing ticket it names is read through the project-scoped `TicketsService.findByRef`, so a foreign or missing ref raises `NotFoundAppException` and answers `not_found` before any action exists. The first lines are fixed:\n- `koda_link_tickets`: `Link <n> URL(s) in <slug>:`, then per link `- <ref> \"<title>\" <- <linkType> <url>`. `linkType` is the one given, or the one `TicketLinksService.inferLinkType` would infer, copied into the tool because that method is private: `pr` when the URL matches `/\\/pull\\/\\d+/`, `/\\/merge_requests\\/\\d+/` or `/\\/pull-requests\\/\\d+/`, else `url`.\n- Preview size is accepted as bounded by the input bounds (at most about 85 KB for 20 tickets with full descriptions); previews are not truncated, because the user approves the exact text.\n\n**2b1-D7 Execution** runs as the requester with the action project's role (`ctx.actor`, 2a-D8), through the domain services, so the usual ticket events, timeline rows and outbox events fire.\n- `koda_link_tickets` calls `TicketLinksService.create(slug, ref, { url, linkType })` once per link, in order. The result is one line per link, `linked <ref> <url>` with ` (already linked)` appended when the service answered status 200. A failure at link `k` throws `ToolActionError` with the lines so far, then `failed at link <k+1>: <reason>`.\n\nThe failure reason follows the batch rule: `not_found` for NotFoundAppException and `error` for anything else. A URL already linked to the ticket is not a failure: that line reads `linked <ref> <url> (already linked)`; the batch continues. A ref that is not a ticket of the project answers `not_found`; no action. Do not leak raw exception details.\n\nCreate link-tickets-tool.ts/.spec.ts and assistant-link-tickets-tool.integration.spec.ts. Add linkTicketsTool to the existing TicketWriteTools.onModuleInit and extend assistant.module.spec.ts with a write-kind/member registration assertion, preserving existing tests. No new AssistantModule provider/import is needed. Integration follows the upstream assistant-create-tickets-tool.integration.spec.ts fixture, entering at POST /api/fleet/runner/jobs/:jobId/tools/koda_link_tickets?leaseEpoch=<n> and deciding at POST /api/projects/web/fleet/approvals/:approvalId/decide with stored approvalId (not action id). Use seedFleetHttpWorld with web key KODA, dev DEVELOPER, viewer VIEWER, and seedThreadJobFor with a dev or explicitly viewer-created RUNNING REPO THREAD job. Set FLEET_THREADS_ENABLED=true before boot. The propose call must create no TicketLink; approval invokes the service. Run against compose Postgres with test:scoped.\n\n**Scope** — In: link parser, project-scoped masked preview, exact PR/url inference, serial/idempotent-link results, partial failures and registration/tests. Out: US-003 creation and US-004 edits; US-006/007 memory writes; ticket-to-ticket relations, atomic batches, changing TicketLinksService or making its private inference public. VIEWER membership is sufficient; do not require ticket create/update abilities.\n\n**Interface** — `TicketLinksService.create(slug, ref, dto: CreateTicketLinkDto): Promise<{ status: 200 | 201; link }>` — answers 200 for a URL already linked to the ticket (`ticket-links/ticket-links.service.ts`). `TICKET_REF` — `fleet/assistant/tools/ticket-tools.ts:23`. `maskSecrets` — `fleet/assistant/assistant-tool-safety.ts`. Export linkTicketsTool returning an AssistantTool using KODA_LINK_TICKETS, kind write and `{ kind: 'member' }`. Execution passes parsed url/linkType through to the domain service; inference for display must match what that service will infer when linkType was omitted.",
+      "acceptanceCriteria": [
+        "[unit] linkTicketsTool(...).parse({ links: [] }) throws ToolInputError with reason links.",
+        "[unit] linkTicketsTool(...).parse with 21 valid links throws ToolInputError with reason links.",
+        "[unit] linkTicketsTool(...).parse({ links: [{ ref: 'KODA-1', url: 'ftp://host/x' }] }) throws ToolInputError with reason links[0].url.",
+        "[unit] linkTicketsTool(...).parse({ links: [{ ref: 'KODA-1', url: 'https://x.dev/a', linkType: 'issue' }] }) throws ToolInputError with reason links[0].linkType.",
+        "[unit] linkTicketsTool(...).preview for { links: [{ ref: 'KODA-1', url: 'https://github.com/o/r/pull/7' }] } on a ticket titled Fix login in project web returns exactly 'Link 1 URL(s) in web:\n- KODA-1 \"Fix login\" <- pr https://github.com/o/r/pull/7'.",
+        "[unit] linkTicketsTool(...).preview for a link whose ref matches no ticket of the project rethrows the NotFoundAppException that TicketsService.findByRef threw.",
+        "[unit] For linkTicketsTool(...).execute in project web with links to KODA-1 then KODA-2, the list of argument tuples TicketLinksService.create received equals, in order, ('web', 'KODA-1', { url, linkType }) and ('web', 'KODA-2', { url, linkType }).",
+        "[unit] For a link to KODA-1 that TicketLinksService.create answers with status 200, the result line is 'linked KODA-1 <url> (already linked)'.",
+        "[unit] For a link to KODA-2 that TicketLinksService.create answers with status 201, the result line is 'linked KODA-2 <url>'.",
+        "[unit] When the second of two TicketLinksService.create calls throws NotFoundAppException after the first answered 201 for KODA-1 and https://x.dev/a, linkTicketsTool(...).execute throws a ToolActionError whose text is 'linked KODA-1 https://x.dev/a\nfailed at link 2: not_found'.",
+        "[unit] In assistant.module.spec.ts, after the compiled AssistantModule testing module runs init(), AssistantToolRegistry.get('koda_link_tickets')?.permission equals { kind: 'member' }.",
+        "[integration] At the runner tool route, koda_link_tickets with { links: [{ ref: 'KODA-1', url: 'https://github.com/o/r/pull/7' }] } answers content starting 'pending '.",
+        "[integration] After that koda_link_tickets route call, KODA-1 has no TicketLink.",
+        "[integration] After dev approves that action at the decide route, KODA-1 has one TicketLink with { url: 'https://github.com/o/r/pull/7', linkType: 'pr' }.",
+        "[integration] At the runner tool route, koda_link_tickets for a RUNNING REPO THREAD job whose thread was created by the project's VIEWER viewer answers content starting 'pending ' (membership is enough, 2b1-D4).",
+        "[integration] When koda_link_tickets names a missing or foreign-project ticket ref at the runner tool route, the result is { isError: true, content: 'not_found' }."
+      ],
+      "tags": [
+        "api",
+        "feature",
+        "assistant",
+        "ticket-links",
+        "security",
+        "integration"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Reuses the established serial write pattern with straightforward URL parsing/inference; project scoping and member-versus-ability access rules trigger strict security TDD.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/ticket-links/ticket-links.service.ts",
+        "apps/api/src/ticket-links/dto/create-ticket-link.dto.ts",
+        "apps/api/src/fleet/assistant/tools/ticket-write-tools.ts",
+        "apps/api/src/fleet/assistant/assistant.module.spec.ts",
+        "apps/api/test/integration/fleet/assistant-create-tickets-tool.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/assistant/tools/link-tickets-tool.ts",
+        "apps/api/src/fleet/assistant/tools/link-tickets-tool.spec.ts",
+        "apps/api/test/integration/fleet/assistant-link-tickets-tool.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/assistant.module.spec.ts",
+          "reason": "gains a test that `koda_link_tickets` is registered as a write tool with its permission; existing tests unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Propose requester-owned project memories",
+      "description": "**Goal** — Add koda_add_memory for approval-only non-decision project memories attributed to the requester and readable through koda_memory_search.\n\n**Motivation** — The umbrella's example asks include \"Turn this brainstorm into tickets\" and \"Record this decision as an ADR\".\n\n**Approach** — **2b-R2** `koda_add_kb_doc` is dropped. The KB route writes the legacy RAG table (`RagService.indexDocument`), which `koda_kb_search` never reads (it searches only repo docs and run outcomes, `tools/kb-tools.ts:46`), and S5b-R14 keeps ADRs as docs-as-code. Durable knowledge goes through `koda_add_memory` and `koda_record_decision`, which `koda_memory_search` already reads.\n\n**2b-R5** Memory items and decisions are always attributed to the requester. The admin override of `ownerId` and `actorId` (`memory/memory.controller.ts:103,145-146`) is not exposed.\n\n**2b1-D4 Permissions** mirror each REST route (S5b-R6):\n- `koda_add_memory` and `koda_record_decision`: project membership (`memory.controller.ts:31-46`).\n\n**2b1-D5 Input bounds** (the parser refuses with the named reason):\n| Tool | Field | Rule | Reason |\n|---|---|---|---|\n| `koda_add_memory` | `kind` | one of `FACT`, `PREFERENCE`, `CONSTRAINT`, `INCIDENT_PATTERN` (never `DECISION`) | `kind` |\n| | `subject`, `predicate` | string, 1 to 200 characters after trim | `subject`, `predicate` |\n| | `object` | optional string, at most 4000 characters | `object` |\n\nThe descriptors' JSON schemas carry the same bounds. A parsed value is stored as written: only the trimmed length is judged, as `koda_add_comment` does.\n\n**2b1-D6 Previews.** Every preview is passed through `maskSecrets`, as `koda_add_comment`'s is. Each one names the project slug, and every existing ticket it names is read through the project-scoped `TicketsService.findByRef`, so a foreign or missing ref raises `NotFoundAppException` and answers `not_found` before any action exists. The first lines are fixed:\n- `koda_add_memory`: `Remember in <slug>: <kind> <subject> / <predicate>`, then the object when present. When an active item with the same `kind`, `subject` and `predicate` exists, the last line is `Replaces memory:<id>: <its object>`, or `Replaces memory:<id>` when that item has no object.\n- Preview size is accepted as bounded by the input bounds (at most about 85 KB for 20 tickets with full descriptions); previews are not truncated, because the user approves the exact text.\n\n**2b1-D7 Execution** runs as the requester with the action project's role (`ctx.actor`, 2a-D8), through the domain services, so the usual ticket events, timeline rows and outbox events fire.\n- `koda_add_memory` calls `PrismaMemoryItemRepository.upsert` with the thread's project, the parsed fields, `sourceType: 'thread'`, `sourceId: <threadId>`, `confidence: 0.8` and `ownerId: ctx.actor.id`. The result is `memory:<id> saved`.\n\n**2b1-D8 Tool groups and files.** Each tool is a factory in its own file under `tools/`: `create-tickets-tool.ts`, `update-ticket-tool.ts`, `link-tickets-tool.ts`, `add-memory-tool.ts` and `record-decision-tool.ts`. `TicketWriteTools` (`tools/ticket-write-tools.ts`) registers the three ticket tools and `MemoryWriteTools` (`tools/memory-write-tools.ts`) the two memory tools, each in `onModuleInit` like `ActionTools`. Both are `AssistantModule` providers.\n\nCreate add-memory-tool.ts/.spec.ts, memory-write-tools.ts and assistant-add-memory-tool.integration.spec.ts. This story creates MemoryWriteTools registering only addMemoryTool; US-007 adds recordDecisionTool. Add MemoryWriteTools to assistant.module.ts providers and import the provider symbol, with no new Nest module imports. MemoryModule already exports PrismaMemoryItemRepository and ExtractionService. Add a no-DB write-kind/member registration test to assistant.module.spec.ts without changing existing tests. Use findActive(ctx.projectId, kind, subject, predicate) for replacement text, not a cross-project query. The parser returns only kind/subject/predicate/object, dropping caller-supplied ownerId before proposal; use ctx.projectId for the acting project, including in WORKSPACE actions.\n\nIntegration follows assistant-memory-tools.integration.spec.ts and the upstream create-tool approval fixture: seedFleetHttpWorld, web key KODA, dev DEVELOPER and viewer VIEWER, dev-created RUNNING REPO THREAD job via seedThreadJobFor, FLEET_THREADS_ENABLED=true before boot. Enter at POST /api/fleet/runner/jobs/:jobId/tools/koda_add_memory?leaseEpoch=<n>, decide as dev at POST /api/projects/web/fleet/approvals/:approvalId/decide using PendingAction.approvalId, then call koda_memory_search at the runner route with { text: 'bun' }. No memory is written before approval. The tests need compose Postgres and must execute via test:scoped in DB mode.\n\n**Scope** — In: non-decision memory parser/masked replacement preview/upsert, MemoryWriteTools provider, registration and write/read seam tests. Out: US-007 decision factory/supersession; US-003 through US-005 ticket writes; legacy RAG or KB writes, DECISION through this tool, arbitrary attribution including for global admins, and changing repository/read-tool semantics.\n\n**Interface** — `PrismaMemoryItemRepository.upsert(item: MemoryItemInput): Promise<MemoryItem>` and `findActive(projectId, kind, subject, predicate): Promise<MemoryItem | null>` — `memory/prisma-memory-item.repository.ts:155,215`. Export addMemoryTool returning an AssistantTool with KODA_ADD_MEMORY, kind write and `{ kind: 'member' }`. Its upsert input is `{ projectId: ctx.projectId, kind, subject, predicate, object, sourceType: 'thread', sourceId: ctx.threadId, confidence: 0.8, ownerId: ctx.actor.id }`.",
+      "acceptanceCriteria": [
+        "[unit] addMemoryTool(...).parse({ kind: 'DECISION', subject: 's', predicate: 'p' }) throws ToolInputError with reason kind.",
+        "[unit] addMemoryTool(...).parse({ kind: 'FACT', subject: ' ', predicate: 'p' }) throws ToolInputError with reason subject.",
+        "[unit] addMemoryTool(...).parse({ kind: 'FACT', subject: 's', predicate: 'p', ownerId: 'someone' }) returns a value with no ownerId key (2b-R5).",
+        "[unit] addMemoryTool(...).preview for { kind: 'FACT', subject: 'api', predicate: 'runs on', object: 'bun' } in project web, with no active item of that key, returns exactly 'Remember in web: FACT api / runs on\nbun'.",
+        "[unit] addMemoryTool(...).preview, when PrismaMemoryItemRepository.findActive answers an item with id m1 and object node, returns text whose last line is 'Replaces memory:m1: node'.",
+        "[unit] addMemoryTool(...).preview, when PrismaMemoryItemRepository.findActive answers an item with id m1 and no object, returns text whose last line is 'Replaces memory:m1'.",
+        "[unit] addMemoryTool(...).execute for { kind: 'FACT', subject: 'api', predicate: 'runs on', object: 'bun' } calls PrismaMemoryItemRepository.upsert once with { projectId: ctx.projectId, kind: 'FACT', subject: 'api', predicate: 'runs on', object: 'bun', sourceType: 'thread', sourceId: ctx.threadId, confidence: 0.8, ownerId: ctx.actor.id }.",
+        "[unit] When that upsert answers an item with id m3, addMemoryTool(...).execute returns 'memory:m3 saved'.",
+        "[unit] In assistant.module.spec.ts, after the compiled AssistantModule testing module runs init(), AssistantToolRegistry.get('koda_add_memory')?.permission equals { kind: 'member' }.",
+        "[integration] At the runner tool route, koda_add_memory with { kind: 'FACT', subject: 'api', predicate: 'runs on', object: 'bun' } from the runner holding dev's RUNNING REPO THREAD job answers content starting 'pending '.",
+        "[integration] After that koda_add_memory route call, the project has no active memory item with subject api and predicate runs on.",
+        "[integration] After dev approves that action at the decide route, koda_memory_search with { text: 'bun' } at the runner tool route answers content containing the memory:<id> of the stored item."
+      ],
+      "tags": [
+        "api",
+        "feature",
+        "assistant",
+        "memory",
+        "security",
+        "integration"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "MemoryModule already exports the repository and search path, so this is a standard factory/provider addition with no storage or retrieval redesign; membership and requester-only ownership require strict security TDD.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/memory/prisma-memory-item.repository.ts",
+        "apps/api/src/memory/memory.controller.ts",
+        "apps/api/src/fleet/assistant/tools/knowledge-tools.ts",
+        "apps/api/test/integration/fleet/assistant-memory-tools.integration.spec.ts",
+        "apps/api/src/fleet/assistant/assistant.module.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/assistant/tools/add-memory-tool.ts",
+        "apps/api/src/fleet/assistant/tools/add-memory-tool.spec.ts",
+        "apps/api/src/fleet/assistant/tools/memory-write-tools.ts",
+        "apps/api/test/integration/fleet/assistant-add-memory-tool.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/assistant.module.ts",
+          "reason": "the providers list gains `MemoryWriteTools`; no import changes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant.module.spec.ts",
+          "reason": "gains a test that `koda_add_memory` is registered as a write tool with its permission; existing tests unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Propose requester-attributed decisions with rationale",
+      "description": "**Goal** — Add koda_record_decision to propose and approve a requester-attributed decision, preserving rationale in its stored text and superseding that requester's previous decision on the topic.\n\n**Motivation** — The umbrella's example asks include \"Turn this brainstorm into tickets\" and \"Record this decision as an ADR\".\n\n**Approach** — **2b-R5** Memory items and decisions are always attributed to the requester. The admin override of `ownerId` and `actorId` (`memory/memory.controller.ts:103,145-146`) is not exposed.\n\n**2b1-D4 Permissions** mirror each REST route (S5b-R6):\n- `koda_add_memory` and `koda_record_decision`: project membership (`memory.controller.ts:31-46`).\n\n**2b1-D5 Input bounds** (the parser refuses with the named reason):\n| Tool | Field | Rule | Reason |\n|---|---|---|---|\n| `koda_record_decision` | `topic` | string, 1 to 200 characters after trim | `topic` |\n| | `decision` | string, 1 to 4000 characters after trim | `decision` |\n| | `rationale` | optional string, at most 4000 characters | `rationale` |\n\nThe descriptors' JSON schemas carry the same bounds. A parsed value is stored as written: only the trimmed length is judged, as `koda_add_comment` does.\n\n**2b1-D6 Previews.** Every preview is passed through `maskSecrets`, as `koda_add_comment`'s is. Each one names the project slug, and every existing ticket it names is read through the project-scoped `TicketsService.findByRef`, so a foreign or missing ref raises `NotFoundAppException` and answers `not_found` before any action exists. The first lines are fixed:\n- `koda_record_decision`: `Record a decision in <slug> on \"<topic>\": <decision>`, then `Rationale: <rationale>` when present. When the requester already has an active decision on that topic, the last line is `Supersedes memory:<id>: <its decision>`.\n- Preview size is accepted as bounded by the input bounds (at most about 85 KB for 20 tickets with full descriptions); previews are not truncated, because the user approves the exact text.\n\n**2b1-D7 Execution** runs as the requester with the action project's role (`ctx.actor`, 2a-D8), through the domain services, so the usual ticket events, timeline rows and outbox events fire.\n- `koda_record_decision` calls `ExtractionService.recordDecision` with the thread's project, `actorId: ctx.actor.id`, the topic, `sourceId: 'thread:<threadId>'` and the same repository. `recordDecision` stores only `decision` as the item's object and drops `rationale` (`memory/extraction.service.ts:223-232`), so the tool passes `decision` as `<decision>\n\nRationale: <rationale>` when a rationale is given, and as the decision alone otherwise, and passes no `rationale` field. The decision and rationale the user approved are both stored; the stored text separates them with a blank line where the preview uses a line break. The result is `decision memory:<memoryId> recorded`.\n\n`ExtractionService.recordDecision(input, repository): Promise<WriteResult>` — stores a `DECISION` whose subject is `agent:<actorId>` and supersedes the active one on the same topic (`memory/extraction.service.ts:204`).\n\nCreate record-decision-tool.ts/.spec.ts and assistant-record-decision-tool.integration.spec.ts. Register recordDecisionTool in MemoryWriteTools.onModuleInit from US-006 and extend assistant.module.spec.ts with the write-kind/member permission assertion, preserving existing tests. No new AssistantModule provider or Nest module import. The parser returns only topic/decision/rationale; it must drop caller-supplied actorId even for admins. The preview looks up findActive(ctx.projectId, 'DECISION', 'agent:<ctx.actor.id>', topic) using the same repository passed to recordDecision. Use the action context project's id/slug rather than the thread's home project. Do not change ExtractionService, repository source-type semantics or the memory model.\n\nIntegration follows US-006's assistant-add-memory-tool.integration.spec.ts: seedFleetHttpWorld with web key KODA, dev DEVELOPER, viewer VIEWER and a dev-created RUNNING REPO THREAD job from seedThreadJobFor; set FLEET_THREADS_ENABLED=true before boot. Propose at POST /api/fleet/runner/jobs/:jobId/tools/koda_record_decision?leaseEpoch=<n> and approve as dev at POST /api/projects/web/fleet/approvals/:approvalId/decide with { decision: 'approve' }, using PendingAction.approvalId rather than its id. Run the per-story integration file with test:scoped against compose Postgres. The approved DECISION has subject agent:<dev id>, ownerId dev, topic as predicate, and the complete decision-plus-rationale object.\n\n**Scope** — In: decision parser, requester-scoped masked supersession preview, rationale composition, domain-service execute, group registration and tests. Out: US-006 generic memory factory/provider creation; US-003 through US-005 ticket tools; RAG/KB docs or docs-as-code ADR commits; arbitrary actor attribution, and a separate rationale field. Do not implement fleet dispatch/requeue/cancel.\n\n**Interface** — `ExtractionService.recordDecision(input, repository): Promise<WriteResult>`. `PrismaMemoryItemRepository.upsert(item: MemoryItemInput): Promise<MemoryItem>` and `findActive(projectId, kind, subject, predicate): Promise<MemoryItem | null>` — `memory/prisma-memory-item.repository.ts:155,215`. Export recordDecisionTool as an AssistantTool using KODA_RECORD_DECISION, kind write and `{ kind: 'member' }`; invoke recordDecision with `{ projectId: ctx.projectId, actorId: ctx.actor.id, topic, decision, sourceId: 'thread:<ctx.threadId>' }` and the same repository as second argument. The decision argument is composed as specified above; pass no rationale property.",
+      "acceptanceCriteria": [
+        "[unit] recordDecisionTool(...).parse({ topic: 'db', decision: '   ' }) throws ToolInputError with reason decision.",
+        "[unit] recordDecisionTool(...).parse({ topic: 'db', decision: 'use postgres', actorId: 'someone' }) returns a value with no actorId key (2b-R5).",
+        "[unit] recordDecisionTool(...).preview for { topic: 'db', decision: 'use postgres', rationale: 'one engine' } in project web, with no active decision, returns exactly 'Record a decision in web on \"db\": use postgres\nRationale: one engine'.",
+        "[unit] recordDecisionTool(...).preview for topic db calls PrismaMemoryItemRepository.findActive with (ctx.projectId, 'DECISION', 'agent:<ctx.actor.id>', 'db').",
+        "[unit] recordDecisionTool(...).preview, when that lookup answers an item with id m2 and object use sqlite, returns text whose last line is 'Supersedes memory:m2: use sqlite'.",
+        "[unit] recordDecisionTool(...).execute for { topic: 'db', decision: 'use postgres', rationale: 'one engine' } calls ExtractionService.recordDecision once with first argument { projectId: ctx.projectId, actorId: ctx.actor.id, topic: 'db', decision: 'use postgres\n\nRationale: one engine', sourceId: 'thread:<ctx.threadId>' }.",
+        "[unit] recordDecisionTool(...).execute for { topic: 'db', decision: 'use postgres' } calls ExtractionService.recordDecision with a first argument whose decision is 'use postgres'.",
+        "[unit] When recordDecision answers { memoryId: 'm4' }, recordDecisionTool(...).execute returns 'decision memory:m4 recorded'.",
+        "[unit] In assistant.module.spec.ts, after the compiled AssistantModule testing module runs init(), AssistantToolRegistry.get('koda_record_decision')?.permission equals { kind: 'member' }.",
+        "[integration] At the runner tool route, koda_record_decision with { topic: 'db', decision: 'use postgres', rationale: 'one engine' } from the runner holding dev's RUNNING REPO THREAD job answers content starting 'pending '.",
+        "[integration] After dev approves that action at the decide route, the project holds one active DECISION memory item, and it has { subject: 'agent:<dev id>', predicate: 'db', object: 'use postgres\n\nRationale: one engine', ownerId: <dev id> }."
+      ],
+      "tags": [
+        "api",
+        "feature",
+        "assistant",
+        "memory",
+        "decisions",
+        "security"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Follows the established memory-tool/provider pattern with a precisely specified text adapter; requester-only attribution and scoped supersession require strict security TDD.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/memory/extraction.service.ts",
+        "apps/api/src/memory/prisma-memory-item.repository.ts",
+        "apps/api/src/fleet/assistant/tools/memory-write-tools.ts",
+        "apps/api/test/integration/fleet/assistant-add-memory-tool.integration.spec.ts",
+        "apps/api/src/fleet/assistant/assistant.module.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/assistant/tools/record-decision-tool.ts",
+        "apps/api/src/fleet/assistant/tools/record-decision-tool.spec.ts",
+        "apps/api/test/integration/fleet/assistant-record-decision-tool.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/assistant.module.spec.ts",
+          "reason": "gains a test that `koda_record_decision` is registered as a write tool with its permission; existing tests unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "This is an additive enhancement of S5b-2a, not greenfield. Navigation: codebase-memory MCP is not exposed in this session, so discovery used direct Read/Grep/Glob against the supplied execution root. No implementation code was changed and no tests were executed while drafting this PRD. The detected Express/Next.js labels in the prompt are not authoritative: the API context specifies NestJS 12 with Fastify, Prisma 7/Postgres, Nathapp platform services, Vitest and oxlint (.nax/mono/apps/api/context.md:17); package dependencies corroborate Nest/Fastify (apps/api/package.json:59). All seven stories are scoped to apps/api. Read the app context and nathapp-nestjs-patterns skill before implementing Nest code; preserve existing Nathapp exception, DI and response-envelope conventions.\n\nExisting write architecture and consumers: AssistantTool<I> already has kind, preview, parse and execute (apps/api/src/fleet/assistant/assistant-tool.types.ts:18); ToolContext supplies projectId/projectSlug, the requester actor, thread/job and a safe data formatter (:7). Only ToolInputError currently exists (:39). AssistantToolExecutor.executeAction re-resolves the requester and action project's membership/ability through actionScope, reparses stored input, runs execute and caps successes at RESULT_CAP_BYTES=16384 (apps/api/src/fleet/assistant/assistant-tool.executor.ts:19,81,98). Its current catch maps NotFoundAppException to not_found and all other exceptions to a logged generic failure. execParsed already performs the declared CASL tuple check (:228). REPO/PROJECT use the home project; WORKSPACE strips its project argument after resolving the named project and membership (:195), so factories must use ctx.projectId and ctx.projectSlug rather than assume the thread's home project. proposeWrite calls preview instead of execute, then passes the parsed input and preview to ActionProposer (:266); currently only NotFoundAppException gets a specific preview refusal. US-001 adds ToolForbiddenError/ToolActionError to the existing types file despite that file being omitted from the spec's abbreviated Modifies list, and adds only the two preview mappings and the partial-action mapping to the executor. Preserve existing parsing, idempotent tool-call replay, audit storage, permission gates, generic error logging, caps and not_found behavior. ToolActionError is expected failure data and must not be error-logged. Existing call outcome values already support invalid_input/forbidden; no schema change is needed.\n\nApproval lifecycle must stay untouched: AssistantActionDecisions checks that the caller is the requester, reauthorizes an approve, commits APPROVED before executeAction and finalizes afterwards (apps/api/src/fleet/assistant/actions/assistant-action-decisions.ts:69,96,140). finalize writes FAILED for ok:false, stores the capped result and inserts the outcome note in the same finalization transaction (:140). Approval itself remains approved even when the action fails. outcomeNote already quotes failure text and uses NOTE_RESULT_MAX=500 (apps/api/src/fleet/assistant/actions/outcome-note.ts:4,17). getActionTool reads only the calling project's/thread's action and returns its stored result using ctx.data (apps/api/src/fleet/assistant/tools/action-tools.ts:89,107). The full stored result means the RESULT_CAP_BYTES-bounded text, not unlimited output; notes keep the existing 500-character result cap. No outcome-note, web card or inbox implementation changes are required.\n\nTool pattern and catalog impact: addCommentTool implements hand parsing, allowlisted parsed fields, masked preview, domain-service execution and a declared write permission; ActionTools registers factories onModuleInit (apps/api/src/fleet/assistant/tools/action-tools.ts:45,116). Move only that file's asRecord and ticketPath to tools/tool-input.ts unchanged (:34,39); do not sweep duplicate private helpers in unrelated groups. New factories each live in their own file and register through TicketWriteTools (created in US-003, extended in US-004/005) and MemoryWriteTools (created in US-006, extended in US-007). AssistantModule already imports TicketsModule, TicketLinksModule and MemoryModule (apps/api/src/fleet/assistant/assistant.module.ts:35); add provider symbols and their TypeScript imports, not new Nest module imports. TicketsModule exports both services needed for updates (apps/api/src/tickets/tickets.module.ts:25); MemoryModule exports PrismaMemoryItemRepository and ExtractionService (apps/api/src/memory/memory.module.ts:45). The registry registration seam is proven by module.init(), not compile() alone (apps/api/src/fleet/assistant/assistant.module.spec.ts:50). Each story adds a write-kind/permission registration assertion without weakening existing tests.\n\nKODA_TOOL_DESCRIPTORS currently ends in ACTION_TOOL_DESCRIPTORS (apps/api/src/fleet/assistant/koda-tool-descriptors.ts:326,329). US-002 appends the five exported descriptors as WRITE_TOOL_DESCRIPTORS, preserving all earlier groups and object identity. withProjectArgument appends a sentence and required project schema without mutating catalog entries (:360), so schemas must work both directly and under WORKSPACE wrapping. Catalog tests explicitly assert the old suffix, counts and pre-action prefix; change precisely those anchors and add the new descriptor assertions (apps/api/src/fleet/assistant/koda-tool-descriptors.spec.ts:133,141,157). Placement imports kodaToolDescriptorsFor and copies its result into THREAD ASSIGN (apps/api/src/fleet/jobs/placement.service.ts:10,227); its project-code spec compares WORKSPACE against that function (:181). The runner rejects an entire list if a description is over 2000 characters, including the workspace sentence, or the list is over maxTools (apps/runner/src/supervisor/assign-parser.ts:88,97,105). The final 19 REPO/PROJECT and 20 WORKSPACE descriptors fit the 32-tool limit. Descriptors can exist before their dependent registrations during development; ship the completed story chain together. No runner or shared-protocol edits. API fleet-protocol imports must remain type-only, following existing catalog code.\n\nTickets and links: TicketsService.create uses per-project number allocation/retry, CREATED/default MEDIUM and actorForeignKeys, and emits the normal ticket event/outbox within its transaction (apps/api/src/tickets/tickets.service.ts:93). findByRef performs a single project/key-scoped lookup and excludes soft-deleted records (:178); all existing-ticket previews must call it to avoid cross-project disclosure. TICKET_REF rejects CUIDs, lowercase keys and leading-zero numbers (apps/api/src/fleet/assistant/tools/ticket-tools.ts:23). TicketsService.update checks transition permission before applying fields, then invokes the state machine (:227). assertTransitionPermission fails closed and enforces transition Ticket (apps/api/src/tickets/state-machine/ticket-transitions.service.ts:518). validateTransition uses typed-comment rules; CREATED/VERIFIED can start without a comment but VERIFY_FIX cannot, even though it has an IN_PROGRESS edge (apps/api/src/tickets/state-machine/ticket-transitions.ts:13,39). US-004 must check transition permission before validating the current status, and recheck the current state at approval. Do not replace state-machine/service behavior with direct Prisma writes. The remaining race between start precheck and the service's field update/transition is explicitly accepted, not a locking project. TicketLinksService.create resolves the scoped ticket, returns status 200 for an existing URL or 201 for a new link, and infers only pr versus url unless explicit linkType is given (apps/api/src/ticket-links/ticket-links.service.ts:53,69). inferLinkType is private, so the preview must copy exactly its three PR URL patterns, not expand inference for commit/branch URLs. DTO validation does not execute when calling services directly, so the tool parser must enforce all specified limits and enums (apps/api/src/ticket-links/dto/create-ticket-link.dto.ts:4). Create/link batches await each item in input order and stop at the first failure, retaining earlier writes and reporting only not_found or error, never raw exception text. There is deliberately no enclosing batch transaction, rollback or retry.\n\nMemory and decisions: memory REST authorization is membership-based; its admin override is intentionally stricter in these tools, which always attribute to ctx.actor.id (apps/api/src/memory/memory.controller.ts:31,103,145). Parsers must build allowlisted outputs so ownerId/actorId cannot survive into PendingAction.input, including for admins. PrismaMemoryItemRepository.upsert is a serializable transaction that deduplicates identical source/object replays and supersedes the current active kind/subject/predicate key, then saves owner and source metadata (apps/api/src/memory/prisma-memory-item.repository.ts:155). findActive is project/key/status scoped (:215); reuse it for replacement previews without changing repository semantics. recordDecision keys decisions as agent:<actorId> and topic, supersedes that requester's active decision and stores only input.decision as object, ignoring rationale (apps/api/src/memory/extraction.service.ts:204,223). US-007 must append a given rationale to decision with two newlines and Rationale: before calling the existing service, passing no rationale field and the same repository. Preserve the service's decision_event source type, confidence and supersession behavior; only sourceId is thread:<threadId>. A generic memory uses sourceType thread and bare threadId, confidence 0.8. Do not change these read-only domain integrations or broaden writes to legacy RAG. memorySearchTool already reads through MemoryGovernanceService with projectId and returns fenced memory:<id> rows (apps/api/src/fleet/assistant/tools/knowledge-tools.ts:133). US-006's route-level readback proves this write/read seam. Repository and extraction failures may still produce existing generic failures; do not introduce new retry or atomicity guarantees.\n\nTests and execution: executor tests already provide stub tools, in-memory call audit rows, attached proposers and PendingAction fixtures (apps/api/src/fleet/assistant/assistant-tool.executor.spec.ts:24,66,96). Add write-tool-errors.spec.ts for US-001 rather than rewriting their harness behavior. Descriptor/helper tests cover US-002. All new tool unit specs use mocked domain services. DI tests remain no-DB units in assistant.module.spec.ts; its existing GlobalStubsModule compilation and init pattern is the baseline (:20,51). Existing domain regression suites include tickets.service.spec.ts, ticket-transitions.service.spec.ts/ticket-transitions.spec.ts, ticket-links.service.spec.ts, memory.controller.spec.ts and extraction.service.spec.ts. Each tool story creates its own integration file. assistant-action-tools.integration.spec.ts supplies seedFleetHttpWorld, KODA key setup, runner enrollment, route envelope extraction and real proposals (apps/api/test/integration/fleet/assistant-action-tools.integration.spec.ts:61,92). Approval examples use stored approvalId, not action id (apps/api/test/integration/fleet/assistant-actions-approve.integration.spec.ts:56; assistant-actions-decide.integration.spec.ts:59). seedThreadJobFor defaults to dev's RUNNING REPO THREAD job with leaseEpoch 1 and supports a viewer creator (apps/api/test/helpers/thread-fixtures.ts:42). Set FLEET_THREADS_ENABLED=true before boot, use /api/fleet/runner/jobs/:jobId/tools/<name>?leaseEpoch=<n>, and decide at /api/projects/web/fleet/approvals/:approvalId/decide as dev. Set CREATED or VERIFY_FIX explicitly on each test's own ticket; do not rely on another test's status. Avoid shared pending-action cap interference between cases. Use generated Prisma client types, vi rather than jest, and lazy import for TypeScript modules. bun run test excludes integration/e2e; bun run test:scoped selects DB mode for their paths (apps/api/package.json:13,20). Integration requires real Postgres and KODA_DB_TESTS=1; bring up compose using bun run test:db:up from apps/api outside the Docker-less agent sandbox. DB tests reset their database: do not run DB-mode suites concurrently against the same database. Generated acceptance material stays under .nax and must not be edited/copied into src.\n\nScope, migration and fidelity: exact binding dependencies are retained: US-001 and US-002 independent, US-003 depends on both, then US-004 through US-007 serially. This also avoids conflicting registration/module edits. No Prisma schema, migrations, REST controller/DTO contract, OpenAPI, generated client, CLI, web, runner or protocol-version changes. Existing pending comment actions and all read tools keep their previous behavior. Ship by extending types/executor and catalog first, then registering each factory/provider in dependency order. Primary risks are executing before approval, cross-project lookup leakage, accidentally granting update via membership, checking state before transition permission, exposing admin attribution overrides, losing rationale, mismatched schemas/parsers, result-byte versus preview-character truncation, hiding partial writes, and descriptor descriptions invalidating an ASSIGN. Preview text is masked but not capped; inputs are retained as written after trimmed-length validation, not normalized, and result caps must never be applied to previews. All 89 numbered spec ACs remain in their original stories. Additional acceptance assertions below come only from explicit Failure Handling rows (precise refusal/no action, late-state failure, partial batch FAILED results), not invented edge cases. Failure-table rows for VIEWER create/update ability refusals, update missing refs and deleted-before-approval retain the existing executor/service mappings; the explicit Out of Scope says this feature adds no AC for those cases, so those exclusions take precedence over expanding the table into new tool-specific ACs. No speculative criteria are promoted into acceptanceCriteria. Refine-pass audit: enumerated and matched every numbered spec criterion to the same-position criterion in its original story: US-001 AC-1 through AC-9 (preview input refusal/result, no proposal, invalid_input audit; forbidden result, no proposal, forbidden audit; partial action text, byte cap, unchanged plain-error mapping); US-002 AC-1 through AC-13 (ordered five descriptors, final-five placement, preceding action pair, REPO count, WORKSPACE count, approval phrase, workspace description cap, tickets bounds, links bounds, start-only enum, non-decision enum, array helper refusal, ticket path); US-003 AC-1 through AC-14 (empty batch, oversized batch, indexed bad type, indexed blank title, preview heading, default priority, masked secret, ordered create arguments, success lines, partial failure text, create permission registration, runner pending response, approved titles in order, requester creator attribution); US-004 AC-1 through AC-15 (no changes, invalid status, preview heading, priority diff, field-only permission bypass, transition refusal adapter, VERIFY_FIX refusal, update arguments, result text, late CLOSED failure, no update after that failure, service forbidden adapter, update permission registration, real preview refusal route, approved status/priority); US-005 AC-1 through AC-15 (empty batch, oversized batch, FTP refusal, bad link type, inferred PR preview, same scoped not-found exception, ordered link service arguments, already-linked result, new-link result, partial not-found text, member registration, runner pending, no link before approval, approved inferred PR link, viewer membership permission); US-006 AC-1 through AC-12 (DECISION refusal, blank subject, owner override stripped, preview, replacement with object, replacement without object, upsert arguments, saved result, member registration, runner pending, no premature memory, approved search readback); US-007 AC-1 through AC-11 (blank decision, actor override stripped, rationale preview, requester/topic lookup, supersession preview, rationale storage arguments, decision-only arguments, result text, member registration, runner pending, one requester-owned active decision with full stored text). Thus all 89 numbered ACs and their qualifying clauses remain; the nine explicit failure-table supplements follow those blocks, for 98 total. In particular, preserve US-005 AC-15's membership-is-enough parenthetical, US-006 AC-3/US-007 AC-2's 2b-R5 qualifiers, the same-exception qualification in US-005 AC-6, and the already-linked suffix. Each criterion is observable via results, exceptions, mock call arguments or persisted state. Every story has a negative path: US-002 AC-12 is specifically malformed array input returning an empty record; the other six have explicit input or execution failures. Backward compatibility is anchored by US-001 AC-9 and US-002 AC-3/12/13 plus the unchanged existing prefix/identity/module tests specified in descriptions. No deprecated grep/file/verbatim AC tags occur. All 18 top-level out-of-scope items were compared item by item and retained verbatim; no story-local deferrals were hoisted. Binding story ids, workdirs and dependencies are unchanged. Context audit restores US-004's explicitly recommended upstream create-ticket integration fixture within its five-file limit; all other critical spec context entries are already present and no story lists its own outputs as context. Factories follow the existing ActionTools/provider pattern and reuse already imported/exported services, so US-003/004/006 are medium rather than complex; strict three-session-tdd remains mandatory for their permission/ownership code. US-002 remains medium/tdd-simple for catalog and unchanged helper extraction. The late-state failure supplement now names CLOSED/MEDIUM explicitly instead of an unspecified set of unchanged fields, and applies before service entry, not to the excluded check/update race. Rechecked domain interfaces confirm no actor argument to TicketLinksService.create, a bare threadId source for generic memory, thread:<threadId> for decisions, and rationale embedded only in the decision string.",
+  "outOfScope": [
+    "`koda_dispatch_job`, `koda_requeue_job` and `koda_cancel_job`: `fleet-s5b-koda-fleet-writes` (2b-R1).",
+    "`koda_add_kb_doc` and any write to the RAG knowledge base: dropped by ruling 2b-R2.",
+    "Status moves other than the start move to `IN_PROGRESS` (verify, fix, verify-fix, close, reject): they need typed comments the tool does not take (2b-R3).",
+    "Assigning, unassigning, labelling or deleting tickets through a tool.",
+    "Ticket-to-ticket relations (blocks, depends on, duplicates): koda has no such model; `koda_link_tickets` attaches URLs only.",
+    "Creating a batch of tickets or links atomically; items apply one at a time and a failure leaves the earlier ones in place (2b-R4).",
+    "Attributing a memory item or decision to anyone other than the requester, including for global admins (2b-R5).",
+    "Writing a `DECISION` memory item through `koda_add_memory`; decisions go through `koda_record_decision` only.",
+    "Any web change: the thread card, the inbox panel and the system notes already render every write tool from its preview text.",
+    "Changes to the runner, the fleet protocol or `FLEET_PROTOCOL_VERSION`.",
+    "Editing a proposed action's input before deciding it (umbrella §12).",
+    "Storing a decision's rationale in a field of its own; it is appended to the stored decision text (2b1-D7).",
+    "Annotating the ticket, link or memory events with `via: thread <id>`; the approval activity row carries the thread id, and memory rows carry it as `sourceId`.",
+    "US-003 only: a requester without `create` `Ticket` (a VIEWER) is refused by the existing executor ability path (2a US-002 AC-8); this feature adds no AC for it.",
+    "US-004 only: a requester without `update` `Ticket` (a VIEWER) is refused by the existing executor ability path (2a US-002 AC-8); this feature adds no AC for it.",
+    "US-004 only: a `koda_update_ticket` ref that matches no ticket of the project answers `not_found` through `TicketsService.findByRef` and the existing executor preview mapping, as US-005 AC-6 pins for links; this feature adds no `koda_update_ticket` AC for it.",
+    "A ticket deleted between proposal and approval answers `not_found` through the existing `executeAction` mapping; this feature adds no AC for it.",
+    "US-004 only: a ticket whose status changes between the start check and `TicketsService.update` can leave the field changes written and the transition refused; the window is one request and is not locked."
+  ],
+  "routingProfile": "cross-agent"
+}
