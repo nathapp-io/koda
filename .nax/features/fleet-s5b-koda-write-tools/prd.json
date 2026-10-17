@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-koda-write-tools",
   "branchName": "feat/fleet-s5b-koda-write-tools",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "updatedAt": "2026-10-17T13:44:21.124Z",
+  "updatedAt": "2026-10-17T13:55:04.766Z",
   "userStories": [
     {
       "id": "US-001",
@@ -95,8 +95,8 @@
         "refactor"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -108,7 +108,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/assistant/koda-tool-descriptors.ts",
@@ -135,7 +137,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "1cb25e129bf14693a07a8b5c6f1ff0ed1d6f78ec"
     },
     {
       "id": "US-003",
