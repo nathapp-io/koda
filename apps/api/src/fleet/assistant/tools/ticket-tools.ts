@@ -20,7 +20,7 @@ const PAGE_SIZE = 20;
 const MAX_TEXT_CHARS = 100;
 const LAST_COMMENTS = 10;
 /** A ref is `PROJECTKEY-N`: `KEY-N` with an uppercase key and no leading zero (a CUID is invalid input). */
-const TICKET_REF = /^[A-Z][A-Z0-9]*-[1-9][0-9]*$/;
+export const TICKET_REF = /^[A-Z][A-Z0-9]*-[1-9][0-9]*$/;
 
 interface SearchTicketsInput {
   status?: TicketStatus;

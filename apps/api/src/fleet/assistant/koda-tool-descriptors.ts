@@ -287,9 +287,47 @@ export const KNOWLEDGE_TOOL_DESCRIPTORS: readonly KodaToolDescriptor[] = [
   KODA_MEMORY_SEARCH, KODA_TIMELINE, KODA_KB_SEARCH, KODA_GET_DOC,
 ];
 
-/** Every registered tool's descriptor, in catalog order: US-003's tickets, US-004's fleet reads, then knowledge. */
+/** `koda_get_action` (S5b 2a US-003, 2a-D14): the status of one action the thread proposed. */
+export const KODA_GET_ACTION: KodaToolDescriptor = {
+  name: 'koda_get_action',
+  description:
+    'Read one assistant action this thread proposed, by the id a write call answered as pending: its tool, its ' +
+    'status, when it was requested, when the user decided it and, once it has run, what it answered. An id of ' +
+    'another thread or another project, or an id that does not exist, is not found.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['id'],
+    properties: {
+      id: { type: 'string', minLength: 1, maxLength: 64, description: 'Action id, as a write call answers it as pending' },
+    },
+  },
+};
+
+/** `koda_add_comment` (S5b 2a US-003, 2a-D13): the pilot write tool. */
+export const KODA_ADD_COMMENT: KodaToolDescriptor = {
+  name: 'koda_add_comment',
+  description:
+    'Add a comment to one ticket of this project. The comment is only added after the user approves it: this call ' +
+    'proposes it and the user decides it, so tell the user the comment is waiting for their approval and do not ' +
+    'call this tool again for the same comment.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['ref', 'body'],
+    properties: {
+      ref: { type: 'string', pattern: '^[A-Z][A-Z0-9]*-[1-9][0-9]*$', description: 'Ticket ref as PROJECTKEY-N, e.g. WEB-12' },
+      body: { type: 'string', minLength: 1, maxLength: 10000, description: 'Comment text as written, 1 to 10000 characters' },
+    },
+  },
+};
+
+/** The descriptors S5b 2a US-003 contributes, in catalog order (2a-D15). */
+export const ACTION_TOOL_DESCRIPTORS: readonly KodaToolDescriptor[] = [KODA_GET_ACTION, KODA_ADD_COMMENT];
+
+/** Every registered tool's descriptor, in catalog order: tickets, fleet reads, knowledge, then the write tools. */
 export const KODA_TOOL_DESCRIPTORS: readonly KodaToolDescriptor[] = [
-  ...TICKET_TOOL_DESCRIPTORS, ...FLEET_TOOL_DESCRIPTORS, ...KNOWLEDGE_TOOL_DESCRIPTORS,
+  ...TICKET_TOOL_DESCRIPTORS, ...FLEET_TOOL_DESCRIPTORS, ...KNOWLEDGE_TOOL_DESCRIPTORS, ...ACTION_TOOL_DESCRIPTORS,
 ];
 
 /**

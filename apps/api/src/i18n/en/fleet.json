@@ -48,6 +48,7 @@
   "configJobActive": { "409": "A config job is already active for this repository: {activeJobId}" },
   "configEditInput": { "-2": "Invalid config edit: {reason}" },
   "assistantTool": { "404": "Unknown koda tool" },
+  "assistantAction": { "404": "Unknown koda action" },
   "notThreadJob": { "409": "This job is not a thread job with a session" },
   "toolCall": { "-2": "Invalid koda tool call: {reason}" }
 }

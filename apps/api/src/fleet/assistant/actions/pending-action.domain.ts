@@ -94,6 +94,11 @@ export interface PendingActionRepository {
   /** The action of one call. Its caller holds the thread lock, so the answer is authoritative (2a-D4 step 2). */
   findByCall(jobId: string, toolCallId: string): Promise<PendingActionRecord | null>;
   findById(id: string): Promise<PendingActionRecord | null>;
+  /**
+   * 2a-D14: the one action `koda_get_action` may read — the id it was given, in the caller's own project and its
+   * own thread. Another thread's or project's id answers null, exactly like an id that does not exist.
+   */
+  findScopedById(id: string, projectId: string, threadId: string): Promise<PendingActionRecord | null>;
   /** The thread's PENDING actions, for the per-thread cap (2a-D4 step 3). */
   countPending(threadId: string): Promise<number>;
   insert(action: NewPendingAction): Promise<PendingActionRecord>;

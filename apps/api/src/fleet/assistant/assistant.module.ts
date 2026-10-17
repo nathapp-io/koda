@@ -23,6 +23,7 @@ import { AssistantToolRegistry } from './assistant-tool.registry';
 import { PrismaAssistantToolCallRepository } from './prisma-assistant-tool-call.repository';
 import { RunnerToolController } from './runner-tool.controller';
 import { RunnerToolService } from './runner-tool.service';
+import { ActionTools } from './tools/action-tools';
 import { FleetTools } from './tools/fleet-tools';
 import { KnowledgeTools } from './tools/knowledge-tools';
 import { TicketTools } from './tools/ticket-tools';
@@ -60,6 +61,8 @@ import { WorkspaceTools } from './tools/workspace-tools';
     FleetTools,
     KnowledgeTools,
     WorkspaceTools,
+    // S5b 2a US-003: the pilot write tool and the scoped action read. It registers on init, like the other groups.
+    ActionTools,
     // S5b 2a US-001: propose storage. The repository stays module-private behind its token.
     PrismaPendingActionRepository,
     { provide: PENDING_ACTION_REPOSITORY, useExisting: PrismaPendingActionRepository },

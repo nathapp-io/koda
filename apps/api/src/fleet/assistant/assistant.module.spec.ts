@@ -5,7 +5,7 @@ import { ProjectsService } from '../../projects/projects.service';
 import { AssistantModule } from './assistant.module';
 import { AssistantToolExecutor } from './assistant-tool.executor';
 import { AssistantToolRegistry } from './assistant-tool.registry';
-import { KODA_MY_PROJECTS } from './koda-tool-descriptors';
+import { KODA_GET_ACTION, KODA_MY_PROJECTS } from './koda-tool-descriptors';
 import { KnowledgeTools } from './tools/knowledge-tools';
 
 describe('AssistantModule', () => {
@@ -41,5 +41,22 @@ describe('AssistantModule', () => {
 
   it('AC-14 (US-003): ProjectsService is in the module graph for the workspace tool group', () => {
     expect(module.get(ProjectsService)).toBeInstanceOf(ProjectsService);
+  });
+
+  it('AC-16 (US-003): init() registers koda_add_comment as a write tool', async () => {
+    await module.init();
+
+    const tool = module.get(AssistantToolRegistry).get('koda_add_comment');
+    expect(tool?.kind).toBe('write');
+    expect(tool?.permission).toEqual({ kind: 'ability', action: 'create', subject: 'Comment' });
+  });
+
+  it('AC-16 (US-003): init() registers koda_get_action as the member-scoped read tool', async () => {
+    await module.init();
+
+    const tool = module.get(AssistantToolRegistry).get('koda_get_action');
+    expect(tool?.descriptor).toBe(KODA_GET_ACTION);
+    expect(tool?.kind).toBeUndefined();
+    expect(tool?.permission).toEqual({ kind: 'member' });
   });
 });

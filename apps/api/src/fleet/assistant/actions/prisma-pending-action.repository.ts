@@ -83,6 +83,14 @@ export class PrismaPendingActionRepository
     return this.first(await this.db.pendingAction.findUnique({ where: { id } }));
   }
 
+  /**
+   * 2a-D14: the scope is part of the read, not a check after it, so another thread's or project's row is never
+   * loaded and cannot be answered differently from an id that does not exist.
+   */
+  async findScopedById(id: string, projectId: string, threadId: string): Promise<PendingActionRecord | null> {
+    return this.first(await this.db.pendingAction.findFirst({ where: { id, projectId, threadId } }));
+  }
+
   async countPending(threadId: string): Promise<number> {
     return this.db.pendingAction.count({ where: { threadId, status: 'PENDING' } });
   }
