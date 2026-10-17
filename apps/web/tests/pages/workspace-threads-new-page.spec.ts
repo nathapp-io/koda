@@ -8,6 +8,7 @@ import { i18nStub, uiStubs } from '../helpers/fleet-harness'
 import * as apiModule from '../../composables/useApi'
 import { ApiError } from '../../composables/useApi'
 import { useFleetDispatchOptions } from '~/composables/useFleetDispatchOptions'
+import { useProjectRunnerSummaries } from '~/composables/useProjectRunnerSummaries'
 import type { FleetRunnerSummary } from '~/lib/fleet-types'
 
 /**
@@ -15,7 +16,7 @@ import type { FleetRunnerSummary } from '~/lib/fleet-types'
  *
  * The page is not project-scoped: it lists the caller's projects to pick a home project, and reads
  * the runner summaries of that project (or of the first listed one while Automatic is selected)
- * through the real `useFleetDispatchOptions`. `$api` is stubbed, so the assertions are on the
+ * through the real `useProjectRunnerSummaries`. `$api` is stubbed, so the assertions are on the
  * requests and the POST body the page really produces.
  */
 const pageFile = webFile('pages', 'threads', 'new.vue')
@@ -74,6 +75,8 @@ interface PageOver {
   runners?: FleetRunnerSummary[]
   post?: jest.Mock
   projectsFail?: boolean
+  /** Mirrors production `useApi()`: it reads i18n state, so it only works with a component instance. */
+  setupOnlyApi?: boolean
 }
 
 function mountPage(over: PageOver = {}) {
@@ -90,7 +93,15 @@ function mountPage(over: PageOver = {}) {
   })
   const post = over.post ?? jest.fn(async () => ({ id: 'th9' }))
   const nav = jest.fn(async () => undefined)
-  const api = () => ({ $api: { get, post } })
+  const api = over.setupOnlyApi === true
+    // The real `useApi()` ends in `useI18n()`, which throws outside a component instance: after the
+    // `await $api.get('/projects')` in `onMounted` there is none left. B1's regression is exactly a
+    // page that builds an API-dependent composable there, so this guard reproduces it.
+    ? () => {
+        if (Vue.getCurrentInstance() === null) throw new Error('useApi() was called outside setup')
+        return { $api: { get, post } }
+      }
+    : () => ({ $api: { get, post } })
   g.useApi = api
   const app = mountSfc(pageFile, {
     components: { ...stubs, FormField, Input, FleetThreadsBackendPicker: backendPicker },
@@ -103,6 +114,7 @@ function mountPage(over: PageOver = {}) {
       useRoute: () => ({ params: {}, query: {} }),
       navigateTo: nav,
       useFleetDispatchOptions,
+      useProjectRunnerSummaries,
     },
   })
   const settle = async (): Promise<void> => {
@@ -267,6 +279,36 @@ describe('US-005 AC-6..AC-11: pages/threads/new.vue', () => {
     expect(optionValues(m.app, select)).toEqual([''])
     expect(m.paths.filter(path => path.endsWith('/fleet/runners'))).toEqual([])
     expect(modelOptions(m.app)).toEqual([])
+    m.app.unmount()
+  })
+
+  test('AC-7 (B1): the runner read still works when useApi() is only usable during setup', async () => {
+    // The page reads the project list first and the runner summaries afterwards. A composable built
+    // in that second step calls useApi() without a component instance, which throws in production
+    // (useI18n) and leaves the form with no model to pick. Building it in setup keeps it working.
+    const m = mountPage({
+      runners: [runner({ id: 'rn1', threadBackends: native(['m1']) })],
+      setupOnlyApi: true,
+    })
+    await m.settle()
+
+    expect(m.paths).toContain('/projects/web/fleet/runners')
+    expect(modelOptions(m.app)).toEqual(['m1'])
+    m.app.unmount()
+  })
+
+  test('AC-7 (B1, edge): picking another home project still reads runners with useApi() confined to setup', async () => {
+    const m = mountPage({
+      runners: [runner({ id: 'rn1', threadBackends: native(['m1']) })],
+      setupOnlyApi: true,
+    })
+    await m.settle()
+
+    pickHomeProject(m.app, 'api')
+    await m.settle()
+
+    expect(m.paths).toContain('/projects/api/fleet/runners')
+    expect(modelOptions(m.app)).toEqual(['m1'])
     m.app.unmount()
   })
 })

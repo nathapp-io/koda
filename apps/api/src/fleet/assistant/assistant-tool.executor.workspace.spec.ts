@@ -128,6 +128,19 @@ describe('S5b-R7 project argument: WORKSPACE threads validate it', () => {
     expect(access.resolveMembership).not.toHaveBeenCalled();
   });
 
+  /**
+   * The project slug contract (`CreateProjectDto.slug`) has no length bound; the descriptor's `maxLength: 100` is
+   * guidance for the model, not a refusal the executor may invent. A longer slug matching the pattern is looked up.
+   */
+  it('M1: a slug longer than the descriptor maxLength is looked up instead of refused', async () => {
+    const longSlug = 'a'.repeat(101);
+    const tool = makeTool();
+    const { executor, access } = setup(tool);
+    expect(await executor.execute(call({ project: longSlug }))).toEqual(NO_PROJECT);
+    expect(access.findProjectIdBySlug).toHaveBeenCalledWith(longSlug);
+    expect(tool.execute).not.toHaveBeenCalled();
+  });
+
   it('AC-5: parse gets the input without project, execute gets the resolved project', async () => {
     let seen: ToolContext | undefined;
     const tool = makeTool({ execute: async (ctx: ToolContext) => { seen = ctx; return 'ok'; } });

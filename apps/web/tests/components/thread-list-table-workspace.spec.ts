@@ -113,4 +113,21 @@ describe('US-005 AC-2/AC-3: ThreadListTable for the personal thread list', () =>
     expect(linkTo(app, '/web/threads/th1')).toBeDefined()
     expect(linkTo(app, '/threads/th1')).toBeUndefined()
   })
+
+  test('M3: with neither slug nor basePath a row links to /threads/th1, never //threads/th1', () => {
+    const app = mountSfc(threadListTableFile, {
+      props: { threads: [workspaceItem()], status: 'ACTIVE', nameOf: () => 'Dana' },
+      components: uiStubs,
+      globals: { ref, computed, watch, useI18n: () => i18nStub() },
+    })
+
+    expect(linkTo(app, '/threads/th1')).toBeDefined()
+    const links: FakeNode[] = []
+    const walk = (node: FakeNode): void => {
+      if (typeof node.props.to === 'string') links.push(node)
+      node.children.forEach(walk)
+    }
+    walk(app.root)
+    expect(links.map(link => link.props.to)).not.toContain('//threads/th1')
+  })
 })

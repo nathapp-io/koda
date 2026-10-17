@@ -5,7 +5,6 @@ import { extractApiError } from '~/composables/useApi'
 import { eligibleModels } from '~/lib/thread-create'
 import { buildWorkspaceThreadCreateSchema, toCreateWorkspaceThreadBody } from '~/lib/workspace-thread-create'
 import type { WorkspaceThreadCreateFormValues } from '~/lib/workspace-thread-create'
-import type { FleetRunnerSummary } from '~/lib/fleet-types'
 
 definePageMeta({ layout: 'default' })
 
@@ -20,10 +19,15 @@ interface HomeProjectOption { slug: string; name: string }
 
 const { t } = useI18n()
 const { $api } = useApi()
+/**
+ * Created during setup, not inside `loadRunners`: the runner read runs after `GET /projects` has
+ * settled, and a composable built there would call `useApi()` — and through it `useI18n()` — with no
+ * component instance left, which throws and leaves the form with no model to pick. `load(slug)` is
+ * the per-project part and takes the slug the selection resolves to (1d2-D11, 1d2-D12).
+ */
+const runnerSummaries = useProjectRunnerSummaries()
 
 const projects = ref<HomeProjectOption[]>([])
-/** The models the picked home project's runners offer (native backends only; ACP is refused). */
-const runners = ref<FleetRunnerSummary[]>([])
 const loadFailed = ref(false)
 const submitError = ref('')
 
@@ -39,21 +43,19 @@ const homeProjectOptions = computed(() => [
   ...projects.value.map(project => ({ value: project.slug, label: project.name })),
 ])
 
-const models = computed(() => eligibleModels(runners.value, 'WORKSPACE'))
+const models = computed(() => eligibleModels(runnerSummaries.runners.value, 'WORKSPACE'))
 
 /** The project whose runners offer the models: the picked home project, else the first listed one. */
 const runnerSlug = computed(() => values.homeProject || projects.value[0]?.slug || '')
 
 async function loadRunners(): Promise<void> {
   const slug = runnerSlug.value
-  runners.value = []
+  runnerSummaries.runners.value = []
   if (!slug) return
   try {
     // The runner summaries are the same for every project (1d2-D11), so this only follows the
     // selection; with no project listed there is nothing to read them from.
-    const options = useFleetDispatchOptions(slug)
-    await options.load()
-    runners.value = options.runners.value
+    await runnerSummaries.load(slug)
   } catch (error: unknown) {
     submitError.value = extractApiError(error)
   }

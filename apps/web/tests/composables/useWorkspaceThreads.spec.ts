@@ -70,3 +70,72 @@ describe('useWorkspaceThreads (US-004 AC-6, AC-7)', () => {
     expect(list.threads.value).toEqual([])
   })
 })
+
+/**
+ * B2: `GET /threads` is paged and a user may own more threads than one page holds. `load()` keeps
+ * the first read exactly `{ status, size }` (AC-6); `loadMore()` asks for `page: 2`, appends, and a
+ * page shorter than the maximum means there is nothing behind it.
+ */
+describe('useWorkspaceThreads pagination (B2)', () => {
+  afterEach(() => {
+    delete g.useApi
+  })
+
+  const fullPage = (prefix: string): ThreadDto[] =>
+    Array.from({ length: 100 }, (_, index) => listItem({ id: `${prefix}${index}` }))
+
+  test('a short first page leaves nothing to load more of', async () => {
+    const get = jest.fn(async () => ({ items: [listItem()], threadsEnabled: true }))
+    g.useApi = () => ({ $api: { get } })
+
+    const { useWorkspaceThreads } = await import('~/composables/useWorkspaceThreads')
+    const list = useWorkspaceThreads()
+    await list.load()
+
+    expect(list.hasNext.value).toBe(false)
+    expect(list.current.value).toBe(1)
+    await list.loadMore()
+    expect(get).toHaveBeenCalledTimes(1)
+  })
+
+  test('a full first page offers the next one, and loadMore appends it', async () => {
+    const first = fullPage('a')
+    const second = [listItem({ id: 'b0' })]
+    const get = jest.fn(async (_path: string, options?: { query?: Record<string, string> }) =>
+      options?.query?.page === '2' ? { items: second, threadsEnabled: true } : { items: first, threadsEnabled: true })
+    g.useApi = () => ({ $api: { get } })
+
+    const { useWorkspaceThreads } = await import('~/composables/useWorkspaceThreads')
+    const list = useWorkspaceThreads()
+    await list.load('ARCHIVED')
+    expect(list.hasNext.value).toBe(true)
+
+    await list.loadMore()
+
+    expect(get).toHaveBeenLastCalledWith('/threads', { query: { status: 'ARCHIVED', size: '100', page: '2' } })
+    expect(list.threads.value).toHaveLength(101)
+    expect(list.threads.value[0]?.id).toBe('a0')
+    expect(list.threads.value[100]?.id).toBe('b0')
+    expect(list.current.value).toBe(2)
+    // The second page was short, so the list stops asking.
+    expect(list.hasNext.value).toBe(false)
+  })
+
+  test('load() resets pagination when the status changes', async () => {
+    const get = jest.fn(async (_path: string, options?: { query?: Record<string, string> }) =>
+      options?.query?.page === '2' ? { items: [listItem({ id: 'b0' })], threadsEnabled: true } : { items: fullPage('a'), threadsEnabled: true })
+    g.useApi = () => ({ $api: { get } })
+
+    const { useWorkspaceThreads } = await import('~/composables/useWorkspaceThreads')
+    const list = useWorkspaceThreads()
+    await list.load()
+    await list.loadMore()
+    expect(list.current.value).toBe(2)
+
+    await list.load('ARCHIVED')
+
+    expect(list.current.value).toBe(1)
+    expect(list.threads.value).toHaveLength(100)
+    expect(get).toHaveBeenLastCalledWith('/threads', { query: { status: 'ARCHIVED', size: '100' } })
+  })
+})

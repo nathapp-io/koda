@@ -15,6 +15,7 @@ const auth = useAuth()
 const threadsList = useWorkspaceThreads()
 const pending = ref(true)
 const loadFailed = ref(false)
+const loadMoreFailed = ref(false)
 
 /** Every row of this list is the caller's own thread, so the creator column answers their name. */
 const nameOf = (userId: string): string => auth.user.value?.name ?? auth.user.value?.email ?? userId
@@ -22,6 +23,7 @@ const nameOf = (userId: string): string => auth.user.value?.name ?? auth.user.va
 async function loadPage(status: 'ACTIVE' | 'ARCHIVED' = threadsList.status.value): Promise<boolean> {
   pending.value = true
   loadFailed.value = false
+  loadMoreFailed.value = false
   try {
     await threadsList.load(status)
     return true
@@ -30,6 +32,20 @@ async function loadPage(status: 'ACTIVE' | 'ARCHIVED' = threadsList.status.value
     return false
   } finally {
     pending.value = false
+  }
+}
+
+/**
+ * The next page of the same list (B2): the API pages `/threads`, so a user with more threads than
+ * one page holds reaches the older ones here. A failure keeps the rows already loaded and reports
+ * itself; the button stays, so the read can be retried.
+ */
+async function loadMore(): Promise<void> {
+  loadMoreFailed.value = false
+  try {
+    await threadsList.loadMore()
+  } catch {
+    loadMoreFailed.value = true
   }
 }
 
@@ -77,6 +93,14 @@ onMounted(() => {
 
     <LoadingState v-if="pending" />
     <ErrorState v-else-if="loadFailed" @retry="loadPage()" />
-    <FleetThreadsThreadListTable v-else :threads="threadsList.threads.value" :status="threadsList.status.value" :name-of="nameOf" base-path="/threads" />
+    <template v-else>
+      <FleetThreadsThreadListTable :threads="threadsList.threads.value" :status="threadsList.status.value" :name-of="nameOf" base-path="/threads" />
+      <div v-if="threadsList.hasNext.value || loadMoreFailed" class="flex flex-col items-center gap-2">
+        <p v-if="loadMoreFailed" class="text-sm text-muted-foreground" role="alert">{{ t('fleet.threads.list.loadMoreFailed') }}</p>
+        <Button v-if="threadsList.hasNext.value" variant="outline" data-testid="threads-load-more" :disabled="threadsList.loadingMore.value" @click="loadMore">
+          {{ t('fleet.threads.list.loadMore') }}
+        </Button>
+      </div>
+    </template>
   </div>
 </template>

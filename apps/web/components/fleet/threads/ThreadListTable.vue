@@ -19,8 +19,15 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
-/** The prefix every row link starts with: `basePath` when given, else the project path (S5b 1d). */
-const rowBase = computed(() => props.basePath ?? `/${props.slug ?? ''}/threads`)
+/**
+ * The prefix every row link starts with: `basePath` when given, else the project path (S5b 1d). Both props are
+ * optional because a project table passes only `slug` and the personal list only `basePath`, so a caller that passes
+ * neither gets the personal `/threads` links rather than the broken `//threads/<id>` (M3).
+ */
+const rowBase = computed(() => {
+  if (props.basePath) return props.basePath
+  return props.slug ? `/${props.slug}/threads` : '/threads'
+})
 
 /**
  * What the feature column shows for one row: a PROJECT thread shows its scope label and a

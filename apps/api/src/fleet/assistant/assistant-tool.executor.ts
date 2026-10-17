@@ -201,18 +201,21 @@ interface ToolScope {
 }
 
 const PROJECT_SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-const PROJECT_SLUG_MAX = 100;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 /** An input that is not an object has no `project` key. */
 const hasProjectKey = (input: unknown): boolean => isRecord(input) && Object.prototype.hasOwnProperty.call(input, 'project');
 
-/** The `project` argument when it is a slug; null for a missing, non-string or malformed one. */
+/**
+ * The `project` argument when it is a slug; null for a missing, non-string or malformed one. Only the project slug
+ * contract's pattern decides: the descriptor's `maxLength` is guidance for the model, and a slug that long is still a
+ * slug the API may hold, so it is looked up rather than refused (M1).
+ */
 function projectArgument(input: unknown): string | null {
   if (!isRecord(input)) return null;
   const value = input['project'];
-  return typeof value === 'string' && value.length <= PROJECT_SLUG_MAX && PROJECT_SLUG.test(value) ? value : null;
+  return typeof value === 'string' && PROJECT_SLUG.test(value) ? value : null;
 }
 
 /** A copy of the input without its `project` key. */

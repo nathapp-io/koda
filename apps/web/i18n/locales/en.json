@@ -769,7 +769,9 @@
         "backend": "Backend",
         "session": "Session",
         "lastActivity": "Last activity",
-        "cost": "Cost"
+        "cost": "Cost",
+        "loadMore": "Load more",
+        "loadMoreFailed": "Could not load more threads."
       },
       "session": {
         "starting": "Starting",

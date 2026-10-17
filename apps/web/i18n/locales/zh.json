@@ -769,7 +769,9 @@
         "backend": "后端",
         "session": "会话",
         "lastActivity": "最近活动",
-        "cost": "费用"
+        "cost": "费用",
+        "loadMore": "加载更多",
+        "loadMoreFailed": "无法加载更多线程。"
       },
       "session": {
         "starting": "启动中",

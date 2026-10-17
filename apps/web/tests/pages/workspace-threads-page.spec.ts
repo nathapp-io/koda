@@ -60,10 +60,11 @@ interface GetCall {
  * reachable both as a mount-sfc global (the page's own `useApi`?) and as a global for the directly
  * imported composable, whose `useApi()` reference is a Nuxt auto-import — hence `g.useApi`.
  */
-function mountPage(over: { items?: ThreadDto[]; threadsEnabled?: boolean } = {}) {
+function mountPage(over: { items?: ThreadDto[]; moreItems?: ThreadDto[]; threadsEnabled?: boolean } = {}) {
   const calls: GetCall[] = []
   const get = jest.fn(async (path: string, options?: { query?: Record<string, string> }) => {
     calls.push({ path, query: options?.query })
+    if (options?.query?.page === '2') return { items: over.moreItems ?? [], threadsEnabled: over.threadsEnabled ?? true }
     return { items: over.items ?? [workspaceItem()], threadsEnabled: over.threadsEnabled ?? true }
   })
   g.useApi = () => ({ $api: { get } })
@@ -172,6 +173,36 @@ describe('US-005 AC-1..AC-5: pages/threads/index.vue', () => {
     await m.settle()
 
     expect(linkTo(m.app, '/threads/new')).toBeDefined()
+    m.app.unmount()
+  })
+
+  test('B2: a full first page offers Load more, which appends the next page', async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) => workspaceItem({ id: `th${index}`, title: `Thread ${index}` }))
+    const m = mountPage({ items: firstPage, moreItems: [workspaceItem({ id: 'older', title: 'Older thread' })] })
+    await m.settle()
+
+    // Only a full page hints at rows behind it.
+    expect(m.app.one('[data-testid="threads-load-more"]')).toBeDefined()
+
+    clickByLabel(m.app, 'fleet.threads.list.loadMore')
+    await m.settle()
+
+    expect(m.calls.map(call => call.query)).toEqual([
+      { status: 'ACTIVE', size: '100' },
+      { status: 'ACTIVE', size: '100', page: '2' },
+    ])
+    expect(linkTo(m.app, '/threads/older')).toBeDefined()
+    // Page 2 came back short, so the control goes away.
+    expect(m.app.one('[data-testid="threads-load-more"]')).toBeUndefined()
+    m.app.unmount()
+  })
+
+  test('B2 (edge): a short first page shows no Load more control', async () => {
+    const m = mountPage({ items: [workspaceItem()] })
+    await m.settle()
+
+    expect(m.app.one('[data-testid="threads-load-more"]')).toBeUndefined()
+    expect(m.calls.map(call => call.query)).toEqual([{ status: 'ACTIVE', size: '100' }])
     m.app.unmount()
   })
 })
