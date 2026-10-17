@@ -70,32 +70,35 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
   /**
    * A REPO thread, by default with a live RUNNING SESSION: its THREAD job, that job's turn and the pinned runner.
    * Without a session the thread is idle and a send creates a new turn.
+   *
+   * The row goes through the repository's own `create`, the only path that fills every REPO field the turn factory
+   * requires (`specPath` included from the feature), and only `runnerId` is written afterwards, because `create` does
+   * not take one. A hand-written row that skips `specPath` is refused `threads.notRepoThread` by `repoThreadFields`
+   * the moment a new turn is built.
    */
   async function seedThread(opts: { live?: boolean } = {}): Promise<SeededThread> {
     const live = opts.live ?? true;
-    const thread = await prisma.chatThread.create({
-      data: {
-        projectId, repoId, kind: 'REPO', baseRef: 'trunk', feature: uid('handoff'), title: 'Hand-off',
-        createdById: userId, runnerId: live ? runnerId : null,
-        backend: { kind: 'native', model: 'm1' } as Prisma.InputJsonValue, skills: [],
-      },
+    const created = await threads.create({
+      kind: 'REPO', projectId, repoId, baseRef: 'trunk', feature: uid('handoff'), title: 'Hand-off',
+      createdById: userId, backend: { kind: 'native', model: 'm1' }, skills: [], maxCostUsd: '5',
     });
-    if (!live) return { threadId: thread.id, jobId: null };
+    if (!live) return { threadId: created.id, jobId: null };
     // The pinned runner is online for the send that is about to run, whatever the file's elapsed time.
+    await prisma.chatThread.update({ where: { id: created.id }, data: { runnerId } });
     await prisma.runner.update({ where: { id: runnerId }, data: { lastSeenAt: new Date() } });
     const job = await prisma.fleetJob.create({
       data: {
-        projectId, repoId, ref: 'trunk', command: 'THREAD', feature: `thread-${thread.id}`, profiles: [], selectorLabels: [],
-        maxCostUsd: new Prisma.Decimal(5), requestedById: userId, state: 'RUNNING', runnerId, leaseEpoch: 3, threadId: thread.id,
+        projectId, repoId, ref: 'trunk', command: 'THREAD', feature: `thread-${created.id}`, profiles: [], selectorLabels: [],
+        maxCostUsd: new Prisma.Decimal(5), requestedById: userId, state: 'RUNNING', runnerId, leaseEpoch: 3, threadId: created.id,
       },
     });
     await prisma.fleetThreadTurn.create({
       data: {
-        jobId: job.id, threadId: thread.id, action: 'SESSION', initialMessageId: null, instructions: 'go',
+        jobId: job.id, threadId: created.id, action: 'SESSION', initialMessageId: null, instructions: 'go',
         backend: { kind: 'native', model: 'm1' } as Prisma.InputJsonValue, skills: [], resume: false,
       },
     });
-    return { threadId: thread.id, jobId: job.id };
+    return { threadId: created.id, jobId: job.id };
   }
 
   /** An undelivered action of `threadId`: what the probe service writes, minus the approval link. */

@@ -579,8 +579,27 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
       createJob: jobCreate, appendEvent: vi.fn(async () => ({})), createCommand: commandCreate,
       lockById: vi.fn(async () => undefined),
     };
+    /**
+     * `txManager.run` calls through, and undoes the delivery markers when the callback throws: the real transaction
+     * rolls its writes back, which is what keeps a turn that fails after the hand-off from leaving a note delivered.
+     */
+    const txRun = vi.fn(async (fn: () => Promise<unknown>) => {
+      const before = new Map(store.all.map((row) => [row.id, { deliveredAt: row.deliveredAt, deliveredMessageId: row.deliveredMessageId }]));
+      try {
+        return await fn();
+      } catch (error) {
+        for (const row of store.all) {
+          const previous = before.get(row.id);
+          if (previous) {
+            row.deliveredAt = previous.deliveredAt;
+            row.deliveredMessageId = previous.deliveredMessageId;
+          }
+        }
+        throw error;
+      }
+    });
     const repo = new PrismaChatThreadRepository(
-      prisma as never, jobs as never, { run: vi.fn(async (fn: () => Promise<unknown>) => fn()) } as never,
+      prisma as never, jobs as never, { run: txRun } as never,
       { record: vi.fn(async () => ({})) } as never, { placeJob: vi.fn(async () => undefined) } as never,
       { notify: vi.fn() } as never, { snapshot: vi.fn(async () => ({ match: () => null })) } as never, { threadsEnabled: opts.threads ?? true, runnerOfflineSec: 90 } as never,
     );
@@ -776,5 +795,22 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
     expect(store.updateMany).not.toHaveBeenCalled();
     expect(commandCreate).not.toHaveBeenCalled();
     expect(executed.deliveredAt).toBeNull();
+  });
+
+  /**
+   * The line this story runs on: a new-turn row that the turn factory refuses (a REPO thread without its `specPath`,
+   * the shape a hand-written DB seed gets wrong) throws *after* the notes were marked, inside the same transaction.
+   * The marking was written — and the rollback leaves the note undelivered, so the next send hands it over again.
+   */
+  it('a mid-transaction failure rolls the hand-off back with the turn it belongs to', async () => {
+    const rejected = action({ id: 'A1', status: 'REJECTED', result: null });
+    const { repo, store, jobCreate } = deliveryRepo({ actions: [rejected], live: false, thread: { runnerId: null, specPath: null } });
+
+    await expect(send(repo, 'hi')).rejects.toMatchObject({ prefix: 'threads.notRepoThread' });
+
+    expect(store.updateMany).toHaveBeenCalledTimes(1);
+    expect(jobCreate).not.toHaveBeenCalled();
+    expect(rejected.deliveredAt).toBeNull();
+    expect(rejected.deliveredMessageId).toBeNull();
   });
 });
