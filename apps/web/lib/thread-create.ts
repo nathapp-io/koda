@@ -93,10 +93,19 @@ export function toCreateThreadBody(values: ThreadCreateValues): CreateThreadBody
   }
 }
 
+/** The one scope capability a runner must advertise to host a thread of this kind (S5b). */
+function scopeCapability(runner: FleetRunnerSummary, kind: ChatThreadKind): boolean {
+  if (kind === 'PROJECT') return runner.projectThreads
+  // A WORKSPACE thread runs with no checkout, so only a runner advertising it may offer a model;
+  // REPO needs no extra capability.
+  if (kind === 'WORKSPACE') return runner.workspaceThreads
+  return true
+}
+
 /** The models offered by the eligible runners of one scope: union, deduplicated and sorted. */
 export function eligibleModels(runners: readonly FleetRunnerSummary[], kind: ChatThreadKind): string[] {
   return [...new Set(runners
-    .filter(runner => runner.online && runner.enabled && (kind !== 'PROJECT' || runner.projectThreads))
+    .filter(runner => runner.online && runner.enabled && scopeCapability(runner, kind))
     .flatMap(runner => runner.threadBackends?.native ?? []))]
     .sort((a, b) => a.localeCompare(b))
 }

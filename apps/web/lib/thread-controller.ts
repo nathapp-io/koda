@@ -32,8 +32,11 @@ export interface ThreadApi {
 
 export interface ThreadControllerDeps {
   api: ThreadApi
-  slug: string
+  /** The project of a project thread (fleet S5a); a WORKSPACE thread has none and passes `threadPath`. */
+  slug?: string
   threadId: string
+  /** Replaces the project path built from `slug`: `/threads/<id>` for a WORKSPACE thread (S5b 1d). */
+  threadPath?: string
   openStream: (handlers: ThreadEventHandlers) => { close: () => void }
   setTimer: (fn: () => void, ms: number) => unknown
   clearTimer: (handle: unknown) => void
@@ -79,7 +82,10 @@ export function createThreadController(deps: ThreadControllerDeps): ThreadContro
   const messages = ref<ChatMessageDto[]>([])
   const live = ref(false)
 
-  const threadPath = apiPath`/projects/${deps.slug}/threads/${deps.threadId}`
+  // A WORKSPACE thread is not project-scoped: `threadPath` is the whole path then, and `slug` is
+  // never read. `apiPath` still refuses an empty segment, so a caller that passes neither fails
+  // loudly instead of requesting `/projects//threads/<id>`.
+  const threadPath = deps.threadPath ?? apiPath`/projects/${deps.slug ?? ''}/threads/${deps.threadId}`
   const messagesPath = `${threadPath}/messages`
 
   let stream: { close: () => void } | null = null

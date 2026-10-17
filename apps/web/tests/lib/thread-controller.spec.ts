@@ -555,3 +555,52 @@ describe('US-003 thread-controller: a job end leaves the streaming state', () =>
     expect(h.messageCalls()).toHaveLength(messageCallsBefore)
   })
 })
+
+describe('US-004 thread-controller: the threadPath option', () => {
+  /**
+   * A controller over one thread with a jest-fn api and a no-op stream. `threadPath` is the S5b 1d
+   * WORKSPACE case (no project in the path); `slug` alone is the unchanged project case.
+   */
+  function make(over: { slug?: string; threadPath?: string } = {}) {
+    const get = jest.fn(async (path: string) => (path.endsWith('/messages') ? { items: [] } : thread()))
+    const post = jest.fn(async () => ({ message: message({ id: 'srv1', seq: 1, role: 'user' }) }))
+    const patch = jest.fn()
+    const ctl = createThreadController({
+      api: { get, post, patch },
+      ...(over.slug === undefined ? {} : { slug: over.slug }),
+      ...(over.threadPath === undefined ? {} : { threadPath: over.threadPath }),
+      threadId: 't1',
+      openStream: () => ({ close: () => undefined }),
+      setTimer: () => 0,
+      clearTimer: () => undefined,
+      now: () => 0,
+    })
+    return { ctl, get, post }
+  }
+
+  test('AC-3: load() reads the thread at the given threadPath', async () => {
+    const { ctl, get } = make({ threadPath: '/threads/t1' })
+
+    await ctl.load()
+
+    expect(get).toHaveBeenCalledWith('/threads/t1')
+    expect(ctl.thread.value?.id).toBe('th1')
+  })
+
+  test('AC-4: a send posts to the threadPath messages route', async () => {
+    const { ctl, post } = make({ threadPath: '/threads/t1' })
+
+    const result = await ctl.send('hello')
+
+    expect(result.ok).toBe(true)
+    expect(post).toHaveBeenCalledWith('/threads/t1/messages', { text: 'hello', clientMessageId: expect.any(String) })
+  })
+
+  test('AC-5: without threadPath the thread path still comes from slug', async () => {
+    const { ctl, get } = make({ slug: 'web' })
+
+    await ctl.load()
+
+    expect(get).toHaveBeenCalledWith('/projects/web/threads/t1')
+  })
+})

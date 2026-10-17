@@ -61,6 +61,24 @@ export async function openThreadLiveUpstream(req: ThreadLiveUpstreamRequest): Pr
 
 export type LiveUpstreamRequest = Omit<LiveProxyRequest, 'slug' | 'apiInternalUrl'>
 
+/** Fleet S5b 1d: the API workspace thread events URL; null for an invalid thread id. */
+export function buildWorkspaceThreadLiveUpstreamUrl(threadId: string, apiInternalUrl: string): string | null {
+  if (!THREAD_ID_PATTERN.test(threadId)) return null
+  return resolveProxyTarget(`/threads/${threadId}/events`, { apiInternalUrl })
+}
+
+export type WorkspaceThreadLiveUpstreamRequest = LiveUpstreamRequest & { apiInternalUrl: string; threadId: string }
+
+/**
+ * Fleet S5b 1d: workspace thread events proxy core. The thread is not project-scoped, so only the
+ * thread id is validated; an invalid one is refused with 400 before any fetch.
+ */
+export async function openWorkspaceThreadLiveUpstream(req: WorkspaceThreadLiveUpstreamRequest): Promise<LiveProxyResult> {
+  const url = buildWorkspaceThreadLiveUpstreamUrl(req.threadId, req.apiInternalUrl)
+  if (!url) return { kind: 'error', status: 400, body: 'invalid thread id' }
+  return openLiveUpstreamUrl(url, req)
+}
+
 export async function openLiveUpstream(req: LiveProxyRequest): Promise<LiveProxyResult> {
   const url = buildLiveUpstreamUrl(req.slug, req.apiInternalUrl)
   if (!url) return { kind: 'error', status: 400, body: 'invalid project slug' }

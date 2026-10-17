@@ -111,6 +111,8 @@ export interface FleetRunnerSummary {
   threadBackends: RunnerThreadBackends
   /** Fleet S5b: the runner hosts PROJECT threads with no checkout. */
   projectThreads: boolean
+  /** Fleet S5b 1d: the runner hosts WORKSPACE threads with no checkout. */
+  workspaceThreads: boolean
 }
 
 export type FleetProvider = 'github' | 'gitlab'
