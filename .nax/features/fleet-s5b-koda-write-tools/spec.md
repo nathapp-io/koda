@@ -244,7 +244,8 @@ Changed — the baseline exists only to locate the code; the target is the inter
 - Editing a proposed action's input before deciding it (umbrella §12).
 - Storing a decision's rationale in a field of its own; it is appended to the stored decision text (2b1-D7).
 - Annotating the ticket, link or memory events with `via: thread <id>`; the approval activity row carries the thread id, and memory rows carry it as `sourceId`.
-- US-003 and US-004 only: a requester without `create` or `update` `Ticket` (a VIEWER) is refused by the existing executor ability path (2a US-002 AC-8); this feature adds no AC for it.
+- US-003 only: a requester without `create` `Ticket` (a VIEWER) is refused by the existing executor ability path (2a US-002 AC-8); this feature adds no AC for it.
+- US-004 only: a requester without `update` `Ticket` (a VIEWER) is refused by the existing executor ability path (2a US-002 AC-8); this feature adds no AC for it.
 - US-004 only: a `koda_update_ticket` ref that matches no ticket of the project answers `not_found` through `TicketsService.findByRef` and the existing executor preview mapping, as US-005 AC-6 pins for links; this feature adds no `koda_update_ticket` AC for it.
 - A ticket deleted between proposal and approval answers `not_found` through the existing `executeAction` mapping; this feature adds no AC for it.
 - US-004 only: a ticket whose status changes between the start check and `TicketsService.update` can leave the field changes written and the transition refused; the window is one request and is not locked.
