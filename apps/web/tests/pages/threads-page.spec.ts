@@ -1,11 +1,14 @@
-import { describe, expect, jest, test } from '@jest/globals'
+import { afterEach, describe, expect, jest, test } from '@jest/globals'
 import * as Vue from 'vue'
 import { ref, computed, watch, nextTick } from 'vue'
 import { mountSfc, webFile, loadSfc } from '../helpers/mount-sfc'
 import type { FakeNode, Mounted } from '../helpers/mount-sfc'
 import { uiStubs, i18nStub, toastRecorder } from '../helpers/fleet-harness'
 import * as apiModule from '../../composables/useApi'
+import { useThreads } from '~/composables/useThreads'
 import type { ThreadDto } from '~/lib/thread-types'
+
+const g = globalThis as Record<string, unknown>
 
 const pageFile = webFile('pages', '[project]', 'threads', 'index.vue')
 
@@ -50,8 +53,22 @@ function mountPage(over: {
   threadsEnabled?: boolean
   threads?: ThreadDto[]
   load?: jest.Mock
+  /** When given, the page gets the REAL useThreads over this `$api`, so a race is decided for real. */
+  api?: { get: jest.Mock }
 } = {}) {
-  const load = over.load ?? jest.fn<() => Promise<void>>(async () => undefined)
+  // `useThreads` resolves true once its read applied (koda#294); the default stub reports that.
+  const load: jest.Mock<() => Promise<boolean>> = over.load ?? jest.fn<() => Promise<boolean>>(async () => true)
+  const replace = jest.fn(async (_to: unknown) => undefined)
+  const stubList = {
+    threads: ref(over.threads ?? [listItem()]),
+    threadsEnabled: ref(over.threadsEnabled ?? true),
+    status: ref<'ACTIVE' | 'ARCHIVED'>('ACTIVE'),
+    load,
+  }
+  const get = over.api?.get ?? jest.fn(async () => ({}))
+  // The real useThreads reads its `$api` through the Nuxt auto-import, which resolves on
+  // globalThis when the composable is imported directly by the test instead of by mount-sfc.
+  if (over.api) g.useApi = () => ({ $api: { get } })
   const app = mountSfc(pageFile, {
     components: {
       ...uiStubs,
@@ -64,17 +81,13 @@ function mountPage(over: {
       definePageMeta: () => undefined,
       useI18n: () => i18nStub(),
       useAppToast: () => toastRecorder(),
-      useApi: () => ({ $api: { get: jest.fn(async () => ({})) } }),
-      useRoute: () => ({ params: { project: 'web' } }),
+      useApi: () => ({ $api: { get } }),
+      useRoute: () => ({ params: { project: 'web' }, query: {} }),
+      useRouter: () => ({ replace }),
       useAuth: () => ({ user: ref({ id: 'me', email: 'a@k.t', role: 'MEMBER' }) }),
       useProjectViewerRole: () => ({ data: ref(over.role ?? VIEWER) }),
       useProjectMemberNames: () => ({ load: jest.fn(async () => undefined), nameOf: () => 'Dana' }),
-      useThreads: () => ({
-        threads: ref(over.threads ?? [listItem()]),
-        threadsEnabled: ref(over.threadsEnabled ?? true),
-        status: ref<'ACTIVE' | 'ARCHIVED'>('ACTIVE'),
-        load,
-      }),
+      useThreads: over.api ? useThreads : () => stubList,
     },
   })
   const settle = async (): Promise<void> => {
@@ -83,7 +96,7 @@ function mountPage(over: {
       await Vue.nextTick()
     }
   }
-  return { app, load, settle }
+  return { app, load, replace, settle }
 }
 
 /** The first node whose `to` or `href` is the given path. */
@@ -108,6 +121,17 @@ function clickByLabel(app: Mounted, label: string): void {
   expect(found.length).toBeGreaterThan(0)
   ;(found[0].props.onClick as () => void)()
 }
+
+/** The `aria-pressed` of the first button whose text includes `label` (the Active|Archived switch). */
+function pressed(app: Mounted, label: string): unknown {
+  const found = app.find('button').find(node => app.textOf(node).includes(label))
+  expect(found).toBeDefined()
+  return found?.props['aria-pressed']
+}
+
+afterEach(() => {
+  delete g.useApi
+})
 
 describe('US-004 AC11-AC15: the project threads list page', () => {
   test('AC11: a DEVELOPER with threadsEnabled true sees the New thread link to /web/threads/new', async () => {
@@ -149,6 +173,122 @@ describe('US-004 AC11-AC15: the project threads list page', () => {
     const m = mountPage({ role: DEVELOPER, threads: [listItem()] })
     await m.settle()
 
+    expect(linkTo(m.app, '/web/threads/th1')).toBeDefined()
+    m.app.unmount()
+  })
+})
+
+/**
+ * koda#294 (2aw-D13): Archived then Active, clicked quickly. The page mounts the REAL useThreads over
+ * a `$api` the test settles by hand, so the test sees the whole chain — the composable's generation
+ * guard decides which read applied, and the page's own token decides which read may touch the URL,
+ * the error state and the spinner.
+ */
+describe('koda#294: out-of-order status reads on the project threads page', () => {
+  interface ThreadsResponse {
+    items: ThreadDto[]
+    threadsEnabled: boolean
+  }
+
+  interface Read {
+    status: string
+    resolve: (value: ThreadsResponse) => void
+    reject: (error: Error) => void
+  }
+
+  /** A `$api.get` that answers nothing until the test settles that read, in the order it chooses. */
+  function queuedApi(): { get: jest.Mock; reads: Read[] } {
+    const reads: Read[] = []
+    const get = jest.fn((_path: string, options?: { query?: Record<string, string> }) => {
+      let resolve!: (value: ThreadsResponse) => void
+      let reject!: (error: Error) => void
+      const promise = new Promise<ThreadsResponse>((done, fail) => {
+        resolve = done
+        reject = fail
+      })
+      reads.push({ status: options?.query?.status ?? '', resolve, reject })
+      return promise
+    })
+    return { get, reads }
+  }
+
+  const activeRows = [listItem({ id: 'th1' })]
+  const archivedRows = [listItem({ id: 'th-old', status: 'ARCHIVED' })]
+
+  /** Mount, settle the initial ACTIVE read, then click Archived and Active without settling either. */
+  async function startRace() {
+    const api = queuedApi()
+    const m = mountPage({ role: DEVELOPER, api: { get: api.get } })
+    await m.settle()
+    // The page's own first read: ACTIVE, from the empty query.
+    expect(api.reads.map(read => read.status)).toEqual(['ACTIVE'])
+    api.reads[0].resolve({ items: activeRows, threadsEnabled: true })
+    await m.settle()
+
+    clickByLabel(m.app, 'fleet.threads.list.archived')
+    clickByLabel(m.app, 'fleet.threads.list.active')
+    expect(api.reads.map(read => read.status)).toEqual(['ACTIVE', 'ARCHIVED', 'ACTIVE'])
+    return { m, api, archived: api.reads[1], active: api.reads[2] }
+  }
+
+  test('AC-6: the Active read answering first leaves the Active toggle pressed', async () => {
+    const { m, archived, active } = await startRace()
+
+    active.resolve({ items: activeRows, threadsEnabled: true })
+    await m.settle()
+    archived.resolve({ items: archivedRows, threadsEnabled: true })
+    await m.settle()
+
+    expect(pressed(m.app, 'fleet.threads.list.active')).toBe(true)
+    expect(pressed(m.app, 'fleet.threads.list.archived')).toBe(false)
+    m.app.unmount()
+  })
+
+  test('AC-7: the URL query ends on Active (status absent), not on ARCHIVED', async () => {
+    const { m, archived, active } = await startRace()
+
+    active.resolve({ items: activeRows, threadsEnabled: true })
+    await m.settle()
+    archived.resolve({ items: archivedRows, threadsEnabled: true })
+    await m.settle()
+
+    const queries = m.replace.mock.calls.map(([to]) => (to as { query: Record<string, unknown> }).query)
+    // The overtaken Archived read replaces nothing: only the applied Active read touched the URL.
+    expect(queries).toHaveLength(1)
+    expect(queries[0]?.status).toBeUndefined()
+    m.app.unmount()
+  })
+
+  test('AC-8: a stale Archived read that fails after the Active read applied shows no error state', async () => {
+    const { m, archived, active } = await startRace()
+
+    active.resolve({ items: activeRows, threadsEnabled: true })
+    await m.settle()
+    archived.reject(new Error('network'))
+    await m.settle()
+
+    expect(m.app.find('[data-stub="error-state"]')).toHaveLength(0)
+    expect(linkTo(m.app, '/web/threads/th1')).toBeDefined()
+    expect(m.replace.mock.calls.map(([to]) => (to as { query: Record<string, unknown> }).query.status)).toEqual([undefined])
+    m.app.unmount()
+  })
+
+  test('AC-9: a stale read that answers first does not clear the newer read\'s loading state', async () => {
+    const { m, archived, active } = await startRace()
+
+    // The older ARCHIVED read answers while the newer ACTIVE read is still in flight.
+    archived.resolve({ items: archivedRows, threadsEnabled: true })
+    await m.settle()
+
+    expect(m.app.find('[data-stub="loading-state"]')).toHaveLength(1)
+    // Nothing is drawn from the stale read either.
+    expect(linkTo(m.app, '/web/threads/th-old')).toBeUndefined()
+
+    // The newer read still owns the state: its own answer is what ends the spinner.
+    active.resolve({ items: activeRows, threadsEnabled: true })
+    await m.settle()
+
+    expect(m.app.find('[data-stub="loading-state"]')).toHaveLength(0)
     expect(linkTo(m.app, '/web/threads/th1')).toBeDefined()
     m.app.unmount()
   })
