@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-koda-write-tools",
   "branchName": "feat/fleet-s5b-koda-write-tools",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "updatedAt": "2026-10-17T14:23:07.630Z",
+  "updatedAt": "2026-10-17T14:40:22.351Z",
   "userStories": [
     {
       "id": "US-001",
@@ -328,8 +328,8 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -341,7 +341,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/ticket-links/ticket-links.service.ts",
@@ -365,7 +367,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "68cad662689d4202a1797a24244559b64cfaff24"
     },
     {
       "id": "US-006",
