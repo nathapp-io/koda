@@ -12,6 +12,7 @@ import { AssistantToolExecutor } from './assistant-tool.executor';
 import { AssistantToolRegistry } from './assistant-tool.registry';
 import { KODA_GET_ACTION, KODA_MY_PROJECTS } from './koda-tool-descriptors';
 import { KnowledgeTools } from './tools/knowledge-tools';
+import { MemoryWriteTools } from './tools/memory-write-tools';
 
 describe('AssistantModule', () => {
   let module: TestingModule;
@@ -76,6 +77,18 @@ describe('AssistantModule', () => {
     await module.init();
 
     const tool = module.get(AssistantToolRegistry).get('koda_link_tickets');
+    expect(tool?.kind).toBe('write');
+    expect(tool?.permission).toEqual({ kind: 'member' });
+  });
+
+  it('AC-9 (US-006): init() registers koda_add_memory as a write tool that needs membership only', async () => {
+    // The group is what fills the entry: resolving it proves the provider is registered and that MemoryModule
+    // (which exports the repository it upserts through) is in the module graph.
+    expect(module.get(MemoryWriteTools)).toBeInstanceOf(MemoryWriteTools);
+
+    await module.init();
+
+    const tool = module.get(AssistantToolRegistry).get('koda_add_memory');
     expect(tool?.kind).toBe('write');
     expect(tool?.permission).toEqual({ kind: 'member' });
   });
