@@ -3,6 +3,7 @@ import { FleetJobsService } from '../../jobs/fleet-jobs.service';
 import { KnowledgeIndexService } from '../../knowledge/knowledge-index.service';
 import { AssistantToolRegistry } from '../assistant-tool.registry';
 import { dispatchJobTool } from './dispatch-job-tool';
+import { requeueJobTool } from './requeue-job-tool';
 
 /**
  * Fleet S5b 2b2 US-003 (2b2-D8): the fleet write tool group — the tools that propose dispatching, requeueing or
@@ -18,6 +19,6 @@ export class FleetWriteTools implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
-    this.registry.register(dispatchJobTool(this.fleetJobs, this.knowledge));
+    this.registry.register(dispatchJobTool(this.fleetJobs, this.knowledge), requeueJobTool(this.fleetJobs, this.knowledge));
   }
 }
