@@ -10,12 +10,16 @@ const route = useRoute()
 const slug = route.params.project as string
 const base: ApprovalBase = { kind: 'project', slug }
 const { t } = useI18n()
+const auth = useAuth()
 const { data: role } = useProjectViewerRole(slug)
 const people = useProjectMemberNames(slug)
 const options = useFleetDispatchOptions(slug)
 
 // D244 / D290: canManage is project ADMIN (a global ADMIN resolves to it); canWork is DEVELOPER+.
-const viewer = computed<ApprovalViewer>(() => ({ kind: 'project', canManage: role.value.canManage, canWork: canWorkOnFleet(role.value) }))
+// 2aw-D6: an assistant_action is decided by its requester alone, so the viewer carries the signed-in user id.
+const viewer = computed<ApprovalViewer>(() => ({
+  kind: 'project', canManage: role.value.canManage, canWork: canWorkOnFleet(role.value), userId: auth.user.value?.id ?? null,
+}))
 const scopeLabel = (p: BudgetApprovalPayload): string | null =>
   scopeName(p, { project: slug, repo: options.repoName, runner: (id) => id })
 // A project inbox holds only this project's approvals (D230), so every candidate is a job of this project.

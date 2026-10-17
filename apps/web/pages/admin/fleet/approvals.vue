@@ -6,7 +6,8 @@ import type { ApprovalBase, ApprovalViewer, BudgetApprovalPayload } from '~/lib/
 definePageMeta({ layout: 'default' })
 
 const base: ApprovalBase = { kind: 'admin' }
-const viewer: ApprovalViewer = { kind: 'admin' }
+// 2aw-D6: an assistant_action is decided by its requester alone, so the viewer carries the signed-in user id.
+const viewer: ApprovalViewer = { kind: 'admin', userId: useAuth().user.value?.id ?? null }
 const { t } = useI18n()
 const repos = useFleetRepos()
 const runnersApi = useFleetRunners()

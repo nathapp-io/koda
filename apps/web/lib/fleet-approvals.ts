@@ -15,8 +15,14 @@ export const BADGE_CAP = 99
 export const MAX_COMMENT = 1000
 
 export type ApprovalBase = { kind: 'admin' } | { kind: 'project'; slug: string }
-/** D290: `canManage` = project ADMIN (budget overrides), `canWork` = DEVELOPER+ (bash asks), both from the members endpoint. */
-export type ApprovalViewer = { kind: 'admin' } | { kind: 'project'; canManage: boolean; canWork: boolean }
+/**
+ * D290: `canManage` = project ADMIN (budget overrides), `canWork` = DEVELOPER+ (bash asks), both from the members
+ * endpoint. S5b 2a-D6: `userId` is the signed-in user, and an `assistant_action` is decided by its requester alone
+ * (2a-R2), whatever the role — so it is read on both viewer kinds.
+ */
+export type ApprovalViewer =
+  | { kind: 'admin'; userId: string | null }
+  | { kind: 'project'; canManage: boolean; canWork: boolean; userId: string | null }
 
 export const INBOX_TABS = ['pending', 'all'] as const
 export type InboxTab = (typeof INBOX_TABS)[number]
@@ -118,6 +124,27 @@ export function bashPayload(a: Pick<FleetApprovalDto, 'type' | 'payload'>): Bash
 
 export type BashDecision = 'allow' | 'allow_for_job' | 'deny'
 
+/**
+ * S5b 2a-D7: what an `assistant_action` approval carries. The preview and the input stay on the action: this is
+ * everything the inbox, the thread card and the notification need to name it and find its thread.
+ */
+export interface AssistantApprovalPayload {
+  actionId: string
+  tool: string
+  threadId: string
+  threadPath: string
+  requestedById: string
+}
+
+/** The action payload, or null for another type or a payload that does not have the five strings (2aw-D7). */
+export function assistantPayload(a: Pick<FleetApprovalDto, 'type' | 'payload'>): AssistantApprovalPayload | null {
+  if (a.type !== 'assistant_action') return null
+  const p = a.payload
+  if (!isString(p.actionId) || !isString(p.tool) || !isString(p.threadId)) return null
+  if (!isString(p.threadPath) || !isString(p.requestedById)) return null
+  return { actionId: p.actionId, tool: p.tool, threadId: p.threadId, threadPath: p.threadPath, requestedById: p.requestedById }
+}
+
 /** D291 (2a `checkBashDecision`): a cut or unreadable ask is deny-only; otherwise only what nax offered, then deny. */
 export function bashChoices(p: BashApprovalPayload | null): BashDecision[] {
   if (p === null || p.commandTruncated) return ['deny']
@@ -128,9 +155,17 @@ export function bashChoices(p: BashApprovalPayload | null): BashDecision[] {
   ]
 }
 
-/** Spec §1.7 (D244, D290): budget overrides by project ADMIN, bash asks by DEVELOPER+, everything on the admin inbox. */
-export function canDecide(a: Pick<FleetApprovalDto, 'type' | 'status'>, viewer: ApprovalViewer): boolean {
+/**
+ * Spec §1.7 (D244, D290): budget overrides by project ADMIN, bash asks by DEVELOPER+, everything on the admin inbox.
+ * S5b 2a-D6 / 2a-R2: an `assistant_action` is decided by its requester alone — no role, no project membership
+ * shortcut, and a viewer who is not signed in decides nothing.
+ */
+export function canDecide(a: Pick<FleetApprovalDto, 'type' | 'status' | 'payload'>, viewer: ApprovalViewer): boolean {
   if (a.status !== 'pending') return false
+  if (a.type === 'assistant_action') {
+    const action = assistantPayload(a)
+    return viewer.userId !== null && action !== null && action.requestedById === viewer.userId
+  }
   if (viewer.kind === 'admin') return true
   return a.type === 'budget_override_required' ? viewer.canManage : viewer.canWork
 }
@@ -163,16 +198,35 @@ export const toKeepPausedBody = (comment: string): DecideApprovalBody => ({ deci
 /** D293: a bash decide never carries budget fields (2a D287 answers 400). */
 export const toBashBody = (decision: BashDecision, comment: string): DecideApprovalBody => ({ decision, ...commentField(comment) })
 
+/** S5b 2a-D7: an action decide carries only the decision and a non-blank comment (2a's `DecideApprovalDto`). */
+export const toActionBody = (decision: 'approve' | 'reject', comment: string): DecideApprovalBody => ({ decision, ...commentField(comment) })
+
+const THREAD_PATH = /^\/(?:([^/]+)\/)?threads\/([^/]+)$/
+
+/**
+ * S5b 2a-D10: the API path of a thread, from the `threadPath` an action carries. A workspace action holds
+ * `/threads/<id>` (already the API's own path); a project action holds `/<slug>/threads/<id>`. Any other shape
+ * answers null, so a caller never builds a request out of a string it did not understand.
+ */
+export function threadApiPath(threadPath: string): string | null {
+  const match = THREAD_PATH.exec(threadPath)
+  if (match === null) return null
+  const [, slug, id] = match
+  return slug === undefined ? `/threads/${id}` : `/projects/${slug}/threads/${id}`
+}
+
 /**
  * Slice 4: what the inbox's A / D keys mean for one expanded approval; null = the key does nothing.
  * Bash: A picks the plain 'allow' (nax must have offered it; a cut ask is deny-only), D denies.
  * Budget: A needs a raised amount only a human types, so it is null; D keeps the policy paused.
+ * Action (S5b 2a-D6): A is null because the preview may not be on screen — only D rejects.
  */
 export function keyboardDecision(
   a: Pick<FleetApprovalDto, 'type' | 'status' | 'payload'>,
   viewer: ApprovalViewer,
 ): { approve: DecideApprovalBody | null; deny: DecideApprovalBody | null } {
   if (!canDecide(a, viewer)) return { approve: null, deny: null }
+  if (a.type === 'assistant_action') return { approve: null, deny: toActionBody('reject', '') }
   if (a.type === 'nax_bash_escalate') {
     // bashPayload validates the shape: a malformed ask reads deny-only, exactly like the panel.
     return {
@@ -327,7 +381,11 @@ export function approvalSummary(
   }
   const bash = bashPayload(a)
   if (bash) return t('fleet.approvals.summary.bashCommand', { command: commandPreview(bash), stage: bash.stage })
-  return a.type === 'nax_bash_escalate' ? t('fleet.approvals.summary.bash') : t('fleet.approvals.type.budget_override_required')
+  // S5b 2a-D8: the action's own label, and the type label when its payload does not parse.
+  const action = assistantPayload(a)
+  if (action) return t('fleet.approvals.summary.assistant', { tool: action.tool })
+  if (a.type === 'nax_bash_escalate') return t('fleet.approvals.summary.bash')
+  return a.type === 'assistant_action' ? t('fleet.approvals.type.assistant_action') : t('fleet.approvals.type.budget_override_required')
 }
 
 /** D243: the raise form's schema; messages are translated, `spent` is the spend recorded at the stop. */
