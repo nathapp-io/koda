@@ -55,6 +55,8 @@ function mountPage(over: {
   load?: jest.Mock
   /** When given, the page gets the REAL useThreads over this `$api`, so a race is decided for real. */
   api?: { get: jest.Mock }
+  /** When given, the members read is settled by the test instead of answering at once. */
+  membersLoad?: jest.Mock
 } = {}) {
   // `useThreads` resolves true once its read applied (koda#294); the default stub reports that.
   const load: jest.Mock<() => Promise<boolean>> = over.load ?? jest.fn<() => Promise<boolean>>(async () => true)
@@ -86,7 +88,7 @@ function mountPage(over: {
       useRouter: () => ({ replace }),
       useAuth: () => ({ user: ref({ id: 'me', email: 'a@k.t', role: 'MEMBER' }) }),
       useProjectViewerRole: () => ({ data: ref(over.role ?? VIEWER) }),
-      useProjectMemberNames: () => ({ load: jest.fn(async () => undefined), nameOf: () => 'Dana' }),
+      useProjectMemberNames: () => ({ load: over.membersLoad ?? jest.fn(async () => undefined), nameOf: () => 'Dana' }),
       useThreads: over.api ? useThreads : () => stubList,
     },
   })
@@ -290,6 +292,55 @@ describe('koda#294: out-of-order status reads on the project threads page', () =
 
     expect(m.app.find('[data-stub="loading-state"]')).toHaveLength(0)
     expect(linkTo(m.app, '/web/threads/th1')).toBeDefined()
+    m.app.unmount()
+  })
+
+  /**
+   * The members read is a second request inside `loadPage`, and it answers on its own schedule. An
+   * Archived load whose thread read applied *before* Active was clicked only releases from its
+   * `Promise.all` when its members request answers — which can be after Active has run to
+   * completion. That finished-but-overtaken load must not write the URL back to Archived.
+   */
+  test('AC-7 (regression): an overtaken load released late by its members read writes nothing', async () => {
+    const members: Array<{ resolve: () => void }> = []
+    const membersLoad = jest.fn(() => new Promise<void>((resolve) => { members.push({ resolve }) }))
+    const api = queuedApi()
+    const m = mountPage({ role: DEVELOPER, api: { get: api.get }, membersLoad })
+    await m.settle()
+
+    // The page's own first read, with its members read settled so the page is idle before the race.
+    api.reads[0].resolve({ items: activeRows, threadsEnabled: true })
+    await m.settle()
+    members[0].resolve()
+    await m.settle()
+
+    const queries = (): Array<Record<string, unknown>> =>
+      m.replace.mock.calls.map(([to]) => (to as { query: Record<string, unknown> }).query)
+    // The first read only fills the list; only a toggle writes the URL.
+    expect(queries()).toHaveLength(0)
+
+    // Archived: its thread read applies at once, its members read stays pending.
+    clickByLabel(m.app, 'fleet.threads.list.archived')
+    api.reads[1].resolve({ items: archivedRows, threadsEnabled: true })
+    await m.settle()
+    expect(queries()).toHaveLength(0)
+
+    // Active overtakes it and runs all the way to completion.
+    clickByLabel(m.app, 'fleet.threads.list.active')
+    api.reads[2].resolve({ items: activeRows, threadsEnabled: true })
+    await m.settle()
+    members[2].resolve()
+    await m.settle()
+    expect(queries()).toEqual([{ status: undefined }])
+
+    // The late members answer releases the overtaken Archived load: it writes nothing at all.
+    members[1].resolve()
+    await m.settle()
+
+    expect(queries()).toEqual([{ status: undefined }])
+    expect(pressed(m.app, 'fleet.threads.list.active')).toBe(true)
+    expect(linkTo(m.app, '/web/threads/th1')).toBeDefined()
+    expect(linkTo(m.app, '/web/threads/th-old')).toBeUndefined()
     m.app.unmount()
   })
 })

@@ -28,7 +28,10 @@ async function loadPage(status: 'ACTIVE' | 'ARCHIVED' = threadsList.status.value
   try {
     // false when a newer selection overtook the thread read: its status is not the one on screen.
     const [applied] = await Promise.all([threadsList.load(status), members.load()])
-    return applied
+    // The members read answers on its own schedule, so `applied` alone is not enough: an Archived
+    // read that applied before Active was clicked only releases here when its members request
+    // answers — possibly after Active ran to completion. The page token makes that write nothing.
+    return mine === pageLoad && applied
   } catch {
     if (mine === pageLoad) loadFailed.value = true
     return false
