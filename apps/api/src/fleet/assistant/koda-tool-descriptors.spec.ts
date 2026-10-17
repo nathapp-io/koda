@@ -1,9 +1,10 @@
 import { KODA_TOOL_LIMITS } from '@nathapp/fleet-protocol';
 import {
-  ACTION_TOOL_DESCRIPTORS, FLEET_TOOL_DESCRIPTORS, KODA_ADD_COMMENT, KODA_ADD_MEMORY, KODA_CREATE_TICKETS,
-  KODA_GET_ACTION, KODA_GET_TICKET, KODA_LINK_TICKETS, KODA_MY_PROJECTS, KODA_RECORD_DECISION, KODA_SEARCH_TICKETS,
-  KODA_TOOL_DESCRIPTORS, KODA_UPDATE_TICKET, KNOWLEDGE_TOOL_DESCRIPTORS, TICKET_TOOL_DESCRIPTORS,
-  WRITE_TOOL_DESCRIPTORS, kodaToolDescriptorsFor,
+  ACTION_TOOL_DESCRIPTORS, FLEET_TOOL_DESCRIPTORS, FLEET_WRITE_TOOL_DESCRIPTORS, KODA_ADD_COMMENT, KODA_ADD_MEMORY,
+  KODA_CANCEL_JOB, KODA_CREATE_TICKETS, KODA_DISPATCH_JOB, KODA_GET_ACTION, KODA_GET_TICKET, KODA_LINK_TICKETS,
+  KODA_MY_PROJECTS, KODA_RECORD_DECISION, KODA_REQUEUE_JOB, KODA_SEARCH_TICKETS, KODA_TOOL_DESCRIPTORS,
+  KODA_UPDATE_TICKET, KNOWLEDGE_TOOL_DESCRIPTORS, TICKET_TOOL_DESCRIPTORS, WRITE_TOOL_DESCRIPTORS,
+  kodaToolDescriptorsFor,
 } from './koda-tool-descriptors';
 
 /**
@@ -13,6 +14,9 @@ import {
  */
 const WORKSPACE_SENTENCE = 'In a workspace thread, name the project with `project` (a slug koda_my_projects lists).';
 const SLUG_PATTERN = '^[a-z0-9]+(-[a-z0-9]+)*$';
+/** The `owner/name` rule (1c-c-D12) and the ticket ref rule (1b-D5) the fleet write schemas spell out. */
+const REPO_PATTERN = '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$';
+const TICKET_REF_PATTERN = '^[A-Z][A-Z0-9]*-[1-9][0-9]*$';
 /** The runner refuses the whole tool list when one description is longer (`apps/runner/src/supervisor/assign-parser.ts`). */
 const KODA_TOOL_DESCRIPTION_MAX_CHARS = 2_000;
 
@@ -151,14 +155,16 @@ describe('US-001 AC-11: the WORKSPACE catalog fits the runner limits', () => {
 describe('US-003 (2a-D15): the action group is appended, never woven in', () => {
   it('AC-15: the action group directly precedes the write group', () => {
     const descriptors = kodaToolDescriptorsFor('REPO');
-    const beforeWrite = descriptors.slice(-(WRITE_TOOL_DESCRIPTORS.length + 2), -WRITE_TOOL_DESCRIPTORS.length);
+    const writeGroup = WRITE_TOOL_DESCRIPTORS.length + FLEET_WRITE_TOOL_DESCRIPTORS.length;
+    const beforeWrite = descriptors.slice(-(writeGroup + 2), -writeGroup);
     expect(beforeWrite.map((descriptor) => descriptor.name)).toEqual(['koda_get_action', 'koda_add_comment']);
     expect(beforeWrite[0]).toBe(KODA_GET_ACTION);
     expect(beforeWrite[1]).toBe(KODA_ADD_COMMENT);
   });
 
   it.each(['REPO', 'PROJECT'] as const)('AC-22: %s keeps the three existing groups, in their existing order', (kind) => {
-    expect(kodaToolDescriptorsFor(kind).slice(0, -(ACTION_TOOL_DESCRIPTORS.length + WRITE_TOOL_DESCRIPTORS.length))).toEqual([
+    const trailing = ACTION_TOOL_DESCRIPTORS.length + WRITE_TOOL_DESCRIPTORS.length + FLEET_WRITE_TOOL_DESCRIPTORS.length;
+    expect(kodaToolDescriptorsFor(kind).slice(0, -trailing)).toEqual([
       ...TICKET_TOOL_DESCRIPTORS, ...FLEET_TOOL_DESCRIPTORS, ...KNOWLEDGE_TOOL_DESCRIPTORS,
     ]);
   });
@@ -170,15 +176,15 @@ describe('US-003 (2a-D15): the action group is appended, never woven in', () => 
     }
     expect(KODA_TOOL_DESCRIPTORS).toEqual([
       ...TICKET_TOOL_DESCRIPTORS, ...FLEET_TOOL_DESCRIPTORS, ...KNOWLEDGE_TOOL_DESCRIPTORS, ...ACTION_TOOL_DESCRIPTORS,
-      ...WRITE_TOOL_DESCRIPTORS,
+      ...WRITE_TOOL_DESCRIPTORS, ...FLEET_WRITE_TOOL_DESCRIPTORS,
     ]);
   });
 
-  it('gives REPO and PROJECT 19 descriptors and WORKSPACE 20, all under the runner limit', () => {
-    expect(kodaToolDescriptorsFor('REPO')).toHaveLength(19);
-    expect(kodaToolDescriptorsFor('PROJECT')).toHaveLength(19);
-    expect(kodaToolDescriptorsFor('WORKSPACE')).toHaveLength(20);
-    expect(kodaToolDescriptorsFor('WORKSPACE').at(-1)?.name).toBe('koda_record_decision');
+  it('gives REPO and PROJECT 22 descriptors and WORKSPACE 23, all under the runner limit', () => {
+    expect(kodaToolDescriptorsFor('REPO')).toHaveLength(22);
+    expect(kodaToolDescriptorsFor('PROJECT')).toHaveLength(22);
+    expect(kodaToolDescriptorsFor('WORKSPACE')).toHaveLength(23);
+    expect(kodaToolDescriptorsFor('WORKSPACE').at(-1)?.name).toBe('koda_cancel_job');
     for (const kind of ['REPO', 'PROJECT', 'WORKSPACE'] as const) {
       expect(kodaToolDescriptorsFor(kind).length).toBeLessThan(KODA_TOOL_LIMITS.maxTools);
     }
@@ -201,24 +207,27 @@ describe('US-002 (2b1-D3): the five write descriptors form the last group', () =
     ]);
   });
 
-  it('AC-2: REPO ends with the WRITE_TOOL_DESCRIPTORS entries, in order', () => {
-    const tail = kodaToolDescriptorsFor('REPO').slice(-WRITE_TOOL_DESCRIPTORS.length);
-    expect(tail).toEqual([...WRITE_TOOL_DESCRIPTORS]);
-    for (const [index, original] of WRITE_TOOL_DESCRIPTORS.entries()) expect(tail[index]).toBe(original);
+  it('AC-2: the WRITE_TOOL_DESCRIPTORS entries directly precede the FLEET_WRITE_TOOL_DESCRIPTORS entries', () => {
+    const descriptors = kodaToolDescriptorsFor('REPO');
+    const end = FLEET_WRITE_TOOL_DESCRIPTORS.length;
+    const before = descriptors.slice(-(end + WRITE_TOOL_DESCRIPTORS.length), -end);
+    expect(before).toEqual([...WRITE_TOOL_DESCRIPTORS]);
+    for (const [index, original] of WRITE_TOOL_DESCRIPTORS.entries()) expect(before[index]).toBe(original);
   });
 
   it('AC-3: the two entries before them are koda_get_action and koda_add_comment', () => {
     const descriptors = kodaToolDescriptorsFor('REPO');
-    const before = descriptors.slice(-(WRITE_TOOL_DESCRIPTORS.length + 2), -WRITE_TOOL_DESCRIPTORS.length);
+    const end = WRITE_TOOL_DESCRIPTORS.length + FLEET_WRITE_TOOL_DESCRIPTORS.length;
+    const before = descriptors.slice(-(end + 2), -end);
     expect(before.map((descriptor) => descriptor.name)).toEqual(['koda_get_action', 'koda_add_comment']);
   });
 
-  it('AC-4: REPO answers 19 descriptors', () => {
-    expect(kodaToolDescriptorsFor('REPO')).toHaveLength(19);
+  it('AC-4: REPO answers 22 descriptors', () => {
+    expect(kodaToolDescriptorsFor('REPO')).toHaveLength(22);
   });
 
-  it('AC-5: WORKSPACE answers 20 descriptors', () => {
-    expect(kodaToolDescriptorsFor('WORKSPACE')).toHaveLength(20);
+  it('AC-5: WORKSPACE answers 23 descriptors', () => {
+    expect(kodaToolDescriptorsFor('WORKSPACE')).toHaveLength(23);
   });
 
   it('AC-6: every write description says the change happens only after the user approves', () => {
@@ -323,6 +332,112 @@ describe('US-002 (2b1-D5): the write descriptors carry the parser bounds', () =>
 
   it('never offers DECISION as a memory kind to write (2b-R5 ruling, 2b1-D5)', () => {
     expect(propertyOf(KODA_ADD_MEMORY, 'kind').enum).not.toContain('DECISION');
+  });
+});
+
+describe('US-001 (2b2-D1, 2b2-D3): the three fleet write descriptors are appended last', () => {
+  it('AC-1: FLEET_WRITE_TOOL_DESCRIPTORS names the three fleet write tools in their fixed order', () => {
+    expect(FLEET_WRITE_TOOL_DESCRIPTORS.map((descriptor) => descriptor.name)).toEqual([
+      'koda_dispatch_job', 'koda_requeue_job', 'koda_cancel_job',
+    ]);
+    expect(FLEET_WRITE_TOOL_DESCRIPTORS).toEqual([KODA_DISPATCH_JOB, KODA_REQUEUE_JOB, KODA_CANCEL_JOB]);
+  });
+
+  it.each(['REPO', 'PROJECT'] as const)('AC-2: %s ends with the FLEET_WRITE_TOOL_DESCRIPTORS entries, in order', (kind) => {
+    const tail = kodaToolDescriptorsFor(kind).slice(-FLEET_WRITE_TOOL_DESCRIPTORS.length);
+    expect(tail).toEqual([...FLEET_WRITE_TOOL_DESCRIPTORS]);
+    for (const [index, original] of FLEET_WRITE_TOOL_DESCRIPTORS.entries()) expect(tail[index]).toBe(original);
+  });
+
+  it('AC-3: the five entries before them are the WRITE_TOOL_DESCRIPTORS entries, in order', () => {
+    const end = FLEET_WRITE_TOOL_DESCRIPTORS.length;
+    const before = kodaToolDescriptorsFor('REPO').slice(-(end + WRITE_TOOL_DESCRIPTORS.length), -end);
+    expect(before.map((descriptor) => descriptor.name)).toEqual(
+      WRITE_TOOL_DESCRIPTORS.map((descriptor) => descriptor.name),
+    );
+    for (const [index, original] of WRITE_TOOL_DESCRIPTORS.entries()) expect(before[index]).toBe(original);
+  });
+
+  it('AC-4: REPO answers 22 descriptors', () => {
+    expect(kodaToolDescriptorsFor('REPO')).toHaveLength(22);
+  });
+
+  it('AC-5: WORKSPACE answers 23 descriptors', () => {
+    expect(kodaToolDescriptorsFor('WORKSPACE')).toHaveLength(23);
+  });
+
+  it('AC-6: every fleet write description says the job acts only after the user approves', () => {
+    for (const descriptor of FLEET_WRITE_TOOL_DESCRIPTORS) {
+      expect(descriptor.description).toContain('only after the user approves');
+    }
+  });
+
+  it('AC-7: every fleet write description tells the agent not to call the tool again', () => {
+    for (const descriptor of FLEET_WRITE_TOOL_DESCRIPTORS) {
+      expect(descriptor.description).toContain('do not call this tool again');
+    }
+  });
+
+  it('AC-8: koda_dispatch_job requires repo, command, feature and maxCostUsd', () => {
+    expect(KODA_DISPATCH_JOB.inputSchema).toMatchObject({ additionalProperties: false });
+    expect((KODA_DISPATCH_JOB.inputSchema as Schema).required).toEqual(['repo', 'command', 'feature', 'maxCostUsd']);
+  });
+
+  it('AC-9: koda_dispatch_job takes command RUN or PLAN', () => {
+    expect(propertyOf(KODA_DISPATCH_JOB, 'command').enum).toEqual(['RUN', 'PLAN']);
+  });
+
+  it('AC-10: koda_dispatch_job costs at least 0.0001', () => {
+    expect(propertyOf(KODA_DISPATCH_JOB, 'maxCostUsd').minimum).toBe(0.0001);
+  });
+
+  it('AC-11: koda_dispatch_job costs at most 10000', () => {
+    expect(propertyOf(KODA_DISPATCH_JOB, 'maxCostUsd').maximum).toBe(10000);
+  });
+
+  it('AC-12: koda_requeue_job requires jobId', () => {
+    expect(KODA_REQUEUE_JOB.inputSchema).toMatchObject({ additionalProperties: false });
+    expect((KODA_REQUEUE_JOB.inputSchema as Schema).required).toEqual(['jobId']);
+  });
+
+  it('AC-13: koda_cancel_job requires jobId', () => {
+    expect(KODA_CANCEL_JOB.inputSchema).toMatchObject({ additionalProperties: false });
+    expect((KODA_CANCEL_JOB.inputSchema as Schema).required).toEqual(['jobId']);
+  });
+
+  it('bounds the rest of the dispatch input as its parser will (2b2-D3)', () => {
+    expect(propertyOf(KODA_DISPATCH_JOB, 'repo')).toMatchObject({ type: 'string', pattern: REPO_PATTERN });
+    expect(propertyOf(KODA_DISPATCH_JOB, 'command')).toMatchObject({ type: 'string' });
+    expect(propertyOf(KODA_DISPATCH_JOB, 'feature')).toMatchObject({ type: 'string', minLength: 1, maxLength: 128 });
+    expect(propertyOf(KODA_DISPATCH_JOB, 'maxCostUsd')).toMatchObject({ type: 'number' });
+    expect(propertyOf(KODA_DISPATCH_JOB, 'ref')).toMatchObject({ type: 'string', minLength: 1, maxLength: 255 });
+    expect(propertyOf(KODA_DISPATCH_JOB, 'planFrom')).toMatchObject({ type: 'string', minLength: 1, maxLength: 512 });
+    expect(propertyOf(KODA_DISPATCH_JOB, 'profiles')).toMatchObject({ type: 'array', maxItems: 8 });
+    expect(itemsOf(KODA_DISPATCH_JOB, 'profiles')).toMatchObject({ type: 'string', minLength: 1, maxLength: 64 });
+    expect(propertyOf(KODA_DISPATCH_JOB, 'bashMode')).toMatchObject({ type: 'string', enum: ['raw', 'gated', 'escalate'] });
+    expect(propertyOf(KODA_DISPATCH_JOB, 'ticketRefs')).toMatchObject({ type: 'array', minItems: 1, maxItems: 20 });
+    expect(itemsOf(KODA_DISPATCH_JOB, 'ticketRefs')).toMatchObject({ type: 'string', pattern: TICKET_REF_PATTERN });
+    for (const descriptor of [KODA_REQUEUE_JOB, KODA_CANCEL_JOB]) {
+      expect(propertyOf(descriptor, 'jobId')).toMatchObject({ type: 'string', minLength: 1, maxLength: 64 });
+    }
+  });
+
+  it('keeps every fleet write description inside the runner cap once the workspace sentence is appended', () => {
+    for (const descriptor of FLEET_WRITE_TOOL_DESCRIPTORS) {
+      expect(descriptor.description.length).toBeLessThanOrEqual(
+        KODA_TOOL_DESCRIPTION_MAX_CHARS - WORKSPACE_SENTENCE.length - 1,
+      );
+    }
+    const workspace = kodaToolDescriptorsFor('WORKSPACE');
+    for (const descriptor of FLEET_WRITE_TOOL_DESCRIPTORS) {
+      expect(workspace.find((d) => d.name === descriptor.name)?.description).toBe(
+        `${descriptor.description} ${WORKSPACE_SENTENCE}`,
+      );
+    }
+  });
+
+  it('names every fleet write tool as the runner expects', () => {
+    for (const descriptor of FLEET_WRITE_TOOL_DESCRIPTORS) expect(descriptor.name).toMatch(KODA_TOOL_LIMITS.nameRe);
   });
 });
 
