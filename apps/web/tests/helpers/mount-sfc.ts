@@ -127,6 +127,8 @@ const NUXT_AUTO_IMPORTS = [
   'useFleetRepoConfig', 'useSkillCatalog', 'useProjectSkills', 'useThread', 'useThreads', 'useThreadHandoffJobs', 'onBeforeRouteLeave',
   // The personal thread pages (US-005/US-006) auto-import these two; tests override them through globals.
   'useWorkspaceThreads', 'useWorkspaceThread',
+  // The workspace thread detail page (US-006) reads the home project's runner summaries through it.
+  'useProjectRunnerSummaries',
 ] as const
 
 /** Defaults for auto-imports a test did not supply; `definePageMeta` is a compile-time no-op macro. */
