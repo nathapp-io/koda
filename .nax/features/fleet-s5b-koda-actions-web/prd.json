@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-koda-actions-web",
   "branchName": "feat/fleet-s5b-koda-actions-web",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "updatedAt": "2026-10-17T11:26:14.136Z",
+  "updatedAt": "2026-10-17T11:41:01.631Z",
   "userStories": [
     {
       "id": "US-001",
@@ -403,8 +403,8 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -416,7 +416,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/components/fleet/threads/ThreadQuestionCard.vue",
@@ -444,7 +446,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "8885680756e7bc07934e00fce1c9a00e79b1c31e"
     },
     {
       "id": "US-006",
