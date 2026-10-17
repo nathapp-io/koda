@@ -1,4 +1,4 @@
-import { approvalDrafts, budgetDrafts, healthDrafts, jobOutcomeDraft } from './fleet-notification-drafts';
+import { actionRequestedDraft, approvalDrafts, budgetDrafts, healthDrafts, jobOutcomeDraft } from './fleet-notification-drafts';
 
 describe('fleet notification drafts (S4a contract: kinds, links, params)', () => {
   const outcome = { jobId: 'j1', leaseEpoch: 2, projectId: 'p1', requestedById: 'u1', outcome: 'escalated' as const, repo: 'acme/app', feature: 'add', resultPrUrl: null };
@@ -29,6 +29,25 @@ describe('fleet notification drafts (S4a contract: kinds, links, params)', () =>
       userId: 'a1', projectId: 'p1', category: 'FLEET_NEEDS_YOU', kind: 'approval_requested', title: 'Approval needed: bash on acme/app',
       body: null, link: '/admin/fleet/approvals', params: { repo: 'acme/app', kind: 'bash' }, sourceType: 'fleet_approval', sourceId: 'ap1', actorId: null,
     });
+  });
+
+  it('action ask (S5b 2a-D6) -> one draft for the requester, linked to the thread path', () => {
+    expect(actionRequestedDraft({ approvalId: 'ap1', projectId: 'p1', requestedById: 'u1', threadPath: '/web/threads/t1', tool: 'koda_add_comment' })).toEqual({
+      userId: 'u1', projectId: 'p1', category: 'FLEET_NEEDS_YOU', kind: 'action_requested',
+      title: 'Approval needed: koda_add_comment in a thread', body: null, link: '/web/threads/t1',
+      params: { tool: 'koda_add_comment' }, sourceType: 'fleet_approval', sourceId: 'ap1', actorId: null,
+    });
+  });
+
+  it('action ask of a WORKSPACE thread keeps the projectless-looking link it was given', () => {
+    expect(actionRequestedDraft({ approvalId: 'ap2', projectId: 'p1', requestedById: 'u2', threadPath: '/threads/t2', tool: 'koda_get_action' }))
+      .toMatchObject({ userId: 'u2', link: '/threads/t2', params: { tool: 'koda_get_action' }, sourceId: 'ap2' });
+  });
+
+  it('action ask with a very long tool name is truncated like every other title', () => {
+    const d = actionRequestedDraft({ approvalId: 'ap3', projectId: null, requestedById: 'u1', threadPath: '/web/threads/t1', tool: `koda_${'x'.repeat(400)}` });
+    expect(d.title.length).toBeLessThanOrEqual(200);
+    expect(d.title.endsWith('…')).toBe(true);
   });
 
   it('budget incidents -> FLEET_HEALTH for admins, money shown with 2 decimals', () => {

@@ -74,8 +74,10 @@ export class WorkspaceThreadsService {
 
   async get(userId: string, id: string): Promise<ChatThreadDetail> {
     const thread = await this.requireOwnedThread(userId, id);
-    const [sendRefusal, handoff] = await Promise.all([this.threads.sendRefusalOf(thread.projectId, thread), this.threads.handoff(thread.id)]);
-    return { ...thread, sendRefusal, handoff };
+    const [sendRefusal, handoff, pendingActions] = await Promise.all([
+      this.threads.sendRefusalOf(thread.projectId, thread), this.threads.handoff(thread.id), this.threads.pendingActions(thread.id),
+    ]);
+    return { ...thread, sendRefusal, handoff, pendingActions };
   }
 
   async messages(userId: string, id: string, afterSeq: number, limit: number): Promise<{ items: ChatMessageRecord[] }> {

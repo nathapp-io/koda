@@ -58,14 +58,15 @@ describe('workspace home project creation', () => {
  */
 describe('workspace read, cap and command scope', () => {
   const record = { id: 't1', kind: 'WORKSPACE' as const, projectId: 'p1', createdById: 'u', homeProject: { slug: 'web', name: 'Web' }, maxCostUsd: '5' };
-  let repository: Record<'list' | 'get' | 'sendRefusalOf' | 'handoff' | 'messages' | 'updateCap' | 'command', ReturnType<typeof vi.fn>>;
+  let repository: Record<'list' | 'get' | 'sendRefusalOf' | 'handoff' | 'pendingActions' | 'messages' | 'updateCap' | 'command', ReturnType<typeof vi.fn>>;
   let config: { threadsEnabled: boolean };
   let service: WorkspaceThreadsService;
 
   beforeEach(() => {
     repository = {
       list: vi.fn(async () => [record]), get: vi.fn(async () => record), sendRefusalOf: vi.fn(async () => null),
-      handoff: vi.fn(async () => ({ plan: null, run: null })), messages: vi.fn(async () => [{ id: 'm1', seq: 1 }]),
+      handoff: vi.fn(async () => ({ plan: null, run: null })), pendingActions: vi.fn(async () => []),
+      messages: vi.fn(async () => [{ id: 'm1', seq: 1 }]),
       updateCap: vi.fn(async () => record), command: vi.fn(async () => undefined),
     };
     config = { threadsEnabled: true };
@@ -81,11 +82,24 @@ describe('workspace read, cap and command scope', () => {
   });
 
   it('AC-5: reads the owned thread with its send refusal and handoff', async () => {
-    await expect(service.get('u', 't1')).resolves.toEqual({ ...record, sendRefusal: null, handoff: { plan: null, run: null } });
+    await expect(service.get('u', 't1')).resolves.toEqual({ ...record, sendRefusal: null, handoff: { plan: null, run: null }, pendingActions: [] });
     expect(repository.get).toHaveBeenCalledWith({ kind: 'workspace', userId: 'u' }, 't1');
     // The send refusal is judged against the thread's home project.
     expect(repository.sendRefusalOf).toHaveBeenCalledWith('p1', record);
     expect(repository.handoff).toHaveBeenCalledWith('t1');
+  });
+
+  it('US-004 AC-4: the workspace detail answers the repository\'s pending actions of that thread, unchanged', async () => {
+    const action = {
+      id: 'a1', approvalId: 'ap1', tool: 'koda_add_comment', preview: 'Add a comment to KODA-1 "Fix login":\n\nhello',
+      projectSlug: 'ops', expiresAt: new Date('2026-10-24T09:00:00.000Z'), createdAt: new Date('2026-10-23T09:00:00.000Z'),
+    };
+    repository.pendingActions.mockResolvedValue([action]);
+
+    const thread = await service.get('u', 't1');
+
+    expect(thread.pendingActions).toEqual([action]);
+    expect(repository.pendingActions).toHaveBeenCalledWith('t1');
   });
 
   it('AC-4/AC-6: a miss through the workspace scope answers 404 threads.notFound', async () => {

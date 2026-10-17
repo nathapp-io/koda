@@ -35,9 +35,24 @@ export class ThreadDto {
   @ApiProperty({ nullable: true, type: 'object', additionalProperties: true }) lastWrite: ThreadWriteResult | null;
 }
 
+/**
+ * S5b 2a-D12: one `PENDING` action of a thread, as its detail shows it. The preview is the text the creator will
+ * approve; `projectSlug` is the project the action acts in, which a WORKSPACE thread's action may differ from its home.
+ */
+export class PendingActionDto {
+  @ApiProperty({ description: 'The action id, the value `koda_get_action` and the decide route take' }) id: string;
+  @ApiProperty({ nullable: true, description: 'The summary approval the action opened; null while propose links it', type: String }) approvalId: string | null;
+  @ApiProperty({ description: 'The koda tool the action would run' }) tool: string;
+  @ApiProperty({ description: 'The preview the creator decides on' }) preview: string;
+  @ApiProperty({ description: 'Slug of the project the action acts in' }) projectSlug: string;
+  @ApiProperty({ description: 'When the action expires if it is not decided' }) expiresAt: Date;
+  @ApiProperty({ description: 'When the action was proposed' }) createdAt: Date;
+}
+
 export class ThreadDetailDto extends ThreadDto {
   @ApiProperty({ enum: ['disabled', 'archived', 'costCap', 'budgetPaused', 'runnerOffline', 'runnerOutdated', 'closing', 'turnRunning'], nullable: true }) sendRefusal: ThreadSendRefusal | null;
   @ApiProperty({ type: 'object', properties: { plan: { type: 'object', nullable: true, additionalProperties: true }, run: { type: 'object', nullable: true, additionalProperties: true } } }) handoff: ChatThreadHandoff;
+  @ApiProperty({ type: [PendingActionDto], description: 'The thread\'s PENDING actions, oldest first (2a-D12)' }) pendingActions: PendingActionDto[];
 }
 
 export class ThreadListDto {

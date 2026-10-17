@@ -62,6 +62,14 @@ describe('fleet OpenAPI contract', () => {
     expect(Object.keys(spec.components.schemas['ThreadListDto']?.properties ?? {})).toContain('threadsEnabled');
   });
 
+  it('exposes the thread detail pending actions and their entry shape (S5b US-004, 2a-D12)', () => {
+    expect(Object.keys(spec.components.schemas['ThreadDetailDto']?.properties ?? {})).toContain('pendingActions');
+    expect(Object.keys(spec.components.schemas['PendingActionDto']?.properties ?? {}).sort())
+      .toEqual(['approvalId', 'createdAt', 'expiresAt', 'id', 'preview', 'projectSlug', 'tool']);
+    expect(JSON.stringify(spec.components.schemas['ThreadDetailDto']?.properties?.['pendingActions']))
+      .toContain('#/components/schemas/PendingActionDto');
+  });
+
   it('exposes the budget routes on both prefixes and the budget_paused misfit (S1b §2.3, §2.4)', () => {
     for (const base of ['/api/fleet/budgets', '/api/projects/{slug}/fleet/budgets']) {
       expect(spec.paths[base]?.['get']).toBeDefined();

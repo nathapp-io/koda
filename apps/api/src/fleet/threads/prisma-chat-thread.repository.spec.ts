@@ -1,4 +1,5 @@
 import { Prisma } from '../../generated/prisma/client';
+import { MAX_PENDING_ACTIONS } from '../assistant/actions/pending-action.domain';
 import { PrismaChatThreadRepository } from './prisma-chat-thread.repository';
 
 /** A ChatMessage row as Prisma returns it, including the fold-internal round columns. */
@@ -237,6 +238,78 @@ describe('PrismaChatThreadRepository message mapping (US-003)', () => {
     const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
     await repo.messages('T', 4, 25);
     expect(findMany).toHaveBeenCalledWith({ where: { threadId: 'T', seq: { gt: 4 } }, orderBy: { seq: 'asc' }, take: 25 });
+  });
+});
+
+/**
+ * S5b US-004 — the thread detail's pending actions (2a-D12): the read is a unit test with a fake Prisma client,
+ * because the entry shape and the slug join are the contract, and the DB-mode spec asserts the same facts through
+ * the detail routes.
+ */
+describe('PrismaChatThreadRepository.pendingActions (S5b US-004)', () => {
+  const createdAt = new Date('2026-10-23T09:00:00.000Z');
+  const expiresAt = new Date('2026-10-24T09:00:00.000Z');
+
+  const actionRow = (over: Record<string, unknown> = {}) => ({
+    id: 'A1', projectId: 'P-web', approvalId: 'AP1', tool: 'koda_add_comment',
+    preview: 'Add a comment to KODA-1 "Fix login":\n\nhello', expiresAt, createdAt, ...over,
+  });
+
+  function repoWith(rows: Array<Record<string, unknown>>, projects: Array<{ id: string; slug: string }>) {
+    const pendingFindMany = vi.fn(async () => rows);
+    const projectFindMany = vi.fn(async () => projects);
+    const prisma = { client: { pendingAction: { findMany: pendingFindMany }, project: { findMany: projectFindMany } } } as never;
+    const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    return { repo, pendingFindMany, projectFindMany };
+  }
+
+  it('AC-1: reads only the thread PENDING actions, oldest first, capped at MAX_PENDING_ACTIONS', async () => {
+    const { repo, pendingFindMany } = repoWith([actionRow()], []);
+
+    await repo.pendingActions('T');
+
+    expect(pendingFindMany).toHaveBeenCalledWith({
+      where: { threadId: 'T', status: 'PENDING' },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: MAX_PENDING_ACTIONS,
+      select: { id: true, projectId: true, approvalId: true, tool: true, preview: true, expiresAt: true, createdAt: true },
+    });
+  });
+
+  it('AC-2/AC-3: answers exactly the six entry fields with the slug of the project the action acts in', async () => {
+    const { repo } = repoWith([actionRow()], [{ id: 'P-web', slug: 'web' }]);
+
+    const [entry] = await repo.pendingActions('T');
+
+    expect(entry).toEqual({
+      id: 'A1', approvalId: 'AP1', tool: 'koda_add_comment',
+      preview: 'Add a comment to KODA-1 "Fix login":\n\nhello', projectSlug: 'web', expiresAt, createdAt,
+    });
+    expect(Object.keys(entry as object).sort()).toEqual(['approvalId', 'createdAt', 'expiresAt', 'id', 'preview', 'projectSlug', 'tool']);
+  });
+
+  it('AC-4: each entry carries its own action project slug, read as one join', async () => {
+    const { repo, projectFindMany } = repoWith(
+      [actionRow({ id: 'A1', projectId: 'P-ops' }), actionRow({ id: 'A2', projectId: 'P-web' })],
+      [{ id: 'P-ops', slug: 'ops' }, { id: 'P-web', slug: 'web' }],
+    );
+
+    const entries = await repo.pendingActions('T');
+
+    expect(entries.map((entry) => entry.projectSlug)).toEqual(['ops', 'web']);
+    expect(projectFindMany).toHaveBeenCalledWith({ where: { id: { in: ['P-ops', 'P-web'] } }, select: { id: true, slug: true } });
+  });
+
+  it('AC-5: a thread with no pending action answers an empty array and reads no project', async () => {
+    const { repo, projectFindMany } = repoWith([], [{ id: 'P-web', slug: 'web' }]);
+
+    expect(await repo.pendingActions('T')).toEqual([]);
+    expect(projectFindMany).not.toHaveBeenCalled();
+  });
+
+  it('maps a missing approval link to a null approvalId', async () => {
+    const { repo } = repoWith([actionRow({ approvalId: null })], [{ id: 'P-web', slug: 'web' }]);
+    expect((await repo.pendingActions('T'))[0]?.approvalId).toBeNull();
   });
 });
 

@@ -86,7 +86,27 @@ export interface ChatThreadRecord {
 
 export interface ThreadHandoffJob { jobId: string; state: string; stateReason: string | null }
 export type ChatThreadHandoff = { plan: ThreadHandoffJob | null; run: ThreadHandoffJob | null };
-export type ChatThreadDetail = ChatThreadRecord & { sendRefusal: ThreadSendRefusal | null; handoff: ChatThreadHandoff };
+
+/**
+ * S5b 2a-D12: one `PENDING` action of a thread, as the thread detail shows it. `projectSlug` is the slug of the
+ * project the action acts in — for a WORKSPACE call the resolved project — never the thread's home project.
+ */
+export interface ChatThreadPendingAction {
+  id: string;
+  approvalId: string | null;
+  tool: string;
+  preview: string;
+  projectSlug: string;
+  expiresAt: Date;
+  createdAt: Date;
+}
+
+export type ChatThreadDetail = ChatThreadRecord & {
+  sendRefusal: ThreadSendRefusal | null;
+  handoff: ChatThreadHandoff;
+  /** Oldest first, at most `MAX_PENDING_ACTIONS`; empty for a thread whose actions are all decided (2a-D12). */
+  pendingActions: ChatThreadPendingAction[];
+};
 
 export interface ChatMessageRecord {
   id: string; seq: number; jobId: string | null; turnId: string | null; role: string; authorUserId: string | null;
@@ -102,6 +122,8 @@ export interface ChatThreadRepository {
   list(scope: ThreadScope, status: string | undefined, skip: number, take: number): Promise<ChatThreadRecord[]>;
   get(scope: ThreadScope, id: string): Promise<ChatThreadRecord | null>;
   handoff(threadId: string): Promise<ChatThreadHandoff>;
+  /** 2a-D12: the reader's own preview of the thread's open actions; the same thread fence as `get`. */
+  pendingActions(threadId: string): Promise<ChatThreadPendingAction[]>;
   sendRefusalOf(projectId: string, thread: ChatThreadRecord): Promise<ThreadSendRefusal | null>;
   messages(threadId: string, afterSeq: number, limit: number): Promise<ChatMessageRecord[]>;
   sendMessage(input: { scope: ThreadScope; threadId: string; userId: string; text: string; clientMessageId: string; repoContext?: string }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }>;

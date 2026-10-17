@@ -6077,7 +6077,8 @@
               "type": "string",
               "enum": [
                 "budget_override_required",
-                "nax_bash_escalate"
+                "nax_bash_escalate",
+                "assistant_action"
               ]
             }
           },
@@ -6268,7 +6269,8 @@
               "type": "string",
               "enum": [
                 "budget_override_required",
-                "nax_bash_escalate"
+                "nax_bash_escalate",
+                "assistant_action"
               ]
             }
           },
@@ -14305,7 +14307,8 @@
           "type": {
             "enum": [
               "budget_override_required",
-              "nax_bash_escalate"
+              "nax_bash_escalate",
+              "assistant_action"
             ],
             "type": "string"
           },
@@ -17395,6 +17398,51 @@
           "threadsEnabled"
         ]
       },
+      "PendingActionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The action id, the value `koda_get_action` and the decide route take"
+          },
+          "approvalId": {
+            "type": "string",
+            "nullable": true,
+            "description": "The summary approval the action opened; null while propose links it"
+          },
+          "tool": {
+            "type": "string",
+            "description": "The koda tool the action would run"
+          },
+          "preview": {
+            "type": "string",
+            "description": "The preview the creator decides on"
+          },
+          "projectSlug": {
+            "type": "string",
+            "description": "Slug of the project the action acts in"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "When the action expires if it is not decided"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "When the action was proposed"
+          }
+        },
+        "required": [
+          "id",
+          "approvalId",
+          "tool",
+          "preview",
+          "projectSlug",
+          "expiresAt",
+          "createdAt"
+        ]
+      },
       "WorkspaceThreadDetailDto": {
         "type": "object",
         "properties": {
@@ -17578,6 +17626,13 @@
               }
             }
           },
+          "pendingActions": {
+            "description": "The thread's PENDING actions, oldest first (2a-D12)",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PendingActionDto"
+            }
+          },
           "homeProject": {
             "required": [
               "slug",
@@ -17622,7 +17677,8 @@
           "specPublished",
           "lastWrite",
           "sendRefusal",
-          "handoff"
+          "handoff",
+          "pendingActions"
         ]
       },
       "ChatMessageDto": {
@@ -18199,6 +18255,13 @@
                 "additionalProperties": true
               }
             }
+          },
+          "pendingActions": {
+            "description": "The thread's PENDING actions, oldest first (2a-D12)",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PendingActionDto"
+            }
           }
         },
         "required": [
@@ -18229,7 +18292,8 @@
           "specPublished",
           "lastWrite",
           "sendRefusal",
-          "handoff"
+          "handoff",
+          "pendingActions"
         ]
       },
       "PlanThreadDto": {

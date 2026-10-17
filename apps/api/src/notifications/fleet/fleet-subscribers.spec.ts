@@ -80,6 +80,56 @@ describe('fleet notification subscribers (S4a §2.4)', () => {
     expect(writer.deliver).not.toHaveBeenCalled();
   });
 
+  const actionAsk = {
+    approvalId: 'ap2', type: 'assistant_action', projectId: 'p1', jobId: 'j1', policyId: null,
+    requestedById: 'u1', threadPath: '/web/threads/t1', tool: 'koda_add_comment',
+  };
+
+  it('AC-10: an assistant_action ask reaches the requester and never looks up the global admins', async () => {
+    await registry.publish(outboxRecord('fleet_approval_requested', actionAsk));
+
+    expect(eligibility.findGlobalAdminIds).not.toHaveBeenCalled();
+    expect(writer.deliver).toHaveBeenCalledWith([{
+      userId: 'u1', projectId: 'p1', category: 'FLEET_NEEDS_YOU', kind: 'action_requested',
+      title: 'Approval needed: koda_add_comment in a thread', body: null, link: '/web/threads/t1',
+      params: { tool: 'koda_add_comment' }, sourceType: 'fleet_approval', sourceId: 'ap2', actorId: null,
+    }]);
+  });
+
+  it.each(['requestedById', 'threadPath', 'tool'] as const)('AC-11/AC-13/AC-14/AC-15: an assistant_action ask without %s is logged and delivers nothing', async (missing) => {
+    const raw: Record<string, unknown> = { ...actionAsk };
+    delete raw[missing];
+    warn.mockClear();
+
+    await expect(registry.publish(outboxRecord('fleet_approval_requested', raw))).resolves.toBeUndefined();
+
+    expect(writer.deliver).not.toHaveBeenCalled();
+    expect(eligibility.findGlobalAdminIds).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('an assistant_action ask answered before the handler ran -> nothing, and no missing-field warning', async () => {
+    reader.approvalContext.mockResolvedValueOnce({ status: 'rejected', repo: null });
+
+    await registry.publish(outboxRecord('fleet_approval_requested', actionAsk));
+
+    expect(writer.deliver).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('AC-12: a nax_bash_escalate ask still delivers one draft per admin id findGlobalAdminIds answers', async () => {
+    eligibility.findGlobalAdminIds.mockResolvedValueOnce(['a1', 'a2', 'a3']);
+
+    await registry.publish(outboxRecord('fleet_approval_requested', ask));
+
+    expect(eligibility.findGlobalAdminIds).toHaveBeenCalledTimes(1);
+    expect(writer.deliver).toHaveBeenCalledWith([
+      expect.objectContaining({ userId: 'a1', kind: 'approval_requested', link: '/admin/fleet/approvals' }),
+      expect.objectContaining({ userId: 'a2', kind: 'approval_requested' }),
+      expect.objectContaining({ userId: 'a3', kind: 'approval_requested' }),
+    ]);
+  });
+
   it('budget incident -> every global admin', async () => {
     await registry.publish(outboxRecord('fleet_budget_incident', { incidentId: 'i1', kind: 'warn', scope: 'global', spentUsd: '5', amountUsd: '10' }));
     expect(writer.deliver).toHaveBeenCalledWith([
