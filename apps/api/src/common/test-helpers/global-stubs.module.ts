@@ -27,6 +27,11 @@ export const mockPrismaService = {
     projectMember: {
       findUnique: vi.fn().mockResolvedValue(null),
     },
+    // AssistantModule's graph reaches VcsModule (TicketsModule → VcsModule); its `onModuleInit` polls
+    // the active connections, so the module spec's `init()` needs the delegate to answer.
+    vcsConnection: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
   },
 } as unknown as PrismaService;
 

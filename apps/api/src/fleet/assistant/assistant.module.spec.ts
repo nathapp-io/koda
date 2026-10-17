@@ -1,8 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module';
 import { MemoryGovernanceService } from '../../memory/memory-governance.service';
+import { ProjectsService } from '../../projects/projects.service';
 import { AssistantModule } from './assistant.module';
 import { AssistantToolExecutor } from './assistant-tool.executor';
+import { AssistantToolRegistry } from './assistant-tool.registry';
+import { KODA_MY_PROJECTS } from './koda-tool-descriptors';
 import { KnowledgeTools } from './tools/knowledge-tools';
 
 describe('AssistantModule', () => {
@@ -26,5 +29,17 @@ describe('AssistantModule', () => {
     // `compile()` alone does not run (knowledge-tools.spec.ts covers the registration itself).
     expect(module.get(KnowledgeTools)).toBeInstanceOf(KnowledgeTools);
     expect(module.get(MemoryGovernanceService)).toBeInstanceOf(MemoryGovernanceService);
+  });
+
+  it('AC-14 (US-003): init() registers koda_my_projects as the workspace-scoped KODA_MY_PROJECTS tool', async () => {
+    await module.init();
+
+    const tool = module.get(AssistantToolRegistry).get('koda_my_projects');
+    expect(tool?.descriptor).toBe(KODA_MY_PROJECTS);
+    expect(tool?.scope).toBe('workspace');
+  });
+
+  it('AC-14 (US-003): ProjectsService is in the module graph for the workspace tool group', () => {
+    expect(module.get(ProjectsService)).toBeInstanceOf(ProjectsService);
   });
 });
