@@ -50,6 +50,13 @@ export function useWorkspaceThreads(): WorkspaceThreadList {
   const loadingMore = ref(false)
 
   /**
+   * Bumped by every `load()`. A `loadMore()` remembers the generation it started in: a reload (of
+   * either status) while that read is in flight means the rows it carries no longer sit behind the
+   * pages the list holds, so they are dropped instead of appended (B2).
+   */
+  let generation = 0
+
+  /**
    * One page of the list. Page 1 sends no `page`: the API defaults to it, and the first read stays
    * exactly `{ status, size }` (US-004 AC-6).
    */
@@ -60,7 +67,10 @@ export function useWorkspaceThreads(): WorkspaceThreadList {
   }
 
   const load = async (next: ThreadStatus = 'ACTIVE'): Promise<void> => {
+    const mine = ++generation
     const response = await fetchPage(next, 1)
+    // A newer load() owns the list now: its page 1 is the one that counts.
+    if (generation !== mine) return
     threads.value = response.items
     threadsEnabled.value = response.threadsEnabled
     status.value = next
@@ -72,12 +82,13 @@ export function useWorkspaceThreads(): WorkspaceThreadList {
   const loadMore = async (): Promise<void> => {
     if (loadingMore.value || !hasNext.value) return
     const next = current.value + 1
-    const requested = status.value
+    const mine = generation
     loadingMore.value = true
     try {
-      const response = await fetchPage(requested, next)
-      // The status switch resets the list while this read is in flight: its rows belong to the old one.
-      if (status.value !== requested) return
+      const response = await fetchPage(status.value, next)
+      // A load() ran while this read was in flight (a status switch, or a reload of the same
+      // status): its rows belong behind a page 1 that is no longer there to be skipped.
+      if (generation !== mine) return
       threads.value = [...threads.value, ...response.items]
       threadsEnabled.value = response.threadsEnabled
       current.value = next

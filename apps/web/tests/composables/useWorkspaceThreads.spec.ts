@@ -84,6 +84,13 @@ describe('useWorkspaceThreads pagination (B2)', () => {
   const fullPage = (prefix: string): ThreadDto[] =>
     Array.from({ length: 100 }, (_, index) => listItem({ id: `${prefix}${index}` }))
 
+  /** A response the test resolves by hand, so a reload can happen while a page read is in flight. */
+  const deferred = <T>() => {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>((done) => { resolve = done })
+    return { promise, resolve }
+  }
+
   test('a short first page leaves nothing to load more of', async () => {
     const get = jest.fn(async () => ({ items: [listItem()], threadsEnabled: true }))
     g.useApi = () => ({ $api: { get } })
@@ -119,6 +126,66 @@ describe('useWorkspaceThreads pagination (B2)', () => {
     expect(list.current.value).toBe(2)
     // The second page was short, so the list stops asking.
     expect(list.hasNext.value).toBe(false)
+  })
+
+  /**
+   * A reload of the SAME status while `loadMore()` is in flight: the status guard alone lets the
+   * stale page answer through, and appending it after `load()` reset to page 1 would skip a page.
+   */
+  test('a page read from before a same-status load() is dropped, so no page is skipped', async () => {
+    const stale = deferred<{ items: ThreadDto[], threadsEnabled: boolean }>()
+    const get = jest.fn(async (_path: string, options?: { query?: Record<string, string> }): Promise<{ items: ThreadDto[], threadsEnabled: boolean }> => {
+      const page = options?.query?.page
+      if (page === '3') return stale.promise
+      if (page === '2') return { items: fullPage('b'), threadsEnabled: true }
+      return { items: fullPage('a'), threadsEnabled: true }
+    })
+    g.useApi = () => ({ $api: { get } })
+
+    const { useWorkspaceThreads } = await import('~/composables/useWorkspaceThreads')
+    const list = useWorkspaceThreads()
+    await list.load()
+    await list.loadMore()
+    expect(list.current.value).toBe(2)
+
+    const pendingMore = list.loadMore()
+    await list.load()
+    expect(list.current.value).toBe(1)
+
+    stale.resolve({ items: fullPage('c'), threadsEnabled: true })
+    await pendingMore
+
+    // Page 3 landed after page 1: appending it would skip page 2.
+    expect(list.threads.value).toHaveLength(100)
+    expect(list.threads.value[0]?.id).toBe('a0')
+    expect(list.current.value).toBe(1)
+    expect(list.hasNext.value).toBe(true)
+  })
+
+  /** The same stale read, short this time: it must not convince the list there is nothing behind it. */
+  test('a short page read from before a same-status load() does not hide Load more', async () => {
+    const stale = deferred<{ items: ThreadDto[], threadsEnabled: boolean }>()
+    const get = jest.fn(async (_path: string, options?: { query?: Record<string, string> }): Promise<{ items: ThreadDto[], threadsEnabled: boolean }> => {
+      const page = options?.query?.page
+      if (page === '3') return stale.promise
+      if (page === '2') return { items: fullPage('b'), threadsEnabled: true }
+      return { items: fullPage('a'), threadsEnabled: true }
+    })
+    g.useApi = () => ({ $api: { get } })
+
+    const { useWorkspaceThreads } = await import('~/composables/useWorkspaceThreads')
+    const list = useWorkspaceThreads()
+    await list.load()
+    await list.loadMore()
+
+    const pendingMore = list.loadMore()
+    await list.load()
+    stale.resolve({ items: [listItem({ id: 'c0' })], threadsEnabled: true })
+    await pendingMore
+
+    expect(list.threads.value).toHaveLength(100)
+    expect(list.hasNext.value).toBe(true)
+    expect(list.current.value).toBe(1)
   })
 
   test('load() resets pagination when the status changes', async () => {
