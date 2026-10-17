@@ -7,7 +7,7 @@ import type { LiveFleetJobEvent } from '../../live/live-event';
 import { cloneUrlFor } from '../git-broker/clone-url';
 import { BudgetGate } from '../budgets/budget-gate';
 import { budgetReason } from '../budgets/budget-rules';
-import { KODA_TOOL_DESCRIPTORS } from '../assistant/koda-tool-descriptors';
+import { kodaToolDescriptorsFor } from '../assistant/koda-tool-descriptors';
 import { buildAssignPayload, gitIdentityFor } from './assign-payload';
 import { FleetJobLivePublisher } from './fleet-job-live.publisher';
 import { JobTransitionsService, SYSTEM_ACTOR } from './job-transitions.service';
@@ -215,13 +215,14 @@ export class PlacementService {
 }
 
 /**
- * 1b-D3 (S5b-R9): only a SESSION turn on a runner advertising `kodaTools` carries the static descriptor catalog, so
- * the session can proxy koda reads. Publish and Discard run no agent, and a runner that does not advertise the
+ * 1b-D3 (S5b-R9): only a SESSION turn on a runner advertising `kodaTools` carries the descriptor catalog, so the
+ * session can proxy koda reads. Publish and Discard run no agent, and a runner that does not advertise the
  * capability would refuse the ASSIGN (US-006), so both keep the thread block as the repository read it.
- * WORKSPACE sessions never receive koda tools, regardless of runner capabilities (1d-D6). The
- * descriptors come from the plain `koda-tool-descriptors` module: placement never imports the assistant module.
+ * The catalog is per kind (1d2-D2): a WORKSPACE session gets `koda_my_projects` and the project argument, while a
+ * REPO or PROJECT session gets the catalog as it is. The descriptors come from the plain `koda-tool-descriptors`
+ * module: placement never imports the assistant module.
  */
 function withKodaTools(thread: ThreadAssign | undefined, capabilities: RunnerCapabilities): ThreadAssign | undefined {
-  if (!thread || thread.kind === 'WORKSPACE' || thread.action !== 'SESSION' || capabilities.kodaTools !== true) return thread;
-  return { ...thread, kodaTools: [...KODA_TOOL_DESCRIPTORS] };
+  if (!thread || thread.action !== 'SESSION' || capabilities.kodaTools !== true) return thread;
+  return { ...thread, kodaTools: [...kodaToolDescriptorsFor(thread.kind ?? 'REPO')] };
 }

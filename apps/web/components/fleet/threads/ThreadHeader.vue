@@ -17,10 +17,16 @@ const runner = computed(() => props.runners.find(r => r.id === props.thread.runn
 const skillNames = computed(() => props.thread.skills.flatMap(source => source.skills.map(skill => skill.name)))
 const totalTokens = computed(() => (props.thread.tokens ? props.thread.tokens.input + props.thread.tokens.output : null))
 
-/** A PROJECT thread has no feature branch: the header shows the scope label instead (S5b 1a-R3). */
-const featureLabel = computed(() =>
-  props.thread.kind === 'PROJECT' ? t('fleet.threads.kind.project') : `feat/${props.thread.feature}`,
-)
+/**
+ * What the header shows where a REPO thread shows its branch: a PROJECT thread has no feature branch
+ * (S5b 1a-R3) and a WORKSPACE thread has neither a branch nor a project scope, so it shows its home
+ * project's name — the same label `ThreadListTable` gives a WORKSPACE row (S5b 1d, 1d2-D12).
+ */
+const featureLabel = computed(() => {
+  if (props.thread.kind === 'PROJECT') return t('fleet.threads.kind.project')
+  if (props.thread.kind === 'WORKSPACE') return props.thread.homeProject?.name ?? t('fleet.threads.kind.workspace')
+  return `feat/${props.thread.feature}`
+})
 </script>
 
 <template>

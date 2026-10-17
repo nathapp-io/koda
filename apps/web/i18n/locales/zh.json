@@ -87,7 +87,8 @@
     "sectionWork": "工作",
     "sectionKnowledge": "知识",
     "sectionFleet": "机群",
-    "threads": "线程"
+    "threads": "线程",
+    "myThreads": "我的线程"
   },
   "palette": {
     "trigger": "搜索或跳转…",
@@ -746,7 +747,14 @@
   "fleet": {
     "threads": {
       "kind": {
-        "project": "项目线程"
+        "project": "项目线程",
+        "workspace": "工作区线程"
+      },
+      "workspace": {
+        "title": "我的线程",
+        "homeProject": "归属项目",
+        "homeAutomatic": "自动",
+        "disabled": "线程功能已停用。"
       },
       "list": {
         "title": "线程",
@@ -761,7 +769,9 @@
         "backend": "后端",
         "session": "会话",
         "lastActivity": "最近活动",
-        "cost": "费用"
+        "cost": "费用",
+        "loadMore": "加载更多",
+        "loadMoreFailed": "无法加载更多线程。"
       },
       "session": {
         "starting": "启动中",

@@ -1,7 +1,7 @@
 import { describe, expect, jest, test } from '@jest/globals'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { LIVE_STREAM_HEADERS, buildLiveUpstreamUrl, buildUserLiveUpstreamUrl, openLiveUpstream, openLiveUpstreamUrl } from '~/server/utils/live-proxy'
+import { LIVE_STREAM_HEADERS, buildLiveUpstreamUrl, buildUserLiveUpstreamUrl, buildWorkspaceThreadLiveUpstreamUrl, openLiveUpstream, openLiveUpstreamUrl, openWorkspaceThreadLiveUpstream } from '~/server/utils/live-proxy'
 
 const API = 'http://api:3100'
 
@@ -156,5 +156,55 @@ describe('user stream (S4a §4)', () => {
     expect(source).toContain('openLiveUpstreamUrl(')
     expect(source).toContain('LIVE_STREAM_HEADERS')
     expect(source).toContain("event.node.res.on('close', cb)")
+  })
+})
+
+describe('workspace thread stream (S5b US-004)', () => {
+  test('AC-9: rejects a thread id outside the id pattern with 400 without calling the API', async () => {
+    const fetchImpl = jest.fn(async () => streamResponse())
+    const result = await openWorkspaceThreadLiveUpstream({
+      threadId: '../x', cookie: undefined, apiInternalUrl: API, onClientClose: () => undefined, fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+
+    expect(result).toEqual({ kind: 'error', status: 400, body: 'invalid thread id' })
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  test('AC-10: targets the API workspace thread events endpoint and forwards the cookie', async () => {
+    const fetchImpl = jest.fn(async (_url: string | URL | Request, _init?: RequestInit) => streamResponse())
+    const result = await openWorkspaceThreadLiveUpstream({
+      threadId: 't1', cookie: 'koda_token=x', apiInternalUrl: API, onClientClose: () => undefined, fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+
+    expect(result.kind).toBe('stream')
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('http://api:3100/api/threads/t1/events')
+    expect(init?.headers).toEqual({ accept: 'text/event-stream', cookie: 'koda_token=x' })
+  })
+
+  test('AC-11: a 404 upstream (not the creator, threads disabled) passes its status through', async () => {
+    const fetchImpl = jest.fn(async () => new Response('{"ret":40004}', { status: 404 }))
+    const result = await openWorkspaceThreadLiveUpstream({
+      threadId: 't1', cookie: undefined, apiInternalUrl: API, onClientClose: () => undefined, fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+
+    expect(result).toEqual({ kind: 'error', status: 404, body: '{"ret":40004}' })
+  })
+
+  test('buildWorkspaceThreadLiveUpstreamUrl targets /threads/<id>/events and refuses an invalid id', () => {
+    expect(buildWorkspaceThreadLiveUpstreamUrl('t1', API)).toBe('http://api:3100/api/threads/t1/events')
+    // No project slug is involved: a slash or a traversal attempt is simply not an id.
+    expect(buildWorkspaceThreadLiveUpstreamUrl('a/b', API)).toBeNull()
+    expect(buildWorkspaceThreadLiveUpstreamUrl('../admin', API)).toBeNull()
+  })
+
+  test('the Nitro route streams through the shared helper with the live headers', () => {
+    const source = readFileSync(path.join(__dirname, '../../server/api/threads/[id]/events.get.ts'), 'utf-8')
+    expect(source).toContain('openWorkspaceThreadLiveUpstream')
+    expect(source).toContain('sendStream')
+    expect(source).toContain('LIVE_STREAM_HEADERS')
+    expect(source).toContain("node.res.on('close', cb)")
+    // The id is read from the [id] param, never from a project slug.
+    expect(source).toContain("getRouterParam(event, 'id')")
   })
 })

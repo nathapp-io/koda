@@ -724,9 +724,19 @@ describe('PrismaThreadIngestRepository.fold write-path lines (US-002)', () => {
 });
 
 
-it('workspace AC-9 stores a live session without tools-unavailable notice', async () => {
+it('US-001 AC-15: a WORKSPACE session on a runner without kodaTools records the tools notice', async () => {
   const { client, thread } = fakeClient({ kind: 'WORKSPACE', runnerId: 'r1', runner: { name: 'box', capabilities: {} } });
   await repoWith(client).fold(batch([sessionStarted()]));
-  expect(thread.session).toMatchObject({ state: 'live' });
+  expect(thread.session).toEqual({
+    jobId: 'J', state: 'live', resumed: false, contextReset: false, reason: null, at: '2026-10-14T00:00:00.000Z',
+    kodaToolsUnavailableOn: 'box',
+  });
+  expect(client.chatThread.findUnique).toHaveBeenCalledWith({ where: { id: 'T' }, select: { kind: true } });
+});
+
+it('US-001 AC-15: a WORKSPACE session on a runner with kodaTools records no notice', async () => {
+  const { client, thread } = fakeClient({ kind: 'WORKSPACE', runnerId: 'r1', runner: { name: 'box', capabilities: { kodaTools: true } } });
+  await repoWith(client).fold(batch([sessionStarted()]));
   expect(thread.session).not.toHaveProperty('kodaToolsUnavailableOn');
+  expect(thread.session).toMatchObject({ jobId: 'J', state: 'live' });
 });

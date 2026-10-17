@@ -7,18 +7,37 @@ function activityText(value: string | null | undefined): string {
   return value && Number.isFinite(new Date(value).getTime()) ? timeText(value) : '-'
 }
 
-defineProps<{
+const props = defineProps<{
   threads: ThreadDto[]
   status: 'ACTIVE' | 'ARCHIVED'
   nameOf: (userId: string) => string | null
-  slug: string
+  /** The project whose threads these are; required unless `basePath` supplies the row-link prefix. */
+  slug?: string
+  /** The row-link prefix on the personal list (`/threads`); defaults to `/<slug>/threads` (S5b 1d). */
+  basePath?: string
 }>()
 
 const { t } = useI18n()
 
-/** A PROJECT thread has no feature: it shows the scope label where a REPO thread shows `feat/<feature>` (S5b). */
+/**
+ * The prefix every row link starts with: `basePath` when given, else the project path (S5b 1d). Both props are
+ * optional because a project table passes only `slug` and the personal list only `basePath`, so a caller that passes
+ * neither gets the personal `/threads` links rather than the broken `//threads/<id>` (M3).
+ */
+const rowBase = computed(() => {
+  if (props.basePath) return props.basePath
+  return props.slug ? `/${props.slug}/threads` : '/threads'
+})
+
+/**
+ * What the feature column shows for one row: a PROJECT thread shows its scope label and a
+ * WORKSPACE thread shows its home project (it has no feature at all); a REPO thread shows
+ * `feat/<feature>`.
+ */
 function featureLabel(thread: ThreadDto): string {
-  return thread.kind === 'PROJECT' ? t('fleet.threads.kind.project') : `feat/${thread.feature}`
+  if (thread.kind === 'PROJECT') return t('fleet.threads.kind.project')
+  if (thread.kind === 'WORKSPACE') return thread.homeProject?.name ?? t('fleet.threads.kind.workspace')
+  return `feat/${thread.feature}`
 }
 </script>
 
@@ -42,7 +61,7 @@ function featureLabel(thread: ThreadDto): string {
       <tbody class="divide-y divide-border">
         <tr v-for="thread in threads" :key="thread.id" class="hover:bg-muted/30">
           <td class="px-3 py-2 font-medium">
-            <NuxtLink :to="`/${slug}/threads/${thread.id}`" class="text-primary hover:underline">{{ thread.title }}</NuxtLink>
+            <NuxtLink :to="`${rowBase}/${thread.id}`" class="text-primary hover:underline">{{ thread.title }}</NuxtLink>
           </td>
           <td class="px-3 py-2 text-muted-foreground">{{ nameOf(thread.createdById) ?? thread.createdById }}</td>
           <td class="px-3 py-2 font-mono text-xs">{{ featureLabel(thread) }}</td>

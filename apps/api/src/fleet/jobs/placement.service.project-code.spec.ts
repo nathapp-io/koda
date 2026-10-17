@@ -1,4 +1,5 @@
 import { FleetCommandType, FleetJobState } from '../../common/enums';
+import { kodaToolDescriptorsFor } from '../assistant/koda-tool-descriptors';
 import type { FleetRepoRef, PlacementRunnerRow } from './domain/fleet-job.domain';
 import { PlacementService } from './placement.service';
 
@@ -171,14 +172,26 @@ describe('workspace ASSIGN AC-6', () => {
     expect(repo.createCommand).not.toHaveBeenCalled();
     expect(await repo.findById()).toMatchObject({ state: FleetJobState.QUEUED });
   });
-  it.each(['placeJob', 'fillRunnerThreads'] as const)('omits tools and project repos via %s', async (entry) => {
+  it.each(['placeJob', 'fillRunnerThreads'] as const)('carries the workspace tools and no project repos via %s', async (entry) => {
     const runner = runnerRow();
     runner.capabilities = { ...runner.capabilities, workspaceThreads: true, projectCode: true, kodaTools: true };
     const { service, repo, assignThread } = fixture('WORKSPACE', [runner]);
     await service[entry](entry === 'placeJob' ? 'j1' : 'r1', NOW);
     expect(assignThread()).toMatchObject({ kind: 'WORKSPACE' });
-    expect(assignThread()).not.toHaveProperty('kodaTools');
+    expect(assignThread().kodaTools).toEqual(kodaToolDescriptorsFor('WORKSPACE'));
     expect(assignThread()).not.toHaveProperty('projectRepos');
     expect(repo.findProjectRepos).not.toHaveBeenCalled();
+  });
+
+  it('AC-13: leaves kodaTools out for a WORKSPACE SESSION on a runner without kodaTools', async () => {
+    const runner = runnerRow();
+    runner.capabilities = { ...runner.capabilities, workspaceThreads: true };
+    const { service, assignThread } = fixture('WORKSPACE', [runner]);
+
+    const outcome = await service.placeJob('j1', NOW);
+
+    expect(outcome).toMatchObject({ assigned: true, runnerId: 'r1' });
+    expect(assignThread()).toMatchObject({ kind: 'WORKSPACE' });
+    expect(assignThread()).not.toHaveProperty('kodaTools');
   });
 });

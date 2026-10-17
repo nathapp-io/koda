@@ -18,7 +18,6 @@ function fixture(over: { job?: unknown; threadsEnabled?: boolean; tool?: boolean
   const job = over.job === undefined ? RUNNING_THREAD_JOB : over.job;
   const jobs = {
     findById: vi.fn(async () => job),
-    findThreadTokenScope: vi.fn(async () => ({ kind: 'PROJECT', action: 'SESSION' })),
     findPendingCommand: vi.fn(async () => null),
     createCommand: vi.fn(async () => ({})),
   };
@@ -175,10 +174,12 @@ describe('US-005 AC-1: a call that passes every gate reaches the executor', () =
 });
 
 
-it('workspace AC-8 refuses tools before registry or executor', async () => {
-  const { service, jobs, registry, execute } = fixture();
-  jobs.findThreadTokenScope.mockResolvedValue({ kind: 'WORKSPACE', action: 'SESSION' });
-  await expect(service.call('r1', 'j1', '1', 'koda_search_tickets', BODY)).rejects.toMatchObject({ prefix: 'fleet.notThreadJob', code: 409, httpStatus: 409 });
-  expect(registry.get).not.toHaveBeenCalled();
-  expect(execute).not.toHaveBeenCalled();
+it('workspace AC-8: a WORKSPACE job call reaches the executor with the job, toolCallId, name and input', async () => {
+  // 1d2-D8 removed the WORKSPACE refusal (and the `findThreadTokenScope` read that fed it): the job's own
+  // `threadId` is the scope, so nothing but the shared gates stands between the route and the executor.
+  const { service, registry, execute } = fixture();
+  const body = { toolCallId: 'c1', input: { project: 'web' } };
+  await expect(service.call('r1', 'j1', '1', 'koda_search_tickets', body)).resolves.toEqual({ content: 'WEB-1 ok', isError: false });
+  expect(registry.get).toHaveBeenCalledWith('koda_search_tickets');
+  expect(execute).toHaveBeenCalledWith({ jobId: 'j1', toolCallId: 'c1', name: 'koda_search_tickets', input: { project: 'web' } });
 });

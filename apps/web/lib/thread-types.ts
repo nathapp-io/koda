@@ -9,9 +9,11 @@
 /**
  * Runtime mirror of packages/fleet-protocol/src/threads.ts (`ChatThreadKind`, fleet S5b).
  * A PROJECT thread needs no repository: its `repoId`, `baseRef`, `feature` and `specPath` are null
- * and it has no Publish, Discard, Plan or Run.
+ * and it has no Publish, Discard, Plan or Run. A WORKSPACE thread is personal (the top-level
+ * `/threads` routes): it has no repository and no project scope either, and carries its
+ * `homeProject` instead.
  */
-export type ChatThreadKind = 'REPO' | 'PROJECT'
+export type ChatThreadKind = 'REPO' | 'PROJECT' | 'WORKSPACE'
 
 /** Runtime mirror of packages/fleet-protocol/src/threads.ts (`ThreadBackend`). */
 export type ThreadBackend =
@@ -91,6 +93,8 @@ export interface ThreadDto {
   repoId: string | null
   baseRef: string | null
   feature: string | null
+  /** The host project of a WORKSPACE thread; absent on REPO and PROJECT threads. */
+  homeProject?: { slug: string; name: string }
   title: string
   createdById: string
   runnerId: string | null

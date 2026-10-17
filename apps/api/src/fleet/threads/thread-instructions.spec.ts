@@ -1,4 +1,4 @@
-import { buildProjectThreadInstructions, buildThreadInstructions, renderBriefBlock } from './thread-instructions';
+import { buildProjectThreadInstructions, buildThreadInstructions, buildWorkspaceThreadInstructions, renderBriefBlock } from './thread-instructions';
 import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
 
 const source: ThreadSkillSource = {
@@ -157,6 +157,37 @@ describe('the koda tools line (US-006 AC-14)', () => {
 
   it('AC-14: both kinds place the extended line immediately before their skills block', () => {
     for (const text of allInstructions()) expect(lineBeforeSkills(text)).toBe(KODA_TOOLS_LINE);
+  });
+});
+
+/** The workspace instruction's own koda tools line: the only one that starts with `koda tools:`. */
+function workspaceKodaToolsLine(): string {
+  const line = buildWorkspaceThreadInstructions({ skills: [] }).split('\n')
+    .find((candidate) => candidate.startsWith('koda tools:'));
+  expect(line).toBeDefined();
+  return line ?? '';
+}
+
+describe('buildWorkspaceThreadInstructions (S5b 1d2-D9)', () => {
+  it('AC-14: the koda tools line names koda_my_projects and the project argument', () => {
+    expect(workspaceKodaToolsLine()).toContain('koda_my_projects');
+    expect(workspaceKodaToolsLine()).toContain('`project`');
+  });
+
+  it('AC-14: the second line no longer says the session has no koda tools', () => {
+    const lines = buildWorkspaceThreadInstructions({ skills: [] }).split('\n');
+    expect(lines[1]).not.toContain('no koda tools');
+  });
+
+  it('AC-14: the koda tools line sits immediately before the skills block', () => {
+    expect(lineBeforeSkills(buildWorkspaceThreadInstructions({ skills: [] }))).toBe(workspaceKodaToolsLine());
+    expect(lineBeforeSkills(buildWorkspaceThreadInstructions({ skills: [source] }))).toBe(workspaceKodaToolsLine());
+  });
+
+  it('AC-14: still carries no project brief and no repository context', () => {
+    const text = buildWorkspaceThreadInstructions({ skills: [source] });
+    expect(text).not.toContain('Project brief:');
+    expect(text).not.toContain('Repository context');
   });
 });
 
