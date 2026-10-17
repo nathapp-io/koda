@@ -25,8 +25,8 @@ async function loadPage(status: 'ACTIVE' | 'ARCHIVED' = threadsList.status.value
   loadFailed.value = false
   loadMoreFailed.value = false
   try {
-    await threadsList.load(status)
-    return true
+    // false when a newer selection overtook this read: its status is not the one on screen.
+    return await threadsList.load(status)
   } catch {
     loadFailed.value = true
     return false

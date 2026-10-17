@@ -35,7 +35,8 @@ export interface WorkspaceThreadList {
   /** True when the last page came back full, so older threads may sit behind it. */
   hasNext: Ref<boolean>
   loadingMore: Ref<boolean>
-  load: (status?: ThreadStatus) => Promise<void>
+  /** Resolves `false` when a newer `load()` overtook this one and its page was discarded. */
+  load: (status?: ThreadStatus) => Promise<boolean>
   loadMore: () => Promise<void>
 }
 
@@ -66,16 +67,21 @@ export function useWorkspaceThreads(): WorkspaceThreadList {
     return $api.get<ThreadPage>('/threads', { query })
   }
 
-  const load = async (next: ThreadStatus = 'ACTIVE'): Promise<void> => {
+  /**
+   * Resolves `true` when this read's page 1 became the list, `false` when a newer `load()` overtook
+   * it and it was discarded, so a caller acts (for example on the URL) only on the list it shows.
+   */
+  const load = async (next: ThreadStatus = 'ACTIVE'): Promise<boolean> => {
     const mine = ++generation
     const response = await fetchPage(next, 1)
     // A newer load() owns the list now: its page 1 is the one that counts.
-    if (generation !== mine) return
+    if (generation !== mine) return false
     threads.value = response.items
     threadsEnabled.value = response.threadsEnabled
     status.value = next
     current.value = 1
     hasNext.value = response.items.length === PAGE_SIZE
+    return true
   }
 
   /** Append the page after the one held; a no-op when the last page was not full. */

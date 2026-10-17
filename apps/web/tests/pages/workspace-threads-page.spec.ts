@@ -60,10 +60,12 @@ interface GetCall {
  * reachable both as a mount-sfc global (the page's own `useApi`?) and as a global for the directly
  * imported composable, whose `useApi()` reference is a Nuxt auto-import — hence `g.useApi`.
  */
-function mountPage(over: { items?: ThreadDto[]; moreItems?: ThreadDto[]; threadsEnabled?: boolean } = {}) {
+function mountPage(over: { items?: ThreadDto[]; moreItems?: ThreadDto[]; threadsEnabled?: boolean; archived?: Promise<{ items: ThreadDto[], threadsEnabled: boolean }> } = {}) {
   const calls: GetCall[] = []
+  const replace = jest.fn(async (_to: unknown) => undefined)
   const get = jest.fn(async (path: string, options?: { query?: Record<string, string> }) => {
     calls.push({ path, query: options?.query })
+    if (over.archived && options?.query?.status === 'ARCHIVED') return over.archived
     if (options?.query?.page === '2') return { items: over.moreItems ?? [], threadsEnabled: over.threadsEnabled ?? true }
     return { items: over.items ?? [workspaceItem()], threadsEnabled: over.threadsEnabled ?? true }
   })
@@ -81,6 +83,7 @@ function mountPage(over: { items?: ThreadDto[]; moreItems?: ThreadDto[]; threads
       useI18n: () => i18nStub(),
       useApi: () => ({ $api: { get } }),
       useRoute: () => ({ params: {}, query: {} }),
+      useRouter: () => ({ replace }),
       useAuth: () => ({ user: ref({ id: 'u1', name: 'Dana', email: 'dana@k.t' }) }),
       useWorkspaceThreads,
     },
@@ -91,7 +94,7 @@ function mountPage(over: { items?: ThreadDto[]; moreItems?: ThreadDto[]; threads
       await Vue.nextTick()
     }
   }
-  return { app, get, calls, settle }
+  return { app, get, calls, replace, settle }
 }
 
 /** The first node whose `to` or `href` is the given path. */
@@ -157,6 +160,27 @@ describe('US-005 AC-1..AC-5: pages/threads/index.vue', () => {
     await m.settle()
 
     expect(m.calls.map(call => call.query?.status)).toEqual(['ACTIVE', 'ARCHIVED'])
+    m.app.unmount()
+  })
+
+  /**
+   * Out-of-order switches: Archived is clicked, then Active, and Active answers first. The stale
+   * Archived read is discarded, so it must not rewrite the URL to status=ARCHIVED over the Active list.
+   */
+  test('AC-4 (edge): a discarded Archived read leaves the URL on the Active list', async () => {
+    let resolveArchived!: (value: { items: ThreadDto[], threadsEnabled: boolean }) => void
+    const archived = new Promise<{ items: ThreadDto[], threadsEnabled: boolean }>((done) => { resolveArchived = done })
+    const m = mountPage({ archived })
+    await m.settle()
+
+    clickByLabel(m.app, 'fleet.threads.list.archived')
+    clickByLabel(m.app, 'fleet.threads.list.active')
+    await m.settle()
+    resolveArchived({ items: [workspaceItem({ id: 'old', status: 'ARCHIVED' })], threadsEnabled: true })
+    await m.settle()
+
+    const statuses = m.replace.mock.calls.map(([to]) => (to as { query: Record<string, unknown> }).query.status)
+    expect(statuses).toEqual([undefined])
     m.app.unmount()
   })
 

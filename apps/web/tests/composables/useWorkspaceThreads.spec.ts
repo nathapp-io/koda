@@ -162,6 +162,29 @@ describe('useWorkspaceThreads pagination (B2)', () => {
     expect(list.hasNext.value).toBe(true)
   })
 
+  /**
+   * Out-of-order status selections: Archived is asked first, Active second, and Active answers
+   * first. The discarded Archived read must report that it did not apply, so its caller does not
+   * act on it (the page would otherwise rewrite the URL to status=ARCHIVED over an Active list).
+   */
+  test('a load() overtaken by a newer one resolves false and leaves the newer list in place', async () => {
+    const archived = deferred<{ items: ThreadDto[], threadsEnabled: boolean }>()
+    const get = jest.fn(async (_path: string, options?: { query?: Record<string, string> }): Promise<{ items: ThreadDto[], threadsEnabled: boolean }> =>
+      options?.query?.status === 'ARCHIVED' ? archived.promise : { items: [listItem({ id: 'active' })], threadsEnabled: true })
+    g.useApi = () => ({ $api: { get } })
+
+    const { useWorkspaceThreads } = await import('~/composables/useWorkspaceThreads')
+    const list = useWorkspaceThreads()
+    const stale = list.load('ARCHIVED')
+    const applied = await list.load('ACTIVE')
+    archived.resolve({ items: [listItem({ id: 'archived', status: 'ARCHIVED' })], threadsEnabled: true })
+
+    expect(applied).toBe(true)
+    expect(await stale).toBe(false)
+    expect(list.status.value).toBe('ACTIVE')
+    expect(list.threads.value.map(thread => thread.id)).toEqual(['active'])
+  })
+
   /** The same stale read, short this time: it must not convince the list there is nothing behind it. */
   test('a short page read from before a same-status load() does not hide Load more', async () => {
     const stale = deferred<{ items: ThreadDto[], threadsEnabled: boolean }>()
