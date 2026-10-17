@@ -465,11 +465,14 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
   }
 
   /**
-   * 1b-D4 / 1c-b-D8: the runner the job ran on decides whether the session it hosts has koda tools and whether it can
-   * read project code. A runner row whose stored capabilities lack the capability names itself on the session; a job
-   * with no runner, or a runner row that is gone, stores no notice. The same capability reads gate the ASSIGN
-   * descriptors and repository list (1b-D3, 1c-b-D7), so the two agree except across a re-probe between the assign and
+   * 1b-D4 / 1c-b-D8 / 1d2-D9: the runner the job ran on decides whether the session it hosts has koda tools and
+   * whether it can read project code. A runner row whose stored capabilities lack the capability names itself on the
+   * session; a job with no runner, or a runner row that is gone, stores no notice. The same capability reads gate the
+   * ASSIGN descriptors and repository list (1b-D3, 1c-b-D7), so the two agree except across a re-probe between the assign and
    * the session start (a runner restart, which also ends the session).
+   *
+   * Every kind of thread, WORKSPACE included, gets the tools notice: a workspace session proxies the same koda tools
+   * (1d2-D2), so a runner without the capability loses it just as much as a REPO or PROJECT one.
    *
    * The project-code notice is a PROJECT thread's alone: a REPO thread has its own checkout, so a runner without
    * `projectCode` loses it nothing. `ChatThread.kind` defaults to `REPO`.
@@ -484,7 +487,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
     const capabilities = runner.capabilities as { kodaTools?: unknown; projectCode?: unknown } | null;
     const thread = await this.prisma.client.chatThread.findUnique({ where: { id: threadId }, select: { kind: true } });
     return {
-      ...(thread?.kind === 'WORKSPACE' || capabilities?.kodaTools === true ? {} : { kodaToolsUnavailableOn: runner.name }),
+      ...(capabilities?.kodaTools === true ? {} : { kodaToolsUnavailableOn: runner.name }),
       ...(thread?.kind === 'PROJECT' && capabilities?.projectCode !== true ? { projectCodeUnavailableOn: runner.name } : {}),
     };
   }

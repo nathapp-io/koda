@@ -42,10 +42,10 @@ describe('workspace turn boundaries', () => {
     cancel.mockRejectedValue(new Error('database unavailable'));
     await expect(service.archive(principal, 't')).rejects.toThrow('database unavailable');
   });
-  it('AC-4: instructions have no koda tool names and include skills', () => {
+  it('AC-4: instructions name the workspace koda tools and include skills', () => {
     const text = instructions.buildWorkspaceThreadInstructions({ skills: [] });
     expect(text).toMatch(/^You are a brainstorming partner in a koda workspace thread\./);
-    expect(text).not.toContain('koda_');
+    expect(text).toContain('koda_my_projects');
     expect(text).toContain('Skills available: none.');
   });
   it('AC-12: send passes no repository context', async () => {
