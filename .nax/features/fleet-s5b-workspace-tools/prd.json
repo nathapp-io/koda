@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-workspace-tools",
   "branchName": "feat/fleet-s5b-workspace-tools",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "updatedAt": "2026-10-17T02:30:27.832Z",
+  "updatedAt": "2026-10-17T02:37:29.502Z",
   "userStories": [
     {
       "id": "US-001",
@@ -113,8 +113,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -126,7 +126,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "claude",
         "initialProfileId": "claude-sonnet",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
@@ -156,7 +158,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "3853ea7ef694edfa2b6993f302468d7873f87baa"
     },
     {
       "id": "US-003",
