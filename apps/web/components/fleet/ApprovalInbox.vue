@@ -81,6 +81,15 @@
                 :job-href="detail.projectId && detail.jobId ? jobLink(detail.projectId, detail.jobId) : null"
                 @decide="onDecide"
               />
+              <FleetApprovalActionPanel
+                v-else-if="detail.type === 'assistant_action' && detail.status === 'pending'"
+                :key="`${detail.id}:${detail.status}:${detailVersion}`"
+                :approval="detail"
+                :can-decide="canDecide(detail, viewer)"
+                :busy="deciding"
+                :now="now"
+                @decide="onDecide"
+              />
               <FleetApprovalOutcome v-else :approval="detail" :name-of="nameOf" :job-link="jobLink" />
             </template>
           </div>

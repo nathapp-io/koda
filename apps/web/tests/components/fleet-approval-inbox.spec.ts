@@ -43,9 +43,12 @@ function mount(opts: {
   now?: Date
   /** The browser clock the D295 delivery watch reads (Date.now); unset keeps the real clock. */
   wallNow?: number
+  /** The `useActionPreview().load` the assistant-action panel reads its exact preview through (US-004). */
+  preview?: jest.Mock
 }) {
   const api = { get: opts.get, post: opts.post ?? jest.fn() }
   ;(globalThis as Record<string, unknown>).useApi = () => ({ $api: api })
+  const preview = opts.preview ?? jest.fn(async () => 'Run the export')
   const toast = toastRecorder()
   const replace = jest.fn()
   let pollTask: () => Promise<void> = async () => undefined
@@ -58,7 +61,7 @@ function mount(opts: {
   const setWall = (ms: number): void => { wall.ms = ms }
   const app = mountSfc(inbox, {
     components: uiStubs,
-    fleetComponents: ['FleetApprovalBudgetPanel', 'FleetApprovalBashPanel', 'FleetApprovalOutcome', 'FleetNativeSelect', 'FleetAge'],
+    fleetComponents: ['FleetApprovalBudgetPanel', 'FleetApprovalBashPanel', 'FleetApprovalActionPanel', 'FleetApprovalOutcome', 'FleetNativeSelect', 'FleetAge'],
     alias: {
       '~/composables/useApi': apiModule,
       // D292: a fixed clock; the real one ticks with setInterval.
@@ -66,7 +69,7 @@ function mount(opts: {
     },
     props: {
       base: { kind: 'project', slug: 'koda' },
-      viewer: { kind: 'project', canManage: true, canWork: true },
+      viewer: { kind: 'project', canManage: true, canWork: true, userId: 'u1' },
       scopeLabel: () => 'koda',
       nameOf: (id: string) => (id === 'u1' ? 'Ada' : null),
       jobLink: (_p: string, j: string) => `/koda/fleet/jobs/${j}`,
@@ -80,6 +83,7 @@ function mount(opts: {
       useI18n: () => enI18n(),
       useAppToast: () => toast,
       useApi: () => ({ $api: api }),
+      useActionPreview: () => ({ load: preview }),
       useRoute: () => ({ query: opts.query ?? {} }),
       useRouter: () => ({ replace }),
       useVisiblePolling: (fn: () => Promise<void>) => {
@@ -102,7 +106,7 @@ function mount(opts: {
     ;(button.props.onClick as () => void)()
     await settle()
   }
-  return { app, api, toast, replace, forbidden, settle, byId, rowEl, toggle, poll: () => pollTask(), live: () => live, setWall }
+  return { app, api, toast, replace, forbidden, settle, byId, rowEl, toggle, preview, poll: () => pollTask(), live: () => live, setWall }
 }
 
 describe('FleetApprovalInbox', () => {
@@ -268,7 +272,7 @@ describe('FleetApprovalInbox', () => {
 
   test('a reader without the right sees no decide buttons (Review Focus 5)', async () => {
     const get = jest.fn(async (path: string) => (path.endsWith('/a1') ? row('a1', { requeueCandidates: [] }) : page([row('a1')])))
-    const m = mount({ get, props: { viewer: { kind: 'project', canManage: false, canWork: false } } })
+    const m = mount({ get, props: { viewer: { kind: 'project', canManage: false, canWork: false, userId: 'u1' } } })
     await m.settle()
     await m.toggle('a1')
     expect(m.byId('fleet-approval-readonly')).toHaveLength(1)
@@ -301,7 +305,7 @@ describe('FleetApprovalInbox', () => {
     let stored: FleetApprovalDto = bash
     const get = jest.fn(async (path: string) => (path.endsWith('/b1') ? stored : page(stored.status === 'pending' ? [stored] : [])))
     const post = jest.fn(async () => { stored = decided; return decided })
-    const m = mount({ get, post, props: { viewer: { kind: 'project', canManage: false, canWork: true } } })
+    const m = mount({ get, post, props: { viewer: { kind: 'project', canManage: false, canWork: true, userId: 'u1' } } })
     await m.settle()
     await m.toggle('b1')
     ;(m.byId('fleet-approval-bash-allow')[0].props.onClick as () => void)()
@@ -422,7 +426,7 @@ describe('FleetApprovalInbox', () => {
       let stored: FleetApprovalDto = pending
       const get = jest.fn(async (path: string) => (path.endsWith('/b1') ? stored : page(stored.status === 'pending' ? [stored] : [])))
       const post = jest.fn(async () => { stored = decided; return decided })
-      const m = mount({ get, post, wallNow: Date.parse('2026-10-04T12:00:00.000Z'), props: { viewer: { kind: 'project', canManage: false, canWork: true } } })
+      const m = mount({ get, post, wallNow: Date.parse('2026-10-04T12:00:00.000Z'), props: { viewer: { kind: 'project', canManage: false, canWork: true, userId: 'u1' } } })
       await m.settle()
       await m.toggle('b1')
       ;(m.byId('fleet-approval-bash-allow')[0].props.onClick as () => void)()
@@ -480,13 +484,13 @@ describe('FleetApprovalInbox', () => {
     const bash = bashRow('b1')
     const budgetRow = row('a1', { requeueCandidates: [] })
     const get = jest.fn(async (path: string) => (path.endsWith('/b1') ? bash : path.endsWith('/a1') ? budgetRow : page([bash, row('a1')])))
-    const viewerOnly = mount({ get, props: { viewer: { kind: 'project', canManage: false, canWork: false } } })
+    const viewerOnly = mount({ get, props: { viewer: { kind: 'project', canManage: false, canWork: false, userId: 'u1' } } })
     await viewerOnly.settle()
     await viewerOnly.toggle('b1')
     expect(viewerOnly.byId('fleet-approval-readonly')).toHaveLength(1)
     expect(viewerOnly.byId('fleet-approval-bash-deny')).toHaveLength(0)
     viewerOnly.app.unmount()
-    const developer = mount({ get, props: { viewer: { kind: 'project', canManage: false, canWork: true } } })
+    const developer = mount({ get, props: { viewer: { kind: 'project', canManage: false, canWork: true, userId: 'u1' } } })
     await developer.settle()
     await developer.toggle('b1')
     expect(developer.byId('fleet-approval-bash-deny')).toHaveLength(1)
@@ -498,7 +502,7 @@ describe('FleetApprovalInbox', () => {
 
   test('the admin inbox reports a 403 and stops (no rows, no toast)', async () => {
     const get = jest.fn(async () => { throw new ApiError(40003, 'Forbidden') })
-    const m = mount({ get, props: { base: { kind: 'admin' }, viewer: { kind: 'admin' } } })
+    const m = mount({ get, props: { base: { kind: 'admin' }, viewer: { kind: 'admin', userId: null } } })
     await m.settle()
     expect(m.forbidden).toEqual([true])
     expect(m.toast.errors).toEqual([])
@@ -507,7 +511,7 @@ describe('FleetApprovalInbox', () => {
 
   test('the admin inbox shows each row\'s project', async () => {
     const get = jest.fn(async () => page([row('a1'), row('g1', { projectId: null })]))
-    const m = mount({ get, props: { base: { kind: 'admin' }, viewer: { kind: 'admin' }, projectName: (id: string | null) => (id === null ? 'Fleet-wide' : 'koda') } })
+    const m = mount({ get, props: { base: { kind: 'admin' }, viewer: { kind: 'admin', userId: null }, projectName: (id: string | null) => (id === null ? 'Fleet-wide' : 'koda') } })
     await m.settle()
     expect(m.app.textOf(m.rowEl('a1'))).toContain('koda')
     expect(m.app.textOf(m.rowEl('g1'))).toContain('Fleet-wide')
@@ -533,10 +537,88 @@ describe('FleetApprovalInbox', () => {
     await project.settle()
     expect(project.live()?.onFleetApproval).toBeDefined()
     project.app.unmount()
-    const admin = mount({ get: jest.fn(async () => page([])), props: { base: { kind: 'admin' }, viewer: { kind: 'admin' } } })
+    const admin = mount({ get: jest.fn(async () => page([])), props: { base: { kind: 'admin' }, viewer: { kind: 'admin', userId: null } } })
     await admin.settle()
     expect(admin.live()).toBeNull()
     admin.app.unmount()
+  })
+})
+
+describe('FleetApprovalInbox assistant actions (US-004)', () => {
+  const actionPayload = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    actionId: 'act1', tool: 'run_command', threadId: 't1', threadPath: '/koda/threads/t1', requestedById: 'u1', ...over,
+  })
+  const actionRow = (id: string, over: Partial<FleetApprovalDto> = {}, payload: Record<string, unknown> = {}): FleetApprovalDto =>
+    row(id, { type: 'assistant_action', policyId: null, jobId: null, payload: actionPayload(payload), expiresAt: '2026-10-03T10:10:00.000Z', ...over })
+
+  test('the requester\'s pending action opens the action panel with Approve (AC-1)', async () => {
+    const action = actionRow('a1')
+    const get = jest.fn(async (path: string) => (path.endsWith('/a1') ? action : page([action])))
+    const m = mount({ get })
+    await m.settle()
+    await m.toggle('a1')
+    expect(m.byId('fleet-approval-action-panel')).toHaveLength(1)
+    expect(m.byId('fleet-approval-action-approve')).toHaveLength(1)
+    expect(m.byId('fleet-approval-action-approve')[0].props.disabled).toBe(false)
+    expect(m.app.textOf(m.byId('fleet-approval-action-preview')[0])).toBe('Run the export')
+    expect(m.preview).toHaveBeenCalledWith('/koda/threads/t1', 'act1')
+    m.app.unmount()
+  })
+
+  test('someone else\'s pending action opens the panel without an Approve button (AC-2)', async () => {
+    const action = actionRow('a1', {}, { requestedById: 'u2' })
+    const get = jest.fn(async (path: string) => (path.endsWith('/a1') ? action : page([action])))
+    const m = mount({ get })
+    await m.settle()
+    await m.toggle('a1')
+    expect(m.byId('fleet-approval-action-panel')).toHaveLength(1)
+    expect(m.byId('fleet-approval-action-approve')).toHaveLength(0)
+    expect(m.byId('fleet-approval-action-reject')).toHaveLength(0)
+    expect(m.byId('fleet-approval-action-requester-only')).toHaveLength(1)
+    // 2aw-D9: a viewer who cannot decide fetches nothing.
+    expect(m.preview).not.toHaveBeenCalled()
+    m.app.unmount()
+  })
+
+  test('Approve after the preview loaded decides the approval through useFleetApprovals (AC-11)', async () => {
+    const action = actionRow('a1')
+    const approved = actionRow('a1', { status: 'approved', decision: 'approve', resolvedBy: 'user', decidedById: 'u1', decidedAt: '2026-10-03T10:06:00.000Z' })
+    const get = jest.fn(async (path: string) => (path.endsWith('/a1') ? action : page([action])))
+    const post = jest.fn(async () => approved)
+    const m = mount({ get, post })
+    await m.settle()
+    await m.toggle('a1')
+    ;(m.byId('fleet-approval-action-approve')[0].props.onClick as () => void)()
+    await m.settle()
+    expect(post).toHaveBeenCalledWith('/projects/koda/fleet/approvals/a1/decide', { decision: 'approve' })
+    expect(m.toast.successes).toEqual(['Approved. The runner runs the action.'])
+    expect(m.byId('fleet-approval-outcome')).toHaveLength(1)
+    m.app.unmount()
+  })
+
+  test('a pending bash row still opens the bash panel, and a pending budget row the budget panel (AC-17, AC-18)', async () => {
+    const bash = row('b1', {
+      type: 'nax_bash_escalate', policyId: null, jobId: 'j1', expiresAt: '2026-10-03T10:10:00.000Z',
+      payload: {
+        command: 'rm -rf build', commandTruncated: false, maskedCount: 0, root: '/w', stage: 'execution',
+        storyId: null, featureName: 'login', reason: 'outside the grants', options: ['allow', 'deny'],
+      },
+    })
+    const budgetRow = row('c1', { requeueCandidates: [] })
+    const get = jest.fn(async (path: string) => {
+      if (path.endsWith('/b1')) return bash
+      if (path.endsWith('/c1')) return budgetRow
+      return page([bash, budgetRow])
+    })
+    const m = mount({ get })
+    await m.settle()
+    await m.toggle('b1')
+    expect(m.byId('fleet-approval-bash-panel')).toHaveLength(1)
+    expect(m.byId('fleet-approval-action-panel')).toHaveLength(0)
+    await m.toggle('c1')
+    expect(m.byId('fleet-approval-budget-panel')).toHaveLength(1)
+    expect(m.byId('fleet-approval-action-panel')).toHaveLength(0)
+    m.app.unmount()
   })
 })
 
@@ -582,7 +664,7 @@ describe('FleetApprovalInbox keyboard (slice 4)', () => {
     const m = mount({
       get: get as unknown as jest.Mock,
       post,
-      props: { viewer: opts.viewer ?? { kind: 'project', canManage: true, canWork: true } },
+      props: { viewer: opts.viewer ?? { kind: 'project', canManage: true, canWork: true, userId: 'u1' } },
     })
     await m.settle()
     return { ...m, post, press: fake.press, listenerCount: fake.count }
@@ -659,7 +741,7 @@ describe('FleetApprovalInbox keyboard (slice 4)', () => {
 
   test('keys ignore typing targets and a viewer without rights; A/D do nothing without an open ask', async () => {
     const post = jest.fn(async () => bashRow('b1', { status: 'approved' }))
-    const m = await mountKeyboard([bashRow('b1')], { post, viewer: { kind: 'project', canManage: false, canWork: false } })
+    const m = await mountKeyboard([bashRow('b1')], { post, viewer: { kind: 'project', canManage: false, canWork: false, userId: 'u1' } })
     m.press('Enter')
     await m.settle()
     m.press('a', { target: { tagName: 'INPUT' } })
