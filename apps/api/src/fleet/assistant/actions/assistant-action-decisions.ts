@@ -87,6 +87,8 @@ export class AssistantActionDecisions implements OnModuleInit, AssistantActionDe
     const action = await this.actions.lockById(stored.id);
     if (!approval || !action || approval.status !== 'pending' || action.status !== 'PENDING') return { kind: 'not_pending' };
     if (action.expiresAt.getTime() <= now.getTime()) return { kind: 'expired', ...(await this.expireLocked(action, approval, now)) };
+    // US-006 owns the approve branch. Until it lands an approve must never fall through to the reject write below.
+    if (dto.decision !== 'reject') throw new ValidationAppException({ reason: 'approve is not available yet' }, 'fleet.approvalDecisionInvalid');
     return { kind: 'rejected', ...(await this.reject(caller, action, approval, dto, now)) };
   }
 

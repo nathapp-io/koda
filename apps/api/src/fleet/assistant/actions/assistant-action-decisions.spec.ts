@@ -134,6 +134,14 @@ describe('AssistantActionDecisions.decide locked checks and reject', () => {
     expect(actions.insertSystemNote).not.toHaveBeenCalled();
   });
 
+  it('approve is refused until US-006 and never takes the reject path', async () => {
+    const { service, actions, approvals, threads } = build();
+    await expect(service.decide(CALLER, approval(), dto('approve'), NOW)).rejects.toMatchObject({ prefix: 'fleet.approvalDecisionInvalid' });
+    expect(actions.resolve).not.toHaveBeenCalled();
+    expect(approvals.resolve).not.toHaveBeenCalled();
+    expect(threads.publish).not.toHaveBeenCalled();
+  });
+
   it('reject resolves the approval, sets the action REJECTED and writes the note', async () => {
     const { service, approvals, actions, closer } = build();
 
