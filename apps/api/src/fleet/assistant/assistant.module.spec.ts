@@ -11,6 +11,7 @@ import { AssistantModule } from './assistant.module';
 import { AssistantToolExecutor } from './assistant-tool.executor';
 import { AssistantToolRegistry } from './assistant-tool.registry';
 import { KODA_GET_ACTION, KODA_MY_PROJECTS } from './koda-tool-descriptors';
+import { FleetWriteTools } from './tools/fleet-write-tools';
 import { KnowledgeTools } from './tools/knowledge-tools';
 import { MemoryWriteTools } from './tools/memory-write-tools';
 
@@ -104,6 +105,19 @@ describe('AssistantModule', () => {
     const tool = module.get(AssistantToolRegistry).get('koda_record_decision');
     expect(tool?.kind).toBe('write');
     expect(tool?.permission).toEqual({ kind: 'member' });
+  });
+
+  it('AC-12 (US-003): init() registers koda_dispatch_job as a write tool needing create FleetJob', async () => {
+    // The fleet write group is what fills the entry: resolving it proves the provider is registered and that
+    // FleetJobsModule (the service it dispatches through) and KnowledgeModule (the repository it resolves) are in
+    // the module graph.
+    expect(module.get(FleetWriteTools)).toBeInstanceOf(FleetWriteTools);
+
+    await module.init();
+
+    const tool = module.get(AssistantToolRegistry).get('koda_dispatch_job');
+    expect(tool?.kind).toBe('write');
+    expect(tool?.permission).toEqual({ kind: 'ability', action: 'create', subject: 'FleetJob' });
   });
 
   it('AC-16 (US-003): init() registers koda_get_action as the member-scoped read tool', async () => {
