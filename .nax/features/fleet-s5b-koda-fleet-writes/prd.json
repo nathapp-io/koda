@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-koda-fleet-writes",
   "branchName": "feat/fleet-s5b-koda-fleet-writes",
   "createdAt": "2026-10-18T00:00:00.000Z",
-  "updatedAt": "2026-10-17T16:39:54.494Z",
+  "updatedAt": "2026-10-17T16:43:37.194Z",
   "userStories": [
     {
       "id": "US-001",
@@ -110,8 +110,8 @@
         "errors"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -123,7 +123,9 @@
         "profileModelTier": "fast",
         "initialAgent": "native",
         "initialProfileId": "native-luna",
-        "initialModelTier": "fast"
+        "initialModelTier": "fast",
+        "initialComplexity": "simple",
+        "modelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/common/exceptions/conflict-app.exception.ts",
@@ -139,7 +141,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "1279dacc63328898cbde571d5db7e3241a6c81f5"
     },
     {
       "id": "US-003",
