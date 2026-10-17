@@ -72,6 +72,14 @@ describe('AssistantModule', () => {
     expect(tool?.permission).toEqual({ kind: 'ability', action: 'update', subject: 'Ticket' });
   });
 
+  it('AC-11 (US-005): init() registers koda_link_tickets as a write tool that needs membership only', async () => {
+    await module.init();
+
+    const tool = module.get(AssistantToolRegistry).get('koda_link_tickets');
+    expect(tool?.kind).toBe('write');
+    expect(tool?.permission).toEqual({ kind: 'member' });
+  });
+
   it('AC-16 (US-003): init() registers koda_get_action as the member-scoped read tool', async () => {
     await module.init();
 

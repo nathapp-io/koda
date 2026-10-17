@@ -1,8 +1,10 @@
 import { Injectable, type OnModuleInit } from '@nestjs/common';
+import { TicketLinksService } from '../../../ticket-links/ticket-links.service';
 import { TicketTransitionsService } from '../../../tickets/state-machine/ticket-transitions.service';
 import { TicketsService } from '../../../tickets/tickets.service';
 import { AssistantToolRegistry } from '../assistant-tool.registry';
 import { createTicketsTool } from './create-tickets-tool';
+import { linkTicketsTool } from './link-tickets-tool';
 import { updateTicketTool } from './update-ticket-tool';
 
 /**
@@ -16,12 +18,14 @@ export class TicketWriteTools implements OnModuleInit {
     private readonly registry: AssistantToolRegistry,
     private readonly tickets: TicketsService,
     private readonly transitions: TicketTransitionsService,
+    private readonly ticketLinks: TicketLinksService,
   ) {}
 
   onModuleInit(): void {
     this.registry.register(
       createTicketsTool({ tickets: this.tickets }),
       updateTicketTool({ tickets: this.tickets, transitions: this.transitions }),
+      linkTicketsTool({ tickets: this.tickets, links: this.ticketLinks }),
     );
   }
 }
