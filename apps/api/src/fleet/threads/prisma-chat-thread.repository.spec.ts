@@ -535,10 +535,12 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
 
   /**
    * A repository driving one send. `live` queues a `THREAD_INPUT` on a RUNNING SESSION job instead of creating a
-   * turn; `inFlight` makes the refusal gate see a pending message. The message fake keeps a clientMessageId set, so a
-   * repeated id answers the duplicate the way the unique index would.
+   * turn; `inFlight` makes the refusal gate see a pending message; `threads: false` turns the S5a kill switch off (the
+   * state every test run boots with, and the reason `assistant-action-send-delivery.integration.spec.ts` sets
+   * `FLEET_THREADS_ENABLED=true`). The message fake keeps a clientMessageId set, so a repeated id answers the
+   * duplicate the way the unique index would.
    */
-  function deliveryRepo(opts: { actions?: readonly StoredAction[]; live?: boolean; thread?: Record<string, unknown>; inFlight?: boolean } = {}) {
+  function deliveryRepo(opts: { actions?: readonly StoredAction[]; live?: boolean; thread?: Record<string, unknown>; inFlight?: boolean; threads?: boolean } = {}) {
     const store = pendingStore(opts.actions ?? []);
     const thread = threadRow(opts.thread);
     const job = { id: 'J', state: 'RUNNING', runnerId: 'R', leaseEpoch: 4, command: 'THREAD', threadTurn: { action: 'SESSION' } };
@@ -580,7 +582,7 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
     const repo = new PrismaChatThreadRepository(
       prisma as never, jobs as never, { run: vi.fn(async (fn: () => Promise<unknown>) => fn()) } as never,
       { record: vi.fn(async () => ({})) } as never, { placeJob: vi.fn(async () => undefined) } as never,
-      { notify: vi.fn() } as never, { snapshot: vi.fn(async () => ({ match: () => null })) } as never, { threadsEnabled: true, runnerOfflineSec: 90 } as never,
+      { notify: vi.fn() } as never, { snapshot: vi.fn(async () => ({ match: () => null })) } as never, { threadsEnabled: opts.threads ?? true, runnerOfflineSec: 90 } as never,
     );
     return { repo, store, jobs, messageCreate, commandCreate, jobCreate };
   }
@@ -757,5 +759,22 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
     expect(commandCreate).not.toHaveBeenCalled();
     expect(executed.deliveredAt).toBeNull();
     expect(executed.deliveredMessageId).toBeNull();
+  });
+
+  /**
+   * The kill switch every test run boots with (FLEET_THREADS_ENABLED unset): the send is refused before the hand-off,
+   * so the PG spec has to turn threads on to reach the delivery at all — this is the unit-level analogue of the
+   * `threads.disabled` a DB run without that flag answers.
+   */
+  it('a send with the threads kill switch off delivers nothing', async () => {
+    const executed = action({ id: 'A1' });
+    const { repo, store, messageCreate, commandCreate } = deliveryRepo({ actions: [executed], live: true, threads: false });
+
+    await expect(send(repo, 'hello')).rejects.toMatchObject({ prefix: 'threads.disabled' });
+
+    expect(messageCreate).not.toHaveBeenCalled();
+    expect(store.updateMany).not.toHaveBeenCalled();
+    expect(commandCreate).not.toHaveBeenCalled();
+    expect(executed.deliveredAt).toBeNull();
   });
 });

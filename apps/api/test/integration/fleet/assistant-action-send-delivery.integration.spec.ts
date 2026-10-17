@@ -6,13 +6,16 @@
  * budget stays for the next message; a duplicate `clientMessageId` and a refused send deliver nothing.
  *
  * The world is seeded the way `assistant-action-delivery.integration.spec.ts` (US-001) seeds it: rows straight into
- * PG, the repository called in process and `findThreadAssign` for the new-turn seam.
+ * PG, the repository called in process and `findThreadAssign` for the new-turn seam. Acceptance setup:
+ * FLEET_THREADS_ENABLED=true before boot (the S5a kill switch, off in every test run), so a send is judged on the
+ * thread's own state instead of answering `threads.disabled`.
  *
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/assistant-action-send-delivery.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
+import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { PrismaChatThreadRepository } from '../../../src/fleet/threads/prisma-chat-thread.repository';
 import { PrismaFleetJobRepository } from '../../../src/fleet/jobs/prisma-fleet-job.repository';
 import { DELIVERY_HEADER, deliveryText } from '../../../src/fleet/assistant/actions/outcome-delivery';
@@ -41,6 +44,7 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
   let repoId: string;
   let runnerId: string;
   let seq = 0;
+  let savedThreadsEnabled: string | undefined;
 
   const uid = (prefix: string): string => `${prefix}-${++seq}`;
   /** The scope of every send in this file; `projectId` is read lazily, it is seeded in `beforeAll`. */
@@ -127,16 +131,26 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
     outcomeNote({ id: row.id, tool: row.tool, status: row.status as PendingActionStatus, result: row.result });
 
   beforeAll(async () => {
+    // S5a kill switch: without it every send answers `threads.disabled` before it can hand anything over.
+    savedThreadsEnabled = process.env['FLEET_THREADS_ENABLED'];
+    process.env['FLEET_THREADS_ENABLED'] = 'true';
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
     threads = app.get(PrismaChatThreadRepository, { strict: false });
     jobs = app.get(PrismaFleetJobRepository, { strict: false });
+    // The booted config must have taken the flag, not the env var alone: otherwise every send is refused.
+    expect(app.get<IFleetConfig>(FLEET_CFG).threadsEnabled).toBe(true);
     await seedWorld();
   }, 120_000);
 
   afterAll(async () => {
-    await app?.close();
+    try {
+      await app?.close();
+    } finally {
+      if (savedThreadsEnabled === undefined) delete process.env['FLEET_THREADS_ENABLED'];
+      else process.env['FLEET_THREADS_ENABLED'] = savedThreadsEnabled;
+    }
   });
 
   it('AC-1: a live send queues a THREAD_INPUT whose text is the note block above the user text', async () => {
