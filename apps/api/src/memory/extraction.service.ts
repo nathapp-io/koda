@@ -201,25 +201,17 @@ export class ExtractionService {
     ];
   }
 
+  /**
+   * Records one `DECISION` and answers what it wrote. The replacement of the requester's previous decision on the
+   * same topic is *not* done here: `repository.upsert` supersedes the active row inside the same transaction that
+   * inserts the new one (its serializable `$transaction`), so the two either both happen or neither does. A
+   * separately committed pre-update left the topic with no active decision at all whenever the insert failed
+   * (fleet S5b 2b1 branch review B1).
+   */
   async recordDecision(
     input: { projectId: string; actorId: string; topic: string; decision: string; rationale?: string; sourceId?: string },
     repository: PrismaMemoryItemRepository,
   ): Promise<WriteResult> {
-    const existingActive = await repository.findActive(
-      input.projectId,
-      MemoryKind.DECISION,
-      `agent:${input.actorId}`,
-      input.topic,
-    );
-
-    if (existingActive) {
-      await repository.updateDirect(existingActive.id, {
-        status: 'superseded',
-        activeKey: null,
-        supersededBy: undefined,
-      });
-    }
-
     const memoryInput: MemoryItemInput = {
       projectId: input.projectId,
       kind: MemoryKind.DECISION,

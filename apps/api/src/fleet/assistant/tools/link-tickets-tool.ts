@@ -76,6 +76,10 @@ export function linkTicketsTool(deps: {
      * 2b1-D7: one `TicketLinksService.create` per link, in input order, as the requester with the action project's
      * role. The batch is not atomic: a failure stops it and the error quotes the lines already written (2b1-D2). A
      * URL the ticket already carries is not a failure — the service answers 200 and the batch continues.
+     *
+     * These lines echo the URL as given, so the answer is masked exactly as the preview is (branch review B2): it
+     * becomes the action's stored `result`, the thread's outcome note and the next turn's delivery to the agent, and
+     * a URL may carry a credential in its query string.
      */
     async execute(ctx: ToolContext, input: LinkTicketsInput): Promise<string> {
       const linked: string[] = [];
@@ -86,11 +90,11 @@ export function linkTicketsTool(deps: {
           alreadyLinked = created.status === 200;
         } catch (error) {
           const reason = error instanceof NotFoundAppException ? 'not_found' : 'error';
-          throw new ToolActionError([...linked, `failed at link ${i + 1}: ${reason}`].join('\n'));
+          throw new ToolActionError(maskSecrets([...linked, `failed at link ${i + 1}: ${reason}`].join('\n')));
         }
         linked.push(`linked ${link.ref} ${link.url}${alreadyLinked ? ' (already linked)' : ''}`);
       }
-      return linked.join('\n');
+      return maskSecrets(linked.join('\n'));
     },
   };
 }

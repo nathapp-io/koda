@@ -311,6 +311,34 @@ describe('koda_link_tickets execute (US-005)', () => {
     expect(result).toBe(`linked KODA-1 ${PLAIN_URL} (already linked)\nlinked KODA-2 https://x.dev/b`);
   });
 
+  it('B2: masks a credential the url carries out of the line it answers', async () => {
+    const deps = toolDeps();
+    // The answer becomes the action's stored result, its outcome note and the next turn's delivery, so the URL it
+    // echoes is masked exactly as the preview masks it (branch review B2).
+    const result = await deps.tool.execute(ctx, deps.tool.parse({
+      links: [{ ref: 'KODA-1', url: `https://x.dev/a?token=${TOKEN}` }],
+    }));
+
+    expect(result).toBe('linked KODA-1 https://x.dev/a?token=[masked]');
+    expect(result).not.toContain(TOKEN);
+  });
+
+  it('B2: masks the lines a failed batch quotes, including the already-linked suffix', async () => {
+    const deps = toolDeps();
+    deps.create
+      .mockResolvedValueOnce({ status: 200, link: LINK })
+      .mockRejectedValueOnce(new NotFoundAppException({}, 'ticket-links'));
+
+    const failure = await failureOf(() => deps.tool.execute(ctx, deps.tool.parse({
+      links: [{ ref: 'KODA-1', url: `https://x.dev/a?token=${TOKEN}` }, { ref: 'KODA-2', url: 'https://x.dev/b' }],
+    })));
+
+    expect(failure).toBeInstanceOf(ToolActionError);
+    const text = (failure as ToolActionError).text;
+    expect(text).toBe('linked KODA-1 https://x.dev/a?token=[masked] (already linked)\nfailed at link 2: not_found');
+    expect(text).not.toContain(TOKEN);
+  });
+
   it('answers one line per link, in input order, for a longer batch', async () => {
     const deps = toolDeps();
     deps.create

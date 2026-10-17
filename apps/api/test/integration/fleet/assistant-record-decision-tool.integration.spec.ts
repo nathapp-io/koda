@@ -114,6 +114,16 @@ describeIntegration('fleet assistant record decision tool (PG, US-007)', () => {
     }
   });
 
+  /**
+   * Branch review M1: every test starts from a clean version of the topic it shares, so AC-10's assertion that the
+   * preview carries no supersession line does not depend on whether the approving test already recorded a decision.
+   */
+  beforeEach(async () => {
+    await prisma.memoryItem.deleteMany({
+      where: { projectId: world.projectId, kind: 'DECISION', predicate: 'db' },
+    });
+  });
+
   it('AC-10: the runner holding dev\'s RUNNING REPO THREAD job proposes one decision and is answered pending', async () => {
     const { content, isError } = resultOf(await callTool('us007-ac10', DECISION).expect(200));
 

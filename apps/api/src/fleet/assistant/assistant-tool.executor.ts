@@ -78,18 +78,23 @@ export class AssistantToolExecutor {
    * that failed partway (2b1-D2), `error: <tool> failed` for anything else, with the stack logged. A successful
    * result is capped at `RESULT_CAP_BYTES` before it is stored, exactly as a partial outcome's text is; the two
    * refusal texts are constants far below it.
+   *
+   * Both stored texts pass through `maskSecrets` first (branch review B2): whatever a tool echoes back — a URL a
+   * link wrote, a batch line quoting one — becomes the action's `result`, and from there the text of the thread's
+   * outcome note and of the next turn's delivery to the agent. Masking here is what keeps a credential a tool
+   * merely repeated out of all three.
    */
   async executeAction(action: PendingActionRecord): Promise<ActionOutcome> {
     const scope = await this.actionScope(action);
     if (!scope) return { ok: false, text: `error: ${action.tool} failed` };
     try {
       const text = await scope.tool.execute(this.actionContext(action, scope.actor), scope.tool.parse(action.input));
-      return { ok: true, text: capText(text, RESULT_CAP_BYTES) };
+      return { ok: true, text: capText(maskSecrets(text), RESULT_CAP_BYTES) };
     } catch (error) {
       if (error instanceof NotFoundAppException) return { ok: false, text: 'not_found' };
       // 2b1-D2: what the tool already wrote is the outcome, so it is answered as stored text and never logged as a
       // failure of its own. The action's `result` gets the same cap, so a long batch result stays readable.
-      if (error instanceof ToolActionError) return { ok: false, text: capText(error.text, RESULT_CAP_BYTES) };
+      if (error instanceof ToolActionError) return { ok: false, text: capText(maskSecrets(error.text), RESULT_CAP_BYTES) };
       this.logger.error(
         `koda action ${action.id} tool ${action.tool} failed for job ${action.jobId}`,
         error instanceof Error ? error.stack : String(error),

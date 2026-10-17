@@ -111,6 +111,16 @@ describeIntegration('fleet assistant add memory tool (PG, US-006)', () => {
     }
   });
 
+  /**
+   * Branch review M1: every test starts from a clean version of the key it shares, so an assertion that the key is
+   * empty or that its preview has no replacement line does not depend on whether the approving test already ran.
+   */
+  beforeEach(async () => {
+    await prisma.memoryItem.deleteMany({
+      where: { projectId: world.projectId, kind: 'FACT', subject: 'api', predicate: 'runs on' },
+    });
+  });
+
   it('AC-10: the runner holding dev\'s RUNNING REPO THREAD job proposes one memory and is answered pending', async () => {
     const { content, isError } = resultOf(await callTool('ac10', ITEM).expect(200));
 

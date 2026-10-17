@@ -6,8 +6,8 @@
  * `POST /projects/web/fleet/approvals/:approvalId/decide`, so the ACs drive the whole path: runner authentication,
  * the lease fence, the tool registry `TicketWriteTools` filled at boot, the executor's write-tool branch, the propose
  * service and — on approve — `TicketLinksService.create` for real. Each test proposes its own links with its own
- * `toolCallId` and its own URLs, so it reads only what it wrote; the tests that assert on KODA-1's link rows run
- * before the ones that add more of them.
+ * `toolCallId` and its own URLs, and reads back only the URLs it proposed, so no test depends on the order of the
+ * ones around it.
  *
  * Acceptance setup: project `web` (its key changed to `KODA`, so the acceptance ref `KODA-1` resolves), `dev` as
  * its DEVELOPER and the thread creator, ticket `KODA-1`, ticket `KODA-2` for the partial-failure case, one ticket
@@ -25,6 +25,7 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, enrollRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { seedThreadJobFor, ThreadJobSeed } from '../../helpers/thread-fixtures';
+import { deliveryText } from '../../../src/fleet/assistant/actions/outcome-delivery';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 vi.setConfig({ testTimeout: 30_000 });
@@ -35,6 +36,8 @@ const WEB_KEY = 'KODA';
 const TOOL = 'koda_link_tickets';
 const APPROVALS = '/api/projects/web/fleet/approvals';
 const PR_URL = 'https://github.com/o/r/pull/7';
+/** `THREAD_LIMITS.messageMaxBytes` (32,768): the budget one hand-off gives the notes and the user's text. */
+const DELIVERY_MAX_BYTES = 32_768;
 /** The route's answer: `{ content, isError }` data, whatever the status. */
 interface ToolResultBody { content: string; isError: boolean }
 
@@ -136,10 +139,12 @@ describeIntegration('fleet assistant link tickets tool (PG, US-005)', () => {
     })).toMatchObject({ tool: TOOL, outcome: 'pending', isError: false });
   });
 
-  it('AC-13: the proposal stores no TicketLink, so KODA-1 carries none while the user decides', async () => {
-    const action = await propose('ac13', [{ ref: 'KODA-1', url: PR_URL }]);
+  it('AC-13: the proposal stores no TicketLink, so KODA-1 carries none of that URL while the user decides', async () => {
+    // Its own URL, so this test reads what it proposed and nothing an earlier test linked (branch review M1).
+    const url = 'https://github.com/o/r/pull/13';
+    const action = await propose('ac13', [{ ref: 'KODA-1', url }]);
 
-    expect(await linksOf(ticketId)).toEqual([]);
+    expect(await prisma.ticketLink.count({ where: { ticketId, url } })).toBe(0);
     expect(action).toMatchObject({ status: 'PENDING' });
   });
 
@@ -148,7 +153,8 @@ describeIntegration('fleet assistant link tickets tool (PG, US-005)', () => {
 
     await decide(action.approvalId, 'approve').expect(200);
 
-    const links = await linksOf(ticketId);
+    // The rows of the URL this test proposed: another test's links to KODA-1 are not this AC's subject.
+    const links = (await linksOf(ticketId)).filter((link) => link.url === PR_URL);
     expect(links).toHaveLength(1);
     expect(links[0]).toMatchObject({ url: PR_URL, linkType: 'pr' });
     expect(await prisma.pendingAction.findUniqueOrThrow({ where: { id: action.id } }))
@@ -198,6 +204,29 @@ describeIntegration('fleet assistant link tickets tool (PG, US-005)', () => {
     expect(await prisma.pendingAction.findUniqueOrThrow({ where: { id: second.id } }))
       .toMatchObject({ status: 'EXECUTED', result: `linked KODA-1 ${url} (already linked)` });
     expect(await prisma.ticketLink.count({ where: { ticketId, url } })).toBe(1);
+  });
+
+  it('B2: a credential a link URL carries reaches neither the stored result, nor the outcome note, nor the next delivery', async () => {
+    // Branch review B2: the preview masked this token, but the tool's own answer echoed the raw URL into the action's
+    // `result`, the note `finalize` writes and — through that note — the text the agent reads on its next turn.
+    const token = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789';
+    const url = `https://x.dev/secret?token=${token}`;
+    const action = await propose('b2-secret', [{ ref: 'KODA-1', url }]);
+    expect(action.preview).not.toContain(token);
+
+    await decide(action.approvalId, 'approve').expect(200);
+
+    const settled = await prisma.pendingAction.findUniqueOrThrow({ where: { id: action.id } });
+    expect(settled).toMatchObject({ status: 'EXECUTED', result: 'linked KODA-1 https://x.dev/secret?token=[masked]' });
+
+    // The note the approve left in the thread, found by the action it names.
+    const note = await prisma.chatMessage.findFirstOrThrow({
+      where: { threadId: repo.threadId, role: 'system', content: { startsWith: `Action ${action.id} ` } },
+    });
+    expect(note.content).toContain('https://x.dev/secret?token=[masked]');
+    expect(note.content).not.toContain(token);
+    // What `sendMessage` hands the runner on the next turn is this note, composed by `deliveryText`.
+    expect(deliveryText([note.content], 'what next?', DELIVERY_MAX_BYTES).text).not.toContain(token);
   });
 
   it('a link whose ticket disappears before the approval fails the batch and quotes the line it wrote', async () => {

@@ -379,7 +379,7 @@ describe('ExtractionService', () => {
       );
     });
 
-    it('supersedes the existing active decision before creating a new one', async () => {
+    it('supersedes the existing active decision inside the atomic upsert, never with a write of its own', async () => {
       const mockRepository = createMockRepository();
       const existing = makeMemoryItem({ id: 'mem-old', status: 'active' });
       const created = makeMemoryItem({ id: 'mem-new' });
@@ -396,12 +396,30 @@ describe('ExtractionService', () => {
         mockRepository as unknown as PrismaMemoryItemRepository,
       );
 
-      expect(mockRepository.updateDirect).toHaveBeenCalledWith('mem-old', {
-        status: 'superseded',
-        activeKey: null,
-        supersededBy: undefined,
-      });
-      expect(mockRepository.upsert).toHaveBeenCalled();
+      // Branch review B1: `upsert` supersedes the previous item in the transaction that inserts the replacement, so
+      // `recordDecision` writes exactly once. A separate, already-committed pre-update would leave the topic with no
+      // active decision whenever the insert failed.
+      expect(mockRepository.upsert).toHaveBeenCalledTimes(1);
+      expect(mockRepository.updateDirect).not.toHaveBeenCalled();
+    });
+
+    it('leaves the previous decision untouched when the one write it makes fails', async () => {
+      const mockRepository = createMockRepository();
+      mockRepository.findActive.mockResolvedValue(makeMemoryItem({ id: 'mem-old', status: 'active' }));
+      mockRepository.upsert.mockRejectedValue(new Error('insert failed'));
+
+      await expect(
+        service.recordDecision(
+          { projectId: 'project-123', actorId: 'actor-1', topic: 'architecture', decision: 'use monolith' },
+          mockRepository as unknown as PrismaMemoryItemRepository,
+        ),
+      ).rejects.toThrow('insert failed');
+
+      // Nothing was superseded: the failed replacement left no trace, so the previous decision is still the active
+      // one (the rollback is the repository's serializable transaction, pinned end to end by
+      // test/integration/memory/decision-replacement-atomic.integration.spec.ts).
+      expect(mockRepository.updateDirect).not.toHaveBeenCalled();
+      expect(mockRepository.upsert).toHaveBeenCalledTimes(1);
     });
 
     it('uses memory id as canonicalId when sourceId is not provided', async () => {
