@@ -117,4 +117,6 @@ export interface ActionResolution {
   status: Exclude<PendingActionStatus, 'PENDING'>;
   decidedAt: Date;
   decidedById?: string;
+  /** 2a-D8 step 8: the outcome an approved action's tool answered; absent when there is nothing to record. */
+  result?: string;
 }

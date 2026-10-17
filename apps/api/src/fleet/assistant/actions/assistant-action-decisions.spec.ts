@@ -1,12 +1,19 @@
 /**
  * Fleet S5b 2a US-005: the decide handler's gate order, its reject and expire-on-decide writes, and the post-commit
- * publication. Every collaborator is a stub, so each assertion is about what the handler decides; the DB-backed
- * behaviour is in test/integration/fleet/assistant-actions-decide.integration.spec.ts.
+ * publication. US-006 extends the same handler with the approve branch: its re-check before the locked checks, the
+ * APPROVED/finalize transaction pair and the capped result. Every collaborator is a stub, so each assertion is about
+ * what the handler decides; the DB-backed behaviour is in
+ * test/integration/fleet/assistant-actions-decide.integration.spec.ts and
+ * test/integration/fleet/assistant-actions-approve.integration.spec.ts.
  */
 import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { KodaCaslAbilityFactory } from '../../../auth/casl/koda-casl-ability.factory';
 import { ConflictAppException } from '../../../common/exceptions/conflict-app.exception';
 import { testFleetConfig } from '../../../common/test-helpers/fleet-config';
 import type { FleetApprovalRecord } from '../../approvals/domain/approval.domain';
+import { AssistantToolExecutor, type ActionOutcome } from '../assistant-tool.executor';
+import { AssistantToolRegistry } from '../assistant-tool.registry';
+import type { AssistantTool, ToolContext } from '../assistant-tool.types';
 import { AssistantActionDecisions } from './assistant-action-decisions';
 import type { PendingActionRecord } from './pending-action.domain';
 
@@ -27,11 +34,11 @@ const approval = (over: Partial<FleetApprovalRecord> = {}): FleetApprovalRecord 
   comment: null, createdAt: NOW, updatedAt: NOW, ...over,
 });
 
-function build(opts: { stored?: PendingActionRecord | null; threadsEnabled?: boolean } = {}) {
+function build(opts: { stored?: PendingActionRecord | null; threadsEnabled?: boolean; check?: 'ok' | 'forbidden'; outcome?: ActionOutcome; executor?: AssistantToolExecutor } = {}) {
   let row: PendingActionRecord | null = opts.stored === undefined ? action() : opts.stored;
   const order: string[] = [];
   const actions = {
-    findById: vi.fn(async () => row),
+    findById: vi.fn(async (_id: string) => row),
     lockThread: vi.fn(async () => { order.push('thread'); return true; }),
     lockById: vi.fn(async () => { order.push('action'); return row; }),
     resolve: vi.fn(async (_id: string, r: Partial<PendingActionRecord>) => (row = { ...(row as PendingActionRecord), ...r })),
@@ -47,9 +54,38 @@ function build(opts: { stored?: PendingActionRecord | null; threadsEnabled?: boo
   const tx = { run: vi.fn(async (fn: () => Promise<unknown>) => fn()) };
   const port = { register: vi.fn() };
   const cfg = testFleetConfig({ threadsEnabled: opts.threadsEnabled ?? true });
-  const service = new AssistantActionDecisions(tx as never, actions as never, approvals as never, closer as never, live as never, threads as never, cfg as never, port as never);
-  return { service, actions, approvals, closer, live, threads, tx, port, order };
+  const executor = opts.executor ?? {
+    checkAction: vi.fn(async () => opts.check ?? 'ok'),
+    executeAction: vi.fn(async (): Promise<ActionOutcome> => opts.outcome ?? { ok: true, text: 'comment c1 added to KODA-1 /web/tickets/KODA-1' }),
+  };
+  const service = new AssistantActionDecisions(tx as never, actions as never, approvals as never, closer as never, live as never, threads as never, cfg as never, port as never, executor as never);
+  return { service, actions, approvals, closer, live, threads, tx, port, order, executor };
 }
+
+/**
+ * The real executor an approve runs the tool with: one registered tool, a job whose thread creator is `u1`, and a
+ * membership that answers DEVELOPER. It is what makes the cap (AC-18) and the tool-never-runs regression (AC-28)
+ * assertions about the shipped code rather than about a stub.
+ */
+function realExecutor(tool: AssistantTool<unknown>): AssistantToolExecutor {
+  const registry = new AssistantToolRegistry();
+  registry.register(tool);
+  const calls = { findCallContext: vi.fn(async () => CONTEXT) };
+  const access = { resolveMembership: vi.fn(async () => 'DEVELOPER') };
+  return new AssistantToolExecutor(registry, calls as never, access as never, new KodaCaslAbilityFactory());
+}
+
+const CONTEXT = {
+  project: { id: 'p1', slug: 'web' }, threadId: 't1',
+  creator: { id: 'u1', email: 'u1@koda.test', role: 'MEMBER', disabled: false },
+};
+
+const commentTool = (execute: (ctx: ToolContext, input: unknown) => Promise<string>): AssistantTool<unknown> => ({
+  descriptor: { name: 'koda_add_comment', description: 'd', inputSchema: {} },
+  permission: { kind: 'ability', action: 'create', subject: 'Comment' },
+  parse: (input) => input,
+  execute,
+});
 
 const dto = (decision: string) => ({ decision }) as never;
 
@@ -134,14 +170,6 @@ describe('AssistantActionDecisions.decide locked checks and reject', () => {
     expect(actions.insertSystemNote).not.toHaveBeenCalled();
   });
 
-  it('approve is refused until US-006 and never takes the reject path', async () => {
-    const { service, actions, approvals, threads } = build();
-    await expect(service.decide(CALLER, approval(), dto('approve'), NOW)).rejects.toMatchObject({ prefix: 'fleet.approvalDecisionInvalid' });
-    expect(actions.resolve).not.toHaveBeenCalled();
-    expect(approvals.resolve).not.toHaveBeenCalled();
-    expect(threads.publish).not.toHaveBeenCalled();
-  });
-
   it('reject resolves the approval, sets the action REJECTED and writes the note', async () => {
     const { service, approvals, actions, closer } = build();
 
@@ -210,5 +238,150 @@ describe('AssistantActionDecisions expiry on decide (2a-D10)', () => {
     const { service, actions } = build({ stored: action({ expiresAt: NOW }) });
     await expect(service.decide(CALLER, approval({ expiresAt: null }), dto('reject'), NOW)).rejects.toMatchObject({ prefix: 'fleet.approvalNotPending' });
     expect(actions.resolve).toHaveBeenCalledWith('act1', { status: 'EXPIRED', decidedAt: NOW });
+  });
+});
+
+describe('AssistantActionDecisions approve (2a-D8 step 8)', () => {
+  it('AC-14: a forbidden checkAction answers 403 projects and writes nothing', async () => {
+    const { service, actions, approvals, tx, executor, threads } = build({ check: 'forbidden' });
+
+    const err = await service.decide(CALLER, approval(), dto('approve'), NOW).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ForbiddenAppException);
+    expect(err).toMatchObject({ prefix: 'projects', httpStatus: 403 });
+    expect(executor.checkAction).toHaveBeenCalledWith(expect.objectContaining({ id: 'act1' }));
+    expect(tx.run).not.toHaveBeenCalled();
+    expect(actions.resolve).not.toHaveBeenCalled();
+    expect(approvals.resolve).not.toHaveBeenCalled();
+    expect(executor.executeAction).not.toHaveBeenCalled();
+    expect(threads.publish).not.toHaveBeenCalled();
+    // The action the handler read before the check is the one that stays PENDING.
+    expect(await actions.findById('act1')).toMatchObject({ status: 'PENDING' });
+  });
+
+  it('checks the approve before the locked status checks, so a decided action is still 403 for a forbidden requester', async () => {
+    const { service, tx } = build({ stored: action({ status: 'EXECUTED' }), check: 'forbidden' });
+
+    await expect(service.decide(CALLER, approval(), dto('approve'), NOW)).rejects.toMatchObject({ prefix: 'projects', httpStatus: 403 });
+    expect(tx.run).not.toHaveBeenCalled();
+  });
+
+  it('approves the approval, sets the action APPROVED, runs the tool and finalizes EXECUTED', async () => {
+    const { service, actions, approvals, closer, live, threads, order, executor } = build();
+
+    const result = await service.decide(CALLER, approval(), { decision: 'approve', comment: 'ship it' }, NOW);
+
+    expect(approvals.resolve).toHaveBeenCalledWith('ap1', {
+      status: 'approved', resolvedBy: 'user', decidedAt: NOW, decision: 'approve', decidedById: 'u1', comment: 'ship it',
+    });
+    expect(actions.resolve).toHaveBeenCalledWith('act1', { status: 'APPROVED', decidedById: 'u1', decidedAt: NOW });
+    expect(closer.recordResolved).toHaveBeenCalledWith(expect.objectContaining({ status: 'approved', decision: 'approve' }), { type: 'USER', id: 'u1', responsibleUserId: 'u1' });
+    expect(executor.executeAction).toHaveBeenCalledWith(expect.objectContaining({ id: 'act1', projectSlug: 'web' }));
+    expect(actions.resolve).toHaveBeenCalledWith('act1', expect.objectContaining({ status: 'EXECUTED', result: 'comment c1 added to KODA-1 /web/tickets/KODA-1' }));
+    expect(actions.insertSystemNote).toHaveBeenCalledWith('t1', 'Action act1 (koda_add_comment) was approved and done: comment c1 added to KODA-1 /web/tickets/KODA-1');
+    expect(live.publish).toHaveBeenCalledWith([{ id: 'live1' }]);
+    expect(result).toEqual(expect.objectContaining({ status: 'approved', decision: 'approve' }));
+  });
+
+  it('2a-D11: both transactions take the thread lock, then the approval, then the action', async () => {
+    const { service, order } = build();
+
+    await service.decide(CALLER, approval(), dto('approve'), NOW);
+
+    expect(order).toEqual(['thread', 'approval', 'action', 'thread', 'action']);
+  });
+
+  it('AC-22: after the approve the thread bus carries the note message and the changed thread', async () => {
+    const { service, threads, tx } = build();
+    let commits = 0;
+    tx.run.mockImplementation(async (fn: () => Promise<unknown>) => { const r = await fn(); commits += 1; return r; });
+    // Both frames belong to the finalization transaction, which is the one that created the note.
+    threads.publish.mockImplementation(() => expect(commits).toBe(2));
+
+    await service.decide(CALLER, approval(), dto('approve'), NOW);
+
+    expect(threads.publish.mock.calls.map(([e]) => e)).toEqual([
+      expect.objectContaining({ threadId: 't1', at: NOW.toISOString(), type: 'message', messageId: 'note1' }),
+      expect.objectContaining({ threadId: 't1', at: NOW.toISOString(), type: 'thread' }),
+    ]);
+    expect(threads.publish.mock.calls[0][0].id).toEqual(expect.any(String));
+  });
+
+  it('the approval live events are published after the approve commit, before the note is written', async () => {
+    const { service, live, threads } = build();
+    live.publish.mockImplementation(() => expect(threads.publish).not.toHaveBeenCalled());
+
+    await service.decide(CALLER, approval(), dto('approve'), NOW);
+
+    expect(live.publish).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers the approved approval when the tool failed, and the action becomes FAILED with the error text', async () => {
+    const { service, actions, approvals, live, threads } = build({ outcome: { ok: false, text: 'not_found' } });
+
+    const result = await service.decide(CALLER, approval(), dto('approve'), NOW);
+
+    // The approval was already approved and cannot be un-approved; only the action records the failure.
+    expect(approvals.resolve).toHaveBeenCalledWith('ap1', expect.objectContaining({ status: 'approved' }));
+    expect(actions.resolve).toHaveBeenCalledWith('act1', expect.objectContaining({ status: 'FAILED', result: 'not_found' }));
+    expect(actions.insertSystemNote).toHaveBeenCalledWith('t1', 'Action act1 (koda_add_comment) was approved but failed: not_found');
+    expect(result).toEqual(expect.objectContaining({ status: 'approved' }));
+    expect(live.publish).toHaveBeenCalled();
+    expect(threads.publish.mock.calls.map(([e]) => e.type)).toEqual(['message', 'thread']);
+  });
+
+  it('a thread that is gone still answers the approved approval, writing no note', async () => {
+    const { service, actions, threads } = build();
+    let locks = 0;
+    actions.lockThread.mockImplementation(async () => ++locks < 2);
+
+    expect(await service.decide(CALLER, approval(), dto('approve'), NOW)).toEqual(expect.objectContaining({ status: 'approved' }));
+    expect(actions.insertSystemNote).not.toHaveBeenCalled();
+    expect(threads.publish).not.toHaveBeenCalled();
+  });
+
+  it('AC-18: a 20000-byte tool result is stored capped at 16384 bytes', async () => {
+    const { service, actions } = build({ executor: realExecutor(commentTool(async () => 'x'.repeat(20_000))) });
+
+    await service.decide(CALLER, approval(), dto('approve'), NOW);
+
+    const settled = actions.resolve.mock.calls.find(([, r]) => r.status === 'EXECUTED')?.[1] as Partial<PendingActionRecord>;
+    const result = String(settled.result);
+    expect(Buffer.byteLength(result)).toBeLessThanOrEqual(16_384);
+    expect(result.endsWith('[truncated]')).toBe(true);
+    expect(actions.insertSystemNote).toHaveBeenCalledWith('t1', expect.stringContaining('was approved and done: x'));
+  });
+
+  it('AC-18 boundary: an over-cap outcome is clamped at the row, whatever answered it', async () => {
+    const { service, actions } = build({ outcome: { ok: true, text: 'x'.repeat(20_000) } });
+
+    await service.decide(CALLER, approval(), dto('approve'), NOW);
+
+    const settled = actions.resolve.mock.calls.find(([, r]) => r.status === 'EXECUTED')?.[1] as Partial<PendingActionRecord>;
+    expect(Buffer.byteLength(String(settled.result))).toBeLessThanOrEqual(16_384);
+    expect(String(settled.result).endsWith('[truncated]')).toBe(true);
+  });
+
+  it('AC-28: a reject never runs the tool', async () => {
+    const execute = vi.fn(async () => 'comment c1 added to KODA-1');
+    const executor = realExecutor(commentTool(execute));
+    const run = vi.spyOn(executor, 'executeAction');
+    const { service, actions, approvals } = build({ executor });
+
+    await service.decide(CALLER, approval(), { decision: 'reject', comment: 'not now' }, NOW);
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+    expect(actions.resolve).toHaveBeenCalledWith('act1', { status: 'REJECTED', decidedById: 'u1', decidedAt: NOW });
+    expect(approvals.resolve).toHaveBeenCalledWith('ap1', expect.objectContaining({ status: 'rejected', decision: 'reject' }));
+  });
+
+  it('an expired approve never runs the tool', async () => {
+    const executor = realExecutor(commentTool(vi.fn(async () => 'comment c1')));
+    const run = vi.spyOn(executor, 'executeAction');
+    const { service } = build({ executor, stored: action({ expiresAt: NOW }) });
+
+    await expect(service.decide(CALLER, approval(), dto('approve'), NOW)).rejects.toMatchObject({ prefix: 'fleet.approvalNotPending' });
+    expect(run).not.toHaveBeenCalled();
   });
 });

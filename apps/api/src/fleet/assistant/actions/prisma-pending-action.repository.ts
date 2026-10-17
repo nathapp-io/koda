@@ -113,7 +113,13 @@ export class PrismaPendingActionRepository
   async resolve(id: string, resolution: ActionResolution): Promise<PendingActionRecord> {
     const row = await this.db.pendingAction.update({
       where: { id },
-      data: { status: resolution.status, decidedAt: resolution.decidedAt, ...(resolution.decidedById !== undefined ? { decidedById: resolution.decidedById } : {}) },
+      data: {
+        status: resolution.status,
+        decidedAt: resolution.decidedAt,
+        ...(resolution.decidedById !== undefined ? { decidedById: resolution.decidedById } : {}),
+        // 2a-D8 step 8: the terminal status and the tool's own outcome are written by the same statement.
+        ...(resolution.result !== undefined ? { result: resolution.result } : {}),
+      },
     });
     return (await this.withSlug([row]))[0];
   }

@@ -9,14 +9,14 @@ import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { ProjectAccessService } from '../../projects/project-access.service';
 import { withProjectRole } from '../../projects/project-context';
 import { stableStringify } from '../sync/stable-json';
-import { MAX_PENDING_ACTIONS, type ActionProposer } from './actions/pending-action.domain';
+import { MAX_PENDING_ACTIONS, type ActionProposer, type PendingActionRecord } from './actions/pending-action.domain';
 import { capText, fenceData, maskSecrets } from './assistant-tool-safety';
 import { ASSISTANT_TOOL_CALL_REPOSITORY, type AssistantToolCallRecord, type AssistantToolCallRepository, type ToolCallContext, type ToolCallOutcome } from './assistant-tool-call.domain';
 import { AssistantToolRegistry } from './assistant-tool.registry';
 import { ToolInputError, type AssistantTool, type ToolContext, type ToolResult } from './assistant-tool.types';
 
 /** The most bytes of one tool result the agent reads (S5b-R5). */
-const RESULT_CAP_BYTES = 16_384;
+export const RESULT_CAP_BYTES = 16_384;
 
 /** 2a-D4: the answer at `MAX_PENDING_ACTIONS`; the cap is in the text because the model can only lower the backlog. */
 const REFUSED_CONTENT = `refused: ${MAX_PENDING_ACTIONS} actions are pending in this thread; wait for the user to decide them`;
@@ -26,6 +26,18 @@ export interface ToolCall {
   toolCallId: string;
   name: string;
   input: unknown;
+}
+
+/** 2a-D8 step 8: what running an approved action answered. `text` is what the action stores as its result. */
+export interface ActionOutcome {
+  ok: boolean;
+  text: string;
+}
+
+/** What an approved action runs with: the tool, and the requester acting with the action project's role. */
+interface ActionScope {
+  tool: AssistantTool;
+  actor: UserPrincipal;
 }
 
 /** Fleet S5b §1 (US-002): runs a koda tool for the thread's creator, with the permission the creator would have in the web. */
@@ -46,6 +58,72 @@ export class AssistantToolExecutor {
   /** 2a-D1: the late binding of the propose side; the constructor is unchanged so no provider depends on the service. */
   attachActions(actions: ActionProposer): void {
     this.actions = actions;
+  }
+
+  /**
+   * 2a-D8 step 5: whether the requester may still run this action's tool. The requester is the thread creator of the
+   * action's job, re-read now, and their membership and ability are re-resolved against the project the action acts
+   * in (2a-D3) — never the thread's home project. A tool that left the registry, a job whose thread is gone and a
+   * requester who is disabled, outside that project or without the tool's ability all answer `forbidden`, so an
+   * approve writes nothing for any of them.
+   */
+  async checkAction(action: PendingActionRecord): Promise<'ok' | 'forbidden'> {
+    return (await this.actionScope(action)) === null ? 'forbidden' : 'ok';
+  }
+
+  /**
+   * 2a-D8 step 8: runs an approved action's tool as the requester. The context is built fresh from the action — its
+   * project slug, its thread and job, a new fence — so nothing the proposing call held leaks in. The tool's own
+   * failures are data, not exceptions: `not_found` for a target that is gone, `error: <tool> failed` for anything
+   * else, with the stack logged. A successful result is capped at `RESULT_CAP_BYTES` before it is stored; the two
+   * refusal texts are constants far below it.
+   */
+  async executeAction(action: PendingActionRecord): Promise<ActionOutcome> {
+    const scope = await this.actionScope(action);
+    if (!scope) return { ok: false, text: `error: ${action.tool} failed` };
+    try {
+      const text = await scope.tool.execute(this.actionContext(action, scope.actor), scope.tool.parse(action.input));
+      return { ok: true, text: capText(text, RESULT_CAP_BYTES) };
+    } catch (error) {
+      if (error instanceof NotFoundAppException) return { ok: false, text: 'not_found' };
+      this.logger.error(
+        `koda action ${action.id} tool ${action.tool} failed for job ${action.jobId}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      return { ok: false, text: `error: ${action.tool} failed` };
+    }
+  }
+
+  /** The tool, the requester and the role an action runs with; null when any of the three gates refuses. */
+  private async actionScope(action: PendingActionRecord): Promise<ActionScope | null> {
+    const tool = this.registry.get(action.tool);
+    if (!tool) return null;
+    const context = await this.calls.findCallContext(action.jobId);
+    if (!context || context.creator.disabled) return null;
+    const requester = userPrincipal(context.creator);
+    const role = await this.membership(action.projectId, requester);
+    if (role === undefined) return null;
+    const actor = withProjectRole(requester, role) as UserPrincipal;
+    if (tool.permission.kind === 'ability') {
+      const { action: caslAction, subject: target } = tool.permission;
+      const ability = await this.abilities.createForUser(actor);
+      if (!ability.can(caslAction as CaslPermissionAction, subject(target, {}))) return null;
+    }
+    return { tool, actor };
+  }
+
+  /** The action's own scope, exactly as `propose` recorded it: its project, its thread, its job and a fresh fence. */
+  private actionContext(action: PendingActionRecord, actor: UserPrincipal): ToolContext {
+    const token = randomBytes(8).toString('hex');
+    return {
+      projectId: action.projectId,
+      projectSlug: action.projectSlug,
+      actor,
+      threadId: action.threadId,
+      jobId: action.jobId,
+      now: new Date(),
+      data: (text) => fenceData(maskSecrets(text), token),
+    };
   }
 
   async execute(call: ToolCall): Promise<ToolResult> {

@@ -5,7 +5,7 @@ import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-com
 import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module';
 import { ProjectAccessService } from '../../projects/project-access.service';
 import { AssistantActionService } from './actions/assistant-action.service';
-import type { ProposeInput, ProposeResult } from './actions/pending-action.domain';
+import type { PendingActionRecord, ProposeInput, ProposeResult } from './actions/pending-action.domain';
 import { AssistantModule } from './assistant.module';
 import { AssistantToolExecutor } from './assistant-tool.executor';
 import { AssistantToolRegistry } from './assistant-tool.registry';
@@ -50,6 +50,10 @@ interface SetupOptions {
   role?: string | null;
   membership?: Error;
   kind?: ToolCallContext['kind'];
+  /** A stubbed ability factory, for the permission a built-in project role always has (2a-D8 step 5). */
+  abilities?: KodaCaslAbilityFactory;
+  /** The job has no thread at all (`findCallContext` answers null). */
+  noThread?: boolean;
 }
 
 interface Setup {
@@ -60,7 +64,7 @@ interface Setup {
 }
 
 function setup(tool: AssistantTool<unknown> | null, opts: SetupOptions = {}): Setup {
-  const { repo, rows } = makeRepo({ ...context(opts.creator), ...(opts.kind ? { kind: opts.kind } : {}) });
+  const { repo, rows } = makeRepo(opts.noThread ? null : { ...context(opts.creator), ...(opts.kind ? { kind: opts.kind } : {}) });
   const access = {
     findProjectIdBySlug: vi.fn(async (slug: string) => {
       const id = PROJECT_IDS[slug];
@@ -74,12 +78,23 @@ function setup(tool: AssistantTool<unknown> | null, opts: SetupOptions = {}): Se
   };
   const registry = new AssistantToolRegistry();
   if (tool) registry.register(tool as AssistantTool);
-  const executor = new AssistantToolExecutor(registry, repo, access as unknown as ProjectAccessService, new KodaCaslAbilityFactory());
+  const executor = new AssistantToolExecutor(registry, repo, access as unknown as ProjectAccessService, opts.abilities ?? new KodaCaslAbilityFactory());
   return { executor, rows, repo, access };
 }
 
 const call = (over: Partial<{ jobId: string; toolCallId: string; name: string; input: unknown }> = {}) => ({
   jobId: 'j1', toolCallId: 'c1', name: 'koda_fake', input: { ref: 'WEB-1' }, ...over,
+});
+
+/**
+ * 2a-D8: one stored action. Its project (`p2`/`ops`) is deliberately not the thread's home project (`p1`/`web`),
+ * so the context the executor builds for an approve can be told apart from the proposing call's (AC-21).
+ */
+const pendingAction = (over: Partial<PendingActionRecord> = {}): PendingActionRecord => ({
+  id: 'a1', projectId: 'p2', projectSlug: 'ops', threadId: 't1', jobId: 'j1', toolCallId: 'c1', tool: 'koda_fake',
+  input: { ref: 'OPS-1' }, preview: 'Add a comment to OPS-1 "Fix"', status: 'PENDING', requestedById: 'u1',
+  approvalId: 'ap1', decidedById: null, decidedAt: null, result: null, deliveredAt: null,
+  expiresAt: new Date('2026-10-24T09:00:00.000Z'), createdAt: new Date('2026-10-23T09:00:00.000Z'), ...over,
 });
 
 describe('AssistantToolExecutor', () => {
@@ -383,6 +398,111 @@ function closeOverRead(tool: AssistantTool<unknown>) {
   base.executor.attachActions(proposer);
   return { ...base, proposer };
 }
+
+describe('S5b 2a-D8: checkAction and executeAction', () => {
+  it('AC-12: checkAction answers forbidden for a disabled requester', async () => {
+    const { executor } = setup(makeTool(), { creator: { disabled: true } });
+
+    expect(await executor.checkAction(pendingAction())).toBe('forbidden');
+  });
+
+  it('AC-13: checkAction answers forbidden when the requester\'s project role is denied create Comment', async () => {
+    const can = vi.fn(() => false);
+    const abilities = { createForUser: vi.fn(async () => ({ can })) } as unknown as KodaCaslAbilityFactory;
+    const tool = makeTool({ permission: { kind: 'ability', action: 'create', subject: 'Comment' } });
+    const { executor } = setup(tool, { abilities });
+
+    expect(await executor.checkAction(pendingAction())).toBe('forbidden');
+    // The tool's own tuple is the one the ability is asked about, for the requester acting with the project role.
+    expect(can).toHaveBeenCalledWith('create', expect.anything());
+    expect(abilities.createForUser).toHaveBeenCalledWith(expect.objectContaining({ id: 'u1', projectRole: 'DEVELOPER' }));
+  });
+
+  it('AC-13 boundary: the same tool is allowed with the real ability factory', async () => {
+    const tool = makeTool({ permission: { kind: 'ability', action: 'create', subject: 'Comment' } });
+    const { executor } = setup(tool);
+
+    expect(await executor.checkAction(pendingAction())).toBe('ok');
+  });
+
+  it('AC-12 boundary: checkAction answers forbidden for a requester who is not a member of the action\'s project', async () => {
+    const { executor, access } = setup(makeTool(), { membership: new ForbiddenAppException({}, 'projects') });
+
+    expect(await executor.checkAction(pendingAction())).toBe('forbidden');
+    expect(access.resolveMembership).toHaveBeenCalledWith('p2', expect.objectContaining({ id: 'u1' }));
+  });
+
+  it('checkAction answers forbidden for a tool that left the registry', async () => {
+    const { executor } = setup(makeTool());
+
+    expect(await executor.checkAction(pendingAction({ tool: 'koda_retired' }))).toBe('forbidden');
+  });
+
+  it('checkAction answers forbidden when the job has no thread', async () => {
+    const { executor } = setup(makeTool(), { noThread: true });
+
+    expect(await executor.checkAction(pendingAction())).toBe('forbidden');
+  });
+
+  it('AC-17: executeAction answers error: <tool> failed when the tool throws a plain Error', async () => {
+    const tool = makeTool({ execute: vi.fn(async () => { throw new Error('db down'); }) });
+    const { executor } = setup(tool);
+
+    expect(await executor.executeAction(pendingAction())).toEqual({ ok: false, text: 'error: koda_fake failed' });
+  });
+
+  it('AC-26: executeAction logs the stack of an ordinary error', async () => {
+    const boom = new Error('db down');
+    const tool = makeTool({ execute: vi.fn(async () => { throw boom; }) });
+    const { executor } = setup(tool);
+    const logged = vi.spyOn(Logger.prototype, 'error');
+    logged.mockClear();
+
+    await executor.executeAction(pendingAction());
+
+    expect(logged).toHaveBeenCalled();
+    expect(String(logged.mock.calls[0]?.[0])).toContain('a1');
+    expect(logged.mock.calls[0]?.[1]).toBe(boom.stack);
+  });
+
+  it('executeAction answers not_found when the tool raises NotFoundAppException', async () => {
+    const tool = makeTool({ execute: vi.fn(async () => { throw new NotFoundAppException({}, 'tickets'); }) });
+    const { executor } = setup(tool);
+
+    expect(await executor.executeAction(pendingAction())).toEqual({ ok: false, text: 'not_found' });
+  });
+
+  it('AC-21: executeAction runs the tool with the action\'s project slug, not the thread\'s home project', async () => {
+    let seen: ToolContext | undefined;
+    const tool = makeTool({ execute: async (ctx: ToolContext) => { seen = ctx; return 'comment c1'; } });
+    const { executor, access } = setup(tool);
+
+    expect(await executor.executeAction(pendingAction())).toEqual({ ok: true, text: 'comment c1' });
+    expect(seen).toMatchObject({
+      projectId: 'p2', projectSlug: 'ops', threadId: 't1', jobId: 'j1',
+      actor: { id: 'u1', actorType: 'user', projectRole: 'DEVELOPER' },
+    });
+    expect(access.resolveMembership).toHaveBeenCalledWith('p2', expect.objectContaining({ id: 'u1' }));
+  });
+
+  it('executeAction re-parses the stored input and answers the tool text', async () => {
+    const parse = vi.fn((input: unknown) => String(input));
+    const execute = vi.fn(async () => 'comment c1 added to KODA-1');
+    const { executor } = setup(makeTool({ parse, execute }));
+
+    expect(await executor.executeAction(pendingAction({ input: { ref: 'KODA-1', body: 'hello' } })))
+      .toEqual({ ok: true, text: 'comment c1 added to KODA-1' });
+    expect(parse).toHaveBeenCalledWith({ ref: 'KODA-1', body: 'hello' });
+  });
+
+  it('executeAction answers error: <tool> failed when its own parser refuses the stored input', async () => {
+    const tool = makeTool({ parse: () => { throw new ToolInputError('ref'); } });
+    const { executor } = setup(tool);
+
+    expect(await executor.executeAction(pendingAction())).toEqual({ ok: false, text: 'error: koda_fake failed' });
+    expect(tool.execute).not.toHaveBeenCalled();
+  });
+});
 
 describe('S5b 2a-D1: the propose service attaches itself to the executor at init', () => {
   let module: TestingModule;
