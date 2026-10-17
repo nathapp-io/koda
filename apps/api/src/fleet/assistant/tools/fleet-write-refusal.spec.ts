@@ -37,6 +37,10 @@ describe('fleetWriteRefusal', () => {
     );
   });
 
+  it('returns null when dispatch validation args are absent', () => {
+    expect(fleetWriteRefusal(new ValidationAppException(undefined, 'fleet.dispatchInput'))).toBeNull();
+  });
+
   it('AC-7: leaves unrelated AppExceptions unexplained', () => {
     expect(fleetWriteRefusal(new ConflictAppException({}, 'threads.busy'))).toBeNull();
   });

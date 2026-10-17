@@ -10,7 +10,7 @@ function argument(args: Record<string, unknown>, key: string): string | null {
 export function fleetWriteRefusal(error: unknown): string | null {
   if (!(error instanceof AppException)) return null;
 
-  const args = error.args;
+  const args = error.args ?? {};
   if (error instanceof ConflictAppException) {
     switch (error.prefix) {
       case 'fleet.jobState': {
