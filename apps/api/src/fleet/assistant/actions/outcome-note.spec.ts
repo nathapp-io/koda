@@ -15,6 +15,11 @@ describe('outcomeNote (2a-D9)', () => {
       .toBe('Action act1 (koda_add_comment) was approved but failed: not_found');
   });
 
+  it('AC-10: a FAILED action whose tool answered not_found reads exactly `was approved but failed: not_found`', () => {
+    expect(outcomeNote(action({ id: 'act7', tool: 'koda_add_comment', status: 'FAILED', result: 'not_found' })))
+      .toBe('Action act7 (koda_add_comment) was approved but failed: not_found');
+  });
+
   it('REJECTED says the user rejected it', () => {
     expect(outcomeNote(action({ status: 'REJECTED', result: null }))).toBe('Action act1 (koda_add_comment) was rejected by the user.');
   });

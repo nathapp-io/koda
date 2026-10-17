@@ -5,6 +5,8 @@ import { ProjectsService } from '../../projects/projects.service';
 import { AssistantActionPort } from '../approvals/assistant-action.port';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { AssistantActionDecisions } from './actions/assistant-action-decisions';
+import { PendingActionExpirySweeper } from './actions/pending-action-expiry.sweeper';
+import { PrismaPendingActionRepository } from './actions/prisma-pending-action.repository';
 import { AssistantModule } from './assistant.module';
 import { AssistantToolExecutor } from './assistant-tool.executor';
 import { AssistantToolRegistry } from './assistant-tool.registry';
@@ -61,6 +63,13 @@ describe('AssistantModule', () => {
     expect(tool?.descriptor).toBe(KODA_GET_ACTION);
     expect(tool?.kind).toBeUndefined();
     expect(tool?.permission).toEqual({ kind: 'member' });
+  });
+
+  it('US-007: provides the action expiry sweeper, which resolves the decide handler and the action repository', () => {
+    const sweeper = module.get(PendingActionExpirySweeper);
+    expect(sweeper).toBeInstanceOf(PendingActionExpirySweeper);
+    expect((sweeper as unknown as { actions: unknown }).actions).toBeInstanceOf(PrismaPendingActionRepository);
+    expect((sweeper as unknown as { decisions: unknown }).decisions).toBeInstanceOf(AssistantActionDecisions);
   });
 
   it('US-005: ApprovalsService and AssistantActionDecisions share one AssistantActionPort instance', () => {

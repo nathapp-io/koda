@@ -96,6 +96,15 @@ export class PrismaPendingActionRepository
     return this.db.pendingAction.count({ where: { threadId, status: 'PENDING' } });
   }
 
+  /** 2a-D10: the sweeper's scan. `expiresAt` at or before `now`, soonest first, then by id for a stable order. */
+  async findDue(now: Date, limit: number): Promise<PendingActionRecord[]> {
+    const rows = await this.db.pendingAction.findMany({
+      where: { status: 'PENDING', expiresAt: { lte: now } },
+      orderBy: [{ expiresAt: 'asc' }, { id: 'asc' }], take: limit,
+    });
+    return this.withSlug(rows);
+  }
+
   async insert(action: NewPendingAction): Promise<PendingActionRecord> {
     const row = await this.db.pendingAction.create({ data: { ...action, input: json(action.input) } });
     return (await this.withSlug([row]))[0];

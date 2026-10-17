@@ -16,6 +16,7 @@ import { RunnersModule } from '../runners/runners.module';
 import { SyncModule } from '../sync/sync.module';
 import { AssistantActionDecisions } from './actions/assistant-action-decisions';
 import { AssistantActionService } from './actions/assistant-action.service';
+import { PendingActionExpirySweeper } from './actions/pending-action-expiry.sweeper';
 import { PENDING_ACTION_REPOSITORY } from './actions/pending-action.domain';
 import { PrismaPendingActionRepository } from './actions/prisma-pending-action.repository';
 import { ASSISTANT_TOOL_CALL_REPOSITORY, PROJECT_COUNTS_READER } from './assistant-tool-call.domain';
@@ -70,6 +71,9 @@ import { WorkspaceTools } from './tools/workspace-tools';
     AssistantActionService,
     // S5b 2a US-005: the creator-only decide handler; it registers with AssistantActionPort on init (2a-D1).
     AssistantActionDecisions,
+    // S5b 2a US-007: the interval that expires the actions nobody decided (2a-D10). It reuses the handler's
+    // `expireLocked`, so the sweep and a decide past `expiresAt` write the same terminal state and note.
+    PendingActionExpirySweeper,
   ],
   exports: [AssistantToolRegistry, AssistantToolExecutor],
 })

@@ -101,6 +101,11 @@ export interface PendingActionRepository {
   findScopedById(id: string, projectId: string, threadId: string): Promise<PendingActionRecord | null>;
   /** The thread's PENDING actions, for the per-thread cap (2a-D4 step 3). */
   countPending(threadId: string): Promise<number>;
+  /**
+   * 2a-D10: `PENDING` actions whose `expiresAt` is at or before `now`, soonest first, capped at `limit`. Separate
+   * from the bash repository's `findExpiredPending`, which stays bash-only.
+   */
+  findDue(now: Date, limit: number): Promise<PendingActionRecord[]>;
   insert(action: NewPendingAction): Promise<PendingActionRecord>;
   /** Links the approval `openAssistant` just created (2a-D4 step 6). */
   setApprovalId(id: string, approvalId: string): Promise<void>;
