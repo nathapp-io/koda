@@ -310,7 +310,7 @@ generated client stay as they are. The web stories call only routes that 1d-1 sh
 - `apps/web/composables/useWorkspaceThreads.ts` — `useWorkspaceThreads`
 - `apps/web/composables/useWorkspaceThread.ts` — `useWorkspaceThread`
 - `apps/web/server/api/threads/[id]/events.get.ts` — workspace thread live proxy route (calls `openWorkspaceThreadLiveUpstream`)
-- `apps/web/lib/workspace-thread-create.ts` — `buildWorkspaceThreadCreateSchema`, `toCreateWorkspaceThreadBody`
+- `apps/web/lib/workspace-thread-create.ts` — `buildWorkspaceThreadCreateSchema`, `toCreateWorkspaceThreadBody` (takes one object `{ homeProject, title, model, effort, maxCostUsd }`, strings except `maxCostUsd: number`)
 
 **US-005**
 
