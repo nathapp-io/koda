@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-workspace-tools",
   "branchName": "feat/fleet-s5b-workspace-tools",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "updatedAt": "2026-10-17T02:50:15.042Z",
+  "updatedAt": "2026-10-17T03:16:17.540Z",
   "userStories": [
     {
       "id": "US-001",
@@ -276,8 +276,8 @@
         "threads"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -289,7 +289,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/lib/thread-controller.ts",
@@ -326,7 +328,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "d1f32a7cca91e536a4d63d40dc07fb07768b89f8"
     },
     {
       "id": "US-005",
