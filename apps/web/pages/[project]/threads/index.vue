@@ -14,17 +14,29 @@ const canCreate = computed(() => canWorkOnFleet(role.value) && threadsList.threa
 const pending = ref(true)
 const loadFailed = ref(false)
 
+/**
+ * Bumped by every `loadPage()`. Only the newest read may settle `pending` or `loadFailed`: an
+ * overtaken one that answers, or fails, after it must not hide the spinner or the list it shows
+ * (koda#294, mirroring `pages/threads/index.vue`).
+ */
+let pageLoad = 0
+
 async function loadPage(status: 'ACTIVE' | 'ARCHIVED' = threadsList.status.value): Promise<boolean> {
+  const mine = ++pageLoad
   pending.value = true
   loadFailed.value = false
   try {
-    await Promise.all([threadsList.load(status), members.load()])
-    return true
+    // false when a newer selection overtook the thread read: its status is not the one on screen.
+    const [applied] = await Promise.all([threadsList.load(status), members.load()])
+    // The members read answers on its own schedule, so `applied` alone is not enough: an Archived
+    // read that applied before Active was clicked only releases here when its members request
+    // answers — possibly after Active ran to completion. The page token makes that write nothing.
+    return mine === pageLoad && applied
   } catch {
-    loadFailed.value = true
+    if (mine === pageLoad) loadFailed.value = true
     return false
   } finally {
-    pending.value = false
+    if (mine === pageLoad) pending.value = false
   }
 }
 

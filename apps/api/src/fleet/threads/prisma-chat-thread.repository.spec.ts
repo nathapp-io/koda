@@ -1,5 +1,8 @@
 import { Prisma } from '../../generated/prisma/client';
-import { MAX_PENDING_ACTIONS } from '../assistant/actions/pending-action.domain';
+import { MAX_PENDING_ACTIONS, type PendingActionStatus } from '../assistant/actions/pending-action.domain';
+import { DELIVERABLE_STATUSES, DELIVERY_HEADER, deliveryText } from '../assistant/actions/outcome-delivery';
+import { outcomeNote } from '../assistant/actions/outcome-note';
+import { THREAD_LIMITS } from '../common/thread-jobs';
 import { PrismaChatThreadRepository } from './prisma-chat-thread.repository';
 
 /** A ChatMessage row as Prisma returns it, including the fold-internal round columns. */
@@ -400,6 +403,7 @@ describe('PrismaChatThreadRepository SESSION turn instructions (S5b US-003)', ()
         fleetThreadTurn: { findFirst: vi.fn(async () => null), create: turnCreate },
         fleetRepo: { findUnique: repoFindUnique, findFirst: anchorFindFirst },
         project: { findUnique: projectFindUnique },
+        pendingAction: { findMany: async () => [], updateMany: async () => ({ count: 0 }) },
         $queryRaw: vi.fn(async () => [{ nextSeq: 1 }]),
       },
     };
@@ -466,5 +470,347 @@ describe('PrismaChatThreadRepository SESSION turn instructions (S5b US-003)', ()
 
     expect(instructionsOf(turnCreate).split('\n').slice(1, 4))
       .toEqual(['Project brief:', '(none)', 'Repository context: unavailable (no context file)']);
+  });
+});
+
+/**
+ * 2aw-D3 — the outcome hand-off inside `sendMessage`, without a database: the thread's undelivered terminal actions
+ * are selected in age order, marked delivered on the new message and their notes are handed to the runner path in the
+ * `THREAD_INPUT` text of a live send. A new-turn send marks them the same way (its assign text is US-001's, pinned
+ * over PG); a duplicate `clientMessageId` and a refused send deliver nothing.
+ *
+ * `pendingStore()` is a small in-memory `pendingAction` double of the two operations the hand-off uses: `findMany`
+ * applies the status/`deliveredAt` filter, the age order and `take`, and `updateMany` writes the markers onto the rows
+ * it holds — so the selection, the marking and the resulting text are all observable without PG.
+ */
+describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)', () => {
+  interface StoredAction {
+    id: string; threadId: string; tool: string; status: string; result: string | null;
+    deliveredAt: Date | null; deliveredMessageId: string | null; createdAt: Date;
+  }
+
+  const action = (over: Partial<StoredAction> & { id: string }): StoredAction => ({
+    threadId: 'T', tool: 'koda_add_comment', status: 'EXECUTED', result: 'done',
+    deliveredAt: null, deliveredMessageId: null, createdAt: new Date('2026-01-01T00:00:00.000Z'), ...over,
+  });
+
+  /** The note the delivered text carries, built with the real US-001 helper. */
+  const noteOf = (a: StoredAction): string =>
+    outcomeNote({ id: a.id, tool: a.tool, status: a.status as PendingActionStatus, result: a.result });
+
+  /** The `pendingAction` delegate over `rows`: the repository's `findMany` and `updateMany`, nothing else. */
+  function pendingStore(rows: readonly StoredAction[]) {
+    const all = [...rows];
+    const findMany = vi.fn(async (args: {
+      where: { threadId: string; status: { in: string[] }; deliveredAt: null };
+      orderBy: readonly unknown[]; take: number;
+    }) => all
+      .filter((row) => row.threadId === args.where.threadId && args.where.status.in.includes(row.status) && row.deliveredAt === null)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id))
+      .slice(0, args.take)
+      .map((row) => ({ id: row.id, tool: row.tool, status: row.status, result: row.result })));
+    const updateMany = vi.fn(async (args: {
+      where: { id: { in: string[] } }; data: { deliveredAt: Date; deliveredMessageId: string };
+    }) => {
+      let count = 0;
+      for (const row of all) {
+        if (args.where.id.in.includes(row.id)) {
+          row.deliveredAt = args.data.deliveredAt;
+          row.deliveredMessageId = args.data.deliveredMessageId;
+          count += 1;
+        }
+      }
+      return { count };
+    });
+    return { all, findMany, updateMany };
+  }
+
+  const threadRow = (over: Record<string, unknown> = {}) => ({
+    id: 'T', projectId: 'P', kind: 'REPO', repoId: 'R', baseRef: 'trunk', feature: 'f', title: 'x', createdById: 'U',
+    runnerId: 'R', backend: { kind: 'native' }, status: 'ACTIVE', archivedAt: null, skills: [], maxCostUsd: new Prisma.Decimal(5),
+    costUsd: new Prisma.Decimal(0), tokens: null, specPath: '.nax/features/f/spec.md', pendingQuestion: null, session: null,
+    writtenPaths: [], publishedSha: null, specPublished: false, lastWrite: null,
+    lastActivityAt: new Date(0), createdAt: new Date(0), ...over,
+  });
+
+  /**
+   * A repository driving one send. `live` queues a `THREAD_INPUT` on a RUNNING SESSION job instead of creating a
+   * turn; `inFlight` makes the refusal gate see a pending message; `threads: false` turns the S5a kill switch off (the
+   * state every test run boots with, and the reason `assistant-action-send-delivery.integration.spec.ts` sets
+   * `FLEET_THREADS_ENABLED=true`). The message fake keeps a clientMessageId set, so a repeated id answers the
+   * duplicate the way the unique index would.
+   */
+  function deliveryRepo(opts: { actions?: readonly StoredAction[]; live?: boolean; thread?: Record<string, unknown>; inFlight?: boolean; threads?: boolean } = {}) {
+    const store = pendingStore(opts.actions ?? []);
+    const thread = threadRow(opts.thread);
+    const job = { id: 'J', state: 'RUNNING', runnerId: 'R', leaseEpoch: 4, command: 'THREAD', threadTurn: { action: 'SESSION' } };
+    const created = new Map<string, Record<string, unknown>>();
+    const messageCreate = vi.fn(async (args: { data: { content: string; clientMessageId: string } }) => {
+      const createdRow = {
+        id: 'M', threadId: 'T', seq: 2, jobId: null, turnId: null, role: 'user', authorUserId: 'U',
+        clientMessageId: args.data.clientMessageId, content: args.data.content, toolSummary: null, status: 'pending',
+        errorReason: null, usage: null, costUsd: null, costSource: null, streamRound: null, streamRoundStart: null, createdAt: new Date(0),
+      };
+      created.set(args.data.clientMessageId, createdRow);
+      return createdRow;
+    });
+    const commandCreate = vi.fn(async (_args: unknown) => ({}));
+    const jobCreate = vi.fn(async (_args: unknown) => ({ id: 'J2', repoId: 'R', ref: 'trunk' }));
+    const prisma = {
+      client: {
+        chatThread: { findFirst: vi.fn(async () => thread), update: vi.fn(async () => ({})) },
+        chatMessage: {
+          findUnique: vi.fn(async (args: { where: { threadId_clientMessageId: { clientMessageId: string } } }) =>
+            created.get(args.where.threadId_clientMessageId.clientMessageId) ?? null),
+          findFirst: vi.fn(async () => (opts.inFlight ? { id: 'PENDING' } : null)),
+          create: messageCreate, update: vi.fn(async () => ({})),
+        },
+        fleetJob: { findFirst: vi.fn(async () => (opts.live ? job : null)) },
+        fleetThreadTurn: { findFirst: vi.fn(async () => null), create: vi.fn(async () => ({})) },
+        fleetRepo: { findUnique: vi.fn(async () => ({ owner: 'acme', name: 'koda' })), findFirst: vi.fn(async () => ({ id: 'A', defaultBranch: 'trunk' })) },
+        project: { findUnique: vi.fn(async () => ({ slug: 'sandbox', brief: null })) },
+        runner: { findUnique: vi.fn(async () => ({ lastSeenAt: new Date(), protocolVersion: 5 })) },
+        fleetCommand: { findFirst: vi.fn(async () => null) },
+        pendingAction: { findMany: store.findMany, updateMany: store.updateMany },
+        $queryRaw: vi.fn(async () => [{ nextSeq: 2 }]),
+      },
+    };
+    const jobs = {
+      createJob: jobCreate, appendEvent: vi.fn(async () => ({})), createCommand: commandCreate,
+      lockById: vi.fn(async () => undefined),
+    };
+    /**
+     * `txManager.run` calls through, and undoes the delivery markers when the callback throws: the real transaction
+     * rolls its writes back, which is what keeps a turn that fails after the hand-off from leaving a note delivered.
+     */
+    const txRun = vi.fn(async (fn: () => Promise<unknown>) => {
+      const before = new Map(store.all.map((row) => [row.id, { deliveredAt: row.deliveredAt, deliveredMessageId: row.deliveredMessageId }]));
+      try {
+        return await fn();
+      } catch (error) {
+        for (const row of store.all) {
+          const previous = before.get(row.id);
+          if (previous) {
+            row.deliveredAt = previous.deliveredAt;
+            row.deliveredMessageId = previous.deliveredMessageId;
+          }
+        }
+        throw error;
+      }
+    });
+    const repo = new PrismaChatThreadRepository(
+      prisma as never, jobs as never, { run: txRun } as never,
+      { record: vi.fn(async () => ({})) } as never, { placeJob: vi.fn(async () => undefined) } as never,
+      { notify: vi.fn() } as never, { snapshot: vi.fn(async () => ({ match: () => null })) } as never, { threadsEnabled: opts.threads ?? true, runnerOfflineSec: 90 } as never,
+    );
+    return { repo, store, jobs, messageCreate, commandCreate, jobCreate };
+  }
+
+  const send = (repo: PrismaChatThreadRepository, text: string, clientMessageId = 'c1') =>
+    repo.sendMessage({ scope: { kind: 'project', projectId: 'P' }, threadId: 'T', userId: 'U', text, clientMessageId });
+
+  const payloadTexts = (commandCreate: { mock: { calls: unknown[][] } }): string[] =>
+    commandCreate.mock.calls.map((call) => (call[0] as { payload: { text: string } }).payload.text);
+
+  it('AC-1: a live send queues a THREAD_INPUT whose text is the note block above the user text', async () => {
+    const executed = action({ id: 'A1', status: 'EXECUTED', result: 'done' });
+    const { repo, commandCreate } = deliveryRepo({ actions: [executed], live: true });
+
+    await send(repo, 'hello');
+
+    const expected = `${DELIVERY_HEADER}\n${noteOf(executed)}\n\nhello`;
+    expect(commandCreate).toHaveBeenCalledWith({
+      runnerId: 'R', jobId: 'J', type: 'THREAD_INPUT', leaseEpoch: 4, payload: { messageId: 'M', text: expected },
+    });
+    // The expected text is exactly what US-001's delivery helper answers for that one note.
+    expect(deliveryText([noteOf(executed)], 'hello', THREAD_LIMITS.messageMaxBytes)).toEqual({ text: expected, delivered: 1 });
+  });
+
+  it('AC-2/AC-3: the send marks the action delivered at now, naming the new message', async () => {
+    const executed = action({ id: 'A1' });
+    const { repo, store } = deliveryRepo({ actions: [executed], live: true });
+
+    await send(repo, 'hello');
+
+    expect(store.updateMany).toHaveBeenCalledTimes(1);
+    expect(store.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['A1'] } }, data: { deliveredAt: expect.any(Date), deliveredMessageId: 'M' },
+    });
+    expect(executed.deliveredAt).not.toBeNull();
+    expect(executed.deliveredMessageId).toBe('M');
+  });
+
+  it('AC-4: the stored user message keeps the plain text', async () => {
+    const { repo, messageCreate } = deliveryRepo({ actions: [action({ id: 'A1' })], live: true });
+
+    const result = await send(repo, 'hello');
+
+    expect(messageCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ content: 'hello' }) });
+    expect(result.message.content).toBe('hello');
+  });
+
+  it('AC-5: a second send after the first turn ended delivers nothing again', async () => {
+    const executed = action({ id: 'A1' });
+    const { repo, commandCreate, store } = deliveryRepo({ actions: [executed], live: true });
+
+    await send(repo, 'hello');
+    // The first message reached a terminal status, so the second send is not a turn in flight.
+    await send(repo, 'again', 'c2');
+
+    expect(payloadTexts(commandCreate)).toEqual([`${DELIVERY_HEADER}\n${noteOf(executed)}\n\nhello`, 'again']);
+    expect(store.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('AC-6: a PENDING action stays undelivered and is never even read as deliverable', async () => {
+    const pending = action({ id: 'A1', status: 'PENDING', result: null });
+    // A terminal neighbour proves the filter picks notes rather than nothing at all.
+    const executed = action({ id: 'A2', createdAt: new Date('2026-01-01T00:01:00.000Z') });
+    const { repo, store, commandCreate } = deliveryRepo({ actions: [pending, executed], live: true });
+
+    await send(repo, 'hello');
+
+    expect(store.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { threadId: 'T', status: { in: [...DELIVERABLE_STATUSES] }, deliveredAt: null },
+    }));
+    expect(pending.deliveredAt).toBeNull();
+    expect(pending.deliveredMessageId).toBeNull();
+    expect(executed.deliveredMessageId).toBe('M');
+    expect(store.updateMany).toHaveBeenCalledWith({ where: { id: { in: ['A2'] } }, data: expect.anything() });
+    expect(payloadTexts(commandCreate)).toEqual([`${DELIVERY_HEADER}\n${noteOf(executed)}\n\nhello`]);
+  });
+
+  it('AC-7: an APPROVED action stays undelivered', async () => {
+    const approved = action({ id: 'A1', status: 'APPROVED', result: null });
+    const executed = action({ id: 'A2', createdAt: new Date('2026-01-01T00:01:00.000Z') });
+    const { repo, store, commandCreate } = deliveryRepo({ actions: [approved, executed], live: true });
+
+    await send(repo, 'hello');
+
+    expect(approved.deliveredAt).toBeNull();
+    expect(approved.deliveredMessageId).toBeNull();
+    expect(executed.deliveredMessageId).toBe('M');
+    expect(store.updateMany).toHaveBeenCalledWith({ where: { id: { in: ['A2'] } }, data: expect.anything() });
+    expect(payloadTexts(commandCreate)).toEqual([`${DELIVERY_HEADER}\n${noteOf(executed)}\n\nhello`]);
+  });
+
+  it('AC-8: a terminal action of another thread stays undelivered', async () => {
+    const elsewhere = action({ id: 'A9', threadId: 'T2' });
+    const { repo, store } = deliveryRepo({ actions: [action({ id: 'A1' }), elsewhere], live: true });
+
+    await send(repo, 'hello');
+
+    expect(store.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ threadId: 'T' }) }));
+    expect(elsewhere.deliveredAt).toBeNull();
+    expect(store.updateMany).toHaveBeenCalledWith({ where: { id: { in: ['A1'] } }, data: expect.anything() });
+  });
+
+  it('AC-9/AC-10: the 20 oldest notes go in age order and the newest of 21 stays undelivered', async () => {
+    const many = Array.from({ length: 21 }, (_unused, i) => action({
+      id: `A${String(i).padStart(2, '0')}`, createdAt: new Date(Date.UTC(2026, 0, 1, 0, i)),
+    }));
+    const { repo, store } = deliveryRepo({ actions: many, live: true });
+
+    await send(repo, 'hello');
+
+    expect(store.all.filter((row) => row.deliveredAt !== null)).toHaveLength(20);
+    // `A20` has the latest createdAt, so it is the one that did not fit the cap.
+    expect(store.all.filter((row) => row.deliveredAt === null).map((row) => row.id)).toEqual(['A20']);
+    expect(store.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: 20,
+    }));
+  });
+
+  it('AC-11: a note that does not fit the byte budget stays undelivered', async () => {
+    const first = action({ id: 'A1', createdAt: new Date('2026-01-01T00:00:00.000Z'), result: 'ok' });
+    const second = action({ id: 'A2', createdAt: new Date('2026-01-01T00:01:00.000Z'), result: 'ok' });
+    const { repo, commandCreate } = deliveryRepo({ actions: [first, second], live: true });
+    const notes = [noteOf(first), noteOf(second)];
+    const oneNote = `${DELIVERY_HEADER}\n${notes[0]}\n\n`;
+    // The user text is sized with the delivery helper: the whole text fills the budget with one note only.
+    const text = 'x'.repeat(THREAD_LIMITS.messageMaxBytes - Buffer.byteLength(oneNote, 'utf8'));
+
+    expect(deliveryText(notes, text, THREAD_LIMITS.messageMaxBytes)).toEqual({ text: oneNote + text, delivered: 1 });
+    await send(repo, text);
+
+    expect(first.deliveredAt).not.toBeNull();
+    expect(second.deliveredAt).toBeNull();
+    expect(second.deliveredMessageId).toBeNull();
+    expect(payloadTexts(commandCreate)).toEqual([oneNote + text]);
+  });
+
+  it('AC-12: a duplicate clientMessageId delivers nothing, an action created between the sends included', async () => {
+    const { repo, store, commandCreate } = deliveryRepo({ actions: [action({ id: 'A1' })], live: true });
+
+    const first = await send(repo, 'hello', 'c1');
+    const later = action({ id: 'A2', createdAt: new Date('2026-01-02T00:00:00.000Z') });
+    store.all.push(later);
+    const second = await send(repo, 'hello', 'c1');
+
+    expect(first.deduplicated).toBe(false);
+    expect(second.deduplicated).toBe(true);
+    expect(later.deliveredAt).toBeNull();
+    expect(later.deliveredMessageId).toBeNull();
+    expect(commandCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('AC-13/AC-14: a new-turn send marks the action on the new message and creates the turn', async () => {
+    const rejected = action({ id: 'A1', status: 'REJECTED', result: null });
+    const { repo, jobCreate, commandCreate } = deliveryRepo({ actions: [rejected], live: false, thread: { runnerId: null } });
+
+    const result = await send(repo, 'hi');
+
+    expect(result).toMatchObject({ jobId: 'J2', deduplicated: false });
+    expect(jobCreate).toHaveBeenCalledTimes(1);
+    expect(commandCreate).not.toHaveBeenCalled();
+    expect(rejected.deliveredAt).not.toBeNull();
+    expect(rejected.deliveredMessageId).toBe('M');
+  });
+
+  it('AC-15/AC-16: a refused send delivers nothing at all', async () => {
+    const executed = action({ id: 'A1' });
+    const { repo, store, messageCreate, commandCreate } = deliveryRepo({ actions: [executed], live: true, inFlight: true });
+
+    await expect(send(repo, 'hello')).rejects.toMatchObject({ prefix: 'threads.turnRunning' });
+
+    expect(messageCreate).not.toHaveBeenCalled();
+    expect(store.findMany).not.toHaveBeenCalled();
+    expect(store.updateMany).not.toHaveBeenCalled();
+    expect(commandCreate).not.toHaveBeenCalled();
+    expect(executed.deliveredAt).toBeNull();
+    expect(executed.deliveredMessageId).toBeNull();
+  });
+
+  /**
+   * The kill switch every test run boots with (FLEET_THREADS_ENABLED unset): the send is refused before the hand-off,
+   * so the PG spec has to turn threads on to reach the delivery at all — this is the unit-level analogue of the
+   * `threads.disabled` a DB run without that flag answers.
+   */
+  it('a send with the threads kill switch off delivers nothing', async () => {
+    const executed = action({ id: 'A1' });
+    const { repo, store, messageCreate, commandCreate } = deliveryRepo({ actions: [executed], live: true, threads: false });
+
+    await expect(send(repo, 'hello')).rejects.toMatchObject({ prefix: 'threads.disabled' });
+
+    expect(messageCreate).not.toHaveBeenCalled();
+    expect(store.updateMany).not.toHaveBeenCalled();
+    expect(commandCreate).not.toHaveBeenCalled();
+    expect(executed.deliveredAt).toBeNull();
+  });
+
+  /**
+   * The line this story runs on: a new-turn row that the turn factory refuses (a REPO thread without its `specPath`,
+   * the shape a hand-written DB seed gets wrong) throws *after* the notes were marked, inside the same transaction.
+   * The marking was written — and the rollback leaves the note undelivered, so the next send hands it over again.
+   */
+  it('a mid-transaction failure rolls the hand-off back with the turn it belongs to', async () => {
+    const rejected = action({ id: 'A1', status: 'REJECTED', result: null });
+    const { repo, store, jobCreate } = deliveryRepo({ actions: [rejected], live: false, thread: { runnerId: null, specPath: null } });
+
+    await expect(send(repo, 'hi')).rejects.toMatchObject({ prefix: 'threads.notRepoThread' });
+
+    expect(store.updateMany).toHaveBeenCalledTimes(1);
+    expect(jobCreate).not.toHaveBeenCalled();
+    expect(rejected.deliveredAt).toBeNull();
+    expect(rejected.deliveredMessageId).toBeNull();
   });
 });

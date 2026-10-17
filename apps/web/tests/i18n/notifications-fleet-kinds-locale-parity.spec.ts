@@ -10,6 +10,7 @@ const at = (tree: Tree, path: string): unknown => path.split('.').reduce<unknown
 const FLEET_KINDS: Record<string, string[]> = {
   job_escalated: ['repo'], job_failed: ['repo'], job_crashed: ['repo'], job_pr_opened: ['repo'],
   approval_requested: ['kind', 'repo'],
+  action_requested: ['tool'],
   budget_warn: ['scope', 'spentUsd', 'amountUsd'], budget_hard_stop: ['scope', 'spentUsd', 'amountUsd'],
   runner_offline: ['runner'], credential_expiring: ['provider', 'runner', 'expiresAt'],
 }

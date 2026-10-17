@@ -1,0 +1,624 @@
+{
+  "project": "koda",
+  "feature": "fleet-s5b-koda-actions-web",
+  "branchName": "feat/fleet-s5b-koda-actions-web",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "updatedAt": "2026-10-17T11:56:15.253Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Delivery text, column and new-turn assign",
+      "description": "**Goal** — Persist the message an outcome is delivered on and deterministically rebuild byte-bounded delivery text for new-turn assignment.\n\n**Motivation** — After #295 an approved, rejected or expired action leaves a `system` note, but nothing hands that note to the agent.\n\n**Approach** — **2aw-D1 delivery column.** `PendingAction` gains `deliveredMessageId String?`, `@@index([threadId, deliveredAt])` and `@@index([deliveredMessageId])` (`api-data.md`: every filtered field is indexed). Migration `apps/api/prisma/migrations/20261024090000_pending_action_delivery/migration.sql`. No relation to `ChatMessage`: the column is an id only, like `approvalId`.\n\n**2aw-D2 delivery text.** A pure module `apps/api/src/fleet/assistant/actions/outcome-delivery.ts` exports:\n\n```ts\nexport const DELIVERY_HEADER = 'Updates on actions you proposed:';\nexport const MAX_DELIVERED_NOTES = 20;\nexport const DELIVERABLE_STATUSES = ['EXECUTED', 'FAILED', 'REJECTED', 'EXPIRED'] as const;\n\n/**\n * The text the agent receives: the header, one note per line block, a blank line, then the user's text.\n * Notes are taken in the given order while the whole text stays within `maxBytes` UTF-8 bytes; the first note\n * that does not fit stops the list. No note fits, or none given: the user's text unchanged, delivered 0.\n */\nexport function deliveryText(notes: readonly string[], userText: string, maxBytes: number): { text: string; delivered: number } {\n  const fits = (text: string): boolean => Buffer.byteLength(text, 'utf8') <= maxBytes;\n  let delivered = 0;\n  let text = userText;\n  for (const [i] of notes.entries()) {\n    const candidate = `${DELIVERY_HEADER}\\n${notes.slice(0, i + 1).join('\\n')}\\n\\n${userText}`;\n    if (!fits(candidate)) break;\n    delivered = i + 1;\n    text = candidate;\n  }\n  return { text, delivered };\n}\n```\n\nThe notes are `outcomeNote(action)` (`outcome-note.ts`), rebuilt from the action, never read back from the `system` messages. `maxBytes` is `THREAD_LIMITS.messageMaxBytes` (32,768, `apps/api/src/fleet/common/thread-jobs.ts:24`), the bound the runner enforces on both `THREAD_INPUT` text and `initialMessage.text`.\n\n**2aw-D4 new-turn assign.** `PrismaFleetJobRepository.findThreadAssign` builds `initialMessage.text` as `deliveryText(notes, message.content, THREAD_LIMITS.messageMaxBytes).text`, where `notes` are the `outcomeNote`s of the actions whose `deliveredMessageId` is the initial message's id, ordered by `createdAt` then `id`. It writes nothing, so every assign of the same job answers the same text. When the turn has no `initialMessageId`, it reads no actions at all and `initialMessage` stays null.\n\n**`PendingActionRecord`** (`pending-action.domain.ts`). Target: gains the optional `deliveredMessageId?: string | null` (optional, so the existing spec literals without it still type-check), mapped by `prisma-pending-action.repository.ts`.\n\nImplementation and regression anchors: modify only PendingAction in schema.prisma; update the repository's create/update/read mappings. Add AC-10 to prisma-fleet-job.repository.find-thread-assign.spec.ts while preserving its existing no-delegate stubs and kind/title expectations. Create the pure-helper unit spec and PG integration spec listed in expectedFiles. Use assistant-actions-decide.integration.spec.ts seeding conventions. Apply the migration and regenerate the generated Prisma client; no generated source edits.\n\n**Scope** — In: 2aw-D1, 2aw-D2, 2aw-D4, record mapping and deterministic assignment tests. Out: selecting or marking newly delivered actions in sendMessage (US-002); all web approvals, cards, notes and list race changes (US-003..US-007). Changes to the runner, the fleet protocol or `FLEET_PROTOCOL_VERSION`; the delivery text rides the existing `THREAD_INPUT` text and `initialMessage.text` fields. Translating outcome note texts or the delivery header; they stay English (2a-D9).\n\n**Interface** — `export function deliveryText(notes: readonly string[], userText: string, maxBytes: number): { text: string; delivered: number }`; `deliveredMessageId?: string | null`; existing `findThreadAssign(jobId: string): Promise<ThreadAssign | null>` keeps its signature.",
+      "acceptanceCriteria": [
+        "[unit] deliveryText([], 'hello', 32768) returns { text: 'hello', delivered: 0 }.",
+        "[unit] deliveryText(['note A', 'note B'], 'hello', 32768).text equals 'Updates on actions you proposed:\nnote A\nnote B\n\nhello'.",
+        "[unit] deliveryText(['note A', 'note B'], 'hello', 32768).delivered equals 2.",
+        "[unit] deliveryText(['note A', 'note B', 'note C'], 'hello', maxBytes).delivered equals 1 when maxBytes is Buffer.byteLength('Updates on actions you proposed:\nnote A\n\nhello', 'utf8').",
+        "[unit] deliveryText(['note A', 'note B', 'note C'], 'hello', maxBytes).text equals 'Updates on actions you proposed:\nnote A\n\nhello' when maxBytes is Buffer.byteLength('Updates on actions you proposed:\nnote A\n\nhello', 'utf8').",
+        "[unit] deliveryText counts UTF-8 bytes, not characters: for a note of 4-byte characters whose character count fits maxBytes but whose byte count does not, it returns delivered 0.",
+        "[integration] For a SESSION job whose turn's initial message m1 has content 'go', with two actions whose deliveredMessageId is m1 and whose createdAt are t1 < t2, PrismaFleetJobRepository.findThreadAssign(jobId).initialMessage.text equals 'Updates on actions you proposed:\n<outcomeNote of the t1 action>\n<outcomeNote of the t2 action>\n\ngo'.",
+        "[integration] For a job whose initial message has no action delivered on it, findThreadAssign returns initialMessage.text equal to the message content, even when the thread has an action delivered on another message.",
+        "[integration] Two calls of findThreadAssign for the same job return the same initialMessage.text.",
+        "[unit] findThreadAssign for a turn with initialMessageId null, on a client stub with no pendingAction delegate, returns initialMessage null without throwing.",
+        "[integration] PrismaPendingActionRepository.findById returns deliveredMessageId equal to the value stored on the row.",
+        "[integration] When a new-turn job is assigned again after a requeue, findThreadAssign returns the same initialMessage.text rebuilt from deliveredMessageId."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "prisma",
+        "migration",
+        "delivery",
+        "sessions"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-module persistence, byte-bounded formatting and replay-stable runner session assignment; use strict isolation for session hand-off changes.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+        "apps/api/src/fleet/assistant/actions/outcome-note.ts",
+        "apps/api/src/fleet/assistant/actions/prisma-pending-action.repository.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.find-thread-assign.spec.ts",
+        "apps/api/test/integration/fleet/assistant-actions-decide.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/assistant/actions/outcome-delivery.ts",
+        "apps/api/src/fleet/assistant/actions/outcome-delivery.spec.ts",
+        "apps/api/prisma/migrations/20261024090000_pending_action_delivery/migration.sql",
+        "apps/api/test/integration/fleet/assistant-action-delivery.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "deliveryText returns the user's text unchanged when the first note cannot fit, even when a later shorter note would fit.",
+        "findThreadAssign orders actions with equal createdAt values by ascending id.",
+        "PrismaPendingActionRepository.findById returns deliveredMessageId null for an action whose delivery message has not been set."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "`PendingAction` gains `deliveredMessageId String?`, `@@index([threadId, deliveredAt])` and `@@index([deliveredMessageId])` (2aw-D1); no other model changes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/pending-action.domain.ts",
+          "reason": "`PendingActionRecord` gains the optional `deliveredMessageId?: string | null`; the existing `deliveredAt` stays."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/prisma-pending-action.repository.ts",
+          "reason": "the record mapper reads and writes `deliveredMessageId` (2aw-D1)."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+          "reason": "`findThreadAssign` builds `initialMessage.text` from the actions delivered on the initial message, and reads none when there is no initial message (2aw-D4)."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/prisma-fleet-job.repository.find-thread-assign.spec.ts",
+          "reason": "gains AC-10's case (a turn with `initialMessageId` null on a stub with no `pendingAction` delegate); the existing cases keep their stubs and expectations."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "fce85eafe2fe4d6cd6631711344fe15222f654bd"
+    },
+    {
+      "id": "US-002",
+      "title": "Hand off outcome notes in sendMessage",
+      "description": "**Goal** — Atomically select, mark and hand terminal action outcomes to the runner on the creator's next user message.\n\n**Motivation** — S5b-R10 says outcomes reach the agent through the next user message.\n\n**Approach** — **2aw-D3 hand-off in `sendMessage`.** In `PrismaChatThreadRepository.sendMessage`, after the user `chatMessage` is created and before the live / new-turn branch, still inside the same transaction and after the thread `FOR UPDATE` lock:\n1. Read the thread's actions with `status` in `DELIVERABLE_STATUSES` and `deliveredAt` null, ordered by `createdAt` then `id`, at most `MAX_DELIVERED_NOTES`.\n2. Call `deliveryText(notes, input.text, THREAD_LIMITS.messageMaxBytes)`.\n3. Set `deliveredAt = now` and `deliveredMessageId = message.id` on the first `delivered` of them, in one update.\n4. Live branch: the `THREAD_INPUT` payload is `{ messageId, text }` with the delivery text. New-turn branch: `createThreadJob` is unchanged.\n\nThe stored user message keeps `content: input.text`. A duplicate `clientMessageId` and a refused send return or throw before step 1, so they deliver nothing.\n\n**2aw-R2 delivery at hand-off.** An action is delivered in the `sendMessage` transaction that hands its note to the runner path. `deliveredAt` and `deliveredMessageId` are set there. A requeued new-turn job rebuilds the same text from `deliveredMessageId`. A live session that dies before reading its `THREAD_INPUT` does not get the note again; the note stays in the transcript and `koda_get_action` still answers.\n\n**S5b-R10.** Outcomes reach the agent through the next user message; no server-to-session command.\n\nUse US-001's exports and outcomeNote(action), never stored system message text. Existing creator checks, duplicate checks on both sides of the locks, refusal gates, retry logic, plain stored message, transaction boundaries and post-commit notification/placement stay intact. Extend prisma-chat-thread.repository.spec.ts's sendRepo fake client with `pendingAction: { findMany: async () => [], updateMany: async () => ({ count: 0 }) }` so the five existing sendMessage tests keep their current expectations. New real-PG cases belong in assistant-action-send-delivery.integration.spec.ts, using the upstream assistant-action-delivery.integration.spec.ts seed helpers as the pattern; finish the prior pending message before testing the next send. The US-001 -> US-002 seam is exercised through sendMessage and then findThreadAssign for a newly created turn.\n\n**Scope** — In: 2aw-D3, atomic hand-off markers, live payload delivery and new-turn integration. Out: helper/migration/assignment reconstruction owned by US-001, and all web changes. Changes to the runner, the fleet protocol or `FLEET_PROTOCOL_VERSION`; the delivery text rides the existing `THREAD_INPUT` text and `initialMessage.text` fields. Re-sending an outcome note when a live session ends before it reads the `THREAD_INPUT` that carried it (2aw-R2); the note stays in the transcript and `koda_get_action` answers. Delivering outcome notes on `THREAD_ANSWER` (an answer to a pending question); only a user message delivers them. US-002 only: marking the notes and creating the new-turn job share one transaction, so a failure rolls back both; no AC forces a mid-transaction failure. US-002 only: two `sendMessage` calls on the same thread are serialised by the thread row lock; no AC drives them concurrently.\n\n**Interface** — Existing `PrismaChatThreadRepository.sendMessage` keeps its public input/result signature; shared `deliveryText(notes: readonly string[], userText: string, maxBytes: number): { text: string; delivered: number }` controls both marked prefix and live text. Live branch payload: `{ messageId, text }`.",
+      "acceptanceCriteria": [
+        "[integration] For a thread with a live RUNNING session and one EXECUTED action with deliveredAt null, PrismaChatThreadRepository.sendMessage with text 'hello' creates a THREAD_INPUT command whose payload text equals 'Updates on actions you proposed:\n<outcomeNote of that action>\n\nhello'.",
+        "[integration] Given a live RUNNING session and one EXECUTED action with deliveredAt null, after sendMessage with input.text 'hello' the action's deliveredAt is not null.",
+        "[integration] Given a live RUNNING session and one EXECUTED action with deliveredAt null, after sendMessage with input.text 'hello' the action's deliveredMessageId equals the new user message's id.",
+        "[integration] Given a live RUNNING session and one EXECUTED action with deliveredAt null, after sendMessage with text 'hello' the stored user ChatMessage content equals 'hello'.",
+        "[integration] After a live-session send delivers an EXECUTED action and the first message's status is set to complete, a second sendMessage with text 'again' creates a THREAD_INPUT command whose payload text equals 'again'.",
+        "[integration] A PENDING action on the thread keeps deliveredAt null after sendMessage.",
+        "[integration] An APPROVED action on the thread keeps deliveredAt null after sendMessage.",
+        "[integration] A terminal undelivered action on a different thread keeps deliveredAt null after sendMessage on this thread.",
+        "[integration] With 21 terminal undelivered actions seeded with distinct, increasing createdAt values on a live thread, sendMessage leaves exactly 20 of them with deliveredAt set.",
+        "[integration] With 21 terminal undelivered actions seeded with distinct, increasing createdAt values on a live thread, after sendMessage the action with the latest createdAt keeps deliveredAt null.",
+        "[integration] With two terminal undelivered actions and a user text whose length the test computes with deliveryText so that only the first note fits within 32,768 bytes, sendMessage sets deliveredAt on the first action and leaves the second null.",
+        "[integration] A sendMessage repeated with the clientMessageId of an earlier send leaves a terminal action created between the two sends with deliveredAt null.",
+        "[integration] For a thread with no live session and one REJECTED undelivered action, after sendMessage with text 'hi' creates the new-turn job, findThreadAssign(jobId).initialMessage.text equals 'Updates on actions you proposed:\n<outcomeNote of that action>\n\nhi'.",
+        "[integration] Given a thread with no live session and one REJECTED undelivered action, after sendMessage with text 'hi' creates the new-turn job, the action's deliveredMessageId equals the new user message's id.",
+        "[integration] When sendMessage refuses a send because a prior message is still pending, a terminal undelivered action on that thread keeps deliveredAt null.",
+        "[integration] When sendMessage refuses a send because a prior message is still pending, a terminal undelivered action on that thread keeps deliveredMessageId null."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "delivery",
+        "transaction",
+        "sessions",
+        "integration"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A bounded selection/update extends one existing locked send transaction and reuses US-001's formatter; creator-authorized session input still requires strict isolated TDD.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
+        "apps/api/src/fleet/threads/prisma-chat-thread.repository.spec.ts",
+        "apps/api/src/fleet/assistant/actions/outcome-delivery.ts",
+        "apps/api/src/fleet/assistant/actions/outcome-note.ts",
+        "apps/api/test/integration/fleet/assistant-action-delivery.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/assistant-action-send-delivery.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "After a successful send, FAILED and EXPIRED actions on that thread receive deliveredAt and deliveredMessageId just as EXECUTED and REJECTED actions do.",
+        "When no terminal note fits within messageMaxBytes, sendMessage hands off the unchanged user text and leaves all action delivery markers null.",
+        "After the first message completes, a later send delivers a terminal action left undelivered by the previous send's 20-action cap."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
+          "reason": "`sendMessage` selects, marks and sends the undelivered notes under the thread lock (2aw-D3)."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/prisma-chat-thread.repository.spec.ts",
+          "reason": "the `sendRepo` fake's `client` gains `pendingAction: { findMany: async () => [], updateMany: async () => ({ count: 0 }) }` so the five existing `sendMessage` tests keep passing with their current expectations."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "9d203dfe343f48b4188faddb5c26a99ca4266adc"
+    },
+    {
+      "id": "US-003",
+      "title": "Model assistant actions in web approvals",
+      "description": "**Goal** — Add assistant-action approval types, requester-only decisions, payload/route helpers and all bilingual copy needed by this feature.\n\n**Motivation** — `canDecide` (`fleet-approvals.ts:132-135`) would let any DEVELOPER decide, while the API lets only the requester decide (2a-R2), so the buttons would answer 403.\n\n**Approach** — **2aw-D5 web types.** `APPROVAL_TYPES` gains `assistant_action`, and `APPROVAL_DECISIONS` gains `approve` and `reject`.\n\n**2aw-D6 web permission.** `ApprovalViewer` gains `userId: string | null` on both kinds.\n- The project and admin approvals pages fill it from `useAuth().user.value?.id ?? null`.\n- `useApprovalNotifications` fills it, on both the admin viewer (line 134) and the project viewer (line 143), from the `userId` it already reads.\n- `canDecide` takes `Pick<FleetApprovalDto, 'type' | 'status' | 'payload'>` (every caller already passes a full row) and answers, for `assistant_action`: `status === 'pending'` and `viewer.userId !== null` and the payload's `requestedById === viewer.userId`, on both viewer kinds. Every other type keeps today's rule.\n- `keyboardDecision` for an `assistant_action` the viewer can decide answers `approve: null`, `deny: { decision: 'reject' }`. The A key never approves an action, because the preview may not be on screen.\n\n**2aw-D7 action payload.** `assistantPayload(a)` in `fleet-approvals.ts` answers `{ actionId, tool, threadId, threadPath, requestedById }` when the approval is `assistant_action` and every field is a string, else null. `toActionBody(decision: 'approve' | 'reject', comment: string)` answers `{ decision }` plus the trimmed comment when it is not empty (`commentField`).\n\n**2aw-D10 preview source.** `threadApiPath(threadPath)` in `lib/fleet-approvals.ts` maps `/threads/<id>` to `/threads/<id>`, and `/<slug>/threads/<id>` to `/projects/<slug>/threads/<id>`. It answers null for any other shape.\n\n**2aw-D8 web labels.** Every key below is added by US-003, in `apps/web/i18n/locales/en.json` and `zh.json`; later stories only use them.\n- `approvalSummary` for `assistant_action` answers `t('fleet.approvals.summary.assistant', { tool })`, or `t('fleet.approvals.type.assistant_action')` when the payload does not parse.\n- New keys in both locales:\n  - `fleet.approvals.type.assistant_action`\n  - `fleet.approvals.decision.approve`, `.reject`\n  - `fleet.approvals.toast.approve`, `.reject`\n  - `fleet.approvals.summary.assistant` (`{tool}`)\n  - `fleet.approvals.assistant.*`: panel strings `openThread`, `requesterOnly`, `previewLoading`, `previewGone`, `previewFailed`, `approve`, `reject`, `expiresIn` (`{time}`)\n  - `notifications.kinds.action_requested` (`{tool}`)\n  - `fleet.threads.action.*`: card strings `title` (`{tool}`), `expiresIn` (`{time}`), `approve`, `reject`, `awaiting`, `decideFailed`\n  - `fleet.threads.message.system`\n- No new `fleet.*` string contains `|` or `@`; `fleet-locale-parity.spec.ts` refuses both.\n- US-003 owns both locale files for this feature, because `nax plan` keeps one Modifies entry per path.\n\n**2a-R2.** Only the action's requester (the thread creator) may approve or reject, on either inbox prefix.\n\nModify fleet-types.ts, fleet-approvals.ts, both approvals pages and useApprovalNotifications.ts. Existing viewer literals in tests/lib/fleet-approvals.spec.ts gain userId:null while the existing bash/budget assertions remain unchanged. Extend the closed locale key lists for type, decision and toast in tests/i18n/fleet-locale-parity.spec.ts without weakening parity. Keep the existing desktop notification project-scan eligibility; a requester with VIEWER membership may decide directly but scanning is not expanded here.\n\n**Scope** — In: 2aw-D5 approval unions, 2aw-D6..D8, threadApiPath and every locale key used by later stories. Out: inbox preview composable/panel (US-004), PendingActionDto/ThreadDetailDto and timeline cards (US-005), system row/notification behavior tests (US-006), project list race (US-007). A decide control for `assistant_action` on the home dashboard (`HomeNeedsYou.vue`); it keeps the label and its link. Filtering `assistant_action` rows out of the approval badge counts or the home dashboard's pending list. The job page's approvals list (`components/fleet/JobApprovals.vue`) keeps its bash summary fallback for an `assistant_action` row; the inbox and the thread card are where an action is read and decided. Approving from the keyboard: the inbox A key never approves an `assistant_action` (2aw-D6). Desktop approval notifications for a requester whose project role is VIEWER: `useApprovalNotifications` keeps scanning only projects where the viewer can manage or work; the notification bell still shows `action_requested`.\n\n**Interface** — `ApprovalViewer` gains `userId: string | null` on both kinds; `canDecide` takes `Pick<FleetApprovalDto, 'type' | 'status' | 'payload'>`; `assistantPayload(a)` answers `{ actionId, tool, threadId, threadPath, requestedById }` or null; `toActionBody(decision: 'approve' | 'reject', comment: string)` returns `DecideApprovalBody`; `threadApiPath(threadPath)` returns a mapped API path or null.",
+      "acceptanceCriteria": [
+        "[unit] canDecide for a pending assistant_action whose payload requestedById is u1 returns true for a project viewer with userId u1 and canWork false.",
+        "[unit] canDecide for a pending assistant_action whose payload requestedById is u1 returns false for a project viewer with userId u2, canManage true and canWork true.",
+        "[unit] canDecide for a pending assistant_action whose payload requestedById is u1 returns false for an admin viewer with userId u2.",
+        "[unit] canDecide for a pending assistant_action whose payload requestedById is u1 returns true for an admin viewer with userId u1.",
+        "[unit] canDecide for a pending assistant_action whose payload requestedById is u1 returns false for a viewer with userId null.",
+        "[unit] canDecide for an assistant_action with status approved returns false for its requester.",
+        "[unit] keyboardDecision for a pending assistant_action and its requester returns { approve: null, deny: { decision: 'reject' } }.",
+        "[unit] assistantPayload returns { actionId, tool, threadId, threadPath, requestedById } for an assistant_action whose payload has those five strings.",
+        "[unit] assistantPayload returns null for an assistant_action whose payload lacks threadPath.",
+        "[unit] toActionBody('approve', '  ') returns { decision: 'approve' }.",
+        "[unit] toActionBody('reject', ' no ') returns { decision: 'reject', comment: 'no' }.",
+        "[unit] approvalSummary for an assistant_action with tool koda_add_comment returns the fleet.approvals.summary.assistant text with { tool: 'koda_add_comment' }, not the budget label.",
+        "[unit] threadApiPath('/threads/t1') returns '/threads/t1'.",
+        "[unit] threadApiPath('/acme/threads/t1') returns '/projects/acme/threads/t1'.",
+        "[unit] threadApiPath('/acme/tickets/t1') returns null.",
+        "[unit] canDecide for a pending budget_override_required approval and a project viewer returns viewer.canManage, preserving the existing budget permission rule regardless of viewer.userId.",
+        "[unit] canDecide for a pending nax_bash_escalate approval and a project viewer returns viewer.canWork, preserving the existing bash permission rule regardless of viewer.userId.",
+        "[unit] canDecide returns true for an admin viewer with userId null viewing either a pending budget_override_required or pending nax_bash_escalate approval, preserving the existing admin rule for those types."
+      ],
+      "tags": [
+        "feature",
+        "web",
+        "approvals",
+        "access-control",
+        "i18n",
+        "shared-contract"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Shared approval unions, role-sensitive requester-only access, keyboard decisions, notification viewer wiring and bilingual contracts span several consumers; access-control override requires strict TDD.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/web/lib/fleet-approvals.ts",
+        "apps/web/composables/useApprovalNotifications.ts",
+        "apps/web/pages/[project]/fleet/approvals.vue",
+        "apps/web/pages/admin/fleet/approvals.vue",
+        "apps/web/tests/i18n/fleet-locale-parity.spec.ts",
+        "apps/web/tests/pages/fleet-approvals-pages.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "approvalSummary returns the fleet.approvals.type.assistant_action label for an assistant_action with a malformed payload.",
+        "canDecide returns false for a pending assistant_action whose requestedById is absent or not a string.",
+        "keyboardDecision returns { approve: null, deny: null } for a non-requester viewing a pending assistant_action.",
+        "threadApiPath returns null for an absolute URL, a protocol-relative URL or a path with extra segments."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/lib/fleet-types.ts",
+          "reason": "`APPROVAL_TYPES` gains `assistant_action`; `APPROVAL_DECISIONS` gains `approve` and `reject` (2aw-D5)."
+        },
+        {
+          "path": "apps/web/lib/fleet-approvals.ts",
+          "reason": "`ApprovalViewer.userId`, the `canDecide` signature and `assistant_action` rule, `keyboardDecision`, `assistantPayload`, `toActionBody`, `threadApiPath` and the `approvalSummary` branch (2aw-D6..D8, D10)."
+        },
+        {
+          "path": "apps/web/tests/lib/fleet-approvals.spec.ts",
+          "reason": "existing viewer literals gain `userId: null` so they type-check; the expectations for the two existing types are unchanged."
+        },
+        {
+          "path": "apps/web/tests/i18n/fleet-locale-parity.spec.ts",
+          "reason": "the closed lists at 49 (`fleet.approvals.type`), 53 (`decision`) and 60 (`toast`) gain `assistant_action`, `approve` / `reject`, and `approve` / `reject`; the invariant stays \"every listed key exists in both locales\"."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "every 2aw-D8 key for this feature: the approvals type, decision, toast, summary and `fleet.approvals.assistant.*` keys, `fleet.threads.action.*`, `fleet.threads.message.system` and `notifications.kinds.action_requested`."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "the same 2aw-D8 keys as the English locale file, in Chinese, with the same parameters."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-approvals-pages.spec.ts",
+          "reason": "the exact viewer expectations at 49, 60-61, 78 and 105 gain `userId` (the stubbed auth id on the project cases, and on the admin case), and the mounts stub `useAuth`; the other assertions are unchanged."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "7281bbb348fca1ac6e03e9658c6bf47a22d10aef"
+    },
+    {
+      "id": "US-004",
+      "title": "Preview and decide actions in the inbox",
+      "description": "**Goal** — Show an assistant-action inbox panel that fetches the exact pending preview before permitting requester approval.\n\n**Motivation** — The web cannot act on the new approvals either.\n\n**Approach** — **2aw-D9 inbox panel.** `components/fleet/ApprovalActionPanel.vue`, with props `{ approval, canDecide, busy, now }` and the emit `decide(DecideApprovalBody)`.\n- It always shows the tool, the countdown (`secondsLeft` / `countdownText`) and an \"open thread\" link to `threadPath`.\n- When `canDecide` is false it shows `requesterOnly` and fetches nothing.\n- When `canDecide` is true it calls `useActionPreview().load(threadPath, actionId)`. Approve is disabled until that answers a preview. Reject is enabled whenever `canDecide` holds and `busy` is false.\n- The answer `null` (the action is no longer pending) shows `previewGone`, with Approve disabled. A failed load shows `previewFailed`, with Approve disabled.\n- The preview renders through `{{ }}` interpolation in a `whitespace-pre-wrap` block, never `v-html`.\n\n`ApprovalInbox.vue` renders it for a pending `assistant_action`, before the outcome fallback, with `:can-decide=\"canDecide(detail, viewer)\"`.\n\n**2aw-D10 preview source.** `composables/useActionPreview.ts` exports `useActionPreview()` with `load(threadPath: string, actionId: string): Promise<string | null>`.\n- `threadApiPath(threadPath)` in `lib/fleet-approvals.ts` maps `/threads/<id>` to `/threads/<id>`, and `/<slug>/threads/<id>` to `/projects/<slug>/threads/<id>`. It answers null for any other shape.\n- `load` GETs that path through `useApi()` and answers the `preview` of the `pendingActions` entry whose `id` is `actionId`, or null when there is none. It throws when `threadApiPath` answers null or the request fails.\n\n**2aw-R1 decide UI.** The requester can decide on the thread card and in the inbox panel. The inbox panel loads the preview from the thread detail before Approve is enabled (S5b-R5).\n\n**S5b-R5.** No write runs without a human approving the exact preview.\n\nUse US-003's assistantPayload, canDecide, toActionBody, threadApiPath and existing locale keys. ApprovalInbox continues to own decide busy state, success/error toasts and 409 refresh behavior through its existing onDecide and useFleetApprovals(base).decide. Follow ApprovalBashPanel's prop/emits pattern but do not copy its expiry-based button hiding. Add a keyed pending action panel branch with approval/canDecide/busy/now and decide forwarding. Extend tests/helpers/mount-sfc.ts's FleetComponentName and FLEET_COMPONENT_FILES with `FleetApprovalActionPanel: 'ApprovalActionPanel.vue'`. In fleet-approval-inbox.spec.ts register the real new panel and add userId to viewer literals, preserving existing bash and budget expectations. Add new component/composable specs. This story runs after US-003 only: the PendingActionDto extension is owned by US-005, so the preview loader must not require US-005's source changes to exist.\n\n**Scope** — In: 2aw-D9, useActionPreview from 2aw-D10, inbox integration and preview/decide tests. Out: shared helper/model/locale implementation (US-003), thread cards and ThreadDetailDto extension (US-005), system rows (US-006), project list race (US-007). Playwright journeys for the action card and the inbox panel; the live check on koda-wk covers the end-to-end path. Editing a proposed action's input before deciding, and deciding several actions in one request. Approving from the keyboard: the inbox A key never approves an `assistant_action` (2aw-D6). Hiding the Approve and Reject buttons once an action's countdown reaches 0; the API answers 409 for an expired action and the card or panel shows that error. US-004 only: a decide racing the action's expiry answers the API's 409, shown as the existing decide error; no AC drives the race.\n\n**Interface** — Props `{ approval, canDecide, busy, now }`; emit `decide(DecideApprovalBody)`; `load(threadPath: string, actionId: string): Promise<string | null>`.",
+      "acceptanceCriteria": [
+        "[unit] Mounting ApprovalInbox on a project base with a pending assistant_action row whose requestedById is the viewer's userId, and expanding it, renders ApprovalActionPanel with an Approve button.",
+        "[unit] Mounting ApprovalInbox on a project base with a pending assistant_action row whose requestedById differs from the viewer's userId, and expanding it, renders the panel with no Approve button.",
+        "[unit] ApprovalActionPanel with canDecide false never calls useActionPreview().load.",
+        "[unit] ApprovalActionPanel with canDecide true calls load with the payload's threadPath and actionId.",
+        "[unit] ApprovalActionPanel with canDecide true renders the preview text returned by useActionPreview().load.",
+        "[unit] While load has not answered, ApprovalActionPanel's Approve button is disabled.",
+        "[unit] When useActionPreview().load answers null, ApprovalActionPanel shows the fleet.approvals.assistant.previewGone text.",
+        "[unit] When useActionPreview().load rejects, ApprovalActionPanel shows the fleet.approvals.assistant.previewFailed text.",
+        "[unit] When useActionPreview().load rejects, ApprovalActionPanel's Approve button stays disabled.",
+        "[unit] A preview containing '<b>x</b>' renders as that literal text, with no b element in ApprovalActionPanel.",
+        "[unit] Clicking Approve after the preview loaded makes ApprovalInbox call useFleetApprovals(base).decide with the approval id and { decision: 'approve' }.",
+        "[unit] Clicking Reject in ApprovalActionPanel emits decide with { decision: 'reject' }.",
+        "[unit] useActionPreview().load('/acme/threads/t1', 'a2') GETs '/projects/acme/threads/t1' through useApi().",
+        "[unit] useActionPreview().load('/acme/threads/t1', 'a2') returns the preview of the pendingActions entry with id a2, and null when no entry has that id.",
+        "[unit] useActionPreview().load('/acme/tickets/t1', 'a2') rejects without making a request.",
+        "[unit] When load answers null because the action is no longer pending, ApprovalActionPanel's Approve button remains disabled.",
+        "[unit] Expanding a pending nax_bash_escalate row in ApprovalInbox still renders FleetApprovalBashPanel, preserving the existing bash panel path.",
+        "[unit] Expanding a pending budget_override_required row in ApprovalInbox still renders FleetApprovalBudgetPanel, preserving the existing budget panel path."
+      ],
+      "tags": [
+        "feature",
+        "web",
+        "approvals",
+        "access-control",
+        "preview",
+        "inbox"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A small GET composable and panel follow the existing bash-panel/inbox mutation pattern; the requester-only exact-preview approval gate requires strict isolated TDD.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/web/components/fleet/ApprovalBashPanel.vue",
+        "apps/web/components/fleet/ApprovalInbox.vue",
+        "apps/web/composables/useFleetApprovals.ts",
+        "apps/web/lib/fleet-approvals.ts",
+        "apps/web/tests/helpers/mount-sfc.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/components/fleet/ApprovalActionPanel.vue",
+        "apps/web/composables/useActionPreview.ts",
+        "apps/web/tests/components/fleet-approval-action-panel.spec.ts",
+        "apps/web/tests/composables/useActionPreview.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When preview loading fails, the requester can still click Reject while busy is false.",
+        "While busy is true, the panel disables both Approve and Reject even after a preview has loaded.",
+        "When a pending action's countdown reaches zero, its action buttons remain visible.",
+        "useActionPreview().load('/threads/t1', 'a1') GETs '/threads/t1' and returns the matching pending action preview."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/components/fleet/ApprovalInbox.vue",
+          "reason": "renders `ApprovalActionPanel` for a pending `assistant_action` (2aw-D9)."
+        },
+        {
+          "path": "apps/web/tests/components/fleet-approval-inbox.spec.ts",
+          "reason": "`fleetComponents` (line 61) registers `FleetApprovalActionPanel`, stubs `useActionPreview` (answering a preview) as a mount global, and viewer literals gain `userId`; the existing bash and budget cases keep their expectations."
+        },
+        {
+          "path": "apps/web/tests/helpers/mount-sfc.ts",
+          "reason": "`FleetComponentName` and `FLEET_COMPONENT_FILES` (lines 273-295) gain `FleetApprovalActionPanel: 'ApprovalActionPanel.vue'`, so the inbox spec can mount the real panel."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "51fd6d2aefa5151a30c3bff2a54e2f6b424273e5"
+    },
+    {
+      "id": "US-005",
+      "title": "Show requester action cards in thread timelines",
+      "description": "**Goal** — Render pending action previews on both thread pages and let only the creator decide each linked approval.\n\n**Motivation** — The web `ThreadDetailDto` (`apps/web/lib/thread-types.ts:122-125`) has no `pendingActions`, so the thread page cannot show what waits for a decision.\n\n**Approach** — **2aw-D5 web types.** `ThreadDetailDto` gains the optional `pendingActions?: PendingActionDto[]` (the API always sends it; optional so existing typed fixtures stay valid), where `PendingActionDto = { id, approvalId, tool, preview, projectSlug, expiresAt, createdAt }`, all strings except `approvalId: string | null` (null while propose links it, `thread.dto.ts:44`). That mirrors the API (`apps/api/src/fleet/threads/dto/thread.dto.ts:42-55`).\n\n**2aw-D11 thread card.** `components/fleet/threads/ThreadActionCard.vue`, with props `{ action: PendingActionDto, canDecide: boolean, now: Date }`.\n- It shows `title`, the preview (interpolation only, `whitespace-pre-wrap`) and `expiresIn`.\n- When `canDecide` holds and `approvalId` is not null it shows Approve and Reject. Otherwise it shows `awaiting`.\n- A click calls `useFleetApprovals({ kind: 'project', slug: action.projectSlug }).decide(action.approvalId, toActionBody(decision, ''))`. Both buttons are disabled while that runs.\n- On success the card hides itself (the thread's live `thread` frame then reloads `pendingActions`). On failure it toasts `extractApiError(err)` and re-enables the buttons.\n\n`ThreadTimeline.vue` renders one card per `thread.pendingActions` entry, below the question card and above the entries, with `:can-decide=\"isCreator\"` and `:now` from `useApprovalCountdown().now` (`composables/useApprovalCountdown.ts:33`). Both thread pages already pass `is-creator`. A `pendingActions` that is absent renders no card.\n\n**2a-R2.** Only the action's requester (the thread creator) may approve or reject, on either inbox prefix.\n\nConsume US-003's toActionBody and locale keys without changing either locale file. Use ThreadQuestionCard's interpolation-only styling pattern, existing secondsLeft/countdownText for the expiry, and the existing useFleetApprovals decide path so badge invalidation remains intact. WORKSPACE actions may act in a different project than the thread home: always use action.projectSlug. Add the new source/spec files and extend thread-types.ts and ThreadTimeline.vue. In tests/components/thread-timeline.spec.ts register ThreadActionCard and stub useApprovalCountdown, preserving existing expectations. Existing typed ThreadDetailDto fixtures need no change, because `pendingActions` is optional.\n\n**Scope** — In: PendingActionDto/ThreadDetailDto mirror, 2aw-D11 card, shared timeline integration and tests. Out: inbox panel/preview loader (US-004), approval helpers/permissions/locales (US-003), system rows (US-006), project list race (US-007). Playwright journeys for the action card and the inbox panel; the live check on koda-wk covers the end-to-end path. Showing whether an outcome note was delivered, anywhere in the web. Editing a proposed action's input before deciding, and deciding several actions in one request. Hiding the Approve and Reject buttons once an action's countdown reaches 0; the API answers 409 for an expired action and the card or panel shows that error. Any API change beyond outcome delivery: approvals, decide, the sweeper, the notification subscriber and the thread detail DTO are unchanged.\n\n**Interface** — `pendingActions?: PendingActionDto[]`; `PendingActionDto = { id, approvalId, tool, preview, projectSlug, expiresAt, createdAt }`, all strings except `approvalId: string | null`; props `{ action: PendingActionDto, canDecide: boolean, now: Date }`; decision call `useFleetApprovals({ kind: 'project', slug: action.projectSlug }).decide(action.approvalId, toActionBody(decision, ''))`.",
+      "acceptanceCriteria": [
+        "[unit] Mounting ThreadTimeline with a thread whose pendingActions has two entries renders two ThreadActionCards.",
+        "[unit] Mounting ThreadTimeline with isCreator true and two pending actions with non-null approvalIds renders an Approve button on each card.",
+        "[unit] Mounting ThreadTimeline with isCreator true and two pending actions with non-null approvalIds renders a Reject button on each card.",
+        "[unit] Mounting ThreadTimeline with isCreator false and pending actions renders the fleet.threads.action.awaiting text and no Approve button on each card.",
+        "[unit] Mounting ThreadTimeline with a thread whose pendingActions is empty renders no ThreadActionCard.",
+        "[unit] A card for an action with approvalId null shows the awaiting text and no Approve button, even with canDecide true.",
+        "[unit] Clicking Approve on a card for an action with approvalId ap1 and projectSlug acme calls useFleetApprovals({ kind: 'project', slug: 'acme' }).decide with ap1 and { decision: 'approve' }.",
+        "[unit] Clicking Reject on a card for an action with approvalId ap1 and projectSlug acme calls useFleetApprovals({ kind: 'project', slug: 'acme' }).decide with ap1 and { decision: 'reject' }.",
+        "[unit] While a creator's linked action card awaits its decide response, the card's Approve button is disabled.",
+        "[unit] After a linked action card's decide call resolves, the card is no longer rendered.",
+        "[unit] When a linked action card's decide call rejects with err, the card toasts extractApiError(err).",
+        "[unit] When a creator's linked action card's decide call rejects, the card stays rendered with its Approve button enabled.",
+        "[unit] A card's preview containing '<img src=x>' renders as literal text, with no img element in the card.",
+        "[unit] A card shows the fleet.threads.action.expiresIn text with time equal to countdownText(secondsLeft(action.expiresAt, now)).",
+        "[unit] ThreadTimeline renders no action card when pendingActions is absent from a legacy response, preserving pre-feature payload compatibility."
+      ],
+      "tags": [
+        "feature",
+        "web",
+        "threads",
+        "approvals",
+        "access-control",
+        "preview"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "One standard card, an additive DTO mirror and shared timeline wiring reuse existing decide/countdown paths; creator-only decision controls require strict isolated TDD.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/web/components/fleet/threads/ThreadQuestionCard.vue",
+        "apps/web/components/fleet/threads/ThreadTimeline.vue",
+        "apps/web/lib/thread-types.ts",
+        "apps/web/composables/useFleetApprovals.ts",
+        "apps/web/lib/fleet-approvals.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/components/fleet/threads/ThreadActionCard.vue",
+        "apps/web/tests/components/thread-action-card.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "While decide has not answered, the card's Reject button is disabled.",
+        "For a WORKSPACE thread whose home project differs from action.projectSlug, clicking Approve posts to the action project's approval endpoint.",
+        "At countdown zero, a creator's linked action card retains its Approve and Reject buttons."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/components/thread-timeline.spec.ts",
+          "reason": "`mountTimeline` registers `ThreadActionCard` and stubs `useApprovalCountdown`; existing expectations unchanged."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "8885680756e7bc07934e00fce1c9a00e79b1c31e"
+    },
+    {
+      "id": "US-006",
+      "title": "Render system notes and action notification text",
+      "description": "**Goal** — Give system outcome notes a distinct muted transcript row and use localized action-request notification copy.\n\n**Motivation** — `ThreadMessage.vue:25` renders a `system` note exactly like a user message.\n\n**Approach** — **2aw-D12 system notes.** `ThreadMessage.vue` renders `role === 'system'` as a separate row:\n- `data-testid=\"thread-system-note\"`;\n- muted styling (`text-muted-foreground`, `bg-muted`);\n- a label `t('fleet.threads.message.system')`, then the content through `{{ }}`.\n\nThe note text stays English, as stored (2a-D9).\n\n**2aw-D8 web labels.** Every key below is added by US-003, in `apps/web/i18n/locales/en.json` and `zh.json`; later stories only use them.\n- `notifications.kinds.action_requested` (`{tool}`)\n- `fleet.threads.message.system`\n\nUse the upstream locale keys without editing the locale files. notificationText in lib/notifications.ts already renders from notifications.kinds.<kind> plus params and falls back to the API title for unknown kinds; keep that generic behavior and verify the action_requested route through it. Add `action_requested: ['tool']` to tests/i18n/notifications-fleet-kinds-locale-parity.spec.ts's FLEET_KINDS map, and action_requested assertions to tests/lib/notifications.spec.ts with existing cases unchanged. Create tests/components/thread-system-note.spec.ts and modify the separate system branch in components/fleet/threads/ThreadMessage.vue, preserving assistant markdown and user/tool/stream/error rendering.\n\n**Scope** — In: 2aw-D12, action_requested notification behavior and parameter parity. Out: locale authoring and shared approval model (US-003), inbox controls (US-004), thread action cards (US-005), project list race (US-007), API delivery (US-001/US-002). Showing whether an outcome note was delivered, anywhere in the web. Translating outcome note texts or the delivery header; they stay English (2a-D9). Translating the API `actionRequestedDraft` title; the web shows `notifications.kinds.action_requested` and falls back to that English title only for an unknown kind.\n\n**Interface** — Existing ThreadMessage props remain `{ message: ChatMessageDto; slug?: string }`; the system branch is selected by `role === 'system'` and exposes `data-testid=\"thread-system-note\"`. Existing `notificationText(n: NotificationDto, i18n: NotificationI18n): string` continues to use the locale key and params.",
+      "acceptanceCriteria": [
+        "[unit] ThreadMessage with role system renders a thread-system-note element.",
+        "[unit] ThreadMessage with role system renders the fleet.threads.message.system label inside its thread-system-note element.",
+        "[unit] ThreadMessage with role system renders the message content inside its thread-system-note element.",
+        "[unit] ThreadMessage with role system and content '<b>x</b>' renders the literal text, with no b element.",
+        "[unit] ThreadMessage with role user renders no thread-system-note element.",
+        "[unit] notificationText (lib/notifications.ts) for kind action_requested with params { tool: 'koda_add_comment' } and title 'API title' returns the notifications.kinds.action_requested text, not 'API title'.",
+        "[unit] notificationText for kind action_requested with params { tool: 'koda_add_comment' } returns text containing koda_add_comment.",
+        "[unit] The zh locale has a notifications.kinds.action_requested message that uses the {tool} parameter."
+      ],
+      "tags": [
+        "feature",
+        "web",
+        "threads",
+        "notifications",
+        "i18n",
+        "convention-touch"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Small convention-sensitive presentation branch and notification/locale parity cases reuse existing interpolation and generic notification logic; no permission changes.",
+        "agentProfileId": "claude-haiku",
+        "agent": "claude",
+        "profileModelTier": "fast",
+        "initialAgent": "claude",
+        "initialProfileId": "claude-haiku",
+        "initialModelTier": "fast",
+        "initialComplexity": "medium",
+        "modelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/components/fleet/threads/ThreadMessage.vue",
+        "apps/web/lib/notifications.ts",
+        "apps/web/tests/i18n/notifications-fleet-kinds-locale-parity.spec.ts",
+        "apps/web/tests/lib/notifications.spec.ts",
+        "apps/web/tests/components/thread-timeline.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/components/thread-system-note.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/i18n/notifications-fleet-kinds-locale-parity.spec.ts",
+          "reason": "`FLEET_KINDS` gains `action_requested: ['tool']`."
+        },
+        {
+          "path": "apps/web/tests/lib/notifications.spec.ts",
+          "reason": "gains the `action_requested` cases (AC-6, AC-7); existing cases unchanged."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "915b5ef91f32b4040e7a7729a5139d57ccf1ec68"
+    },
+    {
+      "id": "US-007",
+      "title": "Prevent stale project thread-list reads (#294)",
+      "description": "**Goal** — Prevent an overtaken Active/Archived request from replacing newer project thread rows, URL or page state.\n\n**Motivation** — koda#294: `useThreads(slug).load()` (`apps/web/composables/useThreads.ts:26-34`) has no guard against overlapping reads, so on a fast Active/Archived switch the read that answers last wins.\n\n**Approach** — **2aw-D13 #294.** Mirror `useWorkspaceThreads.ts` (`generation`, lines 58 and 74-78) and `pages/threads/index.vue` (`pageLoad` token):\n- `useThreads(slug).load(status)` keeps a generation counter and resolves `Promise<boolean>`: true when it applied, false when a newer `load` overtook it (it then writes nothing). `ThreadList.load` says so too.\n- `pages/[project]/threads/index.vue` `loadPage` keeps a page token. Only the newest call writes `pending` and `loadFailed`. It returns the `load` result from its `Promise.all` with `members.load()`.\n- `selectStatus` replaces the URL only when that result is true.\n- An overtaken read that rejects still rejects, as in `useWorkspaceThreads`; the page token keeps it from writing.\n\n**2a-R3.** koda#294 rides in S5b-2a.\n\nModify useThreads.ts and pages/[project]/threads/index.vue only for the prescribed generation/page-token behavior; preserve the current query shape, size, enabled flag, role/member loading and ACTIVE query representation. Extend tests/composables/useThreads.spec.ts with deferred out-of-order reads, retaining its two existing assertions/expectations. In tests/pages/threads-page.spec.ts change the useThreads stub's default load to resolve true and add out-of-order page cases, patterned on useWorkspaceThreads.spec.ts and workspace-threads-page.spec.ts. A stale read must not change rows, enabled flag or status; its page completion must not change URL, show an error or clear a newer spinner.\n\n**Scope** — In: 2aw-D13 generation guard, page token, boolean result propagation and #294 regression behavior. Out: personal list behavior changes, API delivery (US-001/US-002), approval models/panels/cards/system notes (US-003..US-006).\n\n**Interface** — `useThreads(slug).load(status)` resolves `Promise<boolean>`; `ThreadList.load` exposes the same return type. `loadPage` retains `Promise<boolean>` and returns the thread load's applied result from `Promise.all` with `members.load()`.",
+      "acceptanceCriteria": [
+        "[unit] useThreads(slug).load('ARCHIVED') then load('ACTIVE'), with the ACTIVE read answering first, leaves status ACTIVE.",
+        "[unit] When useThreads(slug).load('ARCHIVED') starts before load('ACTIVE') but the ACTIVE response arrives first, threads holds the ACTIVE rows after both loads settle.",
+        "[unit] When useThreads(slug).load('ARCHIVED') starts before load('ACTIVE') but the ACTIVE response arrives first, the overtaken ARCHIVED load resolves false.",
+        "[unit] When useThreads(slug).load('ARCHIVED') starts before load('ACTIVE') but the ACTIVE response arrives first, the ACTIVE load resolves true.",
+        "[unit] An overtaken load that rejects after a newer one applied leaves the newer rows in threads.",
+        "[unit] On the project threads page, clicking Archived then Active, with the Active read answering first, leaves the Active toggle pressed.",
+        "[unit] On the project threads page, clicking Archived then Active with the Active read answering first leaves the URL query on Active after both reads settle, preserving the existing representation with query.status absent or undefined rather than ARCHIVED.",
+        "[unit] On the project threads page, a stale Archived read that rejects after the Active read applied shows no error state.",
+        "[unit] On the project threads page, a stale read that answers before the newer read does not clear the newer read's loading state.",
+        "[unit] useThreads('web').load() GETs '/projects/web/threads' with { query: { status: 'ACTIVE', size: '100' } }, preserving the existing default list request.",
+        "[unit] When the newest useThreads.load response has threadsEnabled false, the composable exposes threadsEnabled.value false, preserving the existing enabled-flag mapping."
+      ],
+      "tags": [
+        "fix",
+        "web",
+        "threads",
+        "race-condition",
+        "concurrency",
+        "294"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Four-file async state bug fix mirrors an existing generation/page-token pattern with deterministic deferred-promise tests; no new abstraction or access-control behavior.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/web/composables/useThreads.ts",
+        "apps/web/composables/useWorkspaceThreads.ts",
+        "apps/web/pages/threads/index.vue",
+        "apps/web/tests/composables/useWorkspaceThreads.spec.ts",
+        "apps/web/tests/pages/workspace-threads-page.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "An overtaken useThreads.load success leaves threadsEnabled equal to the value returned by the newer applied request.",
+        "An overtaken useThreads.load request that fails still rejects to its caller.",
+        "When the newest project thread-list request fails, the page shows its error state and clears its loading state."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/composables/useThreads.ts",
+          "reason": "`load` resolves `boolean` behind a generation counter (2aw-D13)."
+        },
+        {
+          "path": "apps/web/pages/[project]/threads/index.vue",
+          "reason": "`loadPage` page token; `selectStatus` replaces the URL only on an applied read (2aw-D13)."
+        },
+        {
+          "path": "apps/web/tests/composables/useThreads.spec.ts",
+          "reason": "gains the overtaken-read cases; the two existing tests keep their expectations."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-page.spec.ts",
+          "reason": "its `useThreads` stub's `load` resolves `true`; gains the out-of-order page cases."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "2217490218d3384710d5c213359112225d9a2967"
+    }
+  ],
+  "analysis": "Discovery and architecture: This is an enhancement to the existing Koda monorepo, not greenfield. codebase-memory MCP is unavailable in this session, so findings were established with direct source reads and text searches. The supplied detected Express/Next.js labels are inaccurate: apps/api/package.json:45-62 declares Nathapp/NestJS 12 and platform-fastify, while apps/web/package.json:6-15 and :23-39 declare Nuxt 3, Vue, Jest and Nuxt type checking. Follow .nax/mono/apps/api/context.md and .nax/mono/apps/web/context.md; implementation agents writing NestJS must read the nathapp-nestjs-patterns skill. Keep business rules and authorization authoritative in the API; the web uses hand-written DTO mirrors and useApi, not a generated client. Seven stories and their workdirs/dependencies are binding. API delivery and web presentation complete the already-shipped API action flow and should deploy together.\n\nUS-001 persistence and assignment: PendingAction already has deliveredAt but lacks deliveredMessageId and both delivery indexes (apps/api/prisma/schema.prisma:1114-1138). Add only the nullable String column and @@index([threadId, deliveredAt]), @@index([deliveredMessageId]), with migration apps/api/prisma/migrations/20261024090000_pending_action_delivery/migration.sql. No relation/FK or backfill is specified: existing terminal rows with deliveredAt null become eligible on the creator's next send. Apply the additive migration before code querying the new column, regenerate the Prisma 7 client with bun run db:generate, and never edit src/generated/prisma manually. PendingActionRecord is at apps/api/src/fleet/assistant/actions/pending-action.domain.ts:19-42; keep deliveredMessageId optional so existing literals remain compatible. Its repository maps create/update data at prisma-pending-action.repository.ts:47-67 and read records at :159-180; map the new field in all three directions. outcomeNote at outcome-note.ts:17-26 accepts only id/tool/status/result and caps result text through NOTE_RESULT_MAX=500 (:4-10), so raw selected action rows suffice: do not hydrate projectSlug or read stored system messages for delivery. Its default branch throws on nonterminal statuses, making the terminal-status filter essential. Introduce the pure outcome-delivery module with the exact header, oldest-prefix byte-fitting algorithm, terminal allowlist and 20-action selection cap. THREAD_LIMITS.messageMaxBytes is 32768 (apps/api/src/fleet/common/thread-jobs.ts:24); UTF-8 bytes, not JS characters, govern both runner paths. findThreadAssign currently reads the optional initial ChatMessage and forwards message.content unchanged (apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:226-243). Add a deterministic ordered read by deliveredMessageId only when the initial message exists; do not touch a pendingAction delegate for null initialMessageId. Placement consumes findThreadAssign at apps/api/src/fleet/jobs/placement.service.ts:88, :163 and :191, so preserve all other assignment fields, kind normalization, feature fallback, resume, backend and skills. Existing assignment unit specs at prisma-fleet-job.repository.find-thread-assign.spec.ts:7-72 deliberately use Prisma stubs without pendingAction and turns with initialMessageId null. Preserve these cases and add the explicit no-delegate regression. New real-PG assignment/mapper integration coverage belongs in test/integration/fleet/assistant-action-delivery.integration.spec.ts; assistant-actions-decide.integration.spec.ts:36-73 shows thread/job/action seeding, and :78-96 shows DB-mode HTTP bootstrap.\n\nUS-002 transactional hand-off: PrismaChatThreadRepository.sendMessage (apps/api/src/fleet/threads/prisma-chat-thread.repository.ts:312-378) already scopes reads, checks createdById, deduplicates before and after locking, locks the current job and thread, retries changed current-job identity, and runs refusal checks before allocating a user message. Preserve this ordering. At :344-350 it creates the stored user row with input.text; immediately after that and before the live/new-turn branch select at most 20 same-thread terminal undelivered actions, ordered createdAt/id, render outcomeNote, fit the delivery text, and update only the delivered prefix in one updateMany using the transaction-scoped Prisma client. Use one now for deliveredAt and the new user message id for deliveredMessageId. Do not replace stored user content. The live branch currently uses input.text in THREAD_INPUT (:354-356); only that payload changes to the formatted text. The new-turn branch (:359-366) still passes the unchanged message into createThreadJob; the created FleetThreadTurn initialMessageId (:437-441) lets US-001 rebuild the enriched text during assignment/reassignment. Runner notification and placement already happen after txManager.run (:369-374); preserve that commit boundary and lock ordering. sendRefusalFor (:381-400) treats a pending/streaming message as in-flight, so integration tests must complete the prior message before a second real send. Extend the sendRepo unit fake in prisma-chat-thread.repository.spec.ts with empty pendingAction.findMany/updateMany delegates without changing its five existing send expectations. New PG integration tests cover live text, persisted markers, unchanged user content, terminal filtering, thread isolation, caps, byte overflow, duplicate/refused sends, and the US-001/new-turn seam. Rollback and lock serialization remain required by the existing transaction design but no acceptance test forces mid-transaction failure or concurrent sends. Delivery is at hand-off, not runner acknowledgement: a dead live session does not cause redelivery.\n\nUS-003 shared approvals contract, permissions and locales: apps/web/lib/fleet-types.ts:456-461 lacks assistant_action/approve/reject; extending these arrays changes derived unions, type-filter options and dynamic decision/toast labels. ApprovalViewer currently has no userId (apps/web/lib/fleet-approvals.ts:19). canDecide (:132-136) currently grants admins everything and developers non-budget types, so the assistant_action requester check must precede those existing rules and preserve budget/bash behavior. keyboardDecision (:171-183) currently falls through to keep_paused; actions need A=null and D=reject. Add assistantPayload validation of five string fields, toActionBody using existing commentField (:152-155), strict threadApiPath route-shape mapping, and action summary before the current budget fallback (:316-344). Production viewer constructors that must gain the auth user id are apps/web/pages/[project]/fleet/approvals.vue:18, pages/admin/fleet/approvals.vue:9, and composables/useApprovalNotifications.ts:134, :144. The notification scanner rechecks current auth identity (:122-127) and gates project scanning to canManage/canWork (:148); keep that existing VIEWER scanning limitation. canDecide consumers include ApprovalInbox and useApprovalNotifications; the page tests and approval library/inbox test viewer literals need compatible userId values without weakening existing behavior. US-003 owns ALL new keys in en.json and zh.json, including later card/system/notification keys, to avoid concurrent locale edits. fleet-locale-parity.spec.ts:49, :53, :60 closes the type/decision/toast lists and :79-97 checks parity; add only the stated enum values and preserve the no-pipe/no-at-sign invariant. No API DTO/controller change is needed, so no OpenAPI/CLI regeneration is expected for this feature. If an implementation unexpectedly alters a public contract, use the repository's export/generation workflow rather than editing generated clients.\n\nUS-004 inbox preview integration: ApprovalInbox currently renders budget or bash panels before the outcome fallback (apps/web/components/fleet/ApprovalInbox.vue:64-84). Insert a keyed pending assistant_action branch using canDecide(detail, viewer), deciding, now and existing onDecide. onDecide (:265-287) already posts through useFleetApprovals, updates the detail, words the decision toast and refreshes on conflict; keep this behavior for 403/409 failures instead of creating another decide pipeline. ApprovalBashPanel.vue:62-88 is the props/emits/helper pattern, but do NOT copy its left!==0 button-hiding behavior (:35): action controls stay visible at countdown zero and the API decides expiry. The new panel must never fetch for non-requesters; a requester sees Approve only after the exact pending action preview was loaded from the thread, and null/error never enables it. Reject remains available while preview loading/failure when allowed and not busy. Render every preview by interpolation. useActionPreview uses useApi.$api.get and the shared threadApiPath mapping; useFleetApprovals already implements mutation invalidation and badge version updates at composables/useFleetApprovals.ts:43-49. Important dependency seam: US-004 depends only on US-003, whereas the named PendingActionDto/ThreadDetailDto extension belongs to parallel US-005. Implement the preview response typing structurally if necessary so US-004 does not require US-005 to run first and does not take ownership of thread-types.ts. Register FleetApprovalActionPanel in both FleetComponentName and FLEET_COMPONENT_FILES (tests/helpers/mount-sfc.ts:273-295), mount the real panel in fleet-approval-inbox.spec.ts, and add the two specified component/composable specs.\n\nUS-005 thread cards and shared DTO mirror: The API already exports PendingActionDto and pendingActions on ThreadDetailDto (apps/api/src/fleet/threads/dto/thread.dto.ts:42-61); do not alter those endpoints. Its pendingActions reader scopes through the thread, selects only PENDING, orders createdAt/id and hydrates the action project's slug (prisma-chat-thread.repository.ts:113-128). In WORKSPACE threads action.projectSlug can differ from the home project: decide must use the action's project slug. The web mirror lacks the field (apps/web/lib/thread-types.ts:122-125); add the specified named DTO and required pendingActions array but tolerate an absent value when rendering legacy payloads. ThreadTimeline (components/fleet/threads/ThreadTimeline.vue:36-59) already receives thread/isCreator and renders the question, reset marker and timestamped entries. Both project and workspace pages use it (pages/[project]/threads/[id].vue:103; pages/threads/[id].vue:75), so one integration point serves both. Insert cards below the question and above entries, leave timeline ordering logic unchanged, and share useApprovalCountdown().now (composables/useApprovalCountdown.ts:33-38). A card's local success state hides it until live thread reload removes it; failure preserves it and re-enables controls with extractApiError toast. Do not infer ownership from project role; pass existing isCreator and require non-null approvalId. Existing ThreadQuestionCard.vue:19-25, :37-51 provides an interpolation-only card pattern. tests/components/thread-timeline.spec.ts:193-222 has a ThreadDetailDto fixture without pendingActions; add compatible fixture data, card registration and clock stubbing. Other typed ThreadDetailDto fixtures and page mounts of the real timeline may also need additive empty-array/clock mock adaptation (tests/pages/threads-detail-page.spec.ts:175 and workspace-thread-detail-page.spec.ts:160), preserving old assertions.\n\nUS-006 system rows and notification wording: ThreadMessage currently gives all non-assistant content the same row (apps/web/components/fleet/threads/ThreadMessage.vue:23-29). Add a separate system branch with the required test id, bg-muted/text-muted-foreground and translated label, interpolating stored English content only. Preserve the existing assistant-only sanitized markdown path and all user, tool, streaming and error behavior (:25-51). notificationText already dynamically uses notifications.kinds.<kind> and params, falling back to API title only for an unknown key (apps/web/lib/notifications.ts:9-11); the action_requested locale supplied by US-003 should make this work without needless production refactoring. US-006 owns the system row source change, new thread-system-note.spec.ts, notification behavior cases in tests/lib/notifications.spec.ts and action_requested:['tool'] in the FLEET_KINDS parity map (tests/i18n/notifications-fleet-kinds-locale-parity.spec.ts:10-24), not another edit to the locales.\n\nUS-007 #294 race: useThreads.load is currently Promise<void> and unconditionally writes rows, enabled and status after GET (apps/web/composables/useThreads.ts:12-35). Mirror the local generation guard and Promise<boolean> semantics in useWorkspaceThreads.ts:58-86; a stale success returns false and writes nothing, while an HTTP rejection continues to reject. Its only production caller located by text search is pages/[project]/threads/index.vue:9, :21. The page currently treats Promise.all success as true and unconditionally settles error/loading (index.vue:17-37); mirror the pageLoad guard in pages/threads/index.vue:27-42, retain members.load in Promise.all and return its threads load result, and replace the status query only after an applied read. ACTIVE remains represented by removing/omitting status as today (:33). tests/composables/useThreads.spec.ts:35-60 already pins the exact query and threadsEnabled behavior; keep both tests. tests/pages/threads-page.spec.ts:54 currently defaults load to Promise<void>; change it to resolve true and add controlled deferred reads. Use existing workspace composable/page overtaken-read tests as patterns, including a stale rejection and stale completion before the newest read settles.\n\nTesting, boundaries and risk: API unit tests use Vitest with vi, decorator metadata and generated Prisma client imports; PG integration files run only in DB mode. Use bun run test:scoped on the actual integration paths with the compose test Postgres ready (bun run test:db:up from apps/api); without Docker in an agent sandbox the operator must bring it up first. DB-mode runs reset the database, so do not run the two API integration suites simultaneously against the same DB. Web tests use Jest in a Node environment plus the custom mount-sfc fake renderer, not browser DOM assumptions (apps/web/package.json:61-74; tests/helpers/mount-sfc.ts:273-312). Extend its component registrations and auto-import mocks when mounting new composables; preserve old bash, budget, timeline, streaming, query and permission assertions. Generated nax acceptance files stay under each app's .nax/features directory and are run with the app-specific acceptance command, never copied into source tests. No Playwright journeys are added; the spec's live koda-wk check supplies end-to-end confirmation. Main risks are premature delivery marking on duplicate/refused sends, byte/ordering mismatch between live and assignment paths, accidental redelivery, null-message stub breakage, admin role bypassing requester-only decisions, enabling approval before preview, stale async preview enabling the wrong action, XSS from previews/notes, required DTO fixture churn, and stale page writes after out-of-order reads. The prescribed shared helper, transaction markers, requester-first rule, interpolation-only rendering and two-level generation guards address these risks. Security-sensitive permission/approval and session hand-off stories use isolated three-session TDD. No runner/protocol changes, new dependencies, new routes, approval backend rewrites, delivery UI or project navigation redesign are needed.\n\nRefine-pass audit: Enumerated all 86 explicit spec ACs: US-001 1..11, US-002 1..14, US-003 1..15, US-004 1..15, US-005 1..14, US-006 1..8 and US-007 1..9. Each remains in the same story and original order, with anaphoric setup expanded where needed; qualifiers such as the no-pendingAction stub, another-message action, first-message completion, between-sends action, even-canDecide-true and no-request-on-invalid-path are preserved. US-005's creator button setup explicitly uses non-null approvalIds, as required by D11 and its null-approval AC. Active URL means the existing absent/undefined status query, not a new literal Active value. All eight failure-table rows are represented: overflow and 20-action cap in US-002/9..11; duplicate/refused sends in US-002/12,15..16; requeue replay in US-001/12; gone-preview text and disabled Approve in US-004/7,16; failed/invalid preview in US-004/8..9,15; failed card decide in US-005/11..12; stale list/page completion in US-007/1..9. Every story already has negative-path criteria. Audit-required regression anchors additionally pin existing budget/bash/admin permissions, inbox panel dispatch, absent pendingActions compatibility, and default query/enabled mapping. The 18 feature-level exclusions remain verbatim and in order, including the final story-qualified bullets because the spec places them in its feature-level Out of Scope section. No story IDs, workdirs or binding dependencies changed. US-003 context now includes both spec-recommended approvals pages, the scanner and parity test; US-007 includes all four workspace reference sources/tests. Re-reading the current transaction/panel/card patterns supports medium complexity for US-002, US-004 and US-005 while retaining the mandated strict TDD strategy for their session/creator approval gates. US-001 and US-003 remain complex because their shared persistence/contract changes cross module boundaries.",
+  "outOfScope": [
+    "Changes to the runner, the fleet protocol or `FLEET_PROTOCOL_VERSION`; the delivery text rides the existing `THREAD_INPUT` text and `initialMessage.text` fields.",
+    "Re-sending an outcome note when a live session ends before it reads the `THREAD_INPUT` that carried it (2aw-R2); the note stays in the transcript and `koda_get_action` answers.",
+    "Delivering outcome notes on `THREAD_ANSWER` (an answer to a pending question); only a user message delivers them.",
+    "Showing whether an outcome note was delivered, anywhere in the web.",
+    "Translating outcome note texts or the delivery header; they stay English (2a-D9).",
+    "Editing a proposed action's input before deciding, and deciding several actions in one request.",
+    "Approving from the keyboard: the inbox A key never approves an `assistant_action` (2aw-D6).",
+    "Desktop approval notifications for a requester whose project role is VIEWER: `useApprovalNotifications` keeps scanning only projects where the viewer can manage or work; the notification bell still shows `action_requested`.",
+    "A decide control for `assistant_action` on the home dashboard (`HomeNeedsYou.vue`); it keeps the label and its link.",
+    "Filtering `assistant_action` rows out of the approval badge counts or the home dashboard's pending list.",
+    "Translating the API `actionRequestedDraft` title; the web shows `notifications.kinds.action_requested` and falls back to that English title only for an unknown kind.",
+    "Playwright journeys for the action card and the inbox panel; the live check on koda-wk covers the end-to-end path.",
+    "Any API change beyond outcome delivery: approvals, decide, the sweeper, the notification subscriber and the thread detail DTO are unchanged.",
+    "The job page's approvals list (`components/fleet/JobApprovals.vue`) keeps its bash summary fallback for an `assistant_action` row; the inbox and the thread card are where an action is read and decided.",
+    "Hiding the Approve and Reject buttons once an action's countdown reaches 0; the API answers 409 for an expired action and the card or panel shows that error.",
+    "US-002 only: marking the notes and creating the new-turn job share one transaction, so a failure rolls back both; no AC forces a mid-transaction failure.",
+    "US-002 only: two `sendMessage` calls on the same thread are serialised by the thread row lock; no AC drives them concurrently.",
+    "US-004 only: a decide racing the action's expiry answers the API's 409, shown as the existing decide error; no AC drives the race."
+  ],
+  "routingProfile": "cross-agent"
+}

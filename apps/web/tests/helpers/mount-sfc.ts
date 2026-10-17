@@ -125,6 +125,8 @@ const NUXT_AUTO_IMPORTS = [
   'useFleetDispatchOptions', 'useFleetJobs', 'useProjectViewerRole', 'useProjectMembers',
   'useAdminUsers', 'useProjectEvents', 'useAuth', 'useProjectMemberNames', 'useFleetJobLogs',
   'useFleetRepoConfig', 'useSkillCatalog', 'useProjectSkills', 'useThread', 'useThreads', 'useThreadHandoffJobs', 'onBeforeRouteLeave',
+  // The inbox's assistant-action panel (US-004) reads its exact preview through this composable.
+  'useActionPreview',
   // The personal thread pages (US-005/US-006) auto-import these two; tests override them through globals.
   'useWorkspaceThreads', 'useWorkspaceThread',
   // The workspace thread detail page (US-006) reads the home project's runner summaries through it.
@@ -282,6 +284,7 @@ const FLEET_COMPONENT_FILES: Record<FleetComponentName, string> = {
   FleetApprovalOutcome: 'ApprovalOutcome.vue',
   FleetApprovalInbox: 'ApprovalInbox.vue',
   FleetApprovalBashPanel: 'ApprovalBashPanel.vue',
+  FleetApprovalActionPanel: 'ApprovalActionPanel.vue',
   FleetJobApprovals: 'JobApprovals.vue',
   FleetJobWorkflow: 'FleetJobWorkflow.vue',
   FleetAnalyticsPanel: 'analytics/Panel.vue',
@@ -409,6 +412,7 @@ export type FleetComponentName =
   | 'FleetAge' | 'FleetRunnerCapabilityChips' | 'FleetRepoReachabilityBadge' | 'FleetNativeSelect' | 'FleetBudgetTable'
   | 'FleetScheduleTable' | 'FleetScheduleHistory'
   | 'FleetApprovalBudgetPanel' | 'FleetApprovalOutcome' | 'FleetApprovalInbox' | 'FleetApprovalBashPanel'
+  | 'FleetApprovalActionPanel'
   | 'FleetJobApprovals' | 'FleetJobWorkflow'
   | 'FleetAnalyticsPanel' | 'FleetAnalyticsBarList' | 'FleetAnalyticsSeriesLegend' | 'FleetAnalyticsChartDataTable'
   | 'FleetAnalyticsSummaryTiles' | 'FleetAnalyticsRangePicker' | 'FleetAnalyticsStoryTable' | 'FleetAnalyticsJobTable'

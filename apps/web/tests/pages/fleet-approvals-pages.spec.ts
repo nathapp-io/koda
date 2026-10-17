@@ -38,6 +38,7 @@ describe('project approvals page', () => {
         definePageMeta: () => undefined,
         useRoute: () => ({ params: { project: 'koda' } }),
         useI18n: () => enI18n(),
+        useAuth: () => ({ user: ref({ id: 'u1' }) }),
         useProjectViewerRole: () => ({ data: ref({ canManage: true, viewerRole: 'ADMIN' }) }),
         useProjectMemberNames: () => ({ load: jest.fn(async () => undefined), nameOf: (id: string) => (id === 'u1' ? 'Ada' : null) }),
         useFleetDispatchOptions: () => ({ load: jest.fn(async () => undefined), repoName: (id: string) => `repo-${id}` }),
@@ -46,7 +47,8 @@ describe('project approvals page', () => {
     await settle()
     const props = seen[0]
     expect(props.base).toEqual({ kind: 'project', slug: 'koda' })
-    expect(props.viewer).toEqual({ kind: 'project', canManage: true, canWork: true })
+    // 2aw-D6: the viewer carries the signed-in user, because an assistant_action is decided by its requester alone.
+    expect(props.viewer).toEqual({ kind: 'project', canManage: true, canWork: true, userId: 'u1' })
     expect((props.nameOf as (id: string) => string | null)('u1')).toBe('Ada')
     expect((props.jobLink as (p: string, j: string) => string | null)('p1', 'j1')).toBe('/koda/fleet/jobs/j1')
     const scopeLabel = props.scopeLabel as (p: { scopeType: string; scopeId: string | null }) => string | null
@@ -56,9 +58,30 @@ describe('project approvals page', () => {
     app.unmount()
   })
 
+  test('a signed-out visitor gets userId null (2aw-D6)', async () => {
+    const seen: Array<Record<string, unknown>> = []
+    const app = mountSfc(projectPage, {
+      components: { ...uiStubs, FleetApprovalInbox: inboxStub(seen) },
+      globals: {
+        ref, computed,
+        onMounted: Vue.onMounted,
+        definePageMeta: () => undefined,
+        useRoute: () => ({ params: { project: 'koda' } }),
+        useI18n: () => enI18n(),
+        useAuth: () => ({ user: ref(null) }),
+        useProjectViewerRole: () => ({ data: ref({ canManage: false, viewerRole: 'DEVELOPER' }) }),
+        useProjectMemberNames: () => ({ load: jest.fn(async () => undefined), nameOf: () => null }),
+        useFleetDispatchOptions: () => ({ load: jest.fn(async () => undefined), repoName: (id: string) => id }),
+      },
+    })
+    await settle()
+    expect(seen[0]?.viewer).toEqual({ kind: 'project', canManage: false, canWork: true, userId: null })
+    app.unmount()
+  })
+
   test.each([
-    ['DEVELOPER', { canManage: false, viewerRole: 'DEVELOPER' }, { kind: 'project', canManage: false, canWork: true }],
-    ['VIEWER', { canManage: false, viewerRole: 'VIEWER' }, { kind: 'project', canManage: false, canWork: false }],
+    ['DEVELOPER', { canManage: false, viewerRole: 'DEVELOPER' }, { kind: 'project', canManage: false, canWork: true, userId: 'u1' }],
+    ['VIEWER', { canManage: false, viewerRole: 'VIEWER' }, { kind: 'project', canManage: false, canWork: false, userId: 'u1' }],
   ])('a %s gets canWork from canWorkOnFleet (D290)', async (_name, role, expected) => {
     const seen: Array<Record<string, unknown>> = []
     const app = mountSfc(projectPage, {
@@ -69,6 +92,7 @@ describe('project approvals page', () => {
         definePageMeta: () => undefined,
         useRoute: () => ({ params: { project: 'koda' } }),
         useI18n: () => enI18n(),
+        useAuth: () => ({ user: ref({ id: 'u1' }) }),
         useProjectViewerRole: () => ({ data: ref(role) }),
         useProjectMemberNames: () => ({ load: jest.fn(async () => undefined), nameOf: () => null }),
         useFleetDispatchOptions: () => ({ load: jest.fn(async () => undefined), repoName: (id: string) => id }),
@@ -81,7 +105,7 @@ describe('project approvals page', () => {
 })
 
 describe('admin approvals page', () => {
-  function mountAdmin(seen: Array<Record<string, unknown>>) {
+  function mountAdmin(seen: Array<Record<string, unknown>>, user: unknown = { id: 'u1' }) {
     return mountSfc(adminPage, {
       components: { ...uiStubs, FleetApprovalInbox: inboxStub(seen) },
       globals: {
@@ -89,6 +113,7 @@ describe('admin approvals page', () => {
         onMounted: Vue.onMounted,
         definePageMeta: () => undefined,
         useI18n: () => enI18n(),
+        useAuth: () => ({ user: ref(user) }),
         useFleetRepos: () => ({ projects: ref([{ id: 'p1', slug: 'koda', name: 'Koda' }]), loadProjects: jest.fn(async () => undefined) }),
         useFleetRunners: () => ({ runners: ref([{ id: 'r1', name: 'mac-1' }]), load: jest.fn(async () => undefined) }),
         useAdminUsers: () => ({ users: ref([{ id: 'u1', email: 'ada@k.t', name: 'Ada' }]), load: jest.fn(async () => undefined) }),
@@ -102,7 +127,8 @@ describe('admin approvals page', () => {
     await settle()
     const props = seen[0]
     expect(props.base).toEqual({ kind: 'admin' })
-    expect(props.viewer).toEqual({ kind: 'admin' })
+    // 2aw-D6: the admin viewer knows who is signed in, so an assistant_action can be the requester's.
+    expect(props.viewer).toEqual({ kind: 'admin', userId: 'u1' })
     const projectName = props.projectName as (id: string | null) => string
     expect(projectName('p1')).toBe('koda')
     expect(projectName(null)).toBe('Fleet-wide')
@@ -114,6 +140,14 @@ describe('admin approvals page', () => {
     const scopeLabel = props.scopeLabel as (p: { scopeType: string; scopeId: string | null }) => string | null
     expect(scopeLabel({ scopeType: 'runner', scopeId: 'r1' })).toBe('mac-1')
     expect(scopeLabel({ scopeType: 'project', scopeId: 'p1' })).toBe('koda')
+    app.unmount()
+  })
+
+  test('a signed-out admin viewer gets userId null (2aw-D6)', async () => {
+    const seen: Array<Record<string, unknown>> = []
+    const app = mountAdmin(seen, null)
+    await settle()
+    expect(seen[0]?.viewer).toEqual({ kind: 'admin', userId: null })
     app.unmount()
   })
 

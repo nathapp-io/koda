@@ -851,7 +851,16 @@
       },
       "message": {
         "required": "Message cannot be empty.",
-        "tooLong": "Message must be 32768 bytes or fewer."
+        "tooLong": "Message must be 32768 bytes or fewer.",
+        "system": "System note"
+      },
+      "action": {
+        "title": "The assistant asks to run {tool}",
+        "expiresIn": "Expires in {time} unless decided.",
+        "approve": "Approve",
+        "reject": "Reject",
+        "awaiting": "Waiting for the person who asked to decide.",
+        "decideFailed": "Could not decide the action."
       },
       "refusal": {
         "disabled": "Sending is disabled for this thread.",
@@ -1314,14 +1323,16 @@
       "subtitleAdmin": "Every fleet decision, including fleet-wide and runner budgets.",
       "tabs": { "pending": "Pending", "all": "All" },
       "filters": { "type": "Type", "allTypes": "All types" },
-      "type": { "budget_override_required": "Budget override", "nax_bash_escalate": "Shell command" },
+      "type": { "budget_override_required": "Budget override", "nax_bash_escalate": "Shell command", "assistant_action": "Assistant action" },
       "status": { "pending": "Pending", "approved": "Approved", "rejected": "Rejected", "expired": "Expired", "cancelled": "Cancelled" },
       "decision": {
         "allow": "Allowed once",
         "allow_for_job": "Allowed for this job",
         "deny": "Denied",
         "raise_budget_and_resume": "Raised and resumed",
-        "keep_paused": "Kept paused"
+        "keep_paused": "Kept paused",
+        "approve": "Approved",
+        "reject": "Rejected"
       },
       "resolvedBy": {
         "user": "Decided in the inbox",
@@ -1335,7 +1346,8 @@
       "summary": {
         "budget": "Budget for {scope} stopped at {spent} of {amount}",
         "bash": "A job asks to run a shell command",
-        "bashCommand": "Run {command} ({stage})"
+        "bashCommand": "Run {command} ({stage})",
+        "assistant": "The assistant asks to run {tool}"
       },
       "empty": { "pending": "Nothing is waiting for a decision.", "all": "No approvals yet." },
       "linked": "Linked approval",
@@ -1405,7 +1417,19 @@
         "requeueFailed": "{count} job(s) could not be re-queued.",
         "allow": "Allowed. The runner passes the answer to nax.",
         "allow_for_job": "Allowed for this job. The runner passes the answer to nax.",
-        "deny": "Denied. The runner passes the answer to nax."
+        "deny": "Denied. The runner passes the answer to nax.",
+        "approve": "Approved. The runner runs the action.",
+        "reject": "Rejected. The action will not run."
+      },
+      "assistant": {
+        "openThread": "Open the thread",
+        "requesterOnly": "Only the person who asked can decide this action.",
+        "previewLoading": "Loading the preview...",
+        "previewGone": "This action is no longer waiting for a decision.",
+        "previewFailed": "The preview could not be loaded. Reject it, or decide in the thread.",
+        "approve": "Approve",
+        "reject": "Reject",
+        "expiresIn": "Expires in {time} unless decided."
       },
       "delivery": {
         "delivered": "Delivered to nax.",
@@ -2166,6 +2190,7 @@
       "job_crashed": "Fleet job on {repo} crashed",
       "job_pr_opened": "Fleet job on {repo} opened a PR",
       "approval_requested": "Approval needed: {kind} on {repo}",
+      "action_requested": "Confirm an assistant action: {tool}",
       "budget_warn": "Budget {scope} reached {spentUsd} of {amountUsd} USD",
       "budget_hard_stop": "Budget {scope} stopped at {spentUsd} of {amountUsd} USD",
       "runner_offline": "Runner {runner} is offline",

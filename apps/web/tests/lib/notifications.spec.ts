@@ -29,6 +29,15 @@ describe('notificationText (S4a §5: web renders from kind + params)', () => {
     expect(notificationText({ ...base, kind, params }, enI18n())).toBe(expected)
   })
 
+  test('AC-6: action_requested with params returns the locale text, not the API title', () => {
+    expect(notificationText({ ...base, kind: 'action_requested', title: 'API title', params: { tool: 'koda_add_comment' } }, enI18n())).not.toBe('API title')
+  })
+
+  test('AC-7: action_requested text contains the tool parameter', () => {
+    const result = notificationText({ ...base, kind: 'action_requested', title: 'API title', params: { tool: 'koda_add_comment' } }, enI18n())
+    expect(result).toContain('koda_add_comment')
+  })
+
   test('an unknown kind falls back to the API title', () => {
     expect(notificationText({ ...base, kind: 'from_the_future', title: 'Server text' }, enI18n())).toBe('Server text')
   })

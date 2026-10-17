@@ -20,7 +20,11 @@ const { t } = useI18n()
 </script>
 
 <template>
-  <div class="rounded-md border border-border bg-card p-3 text-sm" data-testid="thread-message">
+  <div v-if="props.message.role === 'system'" class="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground" data-testid="thread-system-note">
+    <div class="font-medium">{{ t('fleet.threads.message.system') }}</div>
+    <div class="mt-1 whitespace-pre-wrap break-words">{{ props.message.content }}</div>
+  </div>
+  <div v-else class="rounded-md border border-border bg-card p-3 text-sm" data-testid="thread-message">
     <div
       v-if="props.message.role === 'assistant' && props.message.content"
       class="whitespace-pre-wrap break-words"

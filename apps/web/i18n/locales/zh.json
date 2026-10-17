@@ -851,7 +851,16 @@
       },
       "message": {
         "required": "消息不能为空。",
-        "tooLong": "消息长度不能超过 32768 字节。"
+        "tooLong": "消息长度不能超过 32768 字节。",
+        "system": "系统消息"
+      },
+      "action": {
+        "title": "助手请求运行 {tool}",
+        "expiresIn": "若未决定，将在 {time} 后过期。",
+        "approve": "批准",
+        "reject": "拒绝",
+        "awaiting": "等待发起人决定。",
+        "decideFailed": "无法决定该操作。"
       },
       "refusal": {
         "disabled": "该线程已禁止发送。",
@@ -1314,14 +1323,16 @@
       "subtitleAdmin": "集群中的所有决定，包括全局和运行器预算。",
       "tabs": { "pending": "待处理", "all": "全部" },
       "filters": { "type": "类型", "allTypes": "全部类型" },
-      "type": { "budget_override_required": "预算超额", "nax_bash_escalate": "Shell 命令" },
+      "type": { "budget_override_required": "预算超额", "nax_bash_escalate": "Shell 命令", "assistant_action": "助手操作" },
       "status": { "pending": "待处理", "approved": "已批准", "rejected": "已拒绝", "expired": "已过期", "cancelled": "已取消" },
       "decision": {
         "allow": "允许一次",
         "allow_for_job": "本任务内允许",
         "deny": "已拒绝",
         "raise_budget_and_resume": "已提高并恢复",
-        "keep_paused": "保持暂停"
+        "keep_paused": "保持暂停",
+        "approve": "已批准",
+        "reject": "已拒绝"
       },
       "resolvedBy": {
         "user": "在收件箱中决定",
@@ -1335,7 +1346,8 @@
       "summary": {
         "budget": "{scope} 的预算在 {spent} / {amount} 时停止",
         "bash": "有任务请求运行 shell 命令",
-        "bashCommand": "运行 {command}（{stage}）"
+        "bashCommand": "运行 {command}（{stage}）",
+        "assistant": "助手请求运行 {tool}"
       },
       "empty": { "pending": "没有等待决定的审批。", "all": "暂无审批。" },
       "linked": "链接的审批",
@@ -1405,7 +1417,19 @@
         "requeueFailed": "{count} 个任务无法重新排队。",
         "allow": "已允许，runner 会将答复转交 nax。",
         "allow_for_job": "已在本任务内允许，runner 会将答复转交 nax。",
-        "deny": "已拒绝，runner 会将答复转交 nax。"
+        "deny": "已拒绝，runner 会将答复转交 nax。",
+        "approve": "已批准，runner 将执行该操作。",
+        "reject": "已拒绝，该操作不会执行。"
+      },
+      "assistant": {
+        "openThread": "打开会话",
+        "requesterOnly": "只有发起人可以决定此操作。",
+        "previewLoading": "正在加载预览…",
+        "previewGone": "此操作已不再等待决定。",
+        "previewFailed": "无法加载预览。你可以拒绝它，或到会话中决定。",
+        "approve": "批准",
+        "reject": "拒绝",
+        "expiresIn": "若未决定，将在 {time} 后过期。"
       },
       "delivery": {
         "delivered": "已送达 nax。",
@@ -2166,6 +2190,7 @@
       "job_crashed": "{repo} 上的 fleet 任务崩溃",
       "job_pr_opened": "{repo} 上的 fleet 任务创建了 PR",
       "approval_requested": "需要审批：{repo} 上的 {kind}",
+      "action_requested": "确认助手操作：{tool}",
       "budget_warn": "预算 {scope} 已用 {spentUsd} / {amountUsd} USD",
       "budget_hard_stop": "预算 {scope} 在 {spentUsd} / {amountUsd} USD 处停止",
       "runner_offline": "Runner {runner} 已离线",

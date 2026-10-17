@@ -1,10 +1,10 @@
 import { describe, test, expect } from '@jest/globals'
 import {
-  approvalSummary,
+  approvalSummary, assistantPayload,
   keyboardDecision, badgeTarget, badgeText, bashChoices, bashPayload, budgetPayload, buildApprovalQuery,
   buildRaiseSchema, canDecide, commandPreview, commentTooLong, countdownText, deliveryView, firstPending,
   inboxPath, pendingByPolicy, raiseAmountError, requeueFailure, requeueResults, resumedAmount, secondsLeft,
-  sortPending, toBashBody, toKeepPausedBody, toRaiseBody,
+  sortPending, threadApiPath, toActionBody, toBashBody, toKeepPausedBody, toRaiseBody,
 } from '../../lib/fleet-approvals'
 import type { FleetApprovalDto } from '../../lib/fleet-types'
 import { enI18n } from '../helpers/fleet-harness'
@@ -16,6 +16,13 @@ const approval = (id: string, over: Partial<FleetApprovalDto> = {}): FleetApprov
   payload: { ...budget }, outcome: null, requestedAt: '2026-10-03T10:00:00.000Z', expiresAt: null, decision: null,
   decidedById: null, decidedAt: null, resolvedBy: null, comment: null, ...over,
 })
+
+/** S5b 2a-D5: what `ApprovalCloser.openAssistant` stores on an `assistant_action` approval. */
+const actionFields = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  actionId: 'act1', tool: 'koda_add_comment', threadId: 't1', threadPath: '/threads/t1', requestedById: 'u1', ...over,
+})
+const actionRow = (over: Partial<FleetApprovalDto> = {}, payload: Record<string, unknown> = {}): FleetApprovalDto =>
+  approval('ap1', { type: 'assistant_action', policyId: null, jobId: 'j1', payload: actionFields(payload), ...over })
 
 describe('buildApprovalQuery', () => {
   test('pending asks for one page of 100 pending rows', () => {
@@ -57,10 +64,11 @@ describe('budgetPayload', () => {
 })
 
 describe('canDecide (D244, Review Focus 5)', () => {
-  const admin = { kind: 'admin' } as const
-  const manager = { kind: 'project', canManage: true, canWork: true } as const
-  const member = { kind: 'project', canManage: false, canWork: false } as const
-  const developer = { kind: 'project', canManage: false, canWork: true } as const
+  // The existing budget/bash rules do not read the viewer's user id, so a signed-out struct is enough here.
+  const admin = { kind: 'admin', userId: null } as const
+  const manager = { kind: 'project', canManage: true, canWork: true, userId: null } as const
+  const member = { kind: 'project', canManage: false, canWork: false, userId: null } as const
+  const developer = { kind: 'project', canManage: false, canWork: true, userId: null } as const
   test('a pending budget override: admin inbox or project ADMIN', () => {
     expect(canDecide(approval('a'), admin)).toBe(true)
     expect(canDecide(approval('a'), manager)).toBe(true)
@@ -75,6 +83,111 @@ describe('canDecide (D244, Review Focus 5)', () => {
     expect(canDecide(bash, member)).toBe(false)
     expect(canDecide(approval('a'), developer)).toBe(false)
     expect(canDecide({ ...bash, status: 'expired' }, admin)).toBe(false)
+  })
+})
+
+describe('canDecide for assistant_action (2aw-D6)', () => {
+  test('AC-1: the requester decides even as a project VIEWER who cannot work', () => {
+    expect(canDecide(actionRow(), { kind: 'project', canManage: false, canWork: false, userId: 'u1' })).toBe(true)
+  })
+  test('AC-2: a project ADMIN who is not the requester cannot', () => {
+    expect(canDecide(actionRow(), { kind: 'project', canManage: true, canWork: true, userId: 'u2' })).toBe(false)
+  })
+  test('AC-3: a global ADMIN who is not the requester cannot', () => {
+    expect(canDecide(actionRow(), { kind: 'admin', userId: 'u2' })).toBe(false)
+  })
+  test('AC-4: a global ADMIN who is the requester can', () => {
+    expect(canDecide(actionRow(), { kind: 'admin', userId: 'u1' })).toBe(true)
+  })
+  test('AC-5: nobody signed in never decides, on either viewer kind', () => {
+    expect(canDecide(actionRow(), { kind: 'project', canManage: true, canWork: true, userId: null })).toBe(false)
+    expect(canDecide(actionRow(), { kind: 'admin', userId: null })).toBe(false)
+  })
+  test('AC-6: an action that is no longer pending is not decided again, not even by its requester', () => {
+    expect(canDecide(actionRow({ status: 'approved' }), { kind: 'admin', userId: 'u1' })).toBe(false)
+  })
+  test('a payload that does not parse is decided by nobody', () => {
+    expect(canDecide(actionRow({}, { threadPath: 7 }), { kind: 'admin', userId: 'u1' })).toBe(false)
+  })
+})
+
+describe('canDecide keeps the existing rules for the older types (AC-16..AC-18)', () => {
+  test('AC-16: a pending budget override still follows viewer.canManage, whoever the viewer is', () => {
+    expect(canDecide(approval('a'), { kind: 'project', canManage: true, canWork: false, userId: 'u2' })).toBe(true)
+    expect(canDecide(approval('a'), { kind: 'project', canManage: false, canWork: true, userId: 'u1' })).toBe(false)
+  })
+  test('AC-17: a pending bash ask still follows viewer.canWork, whoever the viewer is', () => {
+    const bash = approval('a', { type: 'nax_bash_escalate', policyId: null })
+    expect(canDecide(bash, { kind: 'project', canManage: false, canWork: true, userId: 'u2' })).toBe(true)
+    expect(canDecide(bash, { kind: 'project', canManage: true, canWork: false, userId: 'u1' })).toBe(false)
+  })
+  test('AC-18: an admin viewer needs no user id for those two types', () => {
+    expect(canDecide(approval('a'), { kind: 'admin', userId: null })).toBe(true)
+    expect(canDecide(approval('a', { type: 'nax_bash_escalate', policyId: null }), { kind: 'admin', userId: null })).toBe(true)
+  })
+})
+
+describe('assistantPayload (2aw-D7)', () => {
+  test('AC-8: the five strings of a proposed action', () => {
+    expect(assistantPayload(actionRow())).toEqual({
+      actionId: 'act1', tool: 'koda_add_comment', threadId: 't1', threadPath: '/threads/t1', requestedById: 'u1',
+    })
+  })
+  test('AC-9: a payload without threadPath does not parse', () => {
+    expect(assistantPayload(actionRow({}, { threadPath: undefined }))).toBeNull()
+  })
+  test('another type, and any non-string field, does not parse', () => {
+    expect(assistantPayload(approval('a'))).toBeNull()
+    expect(assistantPayload(actionRow({}, { requestedById: 7 }))).toBeNull()
+    expect(assistantPayload(actionRow({}, { threadId: null }))).toBeNull()
+  })
+})
+
+describe('toActionBody (2aw-D7)', () => {
+  test('AC-10: a blank comment is dropped', () => {
+    expect(toActionBody('approve', '  ')).toEqual({ decision: 'approve' })
+  })
+  test('AC-11: a comment is trimmed', () => {
+    expect(toActionBody('reject', ' no ')).toEqual({ decision: 'reject', comment: 'no' })
+  })
+})
+
+describe('threadApiPath (2aw-D10)', () => {
+  test('AC-13: a workspace thread path is already an API path', () => {
+    expect(threadApiPath('/threads/t1')).toBe('/threads/t1')
+  })
+  test('AC-14: a project thread path gains the projects prefix', () => {
+    expect(threadApiPath('/acme/threads/t1')).toBe('/projects/acme/threads/t1')
+  })
+  test('AC-15: any other shape does not parse', () => {
+    expect(threadApiPath('/acme/tickets/t1')).toBeNull()
+  })
+  test.each(['', '/threads', '/threads/', '/acme/threads', '/threads/t1/t2', '/acme/threads/t1/x', 'threads/t1', '/acme//threads/t1'])('%s does not parse', (path) => {
+    expect(threadApiPath(path)).toBeNull()
+  })
+})
+
+describe('keyboardDecision for assistant_action (2aw-D6)', () => {
+  test('AC-7: the requester only ever rejects from the keyboard', () => {
+    expect(keyboardDecision(actionRow(), { kind: 'project', canManage: false, canWork: false, userId: 'u1' }))
+      .toEqual({ approve: null, deny: { decision: 'reject' } })
+    // The same for an admin requester: the A key must never approve an action.
+    expect(keyboardDecision(actionRow(), { kind: 'admin', userId: 'u1' }))
+      .toEqual({ approve: null, deny: { decision: 'reject' } })
+  })
+  test('a viewer who cannot decide gets no keyboard decisions', () => {
+    expect(keyboardDecision(actionRow(), { kind: 'admin', userId: 'u2' })).toEqual({ approve: null, deny: null })
+  })
+})
+
+describe('approvalSummary for assistant_action (2aw-D8)', () => {
+  const { t } = enI18n()
+  test('AC-12: the tool is named, not the budget label', () => {
+    expect(approvalSummary(t, actionRow(), () => null)).toBe('The assistant asks to run koda_add_comment')
+    expect(approvalSummary(t, actionRow(), () => null)).not.toBe('Budget override')
+  })
+  test('a payload that does not parse falls back to the type label', () => {
+    expect(approvalSummary(t, actionRow({}, { tool: 7 }), () => null)).toBe('Assistant action')
   })
 })
 
@@ -330,7 +443,7 @@ describe('firstPending (D297)', () => {
 })
 
 describe('keyboardDecision (slice 4: inbox A/D keys)', () => {
-  const worker = { kind: 'project' as const, canManage: false, canWork: true }
+  const worker = { kind: 'project' as const, canManage: false, canWork: true, userId: null }
   // A complete valid bash payload — keyboardDecision validates through bashPayload like the panel.
   const bashAsk = (options: string[], over: Record<string, unknown> = {}) => ({
     type: 'nax_bash_escalate', status: 'pending',
@@ -354,14 +467,14 @@ describe('keyboardDecision (slice 4: inbox A/D keys)', () => {
   })
 
   test('a budget ask denies to keep_paused for a manager; approve needs a typed amount so it is null', () => {
-    const manager = { kind: 'project' as const, canManage: true, canWork: true }
+    const manager = { kind: 'project' as const, canManage: true, canWork: true, userId: null }
     const d = keyboardDecision({ type: 'budget_override_required', status: 'pending', payload: {} } as never, manager)
     expect(d.approve).toBeNull()
     expect(d.deny).toEqual({ decision: 'keep_paused' })
   })
 
   test('a viewer without rights gets no keyboard decisions at all (bash needs canWork, budget canManage)', () => {
-    const viewer = { kind: 'project' as const, canManage: false, canWork: false }
+    const viewer = { kind: 'project' as const, canManage: false, canWork: false, userId: null }
     expect(keyboardDecision(bashAsk(['allow', 'deny']) as never, viewer)).toEqual({ approve: null, deny: null })
     expect(keyboardDecision({ type: 'budget_override_required', status: 'pending', payload: {} } as never, worker)).toEqual({ approve: null, deny: null })
   })

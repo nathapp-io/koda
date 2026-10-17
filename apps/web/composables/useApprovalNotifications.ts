@@ -131,7 +131,7 @@ export function useApprovalNotifications(counts: Ref<ApprovalCountsDto | null>) 
       if (entry.at < Date.now() - 86400000 && !active.has(id)) delete history[id]
     }
     if (auth.user.value?.role === 'ADMIN') {
-      await scan({ kind: 'admin' }, { kind: 'admin' }, current)
+      await scan({ kind: 'admin' }, { kind: 'admin', userId: auth.user.value?.id ?? null }, current)
       return
     }
     for (const project of snapshot.projects) {
@@ -141,7 +141,10 @@ export function useApprovalNotifications(counts: Ref<ApprovalCountsDto | null>) 
       try {
         const member = await $api.get<{ viewerRole?: string | null; canManage?: boolean }>(apiPath`/projects/${project.slug}/members`, { query: { size: '1' } })
         if (!current()) return
-        const viewer: ApprovalViewer = { kind: 'project', canManage: member.canManage === true, canWork: ['ADMIN', 'DEVELOPER'].includes(member.viewerRole ?? '') }
+        const viewer: ApprovalViewer = {
+          kind: 'project', canManage: member.canManage === true,
+          canWork: ['ADMIN', 'DEVELOPER'].includes(member.viewerRole ?? ''), userId: auth.user.value?.id ?? null,
+        }
         for (const [id, entry] of active) {
           if (entry.base.kind === 'project' && entry.base.slug === project.slug && !canDecide(entry.row, viewer)) dismiss(id)
         }
