@@ -4261,7 +4261,8 @@ describeIntegration('API Integration Tests', () => {
 
     describe('S5b 2a US-005 assistant_action decide', () => {
       const proposeAction = async (): Promise<{ actionId: string; approvalId: string; threadId: string }> => {
-        const seeded = await seedThreadJob(httpServer, db(), world);
+        // A fresh feature per call: the active (repo, feature) pair is unique and the fixture defaults to `add-auth`.
+        const seeded = await seedThreadJob(httpServer, db(), world, { feature: `decide-${Math.random().toString(36).slice(2, 10)}` });
         const result = await app.get(AssistantActionService, { strict: false }).propose({
           projectId: world.projectId, threadId: seeded.threadId, threadKind: 'REPO', threadProjectSlug: projectSlug, jobId: seeded.jobId,
           toolCallId: `e2e-${Math.random().toString(36).slice(2, 10)}`, tool: 'koda_add_comment', input: { ref: 'X-1', body: 'hi' },
