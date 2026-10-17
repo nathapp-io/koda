@@ -28,6 +28,7 @@ import { resetDb } from '../../helpers/reset-db';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { SkillsService } from '../../../src/skills/skills.service';
 import { seedThreadJob } from '../../helpers/thread-fixtures';
+import { AssistantActionService } from '../../../src/fleet/assistant/actions/assistant-action.service';
 import { FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { buildThreadInstructions, renderBriefBlock } from '../../../src/fleet/threads/thread-instructions';
 import type { ThreadSkillSource } from '../../../src/skills/skill-catalog.domain';
@@ -4255,6 +4256,45 @@ describeIntegration('API Integration Tests', () => {
       it('GET /api/threads/:id/events hides the stream from a non-creator', async () => {
         // The open-stream happy path needs the streaming helper (it never ends for supertest): test/integration/fleet.
         refusal(await request(httpServer).get(`/api/threads/${workspaceId}/events`).set('Authorization', `Bearer ${world.tokens.root}`).expect(404), 'threads.notFound.404');
+      });
+    });
+
+    describe('S5b 2a US-005 assistant_action decide', () => {
+      const proposeAction = async (): Promise<{ actionId: string; approvalId: string; threadId: string }> => {
+        const seeded = await seedThreadJob(httpServer, db(), world);
+        const result = await app.get(AssistantActionService, { strict: false }).propose({
+          projectId: world.projectId, threadId: seeded.threadId, threadKind: 'REPO', threadProjectSlug: projectSlug, jobId: seeded.jobId,
+          toolCallId: `e2e-${Math.random().toString(36).slice(2, 10)}`, tool: 'koda_add_comment', input: { ref: 'X-1', body: 'hi' },
+          preview: 'Add a comment', requestedById: world.ids.dev, now: new Date(),
+        });
+        if ('refused' in result) throw new Error('propose refused');
+        const row = await db().pendingAction.findUniqueOrThrow({ where: { id: result.actionId } });
+        return { actionId: result.actionId, approvalId: row.approvalId as string, threadId: seeded.threadId };
+      };
+
+      it('the requester rejecting answers 200 with status rejected', async () => {
+        const { actionId, approvalId } = await proposeAction();
+        const res = await request(httpServer).post(`/api/projects/${projectSlug}/fleet/approvals/${approvalId}/decide`)
+          .set('Authorization', `Bearer ${world.tokens.dev}`).send({ decision: 'reject' }).expect(200);
+        expect(body<{ status: string; type: string }>(res)).toMatchObject({ type: 'assistant_action', status: 'rejected' });
+        expect((await db().pendingAction.findUniqueOrThrow({ where: { id: actionId } })).status).toBe('REJECTED');
+      });
+
+      it('another user deciding answers 403 threads.notCreator and leaves the action PENDING', async () => {
+        const { actionId, approvalId } = await proposeAction();
+        const res = await request(httpServer).post(`/api/fleet/approvals/${approvalId}/decide`)
+          .set('Authorization', `Bearer ${world.tokens.root}`).send({ decision: 'reject' }).expect(403);
+        threadMessage(res, 'threads.notCreator.403');
+        expect((await db().pendingAction.findUniqueOrThrow({ where: { id: actionId } })).status).toBe('PENDING');
+      });
+
+      it('the thread detail lists the pending action in a pendingActions array', async () => {
+        const { actionId, threadId } = await proposeAction();
+        const detail = body<{ pendingActions: Array<{ id: string }> }>(
+          await request(httpServer).get(`/api/projects/${projectSlug}/threads/${threadId}`).set('Authorization', `Bearer ${world.tokens.dev}`).expect(200),
+        );
+        expect(Array.isArray(detail.pendingActions)).toBe(true);
+        expect(detail.pendingActions.map((a) => a.id)).toEqual([actionId]);
       });
     });
   });

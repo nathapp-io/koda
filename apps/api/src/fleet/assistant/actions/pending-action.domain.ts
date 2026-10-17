@@ -104,4 +104,17 @@ export interface PendingActionRepository {
   insert(action: NewPendingAction): Promise<PendingActionRecord>;
   /** Links the approval `openAssistant` just created (2a-D4 step 6). */
   setApprovalId(id: string, approvalId: string): Promise<void>;
+  /** `SELECT ... FOR UPDATE` on the action row (2a-D11: last of thread, approval, action); null when it is gone. */
+  lockById(id: string): Promise<PendingActionRecord | null>;
+  /** Writes a terminal status and answers the row as stored, so a note names what was written. */
+  resolve(id: string, resolution: ActionResolution): Promise<PendingActionRecord>;
+  /** 2a-D9: one `system` note in the thread, `seq` from `allocateThreadSeq`; the caller holds the thread lock. Answers its id. */
+  insertSystemNote(threadId: string, content: string): Promise<string>;
+}
+
+/** 2a-D8 / 2a-D10: what a decide or an expiry writes to an action. `decidedById` stays null for an expiry. */
+export interface ActionResolution {
+  status: Exclude<PendingActionStatus, 'PENDING'>;
+  decidedAt: Date;
+  decidedById?: string;
 }

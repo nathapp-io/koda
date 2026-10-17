@@ -2,8 +2,9 @@ import { Inject, Injectable } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { AbstractPrismaRepository, PrismaClientLike, PrismaModelDelegate, PrismaService } from '@nathapp/nestjs-prisma';
 import { PendingAction as PendingActionModel, Prisma, PrismaClient } from '../../../generated/prisma/client';
+import { allocateThreadSeq } from '../../threads/domain/chat-thread.domain';
 import {
-  NewPendingAction, PendingActionRecord, PendingActionRepository, PendingActionStatus,
+  ActionResolution, NewPendingAction, PendingActionRecord, PendingActionRepository, PendingActionStatus,
 } from './pending-action.domain';
 
 const asObject = (v: Prisma.JsonValue): Record<string, unknown> =>
@@ -102,6 +103,25 @@ export class PrismaPendingActionRepository
 
   async setApprovalId(id: string, approvalId: string): Promise<void> {
     await this.db.pendingAction.update({ where: { id }, data: { approvalId } });
+  }
+
+  async lockById(id: string): Promise<PendingActionRecord | null> {
+    const rows = await this.db.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "PendingAction" WHERE "id" = ${id} FOR UPDATE`;
+    return rows.length > 0 ? this.findById(id) : null;
+  }
+
+  async resolve(id: string, resolution: ActionResolution): Promise<PendingActionRecord> {
+    const row = await this.db.pendingAction.update({
+      where: { id },
+      data: { status: resolution.status, decidedAt: resolution.decidedAt, ...(resolution.decidedById !== undefined ? { decidedById: resolution.decidedById } : {}) },
+    });
+    return (await this.withSlug([row]))[0];
+  }
+
+  async insertSystemNote(threadId: string, content: string): Promise<string> {
+    const seq = await allocateThreadSeq(this.db, threadId);
+    const note = await this.db.chatMessage.create({ data: { threadId, seq, role: 'system', status: 'complete', content } });
+    return note.id;
   }
 
   private async first(row: PendingActionModel | null): Promise<PendingActionRecord | null> {

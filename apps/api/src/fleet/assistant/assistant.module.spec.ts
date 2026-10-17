@@ -2,6 +2,9 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module';
 import { MemoryGovernanceService } from '../../memory/memory-governance.service';
 import { ProjectsService } from '../../projects/projects.service';
+import { AssistantActionPort } from '../approvals/assistant-action.port';
+import { ApprovalsService } from '../approvals/approvals.service';
+import { AssistantActionDecisions } from './actions/assistant-action-decisions';
 import { AssistantModule } from './assistant.module';
 import { AssistantToolExecutor } from './assistant-tool.executor';
 import { AssistantToolRegistry } from './assistant-tool.registry';
@@ -58,5 +61,24 @@ describe('AssistantModule', () => {
     expect(tool?.descriptor).toBe(KODA_GET_ACTION);
     expect(tool?.kind).toBeUndefined();
     expect(tool?.permission).toEqual({ kind: 'member' });
+  });
+
+  it('US-005: ApprovalsService and AssistantActionDecisions share one AssistantActionPort instance', () => {
+    const port = module.get(AssistantActionPort);
+    expect(port).toBeInstanceOf(AssistantActionPort);
+    expect((module.get(ApprovalsService) as unknown as { assistantActions: unknown }).assistantActions).toBe(port);
+    expect((module.get(AssistantActionDecisions) as unknown as { port: unknown }).port).toBe(port);
+  });
+
+  it('US-005: init() registers the decide handler, so the port forwards to it', async () => {
+    const decisions = module.get(AssistantActionDecisions);
+    const decide = vi.spyOn(decisions, 'decide').mockResolvedValue({ id: 'a1' } as never);
+    const port = module.get(AssistantActionPort);
+    expect(() => port.decide({ id: 'u1', globalAdmin: false }, { id: 'a1' } as never, { decision: 'reject' }, new Date())).toThrow(expect.objectContaining({ prefix: 'threads.disabled' }));
+
+    await module.init();
+    await port.decide({ id: 'u1', globalAdmin: false }, { id: 'a1' } as never, { decision: 'reject' }, new Date());
+
+    expect(decide).toHaveBeenCalledTimes(1);
   });
 });

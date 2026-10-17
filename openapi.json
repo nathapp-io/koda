@@ -14357,7 +14357,9 @@
               "allow_for_job",
               "deny",
               "raise_budget_and_resume",
-              "keep_paused"
+              "keep_paused",
+              "approve",
+              "reject"
             ],
             "type": "string"
           },
@@ -14415,7 +14417,9 @@
               "allow_for_job",
               "deny",
               "raise_budget_and_resume",
-              "keep_paused"
+              "keep_paused",
+              "approve",
+              "reject"
             ],
             "type": "string"
           },
@@ -18985,7 +18989,8 @@
             "type": "string",
             "enum": [
               "budget_override_required",
-              "nax_bash_escalate"
+              "nax_bash_escalate",
+              "assistant_action"
             ]
           },
           "projectId": {

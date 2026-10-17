@@ -20,7 +20,7 @@ export class HomeTicketDto implements HomeTicketView {
 
 export class HomeApprovalDto implements HomeApprovalView {
   @ApiProperty() id: string;
-  @ApiProperty({ enum: ['budget_override_required', 'nax_bash_escalate'] }) type: string;
+  @ApiProperty({ enum: ['budget_override_required', 'nax_bash_escalate', 'assistant_action'] }) type: string;
   @ApiProperty({ ...NULLABLE_STRING, description: 'null for a no-project (requeue-candidate) approval' }) projectId: string | null;
   @ApiProperty({ ...NULLABLE_STRING, description: 'null when the project row is gone' }) projectSlug: string | null;
   @ApiProperty(NULLABLE_STRING) jobId: string | null;

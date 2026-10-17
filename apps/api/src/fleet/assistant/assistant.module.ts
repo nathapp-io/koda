@@ -14,6 +14,7 @@ import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { LogsModule } from '../logs/logs.module';
 import { RunnersModule } from '../runners/runners.module';
 import { SyncModule } from '../sync/sync.module';
+import { AssistantActionDecisions } from './actions/assistant-action-decisions';
 import { AssistantActionService } from './actions/assistant-action.service';
 import { PENDING_ACTION_REPOSITORY } from './actions/pending-action.domain';
 import { PrismaPendingActionRepository } from './actions/prisma-pending-action.repository';
@@ -67,6 +68,8 @@ import { WorkspaceTools } from './tools/workspace-tools';
     PrismaPendingActionRepository,
     { provide: PENDING_ACTION_REPOSITORY, useExisting: PrismaPendingActionRepository },
     AssistantActionService,
+    // S5b 2a US-005: the creator-only decide handler; it registers with AssistantActionPort on init (2a-D1).
+    AssistantActionDecisions,
   ],
   exports: [AssistantToolRegistry, AssistantToolExecutor],
 })
