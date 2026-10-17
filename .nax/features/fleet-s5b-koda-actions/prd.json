@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-koda-actions",
   "branchName": "feat/fleet-s5b-koda-actions",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "updatedAt": "2026-10-17T07:56:05.956Z",
+  "updatedAt": "2026-10-17T08:23:44.837Z",
   "userStories": [
     {
       "id": "US-001",
@@ -495,8 +495,8 @@
         "US-003",
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -508,7 +508,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
@@ -524,7 +526,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "52c3bd2e315b29cf08e01311e7d74d0e91bf79b4"
     },
     {
       "id": "US-007",
