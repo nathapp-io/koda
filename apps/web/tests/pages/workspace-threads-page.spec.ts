@@ -184,6 +184,25 @@ describe('US-005 AC-1..AC-5: pages/threads/index.vue', () => {
     m.app.unmount()
   })
 
+  /** The same race through the error path: a discarded read that fails must not replace the list. */
+  test('AC-4 (edge): a discarded Archived read that fails leaves the Active list on screen', async () => {
+    let rejectArchived!: (error: Error) => void
+    const archived = new Promise<{ items: ThreadDto[], threadsEnabled: boolean }>((_done, fail) => { rejectArchived = fail })
+    const m = mountPage({ archived })
+    await m.settle()
+
+    clickByLabel(m.app, 'fleet.threads.list.archived')
+    clickByLabel(m.app, 'fleet.threads.list.active')
+    await m.settle()
+    rejectArchived(new Error('network'))
+    await m.settle()
+
+    expect(m.app.find('error-state')).toHaveLength(0)
+    expect(m.app.find('loading-state')).toHaveLength(0)
+    expect(linkTo(m.app, '/threads/th1')).toBeDefined()
+    m.app.unmount()
+  })
+
   test('AC-5: threadsEnabled false renders no link to /threads/new', async () => {
     const m = mountPage({ threadsEnabled: false })
     await m.settle()

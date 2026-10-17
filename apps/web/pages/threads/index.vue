@@ -20,7 +20,14 @@ const loadMoreFailed = ref(false)
 /** Every row of this list is the caller's own thread, so the creator column answers their name. */
 const nameOf = (userId: string): string => auth.user.value?.name ?? auth.user.value?.email ?? userId
 
+/**
+ * Bumped by every `loadPage()`. Only the newest read may settle `pending` or `loadFailed`: an
+ * overtaken one that answers, or fails, after it must not hide the spinner or the list it shows.
+ */
+let pageLoad = 0
+
 async function loadPage(status: 'ACTIVE' | 'ARCHIVED' = threadsList.status.value): Promise<boolean> {
+  const mine = ++pageLoad
   pending.value = true
   loadFailed.value = false
   loadMoreFailed.value = false
@@ -28,10 +35,10 @@ async function loadPage(status: 'ACTIVE' | 'ARCHIVED' = threadsList.status.value
     // false when a newer selection overtook this read: its status is not the one on screen.
     return await threadsList.load(status)
   } catch {
-    loadFailed.value = true
+    if (mine === pageLoad) loadFailed.value = true
     return false
   } finally {
-    pending.value = false
+    if (mine === pageLoad) pending.value = false
   }
 }
 
