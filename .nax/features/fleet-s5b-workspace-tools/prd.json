@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-workspace-tools",
   "branchName": "feat/fleet-s5b-workspace-tools",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "updatedAt": "2026-10-17T03:16:17.540Z",
+  "updatedAt": "2026-10-17T03:55:13.410Z",
   "userStories": [
     {
       "id": "US-001",
@@ -362,8 +362,8 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -375,7 +375,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/pages/[project]/threads/index.vue",
@@ -397,7 +399,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "cde6c21cf2eb8c118060c63b10539f1ba5df7356"
     },
     {
       "id": "US-006",
