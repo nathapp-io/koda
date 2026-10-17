@@ -531,12 +531,147 @@ export const WRITE_TOOL_DESCRIPTORS: readonly KodaToolDescriptor[] = [
 ];
 
 /**
- * Every registered tool's descriptor, in catalog order: tickets, fleet reads, knowledge, the action tools and then
- * the write tools (2b1-D3).
+ * 2b2-D3: the dispatch input bounds, as the dispatch DTO spells them (`fleet/jobs/dto/dispatch-fleet-job.dto.ts`).
+ * The tool's own parser (2b2 US-003) enforces them; the schema is what the model sees.
+ */
+const DISPATCH_MIN_COST_USD = 0.0001;
+const DISPATCH_MAX_COST_USD = 10_000;
+const DISPATCH_MAX_FEATURE_CHARS = 128;
+const DISPATCH_MAX_REF_CHARS = 255;
+const DISPATCH_MAX_PLAN_FROM_CHARS = 512;
+const DISPATCH_MAX_PROFILES = 8;
+const DISPATCH_MAX_PROFILE_CHARS = 64;
+const DISPATCH_MAX_TICKET_REFS = 20;
+/** 2b2-D3: the three bash modes a dispatch may carry (`BashMode`). */
+const DISPATCH_BASH_MODES = ['raw', 'gated', 'escalate'] as const;
+/** 2b2-D3: how long the job id requeue and cancel take may be. */
+const FLEET_WRITE_MAX_JOB_ID_CHARS = 64;
+
+/** `koda_dispatch_job` (S5b 2b2 US-003, 2b2-D1): start one fleet job of the thread's project on one of its repos. */
+export const KODA_DISPATCH_JOB: KodaToolDescriptor = {
+  name: 'koda_dispatch_job',
+  description:
+    'Start one fleet job in this project on one of its repositories. `command` is `RUN` to work and open a PR, or ' +
+    '`PLAN` to plan only; `maxCostUsd` is the cost cap in USD, at least 0.0001, at most 10000 and at most 4 ' +
+    'decimal places. The job is started only after the user approves it: this call proposes it and the user ' +
+    'decides it, so tell the user it is waiting for their approval and do not call this tool again for the same job.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['repo', 'command', 'feature', 'maxCostUsd'],
+    properties: {
+      repo: {
+        type: 'string',
+        pattern: REPO_PATTERN_SOURCE,
+        description: "The repository to run in, as owner/name, one of this project's repositories",
+      },
+      command: {
+        type: 'string',
+        enum: ['RUN', 'PLAN'],
+        description: 'RUN works the feature and opens a PR; PLAN plans only',
+      },
+      feature: {
+        type: 'string',
+        minLength: 1,
+        maxLength: DISPATCH_MAX_FEATURE_CHARS,
+        description: `nax feature name, 1 to ${DISPATCH_MAX_FEATURE_CHARS} characters`,
+      },
+      maxCostUsd: {
+        type: 'number',
+        minimum: DISPATCH_MIN_COST_USD,
+        maximum: DISPATCH_MAX_COST_USD,
+        description: `Cost cap in USD, ${DISPATCH_MIN_COST_USD} to ${DISPATCH_MAX_COST_USD}, at most 4 decimal places`,
+      },
+      ref: {
+        type: 'string',
+        minLength: 1,
+        maxLength: DISPATCH_MAX_REF_CHARS,
+        description: 'Git ref to check out detached; the repository default branch when absent',
+      },
+      planFrom: {
+        type: 'string',
+        minLength: 1,
+        maxLength: DISPATCH_MAX_PLAN_FROM_CHARS,
+        description: 'Repo-relative spec path to plan from, PLAN only',
+      },
+      profiles: {
+        type: 'array',
+        maxItems: DISPATCH_MAX_PROFILES,
+        description: 'nax profile chain, later wins',
+        items: { type: 'string', minLength: 1, maxLength: DISPATCH_MAX_PROFILE_CHARS },
+      },
+      bashMode: {
+        type: 'string',
+        enum: [...DISPATCH_BASH_MODES],
+        description: 'Bash mode; `raw` when absent',
+      },
+      ticketRefs: {
+        type: 'array',
+        minItems: 1,
+        maxItems: DISPATCH_MAX_TICKET_REFS,
+        description: 'Tickets this job works on, KEY-N',
+        items: { type: 'string', pattern: TICKET_REF_PATTERN },
+      },
+    },
+  },
+};
+
+/** `koda_requeue_job` (S5b 2b2 US-004, 2b2-D1): run one failed, crashed or cancelled job of this project again. */
+export const KODA_REQUEUE_JOB: KodaToolDescriptor = {
+  name: 'koda_requeue_job',
+  description:
+    'Requeue one fleet job of this project, so it runs again: a job that failed, crashed or was cancelled. The ' +
+    'job is requeued only after the user approves it: this call proposes it and the user decides it, so tell the ' +
+    'user it is waiting for their approval and do not call this tool again for the same job.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['jobId'],
+    properties: {
+      jobId: {
+        type: 'string',
+        minLength: 1,
+        maxLength: FLEET_WRITE_MAX_JOB_ID_CHARS,
+        description: 'Job id, as koda_list_jobs lists it',
+      },
+    },
+  },
+};
+
+/** `koda_cancel_job` (S5b 2b2 US-005, 2b2-D1): stop one job of this project. */
+export const KODA_CANCEL_JOB: KodaToolDescriptor = {
+  name: 'koda_cancel_job',
+  description:
+    'Cancel one fleet job of this project. The job is cancelled only after the user approves it: this call ' +
+    'proposes it and the user decides it, so tell the user it is waiting for their approval and do not call this ' +
+    'tool again for the same job.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['jobId'],
+    properties: {
+      jobId: {
+        type: 'string',
+        minLength: 1,
+        maxLength: FLEET_WRITE_MAX_JOB_ID_CHARS,
+        description: 'Job id, as koda_list_jobs lists it',
+      },
+    },
+  },
+};
+
+/** The descriptors S5b 2b2 US-001 contributes, in catalog order (2b2-D1). */
+export const FLEET_WRITE_TOOL_DESCRIPTORS: readonly KodaToolDescriptor[] = [
+  KODA_DISPATCH_JOB, KODA_REQUEUE_JOB, KODA_CANCEL_JOB,
+];
+
+/**
+ * Every registered tool's descriptor, in catalog order: tickets, fleet reads, knowledge, the action tools, the
+ * write tools and then the fleet write tools (2b1-D3, 2b2-D1).
  */
 export const KODA_TOOL_DESCRIPTORS: readonly KodaToolDescriptor[] = [
   ...TICKET_TOOL_DESCRIPTORS, ...FLEET_TOOL_DESCRIPTORS, ...KNOWLEDGE_TOOL_DESCRIPTORS, ...ACTION_TOOL_DESCRIPTORS,
-  ...WRITE_TOOL_DESCRIPTORS,
+  ...WRITE_TOOL_DESCRIPTORS, ...FLEET_WRITE_TOOL_DESCRIPTORS,
 ];
 
 /**

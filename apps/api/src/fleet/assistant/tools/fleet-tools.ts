@@ -16,6 +16,7 @@ import {
   KODA_FLEET_SPEND, KODA_GET_JOB, KODA_JOB_LOG_EXCERPT, KODA_LIST_APPROVALS, KODA_LIST_JOBS, KODA_RUNNER_STATUS,
 } from '../koda-tool-descriptors';
 import { ToolInputError, type AssistantTool, type ToolContext } from '../assistant-tool.types';
+import { jobPath } from './tool-input';
 
 /**
  * Fleet S5b US-004: the six fleet read tools. The project is the thread's project (S5b-R7) — no tool takes a
@@ -103,9 +104,6 @@ function optionalInteger(value: unknown, min: number, max: number, fallback: num
   if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) throw new ToolInputError(reason);
   return value;
 }
-
-/** What every result names a job by: the web path a human can open. */
-const jobPath = (slug: string, jobId: string): string => `/${slug}/fleet/jobs/${jobId}`;
 
 /** The last line of a full page. */
 const moreLine = (tool: string, nextPage: number): string => `more: call ${tool} with page ${nextPage}`;
