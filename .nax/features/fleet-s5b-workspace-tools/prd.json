@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-workspace-tools",
   "branchName": "feat/fleet-s5b-workspace-tools",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "updatedAt": "2026-10-17T02:12:21.089Z",
+  "updatedAt": "2026-10-17T02:30:27.832Z",
   "userStories": [
     {
       "id": "US-001",
@@ -33,8 +33,8 @@
         "threads"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -46,7 +46,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/assistant/koda-tool-descriptors.ts",
@@ -74,7 +76,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "d91bd5a9fa2c8f72424ca27c2523f7594c8c8846"
     },
     {
       "id": "US-002",
@@ -136,11 +142,6 @@
         "The stored AssistantToolCall row for a WORKSPACE call refused at the slug-pattern step has projectId equal to the home project's id.",
         "AssistantToolExecutor.execute for a REPO thread's job calling koda_search_tickets with input { text: 'x' } still calls the tool's parse with { text: 'x' } and resolves membership against the job's project, unchanged from before this story."
       ],
-      "outOfScope": [
-        "US-002 only: a membership change that commits between the executor's `resolveMembership` and the tool's read is not detected for that one call (same as the REPO/PROJECT path today).",
-        "Changes to the REPO and PROJECT tool catalog (`KODA_TOOL_DESCRIPTORS`) or to any tool's own parsing, output or permission.",
-        "Changes to the runner, the fleet protocol or `FLEET_PROTOCOL_VERSION`."
-      ],
       "modifiedFiles": [
         {
           "path": "apps/api/src/fleet/assistant/runner-tool.service.spec.ts",
@@ -152,7 +153,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -215,12 +219,6 @@
         "findProjectCounts returns an entry with all-zero counts for a project that has no tickets, jobs or approvals.",
         "koda_my_projects counts one project's tickets, jobs and approvals without including another project's rows."
       ],
-      "outOfScope": [
-        "US-003 only: `koda_my_projects` counts are read without a snapshot across the three counts; a concurrent change can make one line internally inconsistent for that call.",
-        "Pagination of `koda_my_projects` beyond the first 50 projects.",
-        "Counting tickets, jobs or approvals in `koda_my_projects` by any rule other than 1d2-D7 (for example by assignee, label or a configurable window).",
-        "Caching or rate-limiting `koda_my_projects` beyond the executor's existing per-call idempotency."
-      ],
       "modifiedFiles": [
         {
           "path": "apps/api/src/common/test-helpers/global-stubs.module.ts",
@@ -240,7 +238,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -316,7 +317,10 @@
         }
       ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -380,14 +384,11 @@
         "pages/threads/new.vue shows the API error text and does not navigate when POST /threads answers 409 threads.noFleetRepo.",
         "ThreadListTable given a slug and no basePath still renders row links to /<slug>/threads/<id>."
       ],
-      "outOfScope": [
-        "Web breadcrumbs for the `/threads` pages.",
-        "Reserving the `threads` project slug; a project slugged `threads` is shadowed in the web (1d2-D10).",
-        "A Playwright journey for the `/threads` pages; the deploy live check on koda-wk covers the journey, and the web stories are covered by component, page and lib specs.",
-        "ACP backends in the web new-thread page for WORKSPACE threads (refused by the API)."
-      ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -446,12 +447,11 @@
       "suggestedCriteria": [
         "ThreadHeader for a REPO thread still shows feat/<feature> after the WORKSPACE branch is added."
       ],
-      "outOfScope": [
-        "Editing a WORKSPACE thread's home project, title or backend from the web after creation.",
-        "Showing WORKSPACE threads on any project page or in any project thread list (1d-D7 stands)."
-      ],
       "workdir": "apps/web",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "Feature 1d-2 finishes umbrella row 4 (S5b-1d). 1d-1 (#292) shipped WORKSPACE threads with no koda tools. This feature: (a) API: per-kind koda tool catalog, executor-owned `project` argument (S5b-R7), `koda_my_projects` (S5b-R12), route no longer refuses WORKSPACE jobs; (b) web: /threads list, /threads/new, /threads/:id, nav + palette, live-stream Nitro proxy. No runner or fleet-protocol change (FLEET_PROTOCOL_VERSION stays 4); no API route request/response shape change, so openapi.json and the CLI generated client are untouched.\n\nKEY FILES (API): apps/api/src/fleet/assistant/koda-tool-descriptors.ts (KODA_TOOL_DESCRIPTORS at ~:291, 12 tools; add KODA_MY_PROJECTS, PROJECT_ARGUMENT, withProjectArgument, kodaToolDescriptorsFor; never mutate originals); apps/api/src/fleet/jobs/placement.service.ts:224-227 (withKodaTools returns thread unchanged for WORKSPACE today); apps/api/src/fleet/threads/thread-instructions.ts:53-59 (buildWorkspaceThreadInstructions says no koda tools); apps/api/src/fleet/threads/ingest/prisma-thread-ingest.repository.ts:477-489 (sessionNotices skips kodaToolsUnavailableOn for WORKSPACE); apps/api/src/fleet/assistant/assistant-tool.executor.ts:78-123 (run/execute: project from the job today, tool.parse, then membership); assistant-tool-call.domain.ts:21-25 (ToolCallContext, gains kind?); prisma-assistant-tool-call.repository.ts:62-72 (findCallContext selects thread.kind; also gets findProjectCounts, an AbstractPrismaRepository escape hatch, see .nax/rules/api-data.md:105-135); assistant-tool.types.ts:18-25 (AssistantTool gains scope?); runner-tool.service.ts:44-58 (line 51 refuses WORKSPACE job; remove it and drop findThreadTokenScope from the jobs Pick); tools/fleet-tools.ts (provider + onModuleInit registration pattern to mirror for WorkspaceTools); assistant.module.ts (import ProjectsModule, provide WorkspaceTools and PROJECT_COUNTS_READER useExisting the Prisma repo); projects/project-access.service.ts (findProjectIdBySlug throws NotFound for unknown/deleted; resolveMembership returns ADMIN for global admin, member role, or throws Forbidden for non-member); projects/projects.service.ts:80 (findAllForPrincipal).\n\nEXECUTOR ORDER (1d2-D4): after the disabled-creator check and before tool.parse: (1) workspace-scoped tool in REPO/PROJECT thread -> invalid_input: <name> is only available in workspace threads; (2) input has own `project` key in REPO/PROJECT thread or for a workspace-scoped tool -> invalid_input: project; (3) WORKSPACE + project-scoped: project missing/non-string/non-slug -> invalid_input: project with no lookup; (4) findProjectIdBySlug then resolveMembership; unknown, deleted and non-member ALL map to the same `not_found: project` (no existence oracle; map ForbiddenAppException and NotFoundAppException alike); global ADMIN reaches every project; (5) parse a COPY of the input without `project`; resolved id/slug become ToolContext.projectId/projectSlug and the ability check uses the role resolveMembership returned. Non-object input has no project key (steps 2/3 treat as absent). Membership resolved on every call, never cached (AC: removed member gets not_found on the next call with a new toolCallId). Workspace-scoped tools in WORKSPACE threads skip membership/ability checks; ctx.projectId/slug are the home project's (tool must not read them), ctx.actor = userPrincipal(creator) with no project role. Audit (1d2-D6): AssistantToolCall.projectId = resolved project for WORKSPACE calls reaching step 5, else the job's (home) project, including refusals at steps 1-4. ToolCallContext.kind absent reads as REPO.\n\nkoda_my_projects (1d2-D7): no input properties (additionalProperties false); projects = ProjectsService.findAllForPrincipal(ctx.actor) ordered by slug asc, first 50; one line `<slug> open_tickets: <n> failed_jobs_7d: <n> pending_approvals: <n> /<slug>` plus project name via ctx.data on the next line; `no projects` when empty; last line `more: <n> projects not listed` when >50. Counts via findProjectCounts(projectIds, failedSince) = three groupBy reads keyed by projectId returning Map with zeros for absent projects: open tickets = Ticket deletedAt null and status in CREATED/VERIFIED/IN_PROGRESS/VERIFY_FIX; failed jobs = FleetJob state FAILED|CRASHED and finishedAt >= ctx.now - 7d; pending approvals = FleetApproval status 'pending'. Exposed via interface ProjectCountsReader + token PROJECT_COUNTS_READER declared in assistant-tool-call.domain.ts (as findCallContext was in 1b-D6). Only koda_my_projects has scope 'workspace'; all existing tools stay project-scoped (absent scope = project). apps/api/src/common/test-helpers/global-stubs.module.ts may need a stub if AssistantModule compiles with the new ProjectsModule import.\n\nEXISTING TESTS TO UPDATE: placement.service.project-code.spec.ts:175-184 (WORKSPACE ASSIGN now equals kodaToolDescriptorsFor('WORKSPACE')); prisma-thread-ingest.repository.spec.ts:727-732 (now kodaToolsUnavailableOn 'box'); workspace-turns.spec.ts:45-50 (now toContain('koda_my_projects')); runner-tool.service.spec.ts:178-184 (WORKSPACE reaches executor with { jobId, toolCallId, name, input }); test/e2e/api-endpoint/endpoint.e2e.spec.ts:4246-4253 (WORKSPACE route with input { project: <seeded slug> } -> 200 isError false). API tests: vitest; integration under test/integration/**/*.integration.spec.ts need compose test Postgres (`bun run test:db:up` in apps/api).\n\nKEY FILES (WEB, Nuxt 3 + Jest, i18n en/zh separate from API): apps/web/lib/thread-types.ts:14 (ChatThreadKind += WORKSPACE; ThreadDto += homeProject?: {slug,name}); lib/fleet-types.ts:113 (FleetRunnerSummary += workspaceThreads: boolean; fixtures in tests/lib/thread-create.spec.ts, thread-create-project.spec.ts, tests/pages/threads-new-page.spec.ts may need workspaceThreads: false if type-check rejects them); lib/thread-create.ts:97-102 (eligibleModels(runners, kind): WORKSPACE keeps only runners with workspaceThreads; REPO/PROJECT unchanged); lib/thread-controller.ts:33-41,:82 (ThreadControllerDeps += optional threadPath that replaces the project path); composables/useThread.ts (adapter to mirror for useWorkspaceThread); server/utils/live-proxy.ts (add openWorkspaceThreadLiveUpstream using THREAD_ID_PATTERN, openLiveUpstreamUrl, resolveProxyTarget); server/api/projects/[slug]/threads/[id]/events.get.ts (mirror for server/api/threads/[id]/events.get.ts); pages/[project]/threads/{index,new,[id]}.vue (pages to mirror); components/fleet/threads/ThreadListTable.vue:10-15 (+basePath?, slug optional when basePath given, home project name for WORKSPACE row, nameOf on /threads answers signed-in user's name), ThreadHeader.vue:21-23 (WORKSPACE shows home project name where REPO shows feat/<feature>); layouts/default.vue:182-197 (Workspace section; My threads link nav.myThreads with MessagesSquare icon after Agents); components/CommandPalette.vue:26-30 (command my-threads -> /threads with or without a project). Nuxt static routes win over pages/[project], so a project slugged `threads` is shadowed (accepted). Layout renders no breadcrumbs outside a project (layouts/default.vue:73-75).\n\nWEB DETAIL PAGE: no ThreadActionBar, ThreadStaleBanner, ThreadProjectCodeNotice; isCreator always true once loaded; ThreadTimeline slug prop = homeProject.slug; runner summaries come from GET /projects/<homeProject.slug>/fleet/runners via a runners-only read (NOT useFleetDispatchOptions, whose load() also reads the repo list), only after the thread has loaded. New page: models from runner summaries of the selected project, or first listed project when Automatic (useFleetDispatchOptions(slug)); native backends only; no projects -> empty model list.\n\nRISKS: (1) access-control correctness in the executor: a bug leaks cross-project data; the no-oracle rule requires one text for unknown/deleted/non-member; (2) do not mutate KODA_TOOL_DESCRIPTORS (spread copies); (3) tests in the repo share module caches/DB, keep specs isolation-safe; (4) nax exits 0 on failure, rely on test output. Dependency order: US-001 -> US-002 -> US-003 (api); US-004 -> US-005, US-006 (web). Web and api tracks are independent. Follow the user's rules: immutability, small files, no emojis, no console.log.",
