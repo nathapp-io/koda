@@ -312,7 +312,7 @@ describe('ExtractionService', () => {
   });
 
   describe('AC7: recordDecision with existing active decision', () => {
-    it('AC7: marks old decision as superseded via updateDirect when one exists', async () => {
+    it('AC7: supersedes the old decision through the atomic upsert, not with a separate write', async () => {
       const mockRepository = {
         upsert: vi.fn().mockResolvedValue({ id: 'new-memory-123' }),
         updateDirect: vi.fn().mockResolvedValue(undefined),
@@ -323,14 +323,10 @@ describe('ExtractionService', () => {
         mockRepository as any,
       );
 
-      expect(mockRepository.updateDirect).toHaveBeenCalledTimes(1);
-      expect(mockRepository.updateDirect).toHaveBeenCalledWith(
-        'old-decision-456',
-        expect.objectContaining({
-          status: 'superseded',
-        }),
-      );
+      // Branch review B1: `PrismaMemoryItemRepository.upsert` supersedes the active row inside the transaction that
+      // inserts the replacement, so a failed replacement cannot leave the topic without an active decision.
       expect(mockRepository.upsert).toHaveBeenCalledTimes(1);
+      expect(mockRepository.updateDirect).not.toHaveBeenCalled();
     });
   });
 

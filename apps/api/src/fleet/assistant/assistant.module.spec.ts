@@ -12,6 +12,7 @@ import { AssistantToolExecutor } from './assistant-tool.executor';
 import { AssistantToolRegistry } from './assistant-tool.registry';
 import { KODA_GET_ACTION, KODA_MY_PROJECTS } from './koda-tool-descriptors';
 import { KnowledgeTools } from './tools/knowledge-tools';
+import { MemoryWriteTools } from './tools/memory-write-tools';
 
 describe('AssistantModule', () => {
   let module: TestingModule;
@@ -54,6 +55,55 @@ describe('AssistantModule', () => {
     const tool = module.get(AssistantToolRegistry).get('koda_add_comment');
     expect(tool?.kind).toBe('write');
     expect(tool?.permission).toEqual({ kind: 'ability', action: 'create', subject: 'Comment' });
+  });
+
+  it('AC-11 (US-003): init() registers koda_create_tickets as a write tool needing create Ticket', async () => {
+    await module.init();
+
+    const tool = module.get(AssistantToolRegistry).get('koda_create_tickets');
+    expect(tool?.kind).toBe('write');
+    expect(tool?.permission).toEqual({ kind: 'ability', action: 'create', subject: 'Ticket' });
+  });
+
+  it('AC-13 (US-004): init() registers koda_update_ticket as a write tool needing update Ticket', async () => {
+    await module.init();
+
+    const tool = module.get(AssistantToolRegistry).get('koda_update_ticket');
+    expect(tool?.kind).toBe('write');
+    expect(tool?.permission).toEqual({ kind: 'ability', action: 'update', subject: 'Ticket' });
+  });
+
+  it('AC-11 (US-005): init() registers koda_link_tickets as a write tool that needs membership only', async () => {
+    await module.init();
+
+    const tool = module.get(AssistantToolRegistry).get('koda_link_tickets');
+    expect(tool?.kind).toBe('write');
+    expect(tool?.permission).toEqual({ kind: 'member' });
+  });
+
+  it('AC-9 (US-006): init() registers koda_add_memory as a write tool that needs membership only', async () => {
+    // The group is what fills the entry: resolving it proves the provider is registered and that MemoryModule
+    // (which exports the repository it upserts through) is in the module graph.
+    expect(module.get(MemoryWriteTools)).toBeInstanceOf(MemoryWriteTools);
+
+    await module.init();
+
+    const tool = module.get(AssistantToolRegistry).get('koda_add_memory');
+    expect(tool?.kind).toBe('write');
+    expect(tool?.permission).toEqual({ kind: 'member' });
+  });
+
+  it('AC-9 (US-007): init() registers koda_record_decision as a write tool that needs membership only', async () => {
+    // The memory write group is what fills the entry: resolving it proves the provider is registered and that
+    // MemoryModule (which exports both the repository the preview reads and ExtractionService the approve calls)
+    // is in the module graph.
+    expect(module.get(MemoryWriteTools)).toBeInstanceOf(MemoryWriteTools);
+
+    await module.init();
+
+    const tool = module.get(AssistantToolRegistry).get('koda_record_decision');
+    expect(tool?.kind).toBe('write');
+    expect(tool?.permission).toEqual({ kind: 'member' });
   });
 
   it('AC-16 (US-003): init() registers koda_get_action as the member-scoped read tool', async () => {

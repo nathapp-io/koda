@@ -28,7 +28,9 @@ import { RunnerToolService } from './runner-tool.service';
 import { ActionTools } from './tools/action-tools';
 import { FleetTools } from './tools/fleet-tools';
 import { KnowledgeTools } from './tools/knowledge-tools';
+import { MemoryWriteTools } from './tools/memory-write-tools';
 import { TicketTools } from './tools/ticket-tools';
+import { TicketWriteTools } from './tools/ticket-write-tools';
 import { WorkspaceTools } from './tools/workspace-tools';
 
 /** Fleet S5b: the API-owned koda tools a THREAD session calls through the runner. Tool groups join as providers. */
@@ -65,6 +67,11 @@ import { WorkspaceTools } from './tools/workspace-tools';
     WorkspaceTools,
     // S5b 2a US-003: the pilot write tool and the scoped action read. It registers on init, like the other groups.
     ActionTools,
+    // S5b 2b1 US-003: the ticket write group. `koda_create_tickets` registers on init (2b1-D8).
+    TicketWriteTools,
+    // S5b 2b1 US-006: the memory write group. `koda_add_memory` registers on init (2b1-D8) and upserts through
+    // the repository MemoryModule already exports.
+    MemoryWriteTools,
     // S5b 2a US-001: propose storage. The repository stays module-private behind its token.
     PrismaPendingActionRepository,
     { provide: PENDING_ACTION_REPOSITORY, useExisting: PrismaPendingActionRepository },
