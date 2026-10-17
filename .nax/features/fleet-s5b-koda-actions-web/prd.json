@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-koda-actions-web",
   "branchName": "feat/fleet-s5b-koda-actions-web",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "updatedAt": "2026-10-17T11:41:01.631Z",
+  "updatedAt": "2026-10-17T11:49:45.124Z",
   "userStories": [
     {
       "id": "US-001",
@@ -474,8 +474,8 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -487,7 +487,9 @@
         "profileModelTier": "fast",
         "initialAgent": "claude",
         "initialProfileId": "claude-haiku",
-        "initialModelTier": "fast"
+        "initialModelTier": "fast",
+        "initialComplexity": "medium",
+        "modelTier": "fast"
       },
       "contextFiles": [
         "apps/web/components/fleet/threads/ThreadMessage.vue",
@@ -513,7 +515,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "915b5ef91f32b4040e7a7729a5139d57ccf1ec68"
     },
     {
       "id": "US-007",
