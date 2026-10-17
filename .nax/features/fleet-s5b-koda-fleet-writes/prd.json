@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-koda-fleet-writes",
   "branchName": "feat/fleet-s5b-koda-fleet-writes",
   "createdAt": "2026-10-18T00:00:00.000Z",
-  "updatedAt": "2026-10-17T17:18:31.289Z",
+  "updatedAt": "2026-10-17T17:38:07.058Z",
   "userStories": [
     {
       "id": "US-001",
@@ -333,8 +333,8 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -346,7 +346,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
@@ -370,7 +372,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "42d342d7abb51e8727ca2809de6cdc2ad45ce685"
     }
   ],
   "analysis": "Koda S5b-2b-2 adds three fleet write tools (koda_dispatch_job, koda_requeue_job, koda_cancel_job) to the assistant write-tool machinery built in 2a (fleet-s5b-koda-actions) and 2b-1 (fleet-s5b-koda-write-tools, PR #298). A write tool is an AssistantTool (apps/api/src/fleet/assistant/assistant-tool.types.ts) = descriptor + parse + preview + execute. The executor (assistant-tool.executor.ts, proposeWrite/executeAction) already maps a preview's ToolInputError to 'invalid_input: <reason>', NotFoundAppException to 'not_found', and an execute's ToolActionError to a FAILED action carrying its text; any other error becomes 'error: <tool> failed'. This feature only adds the tools and fleetWriteRefusal, which turns the fleet services' 409/400 AppExceptions (read via AppException.prefix/.args) into ToolActionError text.\n\nPattern to mirror: apps/api/src/fleet/assistant/tools/update-ticket-tool.ts (tool) and ticket-write-tools.ts (provider registering in onModuleInit via AssistantToolRegistry). Descriptors live in apps/api/src/fleet/assistant/koda-tool-descriptors.ts (WRITE_TOOL_DESCRIPTORS, KODA_TOOL_DESCRIPTORS, kodaToolDescriptorsFor); the new FLEET_WRITE_TOOL_DESCRIPTORS is appended last (REPO/PROJECT 22 descriptors, WORKSPACE 23, KODA_TOOL_LIMITS.maxTools is 32; each description must stay <= 2000 chars after the WORKSPACE sentence is appended, else apps/runner/src/supervisor/assign-parser.ts rejects the whole list). Existing koda-tool-descriptors.spec.ts assertions pin counts 19/20 and offsets by WRITE_TOOL_DESCRIPTORS.length; US-001 must update them exactly as the spec's Modifies lists (counts to 22/23, at(-1) name to koda_cancel_job, 'AC-2' test asserts five write entries precede the three fleet-write entries, AC-3/AC-15/AC-22 slices offset by WRITE+FLEET_WRITE lengths, AC-22 full-list equality gains ...FLEET_WRITE_TOOL_DESCRIPTORS last).\n\nServices called read-only: FleetJobsService.dispatch/requeue/cancel/get (apps/api/src/fleet/jobs/fleet-jobs.service.ts), normalizeDispatch (fleet/jobs/dispatch-input.ts, throws ValidationAppException({reason}, 'fleet.dispatchInput')), canTransition/isTerminal (fleet/jobs/job-state.ts), isThreadKind (fleet/common/thread-jobs.ts), KnowledgeIndexService.resolveProjectRepo(projectId, selector) returning KnowledgeRepoRef {id, owner, name, defaultBranch}. AssistantModule already imports FleetJobsModule and KnowledgeModule, so only the providers list gains FleetWriteTools. jobPath is currently a private helper in tools/fleet-tools.ts and moves unchanged to an export of tools/tool-input.ts (fleet-tools.ts then imports it).\n\nRulings: 2b2-R1 dispatch passes NO threadId (the calling thread is never idle so threads.busy would always fire); R2 maxCostUsd required; R3 no acknowledgeOpenPr (open PR fails the action); R4 requeue/cancel need update FleetJob and cancel passes canOperate=true; R5 THREAD jobs are never requeued/cancelled (preview ToolInputError('command') before the state check); R6 no pinnedRunnerId/selectorLabels/approvalTimeoutSec/acknowledgeOpenPr inputs.\n\nRisks: (1) the descriptors spec edits must be exact or existing tests break; (2) the three stories share FleetWriteTools and assistant.module.spec.ts so US-003/004/005 are strictly sequential; (3) refusal tests must use the real fleetWriteRefusal, not a stub; (4) previews must be masked with maskSecrets (secret-shaped planFrom/feature must not leak); (5) dispatch execute re-resolves the repo and throws NotFoundAppException before calling the service if it no longer resolves; (6) dto passed to dispatch contains repoId plus only the input fields present (no undefined keys); (7) integration tests need the compose test DB (bun run test:db:up), follow test/integration/fleet/assistant-update-ticket-tool.integration.spec.ts fixtures (seedFleetHttpWorld, dev DEVELOPER, seedThreadJobFor RUNNING REPO THREAD job, FLEET_THREADS_ENABLED=true), use unique features per test, and obey .nax/rules/api-test-isolation.md; the requeue approve test seeds the job with selectorLabels ['no-such-label'] so it stays QUEUED. No Prisma, API contract or openapi.json change; no web, runner or protocol change. Immutability and small files per user style rules.",
