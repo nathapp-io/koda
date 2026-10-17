@@ -99,7 +99,8 @@ describe('workspace read, cap and command scope', () => {
     const thread = await service.get('u', 't1');
 
     expect(thread.pendingActions).toEqual([action]);
-    expect(repository.pendingActions).toHaveBeenCalledWith('t1');
+    // M1: the read is fenced by the caller's scope, never a bare thread id.
+    expect(repository.pendingActions).toHaveBeenCalledWith({ kind: 'workspace', userId: 'u' }, 't1');
   });
 
   it('AC-4/AC-6: a miss through the workspace scope answers 404 threads.notFound', async () => {

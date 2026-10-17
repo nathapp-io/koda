@@ -73,9 +73,10 @@ export class WorkspaceThreadsService {
   }
 
   async get(userId: string, id: string): Promise<ChatThreadDetail> {
+    const scope = { kind: 'workspace', userId } as const;
     const thread = await this.requireOwnedThread(userId, id);
     const [sendRefusal, handoff, pendingActions] = await Promise.all([
-      this.threads.sendRefusalOf(thread.projectId, thread), this.threads.handoff(thread.id), this.threads.pendingActions(thread.id),
+      this.threads.sendRefusalOf(thread.projectId, thread), this.threads.handoff(thread.id), this.threads.pendingActions(scope, thread.id),
     ]);
     return { ...thread, sendRefusal, handoff, pendingActions };
   }

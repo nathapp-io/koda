@@ -107,10 +107,12 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
    * reader sees exactly what can still be decided, oldest first; the cap is the same one propose enforces, so the
    * list can never grow past what one thread may hold. The slug comes from each action's own `projectId` — a
    * WORKSPACE thread's action that acts in another project answers that project's slug, not the thread's home.
+   * The scope fence is part of the query (M1): a thread outside `scope` matches no row, so a caller that never ran
+   * `get` first still cannot read a preview it may not see.
    */
-  async pendingActions(threadId: string): Promise<ChatThreadPendingAction[]> {
+  async pendingActions(scope: ThreadScope, threadId: string): Promise<ChatThreadPendingAction[]> {
     const rows = await this.prisma.client.pendingAction.findMany({
-      where: { threadId, status: 'PENDING' },
+      where: { threadId, status: 'PENDING', thread: scopeWhere(scope) },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       take: MAX_PENDING_ACTIONS,
       select: { id: true, projectId: true, approvalId: true, tool: true, preview: true, expiresAt: true, createdAt: true },

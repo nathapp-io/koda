@@ -95,7 +95,7 @@ describe('ThreadsService.get pending actions (S5b US-004)', () => {
     const thread = await service.get('p1', 't1');
 
     expect(thread.pendingActions).toEqual([action]);
-    expect(pendingActions).toHaveBeenCalledWith('t1');
+    expect(pendingActions).toHaveBeenCalledWith({ kind: 'project', projectId: 'p1' }, 't1');
   });
 });
 

@@ -122,8 +122,12 @@ export interface ChatThreadRepository {
   list(scope: ThreadScope, status: string | undefined, skip: number, take: number): Promise<ChatThreadRecord[]>;
   get(scope: ThreadScope, id: string): Promise<ChatThreadRecord | null>;
   handoff(threadId: string): Promise<ChatThreadHandoff>;
-  /** 2a-D12: the reader's own preview of the thread's open actions; the same thread fence as `get`. */
-  pendingActions(threadId: string): Promise<ChatThreadPendingAction[]>;
+  /**
+   * 2a-D12: the reader's own preview of the thread's open actions, fenced by `scope` in the query itself — the same
+   * visibility `get` applies, so a thread outside the caller's scope answers an empty list rather than another
+   * project's or user's previews, with no prior read required.
+   */
+  pendingActions(scope: ThreadScope, threadId: string): Promise<ChatThreadPendingAction[]>;
   sendRefusalOf(projectId: string, thread: ChatThreadRecord): Promise<ThreadSendRefusal | null>;
   messages(threadId: string, afterSeq: number, limit: number): Promise<ChatMessageRecord[]>;
   sendMessage(input: { scope: ThreadScope; threadId: string; userId: string; text: string; clientMessageId: string; repoContext?: string }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }>;
