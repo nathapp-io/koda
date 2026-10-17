@@ -120,7 +120,8 @@ Drafting calls (spec author, 2026-10-17):
   nothing, so every assign of the same job answers the same text. When the turn has no `initialMessageId`, it reads
   no actions at all and `initialMessage` stays null.
 - **2aw-D5 web types.** `APPROVAL_TYPES` gains `assistant_action`, and `APPROVAL_DECISIONS` gains `approve` and `reject`.
-  `ThreadDetailDto` gains `pendingActions: PendingActionDto[]`, where
+  `ThreadDetailDto` gains the optional `pendingActions?: PendingActionDto[]` (the API always sends it; optional so the
+  existing typed fixtures stay valid), where
   `PendingActionDto = { id, approvalId, tool, preview, projectSlug, expiresAt, createdAt }`, all strings except
   `approvalId: string | null` (null while propose links it, `thread.dto.ts:44`). That mirrors the
   API (`apps/api/src/fleet/threads/dto/thread.dto.ts:42-55`).
@@ -364,13 +365,14 @@ Mutated symbols. The baseline exists only to locate the code; it is never the in
 - `apps/web/lib/fleet-types.ts` — `APPROVAL_TYPES` gains `assistant_action`; `APPROVAL_DECISIONS` gains `approve` and `reject` (2aw-D5).
 - `apps/web/lib/fleet-approvals.ts` — `ApprovalViewer.userId`, the `canDecide` signature and `assistant_action` rule, `keyboardDecision`, `assistantPayload`, `toActionBody`, `threadApiPath` and the `approvalSummary` branch (2aw-D6..D8, D10).
 - `apps/web/tests/lib/fleet-approvals.spec.ts` — existing viewer literals gain `userId: null` so they type-check; the expectations for the two existing types are unchanged.
+- `apps/web/tests/pages/fleet-approvals-pages.spec.ts` — the exact viewer expectations at 49, 60-61, 78 and 105 gain `userId` (the stubbed auth id on the project cases, and on the admin case), and the mounts stub `useAuth`; the other assertions are unchanged.
 - `apps/web/tests/i18n/fleet-locale-parity.spec.ts` — the closed lists at 49 (`fleet.approvals.type`), 53 (`decision`) and 60 (`toast`) gain `assistant_action`, `approve` / `reject`, and `approve` / `reject`; the invariant stays "every listed key exists in both locales".
 - `apps/web/i18n/locales/en.json` — every 2aw-D8 key for this feature: the approvals type, decision, toast, summary and `fleet.approvals.assistant.*` keys, `fleet.threads.action.*`, `fleet.threads.message.system` and `notifications.kinds.action_requested`.
 - `apps/web/i18n/locales/zh.json` — the same 2aw-D8 keys as the English locale file, in Chinese, with the same parameters.
 
 **US-004**
 - `apps/web/components/fleet/ApprovalInbox.vue` — renders `ApprovalActionPanel` for a pending `assistant_action` (2aw-D9).
-- `apps/web/tests/components/fleet-approval-inbox.spec.ts` — `fleetComponents` (line 61) registers `FleetApprovalActionPanel`, and viewer literals gain `userId`; the existing bash and budget cases keep their expectations.
+- `apps/web/tests/components/fleet-approval-inbox.spec.ts` — `fleetComponents` (line 61) registers `FleetApprovalActionPanel`, stubs `useActionPreview` (answering a preview) as a mount global, and viewer literals gain `userId`; the existing bash and budget cases keep their expectations.
 - `apps/web/tests/helpers/mount-sfc.ts` — `FleetComponentName` and `FLEET_COMPONENT_FILES` (lines 273-295) gain `FleetApprovalActionPanel: 'ApprovalActionPanel.vue'`, so the inbox spec can mount the real panel.
 
 **US-005**
