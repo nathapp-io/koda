@@ -122,6 +122,27 @@ export interface ThreadDto {
 export interface ThreadDetailDto extends ThreadDto {
   sendRefusal: ThreadSendRefusal | null
   handoff: ThreadHandoff
+  /**
+   * Fleet S5b 2aw-D5: the thread's PENDING assistant actions, oldest first. The API always sends it; optional here so
+   * a payload written before the feature still type-checks, and a thread with no pending action renders nothing.
+   */
+  pendingActions?: PendingActionDto[]
+}
+
+/**
+ * One PENDING assistant action of a thread (2aw-D5, mirroring the API's `PendingActionDto`). The preview is the text
+ * the creator decides on; `projectSlug` is the project the action acts IN, which a WORKSPACE action may differ from
+ * the thread's home project, so a decision must use it rather than the page's slug.
+ */
+export interface PendingActionDto {
+  id: string
+  /** The summary approval the action opened; null while `propose` has not linked one yet. */
+  approvalId: string | null
+  tool: string
+  preview: string
+  projectSlug: string
+  expiresAt: string
+  createdAt: string
 }
 
 /** One tool/approval entry of a message's folded `toolSummary` (tool-summary.ts `ToolSummaryEntry`). */

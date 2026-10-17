@@ -3,7 +3,7 @@ import * as Vue from 'vue'
 import { createRequire } from 'node:module'
 import { mountSfc, webFile, loadSfc } from '../helpers/mount-sfc'
 import type { FakeNode, Mounted } from '../helpers/mount-sfc'
-import { uiStubs, i18nStub } from '../helpers/fleet-harness'
+import { uiStubs, i18nStub, toastRecorder } from '../helpers/fleet-harness'
 import type {
   ChatMessageDto,
   ThreadDetailDto,
@@ -188,6 +188,7 @@ const toolChipFile = webFile('components', 'fleet', 'threads', 'ThreadToolChip.v
 const questionCardFile = webFile('components', 'fleet', 'threads', 'ThreadQuestionCard.vue')
 const writeMarkerFile = webFile('components', 'fleet', 'threads', 'ThreadWriteMarker.vue')
 const jobCardFile = webFile('components', 'fleet', 'threads', 'ThreadJobCard.vue')
+const actionCardFile = webFile('components', 'fleet', 'threads', 'ThreadActionCard.vue')
 const badgeFile = webFile('components', 'fleet', 'FleetJobStateBadge.vue')
 
 const threadDetail = (over: Record<string, unknown> = {}): ThreadDetailDto => ({
@@ -281,10 +282,19 @@ function mountToolChip(entry: ToolSummaryEntry, messageStatus: string): Mounted 
   })
 }
 
+/** US-005 (D292): the fixed instant the timeline's action cards count their expiry down from. */
+const ACTION_NOW = new Date('2026-10-14T10:00:00.000Z')
+
 function mountTimeline(
   thread: ThreadDetailDto,
   messages: ChatMessageDto[],
-  extra: { jobs?: { plan: FleetJobDto | null; run: FleetJobDto | null }; slug?: string } = {},
+  extra: {
+    jobs?: { plan: FleetJobDto | null; run: FleetJobDto | null }
+    slug?: string
+    isCreator?: boolean
+    /** The action card's `t`, so a test can read the params the timeline handed it. */
+    cardI18n?: (key: string, named?: Record<string, unknown>) => string
+  } = {},
 ): Mounted {
   // The timeline's children resolve under either the contract names (explicit imports) or the
   // Nuxt auto-import names a sub-directory component receives; register the real files for both.
@@ -292,8 +302,19 @@ function mountTimeline(
   const realCard = loadSfc(questionCardFile, { useI18n: () => i18nStub() })
   const realWrite = loadSfc(writeMarkerFile, { useI18n: () => i18nStub() })
   const realJob = loadSfc(jobCardFile, { useI18n: () => i18nStub() })
+  // US-005: the action card is real too, so a card's own decision buttons are what a timeline test clicks.
+  // The timeline tests never decide, so the card's approvals composable only needs an API object to build against.
+  // `cardI18n` lets one test read the params the card was given (the time it counted down from).
+  const realAction = loadSfc(actionCardFile, {
+    useI18n: () => ({ t: extra.cardI18n ?? i18nStub().t, te: () => false }),
+    useAppToast: () => toastRecorder(),
+    useApi: () => ({ $api: { get: async () => ({}), post: async () => ({}) } }),
+  })
   return mountSfc(timelineFile, {
-    props: { thread, messages, isCreator: true, jobs: extra.jobs ?? { plan: null, run: null }, slug: extra.slug ?? 'web' },
+    props: {
+      thread, messages, isCreator: extra.isCreator ?? true,
+      jobs: extra.jobs ?? { plan: null, run: null }, slug: extra.slug ?? 'web',
+    },
     components: {
       ...uiStubs,
       ThreadMessage: realMessage,
@@ -304,9 +325,13 @@ function mountTimeline(
       FleetThreadsThreadWriteMarker: realWrite,
       ThreadJobCard: realJob,
       FleetThreadsThreadJobCard: realJob,
+      ThreadActionCard: realAction,
+      FleetThreadsThreadActionCard: realAction,
       FleetJobStateBadge: loadSfc(badgeFile, { useI18n: () => i18nStub() }),
       NuxtLink: { name: 'StubNuxtLink', props: ['to'], setup: (p: { to: string }, { slots }: { slots: Record<string, () => unknown> }) => () => Vue.h('a', { href: p.to }, slots.default?.()) },
     },
+    // D292: the timeline owns the clock its action cards count down on; a fixed one keeps the assertions stable.
+    alias: { '~/composables/useApprovalCountdown': { useApprovalCountdown: () => ({ now: Vue.ref(ACTION_NOW) }) } },
     globals: { useI18n: () => i18nStub() },
   })
 }
@@ -580,5 +605,115 @@ describe('US-006 (koda knowledge) AC9: koda ticket paths in an assistant message
     expect(elements.flatMap(element => Object.keys(element.attrValues))).not.toContain('onload')
     expect(elements.filter(element => element.tag === 'span')[0].attrValues.title)
       .toBe('> /sandbox/tickets/SB-3 <svg onload=alert(1)>')
+  })
+})
+
+// ── US-005: the thread's pending action cards (S5b 2aw-D11) ─────────────────────────────────
+
+describe('US-005 AC-1-AC-5, AC-15: ThreadTimeline renders one action card per pending action', () => {
+  const pendingAction = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    id: 'a1',
+    approvalId: 'ap1',
+    tool: 'write_doc',
+    preview: 'Write docs/plan.md',
+    projectSlug: 'acme',
+    expiresAt: '2026-10-14T10:10:00.000Z',
+    createdAt: '2026-10-14T09:59:00.000Z',
+    ...over,
+  })
+  const twoActions = (): Record<string, unknown>[] => [
+    pendingAction(),
+    pendingAction({ id: 'a2', approvalId: 'ap2', tool: 'run_command', preview: 'Run the tests' }),
+  ]
+  const cards = (app: Mounted): FakeNode[] => app.find('[data-testid="thread-action"]')
+
+  test('AC-1: two pending actions render two action cards', () => {
+    const app = mountTimeline(threadDetail({ pendingActions: twoActions() }), [])
+
+    expect(cards(app)).toHaveLength(2)
+  })
+
+  test('AC-2: with isCreator true and two linked actions every card shows an Approve button', () => {
+    const app = mountTimeline(threadDetail({ pendingActions: twoActions() }), [], { isCreator: true })
+
+    const found = cards(app)
+    expect(found).toHaveLength(2)
+    for (const card of found) expect(app.find('[data-testid="thread-action-approve"]', card)).toHaveLength(1)
+    expect(app.find('[data-testid="thread-action-approve"]')).toHaveLength(2)
+  })
+
+  test('AC-3: with isCreator true and two linked actions every card shows a Reject button', () => {
+    const app = mountTimeline(threadDetail({ pendingActions: twoActions() }), [], { isCreator: true })
+
+    const found = cards(app)
+    expect(found).toHaveLength(2)
+    for (const card of found) expect(app.find('[data-testid="thread-action-reject"]', card)).toHaveLength(1)
+    expect(app.find('[data-testid="thread-action-reject"]')).toHaveLength(2)
+  })
+
+  test('AC-4: with isCreator false every card shows the awaiting text and no Approve button', () => {
+    const app = mountTimeline(threadDetail({ pendingActions: twoActions() }), [], { isCreator: false })
+
+    const found = cards(app)
+    expect(found).toHaveLength(2)
+    for (const card of found) {
+      expect(app.find('[data-testid="thread-action-awaiting"]', card)).toHaveLength(1)
+      expect(app.find('[data-testid="thread-action-approve"]', card)).toHaveLength(0)
+      expect(app.find('[data-testid="thread-action-reject"]', card)).toHaveLength(0)
+    }
+    expect(app.text()).toContain('fleet.threads.action.awaiting')
+  })
+
+  test('AC-5: an empty pendingActions renders no action card', () => {
+    const app = mountTimeline(threadDetail({ pendingActions: [] }), [])
+
+    expect(cards(app)).toHaveLength(0)
+  })
+
+  test('AC-15: a legacy payload without pendingActions renders no action card', () => {
+    const app = mountTimeline(threadDetail(), [])
+
+    expect(cards(app)).toHaveLength(0)
+    expect(app.find('[data-testid="thread-action-approve"]')).toHaveLength(0)
+  })
+
+  test('the cards sit below the question card and above the transcript entries (2aw-D11)', () => {
+    const app = mountTimeline(
+      threadDetail({
+        pendingQuestion: { requestId: 'q1', text: 'Which DB?', expiresAt: '2026-10-14T10:30:00.000Z' },
+        pendingActions: twoActions(),
+      }),
+      [message({ id: 'm1', role: 'user', content: 'first' })],
+    )
+
+    const order: string[] = []
+    const walk = (node: FakeNode): void => {
+      const id = node.props['data-testid']
+      if (id === 'thread-question' || id === 'thread-action' || id === 'thread-message') order.push(String(id))
+      node.children.forEach(walk)
+    }
+    walk(app.root)
+    expect(order).toEqual(['thread-question', 'thread-action', 'thread-action', 'thread-message'])
+  })
+
+  test('the timeline gives each card its own clock, action and creator flag (2aw-D11)', () => {
+    const seen: string[] = []
+    const record = (key: string, named: Record<string, unknown> = {}): string => {
+      seen.push(`${key} ${JSON.stringify(named)}`)
+      return key
+    }
+    const app = mountTimeline(threadDetail({ pendingActions: twoActions() }), [], { isCreator: true, cardI18n: record })
+
+    // expiresAt is 10:10 and the timeline's clock is fixed at 10:00, so each card counted 10:00 down.
+    expect(seen.filter(row => row.startsWith('fleet.threads.action.expiresIn'))).toEqual([
+      'fleet.threads.action.expiresIn {"time":"10:00"}',
+      'fleet.threads.action.expiresIn {"time":"10:00"}',
+    ])
+    // Each card was given its own action, and the creator is offered both decisions on each.
+    expect(seen.filter(row => row.startsWith('fleet.threads.action.title'))).toEqual([
+      'fleet.threads.action.title {"tool":"write_doc"}',
+      'fleet.threads.action.title {"tool":"run_command"}',
+    ])
+    expect(app.find('[data-testid="thread-action-approve"]')).toHaveLength(2)
   })
 })
