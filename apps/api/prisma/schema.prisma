@@ -1112,29 +1112,32 @@ model AssistantToolCall {
 /// thread (deleted with it); `input` is the parsed input with the WORKSPACE `project` key already removed, and
 /// `projectId` is the project the action acts in — for a WORKSPACE call the resolved project, not the thread's home.
 model PendingAction {
-  id            String    @id @default(cuid())
-  projectId     String
-  threadId      String
-  jobId         String
-  toolCallId    String
-  tool          String
-  input         Json
-  preview       String    @db.Text
-  status        String    @default("PENDING") // PENDING | APPROVED | REJECTED | EXPIRED | EXECUTED | FAILED
-  requestedById String
-  approvalId    String?   @unique
-  decidedById   String?
-  decidedAt     DateTime?
-  result        String?   @db.Text
-  deliveredAt   DateTime?
-  expiresAt     DateTime
-  createdAt     DateTime  @default(now())
+  id                 String    @id @default(cuid())
+  projectId          String
+  threadId           String
+  jobId              String
+  toolCallId         String
+  tool               String
+  input              Json
+  preview            String    @db.Text
+  status             String    @default("PENDING") // PENDING | APPROVED | REJECTED | EXPIRED | EXECUTED | FAILED
+  requestedById      String
+  approvalId         String?   @unique
+  decidedById        String?
+  decidedAt          DateTime?
+  result             String?   @db.Text
+  deliveredAt        DateTime?
+  deliveredMessageId String?
+  expiresAt          DateTime
+  createdAt          DateTime  @default(now())
 
   thread ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
 
   @@unique([jobId, toolCallId])
   @@index([threadId, status])
   @@index([status, expiresAt])
+  @@index([threadId, deliveredAt])
+  @@index([deliveredMessageId])
 }
 
 /// Fleet S5b-1c-c-2 (3c-2-D1): one bounded RUN outcome file of a job's ingest attempt. Epoch-scoped, so a re-ingest

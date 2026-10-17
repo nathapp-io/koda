@@ -9,7 +9,10 @@ import { FleetCommandAckResult, FleetCommandType, FleetJobState, FleetJobKind } 
 import type { RunnerCapabilities, BashMode } from '../common/protocol';
 import { ACTIVE_STATES, RUNNER_HELD_STATES } from './job-state';
 import type { ThreadAssign } from '../common/thread-jobs';
-import { PROJECT_CODE_LIMITS } from '../common/thread-jobs';
+import { PROJECT_CODE_LIMITS, THREAD_LIMITS } from '../common/thread-jobs';
+import { DELIVERABLE_STATUSES, deliveryText, MAX_DELIVERED_NOTES } from '../assistant/actions/outcome-delivery';
+import { outcomeNote } from '../assistant/actions/outcome-note';
+import type { PendingActionStatus } from '../assistant/actions/pending-action.domain';
 import type { ConfigJobResult } from '../common/config-jobs';
 import {
   ActiveJobRef, DuplicateActiveJobError, FleetArtifactRecord, FleetCommandRecord, FleetJobEventRecord, FleetJobFilters,
@@ -236,9 +239,26 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
       feature: thread.feature ?? `thread-${turn.threadId}`, resume: turn.resume,
       instructions: turn.instructions, backend: turn.backend as unknown as ThreadAssign['backend'],
       skills: turn.skills as unknown as ThreadAssign['skills'],
-      initialMessage: message ? { messageId: message.id, text: message.content } : null,
+      initialMessage: message ? { messageId: message.id, text: await this.initialMessageText(message) } : null,
       title: thread.title,
     };
+  }
+
+  /**
+   * 2aw-D4: the text a new-turn job hands its agent. The notes are rebuilt from the actions `sendMessage` delivered
+   * on this message (2aw-D3), never read back from the `system` notes, and nothing is written here, so every assign of
+   * the same job answers the same text — including the assign after a requeue.
+   */
+  private async initialMessageText(message: { id: string; content: string }): Promise<string> {
+    const actions = await this.db.pendingAction.findMany({
+      where: { deliveredMessageId: message.id, status: { in: [...DELIVERABLE_STATUSES] } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: MAX_DELIVERED_NOTES,
+      select: { id: true, tool: true, status: true, result: true },
+    });
+    // The status filter above pins every row to a deliverable status, which is the only shape `outcomeNote` accepts.
+    const notes = actions.map((a) => outcomeNote({ ...a, status: a.status as PendingActionStatus }));
+    return deliveryText(notes, message.content, THREAD_LIMITS.messageMaxBytes).text;
   }
 
   async pinThreadRunner(threadId: string, runnerId: string): Promise<void> {

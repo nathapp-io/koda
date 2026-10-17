@@ -37,6 +37,11 @@ export interface PendingActionRecord {
   result: string | null;
   /** Written by `fleet-s5b-koda-actions-web`; this feature only creates the column. */
   deliveredAt: Date | null;
+  /**
+   * 2aw-D1: the message this action's outcome note was handed to the agent on, so the next new-turn assign of the
+   * same turn rebuilds the same text. Optional: a caller that does not care about deliveries may omit it.
+   */
+  deliveredMessageId?: string | null;
   expiresAt: Date;
   createdAt: Date;
 }

@@ -50,7 +50,7 @@ export class PrismaPendingActionRepository
       projectId: d.projectId, threadId: d.threadId, jobId: d.jobId, toolCallId: d.toolCallId, tool: d.tool,
       input: json(d.input), preview: d.preview, status: d.status, requestedById: d.requestedById,
       approvalId: d.approvalId, decidedById: d.decidedById, decidedAt: d.decidedAt, result: d.result,
-      deliveredAt: d.deliveredAt, expiresAt: d.expiresAt,
+      deliveredAt: d.deliveredAt, deliveredMessageId: d.deliveredMessageId, expiresAt: d.expiresAt,
     };
   }
 
@@ -63,6 +63,7 @@ export class PrismaPendingActionRepository
     if (patch.decidedAt !== undefined) data['decidedAt'] = patch.decidedAt;
     if (patch.result !== undefined) data['result'] = patch.result;
     if (patch.deliveredAt !== undefined) data['deliveredAt'] = patch.deliveredAt;
+    if (patch.deliveredMessageId !== undefined) data['deliveredMessageId'] = patch.deliveredMessageId;
     if (patch.expiresAt !== undefined) data['expiresAt'] = patch.expiresAt;
     return data;
   }
@@ -174,6 +175,7 @@ export class PrismaPendingActionRepository
       decidedAt: m.decidedAt,
       result: m.result,
       deliveredAt: m.deliveredAt,
+      deliveredMessageId: m.deliveredMessageId,
       expiresAt: m.expiresAt,
       createdAt: m.createdAt,
     };
