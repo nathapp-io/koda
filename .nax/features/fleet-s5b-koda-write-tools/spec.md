@@ -73,7 +73,10 @@ Drafting decisions (2b1-D*):
   `koda_create_tickets`, `koda_update_ticket`, `koda_link_tickets`, `koda_add_memory`, `koda_record_decision`.
   `KODA_TOOL_DESCRIPTORS` spreads it last, after `ACTION_TOOL_DESCRIPTORS`. REPO and PROJECT threads then carry 19
   descriptors and WORKSPACE threads 20, under `KODA_TOOL_LIMITS.maxTools` (32). Every description says the change
-  happens only after the user approves it and that the call must not be repeated, as `KODA_ADD_COMMENT` does.
+  happens only after the user approves it and that the call must not be repeated, as `KODA_ADD_COMMENT` does. The
+  runner refuses the whole tool list when any description exceeds `KODA_TOOL_DESCRIPTION_MAX_CHARS` (2000,
+  `apps/runner/src/supervisor/assign-parser.ts`), and a WORKSPACE thread appends its `project` sentence, so every
+  description stays at most 2000 characters after that sentence is appended.
 - **2b1-D4 Permissions** mirror each REST route (S5b-R6):
   - `koda_create_tickets`: ability `create` `Ticket` (`tickets.controller.ts:168`).
   - `koda_update_ticket`: ability `update` `Ticket` (`tickets.controller.ts:214`). When `status` is set, the preview
@@ -129,6 +132,10 @@ Drafting decisions (2b1-D*):
   - `koda_record_decision`: `Record a decision in <slug> on "<topic>": <decision>`, then `Rationale: <rationale>`
     when present. When the requester already has an active decision on that topic, the last line is
     `Supersedes memory:<id>: <its decision>`.
+  - `koda_update_ticket` with `status` checks the requester's `transition` permission before the ticket's current
+    status, so a requester without it gets `forbidden` whatever the status.
+  - Preview size is accepted as bounded by the input bounds (at most about 85 KB for 20 tickets with full
+    descriptions); previews are not truncated, because the user approves the exact text.
 - **2b1-D7 Execution** runs as the requester with the action project's role (`ctx.actor`, 2a-D8), through the domain
   services, so the usual ticket events, timeline rows and outbox events fire.
   - `koda_create_tickets` calls `TicketsService.create(slug, { type, title, description, priority }, ctx.actor)` once
@@ -152,7 +159,8 @@ Drafting decisions (2b1-D*):
     `actorId: ctx.actor.id`, the topic, `sourceId: 'thread:<threadId>'` and the same repository. `recordDecision`
     stores only `decision` as the item's object and drops `rationale` (`memory/extraction.service.ts:223-232`), so the
     tool passes `decision` as `<decision>\n\nRationale: <rationale>` when a rationale is given, and as the decision
-    alone otherwise, and passes no `rationale` field. What the user approves is what is stored. The result is
+    alone otherwise, and passes no `rationale` field. The decision and rationale the user approved are both stored; the stored text
+    separates them with a blank line where the preview uses a line break. The result is
     `decision memory:<memoryId> recorded`.
 - **2b1-D8 Tool groups and files.** Each tool is a factory in its own file under `tools/`:
   `create-tickets-tool.ts`, `update-ticket-tool.ts`, `link-tickets-tool.ts`, `add-memory-tool.ts` and
@@ -236,7 +244,8 @@ Changed — the baseline exists only to locate the code; the target is the inter
 - Editing a proposed action's input before deciding it (umbrella §12).
 - Storing a decision's rationale in a field of its own; it is appended to the stored decision text (2b1-D7).
 - Annotating the ticket, link or memory events with `via: thread <id>`; the approval activity row carries the thread id, and memory rows carry it as `sourceId`.
-- US-003 only: a requester without `create` `Ticket` (a VIEWER) is refused by the existing executor ability path (2a US-002 AC-8); this feature adds no AC for it.
+- US-003 and US-004 only: a requester without `create` or `update` `Ticket` (a VIEWER) is refused by the existing executor ability path (2a US-002 AC-8); this feature adds no AC for it.
+- US-004 only: a `koda_update_ticket` ref that matches no ticket of the project answers `not_found` through `TicketsService.findByRef` and the existing executor preview mapping, as US-005 AC-6 pins for links; this feature adds no `koda_update_ticket` AC for it.
 - A ticket deleted between proposal and approval answers `not_found` through the existing `executeAction` mapping; this feature adds no AC for it.
 - US-004 only: a ticket whose status changes between the start check and `TicketsService.update` can leave the field changes written and the transition refused; the window is one request and is not locked.
 
@@ -257,8 +266,8 @@ Changed — the baseline exists only to locate the code; the target is the inter
 - US-003 creates `TicketWriteTools`; US-004 and US-005 register their tools in it (an additive edit to a file this
   feature creates, so it has no Modifies entry). US-006 creates `MemoryWriteTools`; US-007 registers its tool in it.
 - Integration tests are one file per story. They enter at the runner tool route
-  `POST /fleet/runner/jobs/:jobId/tools/<name>?leaseEpoch=<n>` and decide at
-  `POST /projects/web/fleet/approvals/:approvalId/decide`, where `approvalId` is the stored `PendingAction`'s
+  `POST /api/fleet/runner/jobs/:jobId/tools/<name>?leaseEpoch=<n>` and decide at
+  `POST /api/projects/web/fleet/approvals/:approvalId/decide` (the app's `/api` prefix, as in the fixture), where `approvalId` is the stored `PendingAction`'s
   `approvalId` (not the action id).
 - The fixtures follow `test/integration/fleet/assistant-action-tools.integration.spec.ts`:
   - `seedFleetHttpWorld`, with the web project's key set to `KODA` so the first ticket is `KODA-1`;
@@ -428,12 +437,13 @@ Changed — the baseline exists only to locate the code; the target is the inter
 4. [unit] `kodaToolDescriptorsFor('REPO')` has 19 entries.
 5. [unit] `kodaToolDescriptorsFor('WORKSPACE')` has 20 entries.
 6. [unit] Every `WRITE_TOOL_DESCRIPTORS` entry's `description` contains `only after the user approves`.
-7. [unit] `KODA_CREATE_TICKETS.inputSchema.properties.tickets` has `minItems` 1 and `maxItems` 20.
-8. [unit] `KODA_LINK_TICKETS.inputSchema.properties.links` has `minItems` 1 and `maxItems` 20.
-9. [unit] `KODA_UPDATE_TICKET.inputSchema.properties.status.enum` equals `['IN_PROGRESS']`.
-10. [unit] `KODA_ADD_MEMORY.inputSchema.properties.kind.enum` equals `['FACT', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN']`.
-11. [unit] `asRecord([1])`, imported from `tools/tool-input.ts`, returns `{}`.
-12. [unit] `ticketPath('web', 'KODA-1')`, imported from `tools/tool-input.ts`, returns `/web/tickets/KODA-1`.
+7. [unit] Every entry of `kodaToolDescriptorsFor('WORKSPACE')` has a `description` of at most 2000 characters.
+8. [unit] `KODA_CREATE_TICKETS.inputSchema.properties.tickets` has `minItems` 1 and `maxItems` 20.
+9. [unit] `KODA_LINK_TICKETS.inputSchema.properties.links` has `minItems` 1 and `maxItems` 20.
+10. [unit] `KODA_UPDATE_TICKET.inputSchema.properties.status.enum` equals `['IN_PROGRESS']`.
+11. [unit] `KODA_ADD_MEMORY.inputSchema.properties.kind.enum` equals `['FACT', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN']`.
+12. [unit] `asRecord([1])`, imported from `tools/tool-input.ts`, returns `{}`.
+13. [unit] `ticketPath('web', 'KODA-1')`, imported from `tools/tool-input.ts`, returns `/web/tickets/KODA-1`.
 
 ### US-003: `koda_create_tickets` (`Workdir: apps/api`)
 
@@ -441,17 +451,16 @@ Changed — the baseline exists only to locate the code; the target is the inter
 2. [unit] `createTicketsTool(...).parse` with 21 valid tickets throws `ToolInputError` with reason `tickets`.
 3. [unit] `createTicketsTool(...).parse({ tickets: [{ type: 'TASK', title: 'a' }, { type: 'EPIC', title: 'b' }] })` throws `ToolInputError` with reason `tickets[1].type`.
 4. [unit] `createTicketsTool(...).parse({ tickets: [{ type: 'TASK', title: '   ' }] })` throws `ToolInputError` with reason `tickets[0].title`.
-5. [unit] `createTicketsTool(...).parse` with one ticket whose description has 4001 characters throws `ToolInputError` with reason `tickets[0].description`.
-6. [unit] `createTicketsTool(...).preview` for two tickets in project `web` returns text whose first line is `Create 2 ticket(s) in web:`.
-7. [unit] `createTicketsTool(...).preview` for a first ticket `{ type: 'TASK', title: 'Add login' }` with no priority returns text whose second line is `1. [TASK, MEDIUM] Add login`.
-8. [unit] `createTicketsTool(...).preview` for a ticket whose description holds `token=ghp_abcdefghijklmnopqrstuvwxyz0123456789` returns text in which `ghp_abcdefghijklmnopqrstuvwxyz0123456789` does not appear.
-9. [unit] `createTicketsTool(...).execute` in project `web` for tickets titled `a` then `b` makes exactly two `TicketsService.create` calls whose arguments, in order, are `('web', { type, title: 'a', description, priority }, ctx.actor)` and `('web', { type, title: 'b', description, priority }, ctx.actor)`.
-10. [unit] `createTicketsTool(...).execute` in project `web`, when `TicketsService.create` answers refs `KODA-5` and `KODA-6`, returns `created KODA-5 /web/tickets/KODA-5\ncreated KODA-6 /web/tickets/KODA-6`.
-11. [unit] When the second of three `TicketsService.create` calls throws a plain `Error` after the first answered `KODA-5` in project `web`, `createTicketsTool(...).execute` throws a `ToolActionError` whose `text` is `created KODA-5 /web/tickets/KODA-5\nfailed at ticket 2: error`.
-12. [unit] In `assistant.module.spec.ts`, after the compiled `AssistantModule` testing module runs `init()`, `AssistantToolRegistry.get('koda_create_tickets')` matches `{ kind: 'write', permission: { kind: 'ability', action: 'create', subject: 'Ticket' } }`.
-13. [integration] `POST /fleet/runner/jobs/:jobId/tools/koda_create_tickets?leaseEpoch=<n>` from the runner holding `dev`'s RUNNING REPO THREAD job, with two tickets, answers 200 with content starting `pending `.
-14. [integration] After `dev` approves that action at `POST /projects/web/fleet/approvals/:approvalId/decide` with `{ decision: 'approve' }`, the titles of the project's two newest tickets, oldest first, equal the two proposed titles.
-15. [integration] Each ticket created by that approval has `createdByUserId` equal to `dev`'s id.
+5. [unit] `createTicketsTool(...).preview` for two tickets in project `web` returns text whose first line is `Create 2 ticket(s) in web:`.
+6. [unit] `createTicketsTool(...).preview` for a first ticket `{ type: 'TASK', title: 'Add login' }` with no priority returns text whose second line is `1. [TASK, MEDIUM] Add login`.
+7. [unit] `createTicketsTool(...).preview` for a ticket whose description holds `token=ghp_abcdefghijklmnopqrstuvwxyz0123456789` returns text in which `ghp_abcdefghijklmnopqrstuvwxyz0123456789` does not appear.
+8. [unit] For `createTicketsTool(...).execute` in project `web` with tickets titled `a` then `b`, the list of argument tuples `TicketsService.create` received equals, in order, `('web', { type, title: 'a', description, priority }, ctx.actor)` and `('web', { type, title: 'b', description, priority }, ctx.actor)`.
+9. [unit] `createTicketsTool(...).execute` in project `web`, when `TicketsService.create` answers refs `KODA-5` and `KODA-6`, returns `created KODA-5 /web/tickets/KODA-5\ncreated KODA-6 /web/tickets/KODA-6`.
+10. [unit] When the second of three `TicketsService.create` calls throws a plain `Error` after the first answered `KODA-5` in project `web`, `createTicketsTool(...).execute` throws a `ToolActionError` whose `text` is `created KODA-5 /web/tickets/KODA-5\nfailed at ticket 2: error`.
+11. [unit] In `assistant.module.spec.ts`, after the compiled `AssistantModule` testing module runs `init()`, `AssistantToolRegistry.get('koda_create_tickets')?.permission` equals `{ kind: 'ability', action: 'create', subject: 'Ticket' }`.
+12. [integration] `POST /fleet/runner/jobs/:jobId/tools/koda_create_tickets?leaseEpoch=<n>` from the runner holding `dev`'s RUNNING REPO THREAD job, with two tickets, answers 200 with content starting `pending `.
+13. [integration] After `dev` approves that action at `POST /projects/web/fleet/approvals/:approvalId/decide` with `{ decision: 'approve' }`, the titles of the project's two newest tickets, oldest first, equal the two proposed titles.
+14. [integration] Each ticket created by that approval has `createdByUserId` equal to `dev`'s id.
 
 ### US-004: `koda_update_ticket` (`Workdir: apps/api`)
 
@@ -467,7 +476,7 @@ Changed — the baseline exists only to locate the code; the target is the inter
 10. [unit] `updateTicketTool(...).execute` with `{ ref: 'KODA-1', status: 'IN_PROGRESS' }` on a ticket whose status is now `CLOSED` throws `new ToolActionError('KODA-1 cannot move from CLOSED to IN_PROGRESS')`.
 11. [unit] When `updateTicketTool(...).execute` with `status: 'IN_PROGRESS'` finds the ticket `CLOSED`, `TicketsService.update` is never called.
 12. [unit] `updateTicketTool(...).execute` with `{ ref: 'KODA-1', status: 'IN_PROGRESS' }` on a `CREATED` ticket, when `TicketsService.update` throws `ForbiddenAppException`, throws `new ToolActionError('forbidden: KODA-1 needs transition Ticket')`.
-13. [unit] In `assistant.module.spec.ts`, after the compiled `AssistantModule` testing module runs `init()`, `AssistantToolRegistry.get('koda_update_ticket')` matches `{ kind: 'write', permission: { kind: 'ability', action: 'update', subject: 'Ticket' } }`.
+13. [unit] In `assistant.module.spec.ts`, after the compiled `AssistantModule` testing module runs `init()`, `AssistantToolRegistry.get('koda_update_ticket')?.permission` equals `{ kind: 'ability', action: 'update', subject: 'Ticket' }`.
 14. [integration] At the runner tool route, `koda_update_ticket` with `{ ref: 'KODA-1', status: 'IN_PROGRESS' }` for a ticket in `VERIFY_FIX` answers `{ isError: true, content: 'invalid_input: status' }`.
 15. [integration] `koda_update_ticket` with `{ ref: 'KODA-1', status: 'IN_PROGRESS', priority: 'HIGH' }` at the runner tool route for a `CREATED` ticket, approved by `dev` at the decide route, leaves the ticket with `{ status: 'IN_PROGRESS', priority: 'HIGH' }`.
 
@@ -479,11 +488,11 @@ Changed — the baseline exists only to locate the code; the target is the inter
 4. [unit] `linkTicketsTool(...).parse({ links: [{ ref: 'KODA-1', url: 'https://x.dev/a', linkType: 'issue' }] })` throws `ToolInputError` with reason `links[0].linkType`.
 5. [unit] `linkTicketsTool(...).preview` for `{ links: [{ ref: 'KODA-1', url: 'https://github.com/o/r/pull/7' }] }` on a ticket titled `Fix login` in project `web` returns exactly `Link 1 URL(s) in web:\n- KODA-1 "Fix login" <- pr https://github.com/o/r/pull/7`.
 6. [unit] `linkTicketsTool(...).preview` for a link whose ref matches no ticket of the project rethrows the `NotFoundAppException` that `TicketsService.findByRef` threw.
-7. [unit] `linkTicketsTool(...).execute` in project `web` for links to `KODA-1` then `KODA-2` makes exactly two `TicketLinksService.create` calls whose arguments, in order, are `('web', 'KODA-1', { url, linkType })` and `('web', 'KODA-2', { url, linkType })`.
+7. [unit] For `linkTicketsTool(...).execute` in project `web` with links to `KODA-1` then `KODA-2`, the list of argument tuples `TicketLinksService.create` received equals, in order, `('web', 'KODA-1', { url, linkType })` and `('web', 'KODA-2', { url, linkType })`.
 8. [unit] For a link to `KODA-1` that `TicketLinksService.create` answers with status 200, the result line is `linked KODA-1 <url> (already linked)`.
 9. [unit] For a link to `KODA-2` that `TicketLinksService.create` answers with status 201, the result line is `linked KODA-2 <url>`.
 10. [unit] When the second of two `TicketLinksService.create` calls throws `NotFoundAppException` after the first answered 201 for `KODA-1` and `https://x.dev/a`, `linkTicketsTool(...).execute` throws a `ToolActionError` whose `text` is `linked KODA-1 https://x.dev/a\nfailed at link 2: not_found`.
-11. [unit] In `assistant.module.spec.ts`, after the compiled `AssistantModule` testing module runs `init()`, `AssistantToolRegistry.get('koda_link_tickets')` matches `{ kind: 'write', permission: { kind: 'member' } }`.
+11. [unit] In `assistant.module.spec.ts`, after the compiled `AssistantModule` testing module runs `init()`, `AssistantToolRegistry.get('koda_link_tickets')?.permission` equals `{ kind: 'member' }`.
 12. [integration] At the runner tool route, `koda_link_tickets` with `{ links: [{ ref: 'KODA-1', url: 'https://github.com/o/r/pull/7' }] }` answers content starting `pending `.
 13. [integration] After that `koda_link_tickets` route call, `KODA-1` has no `TicketLink`.
 14. [integration] After `dev` approves that action at the decide route, `KODA-1` has one `TicketLink` with `{ url: 'https://github.com/o/r/pull/7', linkType: 'pr' }`.
@@ -499,7 +508,7 @@ Changed — the baseline exists only to locate the code; the target is the inter
 6. [unit] `addMemoryTool(...).preview`, when `PrismaMemoryItemRepository.findActive` answers an item with id `m1` and no object, returns text whose last line is `Replaces memory:m1`.
 7. [unit] `addMemoryTool(...).execute` for `{ kind: 'FACT', subject: 'api', predicate: 'runs on', object: 'bun' }` calls `PrismaMemoryItemRepository.upsert` once with `{ projectId: ctx.projectId, kind: 'FACT', subject: 'api', predicate: 'runs on', object: 'bun', sourceType: 'thread', sourceId: ctx.threadId, confidence: 0.8, ownerId: ctx.actor.id }`.
 8. [unit] When that `upsert` answers an item with id `m3`, `addMemoryTool(...).execute` returns `memory:m3 saved`.
-9. [unit] In `assistant.module.spec.ts`, after the compiled `AssistantModule` testing module runs `init()`, `AssistantToolRegistry.get('koda_add_memory')` matches `{ kind: 'write', permission: { kind: 'member' } }`.
+9. [unit] In `assistant.module.spec.ts`, after the compiled `AssistantModule` testing module runs `init()`, `AssistantToolRegistry.get('koda_add_memory')?.permission` equals `{ kind: 'member' }`.
 10. [integration] At the runner tool route, `koda_add_memory` with `{ kind: 'FACT', subject: 'api', predicate: 'runs on', object: 'bun' }` from the runner holding `dev`'s RUNNING REPO THREAD job answers content starting `pending `.
 11. [integration] After that `koda_add_memory` route call, the project has no active memory item with subject `api` and predicate `runs on`.
 12. [integration] After `dev` approves that action at the decide route, `koda_memory_search` with `{ text: 'bun' }` at the runner tool route answers content containing the `memory:<id>` of the stored item.
@@ -514,6 +523,6 @@ Changed — the baseline exists only to locate the code; the target is the inter
 6. [unit] `recordDecisionTool(...).execute` for `{ topic: 'db', decision: 'use postgres', rationale: 'one engine' }` calls `ExtractionService.recordDecision` once with first argument `{ projectId: ctx.projectId, actorId: ctx.actor.id, topic: 'db', decision: 'use postgres\n\nRationale: one engine', sourceId: 'thread:<ctx.threadId>' }`.
 7. [unit] `recordDecisionTool(...).execute` for `{ topic: 'db', decision: 'use postgres' }` calls `ExtractionService.recordDecision` with a first argument whose `decision` is `use postgres`.
 8. [unit] When `recordDecision` answers `{ memoryId: 'm4' }`, `recordDecisionTool(...).execute` returns `decision memory:m4 recorded`.
-9. [unit] In `assistant.module.spec.ts`, after the compiled `AssistantModule` testing module runs `init()`, `AssistantToolRegistry.get('koda_record_decision')` matches `{ kind: 'write', permission: { kind: 'member' } }`.
+9. [unit] In `assistant.module.spec.ts`, after the compiled `AssistantModule` testing module runs `init()`, `AssistantToolRegistry.get('koda_record_decision')?.permission` equals `{ kind: 'member' }`.
 10. [integration] At the runner tool route, `koda_record_decision` with `{ topic: 'db', decision: 'use postgres', rationale: 'one engine' }` from the runner holding `dev`'s RUNNING REPO THREAD job answers content starting `pending `.
 11. [integration] After `dev` approves that action at the decide route, the project holds one active `DECISION` memory item, and it has `{ subject: 'agent:<dev id>', predicate: 'db', object: 'use postgres\n\nRationale: one engine', ownerId: <dev id> }`.
