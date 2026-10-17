@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-koda-actions-web",
   "branchName": "feat/fleet-s5b-koda-actions-web",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "updatedAt": "2026-10-17T10:56:15.191Z",
+  "updatedAt": "2026-10-17T11:13:39.326Z",
   "userStories": [
     {
       "id": "US-001",
@@ -211,8 +211,8 @@
         "shared-contract"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -224,7 +224,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "apps/web/lib/fleet-approvals.ts",
@@ -274,7 +276,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "7281bbb348fca1ac6e03e9658c6bf47a22d10aef"
     },
     {
       "id": "US-004",
