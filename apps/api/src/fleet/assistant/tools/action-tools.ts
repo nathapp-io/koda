@@ -9,6 +9,7 @@ import { maskSecrets } from '../assistant-tool-safety';
 import { KODA_ADD_COMMENT, KODA_GET_ACTION } from '../koda-tool-descriptors';
 import { ToolInputError, type AssistantTool, type ToolContext } from '../assistant-tool.types';
 import { TICKET_REF } from './ticket-tools';
+import { asRecord, ticketPath } from './tool-input';
 
 /**
  * Fleet S5b 2a US-003 (2a-D13, 2a-D14): the pilot write tool and the read that reports on it. `koda_add_comment`
@@ -29,14 +30,6 @@ interface AddCommentInput {
 interface GetActionInput {
   id: string;
 }
-
-/** The input as a record; a missing key, a null and a non-object body all read as absent fields. */
-function asRecord(input: unknown): Record<string, unknown> {
-  return input !== null && typeof input === 'object' && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
-}
-
-/** What every result names a ticket by: the web path a human can open. */
-const ticketPath = (slug: string, ref: string): string => `/${slug}/tickets/${ref}`;
 
 /**
  * `koda_add_comment` (2a-D13): the comment one ticket of the thread's project should carry. `body` is kept as
