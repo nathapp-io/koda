@@ -751,7 +751,7 @@ None. The sweeper is a new provider; `ApprovalExpirySweeper` and its specs are u
 6. [integration] Two approves of the same pending action sent concurrently produce one 200 and one 409, and the ticket has one new comment.
 7. [integration] An approve by a requester who was removed from the action's project after the proposal answers 403, and the action stays `PENDING`.
 8. [unit] `AssistantToolExecutor.checkAction` for an action whose requester is disabled returns `forbidden`.
-9. [integration] An approve of a `koda_add_comment` action by a requester demoted to a project role that lacks `create Comment` after the proposal answers 403, and the action stays `PENDING`.
+9. [unit] `AssistantToolExecutor.checkAction`, with `KodaCaslAbilityFactory` stubbed so the requester's project role is denied `create Comment`, returns `forbidden` for a `koda_add_comment` action (every built-in role holds `create Comment`, so the ability-loss case is a unit test).
 10. [integration] An approve of a `koda_add_comment` action whose ticket was soft-deleted after the proposal answers 200, and the action is `FAILED` with `result` `not_found`.
 11. [unit] `AssistantToolExecutor.executeAction` for an action whose tool's `execute` throws a plain `Error` returns `{ ok: false, text: 'error: <tool> failed' }`.
 12. [unit] `AssistantActionDecisions.decide` stores a result of at most 16384 bytes when the tool's `execute` returns 20000 bytes.
