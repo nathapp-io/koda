@@ -19,6 +19,8 @@ export interface AssistantTool<I = unknown> {
   /** One of KODA_TOOL_DESCRIPTORS. */
   descriptor: KodaToolDescriptor;
   permission: ToolPermission;
+  /** 1d2-D3: `workspace` tools run only in WORKSPACE threads and take no `project`; absent means `project`. */
+  scope?: 'project' | 'workspace';
   /** Throws ToolInputError(reason) for input the tool cannot use. */
   parse(input: unknown): I;
   execute(ctx: ToolContext, input: I): Promise<string>;

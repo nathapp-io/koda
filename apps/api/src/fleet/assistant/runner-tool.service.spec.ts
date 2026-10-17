@@ -175,10 +175,11 @@ describe('US-005 AC-1: a call that passes every gate reaches the executor', () =
 });
 
 
-it('workspace AC-8 refuses tools before registry or executor', async () => {
+it('workspace AC-8: a WORKSPACE job call reaches the executor with the job, toolCallId, name and input', async () => {
   const { service, jobs, registry, execute } = fixture();
   jobs.findThreadTokenScope.mockResolvedValue({ kind: 'WORKSPACE', action: 'SESSION' });
-  await expect(service.call('r1', 'j1', '1', 'koda_search_tickets', BODY)).rejects.toMatchObject({ prefix: 'fleet.notThreadJob', code: 409, httpStatus: 409 });
-  expect(registry.get).not.toHaveBeenCalled();
-  expect(execute).not.toHaveBeenCalled();
+  const body = { toolCallId: 'c1', input: { project: 'web' } };
+  await expect(service.call('r1', 'j1', '1', 'koda_search_tickets', body)).resolves.toEqual({ content: 'WEB-1 ok', isError: false });
+  expect(registry.get).toHaveBeenCalledWith('koda_search_tickets');
+  expect(execute).toHaveBeenCalledWith({ jobId: 'j1', toolCallId: 'c1', name: 'koda_search_tickets', input: { project: 'web' } });
 });

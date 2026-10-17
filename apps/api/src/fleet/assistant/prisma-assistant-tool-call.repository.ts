@@ -64,10 +64,16 @@ export class PrismaAssistantToolCallRepository
       where: { id: jobId },
       select: {
         project: { select: { id: true, slug: true } },
-        thread: { select: { id: true, createdBy: { select: { id: true, email: true, role: true, disabled: true } } } },
+        thread: { select: { id: true, kind: true, createdBy: { select: { id: true, email: true, role: true, disabled: true } } } },
       },
     });
     if (!job?.thread) return null;
-    return { project: job.project, threadId: job.thread.id, creator: job.thread.createdBy };
+    const kind = job.thread.kind;
+    return {
+      project: job.project,
+      threadId: job.thread.id,
+      creator: job.thread.createdBy,
+      kind: kind === 'PROJECT' || kind === 'WORKSPACE' ? kind : 'REPO',
+    };
   }
 }

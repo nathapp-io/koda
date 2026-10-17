@@ -4243,12 +4243,12 @@ describeIntegration('API Integration Tests', () => {
         expect(body<{ status: string }>(await request(httpServer).post(archiveUrl).set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(200)).status).toBe('ARCHIVED');
       });
 
-      it('workspace tool route refuses a held RUNNING job with 409 fleet.notThreadJob', async () => {
+      it('workspace tool route answers a held RUNNING job', async () => {
         const seeded = await seedThreadJob(httpServer, db(), world, { kind: 'WORKSPACE' });
         try {
           const res = await request(httpServer).post(`/api/fleet/runner/jobs/${seeded.jobId}/tools/koda_search_tickets?leaseEpoch=1`)
-            .set('Authorization', `Bearer ${seeded.runnerKey}`).send({ toolCallId: 'workspace-call', input: {} }).expect(409);
-          refusal(res, 'fleet.notThreadJob.409');
+            .set('Authorization', `Bearer ${seeded.runnerKey}`).send({ toolCallId: 'workspace-call', input: { project: projectSlug } }).expect(200);
+          expect(body<{ isError: boolean }>(res).isError).toBe(false);
         } finally { await db().runner.update({ where: { id: seeded.runnerId }, data: { enabled: false } }); }
       });
 

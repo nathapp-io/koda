@@ -1,3 +1,5 @@
+import type { ChatThreadKind } from '../common/thread-jobs';
+
 export const ASSISTANT_TOOL_CALL_REPOSITORY = Symbol('ASSISTANT_TOOL_CALL_REPOSITORY');
 
 export type ToolCallOutcome = 'ok' | 'invalid_input' | 'forbidden' | 'not_found' | 'error';
@@ -22,6 +24,8 @@ export interface ToolCallContext {
   project: { id: string; slug: string };
   threadId: string;
   creator: { id: string; email: string; role: string; disabled: boolean };
+  /** The thread's kind (1d2-D4); absent reads as `REPO`, the column default. */
+  kind?: ChatThreadKind;
 }
 
 export interface AssistantToolCallRepository {
