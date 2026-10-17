@@ -193,6 +193,8 @@ const backTo = computed(() => {
 
         <NuxtLink to="/agents" :class="navLinkClass" :active-class="activeClass"><Bot class="h-4 w-4 shrink-0" />{{ t('nav.agents') }}</NuxtLink>
 
+        <NuxtLink to="/threads" :class="navLinkClass" :active-class="activeClass"><MessagesSquare class="h-4 w-4 shrink-0" />{{ t('nav.myThreads') }}</NuxtLink>
+
         <NuxtLink to="/admin/slos" :class="navLinkClass" :active-class="activeClass"><Activity class="h-4 w-4 shrink-0" />{{ t('nav.slos') }}</NuxtLink>
 
         <p v-if="isGlobalAdmin" :class="sectionLabelClass">{{ t('nav.sectionAdmin') }}</p>

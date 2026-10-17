@@ -87,7 +87,8 @@
     "sectionWork": "Work",
     "sectionKnowledge": "Knowledge",
     "sectionFleet": "Fleet",
-    "threads": "Threads"
+    "threads": "Threads",
+    "myThreads": "My threads"
   },
   "palette": {
     "trigger": "Search or jump to…",
@@ -746,7 +747,14 @@
   "fleet": {
     "threads": {
       "kind": {
-        "project": "Project thread"
+        "project": "Project thread",
+        "workspace": "Workspace thread"
+      },
+      "workspace": {
+        "title": "My threads",
+        "homeProject": "Home project",
+        "homeAutomatic": "Automatic",
+        "disabled": "Threads are disabled."
       },
       "list": {
         "title": "Threads",

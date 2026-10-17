@@ -26,6 +26,8 @@ const commands = computed<Command[]>(() => {
   const list: Command[] = [
     { id: 'dashboard', label: t('nav.dashboard'), icon: LayoutDashboard, run: go('/') },
     { id: 'agents', label: t('nav.agents'), icon: Bot, run: go('/agents') },
+    // A personal thread list is a top-level destination, so it is offered with or without a project.
+    { id: 'my-threads', label: t('nav.myThreads'), icon: MessagesSquare, run: go('/threads') },
     { id: 'slos', label: t('nav.slos'), icon: Activity, run: go('/admin/slos') },
   ]
   if (isGlobalAdmin.value) {
