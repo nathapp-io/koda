@@ -1,3 +1,4 @@
+import type { ChatThreadKind } from '../../common/thread-jobs';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import type { FleetCommandType, FleetJobKind, FleetJobState } from '../../../common/enums';
@@ -246,7 +247,7 @@ export interface IFleetJobRepository {
   findActiveLoads(runnerIds: readonly string[]): Promise<ActiveJobRef[]>;
   findThreadAssign(jobId: string): Promise<ThreadAssign | null>;
   /** Minimal scope projection for the per-repository read-only token fence. */
-  findThreadTokenScope(jobId: string): Promise<{ kind: 'REPO' | 'PROJECT'; action: string } | null>;
+  findThreadTokenScope(jobId: string): Promise<{ kind: ChatThreadKind; action: string } | null>;
   pinThreadRunner(threadId: string, runnerId: string): Promise<void>;
 
   /** Takes the next server seq from FleetJob.eventSeq (row-locked by the increment). */

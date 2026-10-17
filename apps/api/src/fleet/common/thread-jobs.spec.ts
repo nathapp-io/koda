@@ -25,12 +25,16 @@ describe('thread job kind (US-001)', () => {
 });
 
 describe('chat thread kinds (US-001)', () => {
-  it('US-001 AC1: the API CHAT_THREAD_KINDS deep-equals the package CHAT_THREAD_KINDS', () => {
-    expect(apiThreads.CHAT_THREAD_KINDS).toEqual(pkg.CHAT_THREAD_KINDS);
+  it('AC-1: the API mirror CHAT_THREAD_KINDS equals [REPO, PROJECT, WORKSPACE]', () => {
+    expect(apiThreads.CHAT_THREAD_KINDS).toEqual(['REPO', 'PROJECT', 'WORKSPACE']);
   });
 
-  it('US-001 AC1: the shared chat thread kinds are REPO then PROJECT', () => {
-    expect(pkg.CHAT_THREAD_KINDS).toEqual(['REPO', 'PROJECT']);
+  it('AC-2: the package CHAT_THREAD_KINDS equals [REPO, PROJECT, WORKSPACE]', () => {
+    expect(pkg.CHAT_THREAD_KINDS).toEqual(['REPO', 'PROJECT', 'WORKSPACE']);
+  });
+
+  it('US-001 AC1: the API CHAT_THREAD_KINDS deep-equals the package CHAT_THREAD_KINDS', () => {
+    expect(apiThreads.CHAT_THREAD_KINDS).toEqual(pkg.CHAT_THREAD_KINDS);
   });
 });
 

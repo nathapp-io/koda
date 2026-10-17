@@ -84,6 +84,8 @@ export interface RunnerCapabilities {
   kodaTools?: true;
   /** Fleet S5b: the runner fetches a PROJECT session's repositories and hosts code tools over them. Absent on older runners. */
   projectCode?: true;
+  /** Fleet S5b 1d: the runner hosts WORKSPACE threads with no checkout. Absent on older runners. */
+  workspaceThreads?: true;
 }
 
 export interface EnrollRequest {

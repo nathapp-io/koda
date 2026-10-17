@@ -29,6 +29,12 @@ function hasProjectThreads(capabilities: unknown, protocolVersion: number): bool
   return capabilities['projectThreads'] === true;
 }
 
+/** Fleet S5b 1d: the same rule for the WORKSPACE opt-in (absent on a runner that predates the kind). */
+function hasWorkspaceThreads(capabilities: unknown, protocolVersion: number): boolean {
+  if (protocolVersion < THREAD_MIN_PROTOCOL_VERSION || !isRecord(capabilities)) return false;
+  return capabilities['workspaceThreads'] === true;
+}
+
 /**
  * What a project member needs to dispatch (labels, pin, profile chain) and to name runners in job
  * lists (overview D118). No versions, capacity, credentials or sandbox detail.
@@ -44,6 +50,7 @@ export class RunnerSummaryDto {
   @ApiProperty({ type: [String], description: 'Machine profile names, sorted' }) declare profiles: string[];
   @ApiProperty({ type: 'object', properties: { native: { type: 'array', items: { type: 'string' } }, acp: { type: 'array', items: { type: 'string' } } } }) declare threadBackends: { native: string[]; acp: string[] };
   @ApiProperty({ description: 'Fleet S5b: the runner hosts PROJECT threads with no checkout' }) declare projectThreads: boolean;
+  @ApiProperty({ description: 'Fleet S5b 1d: the runner hosts WORKSPACE threads with no checkout' }) declare workspaceThreads: boolean;
 
   static from(r: RunnerRecord, view: RunnerView): RunnerSummaryDto {
     return Object.assign(new RunnerSummaryDto(), {
@@ -51,6 +58,7 @@ export class RunnerSummaryDto {
       online: isRunnerOnline(r.lastSeenAt, view.now, view.offlineSec), profiles: profileNames(r.capabilities),
       threadBackends: threadBackends(r.capabilities, r.protocolVersion),
       projectThreads: hasProjectThreads(r.capabilities, r.protocolVersion),
+      workspaceThreads: hasWorkspaceThreads(r.capabilities, r.protocolVersion),
     });
   }
 }

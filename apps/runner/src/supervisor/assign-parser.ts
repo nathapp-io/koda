@@ -210,10 +210,10 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   if (!checked(() => assertSegment('threadId', t['threadId']))) return bad('threadId');
   const action = t['action'];
   if (action !== 'SESSION' && action !== 'PUBLISH' && action !== 'DISCARD') return bad('thread action');
-  // Fleet S5b: `kind` is optional (absent means REPO); a PROJECT thread only ever runs a SESSION.
+  // Fleet S5b: `kind` is optional (absent means REPO); a PROJECT or WORKSPACE thread only ever runs a SESSION.
   const rawKind = t['kind'];
-  if (rawKind !== undefined && rawKind !== 'REPO' && rawKind !== 'PROJECT') return bad('thread kind');
-  if (rawKind === 'PROJECT' && action !== 'SESSION') return bad('thread action');
+  if (rawKind !== undefined && rawKind !== 'REPO' && rawKind !== 'PROJECT' && rawKind !== 'WORKSPACE') return bad('thread kind');
+  if ((rawKind === 'PROJECT' || rawKind === 'WORKSPACE') && action !== 'SESSION') return bad('thread action');
   if (!checked(() => assertFeature(t['feature']))) return bad('thread feature');
   if (typeof t['resume'] !== 'boolean') return bad('thread resume');
   const instructions = t['instructions'];
@@ -245,6 +245,8 @@ export function parseAssign(command: FleetCommandOut): ParsedAssign {
   if (kodaTools === null) return bad('koda tools');
   const rawRepos = t['projectRepos'];
   const rawUnavailable = t['projectReposUnavailable'];
+  // Unchanged S5b 1c-b rule: only PROJECT reads project code — a REPO, WORKSPACE or kind-less block carrying
+  // either list is refused whole.
   if ((rawRepos !== undefined || rawUnavailable !== undefined) && rawKind !== 'PROJECT') return bad('project repos');
   const projectRepos = rawRepos === undefined ? undefined : cleanProjectRepos(rawRepos);
   const projectReposUnavailable = rawUnavailable === undefined ? undefined : cleanProjectUnavailable(rawUnavailable);

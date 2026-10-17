@@ -323,3 +323,12 @@ describe('profileMisfit (S3 §4.4: one profile, the placement rules)', () => {
     expect(profileMisfit(needs({ interaction: TG_FAILED }), caps())).toBe('interaction');
   });
 });
+
+
+describe('workspace placement AC-2/3/4', () => {
+  const workspace = job({ command: 'THREAD', thread: { kind: 'WORKSPACE', enabled: true, backend: { kind: 'native', model: 'm1' } } });
+  const host = (workspaceThreads?: boolean) => runner({ protocolVersion: 4, threadCapacity: 2, capabilities: caps({ projectThreads: true, workspaceThreads, threadBackends: { native: ['m1'], acp: [] } }) });
+  it('requires workspaceThreads', () => expect(misfit(workspace, host())).toBe('workspace_threads'));
+  it('fits a workspace host', () => expect(misfit(workspace, host(true))).toBeNull());
+  it('keeps workspace_threads recoverable', () => expect((PERMANENT_MISFITS as ReadonlySet<string>).has('workspace_threads')).toBe(false));
+});

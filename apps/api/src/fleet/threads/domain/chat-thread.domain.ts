@@ -10,10 +10,10 @@ export const CHAT_THREAD_REPOSITORY = Symbol('CHAT_THREAD_REPOSITORY');
 export interface RepoThreadFields { repoId: string; baseRef: string; feature: string; specPath: string }
 
 /**
- * The REPO-only guard (fleet S5b §1a-R3): the repo fields of a thread whose kind is REPO. A PROJECT thread, and a
- * REPO row whose `kind` is missing or unknown (rows written before the kind column, and unit fixtures), is judged by
- * the four fields alone. Every REPO-only consumer — Plan, Run, Publish, Discard, the THREAD job factory and the ASSIGN
- * and cost-event fallbacks — reads the fields through this one function, so the refusal is uniform.
+ * The REPO-only guard (fleet S5b §1a-R3): the repo fields of a thread whose kind is REPO. A PROJECT or WORKSPACE
+ * thread, and a REPO row whose `kind` is missing or unknown (rows written before the kind column, and unit fixtures),
+ * is judged by the four fields alone. Every REPO-only consumer — Plan, Run, Publish, Discard, the THREAD job factory
+ * and the ASSIGN and cost-event fallbacks — reads the fields through this one function, so the refusal is uniform.
  */
 export function repoThreadFields(thread: {
   kind?: string;
@@ -23,7 +23,9 @@ export function repoThreadFields(thread: {
   specPath: string | null;
 }): RepoThreadFields {
   const { repoId, baseRef, feature, specPath } = thread;
-  if (thread.kind === 'PROJECT' || repoId === null || baseRef === null || feature === null || specPath === null) {
+  // Fleet S5b 1d: a WORKSPACE thread owns no repo either; the create paths never give one repo fields, so this only
+  // catches a row that predates the refusal.
+  if (thread.kind === 'PROJECT' || thread.kind === 'WORKSPACE' || repoId === null || baseRef === null || feature === null || specPath === null) {
     throw new ConflictAppException({}, 'threads.notRepoThread');
   }
   return { repoId, baseRef, feature, specPath };
@@ -67,7 +69,7 @@ export type ThreadWriteResult =
   | { kind: 'discard_failed'; jobId: string; at: string; reason: string };
 
 export interface ChatThreadRecord {
-  id: string; kind: ChatThreadKind; repoId: string | null; baseRef: string | null; feature: string | null;
+  id: string; kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null;
   title: string;
   createdById: string; runnerId: string | null; backend: ThreadBackend; status: string; archivedAt: Date | null;
   skills: ThreadSkillSource[]; maxCostUsd: string; costUsd: string; tokens: unknown; specPath: string | null;
@@ -78,6 +80,8 @@ export interface ChatThreadRecord {
   publishedSha: string | null;
   specPublished: boolean;
   lastWrite: ThreadWriteResult | null;
+  /** Fleet S5b 1d: set only by a workspace-scope read (US-002); a project-scope record never carries it. */
+  homeProject?: { slug: string; name: string };
 }
 
 export interface ThreadHandoffJob { jobId: string; state: string; stateReason: string | null }
@@ -90,18 +94,21 @@ export interface ChatMessageRecord {
   usage: unknown; costUsd: string | null; costSource: string | null; createdAt: Date;
 }
 
+/** Which threads a lookup may see: a project's REPO and PROJECT threads, or one user's WORKSPACE threads. */
+export type ThreadScope = { kind: 'project'; projectId: string } | { kind: 'workspace'; userId: string };
+
 export interface ChatThreadRepository {
   create(input: { kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord>;
-  list(projectId: string, status: string | undefined, skip: number, take: number): Promise<ChatThreadRecord[]>;
-  get(projectId: string, id: string): Promise<ChatThreadRecord | null>;
+  list(scope: ThreadScope, status: string | undefined, skip: number, take: number): Promise<ChatThreadRecord[]>;
+  get(scope: ThreadScope, id: string): Promise<ChatThreadRecord | null>;
   handoff(threadId: string): Promise<ChatThreadHandoff>;
   sendRefusalOf(projectId: string, thread: ChatThreadRecord): Promise<ThreadSendRefusal | null>;
   messages(threadId: string, afterSeq: number, limit: number): Promise<ChatMessageRecord[]>;
-  sendMessage(input: { projectId: string; threadId: string; userId: string; text: string; clientMessageId: string; repoContext?: string }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }>;
+  sendMessage(input: { scope: ThreadScope; threadId: string; userId: string; text: string; clientMessageId: string; repoContext?: string }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }>;
   publish(projectId: string, threadId: string, userId: string): Promise<{ jobId: string | null }>;
   discard(projectId: string, threadId: string, userId: string): Promise<{ jobId: string }>;
   archivedThreadIds(runnerId: string): Promise<string[]>;
-  updateCap(projectId: string, threadId: string, userId: string, maxCostUsd: string): Promise<ChatThreadRecord>;
-  command(projectId: string, threadId: string, userId: string, type: string, payload: object): Promise<void>;
-  archive(projectId: string, threadId: string, userId: string, canArchive: boolean): Promise<string | null>;
+  updateCap(scope: ThreadScope, threadId: string, userId: string, maxCostUsd: string): Promise<ChatThreadRecord>;
+  command(scope: ThreadScope, threadId: string, userId: string, type: string, payload: object): Promise<void>;
+  archive(scope: ThreadScope, threadId: string, userId: string, canArchive: boolean): Promise<string | null>;
 }

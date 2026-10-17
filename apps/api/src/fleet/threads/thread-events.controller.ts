@@ -39,8 +39,8 @@ export class ThreadEventsGuard implements CanActivate {
 
     const projectId = await this.access.findProjectIdBySlug(req.params.slug);
     await this.access.assertProjectMembership(projectId, principal);
-    const thread = await this.prisma.client.chatThread.findUnique({
-      where: { id: req.params.id }, select: { projectId: true },
+    const thread = await this.prisma.client.chatThread.findFirst({
+      where: { id: req.params.id, projectId, kind: { not: 'WORKSPACE' } }, select: { projectId: true },
     });
     if (!thread || thread.projectId !== projectId) throw new NotFoundAppException({}, 'threads.notFound');
 

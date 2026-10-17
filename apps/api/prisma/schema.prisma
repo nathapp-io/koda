@@ -1147,7 +1147,7 @@ model FleetConfigEdit {
 model ChatThread {
   id              String    @id @default(cuid())
   projectId       String
-  kind            String    @default("REPO") // REPO | PROJECT
+  kind            String    @default("REPO") // REPO | PROJECT | WORKSPACE
   repoId          String?
   baseRef         String?
   feature         String? // nax feature; branch feat/<feature>
@@ -1182,6 +1182,7 @@ model ChatThread {
 
   @@index([projectId, lastActivityAt])
   @@index([runnerId, status])
+  @@index([createdById, kind, lastActivityAt])
 }
 
 /// Fleet S5a §1: one message in a chat thread. seq orders the transcript; clientMessageId dedups a retried send.

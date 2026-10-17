@@ -1,3 +1,4 @@
+import type { ChatThreadKind } from '../common/thread-jobs';
 import { Injectable } from '@nestjs/common';
 import { FleetCommand as FleetCommandRow, FleetJob as JobRow, Prisma, PrismaClient } from '../../generated/prisma/client';
 import { Paginate, PrismaService } from '@nathapp/nestjs-prisma';
@@ -213,13 +214,13 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     return rows.map((r) => ({ runnerId: r.runnerId as string, repoId: r.repoId, command: r.command }));
   }
 
-  async findThreadTokenScope(jobId: string): Promise<{ kind: 'REPO' | 'PROJECT'; action: string } | null> {
+  async findThreadTokenScope(jobId: string): Promise<{ kind: ChatThreadKind; action: string } | null> {
     const turn = await this.db.fleetThreadTurn.findUnique({
       where: { jobId },
       select: { action: true, thread: { select: { kind: true } } },
     });
-    // Match findThreadAssign: only an explicit PROJECT kind has project scope.
-    return turn ? { kind: turn.thread.kind === 'PROJECT' ? 'PROJECT' : 'REPO', action: turn.action } : null;
+    // Preserve both non-repo kinds; legacy or unknown kinds retain REPO scope.
+    return turn ? { kind: turn.thread.kind === 'WORKSPACE' ? 'WORKSPACE' : turn.thread.kind === 'PROJECT' ? 'PROJECT' : 'REPO', action: turn.action } : null;
   }
 
   async findThreadAssign(jobId: string): Promise<ThreadAssign | null> {
@@ -230,7 +231,7 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     const message = turn.initialMessageId ? await this.db.chatMessage.findUnique({ where: { id: turn.initialMessageId }, select: { id: true, content: true } }) : null;
     return {
       // 1a-R1: the API always names the thread's kind; a row that says something else (or nothing) is a REPO thread.
-      threadId: turn.threadId, action: turn.action as ThreadAssign['action'], kind: thread.kind === 'PROJECT' ? 'PROJECT' : 'REPO',
+      threadId: turn.threadId, action: turn.action as ThreadAssign['action'], kind: thread.kind === 'WORKSPACE' ? 'WORKSPACE' : thread.kind === 'PROJECT' ? 'PROJECT' : 'REPO',
       // 1a-R1: a PROJECT thread has no feature of its own; the runner still needs a name for the workdir.
       feature: thread.feature ?? `thread-${turn.threadId}`, resume: turn.resume,
       instructions: turn.instructions, backend: turn.backend as unknown as ThreadAssign['backend'],

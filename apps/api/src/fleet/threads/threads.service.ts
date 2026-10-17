@@ -50,40 +50,40 @@ export class ThreadsService {
   }
 
   async list(projectId: string, status: string | undefined, skip: number, take: number): Promise<{ items: ChatThreadRecord[]; threadsEnabled: boolean }> {
-    return { items: await this.threads.list(projectId, status, skip, take), threadsEnabled: this.config.threadsEnabled };
+    return { items: await this.threads.list({ kind: 'project', projectId }, status, skip, take), threadsEnabled: this.config.threadsEnabled };
   }
   async get(projectId: string, id: string): Promise<ChatThreadDetail> {
-    const result = await this.threads.get(projectId, id);
+    const result = await this.threads.get({ kind: 'project', projectId }, id);
     if (!result) throw new NotFoundAppException({}, 'threads.notFound');
     const [sendRefusal, handoff] = await Promise.all([this.threads.sendRefusalOf(projectId, result), this.threads.handoff(result.id)]);
     return { ...result, sendRefusal, handoff };
   }
   async messages(projectId: string, id: string, afterSeq: number, limit: number): Promise<{ items: ChatMessageRecord[] }> {
-    const thread = await this.threads.get(projectId, id);
+    const thread = await this.threads.get({ kind: 'project', projectId }, id);
     if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
     return { items: await this.threads.messages(thread.id, afterSeq, limit) };
   }
 
   async updateCap(projectId: string, threadId: string, userId: string, value: unknown): Promise<ChatThreadRecord> {
     if (!isMaxCostUsd(value)) throw new ValidationAppException({ reason: 'maxCostUsd' }, 'threads.input');
-    return this.threads.updateCap(projectId, threadId, userId, String(value));
+    return this.threads.updateCap({ kind: 'project', projectId }, threadId, userId, String(value));
   }
 
   stop(projectId: string, threadId: string, userId: string): Promise<void> {
-    return this.threads.command(projectId, threadId, userId, FleetCommandType.THREAD_STOP_TURN, {});
+    return this.threads.command({ kind: 'project', projectId }, threadId, userId, FleetCommandType.THREAD_STOP_TURN, {});
   }
 
   endSession(projectId: string, threadId: string, userId: string): Promise<void> {
-    return this.threads.command(projectId, threadId, userId, FleetCommandType.THREAD_CLOSE, {});
+    return this.threads.command({ kind: 'project', projectId }, threadId, userId, FleetCommandType.THREAD_CLOSE, {});
   }
 
   async answer(projectId: string, threadId: string, userId: string, input: AnswerQuestionDto): Promise<void> {
     if (typeof input.requestId !== 'string' || input.requestId.length < 1 || input.requestId.length > 128 || typeof input.text !== 'string' || input.text.length < 1 || Buffer.byteLength(input.text, 'utf8') > 32768) throw new ValidationAppException({ reason: 'answer' }, 'threads.input');
-    return this.threads.command(projectId, threadId, userId, FleetCommandType.THREAD_ANSWER, input);
+    return this.threads.command({ kind: 'project', projectId }, threadId, userId, FleetCommandType.THREAD_ANSWER, input);
   }
 
   async archive(projectId: string, threadId: string, userId: string, canArchive: boolean): Promise<void> {
-    const jobId = await this.threads.archive(projectId, threadId, userId, canArchive);
+    const jobId = await this.threads.archive({ kind: 'project', projectId }, threadId, userId, canArchive);
     if (!jobId) return;
     try { await this.fleetJobs.cancel(userId, projectId, jobId, true); }
     catch (error) {
@@ -93,7 +93,7 @@ export class ThreadsService {
   }
 
   async plan(projectId: string, threadId: string, userId: string, input: PlanThreadDto): Promise<import('../jobs/dto/fleet-job.dto').DispatchResultDto> {
-    const thread = await this.threads.get(projectId, threadId);
+    const thread = await this.threads.get({ kind: 'project', projectId }, threadId);
     if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
     // 1a-R3: Plan is REPO-only, and the guard runs before the creator check so a PROJECT thread answers 409.
     const { repoId, feature, specPath } = repoThreadFields(thread);
@@ -111,7 +111,7 @@ export class ThreadsService {
 
   /** US-007: dispatches the thread's RUN after its latest PLAN completed. Same gates and cap default as Plan. */
   async run(projectId: string, threadId: string, userId: string, input: RunThreadDto): Promise<import('../jobs/dto/fleet-job.dto').DispatchResultDto> {
-    const thread = await this.threads.get(projectId, threadId);
+    const thread = await this.threads.get({ kind: 'project', projectId }, threadId);
     if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
     // 1a-R3: Run is REPO-only, and the guard runs before the creator check so a PROJECT thread answers 409.
     const { repoId, feature } = repoThreadFields(thread);
@@ -143,9 +143,9 @@ export class ThreadsService {
     }
     // 1c-D1: the repository context is resolved here, before the send transaction, because the GitHub read must not
     // run inside it. A missing thread skips the resolution entirely: the repository answers its own not-found.
-    const thread = await this.threads.get(projectId, threadId);
+    const thread = await this.threads.get({ kind: 'project', projectId }, threadId);
     const repoContext = thread ? await this.projectBrief.resolveRepoContext(await this.repoIdForThread(projectId, thread)) : undefined;
-    return this.threads.sendMessage({ projectId, threadId, userId, text: input.text, clientMessageId: input.clientMessageId, repoContext });
+    return this.threads.sendMessage({ scope: { kind: 'project', projectId }, threadId, userId, text: input.text, clientMessageId: input.clientMessageId, repoContext });
   }
 
   /**

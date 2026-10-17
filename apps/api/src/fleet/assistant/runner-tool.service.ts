@@ -33,7 +33,7 @@ interface ParsedCall {
 @Injectable()
 export class RunnerToolService {
   constructor(
-    @Inject(FLEET_JOB_REPOSITORY) private readonly jobs: Pick<IFleetJobRepository, 'findById' | 'findPendingCommand'>,
+    @Inject(FLEET_JOB_REPOSITORY) private readonly jobs: Pick<IFleetJobRepository, 'findById' | 'findPendingCommand' | 'findThreadTokenScope'>,
     private readonly fence: FenceService,
     @Inject(FLEET_CFG) private readonly cfg: Pick<IFleetConfig, 'threadsEnabled'>,
     private readonly registry: AssistantToolRegistry,
@@ -48,6 +48,7 @@ export class RunnerToolService {
     if (!job) throw new NotFoundAppException({}, 'fleet.jobs');
     if (!this.fence.holds(job, runnerId, call.leaseEpoch)) throw new FleetFenceException();
     if (!isThreadKind(job.command) || !job.threadId) throw new ConflictAppException({}, 'fleet.notThreadJob');
+    if ((await this.jobs.findThreadTokenScope(jobId))?.kind === 'WORKSPACE') throw new ConflictAppException({}, 'fleet.notThreadJob');
     if (job.state !== CALLABLE_STATE) throw new ConflictAppException({ state: job.state }, 'fleet.jobState');
     const closing = await this.jobs.findPendingCommand({ jobId, type: FleetCommandType.THREAD_CLOSE, leaseEpoch: job.leaseEpoch });
     if (closing) throw new ConflictAppException({}, 'threads.closing');

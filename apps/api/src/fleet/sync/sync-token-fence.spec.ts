@@ -56,6 +56,15 @@ async function expectDenied(h: ReturnType<typeof harness>, repoId = 'r1', reason
 }
 
 describe('sync repository token fence', () => {
+  it('workspace AC-7 refuses the anchor token without repoId', async () => {
+    const h = harness();
+    h.repo.findThreadTokenScope.mockResolvedValue({ kind: 'WORKSPACE', action: 'SESSION' });
+    const response = await h.sync([{ jobId: 'j1', leaseEpoch: 1 }]);
+    expect(response.gitTokenErrors).toEqual([{ jobId: 'j1', reason: 'repo_not_assigned' }]);
+    expect(response.gitTokens).toEqual([]);
+    expect(h.broker.mint).not.toHaveBeenCalled();
+    expect(h.repo.findRepo).not.toHaveBeenCalled();
+  });
   it('AC-1 preserves repoId only when present', () => {
     const legacy = { jobId: 'j1', leaseEpoch: 1 };
     expect(parseSyncRequest({ ...base, tokenRequests: [request, legacy] }).tokenRequests).toStrictEqual([request, legacy]);

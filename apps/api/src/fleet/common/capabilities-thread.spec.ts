@@ -83,6 +83,33 @@ describe('parseCapabilitiesCore threadBackends (US-001)', () => {
   });
 });
 
+describe('parseCapabilitiesCore workspaceThreads (US-001 AC-3-AC-5)', () => {
+  it('AC-3: keeps workspaceThreads: true', () => {
+    const parsed = parseCapabilitiesCore({ ...valid, workspaceThreads: true });
+    expect(parsed.workspaceThreads).toBe(true);
+  });
+
+  it('AC-4: omits the workspaceThreads key when the report has none', () => {
+    const parsed = parseCapabilitiesCore({ ...valid, projectThreads: true });
+    expect(parsed).not.toHaveProperty('workspaceThreads');
+    // Positive control: the same report with the flag set does carry the key, so the absence above is a real
+    // absence and not a parser that never emits it.
+    expect(parseCapabilitiesCore({ ...valid, workspaceThreads: true })).toHaveProperty('workspaceThreads', true);
+  });
+
+  it("AC-5: refuses workspaceThreads: 'yes' with reason workspaceThreads", () => {
+    const err = rejection({ ...valid, workspaceThreads: 'yes' });
+    expect(err).toBeInstanceOf(CapabilityValidationError);
+    expect(err).toMatchObject({ reason: 'workspaceThreads' });
+  });
+
+  it('AC-5: refuses workspaceThreads: false with reason workspaceThreads', () => {
+    const err = rejection({ ...valid, workspaceThreads: false });
+    expect(err).toBeInstanceOf(CapabilityValidationError);
+    expect(err).toMatchObject({ reason: 'workspaceThreads' });
+  });
+});
+
 describe('parseCapabilitiesCore projectThreads (US-001 AC2-AC4)', () => {
   it('US-001 AC2: keeps projectThreads: true', () => {
     const parsed = parseCapabilitiesCore({ ...valid, projectThreads: true });

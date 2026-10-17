@@ -217,10 +217,11 @@ export class PlacementService {
 /**
  * 1b-D3 (S5b-R9): only a SESSION turn on a runner advertising `kodaTools` carries the static descriptor catalog, so
  * the session can proxy koda reads. Publish and Discard run no agent, and a runner that does not advertise the
- * capability would refuse the ASSIGN (US-006), so both keep the thread block as the repository read it. The
+ * capability would refuse the ASSIGN (US-006), so both keep the thread block as the repository read it.
+ * WORKSPACE sessions never receive koda tools, regardless of runner capabilities (1d-D6). The
  * descriptors come from the plain `koda-tool-descriptors` module: placement never imports the assistant module.
  */
 function withKodaTools(thread: ThreadAssign | undefined, capabilities: RunnerCapabilities): ThreadAssign | undefined {
-  if (!thread || thread.action !== 'SESSION' || capabilities.kodaTools !== true) return thread;
+  if (!thread || thread.kind === 'WORKSPACE' || thread.action !== 'SESSION' || capabilities.kodaTools !== true) return thread;
   return { ...thread, kodaTools: [...KODA_TOOL_DESCRIPTORS] };
 }

@@ -60,8 +60,13 @@ describe('PrismaFleetJobRepository.findThreadAssign kind (US-005 AC-13)', () => 
     expect(await repo.findThreadAssign('j1')).toMatchObject({ kind: 'PROJECT', feature: 'thread-t1' });
   });
 
+  it('workspace AC-1 preserves WORKSPACE and fallback feature', async () => {
+    const { repo } = stub({ kind: 'WORKSPACE', feature: null });
+    expect(await repo.findThreadAssign('j1')).toMatchObject({ kind: 'WORKSPACE', feature: 'thread-t1' });
+  });
+
   it('treats an unknown kind as REPO', async () => {
-    const { repo } = stub({ kind: 'WORKSPACE', feature: 'auth' });
+    const { repo } = stub({ kind: 'FUTURE', feature: 'auth' });
     expect(await repo.findThreadAssign('j1')).toMatchObject({ kind: 'REPO' });
   });
 });

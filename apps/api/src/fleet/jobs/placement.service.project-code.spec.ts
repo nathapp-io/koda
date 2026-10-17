@@ -32,12 +32,12 @@ const projectRepo = (over: Partial<FleetRepoRef> = {}): FleetRepoRef => ({
   githubInstallationId: 7n, ...over,
 });
 
-const threadAssign = (kind: 'REPO' | 'PROJECT') => ({
+const threadAssign = (kind: 'REPO' | 'PROJECT' | 'WORKSPACE') => ({
   threadId: 't1', action: 'SESSION' as const, kind, feature: 'thread-t1', resume: false, instructions: 'go',
   backend: { kind: 'native', model: 'm1' }, skills: [], initialMessage: null,
 });
 
-function fixture(kind: 'REPO' | 'PROJECT', runners: PlacementRunnerRow[], repos: FleetRepoRef[] = [projectRepo()]) {
+function fixture(kind: 'REPO' | 'PROJECT' | 'WORKSPACE', runners: PlacementRunnerRow[], repos: FleetRepoRef[] = [projectRepo()]) {
   const job = {
     id: 'j1', projectId: 'p1', repoId: 'repo1', command: 'THREAD', state: FleetJobState.QUEUED, pinnedRunnerId: null,
     selectorLabels: [], profiles: [], bashMode: 'raw', threadId: 't1', feature: 'thread-t1', ref: 'trunk',
@@ -156,6 +156,28 @@ describe('US-003 AC-7, AC-8: no repository list without the capability or off a 
 
     await service.fillRunnerThreads('r1', NOW);
 
+    expect(assignThread()).not.toHaveProperty('projectRepos');
+    expect(repo.findProjectRepos).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('workspace ASSIGN AC-6', () => {
+  it('leaves a workspace job queued on a project-only runner (AC-4/10)', async () => {
+    const { service, repo } = fixture('WORKSPACE', [runnerRow()]);
+    const result = await service.placeJob('j1', NOW);
+    expect(result).toMatchObject({ assigned: false, misfits: [{ runnerId: 'r1', reason: 'workspace_threads' }] });
+    expect(repo.casAssign).not.toHaveBeenCalled();
+    expect(repo.createCommand).not.toHaveBeenCalled();
+    expect(await repo.findById()).toMatchObject({ state: FleetJobState.QUEUED });
+  });
+  it.each(['placeJob', 'fillRunnerThreads'] as const)('omits tools and project repos via %s', async (entry) => {
+    const runner = runnerRow();
+    runner.capabilities = { ...runner.capabilities, workspaceThreads: true, projectCode: true, kodaTools: true };
+    const { service, repo, assignThread } = fixture('WORKSPACE', [runner]);
+    await service[entry](entry === 'placeJob' ? 'j1' : 'r1', NOW);
+    expect(assignThread()).toMatchObject({ kind: 'WORKSPACE' });
+    expect(assignThread()).not.toHaveProperty('kodaTools');
     expect(assignThread()).not.toHaveProperty('projectRepos');
     expect(repo.findProjectRepos).not.toHaveBeenCalled();
   });

@@ -8,7 +8,8 @@ import type { ChatThreadHandoff } from '../domain/chat-thread.domain';
 
 export class ThreadDto {
   @ApiProperty() id: string;
-  @ApiProperty({ enum: ['REPO', 'PROJECT'] }) kind: ChatThreadKind;
+  @ApiProperty({ enum: ['REPO', 'PROJECT', 'WORKSPACE'] }) kind: ChatThreadKind;
+  @ApiProperty({ description: "The thread's project; for a WORKSPACE thread, its home project" }) projectId: string;
   @ApiProperty({ nullable: true }) repoId: string | null;
   @ApiProperty({ nullable: true }) baseRef: string | null;
   @ApiProperty({ nullable: true }) feature: string | null;

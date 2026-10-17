@@ -77,7 +77,7 @@ describeIntegration('fleet runner views (PG)', () => {
       await request(server).get('/api/projects/web/fleet/runners').set(auth(world.tokens.viewer)).expect(200),
     );
     expect(page.records).toHaveLength(1);
-    expect(Object.keys(page.records[0]).sort()).toEqual(['arch', 'enabled', 'id', 'labels', 'name', 'online', 'os', 'profiles', 'projectThreads', 'threadBackends']);
+    expect(Object.keys(page.records[0]).sort()).toEqual(['arch', 'enabled', 'id', 'labels', 'name', 'online', 'os', 'profiles', 'projectThreads', 'threadBackends', 'workspaceThreads']);
     const summary = page.records[0] as unknown as Summary;
     expect(summary).toEqual(expect.objectContaining({ id: runner.runnerId, name: 'box-1', online: true, profiles: ['fast'] }));
   });

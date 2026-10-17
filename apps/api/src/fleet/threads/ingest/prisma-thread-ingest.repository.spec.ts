@@ -722,3 +722,11 @@ describe('PrismaThreadIngestRepository.fold write-path lines (US-002)', () => {
     expect(result.events.filter((event) => event.type === 'thread')).toHaveLength(1);
   });
 });
+
+
+it('workspace AC-9 stores a live session without tools-unavailable notice', async () => {
+  const { client, thread } = fakeClient({ kind: 'WORKSPACE', runnerId: 'r1', runner: { name: 'box', capabilities: {} } });
+  await repoWith(client).fold(batch([sessionStarted()]));
+  expect(thread.session).toMatchObject({ state: 'live' });
+  expect(thread.session).not.toHaveProperty('kodaToolsUnavailableOn');
+});

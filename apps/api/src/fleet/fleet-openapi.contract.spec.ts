@@ -35,11 +35,17 @@ describe('fleet OpenAPI contract', () => {
     expect(Object.keys(spec.components.schemas['RunnerDto']?.properties ?? {})).toEqual(expect.arrayContaining(['bootId', 'bootedAt', 'online']));
   });
 
-  it('exposes project runner summaries and the repo check (D118, D119)', () => {
+  it('US-001 AC-11: the ThreadDto kind enum carries the WORKSPACE kind', () => {
+    const kind = spec.components.schemas['ThreadDto']?.properties?.['kind'] as { enum?: string[] } | undefined;
+    expect(kind?.enum).toContain('WORKSPACE');
+    expect(Object.keys(spec.components.schemas['ThreadDto']?.properties ?? {})).toContain('projectId');
+  });
+
+  it('exposes the project runner summaries and the repo check (D118, D119)', () => {
     expect(spec.paths['/api/projects/{slug}/fleet/runners']?.['get']).toBeDefined();
     expect(spec.paths['/api/fleet/repos/{id}/check']?.['post']).toBeDefined();
     expect(Object.keys(spec.components.schemas['RunnerSummaryDto']?.properties ?? {}).sort())
-      .toEqual(['arch', 'enabled', 'id', 'labels', 'name', 'online', 'os', 'profiles', 'projectThreads', 'threadBackends']);
+      .toEqual(['arch', 'enabled', 'id', 'labels', 'name', 'online', 'os', 'profiles', 'projectThreads', 'threadBackends', 'workspaceThreads']);
     expect(Object.keys(spec.components.schemas['RepoCheckResultDto']?.properties ?? {}).sort())
       .toEqual(['checkedAt', 'reachable', 'reason', 'repoId']);
   });
@@ -161,4 +167,11 @@ describe('fleet OpenAPI contract', () => {
     expect(JSON.stringify(spec.components.schemas['CredentialCellDto'])).toContain('expiring');
     expect(JSON.stringify(spec.components.schemas['RunnerConditionDto'])).toContain('expiring');
   });
+});
+
+
+it('workspace AC-5 exposes workspace_threads in placement, attention and credential board', () => {
+  expect(JSON.stringify(spec.components.schemas['PlacementMisfitDto'])).toContain('workspace_threads');
+  expect(JSON.stringify(spec.components.schemas['AttentionReasonDto'])).toContain('workspace_threads');
+  expect(JSON.stringify(spec.components.schemas['ProfileCellDto'])).toContain('workspace_threads');
 });

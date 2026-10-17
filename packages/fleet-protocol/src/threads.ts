@@ -11,9 +11,12 @@ export type ThreadCommandType = (typeof THREAD_COMMAND_TYPES)[number];
 
 export type ThreadAgent = 'claude' | 'codex';
 
-/** Fleet S5b §2: a thread belongs to a repo checkout (`REPO`) or to the project with no checkout (`PROJECT`). */
-export type ChatThreadKind = 'REPO' | 'PROJECT';
-export const CHAT_THREAD_KINDS = ['REPO', 'PROJECT'] as const;
+/**
+ * Fleet S5b §2: where a thread runs. `REPO` owns a repo checkout; `PROJECT` belongs to the project with no checkout;
+ * `WORKSPACE` (fleet S5b 1d) is a personal thread with no checkout and no project repositories.
+ */
+export type ChatThreadKind = 'REPO' | 'PROJECT' | 'WORKSPACE';
+export const CHAT_THREAD_KINDS = ['REPO', 'PROJECT', 'WORKSPACE'] as const;
 
 export type ThreadBackend =
   | { kind: 'native'; model?: string; effort?: string }
@@ -67,7 +70,8 @@ export type ThreadDiscardFailReason = 'no_worktree' | 'git_error';
 export interface ThreadAssign {
   threadId: string;
   action: ThreadAction;
-  /** Fleet S5b 1a-R1: `REPO` or `PROJECT`; absent means `REPO` (older API). */
+  /** Fleet S5b 1a-R1: `REPO`, `PROJECT` or `WORKSPACE`; absent means `REPO` (older API). `WORKSPACE`: a personal
+   *  thread, no checkout, no project repositories. */
   kind?: ChatThreadKind;
   /** The thread's feature (branch feat/<feature>), not the job's `thread-<id>` feature. */
   feature: string;

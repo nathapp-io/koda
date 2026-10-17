@@ -1,3 +1,4 @@
+import type { ChatThreadKind } from '../../src/fleet/common/thread-jobs';
 import { createHash } from 'crypto';
 import { PrismaClient, Prisma } from '../../src/generated/prisma/client';
 import request from 'supertest';
@@ -12,6 +13,9 @@ export interface ThreadJobSeed {
 }
 
 export interface SeedThreadOptions {
+  kind?: ChatThreadKind;
+  createdById?: string;
+  projectId?: string;
   /** Pending user messages to queue on the thread, in seq order. */
   pending?: string[];
   /** Thread feature, default `add-auth`. */
@@ -44,17 +48,20 @@ export async function seedThreadJobFor(
   options: SeedThreadOptions = {},
 ): Promise<ThreadJobSeed> {
   const feature = options.feature ?? 'add-auth';
+  const kind = options.kind ?? 'REPO';
+  const projectId = options.projectId ?? world.projectId;
+  const createdById = options.createdById ?? world.ids.dev;
   const thread = await prisma.chatThread.create({
     data: {
-      projectId: world.projectId, repoId: world.repoId, baseRef: 'trunk', feature, title: 'Thread fixture',
-      createdById: world.ids.dev, runnerId: runner.runnerId, backend: { kind: 'native', model: 'm1' }, skills: [],
-      specPath: `.nax/features/${feature}/spec.md`,
+      projectId, kind, repoId: kind === 'REPO' ? world.repoId : null, baseRef: kind === 'REPO' ? 'trunk' : null, feature: kind === 'REPO' ? feature : null, title: 'Thread fixture',
+      createdById, runnerId: runner.runnerId, backend: { kind: 'native', model: 'm1' }, skills: [],
+      specPath: kind === 'REPO' ? `.nax/features/${feature}/spec.md` : null,
     },
   });
   const job = await prisma.fleetJob.create({
     data: {
-      projectId: world.projectId, repoId: world.repoId, ref: 'trunk', command: 'THREAD', feature: `thread-${thread.id}`,
-      profiles: [], selectorLabels: [], maxCostUsd: new Prisma.Decimal(5), requestedById: world.ids.dev,
+      projectId, repoId: world.repoId, ref: 'trunk', command: 'THREAD', feature: `thread-${thread.id}`,
+      profiles: [], selectorLabels: [], maxCostUsd: new Prisma.Decimal(5), requestedById: createdById,
       state: 'RUNNING', runnerId: runner.runnerId, leaseEpoch: 1, firstStartedAt: new Date(), threadId: thread.id,
     },
   });
@@ -66,7 +73,7 @@ export async function seedThreadJobFor(
   });
   for (const [i, text] of (options.pending ?? []).entries()) {
     await prisma.chatMessage.create({
-      data: { threadId: thread.id, seq: i + 1, role: 'user', authorUserId: world.ids.dev, content: text, status: 'pending' },
+      data: { threadId: thread.id, seq: i + 1, role: 'user', authorUserId: createdById, content: text, status: 'pending' },
     });
   }
   if (options.pending?.length) {

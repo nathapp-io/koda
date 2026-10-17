@@ -15,7 +15,7 @@ const briefStub = (section = 'Repository context: unavailable (no repository)') 
   ({ resolveRepoContext: vi.fn(async () => section) }) as unknown as ProjectBriefService;
 
 const record: ChatThreadRecord = {
-  id: 't1', kind: 'REPO', repoId: 'r1', baseRef: 'main', feature: 'auth', title: 'T', createdById: 'u1', runnerId: null,
+  id: 't1', kind: 'REPO', projectId: 'p1', repoId: 'r1', baseRef: 'main', feature: 'auth', title: 'T', createdById: 'u1', runnerId: null,
   backend: { kind: 'native', model: 'm1' }, status: 'ACTIVE', archivedAt: null, skills: [],
   maxCostUsd: '5', costUsd: '0', tokens: null, specPath: '.nax/features/auth/spec.md', pendingQuestion: null,
   session: null, lastActivityAt: new Date('2026-10-01T00:00:00.000Z'), createdAt: new Date('2026-10-01T00:00:00.000Z'),
@@ -343,7 +343,7 @@ describe('ThreadsService.sendMessage repository context (S5b US-003)', () => {
     expect(findAnchor).toHaveBeenCalledWith('p1');
     expect(resolveRepoContext).toHaveBeenCalledTimes(1);
     expect(resolveRepoContext).toHaveBeenCalledWith('r-anchor');
-    expect(sendMessage).toHaveBeenCalledWith({ projectId: 'p1', threadId: 't1', userId: 'u1', text: 'hi', clientMessageId: 'c1', repoContext: SECTION });
+    expect(sendMessage).toHaveBeenCalledWith({ scope: { kind: 'project', projectId: 'p1' }, threadId: 't1', userId: 'u1', text: 'hi', clientMessageId: 'c1', repoContext: SECTION });
     expect(order).toEqual(['resolve:r-anchor', `send:${SECTION}`]);
   });
 
@@ -370,7 +370,7 @@ describe('ThreadsService.sendMessage repository context (S5b US-003)', () => {
 
     await send(service);
 
-    expect(get).toHaveBeenCalledWith('p1', 't1');
+    expect(get).toHaveBeenCalledWith({ kind: 'project', projectId: 'p1' }, 't1');
     expect(resolveRepoContext).not.toHaveBeenCalled();
     expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ repoContext: undefined }));
   });

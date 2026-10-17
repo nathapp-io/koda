@@ -168,6 +168,9 @@ export class NaxCapabilityProbe implements CapabilityProbe {
         configJobs: true,
         threadWrite: true,
         projectThreads: true,
+        // Fleet S5b 1d: a WORKSPACE thread runs on the same no-checkout path as a PROJECT one, so the runner
+        // advertises it and the API places a WORKSPACE ASSIGN nowhere else.
+        workspaceThreads: true,
         // Fleet S5b §1: the runner proxies the API's koda tools into a THREAD session, so the API may attach
         // descriptors to the ASSIGN. The tools themselves are defined and executed on the server.
         kodaTools: true,
