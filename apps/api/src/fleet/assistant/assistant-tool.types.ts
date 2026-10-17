@@ -42,3 +42,19 @@ export class ToolInputError extends Error {
     this.name = 'ToolInputError';
   }
 }
+
+/** 2b1-D1: a write tool's preview refuses because the requester lacks an ability; `need` is the `<action> <subject>` pair. */
+export class ToolForbiddenError extends Error {
+  constructor(readonly need: string) {
+    super(need);
+    this.name = 'ToolForbiddenError';
+  }
+}
+
+/** 2b1-D2: an approved tool failed partway; `text` is the outcome and quotes what it already wrote. */
+export class ToolActionError extends Error {
+  constructor(readonly text: string) {
+    super(text);
+    this.name = 'ToolActionError';
+  }
+}
