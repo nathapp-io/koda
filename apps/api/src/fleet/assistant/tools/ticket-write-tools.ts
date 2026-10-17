@@ -1,7 +1,9 @@
 import { Injectable, type OnModuleInit } from '@nestjs/common';
+import { TicketTransitionsService } from '../../../tickets/state-machine/ticket-transitions.service';
 import { TicketsService } from '../../../tickets/tickets.service';
 import { AssistantToolRegistry } from '../assistant-tool.registry';
 import { createTicketsTool } from './create-tickets-tool';
+import { updateTicketTool } from './update-ticket-tool';
 
 /**
  * Fleet S5b 2b1 US-003 (2b1-D8): the ticket write tool group — the tools that propose a change to the thread's
@@ -13,9 +15,13 @@ export class TicketWriteTools implements OnModuleInit {
   constructor(
     private readonly registry: AssistantToolRegistry,
     private readonly tickets: TicketsService,
+    private readonly transitions: TicketTransitionsService,
   ) {}
 
   onModuleInit(): void {
-    this.registry.register(createTicketsTool({ tickets: this.tickets }));
+    this.registry.register(
+      createTicketsTool({ tickets: this.tickets }),
+      updateTicketTool({ tickets: this.tickets, transitions: this.transitions }),
+    );
   }
 }
