@@ -23,7 +23,9 @@ import { buildWorkspaceThreadInstructions, buildProjectThreadInstructions, build
 import { sendRefusal, type ThreadSendRefusal } from './thread-send-rules';
 import { allocateThreadSeq, repoThreadFields, type ChatMessageRecord, type ChatThreadPendingAction, type ChatThreadRecord, type ChatThreadRepository, type ThreadScope, type ThreadSession, type ThreadWriteResult } from './domain/chat-thread.domain';
 import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
-import { MAX_PENDING_ACTIONS } from '../assistant/actions/pending-action.domain';
+import { MAX_PENDING_ACTIONS, type PendingActionStatus } from '../assistant/actions/pending-action.domain';
+import { DELIVERABLE_STATUSES, MAX_DELIVERED_NOTES, deliveryText } from '../assistant/actions/outcome-delivery';
+import { outcomeNote } from '../assistant/actions/outcome-note';
 import type { ChatThreadKind, ThreadAction, ThreadBackend } from '../common/thread-jobs';
 import { THREAD_LIMITS } from '../common/thread-jobs';
 
@@ -345,9 +347,12 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
         } });
         await this.prisma.client.chatThread.update({ where: { id: thread.id }, data: { lastActivityAt: new Date() } });
         const message = this.mapMessage(messageRow);
+        // 2aw-D3: the outcome hand-off, inside the same transaction, after the message exists and before either
+        // branch. The stored message keeps the plain `input.text`.
+        const handoffText = await this.deliverOutcomeNotes(thread.id, message.id, input.text);
         // The refusal gate passed, so a RUNNING job here is a live session with no turn in flight.
         if (currentAfterLock?.state === 'RUNNING' && currentAfterLock.runnerId) {
-          await this.jobs.createCommand({ runnerId: currentAfterLock.runnerId, jobId: currentAfterLock.id, type: FleetCommandType.THREAD_INPUT, leaseEpoch: currentAfterLock.leaseEpoch, payload: { messageId: message.id, text: input.text } });
+          await this.jobs.createCommand({ runnerId: currentAfterLock.runnerId, jobId: currentAfterLock.id, type: FleetCommandType.THREAD_INPUT, leaseEpoch: currentAfterLock.leaseEpoch, payload: { messageId: message.id, text: handoffText } });
           return { kind: 'done' as const, result: { message, jobId: null, deduplicated: false }, notifyRunnerId: currentAfterLock.runnerId };
         }
 
@@ -366,6 +371,33 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       return outcome.result;
     }
     throw new ConflictAppException({}, 'threads.turnRunning');
+  }
+
+  /**
+   * 2aw-D3: the outcome hand-off. This thread's undelivered terminal actions are read in age order, at most
+   * `MAX_DELIVERED_NOTES` of them; their notes (`outcomeNote`) are folded into the byte-bounded delivery text
+   * (`deliveryText`) and the first `delivered` of them are marked on this message in one update. A note is therefore
+   * handed over exactly once: a new-turn job rebuilds the same text from `deliveredMessageId` (2aw-D4), and a send
+   * that never reaches this point — a duplicate `clientMessageId`, a refusal — delivers nothing. Answers the text the
+   * runner path carries: `userText` itself when no note fits or none is undelivered.
+   */
+  private async deliverOutcomeNotes(threadId: string, messageId: string, userText: string): Promise<string> {
+    const actions = await this.prisma.client.pendingAction.findMany({
+      where: { threadId, status: { in: [...DELIVERABLE_STATUSES] }, deliveredAt: null },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: MAX_DELIVERED_NOTES,
+      select: { id: true, tool: true, status: true, result: true },
+    });
+    // The status filter pins every row to a deliverable status, the only shape `outcomeNote` accepts.
+    const notes = actions.map((action) => outcomeNote({ ...action, status: action.status as PendingActionStatus }));
+    const { text, delivered } = deliveryText(notes, userText, THREAD_LIMITS.messageMaxBytes);
+    if (delivered > 0) {
+      await this.prisma.client.pendingAction.updateMany({
+        where: { id: { in: actions.slice(0, delivered).map((action) => action.id) } },
+        data: { deliveredAt: new Date(), deliveredMessageId: messageId },
+      });
+    }
+    return text;
   }
 
   /** The facts `sendRefusal` judges, read under the thread and job locks. Writes nothing. */
