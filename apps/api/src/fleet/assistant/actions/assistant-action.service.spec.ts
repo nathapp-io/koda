@@ -33,8 +33,9 @@ function fakes() {
     getClient: vi.fn(),
     isInTransaction: vi.fn(() => false),
   };
-  const service = new AssistantActionService(tx as never, repo as never, closer as never, live as never, threads as never);
-  return { service, repo, closer, live, threads, tx };
+  const executor = { attachActions: vi.fn() };
+  const service = new AssistantActionService(tx as never, repo as never, closer as never, live as never, threads as never, executor as never);
+  return { service, repo, closer, live, threads, tx, executor };
 }
 
 const ask = (over: Partial<ProposeInput> = {}): ProposeInput => ({
@@ -51,6 +52,14 @@ const storedAction = (over: Partial<PendingActionRecord> = {}): PendingActionRec
 });
 
 describe('AssistantActionService.propose', () => {
+  it('AC-1: onModuleInit attaches this service as the executor\'s proposer (2a-D1 late binding)', () => {
+    const { service, executor } = fakes();
+
+    service.onModuleInit();
+
+    expect(executor.attachActions).toHaveBeenCalledWith(service);
+  });
+
   it('AC-15: publishes a thread event for the action\'s thread after the commit', async () => {
     const { service, threads, live, tx } = fakes();
 

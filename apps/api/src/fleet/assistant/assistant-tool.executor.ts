@@ -9,6 +9,7 @@ import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { ProjectAccessService } from '../../projects/project-access.service';
 import { withProjectRole } from '../../projects/project-context';
 import { stableStringify } from '../sync/stable-json';
+import { MAX_PENDING_ACTIONS, type ActionProposer } from './actions/pending-action.domain';
 import { capText, fenceData, maskSecrets } from './assistant-tool-safety';
 import { ASSISTANT_TOOL_CALL_REPOSITORY, type AssistantToolCallRecord, type AssistantToolCallRepository, type ToolCallContext, type ToolCallOutcome } from './assistant-tool-call.domain';
 import { AssistantToolRegistry } from './assistant-tool.registry';
@@ -16,6 +17,9 @@ import { ToolInputError, type AssistantTool, type ToolContext, type ToolResult }
 
 /** The most bytes of one tool result the agent reads (S5b-R5). */
 const RESULT_CAP_BYTES = 16_384;
+
+/** 2a-D4: the answer at `MAX_PENDING_ACTIONS`; the cap is in the text because the model can only lower the backlog. */
+const REFUSED_CONTENT = `refused: ${MAX_PENDING_ACTIONS} actions are pending in this thread; wait for the user to decide them`;
 
 export interface ToolCall {
   jobId: string;
@@ -29,12 +33,20 @@ export interface ToolCall {
 export class AssistantToolExecutor {
   private readonly logger = new Logger(AssistantToolExecutor.name);
 
+  /** 2a-D1: attached by `AssistantActionService.onModuleInit`, which is how the two providers stay acyclic. */
+  private actions: ActionProposer | null = null;
+
   constructor(
     private readonly registry: AssistantToolRegistry,
     @Inject(ASSISTANT_TOOL_CALL_REPOSITORY) private readonly calls: AssistantToolCallRepository,
     private readonly access: ProjectAccessService,
     private readonly abilities: KodaCaslAbilityFactory,
   ) {}
+
+  /** 2a-D1: the late binding of the propose side; the constructor is unchanged so no provider depends on the service. */
+  attachActions(actions: ActionProposer): void {
+    this.actions = actions;
+  }
 
   async execute(call: ToolCall): Promise<ToolResult> {
     const inputHash = sha256(stableStringify(call.input));
@@ -59,7 +71,7 @@ export class AssistantToolExecutor {
       inputHash,
       outcome: outcome.outcome,
       content,
-      isError: outcome.outcome !== 'ok',
+      isError: isErrorOutcome(outcome.outcome),
       resultBytes: Buffer.byteLength(content),
       durationMs: Date.now() - started,
     };
@@ -158,6 +170,7 @@ export class AssistantToolExecutor {
       now: new Date(),
       data: (text) => fenceData(maskSecrets(text), token),
     };
+    if (tool.kind === 'write') return this.proposeWrite(call, tool, context, scope, ctx);
     try {
       return { outcome: 'ok', content: await tool.execute(ctx, scope.input), projectId: scope.id };
     } catch (error) {
@@ -165,6 +178,49 @@ export class AssistantToolExecutor {
       this.logger.error(`koda tool ${name} failed for job ${call.jobId}`, error instanceof Error ? error.stack : String(error));
       return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
     }
+  }
+
+  /**
+   * 2a-D2: a write tool never runs its own write. Everything up to here is today's path — creator, scope, `project`
+   * argument, parse, membership and ability — so a caller who may not write is refused before a preview exists. The
+   * preview is what the user approves, and `propose` is what turns it into a decision the thread can render.
+   */
+  private async proposeWrite(call: ToolCall, tool: AssistantTool, context: ToolCallContext, scope: ToolScope, ctx: ToolContext): Promise<RunOutcome> {
+    const name = tool.descriptor.name;
+    const actions = this.actions;
+    if (!actions) {
+      this.logger.warn(`koda write tool ${name} has no action proposer attached; job ${call.jobId} answered error`);
+      return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
+    }
+    const prepare = tool.preview;
+    if (!prepare) {
+      this.logger.error(`koda write tool ${name} declares no preview; job ${call.jobId} answered error`);
+      return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
+    }
+    let preview: string;
+    try {
+      preview = await prepare(ctx, scope.input);
+    } catch (error) {
+      if (error instanceof NotFoundAppException) return { ...refusal('not_found', 'not_found'), projectId: scope.id };
+      this.logger.error(`koda tool ${name} failed for job ${call.jobId}`, error instanceof Error ? error.stack : String(error));
+      return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
+    }
+    const proposed = await actions.propose({
+      projectId: scope.id,
+      threadId: context.threadId,
+      threadKind: context.kind ?? 'REPO',
+      threadProjectSlug: context.project.slug,
+      jobId: call.jobId,
+      toolCallId: call.toolCallId,
+      tool: name,
+      // 2a-D3: `PendingAction.input` is the parsed input, and a write tool's parser answers a JSON object.
+      input: scope.input as Record<string, unknown>,
+      preview,
+      requestedById: context.creator.id,
+      now: ctx.now,
+    });
+    if ('refused' in proposed) return { ...refusal('refused', REFUSED_CONTENT), projectId: scope.id };
+    return { ...refusal('pending', `pending ${proposed.actionId}: awaiting user approval; do not retry`), projectId: scope.id };
   }
 
   /** Step 8: audit and store; a concurrent duplicate answers the stored row instead. */
@@ -184,6 +240,9 @@ export class AssistantToolExecutor {
 const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex');
 
 const refusal = (outcome: ToolCallOutcome, content: string): RunOutcome => ({ outcome, content });
+
+/** 2a-D4: the agent must not retry a write call the user has yet to decide, so `pending` is not an error. */
+const isErrorOutcome = (outcome: ToolCallOutcome): boolean => outcome !== 'ok' && outcome !== 'pending';
 
 /** `projectId` is the resolved project for a call that reached a tool scope; absent means the job's own project (1d2-D6). */
 interface RunOutcome {

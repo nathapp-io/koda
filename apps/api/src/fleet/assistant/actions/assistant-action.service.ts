@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { randomUUID } from 'crypto';
@@ -6,6 +6,7 @@ import type { LiveFleetApprovalEvent } from '../../../live/live-event';
 import { ThreadEventBus } from '../../../live/thread-event-bus';
 import { ApprovalLivePublisher } from '../../approvals/approval-live.publisher';
 import { ApprovalCloser } from '../../approvals/approval-closer';
+import { AssistantToolExecutor } from '../assistant-tool.executor';
 import {
   ACTION_TTL_MS, MAX_PENDING_ACTIONS, PENDING_ACTION_REPOSITORY, ActionProposer, PendingActionRepository,
   ProposeInput, ProposeResult, assistantThreadPath,
@@ -20,17 +21,27 @@ type Proposal =
 /**
  * S5b 2a (2a-D4): the propose side of a koda write-tool call. It owns the whole transaction — thread lock, duplicate
  * read, cap, insert, approval — and publishes both buses only after that transaction commits. The executor reaches it
- * through `ActionProposer` (US-002 attaches it at init), so this service never depends on the executor.
+ * through `ActionProposer`, attached in `onModuleInit` (2a-D1), so this service never depends on the executor being
+ * able to reach it.
  */
 @Injectable()
-export class AssistantActionService implements ActionProposer {
+export class AssistantActionService implements OnModuleInit, ActionProposer {
   constructor(
     @Inject(TRANSACTION_MANAGER) private readonly tx: ITransactionManager,
     @Inject(PENDING_ACTION_REPOSITORY) private readonly actions: PendingActionRepository,
     private readonly approvals: ApprovalCloser,
     private readonly live: ApprovalLivePublisher,
     private readonly threads: ThreadEventBus,
+    private readonly executor: AssistantToolExecutor,
   ) {}
+
+  /**
+   * 2a-D1: the late binding. Neither provider may inject the other — the executor would depend on this service that
+   * depends on the executor — so the executor learns its proposer here, once, instead of in a constructor.
+   */
+  onModuleInit(): void {
+    this.executor.attachActions(this);
+  }
 
   async propose(input: ProposeInput): Promise<ProposeResult> {
     const proposal = await this.tx.run(() => this.open(input));

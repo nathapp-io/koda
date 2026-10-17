@@ -4,7 +4,8 @@ export const ASSISTANT_TOOL_CALL_REPOSITORY = Symbol('ASSISTANT_TOOL_CALL_REPOSI
 
 export const PROJECT_COUNTS_READER = Symbol('PROJECT_COUNTS_READER');
 
-export type ToolCallOutcome = 'ok' | 'invalid_input' | 'forbidden' | 'not_found' | 'error';
+/** 2a-D4: `pending` is a write tool waiting for the user, `refused` is the thread's per-call cap. */
+export type ToolCallOutcome = 'ok' | 'invalid_input' | 'forbidden' | 'not_found' | 'error' | 'pending' | 'refused';
 
 /** One audited tool call. The input is never kept, only its hash. */
 export interface AssistantToolCallRecord {
