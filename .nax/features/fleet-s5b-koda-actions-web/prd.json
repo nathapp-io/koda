@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-koda-actions-web",
   "branchName": "feat/fleet-s5b-koda-actions-web",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "updatedAt": "2026-10-17T10:29:56.480Z",
+  "updatedAt": "2026-10-17T10:56:15.191Z",
   "userStories": [
     {
       "id": "US-001",
@@ -129,8 +129,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -142,7 +142,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
@@ -173,7 +175,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "9d203dfe343f48b4188faddb5c26a99ca4266adc"
     },
     {
       "id": "US-003",
