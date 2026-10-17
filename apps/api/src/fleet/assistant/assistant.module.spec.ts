@@ -132,6 +132,18 @@ describe('AssistantModule', () => {
     expect(tool?.permission).toEqual({ kind: 'ability', action: 'update', subject: 'FleetJob' });
   });
 
+  it('AC-9 (US-005): init() registers koda_cancel_job as a write tool needing update FleetJob', async () => {
+    // The same fleet write group fills this entry: registering it proves `FleetWriteTools.onModuleInit` registers the
+    // cancel tool beside the dispatch and requeue tools, over the same two collaborators.
+    expect(module.get(FleetWriteTools)).toBeInstanceOf(FleetWriteTools);
+
+    await module.init();
+
+    const tool = module.get(AssistantToolRegistry).get('koda_cancel_job');
+    expect(tool?.kind).toBe('write');
+    expect(tool?.permission).toEqual({ kind: 'ability', action: 'update', subject: 'FleetJob' });
+  });
+
   it('AC-16 (US-003): init() registers koda_get_action as the member-scoped read tool', async () => {
     await module.init();
 
