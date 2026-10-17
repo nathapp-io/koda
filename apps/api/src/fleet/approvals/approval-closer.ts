@@ -41,6 +41,23 @@ export const jobSystemActor = (job: Pick<FleetJobRecord, 'requestedById'>): Appr
 export type BashJob = Pick<FleetJobRecord, 'id' | 'projectId' | 'leaseEpoch' | 'state' | 'bashMode' | 'approvalTimeoutSec' | 'requestedById'>;
 export interface BashAsk { naxAskId: string; deadlineAt: Date; payload: Record<string, unknown> }
 
+/** S5b 2a-D5: the summary of a proposed koda action an `assistant_action` approval is opened for. */
+export interface AssistantActionAsk {
+  id: string;
+  projectId: string;
+  threadId: string;
+  jobId: string;
+  tool: string;
+  requestedById: string;
+  expiresAt: Date;
+}
+
+/** The approval `openAssistant` opened and the live frames built inside the caller's transaction. */
+export interface AssistantApprovalChange {
+  approval: FleetApprovalRecord;
+  live: LiveFleetApprovalEvent[];
+}
+
 /** Plan D262: spec §2.5 activity actions for a closed approval. */
 const closedAction = (a: Pick<FleetApprovalRecord, 'status'>): string =>
   a.status === 'expired' ? 'approval.expired' : a.status === 'cancelled' ? 'approval.cancelled' : 'approval.decided';
@@ -120,6 +137,24 @@ export class ApprovalCloser {
     return { approval: closed, live: this.livePublisher.event(closed) };
   }
 
+  /**
+   * S5b 2a-D5: the summary approval of one proposed action. The preview and the input stay on the action: the
+   * inbox, the detail route, the webhooks and the home dashboard only ever carry `{actionId, tool, threadId,
+   * threadPath, requestedById}`. Born pending — the decide handler and the expiry sweeper are its only closers.
+   */
+  async openAssistant(action: AssistantActionAsk, threadPath: string, now: Date): Promise<AssistantApprovalChange> {
+    const actor = userActor(action.requestedById);
+    const approval = await this.repo.create({
+      type: 'assistant_action', projectId: action.projectId, policyId: null, jobId: action.jobId, expiresAt: action.expiresAt,
+      requestedAt: now,
+      payload: { actionId: action.id, tool: action.tool, threadId: action.threadId, threadPath, requestedById: action.requestedById },
+    });
+    await this.record(approval, actor, 'approval.requested', { threadId: action.threadId });
+    await this.dispatch(approval, 'fleet.approval.requested');
+    await this.enqueueRequested(approval, { requestedById: action.requestedById, threadPath, tool: action.tool });
+    return { approval, live: this.livePublisher.event(approval) };
+  }
+
   /** Spec §1.4: the job left RUNNING, so nax has exited or is exiting; every pending ask of it is moot. */
   async closeForJob(job: Pick<FleetJobRecord, 'id' | 'requestedById'>, now: Date): Promise<LiveFleetApprovalEvent[]> {
     const live: LiveFleetApprovalEvent[] = [];
@@ -138,10 +173,10 @@ export class ApprovalCloser {
     return { approval: expired, live: await this.recordResolved(expired, jobSystemActor(job)) };
   }
 
-  private record(approval: FleetApprovalRecord, actor: ApprovalActor, action: string): Promise<void> {
+  private record(approval: FleetApprovalRecord, actor: ApprovalActor, action: string, extra: Record<string, unknown> = {}): Promise<void> {
     return this.activity.record({
       actorType: actor.type, actorId: actor.id, action, entityType: 'approval', entityId: approval.id, jobId: approval.jobId,
-      projectId: approval.projectId, responsibleUserId: actor.responsibleUserId, payload: approvalActivityPayload(approval),
+      projectId: approval.projectId, responsibleUserId: actor.responsibleUserId, payload: approvalActivityPayload(approval, extra),
     });
   }
 
@@ -154,14 +189,15 @@ export class ApprovalCloser {
   /**
    * Enqueue every fresh project ask in the caller's transaction. Project live listeners may not
    * have permission to decide this approval; notification consumers own recipient eligibility.
+   * `extra` is additive: an empty one leaves the payload exactly `approvalWebhookPayload` (S5b 2a-D5).
    */
-  private async enqueueRequested(approval: FleetApprovalRecord): Promise<void> {
+  private async enqueueRequested(approval: FleetApprovalRecord, extra: Record<string, unknown> = {}): Promise<void> {
     if (!approval.projectId) return;
     const slug = await this.repo.findProjectSlug(approval.projectId);
     if (!slug) return;
     await this.outbox.record({
       type: 'fleet_approval_requested',
-      payload: approvalWebhookPayload(approval, slug),
+      payload: { ...approvalWebhookPayload(approval, slug), ...extra },
       metadata: { projectId: approval.projectId, eventId: approval.id },
     });
   }

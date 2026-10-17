@@ -36,6 +36,20 @@ export function approvalDrafts(
   }));
 }
 
+/**
+ * S5b 2a-D6: the proposed action's own ask, and the only ask that is not addressed to the admins. The requester
+ * already saw the preview in the thread, so the notification only links back to the thread they are reading.
+ */
+export function actionRequestedDraft(
+  a: { approvalId: string; projectId: string | null; requestedById: string; threadPath: string; tool: string },
+): NotificationDraft {
+  return fleetDraft({
+    userId: a.requestedById, projectId: a.projectId, category: 'FLEET_NEEDS_YOU', kind: 'action_requested',
+    title: `Approval needed: ${a.tool} in a thread`, link: a.threadPath,
+    params: { tool: a.tool }, sourceType: 'fleet_approval', sourceId: a.approvalId,
+  });
+}
+
 export function budgetDrafts(adminIds: readonly string[], p: FleetBudgetIncidentPayload): NotificationDraft[] {
   const spentUsd = usd(p.spentUsd);
   const amountUsd = usd(p.amountUsd);

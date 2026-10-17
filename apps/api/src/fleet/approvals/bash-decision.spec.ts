@@ -23,3 +23,9 @@ describe('checkBashDecision (spec §1.3, plan D267)', () => {
     expect(checkBashDecision(payload(), d)).toEqual({ ok: false, reason: `${d} does not apply to a bash approval` });
   });
 });
+
+describe('checkBashDecision keeps its branch-local allowlist (AC-24)', () => {
+  it.each(['approve', 'reject'] as const)('refuses %s', (decision) => {
+    expect(checkBashDecision(payload(), decision)).toEqual({ ok: false, reason: `${decision} does not apply to a bash approval` });
+  });
+});

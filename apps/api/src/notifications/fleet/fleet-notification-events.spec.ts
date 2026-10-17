@@ -77,4 +77,37 @@ describe('payload parsers', () => {
     expect(parseApprovalRequestedPayload(raw)).toEqual({ approvalId: 'ap1', type: 'nax_bash_escalate', projectId: 'p1', jobId: 'j1', policyId: null });
     expect(parseApprovalRequestedPayload({ ...raw, approvalId: 7 })).toBeNull();
   });
+
+  it('US-004: keeps requestedById, threadPath and tool of an assistant_action payload', () => {
+    const raw = {
+      approvalId: 'ap1', type: 'assistant_action', projectId: 'p1', jobId: 'j1', policyId: null,
+      requestedById: 'u1', threadPath: '/web/threads/t1', tool: 'koda_add_comment',
+    };
+    expect(parseApprovalRequestedPayload(raw)).toEqual({
+      approvalId: 'ap1', type: 'assistant_action', projectId: 'p1', jobId: 'j1', policyId: null,
+      requestedById: 'u1', threadPath: '/web/threads/t1', tool: 'koda_add_comment',
+    });
+  });
+
+  it.each(['requestedById', 'threadPath', 'tool'] as const)('US-004: omits %s when the payload has none', (missing) => {
+    const complete: Record<string, unknown> = {
+      approvalId: 'ap1', type: 'assistant_action', projectId: 'p1', jobId: 'j1', policyId: null,
+      requestedById: 'u1', threadPath: '/web/threads/t1', tool: 'koda_add_comment',
+    };
+    const raw = { ...complete };
+    const kept = { ...complete };
+    delete raw[missing];
+    delete kept[missing];
+
+    const parsed = parseApprovalRequestedPayload(raw) as unknown as Record<string, unknown>;
+
+    expect(parsed).toEqual(kept);
+    expect(Object.hasOwn(parsed, missing)).toBe(false);
+  });
+
+  it('US-004: a non-string or empty optional field is omitted exactly like a missing one', () => {
+    const raw = { approvalId: 'ap1', type: 'assistant_action', projectId: 'p1', jobId: null, policyId: null, requestedById: '', threadPath: 7, tool: null };
+    const parsed = parseApprovalRequestedPayload(raw) as unknown as Record<string, unknown>;
+    expect(['requestedById', 'threadPath', 'tool'].filter((key) => Object.hasOwn(parsed, key))).toEqual([]);
+  });
 });

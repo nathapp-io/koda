@@ -21,6 +21,10 @@ export interface AssistantTool<I = unknown> {
   permission: ToolPermission;
   /** 1d2-D3: `workspace` tools run only in WORKSPACE threads and take no `project`; absent means `project`. */
   scope?: 'project' | 'workspace';
+  /** 2a-D2: a `write` tool is previewed and proposed, never executed; absent means `read`. */
+  kind?: 'read' | 'write';
+  /** 2a-D2: what the user approves, so a `write` tool must have one. The executor calls it instead of `execute`. */
+  preview?(ctx: ToolContext, input: I): Promise<string>;
   /** Throws ToolInputError(reason) for input the tool cannot use. */
   parse(input: unknown): I;
   execute(ctx: ToolContext, input: I): Promise<string>;

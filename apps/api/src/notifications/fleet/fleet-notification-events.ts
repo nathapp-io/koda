@@ -24,7 +24,11 @@ export interface FleetJobOutcomePayload { jobId: string; leaseEpoch: number; pro
 export interface FleetBudgetIncidentPayload { incidentId: string; kind: BudgetIncidentNotifyKind; scope: string; spentUsd: string; amountUsd: string }
 export interface FleetHealthAlertPayload { alertId: string; kind: HealthAlertKind; runner: string; provider: string | null; expiresAt: string | null }
 /** The fields of approvalWebhookPayload (approvals/approval-payloads.ts) the consumer needs. */
-export interface FleetApprovalRequestedPayload { approvalId: string; type: string; projectId: string | null; jobId: string | null; policyId: string | null }
+export interface FleetApprovalRequestedPayload {
+  approvalId: string; type: string; projectId: string | null; jobId: string | null; policyId: string | null;
+  /** S5b 2a-D6: only an `assistant_action` ask carries these; absent on every other type. */
+  requestedById?: string; threadPath?: string; tool?: string;
+}
 
 const FAILURE_OUTCOME: Readonly<Record<string, JobOutcome>> = Object.freeze({
   [FleetJobState.ESCALATED]: 'escalated',
@@ -92,5 +96,13 @@ export function parseApprovalRequestedPayload(raw: unknown): FleetApprovalReques
   if (!isObject(raw)) return null;
   const { approvalId, type, projectId, jobId, policyId } = raw;
   if (!isText(approvalId) || !isText(type)) return null;
-  return { approvalId, type, projectId: textOrNull(projectId), jobId: textOrNull(jobId), policyId: textOrNull(policyId) };
+  const parsed: FleetApprovalRequestedPayload = {
+    approvalId, type, projectId: textOrNull(projectId), jobId: textOrNull(jobId), policyId: textOrNull(policyId),
+  };
+  // S5b 2a-D6: the action ask's own fields. A key that is not a non-empty string is absent, not empty, so the
+  // consumer can tell a payload that lost the field from one that sent it blank.
+  if (isText(raw['requestedById'])) parsed.requestedById = raw['requestedById'];
+  if (isText(raw['threadPath'])) parsed.threadPath = raw['threadPath'];
+  if (isText(raw['tool'])) parsed.tool = raw['tool'];
+  return parsed;
 }

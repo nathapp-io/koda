@@ -48,6 +48,7 @@
   "configJobActive": { "409": "该仓库已有进行中的配置任务：{activeJobId}" },
   "configEditInput": { "-2": "配置编辑无效：{reason}" },
   "assistantTool": { "404": "未知的 koda 工具" },
+  "assistantAction": { "404": "未知的 koda 操作" },
   "notThreadJob": { "409": "此任务不是带有会话的线程任务" },
   "toolCall": { "-2": "无效的 koda 工具调用：{reason}" }
 }

@@ -1,5 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module';
+import { AssistantActionPort } from './assistant-action.port';
 import { ApprovalCloser } from './approval-closer';
 import { ApprovalLivePublisher } from './approval-live.publisher';
 import { APPROVAL_REPOSITORY } from './domain/approval.domain';
@@ -17,6 +18,7 @@ describe('ApprovalStoreModule', () => {
       expect(moduleRef.get(ApprovalCloser)).toBeDefined();
       expect(moduleRef.get(ApprovalLivePublisher)).toBeDefined();
       expect(moduleRef.get(APPROVAL_REPOSITORY)).toBeDefined();
+      expect(moduleRef.get(AssistantActionPort)).toBeInstanceOf(AssistantActionPort);
     } finally {
       await moduleRef.close();
     }

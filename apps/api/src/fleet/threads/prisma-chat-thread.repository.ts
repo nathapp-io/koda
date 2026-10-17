@@ -21,8 +21,9 @@ import { BudgetPausedException } from '../budgets/budget.exceptions';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
 import { buildWorkspaceThreadInstructions, buildProjectThreadInstructions, buildThreadInstructions, renderBriefBlock } from './thread-instructions';
 import { sendRefusal, type ThreadSendRefusal } from './thread-send-rules';
-import { allocateThreadSeq, repoThreadFields, type ChatMessageRecord, type ChatThreadRecord, type ChatThreadRepository, type ThreadScope, type ThreadSession, type ThreadWriteResult } from './domain/chat-thread.domain';
+import { allocateThreadSeq, repoThreadFields, type ChatMessageRecord, type ChatThreadPendingAction, type ChatThreadRecord, type ChatThreadRepository, type ThreadScope, type ThreadSession, type ThreadWriteResult } from './domain/chat-thread.domain';
 import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
+import { MAX_PENDING_ACTIONS } from '../assistant/actions/pending-action.domain';
 import type { ChatThreadKind, ThreadAction, ThreadBackend } from '../common/thread-jobs';
 import { THREAD_LIMITS } from '../common/thread-jobs';
 
@@ -99,6 +100,33 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       plan: plan ? { jobId: plan.id, state: plan.state, stateReason: plan.stateReason } : null,
       run: run ? { jobId: run.id, state: run.state, stateReason: run.stateReason } : null,
     };
+  }
+
+  /**
+   * S5b 2a-D12: the thread's open actions for its detail. Newest decisions are already gone from the list, so the
+   * reader sees exactly what can still be decided, oldest first; the cap is the same one propose enforces, so the
+   * list can never grow past what one thread may hold. The slug comes from each action's own `projectId` — a
+   * WORKSPACE thread's action that acts in another project answers that project's slug, not the thread's home.
+   * The scope fence is part of the query (M1): a thread outside `scope` matches no row, so a caller that never ran
+   * `get` first still cannot read a preview it may not see.
+   */
+  async pendingActions(scope: ThreadScope, threadId: string): Promise<ChatThreadPendingAction[]> {
+    const rows = await this.prisma.client.pendingAction.findMany({
+      where: { threadId, status: 'PENDING', thread: scopeWhere(scope) },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: MAX_PENDING_ACTIONS,
+      select: { id: true, projectId: true, approvalId: true, tool: true, preview: true, expiresAt: true, createdAt: true },
+    });
+    if (rows.length === 0) return [];
+    const projects = await this.prisma.client.project.findMany({
+      where: { id: { in: [...new Set(rows.map((row) => row.projectId))] } },
+      select: { id: true, slug: true },
+    });
+    const slugs = new Map(projects.map((project) => [project.id, project.slug]));
+    return rows.map((row) => ({
+      id: row.id, approvalId: row.approvalId, tool: row.tool, preview: row.preview,
+      projectSlug: slugs.get(row.projectId) ?? '', expiresAt: row.expiresAt, createdAt: row.createdAt,
+    }));
   }
 
   async sendRefusalOf(projectId: string, thread: ChatThreadRecord): Promise<ThreadSendRefusal | null> {

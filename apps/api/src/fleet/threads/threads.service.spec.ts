@@ -54,6 +54,7 @@ describe('ThreadsService.get (US-003 AC-12)', () => {
       get: vi.fn().mockResolvedValue({ ...record, kind: 'PROJECT', repoId: null, session }),
       sendRefusalOf: vi.fn().mockResolvedValue(null),
       handoff: vi.fn().mockResolvedValue({ plan: null, run: null }),
+      pendingActions: vi.fn().mockResolvedValue([]),
     } as unknown as ChatThreadRepository;
     const service = new ThreadsService(
       threads,
@@ -67,6 +68,34 @@ describe('ThreadsService.get (US-003 AC-12)', () => {
     const thread = await service.get('p1', 't1');
 
     expect(thread.session).toEqual(session);
+  });
+});
+
+describe('ThreadsService.get pending actions (S5b US-004)', () => {
+  const action = {
+    id: 'a1', approvalId: 'ap1', tool: 'koda_add_comment', preview: 'Add a comment to KODA-1 "Fix login":\n\nhello',
+    projectSlug: 'web', expiresAt: new Date('2026-10-24T09:00:00.000Z'), createdAt: new Date('2026-10-23T09:00:00.000Z'),
+  };
+
+  it('AC-1..AC-3: the project detail answers the repository\'s pending actions of that thread, unchanged', async () => {
+    const pendingActions = vi.fn().mockResolvedValue([action]);
+    const threads = {
+      get: vi.fn().mockResolvedValue(record), sendRefusalOf: vi.fn().mockResolvedValue(null),
+      handoff: vi.fn().mockResolvedValue({ plan: null, run: null }), pendingActions,
+    } as unknown as ChatThreadRepository;
+    const service = new ThreadsService(
+      threads,
+      {} as unknown as IFleetRepoRepository,
+      {} as unknown as SkillsService,
+      { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
+      {} as unknown as FleetJobsService,
+      briefStub(),
+    );
+
+    const thread = await service.get('p1', 't1');
+
+    expect(thread.pendingActions).toEqual([action]);
+    expect(pendingActions).toHaveBeenCalledWith({ kind: 'project', projectId: 'p1' }, 't1');
   });
 });
 

@@ -2,10 +2,15 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module';
 import { MemoryGovernanceService } from '../../memory/memory-governance.service';
 import { ProjectsService } from '../../projects/projects.service';
+import { AssistantActionPort } from '../approvals/assistant-action.port';
+import { ApprovalsService } from '../approvals/approvals.service';
+import { AssistantActionDecisions } from './actions/assistant-action-decisions';
+import { PendingActionExpirySweeper } from './actions/pending-action-expiry.sweeper';
+import { PrismaPendingActionRepository } from './actions/prisma-pending-action.repository';
 import { AssistantModule } from './assistant.module';
 import { AssistantToolExecutor } from './assistant-tool.executor';
 import { AssistantToolRegistry } from './assistant-tool.registry';
-import { KODA_MY_PROJECTS } from './koda-tool-descriptors';
+import { KODA_GET_ACTION, KODA_MY_PROJECTS } from './koda-tool-descriptors';
 import { KnowledgeTools } from './tools/knowledge-tools';
 
 describe('AssistantModule', () => {
@@ -41,5 +46,48 @@ describe('AssistantModule', () => {
 
   it('AC-14 (US-003): ProjectsService is in the module graph for the workspace tool group', () => {
     expect(module.get(ProjectsService)).toBeInstanceOf(ProjectsService);
+  });
+
+  it('AC-16 (US-003): init() registers koda_add_comment as a write tool', async () => {
+    await module.init();
+
+    const tool = module.get(AssistantToolRegistry).get('koda_add_comment');
+    expect(tool?.kind).toBe('write');
+    expect(tool?.permission).toEqual({ kind: 'ability', action: 'create', subject: 'Comment' });
+  });
+
+  it('AC-16 (US-003): init() registers koda_get_action as the member-scoped read tool', async () => {
+    await module.init();
+
+    const tool = module.get(AssistantToolRegistry).get('koda_get_action');
+    expect(tool?.descriptor).toBe(KODA_GET_ACTION);
+    expect(tool?.kind).toBeUndefined();
+    expect(tool?.permission).toEqual({ kind: 'member' });
+  });
+
+  it('US-007: provides the action expiry sweeper, which resolves the decide handler and the action repository', () => {
+    const sweeper = module.get(PendingActionExpirySweeper);
+    expect(sweeper).toBeInstanceOf(PendingActionExpirySweeper);
+    expect((sweeper as unknown as { actions: unknown }).actions).toBeInstanceOf(PrismaPendingActionRepository);
+    expect((sweeper as unknown as { decisions: unknown }).decisions).toBeInstanceOf(AssistantActionDecisions);
+  });
+
+  it('US-005: ApprovalsService and AssistantActionDecisions share one AssistantActionPort instance', () => {
+    const port = module.get(AssistantActionPort);
+    expect(port).toBeInstanceOf(AssistantActionPort);
+    expect((module.get(ApprovalsService) as unknown as { assistantActions: unknown }).assistantActions).toBe(port);
+    expect((module.get(AssistantActionDecisions) as unknown as { port: unknown }).port).toBe(port);
+  });
+
+  it('US-005: init() registers the decide handler, so the port forwards to it', async () => {
+    const decisions = module.get(AssistantActionDecisions);
+    const decide = vi.spyOn(decisions, 'decide').mockResolvedValue({ id: 'a1' } as never);
+    const port = module.get(AssistantActionPort);
+    expect(() => port.decide({ id: 'u1', globalAdmin: false }, { id: 'a1' } as never, { decision: 'reject' }, new Date())).toThrow(expect.objectContaining({ prefix: 'threads.disabled' }));
+
+    await module.init();
+    await port.decide({ id: 'u1', globalAdmin: false }, { id: 'a1' } as never, { decision: 'reject' }, new Date());
+
+    expect(decide).toHaveBeenCalledTimes(1);
   });
 });

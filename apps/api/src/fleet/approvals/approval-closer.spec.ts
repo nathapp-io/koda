@@ -1,4 +1,5 @@
 import { ApprovalCloser } from './approval-closer';
+import { approvalWebhookPayload } from './approval-payloads';
 import type { FleetApprovalRecord, NewFleetApproval } from './domain/approval.domain';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
 
@@ -35,7 +36,7 @@ function fakes() {
   const activity = { record: vi.fn(async () => undefined) };
   const webhooks = { dispatch: vi.fn(async () => undefined) };
   const live = { event: vi.fn((a: FleetApprovalRecord) => (a.projectId ? [{ approvalId: a.id, status: a.status }] : [])) };
-  const outbox = { record: vi.fn(async (e: { type: string }) => ({ id: 'ob1', ...e })) };
+  const outbox = { record: vi.fn(async (e: { type: string; payload?: Record<string, unknown> }) => ({ id: 'ob1', ...e })) };
   const closer = new ApprovalCloser(repo as never, activity as never, webhooks as never, live as never, outbox as never);
   return { closer, repo, activity, webhooks, outbox, rows };
 }
@@ -193,5 +194,48 @@ describe('bash (S1.5 2a)', () => {
     const { approval: expired } = await closer.expire(approval as FleetApprovalRecord, job, NOW);
     expect(expired).toEqual(expect.objectContaining({ status: 'expired', resolvedBy: 'timeout', decidedAt: NOW }));
     expect(activity.record).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'approval.expired', actorType: 'SYSTEM', responsibleUserId: 'u9' }));
+  });
+
+  it('AC-19 (S5b US-001): a fresh escalated ask still enqueues exactly approvalWebhookPayload, with no action extras', async () => {
+    const { approval } = await closer.openBash(job, ask(), 'r1', NOW);
+    const expected = approvalWebhookPayload(approval as FleetApprovalRecord, 'web');
+
+    expect(outbox.record).toHaveBeenCalledWith({ type: 'fleet_approval_requested', payload: expected, metadata: { projectId: 'p1', eventId: approval?.id } });
+
+    const payload = outbox.record.mock.calls.at(-1)?.[0].payload as Record<string, unknown>;
+    expect(Object.keys(payload).sort()).toEqual(Object.keys(expected).sort());
+    for (const extra of ['requestedById', 'threadPath', 'tool']) expect(payload).not.toHaveProperty(extra);
+  });
+});
+
+describe('assistant action (S5b 2a)', () => {
+  const expiresAt = new Date(NOW.getTime() + 86_400_000);
+  const action = { id: 'act1', projectId: 'p1', threadId: 't1', jobId: 'j1', tool: 'koda_add_comment', requestedById: 'u9', expiresAt };
+
+  it('AC-5, AC-6: opens one pending assistant_action approval expiring with the action and holding only the summary', async () => {
+    const { closer, repo, activity, webhooks, outbox } = fakes();
+
+    const r = await closer.openAssistant(action, '/web/threads/t1', NOW);
+
+    expect(r.approval).toEqual(expect.objectContaining({
+      type: 'assistant_action', status: 'pending', projectId: 'p1', jobId: 'j1', policyId: null, requestedAt: NOW, expiresAt,
+      payload: { actionId: 'act1', tool: 'koda_add_comment', threadId: 't1', threadPath: '/web/threads/t1', requestedById: 'u9' },
+    }));
+    expect(repo.create).toHaveBeenCalledTimes(1);
+    expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({
+      actorType: 'USER', actorId: 'u9', action: 'approval.requested', entityType: 'approval',
+      entityId: r.approval?.id, projectId: 'p1', jobId: 'j1', responsibleUserId: 'u9',
+      // approvalActivityPayload(approval, { threadId }): the preview and the input are nowhere on it.
+      payload: { type: 'assistant_action', status: 'pending', decision: null, resolvedBy: null, policyId: null, jobId: 'j1', threadId: 't1' },
+    }));
+    expect(webhooks.dispatch).toHaveBeenCalledWith('p1', 'fleet.approval.requested', expect.objectContaining({ approvalId: r.approval?.id, type: 'assistant_action' }));
+    expect(outbox.record).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'fleet_approval_requested',
+      payload: expect.objectContaining({
+        approvalId: r.approval?.id, projectId: 'p1', jobId: 'j1', requestedById: 'u9', threadPath: '/web/threads/t1', tool: 'koda_add_comment',
+      }),
+      metadata: { projectId: 'p1', eventId: r.approval?.id },
+    }));
+    expect(r.live).toHaveLength(1);
   });
 });

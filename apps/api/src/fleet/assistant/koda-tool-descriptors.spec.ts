@@ -1,6 +1,7 @@
 import { KODA_TOOL_LIMITS } from '@nathapp/fleet-protocol';
 import {
-  KODA_GET_TICKET, KODA_MY_PROJECTS, KODA_SEARCH_TICKETS, KODA_TOOL_DESCRIPTORS, kodaToolDescriptorsFor,
+  ACTION_TOOL_DESCRIPTORS, FLEET_TOOL_DESCRIPTORS, KODA_ADD_COMMENT, KODA_GET_ACTION, KODA_GET_TICKET, KODA_MY_PROJECTS,
+  KODA_SEARCH_TICKETS, KODA_TOOL_DESCRIPTORS, KNOWLEDGE_TOOL_DESCRIPTORS, TICKET_TOOL_DESCRIPTORS, kodaToolDescriptorsFor,
 } from './koda-tool-descriptors';
 
 /**
@@ -126,5 +127,46 @@ describe('US-001 AC-11: the WORKSPACE catalog fits the runner limits', () => {
     const workspace = kodaToolDescriptorsFor('WORKSPACE');
     expect(workspace.length).toBeLessThanOrEqual(KODA_TOOL_LIMITS.maxTools);
     for (const descriptor of workspace) expect(descriptor.name).toMatch(KODA_TOOL_LIMITS.nameRe);
+  });
+});
+
+describe('US-003 (2a-D15): the action group is appended, never woven in', () => {
+  it('AC-15: kodaToolDescriptorsFor("REPO") ends with koda_get_action then koda_add_comment', () => {
+    const descriptors = kodaToolDescriptorsFor('REPO');
+    expect(descriptors.slice(-2).map((descriptor) => descriptor.name)).toEqual(['koda_get_action', 'koda_add_comment']);
+    expect(descriptors.at(-2)).toBe(KODA_GET_ACTION);
+    expect(descriptors.at(-1)).toBe(KODA_ADD_COMMENT);
+  });
+
+  it.each(['REPO', 'PROJECT'] as const)('AC-22: %s keeps the three existing groups, in their existing order', (kind) => {
+    expect(kodaToolDescriptorsFor(kind).slice(0, -ACTION_TOOL_DESCRIPTORS.length)).toEqual([
+      ...TICKET_TOOL_DESCRIPTORS, ...FLEET_TOOL_DESCRIPTORS, ...KNOWLEDGE_TOOL_DESCRIPTORS,
+    ]);
+  });
+
+  it('AC-22: the pre-action prefix is the catalog\'s own descriptors, none replaced or rewritten', () => {
+    const descriptors = kodaToolDescriptorsFor('REPO');
+    for (const [index, original] of [...TICKET_TOOL_DESCRIPTORS, ...FLEET_TOOL_DESCRIPTORS, ...KNOWLEDGE_TOOL_DESCRIPTORS].entries()) {
+      expect(descriptors[index]).toBe(original);
+    }
+    expect(KODA_TOOL_DESCRIPTORS).toEqual([
+      ...TICKET_TOOL_DESCRIPTORS, ...FLEET_TOOL_DESCRIPTORS, ...KNOWLEDGE_TOOL_DESCRIPTORS, ...ACTION_TOOL_DESCRIPTORS,
+    ]);
+  });
+
+  it('gives REPO and PROJECT 14 descriptors and WORKSPACE 15, all under the runner limit', () => {
+    expect(kodaToolDescriptorsFor('REPO')).toHaveLength(14);
+    expect(kodaToolDescriptorsFor('PROJECT')).toHaveLength(14);
+    expect(kodaToolDescriptorsFor('WORKSPACE')).toHaveLength(15);
+    expect(kodaToolDescriptorsFor('WORKSPACE').at(-1)?.name).toBe('koda_add_comment');
+    for (const kind of ['REPO', 'PROJECT', 'WORKSPACE'] as const) {
+      expect(kodaToolDescriptorsFor(kind).length).toBeLessThan(KODA_TOOL_LIMITS.maxTools);
+    }
+  });
+
+  it('describes koda_add_comment as a comment the user has to approve first', () => {
+    expect(KODA_ADD_COMMENT.description).toContain('only added after the user approves it');
+    expect(KODA_ADD_COMMENT.inputSchema).toMatchObject({ required: ['ref', 'body'] });
+    expect(KODA_GET_ACTION.inputSchema).toMatchObject({ required: ['id'] });
   });
 });

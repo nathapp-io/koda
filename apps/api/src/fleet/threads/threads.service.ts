@@ -53,10 +53,13 @@ export class ThreadsService {
     return { items: await this.threads.list({ kind: 'project', projectId }, status, skip, take), threadsEnabled: this.config.threadsEnabled };
   }
   async get(projectId: string, id: string): Promise<ChatThreadDetail> {
-    const result = await this.threads.get({ kind: 'project', projectId }, id);
+    const scope = { kind: 'project', projectId } as const;
+    const result = await this.threads.get(scope, id);
     if (!result) throw new NotFoundAppException({}, 'threads.notFound');
-    const [sendRefusal, handoff] = await Promise.all([this.threads.sendRefusalOf(projectId, result), this.threads.handoff(result.id)]);
-    return { ...result, sendRefusal, handoff };
+    const [sendRefusal, handoff, pendingActions] = await Promise.all([
+      this.threads.sendRefusalOf(projectId, result), this.threads.handoff(result.id), this.threads.pendingActions(scope, result.id),
+    ]);
+    return { ...result, sendRefusal, handoff, pendingActions };
   }
   async messages(projectId: string, id: string, afterSeq: number, limit: number): Promise<{ items: ChatMessageRecord[] }> {
     const thread = await this.threads.get({ kind: 'project', projectId }, id);
