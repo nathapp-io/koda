@@ -10,6 +10,7 @@ import { ProjectAccessService } from '../../projects/project-access.service';
 import { withProjectRole } from '../../projects/project-context';
 import { stableStringify } from '../sync/stable-json';
 import { MAX_PENDING_ACTIONS, type ActionProposer, type PendingActionRecord } from './actions/pending-action.domain';
+import { approvalModeFor } from './actions/approval-policy';
 import { capText, fenceData, maskSecrets } from './assistant-tool-safety';
 import { ASSISTANT_TOOL_CALL_REPOSITORY, type AssistantToolCallRecord, type AssistantToolCallRepository, type ToolCallContext, type ToolCallOutcome } from './assistant-tool-call.domain';
 import { AssistantToolRegistry } from './assistant-tool.registry';
@@ -280,7 +281,7 @@ export class AssistantToolExecutor {
       now: new Date(),
       data: (text) => fenceData(maskSecrets(text), token),
     };
-    if (tool.kind === 'write') return this.proposeWrite(call, tool, caller, scope, ctx);
+    if (tool.kind === 'write') return this.writeTool(call, tool, caller, scope, ctx);
     try {
       return { outcome: 'ok', content: await tool.execute(ctx, scope.input), projectId: scope.id };
     } catch (error) {
@@ -290,13 +291,14 @@ export class AssistantToolExecutor {
     }
   }
 
-  /**
-   * 2a-D2: a write tool never runs its own write. Everything up to here is today's path — creator, scope, `project`
-   * argument, parse, membership and ability — so a caller who may not write is refused before a preview exists. The
-   * preview is what the user approves, and `propose` is what turns it into a decision the thread can render.
-   */
-  private async proposeWrite(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope, ctx: ToolContext): Promise<RunOutcome> {
+  /** 3-D13/15: resolve policy once, after permission and before preview. Only none and thread-human are served. */
+  private async writeTool(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope, ctx: ToolContext): Promise<RunOutcome> {
     const name = tool.descriptor.name;
+    const mode = approvalModeFor(caller.origin, name);
+    if (mode !== 'none' && !(mode === 'human' && caller.origin.kind === 'thread')) {
+      this.logger.error(`koda write tool ${name} refused approval mode ${mode} for ${caller.origin.kind}`);
+      return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
+    }
     const actions = this.actions;
     if (!actions) {
       this.logger.warn(`koda write tool ${name} has no action proposer attached; job ${call.jobId} answered error`);
@@ -320,8 +322,13 @@ export class AssistantToolExecutor {
       this.logger.error(`koda tool ${name} failed for job ${call.jobId}`, error instanceof Error ? error.stack : String(error));
       return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
     }
-    // US-005 adds MCP write execution. Until then, keep previews and their refusals but never propose a
-    // thread-less action (the existing approval path requires a user and a replay key).
+    if (mode === 'none') return this.directWrite(call, tool, caller, scope, ctx, actions, preview);
+    return this.proposeWrite(call, tool, caller, scope, ctx, actions, preview);
+  }
+
+  /** The existing human proposal path retains its thread, user and replay-key requirements. */
+  private async proposeWrite(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope, ctx: ToolContext, actions: ActionProposer, preview: string): Promise<RunOutcome> {
+    const name = tool.descriptor.name;
     const origin = caller.origin;
     if (origin.kind !== 'thread' || call.jobId === null || call.toolCallId === null || isAgentPrincipal(caller.principal)) {
       return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
@@ -342,6 +349,43 @@ export class AssistantToolExecutor {
     });
     if ('refused' in proposed) return { ...refusal('refused', REFUSED_CONTENT), projectId: scope.id };
     return { ...refusal('pending', `pending ${proposed.actionId}: awaiting user approval; do not retry`), projectId: scope.id };
+  }
+
+  /** 3-D15: the write stands even if recording fails; never retry it or turn it into a proposal. */
+  private async directWrite(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope, ctx: ToolContext, actions: ActionProposer, preview: string): Promise<RunOutcome> {
+    const name = tool.descriptor.name;
+    let outcome: ToolCallOutcome = 'ok';
+    let text: string;
+    try {
+      text = await tool.execute(ctx, scope.input);
+    } catch (error) {
+      outcome = error instanceof NotFoundAppException ? 'not_found' : 'error';
+      if (error instanceof NotFoundAppException) text = 'not_found';
+      else if (error instanceof ToolActionError) text = error.text;
+      else {
+        this.logger.error(`koda tool ${name} failed for job ${call.jobId}`, error instanceof Error ? error.stack : String(error));
+        text = `error: ${name} failed`;
+      }
+    }
+    text = capText(maskSecrets(text), RESULT_CAP_BYTES - 64);
+    try {
+      const { actionId } = await actions.recordDirect({
+        projectId: scope.id,
+        tool: name,
+        input: scope.input,
+        preview,
+        actorType: isAgentPrincipal(caller.principal) ? 'agent' : 'user',
+        actorId: caller.principal.id,
+        origin: caller.origin.kind,
+        status: outcome === 'ok' ? 'EXECUTED' : 'FAILED',
+        result: text,
+        now: ctx.now,
+      });
+      return { outcome, content: `${text}\naction ${actionId}`, projectId: scope.id };
+    } catch (error) {
+      this.logger.error(`koda tool ${name} action recording failed for job ${call.jobId}`, error instanceof Error ? error.stack : String(error));
+      return { ...refusal('error', `error: ${name} failed (the change was made but its action was not recorded)`), projectId: scope.id };
+    }
   }
 
   /** Step 8: audit and store; a concurrent duplicate answers the stored row instead. */

@@ -1,0 +1,69 @@
+import { NathApplication } from '@nathapp/nestjs-app';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import type { PrismaClient } from '../../../src/generated/prisma/client';
+import { AssistantToolExecutor } from '../../../src/fleet/assistant/assistant-tool.executor';
+import type { ToolCaller } from '../../../src/fleet/assistant/assistant-tool.types';
+import { resetDb } from '../../helpers/reset-db';
+import { bootHttpApp } from '../../helpers/http-app';
+import { seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
+
+const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+describeIntegration('direct assistant actions (PG)', () => {
+  let app: NathApplication;
+  let prisma: PrismaClient;
+  let executor: AssistantToolExecutor;
+  let world: FleetHttpWorld;
+  let number = 100;
+  const saved = process.env.FLEET_THREADS_ENABLED;
+  beforeAll(async () => {
+    process.env.FLEET_THREADS_ENABLED = 'true';
+    await resetDb();
+    app = await bootHttpApp({ registrationEnabled: false });
+    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
+    executor = app.get(AssistantToolExecutor, { strict: false });
+  }, 120_000);
+  afterAll(async () => {
+    await app?.close();
+    if (saved === undefined) delete process.env.FLEET_THREADS_ENABLED;
+    else process.env.FLEET_THREADS_ENABLED = saved;
+  });
+  async function seedCaller(): Promise<ToolCaller> {
+    const agent = await seedFleetHttpAgent(app.getHttpServer(), world.tokens.root);
+    await prisma.agentProject.create({ data: { projectId: world.projectId, agentId: agent.id } });
+    return { principal: { actorType: 'agent', id: agent.id, slug: agent.slug, name: 'claude', status: 'ACTIVE', agentRoles: ['DEVELOPER'], capabilities: [], authorities: [], blacklisted: false, revoked: false }, origin: { kind: 'mcp' }, disabled: false };
+  }
+  async function seedTicket(projectId = world.projectId) {
+    return prisma.ticket.create({ data: { projectId, number: ++number, type: 'TASK', title: 'Direct action ticket' } });
+  }
+  it('AC-12, AC-13: creates an agent-authored comment and one terminal none-mode action', async () => {
+    const caller = await seedCaller();
+    const ticket = await seedTicket();
+    const result = await executor.executeFor(caller, { name: 'koda_add_comment', input: { project: 'web', ref: `WEB-${ticket.number}`, body: 'from mcp' } });
+    expect(result.isError).toBe(false);
+    const comments = await prisma.comment.findMany({ where: { ticketId: ticket.id } });
+    expect(comments).toHaveLength(1);
+    expect(comments[0]).toMatchObject({ authorAgentId: caller.principal.id, authorUserId: null, body: 'from mcp' });
+    const actions = await prisma.pendingAction.findMany({ where: { actorId: caller.principal.id } });
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({ status: 'EXECUTED', actorType: 'agent', actorId: caller.principal.id, origin: 'mcp', approvalMode: 'none', approvalId: null, threadId: null });
+    expect(result.content).toContain(`\naction ${actions[0]?.id}`);
+  });
+  it('AC-14: hides the unrostered project without a comment or action', async () => {
+    const caller = await seedCaller();
+    const ticket = await seedTicket(world.opsProjectId);
+    expect(await executor.executeFor(caller, { name: 'koda_add_comment', input: { project: 'ops', ref: `OPS-${ticket.number}`, body: 'from mcp' } })).toEqual({ content: 'not_found: project', isError: true });
+    expect(await prisma.comment.count({ where: { ticketId: ticket.id } })).toBe(0);
+    expect(await prisma.pendingAction.count({ where: { projectId: world.opsProjectId, actorId: caller.principal.id } })).toBe(0);
+  });
+  it('AC-15: another rostered agent cannot read the caller action', async () => {
+    const caller = await seedCaller();
+    const other = await seedCaller();
+    const ticket = await seedTicket();
+    await executor.executeFor(caller, { name: 'koda_add_comment', input: { project: 'web', ref: `WEB-${ticket.number}`, body: 'from mcp' } });
+    const action = await prisma.pendingAction.findFirstOrThrow({ where: { actorId: caller.principal.id } });
+    const input = { project: 'web', id: action.id };
+    expect((await executor.executeFor(caller, { name: 'koda_get_action', input })).content).toContain(`action ${action.id}`);
+    expect(await executor.executeFor(other, { name: 'koda_get_action', input })).toEqual({ content: 'not_found', isError: true });
+  });
+});
