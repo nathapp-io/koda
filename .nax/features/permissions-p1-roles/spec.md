@@ -59,7 +59,7 @@ The user ruled (2026-10-18) that these gaps are fixed by one redesign: one permi
    - Every other `.nax/rules/api-controllers.md` convention still applies: the JSON envelope, `@ApiTags`, `@ApiBearerAuth`, `@ApiOperation`, `@ApiResponse`, `@ApiProperty` on every response DTO field, and app exceptions.
 5. **i18n and exceptions.**
    - Every new message lives in the new files `apps/api/src/i18n/en/permissions.json` and `apps/api/src/i18n/zh/permissions.json`, with English as the source.
-   - A code written in this spec as `permissions.<code>` with status `<s>` means `new <XAppException>({}, 'permissions.<code>')` from `@nathapp/nestjs-common`. Its message lives at the nested i18n key `permissions.<code>.<s>`, the shape of `users.json` with `lastAdmin.409`.
+   - A code written in this spec as `permissions.<code>` with status `<s>` means `new <XAppException>({}, 'permissions.<code>')`. `ForbiddenAppException`, `NotFoundAppException` and `ValidationAppException` come from `@nathapp/nestjs-common`. `ConflictAppException` is the repo's local class in `apps/api/src/common/exceptions/conflict-app.exception.ts`, which the package does not export. Its message lives at the nested i18n key `permissions.<code>.<s>`, the shape of `users.json` with `lastAdmin.409`.
    - A bare `permissions` 403 means `new ForbiddenAppException({}, 'permissions')`, with its message at `permissions.403`.
    - Each code's exception class and status are given in "Failure Handling".
 6. **Repositories follow `.nax/rules/api-data.md`.**
@@ -282,7 +282,7 @@ bindBaseline(principal: PrincipalRef): Promise<void>;
 setGlobalAdmin(userId: string, admin: boolean, by: Granter): Promise<void>;
 createBinding(input: { principal: PrincipalRef; roleKey: string; projectId: string | null }, by: Granter): Promise<RoleBindingView>;
 findBinding(id: string): Promise<RoleBindingView | null>;
-listBindings(filter: { principal?: PrincipalRef; projectId?: string | null }): Promise<RoleBindingView[]>;
+listBindings(filter: { principal?: PrincipalRef; projectId?: string | null }, page: IPageOption): Promise<IPageResult<RoleBindingView>>;
 removeBinding(id: string): Promise<void>;
 removeAllBindings(principal: PrincipalRef): Promise<void>;
 ```
@@ -313,7 +313,7 @@ removeAllBindings(principal: PrincipalRef): Promise<void>;
 - **Legacy admin column, for USER principals:**
   - Creating a `projectId`-null `owner` or `admin` binding sets `User.role = 'ADMIN'` in the same transaction.
   - Removing one, when no other such binding is left, sets `User.role = 'MEMBER'`.
-- **Token revocation.** Whenever a write changes a user's `User.role`, the same transaction bumps that user's `tokenVersion`, as `UsersRepository.updateUser({ bumpTokenVersion: true })` does today. After the transaction, the service invalidates `userTokenVersionCacheTag(userId)` (tag mode) and `userAuthStateCacheKey(userId)`, the same two invalidations `UsersAdminService.update` performs today. The user's existing access and refresh tokens stop working.
+- **Token revocation.** Whenever a write changes a user's `User.role`, the same transaction bumps that user's `tokenVersion`, as `PrismaUsersRepository.updateUser(id, { bumpTokenVersion: true })` does today. After the transaction, the service invalidates `userTokenVersionCacheTag(userId)` (tag mode) and `userAuthStateCacheKey(userId)`, the same two invalidations `UsersAdminService.update` performs today. The user's existing access and refresh tokens stop working.
 - **`setGlobalAdmin(userId, false, by)`** removes only the user's `projectId`-null `admin` binding. It never touches an `owner` binding: an Owner's `User.role` stays `'ADMIN'`, and removing an owner binding is possible only through `removeBinding`, which keeps the last-owner protection. When no `owner` or `admin` binding remains after the call, it sets `User.role = 'MEMBER'` (with the token revocation above). This includes a legacy admin who held no binding at all.
 - **Unique violations.** A duplicate insert is recognised with `isUniqueViolation(error, 'principalId')`. Both partial index names contain `principalId`, and the helper substring-matches index names. The existing binding is then re-read and returned.
 - **Role delete race.** A foreign key violation on `RoleBinding.roleId` during a role delete, from a binding inserted concurrently, is mapped to 409 `permissions.roleInUse`.
@@ -455,7 +455,7 @@ Symbols this feature **changes**. The baseline only locates the code; implement 
 2. **US-002: Role and RoleBinding schema, migration and system role seeder** — `Workdir: apps/api` — Depends on US-001. Adds the two models, the `Project` back-relation, the migration, the partial unique indexes, `SYSTEM_ROLES` and the `SYSTEM_ROLES_SEED` token, `SystemRoleSeeder`, the `PermissionsModule` shell, `PrismaRoleRepository` and `PrismaRoleBindingRepository`.
 3. **US-003: PermissionService and MembershipService** — `Workdir: apps/api` — Depends on US-002. Implements every method in "Service signatures", with the `permissions` cache tag, the legacy admin union, the owner-row lock and `User.role` mirroring, plus the `GlobalStubsModule` stubs for both services.
 4. **US-004: Owner bootstrap and baseline bindings** — `Workdir: apps/api` — Depends on US-003. Covers `KODA_OWNER_EMAIL` (config, production check, registration refusal), `bindOwnerIfFirst` and `bindBaseline` on registration, admin user create and update through `setGlobalAdmin`, the agent baseline on create, and binding removal on agent delete.
-5. **US-005: Roles API** — `Workdir: apps/api` — Depends on US-003. Adds `GET`, `POST`, `PATCH` and `DELETE` on `/roles` through `RoleAdminService`, with validation, escalation and the system and locked role rules, plus the i18n keys and the `openapi.json` update.
+5. **US-005: Roles API** — `Workdir: apps/api` — Depends on US-003, US-004. (US-004 creates the Owner binding on registration, which AC 15 relies on.) Adds `GET`, `POST`, `PATCH` and `DELETE` on `/roles` through `RoleAdminService`, with validation, escalation and the system and locked role rules, plus the i18n keys and the `openapi.json` update.
 6. **US-006: Role bindings API** — `Workdir: apps/api` — Depends on US-005. Adds `GET`, `POST` and `DELETE` on `/role-bindings`, with the scope, principal, escalation, self-binding and Owner rules.
 
 ### Context Files
@@ -621,7 +621,7 @@ Symbols this feature **changes**. The baseline only locates the code; implement 
 3. [integration] `POST /auth/register` on an empty users table, with `KODA_OWNER_EMAIL` unset, creates the user with a `projectId`-null `owner` binding and a `projectId`-null `member` binding.
 4. [integration] With `REGISTRATION_ENABLED=true` and one user present, `POST /auth/register` creates the new user with a `member` binding and no `owner` binding.
 5. [integration] With `KODA_OWNER_EMAIL=owner@koda.test` and an empty users table, `POST /auth/register` with email `other@koda.test` answers 403, and the users table stays empty.
-6. [integration] With `KODA_OWNER_EMAIL=owner@koda.test` and an empty users table, `POST /auth/register` with email `Owner@Koda.test` answers 200 and the user holds an `owner` binding.
+6. [integration] With `KODA_OWNER_EMAIL=owner@koda.test` and an empty users table, `POST /auth/register` with email `Owner@Koda.test` answers 201 (the route's existing status) and the user holds an `owner` binding.
 7. [integration] `POST /admin/users` by a global admin creating a user with role `MEMBER` gives that user a `member` binding and no `admin` binding.
 8. [integration] `POST /admin/users` creating a user with role `ADMIN` gives that user a `projectId`-null `admin` binding and stores `User.role` `'ADMIN'`.
 9. [integration] With a second active admin present, `PATCH /admin/users/:id` with `{ role: 'MEMBER' }` for a user holding an `admin` binding removes that binding and stores `User.role` `'MEMBER'`.
