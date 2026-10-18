@@ -104,6 +104,44 @@ describeIntegration('MCP route (PG, US-007)', () => {
     expect(textOf(answer)).toBe('not_found: project');
   });
 
+  it('B1: a missing or malformed project answers invalid_input: project and is audited with a null projectId', async () => {
+    const missing = await callTool('koda_get_ticket', { ref: `WEB-${webTicket.number}` });
+
+    expect(missing.isError).toBe(true);
+    expect(textOf(missing)).toBe('invalid_input: project');
+
+    const malformed = await callTool('koda_get_ticket', { project: 'BAD', ref: `WEB-${webTicket.number}` });
+
+    expect(malformed.isError).toBe(true);
+    expect(textOf(malformed)).toBe('invalid_input: project');
+
+    const actionsBefore = await prisma.pendingAction.count({ where: { actorId: claude.id, tool: 'koda_add_comment' } });
+    const refusedWrite = await callTool('koda_add_comment', { project: 'BAD', ref: `WEB-${webTicket.number}`, body: 'never written' });
+
+    expect(refusedWrite.isError).toBe(true);
+    expect(textOf(refusedWrite)).toBe('invalid_input: project');
+
+    const readRows = await prisma.assistantToolCall.findMany({
+      where: { actorId: claude.id, tool: 'koda_get_ticket', projectId: null },
+      orderBy: { createdAt: 'desc' },
+      take: 2,
+    });
+    expect(readRows.map((r) => [r.outcome, r.content, r.projectId, r.isError])).toEqual([
+      ['invalid_input', 'invalid_input: project', null, true],
+      ['invalid_input', 'invalid_input: project', null, true],
+    ]);
+
+    const writeRows = await prisma.assistantToolCall.findMany({
+      where: { actorId: claude.id, tool: 'koda_add_comment', projectId: null },
+      orderBy: { createdAt: 'desc' },
+      take: 1,
+    });
+    expect(writeRows.map((r) => [r.outcome, r.content, r.projectId, r.isError])).toEqual([
+      ['invalid_input', 'invalid_input: project', null, true],
+    ]);
+    expect(await prisma.pendingAction.count({ where: { actorId: claude.id, tool: 'koda_add_comment' } })).toBe(actionsBefore);
+  });
+
   it('AC-8, AC-9: koda_add_comment runs at once, names a none-mode action and stores the agent comment', async () => {
     const answer = await callTool('koda_add_comment', { project: 'web', ref: `WEB-${webTicket.number}`, body: 'via mcp' });
 
@@ -145,7 +183,11 @@ describeIntegration('MCP route (PG, US-007)', () => {
 
   it('AC-1: answers 409 with MCP_ENABLED unset', async () => {
     await boot(false);
-
-    await mcp(claude.apiKey, rpc('tools/list')).expect(409);
+    try {
+      await mcp(claude.apiKey, rpc('tools/list')).expect(409);
+    } finally {
+      // Branch review B2: restore the enabled application, so no other test depends on this one running last.
+      await boot(true);
+    }
   });
 });

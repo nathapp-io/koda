@@ -117,6 +117,35 @@ describe('McpController routes', () => {
     expect(rpcBody(res).result).toMatchObject({ isError: false, content: [{ type: 'text', text: 'found WEB-1' }] });
   });
 
+  it('B1: a malformed `project` reaches executeFor, whose exact answer the client reads, and the schema stays advertised', async () => {
+    await boot(true);
+    executeFor.mockResolvedValue({ content: 'invalid_input: project', isError: true });
+
+    const list = rpcBody(await send(app, 'POST', rpc('tools/list'))).result.tools as Array<{ name: string; inputSchema: { required?: string[] } }>;
+    const advertised = list.find((t) => t.name === 'koda_get_ticket') as { name: string; inputSchema: { required?: string[] } };
+    expect(advertised.inputSchema).toEqual(mcpToolDescriptors().find((d) => d.name === 'koda_get_ticket')?.inputSchema);
+    expect(advertised.inputSchema.required).toContain('project');
+
+    const res = await send(app, 'POST', rpc('tools/call', { name: 'koda_get_ticket', arguments: { project: 'BAD' } }));
+
+    expect(res.statusCode).toBe(200);
+    expect(executeFor).toHaveBeenCalledWith(
+      expect.objectContaining({ origin: { kind: 'mcp' } }),
+      { name: 'koda_get_ticket', input: { project: 'BAD' } },
+    );
+    expect(rpcBody(res).result).toEqual({ content: [{ type: 'text', text: 'invalid_input: project' }], isError: true });
+  });
+
+  it('B1: a call with no arguments at all reaches executeFor', async () => {
+    await boot(true);
+
+    const res = await send(app, 'POST', rpc('tools/call', { name: 'koda_get_ticket' }));
+
+    expect(res.statusCode).toBe(200);
+    expect(executeFor).toHaveBeenCalledWith(expect.objectContaining({ origin: { kind: 'mcp' } }), { name: 'koda_get_ticket', input: {} });
+    expect(rpcBody(res).result).toMatchObject({ isError: false });
+  });
+
   it('AC-13: GET and DELETE answer 405 from the SDK', async () => {
     await boot(true);
 
