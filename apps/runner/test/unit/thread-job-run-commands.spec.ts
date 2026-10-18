@@ -9,6 +9,7 @@ import { createMemoryLogger } from '../../src/logger';
 import { ThreadJobRun } from '../../src/thread/thread-job-run';
 import { assignFor } from '../helpers/assign';
 import { manualClock } from '../helpers/manual-clock';
+import { startThreadRun } from '../helpers/thread-running';
 
 const jobId = 'thread-commands-1';
 const leaseEpoch = 1;
@@ -128,19 +129,7 @@ async function eventually(condition: () => boolean | Promise<boolean>): Promise<
   return false;
 }
 
-async function running(context: ReturnType<typeof setup>): Promise<{ started: Promise<void> }> {
-  await mkdir(context.jobDir, { recursive: true });
-  const started = context.run.start('prepare');
-  const ready = await eventually(() => context.journal.getJob(jobId, leaseEpoch)?.state === 'RUNNING');
-  expect(ready).toBe(true);
-  // The row goes RUNNING before `openStream` awaits its way to the writer, and commands answer `session_not_ready`
-  // until it has. An empty THREAD_INPUT probes that without starting a turn: once ready it is `invalid payload`.
-  const writerReady = await eventually(async () =>
-    (await context.run.command('THREAD_INPUT', {})).detail !== 'session_not_ready');
-  expect(writerReady).toBe(true);
-  await Bun.sleep(10);
-  return { started };
-}
+const running = (context: ReturnType<typeof setup>) => startThreadRun(context, jobId, leaseEpoch);
 
 afterAll(async () => { await Promise.all(roots.map((path) => rm(path, { recursive: true, force: true }))); });
 

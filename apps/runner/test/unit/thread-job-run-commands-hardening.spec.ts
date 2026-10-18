@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdir, rm } from 'node:fs/promises';
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentSession, SessionEvent } from '@nathapp/nax-agent';
 import type { ThreadAssign } from '@nathapp/fleet-protocol';
@@ -9,6 +9,7 @@ import { createMemoryLogger } from '../../src/logger';
 import { ThreadJobRun } from '../../src/thread/thread-job-run';
 import { assignFor } from '../helpers/assign';
 import { manualClock } from '../helpers/manual-clock';
+import { startThreadRun } from '../helpers/thread-running';
 
 // US-005 adversarial review findings: the window between the RUNNING transition and the open stream (a command
 // there must be refused, never acked and dropped), and the synchronous command path that must never throw because
@@ -90,15 +91,7 @@ async function eventually(condition: () => boolean): Promise<boolean> {
   return false;
 }
 
-/** Starts the run and waits until its stream is open — the writer exists only once `openStream` has assigned it. */
-async function running(context: ReturnType<typeof setup>): Promise<{ started: Promise<void> }> {
-  await mkdir(context.jobDir, { recursive: true });
-  const started = context.run.start('prepare');
-  const ready = await eventually(() => context.journal.getJob(jobId, leaseEpoch)?.state === 'RUNNING');
-  expect(ready).toBe(true);
-  await Bun.sleep(10);
-  return { started };
-}
+const running = (context: ReturnType<typeof setup>) => startThreadRun(context, jobId, leaseEpoch);
 
 afterAll(async () => { await Promise.all(roots.map((path) => rm(path, { recursive: true, force: true }))); });
 

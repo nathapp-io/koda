@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdir, rm } from 'node:fs/promises';
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentSession, SessionEvent } from '@nathapp/nax-agent';
 import type { ThreadAssign } from '@nathapp/fleet-protocol';
@@ -9,6 +9,7 @@ import { createMemoryLogger, type MemoryLogger } from '../../src/logger';
 import { ThreadJobRun } from '../../src/thread/thread-job-run';
 import { assignFor } from '../helpers/assign';
 import { manualClock } from '../helpers/manual-clock';
+import { startThreadRun } from '../helpers/thread-running';
 
 // US-005 adversarial review finding: nax-agent's `answer` is not a total function — `pending-asks.js` throws an
 // `AgentSessionError` for a request id the session never issued (and for a reply of the wrong kind), documented as
@@ -70,23 +71,7 @@ function setup(options: { answer?: AgentSession['answer'] } = {}) {
   return { journal, jobDir, log, run };
 }
 
-async function eventually(condition: () => boolean): Promise<boolean> {
-  const deadline = Date.now() + 500;
-  while (Date.now() <= deadline) {
-    if (condition()) return true;
-    await Bun.sleep(5);
-  }
-  return false;
-}
-
-async function running(context: ReturnType<typeof setup>): Promise<{ started: Promise<void> }> {
-  await mkdir(context.jobDir, { recursive: true });
-  const started = context.run.start('prepare');
-  const ready = await eventually(() => context.journal.getJob(jobId, leaseEpoch)?.state === 'RUNNING');
-  expect(ready).toBe(true);
-  await Bun.sleep(10);
-  return { started };
-}
+const running = (context: ReturnType<typeof setup>) => startThreadRun(context, jobId, leaseEpoch);
 
 afterAll(async () => { await Promise.all(roots.map((path) => rm(path, { recursive: true, force: true }))); });
 

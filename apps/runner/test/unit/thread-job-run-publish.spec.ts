@@ -9,6 +9,7 @@ import { createMemoryLogger } from '../../src/logger';
 import { ThreadJobRun, type ThreadOpenInput, type ThreadPublishResult } from '../../src/thread/thread-job-run';
 import { assignFor } from '../helpers/assign';
 import { manualClock } from '../helpers/manual-clock';
+import { startThreadRun } from '../helpers/thread-running';
 
 const roots: string[] = [];
 const thread: ThreadAssign = {
@@ -42,7 +43,7 @@ function setup(options: { send?: () => AsyncGenerator<SessionEvent>; publish?: (
   const run = new ThreadJobRun({ journal, log: createMemoryLogger(), now: () => new Date(clock.nowMs()), sleep: clock.sleep, mutex: { acquire: async () => () => undefined }, logs, host, tuning }, 'thread-publish-1', 1);
   return { root, jobDir, clock, journal, run, session, host, calls, sent, lines, gate };
 }
-async function started(ctx: ReturnType<typeof setup>) { await mkdir(ctx.jobDir, { recursive: true }); const running = ctx.run.start('prepare'); for (let i=0;i<100 && ctx.journal.getJob('thread-publish-1',1)?.state !== 'RUNNING';i++) await Bun.sleep(5); expect(ctx.journal.getJob('thread-publish-1',1)?.state).toBe('RUNNING'); await Bun.sleep(5); return { started: running }; }
+const started = (ctx: ReturnType<typeof setup>) => startThreadRun(ctx, 'thread-publish-1', 1);
 async function stream(ctx: ReturnType<typeof setup>) { const file = ctx.lines[0]; return (await readFile(file, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>); }
 afterAll(async () => { await Promise.all(roots.map((path) => rm(path, { recursive: true, force: true }))); });
 

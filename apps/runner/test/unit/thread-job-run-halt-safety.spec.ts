@@ -9,6 +9,7 @@ import { createMemoryLogger } from '../../src/logger';
 import { ThreadJobRun } from '../../src/thread/thread-job-run';
 import { assignFor } from '../helpers/assign';
 import { manualClock } from '../helpers/manual-clock';
+import { startThreadRun } from '../helpers/thread-running';
 
 // US-005 adversarial review findings on halt: (1) a session that `open` resolves after the halt is closed
 // unawaited — it must never block `start`; (2) a close already in progress writes no stream line once a halt
@@ -108,23 +109,7 @@ async function streamLines(context: ReturnType<typeof setup>): Promise<Array<Rec
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
-async function eventually(condition: () => boolean): Promise<boolean> {
-  const deadline = Date.now() + 500;
-  while (Date.now() <= deadline) {
-    if (condition()) return true;
-    await Bun.sleep(5);
-  }
-  return false;
-}
-
-async function running(context: ReturnType<typeof setup>): Promise<{ started: Promise<void> }> {
-  await mkdir(context.jobDir, { recursive: true });
-  const started = context.run.start('prepare');
-  const ready = await eventually(() => context.journal.getJob(jobId, leaseEpoch)?.state === 'RUNNING');
-  expect(ready).toBe(true);
-  await Bun.sleep(10);
-  return { started };
-}
+const running = (context: ReturnType<typeof setup>) => startThreadRun(context, jobId, leaseEpoch);
 
 afterAll(async () => { await Promise.all(roots.map((path) => rm(path, { recursive: true, force: true }))); });
 
