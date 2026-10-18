@@ -70,3 +70,56 @@ export interface RoleRepository extends IRepository<RoleDomain> {
 export interface RoleBindingRepository extends IRepository<RoleBindingDomain> {
   createBinding(input: NewRoleBinding): Promise<RoleBindingDomain>;
 }
+
+/** A principal a binding can name. */
+export type PrincipalRef = { type: PrincipalType; id: string };
+
+/** Who performs a write; recorded as `grantedByType` and `grantedById`. */
+export type Granter = { type: GranterType; id: string };
+
+/** What the services return for a binding: the row plus its role's key. */
+export interface RoleBindingView {
+  id: string;
+  principalType: PrincipalType;
+  principalId: string;
+  roleId: string;
+  roleKey: string;
+  projectId: string | null;
+  grantedByType: string;
+  grantedById: string;
+  createdAt: Date;
+}
+
+export interface PermissionDecision {
+  allowed: boolean;
+  reason:
+    | 'implicit'
+    | 'public'
+    | 'granted'
+    | 'not-granted'
+    | 'not-owner'
+    | 'non-role-key'
+    | 'unknown-key'
+    | 'no-project'
+    | 'principal-type';
+}
+
+/** A binding row with the role fields the permission decision needs. */
+export interface BindingWithRole {
+  binding: RoleBindingDomain;
+  roleKey: string;
+  roleScope: RoleScope;
+  rolePermissions: string[];
+}
+
+/** Filter of a binding list. `projectId: null` means global bindings only; undefined means any. */
+export interface BindingFilter {
+  principal?: PrincipalRef;
+  projectId?: string | null;
+}
+
+/** Login-relevant state of a user: the legacy global role and whether the account is disabled. */
+export interface UserLegacyState {
+  role: 'MEMBER' | 'ADMIN';
+  disabled: boolean;
+}

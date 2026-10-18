@@ -2,6 +2,9 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { Global, Module } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { CacheManager } from '@nathapp/nestjs-cache';
+import { MembershipService } from './membership.service';
+import { PermissionService } from './permission.service';
 import { PrismaRoleRepository } from './prisma-role.repository';
 import { PrismaRoleBindingRepository } from './prisma-role-binding.repository';
 import {
@@ -48,8 +51,10 @@ const mockPrismaService = { client: mockPrismaClient } as unknown as PrismaServi
   providers: [
     { provide: PrismaService, useValue: mockPrismaService },
     { provide: TRANSACTION_MANAGER, useValue: mockTransactionManager },
+    // The application registers the cache globally (`CacheModule.register({ isGlobal: true })`).
+    { provide: CacheManager, useValue: {} },
   ],
-  exports: [PrismaService, TRANSACTION_MANAGER],
+  exports: [PrismaService, TRANSACTION_MANAGER, CacheManager],
 })
 class PermissionStubsModule {}
 
@@ -87,6 +92,15 @@ describe('US-002 PermissionsModule', () => {
     expect(exported).not.toContain(ROLE_BINDING_REPOSITORY);
     expect(exported).not.toContain(PrismaRoleRepository);
     expect(exported).not.toContain(PrismaRoleBindingRepository);
+  });
+
+  it('exports PermissionService and MembershipService, and provides them', async () => {
+    const exported: unknown[] = Reflect.getMetadata('exports', PermissionsModule) ?? [];
+    moduleRef = await build();
+
+    expect(exported).toEqual(expect.arrayContaining([PermissionService, MembershipService]));
+    expect(moduleRef.get(PermissionService)).toBeInstanceOf(PermissionService);
+    expect(moduleRef.get(MembershipService)).toBeInstanceOf(MembershipService);
   });
 
   it('provides SYSTEM_ROLES_SEED as the system role table', async () => {
