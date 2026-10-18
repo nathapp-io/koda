@@ -5,6 +5,8 @@
  * test/integration/fleet/mcp-route.integration.spec.ts.
  */
 import { CanActivate, ExecutionContext } from '@nestjs/common';
+import { IncomingMessage } from 'http';
+import { Socket } from 'net';
 import { ConfigModule } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -120,5 +122,40 @@ describe('McpController routes', () => {
 
     expect((await send(app, 'GET')).statusCode).toBe(405);
     expect((await send(app, 'DELETE')).statusCode).toBe(405);
+  });
+
+  it('serves an Express-shaped request (no `raw`, body already parsed), as the integration app boots', async () => {
+    await boot(true);
+    const controller = module.get(McpController);
+    const incoming = new IncomingMessage(new Socket());
+    Object.assign(incoming, {
+      method: 'POST',
+      url: '/api/mcp',
+      headers: { host: 'localhost', accept: ACCEPT, 'content-type': 'application/json' },
+      body: rpc('tools/list'),
+    });
+    const sent: { status?: number; headers: Record<string, string>; payload?: Buffer } = { headers: {} };
+    const reply = {
+      header: (k: string, v: string) => { sent.headers[k] = v; },
+      status: (code: number) => { sent.status = code; },
+      send: (payload: Buffer) => { sent.payload = payload; },
+    };
+
+    await controller.post(agent, incoming as never, reply);
+
+    expect(sent.status).toBe(200);
+    expect(rpcBody({ body: String(sent.payload), headers: sent.headers }).result.tools).toHaveLength(mcpToolDescriptors().length);
+  });
+
+  it('serves an Express-shaped GET whose parsed body is an empty object with a 405', async () => {
+    await boot(true);
+    const incoming = new IncomingMessage(new Socket());
+    Object.assign(incoming, { method: 'GET', url: '/api/mcp', headers: { host: 'localhost', accept: ACCEPT }, body: {} });
+    const sent: { status?: number } = {};
+    const reply = { header: () => undefined, status: (code: number) => { sent.status = code; }, send: () => undefined };
+
+    await module.get(McpController).get(agent, incoming as never, reply);
+
+    expect(sent.status).toBe(405);
   });
 });

@@ -15,7 +15,8 @@ import { createKodaMcpServer, kodaMcpToolRegistrations } from './mcp-server.fact
 
 /** The slice of Fastify's request and reply this route uses (`fastify` is not a direct dependency of the API). */
 interface McpHttpRequest {
-  raw: IncomingMessage;
+  /** Fastify's wrapper around the Node request; an Express request is itself the Node request and has none. */
+  raw?: IncomingMessage;
   body?: unknown;
 }
 interface McpHttpReply {
@@ -71,7 +72,10 @@ export class McpController {
     if (!this.cfg.mcpEnabled) throw new ConflictAppException({}, 'mcp.disabled');
     if (!principal || !isAgentPrincipal(principal)) throw new ForbiddenAppException({}, 'mcp.agentOnly');
 
-    const request = await toWebRequest(req.raw, req.body);
+    // Fastify (production) hands over `req.raw`; the Express app the integration helper boots passes the Node request
+    // itself, with its body already parsed (an empty object on GET, which a web Request refuses).
+    const node = req.raw ?? (req as unknown as IncomingMessage);
+    const request = await toWebRequest(node, node.method === 'POST' ? req.body : undefined);
     const response = await this.handler.fetch(request, {
       authInfo: { token: '', clientId: principal.id, scopes: [], extra: { [PRINCIPAL_KEY]: principal } },
     });
