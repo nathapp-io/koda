@@ -22,6 +22,7 @@ const FUTURE = new Date(NOW.getTime() + 60_000);
 const CALLER = { id: 'u1', globalAdmin: false };
 
 const action = (over: Partial<PendingActionRecord> = {}): PendingActionRecord => ({
+  actorType: 'user', actorId: 'u1', origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
   id: 'act1', projectId: 'p1', projectSlug: 'web', threadId: 't1', jobId: 'j1', toolCallId: 'tc1', tool: 'koda_add_comment',
   input: {}, preview: 'p', status: 'PENDING', requestedById: 'u1', approvalId: 'ap1', decidedById: null, decidedAt: null,
   result: null, deliveredAt: null, expiresAt: FUTURE, createdAt: NOW, ...over,

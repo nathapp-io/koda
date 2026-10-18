@@ -27,6 +27,7 @@ function setup(tool: AssistantTool<unknown>, opts: Options = {}) {
     ...(opts.omitKind ? {} : { kind: opts.kind ?? 'WORKSPACE' }),
   };
   const repo: AssistantToolCallRepository = {
+    findUserActor: vi.fn(async () => null),
     findByCall: vi.fn(async (jobId, toolCallId) => rows.find((r) => r.jobId === jobId && r.toolCallId === toolCallId) ?? null),
     record: vi.fn(async (row) => { rows.push(row); }),
     findCallContext: vi.fn(async () => ctx),

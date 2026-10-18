@@ -161,6 +161,7 @@ describe('koda_my_projects through the executor (US-003)', () => {
   it('AC-11: a workspace-scoped call runs the tool with no membership or project lookup', async () => {
     const rows: AssistantToolCallRecord[] = [];
     const repo: AssistantToolCallRepository = {
+      findUserActor: vi.fn(async () => null),
       findByCall: vi.fn(async () => null),
       record: vi.fn(async (row) => { rows.push(row); }),
       findCallContext: vi.fn(async () => context),

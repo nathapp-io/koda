@@ -15,6 +15,7 @@ const PAST = new Date(NOW.getTime() - 60_000);
 const FUTURE = new Date(NOW.getTime() + 60_000);
 
 const action = (over: Partial<PendingActionRecord> = {}): PendingActionRecord => ({
+  actorType: 'user', actorId: 'u1', origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
   id: 'act1', projectId: 'p1', projectSlug: 'web', threadId: 't1', jobId: 'j1', toolCallId: 'tc1', tool: 'koda_add_comment',
   input: {}, preview: 'p', status: 'PENDING', requestedById: 'u1', approvalId: 'ap1', decidedById: null, decidedAt: null,
   result: null, deliveredAt: null, expiresAt: PAST, createdAt: new Date(NOW.getTime() - 86_400_000), ...over,

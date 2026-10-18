@@ -41,6 +41,7 @@ function commentDeps() {
 
 /** An action row as the repository answers it, with the fields `koda_get_action` prints. */
 const action = (over: Partial<PendingActionRecord> = {}): PendingActionRecord => ({
+  actorType: 'user', actorId: 'dev-1', origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
   id: 'a1', projectId: 'project-1', projectSlug: 'web', threadId: 'thread-1', jobId: 'job-1', toolCallId: 'c1',
   tool: 'koda_add_comment', input: { ref: 'KODA-1', body: 'hello' }, preview: 'Add a comment to KODA-1 "Fix login page":\n\nhello',
   status: 'PENDING', requestedById: 'dev-1', approvalId: 'ap1', decidedById: null, decidedAt: null, result: null,

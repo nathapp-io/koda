@@ -25,6 +25,7 @@ const context = (over: Partial<ToolCallContext['creator']> = {}): ToolCallContex
 function makeRepo(ctx: ToolCallContext | null) {
   const rows: AssistantToolCallRecord[] = [];
   const repo: AssistantToolCallRepository = {
+    findUserActor: vi.fn(async () => null),
     findByCall: vi.fn(async (jobId, toolCallId) => rows.find((r) => r.jobId === jobId && r.toolCallId === toolCallId) ?? null),
     record: vi.fn(async (row) => { rows.push(row); }),
     findCallContext: vi.fn(async () => ctx),
@@ -91,6 +92,7 @@ const call = (over: Partial<{ jobId: string; toolCallId: string; name: string; i
  * so the context the executor builds for an approve can be told apart from the proposing call's (AC-21).
  */
 const pendingAction = (over: Partial<PendingActionRecord> = {}): PendingActionRecord => ({
+  actorType: 'user', actorId: 'u1', origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
   id: 'a1', projectId: 'p2', projectSlug: 'ops', threadId: 't1', jobId: 'j1', toolCallId: 'c1', tool: 'koda_fake',
   input: { ref: 'OPS-1' }, preview: 'Add a comment to OPS-1 "Fix"', status: 'PENDING', requestedById: 'u1',
   approvalId: 'ap1', decidedById: null, decidedAt: null, result: null, deliveredAt: null,
@@ -240,7 +242,7 @@ describe('AssistantToolExecutor', () => {
     const tool = makeTool();
     const { repo, rows } = setup(tool);
     const { Prisma } = await import('../../generated/prisma/client');
-    const winner: AssistantToolCallRecord = { jobId: 'j1', threadId: 't1', projectId: 'p1', toolCallId: 'c1', tool: 'koda_fake', inputHash: createHash('sha256').update(stableStringify(call().input)).digest('hex'), outcome: 'ok', content: 'winner', isError: false, resultBytes: 6, durationMs: 1 };
+    const winner: AssistantToolCallRecord = { actorType: 'user', actorId: 'u1', jobId: 'j1', threadId: 't1', projectId: 'p1', toolCallId: 'c1', tool: 'koda_fake', inputHash: createHash('sha256').update(stableStringify(call().input)).digest('hex'), outcome: 'ok', content: 'winner', isError: false, resultBytes: 6, durationMs: 1 };
     let lookups = 0;
     repo.findByCall = vi.fn(async () => (lookups++ === 0 ? null : winner));
     repo.record = vi.fn(async () => {

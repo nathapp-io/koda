@@ -20,6 +20,7 @@ function fakes() {
     findByCall: vi.fn(async (): Promise<PendingActionRecord | null> => null),
     countPending: vi.fn(async () => 0),
     insert: vi.fn(async (action: NewPendingAction): Promise<PendingActionRecord> => ({
+      actorType: 'user', actorId: action.requestedById, origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
       ...action, id: 'act1', projectSlug: 'web', status: 'PENDING', approvalId: null,
       decidedById: null, decidedAt: null, result: null, deliveredAt: null, createdAt: NOW,
     })),
@@ -45,6 +46,7 @@ const ask = (over: Partial<ProposeInput> = {}): ProposeInput => ({
 });
 
 const storedAction = (over: Partial<PendingActionRecord> = {}): PendingActionRecord => ({
+  actorType: 'user', actorId: 'u1', origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
   id: 'act9', projectId: 'p1', projectSlug: 'web', threadId: 't1', jobId: 'j1', toolCallId: 'tc1', tool: 'koda_add_comment',
   input: { ref: 'KODA-1', body: 'hello' }, preview: 'preview', status: 'PENDING', requestedById: 'u1', approvalId: 'ap1',
   decidedById: null, decidedAt: null, result: null, deliveredAt: null, expiresAt: new Date(NOW.getTime() + ACTION_TTL_MS),

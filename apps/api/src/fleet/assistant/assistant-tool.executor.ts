@@ -150,6 +150,8 @@ export class AssistantToolExecutor {
     const outcome = await this.run(call, tool, context);
     const content = capText(outcome.content, RESULT_CAP_BYTES);
     const row: AssistantToolCallRecord = {
+      actorType: 'user',
+      actorId: context.creator.id,
       jobId: call.jobId,
       threadId: context.threadId,
       projectId: outcome.projectId ?? context.project.id,

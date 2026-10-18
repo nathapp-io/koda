@@ -31,6 +31,12 @@ export interface PendingActionRecord {
   preview: string;
   status: PendingActionStatus;
   requestedById: string;
+  actorType: 'user' | 'agent';
+  actorId: string;
+  origin: 'thread' | 'mcp';
+  approvalMode: 'none' | 'self' | 'agent' | 'human';
+  approverType: 'user' | 'agent' | null;
+  approverId: string | null;
   approvalId: string | null;
   decidedById: string | null;
   decidedAt: Date | null;
@@ -92,8 +98,18 @@ export function assistantThreadPath(threadId: string, threadKind: ChatThreadKind
   return threadKind === 'WORKSPACE' ? `/threads/${threadId}` : `/${threadProjectSlug}/threads/${threadId}`;
 }
 
+export interface ActionStatusView {
+  id: string;
+  tool: string;
+  status: string;
+  createdAt: Date;
+  decidedAt: Date | null;
+  result: string | null;
+}
+
 /** Module-private: the repository behind `PENDING_ACTION_REPOSITORY` (never exported by the module). */
 export interface PendingActionRepository {
+  findScopedByActor(id: string, projectId: string, actor: { type: 'user' | 'agent'; id: string }): Promise<ActionStatusView | null>;
   /** `SELECT ... FOR UPDATE` on the thread row (2a-D11 lock order); false when the thread is gone. */
   lockThread(threadId: string): Promise<boolean>;
   /** The action of one call. Its caller holds the thread lock, so the answer is authoritative (2a-D4 step 2). */

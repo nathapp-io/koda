@@ -9,10 +9,12 @@ export type ToolCallOutcome = 'ok' | 'invalid_input' | 'forbidden' | 'not_found'
 
 /** One audited tool call. The input is never kept, only its hash. */
 export interface AssistantToolCallRecord {
-  jobId: string;
-  threadId: string;
-  projectId: string;
-  toolCallId: string;
+  jobId: string | null;
+  threadId: string | null;
+  projectId: string | null;
+  toolCallId: string | null;
+  actorType: 'user' | 'agent';
+  actorId: string;
   tool: string;
   inputHash: string;
   outcome: ToolCallOutcome;
@@ -32,6 +34,7 @@ export interface ToolCallContext {
 }
 
 export interface AssistantToolCallRepository {
+  findUserActor(userId: string): Promise<{ id: string; email: string; role: string; disabled: boolean } | null>;
   findByCall(jobId: string, toolCallId: string): Promise<AssistantToolCallRecord | null>;
   /** Inserts the row; a concurrent duplicate `(jobId, toolCallId)` surfaces as a unique violation on `toolCallId`. */
   record(row: AssistantToolCallRecord): Promise<void>;

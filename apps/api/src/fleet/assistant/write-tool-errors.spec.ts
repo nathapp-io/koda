@@ -25,6 +25,7 @@ const CALL_CONTEXT: ToolCallContext = {
 function makeRepo(): { repo: AssistantToolCallRepository; rows: AssistantToolCallRecord[] } {
   const rows: AssistantToolCallRecord[] = [];
   const repo: AssistantToolCallRepository = {
+    findUserActor: vi.fn(async () => null),
     findByCall: vi.fn(async (jobId: string, toolCallId: string) => rows.find((r) => r.jobId === jobId && r.toolCallId === toolCallId) ?? null),
     record: vi.fn(async (row: AssistantToolCallRecord) => { rows.push(row); }),
     findCallContext: vi.fn(async () => CALL_CONTEXT),
@@ -78,6 +79,7 @@ const call = (over: Partial<{ jobId: string; toolCallId: string; name: string; i
 
 /** One approved action of the `w` stub in project `web`, ready for `executeAction`. */
 const approvedAction = (over: Partial<PendingActionRecord> = {}): PendingActionRecord => ({
+  actorType: 'user', actorId: 'u1', origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
   id: 'a1', projectId: 'p1', projectSlug: 'web', threadId: 't1', jobId: 'j1', toolCallId: 'c1', tool: 'w',
   input: { ref: 'WEB-1' }, preview: 'Add a comment to WEB-1 "Fix"', status: 'APPROVED', requestedById: 'u1',
   approvalId: 'ap1', decidedById: 'u1', decidedAt: null, result: null, deliveredAt: null,

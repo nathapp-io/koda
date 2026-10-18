@@ -90,7 +90,7 @@ describeIntegration('delivering outcome notes on a new-turn assign (PG, 2aw US-0
       data: {
         projectId: p.turn.projectId, threadId: p.turn.threadId, jobId: p.turn.jobId, toolCallId: uid('tc'), tool: TOOL,
         input: { ref: 'KODA-1', body: 'hello' } as Prisma.InputJsonValue, preview: 'Add a comment', status: p.status,
-        requestedById: userId, result: p.result ?? null,
+        requestedById: userId, actorType: 'user', actorId: userId, result: p.result ?? null,
         deliveredAt: p.deliveredMessageId === null ? null : new Date(),
         deliveredMessageId: p.deliveredMessageId,
         expiresAt: new Date(Date.now() + 3_600_000), createdAt: p.createdAt,
