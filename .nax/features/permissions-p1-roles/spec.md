@@ -48,7 +48,7 @@ The user ruled (2026-10-18) that these gaps are fixed by one redesign: one permi
 
 1. **All new code lives in `apps/api/src/permissions/`** as `PermissionsModule`.
    - It is `@Global()`. It exports only `PermissionService`, `MembershipService` and `RoleAdminService`.
-   - Its repository, `PrismaPermissionsRepository`, is module-private and is the only code that touches `Role` or `RoleBinding` through Prisma.
+   - Its repositories (ruling 6) are module-private and are the only code that touches `Role` or `RoleBinding` through Prisma.
    - Every consumer injects the services without `@Optional()`.
 2. **Effective permissions are cached** in the existing in-memory `CacheManager`, under the tag `permissions`, with a 60 000 ms TTL. Every `Role` or `RoleBinding` write invalidates the tag inside the same service call. The API runs as a single instance.
 3. **Global admin status is the union** of a `projectId`-null `owner` or `admin` binding and the legacy `User.role = 'ADMIN'`.
@@ -57,7 +57,28 @@ The user ruled (2026-10-18) that these gaps are fixed by one redesign: one permi
 4. **The new routes do not use the legacy decorators.** They call `PermissionService` through `RoleAdminService.assertCan`, instead of `@RequiredPermission` or `@ProjectPermission`, which `.nax/rules/api-core.md` would otherwise require.
    - This is a deliberate, scoped exception. These routes are the first ones on the new model, and the legacy CASL factory has no notion of roles or bindings.
    - Every other `.nax/rules/api-controllers.md` convention still applies: the JSON envelope, `@ApiTags`, `@ApiBearerAuth`, `@ApiOperation`, `@ApiResponse`, `@ApiProperty` on every response DTO field, and app exceptions.
-5. **i18n.** Every new message key lives in the new files `apps/api/src/i18n/en/permissions.json` and `apps/api/src/i18n/zh/permissions.json`, with English as the source.
+5. **i18n and exceptions.**
+   - Every new message lives in the new files `apps/api/src/i18n/en/permissions.json` and `apps/api/src/i18n/zh/permissions.json`, with English as the source.
+   - A code written in this spec as `permissions.<code>` with status `<s>` means `new <XAppException>({}, 'permissions.<code>')` from `@nathapp/nestjs-common`. Its message lives at the nested i18n key `permissions.<code>.<s>`, the shape of `users.json` with `lastAdmin.409`.
+   - A bare `permissions` 403 means `new ForbiddenAppException({}, 'permissions')`, with its message at `permissions.403`.
+   - Each code's exception class and status are given in "Failure Handling".
+6. **Repositories follow `.nax/rules/api-data.md`.**
+   - `PrismaRoleRepository` and `PrismaRoleBindingRepository` each extend `AbstractPrismaRepository` from `@nathapp/nestjs-prisma`.
+   - Their domain types are `RoleDomain` and `RoleBindingDomain`, plain interfaces.
+   - Each is registered behind a symbol token: `ROLE_REPOSITORY`, `ROLE_BINDING_REPOSITORY`.
+   - Escape-hatch methods (row locks, `User.role` writes, user and agent existence checks) live on the concrete classes.
+7. **Bounded reads.**
+   - `Role` is a small, admin-written table. `GET /roles` reads it with `take: 500`.
+   - `GET /role-bindings` and `MembershipService.listBindings` are paginated with `IPageOption` (`current`, `size`; default size 50, max 200). They answer `IPageResult`, the shape of `GET /projects/:slug/members`.
+8. **Order of checks on every new write route:**
+   1. the route's permission key(s) (`assertCan`);
+   2. input validation and lookups (DTO, role, project, principal, scope match, principal type);
+   3. self-binding;
+   4. escalation;
+   5. Owner lock.
+
+   The first failing step decides the response.
+9. **Test setup.** `test/helpers/reset-db.ts` truncates every table, so a test that needs the system roles runs `SystemRoleSeeder.onApplicationBootstrap()` after the reset, or boots the app.
 
 ### Catalog
 
@@ -107,7 +128,9 @@ export interface PermissionCatalogEntry {
 - only `global` rows → `global`;
 - a mix of `project` and `global`, or any `own (see design §1)` row → `any`.
 
-New keys take `global`, except `role.binding.manage`, `approval.decide`, `approval.policy.read` and `memory.update`, which take `project`, and `approval.policy.manage`, which takes `any`. Global admins and project admins both hold it.
+New keys take `global`, except `role.binding.manage`, `approval.decide` and `approval.policy.read`, which take `project`, and `approval.policy.manage`, which takes `any`. `memory.update` is in `OWNABLE_KEYS`, so it takes `any`.
+
+The TSV `own (see design §1)` rows for `memory.create`, `memory.extract`, `memory.decision.record` and `thread.workspace.create` are **not** ownable: they create new rows, so there is no owner to compare. They take `any` under the rule above. `thread.workspace.read` is ownable on purpose, so a principal can be limited to reading its own workspace threads.
 
 **`OWNABLE_KEYS`:**
 - `comment.update`, `comment.delete`, `ticket.link.remove`, `memory.update`, `kb.document.delete`;
@@ -115,9 +138,9 @@ New keys take `global`, except `role.binding.manage`, `approval.decide`, `approv
 - `thread.workspace.read`, `thread.workspace.message.send`, `thread.workspace.archive`.
 
 **Other fields:**
-- `risk`:
+- `risk`, decided by the first rule that matches:
+  - `critical` for `role.*` and `approval.policy.*`, so `role.read` is `critical`;
   - `low` for keys whose last segment is `read`;
-  - `critical` for `role.*` and `approval.policy.*`;
   - `high` for keys whose last segment is `delete` or `remove`, and for keys under `vcs.connection.`, `vcs.webhook-secret.`, `webhook.`, `fleet.repo.`, `fleet.runner.`, `fleet.budget.`, `fleet.enrollment.` and `fleet.credential.`;
   - `medium` otherwise.
 - `principals`: `['user']` for `role.binding.owner`; `['user', 'agent']` otherwise.
@@ -218,7 +241,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS "RoleBinding_global_key" ON "RoleBinding" ("pr
 | `approver` | Approver | PROJECT | `*.read`, `approval.decide` |
 | `viewer` | Viewer | PROJECT | `*.read`, `comment.create`, `comment.update.own`, `comment.delete.own`, `ticket.watch.*` |
 
-**`SystemRoleSeeder`** is an `OnApplicationBootstrap` provider in `PermissionsModule`:
+**`SystemRoleSeeder`** is an `OnApplicationBootstrap` provider in `PermissionsModule`. It reads its seed list from the injection token `SYSTEM_ROLES_SEED`, which `PermissionsModule` provides as `SYSTEM_ROLES`, so tests can supply another list.
+
+The seeded `agent` role leaves out the design's `mcp.access`, because `mcp.access` is an implicit key every authenticated principal holds and cannot appear in a role.
+
+The seeder:
 - Before any write, it validates every seeded role with `expandEntries`. An invalid entry throws, and the API does not start.
 - It then upserts each role by `key`.
 - A missing role is created.
@@ -270,6 +297,7 @@ removeAllBindings(principal: PrincipalRef): Promise<void>;
    - every `projectId`-null binding of a GLOBAL role;
    - every `projectId`-null binding of a PROJECT role, and every binding of a PROJECT role in `ctx.projectId`, when `ctx.projectId` is given;
    - for a user whose legacy `User.role` is `'ADMIN'`, the `admin` role's entries, as if a `projectId`-null `admin` binding existed.
+   - **Global admins in projects.** A principal with a `projectId`-null `owner` or `admin` binding (or legacy admin), when `ctx.projectId` is given, also holds every key in `expandEntries(['*'], 'PROJECT')`. A global Owner or Admin can therefore do everything inside any project, including `role.binding.manage`, `approval.decide` and `approval.policy.manage`. `effectiveKeys(…, { projectId })` applies the same rule.
 8. Holding `key` (or any `approval.decide@…` whose pattern matches `key`, for `approval.decide`): `granted`.
 9. Holding only `key.own`:
    - `granted` when `ctx.resource.createdBy` equals the principal;
@@ -284,11 +312,15 @@ removeAllBindings(principal: PrincipalRef): Promise<void>;
 - **Legacy admin column, for USER principals:**
   - Creating a `projectId`-null `owner` or `admin` binding sets `User.role = 'ADMIN'` in the same transaction.
   - Removing one, when no other such binding is left, sets `User.role = 'MEMBER'`.
+- **Token revocation.** Whenever a write changes a user's `User.role`, the same transaction bumps that user's `tokenVersion`, as `UsersRepository.updateUser({ bumpTokenVersion: true })` does today. After the transaction, the service invalidates `userTokenVersionCacheTag(userId)` (tag mode) and `userAuthStateCacheKey(userId)`, the same two invalidations `UsersAdminService.update` performs today. The user's existing access and refresh tokens stop working.
+- **`setGlobalAdmin(userId, false, by)`** removes only the user's `projectId`-null `admin` binding. It never touches an `owner` binding: an Owner's `User.role` stays `'ADMIN'`, and removing an owner binding is possible only through `removeBinding`, which keeps the last-owner protection.
+- **Unique violations.** A duplicate insert is recognised with `isUniqueViolation(error, 'principalId')`; then the existing binding is re-read and returned.
+- **Counting Owners.** The last-owner check counts `owner` bindings of users that are not disabled.
 - **Cache.** Every write invalidates the `permissions` cache tag.
 
 ### Owner bootstrap and baseline bindings
 
-- **`IAuthConfig.ownerEmail`** is read from `KODA_OWNER_EMAIL`. `AuthConfigSchema` gains `@IsOptional() @IsEmail() KODA_OWNER_EMAIL?: string`. The value is lower-cased and trimmed.
+- **`IAuthConfig.ownerEmail`** is read from `KODA_OWNER_EMAIL`. `authConfig` trims and lower-cases the raw value **before** validation: it validates a copy of `process.env` whose `KODA_OWNER_EMAIL` is already trimmed and lower-cased. `AuthConfigSchema` gains `@IsOptional() @IsEmail() KODA_OWNER_EMAIL?: string`. An empty value after trimming counts as unset.
 - **Production check.** `PermissionsModule.onModuleInit` throws `Error('permissions.ownerEmailRequired')` when `NODE_ENV === 'production'` and `ownerEmail` is unset.
 - **Registration.**
   - `AuthService.register` refuses before creating the user, with `ForbiddenAppException({}, 'registration')`, when:
@@ -321,7 +353,12 @@ All routes take the global prefix and return the JSON envelope. Each route's che
 **Role write rules** (`RoleAdminService`):
 - **Validation.** `permissions` must pass `expandEntries(permissions, scope)`. A failure answers 400 `ValidationAppException('permissions.unknownEntry')` or `('permissions.scopeMismatch')`.
 - **Escalation.** Every key in `expandEntries(permissions, scope)`, with `X.own` counted as `X` and `approval.decide@…` counted as `approval.decide`, must be in the caller's `effectiveKeys(caller, 'global')`. Otherwise 403 `permissions.escalation`. This applies to both POST and PATCH.
-- **Duplicate key.** `POST /roles` with an existing `key` answers 409 `ConflictAppException('permissions.roleKeyTaken')`.
+- **Duplicate key.** `POST /roles` with an existing `key` answers 409 `permissions.roleKeyTaken`. A concurrent duplicate insert, caught with `isUniqueViolation(error, 'key')`, answers the same.
+- **Input format.**
+  - `key` must match `^[a-z][a-z0-9-]{1,48}$`.
+  - `scope` must be `GLOBAL` or `PROJECT`.
+  - Both are checked by the DTO; a violation answers the standard 400 validation response.
+  - An empty `permissions` list is allowed.
 - **Fixed fields.** `key` and `scope` cannot change. PATCH accepts no such fields.
 - **System roles.** PATCH on a system role may change only `permissions` and `description`. A `name` in the body answers 400 `ValidationAppException('permissions.systemRole')`.
 - **Locked roles.** PATCH or DELETE on a locked role answers 403 `ForbiddenAppException('permissions.ownerLocked')`.
@@ -338,29 +375,31 @@ All routes take the global prefix and return the JSON envelope. Each route's che
 - **Principal type.** A role whose expanded keys include a key whose `principals` excludes the principal type answers 400 `permissions.principalType`. For example, `owner` to an AGENT.
 - **Escalation.** Every key of the role must be in the caller's `effectiveKeys` at the binding's scope: `'global'` for a null `projectId`, else `{ projectId }`. Otherwise 403 `permissions.escalation`.
 - **Self-binding.** Creating or deleting a binding whose principal is the caller answers 403 `permissions.selfBinding`.
+- **Escalation on delete.** `DELETE /role-bindings/:id` applies the same escalation rule as create, against the stored binding's role and scope.
 
 ### Failure Handling
 
 | Situation | Behaviour |
 |:--|:--|
 | Seeded role entry is invalid | `SystemRoleSeeder` throws during bootstrap; the API does not start |
-| Production with no `KODA_OWNER_EMAIL` | `PermissionsModule.onModuleInit` throws `permissions.ownerEmailRequired` |
+| Production with no `KODA_OWNER_EMAIL` | `PermissionsModule.onModuleInit` throws `Error('permissions.ownerEmailRequired')` |
 | First registration with a non-owner email while `KODA_OWNER_EMAIL` is set | 403 `registration`; no user is created |
-| Unknown or out-of-scope role entry on POST or PATCH `/roles` | 400 `permissions.unknownEntry` / `permissions.scopeMismatch`; nothing stored |
-| Role entries exceed the caller's keys | 403 `permissions.escalation`; nothing stored |
-| Duplicate role key | 409 `permissions.roleKeyTaken` |
-| Changing a system role's name, or deleting an unlocked system role | 400 / 403 `permissions.systemRole` |
-| Editing or deleting the locked `owner` role, or removing the last `owner` binding | 403 `permissions.ownerLocked` |
-| Deleting a role that has bindings | 409 `permissions.roleInUse` |
-| Binding with an unknown role, project or principal | 404 `permissions.roleNotFound` / `projects` / `permissions.principalNotFound` |
-| Binding scope mismatch, or a role holding a key the principal type cannot hold | 400 `permissions.scopeMismatch` / `permissions.principalType` |
-| Binding to or unbinding oneself | 403 `permissions.selfBinding` |
+| Unknown or out-of-scope role entry on POST or PATCH `/roles` | 400 `ValidationAppException` `permissions.unknownEntry` / `permissions.scopeMismatch`; nothing stored |
+| Role or binding exceeds the caller's keys (create, edit or delete) | 403 `ForbiddenAppException` `permissions.escalation`; nothing changed |
+| Duplicate role key, including a concurrent duplicate | 409 `ConflictAppException` `permissions.roleKeyTaken` |
+| Changing a system role's name / deleting an unlocked system role | 400 `ValidationAppException` / 403 `ForbiddenAppException`, both `permissions.systemRole` |
+| Editing or deleting the locked `owner` role, or removing the last `owner` binding | 403 `ForbiddenAppException` `permissions.ownerLocked` |
+| Deleting a role that has bindings | 409 `ConflictAppException` `permissions.roleInUse` |
+| Binding with an unknown role, project or principal | 404 `NotFoundAppException` `permissions.roleNotFound` / `projects` / `permissions.principalNotFound` |
+| Binding scope mismatch, or a role holding a key the principal type cannot hold | 400 `ValidationAppException` `permissions.scopeMismatch` / `permissions.principalType` |
+| Binding to or unbinding oneself | 403 `ForbiddenAppException` `permissions.selfBinding` |
 | Concurrent identical binding creates | both answer the same binding; one row exists |
+| Caller lacks the route's permission key | 403 `ForbiddenAppException` `permissions` (prefix only) |
 | Concurrent removal of the last two `owner` bindings | exactly one succeeds; the other answers 403 `permissions.ownerLocked` |
 
 ### Integration
 
-Symbols this feature **reads** (verified at `44269581`):
+Symbols this feature **reads** (verified at `25dcf280`):
 - `KodaPrincipal`, `isUserPrincipal`, `isAgentPrincipal`, `isRunnerPrincipal` — `apps/api/src/auth/principal/koda-principal.types.ts`
 - `CacheManager` (`get(key, loader, ttlMs, { tags })`, tag invalidation) — the pattern in `apps/api/src/auth/jwt-auth.provider.ts`
 - `TRANSACTION_MANAGER` / `ITransactionManager`, and `isUniqueViolation` — the patterns in `apps/api/src/agents/agents.service.ts`
@@ -373,8 +412,8 @@ Symbols this feature **changes**. The baseline only locates the code; implement 
 | Symbol | Baseline (locate only) | Target |
 |:--|:--|:--|
 | `AuthService.register` (`auth/auth.service.ts`) | creates the user and issues a session | adds the `KODA_OWNER_EMAIL` refusal before creating, and the `bindOwnerIfFirst` and `bindBaseline` calls after |
-| `UsersAdminService.create`, `update` (`users/users-admin.service.ts`) | write `role` through the repository | `create` binds `member` (and `admin` for role `ADMIN`); `update` with `role` goes through `MembershipService.setGlobalAdmin` |
-| `AgentsService.generateApiKey(dto)` (`agents/agents.service.ts`) | creates the agent, roles and capabilities | also binds the global `agent` role; `MembershipService` is a required (non-`@Optional`) constructor parameter |
+| `UsersAdminService.create`, `update` (`users/users-admin.service.ts`) | write `role` through the repository, bump `tokenVersion` on a role change, and invalidate the two auth caches | `create` binds `member` (and `admin` for role `ADMIN`). `update` with a changed `role` goes through `MembershipService.setGlobalAdmin`, which now does the `tokenVersion` bump and cache invalidation for the role change. `update` keeps doing them itself for `disabled`. |
+| `AgentsService.generateApiKey(dto)` (`agents/agents.service.ts`) | creates the agent, roles and capabilities | also binds the global `agent` role. `MembershipService` is a required constructor parameter, inserted as the **fourth** parameter after `txManager` and before the two `@Optional()` ones: `(agentRepo, authConfig, txManager, membership, kodaDomainWriter?, agentAuthProvider?)`. |
 | `AgentsService.remove(slug)` (`agents/agents.service.ts`) | deletes the agent | also calls `removeAllBindings({ type: 'AGENT', id })` |
 | `IAuthConfig`, `AuthConfigSchema` (`config/auth.config.ts`) | no owner email | `ownerEmail?: string` from `KODA_OWNER_EMAIL` |
 | `model Project` (`prisma/schema.prisma`) | no role bindings | `roleBindings RoleBinding[]` |
@@ -391,7 +430,7 @@ Symbols this feature **changes**. The baseline only locates the code; implement 
 
   In this feature, project bindings created through `/role-bindings` grant nothing to the existing checks.
 - Invalidating the cached agent principal (`AGENT:<id>` tags) on binding writes is out of scope (`permissions-p1-membership`). Agent principals do not read bindings in this feature.
-- A live JWT `role` is out of scope (`permissions-p1-membership`). A user whose global admin binding changes sees the new `role` claim after their next token refresh, as with today's `User.role` changes.
+- A live JWT `role` read from bindings on every request is out of scope (`permissions-p1-membership`). In this feature a change to a user's global admin status revokes their tokens (see `MembershipService` rules), so their next login carries the new `role` claim, as today.
 - Dropping `ProjectMember`, `AgentProject`, `AgentRoleEntry`, `User.role` or `ProjectInvite.role` is out of scope (`permissions-p1-cleanup`).
 - Copying existing membership data into bindings is out of scope (no data migration; koda-wk is reset by hand).
 - Approval policies, floors and `approval.decide` enforcement are out of scope (design phase P3). The catalog `approval` fields are placeholders.
@@ -405,7 +444,7 @@ Symbols this feature **changes**. The baseline only locates the code; implement 
 ## Stories
 
 1. **US-001: Permission catalog and entry grammar** — `Workdir: apps/api` — No dependencies. Adds `PERMISSION_CATALOG`, `findCatalogEntry`, `OWNABLE_KEYS`, `IMPLICIT_KEYS`, `PUBLIC_KEYS` and `expandEntries` with its two error types. Pure code, no database.
-2. **US-002: Role and RoleBinding schema, migration and system role seeder** — `Workdir: apps/api` — Depends on US-001. Adds the two models, the `Project` back-relation, the migration, the partial unique indexes, `SYSTEM_ROLES`, `SystemRoleSeeder`, the `PermissionsModule` shell, `PrismaPermissionsRepository`, and the `GlobalStubsModule` stubs.
+2. **US-002: Role and RoleBinding schema, migration and system role seeder** — `Workdir: apps/api` — Depends on US-001. Adds the two models, the `Project` back-relation, the migration, the partial unique indexes, `SYSTEM_ROLES` and the `SYSTEM_ROLES_SEED` token, `SystemRoleSeeder`, the `PermissionsModule` shell, `PrismaRoleRepository` and `PrismaRoleBindingRepository`, and the `GlobalStubsModule` stubs.
 3. **US-003: PermissionService and MembershipService** — `Workdir: apps/api` — Depends on US-002. Implements every method in "Service signatures", with the `permissions` cache tag, the legacy admin union, the owner-row lock and `User.role` mirroring.
 4. **US-004: Owner bootstrap and baseline bindings** — `Workdir: apps/api` — Depends on US-003. Covers `KODA_OWNER_EMAIL` (config, production check, registration refusal), `bindOwnerIfFirst` and `bindBaseline` on registration, admin user create and update through `setGlobalAdmin`, the agent baseline on create, and binding removal on agent delete.
 5. **US-005: Roles API** — `Workdir: apps/api` — Depends on US-003. Adds `GET`, `POST`, `PATCH` and `DELETE` on `/roles` through `RoleAdminService`, with validation, escalation and the system and locked role rules, plus the i18n keys and the `openapi.json` update.
@@ -429,7 +468,7 @@ Symbols this feature **changes**. The baseline only locates the code; implement 
 - `apps/api/src/auth/principal/koda-principal.types.ts` — principal shapes
 - `apps/api/src/agents/agents.service.ts` — `txManager.run` and `isUniqueViolation` usage
 - `apps/api/src/permissions/entry-matcher.ts` — created by US-001
-- `apps/api/src/permissions/prisma-permissions.repository.ts` — created by US-002
+- `apps/api/src/permissions/prisma-role-binding.repository.ts` — created by US-002
 
 **US-004**
 - `apps/api/src/auth/auth.service.ts` — `register`
@@ -460,7 +499,9 @@ Symbols this feature **changes**. The baseline only locates the code; implement 
 - `apps/api/src/permissions/permissions.module.ts`
 - `apps/api/src/permissions/system-roles.ts`
 - `apps/api/src/permissions/system-role.seeder.ts`
-- `apps/api/src/permissions/prisma-permissions.repository.ts`
+- `apps/api/src/permissions/prisma-role.repository.ts`
+- `apps/api/src/permissions/prisma-role-binding.repository.ts`
+- `apps/api/src/permissions/permissions.tokens.ts`
 - `apps/api/prisma/migrations/20261027090000_role_bindings/migration.sql`
 
 **US-003**
@@ -490,6 +531,11 @@ Symbols this feature **changes**. The baseline only locates the code; implement 
 - `apps/api/src/agents/agents.service.spec.ts` — the module and the direct new AgentsService( construction lack the now-required MembershipService. The replacing invariant: a MembershipService double is provided, and agent creation calls bindBaseline with { type: 'AGENT', id }.
 - `apps/api/src/agents/agents-create.service.spec.ts` — the explicit provider list lacks MembershipService. The replacing invariant: a MembershipService double is provided and bindBaseline is called once per created agent.
 - `apps/api/src/agents/agents-create.routes.spec.ts` — if its module wiring builds AgentsService without MembershipService, add a MembershipService double. Route behaviour assertions are unchanged.
+- `apps/api/src/users/users.module.spec.ts` — its local FakeGlobalsModule provides only Prisma, TRANSACTION_MANAGER and CacheManager, so UsersModule fails DI once UsersAdminService injects MembershipService. The replacing invariant: the harness also provides a MembershipService double, and the module compiles.
+- `apps/api/src/agents/agents-pickup.routes.spec.ts` — it provides a real AgentsService without MembershipService. The replacing invariant: a MembershipService double is provided; pickup route assertions are unchanged.
+- `apps/api/src/agents/agents-project-roster.service.spec.ts` — it constructs new AgentsService(repo, authConfig, txManager) positionally, and MembershipService is now the required fourth parameter. The replacing invariant: the construction passes a MembershipService double fourth; roster assertions are unchanged.
+- `apps/api/test/integration/agents/agents-create-rollback.integration.spec.ts` — if its test module provides a real AgentsService without PermissionsModule, add a MembershipService (or PermissionsModule) to it. The rollback assertions are unchanged, and a rolled-back create also leaves no RoleBinding row.
+- `apps/api/test/integration/koda-domain-writer/koda-domain-writer.integration.spec.ts` — if its test module provides a real AgentsService without PermissionsModule, add a MembershipService double. Domain-writer assertions are unchanged.
 - `apps/api/src/agents/agent-create-canonical-dto.routes.spec.ts` — if its module wiring builds AgentsService without MembershipService, add a MembershipService double. Route behaviour assertions are unchanged.
 
 **US-005**
@@ -517,7 +563,7 @@ Symbols this feature **changes**. The baseline only locates the code; implement 
 4. [unit] `findCatalogEntry('notification.read').access` is `'implicit'`, `findCatalogEntry('mcp.access').access` is `'implicit'`, and `findCatalogEntry('session.login').access` is `'public'`.
 5. [unit] `findCatalogEntry('ticket.delete')` has `access` `'role'` and `scope` `'project'`; `findCatalogEntry('user.create')` and `findCatalogEntry('fleet.runner.update')` have `scope` `'global'`; `findCatalogEntry('agent.read')` and `findCatalogEntry('comment.update')` have `scope` `'any'`.
 6. [unit] `findCatalogEntry('comment.update').ownable` and `findCatalogEntry('thread.stop').ownable` are `true`; `findCatalogEntry('ticket.delete').ownable` and `findCatalogEntry('thread.create').ownable` are `false`.
-7. [unit] `findCatalogEntry('ticket.delete').risk` is `'high'`, `findCatalogEntry('ticket.read').risk` is `'low'`, `findCatalogEntry('role.manage').risk` is `'critical'`, and `findCatalogEntry('ticket.create').risk` is `'medium'`.
+7. [unit] `findCatalogEntry('ticket.delete').risk` is `'high'`, `findCatalogEntry('ticket.read').risk` is `'low'`, `findCatalogEntry('role.read').risk` is `'critical'`, and `findCatalogEntry('ticket.create').risk` is `'medium'`.
 8. [unit] `findCatalogEntry('role.binding.owner').principals` equals `['user']`, and `findCatalogEntry('ticket.create').principals` equals `['user', 'agent']`.
 9. [unit] `expandEntries(['ticket.*'], 'PROJECT')` returns a set that includes `ticket.delete` and `ticket.transition.fix` and excludes `comment.create`.
 10. [unit] `expandEntries(['*'], 'PROJECT')` returns a set that includes `ticket.delete` and `agent.read`, and excludes `runner.sync`, `notification.read` and `user.create`.
@@ -573,6 +619,8 @@ Symbols this feature **changes**. The baseline only locates the code; implement 
 11. [integration] `PATCH /admin/users/:id` with `{ role: 'MEMBER' }` for the last active admin answers the existing last-admin error, and the user's `admin` binding remains.
 12. [integration] `POST /agents` by a global admin creates the agent with a `projectId`-null `agent` binding whose `principalType` is `AGENT`.
 13. [integration] `DELETE /agents/:slug` leaves no `RoleBinding` row with `principalType` `AGENT` and that agent's id.
+14. [integration] After `PATCH /admin/users/:id` with `{ role: 'MEMBER' }` demotes a user who held an `admin` binding, `GET /auth/me` with that user's access token issued before the change answers 401.
+15. [integration] `PATCH /admin/users/:id` with `{ role: 'MEMBER' }` for a user holding both a `projectId`-null `owner` and a `projectId`-null `admin` binding removes the `admin` binding, keeps the `owner` binding, and leaves `User.role` `'ADMIN'`.
 
 ### US-005: Roles API (`Workdir: apps/api`)
 
@@ -588,14 +636,15 @@ Symbols this feature **changes**. The baseline only locates the code; implement 
 10. [integration] `PATCH /roles/:id` and `DELETE /roles/:id` on the `owner` role each answer 403 with `permissions.ownerLocked`.
 11. [integration] `DELETE /roles/:id` on the `viewer` role answers 403 with `permissions.systemRole`.
 12. [integration] `DELETE /roles/:id` on the custom `qa` role while one binding uses it answers 409 with `permissions.roleInUse`, and after that binding is removed it answers 204 and the role is gone.
-13. [integration] The OpenAPI document built the way `apps/api/scripts/export-spec.ts` builds it lists `GET /roles`, `POST /roles`, `PATCH /roles/{id}` and `DELETE /roles/{id}`, each with a tag, a summary and at least one response.
+13. [integration] After `PATCH /roles/:id` by an `owner` sets a custom PROJECT role `qa` (bound to user `u` in `alpha`) to `['ticket.read', 'ticket.create']`, `PermissionService.can(u, 'ticket.create', { projectId: <alpha id> })` answers `allowed` true on the next call, where it answered false before the edit.
+14. [integration] The OpenAPI document built the way `apps/api/scripts/export-spec.ts` builds it lists `GET /roles`, `POST /roles`, `PATCH /roles/{id}` and `DELETE /roles/{id}`, each with a tag, a summary and at least one response.
 
 ### US-006: Role bindings API (`Workdir: apps/api`)
 
 1. [integration] `POST /role-bindings` by a user with a `project-admin` binding in `alpha`, body `{ principalType: 'AGENT', principalId: <agent id>, roleKey: 'developer', projectId: <alpha id> }`, answers 201 with the binding.
 2. [integration] The same project admin posting the same body with `projectId` omitted answers 403, because the caller lacks `role.binding.global`.
 3. [integration] `GET /role-bindings?principalType=AGENT&principalId=<agent id>` by an `admin` answers 200 listing the `developer` binding in `alpha` and the agent's `projectId`-null `agent` binding.
-4. [integration] `POST /role-bindings` with `roleKey: 'owner'` by an `admin` answers 403 with `permissions.escalation`, and the same body with `principalType: 'AGENT'` by an `owner` answers 400 with `permissions.principalType`.
+4. [integration] `POST /role-bindings` with `roleKey: 'owner'` and no `projectId`, for another user, by an `admin` answers 403 (the caller lacks `role.binding.owner`), and no binding is stored.
 5. [integration] `POST /role-bindings` with `roleKey: 'admin'` and a non-null `projectId` answers 400 with `permissions.scopeMismatch`.
 6. [integration] `POST /role-bindings` with an unknown `roleKey` answers 404 with `permissions.roleNotFound`, and with a `principalId` naming no user answers 404 with `permissions.principalNotFound`.
 7. [integration] A user with a `project-admin` binding in `alpha` posting a binding in `alpha` of a custom PROJECT role whose entries include `approval.policy.manage`, which the caller holds, answers 201; posting one of a custom GLOBAL role holding `user.create` with no `projectId` answers 403.
@@ -604,7 +653,9 @@ Symbols this feature **changes**. The baseline only locates the code; implement 
 10. [integration] `DELETE /role-bindings/:id` by one `owner` on the other `owner`'s binding, when exactly two `owner` bindings exist, answers 204; afterwards, the same call on the remaining `owner` binding by an `admin` answers 403.
 11. [integration] `DELETE /role-bindings/:id` on a project binding in `alpha` by a user without `role.binding.manage` in `alpha` answers 403, and by the `alpha` project admin answers 204.
 12. [integration] After `POST /role-bindings` grants `developer` in `alpha` to user `u`, `PermissionService.can(u, 'ticket.create', { projectId: <alpha id> })` answers `allowed` true on the next call.
-13. [integration] The OpenAPI document built the way `apps/api/scripts/export-spec.ts` builds it lists `GET /role-bindings`, `POST /role-bindings` and `DELETE /role-bindings/{id}`, each with a tag, a summary and at least one response.
+13. [integration] `POST /role-bindings` with `roleKey: 'owner'`, `principalType: 'AGENT'` and no `projectId`, by an `owner`, answers 400 with `permissions.principalType`.
+14. [integration] A user whose only bindings are `member` and a custom GLOBAL role with entries `['role.read', 'role.binding.global']` calling `DELETE /role-bindings/:id` on another user's `projectId`-null `admin` binding answers 403 with `permissions.escalation`, and the binding remains.
+15. [integration] The OpenAPI document built the way `apps/api/scripts/export-spec.ts` builds it lists `GET /role-bindings`, `POST /role-bindings` and `DELETE /role-bindings/{id}`, each with a tag, a summary and at least one response.
 
 **Out of scope:**
 - US-006 only: changing an existing binding in place is out of scope. A binding is deleted and created again; there is no `PATCH /role-bindings/:id`.
