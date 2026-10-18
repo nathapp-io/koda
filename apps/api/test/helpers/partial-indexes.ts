@@ -10,4 +10,6 @@ export const PARTIAL_UNIQUE_INDEXES: readonly string[] = [
   `CREATE UNIQUE INDEX IF NOT EXISTS "FleetApproval_pending_policy_key" ON "FleetApproval" ("policyId") WHERE "status" = 'pending'`,
   `CREATE UNIQUE INDEX IF NOT EXISTS "FleetHealthAlert_open_subject_key" ON "FleetHealthAlert" ("kind", "subjectKey") WHERE "closedAt" IS NULL`,
   `CREATE UNIQUE INDEX IF NOT EXISTS "ChatThread_active_repo_feature_key" ON "ChatThread" ("repoId", "feature") WHERE "status" = 'ACTIVE'`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "RoleBinding_principalId_roleId_projectId_key" ON "RoleBinding" ("principalType", "principalId", "roleId", "projectId") WHERE "projectId" IS NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "RoleBinding_principalId_roleId_global_key" ON "RoleBinding" ("principalType", "principalId", "roleId") WHERE "projectId" IS NULL`,
 ];

@@ -196,6 +196,7 @@ model Project {
   agents             AgentProject[]
   skills             ProjectSkill[]
   knowledgePatterns  KnowledgeProjectPatterns?
+  roleBindings       RoleBinding[]
 
   @@index([deletedAt])
 }
@@ -1553,4 +1554,43 @@ model NotificationTemplate {
   @@unique([tenantId, code, locale, channel])
   @@index([tenantId])
   @@map("notification_templates")
+}
+
+// ---------------------------------------------------------------------------
+// Permissions P1a — roles and bindings
+// ---------------------------------------------------------------------------
+
+/// Permissions P1a: a named set of permission entries.
+model Role {
+  id          String   @id @default(cuid())
+  key         String   @unique // kebab-case, e.g. 'project-admin'
+  name        String
+  description String   @default("")
+  scope       String   // GLOBAL | PROJECT
+  system      Boolean  @default(false)
+  locked      Boolean  @default(false)
+  permissions Json     // string[] of entries
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  bindings RoleBinding[]
+}
+
+/// Permissions P1a: a role given to a user or an agent, in one project or globally (projectId null).
+model RoleBinding {
+  id            String   @id @default(cuid())
+  principalType String   // USER | AGENT
+  principalId   String
+  roleId        String
+  projectId     String?
+  grantedByType String   // USER | AGENT | SYSTEM
+  grantedById   String
+  createdAt     DateTime @default(now())
+
+  role    Role     @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([principalType, principalId])
+  @@index([projectId])
+  @@index([roleId])
 }
