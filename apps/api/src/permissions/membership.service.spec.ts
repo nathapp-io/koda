@@ -24,6 +24,7 @@ describe('MembershipService', () => {
   let store: InMemoryPermissionStore;
   let cache: FakeCacheManager;
   let permissionCache: PermissionCache;
+  let bindingRepo: ReturnType<InMemoryPermissionStore['bindingRepo']>;
   let txRuns: number;
   let service: MembershipService;
 
@@ -31,6 +32,7 @@ describe('MembershipService', () => {
     store = new InMemoryPermissionStore();
     cache = new FakeCacheManager();
     permissionCache = new PermissionCache(cache as never);
+    bindingRepo = store.bindingRepo();
     txRuns = 0;
     // Transactions run one at a time, as the owner-row lock makes concurrent owner writes do in Postgres.
     let queue: Promise<unknown> = Promise.resolve();
@@ -51,7 +53,7 @@ describe('MembershipService', () => {
     };
     service = new MembershipService(
       store.roleRepo() as never,
-      store.bindingRepo() as never,
+      bindingRepo as never,
       txManager as never,
       permissionCache,
       cache as never,
@@ -289,18 +291,6 @@ describe('MembershipService', () => {
       expect(results.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
       expect(store.bindings).toHaveLength(1);
     });
-
-    it('B2: locks the user row before the survivor count of removeAllBindings', async () => {
-      await service.createBinding({ principal: USER('u1'), roleKey: 'owner', projectId: null }, BY);
-      await service.createBinding({ principal: USER('u2'), roleKey: 'owner', projectId: null }, BY);
-      await service.createBinding({ principal: USER('u1'), roleKey: 'admin', projectId: null }, BY);
-      store.calls.length = 0;
-
-      await service.removeAllBindings(USER('u1'));
-
-      expect(store.calls.indexOf('lock-user:u1')).toBeGreaterThanOrEqual(0);
-      expect(store.calls.indexOf('lock-owner')).toBeLessThan(store.calls.indexOf('lock-user:u1'));
-    });
   });
 
   describe('setGlobalAdmin', () => {
@@ -391,6 +381,37 @@ describe('MembershipService', () => {
   });
 
   describe('removeAllBindings', () => {
+    /**
+     * Installs the B2 barrier on the service's repository: a concurrent grant that commits before the
+     * removal takes its first lock. The hook covers both the first lock and the first read, so the grant
+     * lands in the same window whichever order the removal uses — the unlocked-read shape the finding is
+     * about, or the locked one — and `restore()` puts the repository back afterwards.
+     */
+    const grantBeforeTheFirstLock = (grant: () => void): (() => void) => {
+      const originalLock = bindingRepo.lockOwnerRole.bind(bindingRepo);
+      const originalRead = bindingRepo.findPrincipalBindings.bind(bindingRepo);
+      let granted = false;
+      const grantOnce = () => {
+        if (granted) return;
+        granted = true;
+        grant();
+      };
+      bindingRepo.lockOwnerRole = async () => {
+        grantOnce();
+        return originalLock();
+      };
+      bindingRepo.findPrincipalBindings = async (principal) => {
+        const rows = await originalRead(principal);
+        grantOnce();
+        store.calls.push('read-bindings');
+        return rows;
+      };
+      return () => {
+        bindingRepo.lockOwnerRole = originalLock;
+        bindingRepo.findPrincipalBindings = originalRead;
+      };
+    };
+
     it('removes every binding of the principal and demotes a user left without a global admin binding', async () => {
       await service.createBinding({ principal: USER('u2'), roleKey: 'owner', projectId: null }, BY);
       await service.createBinding({ principal: USER('u1'), roleKey: 'admin', projectId: null }, BY);
@@ -410,6 +431,59 @@ describe('MembershipService', () => {
       await service.bindBaseline({ type: 'AGENT', id: 'a1' });
       await service.removeAllBindings({ type: 'AGENT', id: 'a1' });
       expect(store.bindings).toHaveLength(0);
+    });
+
+    it('B2: locks the user row before the survivor count of removeAllBindings', async () => {
+      await service.createBinding({ principal: USER('u1'), roleKey: 'owner', projectId: null }, BY);
+      await service.createBinding({ principal: USER('u2'), roleKey: 'owner', projectId: null }, BY);
+      await service.createBinding({ principal: USER('u1'), roleKey: 'admin', projectId: null }, BY);
+      store.calls.length = 0;
+
+      await service.removeAllBindings(USER('u1'));
+
+      expect(store.calls.indexOf('lock-user:u1')).toBeGreaterThanOrEqual(0);
+      expect(store.calls.indexOf('lock-owner')).toBeLessThan(store.calls.indexOf('lock-user:u1'));
+    });
+
+    it('B2: a grant committed before the bulk-removal lock is deleted and demotes the user', async () => {
+      // The user holds no owner binding, so a removal that decides its snapshot from an unlocked read
+      // would find nothing to lock for and keep its own stale rows. The grant below is the concurrent
+      // admin request that commits in that window: it promotes the user and returns.
+      await service.bindBaseline(USER('u1'));
+      const restore = grantBeforeTheFirstLock(() => {
+        store.bind(USER('u1'), 'admin', null);
+        store.users.set('u1', { role: 'ADMIN', disabled: false, tokenVersion: 1 });
+      });
+
+      try {
+        await service.removeAllBindings(USER('u1'));
+      } finally {
+        restore();
+      }
+
+      // The snapshot is read under the locks, so the committed admin binding is part of what is deleted
+      // and of the legacy-role mirror: no binding survives and no legacy ADMIN is left behind.
+      expect(store.calls.indexOf('lock-user:u1')).toBeLessThan(store.calls.indexOf('read-bindings'));
+      expect(store.bindings.filter((b) => b.principalId === 'u1')).toHaveLength(0);
+      expect(store.users.get('u1')).toMatchObject({ role: 'MEMBER', tokenVersion: 2 });
+      expect(cache.invalidations).toEqual(expect.arrayContaining(['USER:u1#tag', 'user-auth-state|u1']));
+    });
+
+    it('B2: an owner grant committed before the bulk-removal lock still protects the last owner', async () => {
+      // The same window, an owner binding instead: the removal must see it and refuse, rather than
+      // delete the installation's only owner because the read before the lock found none.
+      await service.bindBaseline(USER('u1'));
+      const restore = grantBeforeTheFirstLock(() => {
+        store.bind(USER('u1'), 'owner', null);
+      });
+
+      try {
+        await expect(service.removeAllBindings(USER('u1'))).rejects.toBeInstanceOf(ForbiddenAppException);
+      } finally {
+        restore();
+      }
+
+      expect(store.bindings.filter((b) => b.roleId === store.roleByKey('owner').id)).toHaveLength(1);
     });
   });
 

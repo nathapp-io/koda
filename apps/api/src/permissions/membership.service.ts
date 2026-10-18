@@ -43,10 +43,12 @@ interface WriteOutcome<T> {
  * tokens, and the cache entries that hold their auth state are dropped once the write's transaction
  * committed (see `afterCommit`).
  *
- * Two locks serialize the legacy-role mirror, always in the same order — the `owner` Role row when the
- * write can touch an owner binding, then the user's row: the survivor count of a removal must see
- * every concurrent owner/admin change of that user, or two transactions each count the other's
- * binding as still present and nobody demotes.
+ * Two locks serialize the legacy-role mirror, always in the same order — the `owner` Role row, then the
+ * user's row: the survivor count of a removal must see every concurrent owner/admin change of that
+ * user, or two transactions each count the other's binding as still present and nobody demotes. A
+ * single `removeBinding` takes the `owner` Role row only when the binding it removes is an owner one,
+ * and `removeAllBindings` takes both locks before it reads anything — the snapshot it deletes and
+ * mirrors cannot be decided by an unlocked read.
  */
 @Injectable()
 export class MembershipService {
@@ -166,13 +168,17 @@ export class MembershipService {
 
   async removeAllBindings(principal: PrincipalRef): Promise<void> {
     const outcome = await this.txManager.run(async (): Promise<WriteOutcome<void>> => {
-      const probe = await this.bindings.findPrincipalBindings(principal);
-      const ownerRoleId = probe.some((row) => row.roleKey === OWNER_ROLE_KEY)
-        ? await this.bindings.lockOwnerRole()
-        : null;
+      // Both locks come before the snapshot, in the order every other binding write takes them: the
+      // `owner` Role row, then the principal's user row. A snapshot read before the locks is stale, and
+      // it is the snapshot this method deletes and mirrors: a concurrent global `owner`/`admin` grant of
+      // this user that commits while this call waits for the lock would be deleted without ever reaching
+      // `afterRemoval`, leaving zero bindings and a legacy `User.role = 'ADMIN'` behind. The owner-role
+      // lock is taken unconditionally, because the locks must precede the read that decides whether an
+      // owner binding is in play; it also keeps the last-owner count serialized with `removeBinding`.
+      const ownerRoleId = await this.bindings.lockOwnerRole();
       await this.lockUserPrincipal(principal);
 
-      const current = ownerRoleId ? await this.bindings.findPrincipalBindings(principal) : probe;
+      const current = await this.bindings.findPrincipalBindings(principal);
       if (ownerRoleId) {
         const owned = current.filter((row) => row.roleKey === OWNER_ROLE_KEY);
         if (owned.length > 0) await this.assertOwnerRemains(ownerRoleId, owned.map((row) => row.binding.id));

@@ -182,6 +182,50 @@ describeIntegration('MembershipService (PG)', () => {
       expect(await prisma.roleBinding.count({ where: { principalId: user.id, role: { key: 'admin' } } })).toBe(1);
       expect((await userRow(user.id)).role).toBe('ADMIN');
     });
+
+    it('a global admin grant committed before the bulk-removal lock is deleted and demotes the user', async () => {
+      const user = await newUser();
+      await bindGlobal(user.id, 'member');
+      const principal = { type: 'USER' as const, id: user.id };
+
+      // The barrier: whichever statement runs first widens the window, and the grant always commits
+      // before the removal takes its first lock. The user holds no owner binding, so an unlocked
+      // snapshot would find nothing to lock an owner binding for — and would delete the grant below
+      // without ever mirroring it into `User.role`.
+      const repo = moduleRef.get<PrismaRoleBindingRepository>(PrismaRoleBindingRepository, { strict: false });
+      const originalLockOwnerRole = repo.lockOwnerRole.bind(repo);
+      const originalRead = repo.findPrincipalBindings.bind(repo);
+      let granted = false;
+      const grantOnce = async () => {
+        if (granted) return;
+        granted = true;
+        // A concurrent admin request that commits in the window between the snapshot and the locks.
+        await bindGlobal(user.id, 'admin');
+      };
+      repo.lockOwnerRole = async () => {
+        await grantOnce();
+        return originalLockOwnerRole();
+      };
+      repo.findPrincipalBindings = async (ref) => {
+        const rows = await originalRead(ref);
+        await grantOnce();
+        return rows;
+      };
+
+      try {
+        await membership.removeAllBindings(principal);
+      } finally {
+        repo.lockOwnerRole = originalLockOwnerRole;
+        repo.findPrincipalBindings = originalRead;
+      }
+
+      expect(await prisma.roleBinding.count({ where: { principalId: user.id } })).toBe(0);
+      const row = await userRow(user.id);
+      // One bump for the grant, one for the demotion it must not survive.
+      expect(row.role).toBe('MEMBER');
+      expect(row.tokenVersion).toBe(2);
+      expect(await membership.isGlobalAdmin(user.id)).toBe(false);
+    });
   });
 
   describe('the commit boundary of a nested write (B3)', () => {
