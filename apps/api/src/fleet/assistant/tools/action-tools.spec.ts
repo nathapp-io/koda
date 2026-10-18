@@ -52,7 +52,7 @@ const action = (over: Partial<PendingActionRecord> = {}): PendingActionRecord =>
 /** The `koda_get_action` dependency: one scoped repository read. */
 function actionDeps(found: PendingActionRecord | null) {
   const findScopedById = vi.fn(async () => found);
-  return { findScopedById, tool: getActionTool({ findScopedById }) };
+  return { findScopedById, tool: getActionTool({ findScopedById, findScopedByActor: vi.fn(async () => null) }) };
 }
 
 /** The `reason` a parser refuses with; fails loudly when it accepts or throws something else. */

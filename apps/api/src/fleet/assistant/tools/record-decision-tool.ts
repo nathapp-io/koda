@@ -98,7 +98,7 @@ export function recordDecisionTool(deps: {
           actorId: ctx.actor.id,
           topic: input.topic,
           decision,
-          sourceId: `thread:${ctx.threadId}`,
+          sourceId: ctx.threadId === null ? `mcp:${ctx.actor.id}` : `thread:${ctx.threadId}`,
         },
         deps.memory,
       );

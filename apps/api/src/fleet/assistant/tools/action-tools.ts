@@ -1,9 +1,10 @@
 import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
+import { isAgentPrincipal } from '../../../auth/principal/koda-principal.types';
 import { CommentsService } from '../../../comments/comments.service';
 import { CommentType } from '../../../common/enums';
 import { TicketsService } from '../../../tickets/tickets.service';
-import { PENDING_ACTION_REPOSITORY, type PendingActionRecord, type PendingActionRepository } from '../actions/pending-action.domain';
+import { PENDING_ACTION_REPOSITORY, type ActionStatusView, type PendingActionRepository } from '../actions/pending-action.domain';
 import { AssistantToolRegistry } from '../assistant-tool.registry';
 import { maskSecrets } from '../assistant-tool-safety';
 import { KODA_ADD_COMMENT, KODA_GET_ACTION } from '../koda-tool-descriptors';
@@ -79,7 +80,7 @@ export function addCommentTool(deps: { tickets: TicketsService; comments: Commen
  * caller's own project and its own thread — so an id of another thread (in this project or another) and an id that
  * does not exist answer exactly the same `not_found`.
  */
-export function getActionTool(actions: Pick<PendingActionRepository, 'findScopedById'>): AssistantTool<GetActionInput> {
+export function getActionTool(actions: Pick<PendingActionRepository, 'findScopedById' | 'findScopedByActor'>): AssistantTool<GetActionInput> {
   return {
     descriptor: KODA_GET_ACTION,
     permission: { kind: 'member' },
@@ -89,7 +90,9 @@ export function getActionTool(actions: Pick<PendingActionRepository, 'findScoped
       return { id };
     },
     async execute(ctx: ToolContext, input: GetActionInput): Promise<string> {
-      const action = await actions.findScopedById(input.id, ctx.projectId, ctx.threadId);
+      const action = ctx.threadId === null
+        ? await actions.findScopedByActor(input.id, ctx.projectId, { type: isAgentPrincipal(ctx.actor) ? 'agent' : 'user', id: ctx.actor.id })
+        : await actions.findScopedById(input.id, ctx.projectId, ctx.threadId);
       if (!action) throw new NotFoundAppException({}, 'fleet.assistantAction');
       return actionLines(ctx, action).join('\n');
     },
@@ -97,7 +100,7 @@ export function getActionTool(actions: Pick<PendingActionRepository, 'findScoped
 }
 
 /** 2a-D14: `action <id> <tool> <status>`, when it was asked for, when it was decided and its result. */
-function actionLines(ctx: ToolContext, action: PendingActionRecord): string[] {
+function actionLines(ctx: ToolContext, action: ActionStatusView): string[] {
   const lines = [`action ${action.id} ${action.tool} ${action.status}`, `requested ${action.createdAt.toISOString()}`];
   if (action.decidedAt) lines.push(`decided ${action.decidedAt.toISOString()}`);
   if (action.result !== null) lines.push('result:', ctx.data(action.result));

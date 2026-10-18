@@ -96,8 +96,8 @@ export function addMemoryTool(deps: { memory: PrismaMemoryItemRepository }): Ass
         subject: input.subject,
         predicate: input.predicate,
         ...(input.object === undefined ? {} : { object: input.object }),
-        sourceType: 'thread',
-        sourceId: ctx.threadId,
+        sourceType: ctx.threadId === null ? 'mcp' : 'thread',
+        sourceId: ctx.threadId ?? ctx.actor.id,
         confidence: THREAD_CONFIDENCE,
         ownerId: ctx.actor.id,
       });

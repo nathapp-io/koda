@@ -1,0 +1,85 @@
+import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
+import type { AgentPrincipal } from '../../auth/principal/koda-principal.types';
+import type { ProjectAccessService } from '../../projects/project-access.service';
+import { AssistantToolExecutor } from './assistant-tool.executor';
+import { AssistantToolRegistry } from './assistant-tool.registry';
+import type { AssistantToolCallRecord, AssistantToolCallRepository } from './assistant-tool-call.domain';
+import type { AssistantTool, ToolCaller } from './assistant-tool.types';
+
+const principal: AgentPrincipal = { actorType: 'agent', id: 'claude-id', slug: 'claude', name: 'claude', status: 'ACTIVE', agentRoles: ['DEVELOPER'], capabilities: [], authorities: [], blacklisted: false, revoked: false };
+const caller: ToolCaller = { principal, origin: { kind: 'mcp' }, disabled: false };
+const threadCall = { jobId: 'j1', toolCallId: 'c1', name: 'koda_get_ticket', input: { ref: 'WEB-1' } };
+function setup(workspace = false) {
+  const rows: AssistantToolCallRecord[] = [];
+  const calls: AssistantToolCallRepository = {
+    findUserActor: vi.fn(async () => null),
+    findByCall: vi.fn(async () => rows[0] ?? null),
+    record: vi.fn(async row => { rows.push(row); }),
+    findCallContext: vi.fn(async () => ({ project: { id: 'p1', slug: 'web' }, threadId: 't1', creator: { id: 'u1', email: 'dev@test', role: 'MEMBER', disabled: false } })),
+  };
+  const tool: AssistantTool = { descriptor: { name: workspace ? 'koda_my_projects' : 'koda_get_ticket', description: '', inputSchema: {} }, scope: workspace ? 'workspace' : 'project', permission: { kind: 'member' }, parse: vi.fn(input => input), execute: vi.fn(async () => 'WEB-1') };
+  const registry = new AssistantToolRegistry();
+  registry.register(tool);
+  const access = { findProjectIdBySlug: vi.fn(async () => 'p1'), resolveMembership: vi.fn(async (): Promise<string | null> => null) };
+  return { executor: new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, new KodaCaslAbilityFactory()), calls, rows, tool, access };
+}
+const mcpCall = { name: 'koda_get_ticket', input: { project: 'web', ref: 'WEB-1' } };
+describe('caller-based executor', () => {
+  it('AC-1: thread adapter uses the creator and context thread/job', async () => {
+    const { executor, tool } = setup();
+    await executor.execute(threadCall);
+    expect(tool.execute).toHaveBeenCalledWith(expect.objectContaining({ actor: expect.objectContaining({ id: 'u1' }), threadId: 't1', jobId: 'j1' }), { ref: 'WEB-1' });
+  });
+  it('AC-2: replay precedes context lookup', async () => {
+    const { executor, calls } = setup();
+    await executor.execute(threadCall);
+    vi.mocked(calls.findCallContext).mockClear();
+    expect(await executor.execute(threadCall)).toEqual({ content: 'WEB-1', isError: false });
+    expect(calls.findCallContext).not.toHaveBeenCalled();
+  });
+  it('AC-3, AC-4: MCP uses the agent and resolved project with no thread or job', async () => {
+    const { executor, tool, access } = setup();
+    expect(await executor.executeFor(caller, mcpCall)).toEqual({ content: 'WEB-1', isError: false });
+    expect(access.resolveMembership).toHaveBeenCalledWith('p1', principal);
+    expect(tool.execute).toHaveBeenCalledWith(expect.objectContaining({ actor: principal, projectSlug: 'web', threadId: null, jobId: null }), { ref: 'WEB-1' });
+  });
+  it('AC-5, AC-8: missing project is invalid and audited without a project', async () => {
+    const { executor, rows, tool } = setup();
+    expect(await executor.executeFor(caller, { name: mcpCall.name, input: {} })).toEqual({ content: 'invalid_input: project', isError: true });
+    expect(rows[0]?.projectId).toBeNull();
+    expect(tool.execute).not.toHaveBeenCalled();
+  });
+  it('AC-6: my projects needs no project and uses empty scope', async () => {
+    const { executor, tool } = setup(true);
+    await executor.executeFor(caller, { name: 'koda_my_projects', input: {} });
+    expect(tool.execute).toHaveBeenCalledWith(expect.objectContaining({ projectId: '', projectSlug: '' }), {});
+  });
+  it('AC-7: each MCP call audits the agent, with no replay or thread lookup', async () => {
+    const { executor, calls, rows } = setup();
+    await executor.executeFor(caller, mcpCall);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ actorType: 'agent', actorId: principal.id, jobId: null, threadId: null, toolCallId: null });
+    await executor.executeFor(caller, mcpCall);
+    expect(rows).toHaveLength(2);
+    expect(calls.findByCall).not.toHaveBeenCalled();
+    expect(calls.findCallContext).not.toHaveBeenCalled();
+  });
+  it('unknown MCP tools throw before scope resolution', async () => {
+    const { executor, access } = setup();
+    await expect(executor.executeFor(caller, { name: 'unknown', input: {} })).rejects.toBeInstanceOf(NotFoundAppException);
+    expect(access.resolveMembership).not.toHaveBeenCalled();
+  });
+  it('unreachable project is hidden', async () => {
+    const { executor, access, tool } = setup();
+    access.resolveMembership.mockRejectedValue(new ForbiddenAppException({}, 'projects'));
+    expect(await executor.executeFor(caller, mcpCall)).toEqual({ content: 'not_found: project', isError: true });
+    expect(tool.execute).not.toHaveBeenCalled();
+  });
+  it('agents retain their CASL and cannot create FleetJob', async () => {
+    const { executor, tool } = setup();
+    tool.permission = { kind: 'ability', action: 'create', subject: 'FleetJob' };
+    expect(await executor.executeFor(caller, mcpCall)).toEqual({ content: 'forbidden: koda_get_ticket needs create FleetJob on web', isError: true });
+    expect(tool.execute).not.toHaveBeenCalled();
+  });
+});

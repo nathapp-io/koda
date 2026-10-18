@@ -4,7 +4,7 @@ import { CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { subject } from '@casl/ability';
 import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
-import type { UserPrincipal } from '../../auth/principal/koda-principal.types';
+import { isAgentPrincipal, type AgentPrincipal, type UserPrincipal } from '../../auth/principal/koda-principal.types';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { ProjectAccessService } from '../../projects/project-access.service';
 import { withProjectRole } from '../../projects/project-context';
@@ -13,7 +13,7 @@ import { MAX_PENDING_ACTIONS, type ActionProposer, type PendingActionRecord } fr
 import { capText, fenceData, maskSecrets } from './assistant-tool-safety';
 import { ASSISTANT_TOOL_CALL_REPOSITORY, type AssistantToolCallRecord, type AssistantToolCallRepository, type ToolCallContext, type ToolCallOutcome } from './assistant-tool-call.domain';
 import { AssistantToolRegistry } from './assistant-tool.registry';
-import { ToolActionError, ToolForbiddenError, ToolInputError, type AssistantTool, type ToolContext, type ToolResult } from './assistant-tool.types';
+import { ToolActionError, ToolForbiddenError, ToolInputError, type AssistantTool, type ToolCaller, type ToolContext, type ToolResult } from './assistant-tool.types';
 
 /** The most bytes of one tool result the agent reads (S5b-R5). */
 export const RESULT_CAP_BYTES = 16_384;
@@ -147,14 +147,31 @@ export class AssistantToolExecutor {
     const context = await this.calls.findCallContext(call.jobId);
     if (!context) throw new NotFoundAppException({}, 'fleet.jobs');
 
-    const outcome = await this.run(call, tool, context);
+    const caller: ToolCaller = {
+      principal: userPrincipal(context.creator),
+      disabled: context.creator.disabled,
+      origin: { kind: 'thread', threadId: context.threadId, jobId: call.jobId, threadKind: context.kind ?? 'REPO', homeProject: context.project },
+    };
+    return this.runAndStore(caller, call, tool, inputHash, started);
+  }
+
+  /** Non-thread callers have no replay key; every invocation gets its own audit row. */
+  async executeFor(caller: ToolCaller, call: { name: string; input: unknown }): Promise<ToolResult> {
+    const tool = this.registry.get(call.name);
+    if (!tool) throw new NotFoundAppException({}, 'fleet.assistantTool');
+    return this.runAndStore(caller, { ...call, jobId: null, toolCallId: null }, tool, sha256(stableStringify(call.input)), Date.now());
+  }
+
+  private async runAndStore(caller: ToolCaller, call: RunCall, tool: AssistantTool, inputHash: string, started: number): Promise<ToolResult> {
+    const outcome = await this.run(call, tool, caller);
+    const origin = caller.origin;
     const content = capText(outcome.content, RESULT_CAP_BYTES);
     const row: AssistantToolCallRecord = {
-      actorType: 'user',
-      actorId: context.creator.id,
+      actorType: isAgentPrincipal(caller.principal) ? 'agent' : 'user',
+      actorId: caller.principal.id,
       jobId: call.jobId,
-      threadId: context.threadId,
-      projectId: outcome.projectId ?? context.project.id,
+      threadId: origin.kind === 'thread' ? origin.threadId : null,
+      projectId: outcome.projectId || (origin.kind === 'thread' ? origin.homeProject.id : null),
       toolCallId: call.toolCallId,
       tool: call.name,
       inputHash,
@@ -176,43 +193,43 @@ export class AssistantToolExecutor {
   }
 
   /** Steps 3 to 6: scope, parse, permission, execute. Every refusal is data for the agent. */
-  private async run(call: ToolCall, tool: AssistantTool, context: ToolCallContext): Promise<RunOutcome> {
+  private async run(call: RunCall, tool: AssistantTool, caller: ToolCaller): Promise<RunOutcome> {
     const name = tool.descriptor.name;
-    if (context.creator.disabled) return refusal('forbidden', 'forbidden: the thread creator is disabled');
-
-    const workspaceThread = context.kind === 'WORKSPACE';
+    if (caller.disabled) return refusal('forbidden', 'forbidden: the thread creator is disabled');
+    const origin = caller.origin;
+    const workspace = origin.kind === 'mcp' || origin.threadKind === 'WORKSPACE';
     const workspaceTool = tool.scope === 'workspace';
-    if (workspaceTool && !workspaceThread) return refusal('invalid_input', `invalid_input: ${name} is only available in workspace threads`);
-    const hasProject = hasProjectKey(call.input);
-    if (hasProject && (!workspaceThread || workspaceTool)) return refusal('invalid_input', 'invalid_input: project');
-
-    const actor = userPrincipal(context.creator);
-    if (workspaceTool) return this.execTool(call, tool, context, { id: context.project.id, slug: context.project.slug, actor, input: call.input });
-    if (!workspaceThread) return this.runInHomeProject(call, tool, context, actor);
-    return this.runInNamedProject(call, tool, context, actor);
+    if (workspaceTool && !workspace) return refusal('invalid_input', `invalid_input: ${name} is only available in workspace threads`);
+    if (hasProjectKey(call.input) && (!workspace || workspaceTool)) return refusal('invalid_input', 'invalid_input: project');
+    const actor = caller.principal;
+    if (workspaceTool) {
+      const project = origin.kind === 'thread' ? origin.homeProject : { id: '', slug: '' };
+      return this.execTool(call, tool, caller, { ...project, actor, input: call.input });
+    }
+    if (origin.kind === 'thread' && !workspace) return this.runInHomeProject(call, tool, caller, origin.homeProject);
+    return this.runInNamedProject(call, tool, caller);
   }
 
-  /** REPO and PROJECT threads: the job's project, then `tool.parse`, then membership (today's path). */
-  private async runInHomeProject(call: ToolCall, tool: AssistantTool, context: ToolCallContext, actor: UserPrincipal): Promise<RunOutcome> {
+  /** REPO and PROJECT threads retain parse-before-membership and their home project. */
+  private async runInHomeProject(call: RunCall, tool: AssistantTool, caller: ToolCaller, project: { id: string; slug: string }): Promise<RunOutcome> {
     const parsed = parseInput(tool, call.input);
     if ('refusal' in parsed) return parsed.refusal;
-    const { id, slug } = context.project;
-    const role = await this.membership(id, actor);
+    const { id, slug } = project;
+    const role = await this.membership(id, caller.principal);
     if (role === undefined) return refusal('forbidden', `forbidden: ${tool.descriptor.name} needs project membership on ${slug}`);
-    return this.execParsed(call, tool, context, { id, slug, actor: withProjectRole(actor, role) as UserPrincipal, input: parsed.value });
+    return this.execParsed(call, tool, caller, { id, slug, actor: withProjectRole(caller.principal, role) as ToolScope['actor'], input: parsed.value });
   }
 
-  /** WORKSPACE threads, project-scoped tools (S5b-R7 steps 3 to 5): the `project` argument names the project. */
-  private async runInNamedProject(call: ToolCall, tool: AssistantTool, context: ToolCallContext, actor: UserPrincipal): Promise<RunOutcome> {
+  /** WORKSPACE and MCP callers resolve and authorize the explicit project before parsing tool input. */
+  private async runInNamedProject(call: RunCall, tool: AssistantTool, caller: ToolCaller): Promise<RunOutcome> {
     const slug = projectArgument(call.input);
     if (slug === null) return refusal('invalid_input', 'invalid_input: project');
     const id = await this.findProject(slug);
-    const role = id === undefined ? undefined : await this.membership(id, actor);
+    const role = id === undefined ? undefined : await this.membership(id, caller.principal);
     if (id === undefined || role === undefined) return refusal('not_found', 'not_found: project');
-
     const parsed = parseInput(tool, withoutProject(call.input));
     if ('refusal' in parsed) return { ...parsed.refusal, projectId: id };
-    return this.execParsed(call, tool, context, { id, slug, actor: withProjectRole(actor, role) as UserPrincipal, input: parsed.value });
+    return this.execParsed(call, tool, caller, { id, slug, actor: withProjectRole(caller.principal, role) as ToolScope['actor'], input: parsed.value });
   }
 
   /** The project's id, or undefined for an unknown or soft-deleted slug. */
@@ -226,7 +243,7 @@ export class AssistantToolExecutor {
   }
 
   /** The creator's role in the project, or undefined when they are not a member. */
-  private async membership(projectId: string, actor: UserPrincipal): Promise<string | null | undefined> {
+  private async membership(projectId: string, actor: UserPrincipal | AgentPrincipal): Promise<string | null | undefined> {
     try {
       return await this.access.resolveMembership(projectId, actor);
     } catch (error) {
@@ -236,7 +253,7 @@ export class AssistantToolExecutor {
   }
 
   /** The ability check for the role the membership answered, then the tool. */
-  private async execParsed(call: ToolCall, tool: AssistantTool, context: ToolCallContext, scope: ToolScope): Promise<RunOutcome> {
+  private async execParsed(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope): Promise<RunOutcome> {
     if (tool.permission.kind === 'ability') {
       const { action, subject: target } = tool.permission;
       const ability = await this.abilities.createForUser(scope.actor);
@@ -244,22 +261,22 @@ export class AssistantToolExecutor {
         return { ...refusal('forbidden', `forbidden: ${tool.descriptor.name} needs ${action} ${target} on ${scope.slug}`), projectId: scope.id };
       }
     }
-    return this.execTool(call, tool, context, scope);
+    return this.execTool(call, tool, caller, scope);
   }
 
-  private async execTool(call: ToolCall, tool: AssistantTool, context: ToolCallContext, scope: ToolScope): Promise<RunOutcome> {
+  private async execTool(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope): Promise<RunOutcome> {
     const name = tool.descriptor.name;
     const token = randomBytes(8).toString('hex');
     const ctx: ToolContext = {
       projectId: scope.id,
       projectSlug: scope.slug,
       actor: scope.actor,
-      threadId: context.threadId,
-      jobId: call.jobId,
+      threadId: caller.origin.kind === 'thread' ? caller.origin.threadId : null,
+      jobId: caller.origin.kind === 'thread' ? caller.origin.jobId : null,
       now: new Date(),
       data: (text) => fenceData(maskSecrets(text), token),
     };
-    if (tool.kind === 'write') return this.proposeWrite(call, tool, context, scope, ctx);
+    if (tool.kind === 'write') return this.proposeWrite(call, tool, caller, scope, ctx);
     try {
       return { outcome: 'ok', content: await tool.execute(ctx, scope.input), projectId: scope.id };
     } catch (error) {
@@ -274,7 +291,7 @@ export class AssistantToolExecutor {
    * argument, parse, membership and ability — so a caller who may not write is refused before a preview exists. The
    * preview is what the user approves, and `propose` is what turns it into a decision the thread can render.
    */
-  private async proposeWrite(call: ToolCall, tool: AssistantTool, context: ToolCallContext, scope: ToolScope, ctx: ToolContext): Promise<RunOutcome> {
+  private async proposeWrite(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope, ctx: ToolContext): Promise<RunOutcome> {
     const name = tool.descriptor.name;
     const actions = this.actions;
     if (!actions) {
@@ -299,18 +316,24 @@ export class AssistantToolExecutor {
       this.logger.error(`koda tool ${name} failed for job ${call.jobId}`, error instanceof Error ? error.stack : String(error));
       return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
     }
+    // US-005 adds MCP write execution. Until then, keep previews and their refusals but never propose a
+    // thread-less action (the existing approval path requires a user and a replay key).
+    const origin = caller.origin;
+    if (origin.kind !== 'thread' || call.jobId === null || call.toolCallId === null || isAgentPrincipal(caller.principal)) {
+      return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
+    }
     const proposed = await actions.propose({
       projectId: scope.id,
-      threadId: context.threadId,
-      threadKind: context.kind ?? 'REPO',
-      threadProjectSlug: context.project.slug,
+      threadId: origin.threadId,
+      threadKind: origin.threadKind,
+      threadProjectSlug: origin.homeProject.slug,
       jobId: call.jobId,
       toolCallId: call.toolCallId,
       tool: name,
       // 2a-D3: `PendingAction.input` is the parsed input, and a write tool's parser answers a JSON object.
       input: scope.input as Record<string, unknown>,
       preview,
-      requestedById: context.creator.id,
+      requestedById: caller.principal.id,
       now: ctx.now,
     });
     if ('refused' in proposed) return { ...refusal('refused', REFUSED_CONTENT), projectId: scope.id };
@@ -322,7 +345,7 @@ export class AssistantToolExecutor {
     try {
       await this.calls.record(row);
     } catch (error) {
-      if (!isUniqueViolation(error, 'toolCallId')) throw error;
+      if (row.jobId === null || row.toolCallId === null || !isUniqueViolation(error, 'toolCallId')) throw error;
       const winner = await this.calls.findByCall(row.jobId, row.toolCallId);
       if (!winner) throw error;
       return this.replay(winner, row.tool, row.inputHash);
@@ -331,6 +354,8 @@ export class AssistantToolExecutor {
   }
 }
 
+type RunCall = { name: string; input: unknown; jobId: string | null; toolCallId: string | null };
+
 const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex');
 
 const refusal = (outcome: ToolCallOutcome, content: string): RunOutcome => ({ outcome, content });
@@ -338,7 +363,7 @@ const refusal = (outcome: ToolCallOutcome, content: string): RunOutcome => ({ ou
 /** 2a-D4: the agent must not retry a write call the user has yet to decide, so `pending` is not an error. */
 const isErrorOutcome = (outcome: ToolCallOutcome): boolean => outcome !== 'ok' && outcome !== 'pending';
 
-/** `projectId` is the resolved project for a call that reached a tool scope; absent means the job's own project (1d2-D6). */
+/** Resolved project; absent falls back to the thread's home project, or null for MCP. */
 interface RunOutcome {
   outcome: ToolCallOutcome;
   content: string;
@@ -349,7 +374,7 @@ interface RunOutcome {
 interface ToolScope {
   id: string;
   slug: string;
-  actor: UserPrincipal;
+  actor: UserPrincipal | AgentPrincipal;
   input: unknown;
 }
 
