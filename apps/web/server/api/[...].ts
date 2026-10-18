@@ -11,8 +11,7 @@
  * config.apiInternalUrl directly, see composables/useApi.ts) — this handler
  * serves browser traffic only.
  */
-import { clientIpHeaders } from '../utils/client-ip'
-import { resolveProxyTarget } from '../utils/proxy-target'
+import { proxyHeaders, resolveProxyTarget } from '../utils/proxy-target'
 
 export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig(event)
@@ -21,8 +20,9 @@ export default defineEventHandler(async (event) => {
   const target = resolveProxyTarget(event.path.replace(/^\/api/, ''), {
     apiInternalUrl: String(config.apiInternalUrl ?? ''),
   })
-  // Overrides any browser-sent x-client-ip (see utils/client-ip.ts).
+  // Overrides any browser-sent x-client-ip (see utils/client-ip.ts) and restores
+  // the Accept header proxyRequest would drop (#304).
   return proxyRequest(event, target, {
-    headers: clientIpHeaders(event.context.clientIp),
+    headers: proxyHeaders(event.context.clientIp, getRequestHeader(event, 'accept')),
   })
 })
