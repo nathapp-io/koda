@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-koda-mcp",
   "branchName": "feat/fleet-s5b-koda-mcp",
   "createdAt": "2026-10-18T00:00:00.000Z",
-  "updatedAt": "2026-10-18T04:00:26.211Z",
+  "updatedAt": "2026-10-18T04:39:15.445Z",
   "userStories": [
     {
       "id": "US-001",
@@ -34,8 +34,8 @@
         "backend"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -47,7 +47,9 @@
         "profileModelTier": "powerful",
         "initialAgent": "native",
         "initialProfileId": "native-sol",
-        "initialModelTier": "powerful"
+        "initialModelTier": "powerful",
+        "initialComplexity": "complex",
+        "modelTier": "powerful"
       },
       "contextFiles": [
         "apps/api/prisma/schema.prisma",
@@ -100,7 +102,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "f71e09af4a471412a0d6932794ebe9bef11f95fb"
     },
     {
       "id": "US-002",
@@ -164,9 +170,6 @@
         "executeFor with an MCP caller and an unknown tool name throws NotFoundAppException",
         "executeFor with an MCP caller for an agent that lacks the tool's CASL tuple answers forbidden: <tool> needs <action> <subject> on <slug> with isError true and does not call the tool's execute"
       ],
-      "outOfScope": [
-        "US-002 only: the WORKSPACE-thread and REPO-thread project rules are unchanged and are covered by the existing executor specs; this feature adds no AC for them."
-      ],
       "modifiedFiles": [
         {
           "path": "apps/api/src/fleet/assistant/assistant-tool.types.ts",
@@ -194,7 +197,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -268,7 +274,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -336,7 +345,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -400,10 +412,6 @@
         "When the tool's execute throws an unexpected Error, recordDirect receives status FAILED and result error: <tool> failed and the answer has isError true",
         "When the tool's preview throws ToolForbiddenError, the answer starts with forbidden: and neither execute nor recordDirect is called"
       ],
-      "outOfScope": [
-        "US-005 only: a preview refusal by `ToolForbiddenError` or `NotFoundAppException`, an execute that throws `NotFoundAppException` or an unexpected error, and the policy answering `agent` or `human` for an MCP origin follow the Failure Handling mappings through the code paths the pinned cases use; this feature adds no AC for each of them.",
-        "US-005 only: `koda_get_action` for an action of another project answers `not_found` through the same scoped read the other-agent case pins; this feature adds no AC for it."
-      ],
       "modifiedFiles": [
         {
           "path": "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
@@ -411,7 +419,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -463,7 +474,10 @@
         "apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.spec.ts"
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -534,10 +548,6 @@
         "A registration handler whose executeFor throws answers { content: [{ type: 'text', text: 'error: <name> failed' }], isError: true }",
         "GET /api/mcp with MCP_ENABLED unset answers HTTP 409"
       ],
-      "outOfScope": [
-        "US-007 only: a PAUSED agent authenticates and an unknown or OFFLINE key answers 401, as the existing guard does today; this feature adds no AC for agent status or a bad key beyond the missing-bearer case.",
-        "US-007 only: `DELETE /api/mcp` answers 405 through the same SDK path as `GET`; the 409 `mcp.disabled` answer is the same controller check for every method; the 120-per-minute throttle (tracked per client IP, so agents behind one proxy share it), the JSON response mode, the handler being built once and the `error: <tool> failed` answer for a throwing `executeFor` carry no AC of their own."
-      ],
       "modifiedFiles": [
         {
           "path": "apps/api/src/fleet/assistant/assistant.module.ts",
@@ -549,7 +559,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "Goal: expose the S5b koda assistant tool layer (25 read/write tools in AssistantToolRegistry, run by AssistantToolExecutor) to external agents over MCP at POST /api/mcp, authenticated with existing agent API keys (CombinedAuthGuard.tryApiKey). The tool layer stops assuming a thread: a call has a ToolCaller (principal user|agent + origin thread|mcp). Every assistant write becomes one action record (PendingAction table generalised in place) with actorType/actorId, origin, approvalMode (none|self|agent|human), approverType/approverId. ApprovalPolicy code defaults: thread writes 'human' (propose, as today), MCP writes 'none' (execute at once, record EXECUTED/FAILED via recordDirect).\n\nKey files (all under apps/api): prisma/schema.prisma (PendingAction ~1114-1141, AssistantToolCall ~1090-1109); src/fleet/assistant/assistant-tool.executor.ts (execute, run, runInNamedProject, execTool, checkAction, executeAction, proposeWrite, RESULT_CAP_BYTES line ~19, findCallContext use ~147); assistant-tool.types.ts (ToolContext lines 7-17, ToolResult, ToolInputError, ToolForbiddenError, ToolActionError); assistant-tool-call.domain.ts + prisma-assistant-tool-call.repository.ts; actions/pending-action.domain.ts, actions/prisma-pending-action.repository.ts, actions/assistant-action.service.ts, actions/assistant-action-decisions.ts (unchanged); tools/action-tools.ts (getActionTool, addCommentTool), tools/add-memory-tool.ts, tools/record-decision-tool.ts, tools/fleet-tools.ts (koda_list_approvals reads ctx.actor.projectRole ~247); koda-tool-descriptors.ts (kodaToolDescriptorsFor, withProjectArgument ~704-724); runner-tool.controller.ts, assistant.module.ts; config/fleet.config.ts (registerAs pattern); fleet/repo-config/fleet-config-test-hooks.controller.ts (@ApiExcludeController precedent); auth/guards/combined-auth.guard.ts (tryApiKey 75-101); auth/principal/koda-principal.types.ts (isAgentPrincipal :44); projects/project-access.service.ts (findProjectIdBySlug, resolveMembership); auth/casl/koda-casl-ability.factory.ts; projects/project-context.ts (withProjectRole passes agent through).\n\nStory chain: US-001 -> US-002 -> US-003 -> US-004 -> US-005 -> US-007; US-006 independent, feeds US-007. US-001/002/003/005 all edit assistant-tool.executor.ts so they run sequentially; US-001 and US-004 both edit the pending-action domain/repository. US-001 must land schema + migration + every persistence consequence (both domain record types, both Prisma repositories, executor audit-row literal) so type-check and build pass on its own; thread behaviour unchanged.\n\nRisks: (1) Schema nullability change ripples into every mapper/seed that creates PendingAction/AssistantToolCall rows: assistant-action-delivery and assistant-action-send-delivery integration specs create PendingAction directly and need actorType/actorId. (2) PendingActionRecord stays the thread-action view (thread fields remain string); the mapper throws on a null thread field; all record-returning reads only match thread-origin rows. Direct actions are written by insertDirect and read by findScopedByActor returning ActionStatusView. (3) Migration 20261025090000_assistant_action_actor must backfill then set NOT NULL; no SQL comment or string may contain a semicolon (test helper migrationStatements splits on it). AssistantToolCall actorId is backfilled from the FleetJob.requestedById (not the thread, which may be deleted). (4) execute() keeps its front-check order: (jobId, toolCallId) replay, registry lookup, findCallContext, then shared run path; executeFor skips replay. (5) MCP origin follows WORKSPACE project rules; agent reach = roster under default AGENT_PROJECT_SCOPING; unreachable slug answers not_found: project. koda_my_projects over MCP runs with projectId/projectSlug ''. (6) Direct path: result text is masked with maskSecrets and capped at RESULT_CAP_BYTES minus 64 so the '\\naction <id>' suffix fits; recordDirect failure after write answers the 'change was made but its action was not recorded' error. (7) checkAction/executeAction switch from findCallContext(action.jobId) to findUserActor(action.actorId); non-user actor => forbidden without a read; existing unit specs (assistant-tool.executor.spec.ts, action-result-masking.spec.ts, write-tool-errors.spec.ts, assistant-action-decisions.spec.ts) must have stubs/fixtures updated with findUserActor and actorType/actorId, no outcome changes. (8) MCP SDK v2 (@modelcontextprotocol/server 2.3.1, @modelcontextprotocol/node 2.1.1) is already added to apps/api/package.json before the run; US-007 only imports them. Handler built once in controller constructor via createMcpHandler(factory, { responseMode: 'json' }); request converted with toWebRequest(req.raw, body); authInfo.extra.principal carries the agent principal; Response written directly to the Fastify reply (with an inline comment explaining why not JsonResponse.Ok, per .nax/rules/api-controllers.md). Controller is @ApiExcludeController so openapi.json is unchanged. MCP_ENABLED config via registerAs('mcp') in config/mcp.config.ts, imported with ConfigModule.forFeature in AssistantModule only (not ConfigBridgeModule, not root load list, IFleetConfig unchanged). i18n keys mcp.disabled (409) and mcp.agentOnly (403) in both en and zh (API i18n lives in apps/api/src/i18n/{en,zh}).\n\nTests: unit specs *.spec.ts beside source (vitest); integration under apps/api/test/integration/fleet/ using seedFleetHttpWorld (project web with repo acme/app, foreign project ops), DEVELOPER dev, RUNNING REPO THREAD job from seedThreadJobFor, FLEET_THREADS_ENABLED=true before boot; agent tests create agent claude via seedFleetHttpAgent plus AgentProject row for web only. Compose test DB required (bun run test:db:up). Each test reads only what it wrote and passes in any order (.nax/rules/api-test-isolation.md). Migration test follows test/integration/outbox/outbox-migration.integration.spec.ts using migrationsBefore/applyMigration from test/helpers/migration-schema.ts. No REST DTO changes so openapi.json is not regenerated.\n\nCode style: immutability, small files, no emojis, conventional commits.",
